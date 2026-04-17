@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { resilientSelectorSchema } from './selector.js';
 
 // ---------- Protocol constants ----------
 
@@ -85,7 +86,7 @@ export const serverTaskDispatchSchema = z.object({
   stepId: z.string(),
   action: z.object({
     kind: z.enum(['goto', 'click', 'type', 'extract', 'wait', 'eval', 'screenshot']),
-    selector: z.unknown().optional(),
+    selector: resilientSelectorSchema.optional(),
     payload: z.record(z.string(), z.unknown()).optional(),
   }),
   deadlineMs: z.number().int().positive().optional(),
