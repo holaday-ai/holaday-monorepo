@@ -1,2 +1,8 @@
-// Drizzle schema entry point. Concrete tables added in Task 4 (DDL first draft).
-export {};
+export * from './users.js';
+export * from './user-profiles.js';
+export * from './skills.js';
+export * from './sessions.js';
+export * from './tasks.js';
+export * from './task-steps.js';
+export * from './task-events.js';
+export * from './llm-calls.js';
