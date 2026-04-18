@@ -110,6 +110,38 @@ export const serverUserConfirmSchema = z.object({
   risk: z.enum(['low', 'medium', 'high']),
 });
 
+/**
+ * A single item in a batch confirm preview. `label` is the short
+ * disambiguator ("评论 #3 · 张三 · ★1"), `preview` is the content the
+ * agent plans to act on (e.g. draft reply text). `meta` is free-form so
+ * Skills can attach commentId / rating / replyDraft without widening
+ * the protocol.
+ */
+export const batchItemSchema = z.object({
+  label: z.string().min(1).max(256),
+  preview: z.string().min(1).max(2048),
+  meta: z.record(z.string(), z.unknown()).optional(),
+});
+
+/**
+ * Batch confirm: commander plans a write-heavy step in batches of 3-5
+ * items. For each batch, the server emits this frame; popup shows
+ * "确认第 <index>/<total> 批" with item previews and Confirm / Skip /
+ * Cancel. Skip advances past the batch without executing; Cancel stops
+ * the whole task.
+ */
+export const serverBatchConfirmRequiredSchema = z.object({
+  type: z.literal('server.batch_confirm_required'),
+  taskId: z.string(),
+  stepId: z.string(),
+  batchIndex: z.number().int().nonnegative(),
+  batchTotal: z.number().int().positive(),
+  items: z.array(batchItemSchema).min(1).max(10),
+  risk: z.enum(['low', 'medium', 'high']),
+  /** Short explanation of what the batch does. */
+  summary: z.string().min(1).max(512).optional(),
+});
+
 export const serverMessageSchema = z.discriminatedUnion('type', [
   serverWelcomeSchema,
   serverErrorSchema,
@@ -117,6 +149,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverTaskDispatchSchema,
   serverTaskControlSchema,
   serverUserConfirmSchema,
+  serverBatchConfirmRequiredSchema,
 ]);
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;
