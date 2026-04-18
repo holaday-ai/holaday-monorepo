@@ -121,7 +121,21 @@ export const tasksRouter = router({
   }),
 
   confirm: protectedProcedure
-    .input(z.object({ taskId: z.string().min(1), approve: z.boolean() }))
+    .input(
+      z
+        .object({
+          taskId: z.string().min(1),
+          // New decision enum (approve / skip / reject) — maps to the
+          // single-confirm and batch-confirm paths on the controller.
+          decision: z.enum(['approve', 'skip', 'reject']).optional(),
+          // Back-compat: popup v0 sent `approve: boolean`. Translate it
+          // to the decision enum when present and no explicit decision.
+          approve: z.boolean().optional(),
+        })
+        .refine((v) => v.decision !== undefined || v.approve !== undefined, {
+          message: 'one of decision or approve must be provided',
+        }),
+    )
     .mutation(async ({ ctx, input }) => {
       const repo = new TaskRepository(ctx.db);
       const prev = await loadTaskState(repo, input.taskId, ctx.userId);
@@ -132,19 +146,25 @@ export const tasksRouter = router({
         });
       }
 
-      const { state: next, effects } = taskController.userConfirm(
-        prev,
-        input.approve ? 'approve' : 'reject',
-      );
+      const decision: 'approve' | 'skip' | 'reject' =
+        input.decision ?? (input.approve ? 'approve' : 'reject');
 
-      // userConfirm emits persist effects but our repo layer has two paths:
-      //   - reject → control transition (status=cancelled, no step change)
-      //   - approve → step-result-like transition (cursor advances, next step executing)
-      // Pick the correct repo method from the transition shape.
+      const { state: next, effects } = taskController.userConfirm(prev, decision);
+
+      // Pick the repo method by the shape of the transition.
+      //   reject                → control transition (cancelled)
+      //   batch + approve       → batch-approve (cursor unchanged, clear
+      //                           pending blob, NOT a step completion)
+      //   otherwise (skip,
+      //   single approve)       → step-result (cursor advances, step row
+      //                           marked completed)
+      const batchApprove = prev.pendingConfirm?.kind === 'batch' && decision === 'approve';
       if (next.status === 'cancelled') {
         await repo.applyControlTransition(prev, next);
+      } else if (batchApprove) {
+        await repo.applyBatchApprove(prev, next);
       } else {
-        await repo.applyStepResult(prev, next, { confirmed: true });
+        await repo.applyStepResult(prev, next, { confirmed: true, decision });
       }
       updateTaskStateForUser(ctx.userId, next);
       for (const eff of effects) {

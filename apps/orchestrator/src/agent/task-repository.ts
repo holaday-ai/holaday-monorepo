@@ -200,6 +200,54 @@ export class TaskRepository {
   }
 
   /**
+   * Batch-approve transition: user confirmed THIS batch, cursor stays put,
+   * task goes back to executing, step's pending_confirm_payload clears.
+   * No step row status change (the step is still "in flight"; client will
+   * emit more step.results as it processes the batch).
+   */
+  async applyBatchApprove(prev: TaskState, next: TaskState): Promise<void> {
+    if (prev.taskId !== next.taskId) {
+      throw new Error('applyBatchApprove requires matching taskIds');
+    }
+    const [taskRow] = await this.db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.externalId, next.taskId))
+      .limit(1);
+    if (!taskRow) throw new Error(`task ${next.taskId} not found in DB`);
+
+    const current = next.plan[next.cursor];
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(tasks)
+        .set({ status: next.status, pauseReason: null })
+        .where(eq(tasks.id, taskRow.id));
+
+      if (current) {
+        await tx
+          .update(taskSteps)
+          .set({ status: 'executing', pendingConfirmPayload: null })
+          .where(and(eq(taskSteps.taskId, taskRow.id), eq(taskSteps.externalId, current.id)));
+      }
+
+      await tx.insert(taskEvents).values({
+        externalId: newExternalId('taskEvent'),
+        taskId: taskRow.id,
+        type: 'batch.approved',
+        actor: 'user',
+        payload:
+          prev.pendingConfirm?.kind === 'batch'
+            ? {
+                batchIndex: prev.pendingConfirm.batchIndex,
+                batchTotal: prev.pendingConfirm.batchTotal,
+              }
+            : null,
+      });
+    });
+  }
+
+  /**
    * Rehydrate in-flight TaskStates after orchestrator restart.
    *
    * Reads every `tasks` row whose status is non-terminal (executing /
