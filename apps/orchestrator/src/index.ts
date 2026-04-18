@@ -1,4 +1,7 @@
-import { DrizzleLlmCallRecorder } from './agent/llm-call-recorder.js';
+import { ProxyAgent, setGlobalDispatcher } from 'undici';
+const _proxy = process.env.HTTPS_PROXY;
+if (_proxy) setGlobalDispatcher(new ProxyAgent(_proxy));import { bootstrap } from 'global-agent';
+bootstrap(); import { DrizzleLlmCallRecorder } from './agent/llm-call-recorder.js';
 import { AnthropicPlanner } from './agent/planners/anthropic.js';
 import { StubPlanner } from './agent/planners/stub.js';
 import { env } from './config/env.js';
