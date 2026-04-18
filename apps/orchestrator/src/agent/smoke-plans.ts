@@ -46,22 +46,41 @@ export function buildBaiduSmokePlan(): PlannedStep[] {
   const searchButton: ResilientSelector = {
     description: 'Baidu search submit (#su, "百度一下")',
     strategies: [
+      // Classic id. Confirmed still canonical on desktop Baidu — but
+      // a 2s `attached` probe can miss it if the page is still
+      // hydrating when we reach this step. The fallbacks below cover
+      // that window.
       { kind: 'css', value: '#su' },
-      { kind: 'css', value: 'input[type="submit"][value="百度一下"]' },
+      // Form-scoped: inside <form id="form" action="/s"> the only
+      // submit is the "百度一下" button. Survives class/id renames.
+      { kind: 'css', value: '#form input[type="submit"]' },
+      { kind: 'css', value: '#form button[type="submit"]' },
+      // Unscoped submit — last-ditch, matches any submit on page.
+      // Baidu homepage has only one form so false-positive risk is
+      // near zero.
+      { kind: 'css', value: 'input[type="submit"]' },
+      // Semantic. <input type="submit" value="百度一下"> gets
+      // accessible role=button + name="百度一下", independent of
+      // whatever tag/class the redesign uses.
       { kind: 'role', role: 'button', name: '百度一下' },
+      // Legacy class, still on many layouts.
+      { kind: 'css', value: '.s_btn' },
     ],
-    scope: { timeoutMs: 5_000 },
+    scope: { timeoutMs: 10_000 },
     selfHeal: false,
   };
 
-  // Any of these means the result page rendered. `.result` is the
-  // organic result container; `.result-op` covers special cards
-  // (zhidao, baike, knowledge panels). Empty-state captcha pages
-  // have neither, so this wait also doubles as a "are we blocked?"
+  // Any of these means the result page rendered. `.c-container` is
+  // the universal wrapper across organic + special cards (zhidao,
+  // baike, knowledge panels). `.result` / `.result-op` are the
+  // legacy organic/special wrappers, still emitted as classes on
+  // `.c-container` for back-compat. Empty-state captcha pages have
+  // none of these, so this wait also doubles as a "are we blocked?"
   // probe — the step fails fast instead of extract returning zero.
   const resultContainer: ResilientSelector = {
     description: 'Baidu result list container',
     strategies: [
+      { kind: 'css', value: '#content_left .c-container' },
       { kind: 'css', value: '#content_left .result' },
       { kind: 'css', value: '#content_left .result-op' },
       { kind: 'css', value: '#content_left > div[tpl]' },
@@ -70,14 +89,16 @@ export function buildBaiduSmokePlan(): PlannedStep[] {
     selfHeal: false,
   };
 
-  // h3 is the result headline in every Baidu result template, organic
-  // or card — this is the stable extraction target across layouts.
+  // Every Baidu result card (organic or special) carries an <h3> with
+  // the headline. `h3 a` is the title link specifically — most useful
+  // for text extraction since it skips the URL-and-arrow trailer that
+  // some card types append to the h3.
   const resultTitles: ResilientSelector = {
     description: 'Baidu result headline (h3)',
     strategies: [
+      { kind: 'css', value: '#content_left h3 a' },
       { kind: 'css', value: '#content_left h3' },
       { kind: 'css', value: '#content_left .c-title' },
-      { kind: 'css', value: '#content_left a em' },
     ],
     scope: { timeoutMs: 5_000 },
     selfHeal: false,

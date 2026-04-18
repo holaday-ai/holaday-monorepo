@@ -42,11 +42,41 @@ describe('buildBaiduSmokePlan', () => {
     expect(wait?.selector?.strategies.length).toBeGreaterThanOrEqual(3);
   });
 
-  it('search-button selector lists #su first', () => {
+  it('search-button selector lists #su first, plus form-scoped + semantic fallbacks', () => {
     const plan = buildBaiduSmokePlan();
     const click = plan[3];
     expect(click?.kind).toBe('click');
-    expect(click?.selector?.strategies[0]).toEqual({ kind: 'css', value: '#su' });
+    const s = click?.selector?.strategies ?? [];
+    expect(s[0]).toEqual({ kind: 'css', value: '#su' });
+    // A 2s `attached` probe on #su can miss during hydration — these
+    // fallbacks cover the window without giving up on the step.
+    const cssValues = s.filter((x) => x.kind === 'css').map((x) => x.value);
+    expect(cssValues).toContain('#form input[type="submit"]');
+    expect(cssValues).toContain('input[type="submit"]');
+    expect(s.some((x) => x.kind === 'role' && x.role === 'button' && x.name === '百度一下')).toBe(
+      true,
+    );
+    expect(s.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('results-wait selector covers .c-container (universal) + .result/.result-op (legacy)', () => {
+    const plan = buildBaiduSmokePlan();
+    const wait = plan[4];
+    expect(wait?.kind).toBe('wait');
+    const values = (wait?.selector?.strategies ?? []).map((x) => x.value);
+    expect(values).toContain('#content_left .c-container');
+    expect(values).toContain('#content_left .result');
+    expect(values).toContain('#content_left .result-op');
+  });
+
+  it('extract targets h3 a first (skips trailer text), falls back to plain h3 + .c-title', () => {
+    const plan = buildBaiduSmokePlan();
+    const extract = plan[5];
+    expect(extract?.kind).toBe('extract');
+    const values = (extract?.selector?.strategies ?? []).map((x) => x.value);
+    expect(values[0]).toBe('#content_left h3 a');
+    expect(values).toContain('#content_left h3');
+    expect(values).toContain('#content_left .c-title');
   });
 
   it('all selector-bearing steps disable self-heal (fixed-plan diagnostic)', () => {
