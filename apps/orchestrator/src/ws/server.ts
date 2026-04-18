@@ -10,6 +10,7 @@ import {
 } from '@holaday/shared-types';
 import { jwtVerify } from 'jose';
 import { WebSocket, WebSocketServer } from 'ws';
+import { TaskController, type TaskState } from '../agent/task-controller.js';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 
@@ -19,7 +20,11 @@ interface ClientState {
   socket: WebSocket;
   lastPongAt: number;
   authed: boolean;
+  // taskId -> state. Phase 0 in-memory; persistence wires in W2.
+  tasks: Map<string, TaskState>;
 }
+
+const taskController = new TaskController();
 
 const jwtKey = new TextEncoder().encode(env.JWT_SECRET);
 
@@ -57,6 +62,7 @@ async function handleConnection(socket: WebSocket, req: IncomingMessage) {
     socket,
     lastPongAt: Date.now(),
     authed: false,
+    tasks: new Map(),
   };
 
   const requestedProtos = (req.headers['sec-websocket-protocol'] ?? '')
@@ -144,8 +150,55 @@ async function handleClientMessage(
     return;
   }
 
-  // Other message types wired in W1-W3.
-  logger.debug({ type: msg.type, clientId: state.id }, 'ws message received');
+  if (msg.type === 'client.task.ack') {
+    logger.debug({ taskId: msg.taskId, stepId: msg.stepId, clientId: state.id }, 'task ack');
+    return;
+  }
+
+  if (msg.type === 'client.step.result') {
+    runStepResult(state, msg);
+    return;
+  }
+
+  if (msg.type === 'client.screenshot') {
+    logger.debug(
+      { taskId: msg.taskId, stepId: msg.stepId, key: msg.key, clientId: state.id },
+      'screenshot ready',
+    );
+    return;
+  }
+}
+
+function runStepResult(
+  state: ClientState,
+  msg: Extract<ClientMessage, { type: 'client.step.result' }>,
+): void {
+  const taskState = state.tasks.get(msg.taskId);
+  if (!taskState) {
+    send(state.socket, {
+      type: 'server.error',
+      code: 'UNKNOWN_TASK',
+      message: `no in-flight task ${msg.taskId}`,
+    });
+    return;
+  }
+
+  const { state: nextState, effects } = taskController.onStepResult(taskState, {
+    taskId: msg.taskId,
+    stepId: msg.stepId,
+    status: msg.status,
+    data: msg.data,
+    error: msg.error,
+  });
+
+  state.tasks.set(msg.taskId, nextState);
+
+  for (const eff of effects) {
+    if (eff.kind === 'send') {
+      send(state.socket, eff.message);
+    }
+    // eff.kind === 'persist' wires to MySQL in W2 (SkillLoader / TaskRunner).
+  }
 }
 
 async function verifyToken(token: string): Promise<string | null> {
