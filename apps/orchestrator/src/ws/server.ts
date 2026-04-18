@@ -11,7 +11,7 @@ import {
 import { jwtVerify } from 'jose';
 import { WebSocket, WebSocketServer } from 'ws';
 import { TaskController, type TaskState } from '../agent/task-controller.js';
-import { TaskRepository } from '../agent/task-repository.js';
+import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
@@ -22,7 +22,8 @@ interface ClientState {
   socket: WebSocket;
   lastPongAt: number;
   authed: boolean;
-  // taskId -> state. Phase 0 in-memory; persistence wires in W2.
+  // taskId -> state. Phase 0 in-memory; persistence writes through on every
+  // transition. Restart recovery rehydrates this map per-user at auth time.
   tasks: Map<string, TaskState>;
 }
 
@@ -32,6 +33,25 @@ const taskRepository = new TaskRepository(db);
 const jwtKey = new TextEncoder().encode(env.JWT_SECRET);
 
 const lastPingAt = new WeakMap<WebSocket, number>();
+
+/**
+ * Per-user rehydrated TaskStates loaded at boot from MySQL. When a WS client
+ * authenticates we drain the entry for their user once and seed the client's
+ * in-memory task map (plus re-emit server.user.confirm for awaiting_user
+ * tasks).
+ */
+const rehydratedByUser = new Map<string, RehydratedTask[]>();
+
+export async function loadRehydratedTasks(): Promise<{ userCount: number; taskCount: number }> {
+  rehydratedByUser.clear();
+  const rehydrated = await taskRepository.rehydrateInFlight();
+  for (const r of rehydrated) {
+    const bucket = rehydratedByUser.get(r.userExternalId) ?? [];
+    bucket.push(r);
+    rehydratedByUser.set(r.userExternalId, bucket);
+  }
+  return { userCount: rehydratedByUser.size, taskCount: rehydrated.length };
+}
 
 export function createWsServer(port: number) {
   const wss = new WebSocketServer({ port, handleProtocols });
@@ -50,6 +70,36 @@ export function createWsServer(port: number) {
       return new Promise<void>((resolve) => wss.close(() => resolve()));
     },
   };
+}
+
+/**
+ * Drain per-user rehydrated tasks into the client's in-memory map and
+ * re-emit server.user.confirm for anything in awaiting_user so the
+ * extension immediately re-prompts the user after a restart.
+ */
+function applyRehydrationForUser(state: ClientState): void {
+  if (!state.userId) return;
+  const bucket = rehydratedByUser.get(state.userId);
+  if (!bucket || bucket.length === 0) return;
+
+  for (const entry of bucket) {
+    state.tasks.set(entry.state.taskId, entry.state);
+    if (entry.state.status === 'awaiting_user' && entry.pendingConfirm) {
+      send(state.socket, {
+        type: 'server.user.confirm',
+        taskId: entry.state.taskId,
+        stepId: entry.pendingConfirm.stepId,
+        prompt: entry.pendingConfirm.prompt,
+        risk: entry.pendingConfirm.risk,
+      });
+    }
+  }
+  logger.info(
+    { userId: state.userId, rehydratedCount: bucket.length },
+    'rehydrated tasks delivered to client',
+  );
+  // Drain so reconnecting sibling tabs don't double-prompt.
+  rehydratedByUser.delete(state.userId);
 }
 
 function handleProtocols(protocols: Set<string>): string | false {
@@ -86,6 +136,7 @@ async function handleConnection(socket: WebSocket, req: IncomingMessage) {
         clientId: state.id,
         heartbeatMs: HEARTBEAT_INTERVAL_MS,
       });
+      applyRehydrationForUser(state);
     }
   }
 
@@ -145,6 +196,7 @@ async function handleClientMessage(
       clientId: state.id,
       heartbeatMs: HEARTBEAT_INTERVAL_MS,
     });
+    applyRehydrationForUser(state);
     return;
   }
 
