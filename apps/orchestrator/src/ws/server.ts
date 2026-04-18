@@ -74,16 +74,30 @@ export function createWsServer(port: number) {
 
 /**
  * Drain per-user rehydrated tasks into the client's in-memory map and
- * re-emit server.user.confirm for anything in awaiting_user so the
- * extension immediately re-prompts the user after a restart.
+ * re-emit the right continuation frame so the extension can resume:
+ *
+ *   awaiting_user → re-emit server.user.confirm (persisted pending payload)
+ *   paused        → re-emit server.task.control pause (with reason)
+ *   executing     → re-emit server.task.dispatch for the cursor step,
+ *                    so the extension resumes the in-flight action
+ *                    (W1 rehearsal b1: completeness of crash recovery)
+ *
+ * `planning` and `pending` are transient server-side states that shouldn't
+ * normally persist past a restart; if they do, we log and move on — a
+ * re-plan would need to call the commander again which is out of scope.
  */
 function applyRehydrationForUser(state: ClientState): void {
   if (!state.userId) return;
   const bucket = rehydratedByUser.get(state.userId);
   if (!bucket || bucket.length === 0) return;
 
+  let reemittedDispatch = 0;
+  let reemittedConfirm = 0;
+  let reemittedPause = 0;
+
   for (const entry of bucket) {
     state.tasks.set(entry.state.taskId, entry.state);
+
     if (entry.state.status === 'awaiting_user' && entry.pendingConfirm) {
       send(state.socket, {
         type: 'server.user.confirm',
@@ -92,17 +106,60 @@ function applyRehydrationForUser(state: ClientState): void {
         prompt: entry.pendingConfirm.prompt,
         risk: entry.pendingConfirm.risk,
       });
-    } else if (entry.state.status === 'paused' && entry.pauseReason) {
+      reemittedConfirm += 1;
+      continue;
+    }
+
+    if (entry.state.status === 'paused' && entry.pauseReason) {
       send(state.socket, {
         type: 'server.task.control',
         taskId: entry.state.taskId,
         command: 'pause',
         reason: entry.pauseReason,
       });
+      reemittedPause += 1;
+      continue;
     }
+
+    if (entry.state.status === 'executing') {
+      const step = entry.state.plan[entry.state.cursor];
+      if (!step) {
+        logger.warn(
+          { userId: state.userId, taskId: entry.state.taskId, cursor: entry.state.cursor },
+          'executing task rehydrated with cursor past plan end; skipping re-dispatch',
+        );
+        continue;
+      }
+      send(state.socket, {
+        type: 'server.task.dispatch',
+        taskId: entry.state.taskId,
+        stepId: step.id,
+        action: {
+          kind: step.kind,
+          ...(step.selector ? { selector: step.selector } : {}),
+          ...(step.payload ? { payload: step.payload } : {}),
+        },
+      });
+      reemittedDispatch += 1;
+      continue;
+    }
+
+    logger.info(
+      { userId: state.userId, taskId: entry.state.taskId, status: entry.state.status },
+      'rehydrated task in transient state; not re-emitting (needs re-plan in W2+)',
+    );
   }
+
   logger.info(
-    { userId: state.userId, rehydratedCount: bucket.length },
+    {
+      userId: state.userId,
+      rehydratedCount: bucket.length,
+      reemitted: {
+        dispatch: reemittedDispatch,
+        confirm: reemittedConfirm,
+        pause: reemittedPause,
+      },
+    },
     'rehydrated tasks delivered to client',
   );
   // Drain so reconnecting sibling tabs don't double-prompt.
