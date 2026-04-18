@@ -6,6 +6,7 @@ import {
 } from '@holaday/shared-types';
 import { z } from 'zod';
 import { logger } from '../../config/logger.js';
+import { type LlmCallRecorder, NoopLlmCallRecorder } from '../llm-call-recorder.js';
 import type { Planner, PlannerContext } from '../planner.js';
 import type { PlannedStep } from '../task-controller.js';
 
@@ -45,12 +46,19 @@ export interface AnthropicPlannerOptions {
   client?: Anthropic;
   model?: string;
   maxTokens?: number;
+  /**
+   * LLM billing / observability sink. Default is a no-op; production
+   * orchestrator boot wires `DrizzleLlmCallRecorder` so every plan call
+   * lands a row in `llm_calls`.
+   */
+  recorder?: LlmCallRecorder;
 }
 
 export class AnthropicPlanner implements Planner {
   private readonly client: Anthropic;
   private readonly model: string;
   private readonly maxTokens: number;
+  private readonly recorder: LlmCallRecorder;
 
   constructor(opts: AnthropicPlannerOptions = {}) {
     this.client = opts.client ?? new Anthropic();
@@ -58,6 +66,7 @@ export class AnthropicPlanner implements Planner {
     // cost); production default stays claude-opus-4-7.
     this.model = opts.model ?? process.env.COMMANDER_MODEL ?? DEFAULT_MODEL;
     this.maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS;
+    this.recorder = opts.recorder ?? new NoopLlmCallRecorder();
   }
 
   async plan(ctx: PlannerContext): Promise<PlannedStep[]> {
@@ -78,10 +87,30 @@ export class AnthropicPlanner implements Planner {
     });
     const elapsedMs = Date.now() - startedAt;
 
+    const usage = {
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      cacheReadInputTokens: response.usage.cache_read_input_tokens ?? 0,
+      cacheCreationInputTokens: response.usage.cache_creation_input_tokens ?? 0,
+    };
+
     const toolUse = response.content.find(
       (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === PLAN_TOOL_NAME,
     );
     if (!toolUse) {
+      if (ctx.userId) {
+        // Record the burned tokens even on failure so cost accounting stays honest.
+        await this.recorder.record({
+          userExternalId: ctx.userId,
+          provider: 'anthropic',
+          model: response.model,
+          purpose: 'commander.plan',
+          ...usage,
+          latencyMs: elapsedMs,
+          status: 'error',
+          errorMessage: `missing ${PLAN_TOOL_NAME} tool_use block`,
+        });
+      }
       throw new PlannerError(
         'NO_TOOL_USE',
         `planner response missing ${PLAN_TOOL_NAME} tool_use block`,
@@ -90,6 +119,18 @@ export class AnthropicPlanner implements Planner {
 
     const parsed = planSchema.safeParse(toolUse.input);
     if (!parsed.success) {
+      if (ctx.userId) {
+        await this.recorder.record({
+          userExternalId: ctx.userId,
+          provider: 'anthropic',
+          model: response.model,
+          purpose: 'commander.plan',
+          ...usage,
+          latencyMs: elapsedMs,
+          status: 'error',
+          errorMessage: parsed.error.message.slice(0, 512),
+        });
+      }
       throw new PlannerError('INVALID_PLAN', parsed.error.message);
     }
 
@@ -99,15 +140,23 @@ export class AnthropicPlanner implements Planner {
         model: this.model,
         elapsedMs,
         planSize: parsed.data.steps.length,
-        usage: {
-          inputTokens: response.usage.input_tokens,
-          outputTokens: response.usage.output_tokens,
-          cacheReadInputTokens: response.usage.cache_read_input_tokens ?? 0,
-          cacheCreationInputTokens: response.usage.cache_creation_input_tokens ?? 0,
-        },
+        usage,
       },
       'commander plan',
     );
+
+    if (ctx.userId) {
+      await this.recorder.record({
+        userExternalId: ctx.userId,
+        provider: 'anthropic',
+        model: response.model,
+        purpose: 'commander.plan',
+        ...usage,
+        latencyMs: elapsedMs,
+        status: 'ok',
+        requestMeta: { planSize: parsed.data.steps.length },
+      });
+    }
 
     return parsed.data.steps.map((step) => ({
       id: newExternalId('taskStep'),

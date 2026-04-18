@@ -203,4 +203,104 @@ describe('AnthropicPlanner', () => {
     const system = (captured as unknown as { system: Anthropic.TextBlockParam[] }).system;
     expect(system).toHaveLength(1);
   });
+
+  it('calls recorder.record on success with status=ok + usage + planSize', async () => {
+    const { AnthropicPlanner, PLAN_TOOL_NAME } = await import('./anthropic.js');
+    const { NoopLlmCallRecorder } = await import('../llm-call-recorder.js');
+
+    const client = fakeClient(() =>
+      buildToolUseMessage(
+        {
+          steps: [
+            { kind: 'goto', payload: { url: 'https://example.com' }, risk: 'low' },
+            { kind: 'wait', risk: 'low' },
+          ],
+        },
+        PLAN_TOOL_NAME,
+      ),
+    );
+
+    const seen: unknown[] = [];
+    const recorder = new (class extends NoopLlmCallRecorder {
+      override async record(call: unknown) {
+        seen.push(call);
+      }
+    })();
+
+    await new AnthropicPlanner({ client, recorder }).plan({
+      intent: '研究一下',
+      userId: 'usr_abc123',
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      userExternalId: 'usr_abc123',
+      provider: 'anthropic',
+      model: 'claude-opus-4-7',
+      purpose: 'commander.plan',
+      status: 'ok',
+      inputTokens: 100,
+      outputTokens: 50,
+      requestMeta: { planSize: 2 },
+    });
+  });
+
+  it('records status=error when the API returns a non-tool_use response', async () => {
+    const { AnthropicPlanner } = await import('./anthropic.js');
+    const { NoopLlmCallRecorder } = await import('../llm-call-recorder.js');
+
+    const client = fakeClient(
+      () =>
+        ({
+          id: 'msg_text',
+          type: 'message',
+          role: 'assistant',
+          model: 'claude-opus-4-7',
+          content: [{ type: 'text', text: 'sorry, no tool' }],
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          usage: {
+            input_tokens: 2049,
+            output_tokens: 97,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        }) as unknown as Anthropic.Message,
+    );
+
+    const seen: { status?: string }[] = [];
+    const recorder = new (class extends NoopLlmCallRecorder {
+      override async record(call: unknown) {
+        seen.push(call as { status?: string });
+      }
+    })();
+
+    await expect(
+      new AnthropicPlanner({ client, recorder }).plan({
+        intent: 'x',
+        userId: 'usr_fail',
+      }),
+    ).rejects.toThrow();
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.status).toBe('error');
+  });
+
+  it('skips recording when ctx.userId is missing (tests / internal calls)', async () => {
+    const { AnthropicPlanner, PLAN_TOOL_NAME } = await import('./anthropic.js');
+    const { NoopLlmCallRecorder } = await import('../llm-call-recorder.js');
+
+    const client = fakeClient(() =>
+      buildToolUseMessage({ steps: [{ kind: 'wait', risk: 'low' }] }, PLAN_TOOL_NAME),
+    );
+
+    const seen: unknown[] = [];
+    const recorder = new (class extends NoopLlmCallRecorder {
+      override async record(call: unknown) {
+        seen.push(call);
+      }
+    })();
+
+    await new AnthropicPlanner({ client, recorder }).plan({ intent: 'anonymous call' });
+    expect(seen).toHaveLength(0);
+  });
 });
