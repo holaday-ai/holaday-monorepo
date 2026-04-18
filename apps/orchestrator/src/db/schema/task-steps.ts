@@ -33,6 +33,12 @@ export const taskSteps = mysqlTable(
     input: json('input'),
     output: json('output'),
     screenshotKey: varchar('screenshot_key', { length: 255 }),
+    /**
+     * When status='awaiting_user', this holds the confirm-prompt payload
+     * (stepId, prompt, risk) needed to re-emit server.user.confirm on
+     * orchestrator restart. Null in every other status.
+     */
+    pendingConfirmPayload: json('pending_confirm_payload'),
     errorCode: varchar('error_code', { length: 64 }),
     errorMessage: text('error_message'),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })

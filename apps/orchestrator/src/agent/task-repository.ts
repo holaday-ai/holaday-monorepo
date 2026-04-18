@@ -1,9 +1,10 @@
 import { newExternalId } from '@holaday/shared-types';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { taskEvents } from '../db/schema/task-events.js';
 import { taskSteps } from '../db/schema/task-steps.js';
 import { tasks } from '../db/schema/tasks.js';
+import { users } from '../db/schema/users.js';
 import type { PlannedStep, TaskState } from './task-controller.js';
 
 /**
@@ -95,20 +96,32 @@ export class TaskRepository {
 
       if (completedStep) {
         const stepStatus = stepStatusFor(next);
+        const stepUpdate: Partial<typeof taskSteps.$inferInsert> = {
+          status: stepStatus,
+          completedAt: new Date(),
+          output: resultPayload ?? null,
+        };
+        if (next.status === 'awaiting_user' && next.pendingConfirm) {
+          // Persist the prompt so restart recovery can re-emit server.user.confirm.
+          stepUpdate.pendingConfirmPayload = {
+            stepId: next.pendingConfirm.stepId,
+            prompt: next.pendingConfirm.prompt,
+            risk: next.pendingConfirm.risk,
+          };
+        } else {
+          // Any non-awaiting transition clears a previously stored confirm.
+          stepUpdate.pendingConfirmPayload = null;
+        }
         await tx
           .update(taskSteps)
-          .set({
-            status: stepStatus,
-            completedAt: new Date(),
-            output: resultPayload ?? null,
-          })
+          .set(stepUpdate)
           .where(and(eq(taskSteps.taskId, taskRowId), eq(taskSteps.externalId, completedStep.id)));
       }
 
       if (nowExecuting) {
         await tx
           .update(taskSteps)
-          .set({ status: 'executing', startedAt: new Date() })
+          .set({ status: 'executing', startedAt: new Date(), pendingConfirmPayload: null })
           .where(and(eq(taskSteps.taskId, taskRowId), eq(taskSteps.externalId, nowExecuting.id)));
       }
 
@@ -122,7 +135,104 @@ export class TaskRepository {
       });
     });
   }
+
+  /**
+   * Rehydrate in-flight TaskStates after orchestrator restart.
+   *
+   * Reads every `tasks` row whose status is non-terminal (executing /
+   * awaiting_user / paused / planning / pending) together with the
+   * user's external_id (for routing back to the owning WS client) and
+   * the ordered task_steps list. Rebuilds a TaskState per task so the
+   * WS server can re-seed its per-client in-memory map and, if the step
+   * is awaiting_user, re-emit server.user.confirm from the persisted
+   * pending_confirm_payload.
+   */
+  async rehydrateInFlight(): Promise<RehydratedTask[]> {
+    const rows = await this.db
+      .select({
+        taskExternalId: tasks.externalId,
+        status: tasks.status,
+        userExternalId: users.externalId,
+        errorCode: tasks.errorCode,
+        errorMessage: tasks.errorMessage,
+      })
+      .from(tasks)
+      .innerJoin(users, eq(users.id, tasks.userId))
+      .where(inArray(tasks.status, [...IN_FLIGHT_STATUSES]));
+
+    const out: RehydratedTask[] = [];
+    for (const row of rows) {
+      const [taskRow] = await this.db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(eq(tasks.externalId, row.taskExternalId))
+        .limit(1);
+      if (!taskRow) continue;
+
+      const steps = await this.db
+        .select()
+        .from(taskSteps)
+        .where(eq(taskSteps.taskId, taskRow.id))
+        .orderBy(taskSteps.seq);
+
+      const plan: PlannedStep[] = steps.map((s) => {
+        const input = (normalizeJson(s.input) ?? {}) as {
+          selector?: PlannedStep['selector'];
+          payload?: PlannedStep['payload'];
+          requiresConfirm?: boolean;
+        };
+        return {
+          id: s.externalId,
+          kind: s.kind as PlannedStep['kind'],
+          risk: s.riskLevel as PlannedStep['risk'],
+          ...(input.selector ? { selector: input.selector } : {}),
+          ...(input.payload ? { payload: input.payload } : {}),
+          ...(input.requiresConfirm !== undefined
+            ? { requiresConfirm: input.requiresConfirm }
+            : {}),
+        };
+      });
+
+      // Cursor = first step that is not completed/failed/cancelled.
+      let cursor = steps.findIndex(
+        (s) => s.status !== 'completed' && s.status !== 'failed' && s.status !== 'cancelled',
+      );
+      if (cursor < 0) cursor = steps.length;
+
+      const current = steps[cursor];
+      const pending = normalizeJson(current?.pendingConfirmPayload) as
+        | { stepId: string; prompt: string; risk: 'low' | 'medium' | 'high' }
+        | null
+        | undefined;
+
+      const state: TaskState = {
+        taskId: row.taskExternalId,
+        status: row.status as TaskState['status'],
+        plan,
+        cursor,
+        pendingConfirm: pending ?? null,
+        ...(row.errorCode
+          ? { error: { code: row.errorCode, message: row.errorMessage ?? '' } }
+          : {}),
+      };
+
+      out.push({
+        state,
+        userExternalId: row.userExternalId,
+        pendingConfirm: pending ?? null,
+      });
+    }
+    return out;
+  }
 }
+
+export interface RehydratedTask {
+  state: TaskState;
+  userExternalId: string;
+  pendingConfirm: { stepId: string; prompt: string; risk: 'low' | 'medium' | 'high' } | null;
+}
+
+const IN_FLIGHT_STATUSES = ['pending', 'planning', 'executing', 'awaiting_user', 'paused'] as const;
 
 // ---------- helpers ----------
 
@@ -165,6 +275,21 @@ function serializeStepInput(step: PlannedStep): unknown {
  * surfaces `[{insertId}]`. This helper reads the id without leaking the
  * mysql2 typing into callers.
  */
+/**
+ * MariaDB (and older MySQL configurations) return JSON columns as strings.
+ * Modern MySQL 8 + drizzle returns parsed objects. Accept either.
+ */
+function normalizeJson(value: unknown): unknown {
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return value;
+}
+
 function readInsertId(result: unknown): number {
   if (Array.isArray(result) && result.length > 0) {
     const head = result[0] as { insertId?: number | bigint };
