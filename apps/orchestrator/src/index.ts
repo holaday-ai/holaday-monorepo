@@ -1,12 +1,22 @@
+import { DrizzleLlmCallRecorder } from './agent/llm-call-recorder.js';
 import { AnthropicPlanner } from './agent/planners/anthropic.js';
 import { StubPlanner } from './agent/planners/stub.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
+import { db } from './db/client.js';
 import { createHttpApp } from './http.js';
 import { createWsServer, loadRehydratedTasks } from './ws/server.js';
 
 async function main() {
-  const planner = env.ANTHROPIC_API_KEY ? new AnthropicPlanner() : new StubPlanner();
+  const recorder = new DrizzleLlmCallRecorder(db, {
+    onError: (err, call) => {
+      logger.warn(
+        { err, userExternalId: call.userExternalId, purpose: call.purpose },
+        'llm_calls INSERT failed (non-fatal)',
+      );
+    },
+  });
+  const planner = env.ANTHROPIC_API_KEY ? new AnthropicPlanner({ recorder }) : new StubPlanner();
   if (!env.ANTHROPIC_API_KEY) {
     logger.warn('ANTHROPIC_API_KEY missing — commander is using StubPlanner');
   }
