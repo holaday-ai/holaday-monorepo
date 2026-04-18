@@ -82,3 +82,37 @@ function toLocatorSpec(s: ResilientSelector['strategies'][number]): LocatorSpec 
       return null;
   }
 }
+
+/**
+ * Render a LocatorSpec as a short human-readable string for use in
+ * SELECTOR_NOT_FOUND error messages. Designed for fast skim: the Skill
+ * author (or Claude's next self-heal turn) can read
+ *   role(button, name="Submit")
+ *   css(.news-list > li)
+ *   xpath(//div[@data-testid='x'])
+ * and instantly know which strategy was emitted and where it failed.
+ */
+export function renderLocatorSpec(spec: LocatorSpec): string {
+  switch (spec.how) {
+    case 'role':
+      return spec.name
+        ? `role(${spec.role}, name=${JSON.stringify(spec.name)})`
+        : `role(${spec.role})`;
+    case 'text':
+      return spec.exact
+        ? `text=${JSON.stringify(spec.value)}(exact)`
+        : `text=${JSON.stringify(spec.value)}`;
+    case 'testid':
+      return spec.attr === 'data-testid'
+        ? `testid(${spec.value})`
+        : `testid(${spec.attr}=${JSON.stringify(spec.value)})`;
+    case 'css':
+      return `css(${spec.value})`;
+    case 'xpath':
+      return `xpath(${spec.value})`;
+    case 'label':
+      return `label(${JSON.stringify(spec.value)})`;
+    case 'placeholder':
+      return `placeholder(${JSON.stringify(spec.value)})`;
+  }
+}

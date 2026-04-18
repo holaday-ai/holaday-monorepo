@@ -20,7 +20,39 @@ import {
   driverError,
 } from './driver.js';
 import { isOriginAllowed } from './origin-guard.js';
-import { type LocatorSpec, buildSelectorPlan } from './selector-plan.js';
+import { type LocatorSpec, buildSelectorPlan, renderLocatorSpec } from './selector-plan.js';
+
+/**
+ * Per-strategy failure record. Included in the DriverResult.data for
+ * any SELECTOR_NOT_FOUND path (click / type / extract) so the operator —
+ * and eventually a self-heal planner — can see exactly which selector
+ * attempts the adapter tried and why each one didn't land.
+ */
+export interface StrategyFailure {
+  kind: LocatorSpec['how'];
+  selector: string;
+  reason: string;
+}
+
+/**
+ * Payload attached to DriverResult.data when selector resolution fails.
+ * `screenshot` is raw base64 PNG (no data: URL prefix) so the DB column
+ * keeps the bytes intact; `screenshotKey` is a short logical key that
+ * orchestrator persists to task_steps.screenshot_key — W3 will point
+ * that key at an S3 upload, for now it's a local handle.
+ */
+export interface SelectorNotFoundDiagnostic {
+  url: string;
+  title: string;
+  strategies: StrategyFailure[];
+  screenshotKey?: string;
+  screenshot?: string;
+}
+
+type ResolveLocatorResult = { locator: Locator } | { failures: StrategyFailure[] };
+
+/** Cap on error_message length to keep MySQL TEXT column from ballooning. */
+const ERROR_MESSAGE_CAP = 2000;
 
 export interface PlaywrightCrxAdapterOptions {
   /** Origin allowlist from the active Skill's `allowedOrigins`. */
@@ -136,15 +168,12 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     if (!action.selector) {
       return driverError(DRIVER_ERRORS.SELECTOR_MISSING, 'click requires selector');
     }
-    const locator = await this.resolveLocator(page, action);
-    if (!locator) {
-      return driverError(
-        DRIVER_ERRORS.SELECTOR_NOT_FOUND,
-        `click: no strategy matched (${action.selector.description})`,
-      );
+    const resolved = await this.resolveLocator(page, action);
+    if ('failures' in resolved) {
+      return this.buildSelectorNotFoundResult(page, action, 'click', resolved.failures);
     }
     try {
-      await locator.click({ timeout: action.deadlineMs ?? 5_000 });
+      await resolved.locator.click({ timeout: action.deadlineMs ?? 5_000 });
       return { status: 'ok', data: { clicked: action.selector.description } };
     } catch (err) {
       return driverError(
@@ -164,21 +193,18 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     if (text === null) {
       return driverError(DRIVER_ERRORS.PAYLOAD_MISSING, 'type requires payload.text');
     }
-    const locator = await this.resolveLocator(page, action);
-    if (!locator) {
-      return driverError(
-        DRIVER_ERRORS.SELECTOR_NOT_FOUND,
-        `type: no strategy matched (${action.selector.description})`,
-      );
+    const resolved = await this.resolveLocator(page, action);
+    if ('failures' in resolved) {
+      return this.buildSelectorNotFoundResult(page, action, 'type', resolved.failures);
     }
     try {
       // `fill` works for <input>/<textarea>. For contenteditable (Douyin
       // reply editor) fill fails → we fall back to focus+type. The Skill's
       // SKILL.md caveat marks those step kinds explicitly.
       try {
-        await locator.fill(text, { timeout: action.deadlineMs ?? 5_000 });
+        await resolved.locator.fill(text, { timeout: action.deadlineMs ?? 5_000 });
       } catch {
-        await locator.focus({ timeout: action.deadlineMs ?? 5_000 });
+        await resolved.locator.focus({ timeout: action.deadlineMs ?? 5_000 });
         await page.keyboard.type(text);
       }
       return { status: 'ok', data: { typedChars: text.length } };
@@ -204,22 +230,19 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
         },
       };
     }
-    const locator = await this.resolveLocator(page, action);
-    if (!locator) {
-      return driverError(
-        DRIVER_ERRORS.SELECTOR_NOT_FOUND,
-        `extract: no strategy matched (${action.selector.description})`,
-      );
+    const resolved = await this.resolveLocator(page, action);
+    if ('failures' in resolved) {
+      return this.buildSelectorNotFoundResult(page, action, 'extract', resolved.failures);
     }
     try {
       const limit = Math.min(
         typeof action.payload?.limit === 'number' ? action.payload.limit : 20,
         50,
       );
-      const count = await locator.count();
+      const count = await resolved.locator.count();
       const texts: string[] = [];
       for (let i = 0; i < Math.min(count, limit); i += 1) {
-        const t = (await locator.nth(i).innerText({ timeout: 2_000 })).trim();
+        const t = (await resolved.locator.nth(i).innerText({ timeout: 2_000 })).trim();
         if (t) texts.push(t);
       }
       return {
@@ -305,29 +328,118 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     return this.page;
   }
 
-  private async resolveLocator(page: Page, action: DriverAction): Promise<Locator | null> {
-    if (!action.selector) return null;
+  private async resolveLocator(page: Page, action: DriverAction): Promise<ResolveLocatorResult> {
+    const failures: StrategyFailure[] = [];
+    if (!action.selector) return { failures };
     const plan = buildSelectorPlan(action.selector);
     const scope = plan.scopeCss ? page.locator(plan.scopeCss) : null;
     for (const spec of plan.attempts) {
+      const label = renderLocatorSpec(spec);
       let locator: Locator | null;
       try {
         locator = buildLocator(page, scope, spec);
-      } catch {
+      } catch (err) {
+        failures.push({
+          kind: spec.how,
+          selector: label,
+          reason: `buildLocator threw: ${err instanceof Error ? err.message : String(err)}`,
+        });
         continue;
       }
-      if (!locator) continue;
+      if (!locator) {
+        failures.push({ kind: spec.how, selector: label, reason: 'buildLocator returned null' });
+        continue;
+      }
       if (plan.nth !== undefined) locator = locator.nth(plan.nth);
       try {
         await locator
           .first()
           .waitFor({ state: 'attached', timeout: this.opts.perStrategyTimeoutMs });
-        return locator;
-      } catch {
-        // strategy didn't resolve in time — fall through to next
+        return { locator };
+      } catch (err) {
+        // Most frequent reason is Playwright's own `TimeoutError: ...exceeded`
+        // but if the selector engine rejected the query itself we want that
+        // text instead of a generic "timeout".
+        const raw = err instanceof Error ? err.message : String(err);
+        const isTimeout = raw.toLowerCase().includes('timeout');
+        failures.push({
+          kind: spec.how,
+          selector: label,
+          reason: isTimeout
+            ? `waitFor(state=attached) timeout ${this.opts.perStrategyTimeoutMs}ms`
+            : raw.slice(0, 200),
+        });
       }
     }
-    return null;
+    return { failures };
+  }
+
+  /**
+   * Build a SELECTOR_NOT_FOUND DriverResult with rich diagnostic data:
+   * the current page URL + title, each strategy's selector + failure
+   * reason, and a viewport screenshot (base64 PNG). The screenshot's
+   * logical key lands on `task_steps.screenshot_key` via the orchestrator
+   * repo; the bytes sit in the step's `output` JSON alongside the
+   * strategy list. All of it is bounded so a noisy failure can't
+   * explode the DB row.
+   *
+   * Failure to capture url / title / screenshot degrades gracefully —
+   * we still emit the error with whatever we got, never throw from
+   * inside the diagnostic builder.
+   */
+  private async buildSelectorNotFoundResult(
+    page: Page,
+    action: DriverAction,
+    verb: 'click' | 'type' | 'extract',
+    failures: StrategyFailure[],
+  ): Promise<DriverResult> {
+    const desc = action.selector?.description ?? '(no description)';
+    const [url, title, screenshot] = await Promise.all([
+      safeCall(() => page.url(), ''),
+      safeCall(() => page.title(), ''),
+      safeCall(
+        async () => {
+          const buf = await page.screenshot({ type: 'png', fullPage: false });
+          return Buffer.from(buf).toString('base64');
+        },
+        null as string | null,
+      ),
+    ]);
+
+    const strategiesTxt =
+      failures.length === 0
+        ? 'no strategies emitted by planner'
+        : failures.map((f) => `${f.kind}[${f.selector}]→${f.reason}`).join(' ; ');
+    const message = (
+      `${verb}: no strategy matched "${desc}"` +
+      ` at ${url || '<url unknown>'} (title="${title || ''}"); tried: ${strategiesTxt}`
+    ).slice(0, ERROR_MESSAGE_CAP);
+
+    // screenshotKey is a logical handle. W3 will wire this to an S3
+    // upload; for now the bytes live in `data.screenshot` and the key
+    // lets the task_steps column carry a stable reference string.
+    const screenshotKey = screenshot ? `diag-${verb}-${Date.now().toString(36)}` : undefined;
+
+    const data: SelectorNotFoundDiagnostic = {
+      url,
+      title,
+      strategies: failures,
+      ...(screenshot ? { screenshot, screenshotKey: screenshotKey as string } : {}),
+    };
+
+    return {
+      status: 'error',
+      data,
+      error: { code: DRIVER_ERRORS.SELECTOR_NOT_FOUND, message },
+    };
+  }
+}
+
+async function safeCall<T>(fn: () => T | Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch {
+    return fallback;
   }
 }
 

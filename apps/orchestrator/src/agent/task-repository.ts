@@ -124,6 +124,12 @@ export class TaskRepository {
           completedAt: new Date(),
           output: resultPayload ?? null,
         };
+        // Driver diagnostics (e.g. SELECTOR_NOT_FOUND) include a logical
+        // screenshotKey in the result payload; persist it to the column
+        // so operators can link the step row to its captured frame
+        // without parsing the output JSON blob.
+        const screenshotKey = extractScreenshotKey(resultPayload);
+        if (screenshotKey !== null) stepUpdate.screenshotKey = screenshotKey;
         if (nextRetries > prevRetries) {
           stepUpdate.retryCount = nextRetries;
         }
@@ -457,4 +463,19 @@ function readInsertId(result: unknown): number {
     if (head && typeof head.insertId === 'bigint') return Number(head.insertId);
   }
   throw new Error('insert did not return insertId');
+}
+
+/**
+ * Pull `screenshotKey` out of a driver's result payload if present.
+ * Returns null (not undefined) when absent so the caller can distinguish
+ * "no screenshot to persist" from "drop the existing key", though we
+ * don't use that distinction yet — stepUpdate.screenshotKey only gets
+ * set when we have a real value. Capped at 255 chars to match the DB
+ * column width.
+ */
+function extractScreenshotKey(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const key = (payload as { screenshotKey?: unknown }).screenshotKey;
+  if (typeof key !== 'string' || key.length === 0) return null;
+  return key.slice(0, 255);
 }

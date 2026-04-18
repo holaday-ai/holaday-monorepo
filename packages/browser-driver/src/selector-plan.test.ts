@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSelectorPlan } from './selector-plan.js';
+import { buildSelectorPlan, renderLocatorSpec } from './selector-plan.js';
 
 describe('buildSelectorPlan', () => {
   it('translates a multi-strategy selector into ordered LocatorSpec attempts', () => {
@@ -49,5 +49,32 @@ describe('buildSelectorPlan', () => {
     expect(plan.scopeCss).toBe('.panel');
     expect(plan.nth).toBe(2);
     expect(plan.selfHeal).toBe(false);
+  });
+});
+
+describe('renderLocatorSpec', () => {
+  it('renders each LocatorSpec kind as a debuggable string', () => {
+    expect(renderLocatorSpec({ how: 'role', role: 'button', name: 'Submit', exact: false })).toBe(
+      'role(button, name="Submit")',
+    );
+    expect(renderLocatorSpec({ how: 'role', role: 'navigation', exact: false })).toBe(
+      'role(navigation)',
+    );
+    expect(renderLocatorSpec({ how: 'text', value: '登录', exact: true })).toBe(
+      'text="登录"(exact)',
+    );
+    expect(renderLocatorSpec({ how: 'text', value: 'Login', exact: false })).toBe('text="Login"');
+    expect(renderLocatorSpec({ how: 'testid', value: 'x', attr: 'data-testid' })).toBe('testid(x)');
+    expect(renderLocatorSpec({ how: 'testid', value: 'x', attr: 'data-qa' })).toBe(
+      'testid(data-qa="x")',
+    );
+    expect(renderLocatorSpec({ how: 'css', value: '.a > .b' })).toBe('css(.a > .b)');
+    expect(renderLocatorSpec({ how: 'xpath', value: '//div[@id="x"]' })).toBe(
+      'xpath(//div[@id="x"])',
+    );
+    expect(renderLocatorSpec({ how: 'label', value: '邮箱', exact: false })).toBe('label("邮箱")');
+    expect(renderLocatorSpec({ how: 'placeholder', value: 'Search…' })).toBe(
+      'placeholder("Search…")',
+    );
   });
 });
