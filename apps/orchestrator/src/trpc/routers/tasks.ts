@@ -110,6 +110,39 @@ export const tasksRouter = router({
     }
     return { taskId: next.taskId, status: next.status };
   }),
+
+  confirm: protectedProcedure
+    .input(z.object({ taskId: z.string().min(1), approve: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const repo = new TaskRepository(ctx.db);
+      const prev = await loadTaskState(repo, input.taskId, ctx.userId);
+      if (prev.status !== 'awaiting_user') {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: `cannot confirm from status=${prev.status}`,
+        });
+      }
+
+      const { state: next, effects } = taskController.userConfirm(
+        prev,
+        input.approve ? 'approve' : 'reject',
+      );
+
+      // userConfirm emits persist effects but our repo layer has two paths:
+      //   - reject → control transition (status=cancelled, no step change)
+      //   - approve → step-result-like transition (cursor advances, next step executing)
+      // Pick the correct repo method from the transition shape.
+      if (next.status === 'cancelled') {
+        await repo.applyControlTransition(prev, next);
+      } else {
+        await repo.applyStepResult(prev, next, { confirmed: true });
+      }
+      updateTaskStateForUser(ctx.userId, next);
+      for (const eff of effects) {
+        if (eff.kind === 'send') broadcastToUser(ctx.userId, eff.message);
+      }
+      return { taskId: next.taskId, status: next.status };
+    }),
 });
 
 async function loadTaskState(repo: TaskRepository, taskExternalId: string, userExternalId: string) {
