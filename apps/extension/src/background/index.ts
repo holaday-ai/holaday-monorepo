@@ -35,11 +35,34 @@ type TaskStatus =
 
 type PauseReason = 'user' | 'retries_exhausted' | 'quota_exceeded';
 
+interface BatchItemView {
+  label: string;
+  preview: string;
+  meta?: Record<string, unknown>;
+}
+
+type PendingConfirmView =
+  | {
+      kind: 'single';
+      stepId: string;
+      prompt: string;
+      risk: 'low' | 'medium' | 'high';
+    }
+  | {
+      kind: 'batch';
+      stepId: string;
+      batchIndex: number;
+      batchTotal: number;
+      items: BatchItemView[];
+      risk: 'low' | 'medium' | 'high';
+      summary?: string;
+    };
+
 interface TaskView {
   taskId: string;
   status: TaskStatus;
   steps: StepView[];
-  pendingConfirm?: { stepId: string; prompt: string; risk: 'low' | 'medium' | 'high' } | null;
+  pendingConfirm?: PendingConfirmView | null;
   pauseReason?: PauseReason | null;
   lastUpdated: number;
 }
@@ -74,6 +97,10 @@ onServerMessage((msg) => {
   }
   if (msg.type === 'server.user.confirm') {
     onUserConfirm(msg);
+    return;
+  }
+  if (msg.type === 'server.batch_confirm_required') {
+    onBatchConfirm(msg);
     return;
   }
   if (msg.type === 'server.task.control') {
@@ -137,7 +164,6 @@ function onDispatch(msg: Extract<ServerMessage, { type: 'server.task.dispatch' }
 function onUserConfirm(msg: Extract<ServerMessage, { type: 'server.user.confirm' }>): void {
   let task = state.tasks.get(msg.taskId);
   if (!task) {
-    // Rehydrated task we hadn't seen yet — seed a minimal view.
     task = {
       taskId: msg.taskId,
       status: 'awaiting_user',
@@ -147,7 +173,41 @@ function onUserConfirm(msg: Extract<ServerMessage, { type: 'server.user.confirm'
     state.tasks.set(msg.taskId, task);
   }
   task.status = 'awaiting_user';
-  task.pendingConfirm = { stepId: msg.stepId, prompt: msg.prompt, risk: msg.risk };
+  task.pendingConfirm = {
+    kind: 'single',
+    stepId: msg.stepId,
+    prompt: msg.prompt,
+    risk: msg.risk,
+  };
+  task.lastUpdated = Date.now();
+  const step = task.steps.find((s) => s.id === msg.stepId);
+  if (step) step.status = 'awaiting_user';
+  pushTasksSnapshot();
+}
+
+function onBatchConfirm(
+  msg: Extract<ServerMessage, { type: 'server.batch_confirm_required' }>,
+): void {
+  let task = state.tasks.get(msg.taskId);
+  if (!task) {
+    task = {
+      taskId: msg.taskId,
+      status: 'awaiting_user',
+      steps: [{ id: msg.stepId, kind: 'unknown', status: 'awaiting_user' }],
+      lastUpdated: Date.now(),
+    };
+    state.tasks.set(msg.taskId, task);
+  }
+  task.status = 'awaiting_user';
+  task.pendingConfirm = {
+    kind: 'batch',
+    stepId: msg.stepId,
+    batchIndex: msg.batchIndex,
+    batchTotal: msg.batchTotal,
+    items: msg.items,
+    risk: msg.risk,
+    ...(msg.summary ? { summary: msg.summary } : {}),
+  };
   task.lastUpdated = Date.now();
   const step = task.steps.find((s) => s.id === msg.stepId);
   if (step) step.status = 'awaiting_user';

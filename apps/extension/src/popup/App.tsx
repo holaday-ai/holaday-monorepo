@@ -28,11 +28,34 @@ interface StepView {
   status: 'pending' | 'executing' | 'completed' | 'failed' | 'awaiting_user';
 }
 
+interface BatchItemView {
+  label: string;
+  preview: string;
+  meta?: Record<string, unknown>;
+}
+
+type PendingConfirmView =
+  | {
+      kind: 'single';
+      stepId: string;
+      prompt: string;
+      risk: 'low' | 'medium' | 'high';
+    }
+  | {
+      kind: 'batch';
+      stepId: string;
+      batchIndex: number;
+      batchTotal: number;
+      items: BatchItemView[];
+      risk: 'low' | 'medium' | 'high';
+      summary?: string;
+    };
+
 interface TaskView {
   taskId: string;
   status: TaskStatus;
   steps: StepView[];
-  pendingConfirm?: { stepId: string; prompt: string; risk: 'low' | 'medium' | 'high' } | null;
+  pendingConfirm?: PendingConfirmView | null;
   pauseReason?: PauseReason | null;
   lastUpdated: number;
 }
@@ -174,13 +197,17 @@ export function App() {
   // cancel is not yet exposed on the orchestrator tRPC surface; hidden for now.
   void controlTask;
 
-  async function confirm(taskId: string, _stepId: string, approve: boolean): Promise<void> {
+  async function confirm(
+    taskId: string,
+    _stepId: string,
+    decision: 'approve' | 'skip' | 'reject',
+  ): Promise<void> {
     if (!token) return;
     try {
       const res = await fetch(`${ORCHESTRATOR_HTTP}/trpc/tasks.confirm`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-        body: JSON.stringify({ taskId, approve }),
+        body: JSON.stringify({ taskId, decision }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as {
@@ -188,14 +215,14 @@ export function App() {
         } | null;
         throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
       }
-      // Optimistic UI: clear the pending confirm locally; SW will reconcile.
+      // Optimistic UI: clear the pending confirm locally; SW reconciles next.
       setTasks((prev) =>
         prev.map((t) =>
           t.taskId === taskId
             ? {
                 ...t,
                 pendingConfirm: null,
-                status: approve ? 'executing' : 'cancelled',
+                status: decision === 'reject' ? 'cancelled' : 'executing',
                 lastUpdated: Date.now(),
               }
             : t,
@@ -275,7 +302,11 @@ export function App() {
 function TaskCard(props: {
   task: TaskView;
   onControl: (taskId: string, route: 'pause' | 'resume' | 'cancel') => Promise<void>;
-  onConfirm: (taskId: string, stepId: string, approve: boolean) => Promise<void>;
+  onConfirm: (
+    taskId: string,
+    stepId: string,
+    decision: 'approve' | 'skip' | 'reject',
+  ) => Promise<void>;
 }) {
   const { task, onControl, onConfirm } = props;
   const canPause = task.status === 'executing';
@@ -301,6 +332,60 @@ function TaskCard(props: {
       {awaiting && task.pendingConfirm
         ? (() => {
             const pc = task.pendingConfirm;
+            if (pc.kind === 'batch') {
+              return (
+                <div style={confirmBox}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      marginBottom: 4,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <span>
+                      确认第 {pc.batchIndex + 1}/{pc.batchTotal} 批
+                    </span>
+                    <span style={{ opacity: 0.6, fontWeight: 400 }}>risk: {pc.risk}</span>
+                  </div>
+                  {pc.summary ? (
+                    <div style={{ fontSize: 12, marginBottom: 6 }}>{pc.summary}</div>
+                  ) : null}
+                  <ul style={{ margin: '0 0 8px', paddingLeft: 16, fontSize: 11, lineHeight: 1.4 }}>
+                    {pc.items.map((it, i) => (
+                      <li key={`${i}-${it.label.slice(0, 12)}`}>
+                        <span style={{ fontWeight: 600 }}>{it.label}</span>
+                        <div style={{ opacity: 0.75, marginTop: 2 }}>{it.preview}</div>
+                      </li>
+                    ))}
+                  </ul>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      type="button"
+                      style={{ ...miniBtn, background: '#16a34a', color: 'white' }}
+                      onClick={() => void onConfirm(task.taskId, pc.stepId, 'approve')}
+                    >
+                      确认第 {pc.batchIndex + 1}/{pc.batchTotal} 批
+                    </button>
+                    <button
+                      type="button"
+                      style={miniBtn}
+                      onClick={() => void onConfirm(task.taskId, pc.stepId, 'skip')}
+                    >
+                      Skip
+                    </button>
+                    <button
+                      type="button"
+                      style={{ ...miniBtn, background: '#dc2626', color: 'white' }}
+                      onClick={() => void onConfirm(task.taskId, pc.stepId, 'reject')}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              );
+            }
             return (
               <div style={confirmBox}>
                 <div style={{ fontSize: 12, marginBottom: 4 }}>
@@ -310,14 +395,14 @@ function TaskCard(props: {
                   <button
                     type="button"
                     style={{ ...miniBtn, background: '#16a34a', color: 'white' }}
-                    onClick={() => void onConfirm(task.taskId, pc.stepId, true)}
+                    onClick={() => void onConfirm(task.taskId, pc.stepId, 'approve')}
                   >
                     Confirm
                   </button>
                   <button
                     type="button"
                     style={{ ...miniBtn, background: '#dc2626', color: 'white' }}
-                    onClick={() => void onConfirm(task.taskId, pc.stepId, false)}
+                    onClick={() => void onConfirm(task.taskId, pc.stepId, 'reject')}
                   >
                     Reject
                   </button>
