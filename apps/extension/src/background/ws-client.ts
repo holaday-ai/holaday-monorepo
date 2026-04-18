@@ -52,8 +52,21 @@ export function disconnect(): void {
  */
 export function connect(token: string): void {
   if (!token) throw new Error('connect() requires a token');
+  // Idempotent: a healthy socket means the SW has already connected for
+  // this user. The MV3 keepalive alarm fires every ~30s and lands here;
+  // we don't want to churn the connection just because we got tickled.
+  if (
+    state.socket &&
+    (state.socket.readyState === WebSocket.OPEN || state.socket.readyState === WebSocket.CONNECTING)
+  ) {
+    return;
+  }
   state.closedByUser = false;
   openSocket(token);
+}
+
+export function isConnected(): boolean {
+  return state.socket?.readyState === WebSocket.OPEN;
 }
 
 function openSocket(token: string): void {
