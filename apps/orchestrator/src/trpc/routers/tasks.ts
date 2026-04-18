@@ -32,12 +32,30 @@ export const tasksRouter = router({
 
     const catalogue = await loadSkillCatalogue(ctx.db, input.occupation ?? null);
 
-    const plan = await ctx.planner.plan({
-      intent: input.intent,
-      userId: ctx.userId,
-      occupation: input.occupation ?? null,
-      skills: catalogue,
-    });
+    let plan: Awaited<ReturnType<typeof ctx.planner.plan>>;
+    try {
+      plan = await ctx.planner.plan({
+        intent: input.intent,
+        userId: ctx.userId,
+        occupation: input.occupation ?? null,
+        skills: catalogue,
+      });
+    } catch (err) {
+      // Upstream planner failures (Anthropic 4xx/5xx, network) are NOT our
+      // internal bug — surface them as 502 BAD_GATEWAY with the original
+      // message so the popup can show "Anthropic: 403 forbidden" instead
+      // of an opaque 500. Full stack is logged for the operator.
+      ctx.logger.error(
+        { err, userId: ctx.userId, intent: input.intent.slice(0, 200) },
+        'planner upstream error',
+      );
+      const message = err instanceof Error ? err.message : String(err);
+      throw new TRPCError({
+        code: 'BAD_GATEWAY',
+        message: `planner upstream error: ${message}`,
+        cause: err,
+      });
+    }
     if (plan.length === 0) {
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
