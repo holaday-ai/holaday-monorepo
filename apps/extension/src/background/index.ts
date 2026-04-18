@@ -5,16 +5,54 @@
  * view of the user's in-flight tasks. The popup is stateless — it asks
  * the SW for current state on open and subscribes to updates while open.
  *
- * Phase 0 step execution is **stubbed**: every server.task.dispatch is
- * auto-acked 500ms later with client.step.result status='ok'. Real DOM
- * I/O lands with Playwright-CRX in W2; the stub exists so the whole
- * Agent Loop (dispatch → result → advance → awaiting_user confirm →
- * pause → resume) is demonstrable end-to-end at the W1 checkpoint.
+ * Step execution (W2 Day 4): `server.task.dispatch` frames are routed
+ * through a lazy-initialized `HolaDayBrowserDriver`. In a real Chrome
+ * SW this is `PlaywrightCrxAdapter` (uses chrome.debugger + playwright-
+ * crx). Outside a real SW (dev / host without Chrome) we fall back to
+ * `MockDriver` so the loop still runs for typecheck / build.
  */
 
+import type { DriverAction, HolaDayBrowserDriver } from '@holaday/browser-driver';
+import { MockDriver } from '@holaday/browser-driver/mock';
 import type { ServerMessage } from '@holaday/shared-types';
 import { getAccessToken } from '../shared/storage.js';
 import { connect, disconnect, onServerMessage, send } from './ws-client.js';
+
+/**
+ * Lazy driver factory.
+ *
+ * Runtime Chrome SW path: dynamically import the Playwright-CRX adapter
+ * (which uses chrome.debugger + chrome.tabs and is only meaningful inside
+ * the extension SW).
+ *
+ * Fallback path (Vite dev / smoke-outside-Chrome / tests that import this
+ * module to type-check the SW): fall back to the MockDriver stub so the
+ * loop is still testable. The capability flag `typeof chrome !== 'undefined'`
+ * is the cleanest "am I in a real SW?" check MV3 gives us.
+ */
+let driverPromise: Promise<HolaDayBrowserDriver> | null = null;
+async function getDriver(): Promise<HolaDayBrowserDriver> {
+  if (driverPromise) return driverPromise;
+  driverPromise = (async (): Promise<HolaDayBrowserDriver> => {
+    const hasCrxRuntime =
+      typeof chrome !== 'undefined' &&
+      typeof chrome.debugger !== 'undefined' &&
+      typeof chrome.tabs !== 'undefined';
+    if (!hasCrxRuntime) {
+      console.warn('[holaday] no CRX runtime, falling back to MockDriver (stub)');
+      return new MockDriver({ autoAckDelayMs: 200 });
+    }
+    try {
+      const { PlaywrightCrxAdapter } = await import('@holaday/browser-driver/crx');
+      console.info('[holaday] PlaywrightCrxAdapter ready');
+      return new PlaywrightCrxAdapter();
+    } catch (err) {
+      console.error('[holaday] failed to load PlaywrightCrxAdapter, using MockDriver', err);
+      return new MockDriver({ autoAckDelayMs: 200 });
+    }
+  })();
+  return driverPromise;
+}
 
 type StepStatus = 'pending' | 'executing' | 'completed' | 'failed' | 'awaiting_user';
 
@@ -77,8 +115,6 @@ const state: State = {
   tasks: new Map(),
 };
 
-const AUTO_ACK_DELAY_MS = 500;
-
 // ---------- WS → SW state updates ----------
 
 onServerMessage((msg) => {
@@ -140,25 +176,69 @@ function onDispatch(msg: Extract<ServerMessage, { type: 'server.task.dispatch' }
   }
   pushTasksSnapshot();
 
-  // Stub execution: auto-ack after a short delay so the Agent Loop
-  // visibly advances without real DOM automation (W2 replaces this).
-  setTimeout(() => {
-    console.info('[holaday] stub-exec ok', { taskId: msg.taskId, stepId: msg.stepId });
+  // Real execution path (W2 Day 4): hand the action to the driver.
+  // The driver is PlaywrightCrxAdapter in a real Chrome SW, MockDriver
+  // elsewhere. Either way we translate the result back to a
+  // client.step.result frame the orchestrator's TaskController expects.
+  void runStep(msg);
+}
+
+async function runStep(
+  msg: Extract<ServerMessage, { type: 'server.task.dispatch' }>,
+): Promise<void> {
+  const action: DriverAction = {
+    kind: msg.action.kind,
+    ...(msg.action.selector ? { selector: msg.action.selector } : {}),
+    ...(msg.action.payload ? { payload: msg.action.payload } : {}),
+    ...(msg.deadlineMs ? { deadlineMs: msg.deadlineMs } : {}),
+  };
+  const startedAt = Date.now();
+  try {
+    const driver = await getDriver();
+    const result = await driver.execute(action);
+    const elapsed = Date.now() - startedAt;
+    console.info('[holaday] step done', {
+      taskId: msg.taskId,
+      stepId: msg.stepId,
+      kind: msg.action.kind,
+      status: result.status,
+      elapsed,
+    });
     send({
       type: 'client.step.result',
       taskId: msg.taskId,
       stepId: msg.stepId,
-      status: 'ok',
-      data: { stub: true, kind: msg.action.kind },
+      status: result.status,
+      ...(result.data !== undefined ? { data: result.data } : {}),
+      ...(result.error ? { error: result.error } : {}),
     });
     const t = state.tasks.get(msg.taskId);
     if (t) {
       const step = t.steps.find((s) => s.id === msg.stepId);
-      if (step) step.status = 'completed';
+      if (step) {
+        step.status =
+          result.status === 'ok'
+            ? 'completed'
+            : result.status === 'awaiting_user'
+              ? 'awaiting_user'
+              : 'failed';
+      }
       t.lastUpdated = Date.now();
       pushTasksSnapshot();
     }
-  }, AUTO_ACK_DELAY_MS);
+  } catch (err) {
+    console.error('[holaday] step crash', err);
+    send({
+      type: 'client.step.result',
+      taskId: msg.taskId,
+      stepId: msg.stepId,
+      status: 'error',
+      error: {
+        code: 'DRIVER_CRASH',
+        message: err instanceof Error ? err.message : String(err),
+      },
+    });
+  }
 }
 
 function onUserConfirm(msg: Extract<ServerMessage, { type: 'server.user.confirm' }>): void {

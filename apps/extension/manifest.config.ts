@@ -24,7 +24,20 @@ export default defineManifest({
     type: 'module',
   },
 
-  permissions: ['storage', 'tabs', 'scripting', 'activeTab', 'cookies', 'webNavigation', 'alarms'],
+  permissions: [
+    'storage',
+    'tabs',
+    'scripting',
+    'activeTab',
+    'cookies',
+    'webNavigation',
+    'alarms',
+    // playwright-crx uses chrome.debugger as its transport; required to
+    // drive pages with goto/click/extract/etc. Chrome will show the
+    // "HOLA DAY is debugging this browser" banner while attached — that's
+    // the visible footprint of the control plane.
+    'debugger',
+  ],
 
   host_permissions: ['<all_urls>'],
 
