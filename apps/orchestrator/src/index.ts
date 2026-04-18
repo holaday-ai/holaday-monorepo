@@ -1,10 +1,17 @@
+import { AnthropicPlanner } from './agent/planners/anthropic.js';
+import { StubPlanner } from './agent/planners/stub.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { createHttpApp } from './http.js';
 import { createWsServer } from './ws/server.js';
 
 async function main() {
-  const app = createHttpApp();
+  const planner = env.ANTHROPIC_API_KEY ? new AnthropicPlanner() : new StubPlanner();
+  if (!env.ANTHROPIC_API_KEY) {
+    logger.warn('ANTHROPIC_API_KEY missing — commander is using StubPlanner');
+  }
+
+  const app = createHttpApp({ planner });
 
   const httpServer = app.listen(env.HTTP_PORT, () => {
     logger.info({ port: env.HTTP_PORT }, 'HTTP server listening');
