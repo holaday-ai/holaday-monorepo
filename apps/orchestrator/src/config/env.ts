@@ -1,5 +1,16 @@
-import 'dotenv/config';
+import { resolve } from 'node:path';
+import { config as loadDotenv } from 'dotenv';
 import { z } from 'zod';
+
+// Load order (later overrides earlier — we explicitly do NOT override
+// already-set process.env values so CI / docker-compose env vars win):
+//   1. .env                          (committed defaults — may be empty)
+//   2. .env.local                    (developer secrets, gitignored)
+//   3. apps/orchestrator/.env.local  (per-app override, gitignored)
+const repoRoot = resolve(process.cwd(), '../..');
+loadDotenv({ path: resolve(repoRoot, '.env'), override: false });
+loadDotenv({ path: resolve(repoRoot, '.env.local'), override: false });
+loadDotenv({ path: resolve(process.cwd(), '.env.local'), override: false });
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),

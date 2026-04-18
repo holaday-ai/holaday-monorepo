@@ -20,11 +20,14 @@ async function main() {
   const ws = createWsServer(env.WS_PORT);
   logger.info({ port: env.WS_PORT }, 'WS server listening');
 
+  let shuttingDown = false;
   const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     logger.info({ signal }, 'shutdown requested');
     await ws.close();
-    httpServer.close();
-    setTimeout(() => process.exit(0), 2000).unref();
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    process.exit(0);
   };
 
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
