@@ -23,9 +23,15 @@ importers:
 
   apps/extension:
     dependencies:
+      '@holaday/browser-driver':
+        specifier: workspace:*
+        version: link:../../packages/browser-driver
       '@holaday/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      playwright-crx:
+        specifier: 0.15.0
+        version: 0.15.0
       react:
         specifier: 18.3.1
         version: 18.3.1
@@ -133,6 +139,31 @@ importers:
       tsx:
         specifier: 4.19.2
         version: 4.19.2
+      typescript:
+        specifier: 5.7.3
+        version: 5.7.3
+      vitest:
+        specifier: 2.1.8
+        version: 2.1.8(@types/node@22.10.2)
+
+  packages/browser-driver:
+    dependencies:
+      '@holaday/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
+    devDependencies:
+      '@types/chrome':
+        specifier: 0.0.287
+        version: 0.0.287
+      '@types/node':
+        specifier: 22.10.2
+        version: 22.10.2
+      playwright-crx:
+        specifier: 0.15.0
+        version: 0.15.0
+      rimraf:
+        specifier: 6.0.1
+        version: 6.0.1
       typescript:
         specifier: 5.7.3
         version: 5.7.3
@@ -2380,6 +2411,10 @@ packages:
   pino@9.5.0:
     resolution: {integrity: sha512-xSEmD4pLnV54t0NOUN16yCl7RIB1c5UUOse5HSyEXtBp+FgFQyPeDutc+Q2ZO7/22vImV7VfEjH/1zV2QuqvYw==}
     hasBin: true
+
+  playwright-crx@0.15.0:
+    resolution: {integrity: sha512-yIz2AchvFOKj+oiGz5AAonMCPK5l6ttt4Xijd7Ggjm6D4OUNdVg+R2dnAnKIoBnvjoOBihlL1lyQVYPswV4Xow==}
+    engines: {node: '>=18'}
 
   postcss@8.5.10:
     resolution: {integrity: sha512-pMMHxBOZKFU6HgAZ4eyGnwXF/EvPGGqUr0MnZ5+99485wwW41kW91A4LOGxSHhgugZmSChL5AlElNdwlNgcnLQ==}
@@ -4704,6 +4739,8 @@ snapshots:
       safe-stable-stringify: 2.5.0
       sonic-boom: 4.2.1
       thread-stream: 3.1.0
+
+  playwright-crx@0.15.0: {}
 
   postcss@8.5.10:
     dependencies:
