@@ -12,6 +12,28 @@
  * `MockDriver` so the loop still runs for typecheck / build.
  */
 
+// MV3 Service Worker has no `window`. Vite 6 / CRXJS 2.0.0-beta.31 still
+// emit a `__vitePreload` helper that calls `window.dispatchEvent(...)`
+// on dynamic-import rejection — even with `build.modulePreload = false`
+// — and the synthetic ReferenceError there masks whatever the real
+// import failure was. We can't reach into the helper, so we install the
+// narrowest possible shim here instead: JUST the property the helper
+// calls, on the SW global. We deliberately DON'T alias
+// `window = globalThis`, which would fool libs that check
+// `typeof window === "object"` into assuming a DOM. I audited every
+// `window.*` reference in node_modules/playwright-crx/lib/ — they're
+// all either typeof-guarded and short-circuit on our 1-key shim
+// (window.process / .Buffer / .crypto / .console are all undefined in
+// the shim, so the `&&` chains fall through), or they live inside
+// page-evaluate string literals (executed in the target page's real
+// DOM, not the SW, so never see this shim).
+{
+  const g = globalThis as unknown as { window?: { dispatchEvent: (e: Event) => boolean } };
+  if (typeof g.window === 'undefined') {
+    g.window = { dispatchEvent: () => true };
+  }
+}
+
 import type { DriverAction, HolaDayBrowserDriver } from '@holaday/browser-driver';
 import { MockDriver } from '@holaday/browser-driver/mock';
 import type { ServerMessage } from '@holaday/shared-types';
