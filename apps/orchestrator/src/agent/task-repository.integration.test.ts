@@ -143,29 +143,42 @@ describe('TaskRepository against real MySQL', () => {
     expect(steps1.find((r) => r.seq === 0)?.status).toBe('completed');
     expect(steps1.find((r) => r.seq === 1)?.status).toBe('executing');
 
-    const { state: s2 } = controller.onStepResult(s1, {
+    // First error -> retry (Phase 0: MAX_STEP_RETRIES=1)
+    const { state: s2a } = controller.onStepResult(s1, {
       taskId: s1.taskId,
+      stepId: secondStepId,
+      status: 'error',
+      error: { code: 'CLICK_FAILED', message: 'first attempt' },
+    });
+    await repo.applyStepResult(s1, s2a, undefined);
+    expect(s2a.status).toBe('executing');
+
+    // Second error -> escalate to paused(retries_exhausted), step row marked failed.
+    const { state: s2 } = controller.onStepResult(s2a, {
+      taskId: s2a.taskId,
       stepId: secondStepId,
       status: 'error',
       error: { code: 'CLICK_FAILED', message: 'timeout' },
     });
-    await repo.applyStepResult(s1, s2, undefined);
+    await repo.applyStepResult(s2a, s2, undefined);
 
     const afterFail = must(
       (await db.select().from(tasks).where(eq(tasks.externalId, s0.taskId)))[0],
       'afterFail',
     );
-    expect(afterFail.status).toBe('failed');
+    expect(afterFail.status).toBe('paused');
+    expect(afterFail.pauseReason).toBe('retries_exhausted');
     expect(afterFail.errorCode).toBe('CLICK_FAILED');
-    expect(afterFail.completedAt).toBeTruthy();
 
     const steps2 = await db.select().from(taskSteps).where(eq(taskSteps.taskId, afterFail.id));
     expect(steps2.find((r) => r.seq === 1)?.status).toBe('failed');
+    expect(steps2.find((r) => r.seq === 1)?.retryCount).toBe(1);
 
     const events = await db.select().from(taskEvents).where(eq(taskEvents.taskId, afterFail.id));
     const types = events.map((e) => e.type);
     expect(types).toContain('task.created');
     expect(types).toContain('step.completed');
-    expect(types).toContain('step.failed');
+    expect(types).toContain('step.retry');
+    expect(types).toContain('task.paused');
   });
 });

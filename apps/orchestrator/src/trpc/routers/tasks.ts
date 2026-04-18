@@ -7,9 +7,12 @@ import { TaskController } from '../../agent/task-controller.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { skills } from '../../db/schema/skills.js';
 import { users } from '../../db/schema/users.js';
+import { broadcastToUser, updateTaskStateForUser } from '../../ws/server.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 const taskController = new TaskController();
+
+const taskIdInput = z.object({ taskId: z.string().min(1) });
 
 const createInput = z.object({
   intent: z.string().min(1).max(4_000),
@@ -67,7 +70,61 @@ export const tasksRouter = router({
       })),
     };
   }),
+
+  pause: protectedProcedure.input(taskIdInput).mutation(async ({ ctx, input }) => {
+    const repo = new TaskRepository(ctx.db);
+    const prev = await loadTaskState(repo, input.taskId, ctx.userId);
+
+    const { state: next, effects } = taskController.pause(prev, 'user');
+    if (next === prev) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: `cannot pause from status=${prev.status}`,
+      });
+    }
+
+    await repo.applyControlTransition(prev, next);
+    updateTaskStateForUser(ctx.userId, next);
+    for (const eff of effects) {
+      if (eff.kind === 'send') broadcastToUser(ctx.userId, eff.message);
+    }
+    return { taskId: next.taskId, status: next.status, pauseReason: next.pauseReason ?? null };
+  }),
+
+  resume: protectedProcedure.input(taskIdInput).mutation(async ({ ctx, input }) => {
+    const repo = new TaskRepository(ctx.db);
+    const prev = await loadTaskState(repo, input.taskId, ctx.userId);
+
+    const { state: next, effects } = taskController.resume(prev);
+    if (next === prev) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: `cannot resume from status=${prev.status}`,
+      });
+    }
+
+    await repo.applyControlTransition(prev, next);
+    updateTaskStateForUser(ctx.userId, next);
+    for (const eff of effects) {
+      if (eff.kind === 'send') broadcastToUser(ctx.userId, eff.message);
+    }
+    return { taskId: next.taskId, status: next.status };
+  }),
 });
+
+async function loadTaskState(repo: TaskRepository, taskExternalId: string, userExternalId: string) {
+  const all = await repo.rehydrateInFlight();
+  const hit = all.find(
+    (r) => r.state.taskId === taskExternalId && r.userExternalId === userExternalId,
+  );
+  if (!hit) {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: `task ${taskExternalId} not in-flight`,
+    });
+  }
+  return hit.state;
+}
 
 /**
  * Active skills the user can route to: either untagged (applies to everyone)

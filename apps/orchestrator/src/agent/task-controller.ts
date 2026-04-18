@@ -31,6 +31,10 @@ export type TaskStatus =
 
 export type StepStatus = 'ok' | 'error' | 'awaiting_user';
 export type Risk = 'low' | 'medium' | 'high';
+export type PauseReason = 'user' | 'retries_exhausted' | 'quota_exceeded';
+
+/** Phase 0: retry each failing step once before escalating to paused. */
+export const MAX_STEP_RETRIES = 1;
 
 export interface PlannedStep {
   id: string; // step external_id (stp_...)
@@ -49,6 +53,10 @@ export interface TaskState {
   cursor: number; // index of next step to dispatch
   pendingConfirm?: { stepId: string; prompt: string; risk: Risk } | null;
   error?: { code: string; message: string };
+  /** Populated while status='paused'; null otherwise. */
+  pauseReason?: PauseReason | null;
+  /** stepId -> # of retries already consumed. Missing / 0 = no retry yet. */
+  retryCount?: Record<string, number>;
 }
 
 export interface ControllerInput {
@@ -126,7 +134,8 @@ export class TaskController {
   /**
    * Apply a step result. Decides:
    *   - ok    → advance cursor; dispatch next or complete
-   *   - error → mark failed, no further dispatch (Phase 0: no auto-retry)
+   *   - error (retries remaining) → re-dispatch same step, bump retry_count
+   *   - error (retries exhausted) → transition to paused (reason='retries_exhausted')
    *   - awaiting_user → emit server.user.confirm with prompt; wait
    */
   onStepResult(
@@ -146,14 +155,48 @@ export class TaskController {
     }
 
     if (input.status === 'error') {
-      const failed: TaskState = {
+      const consumed = state.retryCount?.[input.stepId] ?? 0;
+      const err = input.error ?? { code: 'STEP_ERROR', message: 'unspecified step error' };
+
+      if (consumed < MAX_STEP_RETRIES) {
+        // Retry: re-dispatch the same step. Keep status executing.
+        const retried: TaskState = {
+          ...state,
+          retryCount: { ...(state.retryCount ?? {}), [input.stepId]: consumed + 1 },
+          error: err, // remember last error; applyTransition stores on retry row
+        };
+        return {
+          state: retried,
+          effects: [
+            { kind: 'persist', state: retried },
+            { kind: 'send', message: dispatchMessage(state.taskId, current) },
+          ],
+        };
+      }
+
+      // Retries exhausted → paused, user decides resume vs cancel.
+      const paused: TaskState = {
         ...state,
-        status: 'failed',
-        error: input.error ?? { code: 'STEP_ERROR', message: 'unspecified step error' },
+        status: 'paused',
+        pauseReason: 'retries_exhausted',
+        error: err,
+        retryCount: { ...(state.retryCount ?? {}), [input.stepId]: consumed },
       };
       return {
-        state: failed,
-        effects: [{ kind: 'persist', state: failed }],
+        state: paused,
+        effects: [
+          { kind: 'persist', state: paused },
+          {
+            kind: 'send',
+            message: {
+              type: 'server.task.control',
+              taskId: state.taskId,
+              command: 'pause',
+              reason: 'retries_exhausted',
+              detail: { stepId: current.id, attempts: consumed + 1, error: err },
+            },
+          },
+        ],
       };
     }
 
@@ -254,12 +297,17 @@ export class TaskController {
     };
   }
 
-  /** External cancel (user closed task). */
+  /** External cancel (user closed task). Works from any non-terminal state. */
   cancel(state: TaskState): { state: TaskState; effects: ControlEffect[] } {
     if (state.status === 'completed' || state.status === 'failed' || state.status === 'cancelled') {
       return { state, effects: [{ kind: 'noop' }] };
     }
-    const cancelled: TaskState = { ...state, status: 'cancelled', pendingConfirm: null };
+    const cancelled: TaskState = {
+      ...state,
+      status: 'cancelled',
+      pendingConfirm: null,
+      pauseReason: null,
+    };
     return {
       state: cancelled,
       effects: [
@@ -268,6 +316,79 @@ export class TaskController {
           kind: 'send',
           message: { type: 'server.task.control', taskId: state.taskId, command: 'cancel' },
         },
+      ],
+    };
+  }
+
+  /**
+   * Transition to paused. Callable for:
+   *   - 'user'             : explicit user pause (Pause button in popup)
+   *   - 'quota_exceeded'   : billing / rate-limit guard (Phase 0 wires in W2)
+   * `retries_exhausted` is reached inside onStepResult, not via this method.
+   */
+  pause(
+    state: TaskState,
+    reason: Exclude<PauseReason, 'retries_exhausted'>,
+  ): { state: TaskState; effects: ControlEffect[] } {
+    if (
+      state.status === 'completed' ||
+      state.status === 'failed' ||
+      state.status === 'cancelled' ||
+      state.status === 'paused'
+    ) {
+      return { state, effects: [{ kind: 'noop' }] };
+    }
+    const paused: TaskState = { ...state, status: 'paused', pauseReason: reason };
+    return {
+      state: paused,
+      effects: [
+        { kind: 'persist', state: paused },
+        {
+          kind: 'send',
+          message: {
+            type: 'server.task.control',
+            taskId: state.taskId,
+            command: 'pause',
+            reason,
+          },
+        },
+      ],
+    };
+  }
+
+  /**
+   * Resume a paused task. Clears pauseReason and re-dispatches the current
+   * step (cursor unchanged). If the cursor is past the plan we just mark
+   * completed defensively.
+   */
+  resume(state: TaskState): { state: TaskState; effects: ControlEffect[] } {
+    if (state.status !== 'paused') {
+      return { state, effects: [{ kind: 'noop' }] };
+    }
+    const next = state.plan[state.cursor];
+    if (!next) {
+      const completed: TaskState = {
+        ...state,
+        status: 'completed',
+        pauseReason: null,
+      };
+      return { state: completed, effects: [{ kind: 'persist', state: completed }] };
+    }
+    const resumed: TaskState = {
+      ...state,
+      status: 'executing',
+      pauseReason: null,
+      error: undefined,
+    };
+    return {
+      state: resumed,
+      effects: [
+        { kind: 'persist', state: resumed },
+        {
+          kind: 'send',
+          message: { type: 'server.task.control', taskId: state.taskId, command: 'resume' },
+        },
+        { kind: 'send', message: dispatchMessage(state.taskId, next) },
       ],
     };
   }

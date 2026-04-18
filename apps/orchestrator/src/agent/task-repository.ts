@@ -83,6 +83,16 @@ export class TaskRepository {
     const completedStep = prev.plan[prev.cursor];
     const nowExecuting = next.status === 'executing' ? next.plan[next.cursor] : null;
 
+    // Detect a same-step retry: cursor unchanged, retryCount bumped, still executing.
+    const currentStepId = completedStep?.id;
+    const prevRetries = currentStepId ? (prev.retryCount?.[currentStepId] ?? 0) : 0;
+    const nextRetries = currentStepId ? (next.retryCount?.[currentStepId] ?? 0) : 0;
+    const isRetry =
+      next.status === 'executing' && prev.cursor === next.cursor && nextRetries > prevRetries;
+
+    // Detect pause due to retries_exhausted (step failed terminally, task paused).
+    const isRetriesExhausted = next.status === 'paused' && next.pauseReason === 'retries_exhausted';
+
     await this.db.transaction(async (tx) => {
       const taskUpdate: Partial<typeof tasks.$inferInsert> = { status: next.status };
       if (next.status === 'completed' || next.status === 'failed' || next.status === 'cancelled') {
@@ -92,15 +102,35 @@ export class TaskRepository {
         taskUpdate.errorCode = next.error.code;
         taskUpdate.errorMessage = next.error.message;
       }
+      taskUpdate.pauseReason = next.status === 'paused' ? (next.pauseReason ?? null) : null;
       await tx.update(tasks).set(taskUpdate).where(eq(tasks.id, taskRowId));
 
-      if (completedStep) {
-        const stepStatus = stepStatusFor(next);
+      if (isRetry && completedStep) {
+        // Same step, another attempt. Keep status executing; clear last error blob.
+        await tx
+          .update(taskSteps)
+          .set({
+            retryCount: nextRetries,
+            errorCode: null,
+            errorMessage: null,
+            output: null,
+            startedAt: new Date(),
+          })
+          .where(and(eq(taskSteps.taskId, taskRowId), eq(taskSteps.externalId, completedStep.id)));
+      } else if (completedStep) {
+        const stepStatus = stepStatusFor(next, isRetriesExhausted);
         const stepUpdate: Partial<typeof taskSteps.$inferInsert> = {
           status: stepStatus,
           completedAt: new Date(),
           output: resultPayload ?? null,
         };
+        if (nextRetries > prevRetries) {
+          stepUpdate.retryCount = nextRetries;
+        }
+        if (isRetriesExhausted && next.error) {
+          stepUpdate.errorCode = next.error.code;
+          stepUpdate.errorMessage = next.error.message;
+        }
         if (next.status === 'awaiting_user' && next.pendingConfirm) {
           // Persist the prompt so restart recovery can re-emit server.user.confirm.
           stepUpdate.pendingConfirmPayload = {
@@ -118,7 +148,7 @@ export class TaskRepository {
           .where(and(eq(taskSteps.taskId, taskRowId), eq(taskSteps.externalId, completedStep.id)));
       }
 
-      if (nowExecuting) {
+      if (nowExecuting && !isRetry) {
         await tx
           .update(taskSteps)
           .set({ status: 'executing', startedAt: new Date(), pendingConfirmPayload: null })
@@ -129,9 +159,44 @@ export class TaskRepository {
         externalId: newExternalId('taskEvent'),
         taskId: taskRowId,
         ...(completedStep ? { stepId: null } : {}),
-        type: eventTypeFor(prev, next),
+        type: isRetry ? 'step.retry' : eventTypeFor(prev, next),
         actor: 'system',
         payload: resultPayload ?? null,
+      });
+    });
+  }
+
+  /**
+   * User pause / resume and quota-exceeded pause are transitions that do NOT
+   * correspond to a step result frame. This applies them with one SQL batch.
+   */
+  async applyControlTransition(prev: TaskState, next: TaskState): Promise<void> {
+    if (prev.taskId !== next.taskId) {
+      throw new Error('applyControlTransition requires matching taskIds');
+    }
+    const [taskRow] = await this.db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.externalId, next.taskId))
+      .limit(1);
+    if (!taskRow) throw new Error(`task ${next.taskId} not found in DB`);
+
+    await this.db.transaction(async (tx) => {
+      const update: Partial<typeof tasks.$inferInsert> = {
+        status: next.status,
+        pauseReason: next.status === 'paused' ? (next.pauseReason ?? null) : null,
+      };
+      if (next.status === 'completed' || next.status === 'failed' || next.status === 'cancelled') {
+        update.completedAt = new Date();
+      }
+      await tx.update(tasks).set(update).where(eq(tasks.id, taskRow.id));
+
+      await tx.insert(taskEvents).values({
+        externalId: newExternalId('taskEvent'),
+        taskId: taskRow.id,
+        type: controlEventType(prev, next),
+        actor: 'user',
+        payload: next.pauseReason ? { reason: next.pauseReason } : null,
       });
     });
   }
@@ -152,6 +217,7 @@ export class TaskRepository {
       .select({
         taskExternalId: tasks.externalId,
         status: tasks.status,
+        pauseReason: tasks.pauseReason,
         userExternalId: users.externalId,
         errorCode: tasks.errorCode,
         errorMessage: tasks.errorMessage,
@@ -205,6 +271,11 @@ export class TaskRepository {
         | null
         | undefined;
 
+      const retryCount: Record<string, number> = {};
+      for (const s of steps) {
+        if (s.retryCount > 0) retryCount[s.externalId] = s.retryCount;
+      }
+
       const state: TaskState = {
         taskId: row.taskExternalId,
         status: row.status as TaskState['status'],
@@ -214,12 +285,17 @@ export class TaskRepository {
         ...(row.errorCode
           ? { error: { code: row.errorCode, message: row.errorMessage ?? '' } }
           : {}),
+        ...(row.pauseReason
+          ? { pauseReason: row.pauseReason as NonNullable<TaskState['pauseReason']> }
+          : {}),
+        ...(Object.keys(retryCount).length > 0 ? { retryCount } : {}),
       };
 
       out.push({
         state,
         userExternalId: row.userExternalId,
         pendingConfirm: pending ?? null,
+        pauseReason: state.pauseReason ?? null,
       });
     }
     return out;
@@ -230,6 +306,7 @@ export interface RehydratedTask {
   state: TaskState;
   userExternalId: string;
   pendingConfirm: { stepId: string; prompt: string; risk: 'low' | 'medium' | 'high' } | null;
+  pauseReason: 'user' | 'retries_exhausted' | 'quota_exceeded' | null;
 }
 
 const IN_FLIGHT_STATUSES = ['pending', 'planning', 'executing', 'awaiting_user', 'paused'] as const;
@@ -241,11 +318,20 @@ function eventTypeFor(prev: TaskState, next: TaskState): string {
   if (next.status === 'awaiting_user') return 'step.awaiting_user';
   if (next.status === 'cancelled') return 'task.cancelled';
   if (next.status === 'completed') return 'task.completed';
+  if (next.status === 'paused') return 'task.paused';
   if (next.cursor > prev.cursor) return 'step.completed';
   return 'task.transition';
 }
 
-function stepStatusFor(next: TaskState): string {
+function controlEventType(prev: TaskState, next: TaskState): string {
+  if (next.status === 'paused') return 'task.paused';
+  if (prev.status === 'paused' && next.status === 'executing') return 'task.resumed';
+  if (next.status === 'cancelled') return 'task.cancelled';
+  return 'task.transition';
+}
+
+function stepStatusFor(next: TaskState, isRetriesExhausted: boolean): string {
+  if (isRetriesExhausted) return 'failed';
   if (next.status === 'failed') return 'failed';
   if (next.status === 'awaiting_user') return 'awaiting_user';
   return 'completed';

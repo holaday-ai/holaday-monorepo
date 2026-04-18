@@ -30,6 +30,8 @@ export const taskSteps = mysqlTable(
     kind: varchar('kind', { length: 32 }).notNull(),
     status: varchar('status', { length: 24 }).notNull().default('pending'),
     riskLevel: varchar('risk_level', { length: 16 }).notNull().default('low'),
+    /** Phase 0: ≤ MAX_STEP_RETRIES before step failure escalates to task pause. */
+    retryCount: int('retry_count').notNull().default(0),
     input: json('input'),
     output: json('output'),
     screenshotKey: varchar('screenshot_key', { length: 255 }),

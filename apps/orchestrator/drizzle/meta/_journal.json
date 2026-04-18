@@ -15,6 +15,13 @@
       "when": 1776487436735,
       "tag": "0001_pending_confirm_payload",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1776488397943,
+      "tag": "0002_paused_state",
+      "breakpoints": true
     }
   ]
 }

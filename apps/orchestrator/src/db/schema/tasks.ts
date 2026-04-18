@@ -34,6 +34,11 @@ export const tasks = mysqlTable(
       onDelete: 'set null',
     }),
     status: varchar('status', { length: 24 }).notNull().default('pending'),
+    /**
+     * Populated while status='paused'. One of: user, retries_exhausted,
+     * quota_exceeded. Nullable everywhere else.
+     */
+    pauseReason: varchar('pause_reason', { length: 32 }),
     intent: text('intent').notNull(),
     plan: json('plan'),
     result: json('result'),

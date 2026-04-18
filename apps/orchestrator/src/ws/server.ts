@@ -92,6 +92,13 @@ function applyRehydrationForUser(state: ClientState): void {
         prompt: entry.pendingConfirm.prompt,
         risk: entry.pendingConfirm.risk,
       });
+    } else if (entry.state.status === 'paused' && entry.pauseReason) {
+      send(state.socket, {
+        type: 'server.task.control',
+        taskId: entry.state.taskId,
+        command: 'pause',
+        reason: entry.pauseReason,
+      });
     }
   }
   logger.info(
@@ -100,6 +107,52 @@ function applyRehydrationForUser(state: ClientState): void {
   );
   // Drain so reconnecting sibling tabs don't double-prompt.
   rehydratedByUser.delete(state.userId);
+}
+
+// ---------- Connected-clients registry (so tRPC can push) ----------
+
+const clientsByUser = new Map<string, Set<ClientState>>();
+
+function addClientForUser(userId: string, client: ClientState): void {
+  const set = clientsByUser.get(userId) ?? new Set();
+  set.add(client);
+  clientsByUser.set(userId, set);
+}
+
+function removeClientForUser(userId: string, client: ClientState): void {
+  const set = clientsByUser.get(userId);
+  if (!set) return;
+  set.delete(client);
+  if (set.size === 0) clientsByUser.delete(userId);
+}
+
+/**
+ * Send a message to every WebSocket currently authenticated as `userId`.
+ * Returns the number of recipients reached.
+ */
+export function broadcastToUser(userId: string, msg: ServerMessage): number {
+  const set = clientsByUser.get(userId);
+  if (!set) return 0;
+  let count = 0;
+  for (const client of set) {
+    if (client.socket.readyState === WebSocket.OPEN) {
+      send(client.socket, msg);
+      count += 1;
+    }
+  }
+  return count;
+}
+
+/** Update an in-memory TaskState for every connected socket of `userId`. */
+export function updateTaskStateForUser(userId: string, state: TaskState): number {
+  const set = clientsByUser.get(userId);
+  if (!set) return 0;
+  let count = 0;
+  for (const client of set) {
+    client.tasks.set(state.taskId, state);
+    count += 1;
+  }
+  return count;
 }
 
 function handleProtocols(protocols: Set<string>): string | false {
@@ -131,6 +184,7 @@ async function handleConnection(socket: WebSocket, req: IncomingMessage) {
     if (userId) {
       state.userId = userId;
       state.authed = true;
+      addClientForUser(userId, state);
       send(socket, {
         type: 'server.welcome',
         clientId: state.id,
@@ -168,6 +222,7 @@ async function handleConnection(socket: WebSocket, req: IncomingMessage) {
 
   socket.on('close', () => {
     clearTimeout(authTimer);
+    if (state.userId) removeClientForUser(state.userId, state);
     logger.info({ clientId: state.id, userId: state.userId }, 'ws client closed');
   });
 
@@ -190,6 +245,7 @@ async function handleClientMessage(
     }
     state.userId = userId;
     state.authed = true;
+    addClientForUser(userId, state);
     clearTimeout(authTimer);
     send(state.socket, {
       type: 'server.welcome',
