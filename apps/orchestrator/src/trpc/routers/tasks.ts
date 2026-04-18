@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
+import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { TaskController } from '../../agent/task-controller.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { skills } from '../../db/schema/skills.js';
@@ -81,6 +82,59 @@ export const tasksRouter = router({
     // Without this the task sits in `executing` in the DB but the
     // extension never receives `server.task.dispatch` and the Agent
     // Loop never starts. Symmetric with pause/resume/confirm below.
+    updateTaskStateForUser(ctx.userId, state);
+    for (const eff of effects) {
+      if (eff.kind === 'send') broadcastToUser(ctx.userId, eff.message);
+    }
+
+    return {
+      taskId: state.taskId,
+      status: state.status,
+      steps: state.plan.map((s) => ({
+        id: s.id,
+        kind: s.kind,
+        risk: s.risk,
+        requiresConfirm: s.requiresConfirm ?? false,
+      })),
+    };
+  }),
+
+  /**
+   * Diagnostic end-to-end: run a hardcoded Baidu search plan against
+   * the real browser driver. No Anthropic call, no Skill catalogue,
+   * no user intent — the plan is static, the selectors are known
+   * stable (#kw, #su). Use this to confirm the SW ↔ orchestrator ↔
+   * adapter loop is healthy when planner-generated plans are
+   * failing on selector mismatch.
+   */
+  smokeTest: protectedProcedure.mutation(async ({ ctx }) => {
+    const [userRow] = await ctx.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.externalId, ctx.userId))
+      .limit(1);
+    if (!userRow) {
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+    }
+
+    const plan = buildBaiduSmokePlan();
+    const taskId = newExternalId('task');
+    const { state, effects } = taskController.start({
+      state: {
+        taskId,
+        status: 'planning',
+        plan,
+        cursor: 0,
+        pendingConfirm: null,
+      },
+    });
+
+    const repo = new TaskRepository(ctx.db);
+    await repo.insertTask(state, {
+      userId: userRow.id,
+      intent: '[smoke] Baidu search for "半导体" — diagnostic, not Opus-planned',
+    });
+
     updateTaskStateForUser(ctx.userId, state);
     for (const eff of effects) {
       if (eff.kind === 'send') broadcastToUser(ctx.userId, eff.message);

@@ -182,6 +182,43 @@ export function App() {
     }
   }
 
+  /**
+   * Diagnostic: drive the SW ↔ orchestrator ↔ adapter loop against a
+   * hardcoded Baidu search plan (no Opus call). If this green-lights
+   * when Opus-planned runs don't, the planner is the weak link, not
+   * the adapter.
+   */
+  async function runSmokeTest() {
+    if (!token) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(`${ORCHESTRATOR_HTTP}/trpc/tasks.smokeTest`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: { message?: string };
+        } | null;
+        throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+      }
+      const body = (await res.json()) as CreateTaskResponse;
+      chrome.runtime.sendMessage({ type: 'holaday.tasks' }, (resp) => {
+        if (resp?.tasks) setTasks(resp.tasks as TaskView[]);
+      });
+      console.info('[holaday] smoke test started', body.result.data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function controlTask(taskId: string, route: 'pause' | 'resume' | 'cancel'): Promise<void> {
     if (!token) return;
     if (inFlight[taskId]) return; // guard: already have a request in flight for this task
@@ -301,9 +338,25 @@ export function App() {
           value={intent}
           onChange={(e) => setIntent(e.currentTarget.value)}
         />
-        <button type="button" disabled={submitting} onClick={() => void createTask()}>
-          {submitting ? 'Planning...' : 'Run'}
-        </button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={() => void createTask()}
+            style={{ flex: 1 }}
+          >
+            {submitting ? 'Planning...' : 'Run'}
+          </button>
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={() => void runSmokeTest()}
+            title="Hardcoded Baidu search plan — bypasses Opus, diagnostic only"
+            style={miniBtn}
+          >
+            Smoke Test
+          </button>
+        </div>
         {error ? <div style={errStyle}>{error}</div> : null}
       </div>
 
