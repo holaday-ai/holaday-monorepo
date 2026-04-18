@@ -333,25 +333,41 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   private async doScreenshot(action: DriverAction): Promise<DriverResult> {
     const page = this.page;
     if (!page) return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'screenshot before any goto');
+    // Playwright's default screenshot timeout is 30s. Pages like Baidu
+    // SERP have long-running CSS animations (sliding carousel ads) that
+    // keep `page.screenshot()` waiting for a stable frame for the full
+    // 30s. Cap at 10s (override per-step via action.deadlineMs) and
+    // pause animations at their first frame so the capture completes
+    // even when the page never actually goes quiet.
+    const timeout = action.deadlineMs ?? 10_000;
+    const fullPage = Boolean(action.payload?.fullPage);
     try {
-      const fullPage = Boolean(action.payload?.fullPage);
-      const buf = await page.screenshot({ type: 'png', fullPage });
-      // Return base64; SW hands off to S3 upload path (W3); Phase 0
-      // orchestrator just stashes the length as audit evidence.
+      const buf = await page.screenshot({
+        type: 'png',
+        fullPage,
+        timeout,
+        animations: 'disabled',
+        caret: 'hide',
+      });
+      // Return size only; SW hands off to S3 upload path (W3). Phase 0
+      // orchestrator just stashes the length as audit evidence —
+      // shipping the blob over WS would eat the dispatch channel.
       return {
         status: 'ok',
         data: {
           encoding: 'base64',
           bytes: buf.length,
-          // Avoid shipping the blob over WS; a reference hash + size is
-          // enough for Phase 0 audit.
           sizeBytes: buf.length,
         },
       };
     } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      // Playwright emits `TimeoutError: page.screenshot: Timeout Nms
+      // exceeded` on timeout; surface the clearer code for triage.
+      const isTimeout = raw.toLowerCase().includes('timeout');
       return driverError(
         DRIVER_ERRORS.SCREENSHOT_FAILED,
-        err instanceof Error ? err.message : String(err),
+        isTimeout ? `screenshot timed out after ${timeout}ms: ${raw}` : raw,
       );
     }
   }
