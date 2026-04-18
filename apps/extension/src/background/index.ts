@@ -35,6 +35,13 @@
 }
 
 import type { DriverAction, HolaDayBrowserDriver } from '@holaday/browser-driver';
+// Static import of the crx adapter. MV3 SWs (per w3c/ServiceWorker#1356)
+// forbid dynamic `import()` at runtime — `TypeError: import() is
+// disallowed on ServiceWorkerGlobalScope` — so the adapter MUST be
+// bundled into the SW entry itself. In `VITE_BROWSER_DRIVER=mock`
+// builds, vite.config.ts aliases this specifier to a stub so the
+// 3MB playwright-crx dependency doesn't come along for the ride.
+import { PlaywrightCrxAdapter } from '@holaday/browser-driver/crx';
 import { MockDriver } from '@holaday/browser-driver/mock';
 import type { ServerMessage } from '@holaday/shared-types';
 import { getAccessToken } from '../shared/storage.js';
@@ -96,12 +103,12 @@ async function getDriver(): Promise<HolaDayBrowserDriver> {
       return new MockDriver({ autoAckDelayMs: 200 });
     }
 
-    // Real Chrome SW: load the adapter. Any failure here is a real bug
-    // (missing permission, bundle error, playwright-crx incompat) — we
-    // surface it on every dispatch as DRIVER_CRASH instead of falling
-    // back to Mock, which was the W2 Day-5 smoke-test trap (`{stub:true}`
-    // in extract output looked like "it worked" when it hadn't).
-    const { PlaywrightCrxAdapter } = await import('@holaday/browser-driver/crx');
+    // Real Chrome SW: the adapter is already in the bundle (static
+    // import at the top of this file — MV3 forbids dynamic import()).
+    // Any failure from here on surfaces as DRIVER_CRASH on every
+    // dispatch instead of silently falling back to Mock, which was
+    // the W2 Day-5 smoke-test trap (`{stub:true}` in extract output
+    // looked like "it worked" when it hadn't).
     console.info('[holaday] driver=PlaywrightCrxAdapter (real Chrome)');
     return new PlaywrightCrxAdapter();
   })();

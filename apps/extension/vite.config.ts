@@ -1,10 +1,29 @@
+import { fileURLToPath } from 'node:url';
 import { crx } from '@crxjs/vite-plugin';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import manifest from './manifest.config.js';
 
+// MV3 Service Workers forbid dynamic `import()` at runtime, so the
+// crx-adapter has to be statically imported and bundled into the SW.
+// That means in a `VITE_BROWSER_DRIVER=mock` build we'd otherwise drag
+// in the 3MB playwright-crx bundle we don't need. Swap the package
+// subpath for a stub in mock builds so the mock bundle stays lean.
+const driverMode = process.env.VITE_BROWSER_DRIVER;
+const aliasCrxToStub: Record<string, string> =
+  driverMode === 'mock'
+    ? {
+        '@holaday/browser-driver/crx': fileURLToPath(
+          new URL('./src/background/crx-adapter-mock-shim.ts', import.meta.url),
+        ),
+      }
+    : {};
+
 export default defineConfig({
   plugins: [react(), crx({ manifest })],
+  resolve: {
+    alias: aliasCrxToStub,
+  },
   build: {
     target: 'chrome120',
     outDir: 'dist',
