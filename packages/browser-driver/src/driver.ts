@@ -5,7 +5,15 @@ import type { ResilientSelector } from '@holaday/shared-types';
  * protocol's `server.task.dispatch.action.kind` enum so driver translation
  * is a 1:1 mapping.
  */
-export type ActionKind = 'goto' | 'click' | 'type' | 'extract' | 'wait' | 'eval' | 'screenshot';
+export type ActionKind =
+  | 'goto'
+  | 'click'
+  | 'type'
+  | 'key'
+  | 'extract'
+  | 'wait'
+  | 'eval'
+  | 'screenshot';
 
 export interface DriverAction {
   kind: ActionKind;
@@ -49,6 +57,7 @@ export const DRIVER_ERRORS = {
   NAV_FAILED: 'NAV_FAILED',
   CLICK_FAILED: 'CLICK_FAILED',
   TYPE_FAILED: 'TYPE_FAILED',
+  KEY_FAILED: 'KEY_FAILED',
   EXTRACT_FAILED: 'EXTRACT_FAILED',
   EVAL_FAILED: 'EVAL_FAILED',
   SCREENSHOT_FAILED: 'SCREENSHOT_FAILED',

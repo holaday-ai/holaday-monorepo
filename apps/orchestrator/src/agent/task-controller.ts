@@ -38,7 +38,7 @@ export const MAX_STEP_RETRIES = 1;
 
 export interface PlannedStep {
   id: string; // step external_id (stp_...)
-  kind: 'goto' | 'click' | 'type' | 'extract' | 'wait' | 'eval' | 'screenshot';
+  kind: 'goto' | 'click' | 'type' | 'key' | 'extract' | 'wait' | 'eval' | 'screenshot';
   selector?: import('@holaday/shared-types').ResilientSelector;
   payload?: Record<string, unknown>;
   risk: Risk;

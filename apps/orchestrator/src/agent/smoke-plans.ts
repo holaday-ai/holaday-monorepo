@@ -43,32 +43,12 @@ export function buildBaiduSmokePlan(): PlannedStep[] {
     selfHeal: false,
   };
 
-  const searchButton: ResilientSelector = {
-    description: 'Baidu search submit (#su, "百度一下")',
-    strategies: [
-      // Classic id. Confirmed still canonical on desktop Baidu — but
-      // a 2s `attached` probe can miss it if the page is still
-      // hydrating when we reach this step. The fallbacks below cover
-      // that window.
-      { kind: 'css', value: '#su' },
-      // Form-scoped: inside <form id="form" action="/s"> the only
-      // submit is the "百度一下" button. Survives class/id renames.
-      { kind: 'css', value: '#form input[type="submit"]' },
-      { kind: 'css', value: '#form button[type="submit"]' },
-      // Unscoped submit — last-ditch, matches any submit on page.
-      // Baidu homepage has only one form so false-positive risk is
-      // near zero.
-      { kind: 'css', value: 'input[type="submit"]' },
-      // Semantic. <input type="submit" value="百度一下"> gets
-      // accessible role=button + name="百度一下", independent of
-      // whatever tag/class the redesign uses.
-      { kind: 'role', role: 'button', name: '百度一下' },
-      // Legacy class, still on many layouts.
-      { kind: 'css', value: '.s_btn' },
-    ],
-    scope: { timeoutMs: 10_000 },
-    selfHeal: false,
-  };
+  // Note: we explicitly DON'T click #su — Baidu's hydration briefly
+  // detaches the submit button after type-into-#kw fires an input
+  // event, so every selector strategy times out during that window.
+  // Instead step 4 presses Enter on the still-focused #kw input,
+  // which triggers the form's normal submit handler exactly like a
+  // human user pressing Enter.
 
   // Any of these means the result page rendered. `.c-container` is
   // the universal wrapper across organic + special cards (zhidao,
@@ -126,9 +106,14 @@ export function buildBaiduSmokePlan(): PlannedStep[] {
     },
     {
       id: newExternalId('taskStep'),
-      kind: 'click',
+      kind: 'key',
       risk: 'low',
-      selector: searchButton,
+      // Target the same input as step 3 so focus survives re-render;
+      // doKey focuses first, then page.keyboard.press() fires a real
+      // keyboard event through CDP that Baidu treats identically to a
+      // human hitting Enter. Bypasses the button selector entirely.
+      selector: searchInput,
+      payload: { key: 'Enter' },
     },
     {
       id: newExternalId('taskStep'),

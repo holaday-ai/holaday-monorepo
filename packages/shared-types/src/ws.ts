@@ -85,7 +85,7 @@ export const serverTaskDispatchSchema = z.object({
   taskId: z.string(),
   stepId: z.string(),
   action: z.object({
-    kind: z.enum(['goto', 'click', 'type', 'extract', 'wait', 'eval', 'screenshot']),
+    kind: z.enum(['goto', 'click', 'type', 'key', 'extract', 'wait', 'eval', 'screenshot']),
     selector: resilientSelectorSchema.optional(),
     payload: z.record(z.string(), z.unknown()).optional(),
   }),

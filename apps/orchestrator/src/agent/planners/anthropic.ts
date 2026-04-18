@@ -31,7 +31,7 @@ const DEFAULT_MODEL = 'claude-opus-4-7';
 const DEFAULT_MAX_TOKENS = 16_000;
 
 const planStepSchema = z.object({
-  kind: z.enum(['goto', 'click', 'type', 'extract', 'wait', 'eval', 'screenshot']),
+  kind: z.enum(['goto', 'click', 'type', 'key', 'extract', 'wait', 'eval', 'screenshot']),
   selector: resilientSelectorSchema.optional(),
   payload: z.record(z.string(), z.unknown()).optional(),
   risk: z.enum(['low', 'medium', 'high']).default('low'),
@@ -251,8 +251,9 @@ const PLAN_TOOL: Anthropic.Tool = {
           properties: {
             kind: {
               type: 'string',
-              enum: ['goto', 'click', 'type', 'extract', 'wait', 'eval', 'screenshot'],
-              description: 'The browser action to perform.',
+              enum: ['goto', 'click', 'type', 'key', 'extract', 'wait', 'eval', 'screenshot'],
+              description:
+                'The browser action to perform. `key` presses a keyboard key (payload.key, e.g. "Enter") on the focused element or the resolved selector — use this to submit forms where clicking the button is unreliable.',
             },
             selector: {
               type: 'object',

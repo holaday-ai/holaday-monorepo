@@ -87,6 +87,8 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
           return await this.doClick(action);
         case 'type':
           return await this.doType(action);
+        case 'key':
+          return await this.doKey(action);
         case 'extract':
           return await this.doExtract(action);
         case 'eval':
@@ -211,6 +213,51 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     } catch (err) {
       return driverError(
         DRIVER_ERRORS.TYPE_FAILED,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
+  /**
+   * Press a keyboard key (e.g. "Enter", "Escape", "Tab", or combos like
+   * "Control+A"). If `selector` is provided, focus that element first so
+   * the key targets the right input — otherwise the press lands wherever
+   * focus currently is. `payload.key` names the key using Playwright's
+   * key-name vocabulary (same as page.keyboard.press).
+   *
+   * Motivation for having this as a separate action kind: some sites
+   * (Baidu, Douyin search) re-render their submit button during
+   * hydration, so a 2s `attached` probe on the button can flap. Pressing
+   * Enter in the already-focused input bypasses the whole button-
+   * selector problem and matches how a human submits the form.
+   */
+  private async doKey(action: DriverAction): Promise<DriverResult> {
+    const page = this.page;
+    if (!page) return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'key before any goto');
+    const key = typeof action.payload?.key === 'string' ? action.payload.key : null;
+    if (!key) return driverError(DRIVER_ERRORS.PAYLOAD_MISSING, 'key requires payload.key');
+
+    if (action.selector) {
+      const resolved = await this.resolveLocator(page, action);
+      if ('failures' in resolved) {
+        return this.buildSelectorNotFoundResult(page, action, 'key', resolved.failures);
+      }
+      try {
+        await resolved.locator.focus({ timeout: action.deadlineMs ?? 5_000 });
+      } catch (err) {
+        return driverError(
+          DRIVER_ERRORS.KEY_FAILED,
+          `focus failed before key press: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    try {
+      await page.keyboard.press(key);
+      return { status: 'ok', data: { pressed: key } };
+    } catch (err) {
+      return driverError(
+        DRIVER_ERRORS.KEY_FAILED,
         err instanceof Error ? err.message : String(err),
       );
     }
@@ -390,7 +437,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   private async buildSelectorNotFoundResult(
     page: Page,
     action: DriverAction,
-    verb: 'click' | 'type' | 'extract',
+    verb: 'click' | 'type' | 'key' | 'extract',
     failures: StrategyFailure[],
   ): Promise<DriverResult> {
     const desc = action.selector?.description ?? '(no description)';

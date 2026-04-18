@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { buildBaiduSmokePlan } from './smoke-plans.js';
 
 describe('buildBaiduSmokePlan', () => {
-  it('emits the 7 expected steps in order', () => {
+  it('emits the 7 expected steps in order (key-Enter submit, no click)', () => {
     const plan = buildBaiduSmokePlan();
     expect(plan.map((s) => s.kind)).toEqual([
       'goto',
       'wait',
       'type',
-      'click',
+      'key',
       'wait',
       'extract',
       'screenshot',
@@ -42,21 +42,13 @@ describe('buildBaiduSmokePlan', () => {
     expect(wait?.selector?.strategies.length).toBeGreaterThanOrEqual(3);
   });
 
-  it('search-button selector lists #su first, plus form-scoped + semantic fallbacks', () => {
+  it('step 3 submits via Enter key on the search input (bypasses brittle button DOM)', () => {
     const plan = buildBaiduSmokePlan();
-    const click = plan[3];
-    expect(click?.kind).toBe('click');
-    const s = click?.selector?.strategies ?? [];
-    expect(s[0]).toEqual({ kind: 'css', value: '#su' });
-    // A 2s `attached` probe on #su can miss during hydration — these
-    // fallbacks cover the window without giving up on the step.
-    const cssValues = s.filter((x) => x.kind === 'css').map((x) => x.value);
-    expect(cssValues).toContain('#form input[type="submit"]');
-    expect(cssValues).toContain('input[type="submit"]');
-    expect(s.some((x) => x.kind === 'role' && x.role === 'button' && x.name === '百度一下')).toBe(
-      true,
-    );
-    expect(s.length).toBeGreaterThanOrEqual(5);
+    const submit = plan[3];
+    expect(submit?.kind).toBe('key');
+    expect(submit?.payload).toEqual({ key: 'Enter' });
+    // Same selector as step 2 (type) so focus is on the same input.
+    expect(submit?.selector?.strategies[0]).toEqual({ kind: 'css', value: '#kw' });
   });
 
   it('results-wait selector covers .c-container (universal) + .result/.result-op (legacy)', () => {
