@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "sync-skills": "tsx scripts/sync-skills.ts",
+    "smoke-anthropic": "tsx scripts/smoke-anthropic.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
