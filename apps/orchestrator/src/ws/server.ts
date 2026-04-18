@@ -99,13 +99,27 @@ function applyRehydrationForUser(state: ClientState): void {
     state.tasks.set(entry.state.taskId, entry.state);
 
     if (entry.state.status === 'awaiting_user' && entry.pendingConfirm) {
-      send(state.socket, {
-        type: 'server.user.confirm',
-        taskId: entry.state.taskId,
-        stepId: entry.pendingConfirm.stepId,
-        prompt: entry.pendingConfirm.prompt,
-        risk: entry.pendingConfirm.risk,
-      });
+      const pc = entry.pendingConfirm;
+      if (pc.kind === 'batch') {
+        send(state.socket, {
+          type: 'server.batch_confirm_required',
+          taskId: entry.state.taskId,
+          stepId: pc.stepId,
+          batchIndex: pc.batchIndex,
+          batchTotal: pc.batchTotal,
+          items: pc.items,
+          risk: pc.risk,
+          ...(pc.summary ? { summary: pc.summary } : {}),
+        });
+      } else {
+        send(state.socket, {
+          type: 'server.user.confirm',
+          taskId: entry.state.taskId,
+          stepId: pc.stepId,
+          prompt: pc.prompt,
+          risk: pc.risk,
+        });
+      }
       reemittedConfirm += 1;
       continue;
     }

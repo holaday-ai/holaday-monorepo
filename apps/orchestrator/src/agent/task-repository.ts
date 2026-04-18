@@ -5,7 +5,7 @@ import { taskEvents } from '../db/schema/task-events.js';
 import { taskSteps } from '../db/schema/task-steps.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
-import type { PlannedStep, TaskState } from './task-controller.js';
+import type { PendingConfirm, PlannedStep, TaskState } from './task-controller.js';
 
 /**
  * Persists TaskController state to MySQL. Phase 0 scope:
@@ -132,12 +132,10 @@ export class TaskRepository {
           stepUpdate.errorMessage = next.error.message;
         }
         if (next.status === 'awaiting_user' && next.pendingConfirm) {
-          // Persist the prompt so restart recovery can re-emit server.user.confirm.
-          stepUpdate.pendingConfirmPayload = {
-            stepId: next.pendingConfirm.stepId,
-            prompt: next.pendingConfirm.prompt,
-            risk: next.pendingConfirm.risk,
-          };
+          // Persist the full pendingConfirm payload (discriminated union:
+          // single | batch) so restart recovery can re-emit the right
+          // frame without a re-plan.
+          stepUpdate.pendingConfirmPayload = next.pendingConfirm as unknown;
         } else {
           // Any non-awaiting transition clears a previously stored confirm.
           stepUpdate.pendingConfirmPayload = null;
@@ -266,10 +264,10 @@ export class TaskRepository {
       if (cursor < 0) cursor = steps.length;
 
       const current = steps[cursor];
-      const pending = normalizeJson(current?.pendingConfirmPayload) as
-        | { stepId: string; prompt: string; risk: 'low' | 'medium' | 'high' }
-        | null
-        | undefined;
+      const pendingRaw = normalizeJson(current?.pendingConfirmPayload);
+      // Tolerate pre-batch rows that stored the old flat shape
+      // {stepId, prompt, risk}. Upgrade them to {kind:'single', ...}.
+      const pending: PendingConfirm | null = normalizePendingConfirm(pendingRaw);
 
       const retryCount: Record<string, number> = {};
       for (const s of steps) {
@@ -294,7 +292,7 @@ export class TaskRepository {
       out.push({
         state,
         userExternalId: row.userExternalId,
-        pendingConfirm: pending ?? null,
+        pendingConfirm: pending,
         pauseReason: state.pauseReason ?? null,
       });
     }
@@ -305,8 +303,36 @@ export class TaskRepository {
 export interface RehydratedTask {
   state: TaskState;
   userExternalId: string;
-  pendingConfirm: { stepId: string; prompt: string; risk: 'low' | 'medium' | 'high' } | null;
+  pendingConfirm: PendingConfirm | null;
   pauseReason: 'user' | 'retries_exhausted' | 'quota_exceeded' | null;
+}
+
+/**
+ * Upgrades legacy rows that persisted the pre-batch flat shape
+ *   {stepId, prompt, risk}
+ * into the current discriminated union by tagging them as `kind:'single'`.
+ * Returns null for unknown / missing payloads.
+ */
+function normalizePendingConfirm(raw: unknown): PendingConfirm | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  if (r.kind === 'batch' || r.kind === 'single') {
+    return r as unknown as PendingConfirm;
+  }
+  // Legacy flat shape.
+  if (
+    typeof r.stepId === 'string' &&
+    typeof r.prompt === 'string' &&
+    (r.risk === 'low' || r.risk === 'medium' || r.risk === 'high')
+  ) {
+    return {
+      kind: 'single',
+      stepId: r.stepId,
+      prompt: r.prompt,
+      risk: r.risk,
+    };
+  }
+  return null;
 }
 
 const IN_FLIGHT_STATUSES = ['pending', 'planning', 'executing', 'awaiting_user', 'paused'] as const;

@@ -327,4 +327,152 @@ describe('TaskController state machine', () => {
     expect(s1).toBe(s0);
     expect(effects).toEqual([{ kind: 'noop' }]);
   });
+
+  // ---------- Batch confirm ----------
+
+  it('awaiting_user with data.batch builds a batch pendingConfirm + emits server.batch_confirm_required', async () => {
+    const c = await setup();
+    const { state: s0 } = c.start({
+      state: null,
+      plan: [
+        { id: 'stp_batch', kind: 'click', risk: 'low' },
+        { id: 'stp_next', kind: 'wait', risk: 'low' },
+      ],
+    });
+    const { state: s1, effects } = c.onStepResult(s0, {
+      taskId: s0.taskId,
+      stepId: 'stp_batch',
+      status: 'awaiting_user',
+      data: {
+        batch: {
+          batchIndex: 1,
+          batchTotal: 3,
+          summary: 'Reply to 5 negative reviews',
+          items: [
+            { label: '评论 #1 · ★1', preview: '您好，感谢反馈……' },
+            { label: '评论 #2 · ★2', preview: '抱歉体验不佳……' },
+          ],
+        },
+      },
+    });
+    expect(s1.status).toBe('awaiting_user');
+    expect(s1.pendingConfirm?.kind).toBe('batch');
+    if (s1.pendingConfirm?.kind === 'batch') {
+      expect(s1.pendingConfirm.batchIndex).toBe(1);
+      expect(s1.pendingConfirm.batchTotal).toBe(3);
+      expect(s1.pendingConfirm.items).toHaveLength(2);
+      expect(s1.pendingConfirm.summary).toBe('Reply to 5 negative reviews');
+    }
+    const sendEffect = effects.find((e) => e.kind === 'send');
+    expect(sendEffect).toBeDefined();
+    if (sendEffect?.kind === 'send') {
+      expect(sendEffect.message.type).toBe('server.batch_confirm_required');
+      if (sendEffect.message.type === 'server.batch_confirm_required') {
+        expect(sendEffect.message.batchIndex).toBe(1);
+        expect(sendEffect.message.batchTotal).toBe(3);
+        expect(sendEffect.message.items).toHaveLength(2);
+      }
+    }
+  });
+
+  it('userConfirm("approve") on a batch pins cursor + re-dispatches the same step', async () => {
+    const c = await setup();
+    const { state: s0 } = c.start({
+      state: null,
+      plan: [
+        { id: 'stp_batch', kind: 'click', risk: 'low' },
+        { id: 'stp_next', kind: 'wait', risk: 'low' },
+      ],
+    });
+    const { state: awaiting } = c.onStepResult(s0, {
+      taskId: s0.taskId,
+      stepId: 'stp_batch',
+      status: 'awaiting_user',
+      data: {
+        batch: {
+          batchIndex: 0,
+          batchTotal: 2,
+          items: [{ label: 'a', preview: 'b' }],
+        },
+      },
+    });
+    const { state: resumed, effects } = c.userConfirm(awaiting, 'approve');
+    expect(resumed.status).toBe('executing');
+    expect(resumed.cursor).toBe(0); // same step
+    expect(resumed.pendingConfirm).toBeNull();
+    const dispatch = effects.find(
+      (e) => e.kind === 'send' && e.message.type === 'server.task.dispatch',
+    );
+    expect(dispatch).toBeDefined();
+    if (dispatch?.kind === 'send' && dispatch.message.type === 'server.task.dispatch') {
+      expect(dispatch.message.stepId).toBe('stp_batch');
+    }
+  });
+
+  it('userConfirm("skip") on a batch advances cursor past the step', async () => {
+    const c = await setup();
+    const { state: s0 } = c.start({
+      state: null,
+      plan: [
+        { id: 'stp_batch', kind: 'click', risk: 'low' },
+        { id: 'stp_next', kind: 'wait', risk: 'low' },
+      ],
+    });
+    const { state: awaiting } = c.onStepResult(s0, {
+      taskId: s0.taskId,
+      stepId: 'stp_batch',
+      status: 'awaiting_user',
+      data: {
+        batch: { batchIndex: 0, batchTotal: 2, items: [{ label: 'a', preview: 'b' }] },
+      },
+    });
+    const { state: after, effects } = c.userConfirm(awaiting, 'skip');
+    expect(after.status).toBe('executing');
+    expect(after.cursor).toBe(1); // advanced
+    const dispatch = effects.find(
+      (e) => e.kind === 'send' && e.message.type === 'server.task.dispatch',
+    );
+    if (dispatch?.kind === 'send' && dispatch.message.type === 'server.task.dispatch') {
+      expect(dispatch.message.stepId).toBe('stp_next');
+    }
+  });
+
+  it('userConfirm("reject") on a batch cancels the task', async () => {
+    const c = await setup();
+    const { state: s0 } = c.start({
+      state: null,
+      plan: [{ id: 'stp_batch', kind: 'click', risk: 'low' }],
+    });
+    const { state: awaiting } = c.onStepResult(s0, {
+      taskId: s0.taskId,
+      stepId: 'stp_batch',
+      status: 'awaiting_user',
+      data: {
+        batch: { batchIndex: 0, batchTotal: 1, items: [{ label: 'a', preview: 'b' }] },
+      },
+    });
+    const { state: after, effects } = c.userConfirm(awaiting, 'reject');
+    expect(after.status).toBe('cancelled');
+    const control = effects.find(
+      (e) => e.kind === 'send' && e.message.type === 'server.task.control',
+    );
+    if (control?.kind === 'send' && control.message.type === 'server.task.control') {
+      expect(control.message.command).toBe('cancel');
+    }
+  });
+
+  it('malformed batch payload falls back to single confirm', async () => {
+    const c = await setup();
+    const { state: s0 } = c.start({
+      state: null,
+      plan: [{ id: 'stp_1', kind: 'click', risk: 'high' }],
+    });
+    const { state: s1 } = c.onStepResult(s0, {
+      taskId: s0.taskId,
+      stepId: 'stp_1',
+      status: 'ok',
+      data: { batch: { batchTotal: 3 } }, // missing items + batchIndex
+    });
+    expect(s1.pendingConfirm?.kind).toBe('single');
+  });
 });
