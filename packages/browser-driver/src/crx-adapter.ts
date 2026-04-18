@@ -339,16 +339,35 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     // 30s. Cap at 10s (override per-step via action.deadlineMs) and
     // pause animations at their first frame so the capture completes
     // even when the page never actually goes quiet.
-    const timeout = action.deadlineMs ?? 10_000;
+    //
+    // The `timeout` option alone isn't enough: playwright-crx doesn't
+    // reliably forward it to the underlying CDP call on every version,
+    // so we belt-and-brace with a Promise.race hard cap at
+    // `timeoutMs + 2s`. If Playwright honours the option we fail at
+    // ~10s with its clearer message; if it doesn't, our outer race
+    // fires at ~12s. Either way the step advances instead of sitting
+    // for half a minute.
+    const timeoutMs = action.deadlineMs ?? 10_000;
     const fullPage = Boolean(action.payload?.fullPage);
+    let hardTimer: ReturnType<typeof setTimeout> | null = null;
     try {
-      const buf = await page.screenshot({
+      const shot = page.screenshot({
         type: 'png',
         fullPage,
-        timeout,
+        timeout: timeoutMs,
         animations: 'disabled',
         caret: 'hide',
       });
+      const hardCap = new Promise<never>((_resolve, reject) => {
+        hardTimer = setTimeout(() => {
+          reject(
+            new Error(
+              `screenshot hard-capped after ${timeoutMs + 2_000}ms (playwright-crx did not honour the inner timeout)`,
+            ),
+          );
+        }, timeoutMs + 2_000);
+      });
+      const buf = await Promise.race([shot, hardCap]);
       // Return size only; SW hands off to S3 upload path (W3). Phase 0
       // orchestrator just stashes the length as audit evidence —
       // shipping the blob over WS would eat the dispatch channel.
@@ -362,13 +381,15 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
       };
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
-      // Playwright emits `TimeoutError: page.screenshot: Timeout Nms
-      // exceeded` on timeout; surface the clearer code for triage.
-      const isTimeout = raw.toLowerCase().includes('timeout');
+      const isTimeout = raw.toLowerCase().includes('timeout') || raw.includes('hard-capped');
       return driverError(
         DRIVER_ERRORS.SCREENSHOT_FAILED,
-        isTimeout ? `screenshot timed out after ${timeout}ms: ${raw}` : raw,
+        isTimeout ? `screenshot timed out (cap=${timeoutMs}ms): ${raw}` : raw,
       );
+    } finally {
+      // Always release the race timer so a fast-path screenshot doesn't
+      // leak a pending setTimeout in the SW event loop.
+      if (hardTimer) clearTimeout(hardTimer);
     }
   }
 
