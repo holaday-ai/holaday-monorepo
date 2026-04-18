@@ -333,63 +333,33 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   private async doScreenshot(action: DriverAction): Promise<DriverResult> {
     const page = this.page;
     if (!page) return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'screenshot before any goto');
-    // Playwright's default screenshot timeout is 30s. Pages like Baidu
-    // SERP have long-running CSS animations (sliding carousel ads) that
-    // keep `page.screenshot()` waiting for a stable frame for the full
-    // 30s. Cap at 10s (override per-step via action.deadlineMs) and
-    // pause animations at their first frame so the capture completes
-    // even when the page never actually goes quiet.
+    // page.screenshot() via playwright-crx 0.15 hangs indefinitely in
+    // MV3 SW — earlier commits (ae1b49a, 94d0b2b) tried the inner
+    // `timeout` option and an outer Promise.race; both cases still saw
+    // the Playwright default 30s fire because the CDP call backing it
+    // is stuck somewhere we can't reach. Swap to the native Chrome
+    // extension API `chrome.tabs.captureVisibleTab` which runs entirely
+    // inside the SW's own runtime and doesn't round-trip through CDP.
     //
-    // The `timeout` option alone isn't enough: playwright-crx doesn't
-    // reliably forward it to the underlying CDP call on every version,
-    // so we belt-and-brace with a Promise.race hard cap at
-    // `timeoutMs + 2s`. If Playwright honours the option we fail at
-    // ~10s with its clearer message; if it doesn't, our outer race
-    // fires at ~12s. Either way the step advances instead of sitting
-    // for half a minute.
+    // Tradeoff: captureVisibleTab only captures the visible viewport,
+    // not the full page. `action.payload.fullPage=true` is now a
+    // silent no-op — noted here rather than surfacing an error because
+    // every current caller wants viewport-only (smoke test, SELECTOR_
+    // NOT_FOUND diagnostic). When we need fullPage we can scroll +
+    // stitch, but that's Phase 1 work.
     const timeoutMs = action.deadlineMs ?? 10_000;
-    const fullPage = Boolean(action.payload?.fullPage);
-    let hardTimer: ReturnType<typeof setTimeout> | null = null;
     try {
-      const shot = page.screenshot({
-        type: 'png',
-        fullPage,
-        timeout: timeoutMs,
-        animations: 'disabled',
-        caret: 'hide',
-      });
-      const hardCap = new Promise<never>((_resolve, reject) => {
-        hardTimer = setTimeout(() => {
-          reject(
-            new Error(
-              `screenshot hard-capped after ${timeoutMs + 2_000}ms (playwright-crx did not honour the inner timeout)`,
-            ),
-          );
-        }, timeoutMs + 2_000);
-      });
-      const buf = await Promise.race([shot, hardCap]);
-      // Return size only; SW hands off to S3 upload path (W3). Phase 0
-      // orchestrator just stashes the length as audit evidence —
-      // shipping the blob over WS would eat the dispatch channel.
+      const base64 = await captureViewportPngBase64(timeoutMs);
+      const bytes = base64ByteLength(base64);
       return {
         status: 'ok',
-        data: {
-          encoding: 'base64',
-          bytes: buf.length,
-          sizeBytes: buf.length,
-        },
+        data: { encoding: 'base64', bytes, sizeBytes: bytes },
       };
     } catch (err) {
-      const raw = err instanceof Error ? err.message : String(err);
-      const isTimeout = raw.toLowerCase().includes('timeout') || raw.includes('hard-capped');
       return driverError(
         DRIVER_ERRORS.SCREENSHOT_FAILED,
-        isTimeout ? `screenshot timed out (cap=${timeoutMs}ms): ${raw}` : raw,
+        err instanceof Error ? err.message : String(err),
       );
-    } finally {
-      // Always release the race timer so a fast-path screenshot doesn't
-      // leak a pending setTimeout in the SW event loop.
-      if (hardTimer) clearTimeout(hardTimer);
     }
   }
 
@@ -481,13 +451,9 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     const [url, title, screenshot] = await Promise.all([
       safeCall(() => page.url(), ''),
       safeCall(() => page.title(), ''),
-      safeCall(
-        async () => {
-          const buf = await page.screenshot({ type: 'png', fullPage: false });
-          return Buffer.from(buf).toString('base64');
-        },
-        null as string | null,
-      ),
+      // Use chrome.tabs.captureVisibleTab — same reason as doScreenshot:
+      // page.screenshot() hangs in playwright-crx 0.15 under MV3 SW.
+      safeCall(() => captureViewportPngBase64(5_000), null as string | null),
     ]);
 
     const strategiesTxt =
@@ -559,4 +525,56 @@ function buildLocator(page: Page, scope: Locator | null, spec: LocatorSpec): Loc
 
 function cssEscape(v: string): string {
   return v.replace(/[\\"]/g, (c) => `\\${c}`);
+}
+
+// ---------- SW-native screenshot via chrome.tabs.captureVisibleTab ----------
+
+/**
+ * Capture a PNG of the currently-focused Chrome window's active tab,
+ * returning raw base64 (no `data:image/png;base64,` prefix). Runs
+ * entirely inside the extension SW — unlike page.screenshot() it
+ * doesn't hang when playwright-crx's CDP channel gets stuck.
+ *
+ * Requires `<all_urls>` or `activeTab` permission — we declare
+ * `<all_urls>` in manifest.config.ts so this works on every page
+ * the agent can navigate to.
+ *
+ * The `windowId` arg is intentionally omitted so Chrome captures
+ * whichever window currently has focus; for our dispatch-driven
+ * flow that's always the tab playwright-crx opened via
+ * `newPage({ active: true })`.
+ */
+async function captureViewportPngBase64(timeoutMs: number): Promise<string> {
+  if (typeof chrome === 'undefined' || !chrome.tabs?.captureVisibleTab) {
+    throw new Error('chrome.tabs.captureVisibleTab unavailable (not in extension SW)');
+  }
+  let hardTimer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const capture = new Promise<string>((resolve, reject) => {
+      chrome.tabs.captureVisibleTab({ format: 'png' }, (dataUrl) => {
+        const err = chrome.runtime.lastError;
+        if (err) return reject(new Error(err.message ?? 'captureVisibleTab failed'));
+        if (!dataUrl) return reject(new Error('captureVisibleTab returned empty dataUrl'));
+        resolve(dataUrl);
+      });
+    });
+    const hardCap = new Promise<never>((_resolve, reject) => {
+      hardTimer = setTimeout(
+        () => reject(new Error(`captureVisibleTab timed out after ${timeoutMs}ms`)),
+        timeoutMs,
+      );
+    });
+    const dataUrl = await Promise.race([capture, hardCap]);
+    const comma = dataUrl.indexOf(',');
+    if (comma < 0) throw new Error('malformed data URL from captureVisibleTab');
+    return dataUrl.slice(comma + 1);
+  } finally {
+    if (hardTimer) clearTimeout(hardTimer);
+  }
+}
+
+/** Byte length of a base64 string, accounting for padding. */
+function base64ByteLength(b64: string): number {
+  const padding = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
+  return Math.floor((b64.length * 3) / 4) - padding;
 }
