@@ -12,54 +12,22 @@ import { z } from 'zod';
  * runtime** by Claude when no strategy resolves (self-healing).
  */
 
-export const selectorStrategySchema = z.discriminatedUnion('kind', [
-  // ARIA role + accessible name — most stable when present.
-  z.object({
-    kind: z.literal('role'),
-    role: z.string().min(1),
-    name: z.string().optional(),
-    exact: z.boolean().default(false),
-  }),
-
-  // Exact / substring text match.
-  z.object({
-    kind: z.literal('text'),
-    value: z.string().min(1),
-    exact: z.boolean().default(false),
-  }),
-
-  // data-* attribute — authors should prefer these when they control the DOM.
-  z.object({
-    kind: z.literal('testid'),
-    value: z.string().min(1),
-    attr: z.string().default('data-testid'),
-  }),
-
-  // CSS selector — brittle fallback.
-  z.object({
-    kind: z.literal('css'),
-    value: z.string().min(1),
-  }),
-
-  // XPath — last resort for legacy pages.
-  z.object({
-    kind: z.literal('xpath'),
-    value: z.string().min(1),
-  }),
-
-  // Label (for form controls) — "input labelled by <text>".
-  z.object({
-    kind: z.literal('label'),
-    value: z.string().min(1),
-    exact: z.boolean().default(false),
-  }),
-
-  // Visible-placeholder match — e.g. search boxes.
-  z.object({
-    kind: z.literal('placeholder'),
-    value: z.string().min(1),
-  }),
-]);
+/**
+ * Permissive strategy schema: `kind` is required and constrained, everything
+ * else is optional and best-effort. The driver layer (Playwright-CRX adapter,
+ * W2) is responsible for per-kind validation — e.g. rejecting a 'css' strategy
+ * without `value` at resolve time. Phase 0's commander (Claude Opus) doesn't
+ * always fill every field correctly; being permissive here avoids blowing up
+ * the whole plan on a single malformed fallback selector.
+ */
+export const selectorStrategySchema = z.object({
+  kind: z.enum(['role', 'text', 'testid', 'css', 'xpath', 'label', 'placeholder']),
+  value: z.string().optional(),
+  role: z.string().optional(),
+  name: z.string().optional(),
+  attr: z.string().optional(),
+  exact: z.boolean().optional(),
+});
 
 export type SelectorStrategy = z.infer<typeof selectorStrategySchema>;
 

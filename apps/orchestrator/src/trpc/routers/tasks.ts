@@ -46,7 +46,7 @@ export const tasksRouter = router({
     }
 
     const taskId = newExternalId('task');
-    const { state } = taskController.start({
+    const { state, effects } = taskController.start({
       state: {
         taskId,
         status: 'planning',
@@ -58,6 +58,15 @@ export const tasksRouter = router({
 
     const repo = new TaskRepository(ctx.db);
     await repo.insertTask(state, { userId: userRow.id, intent: input.intent });
+
+    // Drive the first dispatch out to any connected WS clients.
+    // Without this the task sits in `executing` in the DB but the
+    // extension never receives `server.task.dispatch` and the Agent
+    // Loop never starts. Symmetric with pause/resume/confirm below.
+    updateTaskStateForUser(ctx.userId, state);
+    for (const eff of effects) {
+      if (eff.kind === 'send') broadcastToUser(ctx.userId, eff.message);
+    }
 
     return {
       taskId: state.taskId,

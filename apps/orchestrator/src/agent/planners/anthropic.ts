@@ -14,11 +14,13 @@ import type { PlannedStep } from '../task-controller.js';
  * schema so the output is always structured.
  *
  * Design notes:
- * - Adaptive thinking on Opus 4.7 (no budget_tokens, no temperature/top_p/top_k).
+ * - `tool_choice` forces the `emit_plan` tool, so the model can't emit
+ *   free-form prose. This is **incompatible with `thinking`** on Opus 4.7
+ *   (API returns 400 "Thinking may not be enabled when tool_choice forces
+ *   tool use."), so we omit the thinking block. The tool schema itself
+ *   constrains the output shape.
  * - System prompt is stable across requests → cache_control ephemeral for
  *   prefix-cache hits on the skills catalogue.
- * - Uses tool_choice to force the `emit_plan` tool, so the model can't
- *   emit free-form prose.
  * - `model` / `maxTokens` are injected so tests can pin them.
  */
 
@@ -62,7 +64,9 @@ export class AnthropicPlanner implements Planner {
     const response = await this.client.messages.create({
       model: this.model,
       max_tokens: this.maxTokens,
-      thinking: { type: 'adaptive' },
+      // NOTE: `thinking` is intentionally omitted — Anthropic rejects
+      // `thinking: adaptive` together with `tool_choice` forced on a
+      // specific tool. The tool schema is what we rely on for structure.
       system: systemBlocks,
       tools: [PLAN_TOOL],
       tool_choice: { type: 'tool', name: PLAN_TOOL_NAME },
