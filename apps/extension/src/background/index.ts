@@ -37,36 +37,58 @@ const KEEPALIVE_PERIOD_MIN = 0.5;
 /**
  * Lazy driver factory.
  *
- * Runtime Chrome SW path: dynamically import the Playwright-CRX adapter
- * (which uses chrome.debugger + chrome.tabs and is only meaningful inside
- * the extension SW).
+ * Driver mode is picked at build time via `VITE_BROWSER_DRIVER`:
+ *   - `auto` (default): in a real Chrome SW → PlaywrightCrxAdapter, and
+ *     if the dynamic import or capability check fails we THROW — the
+ *     popup gets a DRIVER_CRASH on every dispatch until the underlying
+ *     issue is fixed. No silent `{stub:true}` masquerading as success.
+ *     Outside Chrome (build verification / typecheck host) → MockDriver.
+ *   - `mock`: force MockDriver everywhere. For CI builds, headless
+ *     smoke, and intentionally offline dogfood.
  *
- * Fallback path (Vite dev / smoke-outside-Chrome / tests that import this
- * module to type-check the SW): fall back to the MockDriver stub so the
- * loop is still testable. The capability flag `typeof chrome !== 'undefined'`
- * is the cleanest "am I in a real SW?" check MV3 gives us.
+ * Build example:
+ *   pnpm --filter @holaday/extension build                      # auto
+ *   VITE_BROWSER_DRIVER=mock pnpm --filter @holaday/extension build
  */
+type DriverMode = 'auto' | 'mock';
+const RAW_DRIVER_MODE = import.meta.env.VITE_BROWSER_DRIVER as string | undefined;
+const DRIVER_MODE: DriverMode = RAW_DRIVER_MODE === 'mock' ? 'mock' : 'auto';
+
 let driverPromise: Promise<HolaDayBrowserDriver> | null = null;
 async function getDriver(): Promise<HolaDayBrowserDriver> {
   if (driverPromise) return driverPromise;
   driverPromise = (async (): Promise<HolaDayBrowserDriver> => {
+    if (DRIVER_MODE === 'mock') {
+      console.info('[holaday] driver=MockDriver (VITE_BROWSER_DRIVER=mock)');
+      return new MockDriver({ autoAckDelayMs: 200 });
+    }
+
     const hasCrxRuntime =
       typeof chrome !== 'undefined' &&
       typeof chrome.debugger !== 'undefined' &&
       typeof chrome.tabs !== 'undefined';
     if (!hasCrxRuntime) {
-      console.warn('[holaday] no CRX runtime, falling back to MockDriver (stub)');
+      // Non-Chrome host (Vite dev, tsc host). Mock is the only sensible
+      // option — `playwright-crx` can't run here at all.
+      console.warn('[holaday] no chrome.debugger/tabs → MockDriver (build host fallback)');
       return new MockDriver({ autoAckDelayMs: 200 });
     }
-    try {
-      const { PlaywrightCrxAdapter } = await import('@holaday/browser-driver/crx');
-      console.info('[holaday] PlaywrightCrxAdapter ready');
-      return new PlaywrightCrxAdapter();
-    } catch (err) {
-      console.error('[holaday] failed to load PlaywrightCrxAdapter, using MockDriver', err);
-      return new MockDriver({ autoAckDelayMs: 200 });
-    }
+
+    // Real Chrome SW: load the adapter. Any failure here is a real bug
+    // (missing permission, bundle error, playwright-crx incompat) — we
+    // surface it on every dispatch as DRIVER_CRASH instead of falling
+    // back to Mock, which was the W2 Day-5 smoke-test trap (`{stub:true}`
+    // in extract output looked like "it worked" when it hadn't).
+    const { PlaywrightCrxAdapter } = await import('@holaday/browser-driver/crx');
+    console.info('[holaday] driver=PlaywrightCrxAdapter (real Chrome)');
+    return new PlaywrightCrxAdapter();
   })();
+  // If the adapter load rejects, clear the cached promise so the next
+  // dispatch (possibly after a user toggles permission / reloads) can
+  // retry cleanly instead of being stuck on the old failure.
+  driverPromise.catch(() => {
+    driverPromise = null;
+  });
   return driverPromise;
 }
 
