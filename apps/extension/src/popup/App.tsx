@@ -78,6 +78,13 @@ export function App() {
   const [tasks, setTasks] = useState<TaskView[]>([]);
   const [intent, setIntent] = useState('帮我整理今天半导体板块的要闻');
   const [submitting, setSubmitting] = useState(false);
+  /**
+   * Per-task in-flight lock. Keyed by taskId, value is the action that
+   * locked it ("confirm", "pause", "resume"). While set, the card's
+   * Confirm/Skip/Cancel/Pause/Resume buttons are disabled — prevents the
+   * second click from hitting a stale awaiting_user and getting 412.
+   */
+  const [inFlight, setInFlight] = useState<Record<string, string>>({});
 
   // On mount: restore session, hydrate tasks from SW.
   useEffect(() => {
@@ -177,6 +184,8 @@ export function App() {
 
   async function controlTask(taskId: string, route: 'pause' | 'resume' | 'cancel'): Promise<void> {
     if (!token) return;
+    if (inFlight[taskId]) return; // guard: already have a request in flight for this task
+    setInFlight((m) => ({ ...m, [taskId]: route }));
     try {
       const res = await fetch(`${ORCHESTRATOR_HTTP}/trpc/tasks.${route}`, {
         method: 'POST',
@@ -191,6 +200,11 @@ export function App() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setInFlight((m) => {
+        const { [taskId]: _drop, ...rest } = m;
+        return rest;
+      });
     }
   }
 
@@ -203,6 +217,8 @@ export function App() {
     decision: 'approve' | 'skip' | 'reject',
   ): Promise<void> {
     if (!token) return;
+    if (inFlight[taskId]) return; // guard against double-click → 412 storm
+    setInFlight((m) => ({ ...m, [taskId]: `confirm:${decision}` }));
     try {
       const res = await fetch(`${ORCHESTRATOR_HTTP}/trpc/tasks.confirm`, {
         method: 'POST',
@@ -230,6 +246,11 @@ export function App() {
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setInFlight((m) => {
+        const { [taskId]: _drop, ...rest } = m;
+        return rest;
+      });
     }
   }
 
@@ -291,7 +312,13 @@ export function App() {
           <div style={{ opacity: 0.5, fontSize: 12 }}>No tasks yet.</div>
         ) : (
           tasks.map((t) => (
-            <TaskCard key={t.taskId} task={t} onControl={controlTask} onConfirm={confirm} />
+            <TaskCard
+              key={t.taskId}
+              task={t}
+              busy={Boolean(inFlight[t.taskId])}
+              onControl={controlTask}
+              onConfirm={confirm}
+            />
           ))
         )}
       </div>
@@ -301,6 +328,7 @@ export function App() {
 
 function TaskCard(props: {
   task: TaskView;
+  busy: boolean;
   onControl: (taskId: string, route: 'pause' | 'resume' | 'cancel') => Promise<void>;
   onConfirm: (
     taskId: string,
@@ -308,9 +336,9 @@ function TaskCard(props: {
     decision: 'approve' | 'skip' | 'reject',
   ) => Promise<void>;
 }) {
-  const { task, onControl, onConfirm } = props;
-  const canPause = task.status === 'executing';
-  const canResume = task.status === 'paused';
+  const { task, busy, onControl, onConfirm } = props;
+  const canPause = task.status === 'executing' && !busy;
+  const canResume = task.status === 'paused' && !busy;
   const awaiting = task.status === 'awaiting_user' && task.pendingConfirm;
 
   return (
@@ -364,13 +392,15 @@ function TaskCard(props: {
                     <button
                       type="button"
                       style={{ ...miniBtn, background: '#16a34a', color: 'white' }}
+                      disabled={busy}
                       onClick={() => void onConfirm(task.taskId, pc.stepId, 'approve')}
                     >
-                      确认第 {pc.batchIndex + 1}/{pc.batchTotal} 批
+                      {busy ? '处理中…' : `确认第 ${pc.batchIndex + 1}/${pc.batchTotal} 批`}
                     </button>
                     <button
                       type="button"
                       style={miniBtn}
+                      disabled={busy}
                       onClick={() => void onConfirm(task.taskId, pc.stepId, 'skip')}
                     >
                       Skip
@@ -378,6 +408,7 @@ function TaskCard(props: {
                     <button
                       type="button"
                       style={{ ...miniBtn, background: '#dc2626', color: 'white' }}
+                      disabled={busy}
                       onClick={() => void onConfirm(task.taskId, pc.stepId, 'reject')}
                     >
                       Cancel
@@ -395,13 +426,15 @@ function TaskCard(props: {
                   <button
                     type="button"
                     style={{ ...miniBtn, background: '#16a34a', color: 'white' }}
+                    disabled={busy}
                     onClick={() => void onConfirm(task.taskId, pc.stepId, 'approve')}
                   >
-                    Confirm
+                    {busy ? '处理中…' : 'Confirm'}
                   </button>
                   <button
                     type="button"
                     style={{ ...miniBtn, background: '#dc2626', color: 'white' }}
+                    disabled={busy}
                     onClick={() => void onConfirm(task.taskId, pc.stepId, 'reject')}
                   >
                     Reject
