@@ -5,6 +5,7 @@ import {
   resilientSelectorSchema,
 } from '@holaday/shared-types';
 import { z } from 'zod';
+import { logger } from '../../config/logger.js';
 import type { Planner, PlannerContext } from '../planner.js';
 import type { PlannedStep } from '../task-controller.js';
 
@@ -53,7 +54,9 @@ export class AnthropicPlanner implements Planner {
 
   constructor(opts: AnthropicPlannerOptions = {}) {
     this.client = opts.client ?? new Anthropic();
-    this.model = opts.model ?? DEFAULT_MODEL;
+    // Env override primarily for ops / bake-offs (Sonnet vs Opus latency &
+    // cost); production default stays claude-opus-4-7.
+    this.model = opts.model ?? process.env.COMMANDER_MODEL ?? DEFAULT_MODEL;
     this.maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS;
   }
 
@@ -61,6 +64,7 @@ export class AnthropicPlanner implements Planner {
     const systemBlocks = buildSystemBlocks(ctx);
     const userContent = buildUserContent(ctx);
 
+    const startedAt = Date.now();
     const response = await this.client.messages.create({
       model: this.model,
       max_tokens: this.maxTokens,
@@ -72,6 +76,7 @@ export class AnthropicPlanner implements Planner {
       tool_choice: { type: 'tool', name: PLAN_TOOL_NAME },
       messages: [{ role: 'user', content: userContent }],
     });
+    const elapsedMs = Date.now() - startedAt;
 
     const toolUse = response.content.find(
       (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === PLAN_TOOL_NAME,
@@ -87,6 +92,22 @@ export class AnthropicPlanner implements Planner {
     if (!parsed.success) {
       throw new PlannerError('INVALID_PLAN', parsed.error.message);
     }
+
+    logger.info(
+      {
+        component: 'commander',
+        model: this.model,
+        elapsedMs,
+        planSize: parsed.data.steps.length,
+        usage: {
+          inputTokens: response.usage.input_tokens,
+          outputTokens: response.usage.output_tokens,
+          cacheReadInputTokens: response.usage.cache_read_input_tokens ?? 0,
+          cacheCreationInputTokens: response.usage.cache_creation_input_tokens ?? 0,
+        },
+      },
+      'commander plan',
+    );
 
     return parsed.data.steps.map((step) => ({
       id: newExternalId('taskStep'),
