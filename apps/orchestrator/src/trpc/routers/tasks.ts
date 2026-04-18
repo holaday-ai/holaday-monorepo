@@ -1,9 +1,11 @@
 import { newExternalId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
+import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { TaskController } from '../../agent/task-controller.js';
 import { TaskRepository } from '../../agent/task-repository.js';
+import { skills } from '../../db/schema/skills.js';
 import { users } from '../../db/schema/users.js';
 import { protectedProcedure, router } from '../trpc.js';
 
@@ -25,10 +27,13 @@ export const tasksRouter = router({
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
     }
 
+    const catalogue = await loadSkillCatalogue(ctx.db, input.occupation ?? null);
+
     const plan = await ctx.planner.plan({
       intent: input.intent,
       userId: ctx.userId,
       occupation: input.occupation ?? null,
+      skills: catalogue,
     });
     if (plan.length === 0) {
       throw new TRPCError({
@@ -63,3 +68,37 @@ export const tasksRouter = router({
     };
   }),
 });
+
+/**
+ * Active skills the user can route to: either untagged (applies to everyone)
+ * or tagged with the user's occupation. We return slug + one-line description
+ * only — v0.2 §5.5 lazy-load: full SKILL.md is fetched on demand when the
+ * commander actually picks a skill.
+ */
+async function loadSkillCatalogue(
+  db: import('../../db/client.js').DB,
+  occupation: string | null,
+): Promise<SkillCatalogueEntry[]> {
+  const occupationMatch = occupation
+    ? or(isNull(skills.occupationTag), eq(skills.occupationTag, occupation))
+    : isNull(skills.occupationTag);
+
+  const rows = await db
+    .select({
+      slug: skills.slug,
+      description: skills.description,
+      occupationTag: skills.occupationTag,
+    })
+    .from(skills)
+    .where(and(eq(skills.status, 'active'), occupationMatch));
+
+  return rows
+    .filter((r): r is { slug: string; description: string; occupationTag: string | null } =>
+      Boolean(r.description),
+    )
+    .map((r) => ({
+      slug: r.slug,
+      description: r.description,
+      occupationTag: r.occupationTag,
+    }));
+}

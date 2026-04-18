@@ -128,10 +128,15 @@ Output rules:
 The user's occupation and available Skills (if any) are listed below.`;
 
 function buildSystemBlocks(ctx: PlannerContext): Anthropic.TextBlockParam[] {
-  const catalogue: string[] = [];
-  if (ctx.occupation) catalogue.push(`User occupation tag: ${ctx.occupation}`);
-  if (ctx.skillSlugs?.length) {
-    catalogue.push(`Available skill slugs: ${ctx.skillSlugs.join(', ')}`);
+  const lines: string[] = [];
+  if (ctx.occupation) lines.push(`User occupation tag: ${ctx.occupation}`);
+  if (ctx.skills?.length) {
+    lines.push('');
+    lines.push('Available Skills (slug — one-line description). Reference by slug only;');
+    lines.push('full SKILL.md is fetched on demand via SkillLoader, not sent here.');
+    for (const skill of ctx.skills) {
+      lines.push(`- ${skill.slug} — ${skill.description}`);
+    }
   }
   return [
     {
@@ -139,11 +144,11 @@ function buildSystemBlocks(ctx: PlannerContext): Anthropic.TextBlockParam[] {
       text: SYSTEM_PROMPT,
       cache_control: { type: 'ephemeral' },
     },
-    ...(catalogue.length > 0
+    ...(lines.length > 0
       ? [
           {
             type: 'text' as const,
-            text: catalogue.join('\n'),
+            text: lines.join('\n'),
             cache_control: { type: 'ephemeral' as const },
           },
         ]

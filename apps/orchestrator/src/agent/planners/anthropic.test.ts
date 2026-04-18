@@ -153,12 +153,54 @@ describe('AnthropicPlanner', () => {
     await new AnthropicPlanner({ client }).plan({
       intent: 'x',
       occupation: 'ecommerce-ops',
-      skillSlugs: ['taobao-qianniu-inbox'],
+      skills: [{ slug: 'taobao-qianniu-inbox', description: '汇总未回客服消息' }],
     });
 
     expect(captured).not.toBeNull();
     const system = (captured as unknown as { system: Anthropic.TextBlockParam[] }).system;
     expect(Array.isArray(system)).toBe(true);
     expect(system[0]?.cache_control).toEqual({ type: 'ephemeral' });
+  });
+
+  it('renders skill catalogue as "- slug — description" lines', async () => {
+    const { AnthropicPlanner, PLAN_TOOL_NAME } = await import('./anthropic.js');
+
+    let captured: Anthropic.MessageCreateParams | null = null;
+    const client = fakeClient((req) => {
+      captured = req;
+      return buildToolUseMessage({ steps: [{ kind: 'wait', risk: 'low' }] }, PLAN_TOOL_NAME);
+    });
+
+    await new AnthropicPlanner({ client }).plan({
+      intent: 'route me to a skill',
+      skills: [
+        { slug: 'taobao-qianniu-inbox', description: '汇总未回客服消息' },
+        { slug: 'shengyi-canmou-export', description: '导出生意参谋近 7 天数据' },
+      ],
+    });
+
+    const system = (captured as unknown as { system: Anthropic.TextBlockParam[] }).system;
+    const catalogueBlock = system[1];
+    expect(catalogueBlock?.type).toBe('text');
+    expect(catalogueBlock?.text).toContain('- taobao-qianniu-inbox — 汇总未回客服消息');
+    expect(catalogueBlock?.text).toContain('- shengyi-canmou-export — 导出生意参谋近 7 天数据');
+    // Full SKILL.md body must NOT be in the prompt — only one-line descriptions.
+    expect(catalogueBlock?.text).not.toMatch(/千牛/u);
+    expect(catalogueBlock?.cache_control).toEqual({ type: 'ephemeral' });
+  });
+
+  it('omits the catalogue block entirely when there are no skills and no occupation', async () => {
+    const { AnthropicPlanner, PLAN_TOOL_NAME } = await import('./anthropic.js');
+
+    let captured: Anthropic.MessageCreateParams | null = null;
+    const client = fakeClient((req) => {
+      captured = req;
+      return buildToolUseMessage({ steps: [{ kind: 'wait', risk: 'low' }] }, PLAN_TOOL_NAME);
+    });
+
+    await new AnthropicPlanner({ client }).plan({ intent: 'no skills no occupation' });
+
+    const system = (captured as unknown as { system: Anthropic.TextBlockParam[] }).system;
+    expect(system).toHaveLength(1);
   });
 });
