@@ -78,6 +78,11 @@ async function handleConnection(socket: WebSocket, req: IncomingMessage) {
     if (userId) {
       state.userId = userId;
       state.authed = true;
+      send(socket, {
+        type: 'server.welcome',
+        clientId: state.id,
+        heartbeatMs: HEARTBEAT_INTERVAL_MS,
+      });
     }
   }
 
