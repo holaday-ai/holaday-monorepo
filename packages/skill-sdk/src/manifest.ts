@@ -28,6 +28,25 @@ export const skillManifestSchema = z
     hints: z.array(z.string().min(1).max(512)).max(16).optional(),
     /** Execution caveats and known limitations; surfaces to the UI. */
     caveats: z.array(z.string().min(1).max(512)).max(16).optional(),
+    /**
+     * Origin allowlist the driver layer enforces. Supports `*.example.com`
+     * wildcard subdomains. HOLA DAY relies on the user's already-logged-in
+     * browser session — no OAuth, no password storage — so this list just
+     * scopes which pages the Skill is permitted to touch.
+     */
+    allowedOrigins: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(128)
+          .regex(
+            /^\*?\.?[a-z0-9][a-z0-9.-]*[a-z0-9](:\d+)?$/i,
+            'allowedOrigins entries look like "example.com" or "*.example.com"',
+          ),
+      )
+      .max(32)
+      .optional(),
   })
   .strict();
 

@@ -63,4 +63,47 @@ describe('skill-sdk loader', () => {
     await writeFile(join(dir, 'b', 'SKILL.md'), VALID_FRONTMATTER);
     await expect(loadSkillsDir(dir)).rejects.toBeInstanceOf(SkillLoadError);
   });
+
+  it('accepts allowedOrigins (domain + wildcard subdomain forms)', async () => {
+    const fm = `---
+slug: with-origins
+name: With Origins
+version: 0.0.1
+description: domain allowlist test
+entryUrls:
+  - https://example.com/
+allowedOrigins:
+  - example.com
+  - "*.example.com"
+  - api.example.com:8443
+---
+
+body`;
+    const path = join(dir, 'SKILL.md');
+    await writeFile(path, fm);
+    const loaded = await loadSkill(path);
+    expect(loaded.manifest.allowedOrigins).toEqual([
+      'example.com',
+      '*.example.com',
+      'api.example.com:8443',
+    ]);
+  });
+
+  it('rejects obviously malformed allowedOrigins entries', async () => {
+    const fm = `---
+slug: bad-origins
+name: Bad Origins
+version: 0.0.1
+description: bad domain test
+entryUrls:
+  - https://example.com/
+allowedOrigins:
+  - "https://example.com"
+---
+
+body`;
+    const path = join(dir, 'SKILL.md');
+    await writeFile(path, fm);
+    await expect(loadSkill(path)).rejects.toBeInstanceOf(SkillLoadError);
+  });
 });
