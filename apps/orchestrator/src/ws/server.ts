@@ -11,8 +11,10 @@ import {
 import { jwtVerify } from 'jose';
 import { WebSocket, WebSocketServer } from 'ws';
 import { TaskController, type TaskState } from '../agent/task-controller.js';
+import { TaskRepository } from '../agent/task-repository.js';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
+import { db } from '../db/client.js';
 
 interface ClientState {
   id: string;
@@ -25,6 +27,7 @@ interface ClientState {
 }
 
 const taskController = new TaskController();
+const taskRepository = new TaskRepository(db);
 
 const jwtKey = new TextEncoder().encode(env.JWT_SECRET);
 
@@ -161,7 +164,7 @@ async function handleClientMessage(
   }
 
   if (msg.type === 'client.step.result') {
-    runStepResult(state, msg);
+    void runStepResult(state, msg);
     return;
   }
 
@@ -174,10 +177,10 @@ async function handleClientMessage(
   }
 }
 
-function runStepResult(
+async function runStepResult(
   state: ClientState,
   msg: Extract<ClientMessage, { type: 'client.step.result' }>,
-): void {
+): Promise<void> {
   const taskState = state.tasks.get(msg.taskId);
   if (!taskState) {
     send(state.socket, {
@@ -202,7 +205,13 @@ function runStepResult(
     if (eff.kind === 'send') {
       send(state.socket, eff.message);
     }
-    // eff.kind === 'persist' wires to MySQL in W2 (SkillLoader / TaskRunner).
+    if (eff.kind === 'persist') {
+      try {
+        await taskRepository.applyStepResult(taskState, nextState, msg.data);
+      } catch (err) {
+        logger.error({ err, taskId: msg.taskId }, 'persist applyStepResult failed');
+      }
+    }
   }
 }
 

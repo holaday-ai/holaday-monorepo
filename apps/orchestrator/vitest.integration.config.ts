@@ -5,8 +5,13 @@ export default defineConfig({
     include: ['src/**/*.integration.test.ts'],
     environment: 'node',
     globals: false,
+    fileParallelism: false,
     pool: 'forks',
-    singleThread: true,
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
+    },
     testTimeout: 30_000,
     hookTimeout: 30_000,
   },

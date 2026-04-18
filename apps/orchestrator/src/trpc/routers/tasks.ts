@@ -1,12 +1,12 @@
 import { newExternalId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { TaskController } from '../../agent/task-controller.js';
+import { TaskRepository } from '../../agent/task-repository.js';
+import { users } from '../../db/schema/users.js';
 import { protectedProcedure, router } from '../trpc.js';
 
-// Phase 0 scaffold: no persistence yet — the controller returns `persist`
-// effects, but we don't yet write them to MySQL. Persistence lands in
-// the next commit (tasks/task_steps/task_events).
 const taskController = new TaskController();
 
 const createInput = z.object({
@@ -16,6 +16,15 @@ const createInput = z.object({
 
 export const tasksRouter = router({
   create: protectedProcedure.input(createInput).mutation(async ({ ctx, input }) => {
+    const [userRow] = await ctx.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.externalId, ctx.userId))
+      .limit(1);
+    if (!userRow) {
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+    }
+
     const plan = await ctx.planner.plan({
       intent: input.intent,
       userId: ctx.userId,
@@ -38,6 +47,9 @@ export const tasksRouter = router({
         pendingConfirm: null,
       },
     });
+
+    const repo = new TaskRepository(ctx.db);
+    await repo.insertTask(state, { userId: userRow.id, intent: input.intent });
 
     return {
       taskId: state.taskId,
