@@ -7,10 +7,23 @@ import { z } from 'zod';
 //   1. .env                          (committed defaults — may be empty)
 //   2. .env.local                    (developer secrets, gitignored)
 //   3. apps/orchestrator/.env.local  (per-app override, gitignored)
+//
+// Empty-string values in process.env are treated as unset. Some parent
+// processes (e.g. Claude Code) scrub secrets by exporting them as '' to
+// child processes; without this, dotenv's `override: false` would keep
+// the empty string and mask the .env.local value.
+function loadDotenvAllowingEmpty(path: string) {
+  const result = loadDotenv({ path, override: false });
+  if (result.parsed) {
+    for (const [key, value] of Object.entries(result.parsed)) {
+      if (process.env[key] === '') process.env[key] = value;
+    }
+  }
+}
 const repoRoot = resolve(process.cwd(), '../..');
-loadDotenv({ path: resolve(repoRoot, '.env'), override: false });
-loadDotenv({ path: resolve(repoRoot, '.env.local'), override: false });
-loadDotenv({ path: resolve(process.cwd(), '.env.local'), override: false });
+loadDotenvAllowingEmpty(resolve(repoRoot, '.env'));
+loadDotenvAllowingEmpty(resolve(repoRoot, '.env.local'));
+loadDotenvAllowingEmpty(resolve(process.cwd(), '.env.local'));
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
