@@ -1,12 +1,14 @@
 import { newExternalId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
-import { eq } from 'drizzle-orm';
+import { and, asc, desc, eq, lt } from 'drizzle-orm';
 import { z } from 'zod';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import { TaskController } from '../../agent/task-controller.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { skills } from '../../db/schema/skills.js';
+import { taskSteps } from '../../db/schema/task-steps.js';
+import { tasks as tasksTable } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
 import { broadcastToUser, updateTaskStateForUser } from '../../ws/server.js';
 import { protectedProcedure, router } from '../trpc.js';
@@ -258,7 +260,155 @@ export const tasksRouter = router({
       }
       return { taskId: next.taskId, status: next.status };
     }),
+
+  /**
+   * Task history, scoped to the caller. DESC-id cursor pagination so
+   * the popup's "history" section can lazy-load more rows as the user
+   * scrolls without re-fetching the head. Shape mirrors
+   * `llmCalls.list` (commit 52ef5fa) so the popup can use one cursor
+   * idiom across both lists.
+   *
+   * Intentionally omits the full step plan / output blobs — those
+   * come from `tasks.detail(taskId)` when a row is expanded. Keeps
+   * the list payload small even when a user has hundreds of tasks.
+   */
+  list: protectedProcedure
+    .input(
+      z
+        .object({
+          cursor: z.number().int().positive().optional(),
+          limit: z.number().int().min(1).max(100).default(20),
+        })
+        .default({ limit: 20 }),
+    )
+    .query(async ({ ctx, input }) => {
+      const [userRow] = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.externalId, ctx.userId))
+        .limit(1);
+      if (!userRow) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+      }
+      const conds = [eq(tasksTable.userId, userRow.id)];
+      if (input.cursor) conds.push(lt(tasksTable.id, input.cursor));
+      const rows = await ctx.db
+        .select({
+          id: tasksTable.id,
+          externalId: tasksTable.externalId,
+          intent: tasksTable.intent,
+          status: tasksTable.status,
+          pauseReason: tasksTable.pauseReason,
+          errorCode: tasksTable.errorCode,
+          errorMessage: tasksTable.errorMessage,
+          createdAt: tasksTable.createdAt,
+          updatedAt: tasksTable.updatedAt,
+          completedAt: tasksTable.completedAt,
+        })
+        .from(tasksTable)
+        .where(and(...conds))
+        .orderBy(desc(tasksTable.id))
+        .limit(input.limit);
+
+      return {
+        tasks: rows.map((r) => ({
+          taskId: r.externalId,
+          intent: r.intent,
+          status: r.status,
+          pauseReason: r.pauseReason,
+          errorCode: r.errorCode,
+          errorMessage: r.errorMessage,
+          createdAt: r.createdAt,
+          updatedAt: r.updatedAt,
+          completedAt: r.completedAt,
+        })),
+        nextCursor: rows.length === input.limit ? (rows[rows.length - 1]?.id ?? null) : null,
+      };
+    }),
+
+  /**
+   * One task + all its steps. Steps include the `output` blob (extract
+   * texts, screenshot metadata, SELECTOR_NOT_FOUND diagnostic payload,
+   * etc.) so the popup can render the same ResultsSection it uses for
+   * live tasks. Task ownership is verified — unknown or not-owned task
+   * returns NOT_FOUND rather than leaking existence via UNAUTHORIZED.
+   */
+  detail: protectedProcedure
+    .input(z.object({ taskId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const [userRow] = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.externalId, ctx.userId))
+        .limit(1);
+      if (!userRow) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+      }
+      const [taskRow] = await ctx.db
+        .select()
+        .from(tasksTable)
+        .where(and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)))
+        .limit(1);
+      if (!taskRow) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
+      }
+      const stepRows = await ctx.db
+        .select({
+          externalId: taskSteps.externalId,
+          seq: taskSteps.seq,
+          kind: taskSteps.kind,
+          status: taskSteps.status,
+          riskLevel: taskSteps.riskLevel,
+          output: taskSteps.output,
+          errorCode: taskSteps.errorCode,
+          errorMessage: taskSteps.errorMessage,
+          screenshotKey: taskSteps.screenshotKey,
+          startedAt: taskSteps.startedAt,
+          completedAt: taskSteps.completedAt,
+        })
+        .from(taskSteps)
+        .where(eq(taskSteps.taskId, taskRow.id))
+        .orderBy(asc(taskSteps.seq));
+
+      return {
+        taskId: taskRow.externalId,
+        intent: taskRow.intent,
+        status: taskRow.status,
+        pauseReason: taskRow.pauseReason,
+        errorCode: taskRow.errorCode,
+        errorMessage: taskRow.errorMessage,
+        createdAt: taskRow.createdAt,
+        completedAt: taskRow.completedAt,
+        steps: stepRows.map((s) => ({
+          id: s.externalId,
+          seq: s.seq,
+          kind: s.kind,
+          status: s.status,
+          riskLevel: s.riskLevel,
+          // MariaDB JSON column arrives as a string on some driver
+          // configs; the repo's normalizeJson handles that, inline
+          // the parse here so callers get a real object.
+          output: normalizeOutput(s.output),
+          errorCode: s.errorCode,
+          errorMessage: s.errorMessage,
+          screenshotKey: s.screenshotKey,
+          startedAt: s.startedAt,
+          completedAt: s.completedAt,
+        })),
+      };
+    }),
 });
+
+function normalizeOutput(value: unknown): unknown {
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return value;
+}
 
 async function loadTaskState(repo: TaskRepository, taskExternalId: string, userExternalId: string) {
   const all = await repo.rehydrateInFlight();

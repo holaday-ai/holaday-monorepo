@@ -400,6 +400,8 @@ export function App() {
           ))
         )}
       </div>
+
+      <HistorySection token={token} liveTaskIds={tasks.map((t) => t.taskId)} />
     </div>
   );
 }
@@ -555,7 +557,17 @@ function TaskCard(props: {
  * Hidden entirely when there's nothing to show; auto-opens on the
  * task's first completed transition and stays toggleable afterwards.
  */
-function ResultsSection({ task }: { task: TaskView }) {
+/**
+ * History-friendly loosening: only depends on status + steps, so the
+ * historical detail endpoint (which doesn't carry pendingConfirm /
+ * pauseReason / lastUpdated) can reuse this component.
+ */
+interface ResultsSectionTask {
+  status: TaskStatus;
+  steps: StepView[];
+}
+
+function ResultsSection({ task }: { task: ResultsSectionTask }) {
   const extracts = task.steps
     .map((s) => ({ step: s, data: extractOutput(s) }))
     .filter(
@@ -627,6 +639,184 @@ function ResultsSection({ task }: { task: TaskView }) {
     </div>
   );
 }
+
+// ---------- History ----------
+
+interface HistoryListItem {
+  taskId: string;
+  intent: string;
+  status: TaskStatus;
+  createdAt: string; // ISO
+}
+
+interface HistoryDetail {
+  taskId: string;
+  intent: string;
+  status: TaskStatus;
+  steps: StepView[];
+}
+
+/**
+ * Lazy-loaded "history" block under the live tasks list. Shows past
+ * tasks newest-first; click a row to expand and see the same
+ * ResultsSection the live tasks use. Live tasks already on screen
+ * (by taskId) are filtered out so the user doesn't see them twice.
+ *
+ * No page-up / search — Phase 0. One `tasks.list` round-trip with a
+ * 20-row default. Cursor pagination is on the tRPC side if we ever
+ * want a "load more" button.
+ */
+function HistorySection({
+  token,
+  liveTaskIds,
+}: {
+  token: string | null;
+  liveTaskIds: string[];
+}) {
+  const [items, setItems] = useState<HistoryListItem[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, HistoryDetail>>({});
+  const [expanding, setExpanding] = useState<Record<string, boolean>>({});
+
+  // Mount fetch. Token change (login/logout) re-fetches.
+  useEffect(() => {
+    if (!token) {
+      setItems(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setErr(null);
+      try {
+        const res = await fetch(
+          `${ORCHESTRATOR_HTTP}/trpc/tasks.list?input=${encodeURIComponent(
+            JSON.stringify({ limit: 20 }),
+          )}`,
+          { headers: { authorization: `Bearer ${token}` } },
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = (await res.json()) as { result: { data: { tasks: HistoryListItem[] } } };
+        if (!cancelled) setItems(body.result.data.tasks);
+      } catch (e) {
+        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  async function toggle(taskId: string): Promise<void> {
+    if (!token) return;
+    if (expanded[taskId]) {
+      const { [taskId]: _drop, ...rest } = expanded;
+      setExpanded(rest);
+      return;
+    }
+    if (expanding[taskId]) return;
+    setExpanding((m) => ({ ...m, [taskId]: true }));
+    try {
+      const res = await fetch(
+        `${ORCHESTRATOR_HTTP}/trpc/tasks.detail?input=${encodeURIComponent(
+          JSON.stringify({ taskId }),
+        )}`,
+        { headers: { authorization: `Bearer ${token}` } },
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = (await res.json()) as { result: { data: HistoryDetail } };
+      setExpanded((m) => ({ ...m, [taskId]: body.result.data }));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExpanding((m) => {
+        const { [taskId]: _drop, ...rest } = m;
+        return rest;
+      });
+    }
+  }
+
+  if (!token) return null;
+
+  const liveSet = new Set(liveTaskIds);
+  const historyItems = (items ?? []).filter((i) => !liveSet.has(i.taskId));
+
+  return (
+    <div style={{ marginTop: 12, borderTop: '1px solid #eee', paddingTop: 8 }}>
+      <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>历史任务</div>
+      {loading ? <div style={{ opacity: 0.5, fontSize: 12 }}>加载中...</div> : null}
+      {err ? <div style={errStyle}>{err}</div> : null}
+      {!loading && items !== null && historyItems.length === 0 ? (
+        <div style={{ opacity: 0.5, fontSize: 12 }}>还没有任务</div>
+      ) : null}
+      {historyItems.map((item) => {
+        const detail = expanded[item.taskId];
+        const busy = Boolean(expanding[item.taskId]);
+        return (
+          <div key={item.taskId} style={cardStyle}>
+            <button
+              type="button"
+              style={historyRowStyle}
+              onClick={() => void toggle(item.taskId)}
+              aria-expanded={Boolean(detail)}
+            >
+              <span style={{ flex: 1, textAlign: 'left' }}>
+                {detail ? '▼' : '▶'} {truncate(item.intent, 60)}
+              </span>
+              <StatusBadge status={item.status} />
+            </button>
+            <div style={{ fontSize: 11, opacity: 0.55, marginTop: 2 }}>
+              {formatCreatedAt(item.createdAt)}
+              {busy ? ' · 加载详情...' : ''}
+            </div>
+            {detail ? (
+              <div style={{ marginTop: 6 }}>
+                <ol style={{ margin: '6px 0 8px', paddingLeft: 18, fontSize: 12 }}>
+                  {detail.steps.map((s) => (
+                    <li key={s.id}>
+                      <span style={stepStatusStyle(s.status)}>{s.status}</span> · {s.kind} ·{' '}
+                      <span style={{ fontFamily: 'monospace', opacity: 0.5 }}>
+                        {s.id.slice(0, 8)}…
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+                <ResultsSection task={{ status: detail.status, steps: detail.steps }} />
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function truncate(s: string, n: number): string {
+  if (s.length <= n) return s;
+  return `${s.slice(0, n - 1)}…`;
+}
+
+function formatCreatedAt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+}
+
+const historyRowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  width: '100%',
+  background: 'transparent',
+  border: 'none',
+  padding: 0,
+  cursor: 'pointer',
+  fontSize: 12,
+  fontWeight: 500,
+};
 
 function StatusBadge(props: { status: TaskStatus; pauseReason?: PauseReason | null }) {
   const color = statusColor(props.status);
