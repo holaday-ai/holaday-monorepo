@@ -107,6 +107,23 @@ export function App() {
    * second click from hitting a stale awaiting_user and getting 412.
    */
   const [inFlight, setInFlight] = useState<Record<string, string>>({});
+  /**
+   * Debug menu toggle — persisted in chrome.storage.local so devs
+   * don't have to re-enable it every popup open. Off by default, so
+   * normal users don't see the Smoke Test (and any future debug-only
+   * buttons) in the main UI.
+   */
+  const [debugMode, setDebugMode] = useState(false);
+  useEffect(() => {
+    chrome.storage.local.get('holaday.debug_mode', (r) => {
+      setDebugMode(r['holaday.debug_mode'] === true);
+    });
+  }, []);
+  async function toggleDebugMode(): Promise<void> {
+    const next = !debugMode;
+    setDebugMode(next);
+    await chrome.storage.local.set({ 'holaday.debug_mode': next });
+  }
 
   // On mount: restore session, hydrate tasks from SW.
   useEffect(() => {
@@ -351,9 +368,20 @@ export function App() {
             {user.email} · plan: {user.plan}
           </div>
         </div>
-        <button type="button" onClick={() => void logout()} style={miniBtn}>
-          Sign out
-        </button>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button
+            type="button"
+            onClick={() => void toggleDebugMode()}
+            style={debugToggleBtn(debugMode)}
+            title={debugMode ? '关闭调试菜单' : '打开调试菜单'}
+            aria-pressed={debugMode}
+          >
+            ⚙
+          </button>
+          <button type="button" onClick={() => void logout()} style={miniBtn}>
+            Sign out
+          </button>
+        </div>
       </div>
 
       <div style={{ ...column(6), marginTop: 8 }}>
@@ -372,15 +400,17 @@ export function App() {
           >
             {submitting ? 'Planning...' : 'Run'}
           </button>
-          <button
-            type="button"
-            disabled={submitting}
-            onClick={() => void runSmokeTest()}
-            title="Hardcoded Baidu search plan — bypasses Opus, diagnostic only"
-            style={miniBtn}
-          >
-            Smoke Test
-          </button>
+          {debugMode ? (
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => void runSmokeTest()}
+              title="Hardcoded Baidu search plan — bypasses Opus, diagnostic only"
+              style={miniBtn}
+            >
+              Smoke Test
+            </button>
+          ) : null}
         </div>
         {error ? <div style={errStyle}>{error}</div> : null}
       </div>
@@ -428,14 +458,7 @@ function TaskCard(props: {
         <StatusBadge status={task.status} pauseReason={task.pauseReason} />
       </div>
 
-      <ol style={{ margin: '6px 0 8px', paddingLeft: 18, fontSize: 12 }}>
-        {task.steps.map((s) => (
-          <li key={s.id}>
-            <span style={stepStatusStyle(s.status)}>{s.status}</span> · {s.kind} ·{' '}
-            <span style={{ fontFamily: 'monospace', opacity: 0.5 }}>{s.id.slice(0, 8)}…</span>
-          </li>
-        ))}
-      </ol>
+      <StepList steps={task.steps} />
 
       {awaiting && task.pendingConfirm
         ? (() => {
@@ -774,16 +797,7 @@ function HistorySection({
             </div>
             {detail ? (
               <div style={{ marginTop: 6 }}>
-                <ol style={{ margin: '6px 0 8px', paddingLeft: 18, fontSize: 12 }}>
-                  {detail.steps.map((s) => (
-                    <li key={s.id}>
-                      <span style={stepStatusStyle(s.status)}>{s.status}</span> · {s.kind} ·{' '}
-                      <span style={{ fontFamily: 'monospace', opacity: 0.5 }}>
-                        {s.id.slice(0, 8)}…
-                      </span>
-                    </li>
-                  ))}
-                </ol>
+                <StepList steps={detail.steps} />
                 <ResultsSection task={{ status: detail.status, steps: detail.steps }} />
               </div>
             ) : null}
@@ -818,9 +832,106 @@ const historyRowStyle: React.CSSProperties = {
   fontWeight: 500,
 };
 
+/**
+ * Step renderer with long-plan collapse. Plans with more than
+ * STEP_COLLAPSE_AT steps show only the first STEP_COLLAPSE_KEEP
+ * with a "展开全部 (N)" button; click expands to the full list.
+ * Keeps the popup scroll tractable when Opus emits a 30-step plan.
+ *
+ * Collapse state is per-render-instance; re-expanding on a popup
+ * re-mount is fine — users don't need sticky preference for this.
+ */
+const STEP_COLLAPSE_AT = 10;
+const STEP_COLLAPSE_KEEP = 10;
+
+function StepList({ steps }: { steps: StepView[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const collapsed = !expanded && steps.length > STEP_COLLAPSE_AT;
+  const visible = collapsed ? steps.slice(0, STEP_COLLAPSE_KEEP) : steps;
+  const hiddenCount = steps.length - visible.length;
+  return (
+    <>
+      <ol style={{ margin: '6px 0 8px', paddingLeft: 18, fontSize: 12 }}>
+        {visible.map((s) => (
+          <li key={s.id}>
+            <span style={stepStatusStyle(s.status)}>
+              {stepIcon(s.status)} {stepStatusText(s.status)}
+            </span>{' '}
+            · {s.kind} ·{' '}
+            <span style={{ fontFamily: 'monospace', opacity: 0.5 }}>{s.id.slice(0, 8)}…</span>
+          </li>
+        ))}
+      </ol>
+      {collapsed && hiddenCount > 0 ? (
+        <button type="button" style={expandAllBtn} onClick={() => setExpanded(true)}>
+          展开全部 ({steps.length} 步，还有 {hiddenCount} 步未显示)
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+const expandAllBtn: React.CSSProperties = {
+  fontSize: 11,
+  padding: '3px 8px',
+  border: '1px dashed #9ca3af',
+  borderRadius: 3,
+  background: 'transparent',
+  cursor: 'pointer',
+  marginBottom: 6,
+  color: '#4b5563',
+};
+
+// ---------- labels: color-blind friendly + friendly Chinese ----------
+
+/**
+ * Every badge carries ICON + CN LABEL + COLOR — colour alone was
+ * color-blind-hostile. The icons (glyphs that render everywhere
+ * without a font file) give a distinct shape at a glance; the CN
+ * label removes "what does 'awaiting_user' even mean" friction;
+ * colour is gravy.
+ */
+function taskStatusLabel(s: TaskStatus): { icon: string; text: string } {
+  switch (s) {
+    case 'planning':
+      return { icon: '✎', text: '规划中' };
+    case 'executing':
+      return { icon: '▸', text: '执行中' };
+    case 'awaiting_user':
+      return { icon: '?', text: '待确认' };
+    case 'paused':
+      return { icon: '⏸', text: '已暂停' };
+    case 'completed':
+      return { icon: '✓', text: '已完成' };
+    case 'failed':
+      return { icon: '✗', text: '失败' };
+    case 'cancelled':
+      return { icon: '⊘', text: '已取消' };
+    default:
+      return { icon: '·', text: String(s) };
+  }
+}
+
+function pauseReasonLabel(r: PauseReason): string {
+  switch (r) {
+    case 'user':
+      return '已手动暂停';
+    case 'retries_exhausted':
+      return '多次重试未成功，已暂停';
+    case 'quota_exceeded':
+      return '配额用完，已暂停';
+    default:
+      return String(r);
+  }
+}
+
 function StatusBadge(props: { status: TaskStatus; pauseReason?: PauseReason | null }) {
   const color = statusColor(props.status);
-  const extra = props.status === 'paused' && props.pauseReason ? ` · ${props.pauseReason}` : '';
+  const { icon, text } = taskStatusLabel(props.status);
+  // Paused shows the detailed reason in the badge; other statuses
+  // keep the short label to save space.
+  const label =
+    props.status === 'paused' && props.pauseReason ? pauseReasonLabel(props.pauseReason) : text;
   return (
     <span
       style={{
@@ -829,10 +940,17 @@ function StatusBadge(props: { status: TaskStatus; pauseReason?: PauseReason | nu
         borderRadius: 3,
         background: color.bg,
         color: color.fg,
+        display: 'inline-flex',
+        gap: 4,
+        alignItems: 'center',
       }}
+      title={props.status}
+      aria-label={label}
     >
-      {props.status}
-      {extra}
+      <span aria-hidden="true" style={{ fontWeight: 700 }}>
+        {icon}
+      </span>
+      <span>{label}</span>
     </span>
   );
 }
@@ -853,6 +971,40 @@ function statusColor(s: TaskStatus): { bg: string; fg: string } {
       return { bg: '#e5e7eb', fg: '#374151' };
     default:
       return { bg: '#f3f4f6', fg: '#374151' };
+  }
+}
+
+function stepIcon(s: StepView['status']): string {
+  switch (s) {
+    case 'pending':
+      return '·';
+    case 'executing':
+      return '▸';
+    case 'completed':
+      return '✓';
+    case 'failed':
+      return '✗';
+    case 'awaiting_user':
+      return '?';
+    case 'skipped':
+      return '⊝';
+  }
+}
+
+function stepStatusText(s: StepView['status']): string {
+  switch (s) {
+    case 'pending':
+      return '待执行';
+    case 'executing':
+      return '执行中';
+    case 'completed':
+      return '已完成';
+    case 'failed':
+      return '失败';
+    case 'awaiting_user':
+      return '待确认';
+    case 'skipped':
+      return '已跳过';
   }
 }
 
@@ -884,6 +1036,18 @@ const headerRow: React.CSSProperties = {
   alignItems: 'flex-start',
 };
 const errStyle: React.CSSProperties = { color: 'crimson', fontSize: 12 };
+function debugToggleBtn(on: boolean): React.CSSProperties {
+  return {
+    fontSize: 12,
+    padding: '3px 6px',
+    border: '1px solid #d1d5db',
+    borderRadius: 3,
+    background: on ? '#fef3c7' : '#f9fafb',
+    color: on ? '#92400e' : '#6b7280',
+    cursor: 'pointer',
+  };
+}
+
 const miniBtn: React.CSSProperties = {
   fontSize: 11,
   padding: '3px 8px',
