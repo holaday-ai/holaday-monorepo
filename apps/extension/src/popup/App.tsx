@@ -26,6 +26,28 @@ interface StepView {
   id: string;
   kind: string;
   status: 'pending' | 'executing' | 'completed' | 'failed' | 'awaiting_user';
+  /** Driver result.data, forwarded by the SW. Shape varies by kind. */
+  output?: unknown;
+}
+
+/** Narrow an `extract` step's output to the shape we can render. */
+function extractOutput(step: StepView): { texts: string[]; matched?: string } | null {
+  if (step.kind !== 'extract' || !step.output || typeof step.output !== 'object') return null;
+  const o = step.output as { texts?: unknown; matched?: unknown };
+  if (!Array.isArray(o.texts)) return null;
+  const texts = o.texts.filter((t): t is string => typeof t === 'string');
+  return {
+    texts,
+    ...(typeof o.matched === 'string' ? { matched: o.matched } : {}),
+  };
+}
+
+/** Narrow a `screenshot` step's output so we can render the JPEG thumbnail. */
+function screenshotOutput(step: StepView): { thumbnail: string } | null {
+  if (step.kind !== 'screenshot' || !step.output || typeof step.output !== 'object') return null;
+  const o = step.output as { thumbnail?: unknown };
+  if (typeof o.thumbnail !== 'string' || o.thumbnail.length === 0) return null;
+  return { thumbnail: o.thumbnail };
 }
 
 interface BatchItemView {
@@ -516,6 +538,89 @@ function TaskCard(props: {
           Resume
         </button>
       </div>
+
+      <ResultsSection task={task} />
+    </div>
+  );
+}
+
+/**
+ * Collapsible result view beneath a TaskCard. Scans the step list for
+ * anything with a renderable `output`:
+ *   - extract step → { texts: string[] } → scrollable ordered list
+ *   - screenshot step → { thumbnail: base64 jpeg } → <img>
+ * Hidden entirely when there's nothing to show; auto-opens on the
+ * task's first completed transition and stays toggleable afterwards.
+ */
+function ResultsSection({ task }: { task: TaskView }) {
+  const extracts = task.steps
+    .map((s) => ({ step: s, data: extractOutput(s) }))
+    .filter(
+      (x): x is { step: StepView; data: { texts: string[]; matched?: string } } => x.data !== null,
+    );
+  const screenshots = task.steps
+    .map((s) => ({ step: s, data: screenshotOutput(s) }))
+    .filter((x): x is { step: StepView; data: { thumbnail: string } } => x.data !== null);
+
+  const hasAny = extracts.length > 0 || screenshots.length > 0;
+  const [expanded, setExpanded] = useState(task.status === 'completed');
+  // Auto-open the first time a task transitions to completed.
+  useEffect(() => {
+    if (task.status === 'completed') setExpanded(true);
+  }, [task.status]);
+
+  if (!hasAny) return null;
+
+  const summaryBits: string[] = [];
+  if (extracts.length > 0) {
+    const totalItems = extracts.reduce((n, x) => n + x.data.texts.length, 0);
+    summaryBits.push(`${extracts.length} extract · ${totalItems} items`);
+  }
+  if (screenshots.length > 0) summaryBits.push(`${screenshots.length} screenshot`);
+
+  return (
+    <div style={resultsWrap}>
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        style={resultsToggle}
+        aria-expanded={expanded}
+      >
+        <span>{expanded ? '▼' : '▶'}</span>
+        <span>Results</span>
+        <span style={{ opacity: 0.55, fontWeight: 400 }}>— {summaryBits.join(' · ')}</span>
+      </button>
+
+      {expanded ? (
+        <div style={{ marginTop: 6 }}>
+          {extracts.map(({ step, data }) => (
+            <div key={step.id} style={{ marginBottom: 8 }}>
+              <div style={resultsLabel}>
+                extract · {data.matched ?? 'result'} ({data.texts.length})
+              </div>
+              <div style={textsScroll}>
+                <ol style={{ margin: 0, paddingLeft: 18 }}>
+                  {data.texts.map((t, i) => (
+                    <li key={`${step.id}-${i}`} style={textItem}>
+                      {t}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </div>
+          ))}
+          {screenshots.map(({ step, data }) => (
+            <div key={step.id} style={{ marginBottom: 8 }}>
+              <div style={resultsLabel}>screenshot</div>
+              <img
+                src={`data:image/jpeg;base64,${data.thumbnail}`}
+                alt="task screenshot"
+                style={thumbStyle}
+              />
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -601,4 +706,46 @@ const confirmBox: React.CSSProperties = {
   padding: 6,
   borderRadius: 3,
   marginBottom: 6,
+};
+const resultsWrap: React.CSSProperties = {
+  marginTop: 8,
+  paddingTop: 6,
+  borderTop: '1px dashed #e5e7eb',
+};
+const resultsToggle: React.CSSProperties = {
+  display: 'flex',
+  gap: 6,
+  alignItems: 'center',
+  fontSize: 12,
+  fontWeight: 600,
+  background: 'transparent',
+  border: 'none',
+  padding: 0,
+  cursor: 'pointer',
+  color: '#111827',
+};
+const resultsLabel: React.CSSProperties = {
+  fontSize: 11,
+  color: '#6b7280',
+  marginBottom: 3,
+};
+const textsScroll: React.CSSProperties = {
+  maxHeight: 180,
+  overflowY: 'auto',
+  border: '1px solid #e5e7eb',
+  borderRadius: 3,
+  padding: '4px 0',
+  background: '#fafafa',
+  fontSize: 12,
+  lineHeight: 1.5,
+};
+const textItem: React.CSSProperties = {
+  wordBreak: 'break-word',
+  paddingRight: 6,
+};
+const thumbStyle: React.CSSProperties = {
+  display: 'block',
+  maxWidth: '100%',
+  border: '1px solid #e5e7eb',
+  borderRadius: 3,
 };

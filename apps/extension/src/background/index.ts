@@ -127,6 +127,15 @@ interface StepView {
   id: string;
   kind: string;
   status: StepStatus;
+  /**
+   * Driver result.data kept locally so the popup's Results section can
+   * render extract texts and a screenshot thumbnail without another
+   * round-trip to the orchestrator. Populated on the first ok/failed
+   * result for the step; shape depends on the step kind (extract →
+   * {texts[], count, matched}; screenshot → {sizeBytes, thumbnail}
+   * where thumbnail is a base64 JPEG captured by the SW).
+   */
+  output?: unknown;
 }
 
 type TaskStatus =
@@ -271,6 +280,8 @@ async function runStep(
       status: result.status,
       elapsed,
     });
+    // Always ship the driver's raw data over WS — the orchestrator
+    // needs the unmodified payload for task_steps.output persistence.
     send({
       type: 'client.step.result',
       taskId: msg.taskId,
@@ -279,6 +290,34 @@ async function runStep(
       ...(result.data !== undefined ? { data: result.data } : {}),
       ...(result.error ? { error: result.error } : {}),
     });
+
+    // SW-local enrichment for the popup Results UI. The driver's
+    // screenshot action returns only size metadata (shipping the blob
+    // over WS would bloat the dispatch channel); capture an extra JPEG
+    // thumbnail here so the popup has something visual to render. This
+    // is a double-capture but it's cheap (a few hundred ms, local CDP),
+    // keeps the driver contract unchanged, and the blob stays in SW
+    // memory — never leaves the extension.
+    let localOutput: unknown = result.data;
+    if (msg.action.kind === 'screenshot' && result.status === 'ok') {
+      try {
+        const thumbnail = await chrome.tabs.captureVisibleTab({
+          format: 'jpeg',
+          quality: 40,
+        });
+        const base64 =
+          typeof thumbnail === 'string' && thumbnail.startsWith('data:')
+            ? thumbnail.slice(thumbnail.indexOf(',') + 1)
+            : thumbnail;
+        localOutput = {
+          ...(result.data && typeof result.data === 'object' ? result.data : {}),
+          thumbnail: base64,
+        };
+      } catch (err) {
+        console.warn('[holaday] thumbnail capture failed (Results will show size only)', err);
+      }
+    }
+
     const t = state.tasks.get(msg.taskId);
     if (t) {
       const step = t.steps.find((s) => s.id === msg.stepId);
@@ -289,6 +328,7 @@ async function runStep(
             : result.status === 'awaiting_user'
               ? 'awaiting_user'
               : 'failed';
+        step.output = localOutput;
       }
       t.lastUpdated = Date.now();
       pushTasksSnapshot();
