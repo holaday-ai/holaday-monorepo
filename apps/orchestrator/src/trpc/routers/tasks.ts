@@ -64,6 +64,14 @@ export const tasksRouter = router({
       });
     }
 
+    // Origin allowlist: union across every Skill in the catalogue matched
+    // by this task's occupation. Empty = no Skill match OR no Skill
+    // declared allowedOrigins → driver treats as unrestricted. A Skill's
+    // allowedOrigins is the hard boundary the commander promised to
+    // honour; we enforce it at the driver layer so a mis-planned goto
+    // can't walk the agent onto an unrelated site.
+    const allowedOrigins = unionAllowedOrigins(catalogue);
+
     const taskId = newExternalId('task');
     const { state, effects } = taskController.start({
       state: {
@@ -72,6 +80,7 @@ export const tasksRouter = router({
         plan,
         cursor: 0,
         pendingConfirm: null,
+        ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
       },
     });
 
@@ -119,6 +128,10 @@ export const tasksRouter = router({
 
     const plan = buildBaiduSmokePlan();
     const taskId = newExternalId('task');
+    // Smoke drives Baidu only; pinning the allowlist here also serves
+    // as a live test that the end-to-end wiring (dispatch → SW →
+    // driver) actually enforces the list.
+    const smokeAllowedOrigins = ['*.baidu.com'] as const;
     const { state, effects } = taskController.start({
       state: {
         taskId,
@@ -126,6 +139,7 @@ export const tasksRouter = router({
         plan,
         cursor: 0,
         pendingConfirm: null,
+        allowedOrigins: smokeAllowedOrigins,
       },
     });
 
@@ -279,17 +293,62 @@ async function loadSkillCatalogue(
       slug: skills.slug,
       description: skills.description,
       occupationTag: skills.occupationTag,
+      manifest: skills.manifest,
     })
     .from(skills)
     .where(and(eq(skills.status, 'active'), occupationMatch));
 
   return rows
-    .filter((r): r is { slug: string; description: string; occupationTag: string | null } =>
-      Boolean(r.description),
-    )
+    .filter((r): r is typeof r & { description: string } => Boolean(r.description))
     .map((r) => ({
       slug: r.slug,
       description: r.description,
       occupationTag: r.occupationTag,
+      allowedOrigins: extractAllowedOrigins(r.manifest),
     }));
+}
+
+/**
+ * Pull `allowedOrigins` out of a `skills.manifest` JSON column. The manifest
+ * is the parsed SKILL.md front-matter; we only trust string entries. Returns
+ * an empty array when the column is missing, malformed, or the key isn't
+ * present — the caller unions across the whole catalogue so one misshaped
+ * manifest doesn't widen the allowlist.
+ */
+function extractAllowedOrigins(manifest: unknown): readonly string[] {
+  if (!manifest || typeof manifest !== 'object') return [];
+  // MariaDB returns JSON columns as strings on some driver/config combos.
+  const parsed =
+    typeof manifest === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(manifest);
+          } catch {
+            return null;
+          }
+        })()
+      : manifest;
+  if (!parsed || typeof parsed !== 'object') return [];
+  const entries = (parsed as { allowedOrigins?: unknown }).allowedOrigins;
+  if (!Array.isArray(entries)) return [];
+  return entries.filter((e): e is string => typeof e === 'string' && e.length > 0);
+}
+
+/**
+ * Union `allowedOrigins` across all candidate Skills for the task. Empty
+ * result means "no Skill matched the task's occupation, or none of them
+ * declared an origin allowlist" — the driver treats empty as unrestricted.
+ * Deduped; order-preserving.
+ */
+function unionAllowedOrigins(catalogue: SkillCatalogueEntry[]): readonly string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of catalogue) {
+    for (const origin of entry.allowedOrigins ?? []) {
+      if (seen.has(origin)) continue;
+      seen.add(origin);
+      out.push(origin);
+    }
+  }
+  return out;
 }

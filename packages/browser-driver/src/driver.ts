@@ -21,6 +21,18 @@ export interface DriverAction {
   payload?: Record<string, unknown>;
   /** Total budget for this action, including selector resolution. */
   deadlineMs?: number;
+  /**
+   * Per-dispatch origin allowlist from the orchestrator — union of the
+   * task's matched Skills' `allowedOrigins`. Takes precedence over the
+   * adapter's constructor default. Empty / missing means unrestricted.
+   *
+   * Enforcement:
+   *   - `goto` validates `payload.url` before navigating.
+   *   - non-goto actions validate `page.url()` before executing,
+   *     so an in-page navigation to an off-allowlist site doesn't
+   *     let the agent keep clicking.
+   */
+  allowedOrigins?: readonly string[];
 }
 
 /**

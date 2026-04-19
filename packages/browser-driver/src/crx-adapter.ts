@@ -78,6 +78,26 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
 
   async execute(action: DriverAction): Promise<DriverResult> {
     try {
+      // Pre-step origin guard for NON-goto actions. `goto` handles its
+      // own validation inside doGoto (we need to check payload.url,
+      // not page.url()). For everything else: if the agent is already
+      // on a page AND an allowlist is in effect, the page's current
+      // URL must satisfy it. This catches cases where a prior step
+      // (or an in-page JS redirect) walked us off the Skill's origin
+      // boundary and a subsequent click/extract would run on an
+      // unrelated site. Empty list / no page attached = no-op.
+      if (action.kind !== 'goto' && this.page) {
+        const allowlist = action.allowedOrigins ?? this.opts.allowedOrigins;
+        if (allowlist.length > 0) {
+          const currentUrl = this.page.url();
+          if (!isOriginAllowed(currentUrl, allowlist)) {
+            return driverError(
+              DRIVER_ERRORS.ORIGIN_BLOCKED,
+              `current page ${currentUrl} not in Skill allowedOrigins: [${allowlist.join(', ')}]`,
+            );
+          }
+        }
+      }
       switch (action.kind) {
         case 'goto':
           return await this.doGoto(action);
@@ -126,10 +146,14 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   private async doGoto(action: DriverAction): Promise<DriverResult> {
     const url = typeof action.payload?.url === 'string' ? action.payload.url : null;
     if (!url) return driverError(DRIVER_ERRORS.PAYLOAD_MISSING, 'goto requires payload.url');
-    if (!isOriginAllowed(url, this.opts.allowedOrigins)) {
+    // Per-dispatch list from the orchestrator wins over the adapter's
+    // constructor default; both respect the "empty = unrestricted"
+    // contract from isOriginAllowed.
+    const allowlist = action.allowedOrigins ?? this.opts.allowedOrigins;
+    if (!isOriginAllowed(url, allowlist)) {
       return driverError(
         DRIVER_ERRORS.ORIGIN_BLOCKED,
-        `origin not in Skill allowedOrigins: ${url}`,
+        `origin not in Skill allowedOrigins: ${url} (allowlist: [${allowlist.join(', ')}])`,
       );
     }
     const page = await this.ensurePage(url);

@@ -267,6 +267,13 @@ async function runStep(
     ...(msg.action.selector ? { selector: msg.action.selector } : {}),
     ...(msg.action.payload ? { payload: msg.action.payload } : {}),
     ...(msg.deadlineMs ? { deadlineMs: msg.deadlineMs } : {}),
+    // Task-level origin allowlist forwarded from the orchestrator's
+    // Skill union. Empty / missing means unrestricted; the adapter
+    // enforces per-action (goto validates payload.url, non-goto
+    // validates page.url()).
+    ...(msg.allowedOrigins && msg.allowedOrigins.length > 0
+      ? { allowedOrigins: msg.allowedOrigins }
+      : {}),
   };
   const startedAt = Date.now();
   try {

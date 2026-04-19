@@ -89,6 +89,14 @@ export const serverTaskDispatchSchema = z.object({
     selector: resilientSelectorSchema.optional(),
     payload: z.record(z.string(), z.unknown()).optional(),
   }),
+  /**
+   * Origin allowlist from the task's matched Skill manifest(s). Empty
+   * or omitted means unrestricted. The extension SW hands this to the
+   * driver which blocks any goto with an out-of-allowlist URL AND any
+   * non-goto action whose current page URL is out of allowlist (catches
+   * redirects off the approved origin).
+   */
+  allowedOrigins: z.array(z.string()).optional(),
   deadlineMs: z.number().int().positive().optional(),
 });
 

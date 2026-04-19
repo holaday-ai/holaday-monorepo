@@ -361,8 +361,14 @@ describe('AnthropicPlanner.healSelector', () => {
     expect(healed?.strategies[0]).toEqual({ kind: 'css', value: '#content_left h3 a' });
 
     // Verify the request included the screenshot as an image block.
+    // Anthropic SDK's MessageCreateParams is a discriminated union
+    // (stream/non-stream) that TS narrows to `never` on a plain
+    // optional-chain access, so match the cast idiom used elsewhere
+    // in this file (lines ~160 / ~182 / ~203 for the `captured.system`
+    // readouts in the plan tests).
     expect(capturedReq).not.toBeNull();
-    const firstMsg = capturedReq?.messages[0];
+    const req = capturedReq as unknown as { messages: { role: string; content: unknown }[] };
+    const firstMsg = req.messages[0];
     expect(firstMsg?.role).toBe('user');
     expect(Array.isArray(firstMsg?.content)).toBe(true);
     const content = firstMsg?.content as Anthropic.ContentBlockParam[];

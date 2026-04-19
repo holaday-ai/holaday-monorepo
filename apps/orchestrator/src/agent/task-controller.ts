@@ -89,6 +89,15 @@ export interface TaskState {
   pauseReason?: PauseReason | null;
   /** stepId -> # of retries already consumed. Missing / 0 = no retry yet. */
   retryCount?: Record<string, number>;
+  /**
+   * Union of `allowedOrigins` from every matched Skill, carried on every
+   * dispatch so the driver can enforce the Skill's origin boundary.
+   * Empty / undefined means unrestricted (freeform intent with no
+   * Skill match). In-memory only for Phase 0 — on orchestrator restart
+   * the rehydrated task falls back to unrestricted; documented gap,
+   * persistence is Phase 1.
+   */
+  allowedOrigins?: readonly string[];
 }
 
 export type ConfirmDecision = 'approve' | 'skip' | 'reject';
@@ -100,6 +109,8 @@ export interface ControllerInput {
   plan?: PlannedStep[];
   /** Optional intent / metadata, kept for logs only. */
   intent?: string;
+  /** Origin allowlist — see TaskState.allowedOrigins. */
+  allowedOrigins?: readonly string[];
 }
 
 export interface StepResultInput {
@@ -139,6 +150,9 @@ export class TaskController {
         plan: input.plan ?? [],
         cursor: 0,
         pendingConfirm: null,
+        ...(input.allowedOrigins && input.allowedOrigins.length > 0
+          ? { allowedOrigins: input.allowedOrigins }
+          : {}),
       } satisfies TaskState);
 
     if (state.plan.length === 0) {
@@ -160,7 +174,10 @@ export class TaskController {
       state: executing,
       effects: [
         { kind: 'persist', state: executing },
-        { kind: 'send', message: dispatchMessage(executing.taskId, next) },
+        {
+          kind: 'send',
+          message: dispatchMessage(executing.taskId, next, executing.allowedOrigins),
+        },
       ],
     };
   }
@@ -203,7 +220,7 @@ export class TaskController {
           state: retried,
           effects: [
             { kind: 'persist', state: retried },
-            { kind: 'send', message: dispatchMessage(state.taskId, current) },
+            { kind: 'send', message: dispatchMessage(state.taskId, current, state.allowedOrigins) },
           ],
         };
       }
@@ -303,7 +320,10 @@ export class TaskController {
       state: executing,
       effects: [
         { kind: 'persist', state: executing },
-        { kind: 'send', message: dispatchMessage(executing.taskId, nextStep) },
+        {
+          kind: 'send',
+          message: dispatchMessage(executing.taskId, nextStep, executing.allowedOrigins),
+        },
       ],
     };
   }
@@ -377,7 +397,7 @@ export class TaskController {
         state: resumed,
         effects: [
           { kind: 'persist', state: resumed },
-          { kind: 'send', message: dispatchMessage(state.taskId, current) },
+          { kind: 'send', message: dispatchMessage(state.taskId, current, state.allowedOrigins) },
         ],
       };
     }
@@ -398,7 +418,10 @@ export class TaskController {
       state: executing,
       effects: [
         { kind: 'persist', state: executing },
-        { kind: 'send', message: dispatchMessage(executing.taskId, nextStep) },
+        {
+          kind: 'send',
+          message: dispatchMessage(executing.taskId, nextStep, executing.allowedOrigins),
+        },
       ],
     };
   }
@@ -494,13 +517,17 @@ export class TaskController {
           kind: 'send',
           message: { type: 'server.task.control', taskId: state.taskId, command: 'resume' },
         },
-        { kind: 'send', message: dispatchMessage(state.taskId, next) },
+        { kind: 'send', message: dispatchMessage(state.taskId, next, state.allowedOrigins) },
       ],
     };
   }
 }
 
-function dispatchMessage(taskId: string, step: PlannedStep): ServerMessage {
+function dispatchMessage(
+  taskId: string,
+  step: PlannedStep,
+  allowedOrigins?: readonly string[],
+): ServerMessage {
   return {
     type: 'server.task.dispatch',
     taskId,
@@ -510,6 +537,10 @@ function dispatchMessage(taskId: string, step: PlannedStep): ServerMessage {
       selector: step.selector,
       payload: step.payload,
     },
+    // Spread into a mutable copy — the wire schema types this as
+    // `string[]` (zod doesn't emit readonly), while TaskState keeps
+    // it `readonly string[]` to discourage internal mutation.
+    ...(allowedOrigins && allowedOrigins.length > 0 ? { allowedOrigins: [...allowedOrigins] } : {}),
   };
 }
 

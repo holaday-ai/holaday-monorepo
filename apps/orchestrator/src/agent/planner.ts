@@ -11,6 +11,13 @@ export interface SkillCatalogueEntry {
   slug: string;
   description: string;
   occupationTag?: string | null;
+  /**
+   * Origin allowlist from the Skill's SKILL.md front-matter. TaskController
+   * unions these across all candidate Skills at task-creation time and
+   * ships the result with every dispatch so the driver can refuse
+   * off-allowlist actions.
+   */
+  allowedOrigins?: readonly string[];
 }
 
 export interface PlannerContext {

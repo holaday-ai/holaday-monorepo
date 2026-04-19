@@ -475,4 +475,85 @@ describe('TaskController state machine', () => {
     });
     expect(s1.pendingConfirm?.kind).toBe('single');
   });
+
+  // ---------------- allowedOrigins propagation ----------------
+
+  it('start() seeds state.allowedOrigins from ControllerInput and emits it on first dispatch', async () => {
+    const c = await setup();
+    const { state, effects } = c.start({
+      state: null,
+      plan: [{ id: 'stp_1', kind: 'goto', risk: 'low', payload: { url: 'https://x.test/' } }],
+      allowedOrigins: ['*.jinritemai.com', 'xueqiu.com'],
+    });
+    expect(state.allowedOrigins).toEqual(['*.jinritemai.com', 'xueqiu.com']);
+    const send = effects.find((e) => e.kind === 'send');
+    if (send?.kind === 'send' && send.message.type === 'server.task.dispatch') {
+      expect(send.message.allowedOrigins).toEqual(['*.jinritemai.com', 'xueqiu.com']);
+    } else {
+      throw new Error('no dispatch emitted');
+    }
+  });
+
+  it('dispatch omits allowedOrigins when the list is empty (unrestricted = no key)', async () => {
+    const c = await setup();
+    const { effects } = c.start({
+      state: null,
+      plan: [{ id: 'stp_1', kind: 'goto', risk: 'low', payload: { url: 'https://x.test/' } }],
+      allowedOrigins: [],
+    });
+    const send = effects.find((e) => e.kind === 'send');
+    if (send?.kind === 'send' && send.message.type === 'server.task.dispatch') {
+      // Empty list is treated as "no restriction" on the driver side;
+      // we don't emit the key at all so downstream zod schemas see
+      // consistent shape with the pre-allowedOrigins world.
+      expect('allowedOrigins' in send.message).toBe(false);
+    } else {
+      throw new Error('no dispatch emitted');
+    }
+  });
+
+  it('allowedOrigins survives through step advance — every dispatch carries it', async () => {
+    const c = await setup();
+    const { state: s0 } = c.start({
+      state: null,
+      plan: [
+        { id: 'stp_1', kind: 'goto', risk: 'low', payload: { url: 'https://x.test/' } },
+        { id: 'stp_2', kind: 'click', risk: 'low' },
+      ],
+      allowedOrigins: ['*.example.com'],
+    });
+    const { effects } = c.onStepResult(s0, {
+      taskId: s0.taskId,
+      stepId: 'stp_1',
+      status: 'ok',
+    });
+    const send = effects.find((e) => e.kind === 'send');
+    if (send?.kind === 'send' && send.message.type === 'server.task.dispatch') {
+      expect(send.message.stepId).toBe('stp_2');
+      expect(send.message.allowedOrigins).toEqual(['*.example.com']);
+    } else {
+      throw new Error('no dispatch emitted for step 2');
+    }
+  });
+
+  it('retry dispatch also carries allowedOrigins (no regression on error path)', async () => {
+    const c = await setup();
+    const { state: s0 } = c.start({
+      state: null,
+      plan: [{ id: 'stp_1', kind: 'click', risk: 'low' }],
+      allowedOrigins: ['*.example.com'],
+    });
+    const { effects } = c.onStepResult(s0, {
+      taskId: s0.taskId,
+      stepId: 'stp_1',
+      status: 'error',
+      error: { code: 'FAKE', message: 'boom' },
+    });
+    const send = effects.find((e) => e.kind === 'send');
+    if (send?.kind === 'send' && send.message.type === 'server.task.dispatch') {
+      expect(send.message.allowedOrigins).toEqual(['*.example.com']);
+    } else {
+      throw new Error('no dispatch on retry');
+    }
+  });
 });
