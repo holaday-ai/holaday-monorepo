@@ -183,7 +183,10 @@ export function App() {
           'content-type': 'application/json',
           authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ intent: intent.trim(), occupation: 'finance-research' }),
+        // Intent-only: the orchestrator's catalogue returns all active
+        // Skills; Opus picks from them. Phase 1 may re-introduce a
+        // user-selectable occupation as a soft preference.
+        body: JSON.stringify({ intent: intent.trim() }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as {

@@ -1,6 +1,6 @@
 import { newExternalId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
-import { and, eq, isNull, or } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
@@ -275,19 +275,31 @@ async function loadTaskState(repo: TaskRepository, taskExternalId: string, userE
 }
 
 /**
- * Active skills the user can route to: either untagged (applies to everyone)
- * or tagged with the user's occupation. We return slug + one-line description
- * only — v0.2 §5.5 lazy-load: full SKILL.md is fetched on demand when the
- * commander actually picks a skill.
+ * Active skills the user can route to.
+ *
+ * Phase 0 behaviour: we ALWAYS return every active Skill regardless of
+ * the task's occupation. The reason: Skill selection happens inside
+ * Opus (given the catalogue + the intent, the commander picks). The
+ * orchestrator layer doesn't do keyword/intent matching here — and
+ * pre-filtering by occupation was actively harmful (the popup's old
+ * hardcoded `occupation: 'finance-research'` meant douyin Skills were
+ * never in catalogue, so a "帮我看抖音后台" intent fell through to
+ * xueqiu's allowedOrigins and the real douyin URL got ORIGIN_BLOCKED).
+ *
+ * Cost: catalogue is ~5-10 rows, few hundred tokens, Opus handles it.
+ * Boundary is preserved because `unionAllowedOrigins` unions ALL
+ * Skills' allowedOrigins — anything outside that union is still
+ * blocked by the driver.
+ *
+ * `occupation` is kept on the signature for now as a Phase 1 knob
+ * (we may want to *prefer* a Skill matching the user's occupation
+ * tag when ranking / prompting Opus), but it no longer filters the
+ * SQL query.
  */
 async function loadSkillCatalogue(
   db: import('../../db/client.js').DB,
-  occupation: string | null,
+  _occupation: string | null,
 ): Promise<SkillCatalogueEntry[]> {
-  const occupationMatch = occupation
-    ? or(isNull(skills.occupationTag), eq(skills.occupationTag, occupation))
-    : isNull(skills.occupationTag);
-
   const rows = await db
     .select({
       slug: skills.slug,
@@ -296,7 +308,7 @@ async function loadSkillCatalogue(
       manifest: skills.manifest,
     })
     .from(skills)
-    .where(and(eq(skills.status, 'active'), occupationMatch));
+    .where(eq(skills.status, 'active'));
 
   return rows
     .filter((r): r is typeof r & { description: string } => Boolean(r.description))
