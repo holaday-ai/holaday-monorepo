@@ -22,6 +22,9 @@ caveats:
   - 节假日和盘前盘后，热榜数据可能少；commander 不要期望一定抓到 20 条。
   - 不抓评论区主体，只取帖子的标题/计数；进入详情页是可选步骤（仅在 intent 需要原文时）。
   - 合规红线：只做信息聚合，**不**生成买卖建议、不给目标价。战略文档 §6.5 / §7.3。
+allowedOrigins:
+  - "eastmoney.com"
+  - "*.eastmoney.com"
 ---
 
 # Skill: 东方财富资讯聚合（eastmoney-news-digest）

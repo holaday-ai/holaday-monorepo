@@ -392,34 +392,66 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     //
     // History: we spent commits ae1b49a/94d0b2b/9393922 bouncing
     // between page.screenshot() and chrome.tabs.captureVisibleTab
-    // because page.screenshot hung on animation-heavy pages. We
-    // avoid that now with `animations: 'disabled'` + a short hard
-    // cap and, crucially, a graceful null return instead of throwing
-    // on timeout — a missing thumbnail is diagnostic-only and must
-    // not derail the task.
+    // because page.screenshot hung on animation-heavy pages.
     //
-    // Tradeoff: on CDP failure the step returns status='skipped',
-    // which the controller treats like ok for cursor advancement
-    // but the popup/audit log flags distinctly. No retry burned on
-    // a screenshot flake.
-    const base64 = await captureViaCdpPageScreenshot(page);
-    if (base64 === null) {
+    // Tradeoff: on CDP failure the step returns status='skipped'
+    // with the real error string so the operator can see why. The
+    // controller treats skipped like ok for cursor advancement but
+    // the popup/audit log flags distinctly. No retry burned on a
+    // screenshot flake.
+    //
+    // Two-pass strategy: first try with `animations:'disabled'` and
+    // `caret:'hide'` for clean diagnostic frames; on failure drop
+    // those options (they run page-side JS that can hang on SPAs
+    // with hundreds of CSS animations or tickers — Douyin creator
+    // dashboard, Xueqiu live quotes) and try a plain capture.
+    const first = await captureViaCdpPageScreenshot(page, { clean: true });
+    if (first.base64 !== null) {
+      const bytes = base64ByteLength(first.base64);
       return {
-        status: 'skipped',
+        status: 'ok',
         data: {
-          skipped: true,
-          reason: 'page.screenshot() did not return in time (CDP channel unresponsive)',
+          encoding: 'base64',
+          bytes,
+          sizeBytes: bytes,
+          thumbnail: first.base64,
         },
       };
     }
-    const bytes = base64ByteLength(base64);
+    // First attempt failed — log so it's greppable in SW console,
+    // then fall back to a plain capture without animations:disabled.
+    console.warn('[holaday][screenshot] clean capture failed, retrying plain', {
+      error: first.error,
+    });
+    const second = await captureViaCdpPageScreenshot(page, { clean: false });
+    if (second.base64 !== null) {
+      const bytes = base64ByteLength(second.base64);
+      return {
+        status: 'ok',
+        // `thumbnail` is the raw base64 JPEG so the SW can render it
+        // in the popup's Results section without a second capture.
+        // JPEG q40 keeps a 1280-wide viewport under ~80KB.
+        data: {
+          encoding: 'base64',
+          bytes,
+          sizeBytes: bytes,
+          thumbnail: second.base64,
+          degraded: true,
+        },
+      };
+    }
+    // Both attempts failed — surface both errors so we can diagnose.
+    const reason = `page.screenshot() failed: clean=${first.error ?? 'unknown'}; plain=${second.error ?? 'unknown'}`;
+    console.error('[holaday][screenshot] both attempts failed', {
+      clean: first.error,
+      plain: second.error,
+    });
     return {
-      status: 'ok',
-      // `thumbnail` is the raw base64 JPEG so the SW can render it in
-      // the popup's Results section without a second capture (the old
-      // chrome.tabs.captureVisibleTab fallback needed window focus —
-      // product-level veto). JPEG q40 keeps a viewport under ~80KB.
-      data: { encoding: 'base64', bytes, sizeBytes: bytes, thumbnail: base64 },
+      status: 'skipped',
+      data: {
+        skipped: true,
+        reason,
+      },
     };
   }
 
@@ -508,15 +540,16 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     failures: StrategyFailure[],
   ): Promise<DriverResult> {
     const desc = action.selector?.description ?? '(no description)';
-    const [url, title, screenshot] = await Promise.all([
+    const [url, title, shot] = await Promise.all([
       safeCall(() => page.url(), ''),
       safeCall(() => page.title(), ''),
       // Diagnostic viewport capture via CDP — focus-independent.
-      // On CDP timeout we get null (the helper never throws),
-      // the diagnostic still emits with strategies + url + title,
-      // just no screenshot to look at.
-      captureViaCdpPageScreenshot(page),
+      // On CDP timeout the helper resolves with base64=null (never
+      // throws), the diagnostic still emits with strategies + url +
+      // title, just no screenshot to look at.
+      captureViaCdpPageScreenshot(page, { clean: true }),
     ]);
+    const screenshot = shot.base64;
 
     const strategiesTxt =
       failures.length === 0
@@ -616,35 +649,59 @@ function cssEscape(v: string): string {
  * over WS without saturating the dispatch channel. PNG would be
  * 3-10× larger with no visual benefit for diagnostic purposes.
  */
-const SCREENSHOT_HARDCAP_MS = 5_000;
+// Heavy SPAs (Douyin creator-center, Xueqiu quotes, etc.) need more
+// than 5 seconds. Go to 10s; the step has a 30s deadline, and we
+// only spend 1 screenshot per task so the budget is not a concern.
+const SCREENSHOT_HARDCAP_MS = 10_000;
 
-async function captureViaCdpPageScreenshot(page: Page): Promise<string | null> {
+interface ScreenshotResult {
+  base64: string | null;
+  error: string | null;
+}
+
+async function captureViaCdpPageScreenshot(
+  page: Page,
+  opts: { clean: boolean },
+): Promise<ScreenshotResult> {
   let hardTimer: ReturnType<typeof setTimeout> | null = null;
   try {
+    // When `clean` is false we drop animations/caret options — those
+    // run page-side JS (document.getAnimations() etc.) which can
+    // hang on pages with many animations or in certain post-nav
+    // states. A plain capture is more reliable as a fallback.
     const shot = page
       .screenshot({
         type: 'jpeg',
         quality: 40,
         fullPage: false,
-        animations: 'disabled',
-        caret: 'hide',
+        ...(opts.clean ? { animations: 'disabled' as const, caret: 'hide' as const } : {}),
         timeout: SCREENSHOT_HARDCAP_MS,
       })
-      .then((buf) => Buffer.from(buf).toString('base64'));
+      .then((buf) => ({
+        base64: Buffer.from(buf).toString('base64'),
+        error: null,
+      }));
     // Outer cap in case the inner `timeout` option isn't forwarded
     // to the CDP call on this playwright-crx version (this has bit
-    // us before). Resolve to null rather than reject — the caller
-    // decides the soft-fail path.
-    const hardCap = new Promise<null>((resolve) => {
-      hardTimer = setTimeout(() => resolve(null), SCREENSHOT_HARDCAP_MS + 500);
+    // us before). Resolve rather than reject — the caller decides
+    // the soft-fail path.
+    const hardCap = new Promise<ScreenshotResult>((resolve) => {
+      hardTimer = setTimeout(
+        () =>
+          resolve({
+            base64: null,
+            error: `hardcap timeout ${SCREENSHOT_HARDCAP_MS + 500}ms`,
+          }),
+        SCREENSHOT_HARDCAP_MS + 500,
+      );
     });
-    const result = await Promise.race([shot, hardCap]);
-    return result;
+    return await Promise.race([shot, hardCap]);
   } catch (err) {
-    // page.screenshot can throw on target-closed / tab-navigated-away
-    // during capture. Report and return null; never kill the step.
-    console.warn('[holaday] page.screenshot errored, returning null', err);
-    return null;
+    // page.screenshot throws on target-closed / tab-navigated-away
+    // during capture, or on playwright-internal timeout. Never kill
+    // the step — caller decides whether to retry or skip.
+    const message = err instanceof Error ? err.message : String(err);
+    return { base64: null, error: message.slice(0, 500) };
   } finally {
     if (hardTimer) clearTimeout(hardTimer);
   }
