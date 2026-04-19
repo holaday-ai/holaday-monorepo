@@ -385,26 +385,36 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   private async doScreenshot(_action: DriverAction): Promise<DriverResult> {
     const page = this.page;
     if (!page) return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'screenshot before any goto');
-    // Capture via CDP (Playwright's page.screenshot). CDP is
-    // focus-independent — works when the user has switched to
-    // another window, minimized Chrome, or locked the screen. This
-    // is the product-level contract: the agent runs unattended.
+    // Capture via CDP. CDP is focus-independent — works when the user
+    // has switched to another window, minimized Chrome, or locked the
+    // screen. This is the product-level contract: the agent runs
+    // unattended.
     //
-    // History: we spent commits ae1b49a/94d0b2b/9393922 bouncing
-    // between page.screenshot() and chrome.tabs.captureVisibleTab
-    // because page.screenshot hung on animation-heavy pages.
+    // Three-pass strategy, ordered by increasing reliability but
+    // decreasing feature-richness:
     //
-    // Tradeoff: on CDP failure the step returns status='skipped'
-    // with the real error string so the operator can see why. The
-    // controller treats skipped like ok for cursor advancement but
-    // the popup/audit log flags distinctly. No retry burned on a
-    // screenshot flake.
+    //   1. playwright `page.screenshot({ animations: 'disabled', caret: 'hide' })`
+    //      — nicest diagnostic frames, but the wrapper runs page-side
+    //      JS (document.getAnimations(), stable-scrollbar handling,
+    //      networkidle waits) that hangs on animation-heavy SPAs
+    //      (Douyin creator, Xueqiu live quotes). Expected to hang or
+    //      fail on the sites we care about.
     //
-    // Two-pass strategy: first try with `animations:'disabled'` and
-    // `caret:'hide'` for clean diagnostic frames; on failure drop
-    // those options (they run page-side JS that can hang on SPAs
-    // with hundreds of CSS animations or tickers — Douyin creator
-    // dashboard, Xueqiu live quotes) and try a plain capture.
+    //   2. playwright `page.screenshot()` plain — drops animations/caret
+    //      so the page-side JS work is lighter, but still goes through
+    //      playwright's wrapper (scroll, viewport polling).
+    //
+    //   3. Raw CDP `Page.captureScreenshot` via newCDPSession, bypassing
+    //      playwright's wrapper entirely. No page-side JS, no viewport
+    //      stabilization. Just "send the bytes now". This is the actual
+    //      capture primitive the other two layers eventually call into
+    //      — we're cutting out the middle layers that have been hanging.
+    //
+    // Each pass has a 10s hard cap. Skipping is only surfaced if ALL
+    // THREE fail; the reason embeds every error string so the operator
+    // can see what hit. Soft-fail contract: controller treats skipped
+    // like ok for cursor advancement; a missing thumbnail never fails
+    // the task.
     const first = await captureViaCdpPageScreenshot(page, { clean: true });
     if (first.base64 !== null) {
       const bytes = base64ByteLength(first.base64);
@@ -418,8 +428,6 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
         },
       };
     }
-    // First attempt failed — log so it's greppable in SW console,
-    // then fall back to a plain capture without animations:disabled.
     console.warn('[holaday][screenshot] clean capture failed, retrying plain', {
       error: first.error,
     });
@@ -428,9 +436,6 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
       const bytes = base64ByteLength(second.base64);
       return {
         status: 'ok',
-        // `thumbnail` is the raw base64 JPEG so the SW can render it
-        // in the popup's Results section without a second capture.
-        // JPEG q40 keeps a 1280-wide viewport under ~80KB.
         data: {
           encoding: 'base64',
           bytes,
@@ -440,11 +445,34 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
         },
       };
     }
-    // Both attempts failed — surface both errors so we can diagnose.
-    const reason = `page.screenshot() failed: clean=${first.error ?? 'unknown'}; plain=${second.error ?? 'unknown'}`;
-    console.error('[holaday][screenshot] both attempts failed', {
+    console.warn('[holaday][screenshot] plain capture failed, falling back to raw CDP', {
+      error: second.error,
+    });
+    const third = await captureViaRawCdp(page);
+    if (third.base64 !== null) {
+      const bytes = base64ByteLength(third.base64);
+      return {
+        status: 'ok',
+        data: {
+          encoding: 'base64',
+          bytes,
+          sizeBytes: bytes,
+          thumbnail: third.base64,
+          degraded: true,
+          capturePath: 'raw-cdp',
+        },
+      };
+    }
+    // All three failed — surface every error so we can diagnose which
+    // layer of playwright / CDP is actually hanging. The final pass
+    // (raw CDP) is the simplest possible capture: if even it fails
+    // the chrome.debugger session is in a broken state and the task
+    // would be having bigger problems than a missing thumbnail.
+    const reason = `page.screenshot() failed: clean=${first.error ?? 'unknown'}; plain=${second.error ?? 'unknown'}; rawCdp=${third.error ?? 'unknown'}`;
+    console.error('[holaday][screenshot] all three attempts failed', {
       clean: first.error,
       plain: second.error,
+      rawCdp: third.error,
     });
     return {
       status: 'skipped',
@@ -704,6 +732,73 @@ async function captureViaCdpPageScreenshot(
     return { base64: null, error: message.slice(0, 500) };
   } finally {
     if (hardTimer) clearTimeout(hardTimer);
+  }
+}
+
+/**
+ * Last-resort capture: send `Page.captureScreenshot` directly through
+ * a fresh CDP session, bypassing playwright's wrapper. Useful when
+ * `page.screenshot()` hangs inside playwright's page-side JS work
+ * (animations, scrollbar, networkidle) but the underlying
+ * chrome.debugger link is still healthy.
+ *
+ * Returns base64 on success (CDP returns data already base64-encoded),
+ * null + error string on any failure. Never throws.
+ */
+interface RawCdpSession {
+  send: (method: string, params?: unknown) => Promise<unknown>;
+  detach: () => Promise<void>;
+}
+
+async function captureViaRawCdp(page: Page): Promise<ScreenshotResult> {
+  let hardTimer: ReturnType<typeof setTimeout> | null = null;
+  // Typed loosely because playwright-crx doesn't re-export CDPSession;
+  // we only touch `.send('Page.captureScreenshot', …)` and `.detach()`.
+  let session: RawCdpSession | null = null;
+  try {
+    session = (await page.context().newCDPSession(page)) as unknown as RawCdpSession;
+    const shot = session
+      .send('Page.captureScreenshot', {
+        format: 'jpeg',
+        quality: 40,
+        captureBeyondViewport: false,
+      })
+      .then((r: unknown): ScreenshotResult => {
+        const data = (r as { data?: unknown })?.data;
+        if (typeof data !== 'string' || data.length === 0) {
+          return {
+            base64: null,
+            error: `Page.captureScreenshot returned non-string data (${typeof data})`,
+          };
+        }
+        return { base64: data, error: null };
+      });
+    const hardCap = new Promise<ScreenshotResult>((resolve) => {
+      hardTimer = setTimeout(
+        () =>
+          resolve({
+            base64: null,
+            error: `raw-CDP hardcap timeout ${SCREENSHOT_HARDCAP_MS}ms`,
+          }),
+        SCREENSHOT_HARDCAP_MS,
+      );
+    });
+    return await Promise.race([shot, hardCap]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { base64: null, error: message.slice(0, 500) };
+  } finally {
+    if (hardTimer) clearTimeout(hardTimer);
+    // Detach the one-shot session so it doesn't leak as an attached
+    // debugger client. Failures here are ignorable — chrome.debugger
+    // cleans up on tab close anyway.
+    if (session) {
+      try {
+        await session.detach();
+      } catch {
+        // best-effort cleanup
+      }
+    }
   }
 }
 

@@ -4,6 +4,7 @@ import { and, asc, desc, eq, lt } from 'drizzle-orm';
 import { z } from 'zod';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
+import type { PlannedStep } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { skills } from '../../db/schema/skills.js';
@@ -66,13 +67,22 @@ export const tasksRouter = router({
       });
     }
 
-    // Origin allowlist: union across every Skill in the catalogue matched
-    // by this task's occupation. Empty = no Skill match OR no Skill
-    // declared allowedOrigins → driver treats as unrestricted. A Skill's
-    // allowedOrigins is the hard boundary the commander promised to
-    // honour; we enforce it at the driver layer so a mis-planned goto
-    // can't walk the agent onto an unrelated site.
-    const allowedOrigins = unionAllowedOrigins(catalogue);
+    // Origin allowlist: identify which Skills in the catalogue the
+    // generated plan actually reaches (i.e. any Skill whose
+    // allowedOrigins covers ≥1 goto URL in the plan). Union the
+    // allowedOrigins of just those. When the plan uses NO Skill (free-
+    // form intent the commander answered without adopting a Skill — e.g.
+    // "在 Bing 搜一下 XXX"), `usedSkills` is empty, `allowedOrigins`
+    // comes back `[]`, and the driver treats that as unrestricted.
+    //
+    // Earlier bug: we used to union allowedOrigins across the ENTIRE
+    // active catalogue. That meant a free-form plan emitted bing.com
+    // but the union was { douyin.com, xueqiu.com, ... } and the driver
+    // refused bing.com as ORIGIN_BLOCKED. The catalogue is a menu, not
+    // a restraining order — only Skills the plan actually uses should
+    // constrain what the driver is allowed to visit.
+    const usedSkills = pickSkillsUsedByPlan(plan, catalogue);
+    const allowedOrigins = unionAllowedOrigins(usedSkills);
 
     const taskId = newExternalId('task');
     const { state, effects } = taskController.start({
@@ -584,10 +594,74 @@ function extractAllowedOrigins(manifest: unknown): readonly string[] {
 }
 
 /**
- * Union `allowedOrigins` across all candidate Skills for the task. Empty
- * result means "no Skill matched the task's occupation, or none of them
- * declared an origin allowlist" — the driver treats empty as unrestricted.
- * Deduped; order-preserving.
+ * Pick catalogue entries whose `allowedOrigins` covers ≥ 1 goto URL in
+ * the plan — i.e. the Skills the plan will actually visit. A Skill is
+ * "used" if any of its allowedOrigins entries matches any goto URL by
+ * the same rules the driver will apply at dispatch time.
+ *
+ * Why bother: the catalogue is the full menu of Skills (all active) so
+ * Opus can route, but the origin allowlist the driver enforces should
+ * correspond to what the plan is actually doing. A plan that doesn't
+ * touch any catalogued Skill is a free-form browse — `allowedOrigins`
+ * comes back `[]`, and the driver treats empty as unrestricted.
+ *
+ * Reuses the driver's own `isOriginAllowed` to avoid rule-matching
+ * drift between orchestrator and driver.
+ */
+function pickSkillsUsedByPlan(
+  plan: PlannedStep[],
+  catalogue: SkillCatalogueEntry[],
+): SkillCatalogueEntry[] {
+  const gotoUrls = plan
+    .filter((s) => s.kind === 'goto')
+    .map((s) => {
+      const url = (s.payload as { url?: unknown } | undefined)?.url;
+      return typeof url === 'string' ? url : null;
+    })
+    .filter((u): u is string => u !== null);
+  if (gotoUrls.length === 0) return [];
+  return catalogue.filter((entry) => {
+    const origins = entry.allowedOrigins ?? [];
+    if (origins.length === 0) return false;
+    return gotoUrls.some((url) => urlMatchesAnyOrigin(url, origins));
+  });
+}
+
+/**
+ * Does `url` satisfy any of the `origins` rules? Mirrors the semantics
+ * of `packages/browser-driver/src/origin-guard.ts::isOriginAllowed` —
+ * the canonical enforcer lives in the driver; this is a read-only
+ * pre-check on the orchestrator side for deciding which Skills to
+ * union. Keep the rules identical so a URL that passes here passes
+ * there too.
+ */
+function urlMatchesAnyOrigin(url: string, origins: readonly string[]): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  const host = parsed.host.toLowerCase();
+  const bareHost = parsed.hostname.toLowerCase();
+  for (const rule of origins) {
+    const r = rule.toLowerCase();
+    if (r.startsWith('*.')) {
+      const suffix = r.slice(2);
+      if (bareHost === suffix) return true;
+      if (bareHost.endsWith(`.${suffix}`)) return true;
+    } else if (r === host || r === bareHost) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Union `allowedOrigins` across a list of Skills (typically the subset
+ * the plan is using, picked by `pickSkillsUsedByPlan`). Empty result
+ * means "no Skill used or none declared an origin allowlist" — the
+ * driver treats empty as unrestricted. Deduped; order-preserving.
  */
 function unionAllowedOrigins(catalogue: SkillCatalogueEntry[]): readonly string[] {
   const seen = new Set<string>();
