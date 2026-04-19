@@ -66,6 +66,16 @@ export interface PlaywrightCrxAdapterOptions {
 export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   private app: CrxApplication | null = null;
   private page: Page | null = null;
+  /**
+   * Chrome tab id of the page this adapter is driving. Populated from
+   * `CrxApplication.on('attached', {page, tabId})` during ensureApp(),
+   * and defensively from `opts.attachToTabId` on the attach branch of
+   * ensurePage(). Needed so screenshots hit the *agent's* tab, not
+   * whatever tab is currently active in the focused window (the popup
+   * was sneaking in as the "focused" surface and we were screenshotting
+   * our own UI).
+   */
+  private tabId: number | null = null;
   private readonly opts: Required<PlaywrightCrxAdapterOptions>;
 
   constructor(opts: PlaywrightCrxAdapterOptions = {}) {
@@ -138,6 +148,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     } finally {
       this.app = null;
       this.page = null;
+      this.tabId = null;
     }
   }
 
@@ -198,14 +209,42 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     if ('failures' in resolved) {
       return this.buildSelectorNotFoundResult(page, action, 'click', resolved.failures);
     }
+    const timeout = action.deadlineMs ?? 5_000;
     try {
-      await resolved.locator.click({ timeout: action.deadlineMs ?? 5_000 });
+      await resolved.locator.click({ timeout });
       return { status: 'ok', data: { clicked: action.selector.description } };
     } catch (err) {
-      return driverError(
-        DRIVER_ERRORS.CLICK_FAILED,
-        err instanceof Error ? err.message : String(err),
-      );
+      const raw = err instanceof Error ? err.message : String(err);
+      // Playwright strict-mode: selector resolved to N>1 elements and
+      // `.click()` refuses to guess. For Phase 0 dogfood it's better
+      // to click the first match than to fail the whole step — asking
+      // Opus to regenerate "a more specific selector" via self-heal
+      // is slow and often produces the same candidate set (the page
+      // just HAS several matching nodes). Log + flag the ambiguity
+      // so the operator can tighten the Skill's selector later.
+      if (raw.includes('strict mode violation')) {
+        console.warn('[holaday] click strict-mode violation — retrying with .first()', {
+          description: action.selector.description,
+          err: raw.slice(0, 300),
+        });
+        try {
+          await resolved.locator.first().click({ timeout });
+          return {
+            status: 'ok',
+            data: {
+              clicked: action.selector.description,
+              ambiguousFallback: true,
+              originalError: raw.slice(0, 200),
+            },
+          };
+        } catch (firstErr) {
+          return driverError(
+            DRIVER_ERRORS.CLICK_FAILED,
+            firstErr instanceof Error ? firstErr.message : String(firstErr),
+          );
+        }
+      }
+      return driverError(DRIVER_ERRORS.CLICK_FAILED, raw);
     }
   }
 
@@ -373,7 +412,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     // stitch, but that's Phase 1 work.
     const timeoutMs = action.deadlineMs ?? 10_000;
     try {
-      const base64 = await captureViewportPngBase64(timeoutMs);
+      const base64 = await captureViewportPngBase64(timeoutMs, this.tabId);
       const bytes = base64ByteLength(base64);
       return {
         status: 'ok',
@@ -392,6 +431,15 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   private async ensureApp(): Promise<CrxApplication> {
     if (this.app) return this.app;
     this.app = await crx.start();
+    // CrxApplication emits `attached` with `{page, tabId}` whenever a
+    // page is attached (both `app.attach(tabId)` and `app.newPage(...)`
+    // paths). Track the tabId so screenshot / diagnostic-capture code
+    // can pass it to chrome.tabs.captureVisibleTab instead of
+    // defaulting to the currently focused window — which, at the
+    // moment the user clicks Run in the popup, is the popup itself.
+    this.app.on('attached', ({ tabId }) => {
+      this.tabId = tabId;
+    });
     return this.app;
   }
 
@@ -400,8 +448,14 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     const app = await this.ensureApp();
     if (this.opts.attachToTabId !== null) {
       this.page = await app.attach(this.opts.attachToTabId);
+      // Defensive: set tabId in case the `attached` event wasn't
+      // emitted (older playwright-crx versions on some paths). On
+      // attach we already have the tabId from the caller, so this is
+      // authoritative anyway.
+      this.tabId = this.opts.attachToTabId;
     } else {
       this.page = await app.newPage({ url: initialUrl ?? 'about:blank', active: true });
+      // newPage path: the `attached` listener above populates tabId.
     }
     return this.page;
   }
@@ -477,7 +531,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
       safeCall(() => page.title(), ''),
       // Use chrome.tabs.captureVisibleTab — same reason as doScreenshot:
       // page.screenshot() hangs in playwright-crx 0.15 under MV3 SW.
-      safeCall(() => captureViewportPngBase64(5_000), null as string | null),
+      safeCall(() => captureViewportPngBase64(5_000, this.tabId), null as string | null),
     ]);
 
     const strategiesTxt =
@@ -568,19 +622,59 @@ function cssEscape(v: string): string {
  * flow that's always the tab playwright-crx opened via
  * `newPage({ active: true })`.
  */
-async function captureViewportPngBase64(timeoutMs: number): Promise<string> {
+async function captureViewportPngBase64(timeoutMs: number, tabId: number | null): Promise<string> {
   if (typeof chrome === 'undefined' || !chrome.tabs?.captureVisibleTab) {
     throw new Error('chrome.tabs.captureVisibleTab unavailable (not in extension SW)');
   }
+
+  // Resolve the target tab's windowId. chrome.tabs.captureVisibleTab
+  // takes (windowId, options) and captures the ACTIVE tab in that
+  // window — passing the agent tab's window means the popup's own
+  // floating UI no longer counts as "current focused window", which
+  // was the bug. When tabId is unknown we fall back to the default
+  // (current-focused window); behaviour then matches pre-fix.
+  let windowId: number | undefined;
+  if (tabId !== null) {
+    try {
+      const tab = await new Promise<chrome.tabs.Tab>((resolve, reject) => {
+        chrome.tabs.get(tabId, (t) => {
+          const err = chrome.runtime.lastError;
+          if (err) return reject(new Error(err.message ?? 'chrome.tabs.get failed'));
+          resolve(t);
+        });
+      });
+      windowId = tab.windowId;
+    } catch {
+      // Tab was likely closed mid-task; degrade gracefully to the
+      // no-windowId path rather than failing the whole screenshot.
+    }
+  }
+
   let hardTimer: ReturnType<typeof setTimeout> | null = null;
   try {
     const capture = new Promise<string>((resolve, reject) => {
-      chrome.tabs.captureVisibleTab({ format: 'png' }, (dataUrl) => {
+      const cb = (dataUrl: string | undefined): void => {
         const err = chrome.runtime.lastError;
-        if (err) return reject(new Error(err.message ?? 'captureVisibleTab failed'));
-        if (!dataUrl) return reject(new Error('captureVisibleTab returned empty dataUrl'));
+        if (err) {
+          reject(new Error(err.message ?? 'captureVisibleTab failed'));
+          return;
+        }
+        if (!dataUrl) {
+          reject(new Error('captureVisibleTab returned empty dataUrl'));
+          return;
+        }
         resolve(dataUrl);
-      });
+      };
+      // `captureVisibleTab` has overloaded signatures; the windowId
+      // variant takes (windowId, options, callback), the other takes
+      // (options, callback). Dispatching explicitly here keeps TS and
+      // the runtime happy on both Chrome 120 (callback-only) and 121+
+      // (promise-supporting).
+      if (windowId !== undefined) {
+        chrome.tabs.captureVisibleTab(windowId, { format: 'png' }, cb);
+      } else {
+        chrome.tabs.captureVisibleTab({ format: 'png' }, cb);
+      }
     });
     const hardCap = new Promise<never>((_resolve, reject) => {
       hardTimer = setTimeout(
