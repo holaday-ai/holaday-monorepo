@@ -24,6 +24,7 @@ caveats:
 allowedOrigins:
   - "*.jinritemai.com"
   - "*.snssdk.com"
+  - "*.douyin.com"
 ---
 
 # Skill: 抖音罗盘数据导出（douyin-compass-export）

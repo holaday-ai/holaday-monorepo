@@ -26,6 +26,7 @@ caveats:
 allowedOrigins:
   - "*.jinritemai.com"
   - "*.snssdk.com"
+  - "*.douyin.com"
 ---
 
 # Skill: 抖音商家评论管理（douyin-comment-manager）

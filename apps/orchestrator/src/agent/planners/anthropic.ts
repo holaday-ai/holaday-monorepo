@@ -366,6 +366,29 @@ plan failure in dogfood.
     to a click/extract when the DOM is unknown wastes that
     self-heal budget on a guess.
 
+Site-specific context (Phase 0 first-launch sites — fold into your
+plans when the intent points at one of these):
+
+  * \`creator.douyin.com\` (抖音创作者中心) — single-page app.
+    The whole UI lives under \`/creator/...\`; navigation between
+    panels is left-side nav clicks (NOT goto-to-new-URL), and the
+    URL hash often updates without a full page navigation. Always
+    \`wait\` ~2-5s after a left-nav click for the panel content to
+    re-render before extracting. The dashboard summary
+    (粉丝/播放/点赞/评论 数据概览) lives under "数据" in the left
+    nav. CSS class names on Douyin are hashed and rotate per-deploy,
+    so role+name selectors and Chinese-text anchors (\`text="数据"\`,
+    \`text="粉丝数"\`) outlast id/class hooks; use them.
+
+  * \`compass.jinritemai.com\` (抖音电商罗盘) — also SPA. Tabs at
+    the top (商品 / 直播 / 流量); time-window picker top-right.
+    Numbers are rendered into Canvas charts AND DOM tables — only
+    extract from DOM tables, never the Canvas pixels.
+
+  * \`xueqiu.com\` (雪球) — multi-page; portfolio lives at
+    \`/p/<userid>\`. Uses real semantic h1/h2 headings — role-based
+    selectors work well here.
+
 The user's occupation and available Skills (if any) are listed below.`;
 
 function buildSystemBlocks(ctx: PlannerContext): Anthropic.TextBlockParam[] {
