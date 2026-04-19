@@ -42,3 +42,6 @@ Thumbs.db
 
 # Docker volumes (local)
 docker/data/
+
+# Redis dump — created wherever `redis-server` was launched. Never commit.
+dump.rdb

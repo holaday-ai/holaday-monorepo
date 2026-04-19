@@ -1,36 +1,24 @@
 import { sql } from 'drizzle-orm';
-import {
-  bigint,
-  datetime,
-  index,
-  json,
-  mysqlTable,
-  primaryKey,
-  varchar,
-} from 'drizzle-orm/mysql-core';
+import { bigint, datetime, index, json, mysqlTable, varchar } from 'drizzle-orm/mysql-core';
 
 /**
  * `task_events` — append-only event log and audit base for the Agent Loop.
  *
- * **Partitioning note:** we want RANGE partitioning by month on `created_at`.
- * Drizzle does not yet emit partition clauses, so a hand-written migration
- * (`drizzle/0001_partition_task_events.sql`) adds:
- *
- *   ALTER TABLE task_events
- *     PARTITION BY RANGE (TO_DAYS(created_at)) (
- *       PARTITION p2026_04 VALUES LESS THAN (TO_DAYS('2026-05-01')),
- *       PARTITION p2026_05 VALUES LESS THAN (TO_DAYS('2026-06-01')),
- *       ...
- *       PARTITION pmax     VALUES LESS THAN MAXVALUE
- *     );
- *
- * (MySQL requires partition key to be part of every unique/primary key, which is
- *  why the PK here is composite `(id, created_at)`.)
+ * **Primary key**: plain `id` (auto_increment). Earlier iterations used a
+ * composite PK `(id, created_at)` so MySQL's RANGE-by-created_at partitioning
+ * (see `drizzle/manual/0001_partition_task_events.sql`) could be applied on
+ * top — MySQL requires the partition key to be part of every unique/primary
+ * key. Drizzle-kit 0.31.x misdiffs composite PKs on `db:push` and emits a
+ * spurious "primary key removed from a table with auto-increment" warning,
+ * which blocks operators on their first push. Since partitioning is an
+ * ops-side manual step and isn't applied in dogfood or CI anyway, we
+ * simplify here and let the manual partition migration drop+re-add the PK
+ * as composite when it runs.
  */
 export const taskEvents = mysqlTable(
   'task_events',
   {
-    id: bigint('id', { mode: 'number', unsigned: true }).notNull().autoincrement(),
+    id: bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement(),
     externalId: varchar('external_id', { length: 32 }).notNull(),
     taskId: bigint('task_id', { mode: 'number', unsigned: true }).notNull(),
     stepId: bigint('step_id', { mode: 'number', unsigned: true }),
@@ -42,11 +30,13 @@ export const taskEvents = mysqlTable(
       .default(sql`CURRENT_TIMESTAMP(3)`),
   },
   (t) => [
-    // Composite PK so MySQL accepts partitioning by created_at.
-    primaryKey({ name: 'pk_task_events', columns: [t.id, t.createdAt] }),
     index('ix_task_events_task_id_created_at').on(t.taskId, t.createdAt),
     index('ix_task_events_type').on(t.type),
     index('ix_task_events_external_id').on(t.externalId),
+    // `created_at` used to be part of the PK; keep an index for range
+    // scans (time-window queries, rollover detection) now that the
+    // composite PK is gone.
+    index('ix_task_events_created_at').on(t.createdAt),
   ],
 );
 
