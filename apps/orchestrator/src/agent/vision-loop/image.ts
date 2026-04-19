@@ -16,7 +16,12 @@
  *   5. driver dispatches CDP `Input.dispatchMouseEvent` at (x',y')
  */
 
+import sharp from 'sharp';
+
 export const VISION_MODEL_MAX_LONG_EDGE = 1568;
+/** JPEG quality for resized frames. 80 = sweet spot: ~70 KB per 1568×882
+ *  viewport, indistinguishable from q95 at the Claude preprocessing resolution. */
+export const VISION_MODEL_JPEG_QUALITY = 80;
 
 export interface ResizedImage {
   /** Base64 JPEG of the resized frame — raw bytes, no `data:` prefix. */
@@ -28,10 +33,11 @@ export interface ResizedImage {
   resizedWidth: number;
   resizedHeight: number;
   /**
-   * Model→real scale factor. Multiply Claude's x by `realPerModelX` to
-   * get the real viewport x. `scaleX = resizedWidth / originalWidth`;
-   * `realPerModelX = 1 / scaleX = originalWidth / resizedWidth`. We
-   * keep both precomputed for clarity at call sites.
+   * Model→real scale factor. `scaleX = resizedWidth / originalWidth`
+   * — i.e. fraction of original the model sees. To translate a click
+   * at model-space x back to real viewport x, divide: `realX = modelX /
+   * scaleX`. `modelCoordToReal` encapsulates this so call sites don't
+   * have to remember the direction.
    */
   scaleX: number;
   scaleY: number;
@@ -44,13 +50,17 @@ export interface ResizedImage {
  * back to real viewport pixels.
  *
  * If the input is already ≤ `maxLongEdge` on both sides, returns a
- * passthrough (scale=1). That lets small viewports (e.g. a 1280×800
- * laptop display) skip the CPU cost of a JPEG round-trip.
+ * passthrough (scale=1, original bytes). That lets small viewports
+ * (e.g. a 1280×800 laptop display) skip the CPU cost of a JPEG
+ * round-trip.
  *
- * TODO Phase A: implement using `sharp` (bundled with Node; streaming,
- * no tempfile). Skeleton returns a passthrough so the types line up
- * but the resize is a no-op; coordinates won't need translation
- * until we start actually shrinking.
+ * Sharp's resize uses Lanczos3 by default — the quality-preserving
+ * choice for downsampling natural images. We re-encode to JPEG at
+ * quality 80; PNG would be 3-10× the bytes with no Claude-side benefit.
+ *
+ * Never stretches. `fit: 'inside'` means the result is ≤ target on
+ * both dimensions, not padded to exactly target — so a 2560×1440
+ * frame going to 1568px-long-edge lands at 1568×882, not 1568×1568.
  */
 export async function resizeForVisionModel(
   base64Jpeg: string,
@@ -58,10 +68,15 @@ export async function resizeForVisionModel(
   originalHeight: number,
   maxLongEdge: number = VISION_MODEL_MAX_LONG_EDGE,
 ): Promise<ResizedImage> {
+  if (originalWidth <= 0 || originalHeight <= 0) {
+    throw new Error(
+      `resizeForVisionModel: invalid viewport dims ${originalWidth}×${originalHeight}`,
+    );
+  }
   const longEdge = Math.max(originalWidth, originalHeight);
-  // Passthrough branch: the driver's frame is already small enough
-  // that Claude won't resample it, so we save the CPU and emit a
-  // scale=1 descriptor. Real implementation lands next commit.
+  // Passthrough branch: driver's frame is already ≤ threshold, so
+  // Claude won't resample it. Save the CPU and emit a scale=1
+  // descriptor with the original bytes untouched.
   if (longEdge <= maxLongEdge) {
     return {
       base64: base64Jpeg,
@@ -73,22 +88,27 @@ export async function resizeForVisionModel(
       scaleY: 1,
     };
   }
-  // TODO(vision-loop): wire sharp() resize here. For now the caller
-  // gets the original bytes back with a scale descriptor that would
-  // be correct IF we had resized — so downstream code can already
-  // be written against the scaled coordinates and will Just Work
-  // once the resize lands.
-  const scale = maxLongEdge / longEdge;
-  const resizedWidth = Math.round(originalWidth * scale);
-  const resizedHeight = Math.round(originalHeight * scale);
+  const buffer = Buffer.from(base64Jpeg, 'base64');
+  // Ask sharp for post-resize dims rather than trusting our own math —
+  // sharp's rounding matches what downstream tools will see, and that
+  // exact number is what we need for scaleX/scaleY so clicks land true.
+  const { data, info } = await sharp(buffer)
+    .resize({
+      width: originalWidth >= originalHeight ? maxLongEdge : undefined,
+      height: originalHeight > originalWidth ? maxLongEdge : undefined,
+      fit: 'inside',
+      withoutEnlargement: true,
+    })
+    .jpeg({ quality: VISION_MODEL_JPEG_QUALITY })
+    .toBuffer({ resolveWithObject: true });
   return {
-    base64: base64Jpeg,
+    base64: data.toString('base64'),
     originalWidth,
     originalHeight,
-    resizedWidth,
-    resizedHeight,
-    scaleX: scale,
-    scaleY: scale,
+    resizedWidth: info.width,
+    resizedHeight: info.height,
+    scaleX: info.width / originalWidth,
+    scaleY: info.height / originalHeight,
   };
 }
 
