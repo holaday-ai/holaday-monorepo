@@ -51,12 +51,72 @@ export const clientScreenshotSchema = z.object({
   height: z.number().int().positive(),
 });
 
+// ---------- Vision-loop: SW ↔ orchestrator per-tick frames ----------
+
+/**
+ * Vision action the SW is asked to execute. Matches the orchestrator-
+ * side `VisionAction` discriminated union one-for-one. Coordinates in
+ * `click.x/y` are REAL viewport pixels — the orchestrator has already
+ * translated them from Claude's model-space via `modelCoordToReal`.
+ */
+export const visionActionSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('click'),
+    x: z.number().int(),
+    y: z.number().int(),
+    button: z.enum(['left', 'right', 'middle']).optional(),
+  }),
+  z.object({ kind: z.literal('type'), text: z.string() }),
+  z.object({ kind: z.literal('key'), key: z.string().min(1) }),
+  z.object({ kind: z.literal('scroll'), dy: z.number().int() }),
+  z.object({
+    kind: z.literal('wait'),
+    ms: z.number().int().min(100).max(10_000),
+  }),
+  z.object({ kind: z.literal('screenshot') }),
+  z.object({ kind: z.literal('done'), summary: z.string() }),
+  z.object({ kind: z.literal('give_up'), reason: z.string() }),
+]);
+
+export type VisionAction = z.infer<typeof visionActionSchema>;
+
+/**
+ * SW → orchestrator: observation for the current loop tick. Raw
+ * viewport JPEG (base64, no data: prefix) + dims + url + title.
+ * Orchestrator will resize server-side before shipping to Claude.
+ */
+export const clientVisionObservationSchema = z.object({
+  type: z.literal('client.vision.observation'),
+  taskId: z.string(),
+  tickIndex: z.number().int().nonnegative(),
+  screenshotBase64: z.string().min(1),
+  viewportWidth: z.number().int().positive(),
+  viewportHeight: z.number().int().positive(),
+  url: z.string(),
+  title: z.string(),
+});
+
+/**
+ * SW → orchestrator: confirmation the VisionAction executed. `ok=false`
+ * with `message` carries the CDP error back so Claude can see it on
+ * the next tick.
+ */
+export const clientVisionActedSchema = z.object({
+  type: z.literal('client.vision.acted'),
+  taskId: z.string(),
+  tickIndex: z.number().int().nonnegative(),
+  ok: z.boolean(),
+  message: z.string().optional(),
+});
+
 export const clientMessageSchema = z.discriminatedUnion('type', [
   clientHelloSchema,
   clientPongSchema,
   clientTaskAckSchema,
   clientStepResultSchema,
   clientScreenshotSchema,
+  clientVisionObservationSchema,
+  clientVisionActedSchema,
 ]);
 
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
@@ -150,6 +210,35 @@ export const serverBatchConfirmRequiredSchema = z.object({
   summary: z.string().min(1).max(512).optional(),
 });
 
+// ---------- Vision-loop: orchestrator → SW per-tick frames ----------
+
+/**
+ * Orchestrator → SW: "I need an observation for tick N". SW takes a
+ * screenshot of the active tab, gets the viewport dims + url + title,
+ * and replies with `client.vision.observation`.
+ */
+export const serverVisionObserveSchema = z.object({
+  type: z.literal('server.vision.observe'),
+  taskId: z.string(),
+  tickIndex: z.number().int().nonnegative(),
+  /** Optional deadline in ms. SW aborts capture if exceeded. */
+  deadlineMs: z.number().int().positive().optional(),
+});
+
+/**
+ * Orchestrator → SW: "Execute this action, then reply with
+ * client.vision.acted". Coordinates in `action` (for click) are REAL
+ * viewport pixels — the SW dispatches them via CDP without any
+ * further scaling.
+ */
+export const serverVisionActSchema = z.object({
+  type: z.literal('server.vision.act'),
+  taskId: z.string(),
+  tickIndex: z.number().int().nonnegative(),
+  action: visionActionSchema,
+  deadlineMs: z.number().int().positive().optional(),
+});
+
 export const serverMessageSchema = z.discriminatedUnion('type', [
   serverWelcomeSchema,
   serverErrorSchema,
@@ -158,6 +247,8 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverTaskControlSchema,
   serverUserConfirmSchema,
   serverBatchConfirmRequiredSchema,
+  serverVisionObserveSchema,
+  serverVisionActSchema,
 ]);
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;
