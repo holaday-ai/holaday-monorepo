@@ -67,7 +67,12 @@ export class TaskRepository {
     });
   }
 
-  async applyStepResult(prev: TaskState, next: TaskState, resultPayload?: unknown): Promise<void> {
+  async applyStepResult(
+    prev: TaskState,
+    next: TaskState,
+    resultPayload?: unknown,
+    rawInputStatus?: 'ok' | 'error' | 'awaiting_user' | 'skipped',
+  ): Promise<void> {
     if (prev.taskId !== next.taskId) {
       throw new Error('applyStepResult requires matching taskIds');
     }
@@ -118,7 +123,7 @@ export class TaskRepository {
           })
           .where(and(eq(taskSteps.taskId, taskRowId), eq(taskSteps.externalId, completedStep.id)));
       } else if (completedStep) {
-        const stepStatus = stepStatusFor(next, isRetriesExhausted);
+        const stepStatus = stepStatusFor(next, isRetriesExhausted, rawInputStatus);
         const stepUpdate: Partial<typeof taskSteps.$inferInsert> = {
           status: stepStatus,
           completedAt: new Date(),
@@ -410,10 +415,19 @@ function controlEventType(prev: TaskState, next: TaskState): string {
   return 'task.transition';
 }
 
-function stepStatusFor(next: TaskState, isRetriesExhausted: boolean): string {
+function stepStatusFor(
+  next: TaskState,
+  isRetriesExhausted: boolean,
+  rawInputStatus?: 'ok' | 'error' | 'awaiting_user' | 'skipped',
+): string {
   if (isRetriesExhausted) return 'failed';
   if (next.status === 'failed') return 'failed';
   if (next.status === 'awaiting_user') return 'awaiting_user';
+  // `skipped` is persisted distinctly so the audit ledger reflects
+  // that this step didn't actually run (vs `completed` which implies
+  // the action succeeded). The controller already treated it as
+  // advance-the-cursor, so next.status here is executing/completed.
+  if (rawInputStatus === 'skipped') return 'skipped';
   return 'completed';
 }
 

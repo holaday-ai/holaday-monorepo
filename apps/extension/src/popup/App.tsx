@@ -25,7 +25,7 @@ type PauseReason = 'user' | 'retries_exhausted' | 'quota_exceeded';
 interface StepView {
   id: string;
   kind: string;
-  status: 'pending' | 'executing' | 'completed' | 'failed' | 'awaiting_user';
+  status: 'pending' | 'executing' | 'completed' | 'failed' | 'awaiting_user' | 'skipped';
   /** Driver result.data, forwarded by the SW. Shape varies by kind. */
   output?: unknown;
 }
@@ -673,6 +673,10 @@ function stepStatusStyle(s: StepView['status']): React.CSSProperties {
     completed: '#166534',
     failed: '#991b1b',
     awaiting_user: '#92400e',
+    // skipped = muted blue-grey — step didn't fail but didn't really
+    // execute either (screenshot flake, etc). Distinct from gray
+    // `pending` so the operator can tell at a glance.
+    skipped: '#64748b',
   };
   return { color: palette[s], fontWeight: 600 };
 }

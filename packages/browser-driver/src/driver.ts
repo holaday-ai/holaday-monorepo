@@ -42,7 +42,14 @@ export interface DriverAction {
  * redirected to a login URL and a Skill's login detection caveat fires.
  */
 export interface DriverResult {
-  status: 'ok' | 'error' | 'awaiting_user';
+  /**
+   * `skipped` — the step didn't execute but shouldn't fail the task
+   * (e.g. screenshot couldn't capture because the CDP channel didn't
+   * return in time). The controller treats it like `ok` for state
+   * advancement (no retry, no confirm) but the popup / audit ledger
+   * marks it distinctly so the operator knows nothing actually ran.
+   */
+  status: 'ok' | 'error' | 'awaiting_user' | 'skipped';
   data?: unknown;
   error?: { code: string; message: string };
 }

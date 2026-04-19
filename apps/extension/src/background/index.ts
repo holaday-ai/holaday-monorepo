@@ -121,7 +121,7 @@ async function getDriver(): Promise<HolaDayBrowserDriver> {
   return driverPromise;
 }
 
-type StepStatus = 'pending' | 'executing' | 'completed' | 'failed' | 'awaiting_user';
+type StepStatus = 'pending' | 'executing' | 'completed' | 'failed' | 'awaiting_user' | 'skipped';
 
 interface StepView {
   id: string;
@@ -298,33 +298,13 @@ async function runStep(
       ...(result.error ? { error: result.error } : {}),
     });
 
-    // SW-local enrichment for the popup Results UI. The driver's
-    // screenshot action returns only size metadata (shipping the blob
-    // over WS would bloat the dispatch channel); capture an extra JPEG
-    // thumbnail here so the popup has something visual to render. This
-    // is a double-capture but it's cheap (a few hundred ms, local CDP),
-    // keeps the driver contract unchanged, and the blob stays in SW
-    // memory — never leaves the extension.
-    let localOutput: unknown = result.data;
-    if (msg.action.kind === 'screenshot' && result.status === 'ok') {
-      try {
-        const thumbnail = await chrome.tabs.captureVisibleTab({
-          format: 'jpeg',
-          quality: 40,
-        });
-        const base64 =
-          typeof thumbnail === 'string' && thumbnail.startsWith('data:')
-            ? thumbnail.slice(thumbnail.indexOf(',') + 1)
-            : thumbnail;
-        localOutput = {
-          ...(result.data && typeof result.data === 'object' ? result.data : {}),
-          thumbnail: base64,
-        };
-      } catch (err) {
-        console.warn('[holaday] thumbnail capture failed (Results will show size only)', err);
-      }
-    }
-
+    // Thumbnail comes in `result.data.thumbnail` directly from the
+    // driver now (commit landing this change). We used to re-capture
+    // here via chrome.tabs.captureVisibleTab, but that API requires
+    // the target window to be focused — breaking the "agent runs
+    // unattended" product invariant. CDP-based page.screenshot in
+    // the driver works regardless of focus, so we just pass the
+    // driver's output through.
     const t = state.tasks.get(msg.taskId);
     if (t) {
       const step = t.steps.find((s) => s.id === msg.stepId);
@@ -334,8 +314,10 @@ async function runStep(
             ? 'completed'
             : result.status === 'awaiting_user'
               ? 'awaiting_user'
-              : 'failed';
-        step.output = localOutput;
+              : result.status === 'skipped'
+                ? 'skipped'
+                : 'failed';
+        step.output = result.data;
       }
       t.lastUpdated = Date.now();
       pushTasksSnapshot();

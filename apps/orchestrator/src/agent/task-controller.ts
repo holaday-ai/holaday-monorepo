@@ -29,7 +29,7 @@ export type TaskStatus =
   | 'failed'
   | 'cancelled';
 
-export type StepStatus = 'ok' | 'error' | 'awaiting_user';
+export type StepStatus = 'ok' | 'error' | 'awaiting_user' | 'skipped';
 export type Risk = 'low' | 'medium' | 'high';
 export type PauseReason = 'user' | 'retries_exhausted' | 'quota_exceeded';
 
@@ -251,7 +251,14 @@ export class TaskController {
       };
     }
 
-    if (input.status === 'awaiting_user' || current.requiresConfirm || isHighRisk(current)) {
+    // `skipped` = the step didn't actually execute (e.g. screenshot
+    // capture timed out, which must not fail the task). Advance the
+    // cursor like ok; never enter the awaiting_user / confirm gate,
+    // because there's nothing to confirm about a no-op.
+    if (
+      input.status !== 'skipped' &&
+      (input.status === 'awaiting_user' || current.requiresConfirm || isHighRisk(current))
+    ) {
       // If the client attached a batch payload (commander-emitted write
       // steps do this), enter a batch-awaiting gate with a richer
       // pendingConfirm; otherwise fall back to a single-step confirm.

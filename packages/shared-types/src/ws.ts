@@ -32,7 +32,7 @@ export const clientStepResultSchema = z.object({
   type: z.literal('client.step.result'),
   taskId: z.string(),
   stepId: z.string(),
-  status: z.enum(['ok', 'error', 'awaiting_user']),
+  status: z.enum(['ok', 'error', 'awaiting_user', 'skipped']),
   data: z.unknown().optional(),
   error: z
     .object({

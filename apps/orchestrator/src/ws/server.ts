@@ -415,7 +415,7 @@ async function runStepResult(
     }
     if (eff.kind === 'persist') {
       try {
-        await taskRepository.applyStepResult(taskState, nextState, msg.data);
+        await taskRepository.applyStepResult(taskState, nextState, msg.data, msg.status);
       } catch (err) {
         logger.error({ err, taskId: msg.taskId }, 'persist applyStepResult failed');
       }

@@ -66,16 +66,6 @@ export interface PlaywrightCrxAdapterOptions {
 export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   private app: CrxApplication | null = null;
   private page: Page | null = null;
-  /**
-   * Chrome tab id of the page this adapter is driving. Populated from
-   * `CrxApplication.on('attached', {page, tabId})` during ensureApp(),
-   * and defensively from `opts.attachToTabId` on the attach branch of
-   * ensurePage(). Needed so screenshots hit the *agent's* tab, not
-   * whatever tab is currently active in the focused window (the popup
-   * was sneaking in as the "focused" surface and we were screenshotting
-   * our own UI).
-   */
-  private tabId: number | null = null;
   private readonly opts: Required<PlaywrightCrxAdapterOptions>;
 
   constructor(opts: PlaywrightCrxAdapterOptions = {}) {
@@ -148,7 +138,6 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     } finally {
       this.app = null;
       this.page = null;
-      this.tabId = null;
     }
   }
 
@@ -393,37 +382,45 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     }
   }
 
-  private async doScreenshot(action: DriverAction): Promise<DriverResult> {
+  private async doScreenshot(_action: DriverAction): Promise<DriverResult> {
     const page = this.page;
     if (!page) return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'screenshot before any goto');
-    // page.screenshot() via playwright-crx 0.15 hangs indefinitely in
-    // MV3 SW — earlier commits (ae1b49a, 94d0b2b) tried the inner
-    // `timeout` option and an outer Promise.race; both cases still saw
-    // the Playwright default 30s fire because the CDP call backing it
-    // is stuck somewhere we can't reach. Swap to the native Chrome
-    // extension API `chrome.tabs.captureVisibleTab` which runs entirely
-    // inside the SW's own runtime and doesn't round-trip through CDP.
+    // Capture via CDP (Playwright's page.screenshot). CDP is
+    // focus-independent — works when the user has switched to
+    // another window, minimized Chrome, or locked the screen. This
+    // is the product-level contract: the agent runs unattended.
     //
-    // Tradeoff: captureVisibleTab only captures the visible viewport,
-    // not the full page. `action.payload.fullPage=true` is now a
-    // silent no-op — noted here rather than surfacing an error because
-    // every current caller wants viewport-only (smoke test, SELECTOR_
-    // NOT_FOUND diagnostic). When we need fullPage we can scroll +
-    // stitch, but that's Phase 1 work.
-    const timeoutMs = action.deadlineMs ?? 10_000;
-    try {
-      const base64 = await captureViewportPngBase64(timeoutMs, this.tabId);
-      const bytes = base64ByteLength(base64);
+    // History: we spent commits ae1b49a/94d0b2b/9393922 bouncing
+    // between page.screenshot() and chrome.tabs.captureVisibleTab
+    // because page.screenshot hung on animation-heavy pages. We
+    // avoid that now with `animations: 'disabled'` + a short hard
+    // cap and, crucially, a graceful null return instead of throwing
+    // on timeout — a missing thumbnail is diagnostic-only and must
+    // not derail the task.
+    //
+    // Tradeoff: on CDP failure the step returns status='skipped',
+    // which the controller treats like ok for cursor advancement
+    // but the popup/audit log flags distinctly. No retry burned on
+    // a screenshot flake.
+    const base64 = await captureViaCdpPageScreenshot(page);
+    if (base64 === null) {
       return {
-        status: 'ok',
-        data: { encoding: 'base64', bytes, sizeBytes: bytes },
+        status: 'skipped',
+        data: {
+          skipped: true,
+          reason: 'page.screenshot() did not return in time (CDP channel unresponsive)',
+        },
       };
-    } catch (err) {
-      return driverError(
-        DRIVER_ERRORS.SCREENSHOT_FAILED,
-        err instanceof Error ? err.message : String(err),
-      );
     }
+    const bytes = base64ByteLength(base64);
+    return {
+      status: 'ok',
+      // `thumbnail` is the raw base64 JPEG so the SW can render it in
+      // the popup's Results section without a second capture (the old
+      // chrome.tabs.captureVisibleTab fallback needed window focus —
+      // product-level veto). JPEG q40 keeps a viewport under ~80KB.
+      data: { encoding: 'base64', bytes, sizeBytes: bytes, thumbnail: base64 },
+    };
   }
 
   // ---------- private helpers ----------
@@ -431,15 +428,6 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   private async ensureApp(): Promise<CrxApplication> {
     if (this.app) return this.app;
     this.app = await crx.start();
-    // CrxApplication emits `attached` with `{page, tabId}` whenever a
-    // page is attached (both `app.attach(tabId)` and `app.newPage(...)`
-    // paths). Track the tabId so screenshot / diagnostic-capture code
-    // can pass it to chrome.tabs.captureVisibleTab instead of
-    // defaulting to the currently focused window — which, at the
-    // moment the user clicks Run in the popup, is the popup itself.
-    this.app.on('attached', ({ tabId }) => {
-      this.tabId = tabId;
-    });
     return this.app;
   }
 
@@ -448,14 +436,8 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     const app = await this.ensureApp();
     if (this.opts.attachToTabId !== null) {
       this.page = await app.attach(this.opts.attachToTabId);
-      // Defensive: set tabId in case the `attached` event wasn't
-      // emitted (older playwright-crx versions on some paths). On
-      // attach we already have the tabId from the caller, so this is
-      // authoritative anyway.
-      this.tabId = this.opts.attachToTabId;
     } else {
       this.page = await app.newPage({ url: initialUrl ?? 'about:blank', active: true });
-      // newPage path: the `attached` listener above populates tabId.
     }
     return this.page;
   }
@@ -529,9 +511,11 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     const [url, title, screenshot] = await Promise.all([
       safeCall(() => page.url(), ''),
       safeCall(() => page.title(), ''),
-      // Use chrome.tabs.captureVisibleTab — same reason as doScreenshot:
-      // page.screenshot() hangs in playwright-crx 0.15 under MV3 SW.
-      safeCall(() => captureViewportPngBase64(5_000, this.tabId), null as string | null),
+      // Diagnostic viewport capture via CDP — focus-independent.
+      // On CDP timeout we get null (the helper never throws),
+      // the diagnostic still emits with strategies + url + title,
+      // just no screenshot to look at.
+      captureViaCdpPageScreenshot(page),
     ]);
 
     const strategiesTxt =
@@ -605,87 +589,62 @@ function cssEscape(v: string): string {
   return v.replace(/[\\"]/g, (c) => `\\${c}`);
 }
 
-// ---------- SW-native screenshot via chrome.tabs.captureVisibleTab ----------
+// ---------- CDP-based screenshot (focus-independent) ----------
 
 /**
- * Capture a PNG of the currently-focused Chrome window's active tab,
- * returning raw base64 (no `data:image/png;base64,` prefix). Runs
- * entirely inside the extension SW — unlike page.screenshot() it
- * doesn't hang when playwright-crx's CDP channel gets stuck.
+ * Capture a viewport JPEG via Playwright's page.screenshot, which
+ * tunnels `Page.captureScreenshot` through the existing CDP session.
+ * CDP doesn't require the target window to be focused or even
+ * visible — that's the product-level invariant: the agent must
+ * complete tasks while the user is in another window, has Chrome
+ * minimized, or is away from the machine entirely.
  *
- * Requires `<all_urls>` or `activeTab` permission — we declare
- * `<all_urls>` in manifest.config.ts so this works on every page
- * the agent can navigate to.
+ * `animations: 'disabled'` pauses CSS animations at their first
+ * frame so page.screenshot doesn't block waiting for a never-stable
+ * layout on SPA dashboards (Baidu's carousel, Douyin's autoplay
+ * strip). `caret: 'hide'` keeps the text caret out of captures
+ * taken right after a type step.
  *
- * The `windowId` arg is intentionally omitted so Chrome captures
- * whichever window currently has focus; for our dispatch-driven
- * flow that's always the tab playwright-crx opened via
- * `newPage({ active: true })`.
+ * Never throws — on CDP timeout, SDK error, or evergreen target-
+ * closed races, returns null. doScreenshot upgrades null to
+ * `status:'skipped'`; the SELECTOR_NOT_FOUND diagnostic builder
+ * just omits the screenshot field. Both paths keep the task
+ * moving forward; a lost diagnostic frame is not a bug worth
+ * retrying for.
+ *
+ * JPEG quality 40 keeps a 1280-wide viewport under ~80 KB — fits
+ * over WS without saturating the dispatch channel. PNG would be
+ * 3-10× larger with no visual benefit for diagnostic purposes.
  */
-async function captureViewportPngBase64(timeoutMs: number, tabId: number | null): Promise<string> {
-  if (typeof chrome === 'undefined' || !chrome.tabs?.captureVisibleTab) {
-    throw new Error('chrome.tabs.captureVisibleTab unavailable (not in extension SW)');
-  }
+const SCREENSHOT_HARDCAP_MS = 5_000;
 
-  // Resolve the target tab's windowId. chrome.tabs.captureVisibleTab
-  // takes (windowId, options) and captures the ACTIVE tab in that
-  // window — passing the agent tab's window means the popup's own
-  // floating UI no longer counts as "current focused window", which
-  // was the bug. When tabId is unknown we fall back to the default
-  // (current-focused window); behaviour then matches pre-fix.
-  let windowId: number | undefined;
-  if (tabId !== null) {
-    try {
-      const tab = await new Promise<chrome.tabs.Tab>((resolve, reject) => {
-        chrome.tabs.get(tabId, (t) => {
-          const err = chrome.runtime.lastError;
-          if (err) return reject(new Error(err.message ?? 'chrome.tabs.get failed'));
-          resolve(t);
-        });
-      });
-      windowId = tab.windowId;
-    } catch {
-      // Tab was likely closed mid-task; degrade gracefully to the
-      // no-windowId path rather than failing the whole screenshot.
-    }
-  }
-
+async function captureViaCdpPageScreenshot(page: Page): Promise<string | null> {
   let hardTimer: ReturnType<typeof setTimeout> | null = null;
   try {
-    const capture = new Promise<string>((resolve, reject) => {
-      const cb = (dataUrl: string | undefined): void => {
-        const err = chrome.runtime.lastError;
-        if (err) {
-          reject(new Error(err.message ?? 'captureVisibleTab failed'));
-          return;
-        }
-        if (!dataUrl) {
-          reject(new Error('captureVisibleTab returned empty dataUrl'));
-          return;
-        }
-        resolve(dataUrl);
-      };
-      // `captureVisibleTab` has overloaded signatures; the windowId
-      // variant takes (windowId, options, callback), the other takes
-      // (options, callback). Dispatching explicitly here keeps TS and
-      // the runtime happy on both Chrome 120 (callback-only) and 121+
-      // (promise-supporting).
-      if (windowId !== undefined) {
-        chrome.tabs.captureVisibleTab(windowId, { format: 'png' }, cb);
-      } else {
-        chrome.tabs.captureVisibleTab({ format: 'png' }, cb);
-      }
+    const shot = page
+      .screenshot({
+        type: 'jpeg',
+        quality: 40,
+        fullPage: false,
+        animations: 'disabled',
+        caret: 'hide',
+        timeout: SCREENSHOT_HARDCAP_MS,
+      })
+      .then((buf) => Buffer.from(buf).toString('base64'));
+    // Outer cap in case the inner `timeout` option isn't forwarded
+    // to the CDP call on this playwright-crx version (this has bit
+    // us before). Resolve to null rather than reject — the caller
+    // decides the soft-fail path.
+    const hardCap = new Promise<null>((resolve) => {
+      hardTimer = setTimeout(() => resolve(null), SCREENSHOT_HARDCAP_MS + 500);
     });
-    const hardCap = new Promise<never>((_resolve, reject) => {
-      hardTimer = setTimeout(
-        () => reject(new Error(`captureVisibleTab timed out after ${timeoutMs}ms`)),
-        timeoutMs,
-      );
-    });
-    const dataUrl = await Promise.race([capture, hardCap]);
-    const comma = dataUrl.indexOf(',');
-    if (comma < 0) throw new Error('malformed data URL from captureVisibleTab');
-    return dataUrl.slice(comma + 1);
+    const result = await Promise.race([shot, hardCap]);
+    return result;
+  } catch (err) {
+    // page.screenshot can throw on target-closed / tab-navigated-away
+    // during capture. Report and return null; never kill the step.
+    console.warn('[holaday] page.screenshot errored, returning null', err);
+    return null;
   } finally {
     if (hardTimer) clearTimeout(hardTimer);
   }
