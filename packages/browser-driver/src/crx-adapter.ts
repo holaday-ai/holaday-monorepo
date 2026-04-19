@@ -66,6 +66,15 @@ export interface PlaywrightCrxAdapterOptions {
 export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   private app: CrxApplication | null = null;
   private page: Page | null = null;
+  /**
+   * Chrome tab id of the page this adapter is driving. Populated from
+   * `CrxApplication.on('attached', {page, tabId})` during ensureApp(),
+   * and defensively from `opts.attachToTabId` on the attach branch of
+   * ensurePage(). Needed for the raw-CDP and captureVisibleTab
+   * screenshot fallbacks — both address a tab by its chrome.tabs
+   * tabId, not by a Playwright Page handle.
+   */
+  private tabId: number | null = null;
   private readonly opts: Required<PlaywrightCrxAdapterOptions>;
 
   constructor(opts: PlaywrightCrxAdapterOptions = {}) {
@@ -138,6 +147,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     } finally {
       this.app = null;
       this.page = null;
+      this.tabId = null;
     }
   }
 
@@ -448,7 +458,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     console.warn('[holaday][screenshot] plain capture failed, falling back to raw CDP', {
       error: second.error,
     });
-    const third = await captureViaRawCdp(page);
+    const third = await captureViaRawCdp(this.tabId);
     if (third.base64 !== null) {
       const bytes = base64ByteLength(third.base64);
       return {
@@ -463,16 +473,34 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
         },
       };
     }
-    // All three failed — surface every error so we can diagnose which
-    // layer of playwright / CDP is actually hanging. The final pass
-    // (raw CDP) is the simplest possible capture: if even it fails
-    // the chrome.debugger session is in a broken state and the task
-    // would be having bigger problems than a missing thumbnail.
-    const reason = `page.screenshot() failed: clean=${first.error ?? 'unknown'}; plain=${second.error ?? 'unknown'}; rawCdp=${third.error ?? 'unknown'}`;
-    console.error('[holaday][screenshot] all three attempts failed', {
+    console.warn(
+      '[holaday][screenshot] raw CDP failed, falling back to captureVisibleTab (will foreground window)',
+      { error: third.error },
+    );
+    const fourth = await captureViaVisibleTabFallback(this.tabId);
+    if (fourth.base64 !== null) {
+      const bytes = base64ByteLength(fourth.base64);
+      return {
+        status: 'ok',
+        data: {
+          encoding: 'base64',
+          bytes,
+          sizeBytes: bytes,
+          thumbnail: fourth.base64,
+          degraded: true,
+          capturePath: 'visible-tab',
+          foregroundedWindow: true,
+        },
+      };
+    }
+    // All four failed — surface every error so we can diagnose which
+    // layer of playwright / CDP is actually hanging.
+    const reason = `page.screenshot() failed: clean=${first.error ?? 'unknown'}; plain=${second.error ?? 'unknown'}; rawCdp=${third.error ?? 'unknown'}; visibleTab=${fourth.error ?? 'unknown'}`;
+    console.error('[holaday][screenshot] all four attempts failed', {
       clean: first.error,
       plain: second.error,
       rawCdp: third.error,
+      visibleTab: fourth.error,
     });
     return {
       status: 'skipped',
@@ -488,6 +516,15 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   private async ensureApp(): Promise<CrxApplication> {
     if (this.app) return this.app;
     this.app = await crx.start();
+    // `attached` fires on both app.newPage() and app.attach() paths per
+    // playwright-crx types.d.ts, and carries the chrome tabId — the
+    // one identifier our fallback screenshot paths need.
+    (this.app as unknown as { on: (ev: string, cb: (d: { tabId: number }) => void) => void }).on(
+      'attached',
+      ({ tabId }) => {
+        this.tabId = tabId;
+      },
+    );
     return this.app;
   }
 
@@ -496,6 +533,10 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     const app = await this.ensureApp();
     if (this.opts.attachToTabId !== null) {
       this.page = await app.attach(this.opts.attachToTabId);
+      // Defense in depth — some playwright-crx versions don't fire
+      // `attached` on the explicit attach path. We already know the
+      // tabId because the caller gave it to us, so set it directly.
+      this.tabId = this.opts.attachToTabId;
     } else {
       this.page = await app.newPage({ url: initialUrl ?? 'about:blank', active: true });
     }
@@ -736,43 +777,47 @@ async function captureViaCdpPageScreenshot(
 }
 
 /**
- * Last-resort capture: send `Page.captureScreenshot` directly through
- * a fresh CDP session, bypassing playwright's wrapper. Useful when
- * `page.screenshot()` hangs inside playwright's page-side JS work
- * (animations, scrollbar, networkidle) but the underlying
- * chrome.debugger link is still healthy.
+ * Last-resort CDP capture: send `Page.captureScreenshot` directly via
+ * `chrome.debugger.sendCommand({tabId}, …)`, riding on the debugger
+ * session playwright-crx already attached to this tab. Bypasses the
+ * whole Playwright wrapper (no page-side JS, no viewport polling,
+ * no scrollbar stabilization — just "send the bytes now").
+ *
+ * Why not `browserContext.newCDPSession(page)`: playwright-crx routes
+ * that to CDP's `Target.attachToBrowserTarget`, which rejects with
+ * "Either tab id or extension id must be specified". It was never
+ * wired up for the CRX page->tab mapping and hasn't worked in this
+ * environment. `chrome.debugger.sendCommand` on the existing session
+ * sidesteps the whole thing.
+ *
+ * Focus-independent (CDP doesn't require the tab to be foregrounded),
+ * so this preserves the unattended-agent invariant.
  *
  * Returns base64 on success (CDP returns data already base64-encoded),
  * null + error string on any failure. Never throws.
  */
-interface RawCdpSession {
-  send: (method: string, params?: unknown) => Promise<unknown>;
-  detach: () => Promise<void>;
-}
-
-async function captureViaRawCdp(page: Page): Promise<ScreenshotResult> {
+async function captureViaRawCdp(tabId: number | null): Promise<ScreenshotResult> {
+  if (tabId === null) {
+    return { base64: null, error: 'raw-CDP: tabId unknown (listener never fired)' };
+  }
   let hardTimer: ReturnType<typeof setTimeout> | null = null;
-  // Typed loosely because playwright-crx doesn't re-export CDPSession;
-  // we only touch `.send('Page.captureScreenshot', …)` and `.detach()`.
-  let session: RawCdpSession | null = null;
   try {
-    session = (await page.context().newCDPSession(page)) as unknown as RawCdpSession;
-    const shot = session
-      .send('Page.captureScreenshot', {
+    const shot = (
+      chrome.debugger.sendCommand({ tabId }, 'Page.captureScreenshot', {
         format: 'jpeg',
         quality: 40,
         captureBeyondViewport: false,
-      })
-      .then((r: unknown): ScreenshotResult => {
-        const data = (r as { data?: unknown })?.data;
-        if (typeof data !== 'string' || data.length === 0) {
-          return {
-            base64: null,
-            error: `Page.captureScreenshot returned non-string data (${typeof data})`,
-          };
-        }
-        return { base64: data, error: null };
-      });
+      }) as Promise<unknown>
+    ).then((r: unknown): ScreenshotResult => {
+      const data = (r as { data?: unknown })?.data;
+      if (typeof data !== 'string' || data.length === 0) {
+        return {
+          base64: null,
+          error: `Page.captureScreenshot returned non-string data (${typeof data})`,
+        };
+      }
+      return { base64: data, error: null };
+    });
     const hardCap = new Promise<ScreenshotResult>((resolve) => {
       hardTimer = setTimeout(
         () =>
@@ -789,16 +834,68 @@ async function captureViaRawCdp(page: Page): Promise<ScreenshotResult> {
     return { base64: null, error: message.slice(0, 500) };
   } finally {
     if (hardTimer) clearTimeout(hardTimer);
-    // Detach the one-shot session so it doesn't leak as an attached
-    // debugger client. Failures here are ignorable — chrome.debugger
-    // cleans up on tab close anyway.
-    if (session) {
-      try {
-        await session.detach();
-      } catch {
-        // best-effort cleanup
-      }
+  }
+}
+
+/**
+ * Absolute last resort: foreground the agent's window and call
+ * `chrome.tabs.captureVisibleTab(windowId, …)`. This is the ONLY
+ * screenshot path that reliably works when CDP is wedged, but it
+ * has a hard cost: it pulls the window in front of whatever the
+ * user is doing, violating the unattended-agent invariant
+ * (commit 60e3aca). Only reached after BOTH playwright
+ * page.screenshot paths AND raw CDP have failed — a genuinely
+ * broken state where a missing screenshot is the smaller sin
+ * than a completely-silent task.
+ *
+ * Returns base64 JPEG on success; null + error string otherwise.
+ * Never throws.
+ */
+async function captureViaVisibleTabFallback(tabId: number | null): Promise<ScreenshotResult> {
+  if (tabId === null) {
+    return { base64: null, error: 'visibleTab: tabId unknown' };
+  }
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const windowId = tab.windowId;
+    if (typeof windowId !== 'number') {
+      return { base64: null, error: 'visibleTab: windowId missing on chrome.tabs.get result' };
     }
+    // Pull the window to the foreground and make sure our tab is the
+    // active one in it, otherwise captureVisibleTab grabs whatever
+    // OTHER tab the user had focused in that window.
+    try {
+      await chrome.windows.update(windowId, { focused: true });
+    } catch (err) {
+      // Non-fatal; some OSes block focus-steal silently, the capture
+      // may still succeed if the window happened to be visible.
+      console.warn('[holaday][screenshot] windows.update(focused) failed', {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+    try {
+      await chrome.tabs.update(tabId, { active: true });
+    } catch (err) {
+      console.warn('[holaday][screenshot] tabs.update(active) failed', {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+    const dataUrl = (await chrome.tabs.captureVisibleTab(windowId, {
+      format: 'jpeg',
+      quality: 40,
+    })) as string;
+    // captureVisibleTab returns a `data:image/jpeg;base64,…` URL; we
+    // want the bare base64 payload so the downstream thumbnail path
+    // matches the other capture helpers.
+    const comma = dataUrl.indexOf(',');
+    const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+    if (!base64) {
+      return { base64: null, error: 'visibleTab: empty data URL' };
+    }
+    return { base64, error: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { base64: null, error: message.slice(0, 500) };
   }
 }
 
