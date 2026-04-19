@@ -47,7 +47,22 @@ step "git pull --rebase"
 if ! git diff --quiet || ! git diff --cached --quiet; then
   fail "working tree has uncommitted changes — stash or commit before refresh"
 fi
-git pull --rebase || fail "git pull --rebase failed (conflict? network?) — resolve and rerun"
+# Proxy vars that break git-over-HTTPS. With some corporate or local
+# egress proxies set (e.g. HTTPS_PROXY=http://127.0.0.1:7890), GitHub's
+# HTTP/2 push fails with:
+#     fatal: unable to access '…': HTTP/2 framing layer error
+# because the proxy mishandles HTTP/2 PING/RST frames. `env -u` scopes
+# the unset to this one `git pull` — downstream steps (pnpm install /
+# extension build, later the orchestrator's calls to Anthropic) still
+# see the proxy, which they typically need.
+#
+# Both upper- and lower-case variants matter: Node/npm respect
+# HTTPS_PROXY, curl/wget respect https_proxy, some tools read ALL_PROXY.
+# libcurl (what git uses) checks all of them.
+env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \
+    -u ALL_PROXY -u all_proxy \
+    git pull --rebase \
+  || fail "git pull --rebase failed (conflict? network?) — resolve and rerun"
 ok "pulled $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HEAD)"
 
 # ---------- 2. rebuild the extension ----------
