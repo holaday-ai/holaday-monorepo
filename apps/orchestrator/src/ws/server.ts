@@ -26,6 +26,15 @@ interface ClientState {
   // taskId -> state. Phase 0 in-memory; persistence writes through on every
   // transition. Restart recovery rehydrates this map per-user at auth time.
   tasks: Map<string, TaskState>;
+  /**
+   * Step ids whose FAILURE just triggered a self-heal. When the next
+   * `client.step.result` with status='ok' arrives for one of these,
+   * the WS server flips `task_steps.heal_succeeded = 1` and removes
+   * the id. Tracking here (not on TaskState) so the Set doesn't
+   * travel through the pure-function controller — the heal success
+   * signal is plumbing, not state-machine state.
+   */
+  healedStepIds: Set<string>;
 }
 
 const taskController = new TaskController();
@@ -257,6 +266,7 @@ async function handleConnection(socket: WebSocket, req: IncomingMessage) {
     lastPongAt: Date.now(),
     authed: false,
     tasks: new Map(),
+    healedStepIds: new Set(),
   };
 
   const requestedProtos = (req.headers['sec-websocket-protocol'] ?? '')
@@ -396,7 +406,27 @@ async function runStepResult(
   // new selector — zero state-machine change, single extra Opus call
   // per failing step, capped at one heal per step.
   if (msg.status === 'error' && msg.error?.code === 'SELECTOR_NOT_FOUND') {
-    await maybeSelfHeal(taskState, msg);
+    await maybeSelfHeal(state, taskState, msg);
+  }
+
+  // Heal-success bookkeeping: if the current msg is an OK result for
+  // a step we healed on the prior dispatch, flip heal_succeeded=1 on
+  // the DB row and forget the tracking. We run this BEFORE the
+  // controller advances the cursor — the DB update is independent
+  // of the state-machine transition.
+  if (msg.status === 'ok' && state.healedStepIds.has(msg.stepId)) {
+    state.healedStepIds.delete(msg.stepId);
+    try {
+      await taskRepository.markHealSucceeded({
+        taskExternalId: msg.taskId,
+        stepExternalId: msg.stepId,
+      });
+    } catch (err) {
+      logger.warn(
+        { err, taskId: msg.taskId, stepId: msg.stepId },
+        'markHealSucceeded failed (non-fatal)',
+      );
+    }
   }
 
   const { state: nextState, effects } = taskController.onStepResult(taskState, {
@@ -442,6 +472,7 @@ async function runStepResult(
  *    same as pre-self-heal behaviour.
  */
 async function maybeSelfHeal(
+  clientState: ClientState,
   taskState: TaskState,
   msg: Extract<ClientMessage, { type: 'client.step.result' }>,
 ): Promise<void> {
@@ -456,40 +487,68 @@ async function maybeSelfHeal(
   const diagnostic = extractDiagnostic(msg.data);
   if (!diagnostic) return;
 
+  let healResult: Awaited<ReturnType<typeof planner.healSelector>>;
   try {
-    const healed = await planner.healSelector({
-      userId: undefined, // Phase 0: we don't thread user external id through ClientState yet
+    healResult = await planner.healSelector({
+      userId: clientState.userId ?? undefined,
       originalStep: current,
       diagnostic,
     });
-    if (!healed) {
-      logger.info(
-        { taskId: taskState.taskId, stepId: msg.stepId },
-        'selector self-heal declined — falling through to normal retry',
-      );
-      return;
-    }
-    // Mutate in place. We intentionally DON'T persist the new selector
-    // to task_steps.input — Phase 0 keeps the DB record of the
-    // original plan for audit; the heal result lives in memory for
-    // the retry, and on restart a mid-heal task would rehydrate to
-    // the original plan (retries already consumed → paused on first
-    // miss, user resumes manually). Good enough for Phase 0 dogfood.
-    current.selector = healed;
-    logger.info(
-      {
-        taskId: taskState.taskId,
-        stepId: msg.stepId,
-        kind: current.kind,
-        originalStrategies: healed.strategies.length,
-      },
-      'selector self-heal succeeded — retry will use new selector',
-    );
   } catch (err) {
-    // Belt-and-braces: planner.healSelector is contracted not to
-    // throw, but if it does we swallow and fall through.
+    // Belt-and-braces: planner.healSelector is contracted not to throw.
     logger.warn({ err, taskId: taskState.taskId, stepId: msg.stepId }, 'self-heal threw');
+    return;
   }
+
+  // Record the attempt on the step row — whether the selector came
+  // back or not. `heal_attempts` reflects how often we asked; the
+  // separate `heal_succeeded` flag reflects whether the subsequent
+  // retry actually landed ok. This split lets `tasks.healStats`
+  // compute a genuine success rate (succeeded / attempts), not a
+  // "did the model produce any output" rate.
+  try {
+    await taskRepository.recordHealAttempt({
+      taskExternalId: taskState.taskId,
+      stepExternalId: msg.stepId,
+      elapsedMs: healResult.elapsedMs,
+      inputTokens: healResult.inputTokens,
+      outputTokens: healResult.outputTokens,
+    });
+  } catch (err) {
+    logger.warn(
+      { err, taskId: taskState.taskId, stepId: msg.stepId },
+      'recordHealAttempt failed (non-fatal)',
+    );
+  }
+
+  if (!healResult.selector) {
+    logger.info(
+      { taskId: taskState.taskId, stepId: msg.stepId, elapsedMs: healResult.elapsedMs },
+      'selector self-heal declined — falling through to normal retry',
+    );
+    return;
+  }
+  // Mutate in place. We intentionally DON'T persist the new selector
+  // to task_steps.input — Phase 0 keeps the DB record of the
+  // original plan for audit; the heal result lives in memory for
+  // the retry, and on restart a mid-heal task would rehydrate to
+  // the original plan (retries already consumed → paused on first
+  // miss, user resumes manually). Good enough for Phase 0 dogfood.
+  current.selector = healResult.selector;
+  // Track so a subsequent OK result flips heal_succeeded=1.
+  clientState.healedStepIds.add(msg.stepId);
+  logger.info(
+    {
+      taskId: taskState.taskId,
+      stepId: msg.stepId,
+      kind: current.kind,
+      originalStrategies: healResult.selector.strategies.length,
+      elapsedMs: healResult.elapsedMs,
+      inputTokens: healResult.inputTokens,
+      outputTokens: healResult.outputTokens,
+    },
+    'selector self-heal succeeded — retry will use new selector',
+  );
 }
 
 interface Diagnostic {

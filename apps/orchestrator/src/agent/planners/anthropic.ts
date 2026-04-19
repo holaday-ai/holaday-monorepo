@@ -7,7 +7,7 @@ import {
 import { z } from 'zod';
 import { logger } from '../../config/logger.js';
 import { type LlmCallRecorder, NoopLlmCallRecorder } from '../llm-call-recorder.js';
-import type { Planner, PlannerContext, SelfHealContext } from '../planner.js';
+import type { HealResult, Planner, PlannerContext, SelfHealContext } from '../planner.js';
 import type { PlannedStep } from '../task-controller.js';
 
 /**
@@ -180,8 +180,10 @@ export class AnthropicPlanner implements Planner {
    * the model declines, returns null and the caller falls through to
    * the normal retries-exhausted path.
    */
-  async healSelector(ctx: SelfHealContext): Promise<ResilientSelector | null> {
-    if (!ctx.originalStep.selector) return null;
+  async healSelector(ctx: SelfHealContext): Promise<HealResult> {
+    if (!ctx.originalStep.selector) {
+      return { selector: null, elapsedMs: 0, inputTokens: 0, outputTokens: 0 };
+    }
     const startedAt = Date.now();
     try {
       const userBlocks: Anthropic.ContentBlockParam[] = [];
@@ -219,6 +221,12 @@ export class AnthropicPlanner implements Planner {
       const toolUse = response.content.find(
         (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === HEAL_TOOL_NAME,
       );
+      const healMeta = {
+        elapsedMs,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+      } as const;
+
       if (!toolUse) {
         if (ctx.userId) {
           await this.recorder.record({
@@ -232,7 +240,7 @@ export class AnthropicPlanner implements Planner {
             errorMessage: `missing ${HEAL_TOOL_NAME} tool_use block`,
           });
         }
-        return null;
+        return { selector: null, ...healMeta };
       }
 
       const parsed = resilientSelectorSchema.safeParse(toolUse.input);
@@ -249,7 +257,7 @@ export class AnthropicPlanner implements Planner {
             errorMessage: parsed.error.message.slice(0, 512),
           });
         }
-        return null;
+        return { selector: null, ...healMeta };
       }
 
       logger.info(
@@ -280,13 +288,20 @@ export class AnthropicPlanner implements Planner {
         });
       }
 
-      return parsed.data;
+      return { selector: parsed.data, ...healMeta };
     } catch (err) {
       // Anthropic 4xx/5xx, network, SDK error — any throw → decline.
       // Caller falls back to normal retry-exhausted path; user sees
       // retries_exhausted paused state, same as pre-self-heal world.
+      // Return an elapsed measurement so the row still records that
+      // we spent wall-clock on the attempt; tokens we can't know.
       logger.warn({ err, userId: ctx.userId }, 'selector self-heal declined (upstream error)');
-      return null;
+      return {
+        selector: null,
+        elapsedMs: Date.now() - startedAt,
+        inputTokens: 0,
+        outputTokens: 0,
+      };
     }
   }
 }

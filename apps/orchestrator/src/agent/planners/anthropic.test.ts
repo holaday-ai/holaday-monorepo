@@ -355,10 +355,14 @@ describe('AnthropicPlanner.healSelector', () => {
       diagnostic,
     });
 
-    expect(healed).not.toBeNull();
-    expect(healed?.description).toBe('Baidu result headlines (healed)');
-    expect(healed?.strategies).toHaveLength(3);
-    expect(healed?.strategies[0]).toEqual({ kind: 'css', value: '#content_left h3 a' });
+    expect(healed.selector).not.toBeNull();
+    expect(healed.selector?.description).toBe('Baidu result headlines (healed)');
+    expect(healed.selector?.strategies).toHaveLength(3);
+    expect(healed.selector?.strategies[0]).toEqual({ kind: 'css', value: '#content_left h3 a' });
+    // HealResult also reports metrics — even on a synthetic test fixture.
+    expect(typeof healed.elapsedMs).toBe('number');
+    expect(healed.inputTokens).toBe(100);
+    expect(healed.outputTokens).toBe(50);
 
     // Verify the request included the screenshot as an image block.
     // Anthropic SDK's MessageCreateParams is a discriminated union
@@ -396,7 +400,7 @@ describe('AnthropicPlanner.healSelector', () => {
       originalStep: failingStep,
       diagnostic,
     });
-    expect(healed).toBeNull();
+    expect(healed.selector).toBeNull();
   });
 
   it('returns null when the tool_use input fails ResilientSelector schema', async () => {
@@ -409,7 +413,7 @@ describe('AnthropicPlanner.healSelector', () => {
       originalStep: failingStep,
       diagnostic,
     });
-    expect(healed).toBeNull();
+    expect(healed.selector).toBeNull();
   });
 
   it('returns null when the API call throws (contract: never throws)', async () => {
@@ -421,7 +425,7 @@ describe('AnthropicPlanner.healSelector', () => {
       originalStep: failingStep,
       diagnostic,
     });
-    expect(healed).toBeNull();
+    expect(healed.selector).toBeNull();
   });
 
   it('records a commander.heal row with usage + purpose=commander.heal when userId is present', async () => {
@@ -468,7 +472,7 @@ describe('AnthropicPlanner.healSelector', () => {
       originalStep: { ...failingStep, selector: undefined },
       diagnostic,
     });
-    expect(healed).toBeNull();
+    expect(healed.selector).toBeNull();
     expect(called).toBe(false);
   });
 });

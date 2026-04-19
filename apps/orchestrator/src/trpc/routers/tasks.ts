@@ -397,7 +397,94 @@ export const tasksRouter = router({
         })),
       };
     }),
+
+  /**
+   * P1.1 self-heal metrics — aggregate over the caller's task_steps
+   * rows. `healStats` powers the W3 dogfood decision "is self-heal
+   * worth keeping / tuning / expanding to 2 retries?" by measuring:
+   *   - attempts: how often a step triggered a heal call
+   *   - successes: of those, how many were followed by an ok retry
+   *   - successRate: successes / attempts
+   *   - avgElapsedMs: average wall-clock per heal call
+   *   - totalInputTokens / totalOutputTokens: Anthropic token spend
+   *
+   * Scoped strictly to the caller so one account's rates don't
+   * average-out into another's. Empty result (no heals ever) returns
+   * zeros — not an error.
+   */
+  healStats: protectedProcedure
+    .input(
+      z
+        .object({
+          /** ISO timestamp; inclusive lower bound on step created_at. */
+          since: z.string().datetime().optional(),
+        })
+        .default({}),
+    )
+    .query(async ({ ctx, input }) => {
+      const [userRow] = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.externalId, ctx.userId))
+        .limit(1);
+      if (!userRow) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+      }
+
+      const sinceCond = input.since
+        ? sqlFilter`AND ts.created_at >= ${new Date(input.since)}`
+        : sqlEmpty;
+
+      // A single aggregation against task_steps JOIN tasks; cheaper
+      // than pulling all rows and folding in JS, and the query is
+      // simple enough to SQL-native.
+      const result = (await ctx.db.execute(sqlFilter`
+        SELECT
+          COALESCE(SUM(CASE WHEN ts.heal_attempts > 0 THEN 1 ELSE 0 END), 0)  AS attempts,
+          COALESCE(SUM(CASE WHEN ts.heal_succeeded > 0 THEN 1 ELSE 0 END), 0) AS successes,
+          COALESCE(AVG(NULLIF(ts.heal_elapsed_ms, 0)), 0)                    AS avgElapsedMs,
+          COALESCE(SUM(COALESCE(ts.heal_input_tokens, 0)), 0)                AS totalInputTokens,
+          COALESCE(SUM(COALESCE(ts.heal_output_tokens, 0)), 0)               AS totalOutputTokens
+        FROM task_steps ts
+        JOIN tasks t ON ts.task_id = t.id
+        WHERE t.user_id = ${userRow.id}
+        ${sinceCond}
+      `)) as unknown as [Array<Record<string, unknown>>] | Array<Record<string, unknown>>;
+
+      // mysql2 returns `[rows, fields]`; drizzle's mysql2 wrapper
+      // sometimes unwraps to `rows`. Handle both.
+      const rows: Array<Record<string, unknown>> = Array.isArray(result[0])
+        ? (result[0] as Array<Record<string, unknown>>)
+        : (result as unknown as Array<Record<string, unknown>>);
+      const row = rows[0] ?? {};
+      const attempts = toNumber(row.attempts);
+      const successes = toNumber(row.successes);
+      const avgElapsedMs = toNumber(row.avgElapsedMs);
+      const totalInputTokens = toNumber(row.totalInputTokens);
+      const totalOutputTokens = toNumber(row.totalOutputTokens);
+      return {
+        attempts,
+        successes,
+        successRate: attempts > 0 ? successes / attempts : 0,
+        avgElapsedMs,
+        totalInputTokens,
+        totalOutputTokens,
+      };
+    }),
 });
+
+import { sql as sqlFilter } from 'drizzle-orm';
+const sqlEmpty = sqlFilter``;
+
+function toNumber(v: unknown): number {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (typeof v === 'bigint') return Number(v);
+  return 0;
+}
 
 function normalizeOutput(value: unknown): unknown {
   if (typeof value === 'string') {

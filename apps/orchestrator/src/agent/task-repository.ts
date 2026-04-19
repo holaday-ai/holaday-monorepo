@@ -1,5 +1,5 @@
 import { newExternalId } from '@holaday/shared-types';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { taskEvents } from '../db/schema/task-events.js';
 import { taskSteps } from '../db/schema/task-steps.js';
@@ -269,6 +269,58 @@ export class TaskRepository {
    * is awaiting_user, re-emit server.user.confirm from the persisted
    * pending_confirm_payload.
    */
+  /**
+   * Record one self-heal attempt on a task_steps row. Called from the
+   * WS server AFTER `planner.healSelector` returns (whether it
+   * produced a replacement selector or declined). Increments
+   * `heal_attempts` atomically; overwrites `heal_elapsed_ms` /
+   * `heal_input_tokens` / `heal_output_tokens` with the latest
+   * attempt's numbers (P1.1 defaults to one heal attempt per step;
+   * if a future change allows N attempts per step we'd switch these
+   * to cumulative sums — for now the single-attempt sum IS the
+   * cumulative sum).
+   */
+  async recordHealAttempt(params: {
+    taskExternalId: string;
+    stepExternalId: string;
+    elapsedMs: number;
+    inputTokens: number;
+    outputTokens: number;
+  }): Promise<void> {
+    await this.db.execute(sql`
+      UPDATE task_steps ts
+      JOIN tasks t ON ts.task_id = t.id
+      SET
+        ts.heal_attempts = ts.heal_attempts + 1,
+        ts.heal_elapsed_ms = ${params.elapsedMs},
+        ts.heal_input_tokens = ${params.inputTokens},
+        ts.heal_output_tokens = ${params.outputTokens}
+      WHERE t.external_id = ${params.taskExternalId}
+        AND ts.external_id = ${params.stepExternalId}
+    `);
+  }
+
+  /**
+   * Flip `heal_succeeded` to 1 on a previously-healed step when the
+   * retry actually succeeded. Called when the WS server receives an
+   * `ok` step.result for a step whose prior failure triggered
+   * `recordHealAttempt`. The in-memory tracking of "was this step
+   * healed?" lives on ClientState.healedStepIds so we don't need a
+   * SELECT round-trip to check heal_attempts here.
+   */
+  async markHealSucceeded(params: {
+    taskExternalId: string;
+    stepExternalId: string;
+  }): Promise<void> {
+    await this.db.execute(sql`
+      UPDATE task_steps ts
+      JOIN tasks t ON ts.task_id = t.id
+      SET ts.heal_succeeded = 1
+      WHERE t.external_id = ${params.taskExternalId}
+        AND ts.external_id = ${params.stepExternalId}
+    `);
+  }
+
   async rehydrateInFlight(): Promise<RehydratedTask[]> {
     const rows = await this.db
       .select({

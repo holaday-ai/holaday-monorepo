@@ -65,15 +65,32 @@ export interface SelfHealContext {
   };
 }
 
+/**
+ * Richer return shape for `healSelector` so the caller (WS server)
+ * can persist cost + latency on the task_steps row for P1.1's
+ * healStats aggregations — without doing a second DB query or a
+ * join against llm_calls.
+ *
+ * `selector: null` means "declined" — API error, schema parse fail,
+ * or missing tool_use block. Tokens/elapsed are still reported on
+ * the declined path so the cost of the failed attempt is counted.
+ */
+export interface HealResult {
+  selector: ResilientSelector | null;
+  elapsedMs: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export interface Planner {
   /** Build the initial plan from the user's intent. */
   plan(ctx: PlannerContext): Promise<PlannedStep[]>;
   /**
    * On SELECTOR_NOT_FOUND, rewrite a single selector from the failure
-   * diagnostic. Returns the replacement ResilientSelector, or null to
-   * decline (caller then falls through to the normal retry-exhausted
-   * path). MUST NOT throw — a heal that can't produce a useful
-   * selector should just return null.
+   * diagnostic. Returns a HealResult whose `selector` is the
+   * replacement or null when the model declined. MUST NOT throw —
+   * a heal that can't produce a useful selector should just return
+   * `{selector: null, ...zeros}`.
    */
-  healSelector(ctx: SelfHealContext): Promise<ResilientSelector | null>;
+  healSelector(ctx: SelfHealContext): Promise<HealResult>;
 }

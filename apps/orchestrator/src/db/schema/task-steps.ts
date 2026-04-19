@@ -32,6 +32,19 @@ export const taskSteps = mysqlTable(
     riskLevel: varchar('risk_level', { length: 16 }).notNull().default('low'),
     /** Phase 0: ≤ MAX_STEP_RETRIES before step failure escalates to task pause. */
     retryCount: int('retry_count').notNull().default(0),
+    /**
+     * Self-heal metrics (P1.1). Populated by the WS server when
+     * `planner.healSelector()` is invoked in response to a
+     * SELECTOR_NOT_FOUND on this step. `healSucceeded` tracks whether
+     * the returned selector produced an ok step result on the retry.
+     * Elapsed + token counts let `tasks.healStats` compute cost and
+     * latency per heal event.
+     */
+    healAttempts: int('heal_attempts').notNull().default(0),
+    healSucceeded: int('heal_succeeded').notNull().default(0),
+    healElapsedMs: int('heal_elapsed_ms'),
+    healInputTokens: int('heal_input_tokens'),
+    healOutputTokens: int('heal_output_tokens'),
     input: json('input'),
     output: json('output'),
     screenshotKey: varchar('screenshot_key', { length: 255 }),
@@ -54,6 +67,7 @@ export const taskSteps = mysqlTable(
     uniqueIndex('uk_task_steps_task_seq').on(t.taskId, t.seq),
     index('ix_task_steps_status').on(t.status),
     index('ix_task_steps_parent').on(t.parentStepId),
+    index('ix_task_steps_heal_attempts').on(t.healAttempts),
   ],
 );
 
