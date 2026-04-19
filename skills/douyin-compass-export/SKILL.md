@@ -74,6 +74,7 @@ HOLA DAY 不做抖音授权——**强依赖用户在 Chrome 已登录商家号*
 |---|---|---|---|
 | 登录页检测 | — | "登录" / "账号登录" | `form[action*="login"]`、`a[href*="passport"]` |
 | 时间筛选按钮 | `button` name="时间" / "筛选" | "昨日" / "近 7 天" / "本月" | `.compass-header [data-testid="date-picker"]` |
+| 时间窗 tab（不要硬编码一种写法）| `tab` name="近 7 天" / "最近7天" / "7天" / "7日" / "Last 7 days" | 同左（至少 3 个候选） | `[class*='tab'][aria-label*='7']` |
 | 商品分析 tab | `tab` name="商品分析" | "商品分析" | `.compass-nav [data-tab="product"]` |
 | 直播分析 tab | `tab` name="直播分析" | "直播分析" | `.compass-nav [data-tab="live"]` |
 | 流量分析 tab | `tab` name="流量分析" | "流量分析" | `.compass-nav [data-tab="traffic"]` |

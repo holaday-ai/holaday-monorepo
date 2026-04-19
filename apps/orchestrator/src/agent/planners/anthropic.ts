@@ -372,7 +372,19 @@ plan failure in dogfood.
     page. A keyboard submit is human-equivalent and bypasses this
     whole failure mode.
 
-(5) If you are not confident about the target site's DOM, emit a
+(5) For \`<input>\` and \`<textarea>\` targets, emit \`type\` directly —
+    NEVER a \`click\` step before it. The executor's \`type\` action
+    focuses the element itself, so a prior \`click\` is pure
+    overhead AND the visibility check in \`click\` is stricter than
+    what \`type\`/\`fill\` needs — text inputs that are technically
+    rendered but hidden by an animating wrapper (Baidu's homepage
+    #kw fades in; many login modals mount with opacity:0 → 1) will
+    pass type but fail click-with-visibility. The correct plan is:
+      wait (input attached) → type (payload.text) → key "Enter"
+    This also applies to contenteditable editors (Douyin comment
+    compose, Xueqiu post box) — go straight to type.
+
+(6) If you are not confident about the target site's DOM, emit a
     short diagnostic prefix first:
       goto <url> → wait (generous timeout, ~10s) → screenshot
     The executor captures the page and on a SELECTOR_NOT_FOUND

@@ -75,6 +75,7 @@ commander 解析时提取：**时间窗**、**评分筛选**、**主题筛选（
 |---|---|---|---|
 | 评论列表 tab | `tab` name="评论" | "评论管理" / "评论中心" | `[data-tab="comments"]` |
 | 时间筛选 | `button` name="时间" | "近 7 天" / "昨日" | `[data-testid="date-picker"]` |
+| 时间窗 tab（不要硬编码一种写法）| `tab` name="近 7 天" / "最近7天" / "7天" / "7日" / "Last 7 days" | 同左（至少 3 个候选） | `[class*='tab'][aria-label*='7']` |
 | 评分筛选 | `combobox` / `listbox` | "评分" | `.filter-rating select` |
 | 单条评论行 | `row` / `listitem` | — | `.comment-list .comment-item` |
 | 未回标签 | — | "未回复" | `.comment-item .badge-unreplied` |
