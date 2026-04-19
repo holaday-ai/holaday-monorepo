@@ -11,6 +11,9 @@ importers:
       '@biomejs/biome':
         specifier: 1.9.4
         version: 1.9.4
+      '@types/global-agent':
+        specifier: ^3.0.0
+        version: 3.0.0
       rimraf:
         specifier: 6.0.1
         version: 6.0.1
@@ -1666,6 +1669,9 @@ packages:
 
   '@types/filewriter@0.0.33':
     resolution: {integrity: sha512-xFU8ZXTw4gd358lb2jw25nxY9QAgqn2+bKKjKOYfNCzN4DKCFetK7sPtrlpg66Ywe3vWY9FNxprZawAh9wfJ3g==}
+
+  '@types/global-agent@3.0.0':
+    resolution: {integrity: sha512-OmvaPJtTaY/wd1hxelLJmf8oKQpmKZdrlfQ+MWL59eKSEHJDDEifIo69248bdJ0yLIN+iMNQ6sKMtnwU6AxajA==}
 
   '@types/har-format@1.2.16':
     resolution: {integrity: sha512-fluxdy7ryD3MV6h8pTfTYpy/xQzCFC7m89nOH9y94cNqJ1mDIDPut7MnRHI3F6qRmh/cT2fUjG1MLdCNb4hE9A==}
@@ -4073,6 +4079,8 @@ snapshots:
       '@types/filewriter': 0.0.33
 
   '@types/filewriter@0.0.33': {}
+
+  '@types/global-agent@3.0.0': {}
 
   '@types/har-format@1.2.16': {}
 
