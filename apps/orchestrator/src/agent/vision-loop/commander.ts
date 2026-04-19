@@ -25,8 +25,8 @@
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
-import type { VisionAction } from './actions.js';
-import type { ResizedImage } from './image.js';
+import { VISION_TOOLS, type VisionAction, decodeToolUse } from './actions.js';
+import { type ResizedImage, resizeForVisionModel } from './image.js';
 
 /**
  * Live state of the page as seen by the commander at the start of
@@ -67,6 +67,15 @@ export interface VisionLoopTurn {
    * the next turn and can adjust.
    */
   executionResult?: { ok: boolean; message?: string };
+  /**
+   * `tool_use_id` Claude assigned when it emitted THIS turn's action.
+   * We need to round-trip it on the next tick: Anthropic's protocol
+   * requires a `tool_result` block with matching `tool_use_id` to pair
+   * the new observation with the prior tool_use. The runner captures
+   * it from `VisionDecision.toolUseId` and writes it here when it
+   * records the completed turn.
+   */
+  toolUseId?: string;
 }
 
 export interface VisionLoopContext {
@@ -104,6 +113,9 @@ export interface VisionDecision {
   /** Resize descriptor actually sent this tick — caller uses scaleX/Y
    *  to translate click coordinates back to real viewport pixels. */
   image: ResizedImage;
+  /** Anthropic's tool_use_id for THIS turn's action. Undefined when the
+   *  action was synthesised (e.g. model returned no tool_use → give_up). */
+  toolUseId?: string;
   elapsedMs: number;
   inputTokens: number;
   outputTokens: number;
@@ -143,8 +155,8 @@ export interface AnthropicVisionLoopCommanderOptions {
   maxTokens?: number;
 }
 
-const DEFAULT_MODEL = 'claude-opus-4-7';
-const DEFAULT_MAX_TOKENS = 4_000;
+const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+const DEFAULT_MAX_TOKENS = 1_024;
 
 export class AnthropicVisionLoopCommander implements VisionLoopCommander {
   private readonly client: Anthropic;
@@ -157,31 +169,286 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
     this.maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS;
   }
 
-  async decideNextAction(_ctx: VisionLoopContext): Promise<VisionDecision> {
-    // TODO Phase A next commit:
-    //   1. resizeForVisionModel(ctx.observation.screenshotBase64, w, h)
-    //   2. Build messages[]:
-    //      - system: VISION_SYSTEM_PROMPT (role, constraints, coord conv)
-    //      - user:  [image(resized.base64), text(intent + url + title + skillHint)]
-    //      - for each prior turn in ctx.history, append {role:'assistant',
-    //        content:[tool_use]} + {role:'user', content:[image, executionResult]}
-    //   3. client.messages.create({ model, max_tokens, system, tools: VISION_TOOLS,
-    //                              tool_choice: { type: 'any' }, messages })
-    //   4. Find the FIRST tool_use block in response.content (ignore any
-    //      narrative text that came before it; log it into `reasoning`)
-    //   5. decodeToolUse(block.name, block.input) → VisionAction
-    //   6. Return VisionDecision{action, image: resized, usage…}
-    //
-    // Error-handling contract: any throw from the SDK is caught and
-    // converted to a `give_up` action. The loop driver pauses the
-    // task with that reason — no retries, no silent failures.
-    void this.client;
-    void this.model;
-    void this.maxTokens;
-    throw new Error(
-      'AnthropicVisionLoopCommander.decideNextAction: not implemented (Phase A skeleton)',
+  async decideNextAction(ctx: VisionLoopContext): Promise<VisionDecision> {
+    const startedAt = Date.now();
+    // 1. Resize the current observation to ≤1568px long edge. The
+    //    resulting `image` descriptor travels with the VisionDecision
+    //    so callers can translate Claude's click coords back to real
+    //    viewport pixels via `modelCoordToReal`.
+    let image: ResizedImage;
+    try {
+      image = await resizeForVisionModel(
+        ctx.observation.screenshotBase64,
+        ctx.observation.viewportWidth,
+        ctx.observation.viewportHeight,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return synthesiseGiveUp(
+        `image resize failed: ${message}`,
+        startedAt,
+        emptyResizedImage(ctx.observation),
+      );
+    }
+
+    // 2. Build Anthropic messages[]. For each prior turn we emit an
+    //    assistant tool_use block (recreated from VisionLoopTurn.action
+    //    + toolUseId) plus a user tool_result block that wraps the
+    //    observation Claude received AFTER executing that action.
+    //    Current tick's observation goes last as a user message.
+    let messages: Anthropic.MessageParam[];
+    try {
+      messages = await buildMessages(ctx, image);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return synthesiseGiveUp(`message build failed: ${message}`, startedAt, image);
+    }
+
+    // 3. Call Anthropic. `tool_choice: { type: 'any' }` forces the
+    //    model to emit SOME tool_use every tick; that's the whole
+    //    protocol — we never want a text-only response.
+    let response: Anthropic.Message;
+    try {
+      response = await this.client.messages.create({
+        model: this.model,
+        max_tokens: this.maxTokens,
+        system: VISION_SYSTEM_PROMPT,
+        tools: VISION_TOOLS as unknown as Anthropic.Tool[],
+        tool_choice: { type: 'any' },
+        messages,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return synthesiseGiveUp(`Anthropic API error: ${message}`, startedAt, image);
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    const usage = {
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      cacheReadInputTokens: response.usage.cache_read_input_tokens ?? 0,
+      cacheCreationInputTokens: response.usage.cache_creation_input_tokens ?? 0,
+    };
+
+    // 4. Extract narrative text (for logs) + the first tool_use block.
+    //    Models sometimes emit a short "I'll click the search button"
+    //    before the tool_use; keep it as `reasoning` rather than drop.
+    let reasoning: string | undefined;
+    let toolUse: Anthropic.ToolUseBlock | undefined;
+    for (const block of response.content) {
+      if (block.type === 'text' && !reasoning) reasoning = block.text.slice(0, 2_000);
+      if (block.type === 'tool_use' && !toolUse) toolUse = block;
+    }
+
+    // 5. Decode tool_use → VisionAction. decodeToolUse never throws —
+    //    unknown tool names / bad inputs become a `give_up` action so
+    //    the loop exits cleanly.
+    if (!toolUse) {
+      return {
+        action: {
+          kind: 'give_up',
+          reason: `Claude returned no tool_use block; stop_reason=${response.stop_reason}`,
+        },
+        ...(reasoning ? { reasoning } : {}),
+        image,
+        elapsedMs,
+        ...usage,
+      };
+    }
+    const action = decodeToolUse(toolUse.name, toolUse.input);
+
+    return {
+      action,
+      ...(reasoning ? { reasoning } : {}),
+      image,
+      toolUseId: toolUse.id,
+      elapsedMs,
+      ...usage,
+    };
+  }
+}
+
+/**
+ * Build the Anthropic `messages[]` array from a VisionLoopContext.
+ * Each historical turn becomes two content blocks on the wire:
+ *
+ *   assistant: [tool_use(name=mapFromKind(turn.action), id=turn.toolUseId)]
+ *   user:      [tool_result(tool_use_id=turn.toolUseId, content=[image, text])]
+ *
+ * First tick has empty history; we emit a single user message with
+ * [image, text(intent + url + title + skillHint?)] and let Claude
+ * choose its first tool_use.
+ */
+async function buildMessages(
+  ctx: VisionLoopContext,
+  currentImage: ResizedImage,
+): Promise<Anthropic.MessageParam[]> {
+  const messages: Anthropic.MessageParam[] = [];
+
+  // Initial user message — the goal + first screenshot. Always prepended.
+  const initial = ctx.history[0];
+  const firstObservation = initial ? initial.observation : ctx.observation;
+  const firstImageB64 = initial
+    ? (
+        await resizeForVisionModel(
+          firstObservation.screenshotBase64,
+          firstObservation.viewportWidth,
+          firstObservation.viewportHeight,
+        )
+      ).base64
+    : currentImage.base64;
+  messages.push({
+    role: 'user',
+    content: [
+      {
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/jpeg', data: firstImageB64 },
+      },
+      {
+        type: 'text',
+        text: initialUserText(ctx, firstObservation),
+      },
+    ],
+  });
+
+  // Walk history from the oldest completed turn forward.
+  for (let i = 0; i < ctx.history.length; i++) {
+    const turn = ctx.history[i];
+    if (!turn || !turn.toolUseId) continue; // skip unpaired (should not happen)
+    messages.push({
+      role: 'assistant',
+      content: [toolUseBlockFor(turn.action, turn.toolUseId)],
+    });
+
+    // For each turn past the first, the OBSERVATION that belongs to it
+    // (what Claude sees AFTER executing that turn's action) is the
+    // NEXT turn's observation, or the current observation if this was
+    // the last recorded turn.
+    const nextTurn = ctx.history[i + 1];
+    const nextObservation = nextTurn ? nextTurn.observation : ctx.observation;
+    const nextImageB64 = nextTurn
+      ? (
+          await resizeForVisionModel(
+            nextObservation.screenshotBase64,
+            nextObservation.viewportWidth,
+            nextObservation.viewportHeight,
+          )
+        ).base64
+      : currentImage.base64;
+    messages.push({
+      role: 'user',
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: turn.toolUseId,
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/jpeg', data: nextImageB64 },
+            },
+            {
+              type: 'text',
+              text: followupUserText(turn, nextObservation),
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  return messages;
+}
+
+function initialUserText(ctx: VisionLoopContext, obs: VisionObservation): string {
+  const lines: string[] = [];
+  lines.push(`User intent: ${ctx.intent}`);
+  lines.push(`Current URL: ${obs.url || '(blank)'}`);
+  lines.push(`Current page title: ${obs.title || '(blank)'}`);
+  lines.push(
+    `Viewport (model-space): ${ctx.observation.viewportWidth}×${ctx.observation.viewportHeight}; screenshot below is the current state of the tab.`,
+  );
+  lines.push(`Tick ${obs.tickIndex} of at most ${ctx.maxSteps}.`);
+  if (ctx.skillHint) {
+    lines.push('');
+    lines.push('Context for this site (optional hint, may be stale):');
+    lines.push(ctx.skillHint);
+  }
+  lines.push('');
+  lines.push(
+    'Pick ONE tool call. Call task_done when the intent is satisfied, task_give_up when you cannot proceed.',
+  );
+  return lines.join('\n');
+}
+
+function followupUserText(turn: VisionLoopTurn, obs: VisionObservation): string {
+  const lines: string[] = [];
+  if (turn.executionResult) {
+    lines.push(
+      turn.executionResult.ok
+        ? `Previous action executed.${
+            turn.executionResult.message ? ` ${turn.executionResult.message}` : ''
+          }`
+        : `Previous action FAILED: ${turn.executionResult.message ?? 'no detail'}`,
     );
   }
+  lines.push(`URL: ${obs.url || '(blank)'}   Title: ${obs.title || '(blank)'}`);
+  lines.push(`Tick ${obs.tickIndex}.`);
+  return lines.join('\n');
+}
+
+/**
+ * Translate a VisionAction back into the shape Anthropic expects for
+ * an assistant `tool_use` block. This is the reverse of `decodeToolUse`
+ * and we keep the names in sync with VISION_TOOLS.
+ */
+function toolUseBlockFor(action: VisionAction, id: string): Anthropic.ToolUseBlockParam {
+  const base = { type: 'tool_use' as const, id };
+  switch (action.kind) {
+    case 'click':
+      return {
+        ...base,
+        name: 'computer_click',
+        input: { x: action.x, y: action.y, button: action.button ?? 'left' },
+      };
+    case 'type':
+      return { ...base, name: 'computer_type', input: { text: action.text } };
+    case 'key':
+      return { ...base, name: 'computer_key', input: { key: action.key } };
+    case 'scroll':
+      return { ...base, name: 'computer_scroll', input: { dy: action.dy } };
+    case 'wait':
+      return { ...base, name: 'computer_wait', input: { ms: action.ms } };
+    case 'screenshot':
+      return { ...base, name: 'computer_screenshot', input: {} };
+    case 'done':
+      return { ...base, name: 'task_done', input: { summary: action.summary } };
+    case 'give_up':
+      return { ...base, name: 'task_give_up', input: { reason: action.reason } };
+  }
+}
+
+function emptyResizedImage(obs: VisionObservation): ResizedImage {
+  return {
+    base64: obs.screenshotBase64,
+    originalWidth: obs.viewportWidth,
+    originalHeight: obs.viewportHeight,
+    resizedWidth: obs.viewportWidth,
+    resizedHeight: obs.viewportHeight,
+    scaleX: 1,
+    scaleY: 1,
+  };
+}
+
+function synthesiseGiveUp(reason: string, startedAt: number, image: ResizedImage): VisionDecision {
+  return {
+    action: { kind: 'give_up', reason },
+    image,
+    elapsedMs: Date.now() - startedAt,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -193,15 +460,55 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
 
 export const VISION_SYSTEM_PROMPT = `You are HOLA DAY's browser operating agent.
 
-You control a real Chrome tab belonging to the user. Each turn you will
-receive a screenshot of the current viewport plus the user's intent.
-Pick ONE action using the provided tools. Coordinates are in screenshot
-pixels, top-left origin.
+You control a real Chrome tab belonging to the user. Each turn you
+receive a screenshot of the current viewport plus the user's goal.
+Pick ONE action using the provided tools. The user WILL SEE every
+action you take because it happens on their real screen.
 
-<TODO: flesh out in Phase A impl commit — refusal rules, scroll guidance,
-multi-step decomposition, "when to screenshot vs when to click", "how
-to handle login walls / captchas" (call task_give_up with a clear
-reason), done-criteria for common intents.>`;
+Coordinate system:
+- All (x, y) are in the screenshot's pixel space, top-left origin.
+- The screenshot you see IS the model-space — click coordinates as
+  they appear in the image. The executor handles scaling back to the
+  user's real viewport.
+
+Tool selection:
+- computer_click — tap buttons, links, tabs, form fields. Click a
+  text input BEFORE typing into it; computer_type does not focus.
+- computer_type — type into the currently focused field. No shortcuts
+  or special keys here — use computer_key for those.
+- computer_key — single keys or chords: "Enter", "Tab", "Escape",
+  "ctrl+a", "cmd+c". Use for form submit, field nav, common shortcuts.
+- computer_scroll — dy positive scrolls down, negative up. Use when
+  the target element is off-screen.
+- computer_wait — only when a prior action is visibly still loading;
+  not a default "wait between steps". Most transitions are instant.
+- computer_screenshot — re-observe without acting. Rare; use when
+  you know the page just changed but the last action wasn't yours
+  (e.g. a popup appeared).
+- task_done — fire when the user's goal is satisfied. Include a
+  concise summary of what you accomplished.
+- task_give_up — fire when you cannot proceed: captcha, login wall,
+  missing button, ambiguous goal, >5 repeated failed attempts at the
+  same element. Include a clear reason so the user knows what to do.
+
+Rules:
+- One tool call per turn. Never narrate a plan; execute the next step.
+- If the goal has multiple sub-steps, do the FIRST visible one now;
+  subsequent turns will handle the rest.
+- Ground every click on what you SEE in the screenshot — never guess
+  at a coordinate because the element "usually" is there.
+- When an input field needs text, click it FIRST, then type.
+- If you've taken >20 actions on what should be a simple goal, call
+  task_give_up — something is structurally stuck.
+- Never enter the user's password, 2FA code, or payment details, even
+  if the field is focused. If those are required, task_give_up with
+  reason "manual credential entry required".
+
+Safety:
+- You cannot see beyond the current viewport — scroll to explore.
+- The user's tab may be on ANY site; trust only what's on screen.
+- Do not click "unsubscribe", "delete account", or destructive
+  buttons unless the user's goal explicitly asks for that action.`;
 
 /**
  * Hard cap on loop iterations per task. Phase A: 30. Most real flows

@@ -176,12 +176,132 @@ export const VISION_TOOLS = [
   },
 ] as const;
 
+import { z } from 'zod';
+
 /**
- * Decode a single Anthropic tool_use block into a `VisionAction`. TODO
- * Phase A: implement with zod schemas per tool and a dispatch on
- * `block.name`. Rejects unknown tool names with a parse error so the
- * loop treats them as `give_up` rather than silently dropping them.
+ * Per-tool zod schemas for Claude's tool_use input blobs. One for each
+ * entry in `VISION_TOOLS`; the dispatcher in `decodeToolUse` picks by
+ * tool name. Using zod rather than trusting the API keeps us honest
+ * about what Claude actually sent — Anthropic's JSON Schema isn't a
+ * parse-guarantee, just a model hint.
  */
-export function decodeToolUse(_toolName: string, _input: unknown): VisionAction {
-  throw new Error('vision-loop/actions.decodeToolUse: not implemented (Phase A skeleton)');
+const clickInputSchema = z.object({
+  x: z.number().int().nonnegative(),
+  y: z.number().int().nonnegative(),
+  button: z.enum(['left', 'right', 'middle']).default('left'),
+});
+const typeInputSchema = z.object({
+  text: z.string().min(0),
+});
+const keyInputSchema = z.object({
+  key: z.string().min(1),
+});
+const scrollInputSchema = z.object({
+  dy: z.number().int(),
+});
+const waitInputSchema = z.object({
+  ms: z.number().int().min(100).max(10_000),
+});
+const screenshotInputSchema = z.object({}).passthrough();
+const doneInputSchema = z.object({
+  summary: z.string().min(1),
+});
+const giveUpInputSchema = z.object({
+  reason: z.string().min(1),
+});
+
+/**
+ * Decode a single Anthropic `tool_use` content block into a structured
+ * `VisionAction`. Caller passes the block's `name` and `input`; this
+ * dispatches on `name` and validates `input` against the matching
+ * zod schema.
+ *
+ * Never throws — unknown tool names or malformed input become a
+ * `give_up` action so the loop exits cleanly with a descriptive
+ * reason instead of the whole task crashing. Anthropic occasionally
+ * emits plausible-looking but wrong tool names (esp. under rate-limit
+ * retries) so we treat that as a model fail, not a code bug.
+ */
+export function decodeToolUse(toolName: string, input: unknown): VisionAction {
+  switch (toolName) {
+    case 'computer_click': {
+      const r = clickInputSchema.safeParse(input);
+      if (!r.success) {
+        return {
+          kind: 'give_up',
+          reason: `computer_click bad input: ${r.error.message.slice(0, 200)}`,
+        };
+      }
+      return { kind: 'click', x: r.data.x, y: r.data.y, button: r.data.button };
+    }
+    case 'computer_type': {
+      const r = typeInputSchema.safeParse(input);
+      if (!r.success) {
+        return {
+          kind: 'give_up',
+          reason: `computer_type bad input: ${r.error.message.slice(0, 200)}`,
+        };
+      }
+      return { kind: 'type', text: r.data.text };
+    }
+    case 'computer_key': {
+      const r = keyInputSchema.safeParse(input);
+      if (!r.success) {
+        return {
+          kind: 'give_up',
+          reason: `computer_key bad input: ${r.error.message.slice(0, 200)}`,
+        };
+      }
+      return { kind: 'key', key: r.data.key };
+    }
+    case 'computer_scroll': {
+      const r = scrollInputSchema.safeParse(input);
+      if (!r.success) {
+        return {
+          kind: 'give_up',
+          reason: `computer_scroll bad input: ${r.error.message.slice(0, 200)}`,
+        };
+      }
+      return { kind: 'scroll', dy: r.data.dy };
+    }
+    case 'computer_wait': {
+      const r = waitInputSchema.safeParse(input);
+      if (!r.success) {
+        return {
+          kind: 'give_up',
+          reason: `computer_wait bad input: ${r.error.message.slice(0, 200)}`,
+        };
+      }
+      return { kind: 'wait', ms: r.data.ms };
+    }
+    case 'computer_screenshot': {
+      screenshotInputSchema.safeParse(input); // tolerant: ignores extra keys
+      return { kind: 'screenshot' };
+    }
+    case 'task_done': {
+      const r = doneInputSchema.safeParse(input);
+      if (!r.success) {
+        return {
+          kind: 'give_up',
+          reason: `task_done bad input: ${r.error.message.slice(0, 200)}`,
+        };
+      }
+      return { kind: 'done', summary: r.data.summary };
+    }
+    case 'task_give_up': {
+      const r = giveUpInputSchema.safeParse(input);
+      if (!r.success) {
+        // Fallback: if Claude called task_give_up without a reason,
+        // we still want to exit the loop — manufacture a reason rather
+        // than recursing.
+        return { kind: 'give_up', reason: 'Claude called task_give_up without a valid reason' };
+      }
+      return { kind: 'give_up', reason: r.data.reason };
+    }
+    default:
+      return {
+        kind: 'give_up',
+        reason: `unknown tool_use from Claude: ${toolName}`,
+      };
+  }
 }

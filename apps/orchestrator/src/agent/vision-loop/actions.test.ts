@@ -1,0 +1,137 @@
+import { describe, expect, it } from 'vitest';
+import { VISION_TOOLS, decodeToolUse } from './actions.js';
+
+/**
+ * Unit tests for the Anthropic tool_use decoder.
+ *
+ * These never hit the network — we just hand `decodeToolUse` the
+ * (name, input) pair the SDK would give us and check that every
+ * supported tool round-trips and every malformed / unknown shape
+ * falls back to a `give_up` action (the contract: "never throw").
+ */
+
+describe('decodeToolUse', () => {
+  it('decodes computer_click with default button', () => {
+    const a = decodeToolUse('computer_click', { x: 100, y: 200 });
+    expect(a).toEqual({ kind: 'click', x: 100, y: 200, button: 'left' });
+  });
+
+  it('decodes computer_click with explicit button', () => {
+    const a = decodeToolUse('computer_click', { x: 10, y: 20, button: 'right' });
+    expect(a).toEqual({ kind: 'click', x: 10, y: 20, button: 'right' });
+  });
+
+  it('decodes computer_type', () => {
+    const a = decodeToolUse('computer_type', { text: 'hello world' });
+    expect(a).toEqual({ kind: 'type', text: 'hello world' });
+  });
+
+  it('decodes computer_key (named key)', () => {
+    expect(decodeToolUse('computer_key', { key: 'Enter' })).toEqual({
+      kind: 'key',
+      key: 'Enter',
+    });
+  });
+
+  it('decodes computer_key (chord)', () => {
+    expect(decodeToolUse('computer_key', { key: 'ctrl+a' })).toEqual({
+      kind: 'key',
+      key: 'ctrl+a',
+    });
+  });
+
+  it('decodes computer_scroll (positive = down)', () => {
+    expect(decodeToolUse('computer_scroll', { dy: 400 })).toEqual({ kind: 'scroll', dy: 400 });
+  });
+
+  it('decodes computer_scroll (negative = up)', () => {
+    expect(decodeToolUse('computer_scroll', { dy: -250 })).toEqual({ kind: 'scroll', dy: -250 });
+  });
+
+  it('decodes computer_wait', () => {
+    expect(decodeToolUse('computer_wait', { ms: 1500 })).toEqual({ kind: 'wait', ms: 1500 });
+  });
+
+  it('decodes computer_screenshot (empty input tolerated)', () => {
+    expect(decodeToolUse('computer_screenshot', {})).toEqual({ kind: 'screenshot' });
+    expect(decodeToolUse('computer_screenshot', { junk: 1 })).toEqual({ kind: 'screenshot' });
+  });
+
+  it('decodes task_done', () => {
+    expect(decodeToolUse('task_done', { summary: 'Posted the comment.' })).toEqual({
+      kind: 'done',
+      summary: 'Posted the comment.',
+    });
+  });
+
+  it('decodes task_give_up', () => {
+    expect(decodeToolUse('task_give_up', { reason: 'login wall' })).toEqual({
+      kind: 'give_up',
+      reason: 'login wall',
+    });
+  });
+
+  it('unknown tool names fall back to give_up with a diagnostic reason', () => {
+    const a = decodeToolUse('bogus_tool', { x: 1 });
+    expect(a.kind).toBe('give_up');
+    if (a.kind === 'give_up') {
+      expect(a.reason).toMatch(/unknown tool_use.*bogus_tool/);
+    }
+  });
+
+  it('missing required field (computer_click without y) falls back to give_up', () => {
+    const a = decodeToolUse('computer_click', { x: 100 });
+    expect(a.kind).toBe('give_up');
+    if (a.kind === 'give_up') {
+      expect(a.reason).toMatch(/computer_click bad input/);
+    }
+  });
+
+  it('wrong type (negative wait) falls back to give_up', () => {
+    const a = decodeToolUse('computer_wait', { ms: 50 });
+    expect(a.kind).toBe('give_up');
+    if (a.kind === 'give_up') {
+      expect(a.reason).toMatch(/computer_wait bad input/);
+    }
+  });
+
+  it('task_give_up without a reason still exits the loop (fabricates a reason)', () => {
+    const a = decodeToolUse('task_give_up', {});
+    expect(a.kind).toBe('give_up');
+    if (a.kind === 'give_up') {
+      expect(a.reason).toMatch(/without a valid reason/);
+    }
+  });
+});
+
+describe('VISION_TOOLS schema', () => {
+  it('exposes exactly 8 tool primitives', () => {
+    expect(VISION_TOOLS).toHaveLength(8);
+  });
+
+  it('every tool has a name, description, and input_schema.type=object', () => {
+    for (const t of VISION_TOOLS) {
+      expect(typeof t.name).toBe('string');
+      expect(t.name.length).toBeGreaterThan(0);
+      expect(typeof t.description).toBe('string');
+      expect(t.input_schema.type).toBe('object');
+    }
+  });
+
+  it('tool names match the switch arms in decodeToolUse', () => {
+    // If this ever grows, decodeToolUse must also grow. Check explicitly.
+    const names = VISION_TOOLS.map((t) => t.name).sort();
+    expect(names).toEqual(
+      [
+        'computer_click',
+        'computer_key',
+        'computer_screenshot',
+        'computer_scroll',
+        'computer_type',
+        'computer_wait',
+        'task_done',
+        'task_give_up',
+      ].sort(),
+    );
+  });
+});
