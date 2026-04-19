@@ -30,8 +30,17 @@ async function main() {
   const recovery = await loadRehydratedTasks();
   logger.info(recovery, 'restart recovery: rehydrated in-flight tasks');
 
-  const ws = createWsServer(env.WS_PORT);
-  logger.info({ port: env.WS_PORT }, 'WS server listening');
+  // Pass the planner into the WS server so it can call planner.healSelector
+  // when a step fails with SELECTOR_NOT_FOUND. StubPlanner's healSelector is
+  // a no-op, so when ANTHROPIC_API_KEY is absent we're effectively back to
+  // pre-self-heal behaviour (controller's MAX_STEP_RETRIES=1 still retries
+  // with the original selector, which is fine for StubPlanner's about:blank
+  // smoke).
+  const ws = createWsServer(env.WS_PORT, { planner });
+  logger.info(
+    { port: env.WS_PORT, selfHeal: env.ANTHROPIC_API_KEY ? 'anthropic' : 'stub-noop' },
+    'WS server listening',
+  );
 
   let shuttingDown = false;
   const shutdown = async (signal: string) => {

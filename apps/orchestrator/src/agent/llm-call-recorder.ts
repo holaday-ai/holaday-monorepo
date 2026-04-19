@@ -21,11 +21,17 @@ export interface LlmCallRecord {
   /**
    * What the call was for:
    *   - commander.plan: initial plan synthesis from intent
-   *   - commander.replan: re-plan on selector failure (W3)
+   *   - commander.heal: single-selector self-heal on SELECTOR_NOT_FOUND
+   *   - commander.replan: full re-plan on irrecoverable failure (W3)
    *   - skill.body: lazy-load a SKILL.md body (v0.2 §5.5)
    *   - safety.filter: SafetyFilter screening (W3)
    */
-  purpose: 'commander.plan' | 'commander.replan' | 'skill.body' | 'safety.filter';
+  purpose:
+    | 'commander.plan'
+    | 'commander.heal'
+    | 'commander.replan'
+    | 'skill.body'
+    | 'safety.filter';
   inputTokens: number;
   outputTokens: number;
   cacheReadInputTokens?: number;

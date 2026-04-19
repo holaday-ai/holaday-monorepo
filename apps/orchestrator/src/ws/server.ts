@@ -10,6 +10,7 @@ import {
 } from '@holaday/shared-types';
 import { jwtVerify } from 'jose';
 import { WebSocket, WebSocketServer } from 'ws';
+import type { Planner } from '../agent/planner.js';
 import { TaskController, type TaskState } from '../agent/task-controller.js';
 import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js';
 import { env } from '../config/env.js';
@@ -53,7 +54,23 @@ export async function loadRehydratedTasks(): Promise<{ userCount: number; taskCo
   return { userCount: rehydratedByUser.size, taskCount: rehydrated.length };
 }
 
-export function createWsServer(port: number) {
+/**
+ * Planner injected at boot so the WS server can call self-heal when a
+ * step fails with SELECTOR_NOT_FOUND. Null disables self-heal entirely
+ * (integration tests, environments without ANTHROPIC_API_KEY that fall
+ * back to StubPlanner — StubPlanner's heal is a no-op anyway). Module-
+ * level because multiple handler paths need it without threading it
+ * through every function signature.
+ */
+let injectedPlanner: Planner | null = null;
+
+export interface WsServerOpts {
+  planner?: Planner | null;
+}
+
+export function createWsServer(port: number, opts: WsServerOpts = {}) {
+  injectedPlanner = opts.planner ?? null;
+
   const wss = new WebSocketServer({ port, handleProtocols });
 
   wss.on('connection', (socket, req) => {
@@ -370,6 +387,18 @@ async function runStepResult(
     return;
   }
 
+  // Self-heal hook. BEFORE we hand this result to the state machine,
+  // see if it's a SELECTOR_NOT_FOUND on a step that still has retries
+  // available. If so, call the planner with the driver's diagnostic
+  // and, if it hands back a replacement ResilientSelector, swap it
+  // onto the in-memory plan's current step. TaskController's built-in
+  // MAX_STEP_RETRIES=1 then re-dispatches the SAME step id with the
+  // new selector — zero state-machine change, single extra Opus call
+  // per failing step, capped at one heal per step.
+  if (msg.status === 'error' && msg.error?.code === 'SELECTOR_NOT_FOUND') {
+    await maybeSelfHeal(taskState, msg);
+  }
+
   const { state: nextState, effects } = taskController.onStepResult(taskState, {
     taskId: msg.taskId,
     stepId: msg.stepId,
@@ -392,6 +421,119 @@ async function runStepResult(
       }
     }
   }
+}
+
+/**
+ * On SELECTOR_NOT_FOUND, call `planner.healSelector()` with the
+ * driver's diagnostic payload (URL, title, per-strategy failures,
+ * screenshot base64) and — if it returns a replacement — mutate the
+ * in-memory plan's current step selector IN PLACE. The retry that
+ * fires from TaskController.onStepResult immediately after picks up
+ * the new selector transparently.
+ *
+ * Constraints:
+ *  - Only fires if a planner is injected (StubPlanner path skips).
+ *  - Only fires on the step's first failure (retryCount[stepId]===0);
+ *    if we already healed once this step, fall through to the normal
+ *    retries-exhausted path.
+ *  - Never throws — planner.healSelector has its own try/catch and
+ *    returns null on failure. If heal declines or errors, the
+ *    controller's retry still fires with the ORIGINAL selector,
+ *    same as pre-self-heal behaviour.
+ */
+async function maybeSelfHeal(
+  taskState: TaskState,
+  msg: Extract<ClientMessage, { type: 'client.step.result' }>,
+): Promise<void> {
+  const planner = injectedPlanner;
+  if (!planner) return;
+  const current = taskState.plan[taskState.cursor];
+  if (!current || current.id !== msg.stepId) return;
+  if (!current.selector) return;
+  const consumed = taskState.retryCount?.[msg.stepId] ?? 0;
+  if (consumed > 0) return; // only heal on the first failure
+
+  const diagnostic = extractDiagnostic(msg.data);
+  if (!diagnostic) return;
+
+  try {
+    const healed = await planner.healSelector({
+      userId: undefined, // Phase 0: we don't thread user external id through ClientState yet
+      originalStep: current,
+      diagnostic,
+    });
+    if (!healed) {
+      logger.info(
+        { taskId: taskState.taskId, stepId: msg.stepId },
+        'selector self-heal declined — falling through to normal retry',
+      );
+      return;
+    }
+    // Mutate in place. We intentionally DON'T persist the new selector
+    // to task_steps.input — Phase 0 keeps the DB record of the
+    // original plan for audit; the heal result lives in memory for
+    // the retry, and on restart a mid-heal task would rehydrate to
+    // the original plan (retries already consumed → paused on first
+    // miss, user resumes manually). Good enough for Phase 0 dogfood.
+    current.selector = healed;
+    logger.info(
+      {
+        taskId: taskState.taskId,
+        stepId: msg.stepId,
+        kind: current.kind,
+        originalStrategies: healed.strategies.length,
+      },
+      'selector self-heal succeeded — retry will use new selector',
+    );
+  } catch (err) {
+    // Belt-and-braces: planner.healSelector is contracted not to
+    // throw, but if it does we swallow and fall through.
+    logger.warn({ err, taskId: taskState.taskId, stepId: msg.stepId }, 'self-heal threw');
+  }
+}
+
+interface Diagnostic {
+  url: string;
+  title: string;
+  strategies: { kind: string; selector: string; reason: string }[];
+  screenshot?: string;
+}
+
+/**
+ * Pull the SELECTOR_NOT_FOUND diagnostic payload out of the driver's
+ * `data` field. Shape matches `SelectorNotFoundDiagnostic` from
+ * packages/browser-driver/src/crx-adapter.ts. Returns null when the
+ * payload isn't present — e.g. a non-crx adapter that didn't bother
+ * to attach page state, or an older extension build.
+ */
+function extractDiagnostic(data: unknown): Diagnostic | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as {
+    url?: unknown;
+    title?: unknown;
+    strategies?: unknown;
+    screenshot?: unknown;
+  };
+  if (typeof d.url !== 'string' || typeof d.title !== 'string') return null;
+  if (!Array.isArray(d.strategies)) return null;
+  const strategies: Diagnostic['strategies'] = [];
+  for (const row of d.strategies) {
+    if (!row || typeof row !== 'object') continue;
+    const r = row as { kind?: unknown; selector?: unknown; reason?: unknown };
+    if (
+      typeof r.kind === 'string' &&
+      typeof r.selector === 'string' &&
+      typeof r.reason === 'string'
+    ) {
+      strategies.push({ kind: r.kind, selector: r.selector, reason: r.reason });
+    }
+  }
+  return {
+    url: d.url,
+    title: d.title,
+    strategies,
+    ...(typeof d.screenshot === 'string' ? { screenshot: d.screenshot } : {}),
+  };
 }
 
 async function verifyToken(token: string): Promise<string | null> {

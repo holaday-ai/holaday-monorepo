@@ -25,4 +25,13 @@ export class StubPlanner implements Planner {
       },
     ];
   }
+
+  /**
+   * Stub self-heal: always declines. The only consumer is the smoke
+   * test / offline dev path where SELECTOR_NOT_FOUND shouldn't happen
+   * against about:blank.
+   */
+  async healSelector(): Promise<null> {
+    return null;
+  }
 }

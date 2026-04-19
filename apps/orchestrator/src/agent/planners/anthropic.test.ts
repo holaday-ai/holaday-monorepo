@@ -304,3 +304,165 @@ describe('AnthropicPlanner', () => {
     expect(seen).toHaveLength(0);
   });
 });
+
+describe('AnthropicPlanner.healSelector', () => {
+  const failingStep = {
+    id: 'stp_test',
+    kind: 'extract' as const,
+    risk: 'low' as const,
+    selector: {
+      description: 'Baidu result headlines',
+      strategies: [{ kind: 'css' as const, value: '.old-bad-selector' }],
+      scope: { timeoutMs: 5_000 },
+      selfHeal: true,
+    },
+  };
+  const diagnostic = {
+    url: 'https://www.baidu.com/s?wd=x',
+    title: '百度搜索',
+    strategies: [
+      { kind: 'css', selector: 'css(.old-bad-selector)', reason: 'waitFor timeout 2000ms' },
+    ],
+    screenshot:
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+  };
+
+  it('returns a parsed ResilientSelector when Claude emits a valid emit_selector tool_use', async () => {
+    const { AnthropicPlanner, HEAL_TOOL_NAME } = await import('./anthropic.js');
+
+    let capturedReq: Anthropic.MessageCreateParams | null = null;
+    const client = fakeClient((req) => {
+      capturedReq = req;
+      return buildToolUseMessage(
+        {
+          description: 'Baidu result headlines (healed)',
+          strategies: [
+            { kind: 'css', value: '#content_left h3 a' },
+            { kind: 'css', value: '#content_left h3' },
+            { kind: 'css', value: '.c-title' },
+          ],
+          scope: { timeoutMs: 5000 },
+          selfHeal: true,
+        },
+        HEAL_TOOL_NAME,
+      );
+    });
+
+    const healed = await new AnthropicPlanner({ client }).healSelector({
+      userId: 'usr_heal',
+      intent: '帮我整理半导体要闻',
+      originalStep: failingStep,
+      diagnostic,
+    });
+
+    expect(healed).not.toBeNull();
+    expect(healed?.description).toBe('Baidu result headlines (healed)');
+    expect(healed?.strategies).toHaveLength(3);
+    expect(healed?.strategies[0]).toEqual({ kind: 'css', value: '#content_left h3 a' });
+
+    // Verify the request included the screenshot as an image block.
+    expect(capturedReq).not.toBeNull();
+    const firstMsg = capturedReq?.messages[0];
+    expect(firstMsg?.role).toBe('user');
+    expect(Array.isArray(firstMsg?.content)).toBe(true);
+    const content = firstMsg?.content as Anthropic.ContentBlockParam[];
+    const hasImage = content.some(
+      (b) =>
+        b.type === 'image' &&
+        'source' in b &&
+        b.source.type === 'base64' &&
+        b.source.media_type === 'image/png',
+    );
+    expect(hasImage).toBe(true);
+    // Text block mentions the already-tried strategies so the model doesn't repeat.
+    const textBlock = content.find((b) => b.type === 'text') as
+      | Anthropic.TextBlockParam
+      | undefined;
+    expect(textBlock?.text).toContain('.old-bad-selector');
+    expect(textBlock?.text).toContain('waitFor timeout 2000ms');
+    expect(textBlock?.text).toContain('https://www.baidu.com/s?wd=x');
+  });
+
+  it('returns null (declines) when the model response lacks the emit_selector tool_use', async () => {
+    const { AnthropicPlanner } = await import('./anthropic.js');
+    const client = fakeClient(() => buildToolUseMessage({ foo: 'bar' }, 'some_other_tool'));
+    const healed = await new AnthropicPlanner({ client }).healSelector({
+      originalStep: failingStep,
+      diagnostic,
+    });
+    expect(healed).toBeNull();
+  });
+
+  it('returns null when the tool_use input fails ResilientSelector schema', async () => {
+    const { AnthropicPlanner, HEAL_TOOL_NAME } = await import('./anthropic.js');
+    // Empty strategies array — resilientSelectorSchema requires min(1).
+    const client = fakeClient(() =>
+      buildToolUseMessage({ description: 'bad', strategies: [] }, HEAL_TOOL_NAME),
+    );
+    const healed = await new AnthropicPlanner({ client }).healSelector({
+      originalStep: failingStep,
+      diagnostic,
+    });
+    expect(healed).toBeNull();
+  });
+
+  it('returns null when the API call throws (contract: never throws)', async () => {
+    const { AnthropicPlanner } = await import('./anthropic.js');
+    const client = fakeClient(() => {
+      throw new Error('simulated 500');
+    });
+    const healed = await new AnthropicPlanner({ client }).healSelector({
+      originalStep: failingStep,
+      diagnostic,
+    });
+    expect(healed).toBeNull();
+  });
+
+  it('records a commander.heal row with usage + purpose=commander.heal when userId is present', async () => {
+    const { AnthropicPlanner, HEAL_TOOL_NAME } = await import('./anthropic.js');
+    const { NoopLlmCallRecorder } = await import('../llm-call-recorder.js');
+
+    const client = fakeClient(() =>
+      buildToolUseMessage(
+        {
+          description: 'healed',
+          strategies: [
+            { kind: 'css', value: 'a' },
+            { kind: 'css', value: 'b' },
+            { kind: 'css', value: 'c' },
+          ],
+        },
+        HEAL_TOOL_NAME,
+      ),
+    );
+
+    const seen: { purpose: string; status: string }[] = [];
+    const recorder = new (class extends NoopLlmCallRecorder {
+      override async record(call: { purpose: string; status: string }) {
+        seen.push({ purpose: call.purpose, status: call.status });
+      }
+    })();
+
+    await new AnthropicPlanner({ client, recorder }).healSelector({
+      userId: 'usr_heal',
+      originalStep: failingStep,
+      diagnostic,
+    });
+    expect(seen).toEqual([{ purpose: 'commander.heal', status: 'ok' }]);
+  });
+
+  it('returns null without calling the client when the failing step has no selector', async () => {
+    const { AnthropicPlanner } = await import('./anthropic.js');
+    let called = false;
+    const client = fakeClient(() => {
+      called = true;
+      return buildToolUseMessage({}, 'never');
+    });
+    const healed = await new AnthropicPlanner({ client }).healSelector({
+      originalStep: { ...failingStep, selector: undefined },
+      diagnostic,
+    });
+    expect(healed).toBeNull();
+    expect(called).toBe(false);
+  });
+});
