@@ -130,6 +130,31 @@ else
   fail "task_steps row count = $count (expected 7)"
 fi
 
+# Screenshot step status assertion — must NEVER be in {error,failed}.
+# The allowed set is:
+#   pending   (expected in this HTTP-only smoke — nothing executes it)
+#   executing, completed, skipped, awaiting_user
+# A real Chrome + extension driving the task to completion would land
+# this on `completed` (CDP page.screenshot returned) or `skipped` (the
+# 60e3aca soft-fail path for CDP timeouts). `error` or `failed` here
+# would mean the fix regressed — the whole point of 'skipped' is that
+# a flaky screenshot step never fails the task.
+screenshot_status="$(mysql_q "SELECT ts.status FROM task_steps ts JOIN tasks t ON ts.task_id=t.id WHERE t.external_id='$task_id' AND ts.kind='screenshot'")"
+case "$screenshot_status" in
+  error|failed)
+    fail "screenshot step status is '$screenshot_status' — regression of the CDP-via-page.screenshot + 'skipped' soft-fail fix (60e3aca)"
+    ;;
+  pending|executing|completed|skipped|awaiting_user)
+    pass "screenshot step status='$screenshot_status' (not error/failed — soft-fail contract holds)"
+    ;;
+  '')
+    fail "screenshot step not found for task $task_id"
+    ;;
+  *)
+    fail "screenshot step status='$screenshot_status' (unknown value — treat as regression)"
+    ;;
+esac
+
 # ---------- summary ----------
 echo
 if [ "$failures" -eq 0 ]; then

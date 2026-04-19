@@ -119,7 +119,7 @@ else
   printf '%s✔ ports cleared%s\n' "$GREEN" "$NC"
 
   run_check 'integration setup (daemons only)' \
-    env HOLADAY_SKIP_ORCHESTRATOR=1 bash "$SCRIPT_DIR/start.sh"
+    env HOLADAY_SKIP_ORCHESTRATOR=1 HOLADAY_SKIP_PULL=1 HOLADAY_SKIP_INSTALL=1 HOLADAY_SKIP_EXT_BUILD=1 bash "$SCRIPT_DIR/start.sh"
   run_check 'integration @holaday/orchestrator' \
     env DATABASE_URL='mysql://holaday:holaday-dev@127.0.0.1:3306/holaday' \
         REDIS_URL='redis://127.0.0.1:6379/0' \
@@ -139,7 +139,8 @@ run_check 'lint (biome)' pnpm lint
 if [ "${HOLADAY_SKIP_E2E:-0}" = "1" ]; then
   printf '\n%s▶ e2e-http-smoke (SKIPPED via HOLADAY_SKIP_E2E=1)%s\n' "$YELLOW" "$NC"
 else
-  run_check 'e2e setup (orchestrator up)' bash "$SCRIPT_DIR/start.sh"
+  run_check 'e2e setup (orchestrator up)' \
+    env HOLADAY_SKIP_PULL=1 HOLADAY_SKIP_INSTALL=1 HOLADAY_SKIP_EXT_BUILD=1 bash "$SCRIPT_DIR/start.sh"
   run_check 'e2e HTTP smoke (curl + DB)' bash "$SCRIPT_DIR/e2e-smoke.sh"
 fi
 
@@ -158,14 +159,18 @@ awk -F'|' '
 ' "$RESULTS_FILE"
 summary_exit=$?
 
-# Cleanup
+# Cleanup: results file always, but keep FAILED_LOGS on disk so the
+# operator can `cat /tmp/tmp.XXXX` to read what broke. We print those
+# paths inside the summary already.
 rm -f "$RESULTS_FILE"
-for log in "${FAILED_LOGS[@]:-}"; do
-  [ -n "$log" ] && rm -f "$log"
-done
 
 if [ "$summary_exit" -ne 0 ]; then
   printf '\n%s✘ test-all.sh: some checks failed; fix before push.%s\n' "$RED" "$NC" >&2
+  printf '%sFail logs kept at the /tmp paths above for inspection.%s\n' "$RED" "$NC" >&2
   exit 1
 fi
+# All green: clean up any residual temp logs (there shouldn't be any).
+for log in "${FAILED_LOGS[@]:-}"; do
+  [ -n "$log" ] && rm -f "$log"
+done
 printf '\n%s✔ test-all.sh: every check passed. Safe to push.%s\n' "$GREEN" "$NC"

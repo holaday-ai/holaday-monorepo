@@ -53,34 +53,51 @@ port_in_use() {
 }
 
 # ---------- 1. git pull ----------
-step "git pull --rebase"
-if ! git diff --quiet || ! git diff --cached --quiet; then
-  fail "working tree has uncommitted changes — stash or commit before starting"
+# test-all.sh's inner loop skips this: it's validating a *local*
+# working tree, and pulling mid-test would be unsafe. Founder-facing
+# manual runs do the pull by default.
+if [ "${HOLADAY_SKIP_PULL:-0}" = "1" ]; then
+  step "git pull (skipped via HOLADAY_SKIP_PULL=1)"
+else
+  step "git pull --rebase"
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    fail "working tree has uncommitted changes — stash/commit, or set HOLADAY_SKIP_PULL=1"
+  fi
+  # Strip proxy env vars just for git — the proxy that orchestrator needs
+  # to hit Anthropic typically breaks GitHub's HTTP/2 push (same logic as
+  # scripts/refresh.sh; see commit f13da7f for the diagnosis).
+  env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \
+      -u ALL_PROXY -u all_proxy \
+      git pull --rebase \
+    || fail "git pull --rebase failed (conflict? network? rerun after fixing)"
+  ok "pulled $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HEAD)"
 fi
-# Strip proxy env vars just for git — the proxy that orchestrator needs
-# to hit Anthropic typically breaks GitHub's HTTP/2 push (same logic as
-# scripts/refresh.sh; see commit f13da7f for the diagnosis).
-env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \
-    -u ALL_PROXY -u all_proxy \
-    git pull --rebase \
-  || fail "git pull --rebase failed (conflict? network? rerun after fixing)"
-ok "pulled $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HEAD)"
 
 # ---------- 2. pnpm install ----------
-step "pnpm install (workspace)"
-pnpm install --frozen-lockfile >/dev/null 2>&1 \
-  && ok "install clean (frozen lockfile)" \
-  || {
-    info "frozen-lockfile refused; falling back to plain install"
-    pnpm install >/dev/null 2>&1 || fail "pnpm install failed — see pnpm log"
-    ok "install done"
-  }
+if [ "${HOLADAY_SKIP_INSTALL:-0}" = "1" ]; then
+  step "pnpm install (skipped via HOLADAY_SKIP_INSTALL=1)"
+else
+  step "pnpm install (workspace)"
+  pnpm install --frozen-lockfile >/dev/null 2>&1 \
+    && ok "install clean (frozen lockfile)" \
+    || {
+      info "frozen-lockfile refused; falling back to plain install"
+      pnpm install >/dev/null 2>&1 || fail "pnpm install failed — see pnpm log"
+      ok "install done"
+    }
+fi
 
 # ---------- 3. extension build ----------
-step "pnpm --filter @holaday/extension build"
-pnpm --filter @holaday/extension build >/dev/null 2>&1 \
-  || fail "extension build failed — rerun without redirect to see output"
-ok "extension dist rebuilt"
+# test-all.sh has its own 'extension build' check; skip here to avoid
+# doing it twice.
+if [ "${HOLADAY_SKIP_EXT_BUILD:-0}" = "1" ]; then
+  step "extension build (skipped via HOLADAY_SKIP_EXT_BUILD=1)"
+else
+  step "pnpm --filter @holaday/extension build"
+  pnpm --filter @holaday/extension build >/dev/null 2>&1 \
+    || fail "extension build failed — rerun without redirect to see output"
+  ok "extension dist rebuilt"
+fi
 
 # ---------- 4. HTTPS_PROXY check (soft) ----------
 step "HTTPS_PROXY check"
