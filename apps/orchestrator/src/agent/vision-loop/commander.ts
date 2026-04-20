@@ -30,6 +30,7 @@ import { A11Y_TOOLS, type A11yAction, decodeA11yToolUse } from './actions-a11y.j
 import { VISION_TOOLS, type VisionAction, decodeToolUse } from './actions.js';
 import { type ResizedImage, resizeForVisionModel } from './image.js';
 import type { AccessibilityNodeRef } from './playwright-executor.js';
+import { isRetryableAnthropicError, retryAsync } from './retry.js';
 
 /**
  * Live state of the page as seen by the commander at the start of
@@ -305,14 +306,18 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
     //    protocol — we never want a text-only response.
     let response: Anthropic.Message;
     try {
-      response = await this.client.messages.create({
-        model: this.model,
-        max_tokens: this.maxTokens,
-        system: VISION_SYSTEM_PROMPT,
-        tools: VISION_TOOLS as unknown as Anthropic.Tool[],
-        tool_choice: { type: 'any' },
-        messages,
-      });
+      response = await retryAsync(
+        () =>
+          this.client.messages.create({
+            model: this.model,
+            max_tokens: this.maxTokens,
+            system: VISION_SYSTEM_PROMPT,
+            tools: VISION_TOOLS as unknown as Anthropic.Tool[],
+            tool_choice: { type: 'any' },
+            messages,
+          }),
+        { isRetryable: isRetryableAnthropicError, maxAttempts: 3 },
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // Record the failed call so cost accounting stays honest — we
@@ -421,14 +426,18 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
 
     let response: Anthropic.Message;
     try {
-      response = await this.client.messages.create({
-        model: this.model,
-        max_tokens: this.maxTokens,
-        system: A11Y_SYSTEM_PROMPT,
-        tools: A11Y_TOOLS as unknown as Anthropic.Tool[],
-        tool_choice: { type: 'any' },
-        messages,
-      });
+      response = await retryAsync(
+        () =>
+          this.client.messages.create({
+            model: this.model,
+            max_tokens: this.maxTokens,
+            system: A11Y_SYSTEM_PROMPT,
+            tools: A11Y_TOOLS as unknown as Anthropic.Tool[],
+            tool_choice: { type: 'any' },
+            messages,
+          }),
+        { isRetryable: isRetryableAnthropicError, maxAttempts: 3 },
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await this.recordCall({

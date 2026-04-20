@@ -33,6 +33,25 @@
  */
 
 import { EventEmitter } from 'node:events';
+
+/**
+ * How many consecutive tick-level failures tolerated before the runner
+ * bails. F1 bumped this from 2 → 3: transient SPA flicker can hit
+ * twice and recover on the third, and an extra tick costs one
+ * commander call which is cheap compared to cascading a retry across
+ * a whole task.
+ */
+const MAX_SEQUENTIAL_DRIVER_FAILS = 3;
+
+/**
+ * How many times to re-dispatch a single action when the driver
+ * reports ok=false before recording the tick as failed. The default
+ * is 2 attempts total (1 initial + 1 retry) — enough to swallow a
+ * race with page reflow but not so many that we chew the clock on a
+ * genuinely stuck target.
+ */
+const MAX_ACTION_ATTEMPTS = 2;
+const ACTION_RETRY_DELAY_MS = 400;
 import type { A11yAction } from './actions-a11y.js';
 import type { VisionAction } from './actions.js';
 import type {
@@ -351,19 +370,14 @@ export class VisionLoopRunner {
     }
 
     const realAction = translateToRealSpace(decision.action, decision.image);
-    let result: ActionResult;
-    try {
-      result = await this.actionFn(tick, realAction);
-    } catch (err) {
-      result = { ok: false, message: `driver threw: ${errMsg(err)}` };
-    }
+    const result = await this.dispatchWithRetry(() => this.actionFn(tick, realAction));
     this.emitEv('acted', { tickIndex: tick, mode: 'screenshot', action: realAction, result });
     this.recordVisionTurn(observation, decision.action, decision.toolUseId, result);
 
-    if (!result.ok && this.sequentialDriverFails() >= 2) {
+    if (!result.ok && this.sequentialDriverFails() >= MAX_SEQUENTIAL_DRIVER_FAILS) {
       return this.finalise({
         status: 'failed',
-        reason: `driver failed twice in a row (last: ${result.message ?? 'no detail'})`,
+        reason: `driver failed ${MAX_SEQUENTIAL_DRIVER_FAILS} ticks in a row (last: ${result.message ?? 'no detail'})`,
         history: this.history,
       });
     }
@@ -443,12 +457,7 @@ export class VisionLoopRunner {
       });
     }
 
-    let result: ActionResult;
-    try {
-      result = await a11yActionFn(tick, decision.action);
-    } catch (err) {
-      result = { ok: false, message: `driver threw: ${errMsg(err)}` };
-    }
+    const result = await this.dispatchWithRetry(() => a11yActionFn(tick, decision.action));
     this.emitEv('acted', {
       tickIndex: tick,
       mode: 'accessibility',
@@ -457,10 +466,10 @@ export class VisionLoopRunner {
     });
     this.recordA11yTurn(obs, decision.action, decision.toolUseId, result);
 
-    if (!result.ok && this.sequentialDriverFails() >= 2) {
+    if (!result.ok && this.sequentialDriverFails() >= MAX_SEQUENTIAL_DRIVER_FAILS) {
       return this.finalise({
         status: 'failed',
-        reason: `driver failed twice in a row (last: ${result.message ?? 'no detail'})`,
+        reason: `driver failed ${MAX_SEQUENTIAL_DRIVER_FAILS} ticks in a row (last: ${result.message ?? 'no detail'})`,
         history: this.history,
       });
     }
@@ -484,6 +493,34 @@ export class VisionLoopRunner {
     this.a11yHistory.push(turn);
     this.history.push(turn);
     this.emitEv('turn', { tickIndex: this.history.length - 1, turn });
+  }
+
+  /**
+   * Run an action-dispatch closure up to MAX_ACTION_ATTEMPTS times.
+   * A thrown exception or `ok=false` result triggers a retry with
+   * ACTION_RETRY_DELAY_MS gap between attempts; the LAST attempt's
+   * result is returned. Never throws — a thrown final attempt becomes
+   * `{ok: false, message: 'driver threw: ...'}`.
+   *
+   * This handles the "page was mid-reflow when we clicked" class of
+   * failure that's otherwise indistinguishable from a real bug. The
+   * sequentialDriverFails guard still fires on a cross-tick pattern;
+   * we just swallow the single-tick flicker here.
+   */
+  private async dispatchWithRetry(fn: () => Promise<ActionResult>): Promise<ActionResult> {
+    let result: ActionResult = { ok: false, message: 'dispatchWithRetry: no attempt made' };
+    for (let attempt = 0; attempt < MAX_ACTION_ATTEMPTS; attempt++) {
+      try {
+        result = await fn();
+      } catch (err) {
+        result = { ok: false, message: `driver threw: ${errMsg(err)}` };
+      }
+      if (result.ok) return result;
+      if (attempt + 1 < MAX_ACTION_ATTEMPTS) {
+        await new Promise<void>((resolve) => setTimeout(resolve, ACTION_RETRY_DELAY_MS));
+      }
+    }
+    return result;
   }
 
   private recordVisionTurn(

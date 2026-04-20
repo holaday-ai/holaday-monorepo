@@ -226,14 +226,25 @@ describe('VisionLoopRunner.run', () => {
     expect(commander.seenContexts[2]?.history[1]?.toolUseId).toBe('tu_2');
   });
 
-  it('two consecutive driver failures → status=failed', async () => {
+  it('three consecutive driver failures → status=failed (F1 bumped threshold 2→3)', async () => {
+    // Per-action retry (F1) means the first bad result is retried in
+    // the same tick before counting. Feed TWO bad results per tick so
+    // the retry-2 doesn't "save" the tick.
     const commander = new ScriptedCommander([
       { action: { kind: 'click', x: 1, y: 1 } },
       { action: { kind: 'click', x: 2, y: 2 } },
-      { action: { kind: 'click', x: 3, y: 3 } }, // never reached
+      { action: { kind: 'click', x: 3, y: 3 } },
+      { action: { kind: 'click', x: 4, y: 4 } }, // never reached
     ]);
     const { actionFn } = recordingActionFn([
+      // tick 0: retry 1 + retry 2 = 2 failures consumed by one tick.
       { ok: false, message: 'tab closed' },
+      { ok: false, message: 'tab closed' },
+      // tick 1
+      { ok: false, message: 'tab still closed' },
+      { ok: false, message: 'tab still closed' },
+      // tick 2
+      { ok: false, message: 'tab still closed' },
       { ok: false, message: 'tab still closed' },
     ]);
     const runner = new VisionLoopRunner({
@@ -243,8 +254,28 @@ describe('VisionLoopRunner.run', () => {
     });
     const outcome = await runner.run('test');
     expect(outcome.status).toBe('failed');
-    if (outcome.status === 'failed') expect(outcome.reason).toMatch(/driver failed twice/);
-    expect(outcome.history).toHaveLength(2);
+    if (outcome.status === 'failed') expect(outcome.reason).toMatch(/3 ticks in a row/);
+    expect(outcome.history).toHaveLength(3);
+  });
+
+  it('single-action retry recovers a transient flicker (F1)', async () => {
+    // One bad then one ok in the SAME tick — the in-tick retry should
+    // treat the tick as ok, so sequentialDriverFails never trips.
+    const commander = new ScriptedCommander([
+      { action: { kind: 'click', x: 1, y: 1 } },
+      { action: { kind: 'done', summary: 'recovered' } },
+    ]);
+    const { actionFn } = recordingActionFn([
+      { ok: false, message: 'mid-reflow miss' },
+      { ok: true, message: 'second attempt landed' },
+    ]);
+    const runner = new VisionLoopRunner({
+      commander,
+      screenshotFn: async (t) => makeObservation(t),
+      actionFn,
+    });
+    const outcome = await runner.run('recover');
+    expect(outcome.status).toBe('completed');
   });
 
   it('cancel() before next tick → status=cancelled', async () => {

@@ -623,6 +623,37 @@ describe('AnthropicVisionLoopCommander.decideNextActionAccessibility', () => {
     }
   });
 
+  it('retries on transient Anthropic 500 then succeeds (F1)', async () => {
+    let calls = 0;
+    const client = fakeClient(() => {
+      calls += 1;
+      if (calls < 2) {
+        const err: Error & { status?: number } = new Error('Anthropic 500');
+        err.status = 500;
+        throw err;
+      }
+      return toolUseResponse('a11y_task_done', { summary: 'retried ok' });
+    });
+    const c = new AnthropicVisionLoopCommander({ client });
+    const decision = await c.decideNextActionAccessibility(freshA11yContext());
+    expect(decision.action.kind).toBe('done');
+    expect(calls).toBe(2);
+  });
+
+  it('does NOT retry on 400 (non-retryable) — gives up immediately', async () => {
+    let calls = 0;
+    const client = fakeClient(() => {
+      calls += 1;
+      const err: Error & { status?: number } = new Error('bad request');
+      err.status = 400;
+      throw err;
+    });
+    const c = new AnthropicVisionLoopCommander({ client });
+    const decision = await c.decideNextActionAccessibility(freshA11yContext());
+    expect(decision.action.kind).toBe('give_up');
+    expect(calls).toBe(1);
+  });
+
   it('writes an llm_calls row with purpose=commander.accessibility', async () => {
     const records: LlmCallRecord[] = [];
     const recorder: LlmCallRecorder = {
