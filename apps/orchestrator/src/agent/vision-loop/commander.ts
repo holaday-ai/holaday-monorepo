@@ -168,7 +168,7 @@ export interface AnthropicVisionLoopCommanderOptions {
   recorder?: LlmCallRecorder;
 }
 
-const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+const DEFAULT_MODEL = 'claude-sonnet-4-6-20250929';
 const DEFAULT_MAX_TOKENS = 1_024;
 
 export class AnthropicVisionLoopCommander implements VisionLoopCommander {

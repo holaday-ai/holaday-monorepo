@@ -61,7 +61,7 @@ function toolUseResponse(
     id: 'msg_test',
     type: 'message',
     role: 'assistant',
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6-20250929',
     content,
     stop_reason: 'tool_use',
     stop_sequence: null,
@@ -80,7 +80,7 @@ function emptyResponse(): Anthropic.Message {
     id: 'msg_test',
     type: 'message',
     role: 'assistant',
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6-20250929',
     content: [{ type: 'text', text: 'I will not take an action.' } as Anthropic.ContentBlock],
     stop_reason: 'end_turn',
     stop_sequence: null,
@@ -147,7 +147,7 @@ describe('AnthropicVisionLoopCommander.decideNextAction', () => {
 
     // Request shape: one user message with [image, text] and the tools.
     const req = cap.req;
-    expect(req?.model).toBe('claude-sonnet-4-20250514');
+    expect(req?.model).toBe('claude-sonnet-4-6-20250929');
     expect(req?.max_tokens).toBe(1_024);
     expect(req?.tool_choice).toEqual({ type: 'any' });
     expect(Array.isArray(req?.tools)).toBe(true);
