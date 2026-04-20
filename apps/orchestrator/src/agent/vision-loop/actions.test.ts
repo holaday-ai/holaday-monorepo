@@ -87,6 +87,15 @@ describe('decodeToolUse', () => {
     }
   });
 
+  it('coerces string coordinates to numbers (Claude sometimes emits "325" not 325)', () => {
+    const click = decodeToolUse('computer_click', { x: '325', y: '400' });
+    expect(click).toEqual({ kind: 'click', x: 325, y: 400, button: 'left' });
+    const scroll = decodeToolUse('computer_scroll', { dy: '-200' });
+    expect(scroll).toEqual({ kind: 'scroll', dy: -200 });
+    const wait = decodeToolUse('computer_wait', { ms: '1500' });
+    expect(wait).toEqual({ kind: 'wait', ms: 1500 });
+  });
+
   it('wrong type (negative wait) falls back to give_up', () => {
     const a = decodeToolUse('computer_wait', { ms: 50 });
     expect(a.kind).toBe('give_up');

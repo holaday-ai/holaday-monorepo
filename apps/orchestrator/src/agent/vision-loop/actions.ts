@@ -184,10 +184,17 @@ import { z } from 'zod';
  * tool name. Using zod rather than trusting the API keeps us honest
  * about what Claude actually sent — Anthropic's JSON Schema isn't a
  * parse-guarantee, just a model hint.
+ *
+ * Numeric fields use `z.coerce.number()` because Claude occasionally
+ * returns coordinates / dys / ms as strings ("325" instead of 325) —
+ * the JSON Schema says integer but the sampler sometimes emits a
+ * stringified number anyway, and a strict z.number() would reject
+ * those and synthesise an unnecessary `give_up`. Coerce first, then
+ * validate integer + range.
  */
 const clickInputSchema = z.object({
-  x: z.number().int().nonnegative(),
-  y: z.number().int().nonnegative(),
+  x: z.coerce.number().int().nonnegative(),
+  y: z.coerce.number().int().nonnegative(),
   button: z.enum(['left', 'right', 'middle']).default('left'),
 });
 const typeInputSchema = z.object({
@@ -197,10 +204,10 @@ const keyInputSchema = z.object({
   key: z.string().min(1),
 });
 const scrollInputSchema = z.object({
-  dy: z.number().int(),
+  dy: z.coerce.number().int(),
 });
 const waitInputSchema = z.object({
-  ms: z.number().int().min(100).max(10_000),
+  ms: z.coerce.number().int().min(100).max(10_000),
 });
 const screenshotInputSchema = z.object({}).passthrough();
 const doneInputSchema = z.object({
