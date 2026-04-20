@@ -73,6 +73,21 @@ type PendingConfirmView =
       summary?: string;
     };
 
+/**
+ * Live progress for vision-loop tasks — SW emits an update each time
+ * the loop transitions phase (observing → deciding → acting → …).
+ * Classic (plan-once) tasks leave this field undefined.
+ */
+export type VisionPhase = 'observing' | 'deciding' | 'acting' | 'completed' | 'failed';
+
+interface VisionProgressView {
+  phase: VisionPhase;
+  tickIndex?: number;
+  actionKind?: string;
+  /** phase=completed → task_done summary; phase=failed → give_up reason. */
+  detail?: string;
+}
+
 interface TaskView {
   taskId: string;
   status: TaskStatus;
@@ -80,6 +95,7 @@ interface TaskView {
   pendingConfirm?: PendingConfirmView | null;
   pauseReason?: PauseReason | null;
   lastUpdated: number;
+  visionProgress?: VisionProgressView;
 }
 
 interface LoginResponse {
@@ -100,6 +116,17 @@ export function App() {
   const [tasks, setTasks] = useState<TaskView[]>([]);
   const [intent, setIntent] = useState('帮我整理今天半导体板块的要闻');
   const [submitting, setSubmitting] = useState(false);
+  /**
+   * Task id we just POSTed through `tasks.create`. Keeps the Run
+   * button in "执行中..." state until the SW reports the vision loop
+   * has started (first 'observing' / 'deciding' / 'acting' event for
+   * this task) or a 20s safety timeout fires.
+   *
+   * Previous behaviour re-enabled the button as soon as the HTTP
+   * response returned (~200ms), which made impatient users click Run
+   * again and spawn duplicate tasks.
+   */
+  const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
   /**
    * Per-task in-flight lock. Keyed by taskId, value is the action that
    * locked it ("confirm", "pause", "resume"). While set, the card's
@@ -142,10 +169,22 @@ export function App() {
     })();
   }, []);
 
-  // Subscribe to SW task snapshots while popup is open.
+  // Subscribe to SW task snapshots + vision-loop progress events
+  // while the popup is open. `holaday.tasks.update` is the full task
+  // list (classic + vision); `holaday.vision.progress` fires on each
+  // loop phase transition so we can un-stick the Run button and
+  // render a live phase line without waiting for the next full snapshot.
   useEffect(() => {
-    const listener = (msg: { type?: string; tasks?: TaskView[] }) => {
+    const listener = (msg: {
+      type?: string;
+      tasks?: TaskView[];
+      taskId?: string;
+      phase?: VisionPhase;
+    }) => {
       if (msg?.type === 'holaday.tasks.update' && msg.tasks) setTasks(msg.tasks);
+      if (msg?.type === 'holaday.vision.progress' && msg.taskId) {
+        setPendingTaskId((cur) => (cur === msg.taskId ? null : cur));
+      }
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
@@ -212,6 +251,13 @@ export function App() {
         throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
       }
       const body = (await res.json()) as CreateTaskResponse;
+      const newTaskId = body.result.data.taskId;
+      setPendingTaskId(newTaskId);
+      // Safety: if the SW never reports progress (e.g. WS disconnected
+      // or orchestrator hung), unblock the Run button after 20s.
+      window.setTimeout(() => {
+        setPendingTaskId((cur) => (cur === newTaskId ? null : cur));
+      }, 20_000);
       // SW will observe dispatches + advance; we just nudge it to show the new task eagerly.
       chrome.runtime.sendMessage({ type: 'holaday.tasks' }, (resp) => {
         if (resp?.tasks) setTasks(resp.tasks as TaskView[]);
@@ -394,11 +440,11 @@ export function App() {
         <div style={{ display: 'flex', gap: 6 }}>
           <button
             type="button"
-            disabled={submitting}
+            disabled={submitting || pendingTaskId !== null}
             onClick={() => void createTask()}
             style={{ flex: 1 }}
           >
-            {submitting ? 'Planning...' : 'Run'}
+            {submitting || pendingTaskId !== null ? '执行中...' : 'Run'}
           </button>
           {debugMode ? (
             <button
@@ -457,6 +503,8 @@ function TaskCard(props: {
         <div style={{ fontSize: 12, fontFamily: 'monospace' }}>{task.taskId}</div>
         <StatusBadge status={task.status} pauseReason={task.pauseReason} />
       </div>
+
+      {task.visionProgress ? <VisionProgressLine progress={task.visionProgress} /> : null}
 
       <StepList steps={task.steps} />
 
@@ -843,6 +891,86 @@ const historyRowStyle: React.CSSProperties = {
  */
 const STEP_COLLAPSE_AT = 10;
 const STEP_COLLAPSE_KEEP = 10;
+
+/**
+ * Vision-loop live progress line — one row describing what phase the
+ * loop is in right now. Replaces the blank space / "No tasks yet" for
+ * active vision tasks and surfaces the task_done summary / give_up
+ * reason on terminal phases.
+ */
+function VisionProgressLine({ progress }: { progress: VisionProgressView }) {
+  const label = visionPhaseLabel(progress);
+  const terminal = progress.phase === 'completed' || progress.phase === 'failed';
+  const color =
+    progress.phase === 'completed'
+      ? '#065f46'
+      : progress.phase === 'failed'
+        ? '#991b1b'
+        : '#1f2937';
+  const bg =
+    progress.phase === 'completed'
+      ? '#d1fae5'
+      : progress.phase === 'failed'
+        ? '#fee2e2'
+        : '#f3f4f6';
+  return (
+    <div
+      style={{
+        marginTop: 4,
+        padding: '6px 8px',
+        borderRadius: 4,
+        background: bg,
+        color,
+        fontSize: 12,
+        lineHeight: 1.4,
+      }}
+    >
+      <div style={{ fontWeight: 600 }}>
+        {label}
+        {!terminal && typeof progress.tickIndex === 'number'
+          ? ` · 第 ${progress.tickIndex + 1} 轮`
+          : null}
+      </div>
+      {terminal && progress.detail ? (
+        <div style={{ marginTop: 2, whiteSpace: 'pre-wrap' }}>{progress.detail}</div>
+      ) : null}
+    </div>
+  );
+}
+
+function visionPhaseLabel(p: VisionProgressView): string {
+  switch (p.phase) {
+    case 'observing':
+      return '正在截图观察页面...';
+    case 'deciding':
+      return 'AI 分析中，决定下一步...';
+    case 'acting':
+      return `执行操作${p.actionKind ? `（${actionKindLabel(p.actionKind)}）` : ''}...`;
+    case 'completed':
+      return '任务完成';
+    case 'failed':
+      return '任务失败';
+  }
+}
+
+function actionKindLabel(kind: string): string {
+  switch (kind) {
+    case 'click':
+      return '点击';
+    case 'type':
+      return '输入';
+    case 'key':
+      return '按键';
+    case 'scroll':
+      return '滚动';
+    case 'wait':
+      return '等待';
+    case 'screenshot':
+      return '截图';
+    default:
+      return kind;
+  }
+}
 
 function StepList({ steps }: { steps: StepView[] }) {
   const [expanded, setExpanded] = useState(false);

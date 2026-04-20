@@ -173,6 +173,21 @@ type PendingConfirmView =
       summary?: string;
     };
 
+/**
+ * Live progress marker for vision-loop tasks. Classic (plan-once)
+ * tasks leave this undefined and render via their steps[] array.
+ * Vision-loop tasks have an empty steps[] and rely on this field for
+ * popup progress feedback: "observing → deciding → acting" cycling
+ * until the loop terminates with completed (summary) or failed (reason).
+ */
+interface VisionProgressView {
+  phase: VisionPhase;
+  tickIndex?: number;
+  actionKind?: string;
+  /** On phase=completed → task_done summary. On phase=failed → give_up reason. */
+  detail?: string;
+}
+
 interface TaskView {
   taskId: string;
   status: TaskStatus;
@@ -180,6 +195,7 @@ interface TaskView {
   pendingConfirm?: PendingConfirmView | null;
   pauseReason?: PauseReason | null;
   lastUpdated: number;
+  visionProgress?: VisionProgressView;
 }
 
 interface State {
@@ -239,6 +255,7 @@ onServerMessage((msg) => {
 async function onVisionObserve(
   msg: Extract<ServerMessage, { type: 'server.vision.observe' }>,
 ): Promise<void> {
+  trackVisionTask(msg.taskId, 'observing', { tickIndex: msg.tickIndex });
   const tabId = await getActiveTabId();
   if (tabId === null) {
     send({
@@ -266,6 +283,8 @@ async function onVisionObserve(
     title: obs.title,
     ...(obs.error ? { error: obs.error } : {}),
   });
+  // After sending observation → orchestrator is calling Claude next.
+  trackVisionTask(msg.taskId, 'deciding', { tickIndex: msg.tickIndex });
 }
 
 /**
@@ -276,6 +295,26 @@ async function onVisionObserve(
 async function onVisionAct(
   msg: Extract<ServerMessage, { type: 'server.vision.act' }>,
 ): Promise<void> {
+  trackVisionTask(msg.taskId, 'acting', {
+    tickIndex: msg.tickIndex,
+    actionKind: msg.action.kind,
+  });
+  // Terminal actions complete the loop — orchestrator won't send
+  // another frame after this. Mark the task done/failed in the
+  // SW's view so the popup renders the right final state.
+  if (msg.action.kind === 'done' || msg.action.kind === 'give_up') {
+    const finalStatus: 'completed' | 'failed' = msg.action.kind === 'done' ? 'completed' : 'failed';
+    const detail = msg.action.kind === 'done' ? msg.action.summary : msg.action.reason;
+    finaliseVisionTask(msg.taskId, finalStatus, detail);
+    send({
+      type: 'client.vision.acted',
+      taskId: msg.taskId,
+      tickIndex: msg.tickIndex,
+      ok: true,
+      message: `${msg.action.kind} terminal; no driver work`,
+    });
+    return;
+  }
   const tabId = await getActiveTabId();
   if (tabId === null) {
     send({
@@ -295,6 +334,89 @@ async function onVisionAct(
     ok: result.ok,
     ...(result.message ? { message: result.message } : {}),
   });
+  // After action executed → orchestrator takes another observation
+  // next. Signal "deciding" so the popup doesn't look frozen.
+  trackVisionTask(msg.taskId, 'deciding', { tickIndex: msg.tickIndex });
+}
+
+// ---------- Vision-loop task tracking for the popup ----------
+
+/**
+ * Per-loop phase label shown in the popup's progress line.
+ *  observing → SW capturing a screenshot for the orchestrator
+ *  deciding  → orchestrator is calling Claude; loop is waiting
+ *  acting    → SW executing a CDP action (click/type/scroll/…)
+ *  completed → task_done received; summary in detail
+ *  failed    → task_give_up received; reason in detail
+ */
+export type VisionPhase = 'observing' | 'deciding' | 'acting' | 'completed' | 'failed';
+
+/**
+ * Upsert a vision-loop task into the SW's in-memory view so the
+ * popup's task list renders it. Vision tasks don't receive classic
+ * `server.task.dispatch` frames, so without this helper the popup
+ * never sees them. Called on every observe/act tick to keep
+ * `lastUpdated` fresh.
+ */
+function trackVisionTask(
+  taskId: string,
+  phase: VisionPhase,
+  detail: { tickIndex?: number; actionKind?: string },
+): void {
+  let task = state.tasks.get(taskId);
+  if (!task) {
+    task = {
+      taskId,
+      status: 'executing',
+      steps: [],
+      lastUpdated: Date.now(),
+    };
+    state.tasks.set(taskId, task);
+  }
+  task.status = 'executing';
+  task.lastUpdated = Date.now();
+  task.visionProgress = {
+    phase,
+    ...(detail.tickIndex !== undefined ? { tickIndex: detail.tickIndex } : {}),
+    ...(detail.actionKind ? { actionKind: detail.actionKind } : {}),
+  };
+  pushTasksSnapshot();
+  pushVisionProgress(taskId, phase, detail);
+}
+
+function finaliseVisionTask(taskId: string, status: 'completed' | 'failed', detail: string): void {
+  const task = state.tasks.get(taskId);
+  if (task) {
+    task.status = status;
+    task.visionProgress = {
+      phase: status === 'completed' ? 'completed' : 'failed',
+      detail,
+    };
+    task.lastUpdated = Date.now();
+  }
+  pushTasksSnapshot();
+  pushVisionProgress(taskId, status === 'completed' ? 'completed' : 'failed', {
+    detail,
+  });
+}
+
+/**
+ * Fire-and-forget notification to the popup. Mirrors `pushTasksSnapshot`'s
+ * pattern — swallows "no receiver" errors (popup is closed).
+ */
+function pushVisionProgress(
+  taskId: string,
+  phase: VisionPhase,
+  detail: { tickIndex?: number; actionKind?: string; detail?: string },
+): void {
+  chrome.runtime
+    .sendMessage({
+      type: 'holaday.vision.progress',
+      taskId,
+      phase,
+      ...detail,
+    })
+    .catch(() => {});
 }
 
 function onDispatch(msg: Extract<ServerMessage, { type: 'server.task.dispatch' }>): void {
