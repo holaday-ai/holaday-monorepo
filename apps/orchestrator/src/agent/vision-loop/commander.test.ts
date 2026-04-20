@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { LlmCallRecord, LlmCallRecorder } from '../llm-call-recorder.js';
 import {
+  type AccessibilityLoopContext,
   AnthropicVisionLoopCommander,
   type VisionLoopContext,
   type VisionObservation,
@@ -474,5 +475,171 @@ describe('AnthropicVisionLoopCommander.decideNextAction', () => {
       // back to empty string if it wasn't set before this test).
       process.env.COMMANDER_MODEL = prev ?? '';
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// decideNextActionAccessibility — parallel coverage to decideNextAction
+// ---------------------------------------------------------------------------
+
+const SAMPLE_A11Y_SNAPSHOT = [
+  '- generic:',
+  '  - textbox "搜索" [ref=e1]',
+  '  - button "百度一下" [ref=e2]',
+  '  - link "新闻" [ref=e3]:',
+  '    - /url: "http://news.baidu.com"',
+].join('\n');
+
+function freshA11yContext(
+  overrides: Partial<AccessibilityLoopContext> = {},
+): AccessibilityLoopContext {
+  return {
+    intent: '在百度搜今天天气',
+    snapshot: SAMPLE_A11Y_SNAPSHOT,
+    refs: [
+      { ref: 'e1', role: 'textbox', name: '搜索' },
+      { ref: 'e2', role: 'button', name: '百度一下' },
+      { ref: 'e3', role: 'link', name: '新闻' },
+    ],
+    url: 'https://www.baidu.com/',
+    title: '百度一下，你就知道',
+    tickIndex: 0,
+    history: [],
+    maxSteps: 30,
+    ...overrides,
+  };
+}
+
+describe('AnthropicVisionLoopCommander.decideNextActionAccessibility', () => {
+  it('decodes a11y_click_ref into a click_ref action; no image in request', async () => {
+    const cap: CapturedRequest = {};
+    const client = fakeClient(
+      () => toolUseResponse('a11y_click_ref', { ref: 'e2' }, { id: 'toolu_a001' }),
+      cap,
+    );
+    const c = new AnthropicVisionLoopCommander({ client });
+    const decision = await c.decideNextActionAccessibility(freshA11yContext());
+
+    expect(decision.action).toEqual({ kind: 'click_ref', ref: 'e2' });
+    expect(decision.toolUseId).toBe('toolu_a001');
+    expect(decision.inputTokens).toBe(1_500);
+
+    // Request: one user message, text-only content (NO image block).
+    const req = cap.req;
+    expect(req?.messages).toHaveLength(1);
+    const content =
+      (req?.messages?.[0]?.content as Anthropic.ContentBlockParam[] | undefined) ?? [];
+    expect(content).toHaveLength(1);
+    expect(content[0]?.type).toBe('text');
+    if (content[0]?.type === 'text') {
+      expect(content[0].text).toContain('在百度搜今天天气');
+      expect(content[0].text).toContain('[ref=e1]');
+      expect(content[0].text).toContain('https://www.baidu.com/');
+    }
+    // tools must be the a11y_* set, not computer_*.
+    const toolNames = (req?.tools ?? []).map((t) => (t as unknown as { name: string }).name);
+    expect(toolNames).toContain('a11y_click_ref');
+    expect(toolNames).toContain('a11y_task_done');
+    expect(toolNames).not.toContain('computer_click');
+  });
+
+  it('decodes a11y_type_in_ref into a type_in_ref action', async () => {
+    const client = fakeClient(() =>
+      toolUseResponse('a11y_type_in_ref', { ref: 'e1', text: '今天天气' }, { id: 'toolu_a002' }),
+    );
+    const c = new AnthropicVisionLoopCommander({ client });
+    const decision = await c.decideNextActionAccessibility(freshA11yContext());
+    expect(decision.action).toEqual({ kind: 'type_in_ref', ref: 'e1', text: '今天天气' });
+  });
+
+  it('a11y_task_done → done action with summary', async () => {
+    const client = fakeClient(() =>
+      toolUseResponse('a11y_task_done', { summary: '搜索完成' }, { id: 'toolu_a003' }),
+    );
+    const c = new AnthropicVisionLoopCommander({ client });
+    const decision = await c.decideNextActionAccessibility(freshA11yContext());
+    expect(decision.action).toEqual({ kind: 'done', summary: '搜索完成' });
+  });
+
+  it('Anthropic API errors become a give_up action (never throw)', async () => {
+    const client = fakeClient(() => {
+      throw new Error('simulated 429');
+    });
+    const c = new AnthropicVisionLoopCommander({ client });
+    const decision = await c.decideNextActionAccessibility(freshA11yContext());
+    expect(decision.action.kind).toBe('give_up');
+    if (decision.action.kind === 'give_up') {
+      expect(decision.action.reason).toMatch(/Anthropic API error.*simulated 429/);
+    }
+  });
+
+  it('no tool_use → give_up with stop_reason exposed', async () => {
+    const client = fakeClient(() => emptyResponse());
+    const c = new AnthropicVisionLoopCommander({ client });
+    const decision = await c.decideNextActionAccessibility(freshA11yContext());
+    expect(decision.action.kind).toBe('give_up');
+    if (decision.action.kind === 'give_up') {
+      expect(decision.action.reason).toMatch(/no tool_use.*stop_reason=end_turn/);
+    }
+  });
+
+  it('history round-trips: prior a11y_click_ref becomes assistant tool_use + user tool_result', async () => {
+    const cap: CapturedRequest = {};
+    const client = fakeClient(
+      () => toolUseResponse('a11y_task_done', { summary: 'done' }, { id: 'toolu_final' }),
+      cap,
+    );
+    const c = new AnthropicVisionLoopCommander({ client });
+    const ctx = freshA11yContext({
+      tickIndex: 1,
+      history: [
+        {
+          snapshot: SAMPLE_A11Y_SNAPSHOT,
+          url: 'https://www.baidu.com/',
+          title: '百度一下，你就知道',
+          action: { kind: 'click_ref', ref: 'e2' },
+          toolUseId: 'toolu_prior',
+          executionResult: { ok: true, message: 'clicked button e2' },
+        },
+      ],
+    });
+    await c.decideNextActionAccessibility(ctx);
+
+    const msgs = cap.req?.messages ?? [];
+    // 1 initial user + 1 assistant tool_use replay + 1 user tool_result = 3.
+    expect(msgs).toHaveLength(3);
+    expect(msgs[1]?.role).toBe('assistant');
+    const assistantContent = msgs[1]?.content as Anthropic.ContentBlockParam[];
+    expect(assistantContent[0]?.type).toBe('tool_use');
+    if (assistantContent[0]?.type === 'tool_use') {
+      expect(assistantContent[0].name).toBe('a11y_click_ref');
+      expect(assistantContent[0].id).toBe('toolu_prior');
+    }
+    expect(msgs[2]?.role).toBe('user');
+    const userContent = msgs[2]?.content as Anthropic.ContentBlockParam[];
+    expect(userContent[0]?.type).toBe('tool_result');
+    if (userContent[0]?.type === 'tool_result') {
+      expect(userContent[0].tool_use_id).toBe('toolu_prior');
+    }
+  });
+
+  it('writes an llm_calls row with purpose=commander.accessibility', async () => {
+    const records: LlmCallRecord[] = [];
+    const recorder: LlmCallRecorder = {
+      record: async (r) => {
+        records.push(r);
+      },
+    };
+    const client = fakeClient(() =>
+      toolUseResponse('a11y_click_ref', { ref: 'e2' }, { id: 'toolu_a004' }),
+    );
+    const c = new AnthropicVisionLoopCommander({ client, recorder });
+    await c.decideNextActionAccessibility(
+      freshA11yContext({ userId: 'usr_test', taskExternalId: 'tsk_test' }),
+    );
+    expect(records).toHaveLength(1);
+    expect(records[0]?.purpose).toBe('commander.accessibility');
+    expect(records[0]?.status).toBe('ok');
+    expect(records[0]?.inputTokens).toBe(1_500);
   });
 });

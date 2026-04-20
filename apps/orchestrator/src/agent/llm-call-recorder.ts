@@ -25,7 +25,11 @@ export interface LlmCallRecord {
    *   - commander.heal: single-selector self-heal on SELECTOR_NOT_FOUND
    *     (legacy path)
    *   - commander.vision: one tick of the VisionLoopCommander
-   *     observe → decide cycle
+   *     observe → decide cycle in screenshot mode (image input,
+   *     coord-based tools)
+   *   - commander.accessibility: one tick of the commander in a11y
+   *     mode (text input, ref-based tools) — cheaper per tick
+   *     because no image bytes
    *   - commander.replan: full re-plan on irrecoverable failure (W3)
    *   - skill.body: lazy-load a SKILL.md body (v0.2 §5.5)
    *   - safety.filter: SafetyFilter screening (W3)
@@ -34,6 +38,7 @@ export interface LlmCallRecord {
     | 'commander.plan'
     | 'commander.heal'
     | 'commander.vision'
+    | 'commander.accessibility'
     | 'commander.replan'
     | 'skill.body'
     | 'safety.filter';

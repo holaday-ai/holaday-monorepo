@@ -26,8 +26,10 @@
 
 import type Anthropic from '@anthropic-ai/sdk';
 import { type LlmCallRecorder, NoopLlmCallRecorder } from '../llm-call-recorder.js';
+import { A11Y_TOOLS, type A11yAction, decodeA11yToolUse } from './actions-a11y.js';
 import { VISION_TOOLS, type VisionAction, decodeToolUse } from './actions.js';
 import { type ResizedImage, resizeForVisionModel } from './image.js';
+import type { AccessibilityNodeRef } from './playwright-executor.js';
 
 /**
  * Live state of the page as seen by the commander at the start of
@@ -133,6 +135,55 @@ export interface VisionDecision {
 }
 
 /**
+ * Accessibility-mode analogue of VisionLoopContext. Payload is the
+ * annotated ariaSnapshot text (carries `[ref=eN]` markers) rather
+ * than a screenshot. Cheaper to send — Claude reasons about the
+ * page as a screen-reader does — and sidesteps the coordinate
+ * arithmetic that keeps producing NaN clicks in screenshot mode.
+ */
+export interface AccessibilityLoopContext {
+  intent: string;
+  userId?: string;
+  taskExternalId?: string;
+  /** Annotated snapshot text. `[ref=eN]` markers are what Claude cites. */
+  snapshot: string;
+  /** Parallel lookup: ref → (role, name). Commander doesn't read this,
+   *  but the runner carries it through for audit / operator logs. */
+  refs: AccessibilityNodeRef[];
+  url: string;
+  title: string;
+  tickIndex: number;
+  history: AccessibilityLoopTurn[];
+  maxSteps: number;
+  skillHint?: string;
+}
+
+export interface AccessibilityLoopTurn {
+  snapshot: string;
+  url: string;
+  title: string;
+  action: A11yAction;
+  executionResult?: { ok: boolean; message?: string };
+  toolUseId?: string;
+}
+
+/**
+ * Accessibility-mode decision. Parallels VisionDecision, minus the
+ * `image` field (no resize in a11y mode) and carrying A11yAction
+ * (ref-based) instead of VisionAction (coord-based).
+ */
+export interface AccessibilityDecision {
+  action: A11yAction;
+  reasoning?: string;
+  toolUseId?: string;
+  elapsedMs: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
+}
+
+/**
  * Abstract commander interface so integration tests can stub without
  * hitting Anthropic. `AnthropicVisionLoopCommander` is the production
  * implementation; a `StubVisionLoopCommander` (returns a scripted
@@ -147,6 +198,13 @@ export interface VisionLoopCommander {
    * that as a clean exit so the task pauses with a useful message.
    */
   decideNextAction(ctx: VisionLoopContext): Promise<VisionDecision>;
+  /**
+   * Accessibility-mode variant. Same contract (never throws, returns
+   * a `give_up` action on any failure). Optional on the interface so
+   * screenshot-only test stubs keep working without being forced to
+   * implement both paths.
+   */
+  decideNextActionAccessibility?(ctx: AccessibilityLoopContext): Promise<AccessibilityDecision>;
 }
 
 // ---------------------------------------------------------------------------
@@ -341,6 +399,115 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
   }
 
   /**
+   * Accessibility-mode counterpart of `decideNextAction`. Text-only:
+   * no screenshot resize, no image blocks, no sliding window —
+   * sending a fresh a11y snapshot every tick is cheap enough
+   * (≈1-4KB/tick vs ≈70KB for a JPEG, ~20× cheaper).
+   *
+   * Same contract: never throws; on failure returns a `give_up`
+   * action via the shared AccessibilityDecision shape.
+   */
+  async decideNextActionAccessibility(
+    ctx: AccessibilityLoopContext,
+  ): Promise<AccessibilityDecision> {
+    const startedAt = Date.now();
+    let messages: Anthropic.MessageParam[];
+    try {
+      messages = buildA11yMessages(ctx);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return synthesiseA11yGiveUp(`message build failed: ${message}`, startedAt);
+    }
+
+    let response: Anthropic.Message;
+    try {
+      response = await this.client.messages.create({
+        model: this.model,
+        max_tokens: this.maxTokens,
+        system: A11Y_SYSTEM_PROMPT,
+        tools: A11Y_TOOLS as unknown as Anthropic.Tool[],
+        tool_choice: { type: 'any' },
+        messages,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.recordCall({
+        userExternalId: ctx.userId,
+        taskExternalId: ctx.taskExternalId,
+        latencyMs: Date.now() - startedAt,
+        status: 'error',
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        errorMessage: message.slice(0, 512),
+        purpose: 'commander.accessibility',
+      });
+      return synthesiseA11yGiveUp(`Anthropic API error: ${message}`, startedAt);
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    const usage = {
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      cacheReadInputTokens: response.usage.cache_read_input_tokens ?? 0,
+      cacheCreationInputTokens: response.usage.cache_creation_input_tokens ?? 0,
+    };
+
+    let reasoning: string | undefined;
+    let toolUse: Anthropic.ToolUseBlock | undefined;
+    for (const block of response.content) {
+      if (block.type === 'text' && !reasoning) reasoning = block.text.slice(0, 2_000);
+      if (block.type === 'tool_use' && !toolUse) toolUse = block;
+    }
+
+    if (!toolUse) {
+      await this.recordCall({
+        userExternalId: ctx.userId,
+        taskExternalId: ctx.taskExternalId,
+        latencyMs: elapsedMs,
+        status: 'error',
+        ...usage,
+        errorMessage: `no tool_use; stop_reason=${response.stop_reason}`,
+        requestMeta: { tickIndex: ctx.tickIndex },
+        purpose: 'commander.accessibility',
+      });
+      return {
+        action: {
+          kind: 'give_up',
+          reason: `Claude returned no tool_use block; stop_reason=${response.stop_reason}`,
+        },
+        ...(reasoning ? { reasoning } : {}),
+        elapsedMs,
+        ...usage,
+      };
+    }
+
+    const action = decodeA11yToolUse(toolUse.name, toolUse.input);
+    await this.recordCall({
+      userExternalId: ctx.userId,
+      taskExternalId: ctx.taskExternalId,
+      latencyMs: elapsedMs,
+      status: 'ok',
+      ...usage,
+      requestMeta: {
+        tickIndex: ctx.tickIndex,
+        toolName: toolUse.name,
+        actionKind: action.kind,
+      },
+      purpose: 'commander.accessibility',
+    });
+
+    return {
+      action,
+      ...(reasoning ? { reasoning } : {}),
+      toolUseId: toolUse.id,
+      elapsedMs,
+      ...usage,
+    };
+  }
+
+  /**
    * Shared helper to record one llm_calls row per decideNextAction
    * call. Purpose is always `commander.vision`; provider is always
    * `anthropic`. Wraps the record call in a try so a DB miss never
@@ -357,6 +524,8 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
     cacheCreationInputTokens: number;
     errorMessage?: string;
     requestMeta?: Record<string, unknown>;
+    /** Default `commander.vision`. A11y path passes `commander.accessibility`. */
+    purpose?: 'commander.vision' | 'commander.accessibility';
   }): Promise<void> {
     // Recorder requires userExternalId (llm_calls.user_id NOT NULL).
     // Skip persistence entirely when the caller didn't pass one —
@@ -369,7 +538,7 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
         ...(row.taskExternalId ? { taskExternalId: row.taskExternalId } : {}),
         provider: 'anthropic',
         model: this.model,
-        purpose: 'commander.vision',
+        purpose: row.purpose ?? 'commander.vision',
         inputTokens: row.inputTokens,
         outputTokens: row.outputTokens,
         cacheReadInputTokens: row.cacheReadInputTokens,
@@ -574,6 +743,152 @@ function emptyResizedImage(obs: VisionObservation): ResizedImage {
   };
 }
 
+function synthesiseA11yGiveUp(reason: string, startedAt: number): AccessibilityDecision {
+  return {
+    action: { kind: 'give_up', reason },
+    elapsedMs: Date.now() - startedAt,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+  };
+}
+
+/**
+ * Build Anthropic messages[] for accessibility mode. Text-only — no
+ * images. Each historical turn becomes an assistant `tool_use` block
+ * paired with a user `tool_result` carrying the post-action
+ * snapshot text. Current tick goes last as a user message with the
+ * intent + live snapshot.
+ *
+ * No sliding window: a11y snapshots are ~1-4KB so we can keep every
+ * tick's payload without ballooning the request.
+ */
+function buildA11yMessages(ctx: AccessibilityLoopContext): Anthropic.MessageParam[] {
+  const messages: Anthropic.MessageParam[] = [];
+  const initialSnapshot = ctx.history[0]?.snapshot ?? ctx.snapshot;
+  const initialUrl = ctx.history[0]?.url ?? ctx.url;
+  const initialTitle = ctx.history[0]?.title ?? ctx.title;
+  messages.push({
+    role: 'user',
+    content: [
+      {
+        type: 'text',
+        text: initialA11yUserText(ctx, initialUrl, initialTitle, initialSnapshot),
+      },
+    ],
+  });
+
+  for (let i = 0; i < ctx.history.length; i++) {
+    const turn = ctx.history[i];
+    if (!turn || !turn.toolUseId) continue;
+    messages.push({
+      role: 'assistant',
+      content: [toolUseBlockForA11y(turn.action, turn.toolUseId)],
+    });
+    const nextSnap = ctx.history[i + 1]?.snapshot ?? ctx.snapshot;
+    const nextUrl = ctx.history[i + 1]?.url ?? ctx.url;
+    const nextTitle = ctx.history[i + 1]?.title ?? ctx.title;
+    messages.push({
+      role: 'user',
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: turn.toolUseId,
+          content: [
+            {
+              type: 'text',
+              text: followupA11yUserText(turn, nextUrl, nextTitle, nextSnap),
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  return messages;
+}
+
+function initialA11yUserText(
+  ctx: AccessibilityLoopContext,
+  url: string,
+  title: string,
+  snapshot: string,
+): string {
+  const lines: string[] = [];
+  lines.push(`User intent: ${ctx.intent}`);
+  lines.push(`Current URL: ${url || '(blank)'}`);
+  lines.push(`Current page title: ${title || '(blank)'}`);
+  lines.push(`Tick ${ctx.tickIndex} of at most ${ctx.maxSteps}.`);
+  if (ctx.skillHint) {
+    lines.push('');
+    lines.push('Context for this site (optional hint, may be stale):');
+    lines.push(ctx.skillHint);
+  }
+  lines.push('');
+  lines.push('Accessibility snapshot (interactive elements carry [ref=eN] markers):');
+  lines.push(snapshot || '(empty — page may be chrome:// or loading)');
+  lines.push('');
+  lines.push(
+    'Pick ONE tool call, referencing elements by their ref. Call a11y_task_done when the intent is satisfied, a11y_task_give_up when you cannot proceed.',
+  );
+  return lines.join('\n');
+}
+
+function followupA11yUserText(
+  turn: AccessibilityLoopTurn,
+  url: string,
+  title: string,
+  snapshot: string,
+): string {
+  const lines: string[] = [];
+  if (turn.executionResult) {
+    lines.push(
+      turn.executionResult.ok
+        ? `Previous action executed.${
+            turn.executionResult.message ? ` ${turn.executionResult.message}` : ''
+          }`
+        : `Previous action FAILED: ${turn.executionResult.message ?? 'no detail'}`,
+    );
+  }
+  lines.push(`URL: ${url || '(blank)'}   Title: ${title || '(blank)'}`);
+  lines.push('Updated accessibility snapshot:');
+  lines.push(snapshot || '(empty)');
+  return lines.join('\n');
+}
+
+/**
+ * Reverse of `decodeA11yToolUse` — turn an A11yAction back into the
+ * tool_use block Anthropic expects when we replay history.
+ */
+function toolUseBlockForA11y(action: A11yAction, id: string): Anthropic.ToolUseBlockParam {
+  const base = { type: 'tool_use' as const, id };
+  switch (action.kind) {
+    case 'click_ref':
+      return { ...base, name: 'a11y_click_ref', input: { ref: action.ref } };
+    case 'type_in_ref':
+      return {
+        ...base,
+        name: 'a11y_type_in_ref',
+        input: { ref: action.ref, text: action.text },
+      };
+    case 'press_key':
+      return { ...base, name: 'a11y_press_key', input: { key: action.key } };
+    case 'scroll':
+      return { ...base, name: 'a11y_scroll', input: { dy: action.dy } };
+    case 'wait':
+      return { ...base, name: 'a11y_wait', input: { ms: action.ms } };
+    case 'screenshot':
+      return { ...base, name: 'a11y_screenshot', input: {} };
+    case 'navigate':
+      return { ...base, name: 'a11y_navigate', input: { url: action.url } };
+    case 'done':
+      return { ...base, name: 'a11y_task_done', input: { summary: action.summary } };
+    case 'give_up':
+      return { ...base, name: 'a11y_task_give_up', input: { reason: action.reason } };
+  }
+}
+
 function synthesiseGiveUp(reason: string, startedAt: number, image: ResizedImage): VisionDecision {
   return {
     action: { kind: 'give_up', reason },
@@ -640,6 +955,57 @@ export const VISION_SYSTEM_PROMPT = `你是一个浏览器自动化助手。你�
 # 上下文说明
 
 注意：为节省 context，较早的截图已被省略，但操作历史（tool_use + URL + title + 你之前的推理）保留完整。你总能看到最近 3 轮的完整截图，更早的截图会显示为 "[tick N 截图已省略…]" 占位文本。需要回顾更早状态时，依靠已保留的文本操作记录即可；不要因为看不到某张旧截图就怀疑任务进度。`;
+
+/**
+ * Accessibility-mode system prompt. Model receives a screen-reader-
+ * grade tree (role + name per line) with `[ref=eN]` markers on
+ * interactive nodes. It operates by ref — no coordinates — which
+ * removes the coord-NaN class of bugs entirely.
+ */
+export const A11Y_SYSTEM_PROMPT = `你是一个浏览器自动化助手。你通过页面的可访问性树（accessibility tree）理解页面，并使用提供的工具操作用户的 Chrome 浏览器。每一轮你会收到当前页面的 accessibility snapshot 和用户的目标；你选 ONE action 执行下一步。
+
+# 输入格式
+
+Accessibility snapshot 是 YAML-ish 文本，一行一个节点。交互元素（link / button / textbox / checkbox / combobox / tab 等）带有 [ref=eN] 标记，你通过 ref 操作它们：
+
+    - generic:
+      - heading "百度一下，你就知道" [level=1]
+      - textbox "搜索" [ref=e5]
+      - button "百度一下" [ref=e6]
+      - link "新闻" [ref=e1]:
+        - /url: "http://news.baidu.com"
+
+**只有带 [ref=eN] 的节点能被直接操作。** 静态文本 (heading / generic / img / paragraph 等) 是页面结构提示，不能点也不能输入。
+
+# 工作方式
+
+1. **先理解用户意图**，拆成步骤，逐步执行（每轮一步）。
+2. **每次操作后页面会变化**，你会在下一轮看到新的 snapshot — 如果刚做了点击 / 导航 / 提交，snapshot 可能还没反映变化，用 a11y_wait 500–1500ms 再下一轮观察。
+3. **如果当前页面不适合完成任务** (空白页 / 错误页 / 404 / 不相关)，用 a11y_navigate 直接跳到正确 URL — 不要硬点。
+4. **遇到弹窗 / Cookie 提示 / 登录框**，先尝试 dismiss（找 "关闭/×/稍后/拒绝/取消" ref）。仅在登录必须且无凭据时才 give_up。
+5. **任务完成时**调 a11y_task_done，summary 用**中文**（1-3 句说明做了什么 + 结果）。
+6. **只有技术上无法完成**（需登录但没凭据 / captcha 反复 / 站点结构性不可用）才 a11y_task_give_up。
+
+# 工具
+
+- a11y_click_ref { ref } — 点击指定 ref 的元素。输入框点击一次聚焦，按钮点击一次触发。
+- a11y_type_in_ref { ref, text } — 先点击 ref 聚焦，再输入文字。一步完成 "点击输入框再输入" 的常见模式。
+- a11y_press_key { key } — 给当前聚焦元素发键盘事件："Enter"/"Tab"/"Escape"/"ctrl+a"/"cmd+c"。
+- a11y_scroll { dy } — dy 正值向下，负值向上。目标节点不在 snapshot 里时可能滚动后出现。
+- a11y_wait { ms } — 等页面更新。点击 / 导航后 500-1500ms 再观察。
+- a11y_screenshot — 不操作，只重新观察。罕用。
+- a11y_navigate { url } — 直接导航到 URL（等价于地址栏输入+回车）。优于 "点地址栏-清空-打字-回车" 这一长串。
+- a11y_task_done { summary } — 完成。summary 必须中文。
+- a11y_task_give_up { reason } — 放弃并说明原因。
+
+# 规则
+
+- 每轮只调一个工具。不要在 tool_use 之前长篇解释。
+- 只操作 snapshot 里真实出现的 ref。看不到 ref 时先 scroll / wait，不要猜。
+- 输入框要用 a11y_type_in_ref（自带聚焦），不要 click_ref + type 两步走。
+- 超过 25 轮仍无进展 → a11y_task_give_up 并说明卡点。
+- **永远不要输入密码、2FA 码、支付信息** — 遇到这类字段直接 give_up reason="需要用户手动输入凭据"。
+- 不要触发破坏性操作（注销/删除账户/退订），除非用户明确要求。`;
 
 /**
  * Hard cap on loop iterations per task. Phase A: 30. Most real flows
