@@ -280,6 +280,120 @@ describe('AnthropicVisionLoopCommander.decideNextAction', () => {
     }
   });
 
+  it('sliding screenshot window: elides images older than VISION_SCREENSHOT_WINDOW', async () => {
+    // Fabricate 5 prior turns + current = 6 observations. With
+    // default window=3, only the last 3 should carry images; the
+    // earlier 3 should be text placeholders.
+    const cap: CapturedRequest = {};
+    const client = fakeClient(
+      () => toolUseResponse('computer_click', { x: 50, y: 60 }, { id: 'toolu_current' }),
+      cap,
+    );
+    const c = new AnthropicVisionLoopCommander({ client });
+
+    const histObs = await Promise.all(
+      [0, 1, 2, 3, 4].map(async (i) => ({
+        ...(await makeObservation(i)),
+        url: `https://example.com/page-${i}`,
+      })),
+    );
+    const history = histObs.map((obs, i) => ({
+      observation: obs,
+      action: { kind: 'click' as const, x: i, y: i },
+      toolUseId: `toolu_${i}`,
+      executionResult: { ok: true },
+    }));
+
+    await c.decideNextAction({
+      intent: 'long running test',
+      observation: await makeObservation(5),
+      history,
+      maxSteps: 30,
+    });
+
+    const req = cap.req;
+    // Messages: [initial user, assistant_0, tr_1, assistant_1, tr_2,
+    //            assistant_2, tr_3, assistant_3, tr_4, assistant_4, tr_5]
+    // = 1 + (5 * 2) = 11 messages.
+    expect(req?.messages).toHaveLength(11);
+
+    const imageContentBlocks: Array<Anthropic.ImageBlockParam | Anthropic.TextBlockParam> = [];
+    const elisionTexts: string[] = [];
+    // Helper: gather image-or-elision blocks for each observation.
+    function record(block: unknown) {
+      const b = block as { type?: string; text?: string };
+      if (b?.type === 'image') {
+        imageContentBlocks.push(block as Anthropic.ImageBlockParam);
+      } else if (
+        b?.type === 'text' &&
+        typeof b.text === 'string' &&
+        b.text.includes('截图已省略')
+      ) {
+        elisionTexts.push(b.text);
+      }
+    }
+
+    // Observation 0 lives in messages[0].content[0].
+    const initialContent = req?.messages?.[0]?.content as Anthropic.ContentBlockParam[];
+    record(initialContent[0]);
+    // Observations 1..5 live in tool_result.content[0] of each user
+    // message after an assistant (indices 2, 4, 6, 8, 10).
+    for (const i of [2, 4, 6, 8, 10]) {
+      const msg = req?.messages?.[i];
+      const content = msg?.content as Anthropic.ContentBlockParam[];
+      const tr = content[0];
+      if (tr?.type === 'tool_result' && Array.isArray(tr.content)) {
+        record(tr.content[0]);
+      }
+    }
+
+    // totalObservations = 6, window = 3 → keep observations [3, 4, 5]
+    // as images; observations [0, 1, 2] as placeholders.
+    expect(imageContentBlocks).toHaveLength(3);
+    expect(elisionTexts).toHaveLength(3);
+    for (const text of elisionTexts) {
+      expect(text).toMatch(/tick \d+ 截图已省略/);
+    }
+  });
+
+  it('respects COMMANDER_SCREENSHOT_WINDOW env override', async () => {
+    const prev = process.env.COMMANDER_SCREENSHOT_WINDOW;
+    process.env.COMMANDER_SCREENSHOT_WINDOW = '1';
+    try {
+      const cap: CapturedRequest = {};
+      const client = fakeClient(
+        () => toolUseResponse('computer_click', { x: 1, y: 1 }, { id: 'toolu_now' }),
+        cap,
+      );
+      const c = new AnthropicVisionLoopCommander({ client });
+      const history = [
+        {
+          observation: await makeObservation(0),
+          action: { kind: 'click' as const, x: 0, y: 0 },
+          toolUseId: 'toolu_0',
+          executionResult: { ok: true },
+        },
+      ];
+      await c.decideNextAction({
+        intent: 'test',
+        observation: await makeObservation(1),
+        history,
+        maxSteps: 30,
+      });
+      // Window=1 with 2 observations → only observation 1 (the
+      // current tick's) stays as an image. Observation 0 elides.
+      const initialContent = cap.req?.messages?.[0]?.content as Anthropic.ContentBlockParam[];
+      expect(initialContent[0]?.type).toBe('text');
+      const toolResultContent = cap.req?.messages?.[2]?.content as Anthropic.ContentBlockParam[];
+      const tr = toolResultContent[0];
+      if (tr?.type === 'tool_result' && Array.isArray(tr.content)) {
+        expect(tr.content[0]?.type).toBe('image');
+      }
+    } finally {
+      process.env.COMMANDER_SCREENSHOT_WINDOW = prev ?? '';
+    }
+  });
+
   it('writes an llm_calls row per decideNextAction when a recorder + userId are provided', async () => {
     const records: LlmCallRecord[] = [];
     const recorder: LlmCallRecorder = {

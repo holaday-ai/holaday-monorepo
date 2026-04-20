@@ -171,6 +171,29 @@ export interface AnthropicVisionLoopCommanderOptions {
 const DEFAULT_MODEL = 'claude-sonnet-4-6-20250929';
 const DEFAULT_MAX_TOKENS = 1_024;
 
+/**
+ * How many of the most recent observation screenshots to keep as real
+ * image blocks in the Anthropic request. Older ticks collapse to a
+ * text placeholder ("[tick N 的截图已省略…]") so the tool_use + the
+ * URL/title text of every turn survive, but the image payload — by
+ * far the biggest chunk of context — only persists for the last N
+ * ticks. With N=3 and a 1568px JPEG (≈70 KB base64), peak context
+ * stays around 3 × 70 KB ≈ 210 KB image + ≪10 KB text per request,
+ * independent of loop length. Pre-fix, a 10-tick loop shipped ~700 KB
+ * of images and usually blew Anthropic's request size / latency budget.
+ *
+ * Override via env `COMMANDER_SCREENSHOT_WINDOW` at runtime (useful
+ * for ablation).
+ */
+export const VISION_SCREENSHOT_WINDOW = 3;
+
+function readScreenshotWindow(): number {
+  const raw = process.env.COMMANDER_SCREENSHOT_WINDOW;
+  if (!raw) return VISION_SCREENSHOT_WINDOW;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 1 ? n : VISION_SCREENSHOT_WINDOW;
+}
+
 export class AnthropicVisionLoopCommander implements VisionLoopCommander {
   private readonly client: Anthropic;
   private readonly model: string;
@@ -213,7 +236,7 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
     //    Current tick's observation goes last as a user message.
     let messages: Anthropic.MessageParam[];
     try {
-      messages = await buildMessages(ctx, image);
+      messages = await buildMessages(ctx, image, readScreenshotWindow());
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return synthesiseGiveUp(`message build failed: ${message}`, startedAt, image);
@@ -368,40 +391,75 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
  * Each historical turn becomes two content blocks on the wire:
  *
  *   assistant: [tool_use(name=mapFromKind(turn.action), id=turn.toolUseId)]
- *   user:      [tool_result(tool_use_id=turn.toolUseId, content=[image, text])]
+ *   user:      [tool_result(tool_use_id=turn.toolUseId, content=[image|placeholder, text])]
  *
  * First tick has empty history; we emit a single user message with
  * [image, text(intent + url + title + skillHint?)] and let Claude
  * choose its first tool_use.
+ *
+ * Sliding screenshot window: observations older than the last
+ * `screenshotWindow` ticks have their image block replaced with a
+ * short text placeholder. The tool_use payload, URL, title, and
+ * text reasoning all stay — only the bitmap is elided. See
+ * `VISION_SCREENSHOT_WINDOW` for motivation.
  */
 async function buildMessages(
   ctx: VisionLoopContext,
   currentImage: ResizedImage,
+  screenshotWindow: number,
 ): Promise<Anthropic.MessageParam[]> {
   const messages: Anthropic.MessageParam[] = [];
+  // Total observations this turn: one per historical turn (the
+  // frame Claude saw BEFORE each recorded action) + one for the
+  // current tick. Keep the last `screenshotWindow` of those as real
+  // images; elide everything before.
+  const totalObservations = ctx.history.length + 1;
+  const keepFromIndex = Math.max(0, totalObservations - screenshotWindow);
 
-  // Initial user message — the goal + first screenshot. Always prepended.
-  const initial = ctx.history[0];
-  const firstObservation = initial ? initial.observation : ctx.observation;
-  const firstImageB64 = initial
-    ? (
-        await resizeForVisionModel(
-          firstObservation.screenshotBase64,
-          firstObservation.viewportWidth,
-          firstObservation.viewportHeight,
-        )
-      ).base64
-    : currentImage.base64;
+  // Resolve the bytes for an observation. The current observation is
+  // already resized (the commander did it at the top of decideNextAction);
+  // historical ones go through resizeForVisionModel at build time.
+  async function imageDataFor(obsIndex: number, observation: VisionObservation): Promise<string> {
+    if (obsIndex === ctx.history.length) return currentImage.base64;
+    const resized = await resizeForVisionModel(
+      observation.screenshotBase64,
+      observation.viewportWidth,
+      observation.viewportHeight,
+    );
+    return resized.base64;
+  }
+
+  // Return the content block that represents an observation's image
+  // in the wire format — real image when within window, text
+  // placeholder when older. Single function so both call sites
+  // (initial user message + tool_result) use the same rule.
+  async function imageOrElision(
+    obsIndex: number,
+    observation: VisionObservation,
+  ): Promise<Anthropic.TextBlockParam | Anthropic.ImageBlockParam> {
+    if (obsIndex < keepFromIndex) {
+      return {
+        type: 'text',
+        text: `[tick ${observation.tickIndex} 截图已省略以节省 context; URL/title 与操作历史保留]`,
+      };
+    }
+    const data = await imageDataFor(obsIndex, observation);
+    return {
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/jpeg', data },
+    };
+  }
+
+  // Initial user message — the goal + observation 0.
+  const initialObs = ctx.history[0]?.observation ?? ctx.observation;
+  const initialImageBlock = await imageOrElision(0, initialObs);
   messages.push({
     role: 'user',
     content: [
-      {
-        type: 'image',
-        source: { type: 'base64', media_type: 'image/jpeg', data: firstImageB64 },
-      },
+      initialImageBlock,
       {
         type: 'text',
-        text: initialUserText(ctx, firstObservation),
+        text: initialUserText(ctx, initialObs),
       },
     ],
   });
@@ -415,37 +473,19 @@ async function buildMessages(
       content: [toolUseBlockFor(turn.action, turn.toolUseId)],
     });
 
-    // For each turn past the first, the OBSERVATION that belongs to it
-    // (what Claude sees AFTER executing that turn's action) is the
-    // NEXT turn's observation, or the current observation if this was
-    // the last recorded turn.
-    const nextTurn = ctx.history[i + 1];
-    const nextObservation = nextTurn ? nextTurn.observation : ctx.observation;
-    const nextImageB64 = nextTurn
-      ? (
-          await resizeForVisionModel(
-            nextObservation.screenshotBase64,
-            nextObservation.viewportWidth,
-            nextObservation.viewportHeight,
-          )
-        ).base64
-      : currentImage.base64;
+    // Tool_result carries the observation that came AFTER this turn's
+    // action — observation index (i + 1). If there's a turn[i+1],
+    // that's its observation; otherwise the current tick's observation.
+    const nextObsIndex = i + 1;
+    const nextObs = ctx.history[i + 1]?.observation ?? ctx.observation;
+    const nextImageBlock = await imageOrElision(nextObsIndex, nextObs);
     messages.push({
       role: 'user',
       content: [
         {
           type: 'tool_result',
           tool_use_id: turn.toolUseId,
-          content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: 'image/jpeg', data: nextImageB64 },
-            },
-            {
-              type: 'text',
-              text: followupUserText(turn, nextObservation),
-            },
-          ],
+          content: [nextImageBlock, { type: 'text', text: followupUserText(turn, nextObs) }],
         },
       ],
     });
@@ -595,7 +635,11 @@ export const VISION_SYSTEM_PROMPT = `你是一个浏览器自动化助手。你�
 
 - 视口外的内容你看不到 — 需要时 \`computer_scroll\` 探索。
 - 当前标签页可能在任何站点 — 只相信截图里真实可见的。
-- 不要点击 "注销/删除账户/退订" 等破坏性按钮，除非用户的目标明确要求这个动作。`;
+- 不要点击 "注销/删除账户/退订" 等破坏性按钮，除非用户的目标明确要求这个动作。
+
+# 上下文说明
+
+注意：为节省 context，较早的截图已被省略，但操作历史（tool_use + URL + title + 你之前的推理）保留完整。你总能看到最近 3 轮的完整截图，更早的截图会显示为 "[tick N 截图已省略…]" 占位文本。需要回顾更早状态时，依靠已保留的文本操作记录即可；不要因为看不到某张旧截图就怀疑任务进度。`;
 
 /**
  * Hard cap on loop iterations per task. Phase A: 30. Most real flows
