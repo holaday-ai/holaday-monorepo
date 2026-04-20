@@ -29,6 +29,7 @@
  */
 
 import type { Browser, Page } from 'playwright';
+import sharp from 'sharp';
 
 export interface ConnectResult {
   ok: boolean;
@@ -244,10 +245,31 @@ export class PlaywrightExecutor {
   async screenshot(page: PageLike): Promise<ScreenshotResult> {
     try {
       const buf = await page.screenshot({ type: 'jpeg', quality: 80, fullPage: false });
+      // `page.viewportSize()` returns null when Playwright is attached
+      // via `connectOverCDP` to an externally-launched Chrome (the
+      // whole point of Phase D) — Playwright didn't configure the
+      // viewport so it refuses to guess. Fall back to decoding the
+      // actual JPEG bytes, which always carries the real capture dims.
+      // Downstream (modelCoordToReal + the commander's resize path)
+      // needs real pixels or the vision loop can't translate clicks.
       const vp = page.viewportSize();
+      if (vp) {
+        return {
+          base64: buf.toString('base64'),
+          viewportWidth: vp.width,
+          viewportHeight: vp.height,
+        };
+      }
+      const meta = await sharp(buf).metadata();
+      if (typeof meta.width === 'number' && typeof meta.height === 'number') {
+        return {
+          base64: buf.toString('base64'),
+          viewportWidth: meta.width,
+          viewportHeight: meta.height,
+        };
+      }
       return {
-        base64: buf.toString('base64'),
-        ...(vp ? { viewportWidth: vp.width, viewportHeight: vp.height } : {}),
+        error: `screenshot captured but both page.viewportSize() and sharp metadata returned no dimensions (buf=${buf.length} bytes)`,
       };
     } catch (err) {
       return { error: `screenshot failed: ${errMsg(err)}` };
