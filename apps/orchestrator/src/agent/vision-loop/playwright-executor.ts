@@ -102,29 +102,19 @@ export interface PageLike {
     type(text: string): Promise<void>;
     press(key: string): Promise<void>;
   };
-  accessibility: {
-    snapshot(opts?: { interestingOnly?: boolean }): Promise<AccessibilityNode | null>;
-  };
+  /**
+   * Playwright 1.55+ replaced the tree-returning `page.accessibility`
+   * namespace with `page.ariaSnapshot()`, which emits YAML-ish text
+   * (one line per node, nested via indentation). We pass `ref:true`
+   * even though Page-level snapshot on 1.59 ignores it (the option is
+   * currently honoured only via Locator.ariaSnapshot) — keeps us
+   * forward-compatible if/when Playwright turns it on Page-wide — and
+   * inject our own `[ref=eN]` markers on interactive lines via
+   * annotateAriaSnapshot below.
+   */
+  ariaSnapshot(opts?: { ref?: boolean }): Promise<string>;
   waitForTimeout(ms: number): Promise<void>;
   goto(url: string, opts?: { waitUntil?: string; timeout?: number }): Promise<unknown>;
-}
-
-/**
- * Shape of Playwright's `accessibility.snapshot()` return — mirrored
- * locally so we don't drag all of `playwright.Accessibility` into the
- * type surface and to keep the test fake tight.
- */
-export interface AccessibilityNode {
-  role: string;
-  name?: string;
-  value?: string | number;
-  description?: string;
-  children?: AccessibilityNode[];
-  disabled?: boolean;
-  focused?: boolean;
-  checked?: boolean | 'mixed';
-  selected?: boolean;
-  expanded?: boolean;
 }
 
 /**
@@ -288,33 +278,26 @@ export class PlaywrightExecutor {
    * pages; Step 2 wires it into the commander.
    */
   async accessibilitySnapshot(page: PageLike): Promise<AccessibilitySnapshotResult> {
-    let root: AccessibilityNode | null = null;
+    let yaml = '';
     try {
-      root = await page.accessibility.snapshot({ interestingOnly: true });
+      yaml = await page.ariaSnapshot({ ref: true });
     } catch (err) {
       return {
         text: '',
         refs: [],
         url: safeUrl(page),
         title: '',
-        error: `accessibility.snapshot failed: ${errMsg(err)}`,
+        error: `ariaSnapshot failed: ${errMsg(err)}`,
       };
     }
-    const refs: AccessibilityNodeRef[] = [];
-    const lines: string[] = [];
-    if (root) serialiseA11y(root, 0, refs, lines);
+    const { text, refs } = annotateAriaSnapshot(yaml);
     let title = '';
     try {
       title = await page.title();
     } catch {
       // non-fatal — title best-effort
     }
-    return {
-      text: lines.join('\n'),
-      refs,
-      url: safeUrl(page),
-      title,
-    };
+    return { text, refs, url: safeUrl(page), title };
   }
 
   // ---------- input actions ----------
@@ -448,40 +431,68 @@ function normaliseKey(key: string): string {
 }
 
 /**
- * Depth-first walk of the a11y tree. For each interesting node:
- *   - emit a single text line with role + (optional) name
- *   - assign a ref (e1, e2, …) to interactive roles and include it in
- *     the line so Claude can cite it: `e3 textbox "Email"`
- * Children are rendered indented.
+ * Parse Playwright's `ariaSnapshot()` YAML output, inject `[ref=eN]`
+ * markers on lines whose role is interactive, and return the augmented
+ * text + a refs table.
+ *
+ * ariaSnapshot output looks like:
+ *
+ *   - generic:
+ *     - heading "Hello" [level=1]
+ *     - link "Home":
+ *       - /url: "https://..."
+ *     - button "Submit"
+ *     - textbox "Search"
+ *
+ * Sub-properties (`/url`, `/description`, etc.) are NOT interactive
+ * nodes — they're metadata on the parent line and get left untouched.
+ * Non-interactive roles (generic, heading, img, …) also pass through.
+ *
+ * Produced output for the snippet above:
+ *
+ *   - generic:
+ *     - heading "Hello" [level=1]
+ *     - link "Home" [ref=e1]:
+ *       - /url: "https://..."
+ *     - button "Submit" [ref=e2]
+ *     - textbox "Search" [ref=e3]
+ *
+ * Exported so unit tests can exercise the parser in isolation.
  */
-function serialiseA11y(
-  node: AccessibilityNode,
-  depth: number,
-  refs: AccessibilityNodeRef[],
-  out: string[],
-): void {
-  const role = node.role ?? 'unknown';
-  const name = (node.name ?? '').trim();
-  const indent = '  '.repeat(depth);
-  const interactive = INTERACTIVE_ROLES.has(role);
-  let line: string;
-  if (interactive) {
+export function annotateAriaSnapshot(yaml: string): {
+  text: string;
+  refs: AccessibilityNodeRef[];
+} {
+  const refs: AccessibilityNodeRef[] = [];
+  const lines = yaml.split('\n');
+  // Match: leading spaces, the "- ", role word, optional quoted name,
+  // then whatever trailing metadata (`[attr=val]`, `:`, sub-content).
+  // Group 1 captures everything up through and including the name/role;
+  // group 2 captures the bare role token for the interactive check;
+  // group 3 captures the raw name (quotes stripped); group 4 is the
+  // trailing colon/attrs so we can re-attach them after `[ref=eN]`.
+  const roleLine = /^(\s*-\s*(\w+)(?:\s+"((?:[^"\\]|\\.)*)")?)(.*)$/;
+  const out: string[] = [];
+  for (const line of lines) {
+    const m = line.match(roleLine);
+    if (!m) {
+      out.push(line);
+      continue;
+    }
+    const [, head, role, quotedName, tail] = m;
+    if (!head || !role) {
+      out.push(line);
+      continue;
+    }
+    if (!INTERACTIVE_ROLES.has(role)) {
+      out.push(line);
+      continue;
+    }
     const ref = `e${refs.length + 1}`;
-    refs.push({ ref, role, name });
-    line = name ? `${indent}${ref} ${role} "${truncate(name, 120)}"` : `${indent}${ref} ${role}`;
-  } else {
-    line = name ? `${indent}${role} "${truncate(name, 120)}"` : `${indent}${role}`;
+    refs.push({ ref, role, name: (quotedName ?? '').trim() });
+    out.push(`${head} [ref=${ref}]${tail ?? ''}`);
   }
-  out.push(line);
-  const children = node.children;
-  if (children && children.length > 0) {
-    for (const child of children) serialiseA11y(child, depth + 1, refs, out);
-  }
-}
-
-function truncate(s: string, n: number): string {
-  if (s.length <= n) return s;
-  return `${s.slice(0, n - 1)}…`;
+  return { text: out.join('\n'), refs };
 }
 
 /**

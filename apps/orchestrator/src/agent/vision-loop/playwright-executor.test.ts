@@ -1,9 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import {
-  type AccessibilityNode,
-  type PageLike,
-  PlaywrightExecutor,
-} from './playwright-executor.js';
+import { type PageLike, PlaywrightExecutor, annotateAriaSnapshot } from './playwright-executor.js';
 
 beforeAll(() => {
   process.env.JWT_SECRET ??= 'test-secret-must-be-at-least-32-characters-long-yes';
@@ -58,9 +54,7 @@ function makeFakePage(overrides: Partial<PageLike> = {}): {
         record('keyboard.press', key);
       },
     },
-    accessibility: {
-      snapshot: async () => null,
-    },
+    ariaSnapshot: async () => '',
     waitForTimeout: async (ms) => {
       record('waitForTimeout', ms);
     },
@@ -136,74 +130,104 @@ describe('PlaywrightExecutor.screenshot', () => {
   });
 });
 
-describe('PlaywrightExecutor.accessibilitySnapshot', () => {
-  function makeTree(): AccessibilityNode {
-    return {
-      role: 'WebArea',
-      name: 'Example',
-      children: [
-        {
-          role: 'navigation',
-          name: 'Main nav',
-          children: [
-            { role: 'link', name: 'Home' },
-            { role: 'link', name: 'About' },
-          ],
-        },
-        {
-          role: 'main',
-          children: [
-            { role: 'heading', name: '欢迎来到 HOLA DAY' },
-            { role: 'textbox', name: 'Email' },
-            { role: 'button', name: '提交' },
-          ],
-        },
-      ],
-    };
-  }
+describe('annotateAriaSnapshot', () => {
+  it('injects [ref=eN] on interactive lines; leaves static lines untouched', () => {
+    const yaml = [
+      '- generic:',
+      '  - heading "Hello" [level=1]',
+      '  - link "Home":',
+      '    - /url: "https://example.com/"',
+      '  - button "Submit"',
+      '  - textbox "Email"',
+    ].join('\n');
+    const r = annotateAriaSnapshot(yaml);
+    // 3 interactive roles in DFS order: link, button, textbox
+    expect(r.refs.map((x) => x.ref)).toEqual(['e1', 'e2', 'e3']);
+    expect(r.refs.map((x) => x.role)).toEqual(['link', 'button', 'textbox']);
+    expect(r.refs.map((x) => x.name)).toEqual(['Home', 'Submit', 'Email']);
+    // Augmented text keeps the original structure and sprinkles refs only on interactive lines.
+    expect(r.text).toContain('- heading "Hello" [level=1]');
+    expect(r.text).not.toMatch(/heading.*\[ref=/);
+    expect(r.text).toContain('- link "Home" [ref=e1]:');
+    expect(r.text).toContain('- button "Submit" [ref=e2]');
+    expect(r.text).toContain('- textbox "Email" [ref=e3]');
+    // Sub-properties (/url) must pass through verbatim.
+    expect(r.text).toContain('    - /url: "https://example.com/"');
+  });
 
-  it('serialises tree with indentation; interactive nodes get refs', async () => {
+  it('handles CJK names without mangling quoting', () => {
+    const yaml = '- button "提交"\n- textbox "搜索"';
+    const r = annotateAriaSnapshot(yaml);
+    expect(r.refs).toEqual([
+      { ref: 'e1', role: 'button', name: '提交' },
+      { ref: 'e2', role: 'textbox', name: '搜索' },
+    ]);
+  });
+
+  it('handles interactive role without a name (rare but legal)', () => {
+    const yaml = '- button';
+    const r = annotateAriaSnapshot(yaml);
+    expect(r.refs).toEqual([{ ref: 'e1', role: 'button', name: '' }]);
+    expect(r.text).toBe('- button [ref=e1]');
+  });
+
+  it('returns empty refs for empty input', () => {
+    expect(annotateAriaSnapshot('')).toEqual({ text: '', refs: [] });
+  });
+});
+
+describe('PlaywrightExecutor.accessibilitySnapshot', () => {
+  const sampleYaml = [
+    '- generic:',
+    '  - navigation "Main nav":',
+    '    - link "Home":',
+    '      - /url: "/"',
+    '    - link "About":',
+    '      - /url: "/about"',
+    '  - main:',
+    '    - heading "欢迎来到 HOLA DAY" [level=1]',
+    '    - textbox "Email"',
+    '    - button "提交"',
+  ].join('\n');
+
+  it('calls page.ariaSnapshot + annotates refs; returns url+title', async () => {
     const exec = new PlaywrightExecutor();
-    const tree = makeTree();
     const { page } = makeFakePage({
-      accessibility: { snapshot: async () => tree },
+      ariaSnapshot: async () => sampleYaml,
     });
     const r = await exec.accessibilitySnapshot(page);
     expect(r.error).toBeUndefined();
     expect(r.url).toBe('https://example.com/page');
     expect(r.title).toBe('Example Title');
-    // 4 interactive nodes (2 links + textbox + button) → 4 refs, in DFS order.
+    // 4 interactive nodes in DFS order: 2 links + textbox + button.
     expect(r.refs.map((x) => x.ref)).toEqual(['e1', 'e2', 'e3', 'e4']);
     expect(r.refs.map((x) => x.role)).toEqual(['link', 'link', 'textbox', 'button']);
     expect(r.refs.map((x) => x.name)).toEqual(['Home', 'About', 'Email', '提交']);
-    // Text output uses indentation: e.g. navigation's children are 2x indented
-    expect(r.text).toContain('WebArea');
-    expect(r.text).toContain('    e1 link "Home"');
-    expect(r.text).toContain('    e4 button "提交"');
+    expect(r.text).toContain('- link "Home" [ref=e1]:');
+    expect(r.text).toContain('- button "提交" [ref=e4]');
+    // Static nodes (heading, generic, navigation) must NOT get refs.
+    expect(r.text).not.toMatch(/heading.*\[ref=/);
+    expect(r.text).not.toMatch(/navigation.*\[ref=/);
   });
 
-  it('handles a null snapshot (e.g. chrome:// pages with no a11y tree)', async () => {
+  it('handles an empty snapshot (e.g. chrome:// pages)', async () => {
     const exec = new PlaywrightExecutor();
-    const { page } = makeFakePage({
-      accessibility: { snapshot: async () => null },
-    });
+    const { page } = makeFakePage({ ariaSnapshot: async () => '' });
     const r = await exec.accessibilitySnapshot(page);
     expect(r.text).toBe('');
     expect(r.refs).toEqual([]);
     expect(r.error).toBeUndefined();
   });
 
-  it('wraps snapshot errors without throwing', async () => {
+  it('wraps ariaSnapshot errors without throwing', async () => {
     const exec = new PlaywrightExecutor();
     const { page } = makeFakePage({
-      accessibility: {
-        snapshot: async () => {
-          throw new Error('page detached');
-        },
+      ariaSnapshot: async () => {
+        throw new Error('page detached');
       },
     });
     const r = await exec.accessibilitySnapshot(page);
-    expect(r.error).toMatch(/accessibility\.snapshot failed.*page detached/);
+    expect(r.error).toMatch(/ariaSnapshot failed.*page detached/);
     expect(r.text).toBe('');
   });
 });

@@ -128,21 +128,15 @@ async function main(): Promise<void> {
     );
     log('  ok', `${shot.viewportWidth}x${shot.viewportHeight}, base64=${shot.base64.length} chars`);
 
-    // PlaywrightExecutor.accessibilitySnapshot() calls
-    // `page.accessibility.snapshot()` — that API was removed in
-    // Playwright 1.55+; 1.59 (our pinned version) doesn't have it.
-    // Phase D landed the code untested against the real SDK. The
-    // vision-loop `buildPlaywrightTransport` path doesn't hit this
-    // method (only the not-yet-wired PageUnderstanding abstraction
-    // does), so it doesn't regress production — just report rather
-    // than gate.
-    log('assert accessibility snapshot (expected to fail on Playwright 1.59)');
+    // Phase E1 reimplemented `accessibilitySnapshot` on top of
+    // `page.ariaSnapshot()` + a server-side `[ref=eN]` annotator, so
+    // this now returns a real tree on Playwright 1.59.
+    log('assert accessibility snapshot');
     const snap = await executor.accessibilitySnapshot(activePage);
-    if (snap.error) {
-      log('  ⚠ known broken', snap.error);
-    } else {
-      log('  ok', `${snap.refs.length} refs, url=${snap.url}, title=${snap.title}`);
-    }
+    assert(!snap.error, `snapshot error: ${snap.error}`);
+    assert(snap.refs.length > 0, 'snapshot refs empty — page had no interactive elements?');
+    assert(snap.text.includes('[ref='), 'snapshot text missing [ref=eN] annotations');
+    log('  ok', `${snap.refs.length} refs, url=${snap.url}, title=${snap.title}`);
 
     log('assert actions (click/type/press)');
     const clickRes = await executor.click(activePage, 640, 300, 'left');

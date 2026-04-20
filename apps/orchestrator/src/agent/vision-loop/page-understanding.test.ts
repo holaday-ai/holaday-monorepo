@@ -62,7 +62,7 @@ function makePage(url: string, title: string): PageLike {
     screenshot: async () => Buffer.from(''),
     mouse: { click: async () => {}, move: async () => {}, wheel: async () => {} },
     keyboard: { type: async () => {}, press: async () => {} },
-    accessibility: { snapshot: async () => null },
+    ariaSnapshot: async () => '',
     waitForTimeout: async () => {},
     goto: async () => null,
   };
