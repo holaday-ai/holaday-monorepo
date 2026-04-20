@@ -1,12 +1,20 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import type { A11yAction } from './actions-a11y.js';
 import type { VisionAction } from './actions.js';
 import type {
+  AccessibilityDecision,
+  AccessibilityLoopContext,
   VisionDecision,
   VisionLoopCommander,
   VisionLoopContext,
   VisionObservation,
 } from './commander.js';
-import { type ActionResult, VisionLoopRunner, translateToRealSpace } from './runner.js';
+import {
+  type AccessibilityObservation,
+  type ActionResult,
+  VisionLoopRunner,
+  translateToRealSpace,
+} from './runner.js';
 
 beforeAll(() => {
   process.env.JWT_SECRET ??= 'test-secret-must-be-at-least-32-characters-long-yes';
@@ -303,5 +311,153 @@ describe('translateToRealSpace', () => {
     expect(translateToRealSpace(type, { scaleX: 0.5, scaleY: 0.5 })).toBe(type);
     const done: VisionAction = { kind: 'done', summary: 'ok' };
     expect(translateToRealSpace(done, { scaleX: 0.5, scaleY: 0.5 })).toBe(done);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dual-mode runner tests (E3)
+// ---------------------------------------------------------------------------
+
+class DualModeScriptedCommander implements VisionLoopCommander {
+  private visionIdx = 0;
+  private a11yIdx = 0;
+  public readonly visionCalls: Array<{ historyLen: number }> = [];
+  public readonly a11yCalls: Array<{ historyLen: number; snapshot: string }> = [];
+  constructor(
+    private readonly visionScript: VisionAction[],
+    private readonly a11yScript: A11yAction[],
+  ) {}
+  async decideNextAction(ctx: VisionLoopContext): Promise<VisionDecision> {
+    this.visionCalls.push({ historyLen: ctx.history.length });
+    const action = this.visionScript[this.visionIdx++];
+    if (!action) throw new Error('vision script exhausted');
+    return {
+      action,
+      image: {
+        base64: 'AA==',
+        originalWidth: ctx.observation.viewportWidth,
+        originalHeight: ctx.observation.viewportHeight,
+        resizedWidth: ctx.observation.viewportWidth,
+        resizedHeight: ctx.observation.viewportHeight,
+        scaleX: 1,
+        scaleY: 1,
+      },
+      elapsedMs: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+    };
+  }
+  async decideNextActionAccessibility(
+    ctx: AccessibilityLoopContext,
+  ): Promise<AccessibilityDecision> {
+    this.a11yCalls.push({ historyLen: ctx.history.length, snapshot: ctx.snapshot });
+    const action = this.a11yScript[this.a11yIdx++];
+    if (!action) throw new Error('a11y script exhausted');
+    return {
+      action,
+      elapsedMs: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+    };
+  }
+}
+
+function a11yObs(refCount: number): AccessibilityObservation {
+  return {
+    snapshot: Array.from({ length: refCount }, (_, i) => `- button "b${i}" [ref=e${i + 1}]`).join(
+      '\n',
+    ),
+    refs: Array.from({ length: refCount }, (_, i) => ({
+      ref: `e${i + 1}`,
+      role: 'button',
+      name: `b${i}`,
+    })),
+    url: 'https://example.com/',
+    title: 'Example',
+  };
+}
+
+describe('VisionLoopRunner — dual-mode (E3)', () => {
+  it('explicit accessibility mode: calls decideNextActionAccessibility, dispatches via a11yActionFn', async () => {
+    const commander = new DualModeScriptedCommander(
+      [],
+      [
+        { kind: 'click_ref', ref: 'e1' },
+        { kind: 'done', summary: '完成' },
+      ],
+    );
+    const a11yCalls: A11yAction[] = [];
+    const runner = new VisionLoopRunner({
+      commander,
+      visionModeEnv: 'accessibility',
+      screenshotFn: async () => makeObservation(0),
+      actionFn: async () => ({ ok: true }),
+      accessibilityFn: async () => a11yObs(10),
+      a11yActionFn: async (_tick, action) => {
+        a11yCalls.push(action);
+        return { ok: true };
+      },
+    });
+    const outcome = await runner.run('在页面上点按钮');
+    expect(outcome.status).toBe('completed');
+    if (outcome.status === 'completed') expect(outcome.summary).toBe('完成');
+    expect(commander.a11yCalls.length).toBe(2);
+    expect(commander.visionCalls.length).toBe(0);
+    expect(a11yCalls).toEqual([{ kind: 'click_ref', ref: 'e1' }]);
+  });
+
+  it('auto mode with rich a11y tree (refs ≥ 5) → picks accessibility', async () => {
+    const commander = new DualModeScriptedCommander([], [{ kind: 'done', summary: 'ok' }]);
+    const runner = new VisionLoopRunner({
+      commander,
+      visionModeEnv: 'auto',
+      screenshotFn: async () => makeObservation(0),
+      actionFn: async () => ({ ok: true }),
+      accessibilityFn: async () => a11yObs(10), // 10 refs >= MIN_A11Y_ELEMENTS (5)
+      a11yActionFn: async () => ({ ok: true }),
+    });
+    const outcome = await runner.run('read the page');
+    expect(outcome.status).toBe('completed');
+    expect(commander.a11yCalls.length).toBe(1);
+    expect(commander.visionCalls.length).toBe(0);
+  });
+
+  it('auto mode with thin a11y tree (refs < 5) → falls through to screenshot', async () => {
+    const commander = new DualModeScriptedCommander(
+      [{ kind: 'done', summary: 'screenshot mode' }],
+      [],
+    );
+    const runner = new VisionLoopRunner({
+      commander,
+      visionModeEnv: 'auto',
+      screenshotFn: async () => makeObservation(0),
+      actionFn: async () => ({ ok: true }),
+      accessibilityFn: async () => a11yObs(2), // < MIN_A11Y_ELEMENTS
+      a11yActionFn: async () => ({ ok: true }),
+    });
+    const outcome = await runner.run('canvas page');
+    expect(outcome.status).toBe('completed');
+    if (outcome.status === 'completed') expect(outcome.summary).toBe('screenshot mode');
+    expect(commander.visionCalls.length).toBe(1);
+    expect(commander.a11yCalls.length).toBe(0);
+  });
+
+  it('screenshot mode with no a11y wiring: existing callers unchanged', async () => {
+    // No accessibilityFn / a11yActionFn / visionModeEnv provided — runner
+    // must stay on the legacy screenshot path for back-compat.
+    const commander = new DualModeScriptedCommander([{ kind: 'done', summary: 'legacy' }], []);
+    const runner = new VisionLoopRunner({
+      commander,
+      screenshotFn: async () => makeObservation(0),
+      actionFn: async () => ({ ok: true }),
+    });
+    const outcome = await runner.run('legacy');
+    expect(outcome.status).toBe('completed');
+    expect(commander.visionCalls.length).toBe(1);
+    expect(commander.a11yCalls.length).toBe(0);
   });
 });

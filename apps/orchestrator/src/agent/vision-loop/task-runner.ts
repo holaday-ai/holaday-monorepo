@@ -21,8 +21,21 @@
 import { dispatchVisionActionToSW, requestVisionObservationFromSW } from '../../ws/server.js';
 import type { VisionLoopCommander } from './commander.js';
 import type { PageLike, PlaywrightExecutor } from './playwright-executor.js';
-import type { ActionFn, RunOutcome, ScreenshotFn } from './runner.js';
+import type {
+  A11yActionFn,
+  AccessibilityFn,
+  ActionFn,
+  RunOutcome,
+  ScreenshotFn,
+} from './runner.js';
 import { VisionLoopRunner } from './runner.js';
+
+interface Transport {
+  screenshotFn: ScreenshotFn;
+  actionFn: ActionFn;
+  accessibilityFn?: AccessibilityFn;
+  a11yActionFn?: A11yActionFn;
+}
 
 export interface StartVisionLoopTaskOptions {
   /** External (user-facing) task id — used to correlate WS frames. */
@@ -56,9 +69,10 @@ export interface StartVisionLoopTaskOptions {
    */
   onDecision?: (info: {
     tickIndex: number;
-    decision: import('./runner.js').RunOutcome extends never
-      ? never
-      : import('./commander.js').VisionDecision;
+    mode: import('./vision-mode.js').VisionMode;
+    decision:
+      | import('./commander.js').VisionDecision
+      | import('./commander.js').AccessibilityDecision;
   }) => Promise<void> | void;
 }
 
@@ -73,18 +87,23 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
   // wired at boot we go direct (no WS / SW); otherwise fall through
   // to the classic SW round-trip. The selection happens once per
   // task at start-up; we don't swap mid-loop.
-  const { screenshotFn, actionFn } = opts.playwrightExecutor
+  const transport: Transport = opts.playwrightExecutor
     ? buildPlaywrightTransport(opts.playwrightExecutor)
     : buildWsTransport(opts.userId, opts.taskId);
 
+  // Only Playwright transport provides the a11y pair — SW transport
+  // can't serve ariaSnapshot. Runner auto-pins to screenshot mode
+  // when these are undefined.
   const runner = new VisionLoopRunner({
     commander: opts.commander,
     userId: opts.userId,
     taskExternalId: opts.taskId,
     maxSteps: opts.maxSteps ?? 30,
     ...(opts.skillHint ? { skillHint: opts.skillHint } : {}),
-    screenshotFn,
-    actionFn,
+    screenshotFn: transport.screenshotFn,
+    actionFn: transport.actionFn,
+    ...(transport.accessibilityFn ? { accessibilityFn: transport.accessibilityFn } : {}),
+    ...(transport.a11yActionFn ? { a11yActionFn: transport.a11yActionFn } : {}),
   });
 
   if (opts.onDecision) {
@@ -163,6 +182,8 @@ function buildWsTransport(
 function buildPlaywrightTransport(executor: PlaywrightExecutor): {
   screenshotFn: ScreenshotFn;
   actionFn: ActionFn;
+  accessibilityFn: import('./runner.js').AccessibilityFn;
+  a11yActionFn: import('./runner.js').A11yActionFn;
 } {
   const screenshotFn: ScreenshotFn = async (tickIndex) => {
     // Cast through unknown — Playwright's real Page has a richer
@@ -188,8 +209,6 @@ function buildPlaywrightTransport(executor: PlaywrightExecutor): {
     };
   };
   const actionFn: ActionFn = async (_tickIndex, action) => {
-    // Cast through unknown — Playwright's real Page has a richer
-    // Accessibility type than PageLike's duck-typed subset.
     const page = (await executor.getPage()) as unknown as PageLike;
     switch (action.kind) {
       case 'click':
@@ -211,5 +230,66 @@ function buildPlaywrightTransport(executor: PlaywrightExecutor): {
         return { ok: false, message: 'unknown VisionAction kind' };
     }
   };
-  return { screenshotFn, actionFn };
+  // ---- accessibility-mode transport ----
+  // Cheap: the executor already owns accessibilitySnapshot and the
+  // ref-based action dispatchers live behind `resolveRef + act`.
+  const accessibilityFn: import('./runner.js').AccessibilityFn = async (tickIndex) => {
+    const page = (await executor.getPage()) as unknown as PageLike;
+    const snap = await executor.accessibilitySnapshot(page);
+    if (snap.error) {
+      throw new Error(`playwright a11y snapshot failed at tick ${tickIndex}: ${snap.error}`);
+    }
+    return {
+      snapshot: snap.text,
+      refs: snap.refs,
+      url: snap.url,
+      title: snap.title,
+    };
+  };
+  const a11yActionFn: import('./runner.js').A11yActionFn = async (_tickIndex, action) => {
+    const page = (await executor.getPage()) as unknown as PageLike;
+    switch (action.kind) {
+      case 'click_ref': {
+        // Resolve the ref by role+name from the current snapshot, then
+        // page.getByRole({name}) click. Same locator rules screen-
+        // reader users see; no coord math.
+        const snap = await executor.accessibilitySnapshot(page);
+        const info = snap.refs.find((r) => r.ref === action.ref);
+        if (!info) return { ok: false, message: `ref ${action.ref} not in current snapshot` };
+        return executor.clickByRoleName(page, info.role, info.name);
+      }
+      case 'type_in_ref': {
+        const snap = await executor.accessibilitySnapshot(page);
+        const info = snap.refs.find((r) => r.ref === action.ref);
+        if (!info) return { ok: false, message: `ref ${action.ref} not in current snapshot` };
+        const clickRes = await executor.clickByRoleName(page, info.role, info.name);
+        if (!clickRes.ok) return clickRes;
+        return executor.type(page, action.text);
+      }
+      case 'press_key':
+        return executor.pressKey(page, action.key);
+      case 'scroll':
+        return executor.scroll(page, action.dy);
+      case 'wait':
+        return executor.wait(page, action.ms);
+      case 'screenshot':
+        return { ok: true, message: 'noop — runner re-observes on next tick' };
+      case 'navigate':
+        try {
+          await page.goto(action.url, { waitUntil: 'domcontentloaded', timeout: 20_000 });
+          return { ok: true, message: `navigated to ${action.url}` };
+        } catch (err) {
+          return {
+            ok: false,
+            message: `goto failed: ${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
+      case 'done':
+      case 'give_up':
+        return { ok: true, message: `${action.kind} terminal — no driver work` };
+      default:
+        return { ok: false, message: 'unknown A11yAction kind' };
+    }
+  };
+  return { screenshotFn, actionFn, accessibilityFn, a11yActionFn };
 }

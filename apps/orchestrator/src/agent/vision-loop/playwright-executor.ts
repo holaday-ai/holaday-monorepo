@@ -326,6 +326,33 @@ export class PlaywrightExecutor {
   }
 
   /**
+   * Resolve + click an element by its ARIA role + accessible name —
+   * the only addressing scheme accessibility mode has (refs are names
+   * after all). Name is matched case-sensitively with `exact: false`
+   * so Claude's abbreviations land on close variants. Times out at
+   * 5s per click; bubbles failures as `{ok:false}` rather than
+   * throwing.
+   *
+   * Typed loosely against PageLike for the unit-test seam, but the
+   * production value is always a real playwright.Page (which has
+   * getByRole). See build dispatchers in task-runner.ts.
+   */
+  async clickByRoleName(page: PageLike, role: string, name: string): Promise<ActionResult> {
+    try {
+      // biome-ignore lint/suspicious/noExplicitAny: duck-typed access to Page.getByRole
+      const anyPage = page as any;
+      if (typeof anyPage.getByRole !== 'function') {
+        return { ok: false, message: 'page.getByRole unavailable (test stub?)' };
+      }
+      const loc = anyPage.getByRole(role, name ? { name } : undefined);
+      await loc.first().click({ timeout: 5_000 });
+      return { ok: true, message: `clicked ${role}${name ? ` "${name}"` : ''}` };
+    } catch (err) {
+      return { ok: false, message: `clickByRoleName failed: ${errMsg(err)}` };
+    }
+  }
+
+  /**
    * Press a single named key or chord. Playwright accepts any of:
    *   "Enter" / "Escape" / "Tab" / "Backspace" / "ArrowLeft" / …
    *   "Control+A" / "Meta+C" / "Shift+Tab" (note: capital "Control"/"Meta")

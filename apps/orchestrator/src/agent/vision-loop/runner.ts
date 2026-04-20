@@ -33,14 +33,24 @@
  */
 
 import { EventEmitter } from 'node:events';
+import type { A11yAction } from './actions-a11y.js';
 import type { VisionAction } from './actions.js';
 import type {
+  AccessibilityDecision,
+  AccessibilityLoopTurn,
   VisionDecision,
   VisionLoopCommander,
   VisionLoopTurn,
   VisionObservation,
 } from './commander.js';
 import { modelCoordToReal } from './image.js';
+import type { AccessibilityNodeRef } from './playwright-executor.js';
+import {
+  MIN_A11Y_ELEMENTS,
+  type VisionMode,
+  type VisionModeEnv,
+  readVisionModeEnv,
+} from './vision-mode.js';
 
 export interface ActionResult {
   ok: boolean;
@@ -65,6 +75,29 @@ export type ScreenshotFn = (tickIndex: number) => Promise<VisionObservation>;
  */
 export type ActionFn = (tickIndex: number, action: VisionAction) => Promise<ActionResult>;
 
+/**
+ * Accessibility-mode observation surface. The runner asks the driver
+ * for a snapshot (text + refs + url + title); the commander consumes
+ * that instead of a screenshot in accessibility / auto modes.
+ */
+export interface AccessibilityObservation {
+  snapshot: string;
+  refs: AccessibilityNodeRef[];
+  url: string;
+  title: string;
+}
+
+export type AccessibilityFn = (tickIndex: number) => Promise<AccessibilityObservation>;
+
+/**
+ * A11y-mode action dispatcher. Parallel to ActionFn but carries an
+ * A11yAction (ref-based) instead of a VisionAction (coord-based).
+ */
+export type A11yActionFn = (tickIndex: number, action: A11yAction) => Promise<ActionResult>;
+
+/** Union of the two turn shapes — exported so outcome consumers can narrow. */
+export type AnyTurn = VisionLoopTurn | AccessibilityLoopTurn;
+
 export interface VisionLoopRunnerOptions {
   commander: VisionLoopCommander;
   screenshotFn: ScreenshotFn;
@@ -77,6 +110,19 @@ export interface VisionLoopRunnerOptions {
   userId?: string;
   /** Forwarded to commander so each llm_calls row carries the task id. */
   taskExternalId?: string;
+  /**
+   * Override the VISION_MODE env. Tests use this to force a mode
+   * without touching global env; prod callers usually omit and let
+   * `readVisionModeEnv()` pick from process.env.
+   */
+  visionModeEnv?: VisionModeEnv;
+  /**
+   * Accessibility-mode transport. Required to run in `accessibility`
+   * or `auto` (the latter peeks at a11y first each tick to decide).
+   * Omit to pin the runner to screenshot mode regardless of env.
+   */
+  accessibilityFn?: AccessibilityFn;
+  a11yActionFn?: A11yActionFn;
 }
 
 /**
@@ -90,10 +136,10 @@ export interface VisionLoopRunnerOptions {
  *   cancelled  — external code called `runner.cancel()` mid-loop.
  */
 export type RunOutcome =
-  | { status: 'completed'; summary: string; history: VisionLoopTurn[] }
-  | { status: 'failed'; reason: string; history: VisionLoopTurn[] }
-  | { status: 'paused'; reason: string; history: VisionLoopTurn[] }
-  | { status: 'cancelled'; history: VisionLoopTurn[] };
+  | { status: 'completed'; summary: string; history: AnyTurn[] }
+  | { status: 'failed'; reason: string; history: AnyTurn[] }
+  | { status: 'paused'; reason: string; history: AnyTurn[] }
+  | { status: 'cancelled'; history: AnyTurn[] };
 
 /**
  * Events the runner emits. Higher layers can subscribe to stream
@@ -106,14 +152,26 @@ export type RunOutcome =
  *   outcome     — terminal; loop is exiting
  */
 export interface VisionLoopRunnerEvents {
-  tick: (ev: { tickIndex: number; observation: VisionObservation }) => void;
-  decision: (ev: { tickIndex: number; decision: VisionDecision }) => void;
+  tick: (ev: {
+    tickIndex: number;
+    mode: VisionMode;
+    /** Populated when mode='screenshot'. */
+    observation?: VisionObservation;
+    /** Populated when mode='accessibility'. */
+    accessibility?: AccessibilityObservation;
+  }) => void;
+  decision: (ev: {
+    tickIndex: number;
+    mode: VisionMode;
+    decision: VisionDecision | AccessibilityDecision;
+  }) => void;
   acted: (ev: {
     tickIndex: number;
-    action: VisionAction;
+    mode: VisionMode;
+    action: VisionAction | A11yAction;
     result: ActionResult;
   }) => void;
-  turn: (ev: { tickIndex: number; turn: VisionLoopTurn }) => void;
+  turn: (ev: { tickIndex: number; turn: AnyTurn }) => void;
   outcome: (outcome: RunOutcome) => void;
 }
 
@@ -136,14 +194,25 @@ export class VisionLoopRunner {
   private readonly commander: VisionLoopCommander;
   private readonly screenshotFn: ScreenshotFn;
   private readonly actionFn: ActionFn;
+  private readonly accessibilityFn?: AccessibilityFn;
+  private readonly a11yActionFn?: A11yActionFn;
+  private readonly visionModeEnv: VisionModeEnv;
   private readonly maxSteps: number;
   private readonly skillHint?: string;
   private readonly userId?: string;
   private readonly taskExternalId?: string;
   private readonly emitter: EventEmitter = new EventEmitter();
   private cancelled = false;
-  /** Running log of turns so run() and consumers can share one history. */
-  private readonly history: VisionLoopTurn[] = [];
+  /**
+   * Master history in chronological tick order. Each entry is either a
+   * VisionLoopTurn or an AccessibilityLoopTurn; consumers narrow via
+   * the turn's shape (VisionLoopTurn has `observation`, AccessibilityLoopTurn
+   * has `snapshot`).
+   */
+  private readonly history: AnyTurn[] = [];
+  /** Mode-scoped history shards fed back to the commander each tick. */
+  private readonly visionHistory: VisionLoopTurn[] = [];
+  private readonly a11yHistory: AccessibilityLoopTurn[] = [];
 
   constructor(opts: VisionLoopRunnerOptions) {
     this.commander = opts.commander;
@@ -153,6 +222,13 @@ export class VisionLoopRunner {
     if (opts.skillHint) this.skillHint = opts.skillHint;
     if (opts.userId) this.userId = opts.userId;
     if (opts.taskExternalId) this.taskExternalId = opts.taskExternalId;
+    if (opts.accessibilityFn) this.accessibilityFn = opts.accessibilityFn;
+    if (opts.a11yActionFn) this.a11yActionFn = opts.a11yActionFn;
+    // Mode source: explicit opt → env → 'auto'. A11y-capable callers
+    // (task-runner wiring Playwright) should ALSO pass accessibilityFn
+    // + a11yActionFn; without those we silently pin to screenshot even
+    // if env says otherwise (see pickMode below).
+    this.visionModeEnv = opts.visionModeEnv ?? readVisionModeEnv();
   }
 
   /**
@@ -184,78 +260,39 @@ export class VisionLoopRunner {
         return this.finalise({ status: 'cancelled', history: this.history });
       }
 
-      // 1. Observe.
-      let observation: VisionObservation;
-      try {
-        observation = await this.screenshotFn(tick);
-      } catch (err) {
-        const reason = `screenshot failed at tick ${tick}: ${errMsg(err)}`;
-        return this.finalise({ status: 'failed', reason, history: this.history });
-      }
-      this.emitEv('tick', { tickIndex: tick, observation });
-
-      // 2. Decide.
-      const decision = await this.commander.decideNextAction({
-        intent: goal,
-        observation,
-        history: this.history,
-        maxSteps: this.maxSteps,
-        ...(this.skillHint ? { skillHint: this.skillHint } : {}),
-        ...(this.userId ? { userId: this.userId } : {}),
-        ...(this.taskExternalId ? { taskExternalId: this.taskExternalId } : {}),
-      });
-      this.emitEv('decision', { tickIndex: tick, decision });
-
-      // 3. Terminal actions skip driver execution and exit immediately.
-      if (decision.action.kind === 'done') {
-        this.recordTurn(observation, decision.action, decision.toolUseId, {
-          ok: true,
-          message: 'task_done',
-        });
-        return this.finalise({
-          status: 'completed',
-          summary: decision.action.summary,
-          history: this.history,
-        });
-      }
-      if (decision.action.kind === 'give_up') {
-        this.recordTurn(observation, decision.action, decision.toolUseId, {
-          ok: false,
-          message: decision.action.reason,
-        });
-        return this.finalise({
-          status: 'failed',
-          reason: decision.action.reason,
-          history: this.history,
-        });
+      // ---------- 1. Pick mode for this tick ----------
+      // In 'auto', we sample the a11y snapshot here so we can decide
+      // based on live ref count (MIN_A11Y_ELEMENTS threshold). The
+      // fetched observation is reused below if we commit to a11y,
+      // avoiding a double call.
+      let mode: VisionMode;
+      let preFetchedA11y: AccessibilityObservation | null = null;
+      const a11yWired = Boolean(
+        this.accessibilityFn && this.a11yActionFn && this.commander.decideNextActionAccessibility,
+      );
+      if (this.visionModeEnv === 'screenshot' || !a11yWired) {
+        mode = 'screenshot';
+      } else if (this.visionModeEnv === 'accessibility') {
+        mode = 'accessibility';
+      } else {
+        // auto — we already verified accessibilityFn is present via a11yWired.
+        const a11yFn = this.accessibilityFn;
+        try {
+          preFetchedA11y = a11yFn ? await a11yFn(tick) : null;
+        } catch {
+          preFetchedA11y = null;
+        }
+        mode =
+          preFetchedA11y && preFetchedA11y.refs.length >= MIN_A11Y_ELEMENTS
+            ? 'accessibility'
+            : 'screenshot';
       }
 
-      // 4. Execute the action. For clicks, translate model-space coords
-      //    to real viewport pixels first — the driver doesn't know
-      //    about the resize.
-      const realAction = translateToRealSpace(decision.action, decision.image);
-      let result: ActionResult;
-      try {
-        result = await this.actionFn(tick, realAction);
-      } catch (err) {
-        result = { ok: false, message: `driver threw: ${errMsg(err)}` };
-      }
-      this.emitEv('acted', { tickIndex: tick, action: realAction, result });
-
-      // 5. Record the turn so the next commander call has history.
-      //    We record the ORIGINAL (model-space) action so decodeToolUse
-      //    round-trips cleanly on subsequent ticks.
-      this.recordTurn(observation, decision.action, decision.toolUseId, result);
-
-      // If the driver hard-failed, don't loop forever — one bad action
-      // per task is tolerable, two is a pattern.
-      if (!result.ok && this.sequentialDriverFails() >= 2) {
-        return this.finalise({
-          status: 'failed',
-          reason: `driver failed twice in a row (last: ${result.message ?? 'no detail'})`,
-          history: this.history,
-        });
-      }
+      const outcome =
+        mode === 'accessibility'
+          ? await this.runA11yTick(tick, goal, preFetchedA11y)
+          : await this.runScreenshotTick(tick, goal);
+      if (outcome) return outcome;
     }
 
     return this.finalise({
@@ -265,7 +302,191 @@ export class VisionLoopRunner {
     });
   }
 
-  private recordTurn(
+  /**
+   * Run a single tick in screenshot mode. Returns a terminal RunOutcome
+   * to bubble up, or null to continue the loop.
+   */
+  private async runScreenshotTick(tick: number, goal: string): Promise<RunOutcome | null> {
+    let observation: VisionObservation;
+    try {
+      observation = await this.screenshotFn(tick);
+    } catch (err) {
+      const reason = `screenshot failed at tick ${tick}: ${errMsg(err)}`;
+      return this.finalise({ status: 'failed', reason, history: this.history });
+    }
+    this.emitEv('tick', { tickIndex: tick, mode: 'screenshot', observation });
+
+    const decision = await this.commander.decideNextAction({
+      intent: goal,
+      observation,
+      history: this.visionHistory,
+      maxSteps: this.maxSteps,
+      ...(this.skillHint ? { skillHint: this.skillHint } : {}),
+      ...(this.userId ? { userId: this.userId } : {}),
+      ...(this.taskExternalId ? { taskExternalId: this.taskExternalId } : {}),
+    });
+    this.emitEv('decision', { tickIndex: tick, mode: 'screenshot', decision });
+
+    if (decision.action.kind === 'done') {
+      this.recordVisionTurn(observation, decision.action, decision.toolUseId, {
+        ok: true,
+        message: 'task_done',
+      });
+      return this.finalise({
+        status: 'completed',
+        summary: decision.action.summary,
+        history: this.history,
+      });
+    }
+    if (decision.action.kind === 'give_up') {
+      this.recordVisionTurn(observation, decision.action, decision.toolUseId, {
+        ok: false,
+        message: decision.action.reason,
+      });
+      return this.finalise({
+        status: 'failed',
+        reason: decision.action.reason,
+        history: this.history,
+      });
+    }
+
+    const realAction = translateToRealSpace(decision.action, decision.image);
+    let result: ActionResult;
+    try {
+      result = await this.actionFn(tick, realAction);
+    } catch (err) {
+      result = { ok: false, message: `driver threw: ${errMsg(err)}` };
+    }
+    this.emitEv('acted', { tickIndex: tick, mode: 'screenshot', action: realAction, result });
+    this.recordVisionTurn(observation, decision.action, decision.toolUseId, result);
+
+    if (!result.ok && this.sequentialDriverFails() >= 2) {
+      return this.finalise({
+        status: 'failed',
+        reason: `driver failed twice in a row (last: ${result.message ?? 'no detail'})`,
+        history: this.history,
+      });
+    }
+    return null;
+  }
+
+  /**
+   * Run a single tick in accessibility mode. `preFetched` is the
+   * observation the mode-picker already read (when arriving from
+   * 'auto'); if null we fetch fresh.
+   */
+  private async runA11yTick(
+    tick: number,
+    goal: string,
+    preFetched: AccessibilityObservation | null,
+  ): Promise<RunOutcome | null> {
+    // Safe to assert — `pickMode` in run() only routes here when the
+    // full a11y trio (accessibilityFn / a11yActionFn / commander.a11y)
+    // is present. Hoist once so we stop sprinkling non-null asserts.
+    const accessibilityFn = this.accessibilityFn;
+    const a11yActionFn = this.a11yActionFn;
+    const commanderA11y = this.commander.decideNextActionAccessibility?.bind(this.commander);
+    if (!accessibilityFn || !a11yActionFn || !commanderA11y) {
+      return this.finalise({
+        status: 'failed',
+        reason: 'a11y mode picked but runner is not a11y-wired (internal invariant broken)',
+        history: this.history,
+      });
+    }
+    let obs: AccessibilityObservation;
+    try {
+      obs = preFetched ?? (await accessibilityFn(tick));
+    } catch (err) {
+      return this.finalise({
+        status: 'failed',
+        reason: `accessibility observe failed at tick ${tick}: ${errMsg(err)}`,
+        history: this.history,
+      });
+    }
+    this.emitEv('tick', { tickIndex: tick, mode: 'accessibility', accessibility: obs });
+
+    const decision = await commanderA11y({
+      intent: goal,
+      snapshot: obs.snapshot,
+      refs: obs.refs,
+      url: obs.url,
+      title: obs.title,
+      tickIndex: tick,
+      history: this.a11yHistory,
+      maxSteps: this.maxSteps,
+      ...(this.skillHint ? { skillHint: this.skillHint } : {}),
+      ...(this.userId ? { userId: this.userId } : {}),
+      ...(this.taskExternalId ? { taskExternalId: this.taskExternalId } : {}),
+    });
+    this.emitEv('decision', { tickIndex: tick, mode: 'accessibility', decision });
+
+    if (decision.action.kind === 'done') {
+      this.recordA11yTurn(obs, decision.action, decision.toolUseId, {
+        ok: true,
+        message: 'task_done',
+      });
+      return this.finalise({
+        status: 'completed',
+        summary: decision.action.summary,
+        history: this.history,
+      });
+    }
+    if (decision.action.kind === 'give_up') {
+      this.recordA11yTurn(obs, decision.action, decision.toolUseId, {
+        ok: false,
+        message: decision.action.reason,
+      });
+      return this.finalise({
+        status: 'failed',
+        reason: decision.action.reason,
+        history: this.history,
+      });
+    }
+
+    let result: ActionResult;
+    try {
+      result = await a11yActionFn(tick, decision.action);
+    } catch (err) {
+      result = { ok: false, message: `driver threw: ${errMsg(err)}` };
+    }
+    this.emitEv('acted', {
+      tickIndex: tick,
+      mode: 'accessibility',
+      action: decision.action,
+      result,
+    });
+    this.recordA11yTurn(obs, decision.action, decision.toolUseId, result);
+
+    if (!result.ok && this.sequentialDriverFails() >= 2) {
+      return this.finalise({
+        status: 'failed',
+        reason: `driver failed twice in a row (last: ${result.message ?? 'no detail'})`,
+        history: this.history,
+      });
+    }
+    return null;
+  }
+
+  private recordA11yTurn(
+    obs: AccessibilityObservation,
+    action: A11yAction,
+    toolUseId: string | undefined,
+    result: ActionResult,
+  ): void {
+    const turn: AccessibilityLoopTurn = {
+      snapshot: obs.snapshot,
+      url: obs.url,
+      title: obs.title,
+      action,
+      executionResult: result,
+      ...(toolUseId ? { toolUseId } : {}),
+    };
+    this.a11yHistory.push(turn);
+    this.history.push(turn);
+    this.emitEv('turn', { tickIndex: this.history.length - 1, turn });
+  }
+
+  private recordVisionTurn(
     observation: VisionObservation,
     action: VisionAction,
     toolUseId: string | undefined,
@@ -277,6 +498,7 @@ export class VisionLoopRunner {
       executionResult: result,
       ...(toolUseId ? { toolUseId } : {}),
     };
+    this.visionHistory.push(turn);
     this.history.push(turn);
     this.emitEv('turn', { tickIndex: this.history.length - 1, turn });
   }
