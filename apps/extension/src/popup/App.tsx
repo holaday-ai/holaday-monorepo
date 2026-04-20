@@ -717,6 +717,10 @@ interface HistoryListItem {
   taskId: string;
   intent: string;
   status: TaskStatus;
+  /** Vision-loop terminal payload ({summary, tickCount} or {reason, tickCount}). */
+  result?: { summary?: string; reason?: string; tickCount?: number } | null;
+  /** Legacy plan-once final error message (kept for old tasks). */
+  errorMessage?: string | null;
   createdAt: string; // ISO
 }
 
@@ -724,6 +728,8 @@ interface HistoryDetail {
   taskId: string;
   intent: string;
   status: TaskStatus;
+  result?: { summary?: string; reason?: string; tickCount?: number } | null;
+  errorMessage?: string | null;
   steps: StepView[];
 }
 
@@ -843,6 +849,7 @@ function HistorySection({
               {formatCreatedAt(item.createdAt)}
               {busy ? ' · 加载详情...' : ''}
             </div>
+            <HistoryResultLine item={item} />
             {detail ? (
               <div style={{ marginTop: 6 }}>
                 <StepList steps={detail.steps} />
@@ -852,6 +859,52 @@ function HistorySection({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * Render the task's final summary / failure reason as a compact pill
+ * under the history row header. For vision-loop tasks this pulls from
+ * `result.{summary,reason}`. For legacy plan-once failures we fall
+ * back to `errorMessage` so old rows still show something useful.
+ * No pill when the task is still running or has no terminal payload.
+ */
+function HistoryResultLine({ item }: { item: HistoryListItem }) {
+  const isCompleted = item.status === 'completed';
+  const isFailed = item.status === 'failed' || item.status === 'cancelled';
+  const isPaused = item.status === 'paused';
+  const summary = item.result?.summary?.trim() || null;
+  const reason = item.result?.reason?.trim() || (item.errorMessage ?? '').trim() || null;
+  let text: string | null = null;
+  let tone: 'ok' | 'err' | 'warn' | null = null;
+  if (isCompleted && summary) {
+    text = summary;
+    tone = 'ok';
+  } else if (isFailed && reason) {
+    text = reason;
+    tone = 'err';
+  } else if (isPaused && reason) {
+    text = reason;
+    tone = 'warn';
+  }
+  if (!text || !tone) return null;
+  const color = tone === 'ok' ? '#065f46' : tone === 'err' ? '#991b1b' : '#92400e';
+  const bg = tone === 'ok' ? '#d1fae5' : tone === 'err' ? '#fee2e2' : '#fef3c7';
+  return (
+    <div
+      style={{
+        marginTop: 4,
+        padding: '4px 6px',
+        borderRadius: 3,
+        background: bg,
+        color,
+        fontSize: 11,
+        lineHeight: 1.4,
+        whiteSpace: 'pre-wrap',
+      }}
+    >
+      {text}
     </div>
   );
 }

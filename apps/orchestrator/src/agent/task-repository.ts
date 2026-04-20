@@ -211,6 +211,81 @@ export class TaskRepository {
   }
 
   /**
+   * Persist the terminal state of a vision-loop task. Called by the
+   * task-runner's `.then` once VisionLoopRunner.run() resolves.
+   *
+   * Maps RunOutcome → tasks row:
+   *   completed → status='completed', result={summary, tickCount},
+   *               completedAt=now
+   *   failed    → status='failed',    result={reason, tickCount},
+   *               errorCode='VISION_GAVE_UP' | 'VISION_DRIVER_FAILED',
+   *               errorMessage=reason, completedAt=now
+   *   paused    → status='paused',    result={tickCount},
+   *               pauseReason='max_steps_reached'
+   *   cancelled → status='cancelled', completedAt=now
+   *
+   * Writes a task_events row so the audit trail includes the vision
+   * loop's terminal outcome alongside classic-flow step.result events.
+   */
+  async persistVisionOutcome(
+    taskExternalId: string,
+    outcome:
+      | { status: 'completed'; summary: string; tickCount: number }
+      | {
+          status: 'failed';
+          reason: string;
+          tickCount: number;
+          errorCode?: string;
+        }
+      | { status: 'paused'; reason: string; tickCount: number }
+      | { status: 'cancelled'; tickCount: number },
+  ): Promise<void> {
+    const [taskRow] = await this.db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.externalId, taskExternalId))
+      .limit(1);
+    if (!taskRow) throw new Error(`task ${taskExternalId} not found in DB`);
+    const taskRowId = taskRow.id;
+
+    const update: Partial<typeof tasks.$inferInsert> = { status: outcome.status };
+    const result: Record<string, unknown> = { tickCount: outcome.tickCount };
+    let eventPayload: Record<string, unknown> = { tickCount: outcome.tickCount };
+    if (outcome.status === 'completed') {
+      update.completedAt = new Date();
+      update.pauseReason = null;
+      result.summary = outcome.summary;
+      eventPayload = { ...eventPayload, summary: outcome.summary };
+    } else if (outcome.status === 'failed') {
+      update.completedAt = new Date();
+      update.pauseReason = null;
+      update.errorCode = outcome.errorCode ?? 'VISION_GAVE_UP';
+      update.errorMessage = outcome.reason.slice(0, 2_000);
+      result.reason = outcome.reason;
+      eventPayload = { ...eventPayload, reason: outcome.reason };
+    } else if (outcome.status === 'paused') {
+      update.pauseReason = 'max_steps_reached';
+      result.reason = outcome.reason;
+      eventPayload = { ...eventPayload, reason: outcome.reason };
+    } else {
+      update.completedAt = new Date();
+      update.pauseReason = null;
+    }
+    update.result = result;
+
+    await this.db.transaction(async (tx) => {
+      await tx.update(tasks).set(update).where(eq(tasks.id, taskRowId));
+      await tx.insert(taskEvents).values({
+        externalId: newExternalId('taskEvent'),
+        taskId: taskRowId,
+        type: `vision.${outcome.status}`,
+        actor: 'system',
+        payload: eventPayload,
+      });
+    });
+  }
+
+  /**
    * Batch-approve transition: user confirmed THIS batch, cursor stays put,
    * task goes back to executing, step's pending_confirm_payload clears.
    * No step row status change (the step is still "in flight"; client will

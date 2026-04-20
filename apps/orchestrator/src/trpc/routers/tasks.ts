@@ -79,10 +79,34 @@ export const tasksRouter = router({
             },
             'vision loop terminated',
           );
-          // TODO(item-3): persist terminal outcome to tasks row
-          // (status completed/failed/paused/cancelled + optional
-          // summary / reason). Phase A ships the loop first, DB
-          // shape second.
+          try {
+            if (outcome.status === 'completed') {
+              await repo.persistVisionOutcome(taskId, {
+                status: 'completed',
+                summary: outcome.summary,
+                tickCount: outcome.history.length,
+              });
+            } else if (outcome.status === 'failed') {
+              await repo.persistVisionOutcome(taskId, {
+                status: 'failed',
+                reason: outcome.reason,
+                tickCount: outcome.history.length,
+              });
+            } else if (outcome.status === 'paused') {
+              await repo.persistVisionOutcome(taskId, {
+                status: 'paused',
+                reason: outcome.reason,
+                tickCount: outcome.history.length,
+              });
+            } else {
+              await repo.persistVisionOutcome(taskId, {
+                status: 'cancelled',
+                tickCount: outcome.history.length,
+              });
+            }
+          } catch (err) {
+            ctx.logger.error({ err, taskId }, 'persistVisionOutcome failed');
+          }
         })
         .catch((err) => {
           ctx.logger.error({ err, taskId }, 'vision loop threw');
@@ -371,6 +395,7 @@ export const tasksRouter = router({
           pauseReason: tasksTable.pauseReason,
           errorCode: tasksTable.errorCode,
           errorMessage: tasksTable.errorMessage,
+          result: tasksTable.result,
           createdAt: tasksTable.createdAt,
           updatedAt: tasksTable.updatedAt,
           completedAt: tasksTable.completedAt,
@@ -388,6 +413,7 @@ export const tasksRouter = router({
           pauseReason: r.pauseReason,
           errorCode: r.errorCode,
           errorMessage: r.errorMessage,
+          result: normalizeOutput(r.result),
           createdAt: r.createdAt,
           updatedAt: r.updatedAt,
           completedAt: r.completedAt,
@@ -447,6 +473,7 @@ export const tasksRouter = router({
         pauseReason: taskRow.pauseReason,
         errorCode: taskRow.errorCode,
         errorMessage: taskRow.errorMessage,
+        result: normalizeOutput(taskRow.result),
         createdAt: taskRow.createdAt,
         completedAt: taskRow.completedAt,
         steps: stepRows.map((s) => ({
