@@ -7,6 +7,7 @@ import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import type { PlannedStep } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
 import { TaskRepository } from '../../agent/task-repository.js';
+import { visionLoopTaskQueue } from '../../agent/vision-loop/task-queue.js';
 import { startVisionLoopTask } from '../../agent/vision-loop/task-runner.js';
 import { skills } from '../../db/schema/skills.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
@@ -64,76 +65,92 @@ export const tasksRouter = router({
       // Outcome persistence is best-effort: we log failures instead
       // of surfacing them to the caller (they already got the taskId
       // and can poll tasks.detail).
-      void startVisionLoopTask({
-        userId: ctx.userId,
-        taskId,
-        intent: input.intent,
-        commander: ctx.visionCommander,
-        // Phase D Step 3: when PlaywrightExecutor is wired at boot,
-        // the runner bypasses the WS/SW path and drives Chrome
-        // directly via CDP. Falls through to the legacy WS transport
-        // automatically when absent.
-        ...(ctx.playwrightExecutor ? { playwrightExecutor: ctx.playwrightExecutor } : {}),
-      })
-        .then(async (outcome) => {
-          ctx.logger.info(
-            {
-              taskId,
-              status: outcome.status,
-              tickCount: outcome.history.length,
-            },
-            'vision loop terminated',
-          );
-          try {
-            if (outcome.status === 'completed') {
-              await repo.persistVisionOutcome(taskId, {
-                status: 'completed',
-                summary: outcome.summary,
-                tickCount: outcome.history.length,
-              });
-            } else if (outcome.status === 'failed') {
-              await repo.persistVisionOutcome(taskId, {
-                status: 'failed',
-                reason: outcome.reason,
-                tickCount: outcome.history.length,
-              });
-            } else if (outcome.status === 'paused') {
-              await repo.persistVisionOutcome(taskId, {
-                status: 'paused',
-                reason: outcome.reason,
-                tickCount: outcome.history.length,
-              });
-            } else {
-              await repo.persistVisionOutcome(taskId, {
-                status: 'cancelled',
-                tickCount: outcome.history.length,
-              });
-            }
-          } catch (err) {
-            ctx.logger.error({ err, taskId }, 'persistVisionOutcome failed');
-          }
-          // Push the terminal state to any connected SW for the user
-          // so the popup can update its card without polling. Fire-
-          // and-forget — broadcastToUser skips cleanly if no client
-          // is connected (task ended while popup/SW was offline;
-          // the popup will pick up the DB row on its next mount).
-          try {
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: outcome.status,
-              ...(outcome.status === 'completed' ? { summary: outcome.summary } : {}),
-              ...(outcome.status === 'failed' || outcome.status === 'paused'
-                ? { reason: outcome.reason }
-                : {}),
-            });
-          } catch (err) {
-            ctx.logger.warn({ err, taskId }, 'broadcast task.terminal failed');
-          }
+      // F3: serialise per-user through the vision-loop task queue.
+      // Multiple Run clicks for the same user (popup glitch / user
+      // queueing intentional follow-ups) FIFO onto a single
+      // Playwright Page — no racing clicks. Different users don't
+      // block each other.
+      const commander = ctx.visionCommander;
+      const runTaskFn = () =>
+        startVisionLoopTask({
+          userId: ctx.userId,
+          taskId,
+          intent: input.intent,
+          commander,
+          // Phase D Step 3: when PlaywrightExecutor is wired at boot,
+          // the runner bypasses the WS/SW path and drives Chrome
+          // directly via CDP. Falls through to the legacy WS transport
+          // automatically when absent.
+          ...(ctx.playwrightExecutor ? { playwrightExecutor: ctx.playwrightExecutor } : {}),
         })
-        .catch((err) => {
-          ctx.logger.error({ err, taskId }, 'vision loop threw');
-        });
+          .then(async (outcome) => {
+            ctx.logger.info(
+              {
+                taskId,
+                status: outcome.status,
+                tickCount: outcome.history.length,
+              },
+              'vision loop terminated',
+            );
+            try {
+              if (outcome.status === 'completed') {
+                await repo.persistVisionOutcome(taskId, {
+                  status: 'completed',
+                  summary: outcome.summary,
+                  tickCount: outcome.history.length,
+                });
+              } else if (outcome.status === 'failed') {
+                await repo.persistVisionOutcome(taskId, {
+                  status: 'failed',
+                  reason: outcome.reason,
+                  tickCount: outcome.history.length,
+                });
+              } else if (outcome.status === 'paused') {
+                await repo.persistVisionOutcome(taskId, {
+                  status: 'paused',
+                  reason: outcome.reason,
+                  tickCount: outcome.history.length,
+                });
+              } else {
+                await repo.persistVisionOutcome(taskId, {
+                  status: 'cancelled',
+                  tickCount: outcome.history.length,
+                });
+              }
+            } catch (err) {
+              ctx.logger.error({ err, taskId }, 'persistVisionOutcome failed');
+            }
+            // Push the terminal state to any connected SW for the user
+            // so the popup can update its card without polling. Fire-
+            // and-forget — broadcastToUser skips cleanly if no client
+            // is connected (task ended while popup/SW was offline;
+            // the popup will pick up the DB row on its next mount).
+            try {
+              broadcastToUser(ctx.userId, {
+                type: 'server.task.terminal',
+                taskId,
+                status: outcome.status,
+                ...(outcome.status === 'completed' ? { summary: outcome.summary } : {}),
+                ...(outcome.status === 'failed' || outcome.status === 'paused'
+                  ? { reason: outcome.reason }
+                  : {}),
+              });
+            } catch (err) {
+              ctx.logger.warn({ err, taskId }, 'broadcast task.terminal failed');
+            }
+          })
+          .catch((err) => {
+            ctx.logger.error({ err, taskId }, 'vision loop threw');
+          });
+
+      void visionLoopTaskQueue.enqueue(ctx.userId, runTaskFn, (position) => {
+        if (position > 1) {
+          ctx.logger.info(
+            { taskId, userId: ctx.userId, queuePosition: position },
+            'vision loop task queued behind earlier work',
+          );
+        }
+      });
       return {
         taskId,
         status: 'executing' as const,
