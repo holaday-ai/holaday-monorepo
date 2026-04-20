@@ -25,6 +25,7 @@
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
+import { type LlmCallRecorder, NoopLlmCallRecorder } from '../llm-call-recorder.js';
 import { VISION_TOOLS, type VisionAction, decodeToolUse } from './actions.js';
 import { type ResizedImage, resizeForVisionModel } from './image.js';
 
@@ -81,8 +82,14 @@ export interface VisionLoopTurn {
 export interface VisionLoopContext {
   /** Original user intent (free-form text). Never mutated mid-loop. */
   intent: string;
-  /** For llm_calls accounting + per-user rate limits. */
+  /** External user id (usr_…). Required for llm_calls attribution. */
   userId?: string;
+  /**
+   * External task id (tsk_…). Stamped on every llm_calls row the
+   * commander writes so operators can group rows by task. Absent in
+   * unit tests that don't care about persistence.
+   */
+  taskExternalId?: string;
   /** Observation that triggered THIS tick. */
   observation: VisionObservation;
   /**
@@ -150,9 +157,15 @@ export interface VisionLoopCommander {
 
 export interface AnthropicVisionLoopCommanderOptions {
   client: Anthropic;
-  /** Default `claude-opus-4-7`. Env `COMMANDER_MODEL` overrides. */
+  /** Default `claude-sonnet-4-20250514`. Env `COMMANDER_MODEL` overrides. */
   model?: string;
   maxTokens?: number;
+  /**
+   * LLM accounting sink — one row per decideNextAction call lands as
+   * `purpose: 'commander.vision'`. Default NoopLlmCallRecorder so
+   * tests don't need a DB; production boot wires DrizzleLlmCallRecorder.
+   */
+  recorder?: LlmCallRecorder;
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
@@ -162,11 +175,13 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
   private readonly client: Anthropic;
   private readonly model: string;
   private readonly maxTokens: number;
+  private readonly recorder: LlmCallRecorder;
 
   constructor(opts: AnthropicVisionLoopCommanderOptions) {
     this.client = opts.client;
     this.model = opts.model ?? process.env.COMMANDER_MODEL ?? DEFAULT_MODEL;
     this.maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS;
+    this.recorder = opts.recorder ?? new NoopLlmCallRecorder();
   }
 
   async decideNextAction(ctx: VisionLoopContext): Promise<VisionDecision> {
@@ -219,6 +234,19 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      // Record the failed call so cost accounting stays honest — we
+      // don't know token counts on API failure, so they're zero.
+      await this.recordCall({
+        userExternalId: ctx.userId,
+        taskExternalId: ctx.taskExternalId,
+        latencyMs: Date.now() - startedAt,
+        status: 'error',
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        errorMessage: message.slice(0, 512),
+      });
       return synthesiseGiveUp(`Anthropic API error: ${message}`, startedAt, image);
     }
 
@@ -244,6 +272,15 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
     //    unknown tool names / bad inputs become a `give_up` action so
     //    the loop exits cleanly.
     if (!toolUse) {
+      await this.recordCall({
+        userExternalId: ctx.userId,
+        taskExternalId: ctx.taskExternalId,
+        latencyMs: elapsedMs,
+        status: 'error',
+        ...usage,
+        errorMessage: `no tool_use; stop_reason=${response.stop_reason}`,
+        requestMeta: { tickIndex: ctx.observation.tickIndex },
+      });
       return {
         action: {
           kind: 'give_up',
@@ -257,6 +294,19 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
     }
     const action = decodeToolUse(toolUse.name, toolUse.input);
 
+    await this.recordCall({
+      userExternalId: ctx.userId,
+      taskExternalId: ctx.taskExternalId,
+      latencyMs: elapsedMs,
+      status: 'ok',
+      ...usage,
+      requestMeta: {
+        tickIndex: ctx.observation.tickIndex,
+        toolName: toolUse.name,
+        actionKind: action.kind,
+      },
+    });
+
     return {
       action,
       ...(reasoning ? { reasoning } : {}),
@@ -265,6 +315,51 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
       elapsedMs,
       ...usage,
     };
+  }
+
+  /**
+   * Shared helper to record one llm_calls row per decideNextAction
+   * call. Purpose is always `commander.vision`; provider is always
+   * `anthropic`. Wraps the record call in a try so a DB miss never
+   * kills the loop — the recorder itself also logs on failure.
+   */
+  private async recordCall(row: {
+    userExternalId?: string;
+    taskExternalId?: string;
+    latencyMs: number;
+    status: 'ok' | 'error';
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadInputTokens: number;
+    cacheCreationInputTokens: number;
+    errorMessage?: string;
+    requestMeta?: Record<string, unknown>;
+  }): Promise<void> {
+    // Recorder requires userExternalId (llm_calls.user_id NOT NULL).
+    // Skip persistence entirely when the caller didn't pass one —
+    // keeps the commander usable from test contexts without making
+    // the column nullable.
+    if (!row.userExternalId) return;
+    try {
+      await this.recorder.record({
+        userExternalId: row.userExternalId,
+        ...(row.taskExternalId ? { taskExternalId: row.taskExternalId } : {}),
+        provider: 'anthropic',
+        model: this.model,
+        purpose: 'commander.vision',
+        inputTokens: row.inputTokens,
+        outputTokens: row.outputTokens,
+        cacheReadInputTokens: row.cacheReadInputTokens,
+        cacheCreationInputTokens: row.cacheCreationInputTokens,
+        latencyMs: row.latencyMs,
+        status: row.status,
+        ...(row.errorMessage ? { errorMessage: row.errorMessage } : {}),
+        ...(row.requestMeta ? { requestMeta: row.requestMeta } : {}),
+      });
+    } catch {
+      // recorder has its own onError logger; swallow here so the
+      // loop never dies on an audit row failure.
+    }
   }
 }
 

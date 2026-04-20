@@ -37,7 +37,7 @@ async function main() {
   // HOLADAY_USE_LEGACY_PLANNER=1.
   const visionCommander =
     env.ANTHROPIC_API_KEY && !shouldUseLegacyPlanner()
-      ? new AnthropicVisionLoopCommander({ client: new Anthropic() })
+      ? new AnthropicVisionLoopCommander({ client: new Anthropic(), recorder })
       : undefined;
   if (visionCommander) {
     logger.info('vision-loop commander enabled (new control plane)');

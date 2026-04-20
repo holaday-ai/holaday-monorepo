@@ -75,6 +75,8 @@ export interface VisionLoopRunnerOptions {
   skillHint?: string;
   /** Forwarded to commander for llm_calls attribution / rate limits. */
   userId?: string;
+  /** Forwarded to commander so each llm_calls row carries the task id. */
+  taskExternalId?: string;
 }
 
 /**
@@ -137,6 +139,7 @@ export class VisionLoopRunner {
   private readonly maxSteps: number;
   private readonly skillHint?: string;
   private readonly userId?: string;
+  private readonly taskExternalId?: string;
   private readonly emitter: EventEmitter = new EventEmitter();
   private cancelled = false;
   /** Running log of turns so run() and consumers can share one history. */
@@ -149,6 +152,7 @@ export class VisionLoopRunner {
     this.maxSteps = opts.maxSteps ?? 30;
     if (opts.skillHint) this.skillHint = opts.skillHint;
     if (opts.userId) this.userId = opts.userId;
+    if (opts.taskExternalId) this.taskExternalId = opts.taskExternalId;
   }
 
   /**
@@ -198,6 +202,7 @@ export class VisionLoopRunner {
         maxSteps: this.maxSteps,
         ...(this.skillHint ? { skillHint: this.skillHint } : {}),
         ...(this.userId ? { userId: this.userId } : {}),
+        ...(this.taskExternalId ? { taskExternalId: this.taskExternalId } : {}),
       });
       this.emitEv('decision', { tickIndex: tick, decision });
 

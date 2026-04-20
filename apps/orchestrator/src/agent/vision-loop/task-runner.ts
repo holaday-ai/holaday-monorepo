@@ -62,6 +62,7 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
   const runner = new VisionLoopRunner({
     commander: opts.commander,
     userId: opts.userId,
+    taskExternalId: opts.taskId,
     maxSteps: opts.maxSteps ?? 30,
     ...(opts.skillHint ? { skillHint: opts.skillHint } : {}),
     // Screenshot round-trip: send server.vision.observe, await the

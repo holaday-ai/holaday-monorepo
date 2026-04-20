@@ -20,8 +20,12 @@ export interface LlmCallRecord {
   model: string;
   /**
    * What the call was for:
-   *   - commander.plan: initial plan synthesis from intent
+   *   - commander.plan: initial plan synthesis from intent (legacy
+   *     AnthropicPlanner path)
    *   - commander.heal: single-selector self-heal on SELECTOR_NOT_FOUND
+   *     (legacy path)
+   *   - commander.vision: one tick of the VisionLoopCommander
+   *     observe → decide cycle
    *   - commander.replan: full re-plan on irrecoverable failure (W3)
    *   - skill.body: lazy-load a SKILL.md body (v0.2 §5.5)
    *   - safety.filter: SafetyFilter screening (W3)
@@ -29,6 +33,7 @@ export interface LlmCallRecord {
   purpose:
     | 'commander.plan'
     | 'commander.heal'
+    | 'commander.vision'
     | 'commander.replan'
     | 'skill.body'
     | 'safety.filter';
@@ -71,6 +76,8 @@ const MODEL_PRICES: Record<string, { inputPerM: number; outputPerM: number }> = 
   'claude-opus-4-7': { inputPerM: 5, outputPerM: 25 },
   'claude-opus-4-6': { inputPerM: 5, outputPerM: 25 },
   'claude-sonnet-4-6': { inputPerM: 3, outputPerM: 15 },
+  'claude-sonnet-4-20250514': { inputPerM: 3, outputPerM: 15 },
+  'claude-sonnet-4': { inputPerM: 3, outputPerM: 15 },
   'claude-haiku-4-5': { inputPerM: 1, outputPerM: 5 },
 };
 const DEFAULT_PRICE = { inputPerM: 5, outputPerM: 25 } as const; // conservative: assume Opus-tier

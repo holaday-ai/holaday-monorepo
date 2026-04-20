@@ -1,6 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import sharp from 'sharp';
 import { beforeAll, describe, expect, it } from 'vitest';
+import type { LlmCallRecord, LlmCallRecorder } from '../llm-call-recorder.js';
 import {
   AnthropicVisionLoopCommander,
   type VisionLoopContext,
@@ -277,6 +278,71 @@ describe('AnthropicVisionLoopCommander.decideNextAction', () => {
     if (toolResultContent[0]?.type === 'tool_result') {
       expect(toolResultContent[0].tool_use_id).toBe('toolu_1');
     }
+  });
+
+  it('writes an llm_calls row per decideNextAction when a recorder + userId are provided', async () => {
+    const records: LlmCallRecord[] = [];
+    const recorder: LlmCallRecorder = {
+      record: async (c) => {
+        records.push(c);
+      },
+    };
+    const client = fakeClient(() =>
+      toolUseResponse('computer_click', { x: 1, y: 2 }, { id: 'toolu_rec' }),
+    );
+    const c = new AnthropicVisionLoopCommander({ client, recorder });
+    const ctx = await freshContext({
+      userId: 'usr_test',
+      taskExternalId: 'tsk_test',
+    });
+    await c.decideNextAction(ctx);
+    expect(records).toHaveLength(1);
+    const row = records[0];
+    expect(row?.userExternalId).toBe('usr_test');
+    expect(row?.taskExternalId).toBe('tsk_test');
+    expect(row?.provider).toBe('anthropic');
+    expect(row?.purpose).toBe('commander.vision');
+    expect(row?.status).toBe('ok');
+    expect(row?.inputTokens).toBe(1_500);
+    expect(row?.outputTokens).toBe(42);
+    expect(row?.requestMeta).toMatchObject({
+      toolName: 'computer_click',
+      actionKind: 'click',
+    });
+  });
+
+  it('writes an llm_calls row with status=error when the API throws', async () => {
+    const records: LlmCallRecord[] = [];
+    const recorder: LlmCallRecorder = {
+      record: async (c) => {
+        records.push(c);
+      },
+    };
+    const client = fakeClient(() => {
+      throw new Error('rate limited');
+    });
+    const c = new AnthropicVisionLoopCommander({ client, recorder });
+    await c.decideNextAction(await freshContext({ userId: 'usr_test' }));
+    expect(records).toHaveLength(1);
+    const row = records[0];
+    expect(row?.status).toBe('error');
+    expect(row?.inputTokens).toBe(0);
+    expect(row?.errorMessage).toMatch(/rate limited/);
+  });
+
+  it('skips persistence when no userId is in the context (tests / misc calls)', async () => {
+    const records: LlmCallRecord[] = [];
+    const recorder: LlmCallRecorder = {
+      record: async (c) => {
+        records.push(c);
+      },
+    };
+    const client = fakeClient(() => toolUseResponse('computer_click', { x: 1, y: 2 }));
+    const c = new AnthropicVisionLoopCommander({ client, recorder });
+    // freshContext defaults intent/observation/history/maxSteps; we
+    // explicitly omit userId here.
+    await c.decideNextAction(await freshContext());
+    expect(records).toHaveLength(0);
   });
 
   it('honours the COMMANDER_MODEL env override', async () => {
