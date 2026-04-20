@@ -11,6 +11,16 @@ import {
 
 type Status = 'idle' | 'loading' | 'connected' | 'error';
 
+/**
+ * F4: cap the number of task cards rendered in the popup's "recent"
+ * section. Older runs (cancelled, failed from weeks ago) pile up
+ * and bury the current task behind a long scroll; older rows stay
+ * accessible via the HistorySection below. 10 mirrors what the
+ * backend returns via tasks.list(limit:20) divided by the "most
+ * users care about the last handful" heuristic.
+ */
+const POPUP_MAX_VISIBLE_TASKS = 10;
+
 type TaskStatus =
   | 'planning'
   | 'executing'
@@ -526,15 +536,30 @@ export function App() {
         {tasks.length === 0 ? (
           <div style={{ opacity: 0.5, fontSize: 12 }}>No tasks yet.</div>
         ) : (
-          tasks.map((t) => (
-            <TaskCard
-              key={t.taskId}
-              task={t}
-              busy={Boolean(inFlight[t.taskId])}
-              onControl={controlTask}
-              onConfirm={confirm}
-            />
-          ))
+          <>
+            {tasks.slice(0, POPUP_MAX_VISIBLE_TASKS).map((t) => (
+              <TaskCard
+                key={t.taskId}
+                task={t}
+                busy={Boolean(inFlight[t.taskId])}
+                onControl={controlTask}
+                onConfirm={confirm}
+              />
+            ))}
+            {tasks.length > POPUP_MAX_VISIBLE_TASKS ? (
+              <div
+                style={{
+                  fontSize: 11,
+                  opacity: 0.6,
+                  padding: '6px 2px',
+                  textAlign: 'center',
+                }}
+              >
+                只显示最近 {POPUP_MAX_VISIBLE_TASKS} 条（共 {tasks.length}{' '}
+                条）。更早的任务请查看下方历史。
+              </div>
+            ) : null}
+          </>
         )}
       </div>
 
