@@ -501,11 +501,11 @@ export function App() {
         <div style={{ display: 'flex', gap: 6 }}>
           <button
             type="button"
-            disabled={submitting || pendingTaskId !== null}
+            disabled={submitting || pendingTaskId !== null || hasRunningTask(tasks)}
             onClick={() => void createTask()}
             style={{ flex: 1 }}
           >
-            {submitting || pendingTaskId !== null ? '执行中...' : 'Run'}
+            {runButtonLabel(submitting, pendingTaskId, tasks)}
           </button>
           {debugMode ? (
             <button
@@ -968,6 +968,30 @@ function HistoryResultLine({ item }: { item: HistoryListItem }) {
       {text}
     </div>
   );
+}
+
+/**
+ * True when any visible task is in a state that should block Run —
+ * `executing`, `planning`, or `awaiting_user`. `paused` is deliberately
+ * NOT blocked: a paused task is waiting for the user's attention on
+ * the card, and they may reasonably want to kick off a parallel task.
+ * Exported via local closure only — used by the Run button's disabled
+ * + label logic.
+ */
+function hasRunningTask(tasks: TaskView[]): boolean {
+  return tasks.some(
+    (t) => t.status === 'executing' || t.status === 'planning' || t.status === 'awaiting_user',
+  );
+}
+
+function runButtonLabel(
+  submitting: boolean,
+  pendingTaskId: string | null,
+  tasks: TaskView[],
+): string {
+  if (submitting || pendingTaskId !== null) return '执行中...';
+  if (hasRunningTask(tasks)) return '有任务正在执行';
+  return 'Run';
 }
 
 function truncate(s: string, n: number): string {
