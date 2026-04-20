@@ -44,6 +44,30 @@ import { EventEmitter } from 'node:events';
 const MAX_SEQUENTIAL_DRIVER_FAILS = 3;
 
 /**
+ * Default whole-task timeout (ms). Overridden by env TASK_TIMEOUT_MS
+ * or by `taskTimeoutMs` on the runner constructor (tests pass shorter
+ * values). 5 minutes is plenty for real workflows; most finish in
+ * 5-15 ticks × a few seconds each.
+ *
+ * When the deadline is hit we DON'T hard-kill — we inject a
+ * `timeoutHint` into the next commander call so the model has one
+ * final tick to call task_done / task_give_up with a useful summary.
+ * Force-finalise only if the model's final tick returns a non-terminal
+ * action (didn't take the hint).
+ */
+const DEFAULT_TASK_TIMEOUT_MS = 5 * 60 * 1000;
+
+function readTaskTimeoutMs(): number {
+  const raw = process.env.TASK_TIMEOUT_MS;
+  if (!raw) return DEFAULT_TASK_TIMEOUT_MS;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_TASK_TIMEOUT_MS;
+}
+
+const TIMEOUT_HINT_TEXT =
+  '任务已达到时间上限，请立刻调用 task_done 总结目前进展（summary 用中文）；如确实无法推进，调用 task_give_up 说明卡在哪里。本轮之后不会再给继续行动的机会。';
+
+/**
  * How many times to re-dispatch a single action when the driver
  * reports ok=false before recording the tick as failed. The default
  * is 2 attempts total (1 initial + 1 retry) — enough to swallow a
@@ -142,6 +166,19 @@ export interface VisionLoopRunnerOptions {
    */
   accessibilityFn?: AccessibilityFn;
   a11yActionFn?: A11yActionFn;
+  /**
+   * Whole-task timeout in ms. Default: env TASK_TIMEOUT_MS or
+   * 5 minutes. When the deadline is hit, the runner passes a
+   * `timeoutHint` into the NEXT commander call giving the model
+   * one final tick to call task_done / task_give_up gracefully;
+   * a non-terminal response force-finalises as failed.
+   */
+  taskTimeoutMs?: number;
+  /**
+   * Test seam — override Date.now for deterministic timeout tests.
+   * Prod code never passes this; it defaults to Date.now.
+   */
+  now?: () => number;
 }
 
 /**
@@ -216,6 +253,10 @@ export class VisionLoopRunner {
   private readonly accessibilityFn?: AccessibilityFn;
   private readonly a11yActionFn?: A11yActionFn;
   private readonly visionModeEnv: VisionModeEnv;
+  private readonly taskTimeoutMs: number;
+  private readonly now: () => number;
+  /** Set during the tick on which the deadline is hit; one-shot. */
+  private timeoutAnnounced = false;
   private readonly maxSteps: number;
   private readonly skillHint?: string;
   private readonly userId?: string;
@@ -248,6 +289,8 @@ export class VisionLoopRunner {
     // + a11yActionFn; without those we silently pin to screenshot even
     // if env says otherwise (see pickMode below).
     this.visionModeEnv = opts.visionModeEnv ?? readVisionModeEnv();
+    this.taskTimeoutMs = opts.taskTimeoutMs ?? readTaskTimeoutMs();
+    this.now = opts.now ?? Date.now;
   }
 
   /**
@@ -274,10 +317,34 @@ export class VisionLoopRunner {
    * for subscribers.
    */
   async run(goal: string): Promise<RunOutcome> {
+    const startedAt = this.now();
+    const deadline = startedAt + this.taskTimeoutMs;
     for (let tick = 0; tick < this.maxSteps; tick++) {
       if (this.cancelled) {
         return this.finalise({ status: 'cancelled', history: this.history });
       }
+      // Deadline handling — "graceful" timeout.
+      //   1. First tick that finds Date.now() > deadline passes a
+      //      timeoutHint into the commander so the model has ONE more
+      //      call to summarise via task_done / task_give_up.
+      //   2. If that call's action is terminal, the normal exit paths
+      //      do the right thing and we're done.
+      //   3. If the model ignores the hint and returns a non-terminal
+      //      action, we force-finalise as failed reason='task_timeout'
+      //      instead of letting it keep burning budget.
+      // timeoutAnnounced is the "already gave the model its final
+      // turn" latch — prevents a single timeout triggering multiple
+      // commander calls if the tick loop re-enters.
+      const timeoutHit = this.now() >= deadline;
+      if (timeoutHit && this.timeoutAnnounced) {
+        return this.finalise({
+          status: 'failed',
+          reason: 'task_timeout: model ignored final-tick hint',
+          history: this.history,
+        });
+      }
+      const timeoutHint = timeoutHit && !this.timeoutAnnounced ? TIMEOUT_HINT_TEXT : undefined;
+      if (timeoutHint) this.timeoutAnnounced = true;
 
       // ---------- 1. Pick mode for this tick ----------
       // In 'auto', we sample the a11y snapshot here so we can decide
@@ -309,8 +376,8 @@ export class VisionLoopRunner {
 
       const outcome =
         mode === 'accessibility'
-          ? await this.runA11yTick(tick, goal, preFetchedA11y)
-          : await this.runScreenshotTick(tick, goal);
+          ? await this.runA11yTick(tick, goal, preFetchedA11y, timeoutHint)
+          : await this.runScreenshotTick(tick, goal, timeoutHint);
       if (outcome) return outcome;
     }
 
@@ -325,7 +392,11 @@ export class VisionLoopRunner {
    * Run a single tick in screenshot mode. Returns a terminal RunOutcome
    * to bubble up, or null to continue the loop.
    */
-  private async runScreenshotTick(tick: number, goal: string): Promise<RunOutcome | null> {
+  private async runScreenshotTick(
+    tick: number,
+    goal: string,
+    timeoutHint?: string,
+  ): Promise<RunOutcome | null> {
     let observation: VisionObservation;
     try {
       observation = await this.screenshotFn(tick);
@@ -343,6 +414,7 @@ export class VisionLoopRunner {
       ...(this.skillHint ? { skillHint: this.skillHint } : {}),
       ...(this.userId ? { userId: this.userId } : {}),
       ...(this.taskExternalId ? { taskExternalId: this.taskExternalId } : {}),
+      ...(timeoutHint ? { timeoutHint } : {}),
     });
     this.emitEv('decision', { tickIndex: tick, mode: 'screenshot', decision });
 
@@ -393,6 +465,7 @@ export class VisionLoopRunner {
     tick: number,
     goal: string,
     preFetched: AccessibilityObservation | null,
+    timeoutHint?: string,
   ): Promise<RunOutcome | null> {
     // Safe to assert — `pickMode` in run() only routes here when the
     // full a11y trio (accessibilityFn / a11yActionFn / commander.a11y)
@@ -431,6 +504,7 @@ export class VisionLoopRunner {
       ...(this.skillHint ? { skillHint: this.skillHint } : {}),
       ...(this.userId ? { userId: this.userId } : {}),
       ...(this.taskExternalId ? { taskExternalId: this.taskExternalId } : {}),
+      ...(timeoutHint ? { timeoutHint } : {}),
     });
     this.emitEv('decision', { tickIndex: tick, mode: 'accessibility', decision });
 

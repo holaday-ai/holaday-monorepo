@@ -110,6 +110,14 @@ export interface VisionLoopContext {
    * Skills as *context strings* stays useful.
    */
   skillHint?: string;
+  /**
+   * Optional timeout warning appended to the user prompt. The runner
+   * sets this on the tick where the task deadline has been reached,
+   * asking the model to call task_done or task_give_up rather than
+   * continuing. Presence = the next tick MUST be terminal; runner
+   * enforces this with a force-finalise after the call.
+   */
+  timeoutHint?: string;
 }
 
 /**
@@ -157,6 +165,7 @@ export interface AccessibilityLoopContext {
   history: AccessibilityLoopTurn[];
   maxSteps: number;
   skillHint?: string;
+  timeoutHint?: string;
 }
 
 export interface AccessibilityLoopTurn {
@@ -686,6 +695,10 @@ function initialUserText(ctx: VisionLoopContext, obs: VisionObservation): string
     lines.push('Context for this site (optional hint, may be stale):');
     lines.push(ctx.skillHint);
   }
+  if (ctx.timeoutHint) {
+    lines.push('');
+    lines.push(`⚠ ${ctx.timeoutHint}`);
+  }
   lines.push('');
   lines.push(
     'Pick ONE tool call. Call task_done when the intent is satisfied, task_give_up when you cannot proceed.',
@@ -833,6 +846,10 @@ function initialA11yUserText(
     lines.push('');
     lines.push('Context for this site (optional hint, may be stale):');
     lines.push(ctx.skillHint);
+  }
+  if (ctx.timeoutHint) {
+    lines.push('');
+    lines.push(`⚠ ${ctx.timeoutHint}`);
   }
   lines.push('');
   lines.push('Accessibility snapshot (interactive elements carry [ref=eN] markers):');

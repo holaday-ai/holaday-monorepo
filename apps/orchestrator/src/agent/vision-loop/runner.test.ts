@@ -477,6 +477,107 @@ describe('VisionLoopRunner — dual-mode (E3)', () => {
     expect(commander.a11yCalls.length).toBe(0);
   });
 
+  it('F2: deadline reached → commander sees timeoutHint → graceful task_done', async () => {
+    // Tick 0: normal (no hint yet). Commander emits a click.
+    // Tick 1: deadline already hit (our fake clock jumps). Runner
+    //   must pass `timeoutHint` into the ctx. Commander asserts
+    //   and emits task_done → loop exits cleanly completed.
+    let tickNum = 0;
+    const seenHints: Array<string | undefined> = [];
+    const commander: VisionLoopCommander = {
+      async decideNextAction(ctx) {
+        seenHints.push(ctx.timeoutHint);
+        tickNum += 1;
+        const action: VisionAction =
+          tickNum === 1
+            ? { kind: 'click', x: 1, y: 1 }
+            : { kind: 'done', summary: '时间到了，做到这一步' };
+        return {
+          action,
+          image: {
+            base64: 'AA==',
+            originalWidth: 800,
+            originalHeight: 600,
+            resizedWidth: 800,
+            resizedHeight: 600,
+            scaleX: 1,
+            scaleY: 1,
+          },
+          elapsedMs: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+        };
+      },
+    };
+    // Fake clock: tick 0 at t=0, tick 1 at t=10_000 (past the 5000ms
+    // timeout). Each run() call reads `now()` multiple times — fold
+    // the steps behind a counter.
+    let nowMs = 0;
+    const runner = new VisionLoopRunner({
+      commander,
+      screenshotFn: async (t) => makeObservation(t),
+      actionFn: async () => ({ ok: true }),
+      taskTimeoutMs: 5_000,
+      now: () => {
+        nowMs += 4_000; // advances ~4s per query — tick 0 stays under, tick 1 crosses
+        return nowMs;
+      },
+    });
+    const outcome = await runner.run('timeout graceful');
+    expect(outcome.status).toBe('completed');
+    if (outcome.status === 'completed') expect(outcome.summary).toMatch(/时间到了/);
+    // Tick 0 had no hint; tick 1 received the timeout hint.
+    expect(seenHints[0]).toBeUndefined();
+    expect(seenHints[1]).toMatch(/任务已达到时间上限/);
+  });
+
+  it('F2: deadline reached → commander ignores hint → force-finalises as failed next tick', async () => {
+    // Commander keeps emitting clicks despite the hint; runner
+    // must bail after exactly one post-timeout tick.
+    const commander: VisionLoopCommander = {
+      async decideNextAction(ctx) {
+        return {
+          action: { kind: 'click', x: Number(ctx.timeoutHint ? 9 : 1), y: 1 },
+          image: {
+            base64: 'AA==',
+            originalWidth: 800,
+            originalHeight: 600,
+            resizedWidth: 800,
+            resizedHeight: 600,
+            scaleX: 1,
+            scaleY: 1,
+          },
+          elapsedMs: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+        };
+      },
+    };
+    let nowMs = 0;
+    const runner = new VisionLoopRunner({
+      commander,
+      screenshotFn: async (t) => makeObservation(t),
+      actionFn: async () => ({ ok: true }),
+      taskTimeoutMs: 1, // force immediate timeout on first deadline check
+      now: () => {
+        nowMs += 10;
+        return nowMs;
+      },
+      maxSteps: 30,
+    });
+    const outcome = await runner.run('ignore hint');
+    expect(outcome.status).toBe('failed');
+    if (outcome.status === 'failed') {
+      expect(outcome.reason).toMatch(/task_timeout.*ignored final-tick hint/);
+    }
+    // One turn recorded: the post-timeout non-terminal tick.
+    expect(outcome.history).toHaveLength(1);
+  });
+
   it('screenshot mode with no a11y wiring: existing callers unchanged', async () => {
     // No accessibilityFn / a11yActionFn / visionModeEnv provided — runner
     // must stay on the legacy screenshot path for back-compat.
