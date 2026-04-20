@@ -20,7 +20,8 @@
 
 import { dispatchVisionActionToSW, requestVisionObservationFromSW } from '../../ws/server.js';
 import type { VisionLoopCommander } from './commander.js';
-import type { RunOutcome } from './runner.js';
+import type { PageLike, PlaywrightExecutor } from './playwright-executor.js';
+import type { ActionFn, RunOutcome, ScreenshotFn } from './runner.js';
 import { VisionLoopRunner } from './runner.js';
 
 export interface StartVisionLoopTaskOptions {
@@ -36,6 +37,15 @@ export interface StartVisionLoopTaskOptions {
   maxSteps?: number;
   /** Optional Skill body as a prompt hint. */
   skillHint?: string;
+  /**
+   * Phase D Step 3: when set, the runner observes + acts via
+   * Playwright instead of the WS → SW → CDP round-trip. On any
+   * Playwright-side failure we do NOT silently fall back to WS
+   * mid-task — the loop exits as failed so the operator sees what
+   * broke. Fallback-on-connect-failure happens at orchestrator
+   * boot, not per-task.
+   */
+  playwrightExecutor?: PlaywrightExecutor | null;
   /**
    * Optional per-tick observer hook — called after the commander
    * returns a decision but before the action is dispatched. Used
@@ -59,43 +69,22 @@ export interface StartVisionLoopTaskOptions {
  * handler owns user-facing persistence, this function owns the loop).
  */
 export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Promise<RunOutcome> {
+  // Pick the observation + action transport. When Playwright is
+  // wired at boot we go direct (no WS / SW); otherwise fall through
+  // to the classic SW round-trip. The selection happens once per
+  // task at start-up; we don't swap mid-loop.
+  const { screenshotFn, actionFn } = opts.playwrightExecutor
+    ? buildPlaywrightTransport(opts.playwrightExecutor)
+    : buildWsTransport(opts.userId, opts.taskId);
+
   const runner = new VisionLoopRunner({
     commander: opts.commander,
     userId: opts.userId,
     taskExternalId: opts.taskId,
     maxSteps: opts.maxSteps ?? 30,
     ...(opts.skillHint ? { skillHint: opts.skillHint } : {}),
-    // Screenshot round-trip: send server.vision.observe, await the
-    // matching client.vision.observation. SW-layer errors surface as
-    // the observation's `error` field; we re-throw so the runner
-    // catches it and fails the tick cleanly.
-    screenshotFn: async (tickIndex) => {
-      const obs = await requestVisionObservationFromSW(opts.userId, opts.taskId, tickIndex);
-      if (obs.error) throw new Error(obs.error);
-      if (!obs.screenshotBase64 || obs.viewportWidth === 0 || obs.viewportHeight === 0) {
-        throw new Error(
-          `malformed observation from SW at tick ${tickIndex}: empty screenshot or zero dims`,
-        );
-      }
-      return {
-        screenshotBase64: obs.screenshotBase64,
-        viewportWidth: obs.viewportWidth,
-        viewportHeight: obs.viewportHeight,
-        url: obs.url,
-        title: obs.title,
-        tickIndex,
-      };
-    },
-    // Action round-trip: send server.vision.act, await
-    // client.vision.acted. The runner has already translated
-    // click coords from model-space to real viewport pixels.
-    actionFn: async (tickIndex, action) => {
-      const acted = await dispatchVisionActionToSW(opts.userId, opts.taskId, tickIndex, action);
-      return {
-        ok: acted.ok,
-        ...(acted.message ? { message: acted.message } : {}),
-      };
-    },
+    screenshotFn,
+    actionFn,
   });
 
   if (opts.onDecision) {
@@ -112,4 +101,115 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
   }
 
   return runner.run(opts.intent);
+}
+
+/**
+ * Legacy transport — keeps the classic WS/SW/CDP path working when
+ * Playwright isn't available or EXECUTOR_MODE=legacy. Unchanged from
+ * the pre–Step 3 implementation; factored out so the branch in
+ * `startVisionLoopTask` stays clean.
+ */
+function buildWsTransport(
+  userId: string,
+  taskId: string,
+): { screenshotFn: ScreenshotFn; actionFn: ActionFn } {
+  const screenshotFn: ScreenshotFn = async (tickIndex) => {
+    const obs = await requestVisionObservationFromSW(userId, taskId, tickIndex);
+    if (obs.error) throw new Error(obs.error);
+    if (!obs.screenshotBase64 || obs.viewportWidth === 0 || obs.viewportHeight === 0) {
+      throw new Error(
+        `malformed observation from SW at tick ${tickIndex}: empty screenshot or zero dims`,
+      );
+    }
+    return {
+      screenshotBase64: obs.screenshotBase64,
+      viewportWidth: obs.viewportWidth,
+      viewportHeight: obs.viewportHeight,
+      url: obs.url,
+      title: obs.title,
+      tickIndex,
+    };
+  };
+  const actionFn: ActionFn = async (tickIndex, action) => {
+    const acted = await dispatchVisionActionToSW(userId, taskId, tickIndex, action);
+    return {
+      ok: acted.ok,
+      ...(acted.message ? { message: acted.message } : {}),
+    };
+  };
+  return { screenshotFn, actionFn };
+}
+
+/**
+ * Playwright transport — observe + act against the user's Chrome
+ * directly via CDP. No WS, no SW. Coordinate translation still
+ * happens in the runner (modelCoordToReal on the click path); here
+ * we just ferry the screenshot bytes / click events through
+ * PlaywrightExecutor.
+ *
+ * The screenshot path re-uses the executor's screenshot() which
+ * already produces a JPEG at quality 80; the runner's resize step
+ * downstream is tolerant of that (resizeForVisionModel treats
+ * small viewports as passthrough and only re-encodes when it needs
+ * to shrink past MAX_LONG_EDGE).
+ *
+ * Action translation: VisionAction kinds map onto PlaywrightExecutor
+ * methods 1:1 except `screenshot` (runner asks for fresh observation
+ * on next tick — nothing for the executor to do) and terminal
+ * actions (`done`/`give_up` — runner never dispatches these to
+ * actionFn). `type` focuses nothing on its own, matching screenshot-
+ * mode semantics: the commander is expected to click first.
+ */
+function buildPlaywrightTransport(executor: PlaywrightExecutor): {
+  screenshotFn: ScreenshotFn;
+  actionFn: ActionFn;
+} {
+  const screenshotFn: ScreenshotFn = async (tickIndex) => {
+    // Cast through unknown — Playwright's real Page has a richer
+    // Accessibility type than PageLike's duck-typed subset.
+    const page = (await executor.getPage()) as unknown as PageLike;
+    const shot = await executor.screenshot(page);
+    if (shot.error || !shot.base64) {
+      throw new Error(`playwright screenshot failed at tick ${tickIndex}: ${shot.error ?? '?'}`);
+    }
+    let title = '';
+    try {
+      title = await page.title();
+    } catch {
+      // best-effort — chrome:// pages may throw
+    }
+    return {
+      screenshotBase64: shot.base64,
+      viewportWidth: shot.viewportWidth ?? 0,
+      viewportHeight: shot.viewportHeight ?? 0,
+      url: page.url(),
+      title,
+      tickIndex,
+    };
+  };
+  const actionFn: ActionFn = async (_tickIndex, action) => {
+    // Cast through unknown — Playwright's real Page has a richer
+    // Accessibility type than PageLike's duck-typed subset.
+    const page = (await executor.getPage()) as unknown as PageLike;
+    switch (action.kind) {
+      case 'click':
+        return executor.click(page, action.x, action.y, action.button ?? 'left');
+      case 'type':
+        return executor.type(page, action.text);
+      case 'key':
+        return executor.pressKey(page, action.key);
+      case 'scroll':
+        return executor.scroll(page, action.dy);
+      case 'wait':
+        return executor.wait(page, action.ms);
+      case 'screenshot':
+        return { ok: true, message: 'noop — runner re-observes on next tick' };
+      case 'done':
+      case 'give_up':
+        return { ok: true, message: `${action.kind} terminal — no driver work` };
+      default:
+        return { ok: false, message: 'unknown VisionAction kind' };
+    }
+  };
+  return { screenshotFn, actionFn };
 }

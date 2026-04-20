@@ -69,6 +69,11 @@ export const tasksRouter = router({
         taskId,
         intent: input.intent,
         commander: ctx.visionCommander,
+        // Phase D Step 3: when PlaywrightExecutor is wired at boot,
+        // the runner bypasses the WS/SW path and drives Chrome
+        // directly via CDP. Falls through to the legacy WS transport
+        // automatically when absent.
+        ...(ctx.playwrightExecutor ? { playwrightExecutor: ctx.playwrightExecutor } : {}),
       })
         .then(async (outcome) => {
           ctx.logger.info(

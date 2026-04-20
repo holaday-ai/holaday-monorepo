@@ -37,6 +37,38 @@ const schema = z.object({
 
   ANTHROPIC_API_KEY: z.string().optional().default(''),
 
+  /**
+   * Phase D Step 3 rollout switch.
+   *   playwright → boot connects PlaywrightExecutor to Chrome's
+   *                CDP (needs Chrome launched with
+   *                --remote-debugging-port=<CDP_PORT>). On success,
+   *                VisionLoopRunner drives the page directly via
+   *                Playwright, bypassing the WS → SW → CDP path.
+   *   legacy     → skip Playwright; task-runner keeps using the WS
+   *                round-trip to the extension's cdp-actions.ts.
+   *   auto       → try playwright; on connect failure, fall back
+   *                to legacy silently (operator sees a warn in the
+   *                orchestrator log).
+   * Default: 'auto' (best-effort upgrade, never breaks existing
+   * flow).
+   */
+  EXECUTOR_MODE: z.enum(['playwright', 'legacy', 'auto']).default('auto'),
+  /**
+   * CDP endpoint for `chromium.connectOverCDP` when EXECUTOR_MODE is
+   * playwright or auto. Must be a full http URL to the devtools
+   * endpoint Chrome exposes with `--remote-debugging-port=<n>`.
+   * Default: http://127.0.0.1:9222.
+   */
+  CDP_ENDPOINT: z.string().url().default('http://127.0.0.1:9222'),
+
+  /**
+   * Commander mode preference, read by vision-mode.ts's
+   * `readVisionModeEnv`. Kept here so `env.VISION_MODE` is a typed
+   * field instead of a stringly-typed lookup. `auto` (default) lets
+   * the per-tick selector decide.
+   */
+  VISION_MODE: z.enum(['screenshot', 'accessibility', 'auto']).default('auto'),
+
   S3_ENDPOINT: z.string().url().optional(),
   S3_ACCESS_KEY: z.string().optional(),
   S3_SECRET_KEY: z.string().optional(),

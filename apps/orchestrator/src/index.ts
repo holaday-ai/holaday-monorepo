@@ -11,6 +11,7 @@ import {
   AnthropicVisionLoopCommander,
   shouldUseLegacyPlanner,
 } from './agent/vision-loop/commander.js';
+import { PlaywrightExecutor } from './agent/vision-loop/playwright-executor.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { db } from './db/client.js';
@@ -45,9 +46,46 @@ async function main() {
     logger.info('HOLADAY_USE_LEGACY_PLANNER=1 — using legacy plan-once planner');
   }
 
+  // Phase D Step 3: try to connect PlaywrightExecutor to the user's
+  // Chrome if EXECUTOR_MODE allows it. On success, VisionLoopRunner
+  // will drive the browser directly via Playwright and skip the WS
+  // → SW → CDP round-trip. On failure (Chrome not running with
+  // --remote-debugging-port, wrong port, etc.) we log a warning
+  // and leave the executor unset — task-runner falls back to the
+  // legacy WS path automatically.
+  let playwrightExecutor: PlaywrightExecutor | null = null;
+  if (env.EXECUTOR_MODE !== 'legacy') {
+    const candidate = new PlaywrightExecutor();
+    const connectResult = await candidate.connect(env.CDP_ENDPOINT);
+    if (connectResult.ok) {
+      playwrightExecutor = candidate;
+      logger.info(
+        { cdpEndpoint: env.CDP_ENDPOINT, mode: env.EXECUTOR_MODE },
+        'PlaywrightExecutor connected — vision loop will bypass WS/SW',
+      );
+    } else if (env.EXECUTOR_MODE === 'playwright') {
+      // Hard mode: the operator asked for playwright but we can't
+      // connect. Don't silently degrade — boot fails loudly so the
+      // operator fixes their Chrome launch.
+      logger.fatal(
+        { cdpEndpoint: env.CDP_ENDPOINT, error: connectResult.error },
+        'EXECUTOR_MODE=playwright requested but connectOverCDP failed — is Chrome running with --remote-debugging-port?',
+      );
+      process.exit(1);
+    } else {
+      logger.warn(
+        { cdpEndpoint: env.CDP_ENDPOINT, error: connectResult.error },
+        'PlaywrightExecutor connect failed — falling back to legacy WS/SW path (EXECUTOR_MODE=auto)',
+      );
+    }
+  } else {
+    logger.info('EXECUTOR_MODE=legacy — skipping Playwright init');
+  }
+
   const app = createHttpApp({
     planner,
     ...(visionCommander ? { visionCommander } : {}),
+    ...(playwrightExecutor ? { playwrightExecutor } : {}),
   });
 
   const httpServer = app.listen(env.HTTP_PORT, () => {
@@ -76,6 +114,9 @@ async function main() {
     logger.info({ signal }, 'shutdown requested');
     await ws.close();
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    if (playwrightExecutor) {
+      await playwrightExecutor.disconnect().catch(() => {});
+    }
     process.exit(0);
   };
 
