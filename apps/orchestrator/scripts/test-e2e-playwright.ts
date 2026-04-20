@@ -147,42 +147,62 @@ async function main(): Promise<void> {
     assert(keyRes.ok, `pressKey failed: ${keyRes.message}`);
     log('  ok');
 
-    // Reset to a clean baidu page before the vision loop so the loop
-    // starts from a predictable state (typing "hello" into whatever
-    // we hit could have opened an overlay).
-    log('reset to clean baidu for vision loop');
-    await page.goto('https://www.baidu.com', { waitUntil: 'domcontentloaded', timeout: 20_000 });
-
-    log('run vision loop', 'intent="在百度搜索今天天气"');
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const commander = new AnthropicVisionLoopCommander({ client: anthropic });
-    const outcome = await startVisionLoopTask({
-      userId: 'e2e-user',
-      taskId: `e2e-${Date.now()}`,
-      intent: '在百度搜索今天天气',
-      commander,
-      playwrightExecutor: executor,
-      maxSteps: 20,
-    });
 
-    log('vision loop terminated', `status=${outcome.status} ticks=${outcome.history.length}`);
-    if (outcome.status === 'completed') {
-      log('  summary', outcome.summary.slice(0, 200));
-    } else if (outcome.status === 'failed' || outcome.status === 'paused') {
-      log('  reason', outcome.reason.slice(0, 200));
-    }
+    // Run the loop TWICE — once in auto mode (default), once forced
+    // into accessibility mode. Both paths must reach completion or
+    // at minimum exit with ≥3 ticks worth of mechanics (no crash).
+    // We check MECHANICS not semantics: whether Claude judges the
+    // result page as "today's weather" is model-dependent and flaky
+    // as a CI signal.
+    const runLoop = async (modeLabel: string, modeEnv?: string) => {
+      log(`reset to clean baidu (mode=${modeLabel})`);
+      await page.goto('https://www.baidu.com', {
+        waitUntil: 'domcontentloaded',
+        timeout: 20_000,
+      });
 
-    // We intentionally DON'T fail the script on paused/failed — the
-    // loop reached the commander, dispatched actions, and exited
-    // cleanly. "completed" depends on Claude successfully judging the
-    // search results page as matching the intent, which is model-
-    // dependent and not a stable gate. We assert the MECHANICS
-    // succeeded (no crash, ran ≥3 ticks), not the semantics.
-    assert(
-      outcome.history.length >= 3,
-      `loop exited too early (${outcome.history.length} ticks); check first tick errors`,
-    );
-    log('E2E PASSED', `${outcome.history.length} ticks, outcome=${outcome.status}`);
+      // Scope the env override to this run; restore after. Using ''
+      // as the "unset" state: env.ts and readVisionModeEnv both treat
+      // empty-string as absent (see loadEnvLocal / env.ts for the
+      // original fix), so this is equivalent to delete without
+      // tripping biome's noDelete rule.
+      const prev = process.env.VISION_MODE ?? '';
+      process.env.VISION_MODE = modeEnv ?? '';
+      try {
+        log(`run vision loop (${modeLabel})`, 'intent="在百度搜索今天天气"');
+        const commander = new AnthropicVisionLoopCommander({ client: anthropic });
+        const outcome = await startVisionLoopTask({
+          userId: 'e2e-user',
+          taskId: `e2e-${modeLabel}-${Date.now()}`,
+          intent: '在百度搜索今天天气',
+          commander,
+          playwrightExecutor: executor,
+          maxSteps: 20,
+        });
+        log(
+          `vision loop terminated (${modeLabel})`,
+          `status=${outcome.status} ticks=${outcome.history.length}`,
+        );
+        if (outcome.status === 'completed') {
+          log('  summary', outcome.summary.slice(0, 200));
+        } else if (outcome.status === 'failed' || outcome.status === 'paused') {
+          log('  reason', outcome.reason.slice(0, 200));
+        }
+        assert(
+          outcome.history.length >= 3,
+          `${modeLabel}: loop exited too early (${outcome.history.length} ticks)`,
+        );
+        return outcome;
+      } finally {
+        process.env.VISION_MODE = prev;
+      }
+    };
+
+    const auto = await runLoop('auto'); // default env = auto
+    const a11y = await runLoop('accessibility', 'accessibility');
+
+    log('E2E PASSED', `auto=${auto.history.length}t, a11y=${a11y.history.length}t`);
     exitCode = 0;
   } catch (err) {
     failure = err;
