@@ -107,6 +107,24 @@ export const tasksRouter = router({
           } catch (err) {
             ctx.logger.error({ err, taskId }, 'persistVisionOutcome failed');
           }
+          // Push the terminal state to any connected SW for the user
+          // so the popup can update its card without polling. Fire-
+          // and-forget — broadcastToUser skips cleanly if no client
+          // is connected (task ended while popup/SW was offline;
+          // the popup will pick up the DB row on its next mount).
+          try {
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: outcome.status,
+              ...(outcome.status === 'completed' ? { summary: outcome.summary } : {}),
+              ...(outcome.status === 'failed' || outcome.status === 'paused'
+                ? { reason: outcome.reason }
+                : {}),
+            });
+          } catch (err) {
+            ctx.logger.warn({ err, taskId }, 'broadcast task.terminal failed');
+          }
         })
         .catch((err) => {
           ctx.logger.error({ err, taskId }, 'vision loop threw');

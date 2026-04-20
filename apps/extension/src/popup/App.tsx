@@ -152,7 +152,12 @@ export function App() {
     await chrome.storage.local.set({ 'holaday.debug_mode': next });
   }
 
-  // On mount: restore session, hydrate tasks from SW.
+  // On mount: restore session, hydrate tasks from SW, AND reconcile
+  // with the orchestrator's tasks.list so terminal states that
+  // happened while the popup was closed show up correctly (the SW
+  // may have missed the `server.task.terminal` frame if it was
+  // recycled, or the task may have ended before the SW saw any
+  // vision frames at all).
   useEffect(() => {
     void (async () => {
       const stored = await getStoredUser();
@@ -166,6 +171,62 @@ export function App() {
       chrome.runtime.sendMessage({ type: 'holaday.tasks' }, (resp) => {
         if (resp?.tasks) setTasks(resp.tasks as TaskView[]);
       });
+      // DB reconcile — authoritative for terminal statuses. We
+      // overlay the DB's status/result onto the SW's in-memory view
+      // when it disagrees (DB wins: it's written by the orchestrator
+      // after persistVisionOutcome, SW view may be stale).
+      if (tok) {
+        try {
+          const res = await fetch(
+            `${ORCHESTRATOR_HTTP}/trpc/tasks.list?input=${encodeURIComponent(
+              JSON.stringify({ limit: 20 }),
+            )}`,
+            { headers: { authorization: `Bearer ${tok}` } },
+          );
+          if (res.ok) {
+            const body = (await res.json()) as {
+              result: { data: { tasks: HistoryListItem[] } };
+            };
+            const dbByTaskId = new Map(body.result.data.tasks.map((t) => [t.taskId, t]));
+            setTasks((prev) =>
+              prev.map((t) => {
+                const db = dbByTaskId.get(t.taskId);
+                if (!db) return t;
+                const dbStatus = db.status as TaskStatus;
+                const isTerminalInDb =
+                  dbStatus === 'completed' ||
+                  dbStatus === 'failed' ||
+                  dbStatus === 'cancelled' ||
+                  dbStatus === 'paused';
+                // Only overwrite when the DB is terminal and the SW
+                // still thinks the task is running — don't stomp an
+                // executing task with stale list data.
+                if (!isTerminalInDb) return t;
+                if (t.status === dbStatus) return t;
+                const summary = db.result?.summary?.trim() || null;
+                const reason = db.result?.reason?.trim() || (db.errorMessage ?? '').trim() || null;
+                const phase: VisionPhase =
+                  dbStatus === 'completed'
+                    ? 'completed'
+                    : dbStatus === 'failed' || dbStatus === 'cancelled'
+                      ? 'failed'
+                      : 'failed';
+                const detail = summary ?? reason ?? undefined;
+                return {
+                  ...t,
+                  status: dbStatus,
+                  visionProgress: {
+                    phase,
+                    ...(detail ? { detail } : {}),
+                  },
+                };
+              }),
+            );
+          }
+        } catch {
+          // Non-fatal — SW view stands.
+        }
+      }
     })();
   }, []);
 

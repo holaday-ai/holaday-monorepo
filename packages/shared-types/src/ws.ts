@@ -246,6 +246,29 @@ export const serverVisionActSchema = z.object({
   deadlineMs: z.number().int().positive().optional(),
 });
 
+/**
+ * Orchestrator → SW: task has reached a terminal state. Fired for
+ * vision-loop tasks after `persistVisionOutcome` lands, so the SW
+ * can update its in-memory view and the popup shows the final result
+ * even when a task ended while the popup was closed.
+ *
+ *   completed → `summary` populated (task_done's summary text)
+ *   failed    → `reason` populated (task_give_up reason or
+ *                orchestrator-synthesised message)
+ *   paused    → `reason` populated (e.g. max_steps_reached)
+ *   cancelled → both optional
+ *
+ * Legacy plan-once tasks use server.task.control(pause) /
+ * persistence, not this frame.
+ */
+export const serverTaskTerminalSchema = z.object({
+  type: z.literal('server.task.terminal'),
+  taskId: z.string(),
+  status: z.enum(['completed', 'failed', 'paused', 'cancelled']),
+  summary: z.string().optional(),
+  reason: z.string().optional(),
+});
+
 export const serverMessageSchema = z.discriminatedUnion('type', [
   serverWelcomeSchema,
   serverErrorSchema,
@@ -256,6 +279,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverBatchConfirmRequiredSchema,
   serverVisionObserveSchema,
   serverVisionActSchema,
+  serverTaskTerminalSchema,
 ]);
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;

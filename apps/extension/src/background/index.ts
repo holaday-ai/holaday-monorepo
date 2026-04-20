@@ -244,8 +244,59 @@ onServerMessage((msg) => {
     void onVisionAct(msg);
     return;
   }
+  if (msg.type === 'server.task.terminal') {
+    onTaskTerminal(msg);
+    return;
+  }
   console.debug('[holaday] msg', msg);
 });
+
+/**
+ * Orchestrator signalled a vision-loop task reached a terminal state.
+ * Update the SW's in-memory TaskView + push the final progress event
+ * to the popup so its card reflects completed/failed without polling.
+ *
+ * Fires regardless of whether the SW saw the loop in action (it may
+ * not have — a task can reach `task_done` on its first tick, before
+ * the runner dispatches any `server.vision.act` frame). If the task
+ * isn't in state.tasks yet, create it with the final status.
+ */
+function onTaskTerminal(msg: Extract<ServerMessage, { type: 'server.task.terminal' }>): void {
+  const detail = msg.summary ?? msg.reason ?? '';
+  const statusMap: Record<
+    'completed' | 'failed' | 'paused' | 'cancelled',
+    'completed' | 'failed' | 'paused' | 'cancelled'
+  > = {
+    completed: 'completed',
+    failed: 'failed',
+    paused: 'paused',
+    cancelled: 'cancelled',
+  };
+  const nextStatus = statusMap[msg.status];
+  const phase: VisionPhase =
+    msg.status === 'completed' ? 'completed' : msg.status === 'failed' ? 'failed' : 'failed';
+
+  let task = state.tasks.get(msg.taskId);
+  if (!task) {
+    task = {
+      taskId: msg.taskId,
+      status: nextStatus,
+      steps: [],
+      lastUpdated: Date.now(),
+    };
+    state.tasks.set(msg.taskId, task);
+  }
+  task.status = nextStatus;
+  task.lastUpdated = Date.now();
+  task.visionProgress = {
+    phase,
+    ...(detail ? { detail } : {}),
+  };
+  pushTasksSnapshot();
+  // Also fire a vision.progress event so the popup's existing
+  // listener (which un-sticks the Run button) sees the final state.
+  pushVisionProgress(msg.taskId, phase, { detail });
+}
 
 /**
  * Capture an observation for the vision loop and send it back.
