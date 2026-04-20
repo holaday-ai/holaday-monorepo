@@ -45,6 +45,7 @@ import { PlaywrightCrxAdapter } from '@holaday/browser-driver/crx';
 import { MockDriver } from '@holaday/browser-driver/mock';
 import type { ServerMessage } from '@holaday/shared-types';
 import { getAccessToken } from '../shared/storage.js';
+import { captureVisionObservation, executeCdpAction, getActiveTabId } from './cdp-actions.js';
 import { connect, disconnect, isConnected, onServerMessage, send } from './ws-client.js';
 
 /**
@@ -219,8 +220,82 @@ onServerMessage((msg) => {
     onTaskControl(msg);
     return;
   }
+  if (msg.type === 'server.vision.observe') {
+    void onVisionObserve(msg);
+    return;
+  }
+  if (msg.type === 'server.vision.act') {
+    void onVisionAct(msg);
+    return;
+  }
   console.debug('[holaday] msg', msg);
 });
+
+/**
+ * Capture an observation for the vision loop and send it back.
+ * Never throws — capture errors land in the observation's `error`
+ * field so the orchestrator exits the loop cleanly.
+ */
+async function onVisionObserve(
+  msg: Extract<ServerMessage, { type: 'server.vision.observe' }>,
+): Promise<void> {
+  const tabId = await getActiveTabId();
+  if (tabId === null) {
+    send({
+      type: 'client.vision.observation',
+      taskId: msg.taskId,
+      tickIndex: msg.tickIndex,
+      screenshotBase64: '',
+      viewportWidth: 0,
+      viewportHeight: 0,
+      url: '',
+      title: '',
+      error: 'no active tab (window may have been backgrounded before task started)',
+    });
+    return;
+  }
+  const obs = await captureVisionObservation(tabId);
+  send({
+    type: 'client.vision.observation',
+    taskId: msg.taskId,
+    tickIndex: msg.tickIndex,
+    screenshotBase64: obs.screenshotBase64,
+    viewportWidth: obs.viewportWidth,
+    viewportHeight: obs.viewportHeight,
+    url: obs.url,
+    title: obs.title,
+    ...(obs.error ? { error: obs.error } : {}),
+  });
+}
+
+/**
+ * Execute a VisionAction via CDP and report back.
+ * Coordinates in msg.action are already real viewport pixels — the
+ * orchestrator pre-translated them from Claude's model-space.
+ */
+async function onVisionAct(
+  msg: Extract<ServerMessage, { type: 'server.vision.act' }>,
+): Promise<void> {
+  const tabId = await getActiveTabId();
+  if (tabId === null) {
+    send({
+      type: 'client.vision.acted',
+      taskId: msg.taskId,
+      tickIndex: msg.tickIndex,
+      ok: false,
+      message: 'no active tab',
+    });
+    return;
+  }
+  const result = await executeCdpAction(tabId, msg.action);
+  send({
+    type: 'client.vision.acted',
+    taskId: msg.taskId,
+    tickIndex: msg.tickIndex,
+    ok: result.ok,
+    ...(result.message ? { message: result.message } : {}),
+  });
+}
 
 function onDispatch(msg: Extract<ServerMessage, { type: 'server.task.dispatch' }>): void {
   let task = state.tasks.get(msg.taskId);

@@ -328,3 +328,113 @@ function resolveKey(name: string): KeyInfo {
 export function _resetAttachedTabsForTests(): void {
   attachedTabs.clear();
 }
+
+// ---------------------------------------------------------------------------
+// Vision-loop observation capture.
+// ---------------------------------------------------------------------------
+
+/**
+ * Shape the SW reports back to the orchestrator for one tick.
+ * `error` (if set) means capture failed — the orchestrator will surface
+ * it as the tick's failure reason and exit the loop.
+ */
+export interface VisionObservationCapture {
+  screenshotBase64: string;
+  viewportWidth: number;
+  viewportHeight: number;
+  url: string;
+  title: string;
+  error?: string;
+}
+
+/**
+ * Pick the currently-active tab in the foreground window — the tab the
+ * user is looking at. The vision loop always operates on whatever's
+ * in front; we don't try to track a specific task's tab (Phase B).
+ *
+ * Returns null when there's no active tab (e.g. SW launched during
+ * Chrome startup before any window has focus) so callers can surface
+ * a clean error instead of crashing.
+ */
+export async function getActiveTabId(): Promise<number | null> {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = tabs[0];
+  if (!tab || typeof tab.id !== 'number') return null;
+  return tab.id;
+}
+
+/**
+ * Capture one observation via raw CDP: screenshot + viewport dims +
+ * url + title. Single round-trip through the debugger session (two
+ * CDP calls: Page.captureScreenshot, Runtime.evaluate for dims/url/
+ * title). Attaches debugger idempotently via ensureAttached.
+ *
+ * Never throws — any CDP failure returns a result with `error` set
+ * plus best-effort defaults for the other fields. The orchestrator
+ * checks `error` first; populated = failed tick.
+ */
+export async function captureVisionObservation(tabId: number): Promise<VisionObservationCapture> {
+  try {
+    await ensureAttached(tabId);
+  } catch (err) {
+    return {
+      screenshotBase64: '',
+      viewportWidth: 0,
+      viewportHeight: 0,
+      url: '',
+      title: '',
+      error: `debugger attach failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  // Read viewport + url + title FIRST so we still have metadata even
+  // if the screenshot capture then fails.
+  let viewportWidth = 0;
+  let viewportHeight = 0;
+  let url = '';
+  let title = '';
+  try {
+    const evalResp = (await sendCdp(tabId, 'Runtime.evaluate', {
+      expression:
+        'JSON.stringify({ w: innerWidth, h: innerHeight, u: location.href, t: document.title })',
+      returnByValue: true,
+    })) as { result?: { value?: unknown } };
+    const raw = evalResp?.result?.value;
+    if (typeof raw === 'string') {
+      const parsed = JSON.parse(raw) as { w?: number; h?: number; u?: string; t?: string };
+      viewportWidth = Math.round(parsed.w ?? 0);
+      viewportHeight = Math.round(parsed.h ?? 0);
+      url = parsed.u ?? '';
+      title = parsed.t ?? '';
+    }
+  } catch {
+    // Tab may be an extension page, chrome://, or otherwise not
+    // evaluable. Fall through with zeros; screenshot may still succeed.
+  }
+
+  let screenshotBase64 = '';
+  let error: string | undefined;
+  try {
+    const shot = (await sendCdp(tabId, 'Page.captureScreenshot', {
+      format: 'jpeg',
+      quality: 80,
+      captureBeyondViewport: false,
+    })) as { data?: unknown };
+    if (typeof shot?.data === 'string' && shot.data.length > 0) {
+      screenshotBase64 = shot.data;
+    } else {
+      error = `Page.captureScreenshot returned non-string data (${typeof shot?.data})`;
+    }
+  } catch (err) {
+    error = `Page.captureScreenshot failed: ${err instanceof Error ? err.message : String(err)}`;
+  }
+
+  return {
+    screenshotBase64,
+    viewportWidth,
+    viewportHeight,
+    url,
+    title,
+    ...(error ? { error } : {}),
+  };
+}

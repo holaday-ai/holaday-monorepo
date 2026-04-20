@@ -84,16 +84,23 @@ export type VisionAction = z.infer<typeof visionActionSchema>;
  * SW → orchestrator: observation for the current loop tick. Raw
  * viewport JPEG (base64, no data: prefix) + dims + url + title.
  * Orchestrator will resize server-side before shipping to Claude.
+ *
+ * If capture failed at the SW layer (debugger attach denied, target
+ * closed, CDP timeout), SW sets `error` to a diagnostic string and
+ * leaves the other fields best-effort (empty string / 0). The
+ * orchestrator treats a populated `error` as a failed tick and exits
+ * the loop with `status='failed'`.
  */
 export const clientVisionObservationSchema = z.object({
   type: z.literal('client.vision.observation'),
   taskId: z.string(),
   tickIndex: z.number().int().nonnegative(),
-  screenshotBase64: z.string().min(1),
-  viewportWidth: z.number().int().positive(),
-  viewportHeight: z.number().int().positive(),
+  screenshotBase64: z.string(),
+  viewportWidth: z.number().int().nonnegative(),
+  viewportHeight: z.number().int().nonnegative(),
   url: z.string(),
   title: z.string(),
+  error: z.string().optional(),
 });
 
 /**
