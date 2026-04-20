@@ -381,6 +381,142 @@ async function handleClientMessage(
     );
     return;
   }
+
+  if (msg.type === 'client.vision.observation') {
+    const key = visionKey(msg.taskId, msg.tickIndex);
+    const resolver = pendingObservations.get(key);
+    if (resolver) resolver(msg);
+    else {
+      logger.warn(
+        { taskId: msg.taskId, tickIndex: msg.tickIndex },
+        'vision.observation arrived with no pending request (late response?)',
+      );
+    }
+    return;
+  }
+
+  if (msg.type === 'client.vision.acted') {
+    const key = visionKey(msg.taskId, msg.tickIndex);
+    const resolver = pendingActed.get(key);
+    if (resolver) resolver(msg);
+    else {
+      logger.warn(
+        { taskId: msg.taskId, tickIndex: msg.tickIndex },
+        'vision.acted arrived with no pending request',
+      );
+    }
+    return;
+  }
+}
+
+// ---------- Vision-loop request/response plumbing ----------
+
+/**
+ * Correlation key for a (taskId, tickIndex) vision round-trip. One
+ * outstanding request per kind per tick — the runner never asks twice
+ * for the same observation / same action slot.
+ */
+function visionKey(taskId: string, tickIndex: number): string {
+  return `${taskId}:${tickIndex}`;
+}
+
+type ObservationMsg = Extract<ClientMessage, { type: 'client.vision.observation' }>;
+type ActedMsg = Extract<ClientMessage, { type: 'client.vision.acted' }>;
+
+const pendingObservations = new Map<string, (m: ObservationMsg) => void>();
+const pendingActed = new Map<string, (m: ActedMsg) => void>();
+
+/**
+ * Default per-tick round-trip timeout. Screenshot + Runtime.evaluate
+ * + WS hops is normally sub-second; 15s absorbs cold-SW wake-ups and
+ * slow pages without blocking a stuck task forever.
+ */
+const VISION_RTT_TIMEOUT_MS = 15_000;
+
+/**
+ * Ask the SW for an observation. Sends `server.vision.observe` to a
+ * connected client for `userId` and resolves when the matching
+ * `client.vision.observation` arrives. Rejects on timeout, on no
+ * connected client, or if a duplicate request is already outstanding.
+ *
+ * Exported so the vision-loop task runner can inject it as its
+ * `screenshotFn`. Not part of a class — server.ts already owns the
+ * per-user client map, so threading this through a class would
+ * duplicate bookkeeping.
+ */
+export async function requestVisionObservationFromSW(
+  userId: string,
+  taskId: string,
+  tickIndex: number,
+  timeoutMs: number = VISION_RTT_TIMEOUT_MS,
+): Promise<ObservationMsg> {
+  const client = firstConnectedClient(userId);
+  if (!client) throw new Error(`no SW connected for user ${userId}`);
+  const key = visionKey(taskId, tickIndex);
+  if (pendingObservations.has(key)) {
+    throw new Error(`duplicate vision.observe for ${key}`);
+  }
+  return new Promise<ObservationMsg>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingObservations.delete(key);
+      reject(new Error(`vision.observe timeout at tick ${tickIndex}`));
+    }, timeoutMs);
+    pendingObservations.set(key, (m) => {
+      clearTimeout(timer);
+      pendingObservations.delete(key);
+      resolve(m);
+    });
+    send(client.socket, {
+      type: 'server.vision.observe',
+      taskId,
+      tickIndex,
+    });
+  });
+}
+
+/**
+ * Dispatch a VisionAction to the SW and await the acted-frame reply.
+ * `action.click.x/y` must already be REAL viewport pixels (runner
+ * applies modelCoordToReal before calling this).
+ */
+export async function dispatchVisionActionToSW(
+  userId: string,
+  taskId: string,
+  tickIndex: number,
+  action: Extract<ServerMessage, { type: 'server.vision.act' }>['action'],
+  timeoutMs: number = VISION_RTT_TIMEOUT_MS,
+): Promise<ActedMsg> {
+  const client = firstConnectedClient(userId);
+  if (!client) throw new Error(`no SW connected for user ${userId}`);
+  const key = visionKey(taskId, tickIndex);
+  if (pendingActed.has(key)) {
+    throw new Error(`duplicate vision.act for ${key}`);
+  }
+  return new Promise<ActedMsg>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingActed.delete(key);
+      reject(new Error(`vision.act timeout at tick ${tickIndex}`));
+    }, timeoutMs);
+    pendingActed.set(key, (m) => {
+      clearTimeout(timer);
+      pendingActed.delete(key);
+      resolve(m);
+    });
+    send(client.socket, {
+      type: 'server.vision.act',
+      taskId,
+      tickIndex,
+      action,
+    });
+  });
+}
+
+function firstConnectedClient(userId: string): ClientState | null {
+  const set = clientsByUser.get(userId);
+  if (!set || set.size === 0) return null;
+  // Iterator-first; Phase B will pick by last-heartbeat freshness.
+  for (const c of set) return c;
+  return null;
 }
 
 async function runStepResult(

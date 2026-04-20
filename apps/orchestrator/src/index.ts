@@ -3,9 +3,14 @@ const _proxy = process.env.HTTPS_PROXY;
 if (_proxy) setGlobalDispatcher(new ProxyAgent(_proxy));
 import { bootstrap } from 'global-agent';
 bootstrap();
+import Anthropic from '@anthropic-ai/sdk';
 import { DrizzleLlmCallRecorder } from './agent/llm-call-recorder.js';
 import { AnthropicPlanner } from './agent/planners/anthropic.js';
 import { StubPlanner } from './agent/planners/stub.js';
+import {
+  AnthropicVisionLoopCommander,
+  shouldUseLegacyPlanner,
+} from './agent/vision-loop/commander.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { db } from './db/client.js';
@@ -26,7 +31,24 @@ async function main() {
     logger.warn('ANTHROPIC_API_KEY missing — commander is using StubPlanner');
   }
 
-  const app = createHttpApp({ planner });
+  // Vision-loop commander (new control plane). Only wired up when the
+  // API key is present — without it the vision loop can't call
+  // Anthropic anyway. Legacy planner still drives tasks when
+  // HOLADAY_USE_LEGACY_PLANNER=1.
+  const visionCommander =
+    env.ANTHROPIC_API_KEY && !shouldUseLegacyPlanner()
+      ? new AnthropicVisionLoopCommander({ client: new Anthropic() })
+      : undefined;
+  if (visionCommander) {
+    logger.info('vision-loop commander enabled (new control plane)');
+  } else if (shouldUseLegacyPlanner()) {
+    logger.info('HOLADAY_USE_LEGACY_PLANNER=1 — using legacy plan-once planner');
+  }
+
+  const app = createHttpApp({
+    planner,
+    ...(visionCommander ? { visionCommander } : {}),
+  });
 
   const httpServer = app.listen(env.HTTP_PORT, () => {
     logger.info({ port: env.HTTP_PORT }, 'HTTP server listening');

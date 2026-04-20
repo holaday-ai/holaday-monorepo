@@ -60,9 +60,10 @@ export type ScreenshotFn = (tickIndex: number) => Promise<VisionObservation>;
  * Action executor. Coordinates in `action` are REAL viewport pixels —
  * the runner has already translated them through `modelCoordToReal`.
  * Driver just dispatches the CDP event; no scaling, no selector
- * resolution.
+ * resolution. `tickIndex` matches the screenshot's tickIndex so WS
+ * adapters can correlate request/response frames.
  */
-export type ActionFn = (action: VisionAction) => Promise<ActionResult>;
+export type ActionFn = (tickIndex: number, action: VisionAction) => Promise<ActionResult>;
 
 export interface VisionLoopRunnerOptions {
   commander: VisionLoopCommander;
@@ -230,7 +231,7 @@ export class VisionLoopRunner {
       const realAction = translateToRealSpace(decision.action, decision.image);
       let result: ActionResult;
       try {
-        result = await this.actionFn(realAction);
+        result = await this.actionFn(tick, realAction);
       } catch (err) {
         result = { ok: false, message: `driver threw: ${errMsg(err)}` };
       }

@@ -7,6 +7,7 @@ import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import type { PlannedStep } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
 import { TaskRepository } from '../../agent/task-repository.js';
+import { startVisionLoopTask } from '../../agent/vision-loop/task-runner.js';
 import { skills } from '../../db/schema/skills.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
 import { tasks as tasksTable } from '../../db/schema/tasks.js';
@@ -32,6 +33,65 @@ export const tasksRouter = router({
       .limit(1);
     if (!userRow) {
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+    }
+
+    // Vision-loop path — the new control plane. Claude looks at each
+    // tick's screenshot and picks one action at a time; there is no
+    // pre-generated plan, no ResilientSelector, no Skill matching.
+    // Activates when the env flag is off AND a vision commander is
+    // wired at boot (needs ANTHROPIC_API_KEY). Falls through to the
+    // legacy plan-once path otherwise.
+    if (ctx.visionCommander) {
+      const taskId = newExternalId('task');
+      const repo = new TaskRepository(ctx.db);
+      // Seed task row with status='executing' and empty plan — the
+      // vision loop has no pre-planned steps; task_steps rows get
+      // written as the loop progresses (Phase B: per-tick row; Phase
+      // A: single synthetic row reflecting terminal outcome).
+      await repo.insertTask(
+        {
+          taskId,
+          status: 'executing',
+          plan: [],
+          cursor: 0,
+          pendingConfirm: null,
+        },
+        { userId: userRow.id, intent: input.intent },
+      );
+      // Start the loop asynchronously. We return to the popup
+      // immediately with the taskId; the loop proceeds in the
+      // background, driven by WS round-trips to the connected SW.
+      // Outcome persistence is best-effort: we log failures instead
+      // of surfacing them to the caller (they already got the taskId
+      // and can poll tasks.detail).
+      void startVisionLoopTask({
+        userId: ctx.userId,
+        taskId,
+        intent: input.intent,
+        commander: ctx.visionCommander,
+      })
+        .then(async (outcome) => {
+          ctx.logger.info(
+            {
+              taskId,
+              status: outcome.status,
+              tickCount: outcome.history.length,
+            },
+            'vision loop terminated',
+          );
+          // TODO(item-3): persist terminal outcome to tasks row
+          // (status completed/failed/paused/cancelled + optional
+          // summary / reason). Phase A ships the loop first, DB
+          // shape second.
+        })
+        .catch((err) => {
+          ctx.logger.error({ err, taskId }, 'vision loop threw');
+        });
+      return {
+        taskId,
+        status: 'executing' as const,
+        steps: [],
+      };
     }
 
     const catalogue = await loadSkillCatalogue(ctx.db, input.occupation ?? null);

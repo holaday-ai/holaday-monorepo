@@ -93,14 +93,14 @@ class ScriptedCommander implements VisionLoopCommander {
 }
 
 function recordingActionFn(results: ActionResult[] = []): {
-  actionFn: (a: VisionAction) => Promise<ActionResult>;
+  actionFn: (tickIndex: number, a: VisionAction) => Promise<ActionResult>;
   calls: VisionAction[];
 } {
   const calls: VisionAction[] = [];
   let i = 0;
   return {
     calls,
-    actionFn: async (a) => {
+    actionFn: async (_tickIndex, a) => {
       calls.push(a);
       const r = results[i++];
       return r ?? { ok: true };
