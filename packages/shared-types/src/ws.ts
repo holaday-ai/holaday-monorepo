@@ -304,6 +304,31 @@ export const serverVisionTickEndSchema = z.object({
   message: z.string().optional(),
 });
 
+/**
+ * Per-tick screencast frame — G5. Sends the raw JPEG the runner
+ * already captured to drive the commander, so the web workbench can
+ * render a poor-man's screencast in the right-hand panel. Only fires
+ * in screenshot mode; accessibility mode has no image to ship.
+ *
+ * The payload is large (a few tens of KB per tick) but fires at most
+ * once every ~2–5 s per task, so the WS channel absorbs it. `imageBase64`
+ * carries no `data:` prefix — callers prepend `data:image/jpeg;base64,`
+ * themselves.
+ */
+export const serverVisionScreencastSchema = z.object({
+  type: z.literal('server.vision.screencast'),
+  taskId: z.string(),
+  tickIndex: z.number().int().nonnegative(),
+  imageBase64: z.string(),
+  url: z.string(),
+  viewport: z.object({
+    width: z.number().int().nonnegative(),
+    height: z.number().int().nonnegative(),
+  }),
+  /** ISO-8601 capture timestamp so clients can dedupe + show freshness. */
+  timestamp: z.string(),
+});
+
 export const serverMessageSchema = z.discriminatedUnion('type', [
   serverWelcomeSchema,
   serverErrorSchema,
@@ -317,6 +342,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverTaskTerminalSchema,
   serverVisionTickStartSchema,
   serverVisionTickEndSchema,
+  serverVisionScreencastSchema,
 ]);
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;

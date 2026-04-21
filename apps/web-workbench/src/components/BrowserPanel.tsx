@@ -2,23 +2,28 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import type { UiScreencast, UiTaskStatus } from '@/types/task';
 
 interface Props {
-  /** URL of the page the agent is currently driving. */
-  currentUrl?: string;
-  /** 'live' while a task is executing; 'idle' when nothing is happening. */
-  status?: 'idle' | 'live' | 'error';
+  /** Latest screencast frame for the selected task (if any). */
+  frame?: UiScreencast | null;
+  /** Selected task status — drives the status dot colour. */
+  taskStatus?: UiTaskStatus | null;
 }
 
 /**
- * 400px right rail with a collapse affordance. The collapse state is
- * purely local — BrowserPanel doesn't tell the layout its own width.
- * The parent renders two variants (`w-[400px]` vs `w-10`) based on
- * the `collapsed` state so tailwind generates both widths ahead of
- * time.
+ * Right-hand screencast panel. Shows the newest JPEG the runner
+ * produced for the active task, with URL + resolution + tick counter
+ * chrome around it. Collapses to a thin vertical rail on demand.
+ *
+ * The runner ships maybe 1 frame every 2–5 s, so we don't get a true
+ * screencast — it's a poor-man's "picture in picture" for the task's
+ * tab. Good enough for PoC dogfooding; a real screencast would need
+ * CDP `Page.startScreencast` wired through the SW.
  */
-export function BrowserPanel({ currentUrl, status = 'idle' }: Props): JSX.Element {
+export function BrowserPanel({ frame, taskStatus }: Props): JSX.Element {
   const [collapsed, setCollapsed] = React.useState(false);
+  const status: DotStatus = deriveDotStatus(taskStatus, Boolean(frame));
 
   return (
     <section
@@ -53,21 +58,43 @@ export function BrowserPanel({ currentUrl, status = 'idle' }: Props): JSX.Elemen
           <header className="flex h-11 items-center gap-2 border-b border-black/[0.06] px-3">
             <StatusDot status={status} />
             <div className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-              {currentUrl ?? 'about:blank'}
+              {frame?.url ?? 'about:blank'}
             </div>
           </header>
-          <div className="flex flex-1 items-center justify-center bg-muted/40 p-4">
-            <div className="text-center text-xs text-muted-foreground">
-              {status === 'live' ? '浏览器画面传输中…' : '等待任务开始...'}
-            </div>
+          <div className="flex flex-1 items-center justify-center overflow-hidden bg-muted/40 p-3">
+            {frame ? (
+              <img
+                src={`data:image/jpeg;base64,${frame.imageBase64}`}
+                alt={`screencast tick ${frame.tickIndex + 1}`}
+                className="max-h-full max-w-full rounded-md border border-black/[0.06] object-contain shadow-sm"
+              />
+            ) : (
+              <div className="text-center text-xs text-muted-foreground">
+                {taskStatus === 'executing' ? '等待第一帧…' : '等待任务开始...'}
+              </div>
+            )}
           </div>
+          <footer className="flex h-7 items-center justify-between border-t border-black/[0.06] px-3 text-[11px] text-muted-foreground">
+            <span>
+              {frame ? `${frame.viewport.width}×${frame.viewport.height}` : '—'}
+            </span>
+            <span>{frame ? `第 ${frame.tickIndex + 1} 帧` : ''}</span>
+          </footer>
         </>
       )}
     </section>
   );
 }
 
-function StatusDot({ status }: { status: 'idle' | 'live' | 'error' }): JSX.Element {
+type DotStatus = 'idle' | 'live' | 'error';
+
+function deriveDotStatus(status: UiTaskStatus | null | undefined, hasFrame: boolean): DotStatus {
+  if (status === 'failed') return 'error';
+  if (status === 'executing' || hasFrame) return 'live';
+  return 'idle';
+}
+
+function StatusDot({ status }: { status: DotStatus }): JSX.Element {
   return (
     <span
       className={cn(

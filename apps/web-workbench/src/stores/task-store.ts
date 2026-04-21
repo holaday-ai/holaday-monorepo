@@ -1,7 +1,7 @@
 import type { ServerMessage } from '@holaday/shared-types';
 import { create } from 'zustand';
 import { trpc } from '@/lib/trpc';
-import type { UiStep, UiTask, UiTaskStatus } from '@/types/task';
+import type { UiScreencast, UiStep, UiTask, UiTaskStatus } from '@/types/task';
 
 /**
  * Single source of truth for the task list + selection. Data flows in
@@ -21,6 +21,8 @@ export interface TaskStore {
   error: string | null;
   /** Per-task step streams, keyed by taskId. */
   stepsByTask: Record<string, UiStep[]>;
+  /** Latest screencast frame per task (G5). */
+  screencastByTask: Record<string, UiScreencast>;
 
   setSelectedTask(taskId: string | null): void;
   refreshTasks(): Promise<void>;
@@ -35,6 +37,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   loading: false,
   error: null,
   stepsByTask: {},
+  screencastByTask: {},
 
   setSelectedTask(taskId) {
     set({ selectedTaskId: taskId });
@@ -165,14 +168,43 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       });
       return;
     }
+    if (msg.type === 'server.vision.screencast') {
+      set((prev) => ({
+        screencastByTask: {
+          ...prev.screencastByTask,
+          [msg.taskId]: {
+            tickIndex: msg.tickIndex,
+            imageBase64: msg.imageBase64,
+            url: msg.url,
+            viewport: msg.viewport,
+            timestamp: msg.timestamp,
+          },
+        },
+      }));
+      return;
+    }
     // Other frames (vision.observe / vision.act / user.confirm / ...)
     // aren't UI-relevant yet; silently ignore.
   },
 
   reset() {
-    set({ tasks: [], selectedTaskId: null, loading: false, error: null, stepsByTask: {} });
+    set({
+      tasks: [],
+      selectedTaskId: null,
+      loading: false,
+      error: null,
+      stepsByTask: {},
+      screencastByTask: {},
+    });
   },
 }));
+
+// Dev helper — pins the store on `window.__taskStore` so browser-based
+// smoke tests can inject fake server frames without spinning up the
+// orchestrator. Stripped out of production builds by vite's DEV flag.
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { __taskStore?: typeof useTaskStore }).__taskStore = useTaskStore;
+}
 
 type ListRow = Awaited<ReturnType<typeof trpc.tasks.list.query>>['tasks'][number];
 

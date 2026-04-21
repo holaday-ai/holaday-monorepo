@@ -31,6 +31,7 @@ export function App(): JSX.Element {
   const createTask = useTaskStore((s) => s.createTask);
   const applyServerMessage = useTaskStore((s) => s.applyServerMessage);
   const reset = useTaskStore((s) => s.reset);
+  const screencastByTask = useTaskStore((s) => s.screencastByTask);
 
   // Kick off tRPC + WS once authenticated. StrictMode double-mount is
   // safe here: refreshTasks is idempotent, connect() is a no-op when
@@ -79,7 +80,10 @@ export function App(): JSX.Element {
           await createTask(intent);
         }}
       />
-      <BrowserPanel status={selectedTask?.status === 'executing' ? 'live' : 'idle'} />
+      <BrowserPanel
+        frame={selectedTask ? (screencastByTask[selectedTask.taskId] ?? null) : null}
+        taskStatus={selectedTask?.status ?? null}
+      />
     </div>
   );
 }

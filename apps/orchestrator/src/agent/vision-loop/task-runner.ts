@@ -100,6 +100,20 @@ export interface StartVisionLoopTaskOptions {
     ok: boolean;
     message?: string;
   }) => void;
+  /**
+   * Fires right after a screenshot-mode observation lands, with the
+   * raw JPEG bytes (base64, no data: prefix) + url + viewport. G5
+   * wires this to a `server.vision.screencast` broadcast so the web
+   * workbench can render a poor-man's screencast in the right-hand
+   * panel. a11y-mode ticks have no image and skip this hook.
+   */
+  onScreencast?: (info: {
+    tickIndex: number;
+    imageBase64: string;
+    url: string;
+    viewportWidth: number;
+    viewportHeight: number;
+  }) => void;
 }
 
 /**
@@ -152,11 +166,15 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
   if (opts.onTickStart || opts.onTickEnd) {
     const startedAt = new Map<number, number>();
     const lastMode = new Map<number, import('./vision-mode.js').VisionMode>();
+    // Populate timing on every tick, even when onTickStart is unset —
+    // onTickEnd needs it for durationMs.
+    runner.on('tick', (ev) => {
+      startedAt.set(ev.tickIndex, Date.now());
+      lastMode.set(ev.tickIndex, ev.mode);
+    });
     if (opts.onTickStart) {
       const hookStart = opts.onTickStart;
       runner.on('tick', (ev) => {
-        startedAt.set(ev.tickIndex, Date.now());
-        lastMode.set(ev.tickIndex, ev.mode);
         try {
           hookStart({ tickIndex: ev.tickIndex, mode: ev.mode });
         } catch (err) {
@@ -196,6 +214,29 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
         }
       });
     }
+  }
+
+  // G5 screencast: piggy-back on the same `tick` event, but only fire
+  // in screenshot mode where we actually have a JPEG. Separate
+  // subscription from the onTickStart wiring so the two concerns
+  // don't interleave in one callback.
+  if (opts.onScreencast) {
+    const hookCast = opts.onScreencast;
+    runner.on('tick', (ev) => {
+      if (ev.mode !== 'screenshot' || !ev.observation) return;
+      try {
+        hookCast({
+          tickIndex: ev.tickIndex,
+          imageBase64: ev.observation.screenshotBase64,
+          url: ev.observation.url,
+          viewportWidth: ev.observation.viewportWidth,
+          viewportHeight: ev.observation.viewportHeight,
+        });
+      } catch (err) {
+        // biome-ignore lint/suspicious/noConsole: surfaced to orchestrator logs
+        console.warn('[vision-loop] onScreencast hook threw', err);
+      }
+    });
   }
 
   return runner.run(opts.intent);

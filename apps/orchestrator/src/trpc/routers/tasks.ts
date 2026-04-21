@@ -115,6 +115,24 @@ export const tasksRouter = router({
               ctx.logger.warn({ err, taskId, tickIndex: info.tickIndex }, 'broadcast tick.end failed');
             }
           },
+          onScreencast(info) {
+            try {
+              broadcastToUser(userId, {
+                type: 'server.vision.screencast',
+                taskId,
+                tickIndex: info.tickIndex,
+                imageBase64: info.imageBase64,
+                url: info.url,
+                viewport: { width: info.viewportWidth, height: info.viewportHeight },
+                timestamp: new Date().toISOString(),
+              });
+            } catch (err) {
+              ctx.logger.warn(
+                { err, taskId, tickIndex: info.tickIndex },
+                'broadcast screencast failed',
+              );
+            }
+          },
         })
           .then(async (outcome) => {
             ctx.logger.info(

@@ -34,6 +34,19 @@ export interface UiStep {
   startedAt: number;
 }
 
+/**
+ * Latest screencast frame observed for a task — rendered into the
+ * right-hand BrowserPanel. We keep only the newest frame per task;
+ * older frames fall out of memory with the next tick.
+ */
+export interface UiScreencast {
+  tickIndex: number;
+  imageBase64: string;
+  url: string;
+  viewport: { width: number; height: number };
+  timestamp: string;
+}
+
 export function isActive(status: UiTaskStatus): boolean {
   return status === 'executing' || status === 'paused';
 }

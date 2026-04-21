@@ -3,11 +3,17 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { StepCard } from '@/components/StepCard';
 import { useTaskStore } from '@/stores/task-store';
-import type { UiTask } from '@/types/task';
+import type { UiStep, UiTask } from '@/types/task';
 
 interface Props {
   task: UiTask;
 }
+
+// Stable empty-array reference so the zustand selector below returns
+// the SAME value on every render when the task has no steps yet. A
+// fresh `[]` via `?? []` triggers React's getSnapshot cache warning
+// and can loop infinitely under StrictMode.
+const EMPTY_STEPS: UiStep[] = [];
 
 /**
  * Stream panel for one task. Top: the user's intent (as a chat-style
@@ -21,7 +27,7 @@ interface Props {
  * instant scrolling.
  */
 export function TaskStream({ task }: Props): JSX.Element {
-  const steps = useTaskStore((s) => s.stepsByTask[task.taskId] ?? []);
+  const steps = useTaskStore((s) => s.stepsByTask[task.taskId]) ?? EMPTY_STEPS;
   const scrollAnchorRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
