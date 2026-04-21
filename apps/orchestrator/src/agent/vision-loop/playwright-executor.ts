@@ -30,6 +30,13 @@
 
 import type { Browser, BrowserContext, Page } from 'playwright';
 import sharp from 'sharp';
+import {
+  humanClick,
+  humanScroll,
+  humanTypeText,
+  isHumanizeEnabled,
+  randomDelay,
+} from './humanize.js';
 import { STEALTH_INIT_SCRIPT, isStealthEnabled } from './stealth-scripts.js';
 
 export interface ConnectResult {
@@ -467,11 +474,18 @@ export class PlaywrightExecutor {
     button: 'left' | 'right' | 'middle' = 'left',
   ): Promise<ActionResult> {
     try {
-      await withTimeout(
-        page.mouse.click(x, y, { button }),
-        CLICK_TIMEOUT_MS,
-        `click @ (${x},${y})`,
-      );
+      if (isHumanizeEnabled()) {
+        // humanClick moves via bezier + jitter + settle delay and then
+        // fires mouse.click. Whole sequence is still bounded by
+        // CLICK_TIMEOUT_MS so a hung renderer can't burn the tick.
+        await withTimeout(humanClick(page, x, y, button), CLICK_TIMEOUT_MS, `click @ (${x},${y})`);
+      } else {
+        await withTimeout(
+          page.mouse.click(x, y, { button }),
+          CLICK_TIMEOUT_MS,
+          `click @ (${x},${y})`,
+        );
+      }
       return { ok: true, message: `clicked ${button} @ (${x},${y})` };
     } catch (err) {
       return { ok: false, message: `click failed: ${errMsg(err)}` };
@@ -480,7 +494,15 @@ export class PlaywrightExecutor {
 
   async type(page: PageLike, text: string): Promise<ActionResult> {
     try {
-      await withTimeout(page.keyboard.type(text), TYPE_TIMEOUT_MS, `type ${text.length} chars`);
+      if (isHumanizeEnabled()) {
+        // Per-char delays push long strings past the 10s default; scale
+        // the cap with length (200ms per char headroom) but never below
+        // the configured minimum.
+        const bound = Math.max(TYPE_TIMEOUT_MS, text.length * 250);
+        await withTimeout(humanTypeText(page, text), bound, `type ${text.length} chars`);
+      } else {
+        await withTimeout(page.keyboard.type(text), TYPE_TIMEOUT_MS, `type ${text.length} chars`);
+      }
       return { ok: true, message: `typed ${text.length} chars` };
     } catch (err) {
       return { ok: false, message: `type failed: ${errMsg(err)}` };
@@ -543,7 +565,16 @@ export class PlaywrightExecutor {
       if (typeof atX === 'number' && typeof atY === 'number') {
         await withTimeout(page.mouse.move(atX, atY), SCROLL_TIMEOUT_MS, 'mouse.move');
       }
-      await withTimeout(page.mouse.wheel(0, deltaY), SCROLL_TIMEOUT_MS, `scroll ${deltaY}px`);
+      if (isHumanizeEnabled()) {
+        // Chunked scroll pushes past the default 5s when the delta is
+        // big — 2–5 chunks × ~300ms gap can be 1.5s alone. Scale the
+        // cap so we don't trip our own timeout on a legitimate
+        // scroll-through-a-long-page.
+        const bound = Math.max(SCROLL_TIMEOUT_MS, 2_500);
+        await withTimeout(humanScroll(page, deltaY), bound, `scroll ${deltaY}px`);
+      } else {
+        await withTimeout(page.mouse.wheel(0, deltaY), SCROLL_TIMEOUT_MS, `scroll ${deltaY}px`);
+      }
       return { ok: true, message: `scrolled ${deltaY}px` };
     } catch (err) {
       return { ok: false, message: `scroll failed: ${errMsg(err)}` };

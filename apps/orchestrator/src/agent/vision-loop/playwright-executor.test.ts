@@ -5,6 +5,12 @@ beforeAll(() => {
   process.env.JWT_SECRET ??= 'test-secret-must-be-at-least-32-characters-long-yes';
   process.env.DATABASE_URL ??= 'mysql://test:test@127.0.0.1:3306/test';
   process.env.REDIS_URL ??= 'redis://127.0.0.1:6379/0';
+  // Turn off humanize for the raw-behaviour tests below: they assert
+  // direct mouse.click / keyboard.type calls with specific arg
+  // shapes, which humanize intentionally replaces with bezier paths
+  // + per-char typing. Humanize behaviour has its own dedicated
+  // tests in humanize.test.ts.
+  process.env.HUMANIZE_ENABLED = 'false';
 });
 
 /**
