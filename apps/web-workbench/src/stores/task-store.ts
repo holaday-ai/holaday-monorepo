@@ -1,0 +1,144 @@
+import type { ServerMessage } from '@holaday/shared-types';
+import { create } from 'zustand';
+import { trpc } from '@/lib/trpc';
+import type { UiTask, UiTaskStatus } from '@/types/task';
+
+/**
+ * Single source of truth for the task list + selection. Data flows in
+ * from two places:
+ *   1. `refreshTasks()` — tRPC `tasks.list`, called on login and after
+ *      a new task is created (optimistic append + server truth).
+ *   2. `applyServerMessage()` — WS server frames. task.terminal flips
+ *      the status / stores the result; G4 wires the per-tick ticks.
+ *
+ * Kept as a plain zustand store (no slices, no middleware) — the UI
+ * surface is small and the hot path is a single selector.
+ */
+export interface TaskStore {
+  tasks: UiTask[];
+  selectedTaskId: string | null;
+  loading: boolean;
+  error: string | null;
+
+  setSelectedTask(taskId: string | null): void;
+  refreshTasks(): Promise<void>;
+  createTask(intent: string): Promise<{ taskId: string } | { error: string }>;
+  applyServerMessage(msg: ServerMessage): void;
+  reset(): void;
+}
+
+export const useTaskStore = create<TaskStore>((set, get) => ({
+  tasks: [],
+  selectedTaskId: null,
+  loading: false,
+  error: null,
+
+  setSelectedTask(taskId) {
+    set({ selectedTaskId: taskId });
+  },
+
+  async refreshTasks() {
+    set({ loading: true, error: null });
+    try {
+      const res = await trpc.tasks.list.query({ limit: 50 });
+      const tasks: UiTask[] = res.tasks.map(toUiTask);
+      set((prev) => ({
+        tasks,
+        loading: false,
+        // keep the current selection if it still exists; otherwise pick the newest.
+        selectedTaskId:
+          prev.selectedTaskId && tasks.some((t) => t.taskId === prev.selectedTaskId)
+            ? prev.selectedTaskId
+            : (tasks[0]?.taskId ?? null),
+      }));
+    } catch (err) {
+      set({ loading: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+
+  async createTask(intent) {
+    try {
+      const res = await trpc.tasks.create.mutate({ intent });
+      // Optimistic insert at the top so the UI feels instant; the next
+      // refreshTasks() will pick up the canonical server row.
+      const now = new Date();
+      const optimistic: UiTask = {
+        taskId: res.taskId,
+        intent,
+        status: (res.status as UiTaskStatus) ?? 'executing',
+        tickCount: 0,
+        createdAt: now,
+      };
+      set((prev) => ({
+        tasks: [optimistic, ...prev.tasks.filter((t) => t.taskId !== res.taskId)],
+        selectedTaskId: res.taskId,
+      }));
+      // Fire-and-forget refresh so the row's server-authored fields
+      // (createdAt, status) replace the optimistic stub once available.
+      void get().refreshTasks();
+      return { taskId: res.taskId };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      set({ error: msg });
+      return { error: msg };
+    }
+  },
+
+  applyServerMessage(msg) {
+    if (msg.type === 'server.task.terminal') {
+      set((prev) => ({
+        tasks: prev.tasks.map((t) =>
+          t.taskId === msg.taskId
+            ? {
+                ...t,
+                status: msg.status,
+                ...(msg.summary ? { resultText: msg.summary } : {}),
+                ...(msg.reason ? { resultText: msg.reason } : {}),
+              }
+            : t,
+        ),
+      }));
+      return;
+    }
+    // Other frames (vision.observe / vision.act / user.confirm / ...
+    // get handled in G4 once per-tick events are wired.
+  },
+
+  reset() {
+    set({ tasks: [], selectedTaskId: null, loading: false, error: null });
+  },
+}));
+
+type ListRow = Awaited<ReturnType<typeof trpc.tasks.list.query>>['tasks'][number];
+
+function toUiTask(row: ListRow): UiTask {
+  return {
+    taskId: row.taskId,
+    intent: row.intent,
+    status: normaliseStatus(row.status),
+    // The list endpoint doesn't expose tickCount directly; we leave 0
+    // for now and let G4's ws events fill it in as ticks stream.
+    tickCount: 0,
+    ...(typeof row.errorMessage === 'string' ? { resultText: row.errorMessage } : {}),
+    // tRPC serializes Date to string over the wire; coerce back.
+    createdAt: new Date(row.createdAt as unknown as string | number | Date),
+  };
+}
+
+function normaliseStatus(raw: string): UiTaskStatus {
+  // The orchestrator has a richer status set (planning, pending,
+  // awaiting_user, ...). Map everything we don't display onto an
+  // active/paused bucket so the sidebar stays readable.
+  switch (raw) {
+    case 'completed':
+    case 'failed':
+    case 'cancelled':
+    case 'paused':
+    case 'executing':
+      return raw;
+    case 'awaiting_user':
+      return 'paused';
+    default:
+      return 'executing';
+  }
+}

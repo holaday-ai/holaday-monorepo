@@ -4,6 +4,12 @@
   "private": true,
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    "./trpc/router": {
+      "types": "./src/trpc/router.ts",
+      "default": "./src/trpc/router.ts"
+    }
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.build.json",
