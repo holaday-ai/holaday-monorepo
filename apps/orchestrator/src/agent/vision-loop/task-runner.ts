@@ -74,6 +74,32 @@ export interface StartVisionLoopTaskOptions {
       | import('./commander.js').VisionDecision
       | import('./commander.js').AccessibilityDecision;
   }) => Promise<void> | void;
+  /**
+   * Fires when the runner has pulled a fresh observation for a tick
+   * and is about to call the commander. G4 wires this to a
+   * `server.vision.tick.start` broadcast so the web workbench can
+   * append an in-progress step card.
+   */
+  onTickStart?: (info: {
+    tickIndex: number;
+    mode: import('./vision-mode.js').VisionMode;
+  }) => void;
+  /**
+   * Fires once per tick after the turn has been recorded — covers
+   * both "driver executed the action" and "commander returned a
+   * terminal action" (done / give_up) paths. G4 wires this to
+   * `server.vision.tick.end` so the step card can flip to its
+   * final state.
+   */
+  onTickEnd?: (info: {
+    tickIndex: number;
+    mode: import('./vision-mode.js').VisionMode;
+    actionKind: string;
+    actionSummary: string;
+    durationMs: number;
+    ok: boolean;
+    message?: string;
+  }) => void;
 }
 
 /**
@@ -119,7 +145,104 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
     });
   }
 
+  // Per-tick streaming hooks. `tick` gives us the start timestamp;
+  // `turn` (which fires for both acted + terminal paths) gives us
+  // the closing action + duration. We keep the timestamps in a Map
+  // keyed by tickIndex so out-of-order bookkeeping can't cross-pollute.
+  if (opts.onTickStart || opts.onTickEnd) {
+    const startedAt = new Map<number, number>();
+    const lastMode = new Map<number, import('./vision-mode.js').VisionMode>();
+    if (opts.onTickStart) {
+      const hookStart = opts.onTickStart;
+      runner.on('tick', (ev) => {
+        startedAt.set(ev.tickIndex, Date.now());
+        lastMode.set(ev.tickIndex, ev.mode);
+        try {
+          hookStart({ tickIndex: ev.tickIndex, mode: ev.mode });
+        } catch (err) {
+          // biome-ignore lint/suspicious/noConsole: surfaced to orchestrator logs
+          console.warn('[vision-loop] onTickStart hook threw', err);
+        }
+      });
+    }
+    if (opts.onTickEnd) {
+      const hookEnd = opts.onTickEnd;
+      // The runner's `turn` event carries the full AnyTurn — that
+      // includes the action + executionResult for BOTH vision-mode
+      // and a11y-mode turns, and fires after terminal done/give_up
+      // paths too. Using it as the single "tick finished" signal
+      // keeps the start/end pair well-defined even when the driver
+      // is bypassed (done / give_up never hit `acted`).
+      runner.on('turn', (ev) => {
+        const started = startedAt.get(ev.tickIndex);
+        const mode = lastMode.get(ev.tickIndex) ?? 'screenshot';
+        const durationMs = started ? Date.now() - started : 0;
+        startedAt.delete(ev.tickIndex);
+        lastMode.delete(ev.tickIndex);
+        const { action, executionResult } = ev.turn;
+        try {
+          hookEnd({
+            tickIndex: ev.tickIndex,
+            mode,
+            actionKind: action.kind,
+            actionSummary: describeAction(action),
+            durationMs,
+            ok: executionResult?.ok ?? false,
+            ...(executionResult?.message ? { message: executionResult.message } : {}),
+          });
+        } catch (err) {
+          // biome-ignore lint/suspicious/noConsole: surfaced to orchestrator logs
+          console.warn('[vision-loop] onTickEnd hook threw', err);
+        }
+      });
+    }
+  }
+
   return runner.run(opts.intent);
+}
+
+/**
+ * Short Chinese label for an action — rendered verbatim in the
+ * web workbench's step card. Covers the full VisionAction + A11yAction
+ * discriminated union; unknown kinds fall through to the bare kind.
+ */
+function describeAction(
+  action:
+    | import('./actions.js').VisionAction
+    | import('./actions-a11y.js').A11yAction,
+): string {
+  switch (action.kind) {
+    case 'click':
+      return `点击 (${action.x}, ${action.y})`;
+    case 'type':
+      return `输入：${truncate(action.text, 40)}`;
+    case 'key':
+      return `按键：${action.key}`;
+    case 'scroll':
+      return `滚动 ${action.dy}px`;
+    case 'wait':
+      return `等待 ${action.ms}ms`;
+    case 'screenshot':
+      return '截图';
+    case 'done':
+      return '任务完成';
+    case 'give_up':
+      return `放弃：${truncate(action.reason, 40)}`;
+    case 'click_ref':
+      return `点击元素 ${action.ref}`;
+    case 'type_in_ref':
+      return `在 ${action.ref} 中输入：${truncate(action.text, 40)}`;
+    case 'press_key':
+      return `按键：${action.key}`;
+    case 'navigate':
+      return `打开 ${action.url}`;
+    default:
+      return (action as { kind: string }).kind;
+  }
+}
+
+function truncate(s: string, max: number): string {
+  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
 }
 
 /**

@@ -1,7 +1,7 @@
 import type { ServerMessage } from '@holaday/shared-types';
 import { create } from 'zustand';
 import { trpc } from '@/lib/trpc';
-import type { UiTask, UiTaskStatus } from '@/types/task';
+import type { UiStep, UiTask, UiTaskStatus } from '@/types/task';
 
 /**
  * Single source of truth for the task list + selection. Data flows in
@@ -19,6 +19,8 @@ export interface TaskStore {
   selectedTaskId: string | null;
   loading: boolean;
   error: string | null;
+  /** Per-task step streams, keyed by taskId. */
+  stepsByTask: Record<string, UiStep[]>;
 
   setSelectedTask(taskId: string | null): void;
   refreshTasks(): Promise<void>;
@@ -32,6 +34,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   selectedTaskId: null,
   loading: false,
   error: null,
+  stepsByTask: {},
 
   setSelectedTask(taskId) {
     set({ selectedTaskId: taskId });
@@ -100,12 +103,74 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       }));
       return;
     }
-    // Other frames (vision.observe / vision.act / user.confirm / ...
-    // get handled in G4 once per-tick events are wired.
+    if (msg.type === 'server.vision.tick.start') {
+      set((prev) => {
+        const existing = prev.stepsByTask[msg.taskId] ?? [];
+        // Idempotent: a reconnected WS may replay a recent tick. If
+        // we already have the step, leave it alone.
+        if (existing.some((s) => s.tickIndex === msg.tickIndex)) return prev;
+        const next: UiStep = {
+          tickIndex: msg.tickIndex,
+          status: 'running',
+          startedAt: Date.now(),
+        };
+        return {
+          stepsByTask: { ...prev.stepsByTask, [msg.taskId]: [...existing, next] },
+          tasks: prev.tasks.map((t) =>
+            t.taskId === msg.taskId ? { ...t, tickCount: Math.max(t.tickCount, msg.tickIndex + 1) } : t,
+          ),
+        };
+      });
+      return;
+    }
+    if (msg.type === 'server.vision.tick.end') {
+      set((prev) => {
+        const existing = prev.stepsByTask[msg.taskId] ?? [];
+        let matched = false;
+        const updated = existing.map((s) => {
+          if (s.tickIndex !== msg.tickIndex) return s;
+          matched = true;
+          return {
+            ...s,
+            status: msg.ok ? ('done' as const) : ('failed' as const),
+            actionKind: msg.actionKind,
+            actionSummary: msg.actionSummary,
+            durationMs: msg.durationMs,
+            ...(msg.message ? { message: msg.message } : {}),
+          };
+        });
+        // Missed tick.start (e.g. reconnected mid-task): synthesise
+        // the step from the end frame so nothing's dropped.
+        const finalList = matched
+          ? updated
+          : [
+              ...existing,
+              {
+                tickIndex: msg.tickIndex,
+                status: msg.ok ? ('done' as const) : ('failed' as const),
+                actionKind: msg.actionKind,
+                actionSummary: msg.actionSummary,
+                durationMs: msg.durationMs,
+                ...(msg.message ? { message: msg.message } : {}),
+                startedAt: Date.now() - msg.durationMs,
+              } satisfies UiStep,
+            ];
+        finalList.sort((a, b) => a.tickIndex - b.tickIndex);
+        return {
+          stepsByTask: { ...prev.stepsByTask, [msg.taskId]: finalList },
+          tasks: prev.tasks.map((t) =>
+            t.taskId === msg.taskId ? { ...t, tickCount: Math.max(t.tickCount, msg.tickIndex + 1) } : t,
+          ),
+        };
+      });
+      return;
+    }
+    // Other frames (vision.observe / vision.act / user.confirm / ...)
+    // aren't UI-relevant yet; silently ignore.
   },
 
   reset() {
-    set({ tasks: [], selectedTaskId: null, loading: false, error: null });
+    set({ tasks: [], selectedTaskId: null, loading: false, error: null, stepsByTask: {} });
   },
 }));
 

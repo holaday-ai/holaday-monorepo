@@ -269,6 +269,41 @@ export const serverTaskTerminalSchema = z.object({
   reason: z.string().optional(),
 });
 
+/**
+ * Per-tick progress frames — G4 streaming step rendering.
+ *
+ * `server.vision.tick.start` fires as soon as the runner has captured
+ * the observation for tick N and is about to ask the commander. The
+ * web workbench uses this to append a new step card in the "进行中"
+ * state.
+ *
+ * `server.vision.tick.end` fires once the tick completes — either
+ * after the driver reports back (`acted`) or after a terminal action
+ * (done / give_up) is recorded. The UI uses it to flip the step card
+ * to "完成" / "失败" and stamp the duration. `actionKind` is the
+ * VisionAction / A11yAction kind string; `actionSummary` is a short
+ * Chinese human-readable label pre-derived by the orchestrator.
+ */
+export const serverVisionTickStartSchema = z.object({
+  type: z.literal('server.vision.tick.start'),
+  taskId: z.string(),
+  tickIndex: z.number().int().nonnegative(),
+  mode: z.enum(['screenshot', 'accessibility']),
+});
+
+export const serverVisionTickEndSchema = z.object({
+  type: z.literal('server.vision.tick.end'),
+  taskId: z.string(),
+  tickIndex: z.number().int().nonnegative(),
+  mode: z.enum(['screenshot', 'accessibility']),
+  actionKind: z.string(),
+  actionSummary: z.string(),
+  durationMs: z.number().int().nonnegative(),
+  ok: z.boolean(),
+  /** Driver / commander detail surfaced on !ok. */
+  message: z.string().optional(),
+});
+
 export const serverMessageSchema = z.discriminatedUnion('type', [
   serverWelcomeSchema,
   serverErrorSchema,
@@ -280,6 +315,8 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverVisionObserveSchema,
   serverVisionActSchema,
   serverTaskTerminalSchema,
+  serverVisionTickStartSchema,
+  serverVisionTickEndSchema,
 ]);
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;

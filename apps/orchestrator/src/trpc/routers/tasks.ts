@@ -71,6 +71,7 @@ export const tasksRouter = router({
       // Playwright Page — no racing clicks. Different users don't
       // block each other.
       const commander = ctx.visionCommander;
+      const userId = ctx.userId;
       const runTaskFn = () =>
         startVisionLoopTask({
           userId: ctx.userId,
@@ -82,6 +83,38 @@ export const tasksRouter = router({
           // directly via CDP. Falls through to the legacy WS transport
           // automatically when absent.
           ...(ctx.playwrightExecutor ? { playwrightExecutor: ctx.playwrightExecutor } : {}),
+          // G4: stream per-tick progress to the web workbench. Best-
+          // effort — a broadcast throw is swallowed so loop progress
+          // is never gated on the UI being online.
+          onTickStart(info) {
+            try {
+              broadcastToUser(userId, {
+                type: 'server.vision.tick.start',
+                taskId,
+                tickIndex: info.tickIndex,
+                mode: info.mode,
+              });
+            } catch (err) {
+              ctx.logger.warn({ err, taskId, tickIndex: info.tickIndex }, 'broadcast tick.start failed');
+            }
+          },
+          onTickEnd(info) {
+            try {
+              broadcastToUser(userId, {
+                type: 'server.vision.tick.end',
+                taskId,
+                tickIndex: info.tickIndex,
+                mode: info.mode,
+                actionKind: info.actionKind,
+                actionSummary: info.actionSummary,
+                durationMs: info.durationMs,
+                ok: info.ok,
+                ...(info.message ? { message: info.message } : {}),
+              });
+            } catch (err) {
+              ctx.logger.warn({ err, taskId, tickIndex: info.tickIndex }, 'broadcast tick.end failed');
+            }
+          },
         })
           .then(async (outcome) => {
             ctx.logger.info(

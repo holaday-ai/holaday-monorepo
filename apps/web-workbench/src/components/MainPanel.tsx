@@ -1,4 +1,5 @@
 import { InputArea } from '@/components/InputArea';
+import { TaskStream } from '@/components/TaskStream';
 import type { UiTask } from '@/types/task';
 
 interface Props {
@@ -16,25 +17,13 @@ export function MainPanel({ task, onSubmit, busy }: Props): JSX.Element {
   return (
     <main className="flex h-full flex-1 flex-col bg-background">
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-6 pt-12">
-          {task ? (
-            <>
-              <div className="pb-6">
-                <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                  当前任务
-                </div>
-                <h2 className="mt-1 text-lg font-semibold leading-snug tracking-tight">
-                  {task.intent}
-                </h2>
-              </div>
-              <div className="rounded-lg border border-dashed border-border px-6 py-12 text-center text-sm text-muted-foreground">
-                步骤流将在 G4 阶段填充
-              </div>
-            </>
-          ) : (
+        {task ? (
+          <TaskStream task={task} />
+        ) : (
+          <div className="mx-auto max-w-3xl px-6 pt-12">
             <EmptyState />
-          )}
-        </div>
+          </div>
+        )}
       </div>
       <InputArea onSubmit={onSubmit} busy={busy} />
     </main>
