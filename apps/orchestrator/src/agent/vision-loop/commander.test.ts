@@ -692,4 +692,14 @@ describe('VISION_SYSTEM_PROMPT — anti-hallucination guardrail', () => {
   it('requires task_give_up with a blank-page reason rather than fabrication', () => {
     expect(VISION_SYSTEM_PROMPT).toMatch(/浏览器无法加载目标页面/);
   });
+
+  it('anchors the blank-page judgement to Current URL, not visual emptiness', () => {
+    // Symptom that forced this clarification: example.com (mostly white)
+    // is visually sparse, so the earlier rule mis-fired and the model
+    // task_give_up'd a healthy page. Telling the model to key on the
+    // URL observation instead makes the judgement objective and avoids
+    // false positives for minimal real pages.
+    expect(VISION_SYSTEM_PROMPT).toMatch(/Current URL/);
+    expect(VISION_SYSTEM_PROMPT).toMatch(/不要凭截图的视觉空白程度猜/);
+  });
 });
