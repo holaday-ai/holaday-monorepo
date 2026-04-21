@@ -747,6 +747,78 @@ describe('PlaywrightExecutor.navigate — goto-no-op fallback', () => {
   });
 });
 
+describe('PlaywrightExecutor.getPage — pinned activePage bypasses probe', () => {
+  // Production bug: after a successful navigate(), the next tick's
+  // getPage() was running the responsiveness probe on the just-
+  // navigated page. When the probe raced with Playwright's context
+  // teardown it returned false, which triggered a soft-reset
+  // `goto('about:blank')` and clobbered the navigation. The commander
+  // then saw url=about:blank forever and gave up.
+  //
+  // Fix invariant: once a page is pinned as activePage (either by
+  // resetPageForTask or by navigate's fallback), getPage returns it
+  // DIRECTLY without any probe / reset. The probe path is reserved
+  // for the stale pages[0] we didn't create ourselves.
+  it('returns the pinned activePage without running the liveness probe', async () => {
+    // We count only probe-shaped evaluate calls (the probe passes '1'
+    // as the argument). The stealth injector also calls evaluate but
+    // with the stealth SCRIPT text, which is fire-and-forget and
+    // idempotent — not what this regression test is about.
+    let probeCalls = 0;
+    let gotoCalls = 0;
+    const pinned: PageLike = {
+      url: () => 'https://example.com/',
+      title: async () => 'Example Domain',
+      viewportSize: () => ({ width: 1280, height: 800 }),
+      screenshot: async () => Buffer.from(''),
+      mouse: { click: async () => {}, move: async () => {}, wheel: async () => {} },
+      keyboard: { type: async () => {}, press: async () => {} },
+      ariaSnapshot: async () => '',
+      waitForTimeout: async () => {},
+      goto: async () => {
+        gotoCalls += 1;
+        return null;
+      },
+      evaluate: async (expr: string) => {
+        if (expr === '1') probeCalls += 1;
+        return 1;
+      },
+    };
+    // Context has a stale pages[0] that would be returned if the pin
+    // failed — we assert we NEVER fall through to it.
+    const stale = { tag: 'stale' } as unknown;
+    const ctx = {
+      pages: () => [stale, pinned],
+      newPage: async () => pinned,
+      addInitScript: async () => {},
+    };
+    const exec = new PlaywrightExecutor({
+      chromium: {
+        connectOverCDP: async () =>
+          ({
+            contexts: () => [ctx],
+            close: async () => {},
+          }) as never,
+      },
+    });
+    await exec.connect('http://a');
+    // Prime the pin via resetPageForTask so activePage = pinned.
+    // We have to tweak ctx.newPage to return the pinned page since
+    // resetPageForTask opens a newPage.
+    await exec.resetPageForTask();
+    // First getPage — should return the pinned page, no probe.
+    const p1 = await exec.getPage();
+    expect(p1).toBe(pinned);
+    expect(probeCalls).toBe(0);
+    // Second getPage — still no probe, still the pin.
+    const p2 = await exec.getPage();
+    expect(p2).toBe(pinned);
+    expect(probeCalls).toBe(0);
+    // And no silent soft-reset goto('about:blank').
+    expect(gotoCalls).toBe(0);
+  });
+});
+
 describe('PlaywrightExecutor.resetPageForTask', () => {
   // Cleanslate guarantee: every task starts on a page we ourselves
   // created via ctx.newPage(), never on a page that survived from the

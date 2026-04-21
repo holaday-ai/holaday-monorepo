@@ -282,15 +282,27 @@ export class PlaywrightExecutor {
     // (fresh ctx.newPage at task start) or by navigate()'s fallback when
     // a goto left the prior page stuck. Only re-pick from ctx.pages()[0]
     // when the pinned page is gone or has been closed.
+    //
+    // Critical: we SKIP the responsiveness probe + soft-reset when the
+    // page is our pinned activePage. A just-navigated page (e.g. right
+    // after computer_navigate succeeded) can transiently fail
+    // `evaluate('1')` while Playwright is rebuilding the JS context,
+    // and the soft-reset path below does `goto('about:blank')` which
+    // would silently *erase* the task's successful navigation. The
+    // probe is still useful for stale `pages[0]` we didn't create, so
+    // keep it on that code path — it's what the anti-bot recovery path
+    // was originally designed for.
     let page: Page | undefined = this.activePage ?? undefined;
     if (page && typeof page.isClosed === 'function' && page.isClosed()) {
       this.activePage = null;
       page = undefined;
     }
-    if (!page) {
-      const pages = ctx.pages();
-      page = pages[0];
+    if (page) {
+      await this.applyStealthToPageIfNeeded(page as unknown as PageLike);
+      return page;
     }
+    const pages = ctx.pages();
+    page = pages[0];
     // No pages at all: open one.
     if (!page) {
       page = await ctx.newPage();
