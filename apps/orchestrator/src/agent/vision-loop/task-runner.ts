@@ -216,30 +216,80 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
     }
   }
 
-  // G5 screencast: piggy-back on the same `tick` event, but only fire
-  // in screenshot mode where we actually have a JPEG. Separate
-  // subscription from the onTickStart wiring so the two concerns
-  // don't interleave in one callback.
+  // G5 screencast + G8 follow-up: every tick pushes a frame to the
+  // workbench for traceability, regardless of whether the commander
+  // consumed it.
+  //   - screenshot mode: reuse the JPEG the commander already has
+  //     (ev.observation.screenshotBase64). Zero extra cost.
+  //   - accessibility mode: commander gets text only, so we fire a
+  //     *display-only* screenshot via PlaywrightExecutor here. Runs
+  //     concurrently with the commander call (the runner doesn't
+  //     await listeners), so it doesn't stretch the tick budget.
+  //
+  // Best-effort: capture failures are logged and swallowed. A missing
+  // screencast frame is visually noticeable (right panel shows "等待
+  // 第一帧"), but MUST NOT stall the loop.
   if (opts.onScreencast) {
     const hookCast = opts.onScreencast;
+    const executor = opts.playwrightExecutor ?? null;
     runner.on('tick', (ev) => {
-      if (ev.mode !== 'screenshot' || !ev.observation) return;
-      try {
-        hookCast({
-          tickIndex: ev.tickIndex,
-          imageBase64: ev.observation.screenshotBase64,
-          url: ev.observation.url,
-          viewportWidth: ev.observation.viewportWidth,
-          viewportHeight: ev.observation.viewportHeight,
-        });
-      } catch (err) {
-        // biome-ignore lint/suspicious/noConsole: surfaced to orchestrator logs
-        console.warn('[vision-loop] onScreencast hook threw', err);
+      if (ev.mode === 'screenshot' && ev.observation) {
+        try {
+          hookCast({
+            tickIndex: ev.tickIndex,
+            imageBase64: ev.observation.screenshotBase64,
+            url: ev.observation.url,
+            viewportWidth: ev.observation.viewportWidth,
+            viewportHeight: ev.observation.viewportHeight,
+          });
+        } catch (err) {
+          // biome-ignore lint/suspicious/noConsole: surfaced to orchestrator logs
+          console.warn('[vision-loop] onScreencast hook threw', err);
+        }
+        return;
+      }
+      if (ev.mode === 'accessibility' && executor) {
+        void captureDisplayFrame(executor, ev.tickIndex, hookCast);
       }
     });
   }
 
   return runner.run(opts.intent);
+}
+
+/**
+ * Display-only screenshot for accessibility-mode ticks. Completely
+ * decoupled from the commander path — the JPEG we produce here is
+ * NEVER fed back into Claude's prompt. Existence of this helper is
+ * the whole point of G8: give the UI a frame even when the loop is
+ * in a11y mode.
+ */
+async function captureDisplayFrame(
+  executor: import('./playwright-executor.js').PlaywrightExecutor,
+  tickIndex: number,
+  hookCast: NonNullable<StartVisionLoopTaskOptions['onScreencast']>,
+): Promise<void> {
+  try {
+    const page = (await executor.getPage()) as unknown as import('./playwright-executor.js').PageLike;
+    const shot = await executor.screenshot(page);
+    if (shot.error || !shot.base64) return;
+    let url = '';
+    try {
+      url = page.url();
+    } catch {
+      // chrome:// and about: pages can throw; URL blank is fine.
+    }
+    hookCast({
+      tickIndex,
+      imageBase64: shot.base64,
+      url,
+      viewportWidth: shot.viewportWidth ?? 0,
+      viewportHeight: shot.viewportHeight ?? 0,
+    });
+  } catch (err) {
+    // biome-ignore lint/suspicious/noConsole: surfaced to orchestrator logs
+    console.warn('[vision-loop] a11y-tick display screenshot failed', err);
+  }
 }
 
 /**
