@@ -16,6 +16,12 @@ export interface UiTask {
   /** Terminal summary (completed) or failure reason (failed/paused). */
   resultText?: string;
   createdAt: Date;
+  /**
+   * G6: position in the per-user FIFO queue as reported at enqueue
+   * time. 1 = running now; 2+ = queued that many slots back. Cleared
+   * once the first tick.start lands (task is actually executing).
+   */
+  queuePosition?: number;
 }
 
 /**

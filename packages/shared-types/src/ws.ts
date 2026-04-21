@@ -305,6 +305,22 @@ export const serverVisionTickEndSchema = z.object({
 });
 
 /**
+ * Task queued behind earlier work (Phase F F3 per-user FIFO). Fires
+ * once on enqueue when the task lands at position > 1 — position 1
+ * means it started immediately and the UI never needs a "queued"
+ * badge for it. Position is *stable at enqueue time*: as earlier
+ * tasks drain, we don't re-broadcast updates, we just rely on the
+ * first `server.vision.tick.start` to signal the task is now
+ * actually running.
+ */
+export const serverTaskQueuedSchema = z.object({
+  type: z.literal('server.task.queued'),
+  taskId: z.string(),
+  /** 1 = currently running; 2+ = queued N-1 tasks ahead. */
+  position: z.number().int().positive(),
+});
+
+/**
  * Per-tick screencast frame — G5. Sends the raw JPEG the runner
  * already captured to drive the commander, so the web workbench can
  * render a poor-man's screencast in the right-hand panel. Only fires
@@ -343,6 +359,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverVisionTickStartSchema,
   serverVisionTickEndSchema,
   serverVisionScreencastSchema,
+  serverTaskQueuedSchema,
 ]);
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;

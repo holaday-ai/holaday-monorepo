@@ -200,6 +200,19 @@ export const tasksRouter = router({
             { taskId, userId: ctx.userId, queuePosition: position },
             'vision loop task queued behind earlier work',
           );
+          // G6: surface the queue position to any connected web
+          // workbench so the sidebar can show "排队中 · 第 N 位".
+          // Best-effort — broadcastToUser is a noop if nobody's
+          // listening, and a throw here must not block enqueue.
+          try {
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.queued',
+              taskId,
+              position,
+            });
+          } catch (err) {
+            ctx.logger.warn({ err, taskId }, 'broadcast task.queued failed');
+          }
         }
       });
       return {

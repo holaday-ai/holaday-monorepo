@@ -41,9 +41,15 @@ export function TaskListItem({ task, selected, onSelect }: Props): JSX.Element {
 }
 
 function subtitleFor(task: UiTask): string {
+  // Queued tasks report a per-user FIFO slot until the first tick
+  // arrives; once we observe real progress (tickCount > 0) we fall
+  // through to the normal status line.
+  if (task.queuePosition && task.queuePosition > 1 && task.tickCount === 0) {
+    return `排队中 · 第 ${task.queuePosition} 位`;
+  }
   switch (task.status) {
     case 'executing':
-      return `执行中 · 第 ${task.tickCount} 步`;
+      return task.tickCount === 0 ? '准备中…' : `执行中 · 第 ${task.tickCount} 步`;
     case 'paused':
       return `已暂停 · ${task.tickCount} 步`;
     case 'completed':

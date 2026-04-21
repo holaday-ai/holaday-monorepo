@@ -106,6 +106,14 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       }));
       return;
     }
+    if (msg.type === 'server.task.queued') {
+      set((prev) => ({
+        tasks: prev.tasks.map((t) =>
+          t.taskId === msg.taskId ? { ...t, queuePosition: msg.position } : t,
+        ),
+      }));
+      return;
+    }
     if (msg.type === 'server.vision.tick.start') {
       set((prev) => {
         const existing = prev.stepsByTask[msg.taskId] ?? [];
@@ -119,9 +127,12 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         };
         return {
           stepsByTask: { ...prev.stepsByTask, [msg.taskId]: [...existing, next] },
-          tasks: prev.tasks.map((t) =>
-            t.taskId === msg.taskId ? { ...t, tickCount: Math.max(t.tickCount, msg.tickIndex + 1) } : t,
-          ),
+          tasks: prev.tasks.map((t) => {
+            if (t.taskId !== msg.taskId) return t;
+            const { queuePosition: _queuePosition, ...rest } = t;
+            void _queuePosition;
+            return { ...rest, tickCount: Math.max(t.tickCount, msg.tickIndex + 1) };
+          }),
         };
       });
       return;
