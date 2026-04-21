@@ -291,6 +291,25 @@ export const serverVisionTickStartSchema = z.object({
   mode: z.enum(['screenshot', 'accessibility']),
 });
 
+/**
+ * Anti-bot signal attached to a tick.end frame — Layer 3 of the
+ * anti-detection stack. Populated when the orchestrator's detector
+ * matches a captcha / verify / block / Cloudflare marker in the
+ * action error OR in the accessibility snapshot text.
+ *
+ *   confidence='high'   — strong match (explicit captcha/cloudflare
+ *                         keyword). UI shows the orange warning badge
+ *                         and the Layer 4 captcha_detected flow fires.
+ *   confidence='medium' — ambiguous match (e.g. generic "verify"
+ *                         substring). UI shows a softer hint; no
+ *                         Layer 4 pause.
+ */
+export const antiBotSignalSchema = z.object({
+  type: z.enum(['captcha', 'verify', 'block', 'cloudflare']),
+  confidence: z.enum(['high', 'medium']),
+  message: z.string(),
+});
+
 export const serverVisionTickEndSchema = z.object({
   type: z.literal('server.vision.tick.end'),
   taskId: z.string(),
@@ -302,6 +321,8 @@ export const serverVisionTickEndSchema = z.object({
   ok: z.boolean(),
   /** Driver / commander detail surfaced on !ok. */
   message: z.string().optional(),
+  /** Layer 3 anti-bot classification, populated when detected. */
+  antiBot: antiBotSignalSchema.optional(),
 });
 
 /**

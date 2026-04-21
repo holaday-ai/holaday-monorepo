@@ -138,6 +138,17 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       return;
     }
     if (msg.type === 'server.vision.tick.end') {
+      // Layer 3: forward the anti-bot tag into the UI step. When the
+      // orchestrator flagged this tick as captcha / verify / block /
+      // cloudflare, StepCard renders an orange warning badge instead
+      // of plain green/red.
+      const antiBotTag = msg.antiBot
+        ? {
+            type: msg.antiBot.type,
+            confidence: msg.antiBot.confidence,
+            message: msg.antiBot.message,
+          }
+        : undefined;
       set((prev) => {
         const existing = prev.stepsByTask[msg.taskId] ?? [];
         let matched = false;
@@ -151,6 +162,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
             actionSummary: msg.actionSummary,
             durationMs: msg.durationMs,
             ...(msg.message ? { message: msg.message } : {}),
+            ...(antiBotTag ? { antiBot: antiBotTag } : {}),
           };
         });
         // Missed tick.start (e.g. reconnected mid-task): synthesise
@@ -166,6 +178,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
                 actionSummary: msg.actionSummary,
                 durationMs: msg.durationMs,
                 ...(msg.message ? { message: msg.message } : {}),
+                ...(antiBotTag ? { antiBot: antiBotTag } : {}),
                 startedAt: Date.now() - msg.durationMs,
               } satisfies UiStep,
             ];

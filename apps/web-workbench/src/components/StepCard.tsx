@@ -1,4 +1,4 @@
-import { Check, X } from 'lucide-react';
+import { AlertTriangle, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { UiStep } from '@/types/task';
 
@@ -18,8 +18,20 @@ interface Props {
  */
 export function StepCard({ step }: Props): JSX.Element {
   const title = stepTitle(step);
+  // High-confidence anti-bot signals get a warning treatment on the
+  // card itself (orange border) so the row stands out in a long
+  // stream. Medium-confidence matches keep the standard border and
+  // surface via the inline AntiBotNotice below.
+  const antiBotHigh = step.antiBot?.confidence === 'high';
   return (
-    <div className="flex animate-fade-in items-start gap-3 rounded-xl border border-border/60 bg-white/60 px-4 py-3 transition-colors">
+    <div
+      className={cn(
+        'flex animate-fade-in items-start gap-3 rounded-xl border px-4 py-3 transition-colors',
+        antiBotHigh
+          ? 'border-amber-300 bg-amber-50/70'
+          : 'border-border/60 bg-white/60',
+      )}
+    >
       <StatusBadge step={step} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-3">
@@ -34,9 +46,34 @@ export function StepCard({ step }: Props): JSX.Element {
             {step.status === 'running' && <Cursor />}
           </div>
         )}
-        {step.status === 'failed' && step.message && (
+        {step.antiBot && <AntiBotNotice step={step} />}
+        {step.status === 'failed' && step.message && !step.antiBot && (
           <div className="mt-1.5 text-xs text-red-500">{step.message}</div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function AntiBotNotice({ step }: { step: UiStep }): JSX.Element {
+  const signal = step.antiBot;
+  if (!signal) return <></>;
+  return (
+    <div
+      className={cn(
+        'mt-1.5 flex items-start gap-2 rounded-md px-3 py-2 text-xs',
+        signal.confidence === 'high'
+          ? 'bg-amber-100/80 text-amber-900'
+          : 'bg-muted/60 text-muted-foreground',
+      )}
+    >
+      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <div className="font-medium">{signal.message}</div>
+        <div className="mt-0.5 text-[11px] opacity-80">
+          目标网站检测到自动化操作，可能需要人工验证。匹配：
+          <code className="font-mono">{signal.confidence}</code>
+        </div>
       </div>
     </div>
   );

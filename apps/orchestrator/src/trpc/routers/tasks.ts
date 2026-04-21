@@ -7,6 +7,7 @@ import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import type { PlannedStep } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
 import { TaskRepository } from '../../agent/task-repository.js';
+import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { visionLoopTaskQueue } from '../../agent/vision-loop/task-queue.js';
 import { startVisionLoopTask } from '../../agent/vision-loop/task-runner.js';
 import { skills } from '../../db/schema/skills.js';
@@ -110,6 +111,19 @@ export const tasksRouter = router({
                 durationMs: info.durationMs,
                 ok: info.ok,
                 ...(info.message ? { message: info.message } : {}),
+                ...(info.antiBot
+                  ? {
+                      // Flatten the server-side signal into the
+                      // WS-facing shape: the UI wants a human-readable
+                      // Chinese tag + the raw match concatenated, and
+                      // never sees rawMatch as a separate field.
+                      antiBot: {
+                        type: info.antiBot.type,
+                        confidence: info.antiBot.confidence,
+                        message: `${describeSignal(info.antiBot)}（匹配：${info.antiBot.rawMatch}）`,
+                      },
+                    }
+                  : {}),
               });
             } catch (err) {
               ctx.logger.warn({ err, taskId, tickIndex: info.tickIndex }, 'broadcast tick.end failed');

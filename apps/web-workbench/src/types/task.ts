@@ -38,6 +38,17 @@ export interface UiStep {
   durationMs?: number;
   message?: string;
   startedAt: number;
+  /**
+   * Layer 3 anti-bot marker. Set when the orchestrator's detector
+   * classified this tick's error or snapshot as a captcha / verify /
+   * block / cloudflare signal. Drives the orange warning badge in
+   * StepCard.
+   */
+  antiBot?: {
+    type: 'captcha' | 'verify' | 'block' | 'cloudflare';
+    confidence: 'high' | 'medium';
+    message: string;
+  };
 }
 
 /**

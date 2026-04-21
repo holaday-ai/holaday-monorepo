@@ -30,13 +30,7 @@
 
 import type { Browser, BrowserContext, Page } from 'playwright';
 import sharp from 'sharp';
-import {
-  humanClick,
-  humanScroll,
-  humanTypeText,
-  isHumanizeEnabled,
-  randomDelay,
-} from './humanize.js';
+import { humanClick, humanScroll, humanTypeText, isHumanizeEnabled } from './humanize.js';
 import { STEALTH_INIT_SCRIPT, isStealthEnabled } from './stealth-scripts.js';
 
 export interface ConnectResult {

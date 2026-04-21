@@ -19,6 +19,7 @@
  */
 
 import { dispatchVisionActionToSW, requestVisionObservationFromSW } from '../../ws/server.js';
+import { type AntiBotSignal, detectAntiBot } from './anti-bot-detector.js';
 import type { VisionLoopCommander } from './commander.js';
 import type { PageLike, PlaywrightExecutor } from './playwright-executor.js';
 import type {
@@ -99,6 +100,13 @@ export interface StartVisionLoopTaskOptions {
     durationMs: number;
     ok: boolean;
     message?: string;
+    /**
+     * Layer 3: populated when the anti-bot detector matched a
+     * captcha / verify / block / Cloudflare signal in either the
+     * action's error message or the tick's accessibility snapshot.
+     * Consumers forward it to `server.vision.tick.end.antiBot`.
+     */
+    antiBot?: AntiBotSignal;
   }) => void;
   /**
    * Fires right after a screenshot-mode observation lands, with the
@@ -175,11 +183,18 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
   if (opts.onTickStart || opts.onTickEnd) {
     const startedAt = new Map<number, number>();
     const lastMode = new Map<number, import('./vision-mode.js').VisionMode>();
+    // Last accessibility snapshot per tick — fed to the anti-bot
+    // detector on the matching `turn` event. Only populated in a11y
+    // mode; screenshot-mode ticks don't have snapshot text.
+    const lastSnapshot = new Map<number, string>();
     // Populate timing on every tick, even when onTickStart is unset —
     // onTickEnd needs it for durationMs.
     runner.on('tick', (ev) => {
       startedAt.set(ev.tickIndex, Date.now());
       lastMode.set(ev.tickIndex, ev.mode);
+      if (ev.mode === 'accessibility' && ev.accessibility?.snapshot) {
+        lastSnapshot.set(ev.tickIndex, ev.accessibility.snapshot);
+      }
     });
     if (opts.onTickStart) {
       const hookStart = opts.onTickStart;
@@ -204,9 +219,20 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
         const started = startedAt.get(ev.tickIndex);
         const mode = lastMode.get(ev.tickIndex) ?? 'screenshot';
         const durationMs = started ? Date.now() - started : 0;
+        const snapshot = lastSnapshot.get(ev.tickIndex) ?? null;
         startedAt.delete(ev.tickIndex);
         lastMode.delete(ev.tickIndex);
+        lastSnapshot.delete(ev.tickIndex);
         const { action, executionResult } = ev.turn;
+        // Layer 3 detection: scan the action's error message AND the
+        // a11y snapshot (when available) for captcha / verify / block
+        // / cloudflare markers. Errors win on confidence ties — a
+        // "verify email" button in a snapshot is less reliable than
+        // a Playwright error complaining about a security challenge.
+        const antiBot = detectAntiBot({
+          errorMessage: executionResult?.ok === false ? executionResult.message : null,
+          snapshotText: snapshot,
+        });
         try {
           hookEnd({
             tickIndex: ev.tickIndex,
@@ -216,6 +242,7 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
             durationMs,
             ok: executionResult?.ok ?? false,
             ...(executionResult?.message ? { message: executionResult.message } : {}),
+            ...(antiBot ? { antiBot } : {}),
           });
         } catch (err) {
           // biome-ignore lint/suspicious/noConsole: surfaced to orchestrator logs
