@@ -599,3 +599,205 @@ describe('PlaywrightExecutor.screenshot — timeout', () => {
     expect((shot?.args[0] as { timeout: number }).timeout).toBe(2_500);
   });
 });
+
+describe('PlaywrightExecutor.navigate — goto-no-op fallback', () => {
+  // Production bug: Playwright's page.goto can return "success" while
+  // the page silently stays on its prior URL (esp. Chromium's startup
+  // about:blank tab). Before the fix, we blindly believed the return
+  // value and reported `ok:true`, so the commander saw a green
+  // navigate and tried to interact with a blank viewport. The fix is
+  // to detect "url stayed blank" and retry on a fresh ctx.newPage().
+  it('detects url-stayed-blank, opens a fresh page, and retries the goto there', async () => {
+    // Simulate the exact symptom: goto resolves OK, but page.url()
+    // keeps returning about:blank. Fresh page behaves normally.
+    let stuckGotoCalls = 0;
+    const stuck: PageLike = {
+      url: () => 'about:blank',
+      title: async () => '',
+      viewportSize: () => ({ width: 1280, height: 800 }),
+      screenshot: async () => Buffer.from(''),
+      mouse: { click: async () => {}, move: async () => {}, wheel: async () => {} },
+      keyboard: { type: async () => {}, press: async () => {} },
+      ariaSnapshot: async () => '',
+      waitForTimeout: async () => {},
+      goto: async () => {
+        stuckGotoCalls += 1;
+        return null; // "200 OK" — but page.url() stays about:blank
+      },
+      close: async () => {},
+    };
+    let freshGotoCalls = 0;
+    let freshUrl = 'about:blank';
+    const fresh: PageLike = {
+      ...stuck,
+      url: () => freshUrl,
+      goto: async (u: string) => {
+        freshGotoCalls += 1;
+        freshUrl = u; // newPage actually navigates
+        return { status: () => 200 } as unknown as null;
+      },
+    };
+    let newPageCalls = 0;
+    const exec = new PlaywrightExecutor({
+      chromium: {
+        connectOverCDP: async () =>
+          ({
+            contexts: () => [
+              {
+                pages: () => [stuck],
+                newPage: async () => {
+                  newPageCalls += 1;
+                  return fresh;
+                },
+              },
+            ],
+            close: async () => {},
+          }) as never,
+      },
+    });
+    await exec.connect('http://a');
+    const r = await exec.navigate(stuck, 'https://example.com/');
+    expect(r.ok).toBe(true);
+    expect(r.message).toMatch(/via fresh page fallback/);
+    expect(stuckGotoCalls).toBe(1);
+    expect(newPageCalls).toBe(1);
+    expect(freshGotoCalls).toBe(1);
+    expect(freshUrl).toBe('https://example.com/');
+  });
+
+  it('returns ok:false when even the fresh page stays blank', async () => {
+    // Models the worst case: the whole browser is wedged and neither
+    // the current page nor a fresh one can reach the target. We must
+    // report failure rather than claim success.
+    const stuck: PageLike = {
+      url: () => 'about:blank',
+      title: async () => '',
+      viewportSize: () => null,
+      screenshot: async () => Buffer.from(''),
+      mouse: { click: async () => {}, move: async () => {}, wheel: async () => {} },
+      keyboard: { type: async () => {}, press: async () => {} },
+      ariaSnapshot: async () => '',
+      waitForTimeout: async () => {},
+      goto: async () => null,
+      close: async () => {},
+    };
+    const fresh: PageLike = { ...stuck };
+    const exec = new PlaywrightExecutor({
+      chromium: {
+        connectOverCDP: async () =>
+          ({
+            contexts: () => [
+              {
+                pages: () => [stuck],
+                newPage: async () => fresh,
+              },
+            ],
+            close: async () => {},
+          }) as never,
+      },
+    });
+    await exec.connect('http://a');
+    const r = await exec.navigate(stuck, 'https://example.com/');
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/still stuck/);
+  });
+
+  it('happy path: single goto succeeds, no fallback triggered', async () => {
+    let gotoCalls = 0;
+    let currentUrl = 'about:blank';
+    const page: PageLike = {
+      url: () => currentUrl,
+      title: async () => 'Example Domain',
+      viewportSize: () => ({ width: 1280, height: 800 }),
+      screenshot: async () => Buffer.from(''),
+      mouse: { click: async () => {}, move: async () => {}, wheel: async () => {} },
+      keyboard: { type: async () => {}, press: async () => {} },
+      ariaSnapshot: async () => '',
+      waitForTimeout: async () => {},
+      goto: async (u: string) => {
+        gotoCalls += 1;
+        currentUrl = u;
+        return { status: () => 200 } as unknown as null;
+      },
+    };
+    let newPageCalls = 0;
+    const exec = new PlaywrightExecutor({
+      chromium: {
+        connectOverCDP: async () =>
+          ({
+            contexts: () => [
+              {
+                pages: () => [page],
+                newPage: async () => {
+                  newPageCalls += 1;
+                  return page;
+                },
+              },
+            ],
+            close: async () => {},
+          }) as never,
+      },
+    });
+    await exec.connect('http://a');
+    const r = await exec.navigate(page, 'https://example.com/');
+    expect(r.ok).toBe(true);
+    expect(r.message).toBe('navigated to https://example.com/');
+    expect(gotoCalls).toBe(1);
+    expect(newPageCalls).toBe(0);
+  });
+});
+
+describe('PlaywrightExecutor.resetPageForTask', () => {
+  // Cleanslate guarantee: every task starts on a page we ourselves
+  // created via ctx.newPage(), never on a page that survived from the
+  // previous task or from Chromium's launch. Prevents the goto-no-op
+  // symptom and drops residual state (timers, cookies-in-memory).
+  it('opens a fresh newPage, pins it, and closes prior pages', async () => {
+    const closeCalls: string[] = [];
+    const old1 = {
+      url: () => 'https://prev.task/',
+      close: async () => {
+        closeCalls.push('old1');
+      },
+    };
+    const old2 = {
+      url: () => 'about:blank',
+      close: async () => {
+        closeCalls.push('old2');
+      },
+    };
+    const fresh = {
+      url: () => 'about:blank',
+      evaluate: async () => 1,
+      close: async () => {
+        closeCalls.push('fresh');
+      },
+    };
+    const pagesRef: unknown[] = [old1, old2];
+    const ctx = {
+      pages: () => [...pagesRef],
+      newPage: async () => {
+        pagesRef.push(fresh);
+        return fresh;
+      },
+      addInitScript: async () => {},
+    };
+    const exec = new PlaywrightExecutor({
+      chromium: {
+        connectOverCDP: async () =>
+          ({
+            contexts: () => [ctx],
+            close: async () => {},
+          }) as never,
+      },
+    });
+    await exec.connect('http://a');
+    await exec.resetPageForTask();
+    // Both priors got a close() queued. Fresh is NOT closed.
+    await new Promise((r) => setTimeout(r, 10)); // drain fire-and-forget
+    expect(closeCalls.sort()).toEqual(['old1', 'old2']);
+    // Subsequent getPage returns the pinned fresh page, not pages[0].
+    const p = await exec.getPage();
+    expect(p).toBe(fresh);
+  });
+});
