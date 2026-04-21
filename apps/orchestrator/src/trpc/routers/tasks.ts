@@ -176,6 +176,22 @@ export const tasksRouter = router({
               ctx.logger.warn({ err, taskId }, 'broadcast captcha_resolved failed');
             }
           },
+          onExecutorFallback(info) {
+            ctx.logger.info(
+              { taskId, reason: info.reason, available: info.available },
+              'vision loop executor fallback triggered',
+            );
+            try {
+              broadcastToUser(userId, {
+                type: 'server.vision.executor_fallback',
+                taskId,
+                reason: info.reason,
+                available: info.available,
+              });
+            } catch (err) {
+              ctx.logger.warn({ err, taskId }, 'broadcast executor_fallback failed');
+            }
+          },
         })
           .then(async (outcome) => {
             ctx.logger.info(

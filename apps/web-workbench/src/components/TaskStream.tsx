@@ -1,10 +1,10 @@
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Puzzle } from 'lucide-react';
 import * as React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { StepCard } from '@/components/StepCard';
 import { useTaskStore } from '@/stores/task-store';
-import type { UiCaptchaWait, UiStep, UiTask } from '@/types/task';
+import type { UiCaptchaWait, UiExecutorFallback, UiStep, UiTask } from '@/types/task';
 
 interface Props {
   task: UiTask;
@@ -30,11 +30,12 @@ const EMPTY_STEPS: UiStep[] = [];
 export function TaskStream({ task }: Props): JSX.Element {
   const steps = useTaskStore((s) => s.stepsByTask[task.taskId]) ?? EMPTY_STEPS;
   const captchaWait = useTaskStore((s) => s.captchaWaitByTask[task.taskId]);
+  const executorFallback = useTaskStore((s) => s.executorFallbackByTask[task.taskId]);
   const scrollAnchorRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ block: 'end' });
-  }, [steps.length, task.status, captchaWait]);
+  }, [steps.length, task.status, captchaWait, executorFallback]);
 
   const terminal =
     task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled';
@@ -56,6 +57,8 @@ export function TaskStream({ task }: Props): JSX.Element {
       </div>
 
       {captchaWait && <CaptchaWaitBanner wait={captchaWait} />}
+
+      {executorFallback && <ExecutorFallbackBanner fallback={executorFallback} />}
 
       {terminal && task.resultText && (
         <TerminalSummary status={task.status} text={task.resultText} />
@@ -97,6 +100,50 @@ function CaptchaWaitBanner({ wait }: { wait: UiCaptchaWait }): JSX.Element {
         </div>
         <div className="mt-2 text-[11px] font-medium text-amber-900/70">
           自动恢复窗口剩余：{remainingSec}s
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Layer 5 status: reported once on transport swap and kept on screen
+ * for the rest of the task as a breadcrumb. Two variants:
+ *
+ *  - available=true  → swap succeeded. Neutral info styling.
+ *  - available=false → no extension connected. Error styling + a
+ *                      call-to-action ("请打开 HOLA DAY 扩展").
+ */
+function ExecutorFallbackBanner({
+  fallback,
+}: {
+  fallback: UiExecutorFallback;
+}): JSX.Element {
+  if (!fallback.available) {
+    return (
+      <div
+        role="alert"
+        className="flex animate-fade-in items-start gap-3 rounded-xl border border-red-300 bg-red-50/70 px-4 py-3"
+      >
+        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+        <div className="min-w-0 flex-1 text-sm">
+          <div className="font-semibold text-red-900">反爬保护触发，但扩展未连接</div>
+          <div className="mt-1 text-xs text-red-900/80">
+            orchestrator 想切换到 Chrome 扩展执行，但没有检测到在线的扩展客户端。请安装并打开
+            HOLA DAY 扩展后重试此任务。
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex animate-fade-in items-start gap-3 rounded-xl border border-sky-200 bg-sky-50/70 px-4 py-3">
+      <Puzzle className="mt-0.5 h-5 w-5 shrink-0 text-sky-600" />
+      <div className="min-w-0 flex-1 text-sm">
+        <div className="font-semibold text-sky-900">已切换到浏览器扩展模式执行</div>
+        <div className="mt-1 text-xs text-sky-900/80">
+          连续检测到反爬拦截，agent 切到 Chrome 扩展继续任务，后续步骤通过扩展内的 CDP 驱动
+          执行（可能会失去 accessibility 模式的优势）。
         </div>
       </div>
     </div>

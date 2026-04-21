@@ -78,6 +78,23 @@ export interface UiCaptchaWait {
   startedAt: number;
 }
 
+/**
+ * Layer 5: fallback notice for a task. Set once the orchestrator
+ * swaps transports (Playwright → extension WS/SW) due to repeated
+ * anti-bot strikes. Sticky for the lifetime of the task — we don't
+ * clear it if subsequent ticks succeed.
+ */
+export interface UiExecutorFallback {
+  /**
+   * true  → swap actually took effect; runner is now using the
+   *         extension transport.
+   * false → no extension client connected; swap didn't happen and
+   *         the UI should prompt the user to install / open it.
+   */
+  available: boolean;
+  at: number;
+}
+
 export function isActive(status: UiTaskStatus): boolean {
   return status === 'executing' || status === 'paused';
 }

@@ -1,7 +1,14 @@
 import type { ServerMessage } from '@holaday/shared-types';
 import { create } from 'zustand';
 import { trpc } from '@/lib/trpc';
-import type { UiCaptchaWait, UiScreencast, UiStep, UiTask, UiTaskStatus } from '@/types/task';
+import type {
+  UiCaptchaWait,
+  UiExecutorFallback,
+  UiScreencast,
+  UiStep,
+  UiTask,
+  UiTaskStatus,
+} from '@/types/task';
 
 /**
  * Single source of truth for the task list + selection. Data flows in
@@ -25,6 +32,8 @@ export interface TaskStore {
   screencastByTask: Record<string, UiScreencast>;
   /** Active captcha-wait state per task (Layer 4). */
   captchaWaitByTask: Record<string, UiCaptchaWait>;
+  /** Sticky executor-fallback notice per task (Layer 5). */
+  executorFallbackByTask: Record<string, UiExecutorFallback>;
 
   setSelectedTask(taskId: string | null): void;
   refreshTasks(): Promise<void>;
@@ -41,6 +50,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   stepsByTask: {},
   screencastByTask: {},
   captchaWaitByTask: {},
+  executorFallbackByTask: {},
 
   setSelectedTask(taskId) {
     set({ selectedTaskId: taskId });
@@ -218,6 +228,15 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       });
       return;
     }
+    if (msg.type === 'server.vision.executor_fallback') {
+      set((prev) => ({
+        executorFallbackByTask: {
+          ...prev.executorFallbackByTask,
+          [msg.taskId]: { available: msg.available, at: Date.now() },
+        },
+      }));
+      return;
+    }
     if (msg.type === 'server.vision.screencast') {
       set((prev) => ({
         screencastByTask: {
@@ -246,6 +265,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       stepsByTask: {},
       screencastByTask: {},
       captchaWaitByTask: {},
+      executorFallbackByTask: {},
     });
   },
 }));

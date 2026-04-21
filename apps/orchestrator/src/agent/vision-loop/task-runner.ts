@@ -18,7 +18,11 @@
  * or in higher-level orchestration that wraps this function.
  */
 
-import { dispatchVisionActionToSW, requestVisionObservationFromSW } from '../../ws/server.js';
+import {
+  dispatchVisionActionToSW,
+  hasConnectedSwClient,
+  requestVisionObservationFromSW,
+} from '../../ws/server.js';
 import {
   type AntiBotSignal,
   describeSignal,
@@ -145,6 +149,14 @@ export interface StartVisionLoopTaskOptions {
    * or the configured wait elapsed (`reason='timeout'`).
    */
   onCaptchaResolved?: (info: { reason: 'auto' | 'timeout' }) => void;
+  /**
+   * Layer 5 — fires when the strike counter crosses the fallback
+   * threshold and the runner swaps transports (or tries to).
+   * `available=false` means no extension client was connected, so
+   * the swap didn't take effect — the UI prompts the user to
+   * install / open the extension.
+   */
+  onExecutorFallback?: (info: { reason: 'anti-bot'; available: boolean }) => void;
 }
 
 /**
@@ -155,6 +167,14 @@ export interface StartVisionLoopTaskOptions {
  */
 const DEFAULT_CAPTCHA_WAIT_TIMEOUT_MS = 120_000;
 const DEFAULT_CAPTCHA_POLL_INTERVAL_MS = 3_000;
+/**
+ * Layer 5: how many high-confidence anti-bot detections to tolerate
+ * before we give up on the current transport and try the extension.
+ * 3 is the sweet spot — one strike might be a fluke, two could be
+ * the user re-trying a page that autoloads a captcha once per visit,
+ * three is a pattern.
+ */
+const DEFAULT_ANTI_BOT_STRIKES_BEFORE_FALLBACK = 3;
 
 function readEnvPositiveInt(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -192,6 +212,10 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
   // anti-bot signal fires; consumed + cleared by the afterTickHook.
   // `null` means no pause pending.
   let pendingCaptchaSignal: AntiBotSignal | null = null;
+  // Layer 5: cross-tick counter. Incremented on every high-confidence
+  // detection; crossing the threshold triggers a transport swap.
+  let antiBotStrikeCount = 0;
+  let fallbackTriggered = false;
   const captchaWaitTimeoutMs = readEnvPositiveInt(
     'CAPTCHA_WAIT_TIMEOUT_MS',
     DEFAULT_CAPTCHA_WAIT_TIMEOUT_MS,
@@ -199,6 +223,10 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
   const captchaPollIntervalMs = readEnvPositiveInt(
     'CAPTCHA_POLL_INTERVAL_MS',
     DEFAULT_CAPTCHA_POLL_INTERVAL_MS,
+  );
+  const strikeThreshold = readEnvPositiveInt(
+    'ANTI_BOT_STRIKES_BEFORE_FALLBACK',
+    DEFAULT_ANTI_BOT_STRIKES_BEFORE_FALLBACK,
   );
 
   // Only Playwright transport provides the a11y pair — SW transport
@@ -340,19 +368,14 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
     }
   }
 
-  // Layer 4: independent turn subscription so captcha detection fires
-  // even when the caller wired only onCaptchaDetected / onCaptchaResolved
-  // (no onTickEnd). Reruns the same detector the onTickEnd path uses
-  // above; cheap enough that double-running is fine. Only "high"
-  // signals arm a pause — medium matches would make the task halt
-  // every time a page mentions "verify email".
-  if (opts.onCaptchaDetected || opts.onCaptchaResolved) {
+  // Layers 4 + 5: independent turn subscription so captcha detection
+  // + strike counting fire even when the caller wired only the Layer
+  // 4 / 5 hooks (no onTickEnd). Reruns the same detector the
+  // onTickEnd path uses above; cheap enough that double-running is
+  // fine.
+  if (opts.onCaptchaDetected || opts.onCaptchaResolved || opts.onExecutorFallback) {
     runner.on('turn', (ev) => {
       const exec = ev.turn.executionResult;
-      // Replicate the snapshot-lookup the onTickEnd path uses. The
-      // shared Map above is scoped inside its `if` block — so for
-      // Layer-4-only callers we re-derive snapshot text from the
-      // turn itself when it's an a11y turn.
       const snap = 'snapshot' in ev.turn ? ev.turn.snapshot : null;
       const antiBot = detectAntiBot({
         errorMessage: exec?.ok === false ? exec.message : null,
@@ -360,6 +383,33 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
       });
       if (antiBot && antiBot.confidence === 'high') {
         pendingCaptchaSignal = antiBot;
+        antiBotStrikeCount += 1;
+        // Layer 5 trigger: crossed the strike threshold AND we
+        // haven't already swapped. Only relevant when we're
+        // currently on the Playwright path — if the task already
+        // started on WS/SW, there's nothing to fall back TO.
+        if (
+          !fallbackTriggered &&
+          antiBotStrikeCount >= strikeThreshold &&
+          opts.playwrightExecutor
+        ) {
+          fallbackTriggered = true;
+          const available = hasConnectedSwClient(opts.userId);
+          if (available) {
+            // Swap the runner's closures. The in-flight tick has
+            // already fired its action; the next tick will fetch
+            // observations + dispatch actions through the WS/SW
+            // path, bypassing Playwright entirely.
+            const ws = buildWsTransport(opts.userId, opts.taskId);
+            runner.setTransport({
+              screenshotFn: ws.screenshotFn,
+              actionFn: ws.actionFn,
+              // WS transport has no a11y pair — runner's mode
+              // picker will pin to screenshot mode from here.
+            });
+          }
+          opts.onExecutorFallback?.({ reason: 'anti-bot', available });
+        }
       }
     });
   }

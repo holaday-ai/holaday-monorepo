@@ -257,10 +257,14 @@ interface TypedVisionEmitter extends EventEmitter {
 
 export class VisionLoopRunner {
   private readonly commander: VisionLoopCommander;
-  private readonly screenshotFn: ScreenshotFn;
-  private readonly actionFn: ActionFn;
-  private readonly accessibilityFn?: AccessibilityFn;
-  private readonly a11yActionFn?: A11yActionFn;
+  // Transport functions are mutable to support Layer 5 mid-run
+  // fallback (Playwright → WS/SW extension). `setTransport` below
+  // swaps them; the next tick picks up the new closures through
+  // these fields.
+  private screenshotFn: ScreenshotFn;
+  private actionFn: ActionFn;
+  private accessibilityFn?: AccessibilityFn;
+  private a11yActionFn?: A11yActionFn;
   private readonly visionModeEnv: VisionModeEnv;
   private readonly taskTimeoutMs: number;
   private readonly now: () => number;
@@ -320,6 +324,29 @@ export class VisionLoopRunner {
    */
   cancel(): void {
     this.cancelled = true;
+  }
+
+  /**
+   * Layer 5 — replace the transport closures while the loop is
+   * running. Called from `task-runner.ts` when the anti-bot strike
+   * counter crosses the threshold and we want to re-execute the
+   * task via the Chrome-extension legacy WS/SW path.
+   *
+   * The swap takes effect on the NEXT tick (the in-flight tick
+   * finishes on the old transport). Pass `accessibilityFn: undefined`
+   * explicitly to disable a11y mode — the runner's mode picker falls
+   * back to screenshot mode when accessibility isn't wired.
+   */
+  setTransport(fns: {
+    screenshotFn: ScreenshotFn;
+    actionFn: ActionFn;
+    accessibilityFn?: AccessibilityFn;
+    a11yActionFn?: A11yActionFn;
+  }): void {
+    this.screenshotFn = fns.screenshotFn;
+    this.actionFn = fns.actionFn;
+    this.accessibilityFn = fns.accessibilityFn;
+    this.a11yActionFn = fns.a11yActionFn;
   }
 
   /**

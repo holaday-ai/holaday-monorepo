@@ -519,6 +519,21 @@ function firstConnectedClient(userId: string): ClientState | null {
   return null;
 }
 
+/**
+ * Layer 5 — does `userId` have at least one authed WS client with an
+ * open socket right now? Exported for the vision-loop fallback path
+ * so it can decide whether swapping the transport to the extension
+ * would actually get the task executed.
+ */
+export function hasConnectedSwClient(userId: string): boolean {
+  const set = clientsByUser.get(userId);
+  if (!set) return false;
+  for (const c of set) {
+    if (c.authed && c.socket.readyState === WebSocket.OPEN) return true;
+  }
+  return false;
+}
+
 async function runStepResult(
   state: ClientState,
   msg: Extract<ClientMessage, { type: 'client.step.result' }>,

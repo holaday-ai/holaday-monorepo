@@ -356,6 +356,24 @@ export const serverVisionCaptchaResolvedSchema = z.object({
 });
 
 /**
+ * Layer 5 — fired when the orchestrator runs out of patience with
+ * Playwright in the face of anti-bot walls and swaps the task's
+ * transport mid-flight to the extension's legacy WS/SW path.
+ *
+ *   available=true  → extension is connected for this user; the
+ *                     runner just switched. Next tick executes via
+ *                     the extension's cdp-actions.ts.
+ *   available=false → no SW client connected; fallback could NOT
+ *                     take effect. UI shows "请打开 HOLA DAY 扩展".
+ */
+export const serverVisionExecutorFallbackSchema = z.object({
+  type: z.literal('server.vision.executor_fallback'),
+  taskId: z.string(),
+  reason: z.literal('anti-bot'),
+  available: z.boolean(),
+});
+
+/**
  * Task queued behind earlier work (Phase F F3 per-user FIFO). Fires
  * once on enqueue when the task lands at position > 1 — position 1
  * means it started immediately and the UI never needs a "queued"
@@ -413,6 +431,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverTaskQueuedSchema,
   serverVisionCaptchaDetectedSchema,
   serverVisionCaptchaResolvedSchema,
+  serverVisionExecutorFallbackSchema,
 ]);
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;

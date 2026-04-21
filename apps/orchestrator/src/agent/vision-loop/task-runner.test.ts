@@ -210,3 +210,112 @@ describe('startVisionLoopTask — Layer 4 captcha wait', () => {
     expect(outcome.status).toBe('completed');
   }, 10_000);
 });
+
+describe('startVisionLoopTask — Layer 5 executor fallback', () => {
+  it('fires onExecutorFallback with available=false when no extension client is connected', async () => {
+    // Each click fails with a distinct captcha marker so the
+    // detector scores each as a separate high-confidence strike.
+    let clickIdx = 0;
+    const captchaMessages = [
+      'locator click: recaptcha challenge tick 0',
+      'locator click: hcaptcha challenge tick 1',
+      'locator click: cloudflare challenge tick 2',
+    ];
+    const fakePage = { url: () => 'https://x.test/', title: async () => '' };
+    const executor = {
+      getPage: async () => fakePage,
+      screenshot: async () => ({
+        base64: 'AAA=',
+        viewportWidth: 1280,
+        viewportHeight: 800,
+      }),
+      click: async () => {
+        const msg = captchaMessages[Math.min(clickIdx, captchaMessages.length - 1)]!;
+        clickIdx += 1;
+        return { ok: false, message: msg };
+      },
+      type: async () => ({ ok: true }),
+      pressKey: async () => ({ ok: true }),
+      scroll: async () => ({ ok: true }),
+      wait: async () => ({ ok: true }),
+      // No accessibilitySnapshot — a11y mode is off, so the Layer 4
+      // wait loop will time out quickly (the shortened env knob
+      // below).
+      resetPageForTask: async () => {},
+    } as unknown as PlaywrightExecutor;
+
+    // Script the commander to issue click every tick until we hit
+    // the fallback. Each tick the click fails → strike +1. On the
+    // 3rd strike the fallback fires; we assert on the hook.
+    let tickCount = 0;
+    const commander: VisionLoopCommander = {
+      async decideNextAction(ctx) {
+        tickCount += 1;
+        const { viewportWidth, viewportHeight } = ctx.observation;
+        const isFinal = tickCount >= 5;
+        return {
+          action: isFinal
+            ? { kind: 'done', summary: 'ending' }
+            : { kind: 'click', x: 1, y: 1 },
+          image: {
+            base64: 'AA==',
+            originalWidth: viewportWidth || 1,
+            originalHeight: viewportHeight || 1,
+            resizedWidth: viewportWidth || 1,
+            resizedHeight: viewportHeight || 1,
+            scaleX: 1,
+            scaleY: 1,
+          },
+          toolUseId: `tu_${tickCount}`,
+          elapsedMs: 5,
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+        };
+      },
+    };
+
+    // Short env knobs so the Layer 4 wait doesn't eat the test
+    // budget. userId is a throwaway that's guaranteed to have no
+    // connected SW client in a unit test.
+    const prev = {
+      timeout: process.env.CAPTCHA_WAIT_TIMEOUT_MS,
+      poll: process.env.CAPTCHA_POLL_INTERVAL_MS,
+    };
+    process.env.CAPTCHA_WAIT_TIMEOUT_MS = '50';
+    process.env.CAPTCHA_POLL_INTERVAL_MS = '10';
+
+    const fallbackEvents: unknown[] = [];
+    const outcome = await startVisionLoopTask({
+      taskId: 'tsk_fallback',
+      userId: 'usr_never_connected_in_unit_test',
+      intent: 'click buttons forever',
+      commander,
+      playwrightExecutor: executor,
+      maxSteps: 6,
+      onExecutorFallback: (info) => {
+        fallbackEvents.push(info);
+      },
+    });
+
+    if (prev.timeout === undefined) delete process.env.CAPTCHA_WAIT_TIMEOUT_MS;
+    else process.env.CAPTCHA_WAIT_TIMEOUT_MS = prev.timeout;
+    if (prev.poll === undefined) delete process.env.CAPTCHA_POLL_INTERVAL_MS;
+    else process.env.CAPTCHA_POLL_INTERVAL_MS = prev.poll;
+
+    // The hook should fire exactly once (not every tick past the
+    // threshold — `fallbackTriggered` latches).
+    expect(fallbackEvents).toHaveLength(1);
+    const ev = fallbackEvents[0] as { reason: string; available: boolean };
+    expect(ev.reason).toBe('anti-bot');
+    // No extension client in a unit test → available=false.
+    expect(ev.available).toBe(false);
+    // The 3rd consecutive failed click also trips the runner's own
+    // `MAX_SEQUENTIAL_DRIVER_FAILS=3` guard, so the outcome is
+    // 'failed' with a driver-fail reason. That's fine — Layer 5's
+    // job is to EMIT the fallback signal; the task still terminates
+    // because the stand-in WS transport has no real SW to drive.
+    expect(outcome.status).toBe('failed');
+  }, 20_000);
+});
