@@ -688,14 +688,14 @@ function safeUrl(page: PageLike): string {
  *   "cmd+c"   → "Meta+c"
  *   "alt+F4"  → "Alt+F4"
  *   "Enter"   → "Enter" (unchanged)
- * Single printable chars pass through untouched.
+ *   "Return"  → "Enter"  (Playwright rejects "Return")
+ *   "Esc"     → "Escape"
+ *   "Del"     → "Delete"
+ *   "Space"   → " "
+ * Terminal-key aliases are applied to bare keys and to the last
+ * segment of a chord. Single printable chars pass through untouched.
  */
 function normaliseKey(key: string): string {
-  if (!key.includes('+')) return key;
-  const parts = key
-    .split('+')
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
   const modMap: Record<string, string> = {
     ctrl: 'Control',
     control: 'Control',
@@ -707,10 +707,28 @@ function normaliseKey(key: string): string {
     option: 'Alt',
     shift: 'Shift',
   };
+  // Models sometimes emit legacy / OS-specific key names that Playwright
+  // doesn't recognise ("Return" from macOS, "Esc" shorthand). Alias them
+  // to Playwright's canonical form. Lookup is lowercased so "RETURN",
+  // "return", "Return" all hit the same entry.
+  const terminalAliases: Record<string, string> = {
+    return: 'Enter',
+    esc: 'Escape',
+    del: 'Delete',
+    ins: 'Insert',
+    space: ' ',
+    spacebar: ' ',
+  };
+  const aliasTerminal = (seg: string): string => terminalAliases[seg.toLowerCase()] ?? seg;
+  if (!key.includes('+')) return aliasTerminal(key);
+  const parts = key
+    .split('+')
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
   return parts
     .map((p, i) => {
+      if (i === parts.length - 1) return aliasTerminal(p);
       const lower = p.toLowerCase();
-      if (i === parts.length - 1) return p; // terminal key — keep as-is
       return modMap[lower] ?? p;
     })
     .join('+');

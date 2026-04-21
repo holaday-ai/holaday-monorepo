@@ -283,6 +283,28 @@ describe('PlaywrightExecutor — input actions', () => {
     }
   });
 
+  it('pressKey aliases legacy / OS-specific terminal keys to Playwright names', async () => {
+    // Reason: Claude occasionally emits "Return" (macOS JS KeyboardEvent),
+    // "Esc", "Del" — Playwright rejects those. Alias to canonical form
+    // both as bare keys and as chord terminals.
+    const exec = new PlaywrightExecutor();
+    const cases: Array<[string, string]> = [
+      ['Return', 'Enter'],
+      ['return', 'Enter'],
+      ['RETURN', 'Enter'],
+      ['Esc', 'Escape'],
+      ['Del', 'Delete'],
+      ['Space', ' '],
+      ['ctrl+Return', 'Control+Enter'],
+      ['shift+Esc', 'Shift+Escape'],
+    ];
+    for (const [input, expected] of cases) {
+      const { page, calls } = makeFakePage();
+      await exec.pressKey(page, input);
+      expect(calls[0]).toEqual({ method: 'keyboard.press', args: [expected] });
+    }
+  });
+
   it('scroll calls page.mouse.wheel (0, deltaY), optionally moving first', async () => {
     const exec = new PlaywrightExecutor();
     // No coords → no move

@@ -152,7 +152,7 @@ describe('AnthropicVisionLoopCommander.decideNextAction', () => {
     expect(req?.max_tokens).toBe(1_024);
     expect(req?.tool_choice).toEqual({ type: 'any' });
     expect(Array.isArray(req?.tools)).toBe(true);
-    expect(req?.tools?.length).toBe(8);
+    expect(req?.tools?.length).toBe(9);
     expect(req?.messages).toHaveLength(1);
     const content =
       (req?.messages?.[0]?.content as Anthropic.ContentBlockParam[] | undefined) ?? [];

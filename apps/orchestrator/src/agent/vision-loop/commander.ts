@@ -742,6 +742,8 @@ function toolUseBlockFor(action: VisionAction, id: string): Anthropic.ToolUseBlo
       return { ...base, name: 'computer_key', input: { key: action.key } };
     case 'scroll':
       return { ...base, name: 'computer_scroll', input: { dy: action.dy } };
+    case 'navigate':
+      return { ...base, name: 'computer_navigate', input: { url: action.url } };
     case 'wait':
       return { ...base, name: 'computer_wait', input: { ms: action.ms } };
     case 'screenshot':
@@ -941,8 +943,8 @@ export const VISION_SYSTEM_PROMPT = `你是一个浏览器自动化助手。你�
 1. **先理解用户意图**，把任务分解成步骤，然后逐步执行（但每轮只做一步）。
 2. **每一步操作后等待页面加载再观察结果**。除非 UI 变化是即时的（比如菜单展开），否则在点击/回车/导航类动作后用 \`computer_wait { ms }\` 给页面 500–1500ms 的时间，然后下一轮的截图会反映新状态。
 3. **如果当前页面不适合完成任务（空白页 / 新标签页 / 错误页 / 404 / 不相关的站点），你应该主动导航**：
-   - 点击地址栏（Chrome 里地址栏在顶部，通常 y ≈ 50–80），全选（\`computer_key "ctrl+a"\` 或 Mac 上 \`"cmd+a"\`）然后 \`computer_type\` 目标 URL，最后 \`computer_key "Enter"\`。
-   - 不要因为当前页不对就 give_up — 先尝试导航到正确的起点。
+   - **必须使用 \`computer_navigate { url }\` 工具直接跳转** — 不要点击地址栏，不要用"click 地址栏 → 全选 → 打字 → 回车"这套操作。地址栏坐标不可靠、字段有时不能全选、字符会被补全，多步出错率远高于一次 goto。
+   - 不要因为当前页不对就 give_up — 先用 \`computer_navigate\` 跳到正确的起点。
 4. **遇到弹窗 / 登录框 / Cookie 提示**，先尝试关闭或跳过：找 "关闭/×/Dismiss/稍后/拒绝/取消" 按钮。只有当登录是必须的、且你没有凭据时才 give_up。
 5. **确信任务完成时**，调用 \`task_done\` 并在 \`summary\` 里用**中文**简要描述做了什么 + 结果（1–3 句）。
 6. **如果当前截图里已经包含回答用户问题所需的全部信息**（例如热榜标题、股价、板块涨幅已经肉眼可见）**，立即调 \`task_done\` 把这些信息抄进 summary**。不要"为了严谨"再点一下、再滚一下 — 每多一步都是额外的失败风险和时间成本。
@@ -957,8 +959,9 @@ export const VISION_SYSTEM_PROMPT = `你是一个浏览器自动化助手。你�
 
 - \`computer_click { x, y, button? }\` — 点击按钮 / 链接 / 标签 / 输入框。点击输入框 **之前** 不会自动聚焦 — 先 click 再 type。
 - \`computer_type { text }\` — 向当前聚焦的字段输入文字。不能输入快捷键。
-- \`computer_key { key }\` — 单键或组合键："Enter" / "Tab" / "Escape" / "ctrl+a" / "cmd+c"。用于提交表单、字段切换、地址栏全选。
+- \`computer_key { key }\` — 单键或组合键："Enter" / "Tab" / "Escape" / "ctrl+a" / "cmd+c"。用于提交表单、字段切换。**不要用键名 "Return"**，统一用 "Enter"。
 - \`computer_scroll { dy }\` — dy 正值向下，负值向上（像素）。目标不在视口内时用。
+- \`computer_navigate { url }\` — 直接跳到目标 URL（等价于"地址栏输入+回车"）。需要换站点 / 换路径时**首选此工具**，不要再走点击地址栏那一长串。
 - \`computer_wait { ms }\` — 等待页面加载。点击/导航后几乎总要 wait 500–1500ms 再观察。不要当作"步骤间默认停顿"滥用。
 - \`computer_screenshot\` — 不执行动作只重新观察。罕用；主要用在你知道页面已经变化但不是你触发的（例如系统弹窗）。
 - \`task_done { summary }\` — 任务完成。\`summary\` 必须是**中文**。

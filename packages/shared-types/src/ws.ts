@@ -69,6 +69,7 @@ export const visionActionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('type'), text: z.string() }),
   z.object({ kind: z.literal('key'), key: z.string().min(1) }),
   z.object({ kind: z.literal('scroll'), dy: z.number().int() }),
+  z.object({ kind: z.literal('navigate'), url: z.string().url().max(2048) }),
   z.object({
     kind: z.literal('wait'),
     ms: z.number().int().min(100).max(10_000),

@@ -114,8 +114,8 @@ describe('decodeToolUse', () => {
 });
 
 describe('VISION_TOOLS schema', () => {
-  it('exposes exactly 8 tool primitives', () => {
-    expect(VISION_TOOLS).toHaveLength(8);
+  it('exposes exactly 9 tool primitives', () => {
+    expect(VISION_TOOLS).toHaveLength(9);
   });
 
   it('every tool has a name, description, and input_schema.type=object', () => {
@@ -134,6 +134,7 @@ describe('VISION_TOOLS schema', () => {
       [
         'computer_click',
         'computer_key',
+        'computer_navigate',
         'computer_screenshot',
         'computer_scroll',
         'computer_type',

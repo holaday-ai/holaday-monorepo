@@ -48,6 +48,11 @@ export type VisionAction =
       dy: number;
     }
   | {
+      kind: 'navigate';
+      /** Absolute URL. Orchestrator does the goto(). */
+      url: string;
+    }
+  | {
       kind: 'wait';
       ms: number;
     }
@@ -123,6 +128,21 @@ export const VISION_TOOLS = [
       required: ['dy'],
       properties: {
         dy: { type: 'integer', description: 'Pixels to scroll; positive=down.' },
+      },
+    },
+  },
+  {
+    name: 'computer_navigate',
+    description:
+      'Go directly to a URL. Use this instead of clicking the address bar + typing + Enter — it is more reliable (no coordinate guessing) and faster. Always prefer this when you need to land on a new origin or a specific path.',
+    input_schema: {
+      type: 'object' as const,
+      required: ['url'],
+      properties: {
+        url: {
+          type: 'string',
+          description: 'Absolute URL including scheme, e.g. "https://example.com/path".',
+        },
       },
     },
   },
@@ -206,6 +226,9 @@ const keyInputSchema = z.object({
 const scrollInputSchema = z.object({
   dy: z.coerce.number().int(),
 });
+const navigateInputSchema = z.object({
+  url: z.string().url().max(2048),
+});
 const waitInputSchema = z.object({
   ms: z.coerce.number().int().min(100).max(10_000),
 });
@@ -270,6 +293,16 @@ export function decodeToolUse(toolName: string, input: unknown): VisionAction {
         };
       }
       return { kind: 'scroll', dy: r.data.dy };
+    }
+    case 'computer_navigate': {
+      const r = navigateInputSchema.safeParse(input);
+      if (!r.success) {
+        return {
+          kind: 'give_up',
+          reason: `computer_navigate bad input: ${r.error.message.slice(0, 200)}`,
+        };
+      }
+      return { kind: 'navigate', url: r.data.url };
     }
     case 'computer_wait': {
       const r = waitInputSchema.safeParse(input);

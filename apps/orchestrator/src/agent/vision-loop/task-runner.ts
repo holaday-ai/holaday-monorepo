@@ -631,6 +631,8 @@ function buildPlaywrightTransport(executor: PlaywrightExecutor): {
         return executor.pressKey(page, action.key);
       case 'scroll':
         return executor.scroll(page, action.dy);
+      case 'navigate':
+        return executor.navigate(page, action.url);
       case 'wait':
         return executor.wait(page, action.ms);
       case 'screenshot':

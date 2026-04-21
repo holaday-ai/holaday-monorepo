@@ -97,6 +97,8 @@ export async function executeCdpAction(tabId: number, action: VisionAction): Pro
         return await doKey(tabId, action);
       case 'scroll':
         return await doScroll(tabId, action);
+      case 'navigate':
+        return await doNavigate(tabId, action);
       case 'wait':
         return await doWait(action);
       case 'screenshot':
@@ -220,6 +222,15 @@ async function doWait(action: Extract<VisionAction, { kind: 'wait' }>): Promise<
   const ms = Math.min(action.ms, WAIT_CAP_MS);
   await new Promise<void>((resolve) => setTimeout(resolve, ms));
   return { ok: true, message: `waited ${ms}ms` };
+}
+
+async function doNavigate(
+  tabId: number,
+  action: Extract<VisionAction, { kind: 'navigate' }>,
+): Promise<ActionResult> {
+  await ensureAttached(tabId);
+  await sendCdp(tabId, 'Page.navigate', { url: action.url });
+  return { ok: true, message: `navigated to ${action.url}` };
 }
 
 // ---------------------------------------------------------------------------
