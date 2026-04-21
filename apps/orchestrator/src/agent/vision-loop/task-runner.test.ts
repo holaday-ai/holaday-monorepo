@@ -127,3 +127,86 @@ describe('startVisionLoopTask — playwrightExecutor branch', () => {
     }
   });
 });
+
+describe('startVisionLoopTask — Layer 4 captcha wait', () => {
+  it('calls onCaptchaDetected then onCaptchaResolved(auto) when the snapshot clears', async () => {
+    // Sequence of accessibility snapshots returned by the executor.
+    // The loop runs in screenshot mode here (commander returns
+    // click), but the afterTickHook polls via accessibilitySnapshot
+    // regardless of mode.
+    let snapshotCall = 0;
+    const snapshots = [
+      '- heading "Checking your browser" [ref=e1]', // first poll: still captcha
+      '- heading "Welcome back"', // second poll: cleared
+    ];
+
+    const fakePage = { url: () => 'https://x.test/', title: async () => '' };
+    const executor = {
+      getPage: async () => fakePage,
+      screenshot: async () => ({
+        base64: 'AAA=',
+        viewportWidth: 1280,
+        viewportHeight: 800,
+      }),
+      // The click fails with a captcha-signalling error, which the
+      // detector should classify as high-confidence 'captcha'.
+      click: async () => ({ ok: false, message: 'locator click: recaptcha challenge' }),
+      type: async () => ({ ok: true }),
+      pressKey: async () => ({ ok: true }),
+      scroll: async () => ({ ok: true }),
+      wait: async () => ({ ok: true }),
+      accessibilitySnapshot: async () => {
+        const idx = Math.min(snapshotCall, snapshots.length - 1);
+        snapshotCall += 1;
+        return {
+          text: snapshots[idx]!,
+          refs: [],
+          url: 'https://x.test/',
+          title: '',
+        };
+      },
+      resetPageForTask: async () => {},
+    } as unknown as PlaywrightExecutor;
+
+    const commander = scriptedCommander({ kind: 'click', x: 1, y: 1 });
+
+    // Shorten the poll cadence + wait timeout so the test completes
+    // quickly.
+    const prevTimeout = process.env.CAPTCHA_WAIT_TIMEOUT_MS;
+    const prevPoll = process.env.CAPTCHA_POLL_INTERVAL_MS;
+    process.env.CAPTCHA_WAIT_TIMEOUT_MS = '500';
+    process.env.CAPTCHA_POLL_INTERVAL_MS = '50';
+
+    const detections: unknown[] = [];
+    const resolutions: unknown[] = [];
+    const outcome = await startVisionLoopTask({
+      taskId: 'tsk_captcha_auto',
+      userId: 'usr_test',
+      intent: 'thing',
+      commander,
+      playwrightExecutor: executor,
+      maxSteps: 3,
+      onCaptchaDetected: (info) => {
+        detections.push(info);
+      },
+      onCaptchaResolved: (info) => {
+        resolutions.push(info);
+      },
+    });
+
+    if (prevTimeout === undefined) delete process.env.CAPTCHA_WAIT_TIMEOUT_MS;
+    else process.env.CAPTCHA_WAIT_TIMEOUT_MS = prevTimeout;
+    if (prevPoll === undefined) delete process.env.CAPTCHA_POLL_INTERVAL_MS;
+    else process.env.CAPTCHA_POLL_INTERVAL_MS = prevPoll;
+
+    expect(detections.length).toBeGreaterThanOrEqual(1);
+    expect(resolutions.length).toBeGreaterThanOrEqual(1);
+    // The first resolution fired should be 'auto' — the snapshot
+    // went clean on the second poll.
+    expect((resolutions[0] as { reason: string }).reason).toBe('auto');
+    // Commander ran at least twice (tick 0 + tick 1 after wait
+    // resolved), so the outcome is 'completed' via the scripted
+    // done-action on tick 2.
+    expect(outcome.status).toBe('completed');
+  }, 10_000);
+});

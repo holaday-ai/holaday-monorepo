@@ -1,7 +1,7 @@
 import type { ServerMessage } from '@holaday/shared-types';
 import { create } from 'zustand';
 import { trpc } from '@/lib/trpc';
-import type { UiScreencast, UiStep, UiTask, UiTaskStatus } from '@/types/task';
+import type { UiCaptchaWait, UiScreencast, UiStep, UiTask, UiTaskStatus } from '@/types/task';
 
 /**
  * Single source of truth for the task list + selection. Data flows in
@@ -23,6 +23,8 @@ export interface TaskStore {
   stepsByTask: Record<string, UiStep[]>;
   /** Latest screencast frame per task (G5). */
   screencastByTask: Record<string, UiScreencast>;
+  /** Active captcha-wait state per task (Layer 4). */
+  captchaWaitByTask: Record<string, UiCaptchaWait>;
 
   setSelectedTask(taskId: string | null): void;
   refreshTasks(): Promise<void>;
@@ -38,6 +40,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   error: null,
   stepsByTask: {},
   screencastByTask: {},
+  captchaWaitByTask: {},
 
   setSelectedTask(taskId) {
     set({ selectedTaskId: taskId });
@@ -192,6 +195,29 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       });
       return;
     }
+    if (msg.type === 'server.vision.captcha_detected') {
+      const startedAt = Date.now();
+      set((prev) => ({
+        captchaWaitByTask: {
+          ...prev.captchaWaitByTask,
+          [msg.taskId]: {
+            antiBotType: msg.antiBotType,
+            message: msg.message,
+            startedAt,
+            deadlineMs: startedAt + msg.waitTimeoutMs,
+          },
+        },
+      }));
+      return;
+    }
+    if (msg.type === 'server.vision.captcha_resolved') {
+      set((prev) => {
+        const next = { ...prev.captchaWaitByTask };
+        delete next[msg.taskId];
+        return { captchaWaitByTask: next };
+      });
+      return;
+    }
     if (msg.type === 'server.vision.screencast') {
       set((prev) => ({
         screencastByTask: {
@@ -219,6 +245,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       error: null,
       stepsByTask: {},
       screencastByTask: {},
+      captchaWaitByTask: {},
     });
   },
 }));

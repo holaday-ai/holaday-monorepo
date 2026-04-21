@@ -64,6 +64,20 @@ export interface UiScreencast {
   timestamp: string;
 }
 
+/**
+ * Layer 4: captcha-wait state for a task. Populated when the
+ * orchestrator broadcasts `captcha_detected` and cleared by
+ * `captcha_resolved`. The UI uses this to swap in a warning banner
+ * and pulse the browser panel.
+ */
+export interface UiCaptchaWait {
+  antiBotType: 'captcha' | 'verify' | 'block' | 'cloudflare';
+  message: string;
+  /** Absolute timestamp when the wait will give up. */
+  deadlineMs: number;
+  startedAt: number;
+}
+
 export function isActive(status: UiTaskStatus): boolean {
   return status === 'executing' || status === 'paused';
 }

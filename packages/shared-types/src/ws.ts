@@ -326,6 +326,36 @@ export const serverVisionTickEndSchema = z.object({
 });
 
 /**
+ * Layer 4 — fired when the orchestrator's anti-bot detector returns
+ * a high-confidence signal mid-task. The runner pauses the vision
+ * loop, starts polling the page for the captcha to clear (a11y
+ * snapshot every 3 s), and relies on the user finishing the
+ * challenge in the attached Chrome window. `message` carries the
+ * same Chinese description the step card shows so the UI can keep
+ * the two in sync without re-deriving.
+ */
+export const serverVisionCaptchaDetectedSchema = z.object({
+  type: z.literal('server.vision.captcha_detected'),
+  taskId: z.string(),
+  antiBotType: z.enum(['captcha', 'verify', 'block', 'cloudflare']),
+  message: z.string(),
+  /** How long the runner will wait before giving up, in ms. */
+  waitTimeoutMs: z.number().int().positive(),
+});
+
+/**
+ * Layer 4 — fired when the pause ended. `reason='auto'` means we
+ * polled and the anti-bot markers disappeared (user finished the
+ * captcha); `reason='timeout'` means the configured wait elapsed and
+ * the task is about to terminate as failed.
+ */
+export const serverVisionCaptchaResolvedSchema = z.object({
+  type: z.literal('server.vision.captcha_resolved'),
+  taskId: z.string(),
+  reason: z.enum(['auto', 'timeout']),
+});
+
+/**
  * Task queued behind earlier work (Phase F F3 per-user FIFO). Fires
  * once on enqueue when the task lands at position > 1 — position 1
  * means it started immediately and the UI never needs a "queued"
@@ -381,6 +411,8 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverVisionTickEndSchema,
   serverVisionScreencastSchema,
   serverTaskQueuedSchema,
+  serverVisionCaptchaDetectedSchema,
+  serverVisionCaptchaResolvedSchema,
 ]);
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;

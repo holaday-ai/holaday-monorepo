@@ -19,7 +19,12 @@
  */
 
 import { dispatchVisionActionToSW, requestVisionObservationFromSW } from '../../ws/server.js';
-import { type AntiBotSignal, detectAntiBot } from './anti-bot-detector.js';
+import {
+  type AntiBotSignal,
+  describeSignal,
+  detectAntiBot,
+  detectFromSnapshot,
+} from './anti-bot-detector.js';
 import type { VisionLoopCommander } from './commander.js';
 import type { PageLike, PlaywrightExecutor } from './playwright-executor.js';
 import type {
@@ -122,6 +127,40 @@ export interface StartVisionLoopTaskOptions {
     viewportWidth: number;
     viewportHeight: number;
   }) => void;
+  /**
+   * Layer 4 — fires when the anti-bot detector returns a high-
+   * confidence signal and the runner is about to enter the captcha-
+   * wait state. Consumers broadcast `server.vision.captcha_detected`
+   * so the UI can prompt the user to complete the challenge in
+   * Chrome.
+   */
+  onCaptchaDetected?: (info: {
+    antiBotType: AntiBotSignal['type'];
+    message: string;
+    waitTimeoutMs: number;
+  }) => void;
+  /**
+   * Layer 4 — fires when the captcha-wait state exits, either
+   * because the page's anti-bot markers disappeared (`reason='auto'`)
+   * or the configured wait elapsed (`reason='timeout'`).
+   */
+  onCaptchaResolved?: (info: { reason: 'auto' | 'timeout' }) => void;
+}
+
+/**
+ * Default max-wait for a user to complete a captcha challenge before
+ * the runner gives up and fails the task. 120 s matches the
+ * observed time-to-solve for a reCAPTCHA image grid. Overridable
+ * via `CAPTCHA_WAIT_TIMEOUT_MS`.
+ */
+const DEFAULT_CAPTCHA_WAIT_TIMEOUT_MS = 120_000;
+const DEFAULT_CAPTCHA_POLL_INTERVAL_MS = 3_000;
+
+function readEnvPositiveInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
 /**
@@ -148,6 +187,20 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
     await opts.playwrightExecutor.resetPageForTask();
   }
 
+  // Layer 4: shared between onTickEnd (detection) and afterTickHook
+  // (pause + poll). Populated by the detector when a high-confidence
+  // anti-bot signal fires; consumed + cleared by the afterTickHook.
+  // `null` means no pause pending.
+  let pendingCaptchaSignal: AntiBotSignal | null = null;
+  const captchaWaitTimeoutMs = readEnvPositiveInt(
+    'CAPTCHA_WAIT_TIMEOUT_MS',
+    DEFAULT_CAPTCHA_WAIT_TIMEOUT_MS,
+  );
+  const captchaPollIntervalMs = readEnvPositiveInt(
+    'CAPTCHA_POLL_INTERVAL_MS',
+    DEFAULT_CAPTCHA_POLL_INTERVAL_MS,
+  );
+
   // Only Playwright transport provides the a11y pair — SW transport
   // can't serve ariaSnapshot. Runner auto-pins to screenshot mode
   // when these are undefined.
@@ -161,6 +214,41 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
     actionFn: transport.actionFn,
     ...(transport.accessibilityFn ? { accessibilityFn: transport.accessibilityFn } : {}),
     ...(transport.a11yActionFn ? { a11yActionFn: transport.a11yActionFn } : {}),
+    // Layer 4: between ticks, if the previous turn flagged a high-
+    // confidence captcha signal, run the polling wait loop before
+    // the next tick starts. Transport-agnostic via the accessibility
+    // function — when Playwright isn't wired, the hook short-circuits
+    // (no way to poll the page's snapshot).
+    afterTickHook: async (_tickIndex) => {
+      if (!pendingCaptchaSignal) return;
+      const signal = pendingCaptchaSignal;
+      pendingCaptchaSignal = null;
+      if (!transport.accessibilityFn) return; // no polling surface
+      opts.onCaptchaDetected?.({
+        antiBotType: signal.type,
+        message: `${describeSignal(signal)}（匹配：${signal.rawMatch}）`,
+        waitTimeoutMs: captchaWaitTimeoutMs,
+      });
+      const started = Date.now();
+      const deadline = started + captchaWaitTimeoutMs;
+      let resolved: 'auto' | 'timeout' = 'timeout';
+      while (Date.now() < deadline) {
+        await new Promise<void>((r) => setTimeout(r, captchaPollIntervalMs));
+        try {
+          const snap = await transport.accessibilityFn(-1);
+          const stillThere = detectFromSnapshot(snap.snapshot);
+          if (!stillThere || stillThere.confidence !== 'high') {
+            resolved = 'auto';
+            break;
+          }
+        } catch {
+          // Snapshot failures are non-fatal — just try again next
+          // iteration. If the whole page is unreachable we'll hit
+          // the deadline and time out.
+        }
+      }
+      opts.onCaptchaResolved?.({ reason: resolved });
+    },
   });
 
   if (opts.onDecision) {
@@ -250,6 +338,30 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
         }
       });
     }
+  }
+
+  // Layer 4: independent turn subscription so captcha detection fires
+  // even when the caller wired only onCaptchaDetected / onCaptchaResolved
+  // (no onTickEnd). Reruns the same detector the onTickEnd path uses
+  // above; cheap enough that double-running is fine. Only "high"
+  // signals arm a pause — medium matches would make the task halt
+  // every time a page mentions "verify email".
+  if (opts.onCaptchaDetected || opts.onCaptchaResolved) {
+    runner.on('turn', (ev) => {
+      const exec = ev.turn.executionResult;
+      // Replicate the snapshot-lookup the onTickEnd path uses. The
+      // shared Map above is scoped inside its `if` block — so for
+      // Layer-4-only callers we re-derive snapshot text from the
+      // turn itself when it's an a11y turn.
+      const snap = 'snapshot' in ev.turn ? ev.turn.snapshot : null;
+      const antiBot = detectAntiBot({
+        errorMessage: exec?.ok === false ? exec.message : null,
+        snapshotText: snap,
+      });
+      if (antiBot && antiBot.confidence === 'high') {
+        pendingCaptchaSignal = antiBot;
+      }
+    });
   }
 
   // G5 screencast + G8 follow-up: every tick pushes a frame to the

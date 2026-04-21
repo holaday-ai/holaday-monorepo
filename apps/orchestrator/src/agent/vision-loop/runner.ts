@@ -179,6 +179,15 @@ export interface VisionLoopRunnerOptions {
    * Prod code never passes this; it defaults to Date.now.
    */
   now?: () => number;
+  /**
+   * Layer 4 hook — called between ticks after the turn has been
+   * recorded. Runs BEFORE the next mode-picker / observation round
+   * so a captcha-wait implementation can poll the page and return
+   * only when the challenge is cleared. Awaited by the runner, so
+   * sleeps in the hook actually pause the loop. `null` (default)
+   * keeps the classic "no pause" behaviour.
+   */
+  afterTickHook?: (tickIndex: number) => Promise<void>;
 }
 
 /**
@@ -255,6 +264,7 @@ export class VisionLoopRunner {
   private readonly visionModeEnv: VisionModeEnv;
   private readonly taskTimeoutMs: number;
   private readonly now: () => number;
+  private readonly afterTickHook: ((tickIndex: number) => Promise<void>) | null;
   /** Set during the tick on which the deadline is hit; one-shot. */
   private timeoutAnnounced = false;
   private readonly maxSteps: number;
@@ -291,6 +301,7 @@ export class VisionLoopRunner {
     this.visionModeEnv = opts.visionModeEnv ?? readVisionModeEnv();
     this.taskTimeoutMs = opts.taskTimeoutMs ?? readTaskTimeoutMs();
     this.now = opts.now ?? Date.now;
+    this.afterTickHook = opts.afterTickHook ?? null;
   }
 
   /**
@@ -379,6 +390,21 @@ export class VisionLoopRunner {
           ? await this.runA11yTick(tick, goal, preFetchedA11y, timeoutHint)
           : await this.runScreenshotTick(tick, goal, timeoutHint);
       if (outcome) return outcome;
+      // Layer 4 pause point — the hook awaits its own polling loop
+      // when a captcha was detected this tick, so this `await` is
+      // potentially several seconds long. Cancellation is honoured
+      // at the top of the next iteration via the `this.cancelled`
+      // check, so a user-initiated cancel during the wait still
+      // exits cleanly on the next tick.
+      if (this.afterTickHook) {
+        try {
+          await this.afterTickHook(tick);
+        } catch (err) {
+          // Hook failures must not kill the loop; log and continue.
+          // biome-ignore lint/suspicious/noConsole: surfaced to orchestrator logs
+          console.warn('[vision-loop] afterTickHook threw', err);
+        }
+      }
     }
 
     return this.finalise({

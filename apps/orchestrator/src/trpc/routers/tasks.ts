@@ -147,6 +147,35 @@ export const tasksRouter = router({
               );
             }
           },
+          onCaptchaDetected(info) {
+            ctx.logger.info(
+              { taskId, antiBotType: info.antiBotType, waitTimeoutMs: info.waitTimeoutMs },
+              'vision loop paused on captcha signal',
+            );
+            try {
+              broadcastToUser(userId, {
+                type: 'server.vision.captcha_detected',
+                taskId,
+                antiBotType: info.antiBotType,
+                message: info.message,
+                waitTimeoutMs: info.waitTimeoutMs,
+              });
+            } catch (err) {
+              ctx.logger.warn({ err, taskId }, 'broadcast captcha_detected failed');
+            }
+          },
+          onCaptchaResolved(info) {
+            ctx.logger.info({ taskId, reason: info.reason }, 'vision loop captcha wait ended');
+            try {
+              broadcastToUser(userId, {
+                type: 'server.vision.captcha_resolved',
+                taskId,
+                reason: info.reason,
+              });
+            } catch (err) {
+              ctx.logger.warn({ err, taskId }, 'broadcast captcha_resolved failed');
+            }
+          },
         })
           .then(async (outcome) => {
             ctx.logger.info(

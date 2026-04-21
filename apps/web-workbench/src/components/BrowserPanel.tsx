@@ -9,6 +9,8 @@ interface Props {
   frame?: UiScreencast | null;
   /** Selected task status — drives the status dot colour. */
   taskStatus?: UiTaskStatus | null;
+  /** Non-null when the orchestrator paused on a captcha signal. */
+  awaitingUser?: boolean;
 }
 
 /**
@@ -21,9 +23,11 @@ interface Props {
  * tab. Good enough for PoC dogfooding; a real screencast would need
  * CDP `Page.startScreencast` wired through the SW.
  */
-export function BrowserPanel({ frame, taskStatus }: Props): JSX.Element {
+export function BrowserPanel({ frame, taskStatus, awaitingUser }: Props): JSX.Element {
   const [collapsed, setCollapsed] = React.useState(false);
-  const status: DotStatus = deriveDotStatus(taskStatus, Boolean(frame));
+  const status: DotStatus = awaitingUser
+    ? 'error'
+    : deriveDotStatus(taskStatus, Boolean(frame));
 
   return (
     <section
@@ -61,6 +65,11 @@ export function BrowserPanel({ frame, taskStatus }: Props): JSX.Element {
               {frame?.url ?? 'about:blank'}
             </div>
           </header>
+          {awaitingUser && (
+            <div className="animate-pulse-dot border-b border-amber-300/60 bg-amber-100/80 px-3 py-1.5 text-center text-[11px] font-semibold text-amber-900">
+              需要您操作 · 请在 Chrome 中完成验证
+            </div>
+          )}
           <div className="flex flex-1 items-center justify-center overflow-hidden bg-muted/40 p-3">
             {frame ? (
               <img

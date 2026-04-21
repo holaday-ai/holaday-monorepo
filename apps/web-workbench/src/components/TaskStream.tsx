@@ -1,9 +1,10 @@
+import { AlertCircle } from 'lucide-react';
 import * as React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { StepCard } from '@/components/StepCard';
 import { useTaskStore } from '@/stores/task-store';
-import type { UiStep, UiTask } from '@/types/task';
+import type { UiCaptchaWait, UiStep, UiTask } from '@/types/task';
 
 interface Props {
   task: UiTask;
@@ -28,11 +29,12 @@ const EMPTY_STEPS: UiStep[] = [];
  */
 export function TaskStream({ task }: Props): JSX.Element {
   const steps = useTaskStore((s) => s.stepsByTask[task.taskId]) ?? EMPTY_STEPS;
+  const captchaWait = useTaskStore((s) => s.captchaWaitByTask[task.taskId]);
   const scrollAnchorRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ block: 'end' });
-  }, [steps.length, task.status]);
+  }, [steps.length, task.status, captchaWait]);
 
   const terminal =
     task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled';
@@ -41,7 +43,7 @@ export function TaskStream({ task }: Props): JSX.Element {
     <div className="mx-auto max-w-3xl space-y-4 px-6 pb-4 pt-8">
       <UserBubble intent={task.intent} />
 
-      {steps.length === 0 && !terminal && (
+      {steps.length === 0 && !terminal && !captchaWait && (
         <div className="rounded-lg border border-dashed border-border px-6 py-10 text-center text-sm text-muted-foreground">
           等待第一个操作…
         </div>
@@ -53,11 +55,50 @@ export function TaskStream({ task }: Props): JSX.Element {
         ))}
       </div>
 
+      {captchaWait && <CaptchaWaitBanner wait={captchaWait} />}
+
       {terminal && task.resultText && (
         <TerminalSummary status={task.status} text={task.resultText} />
       )}
 
       <div ref={scrollAnchorRef} />
+    </div>
+  );
+}
+
+/**
+ * Layer 4 prompt: shows when the orchestrator has paused the loop on
+ * a high-confidence anti-bot signal. Tells the user exactly where to
+ * act (attached Chrome window) and how long the orchestrator will
+ * wait. Auto-unmounts when the task-store clears `captchaWaitByTask`
+ * for this task (either auto-resolved or timed out).
+ */
+function CaptchaWaitBanner({ wait }: { wait: UiCaptchaWait }): JSX.Element {
+  const [now, setNow] = React.useState(Date.now());
+  React.useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(id);
+  }, []);
+  const remainingMs = Math.max(0, wait.deadlineMs - now);
+  const remainingSec = Math.ceil(remainingMs / 1000);
+  return (
+    <div
+      role="alert"
+      className="flex animate-fade-in items-start gap-3 rounded-xl border border-amber-300 bg-amber-50/80 px-4 py-3"
+    >
+      <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 animate-pulse-dot text-amber-600" />
+      <div className="min-w-0 flex-1 text-sm">
+        <div className="font-semibold text-amber-900">目标网站需要人工验证</div>
+        <div className="mt-1 text-xs text-amber-900/80">
+          {wait.message}
+        </div>
+        <div className="mt-1 text-xs text-amber-900/80">
+          请在右侧显示的 Chrome 浏览器窗口中完成验证，agent 将自动继续。
+        </div>
+        <div className="mt-2 text-[11px] font-medium text-amber-900/70">
+          自动恢复窗口剩余：{remainingSec}s
+        </div>
+      </div>
     </div>
   );
 }

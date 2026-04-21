@@ -33,6 +33,7 @@ export function App(): JSX.Element {
   const applyServerMessage = useTaskStore((s) => s.applyServerMessage);
   const reset = useTaskStore((s) => s.reset);
   const screencastByTask = useTaskStore((s) => s.screencastByTask);
+  const captchaWaitByTask = useTaskStore((s) => s.captchaWaitByTask);
 
   // Kick off tRPC + WS once authenticated. StrictMode double-mount is
   // safe here: refreshTasks is idempotent, connect() is a no-op when
@@ -88,6 +89,9 @@ export function App(): JSX.Element {
         <BrowserPanel
           frame={selectedTask ? (screencastByTask[selectedTask.taskId] ?? null) : null}
           taskStatus={selectedTask?.status ?? null}
+          awaitingUser={
+            selectedTask ? Boolean(captchaWaitByTask[selectedTask.taskId]) : false
+          }
         />
       </div>
     </div>
