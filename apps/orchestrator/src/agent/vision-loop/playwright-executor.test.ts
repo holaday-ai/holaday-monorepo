@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { type PageLike, PlaywrightExecutor, annotateAriaSnapshot } from './playwright-executor.js';
 
 beforeAll(() => {
@@ -519,12 +519,12 @@ describe('PlaywrightExecutor — per-action deadlines', () => {
     // Force a short override so the test completes quickly.
     const prev = process.env.ACTION_TIMEOUT_MS;
     process.env.ACTION_TIMEOUT_MS = '200';
-    const mod = await import('./playwright-executor.js?t=click-timeout');
+    vi.resetModules();
+    const mod = await import('./playwright-executor.js');
     const e = new mod.PlaywrightExecutor();
     const r = await e.click(page as never, 1, 2);
     if (prev === undefined) delete process.env.ACTION_TIMEOUT_MS;
     else process.env.ACTION_TIMEOUT_MS = prev;
-    // Keep the generic executor reference to satisfy the unused-var rule.
     void exec;
     expect(r.ok).toBe(false);
     expect(r.message).toMatch(/click failed.*timed out/);
@@ -539,7 +539,8 @@ describe('PlaywrightExecutor — per-action deadlines', () => {
     });
     const prev = process.env.ACTION_TIMEOUT_MS;
     process.env.ACTION_TIMEOUT_MS = '150';
-    const mod = await import('./playwright-executor.js?t=type-timeout');
+    vi.resetModules();
+    const mod = await import('./playwright-executor.js');
     const e = new mod.PlaywrightExecutor();
     const r = await e.type(page as never, 'hello');
     if (prev === undefined) delete process.env.ACTION_TIMEOUT_MS;

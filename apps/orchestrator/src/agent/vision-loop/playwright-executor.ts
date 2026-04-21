@@ -28,8 +28,9 @@
  * before it calls through.
  */
 
-import type { Browser, Page } from 'playwright';
+import type { Browser, BrowserContext, Page } from 'playwright';
 import sharp from 'sharp';
+import { STEALTH_INIT_SCRIPT, isStealthEnabled } from './stealth-scripts.js';
 
 export interface ConnectResult {
   ok: boolean;
@@ -156,6 +157,14 @@ export class PlaywrightExecutor {
   private readonly chromium: {
     connectOverCDP: (endpoint: string) => Promise<Browser>;
   };
+  /**
+   * Pages we've already stealth-ified this session. Playwright's
+   * `addInitScript` only fires on the NEXT navigation, so we also
+   * call `page.evaluate(STEALTH_INIT_SCRIPT)` once per page to cover
+   * the currently-loaded document. Tracking avoids re-running the
+   * evaluate on every getPage() call.
+   */
+  private readonly stealthApplied = new WeakSet<object>();
 
   constructor(
     opts: {
@@ -183,6 +192,9 @@ export class PlaywrightExecutor {
     if (this.browser) return { ok: true };
     try {
       this.browser = await this.chromium.connectOverCDP(cdpEndpoint);
+      if (isStealthEnabled()) {
+        await this.applyStealthToContexts(this.browser);
+      }
       return { ok: true };
     } catch (err) {
       this.browser = null;
@@ -190,6 +202,28 @@ export class PlaywrightExecutor {
         ok: false,
         error: `connectOverCDP(${cdpEndpoint}) failed: ${errMsg(err)}`,
       };
+    }
+  }
+
+  /**
+   * Install the stealth init script on every existing context so any
+   * future page opened in those contexts picks it up before the first
+   * navigation. Called once at connect; `getPage` covers brand-new
+   * contexts that appear later.
+   *
+   * Best-effort — a failure here is logged and doesn't block connect.
+   * The individual evasions in STEALTH_INIT_SCRIPT are already
+   * wrapped in try/catch, so a locked-down browser with strict CSP
+   * just falls back to un-stealthed behaviour.
+   */
+  private async applyStealthToContexts(browser: Browser): Promise<void> {
+    const contexts = browser.contexts();
+    for (const ctx of contexts) {
+      try {
+        await (ctx as BrowserContext).addInitScript({ content: STEALTH_INIT_SCRIPT });
+      } catch {
+        // non-fatal — see docstring
+      }
     }
   }
 
@@ -233,6 +267,7 @@ export class PlaywrightExecutor {
     // No pages at all: open one.
     if (!page) {
       page = await ctx.newPage();
+      await this.applyStealthToPageIfNeeded(page as unknown as PageLike);
       return page;
     }
     // Liveness probe + auto-recovery. Anti-bot modals (e.g. Douyin's
@@ -244,9 +279,13 @@ export class PlaywrightExecutor {
     // (goto about:blank, 5s), then hard-reset by opening a fresh
     // page and best-effort closing the old one.
     const responsive = await this.isPageResponsive(page as unknown as PageLike);
-    if (responsive) return page;
+    if (responsive) {
+      await this.applyStealthToPageIfNeeded(page as unknown as PageLike);
+      return page;
+    }
     try {
       await (page as unknown as PageLike).goto('about:blank', { timeout: 5_000 });
+      await this.applyStealthToPageIfNeeded(page as unknown as PageLike);
       return page;
     } catch {
       // soft reset failed — fall through to hard reset
@@ -257,7 +296,50 @@ export class PlaywrightExecutor {
       const closer = (page as unknown as PageLike).close;
       if (typeof closer === 'function') await closer().catch(() => {});
     })();
+    await this.applyStealthToPageIfNeeded(fresh as unknown as PageLike);
     return fresh;
+  }
+
+  /**
+   * Apply the stealth script to a page if we haven't already this
+   * session. We do two things:
+   *   1. `page.addInitScript` — the script runs on every NEXT
+   *      navigation, so newly opened URLs start stealthed.
+   *   2. `page.evaluate` — the script runs RIGHT NOW against the
+   *      currently-loaded document, so detectors on the current page
+   *      see stealthed values too.
+   *
+   * Both calls are guarded behind `stealthApplied` to avoid
+   * re-running on every `getPage()` hit (the evasions are idempotent
+   * but the IPC round-trips are not free).
+   *
+   * `isStealthEnabled()` is re-checked per call so an operator can
+   * flip the env var mid-run and have it take effect without a
+   * restart.
+   */
+  private async applyStealthToPageIfNeeded(page: PageLike): Promise<void> {
+    if (!isStealthEnabled()) return;
+    if (this.stealthApplied.has(page as unknown as object)) return;
+    this.stealthApplied.add(page as unknown as object);
+    const anyPage = page as unknown as {
+      addInitScript?: (script: { content: string } | string) => Promise<void>;
+      evaluate?: (expr: string) => Promise<unknown>;
+    };
+    try {
+      if (anyPage.addInitScript) {
+        await anyPage.addInitScript({ content: STEALTH_INIT_SCRIPT });
+      }
+    } catch {
+      // non-fatal — best-effort
+    }
+    // Fire-and-forget the immediate-doc evaluate. If the page is
+    // still half-stuck, we don't want our best-effort stealth call to
+    // wedge the task start. addInitScript (above) has already armed
+    // the NEXT navigation, which is what matters for captcha tests
+    // that fingerprint via `new Navigator()` on load.
+    if (anyPage.evaluate) {
+      void anyPage.evaluate(STEALTH_INIT_SCRIPT).catch(() => {});
+    }
   }
 
   /**
