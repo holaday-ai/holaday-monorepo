@@ -1,0 +1,22 @@
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+
+# Vite cache
+.vite
+
+# tsc -b composite project emissions from tsconfig.node (vite.config.ts
+# + tailwind.config.ts). These aren't source; biome complains about the
+# `plugins: any[]` in the tailwind-generated .d.ts. Keep them out of git.
+vite.config.d.ts
+vite.config.js
+tailwind.config.d.ts
+tailwind.config.js
+*.tsbuildinfo
