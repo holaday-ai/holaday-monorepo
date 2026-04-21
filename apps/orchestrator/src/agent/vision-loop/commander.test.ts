@@ -5,6 +5,7 @@ import type { LlmCallRecord, LlmCallRecorder } from '../llm-call-recorder.js';
 import {
   type AccessibilityLoopContext,
   AnthropicVisionLoopCommander,
+  VISION_SYSTEM_PROMPT,
   type VisionLoopContext,
   type VisionObservation,
 } from './commander.js';
@@ -672,5 +673,23 @@ describe('AnthropicVisionLoopCommander.decideNextActionAccessibility', () => {
     expect(records[0]?.purpose).toBe('commander.accessibility');
     expect(records[0]?.status).toBe('ok');
     expect(records[0]?.inputTokens).toBe(1_500);
+  });
+});
+
+describe('VISION_SYSTEM_PROMPT — anti-hallucination guardrail', () => {
+  // Reason: models love to "be helpful" by answering from training data
+  // when the page is stuck on about:blank. Lock the refusal clause into
+  // the prompt so a reviewer that accidentally deletes it fails CI, not
+  // prod. If the Chinese wording changes, update these tokens too.
+  it('tells the model to stop navigating when the page stays blank', () => {
+    expect(VISION_SYSTEM_PROMPT).toMatch(/立即停止尝试导航/);
+  });
+
+  it("forbids answering from the model's own knowledge when the browser is blank", () => {
+    expect(VISION_SYSTEM_PROMPT).toMatch(/不可以用你自己的知识/);
+  });
+
+  it('requires task_give_up with a blank-page reason rather than fabrication', () => {
+    expect(VISION_SYSTEM_PROMPT).toMatch(/浏览器无法加载目标页面/);
   });
 });

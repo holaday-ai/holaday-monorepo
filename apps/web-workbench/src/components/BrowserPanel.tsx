@@ -72,11 +72,21 @@ export function BrowserPanel({ frame, taskStatus, awaitingUser }: Props): JSX.El
           )}
           <div className="flex flex-1 items-center justify-center overflow-hidden bg-muted/40 p-3">
             {frame ? (
-              <img
-                src={`data:image/jpeg;base64,${frame.imageBase64}`}
-                alt={`screencast tick ${frame.tickIndex + 1}`}
-                className="max-h-full max-w-full rounded-md border border-black/[0.06] object-contain shadow-sm"
-              />
+              isBlankUrl(frame.url) ? (
+                // Screencast is live but the tab is parked on about:blank —
+                // render a neutral placeholder instead of a literal blank
+                // image so users can tell "browser isn't on a real page yet"
+                // from "the screencast stream is broken".
+                <div className="text-center text-xs text-muted-foreground/80">
+                  等待浏览器加载页面...
+                </div>
+              ) : (
+                <img
+                  src={`data:image/jpeg;base64,${frame.imageBase64}`}
+                  alt={`screencast tick ${frame.tickIndex + 1}`}
+                  className="max-h-full max-w-full rounded-md border border-black/[0.06] object-contain shadow-sm"
+                />
+              )
             ) : (
               <div className="text-center text-xs text-muted-foreground">
                 {taskStatus === 'executing' ? '等待第一帧…' : '等待任务开始...'}
@@ -93,6 +103,16 @@ export function BrowserPanel({ frame, taskStatus, awaitingUser }: Props): JSX.El
       )}
     </section>
   );
+}
+
+function isBlankUrl(url: string | undefined | null): boolean {
+  if (!url) return true;
+  const u = url.trim().toLowerCase();
+  // Chromium reports a just-launched tab as "about:blank"; some CDP
+  // paths also yield empty / "chrome://newtab/". Treat all as "not on a
+  // real page yet" so the placeholder fires in every genuinely-blank
+  // case and never hides real content.
+  return u === 'about:blank' || u === '' || u === 'chrome://newtab/';
 }
 
 type DotStatus = 'idle' | 'live' | 'error';
