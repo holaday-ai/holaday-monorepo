@@ -505,6 +505,50 @@ describe('PlaywrightExecutor.getPage — anti-bot auto-recovery', () => {
   });
 });
 
+describe('PlaywrightExecutor — per-action deadlines', () => {
+  it('click returns { ok:false } rather than hanging when mouse.click never resolves', async () => {
+    const exec = new PlaywrightExecutor();
+    const { page } = makeFakePage({
+      mouse: {
+        // Never resolves → would hang forever without our withTimeout guard.
+        click: () => new Promise(() => {}),
+        move: async () => {},
+        wheel: async () => {},
+      },
+    });
+    // Force a short override so the test completes quickly.
+    const prev = process.env.ACTION_TIMEOUT_MS;
+    process.env.ACTION_TIMEOUT_MS = '200';
+    const mod = await import('./playwright-executor.js?t=click-timeout');
+    const e = new mod.PlaywrightExecutor();
+    const r = await e.click(page as never, 1, 2);
+    if (prev === undefined) delete process.env.ACTION_TIMEOUT_MS;
+    else process.env.ACTION_TIMEOUT_MS = prev;
+    // Keep the generic executor reference to satisfy the unused-var rule.
+    void exec;
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/click failed.*timed out/);
+  });
+
+  it('type returns { ok:false } when keyboard.type never resolves', async () => {
+    const { page } = makeFakePage({
+      keyboard: {
+        type: () => new Promise(() => {}),
+        press: async () => {},
+      },
+    });
+    const prev = process.env.ACTION_TIMEOUT_MS;
+    process.env.ACTION_TIMEOUT_MS = '150';
+    const mod = await import('./playwright-executor.js?t=type-timeout');
+    const e = new mod.PlaywrightExecutor();
+    const r = await e.type(page as never, 'hello');
+    if (prev === undefined) delete process.env.ACTION_TIMEOUT_MS;
+    else process.env.ACTION_TIMEOUT_MS = prev;
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/type failed.*timed out/);
+  });
+});
+
 describe('PlaywrightExecutor.screenshot — timeout', () => {
   it('passes a bounded timeout to page.screenshot', async () => {
     const exec = new PlaywrightExecutor();

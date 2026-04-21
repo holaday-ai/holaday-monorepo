@@ -385,7 +385,11 @@ export class PlaywrightExecutor {
     button: 'left' | 'right' | 'middle' = 'left',
   ): Promise<ActionResult> {
     try {
-      await page.mouse.click(x, y, { button });
+      await withTimeout(
+        page.mouse.click(x, y, { button }),
+        CLICK_TIMEOUT_MS,
+        `click @ (${x},${y})`,
+      );
       return { ok: true, message: `clicked ${button} @ (${x},${y})` };
     } catch (err) {
       return { ok: false, message: `click failed: ${errMsg(err)}` };
@@ -394,7 +398,7 @@ export class PlaywrightExecutor {
 
   async type(page: PageLike, text: string): Promise<ActionResult> {
     try {
-      await page.keyboard.type(text);
+      await withTimeout(page.keyboard.type(text), TYPE_TIMEOUT_MS, `type ${text.length} chars`);
       return { ok: true, message: `typed ${text.length} chars` };
     } catch (err) {
       return { ok: false, message: `type failed: ${errMsg(err)}` };
@@ -421,7 +425,7 @@ export class PlaywrightExecutor {
         return { ok: false, message: 'page.getByRole unavailable (test stub?)' };
       }
       const loc = anyPage.getByRole(role, name ? { name } : undefined);
-      await loc.first().click({ timeout: 5_000 });
+      await loc.first().click({ timeout: CLICK_BY_ROLE_TIMEOUT_MS });
       return { ok: true, message: `clicked ${role}${name ? ` "${name}"` : ''}` };
     } catch (err) {
       return { ok: false, message: `clickByRoleName failed: ${errMsg(err)}` };
@@ -439,7 +443,7 @@ export class PlaywrightExecutor {
   async pressKey(page: PageLike, key: string): Promise<ActionResult> {
     const normalised = normaliseKey(key);
     try {
-      await page.keyboard.press(normalised);
+      await withTimeout(page.keyboard.press(normalised), KEY_TIMEOUT_MS, `press ${normalised}`);
       return { ok: true, message: `pressed ${normalised}` };
     } catch (err) {
       return { ok: false, message: `press failed: ${errMsg(err)}` };
@@ -455,9 +459,9 @@ export class PlaywrightExecutor {
   async scroll(page: PageLike, deltaY: number, atX?: number, atY?: number): Promise<ActionResult> {
     try {
       if (typeof atX === 'number' && typeof atY === 'number') {
-        await page.mouse.move(atX, atY);
+        await withTimeout(page.mouse.move(atX, atY), SCROLL_TIMEOUT_MS, 'mouse.move');
       }
-      await page.mouse.wheel(0, deltaY);
+      await withTimeout(page.mouse.wheel(0, deltaY), SCROLL_TIMEOUT_MS, `scroll ${deltaY}px`);
       return { ok: true, message: `scrolled ${deltaY}px` };
     } catch (err) {
       return { ok: false, message: `scroll failed: ${errMsg(err)}` };
@@ -475,7 +479,7 @@ export class PlaywrightExecutor {
 
   async navigate(page: PageLike, url: string): Promise<ActionResult> {
     try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAVIGATE_TIMEOUT_MS });
       return { ok: true, message: `navigated to ${url}` };
     } catch (err) {
       return { ok: false, message: `navigate failed: ${errMsg(err)}` };
@@ -505,14 +509,54 @@ export class PlaywrightExecutor {
   }
 }
 
-/** Default screenshot cap, overridable via `ACTION_TIMEOUT_MS`. */
-const SCREENSHOT_TIMEOUT_MS = readEnvTimeout('ACTION_TIMEOUT_MS', 10_000);
+/**
+ * Per-action deadlines. Playwright's own defaults are 30 s (or none
+ * at all for mouse / keyboard), which means a hung renderer burns a
+ * full 30 s per action — on a 10-action task, that's 5 real minutes
+ * before the task-timeout finally kicks in and we give up. These
+ * caps surface trouble fast; `ACTION_TIMEOUT_MS` uniformly overrides
+ * every knob below for operators who want a custom cap (e.g. very
+ * slow test networks).
+ */
+const ACTION_TIMEOUT_OVERRIDE = readEnvTimeoutOrNull('ACTION_TIMEOUT_MS');
+const CLICK_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 10_000;
+const TYPE_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 10_000;
+const KEY_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 5_000;
+const SCROLL_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 5_000;
+const NAVIGATE_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 15_000;
+const SCREENSHOT_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 10_000;
+const CLICK_BY_ROLE_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 10_000;
 
-function readEnvTimeout(name: string, fallback: number): number {
+function readEnvTimeoutOrNull(name: string): number | null {
   const raw = process.env[name];
-  if (!raw) return fallback;
+  if (!raw) return null;
   const n = Number.parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Race a promise against a timeout. Playwright's `mouse.click` /
+ * `keyboard.type` / `mouse.wheel` don't take a timeout option — when
+ * the renderer freezes they just sit forever. This helper is how we
+ * apply a hard cap anyway. Rejects with a labelled `Error` on
+ * timeout; never leaves a timer dangling.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms}ms`));
+    }, ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------
