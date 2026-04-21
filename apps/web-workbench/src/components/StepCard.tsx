@@ -19,7 +19,7 @@ interface Props {
 export function StepCard({ step }: Props): JSX.Element {
   const title = stepTitle(step);
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-border/60 bg-white/60 px-4 py-3">
+    <div className="flex animate-fade-in items-start gap-3 rounded-xl border border-border/60 bg-white/60 px-4 py-3 transition-colors">
       <StatusBadge step={step} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-3">

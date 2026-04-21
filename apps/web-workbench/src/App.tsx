@@ -22,6 +22,7 @@ import { useTaskStore } from '@/stores/task-store';
 export function App(): JSX.Element {
   const [authed, setAuthed] = React.useState<boolean>(() => Boolean(getAccessToken()));
   const [wsStatus, setWsStatus] = React.useState<ConnStatus>('idle');
+  const [sidebarOpen, setSidebarOpen] = React.useState(false);
 
   const tasks = useTaskStore((s) => s.tasks);
   const selectedTaskId = useTaskStore((s) => s.selectedTaskId);
@@ -66,12 +67,14 @@ export function App(): JSX.Element {
   const selectedTask = tasks.find((t) => t.taskId === selectedTaskId) ?? null;
 
   return (
-    <div className="flex h-full min-h-0 w-full overflow-hidden">
+    <div className="relative flex h-full min-h-0 w-full overflow-hidden">
       <Sidebar
         tasks={tasks}
         selectedTaskId={selectedTaskId}
         onSelectTask={setSelectedTask}
         onNewTask={() => setSelectedTask(null)}
+        mobileOpen={sidebarOpen}
+        onMobileClose={() => setSidebarOpen(false)}
       />
       <MainPanel
         task={selectedTask}
@@ -79,11 +82,14 @@ export function App(): JSX.Element {
         onSubmit={async (intent) => {
           await createTask(intent);
         }}
+        onOpenSidebar={() => setSidebarOpen(true)}
       />
-      <BrowserPanel
-        frame={selectedTask ? (screencastByTask[selectedTask.taskId] ?? null) : null}
-        taskStatus={selectedTask?.status ?? null}
-      />
+      <div className="hidden lg:block">
+        <BrowserPanel
+          frame={selectedTask ? (screencastByTask[selectedTask.taskId] ?? null) : null}
+          taskStatus={selectedTask?.status ?? null}
+        />
+      </div>
     </div>
   );
 }

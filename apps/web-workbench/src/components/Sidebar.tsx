@@ -1,6 +1,7 @@
-import { Plus } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TaskListItem } from '@/components/TaskListItem';
+import { cn } from '@/lib/utils';
 import { type UiTask, isActive } from '@/types/task';
 
 interface Props {
@@ -8,6 +9,9 @@ interface Props {
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
   onNewTask: () => void;
+  /** Mobile drawer state — ignored at md+ breakpoints. */
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
 /**
@@ -16,26 +20,66 @@ interface Props {
  * bottom. Uses a frosted white-panel aesthetic via rgba+blur so it
  * reads as a layer sitting on top of the main canvas.
  */
-export function Sidebar({ tasks, selectedTaskId, onSelectTask, onNewTask }: Props): JSX.Element {
+export function Sidebar({
+  tasks,
+  selectedTaskId,
+  onSelectTask,
+  onNewTask,
+  mobileOpen,
+  onMobileClose,
+}: Props): JSX.Element {
   const active = tasks.filter((t) => isActive(t.status));
   const done = tasks.filter((t) => !isActive(t.status));
 
+  // The sidebar renders inline at md+ and flips to a fixed overlay
+  // on smaller screens. The backdrop is a sibling element rendered
+  // only while mobileOpen so it doesn't steal clicks on desktop.
   return (
-    <aside
-      className="flex h-full w-60 shrink-0 flex-col border-r border-black/[0.06] backdrop-blur-xl"
-      style={{ backgroundColor: 'rgba(255,255,255,0.7)' }}
-    >
-      <header className="px-4 pb-3 pt-5">
-        <h1 className="text-base font-semibold tracking-tight text-foreground">HOLA DAY</h1>
-        <Button
-          variant="default"
-          size="sm"
-          onClick={onNewTask}
-          className="mt-3 w-full justify-start"
-        >
-          <Plus className="h-4 w-4" />
-          新任务
-        </Button>
+    <>
+      {mobileOpen && (
+        <button
+          type="button"
+          aria-label="关闭侧边栏"
+          onClick={onMobileClose}
+          className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm md:hidden"
+        />
+      )}
+      <aside
+        className={cn(
+          'flex h-full w-60 shrink-0 flex-col border-r border-black/[0.06] backdrop-blur-xl transition-transform duration-200',
+          'md:static md:translate-x-0',
+          'fixed inset-y-0 left-0 z-50',
+          mobileOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full md:shadow-none',
+        )}
+        style={{ backgroundColor: 'rgba(255,255,255,0.72)' }}
+      >
+      <header className="flex items-start justify-between px-4 pb-3 pt-5">
+        <div className="flex-1">
+          <h1 className="text-base font-semibold tracking-tight text-foreground">HOLA DAY</h1>
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => {
+              onNewTask();
+              onMobileClose?.();
+            }}
+            className="mt-3 w-full justify-start"
+          >
+            <Plus className="h-4 w-4" />
+            新任务
+          </Button>
+        </div>
+        {mobileOpen && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onMobileClose}
+            aria-label="关闭"
+            className="md:hidden"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        )}
       </header>
 
       <div className="flex-1 overflow-y-auto px-2 pb-4">
@@ -46,7 +90,10 @@ export function Sidebar({ tasks, selectedTaskId, onSelectTask, onNewTask }: Prop
                 key={t.taskId}
                 task={t}
                 selected={t.taskId === selectedTaskId}
-                onSelect={onSelectTask}
+                onSelect={(id) => {
+                  onSelectTask(id);
+                  onMobileClose?.();
+                }}
               />
             ))}
           </TaskGroup>
@@ -58,7 +105,10 @@ export function Sidebar({ tasks, selectedTaskId, onSelectTask, onNewTask }: Prop
                 key={t.taskId}
                 task={t}
                 selected={t.taskId === selectedTaskId}
-                onSelect={onSelectTask}
+                onSelect={(id) => {
+                  onSelectTask(id);
+                  onMobileClose?.();
+                }}
               />
             ))}
           </TaskGroup>
@@ -78,6 +128,7 @@ export function Sidebar({ tasks, selectedTaskId, onSelectTask, onNewTask }: Prop
         </div>
       </footer>
     </aside>
+    </>
   );
 }
 
