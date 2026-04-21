@@ -92,6 +92,7 @@ export interface PageLike {
     type?: 'jpeg' | 'png';
     quality?: number;
     fullPage?: boolean;
+    timeout?: number;
   }): Promise<Buffer>;
   mouse: {
     click(x: number, y: number, opts?: { button?: 'left' | 'right' | 'middle' }): Promise<void>;
@@ -115,6 +116,14 @@ export interface PageLike {
   ariaSnapshot(opts?: { ref?: boolean }): Promise<string>;
   waitForTimeout(ms: number): Promise<void>;
   goto(url: string, opts?: { waitUntil?: string; timeout?: number }): Promise<unknown>;
+  /**
+   * Added as part of the anti-bot recovery work: we race a trivial
+   * evaluate against a timeout to check liveness. Real playwright.Page
+   * provides this; test stubs that never set it fall back to a
+   * tolerant default in `isPageResponsive`.
+   */
+  evaluate?: (expression: string) => Promise<unknown>;
+  close?: () => Promise<void>;
 }
 
 /**
@@ -220,9 +229,68 @@ export class PlaywrightExecutor {
     if (!ctx)
       throw new Error('PlaywrightExecutor: no browser context (is Chrome actually running?)');
     const pages = ctx.pages();
-    const page = pages[0];
-    if (!page) throw new Error('PlaywrightExecutor: no pages in the browser context');
-    return page;
+    let page = pages[0];
+    // No pages at all: open one.
+    if (!page) {
+      page = await ctx.newPage();
+      return page;
+    }
+    // Liveness probe + auto-recovery. Anti-bot modals (e.g. Douyin's
+    // "开启读屏标签 / 第二次验证" overlay) can freeze the tab so that
+    // page.screenshot() hangs for the full 30 s Playwright default,
+    // and every subsequent task fails the same way because we keep
+    // handing back the same stuck pages[0]. We check responsiveness
+    // cheaply (evaluate('1') with a 3s race), try a soft reset
+    // (goto about:blank, 5s), then hard-reset by opening a fresh
+    // page and best-effort closing the old one.
+    const responsive = await this.isPageResponsive(page as unknown as PageLike);
+    if (responsive) return page;
+    try {
+      await (page as unknown as PageLike).goto('about:blank', { timeout: 5_000 });
+      return page;
+    } catch {
+      // soft reset failed — fall through to hard reset
+    }
+    const fresh = await ctx.newPage();
+    // Fire-and-forget close so we don't re-hang on the stuck page.
+    void (async () => {
+      const closer = (page as unknown as PageLike).close;
+      if (typeof closer === 'function') await closer().catch(() => {});
+    })();
+    return fresh;
+  }
+
+  /**
+   * Cheap liveness probe. Races `page.evaluate('1')` against a
+   * timeout — real Playwright pages respond in <10ms when healthy, so
+   * anything past a few seconds is hung on a modal / disconnected
+   * renderer. Never throws; returns false on any error.
+   *
+   * Exposed as a public method so tests can wire a pending-evaluate
+   * stub, and so the runner can reuse the probe pre-tick if we ever
+   * want that.
+   */
+  async isPageResponsive(page: PageLike, timeoutMs = 3_000): Promise<boolean> {
+    if (typeof page.evaluate !== 'function') {
+      // Test stubs without an evaluate method default to "responsive"
+      // so they don't accidentally trip the recovery path.
+      return true;
+    }
+    const evaluator = page.evaluate;
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(ok);
+      };
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      evaluator('1').then(
+        () => finish(true),
+        () => finish(false),
+      );
+    });
   }
 
   // ---------- screenshot / snapshot ----------
@@ -231,10 +299,18 @@ export class PlaywrightExecutor {
    * Viewport JPEG capture. Quality 80 matches the sharp-resize quality
    * already used in `image.ts`, so post-resize bytes look consistent
    * across the legacy and Playwright paths. Never throws.
+   *
+   * `timeoutMs` defaults to `SCREENSHOT_TIMEOUT_MS` — way below
+   * Playwright's built-in 30 s. The old 30 s default made a single
+   * stuck tab (anti-bot modal, renderer hang) burn 30 s per tick on
+   * every subsequent task until someone restarted Chrome. 10 s is
+   * still generous for a healthy page (sub-second in practice) and
+   * surfaces trouble fast.
    */
-  async screenshot(page: PageLike): Promise<ScreenshotResult> {
+  async screenshot(page: PageLike, opts: { timeoutMs?: number } = {}): Promise<ScreenshotResult> {
+    const timeout = opts.timeoutMs ?? SCREENSHOT_TIMEOUT_MS;
     try {
-      const buf = await page.screenshot({ type: 'jpeg', quality: 80, fullPage: false });
+      const buf = await page.screenshot({ type: 'jpeg', quality: 80, fullPage: false, timeout });
       // `page.viewportSize()` returns null when Playwright is attached
       // via `connectOverCDP` to an externally-launched Chrome (the
       // whole point of Phase D) — Playwright didn't configure the
@@ -405,6 +481,38 @@ export class PlaywrightExecutor {
       return { ok: false, message: `navigate failed: ${errMsg(err)}` };
     }
   }
+
+  /**
+   * Park the active page on about:blank. Called by `task-runner.ts`
+   * at the top of every vision-loop task so leftover state (pending
+   * fetches, verification overlays, console spam, big JS heap) from
+   * the prior task doesn't bleed into the new one. Silently no-ops
+   * when the executor isn't wired up.
+   *
+   * This compounds with `getPage`'s hard-reset: getPage is the
+   * *reactive* recovery (page already stuck), `resetPageForTask` is
+   * the *proactive* one (start clean so we never get stuck).
+   */
+  async resetPageForTask(): Promise<void> {
+    if (!this.browser) return;
+    try {
+      const page = (await this.getPage()) as unknown as PageLike;
+      await page.goto('about:blank', { timeout: 5_000 }).catch(() => {});
+    } catch {
+      // Any failure here is non-fatal — the runner will try its own
+      // screenshot/observe on tick 0 and the usual failure paths kick in.
+    }
+  }
+}
+
+/** Default screenshot cap, overridable via `ACTION_TIMEOUT_MS`. */
+const SCREENSHOT_TIMEOUT_MS = readEnvTimeout('ACTION_TIMEOUT_MS', 10_000);
+
+function readEnvTimeout(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
 // ---------------------------------------------------------------------------

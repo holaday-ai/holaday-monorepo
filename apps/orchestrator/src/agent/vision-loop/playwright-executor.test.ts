@@ -376,17 +376,153 @@ describe('PlaywrightExecutor.getPage', () => {
     expect(p).toBe(fakePage);
   });
 
-  it('throws when there are no pages', async () => {
+  it('auto-creates a page via ctx.newPage() when the context is empty', async () => {
+    const created = { tag: 'fresh' } as unknown;
+    let newPageCalls = 0;
     const exec = new PlaywrightExecutor({
       chromium: {
         connectOverCDP: async () =>
           ({
-            contexts: () => [{ pages: () => [] }],
+            contexts: () => [
+              {
+                pages: () => [],
+                newPage: async () => {
+                  newPageCalls += 1;
+                  return created;
+                },
+              },
+            ],
             close: async () => {},
           }) as never,
       },
     });
     await exec.connect('http://a');
-    await expect(exec.getPage()).rejects.toThrow(/no pages/);
+    const p = await exec.getPage();
+    expect(p).toBe(created);
+    expect(newPageCalls).toBe(1);
+  });
+});
+
+describe('PlaywrightExecutor.isPageResponsive', () => {
+  it('returns true when evaluate resolves inside the timeout', async () => {
+    const exec = new PlaywrightExecutor();
+    const { page } = makeFakePage({
+      evaluate: async () => 1,
+    });
+    expect(await exec.isPageResponsive(page, 200)).toBe(true);
+  });
+
+  it('returns false when evaluate hangs past the timeout', async () => {
+    const exec = new PlaywrightExecutor();
+    const { page } = makeFakePage({
+      // Never resolves — simulates a stuck renderer / anti-bot modal.
+      evaluate: () => new Promise(() => {}),
+    });
+    expect(await exec.isPageResponsive(page, 100)).toBe(false);
+  });
+
+  it('returns false when evaluate rejects', async () => {
+    const exec = new PlaywrightExecutor();
+    const { page } = makeFakePage({
+      evaluate: async () => {
+        throw new Error('target crashed');
+      },
+    });
+    expect(await exec.isPageResponsive(page, 200)).toBe(false);
+  });
+
+  it('defaults to true when the page stub has no evaluate (test tolerance)', async () => {
+    const exec = new PlaywrightExecutor();
+    const { page } = makeFakePage();
+    // makeFakePage doesn't set evaluate — PageLike.evaluate is optional.
+    expect(await exec.isPageResponsive(page, 100)).toBe(true);
+  });
+});
+
+describe('PlaywrightExecutor.getPage — anti-bot auto-recovery', () => {
+  it('soft-resets a stuck page by navigating to about:blank', async () => {
+    const { page: stuckPage, calls } = makeFakePage({
+      evaluate: () => new Promise(() => {}), // hangs → not responsive
+    });
+    let newPageCalls = 0;
+    const exec = new PlaywrightExecutor({
+      chromium: {
+        connectOverCDP: async () =>
+          ({
+            contexts: () => [
+              {
+                pages: () => [stuckPage],
+                newPage: async () => {
+                  newPageCalls += 1;
+                  return { tag: 'fresh' };
+                },
+              },
+            ],
+            close: async () => {},
+          }) as never,
+      },
+    });
+    await exec.connect('http://a');
+    const p = await exec.getPage();
+    // Soft reset (goto about:blank) succeeded → we keep the same page.
+    expect(p).toBe(stuckPage);
+    expect(newPageCalls).toBe(0);
+    expect(calls.find((c) => c.method === 'goto')?.args[0]).toBe('about:blank');
+  });
+
+  it('hard-resets via ctx.newPage() when the soft reset also hangs', async () => {
+    const { page: stuckPage } = makeFakePage({
+      evaluate: () => new Promise(() => {}),
+      // goto also hangs — Playwright will give up at the 5s timeout;
+      // in the unit test we simulate the rejection path.
+      goto: async () => {
+        throw new Error('goto timeout: page not responding');
+      },
+    });
+    let newPageCalls = 0;
+    const fresh = { tag: 'hard-reset' } as unknown;
+    const exec = new PlaywrightExecutor({
+      chromium: {
+        connectOverCDP: async () =>
+          ({
+            contexts: () => [
+              {
+                pages: () => [stuckPage],
+                newPage: async () => {
+                  newPageCalls += 1;
+                  return fresh;
+                },
+              },
+            ],
+            close: async () => {},
+          }) as never,
+      },
+    });
+    await exec.connect('http://a');
+    const p = await exec.getPage();
+    expect(p).toBe(fresh);
+    expect(newPageCalls).toBe(1);
+  });
+});
+
+describe('PlaywrightExecutor.screenshot — timeout', () => {
+  it('passes a bounded timeout to page.screenshot', async () => {
+    const exec = new PlaywrightExecutor();
+    const { page, calls } = makeFakePage();
+    await exec.screenshot(page);
+    const shot = calls.find((c) => c.method === 'screenshot');
+    expect(shot?.args[0]).toMatchObject({ timeout: expect.any(Number) });
+    const passedTimeout = (shot?.args[0] as { timeout: number }).timeout;
+    // Default is 10s, and must be strictly shorter than Playwright's
+    // built-in 30s — that's the whole point of this knob.
+    expect(passedTimeout).toBeLessThan(30_000);
+  });
+
+  it('accepts an explicit timeoutMs override', async () => {
+    const exec = new PlaywrightExecutor();
+    const { page, calls } = makeFakePage();
+    await exec.screenshot(page, { timeoutMs: 2_500 });
+    const shot = calls.find((c) => c.method === 'screenshot');
+    expect((shot?.args[0] as { timeout: number }).timeout).toBe(2_500);
   });
 });

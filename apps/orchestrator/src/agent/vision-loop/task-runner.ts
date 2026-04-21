@@ -131,6 +131,15 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
     ? buildPlaywrightTransport(opts.playwrightExecutor)
     : buildWsTransport(opts.userId, opts.taskId);
 
+  // Park the tab on about:blank before we start so anti-bot modals
+  // or half-loaded frames from the previous task can't poison this
+  // one. `resetPageForTask` swallows its own failures; the typeof
+  // guard keeps the older test-runner stubs happy (they pass a duck-
+  // typed PlaywrightExecutor that doesn't implement the new method).
+  if (opts.playwrightExecutor && typeof opts.playwrightExecutor.resetPageForTask === 'function') {
+    await opts.playwrightExecutor.resetPageForTask();
+  }
+
   // Only Playwright transport provides the a11y pair — SW transport
   // can't serve ariaSnapshot. Runner auto-pins to screenshot mode
   // when these are undefined.
