@@ -117,6 +117,37 @@ export const clientVisionActedSchema = z.object({
   message: z.string().optional(),
 });
 
+/**
+ * Web workbench → orchestrator: a user interaction inside the right-
+ * side screencast panel (click / scroll / type / key). Orchestrator
+ * dispatches it straight to PlaywrightExecutor so the user can nudge
+ * the browser — captcha solves, filling a field the agent missed, or
+ * plain manual driving when no task is running ("免 VPN 海外浏览器").
+ *
+ * Coordinates are in REAL viewport pixels; the frontend is responsible
+ * for scaling from the screencast canvas to the actual page size
+ * before sending.
+ *
+ * `taskId` is optional — when the panel is in free-drive mode (no
+ * task), the orchestrator still accepts events and drives whatever
+ * tab activePage points at.
+ */
+export const clientVisionUserInputSchema = z.object({
+  type: z.literal('client.vision.user_input'),
+  taskId: z.string().optional(),
+  kind: z.enum(['click', 'scroll', 'type', 'key']),
+  x: z.number().int().optional(),
+  y: z.number().int().optional(),
+  /** For kind=type: the literal text to type. */
+  text: z.string().max(4_000).optional(),
+  /** For kind=key: named key or chord ("Enter", "ctrl+a"). */
+  key: z.string().min(1).max(64).optional(),
+  /** For kind=scroll: dy in CSS px (positive=down). */
+  scrollDeltaY: z.number().int().min(-5_000).max(5_000).optional(),
+  /** For kind=click: button. Default 'left'. */
+  button: z.enum(['left', 'right', 'middle']).optional(),
+});
+
 export const clientMessageSchema = z.discriminatedUnion('type', [
   clientHelloSchema,
   clientPongSchema,
@@ -125,6 +156,7 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
   clientScreenshotSchema,
   clientVisionObservationSchema,
   clientVisionActedSchema,
+  clientVisionUserInputSchema,
 ]);
 
 export type ClientMessage = z.infer<typeof clientMessageSchema>;

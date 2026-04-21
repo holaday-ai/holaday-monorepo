@@ -1,0 +1,35 @@
+domain: tech
+keywords:
+  - GitHub
+  - Stack Overflow
+  - API 文档
+  - SDK
+  - npm
+  - PyPI
+  - 报错
+  - 堆栈
+  - changelog
+  - README
+analysis_framework: |
+  定位文档版本（major.minor），注意 deprecated / removed API 的分界线。
+  跨版本行为差异用原 changelog / release notes 原文核对，不要凭印象。
+  代码示例必须标注语言 + 运行环境假设（Node 版本、Python 版本、OS）。
+  避免复制粘贴未审核的 Stack Overflow 高票答案——时效可能已过。
+recommended_sources:
+  - name: GitHub
+    url: github.com
+    use_for: 源码、Issue 追踪、release notes
+  - name: MDN Web Docs
+    url: developer.mozilla.org
+    use_for: Web 标准、浏览器兼容性
+  - name: Stack Overflow
+    url: stackoverflow.com
+    use_for: 具体报错的解决方案（注意答案时效）
+  - name: 官方 API 文档
+    url: (按库 / 平台官网)
+    use_for: 权威接口签名、参数说明
+output_format: |
+  代码块标明语言 + 最小复现假设。
+  版本差异分栏："vA 行为 / vB 行为"。
+  引用 Issue 必须给链接与状态（open/closed/fixed in vX）。
+disclaimer: 软件行为随版本更迭变化，务必结合你实际使用的版本核对。

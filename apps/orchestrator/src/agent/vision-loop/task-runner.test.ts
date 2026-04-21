@@ -209,6 +209,128 @@ describe('startVisionLoopTask — Layer 4 captcha wait', () => {
     // done-action on tick 2.
     expect(outcome.status).toBe('completed');
   }, 10_000);
+
+  it('resolves with reason=timeout when the captcha snapshot never clears in window', async () => {
+    // Snapshot stays captcha-ish forever — we expect the wait loop to
+    // time out rather than auto-resolve, and onCaptchaResolved must
+    // fire with reason='timeout'.
+    const fakePage = { url: () => 'https://x.test/', title: async () => '' };
+    const executor = {
+      getPage: async () => fakePage,
+      screenshot: async () => ({
+        base64: 'AAA=',
+        viewportWidth: 1280,
+        viewportHeight: 800,
+      }),
+      click: async () => ({ ok: false, message: 'locator click: recaptcha challenge' }),
+      type: async () => ({ ok: true }),
+      pressKey: async () => ({ ok: true }),
+      scroll: async () => ({ ok: true }),
+      wait: async () => ({ ok: true }),
+      accessibilitySnapshot: async () => ({
+        text: '- heading "Checking your browser"',
+        refs: [],
+        url: 'https://x.test/',
+        title: '',
+      }),
+      resetPageForTask: async () => {},
+    } as unknown as PlaywrightExecutor;
+
+    const prev = {
+      timeout: process.env.CAPTCHA_WAIT_TIMEOUT_MS,
+      poll: process.env.CAPTCHA_POLL_INTERVAL_MS,
+    };
+    process.env.CAPTCHA_WAIT_TIMEOUT_MS = '80';
+    process.env.CAPTCHA_POLL_INTERVAL_MS = '15';
+
+    const resolutions: { reason: string }[] = [];
+    const commander = scriptedCommander({ kind: 'click', x: 1, y: 1 });
+    await startVisionLoopTask({
+      taskId: 'tsk_captcha_timeout',
+      userId: 'usr_test',
+      intent: 'thing',
+      commander,
+      playwrightExecutor: executor,
+      maxSteps: 2,
+      onCaptchaDetected: () => {},
+      onCaptchaResolved: (info) => {
+        resolutions.push(info);
+      },
+    });
+
+    if (prev.timeout === undefined) delete process.env.CAPTCHA_WAIT_TIMEOUT_MS;
+    else process.env.CAPTCHA_WAIT_TIMEOUT_MS = prev.timeout;
+    if (prev.poll === undefined) delete process.env.CAPTCHA_POLL_INTERVAL_MS;
+    else process.env.CAPTCHA_POLL_INTERVAL_MS = prev.poll;
+
+    expect(resolutions.length).toBeGreaterThanOrEqual(1);
+    expect(resolutions[0]?.reason).toBe('timeout');
+  }, 10_000);
+});
+
+describe('startVisionLoopTask — Layer 5 threshold latch', () => {
+  it('does not fire onExecutorFallback when strike count stays below the threshold', async () => {
+    // Only one captcha-flavoured failure in the whole loop. Layer 5
+    // needs 3 strikes to trip (strikeThreshold=3 in task-runner). The
+    // fallback hook must NOT fire here.
+    let clickCount = 0;
+    const fakePage = { url: () => 'https://x.test/', title: async () => '' };
+    const executor = {
+      getPage: async () => fakePage,
+      screenshot: async () => ({
+        base64: 'AAA=',
+        viewportWidth: 1280,
+        viewportHeight: 800,
+      }),
+      click: async () => {
+        clickCount += 1;
+        // Only tick 0 sees a captcha; tick 1 succeeds → we finish.
+        if (clickCount === 1) {
+          return { ok: false, message: 'locator click: recaptcha challenge' };
+        }
+        return { ok: true, message: 'clicked' };
+      },
+      type: async () => ({ ok: true }),
+      pressKey: async () => ({ ok: true }),
+      scroll: async () => ({ ok: true }),
+      wait: async () => ({ ok: true }),
+      accessibilitySnapshot: async () => ({
+        text: '- heading "Welcome"',
+        refs: [],
+        url: 'https://x.test/',
+        title: '',
+      }),
+      resetPageForTask: async () => {},
+    } as unknown as PlaywrightExecutor;
+
+    const prev = {
+      timeout: process.env.CAPTCHA_WAIT_TIMEOUT_MS,
+      poll: process.env.CAPTCHA_POLL_INTERVAL_MS,
+    };
+    process.env.CAPTCHA_WAIT_TIMEOUT_MS = '50';
+    process.env.CAPTCHA_POLL_INTERVAL_MS = '10';
+
+    const fallbackEvents: unknown[] = [];
+    const commander = scriptedCommander({ kind: 'click', x: 1, y: 1 });
+    await startVisionLoopTask({
+      taskId: 'tsk_single_strike',
+      userId: 'usr_test',
+      intent: 'thing',
+      commander,
+      playwrightExecutor: executor,
+      maxSteps: 3,
+      onExecutorFallback: (info) => {
+        fallbackEvents.push(info);
+      },
+    });
+
+    if (prev.timeout === undefined) delete process.env.CAPTCHA_WAIT_TIMEOUT_MS;
+    else process.env.CAPTCHA_WAIT_TIMEOUT_MS = prev.timeout;
+    if (prev.poll === undefined) delete process.env.CAPTCHA_POLL_INTERVAL_MS;
+    else process.env.CAPTCHA_POLL_INTERVAL_MS = prev.poll;
+
+    expect(fallbackEvents).toHaveLength(0);
+  }, 10_000);
 });
 
 describe('startVisionLoopTask — Layer 5 executor fallback', () => {

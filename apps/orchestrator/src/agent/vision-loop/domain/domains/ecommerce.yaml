@@ -1,0 +1,36 @@
+domain: ecommerce
+keywords:
+  - 淘宝
+  - 京东
+  - 天猫
+  - 拼多多
+  - 亚马逊
+  - 购物车
+  - 比价
+  - 促销
+  - 优惠券
+  - SKU
+  - 退货
+analysis_framework: |
+  对比购买决策：标价、到手价（满减 + 优惠券 + 店铺红包后）、运费、运费险、发货时效。
+  SKU 规格核对，注意"颜色分类"下的隐藏加价。
+  店铺信誉（DSR 评分、近 30 日退款率、开店年限）优先于单品销量。
+  海淘注意清关税 + 汇率。
+recommended_sources:
+  - name: 淘宝 / 天猫
+    url: taobao.com
+    use_for: 国内零售、品牌官方店
+  - name: 京东
+    url: jd.com
+    use_for: 自营物流、正品保障
+  - name: Amazon
+    url: amazon.com
+    use_for: 海外正品、用户评论密度高
+  - name: 什么值得买
+    url: smzdm.com
+    use_for: 爆料、历史价格、真人晒单
+output_format: |
+  用表格横比：商品、店铺、标价、到手价、发货时效、退货政策。
+  明确声明"到手价"的构成（原价 − 优惠 = 到手）。
+  高价商品（> ¥ 1000）必须提示核对官方授权渠道。
+disclaimer: 商品价格与库存实时波动，下单前请以店铺最终页面展示为准。

@@ -28,6 +28,8 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { type LlmCallRecorder, NoopLlmCallRecorder } from '../llm-call-recorder.js';
 import { A11Y_TOOLS, type A11yAction, decodeA11yToolUse } from './actions-a11y.js';
 import { VISION_TOOLS, type VisionAction, decodeToolUse } from './actions.js';
+import type { DomainName } from './domain/classifier.js';
+import { buildDomainPrompt } from './domain/enricher.js';
 import { type ResizedImage, resizeForVisionModel } from './image.js';
 import type { AccessibilityNodeRef } from './playwright-executor.js';
 import { isRetryableAnthropicError, retryAsync } from './retry.js';
@@ -215,6 +217,14 @@ export interface VisionLoopCommander {
    * implement both paths.
    */
   decideNextActionAccessibility?(ctx: AccessibilityLoopContext): Promise<AccessibilityDecision>;
+  /**
+   * Per-task domain specialisation. Returns a commander instance whose
+   * system prompt carries the analysis framework / recommended sources
+   * / output format / disclaimer for `domain`. Optional on the
+   * interface so scripted test commanders don't need to implement it —
+   * callers guard with `?.` and fall back to the base commander.
+   */
+  withDomain?(domain: DomainName | undefined): VisionLoopCommander;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +244,15 @@ export interface AnthropicVisionLoopCommanderOptions {
    * tests don't need a DB; production boot wires DrizzleLlmCallRecorder.
    */
   recorder?: LlmCallRecorder;
+  /**
+   * Domain classification for the task's intent. When set (and not
+   * 'general'), the matching YAML in `./domain/domains/*.yaml` is
+   * appended to the system prompt as an analysis-framework /
+   * recommended-sources / output-format / disclaimer block. Callers
+   * (task-runner) run DomainClassifier once per task and pass the
+   * result here — the commander doesn't reclassify per tick.
+   */
+  domain?: DomainName;
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
@@ -267,13 +286,53 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
   private readonly model: string;
   private readonly maxTokens: number;
   private readonly recorder: LlmCallRecorder;
+  /** Composed once at construction; reused every tick. */
+  private readonly systemPrompt: string;
+  private readonly a11ySystemPrompt: string;
 
   constructor(opts: AnthropicVisionLoopCommanderOptions) {
     this.client = opts.client;
     this.model = opts.model ?? process.env.COMMANDER_MODEL ?? DEFAULT_MODEL;
     this.maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS;
     this.recorder = opts.recorder ?? new NoopLlmCallRecorder();
+    this.domain = opts.domain ?? 'general';
+    const domainFragment = buildDomainPrompt(this.domain);
+    this.systemPrompt = VISION_SYSTEM_PROMPT + domainFragment;
+    this.a11ySystemPrompt = A11Y_SYSTEM_PROMPT + domainFragment;
   }
+
+  /** Exposed for tests that assert on the composed prompt content. */
+  getSystemPrompt(): string {
+    return this.systemPrompt;
+  }
+
+  getA11ySystemPrompt(): string {
+    return this.a11ySystemPrompt;
+  }
+
+  /**
+   * Produce a commander that shares this one's client / model / recorder
+   * but specialises its system prompt for `domain`. Lets the task-
+   * runner swap in domain-specific prompting per task without exposing
+   * Anthropic client wiring to the caller.
+   *
+   * Returns `this` when the domain matches current setting — no copy,
+   * no extra allocation, no behaviour change.
+   */
+  withDomain(domain: DomainName | undefined): AnthropicVisionLoopCommander {
+    const current = this.domain ?? 'general';
+    const next = domain ?? 'general';
+    if (current === next) return this;
+    return new AnthropicVisionLoopCommander({
+      client: this.client,
+      model: this.model,
+      maxTokens: this.maxTokens,
+      recorder: this.recorder,
+      domain: next,
+    });
+  }
+  /** Set at construction, used by `withDomain` to avoid pointless clones. */
+  private readonly domain: DomainName;
 
   async decideNextAction(ctx: VisionLoopContext): Promise<VisionDecision> {
     const startedAt = Date.now();
@@ -320,7 +379,7 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
           this.client.messages.create({
             model: this.model,
             max_tokens: this.maxTokens,
-            system: VISION_SYSTEM_PROMPT,
+            system: this.systemPrompt,
             tools: VISION_TOOLS as unknown as Anthropic.Tool[],
             tool_choice: { type: 'any' },
             messages,
@@ -440,7 +499,7 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
           this.client.messages.create({
             model: this.model,
             max_tokens: this.maxTokens,
-            system: A11Y_SYSTEM_PROMPT,
+            system: this.a11ySystemPrompt,
             tools: A11Y_TOOLS as unknown as Anthropic.Tool[],
             tool_choice: { type: 'any' },
             messages,

@@ -1,0 +1,35 @@
+domain: job
+keywords:
+  - 招聘
+  - 简历
+  - 面试
+  - 猎头
+  - BOSS直聘
+  - 拉勾
+  - 前程无忧
+  - 智联
+  - LinkedIn
+  - offer
+analysis_framework: |
+  岗位甄别：薪资范围、职级（P7 / L5 / Senior）、汇报关系、团队规模、出差 / 加班要求。
+  公司背景：融资轮次、员工数量变化、脉脉爆料、最近 3 个月离职率信号。
+  技能匹配度量化："必需 / 加分 / 可忽略"三档，匹配度 %。
+  薪酬谈判关注 base、bonus、stock、sign-on、vesting schedule。
+recommended_sources:
+  - name: BOSS直聘
+    url: zhipin.com
+    use_for: 国内职位、HR 直聊
+  - name: 脉脉
+    url: maimai.cn
+    use_for: 公司爆料、薪酬参考
+  - name: LinkedIn
+    url: linkedin.com
+    use_for: 外企 / 高端职位、连接内推
+  - name: Glassdoor
+    url: glassdoor.com
+    use_for: 海外薪酬、面试体验
+output_format: |
+  岗位表格横比：公司、职位、薪资、匹配度、风险点、下一步动作。
+  面试准备清单按"技术题 / 项目题 / 行为题"分档。
+  给 offer 评分前必须量化 TC（Total Compensation），不要只看 base。
+disclaimer: 职位信息与薪酬数据实时变动，以招聘方和 HR 的官方沟通为准。

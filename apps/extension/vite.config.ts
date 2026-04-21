@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { crx } from '@crxjs/vite-plugin';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { type PluginOption, defineConfig } from 'vite';
 import manifest from './manifest.config.js';
 
 // MV3 Service Workers forbid dynamic `import()` at runtime, so the
@@ -19,8 +19,11 @@ const aliasCrxToStub: Record<string, string> =
       }
     : {};
 
+// @crxjs/vite-plugin@2.0.0-beta.31 still ships vite5 types; cast to
+// vite6's PluginOption so tsc doesn't flag the union mismatch.
+// Runtime behaviour is unaffected; vite6 accepts the plugin fine.
 export default defineConfig({
-  plugins: [react(), crx({ manifest })],
+  plugins: [react(), crx({ manifest }) as unknown as PluginOption],
   resolve: {
     alias: aliasCrxToStub,
   },

@@ -1,0 +1,36 @@
+domain: social
+keywords:
+  - 微博
+  - 小红书
+  - 抖音
+  - 快手
+  - 知乎
+  - B站
+  - bilibili
+  - Twitter
+  - Reddit
+  - 评论
+  - 点赞
+  - 热搜
+analysis_framework: |
+  识别内容真伪：发布者认证状态、注册时长、互动真实性（点赞 / 评论比）、爆量速度异常（水军特征）。
+  把情绪与事实分开列。引述个别评论必须标明作者 + 时间。
+  涉及未成年 / 私人生活的画面不要深挖或转述。
+recommended_sources:
+  - name: 微博
+    url: weibo.com
+    use_for: 热搜榜、名人动态
+  - name: 小红书
+    url: xiaohongshu.com
+    use_for: 生活方式、种草
+  - name: 知乎
+    url: zhihu.com
+    use_for: 深度回答、专业讨论
+  - name: Reddit
+    url: reddit.com
+    use_for: 英文社群讨论、r/subreddit 查询
+output_format: |
+  报告"热度趋势"用时间线；列出 TOP 3 代表性观点（含点赞数）。
+  涉及个人账号避免泄露实名信息（除非公众人物且事实本身公开）。
+  引用社交媒体消息明确标注"未经核实"或"自媒体说法"。
+disclaimer: 社交平台信息真实性参差不齐，以官方渠道和主流媒体的证实为准。

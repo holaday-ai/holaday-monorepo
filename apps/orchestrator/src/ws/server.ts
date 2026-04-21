@@ -12,6 +12,7 @@ import { jwtVerify } from 'jose';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { Planner } from '../agent/planner.js';
 import { TaskController, type TaskState } from '../agent/task-controller.js';
+import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
 import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
@@ -72,13 +73,23 @@ export async function loadRehydratedTasks(): Promise<{ userCount: number; taskCo
  * through every function signature.
  */
 let injectedPlanner: Planner | null = null;
+let injectedExecutor: PlaywrightExecutor | null = null;
 
 export interface WsServerOpts {
   planner?: Planner | null;
+  /**
+   * When wired, the WS handler can dispatch `client.vision.user_input`
+   * events straight to PlaywrightExecutor — that's how the web
+   * workbench's right-side panel lets users click/type/scroll inside
+   * the remote browser. Unset in the legacy WS/SW path; the user-input
+   * handler no-ops in that case.
+   */
+  playwrightExecutor?: PlaywrightExecutor | null;
 }
 
 export function createWsServer(port: number, opts: WsServerOpts = {}) {
   injectedPlanner = opts.planner ?? null;
+  injectedExecutor = opts.playwrightExecutor ?? null;
 
   const wss = new WebSocketServer({ port, handleProtocols });
 
@@ -406,6 +417,93 @@ async function handleClientMessage(
       );
     }
     return;
+  }
+
+  if (msg.type === 'client.vision.user_input') {
+    await dispatchUserInput(msg, injectedExecutor, state.userId ?? null);
+    return;
+  }
+}
+
+type UserInputMsg = Extract<ClientMessage, { type: 'client.vision.user_input' }>;
+
+/**
+ * Dispatch a user-driven panel interaction (click / scroll / type /
+ * key) straight to PlaywrightExecutor. Exposed for unit tests; prod
+ * code path reaches it through handleClientMessage.
+ *
+ * When no executor is wired (legacy WS/SW path), log + no-op so the
+ * frontend doesn't get a hard error — the UX there is "interactive
+ * mode isn't available for your session" not "WS is broken".
+ */
+export async function dispatchUserInput(
+  msg: UserInputMsg,
+  executor: PlaywrightExecutor | null,
+  userId: string | null,
+): Promise<void> {
+  if (!executor) {
+    logger.warn(
+      { userId, kind: msg.kind, taskId: msg.taskId },
+      'user_input received but no PlaywrightExecutor wired — ignoring',
+    );
+    return;
+  }
+  try {
+    // PlaywrightExecutor's action methods take our internal PageLike.
+    // `getPage()` returns a real `Page`, but the shapes diverge on
+    // optional-arg signatures that TS rejects at the union level; the
+    // rest of the codebase uses the same `as unknown as` bridge.
+    const page = (await executor.getPage()) as unknown as Parameters<
+      PlaywrightExecutor['click']
+    >[0];
+    switch (msg.kind) {
+      case 'click': {
+        if (typeof msg.x !== 'number' || typeof msg.y !== 'number') {
+          logger.warn({ msg: 'user_input.click missing x/y' });
+          return;
+        }
+        await executor.click(page, msg.x, msg.y, msg.button ?? 'left');
+        break;
+      }
+      case 'type': {
+        if (!msg.text) return;
+        await executor.type(page, msg.text);
+        break;
+      }
+      case 'key': {
+        if (!msg.key) return;
+        await executor.pressKey(page, msg.key);
+        break;
+      }
+      case 'scroll': {
+        if (typeof msg.scrollDeltaY !== 'number') return;
+        await executor.scroll(
+          page,
+          msg.scrollDeltaY,
+          typeof msg.x === 'number' ? msg.x : undefined,
+          typeof msg.y === 'number' ? msg.y : undefined,
+        );
+        break;
+      }
+    }
+    logger.info(
+      {
+        action: 'panel_user_input',
+        kind: msg.kind,
+        taskId: msg.taskId ?? null,
+        userId,
+      },
+      'dispatched user_input to PlaywrightExecutor',
+    );
+  } catch (err) {
+    logger.error(
+      {
+        err: err instanceof Error ? err.message : String(err),
+        kind: msg.kind,
+        taskId: msg.taskId,
+      },
+      'handleUserInput failed',
+    );
   }
 }
 

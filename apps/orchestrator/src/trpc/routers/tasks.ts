@@ -8,6 +8,7 @@ import type { PlannedStep } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
+import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
 import { visionLoopTaskQueue } from '../../agent/vision-loop/task-queue.js';
 import { startVisionLoopTask } from '../../agent/vision-loop/task-runner.js';
 import { skills } from '../../db/schema/skills.js';
@@ -71,7 +72,23 @@ export const tasksRouter = router({
       // queueing intentional follow-ups) FIFO onto a single
       // Playwright Page — no racing clicks. Different users don't
       // block each other.
-      const commander = ctx.visionCommander;
+      // Per-task domain specialisation. Classifier is keyword-only
+      // (no LLM call), safe to run on every create. If the commander
+      // supports per-task specialisation, clone it with the classified
+      // domain; otherwise fall back to the generic singleton.
+      const classification = classifyDomain(input.intent);
+      const commander = ctx.visionCommander.withDomain
+        ? ctx.visionCommander.withDomain(classification.domain)
+        : ctx.visionCommander;
+      ctx.logger.info(
+        {
+          taskId,
+          domain: classification.domain,
+          confidence: classification.confidence,
+          matched: classification.matched,
+        },
+        'vision-loop domain classification',
+      );
       const userId = ctx.userId;
       const runTaskFn = () =>
         startVisionLoopTask({

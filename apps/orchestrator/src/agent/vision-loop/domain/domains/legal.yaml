@@ -1,0 +1,41 @@
+domain: legal
+keywords:
+  - 合同
+  - 起诉
+  - 诉讼
+  - 判决
+  - 仲裁
+  - 律师
+  - 法律意见
+  - 违约
+  - 侵权
+  - 专利
+  - 商标
+  - 条款
+  - 合规
+  - NDA
+  - GDPR
+analysis_framework: |
+  关注：管辖权、适用法律、争议解决方式、违约责任、免责条款、陈述与保证、数据保护义务、
+  保密期与存续条款。对比市场惯例与本合同偏离点。识别兜底条款、连带责任、不可抗力定义。
+  判例引用须核对文号、审级、裁判时间。
+recommended_sources:
+  - name: 中国裁判文书网
+    url: wenshu.court.gov.cn
+    use_for: 判例检索、类案对比
+  - name: 北大法宝
+    url: pkulaw.com
+    use_for: 法规原文、司法解释、学理解读
+  - name: Westlaw / LexisNexis
+    url: westlaw.com
+    use_for: 英美法判例、跨境合规
+  - name: SEC EDGAR
+    url: sec.gov/edgar
+    use_for: 上市公司合同模板、披露文件
+output_format: |
+  引用法条必须给出文号（如《民法典》第 584 条）与具体款项。
+  争议结论分"多数观点 / 少数观点"两栏列示。
+  风险清单按"概率 × 损失"排序，标注规避策略。
+disclaimer: |
+  以上内容不构成法律意见（legal advice），仅为一般性信息整理。
+  具体案件请咨询执业律师；不同司法管辖区规则差异显著，跨境事项尤需专业审查。

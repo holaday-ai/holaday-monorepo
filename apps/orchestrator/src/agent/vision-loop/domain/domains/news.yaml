@@ -1,0 +1,32 @@
+domain: news
+keywords:
+  - 新闻
+  - 头条
+  - 资讯
+  - 热榜
+  - 报道
+  - 快讯
+  - 澎湃
+  - 财经新闻
+analysis_framework: |
+  交叉核实：同一事件查 ≥ 2 个独立来源，优先一手报道（发布机构 / 当事人声明）。
+  区分事实（who/what/when/where）与解读。留意标题党与摘要偏差。
+  报道时间戳必须精确到日，涉及股价 / 汇率等时效性高的话题精确到小时。
+recommended_sources:
+  - name: 新华社
+    url: news.cn
+    use_for: 政策、官方口径
+  - name: 澎湃新闻
+    url: thepaper.cn
+    use_for: 深度报道、地方新闻
+  - name: Reuters
+    url: reuters.com
+    use_for: 国际事件、金融市场
+  - name: Bloomberg
+    url: bloomberg.com
+    use_for: 财经资讯、公司快讯
+output_format: |
+  每条结论后附 [来源 · 时间] 脚注。
+  多源冲突时分别列出并标注倾向（"A 报道 X；B 报道 Y"）。
+  不要引用未经核实的社交媒体消息为事实。
+disclaimer: 新闻信息可能持续更新，以最新权威发布为准。

@@ -101,7 +101,10 @@ async function main() {
   // pre-self-heal behaviour (controller's MAX_STEP_RETRIES=1 still retries
   // with the original selector, which is fine for StubPlanner's about:blank
   // smoke).
-  const ws = createWsServer(env.WS_PORT, { planner });
+  const ws = createWsServer(env.WS_PORT, {
+    planner,
+    playwrightExecutor: playwrightExecutor ?? null,
+  });
   logger.info(
     { port: env.WS_PORT, selfHeal: env.ANTHROPIC_API_KEY ? 'anthropic' : 'stub-noop' },
     'WS server listening',
