@@ -99,6 +99,12 @@ export async function executeCdpAction(tabId: number, action: VisionAction): Pro
         return await doScroll(tabId, action);
       case 'navigate':
         return await doNavigate(tabId, action);
+      case 'wait_for_human':
+        // Orchestrator does the polling + Layer 4 bookkeeping for this
+        // action; the extension just acknowledges so the runner sees
+        // ok:true and proceeds to the wait loop (triggered server-side
+        // via the runner's turn subscription).
+        return { ok: true, message: `wait_for_human: ${action.reason}` };
       case 'wait':
         return await doWait(action);
       case 'screenshot':

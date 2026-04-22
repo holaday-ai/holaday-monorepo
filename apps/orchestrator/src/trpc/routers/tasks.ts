@@ -193,6 +193,26 @@ export const tasksRouter = router({
               ctx.logger.warn({ err, taskId }, 'broadcast captcha_resolved failed');
             }
           },
+          onDegrade(info) {
+            ctx.logger.info(
+              { taskId, level: info.level, strategy: info.strategy, ok: info.ok },
+              'degradation tier attempted',
+            );
+            try {
+              broadcastToUser(userId, {
+                type: 'server.vision.degrade',
+                taskId,
+                level: info.level,
+                strategy: info.strategy,
+                ok: info.ok,
+                message: info.message,
+                ...(info.handoffToExtension ? { handoffToExtension: true } : {}),
+                ...(info.nextUrl ? { nextUrl: info.nextUrl } : {}),
+              });
+            } catch (err) {
+              ctx.logger.warn({ err, taskId }, 'broadcast degrade failed');
+            }
+          },
           onExecutorFallback(info) {
             ctx.logger.info(
               { taskId, reason: info.reason, available: info.available },

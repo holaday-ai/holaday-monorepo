@@ -84,6 +84,16 @@ export interface UiCaptchaWait {
  * anti-bot strikes. Sticky for the lifetime of the task — we don't
  * clear it if subsequent ticks succeed.
  */
+export interface UiDegradeEvent {
+  level: number;
+  strategy: string;
+  ok: boolean;
+  message: string;
+  handoffToExtension?: boolean;
+  nextUrl?: string;
+  at: number;
+}
+
 export interface UiExecutorFallback {
   /**
    * true  → swap actually took effect; runner is now using the

@@ -803,6 +803,12 @@ function toolUseBlockFor(action: VisionAction, id: string): Anthropic.ToolUseBlo
       return { ...base, name: 'computer_scroll', input: { dy: action.dy } };
     case 'navigate':
       return { ...base, name: 'computer_navigate', input: { url: action.url } };
+    case 'wait_for_human':
+      return {
+        ...base,
+        name: 'computer_wait_for_human',
+        input: { reason: action.reason },
+      };
     case 'wait':
       return { ...base, name: 'computer_wait', input: { ms: action.ms } };
     case 'screenshot':
@@ -969,6 +975,12 @@ function toolUseBlockForA11y(action: A11yAction, id: string): Anthropic.ToolUseB
       return { ...base, name: 'a11y_screenshot', input: {} };
     case 'navigate':
       return { ...base, name: 'a11y_navigate', input: { url: action.url } };
+    case 'wait_for_human':
+      return {
+        ...base,
+        name: 'a11y_wait_for_human',
+        input: { reason: action.reason },
+      };
     case 'done':
       return { ...base, name: 'a11y_task_done', input: { summary: action.summary } };
     case 'give_up':
@@ -1028,8 +1040,9 @@ export const VISION_SYSTEM_PROMPT = `你是一个浏览器自动化助手。你�
 - \`computer_navigate { url }\` — 直接跳到目标 URL（等价于"地址栏输入+回车"）。需要换站点 / 换路径时**首选此工具**，不要再走点击地址栏那一长串。
 - \`computer_wait { ms }\` — 等待页面加载。点击/导航后几乎总要 wait 500–1500ms 再观察。不要当作"步骤间默认停顿"滥用。
 - \`computer_screenshot\` — 不执行动作只重新观察。罕用；主要用在你知道页面已经变化但不是你触发的（例如系统弹窗）。
-- \`task_done { summary }\` — 任务完成。\`summary\` 必须是**中文**。
-- \`task_give_up { reason }\` — 技术上无法完成。\`reason\` 简洁说明原因。
+- \`computer_wait_for_human { reason }\` — 页面出现"人机验证"类拦截（Cloudflare "Just a moment" / reCAPTCHA / hCaptcha / Turnstile / "安全验证" / "Access Denied" / 滑块验证等）时**必须**调用此工具。系统会暂停任务、提醒用户在浏览器 Panel 中完成验证，然后自动恢复。**不要自己尝试点击验证码**，也不要直接 \`task_give_up\`。
+- \`task_done { summary }\` — 任务完成。\`summary\` 必须是**中文**，哪怕只有一两个字也不要省略。
+- \`task_give_up { reason }\` — 技术上无法完成。\`reason\` 必须填写原因。遇到验证码时**不要**走这条路；走 \`computer_wait_for_human\`。
 
 # 规则
 
@@ -1038,7 +1051,8 @@ export const VISION_SYSTEM_PROMPT = `你是一个浏览器自动化助手。你�
 - 给输入框输入文字前必须先 \`computer_click\` 聚焦。
 - 导航后 / 提交表单后 / 点击可能触发加载的链接后 → **下一步用 \`computer_wait\`**，再下一轮观察。
 - 如果超过 25 轮还没进展，调用 \`task_give_up\` 并说明卡在哪里。
-- **永远不要输入用户的密码、2FA 验证码、支付信息**，即使对应字段已聚焦。遇到这类字段 → \`task_give_up\` reason="需要用户手动输入凭据"。
+- **永远不要输入用户的密码、2FA 验证码、支付信息**，即使对应字段已聚焦。遇到这类字段 → \`computer_wait_for_human\` reason="需要用户手动输入凭据"。
+- **反爬拦截必须用 \`computer_wait_for_human\`，不能 \`task_give_up\`**：看到 Cloudflare challenge、reCAPTCHA、hCaptcha、Turnstile、"请完成安全验证"、"Access Denied"、"Just a moment"、滑块验证、短信/邮箱验证码 — 一律调 \`computer_wait_for_human\`。只有当系统明确告诉你"验证超时未完成"（你会在操作历史里看到相关消息）后，你才能 \`task_give_up\`。
 
 # 安全
 
@@ -1090,8 +1104,9 @@ Accessibility snapshot 是 YAML-ish 文本，一行一个节点。交互元素�
 - a11y_wait { ms } — 等页面更新。点击 / 导航后 500-1500ms 再观察。
 - a11y_screenshot — 不操作，只重新观察。罕用。
 - a11y_navigate { url } — 直接导航到 URL（等价于地址栏输入+回车）。优于 "点地址栏-清空-打字-回车" 这一长串。
+- a11y_wait_for_human { reason } — 页面出现反爬/人机验证时**必须**用此工具（snapshot 里出现 "Just a moment" / reCAPTCHA / hCaptcha / Turnstile / "安全验证" / "Access Denied" / 滑块 等关键词）。系统自动进入等待 + 自动恢复流程。不要自己试图破解验证码。
 - a11y_task_done { summary } — 完成。summary 必须中文。
-- a11y_task_give_up { reason } — 放弃并说明原因。
+- a11y_task_give_up { reason } — 放弃并说明原因。**反爬场景改用 \`a11y_wait_for_human\`；此工具只用于真正无法完成的任务**（比如必须登录但无凭据、站点结构性不可访问）。
 
 # 规则
 
@@ -1099,7 +1114,8 @@ Accessibility snapshot 是 YAML-ish 文本，一行一个节点。交互元素�
 - 只操作 snapshot 里真实出现的 ref。看不到 ref 时先 scroll / wait，不要猜。
 - 输入框要用 a11y_type_in_ref（自带聚焦），不要 click_ref + type 两步走。
 - 超过 25 轮仍无进展 → a11y_task_give_up 并说明卡点。
-- **永远不要输入密码、2FA 码、支付信息** — 遇到这类字段直接 give_up reason="需要用户手动输入凭据"。
+- **永远不要输入密码、2FA 码、支付信息** — 遇到这类字段调 \`a11y_wait_for_human\` reason="需要用户手动输入凭据"，不要 give_up。
+- **反爬/验证码必须走 \`a11y_wait_for_human\`**，不可 give_up。只有当系统明确告诉你"验证超时未完成"（在操作历史里）你才能 give_up。
 - 不要触发破坏性操作（注销/删除账户/退订），除非用户明确要求。`;
 
 /**

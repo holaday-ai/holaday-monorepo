@@ -87,16 +87,28 @@ describe('decodeA11yToolUse', () => {
     if (r.kind === 'give_up') expect(r.reason).toMatch(/a11y_press_key bad input/);
   });
 
-  it('task_give_up without a reason still returns give_up (fallback)', () => {
+  it('task_give_up without a reason still returns give_up (fallback placeholder)', () => {
     const r = decodeA11yToolUse('a11y_task_give_up', {});
     expect(r.kind).toBe('give_up');
-    if (r.kind === 'give_up') expect(r.reason).toMatch(/without a valid reason/);
+    if (r.kind === 'give_up') expect(r.reason.length).toBeGreaterThan(0);
+  });
+
+  it('task_done without a summary returns done with a placeholder (never fails the task)', () => {
+    const r = decodeA11yToolUse('a11y_task_done', {});
+    expect(r.kind).toBe('done');
+    if (r.kind === 'done') expect(r.summary.length).toBeGreaterThan(0);
+  });
+
+  it('a11y_wait_for_human decodes with the reason text', () => {
+    const r = decodeA11yToolUse('a11y_wait_for_human', { reason: '滑块验证' });
+    expect(r.kind).toBe('wait_for_human');
+    if (r.kind === 'wait_for_human') expect(r.reason).toBe('滑块验证');
   });
 });
 
 describe('A11Y_TOOLS schema', () => {
-  it('exposes exactly 9 tool primitives', () => {
-    expect(A11Y_TOOLS).toHaveLength(9);
+  it('exposes exactly 10 tool primitives', () => {
+    expect(A11Y_TOOLS).toHaveLength(10);
   });
 
   it('every tool name starts with a11y_', () => {
@@ -118,6 +130,7 @@ describe('A11Y_TOOLS schema', () => {
         'a11y_task_give_up',
         'a11y_type_in_ref',
         'a11y_wait',
+        'a11y_wait_for_human',
       ].sort(),
     );
   });

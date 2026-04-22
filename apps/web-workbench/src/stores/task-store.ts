@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { trpc } from '@/lib/trpc';
 import type {
   UiCaptchaWait,
+  UiDegradeEvent,
   UiExecutorFallback,
   UiScreencast,
   UiStep,
@@ -34,6 +35,8 @@ export interface TaskStore {
   captchaWaitByTask: Record<string, UiCaptchaWait>;
   /** Sticky executor-fallback notice per task (Layer 5). */
   executorFallbackByTask: Record<string, UiExecutorFallback>;
+  /** Latest degradation-chain attempt per task — most recent wins. */
+  degradeByTask: Record<string, UiDegradeEvent>;
 
   setSelectedTask(taskId: string | null): void;
   refreshTasks(): Promise<void>;
@@ -51,6 +54,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   screencastByTask: {},
   captchaWaitByTask: {},
   executorFallbackByTask: {},
+  degradeByTask: {},
 
   setSelectedTask(taskId) {
     set({ selectedTaskId: taskId });
@@ -226,6 +230,23 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         delete next[msg.taskId];
         return { captchaWaitByTask: next };
       });
+      return;
+    }
+    if (msg.type === 'server.vision.degrade') {
+      set((prev) => ({
+        degradeByTask: {
+          ...prev.degradeByTask,
+          [msg.taskId]: {
+            level: msg.level,
+            strategy: msg.strategy,
+            ok: msg.ok,
+            message: msg.message,
+            ...(msg.handoffToExtension ? { handoffToExtension: true } : {}),
+            ...(msg.nextUrl ? { nextUrl: msg.nextUrl } : {}),
+            at: Date.now(),
+          },
+        },
+      }));
       return;
     }
     if (msg.type === 'server.vision.executor_fallback') {

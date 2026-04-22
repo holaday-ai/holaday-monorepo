@@ -268,6 +268,204 @@ describe('startVisionLoopTask — Layer 4 captcha wait', () => {
   }, 10_000);
 });
 
+describe('startVisionLoopTask — wait_for_human action triggers Layer 4', () => {
+  // Regression: commander in Bug 2 directly emits wait_for_human when
+  // it spots a captcha wall. The runner must synthesise an anti-bot
+  // signal from that action (even though no driver error / snapshot
+  // match exists) so the existing Layer 4 wait loop runs.
+  it('synthesises a captcha signal and fires onCaptchaDetected when the commander calls wait_for_human', async () => {
+    const fakePage = { url: () => 'https://x.test/', title: async () => '' };
+    const executor = {
+      getPage: async () => fakePage,
+      screenshot: async () => ({
+        base64: 'AAA=',
+        viewportWidth: 1280,
+        viewportHeight: 800,
+      }),
+      click: async () => ({ ok: true }),
+      type: async () => ({ ok: true }),
+      pressKey: async () => ({ ok: true }),
+      scroll: async () => ({ ok: true }),
+      wait: async () => ({ ok: true }),
+      accessibilitySnapshot: async () => ({
+        // Snapshot already clean → auto-resolves immediately.
+        text: '- heading "Welcome"',
+        refs: [],
+        url: 'https://x.test/',
+        title: '',
+      }),
+      resetPageForTask: async () => {},
+    } as unknown as PlaywrightExecutor;
+
+    // Script a single wait_for_human emission; follow-up tick calls done.
+    let tickCount = 0;
+    const commander: VisionLoopCommander = {
+      async decideNextAction(ctx) {
+        tickCount += 1;
+        const vp = ctx.observation;
+        return {
+          action:
+            tickCount === 1
+              ? { kind: 'wait_for_human', reason: 'Cloudflare 验证' }
+              : { kind: 'done', summary: 'ok' },
+          image: {
+            base64: 'AA==',
+            originalWidth: vp.viewportWidth || 1,
+            originalHeight: vp.viewportHeight || 1,
+            resizedWidth: vp.viewportWidth || 1,
+            resizedHeight: vp.viewportHeight || 1,
+            scaleX: 1,
+            scaleY: 1,
+          },
+          toolUseId: `tu_${tickCount}`,
+          elapsedMs: 5,
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+        };
+      },
+    };
+
+    const prev = {
+      timeout: process.env.CAPTCHA_WAIT_TIMEOUT_MS,
+      poll: process.env.CAPTCHA_POLL_INTERVAL_MS,
+    };
+    process.env.CAPTCHA_WAIT_TIMEOUT_MS = '300';
+    process.env.CAPTCHA_POLL_INTERVAL_MS = '30';
+
+    const detections: Array<{ message: string }> = [];
+    const resolutions: Array<{ reason: string }> = [];
+    await startVisionLoopTask({
+      taskId: 'tsk_wfh',
+      userId: 'usr_test',
+      intent: 'browse a protected site',
+      commander,
+      playwrightExecutor: executor,
+      maxSteps: 3,
+      onCaptchaDetected: (info) => {
+        detections.push(info);
+      },
+      onCaptchaResolved: (info) => {
+        resolutions.push(info);
+      },
+    });
+
+    if (prev.timeout === undefined) delete process.env.CAPTCHA_WAIT_TIMEOUT_MS;
+    else process.env.CAPTCHA_WAIT_TIMEOUT_MS = prev.timeout;
+    if (prev.poll === undefined) delete process.env.CAPTCHA_POLL_INTERVAL_MS;
+    else process.env.CAPTCHA_POLL_INTERVAL_MS = prev.poll;
+
+    expect(detections.length).toBeGreaterThanOrEqual(1);
+    expect(detections[0]?.message).toMatch(/Cloudflare 验证/);
+    // Snapshot was clean → auto-resolve.
+    expect(resolutions[0]?.reason).toBe('auto');
+  }, 10_000);
+});
+
+describe('startVisionLoopTask — DegradationChain on Layer 4 timeout', () => {
+  // Regression: after the Bug 3 fix, a Layer 4 timeout walks the chain
+  // one tier. The chain + onDegrade hook must fire exactly when the
+  // captcha wait reaches `reason='timeout'` (not on auto-resolve).
+  it('fires onDegrade when wait_for_human times out, with the first-tier strategy', async () => {
+    const fakePage = { url: () => 'https://x.test/', title: async () => '' };
+    const clearCookiesCalls: string[] = [];
+    const executor = {
+      getPage: async () => fakePage,
+      screenshot: async () => ({
+        base64: 'AAA=',
+        viewportWidth: 1280,
+        viewportHeight: 800,
+      }),
+      click: async () => ({ ok: true }),
+      type: async () => ({ ok: true }),
+      pressKey: async () => ({ ok: true }),
+      scroll: async () => ({ ok: true }),
+      wait: async () => ({ ok: true }),
+      accessibilitySnapshot: async () => ({
+        text: '- heading "Just a moment..."',
+        refs: [],
+        url: 'https://x.test/',
+        title: 'Just a moment',
+      }),
+      resetPageForTask: async () => {},
+      navigate: async () => ({ ok: true }),
+      browser: {
+        contexts: () => [
+          {
+            clearCookies: async () => {
+              clearCookiesCalls.push('c');
+            },
+            addInitScript: async () => {},
+          },
+        ],
+      },
+    } as unknown as PlaywrightExecutor;
+
+    let tickCount = 0;
+    const commander: VisionLoopCommander = {
+      async decideNextAction(ctx) {
+        tickCount += 1;
+        const vp = ctx.observation;
+        return {
+          action:
+            tickCount === 1
+              ? { kind: 'wait_for_human', reason: 'Cloudflare' }
+              : { kind: 'done', summary: 'ok' },
+          image: {
+            base64: 'AA==',
+            originalWidth: vp.viewportWidth || 1,
+            originalHeight: vp.viewportHeight || 1,
+            resizedWidth: vp.viewportWidth || 1,
+            resizedHeight: vp.viewportHeight || 1,
+            scaleX: 1,
+            scaleY: 1,
+          },
+          toolUseId: `tu_${tickCount}`,
+          elapsedMs: 5,
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+        };
+      },
+    };
+
+    const prev = {
+      timeout: process.env.CAPTCHA_WAIT_TIMEOUT_MS,
+      poll: process.env.CAPTCHA_POLL_INTERVAL_MS,
+    };
+    process.env.CAPTCHA_WAIT_TIMEOUT_MS = '80';
+    process.env.CAPTCHA_POLL_INTERVAL_MS = '15';
+
+    const degrades: Array<{ level: number; strategy: string }> = [];
+    await startVisionLoopTask({
+      taskId: 'tsk_deg',
+      userId: 'usr_test',
+      intent: 'browse a protected site',
+      commander,
+      playwrightExecutor: executor,
+      maxSteps: 3,
+      onCaptchaDetected: () => {},
+      onCaptchaResolved: () => {},
+      onDegrade: (info) => {
+        degrades.push(info);
+      },
+    });
+
+    if (prev.timeout === undefined) delete process.env.CAPTCHA_WAIT_TIMEOUT_MS;
+    else process.env.CAPTCHA_WAIT_TIMEOUT_MS = prev.timeout;
+    if (prev.poll === undefined) delete process.env.CAPTCHA_POLL_INTERVAL_MS;
+    else process.env.CAPTCHA_POLL_INTERVAL_MS = prev.poll;
+
+    // First degrade tier is profile_rotation; it should have called
+    // clearCookies on our fake context.
+    expect(degrades.length).toBeGreaterThanOrEqual(1);
+    expect(degrades[0]?.strategy).toBe('profile_rotation');
+    expect(clearCookiesCalls.length).toBeGreaterThanOrEqual(1);
+  }, 15_000);
+});
+
 describe('startVisionLoopTask — Layer 5 threshold latch', () => {
   it('does not fire onExecutorFallback when strike count stays below the threshold', async () => {
     // Only one captcha-flavoured failure in the whole loop. Layer 5

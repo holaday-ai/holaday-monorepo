@@ -40,6 +40,7 @@ export type A11yAction =
   | { kind: 'wait'; ms: number }
   | { kind: 'screenshot' }
   | { kind: 'navigate'; url: string }
+  | { kind: 'wait_for_human'; reason: string }
   | { kind: 'done'; summary: string }
   | { kind: 'give_up'; reason: string };
 
@@ -68,11 +69,18 @@ const screenshotSchema = z.object({}).passthrough();
 const navigateSchema = z.object({
   url: z.string().url(),
 });
+const waitForHumanSchema = z.object({
+  reason: z.string().min(1).max(512),
+});
+// Matches actions.ts — a missing `summary` / `reason` must not fail
+// the task (models sometimes emit naked terminal calls). Keep optional
+// + default to empty; the decoder below fills in a placeholder so the
+// UI never shows a blank result card.
 const doneSchema = z.object({
-  summary: z.string().min(1),
+  summary: z.string().max(4_000).optional().default(''),
 });
 const giveUpSchema = z.object({
-  reason: z.string().min(1),
+  reason: z.string().max(4_000).optional().default(''),
 });
 
 /**
@@ -160,6 +168,18 @@ export const A11Y_TOOLS = [
       required: ['url'],
       properties: {
         url: { type: 'string', description: 'Full URL including scheme.' },
+      },
+    },
+  },
+  {
+    name: 'a11y_wait_for_human',
+    description:
+      'Pause the task and request human help (captcha, 2FA, age gate, cookie consent). Orchestrator polls the accessibility tree until the challenge clears, then resumes the loop. Prefer over a11y_task_give_up for ANY security-verification surface.',
+    input_schema: {
+      type: 'object' as const,
+      required: ['reason'],
+      properties: {
+        reason: { type: 'string' },
       },
     },
   },
@@ -259,22 +279,22 @@ export function decodeA11yToolUse(toolName: string, input: unknown): A11yAction 
       }
       return { kind: 'navigate', url: r.data.url };
     }
+    case 'a11y_wait_for_human': {
+      const r = waitForHumanSchema.safeParse(input);
+      const reason = (r.success ? r.data.reason : '') || '需要人工验证';
+      return { kind: 'wait_for_human', reason };
+    }
     case 'a11y_task_done': {
       const r = doneSchema.safeParse(input);
-      if (!r.success) {
-        return {
-          kind: 'give_up',
-          reason: `a11y_task_done bad input: ${r.error.message.slice(0, 200)}`,
-        };
-      }
-      return { kind: 'done', summary: r.data.summary };
+      const summary =
+        (r.success ? r.data.summary : '') || '(commander 未提供摘要)';
+      return { kind: 'done', summary };
     }
     case 'a11y_task_give_up': {
       const r = giveUpSchema.safeParse(input);
-      if (!r.success) {
-        return { kind: 'give_up', reason: 'a11y_task_give_up called without a valid reason' };
-      }
-      return { kind: 'give_up', reason: r.data.reason };
+      const reason =
+        (r.success ? r.data.reason : '') || 'Claude 调用 a11y_task_give_up 但未提供原因';
+      return { kind: 'give_up', reason };
     }
     default:
       return {

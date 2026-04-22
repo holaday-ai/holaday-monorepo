@@ -108,14 +108,40 @@ describe('decodeToolUse', () => {
     const a = decodeToolUse('task_give_up', {});
     expect(a.kind).toBe('give_up');
     if (a.kind === 'give_up') {
-      expect(a.reason).toMatch(/without a valid reason/);
+      // Text is Chinese now ("未提供原因"); keep this test forgiving so
+      // a future wording tweak doesn't force a test update — all we
+      // care about is non-empty fallback text.
+      expect(a.reason.length).toBeGreaterThan(0);
     }
+  });
+
+  it('task_done without a summary emits a placeholder instead of failing the task', () => {
+    // Reason: Claude occasionally calls task_done with {} — pre-fix
+    // that became a give_up with `summary Required` and failed the
+    // whole task. The fix must let the loop exit with a placeholder.
+    const a = decodeToolUse('task_done', {});
+    expect(a.kind).toBe('done');
+    if (a.kind === 'done') {
+      expect(a.summary.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('computer_wait_for_human decodes with the reason text', () => {
+    const a = decodeToolUse('computer_wait_for_human', { reason: '需要 Cloudflare 验证' });
+    expect(a.kind).toBe('wait_for_human');
+    if (a.kind === 'wait_for_human') expect(a.reason).toBe('需要 Cloudflare 验证');
+  });
+
+  it('computer_wait_for_human with no reason falls back to placeholder text', () => {
+    const a = decodeToolUse('computer_wait_for_human', {});
+    expect(a.kind).toBe('wait_for_human');
+    if (a.kind === 'wait_for_human') expect(a.reason.length).toBeGreaterThan(0);
   });
 });
 
 describe('VISION_TOOLS schema', () => {
-  it('exposes exactly 9 tool primitives', () => {
-    expect(VISION_TOOLS).toHaveLength(9);
+  it('exposes exactly 10 tool primitives', () => {
+    expect(VISION_TOOLS).toHaveLength(10);
   });
 
   it('every tool has a name, description, and input_schema.type=object', () => {
@@ -139,6 +165,7 @@ describe('VISION_TOOLS schema', () => {
         'computer_scroll',
         'computer_type',
         'computer_wait',
+        'computer_wait_for_human',
         'task_done',
         'task_give_up',
       ].sort(),

@@ -53,6 +53,17 @@ export type VisionAction =
       url: string;
     }
   | {
+      kind: 'wait_for_human';
+      /**
+       * Short human-readable reason shown to the user while the task
+       * pauses (e.g. "Cloudflare 验证页"). Synthesises a captcha
+       * signal so the existing Layer 4 wait loop runs; when the user
+       * resolves the challenge (or Layer 4 times out) the commander
+       * regains control.
+       */
+      reason: string;
+    }
+  | {
       kind: 'wait';
       ms: number;
     }
@@ -147,6 +158,22 @@ export const VISION_TOOLS = [
     },
   },
   {
+    name: 'computer_wait_for_human',
+    description:
+      'Pause the task because the page needs human interaction (captcha, 2FA, age gate, cookie consent the user should review). The system broadcasts a "needs verification" signal to the user, polls the page until the challenge clears, and resumes the loop. Use this instead of task_give_up for ANY security-challenge page — Cloudflare, reCAPTCHA, hCaptcha, Turnstile, "Access Denied", "Just a moment", "安全验证". NEVER guess through the challenge yourself.',
+    input_schema: {
+      type: 'object' as const,
+      required: ['reason'],
+      properties: {
+        reason: {
+          type: 'string',
+          description:
+            'One-sentence Chinese description of the challenge (e.g. "需要 Cloudflare 人机验证"). Shown to the user in the pending-card.',
+        },
+      },
+    },
+  },
+  {
     name: 'computer_wait',
     description:
       'Pause briefly (used when a prior action is still applying). Do not use as a default between steps.',
@@ -229,15 +256,24 @@ const scrollInputSchema = z.object({
 const navigateInputSchema = z.object({
   url: z.string().url().max(2048),
 });
+const waitForHumanInputSchema = z.object({
+  reason: z.string().min(1).max(512),
+});
 const waitInputSchema = z.object({
   ms: z.coerce.number().int().min(100).max(10_000),
 });
 const screenshotInputSchema = z.object({}).passthrough();
+// Claude occasionally emits `task_done` / `task_give_up` with NO
+// arguments at all (esp. when the tool's required schema is long + the
+// model decides the terminal state mid-thought). Previously we failed
+// the whole task with "summary Required"; now we tolerate empty
+// payloads and fall back to placeholder text so the loop still exits
+// cleanly. Short strings (length 1..4000) are accepted as-is.
 const doneInputSchema = z.object({
-  summary: z.string().min(1),
+  summary: z.string().max(4_000).optional().default(''),
 });
 const giveUpInputSchema = z.object({
-  reason: z.string().min(1),
+  reason: z.string().max(4_000).optional().default(''),
 });
 
 /**
@@ -304,6 +340,14 @@ export function decodeToolUse(toolName: string, input: unknown): VisionAction {
       }
       return { kind: 'navigate', url: r.data.url };
     }
+    case 'computer_wait_for_human': {
+      const r = waitForHumanInputSchema.safeParse(input);
+      // A reason-less call is still actionable (we know the model
+      // wants human help), so don't reject — fall back to placeholder
+      // text. The UX card only shows the reason as supplementary info.
+      const reason = (r.success ? r.data.reason : '') || '需要人工验证';
+      return { kind: 'wait_for_human', reason };
+    }
     case 'computer_wait': {
       const r = waitInputSchema.safeParse(input);
       if (!r.success) {
@@ -320,23 +364,18 @@ export function decodeToolUse(toolName: string, input: unknown): VisionAction {
     }
     case 'task_done': {
       const r = doneInputSchema.safeParse(input);
-      if (!r.success) {
-        return {
-          kind: 'give_up',
-          reason: `task_done bad input: ${r.error.message.slice(0, 200)}`,
-        };
-      }
-      return { kind: 'done', summary: r.data.summary };
+      // Never fail the whole task on a missing summary — the model
+      // decided "done", we honour that. Empty summary surfaces a
+      // placeholder so downstream UI shows something.
+      const summary =
+        (r.success ? r.data.summary : '') || '(commander 未提供摘要)';
+      return { kind: 'done', summary };
     }
     case 'task_give_up': {
       const r = giveUpInputSchema.safeParse(input);
-      if (!r.success) {
-        // Fallback: if Claude called task_give_up without a reason,
-        // we still want to exit the loop — manufacture a reason rather
-        // than recursing.
-        return { kind: 'give_up', reason: 'Claude called task_give_up without a valid reason' };
-      }
-      return { kind: 'give_up', reason: r.data.reason };
+      const reason =
+        (r.success ? r.data.reason : '') || 'Claude 调用 task_give_up 但未提供原因';
+      return { kind: 'give_up', reason };
     }
     default:
       return {

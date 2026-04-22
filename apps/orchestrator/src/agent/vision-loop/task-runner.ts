@@ -23,6 +23,7 @@ import {
   hasConnectedSwClient,
   requestVisionObservationFromSW,
 } from '../../ws/server.js';
+import { logger } from '../../config/logger.js';
 import {
   type AntiBotSignal,
   describeSignal,
@@ -30,6 +31,7 @@ import {
   detectFromSnapshot,
 } from './anti-bot-detector.js';
 import type { VisionLoopCommander } from './commander.js';
+import { DegradationChain, type DegradationResult } from './degradation-chain.js';
 import type { PageLike, PlaywrightExecutor } from './playwright-executor.js';
 import type {
   A11yActionFn,
@@ -157,6 +159,19 @@ export interface StartVisionLoopTaskOptions {
    * install / open the extension.
    */
   onExecutorFallback?: (info: { reason: 'anti-bot'; available: boolean }) => void;
+  /**
+   * Fires when the DegradationChain attempts a strategy after Layer 4
+   * has timed out waiting for human verification. Each call represents
+   * one tier: profile rotation → proxy → search-engine swap → search
+   * API → extension handoff. The chain stops at the first ok:true
+   * strategy; subsequent ticks continue normally.
+   *
+   * Routers forward this to `server.vision.degrade` so the step card
+   * can display "正在尝试替代方案 (level N)".
+   */
+  onDegrade?: (info: DegradationResult) => void;
+  /** Dependency-injection seam for tests to supply a hand-rolled chain. */
+  degradationChain?: DegradationChain;
 }
 
 /**
@@ -216,6 +231,12 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
   // detection; crossing the threshold triggers a transport swap.
   let antiBotStrikeCount = 0;
   let fallbackTriggered = false;
+  // Bug 3 — DegradationChain per-task state. `lastDegradationLevel`
+  // tracks which tier we've already attempted so the next invocation
+  // (after the next Layer 4 timeout) escalates to the next tier
+  // rather than retrying the cheapest one forever.
+  const degradationChain = opts.degradationChain ?? new DegradationChain();
+  let lastDegradationLevel = 0;
   const captchaWaitTimeoutMs = readEnvPositiveInt(
     'CAPTCHA_WAIT_TIMEOUT_MS',
     DEFAULT_CAPTCHA_WAIT_TIMEOUT_MS,
@@ -251,7 +272,6 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
       if (!pendingCaptchaSignal) return;
       const signal = pendingCaptchaSignal;
       pendingCaptchaSignal = null;
-      if (!transport.accessibilityFn) return; // no polling surface
       opts.onCaptchaDetected?.({
         antiBotType: signal.type,
         message: `${describeSignal(signal)}（匹配：${signal.rawMatch}）`,
@@ -260,8 +280,14 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
       const started = Date.now();
       const deadline = started + captchaWaitTimeoutMs;
       let resolved: 'auto' | 'timeout' = 'timeout';
+      // When `accessibilityFn` is absent (legacy WS transport with no
+      // a11y pair), we can't poll for resolution — sleep the full
+      // timeout and let the human decide. The flow still runs so the
+      // UI sees captcha_detected → captcha_resolved(timeout), which
+      // triggers the downstream degradation chain.
       while (Date.now() < deadline) {
         await new Promise<void>((r) => setTimeout(r, captchaPollIntervalMs));
+        if (!transport.accessibilityFn) continue;
         try {
           const snap = await transport.accessibilityFn(-1);
           const stillThere = detectFromSnapshot(snap.snapshot);
@@ -276,6 +302,66 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
         }
       }
       opts.onCaptchaResolved?.({ reason: resolved });
+
+      // Bug 3 integration — when the user couldn't solve it in the
+      // Layer 4 window, walk the DegradationChain one tier. Per-task
+      // state keeps `lastDegradationLevel` so successive timeouts
+      // escalate instead of re-trying the cheapest tier forever.
+      if (resolved === 'timeout') {
+        const result = await degradationChain.tryNext(
+          {
+            taskId: opts.taskId,
+            userId: opts.userId,
+            intent: opts.intent,
+            signal,
+            executor: opts.playwrightExecutor ?? null,
+            strikes: antiBotStrikeCount,
+          },
+          lastDegradationLevel,
+        );
+        if (result) {
+          lastDegradationLevel = result.level;
+          opts.onDegrade?.(result);
+          logger.info(
+            {
+              taskId: opts.taskId,
+              level: result.level,
+              strategy: result.strategy,
+              ok: result.ok,
+              handoff: result.handoffToExtension ?? false,
+              nextUrl: result.nextUrl ?? null,
+            },
+            'degradation tier attempted after Layer 4 timeout',
+          );
+          // If the strategy nominated a new URL, navigate there so the
+          // next tick's screenshot reflects the escape. navigate() has
+          // its own goto-no-op fallback.
+          if (result.nextUrl && opts.playwrightExecutor) {
+            try {
+              const page = (await opts.playwrightExecutor.getPage()) as unknown as PageLike;
+              await opts.playwrightExecutor.navigate(page, result.nextUrl);
+            } catch (err) {
+              logger.warn(
+                { err: err instanceof Error ? err.message : String(err) },
+                'degrade: post-strategy navigate failed',
+              );
+            }
+          }
+          // Extension handoff folds into existing Layer 5 plumbing.
+          if (result.handoffToExtension && !fallbackTriggered && opts.playwrightExecutor) {
+            fallbackTriggered = true;
+            const available = hasConnectedSwClient(opts.userId);
+            if (available) {
+              const ws = buildWsTransport(opts.userId, opts.taskId);
+              runner.setTransport({
+                screenshotFn: ws.screenshotFn,
+                actionFn: ws.actionFn,
+              });
+            }
+            opts.onExecutorFallback?.({ reason: 'anti-bot', available });
+          }
+        }
+      }
     },
   });
 
@@ -377,10 +463,25 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
     runner.on('turn', (ev) => {
       const exec = ev.turn.executionResult;
       const snap = 'snapshot' in ev.turn ? ev.turn.snapshot : null;
-      const antiBot = detectAntiBot({
-        errorMessage: exec?.ok === false ? exec.message : null,
-        snapshotText: snap,
-      });
+      const action = ev.turn.action;
+      // wait_for_human is the commander's explicit "stop and ask the
+      // user" signal. Synthesise a matching anti-bot signal so the
+      // rest of the plumbing (afterTickHook's poll loop + downstream
+      // hooks) works identically whether the commander or the
+      // heuristic detector raised it.
+      let antiBot: AntiBotSignal | null = null;
+      if (action.kind === 'wait_for_human') {
+        antiBot = {
+          type: 'captcha',
+          confidence: 'high',
+          rawMatch: action.reason,
+        };
+      } else {
+        antiBot = detectAntiBot({
+          errorMessage: exec?.ok === false ? exec.message : null,
+          snapshotText: snap,
+        });
+      }
       if (antiBot && antiBot.confidence === 'high') {
         pendingCaptchaSignal = antiBot;
         antiBotStrikeCount += 1;
@@ -635,6 +736,13 @@ function buildPlaywrightTransport(executor: PlaywrightExecutor): {
         return executor.navigate(page, action.url);
       case 'wait':
         return executor.wait(page, action.ms);
+      case 'wait_for_human':
+        // The driver has nothing to execute — the Layer 4 polling is
+        // what actually resolves the challenge. We just ack; the
+        // runner's turn subscription (below) synthesises a captcha
+        // signal so the existing afterTickHook kicks in between
+        // this tick and the next.
+        return { ok: true, message: `wait_for_human: ${action.reason}` };
       case 'screenshot':
         return { ok: true, message: 'noop — runner re-observes on next tick' };
       case 'done':
@@ -698,6 +806,8 @@ function buildPlaywrightTransport(executor: PlaywrightExecutor): {
             message: `goto failed: ${err instanceof Error ? err.message : String(err)}`,
           };
         }
+      case 'wait_for_human':
+        return { ok: true, message: `wait_for_human: ${action.reason}` };
       case 'done':
       case 'give_up':
         return { ok: true, message: `${action.kind} terminal — no driver work` };

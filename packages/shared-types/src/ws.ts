@@ -70,6 +70,7 @@ export const visionActionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('key'), key: z.string().min(1) }),
   z.object({ kind: z.literal('scroll'), dy: z.number().int() }),
   z.object({ kind: z.literal('navigate'), url: z.string().url().max(2048) }),
+  z.object({ kind: z.literal('wait_for_human'), reason: z.string().min(1).max(512) }),
   z.object({
     kind: z.literal('wait'),
     ms: z.number().int().min(100).max(10_000),
@@ -407,6 +408,25 @@ export const serverVisionExecutorFallbackSchema = z.object({
 });
 
 /**
+ * DegradationChain attempted a tier after Layer 4 timed out. UI shows
+ * "正在尝试替代方案 (level N)" so the user knows the agent is
+ * escalating without task-level failure. `handoffToExtension=true`
+ * means the chain reached the last tier and the task is about to
+ * switch to the Chrome extension transport; `ok=false` means the
+ * strategy tried but couldn't apply (e.g. proxy swap is a stub).
+ */
+export const serverVisionDegradeSchema = z.object({
+  type: z.literal('server.vision.degrade'),
+  taskId: z.string(),
+  level: z.number().int().positive(),
+  strategy: z.string(),
+  ok: z.boolean(),
+  message: z.string(),
+  handoffToExtension: z.boolean().optional(),
+  nextUrl: z.string().optional(),
+});
+
+/**
  * Task queued behind earlier work (Phase F F3 per-user FIFO). Fires
  * once on enqueue when the task lands at position > 1 — position 1
  * means it started immediately and the UI never needs a "queued"
@@ -465,6 +485,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverVisionCaptchaDetectedSchema,
   serverVisionCaptchaResolvedSchema,
   serverVisionExecutorFallbackSchema,
+  serverVisionDegradeSchema,
 ]);
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;

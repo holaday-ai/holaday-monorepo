@@ -4,7 +4,13 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { StepCard } from '@/components/StepCard';
 import { useTaskStore } from '@/stores/task-store';
-import type { UiCaptchaWait, UiExecutorFallback, UiStep, UiTask } from '@/types/task';
+import type {
+  UiCaptchaWait,
+  UiDegradeEvent,
+  UiExecutorFallback,
+  UiStep,
+  UiTask,
+} from '@/types/task';
 
 interface Props {
   task: UiTask;
@@ -31,11 +37,12 @@ export function TaskStream({ task }: Props): JSX.Element {
   const steps = useTaskStore((s) => s.stepsByTask[task.taskId]) ?? EMPTY_STEPS;
   const captchaWait = useTaskStore((s) => s.captchaWaitByTask[task.taskId]);
   const executorFallback = useTaskStore((s) => s.executorFallbackByTask[task.taskId]);
+  const degrade = useTaskStore((s) => s.degradeByTask[task.taskId]);
   const scrollAnchorRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ block: 'end' });
-  }, [steps.length, task.status, captchaWait, executorFallback]);
+  }, [steps.length, task.status, captchaWait, executorFallback, degrade]);
 
   const terminal =
     task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled';
@@ -57,6 +64,8 @@ export function TaskStream({ task }: Props): JSX.Element {
       </div>
 
       {captchaWait && <CaptchaWaitBanner wait={captchaWait} />}
+
+      {degrade && !executorFallback && <DegradeBanner event={degrade} />}
 
       {executorFallback && <ExecutorFallbackBanner fallback={executorFallback} />}
 
@@ -149,6 +158,42 @@ function ExecutorFallbackBanner({
     </div>
   );
 }
+
+/**
+ * DegradationChain banner — shown between the final StepCard and the
+ * ExecutorFallback one (if any). Purpose is purely user-facing: "the
+ * agent is trying alternatives instead of giving up". We keep the
+ * most recent event only; each Layer-4 timeout replaces the previous
+ * notice rather than stacking.
+ */
+function DegradeBanner({ event }: { event: UiDegradeEvent }): JSX.Element {
+  const label = STRATEGY_LABELS[event.strategy] ?? event.strategy;
+  return (
+    <div className="flex animate-fade-in items-start gap-3 rounded-xl border border-violet-300 bg-violet-50/70 px-4 py-3">
+      <Puzzle className="mt-0.5 h-5 w-5 shrink-0 text-violet-600" />
+      <div className="min-w-0 flex-1 text-sm">
+        <div className="font-semibold text-violet-900">
+          正在尝试替代方案（level {event.level}）
+        </div>
+        <div className="mt-1 text-xs text-violet-900/80">
+          策略：<span className="font-medium">{label}</span>
+          {event.ok ? '' : '（未生效，继续升级）'}
+        </div>
+        {event.nextUrl ? (
+          <div className="mt-1 text-xs text-violet-900/80">下一步导航：{event.nextUrl}</div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+const STRATEGY_LABELS: Readonly<Record<string, string>> = {
+  profile_rotation: '清 cookie + 换 UA',
+  proxy_swap: '切换代理（需配置）',
+  search_engine_swap: '换搜索引擎',
+  search_api_fallback: '走搜索 API',
+  extension_fallback: '切到浏览器扩展',
+};
 
 function UserBubble({ intent }: { intent: string }): JSX.Element {
   return (
