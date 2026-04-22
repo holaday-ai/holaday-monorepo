@@ -45,6 +45,7 @@ export interface TaskStore {
   setSelectedTask(taskId: string | null): void;
   refreshTasks(): Promise<void>;
   createTask(intent: string): Promise<{ taskId: string } | { error: string }>;
+  deleteTask(taskId: string): Promise<{ ok: true } | { error: string }>;
   applyServerMessage(msg: ServerMessage): void;
   reset(): void;
 }
@@ -136,6 +137,41 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       }));
     } catch (err) {
       set({ loading: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+
+  async deleteTask(taskId) {
+    try {
+      await trpc.tasks.delete.mutate({ taskId });
+      set((prev) => {
+        const stepsByTask = { ...prev.stepsByTask };
+        delete stepsByTask[taskId];
+        const screencastByTask = { ...prev.screencastByTask };
+        delete screencastByTask[taskId];
+        const captchaWaitByTask = { ...prev.captchaWaitByTask };
+        delete captchaWaitByTask[taskId];
+        const executorFallbackByTask = { ...prev.executorFallbackByTask };
+        delete executorFallbackByTask[taskId];
+        const degradeByTask = { ...prev.degradeByTask };
+        delete degradeByTask[taskId];
+        const nextTasks = prev.tasks.filter((t) => t.taskId !== taskId);
+        const nextSelected =
+          prev.selectedTaskId === taskId ? (nextTasks[0]?.taskId ?? null) : prev.selectedTaskId;
+        return {
+          tasks: nextTasks,
+          selectedTaskId: nextSelected,
+          stepsByTask,
+          screencastByTask,
+          captchaWaitByTask,
+          executorFallbackByTask,
+          degradeByTask,
+        };
+      });
+      return { ok: true as const };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      set({ error: msg });
+      return { error: msg };
     }
   },
 

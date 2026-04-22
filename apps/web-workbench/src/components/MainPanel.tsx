@@ -1,4 +1,4 @@
-import { Menu } from 'lucide-react';
+import { Menu, Sparkles } from 'lucide-react';
 import { InputArea } from '@/components/InputArea';
 import { TaskStream } from '@/components/TaskStream';
 import { Button } from '@/components/ui/button';
@@ -9,14 +9,23 @@ interface Props {
   onSubmit: (intent: string) => Promise<void> | void;
   busy?: boolean;
   onOpenSidebar?: () => void;
+  greetingName?: string;
 }
 
 /**
  * Centre column — a scrollable TaskStream area on top, InputArea
  * pinned to the bottom, and a mobile-only top bar that hosts the
- * hamburger toggle (the sidebar collapses into a drawer below `md`).
+ * hamburger toggle. Empty state (no task selected) shows a welcome
+ * line plus clickable suggestion chips; clicking a chip prefills the
+ * input and submits it immediately.
  */
-export function MainPanel({ task, onSubmit, busy, onOpenSidebar }: Props): JSX.Element {
+export function MainPanel({
+  task,
+  onSubmit,
+  busy,
+  onOpenSidebar,
+  greetingName,
+}: Props): JSX.Element {
   return (
     <main className="flex h-full flex-1 flex-col bg-background">
       <div className="flex h-11 items-center border-b border-black/[0.04] px-3 md:hidden">
@@ -37,7 +46,7 @@ export function MainPanel({ task, onSubmit, busy, onOpenSidebar }: Props): JSX.E
           <TaskStream task={task} />
         ) : (
           <div className="mx-auto max-w-3xl px-6 pt-12">
-            <EmptyState />
+            <EmptyState greetingName={greetingName} onPick={(intent) => void onSubmit(intent)} />
           </div>
         )}
       </div>
@@ -46,27 +55,43 @@ export function MainPanel({ task, onSubmit, busy, onOpenSidebar }: Props): JSX.E
   );
 }
 
-function EmptyState(): JSX.Element {
+function EmptyState({
+  greetingName,
+  onPick,
+}: {
+  greetingName?: string;
+  onPick(intent: string): void;
+}): JSX.Element {
+  const who = greetingName ? `，${greetingName}` : '';
   return (
     <div className="flex flex-col items-center justify-center pb-8 pt-16 text-center">
-      <h2 className="text-2xl font-semibold tracking-tight">你好，Yalei</h2>
+      <div className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-pink-500 text-white shadow-sm">
+        <Sparkles className="h-5 w-5" />
+      </div>
+      <h2 className="mt-4 text-2xl font-semibold tracking-tight">你好{who}</h2>
       <p className="mt-2 text-sm text-muted-foreground">
-        告诉 HOLA DAY 你想在浏览器里完成什么，它会一步步把事情做完。
+        告诉 HOLA DAY 你想做什么，它会替你操作浏览器，把事情一步步做完。
       </p>
-      <ul className="mt-6 grid gap-2 text-left text-xs text-muted-foreground sm:grid-cols-2">
-        <Suggestion text="帮我在小红书发一条关于春日咖啡店探店的笔记" />
-        <Suggestion text="查看本周互动最多的 5 条评论并整理成表格" />
-        <Suggestion text="在百度搜索 claude opus 4 并把首条结果发给我" />
-        <Suggestion text="打开 Gmail，抓取今天未读邮件的标题清单" />
+      <ul className="mt-6 grid w-full gap-2 text-left text-sm sm:grid-cols-2">
+        {SUGGESTIONS.map((s) => (
+          <li key={s}>
+            <button
+              type="button"
+              onClick={() => onPick(s)}
+              className="w-full rounded-lg border border-border/70 bg-white/70 px-3 py-2.5 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition hover:border-foreground/20 hover:bg-white"
+            >
+              {s}
+            </button>
+          </li>
+        ))}
       </ul>
     </div>
   );
 }
 
-function Suggestion({ text }: { text: string }): JSX.Element {
-  return (
-    <li className="rounded-lg border border-border/70 bg-white/70 px-3 py-2 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-      {text}
-    </li>
-  );
-}
+const SUGGESTIONS = [
+  '帮我查一下今天的科技新闻',
+  '打开 GitHub 看看 trending 项目',
+  '去东方财富查一下茅台最新股价',
+  '在百度搜索 claude opus 并把首条结果发给我',
+];

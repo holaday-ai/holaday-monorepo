@@ -1,8 +1,10 @@
 import { TRPCError } from '@trpc/server';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { EmailCodeError, createEmailCodeService } from '../../auth/email-code.js';
 import { AuthError, AuthService } from '../../auth/service.js';
-import { publicProcedure, router } from '../trpc.js';
+import { users } from '../../db/schema/users.js';
+import { protectedProcedure, publicProcedure, router } from '../trpc.js';
 
 const registerInput = z.object({
   email: z.string().email().max(255),
@@ -90,5 +92,32 @@ export const authRouter = router({
     }
     const svc = new AuthService(ctx.db);
     return await svc.loginOrRegisterByEmail(input.email);
+  }),
+
+  /**
+   * Resolve the bearer token to the user's public profile. Powers the
+   * sidebar's user card (real email + display name + plan) so we stop
+   * hardcoding "Yalei / Free" for everyone.
+   */
+  me: protectedProcedure.query(async ({ ctx }) => {
+    const [row] = await ctx.db
+      .select({
+        externalId: users.externalId,
+        email: users.email,
+        displayName: users.displayName,
+        plan: users.plan,
+      })
+      .from(users)
+      .where(eq(users.externalId, ctx.userId))
+      .limit(1);
+    if (!row) {
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+    }
+    return {
+      userId: row.externalId,
+      email: row.email,
+      displayName: row.displayName,
+      plan: row.plan,
+    };
   }),
 });

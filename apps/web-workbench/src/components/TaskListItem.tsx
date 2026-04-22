@@ -5,38 +5,61 @@ interface Props {
   task: UiTask;
   selected: boolean;
   onSelect: (taskId: string) => void;
+  onContextMenu?(taskId: string, event: React.MouseEvent): void;
 }
 
 /**
- * One row in the sidebar task list. Active tasks (executing / paused)
- * get a blue left border and a tick counter subtitle; terminal tasks
- * render the status label in a muted tone.
+ * One row in the sidebar task list. Status is signalled by a small
+ * colour dot on the left (blue=active, emerald=completed, red=failed,
+ * grey=cancelled) — the long status text is pushed to the subtitle so
+ * the intent stays legible.
  */
-export function TaskListItem({ task, selected, onSelect }: Props): JSX.Element {
+export function TaskListItem({ task, selected, onSelect, onContextMenu }: Props): JSX.Element {
   const active = isActive(task.status);
   return (
     <button
       type="button"
       onClick={() => onSelect(task.taskId)}
+      onContextMenu={onContextMenu ? (e) => onContextMenu(task.taskId, e) : undefined}
       className={cn(
-        'group relative w-full rounded-md px-3 py-2 text-left transition-colors',
+        'group relative flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left transition-colors',
         'hover:bg-white/60',
         selected && 'bg-white shadow-sm',
-        active && 'border-l-2 border-l-blue-500 pl-[10px]',
       )}
     >
-      <div className="truncate text-sm font-medium text-foreground">{task.intent}</div>
-      <div
-        className={cn(
-          'mt-0.5 truncate text-xs',
-          task.status === 'completed' && 'text-emerald-600',
-          task.status === 'failed' && 'text-red-500',
-          (task.status === 'executing' || task.status === 'paused') && 'text-muted-foreground',
-        )}
-      >
-        {subtitleFor(task)}
+      <StatusDot status={task.status} />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-foreground">{task.intent}</div>
+        <div
+          className={cn(
+            'mt-0.5 truncate text-xs',
+            task.status === 'completed' && 'text-emerald-600',
+            task.status === 'failed' && 'text-red-500',
+            (task.status === 'executing' || task.status === 'paused') && 'text-muted-foreground',
+            task.status === 'cancelled' && 'text-muted-foreground',
+          )}
+        >
+          {subtitleFor(task)}
+        </div>
       </div>
+      {active && <span className="sr-only">进行中</span>}
     </button>
+  );
+}
+
+function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
+  return (
+    <span
+      className={cn(
+        'mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full',
+        status === 'executing' && 'animate-pulse-dot bg-blue-500',
+        status === 'paused' && 'bg-amber-500',
+        status === 'completed' && 'bg-emerald-500',
+        status === 'failed' && 'bg-red-500',
+        status === 'cancelled' && 'bg-muted-foreground/40',
+      )}
+      aria-hidden
+    />
   );
 }
 
@@ -51,12 +74,15 @@ function subtitleFor(task: UiTask): string {
     case 'executing':
       return task.tickCount === 0 ? '准备中…' : `执行中 · 第 ${task.tickCount} 步`;
     case 'paused':
-      return `已暂停 · ${task.tickCount} 步`;
+      return task.tickCount === 0 ? '已暂停' : `已暂停 · ${task.tickCount} 步`;
     case 'completed':
-      return `已完成 · ${task.tickCount} 步`;
+      // Legacy rows seeded before we persisted per-tick step rows show
+      // tickCount=0; rendering "已完成 · 0 步" looks broken. Summarise
+      // with just "已完成" instead when we have no step data.
+      return task.tickCount === 0 ? '已完成' : `已完成 · ${task.tickCount} 步`;
     case 'failed':
-      return `失败 · ${task.tickCount} 步`;
+      return task.tickCount === 0 ? '失败' : `失败 · ${task.tickCount} 步`;
     case 'cancelled':
-      return `已取消 · ${task.tickCount} 步`;
+      return task.tickCount === 0 ? '已取消' : `已取消 · ${task.tickCount} 步`;
   }
 }

@@ -12,7 +12,9 @@ interface Props {
  * Bottom-of-panel composer. Enter submits, Shift+Enter inserts a
  * newline. Textarea auto-grows to ~6 lines before scrolling. The
  * circular send button sits in the bottom-right corner of the card
- * so the user can click it OR just hit Enter.
+ * so the user can click it OR just hit Enter. We deliberately keep
+ * the footer minimal — the model / mode selector is product-team UI,
+ * not useful to end users, so it's gone.
  */
 export function InputArea({ onSubmit, busy }: Props): JSX.Element {
   const [value, setValue] = React.useState('');
@@ -71,8 +73,7 @@ export function InputArea({ onSubmit, busy }: Props): JSX.Element {
           )}
         </Button>
       </div>
-      <div className="mt-2 flex items-center justify-between px-1 text-[11px] text-muted-foreground">
-        <span>claude-opus-4 · 自动模式</span>
+      <div className="mt-2 flex items-center justify-end px-1 text-[11px] text-muted-foreground">
         <span>Enter 发送 · Shift+Enter 换行</span>
       </div>
     </div>

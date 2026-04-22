@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, MousePointerClick, Power } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Globe, MousePointerClick, Power } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { send as wsSend } from '@/lib/ws';
@@ -212,7 +212,11 @@ export function BrowserPanel({
             <button
               type="button"
               onClick={() => setInteractive(!interactive)}
-              title={interactive ? '退出交互模式' : '进入交互模式'}
+              title={
+                interactive
+                  ? '退出交互模式'
+                  : '开启交互模式 — 直接在这个浏览器里点击、滚动、输入'
+              }
               aria-label="toggle interactive mode"
               aria-pressed={interactive}
               className={cn(
@@ -292,9 +296,7 @@ export function BrowserPanel({
                 </div>
               )
             ) : (
-              <div className="text-center text-xs text-muted-foreground">
-                {taskStatus === 'executing' ? '等待第一帧…' : '等待任务开始...'}
-              </div>
+              <EmptyBrowserState taskStatus={taskStatus} />
             )}
           </div>
           <footer className="flex h-7 items-center justify-between border-t border-black/[0.06] px-3 text-[11px] text-muted-foreground">
@@ -340,6 +342,27 @@ function ActivityOverlay({
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+function EmptyBrowserState({
+  taskStatus,
+}: {
+  taskStatus: UiTaskStatus | null | undefined;
+}): JSX.Element {
+  if (taskStatus === 'executing') {
+    return <div className="text-center text-xs text-muted-foreground">等待第一帧…</div>;
+  }
+  return (
+    <div className="flex flex-col items-center px-6 text-center text-muted-foreground">
+      <Globe className="h-10 w-10 text-muted-foreground/40" aria-hidden />
+      <div className="mt-3 text-sm font-medium text-foreground/80">浏览器将在这里显示</div>
+      <div className="mt-1 text-xs leading-relaxed">
+        创建一个任务后，HOLA DAY 的浏览器画面会实时出现在这里，
+        <br />
+        你可以观察或亲自接管。
+      </div>
     </div>
   );
 }

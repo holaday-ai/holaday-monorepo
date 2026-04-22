@@ -1,9 +1,19 @@
-import { AlertCircle, ExternalLink, MousePointerClick, Puzzle } from 'lucide-react';
+import {
+  AlertCircle,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  Loader2,
+  MousePointerClick,
+  Puzzle,
+} from 'lucide-react';
 import * as React from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { StepCard } from '@/components/StepCard';
 import { useTaskStore } from '@/stores/task-store';
+import { cn } from '@/lib/utils';
 import type {
   UiCaptchaWait,
   UiDegradeEvent,
@@ -11,6 +21,7 @@ import type {
   UiStep,
   UiTask,
 } from '@/types/task';
+import { humanizeStep, humanizedGlyph } from '@/utils/step-humanize';
 
 interface Props {
   task: UiTask;
@@ -23,15 +34,20 @@ interface Props {
 const EMPTY_STEPS: UiStep[] = [];
 
 /**
- * Stream panel for one task. Top: the user's intent (as a chat-style
- * bubble). Middle: one StepCard per tick as they arrive over WS.
- * Bottom: a terminal summary rendered through react-markdown once
- * the task reaches a terminal state (completed / failed / cancelled).
+ * Conversational stream for one task. Emulates Claude's chat layout:
  *
- * Auto-scroll: we bind a ref to the container and push to the bottom
- * whenever the step count changes or the task status flips terminal.
- * `behavior: smooth` looks nicer but janks on fast streams, so we use
- * instant scrolling.
+ *   1. User intent as a right-biased bubble.
+ *   2. One agent "message" block that narrates the run in plain
+ *      language. Technical cards (navigate / click / screenshot /
+ *      wait / ...) are folded into a collapsible "详细步骤" panel so
+ *      the main area reads as prose, not a log file.
+ *   3. Terminal summary rendered through react-markdown once the task
+ *      reaches completed / failed / cancelled.
+ *
+ * The humanizer hides screenshot/wait/done steps entirely — they carry
+ * no user-facing signal. Everything else becomes one line ("正在打开
+ * 百度…" or "点击了'搜索'"), with a spinner-adorned status row for the
+ * still-running tick.
  */
 export function TaskStream({ task }: Props): JSX.Element {
   const steps = useTaskStore((s) => s.stepsByTask[task.taskId]) ?? EMPTY_STEPS;
@@ -49,57 +65,256 @@ export function TaskStream({ task }: Props): JSX.Element {
   const terminal =
     task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled';
 
+  const humanLines = React.useMemo(() => buildHumanLines(steps), [steps]);
+  const thinking = pickThinking(steps);
+
   return (
     <div className="mx-auto max-w-3xl space-y-4 px-6 pb-4 pt-8">
       <UserBubble intent={task.intent} />
 
-      {steps.length === 0 && !terminal && !captchaWait && (
-        <div className="rounded-lg border border-dashed border-border px-6 py-10 text-center text-sm text-muted-foreground">
-          等待第一个操作…
-        </div>
-      )}
-
-      <div className="space-y-2">
-        {steps.map((step) => (
-          <StepCard key={step.tickIndex} step={step} />
-        ))}
-      </div>
-
-      {captchaWait && <CaptchaWaitBanner wait={captchaWait} />}
-
-      {degrade && !executorFallback && <DegradeBanner event={degrade} />}
-
-      {executorFallback && <ExecutorFallbackBanner fallback={executorFallback} />}
-
-      {terminal && task.resultText && (
-        <TerminalSummary
-          status={task.status}
-          text={task.resultText}
-          currentUrl={screencast?.url ?? null}
-          onContinueInBrowser={() => setBrowserInteractive(true)}
-        />
-      )}
+      <AgentBlock
+        task={task}
+        steps={steps}
+        humanLines={humanLines}
+        thinking={thinking}
+        terminal={terminal}
+        screencastUrl={screencast?.url ?? null}
+        onContinueInBrowser={() => setBrowserInteractive(true)}
+        captchaWait={captchaWait}
+        degrade={degrade}
+        executorFallback={executorFallback}
+      />
 
       <div ref={scrollAnchorRef} />
     </div>
   );
 }
 
+interface HumanLine {
+  key: string;
+  text: string;
+  glyph: string;
+  status: UiStep['status'];
+}
+
+function buildHumanLines(steps: UiStep[]): HumanLine[] {
+  const out: HumanLine[] = [];
+  for (const step of steps) {
+    const text = humanizeStep(step);
+    if (!text) continue;
+    out.push({
+      key: String(step.tickIndex),
+      text,
+      glyph: humanizedGlyph(step.actionKind),
+      status: step.status,
+    });
+  }
+  return out;
+}
+
 /**
- * Layer 4 prompt: shows when the orchestrator has paused the loop on
- * a high-confidence anti-bot signal. Tells the user exactly where to
- * act (attached Chrome window) and how long the orchestrator will
- * wait. Auto-unmounts when the task-store clears `captchaWaitByTask`
- * for this task (either auto-resolved or timed out).
+ * Right now we don't have a real "thinking" stream from the commander;
+ * until wired, return null so the UI just hides the block. The hook
+ * stays in place so a future onThinking(...) delta can feed it.
  */
+function pickThinking(_steps: UiStep[]): string | null {
+  return null;
+}
+
+function AgentBlock({
+  task,
+  steps,
+  humanLines,
+  thinking,
+  terminal,
+  screencastUrl,
+  onContinueInBrowser,
+  captchaWait,
+  degrade,
+  executorFallback,
+}: {
+  task: UiTask;
+  steps: UiStep[];
+  humanLines: HumanLine[];
+  thinking: string | null;
+  terminal: boolean;
+  screencastUrl: string | null;
+  onContinueInBrowser(): void;
+  captchaWait: UiCaptchaWait | undefined;
+  degrade: UiDegradeEvent | undefined;
+  executorFallback: UiExecutorFallback | undefined;
+}): JSX.Element {
+  const [detailOpen, setDetailOpen] = React.useState(false);
+  const hasAnyActivity =
+    humanLines.length > 0 ||
+    Boolean(captchaWait) ||
+    Boolean(degrade) ||
+    Boolean(executorFallback) ||
+    Boolean(task.resultText);
+
+  return (
+    <div className="flex items-start gap-3">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground text-[11px] font-semibold text-background">
+        H
+      </div>
+      <div className="min-w-0 flex-1 space-y-3">
+        {thinking && <ThinkingBlock text={thinking} />}
+
+        {!hasAnyActivity && !terminal && <BoardingLine />}
+
+        {humanLines.length > 0 && <HumanLineList lines={humanLines} />}
+
+        {captchaWait && <CaptchaWaitBanner wait={captchaWait} />}
+        {degrade && !executorFallback && <DegradeBanner event={degrade} />}
+        {executorFallback && <ExecutorFallbackBanner fallback={executorFallback} />}
+
+        {terminal && task.resultText && (
+          <TerminalSummary
+            status={task.status}
+            text={task.resultText}
+            currentUrl={screencastUrl}
+            onContinueInBrowser={onContinueInBrowser}
+          />
+        )}
+
+        {steps.length > 0 && (
+          <DetailToggle open={detailOpen} count={steps.length} onToggle={() => setDetailOpen((v) => !v)}>
+            <div className="mt-2 space-y-2">
+              {steps.map((step) => (
+                <StepCard key={step.tickIndex} step={step} />
+              ))}
+            </div>
+          </DetailToggle>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BoardingLine(): JSX.Element {
+  return (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      <span>正在分析您的请求…</span>
+    </div>
+  );
+}
+
+function HumanLineList({ lines }: { lines: HumanLine[] }): JSX.Element {
+  return (
+    <ul className="space-y-1.5">
+      {lines.map((line) => (
+        <li key={line.key} className="flex items-start gap-2 text-sm leading-relaxed">
+          <LineBadge status={line.status} glyph={line.glyph} />
+          <span
+            className={cn(
+              'min-w-0 flex-1',
+              line.status === 'failed' ? 'text-red-600' : 'text-foreground',
+              line.status === 'running' && 'text-foreground',
+            )}
+          >
+            {line.text}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function LineBadge({
+  status,
+  glyph,
+}: {
+  status: UiStep['status'];
+  glyph: string;
+}): JSX.Element {
+  if (status === 'running') {
+    return <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />;
+  }
+  if (status === 'failed') {
+    return (
+      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-500" aria-hidden />
+    );
+  }
+  return (
+    <Check
+      aria-hidden
+      className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500"
+      strokeWidth={3}
+      aria-label={glyph}
+    />
+  );
+}
+
+function DetailToggle({
+  open,
+  count,
+  onToggle,
+  children,
+}: {
+  open: boolean;
+  count: number;
+  onToggle(): void;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <div className="pt-1">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground"
+      >
+        {open ? (
+          <ChevronDown className="h-3 w-3" />
+        ) : (
+          <ChevronRight className="h-3 w-3" />
+        )}
+        {open ? '收起详细步骤' : `查看详细步骤（${count} 步）`}
+      </button>
+      {open && children}
+    </div>
+  );
+}
+
+function ThinkingBlock({ text }: { text: string }): JSX.Element {
+  const [open, setOpen] = React.useState(false);
+  const preview = text.length > 140 ? `${text.slice(0, 140)}…` : text;
+  return (
+    <details
+      open={open}
+      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+      className="rounded-md bg-muted/50 px-3 py-2 text-[12px] text-muted-foreground"
+    >
+      <summary className="flex cursor-pointer items-center gap-1 list-none">
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        <span className="font-medium uppercase tracking-wide text-[10px]">思考</span>
+      </summary>
+      <p className="mt-1.5 whitespace-pre-wrap leading-relaxed">{open ? text : preview}</p>
+    </details>
+  );
+}
+
+function UserBubble({ intent }: { intent: string }): JSX.Element {
+  return (
+    <div className="flex items-start justify-end gap-3">
+      <div className="max-w-[80%] rounded-2xl bg-foreground px-4 py-2.5 text-sm leading-relaxed text-background">
+        {intent}
+      </div>
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-400 to-pink-400 text-xs font-semibold text-white">
+        Y
+      </div>
+    </div>
+  );
+}
+
 function CaptchaWaitBanner({ wait }: { wait: UiCaptchaWait }): JSX.Element {
   const [now, setNow] = React.useState(Date.now());
   React.useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1_000);
     return () => clearInterval(id);
   }, []);
-  const remainingMs = Math.max(0, wait.deadlineMs - now);
-  const remainingSec = Math.ceil(remainingMs / 1000);
+  const remainingSec = Math.max(0, Math.ceil((wait.deadlineMs - now) / 1000));
   return (
     <div
       role="alert"
@@ -108,11 +323,9 @@ function CaptchaWaitBanner({ wait }: { wait: UiCaptchaWait }): JSX.Element {
       <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 animate-pulse-dot text-amber-600" />
       <div className="min-w-0 flex-1 text-sm">
         <div className="font-semibold text-amber-900">目标网站需要人工验证</div>
+        <div className="mt-1 text-xs text-amber-900/80">{wait.message}</div>
         <div className="mt-1 text-xs text-amber-900/80">
-          {wait.message}
-        </div>
-        <div className="mt-1 text-xs text-amber-900/80">
-          请在右侧显示的 Chrome 浏览器窗口中完成验证，agent 将自动继续。
+          请在右侧 Chrome 窗口中完成验证，HOLA DAY 将自动继续。
         </div>
         <div className="mt-2 text-[11px] font-medium text-amber-900/70">
           自动恢复窗口剩余：{remainingSec}s
@@ -122,14 +335,6 @@ function CaptchaWaitBanner({ wait }: { wait: UiCaptchaWait }): JSX.Element {
   );
 }
 
-/**
- * Layer 5 status: reported once on transport swap and kept on screen
- * for the rest of the task as a breadcrumb. Two variants:
- *
- *  - available=true  → swap succeeded. Neutral info styling.
- *  - available=false → no extension connected. Error styling + a
- *                      call-to-action ("请打开 HOLA DAY 扩展").
- */
 function ExecutorFallbackBanner({
   fallback,
 }: {
@@ -145,8 +350,8 @@ function ExecutorFallbackBanner({
         <div className="min-w-0 flex-1 text-sm">
           <div className="font-semibold text-red-900">反爬保护触发，但扩展未连接</div>
           <div className="mt-1 text-xs text-red-900/80">
-            orchestrator 想切换到 Chrome 扩展执行，但没有检测到在线的扩展客户端。请安装并打开
-            HOLA DAY 扩展后重试此任务。
+            HOLA DAY 想切到 Chrome 扩展继续任务，但没有检测到在线的扩展客户端。请安装并打开
+            HOLA DAY 扩展后重试。
           </div>
         </div>
       </div>
@@ -158,21 +363,14 @@ function ExecutorFallbackBanner({
       <div className="min-w-0 flex-1 text-sm">
         <div className="font-semibold text-sky-900">已切换到浏览器扩展模式执行</div>
         <div className="mt-1 text-xs text-sky-900/80">
-          连续检测到反爬拦截，agent 切到 Chrome 扩展继续任务，后续步骤通过扩展内的 CDP 驱动
-          执行（可能会失去 accessibility 模式的优势）。
+          连续检测到反爬拦截，HOLA DAY 切到 Chrome 扩展继续任务，后续步骤通过扩展内的 CDP 驱动
+          执行。
         </div>
       </div>
     </div>
   );
 }
 
-/**
- * DegradationChain banner — shown between the final StepCard and the
- * ExecutorFallback one (if any). Purpose is purely user-facing: "the
- * agent is trying alternatives instead of giving up". We keep the
- * most recent event only; each Layer-4 timeout replaces the previous
- * notice rather than stacking.
- */
 function DegradeBanner({ event }: { event: UiDegradeEvent }): JSX.Element {
   const label = STRATEGY_LABELS[event.strategy] ?? event.strategy;
   return (
@@ -202,19 +400,6 @@ const STRATEGY_LABELS: Readonly<Record<string, string>> = {
   extension_fallback: '切到浏览器扩展',
 };
 
-function UserBubble({ intent }: { intent: string }): JSX.Element {
-  return (
-    <div className="flex items-start gap-3">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-400 to-pink-400 text-xs font-semibold text-white">
-        Y
-      </div>
-      <div className="flex-1 rounded-2xl bg-muted/50 px-4 py-3 text-sm leading-relaxed text-foreground">
-        {intent}
-      </div>
-    </div>
-  );
-}
-
 function TerminalSummary({
   status,
   text,
@@ -230,21 +415,16 @@ function TerminalSummary({
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
         <div className="mb-1 text-xs font-semibold uppercase tracking-wider">
-          {status === 'failed' ? '失败' : '已取消'}
+          {status === 'failed' ? '任务失败' : '已取消'}
         </div>
         <div className="whitespace-pre-wrap">{text}</div>
       </div>
     );
   }
   const hasRealUrl =
-    !!currentUrl &&
-    currentUrl !== 'about:blank' &&
-    !currentUrl.startsWith('chrome://');
+    !!currentUrl && currentUrl !== 'about:blank' && !currentUrl.startsWith('chrome://');
   return (
     <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-5 py-4">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-emerald-700">
-        已完成
-      </div>
       <div className="prose prose-sm prose-neutral max-w-none">
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
           {text}
@@ -271,9 +451,7 @@ function TerminalSummary({
             >
               <ExternalLink className="h-3.5 w-3.5" />
               在新标签页打开
-              <span className="max-w-[180px] truncate text-emerald-700/70">
-                {currentUrl}
-              </span>
+              <span className="max-w-[180px] truncate text-emerald-700/70">{currentUrl}</span>
             </a>
           )}
         </div>
@@ -285,8 +463,7 @@ function TerminalSummary({
 // All markdown links open in a new tab (noopener/noreferrer). Primary
 // use case is summary text containing URLs the agent produced —
 // letting them hijack the current tab drops the user out of the
-// workbench (Bug 4). Also annotates visually with an external-link
-// icon so users know a click navigates away.
+// workbench.
 const MARKDOWN_COMPONENTS: Components = {
   // biome-ignore lint/a11y/useAnchorContent: react-markdown passes children
   a: ({ href, children, ...rest }) => (

@@ -15,6 +15,7 @@ import { classify as classifyDomain } from '../../agent/vision-loop/domain/class
 import { visionLoopTaskQueue } from '../../agent/vision-loop/task-queue.js';
 import { startVisionLoopTask } from '../../agent/vision-loop/task-runner.js';
 import { skills } from '../../db/schema/skills.js';
+import { taskEvents } from '../../db/schema/task-events.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
 import { tasks as tasksTable } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
@@ -767,6 +768,60 @@ export const tasksRouter = router({
           completedAt: s.completedAt,
         })),
       };
+    }),
+
+  /**
+   * Remove one of the caller's tasks. Cascades to task_steps / task_events
+   * via the schema's onDelete. Scoped hard — the WHERE clause requires
+   * both the externalId AND caller's userId so a user cannot delete
+   * another user's row by guessing its id.
+   *
+   * In-flight tasks are rejected with PRECONDITION_FAILED rather than
+   * silently deleted: the vision loop would continue writing rows for
+   * a task that no longer exists, producing an orphaned-step log spam.
+   * The UI disables the delete action on non-terminal tasks too, but we
+   * defend in depth.
+   */
+  delete: protectedProcedure
+    .input(z.object({ taskId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const [userRow] = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.externalId, ctx.userId))
+        .limit(1);
+      if (!userRow) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+      }
+      const [taskRow] = await ctx.db
+        .select({ id: tasksTable.id, status: tasksTable.status })
+        .from(tasksTable)
+        .where(
+          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)),
+        )
+        .limit(1);
+      if (!taskRow) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
+      }
+      if (
+        taskRow.status === 'executing' ||
+        taskRow.status === 'planning' ||
+        taskRow.status === 'awaiting_user' ||
+        taskRow.status === 'pending'
+      ) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: `cannot delete task in status=${taskRow.status}; pause or cancel first`,
+        });
+      }
+      // task_steps has onDelete:cascade via FK; task_events has no FK
+      // (append-only audit log) so we clean it up manually in one tx
+      // to keep the orphan event rows from piling up.
+      await ctx.db.transaction(async (tx) => {
+        await tx.delete(taskEvents).where(eq(taskEvents.taskId, taskRow.id));
+        await tx.delete(tasksTable).where(eq(tasksTable.id, taskRow.id));
+      });
+      return { ok: true as const, taskId: input.taskId };
     }),
 
   /**
