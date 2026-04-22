@@ -6,6 +6,8 @@ import { Textarea } from '@/components/ui/textarea';
 interface Props {
   onSubmit: (intent: string) => Promise<void> | void;
   busy?: boolean;
+  /** Forwarded ref for keyboard-shortcut focus (Cmd+N / slash). */
+  inputRef?: React.Ref<HTMLTextAreaElement>;
 }
 
 /**
@@ -16,7 +18,7 @@ interface Props {
  * the footer minimal — the model / mode selector is product-team UI,
  * not useful to end users, so it's gone.
  */
-export function InputArea({ onSubmit, busy }: Props): JSX.Element {
+export function InputArea({ onSubmit, busy, inputRef }: Props): JSX.Element {
   const [value, setValue] = React.useState('');
   // Local submitting flag — decouples the button spinner from the
   // global `busy` prop (which is driven by the store-level `loading`
@@ -50,6 +52,7 @@ export function InputArea({ onSubmit, busy }: Props): JSX.Element {
     <div className="mx-auto w-full max-w-3xl px-6 pb-6">
       <div className="relative rounded-2xl border border-input bg-background shadow-[0_2px_12px_rgba(0,0,0,0.04)] focus-within:border-foreground/20 focus-within:shadow-[0_4px_24px_rgba(0,0,0,0.08)]">
         <Textarea
+          ref={inputRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -73,9 +76,20 @@ export function InputArea({ onSubmit, busy }: Props): JSX.Element {
           )}
         </Button>
       </div>
-      <div className="mt-2 flex items-center justify-end px-1 text-[11px] text-muted-foreground">
+      <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[11px] text-muted-foreground">
+        <span className="hidden md:inline">
+          按 <Kbd>/</Kbd> 聚焦 · <Kbd>⌘K</Kbd> 搜索任务
+        </span>
         <span>Enter 发送 · Shift+Enter 换行</span>
       </div>
     </div>
+  );
+}
+
+function Kbd({ children }: { children: React.ReactNode }): JSX.Element {
+  return (
+    <kbd className="rounded border border-border bg-muted/40 px-1 py-0.5 font-sans text-[10px] text-foreground/80">
+      {children}
+    </kbd>
   );
 }

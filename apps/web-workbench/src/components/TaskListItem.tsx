@@ -23,8 +23,8 @@ export function TaskListItem({ task, selected, onSelect, onContextMenu }: Props)
       onContextMenu={onContextMenu ? (e) => onContextMenu(task.taskId, e) : undefined}
       className={cn(
         'group relative flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left transition-colors',
-        'hover:bg-white/60',
-        selected && 'bg-white shadow-sm',
+        'hover:bg-foreground/5',
+        selected && 'bg-accent shadow-sm',
       )}
     >
       <StatusDot status={task.status} />
@@ -72,7 +72,7 @@ function subtitleFor(task: UiTask): string {
   }
   switch (task.status) {
     case 'executing':
-      return task.tickCount === 0 ? '准备中…' : `执行中 · 第 ${task.tickCount} 步`;
+      return task.tickCount === 0 ? '正在启动…' : `执行中 · 第 ${task.tickCount} 步`;
     case 'paused':
       return task.tickCount === 0 ? '已暂停' : `已暂停 · ${task.tickCount} 步`;
     case 'completed':

@@ -26,6 +26,12 @@ const verifyCodeInput = z.object({
   code: z.string().regex(/^\d{6}$/),
 });
 
+const resetPasswordInput = z.object({
+  email: z.string().email().max(255),
+  code: z.string().regex(/^\d{6}$/),
+  password: z.string().min(8).max(128),
+});
+
 // Module-scope service so the in-memory code store survives across
 // requests. Test suites can instantiate their own via
 // createEmailCodeService(fakeSender).
@@ -99,6 +105,32 @@ export const authRouter = router({
    * sidebar's user card (real email + display name + plan) so we stop
    * hardcoding "Yalei / Free" for everyone.
    */
+  /**
+   * Forgot-password flow — shares the same verification-code store as
+   * email-code login. Verify + replace password + issue a fresh JWT
+   * so the user lands logged in. Code is single-use (consumed by
+   * verifyCode inside the service).
+   */
+  resetPassword: publicProcedure.input(resetPasswordInput).mutation(async ({ ctx, input }) => {
+    try {
+      await emailCodeService.verifyCode(input.email, input.code);
+    } catch (err) {
+      if (err instanceof EmailCodeError) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: err.message });
+      }
+      throw err;
+    }
+    const svc = new AuthService(ctx.db);
+    try {
+      return await svc.resetPasswordByEmail(input.email, input.password);
+    } catch (err) {
+      if (err instanceof AuthError && err.code === 'INVALID_CREDENTIALS') {
+        throw new TRPCError({ code: 'NOT_FOUND', message: err.message });
+      }
+      throw err;
+    }
+  }),
+
   me: protectedProcedure.query(async ({ ctx }) => {
     const [row] = await ctx.db
       .select({

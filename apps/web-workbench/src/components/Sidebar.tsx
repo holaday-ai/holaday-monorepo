@@ -18,6 +18,7 @@ interface Props {
   userDisplayName: string;
   userPlan: string;
   onLogout(): void;
+  onOpenFeedback?(): void;
   /** Mobile drawer state — ignored at md+ breakpoints. */
   mobileOpen?: boolean;
   onMobileClose?: () => void;
@@ -40,6 +41,7 @@ export function Sidebar({
   userDisplayName,
   userPlan,
   onLogout,
+  onOpenFeedback,
   mobileOpen,
   onMobileClose,
 }: Props): JSX.Element {
@@ -74,12 +76,12 @@ export function Sidebar({
       )}
       <aside
         className={cn(
-          'flex h-full w-60 shrink-0 flex-col border-r border-black/[0.06] backdrop-blur-xl transition-transform duration-200',
+          'flex h-full w-72 max-w-[90vw] shrink-0 flex-col border-r border-border backdrop-blur-xl transition-transform duration-200 md:w-60',
           'md:static md:translate-x-0',
           'fixed inset-y-0 left-0 z-50',
           mobileOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full md:shadow-none',
         )}
-        style={{ backgroundColor: 'rgba(255,255,255,0.72)' }}
+        style={{ backgroundColor: 'hsl(var(--card) / 0.85)' }}
       >
         <header className="flex items-start justify-between px-4 pb-3 pt-5">
           <div className="flex-1">
@@ -152,6 +154,7 @@ export function Sidebar({
             email={userEmail}
             plan={userPlan}
             onLogout={onLogout}
+            {...(onOpenFeedback ? { onOpenFeedback } : {})}
           />
         </footer>
       </aside>
@@ -160,7 +163,7 @@ export function Sidebar({
         <div
           role="menu"
           onClick={(e) => e.stopPropagation()}
-          className="fixed z-[60] min-w-[160px] rounded-md border border-black/[0.08] bg-white/98 p-1 text-sm shadow-lg backdrop-blur-md animate-fade-in"
+          className="fixed z-[60] min-w-[160px] rounded-md border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg animate-fade-in"
           style={{ top: menu.y, left: menu.x }}
         >
           {onRetryTask && (
@@ -172,7 +175,7 @@ export function Sidebar({
                 setMenu(null);
                 await onRetryTask(intent);
               }}
-              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-black/5"
+              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-foreground/5"
             >
               <RotateCcw className="h-3.5 w-3.5" />
               用相同意图重试
@@ -192,7 +195,7 @@ export function Sidebar({
               className={cn(
                 'flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left transition-colors',
                 menu.deletable
-                  ? 'text-red-600 hover:bg-red-50'
+                  ? 'text-red-600 hover:bg-red-500/10 dark:text-red-400'
                   : 'cursor-not-allowed text-muted-foreground',
               )}
               title={menu.deletable ? '' : '任务进行中，不能删除'}

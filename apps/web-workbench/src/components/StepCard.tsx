@@ -1,9 +1,17 @@
-import { AlertTriangle, Check, X } from 'lucide-react';
+import { AlertTriangle, Check, Loader2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { UiStep } from '@/types/task';
 
 interface Props {
   step: UiStep;
+  /**
+   * Position within the detail list. When true, we draw the connector
+   * line above the badge; when `isLast`, we omit the line below. Used
+   * so the detail panel reads like a timeline instead of a stack of
+   * disconnected cards.
+   */
+  isFirst?: boolean;
+  isLast?: boolean;
 }
 
 /**
@@ -16,32 +24,50 @@ interface Props {
  * (pre-derived on the orchestrator). Errors reveal a secondary line
  * for the driver message if present.
  */
-export function StepCard({ step }: Props): JSX.Element {
+export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
   const title = stepTitle(step);
-  // High-confidence anti-bot signals get a warning treatment on the
-  // card itself (orange border) so the row stands out in a long
-  // stream. Medium-confidence matches keep the standard border and
-  // surface via the inline AntiBotNotice below.
   const antiBotHigh = step.antiBot?.confidence === 'high';
   return (
-    <div
-      className={cn(
-        'flex animate-fade-in items-start gap-3 rounded-xl border px-4 py-3 transition-colors',
-        antiBotHigh
-          ? 'border-amber-300 bg-amber-50/70'
-          : 'border-border/60 bg-white/60',
+    <div className="relative flex animate-fade-in items-start gap-3">
+      {/* Timeline rail — a 2px line centered behind the badge. */}
+      {!isFirst && (
+        <span
+          aria-hidden
+          className="absolute left-3 top-0 h-3 w-px -translate-x-1/2 bg-border"
+        />
       )}
-    >
+      {!isLast && (
+        <span
+          aria-hidden
+          className={cn(
+            'absolute left-3 top-6 bottom-0 w-px -translate-x-1/2',
+            step.status === 'running' ? 'bg-blue-300 animate-pulse-dot' : 'bg-border',
+          )}
+        />
+      )}
       <StatusBadge step={step} />
-      <div className="min-w-0 flex-1">
+      <div
+        className={cn(
+          'min-w-0 flex-1 rounded-xl border px-4 py-3 transition-colors',
+          antiBotHigh
+            ? 'border-amber-300 bg-amber-50/70 dark:border-amber-500/40 dark:bg-amber-500/10'
+            : 'border-border bg-card/80',
+          step.status === 'running' && 'ring-1 ring-blue-300/60',
+        )}
+      >
         <div className="flex items-baseline justify-between gap-3">
-          <div className="truncate text-sm font-medium text-foreground">{title}</div>
+          <div className="flex min-w-0 items-center gap-2">
+            {step.status === 'running' && (
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-blue-500" />
+            )}
+            <div className="truncate text-sm font-medium text-foreground">{title}</div>
+          </div>
           <div className="shrink-0 text-xs text-muted-foreground">
             {step.durationMs != null ? formatDuration(step.durationMs) : '…'}
           </div>
         </div>
         {step.actionSummary && (
-          <div className="mt-1.5 rounded-md bg-muted/60 px-3 py-2 font-mono text-xs leading-relaxed text-foreground/80">
+          <div className="mt-1.5 rounded-md bg-muted px-3 py-2 font-mono text-xs leading-relaxed text-foreground/80">
             {step.actionSummary}
             {step.status === 'running' && <Cursor />}
           </div>

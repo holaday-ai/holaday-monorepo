@@ -154,7 +154,7 @@ function AgentBlock({
 
   return (
     <div className="flex items-start gap-3">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground text-[11px] font-semibold text-background">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-pink-500 text-[11px] font-semibold text-white">
         H
       </div>
       <div className="min-w-0 flex-1 space-y-3">
@@ -180,8 +180,13 @@ function AgentBlock({
         {steps.length > 0 && (
           <DetailToggle open={detailOpen} count={steps.length} onToggle={() => setDetailOpen((v) => !v)}>
             <div className="mt-2 space-y-2">
-              {steps.map((step) => (
-                <StepCard key={step.tickIndex} step={step} />
+              {steps.map((step, i) => (
+                <StepCard
+                  key={step.tickIndex}
+                  step={step}
+                  isFirst={i === 0}
+                  isLast={i === steps.length - 1}
+                />
               ))}
             </div>
           </DetailToggle>
@@ -193,9 +198,13 @@ function AgentBlock({
 
 function BoardingLine(): JSX.Element {
   return (
-    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      <span>正在分析您的请求…</span>
+    <div className="flex items-center gap-3 text-sm text-muted-foreground">
+      <span className="text-foreground/70">正在分析您的请求</span>
+      <span aria-hidden className="flex items-end text-muted-foreground">
+        <span className="hola-typing-dot" />
+        <span className="hola-typing-dot" />
+        <span className="hola-typing-dot" />
+      </span>
     </div>
   );
 }
@@ -263,7 +272,7 @@ function DetailToggle({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground"
+        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
       >
         {open ? (
           <ChevronDown className="h-3 w-3" />
@@ -298,7 +307,7 @@ function ThinkingBlock({ text }: { text: string }): JSX.Element {
 function UserBubble({ intent }: { intent: string }): JSX.Element {
   return (
     <div className="flex items-start justify-end gap-3">
-      <div className="max-w-[80%] rounded-2xl bg-foreground px-4 py-2.5 text-sm leading-relaxed text-background">
+      <div className="max-w-[80%] rounded-2xl bg-muted px-4 py-2.5 text-sm leading-relaxed text-foreground">
         {intent}
       </div>
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-400 to-pink-400 text-xs font-semibold text-white">
@@ -318,7 +327,7 @@ function CaptchaWaitBanner({ wait }: { wait: UiCaptchaWait }): JSX.Element {
   return (
     <div
       role="alert"
-      className="flex animate-fade-in items-start gap-3 rounded-xl border border-amber-300 bg-amber-50/80 px-4 py-3"
+      className="flex animate-fade-in items-start gap-3 rounded-xl border border-amber-300 bg-amber-50/80 px-4 py-3 dark:border-amber-500/40 dark:bg-amber-500/10"
     >
       <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 animate-pulse-dot text-amber-600" />
       <div className="min-w-0 flex-1 text-sm">
@@ -344,7 +353,7 @@ function ExecutorFallbackBanner({
     return (
       <div
         role="alert"
-        className="flex animate-fade-in items-start gap-3 rounded-xl border border-red-300 bg-red-50/70 px-4 py-3"
+        className="flex animate-fade-in items-start gap-3 rounded-xl border border-red-300 bg-red-50/70 px-4 py-3 dark:border-red-500/40 dark:bg-red-500/10"
       >
         <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
         <div className="min-w-0 flex-1 text-sm">
@@ -358,7 +367,7 @@ function ExecutorFallbackBanner({
     );
   }
   return (
-    <div className="flex animate-fade-in items-start gap-3 rounded-xl border border-sky-200 bg-sky-50/70 px-4 py-3">
+    <div className="flex animate-fade-in items-start gap-3 rounded-xl border border-sky-200 bg-sky-50/70 px-4 py-3 dark:border-sky-500/40 dark:bg-sky-500/10">
       <Puzzle className="mt-0.5 h-5 w-5 shrink-0 text-sky-600" />
       <div className="min-w-0 flex-1 text-sm">
         <div className="font-semibold text-sky-900">已切换到浏览器扩展模式执行</div>
@@ -374,7 +383,7 @@ function ExecutorFallbackBanner({
 function DegradeBanner({ event }: { event: UiDegradeEvent }): JSX.Element {
   const label = STRATEGY_LABELS[event.strategy] ?? event.strategy;
   return (
-    <div className="flex animate-fade-in items-start gap-3 rounded-xl border border-violet-300 bg-violet-50/70 px-4 py-3">
+    <div className="flex animate-fade-in items-start gap-3 rounded-xl border border-violet-300 bg-violet-50/70 px-4 py-3 dark:border-violet-500/40 dark:bg-violet-500/10">
       <Puzzle className="mt-0.5 h-5 w-5 shrink-0 text-violet-600" />
       <div className="min-w-0 flex-1 text-sm">
         <div className="font-semibold text-violet-900">
@@ -413,7 +422,7 @@ function TerminalSummary({
 }): JSX.Element {
   if (status === 'failed' || status === 'cancelled') {
     return (
-      <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
         <div className="mb-1 text-xs font-semibold uppercase tracking-wider">
           {status === 'failed' ? '任务失败' : '已取消'}
         </div>
@@ -424,7 +433,7 @@ function TerminalSummary({
   const hasRealUrl =
     !!currentUrl && currentUrl !== 'about:blank' && !currentUrl.startsWith('chrome://');
   return (
-    <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-5 py-4">
+    <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-5 py-4 dark:border-emerald-500/30 dark:bg-emerald-500/10">
       <div className="prose prose-sm prose-neutral max-w-none">
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
           {text}
@@ -436,7 +445,7 @@ function TerminalSummary({
             <button
               type="button"
               onClick={onContinueInBrowser}
-              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-white/80 px-3 py-1.5 font-medium text-emerald-800 shadow-sm transition hover:bg-white"
+              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-card px-3 py-1.5 font-medium text-emerald-800 shadow-sm transition hover:bg-emerald-50 dark:border-emerald-500/40 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
             >
               <MousePointerClick className="h-3.5 w-3.5" />
               在浏览器中继续操作
@@ -447,7 +456,7 @@ function TerminalSummary({
               href={currentUrl ?? '#'}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-white/80 px-3 py-1.5 font-medium text-emerald-800 shadow-sm transition hover:bg-white"
+              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-card px-3 py-1.5 font-medium text-emerald-800 shadow-sm transition hover:bg-emerald-50 dark:border-emerald-500/40 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
             >
               <ExternalLink className="h-3.5 w-3.5" />
               在新标签页打开
@@ -471,7 +480,7 @@ const MARKDOWN_COMPONENTS: Components = {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-800"
+      className="inline-flex items-center gap-1 text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300"
       {...rest}
     >
       {children}

@@ -1,3 +1,4 @@
+import { Eye, EyeOff } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { setAccessToken } from '@/lib/auth';
@@ -7,13 +8,14 @@ interface Props {
   onAuthenticated: () => void;
 }
 
-type Mode = 'login' | 'register' | 'emailCode';
+type Mode = 'login' | 'register' | 'emailCode' | 'forgot';
 
 /**
- * Login / register card. Three modes:
+ * Login / register / forgot-password card. Modes:
  *   - login        : email + password → auth.login
  *   - register     : email + password + confirm → auth.register → auto-login
  *   - emailCode    : email → auth.sendCode → 6-digit code → auth.verifyCode
+ *   - forgot       : email → auth.sendCode → code + new password → auth.resetPassword
  *
  * Google OAuth button only appears when the server advertises the
  * feature via `auth.loginOptions` (env-gated on GOOGLE_CLIENT_ID).
@@ -46,7 +48,7 @@ export function LoginGate({ onAuthenticated }: Props): JSX.Element {
     })();
   }, []);
 
-  // Resend-cooldown ticker for the email-code flow.
+  // Resend-cooldown ticker for the email-code / forgot flow.
   React.useEffect(() => {
     if (cooldown <= 0) return;
     const id = setInterval(() => setCooldown((c) => Math.max(0, c - 1)), 1000);
@@ -57,6 +59,15 @@ export function LoginGate({ onAuthenticated }: Props): JSX.Element {
     setError(null);
     setNotice(null);
   };
+
+  function switchMode(m: Mode): void {
+    setMode(m);
+    resetTransient();
+    setPassword('');
+    setConfirm('');
+    setCode('');
+    setCodeSent(false);
+  }
 
   async function handleLogin(e: React.FormEvent): Promise<void> {
     e.preventDefault();
@@ -130,40 +141,55 @@ export function LoginGate({ onAuthenticated }: Props): JSX.Element {
     }
   }
 
+  async function handleResetPassword(e: React.FormEvent): Promise<void> {
+    e.preventDefault();
+    resetTransient();
+    if (password.length < 8) {
+      setError('新密码至少 8 位');
+      return;
+    }
+    if (password !== confirm) {
+      setError('两次输入的新密码不一致');
+      return;
+    }
+    setPending(true);
+    try {
+      const res = await trpc.auth.resetPassword.mutate({ email, code, password });
+      setAccessToken(res.accessToken);
+      onAuthenticated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending(false);
+    }
+  }
+
   const handleGoogle = (): void => {
-    // Backend sets up the OAuth URL; we just redirect. Callback will
-    // return with a short-lived token in the URL fragment that
-    // `lib/auth` picks up on next page load.
     window.location.href = '/api/auth/google';
   };
 
   return (
-    <div className="flex h-full items-center justify-center bg-background">
+    <div className="flex h-full items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm space-y-4 rounded-xl border border-border bg-card p-8 shadow-sm">
         <div className="space-y-1 text-center">
           <div className="text-lg font-semibold tracking-tight">HOLA DAY Workbench</div>
           <div className="text-xs text-muted-foreground">
-            {mode === 'register' ? '创建新账号' : '请登录继续'}
+            {mode === 'register' && '创建新账号'}
+            {mode === 'forgot' && '重置密码'}
+            {mode === 'login' && '请登录继续'}
+            {mode === 'emailCode' && '用邮箱验证码登录'}
           </div>
         </div>
 
-        {mode !== 'register' && (
+        {(mode === 'login' || mode === 'emailCode') && (
           <div className="flex gap-1 rounded-md bg-muted/50 p-1 text-xs">
-            <button
-              type="button"
-              onClick={() => setMode('login')}
-              className={`flex-1 rounded px-2 py-1 font-medium transition ${mode === 'login' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-            >
+            <TabButton active={mode === 'login'} onClick={() => switchMode('login')}>
               密码登录
-            </button>
+            </TabButton>
             {loginOptions.emailCode && (
-              <button
-                type="button"
-                onClick={() => setMode('emailCode')}
-                className={`flex-1 rounded px-2 py-1 font-medium transition ${mode === 'emailCode' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-              >
+              <TabButton active={mode === 'emailCode'} onClick={() => switchMode('emailCode')}>
                 验证码登录
-              </button>
+              </TabButton>
             )}
           </div>
         )}
@@ -176,6 +202,15 @@ export function LoginGate({ onAuthenticated }: Props): JSX.Element {
               onChange={setPassword}
               autoComplete="current-password"
             />
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => switchMode('forgot')}
+                className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+              >
+                忘记密码？
+              </button>
+            </div>
             {error && <div className="text-xs text-destructive">{error}</div>}
             <Button type="submit" className="w-full" disabled={pending}>
               {pending ? '登录中…' : '登录'}
@@ -208,32 +243,15 @@ export function LoginGate({ onAuthenticated }: Props): JSX.Element {
         {mode === 'emailCode' && (
           <form onSubmit={handleVerifyCode} className="space-y-3">
             <EmailInput value={email} onChange={setEmail} />
-            <div className="space-y-1">
-              <span className="text-xs font-medium text-muted-foreground">验证码</span>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="\d{6}"
-                  maxLength={6}
-                  placeholder="6 位数字"
-                  required
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-                  className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleSendCode}
-                  disabled={pending || cooldown > 0}
-                  className="whitespace-nowrap"
-                >
-                  {cooldown > 0 ? `${cooldown}s` : codeSent ? '重新发送' : '发送验证码'}
-                </Button>
-              </div>
-            </div>
-            {notice && <div className="text-xs text-emerald-700">{notice}</div>}
+            <CodeRow
+              code={code}
+              onChange={setCode}
+              onSend={handleSendCode}
+              cooldown={cooldown}
+              codeSent={codeSent}
+              pending={pending}
+            />
+            {notice && <div className="text-xs text-emerald-700 dark:text-emerald-400">{notice}</div>}
             {error && <div className="text-xs text-destructive">{error}</div>}
             <Button type="submit" className="w-full" disabled={pending || code.length !== 6}>
               {pending ? '验证中…' : '验证并登录'}
@@ -241,7 +259,47 @@ export function LoginGate({ onAuthenticated }: Props): JSX.Element {
           </form>
         )}
 
-        {loginOptions.google && mode !== 'register' && (
+        {mode === 'forgot' && (
+          <form onSubmit={handleResetPassword} className="space-y-3">
+            <EmailInput value={email} onChange={setEmail} />
+            <CodeRow
+              code={code}
+              onChange={setCode}
+              onSend={handleSendCode}
+              cooldown={cooldown}
+              codeSent={codeSent}
+              pending={pending}
+            />
+            <PasswordInput
+              value={password}
+              onChange={setPassword}
+              autoComplete="new-password"
+              label="新密码（至少 8 位）"
+            />
+            <PasswordInput
+              value={confirm}
+              onChange={setConfirm}
+              autoComplete="new-password"
+              label="确认新密码"
+            />
+            {notice && <div className="text-xs text-emerald-700 dark:text-emerald-400">{notice}</div>}
+            {error && <div className="text-xs text-destructive">{error}</div>}
+            <Button type="submit" className="w-full" disabled={pending || code.length !== 6}>
+              {pending ? '重置中…' : '重置密码并登录'}
+            </Button>
+            <div className="text-center text-xs text-muted-foreground">
+              <button
+                type="button"
+                onClick={() => switchMode('login')}
+                className="text-primary underline-offset-2 hover:underline"
+              >
+                返回登录
+              </button>
+            </div>
+          </form>
+        )}
+
+        {loginOptions.google && mode !== 'register' && mode !== 'forgot' && (
           <>
             <div className="relative text-center text-[10px] uppercase text-muted-foreground">
               <span className="relative z-10 bg-card px-2">或</span>
@@ -259,31 +317,89 @@ export function LoginGate({ onAuthenticated }: Props): JSX.Element {
               已有账号？
               <button
                 type="button"
-                onClick={() => {
-                  setMode('login');
-                  resetTransient();
-                }}
+                onClick={() => switchMode('login')}
                 className="ml-1 text-primary underline-offset-2 hover:underline"
               >
                 直接登录
               </button>
             </>
-          ) : (
+          ) : mode !== 'forgot' ? (
             <>
               没有账号？
               <button
                 type="button"
-                onClick={() => {
-                  setMode('register');
-                  resetTransient();
-                }}
+                onClick={() => switchMode('register')}
                 className="ml-1 text-primary underline-offset-2 hover:underline"
               >
                 注册
               </button>
             </>
-          )}
+          ) : null}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick(): void;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex-1 rounded px-2 py-1 font-medium transition ${active ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function CodeRow({
+  code,
+  onChange,
+  onSend,
+  cooldown,
+  codeSent,
+  pending,
+}: {
+  code: string;
+  onChange(v: string): void;
+  onSend(): void;
+  cooldown: number;
+  codeSent: boolean;
+  pending: boolean;
+}): JSX.Element {
+  return (
+    <div className="space-y-1">
+      <span className="text-xs font-medium text-muted-foreground">验证码</span>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          inputMode="numeric"
+          pattern="\d{6}"
+          maxLength={6}
+          placeholder="6 位数字"
+          required
+          value={code}
+          onChange={(e) => onChange(e.target.value.replace(/\D/g, ''))}
+          className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        />
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onSend}
+          disabled={pending || cooldown > 0}
+          className="whitespace-nowrap"
+        >
+          {cooldown > 0 ? `${cooldown}s` : codeSent ? '重新发送' : '发送验证码'}
+        </Button>
       </div>
     </div>
   );
@@ -322,17 +438,29 @@ function PasswordInput({
   autoComplete: 'current-password' | 'new-password';
   label?: string;
 }): JSX.Element {
+  const [show, setShow] = React.useState(false);
   return (
     <label className="block space-y-1">
       <span className="text-xs font-medium text-muted-foreground">{label}</span>
-      <input
-        type="password"
-        required
-        autoComplete={autoComplete}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-      />
+      <div className="relative">
+        <input
+          type={show ? 'text' : 'password'}
+          required
+          autoComplete={autoComplete}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full rounded-md border border-input bg-background px-3 py-2 pr-10 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        />
+        <button
+          type="button"
+          onClick={() => setShow((v) => !v)}
+          aria-label={show ? '隐藏密码' : '显示密码'}
+          tabIndex={-1}
+          className="absolute inset-y-0 right-0 flex w-9 items-center justify-center text-muted-foreground hover:text-foreground"
+        >
+          {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        </button>
+      </div>
     </label>
   );
 }

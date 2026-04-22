@@ -1,4 +1,4 @@
-import { Menu, Sparkles } from 'lucide-react';
+import { Globe, Menu, Sparkles } from 'lucide-react';
 import { InputArea } from '@/components/InputArea';
 import { TaskStream } from '@/components/TaskStream';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,10 @@ interface Props {
   onSubmit: (intent: string) => Promise<void> | void;
   busy?: boolean;
   onOpenSidebar?: () => void;
+  onOpenBrowser?: () => void;
   greetingName?: string;
+  /** Ref to focus the composer textarea via keyboard shortcut. */
+  inputRef?: React.Ref<HTMLTextAreaElement>;
 }
 
 /**
@@ -24,22 +27,35 @@ export function MainPanel({
   onSubmit,
   busy,
   onOpenSidebar,
+  onOpenBrowser,
   greetingName,
+  inputRef,
 }: Props): JSX.Element {
   return (
     <main className="flex h-full flex-1 flex-col bg-background">
-      <div className="flex h-11 items-center border-b border-black/[0.04] px-3 md:hidden">
+      <div className="flex h-11 items-center border-b border-border px-3 lg:hidden">
         <Button
           variant="ghost"
           size="icon"
           onClick={onOpenSidebar}
           aria-label="打开任务列表"
+          className="md:hidden"
         >
           <Menu className="h-4 w-4" />
         </Button>
         <div className="ml-2 min-w-0 flex-1 truncate text-sm font-medium">
           {task ? task.intent : 'HOLA DAY'}
         </div>
+        {task && onOpenBrowser && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onOpenBrowser}
+            aria-label="打开浏览器面板"
+          >
+            <Globe className="h-4 w-4" />
+          </Button>
+        )}
       </div>
       <div className="flex-1 overflow-y-auto">
         {task ? (
@@ -50,7 +66,7 @@ export function MainPanel({
           </div>
         )}
       </div>
-      <InputArea onSubmit={onSubmit} busy={busy} />
+      <InputArea onSubmit={onSubmit} busy={busy} inputRef={inputRef} />
     </main>
   );
 }
@@ -78,7 +94,7 @@ function EmptyState({
             <button
               type="button"
               onClick={() => onPick(s)}
-              className="w-full rounded-lg border border-border/70 bg-white/70 px-3 py-2.5 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition hover:border-foreground/20 hover:bg-white"
+              className="w-full rounded-lg border border-border bg-card px-3 py-2.5 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition hover:border-foreground/20 hover:bg-accent"
             >
               {s}
             </button>

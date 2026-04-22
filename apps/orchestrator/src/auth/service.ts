@@ -109,6 +109,24 @@ export class AuthService {
     return { user: toPublic(row), accessToken };
   }
 
+  /**
+   * Replace the user's password hash. Caller must have already
+   * verified proof of ownership (we use an email verification code in
+   * the forgot-password flow). Returns the updated user + a fresh
+   * access token so the frontend can log them in immediately.
+   */
+  async resetPasswordByEmail(email: string, newPassword: string): Promise<AuthResult> {
+    const normalized = email.trim().toLowerCase();
+    const [existing] = await this.db.select().from(users).where(eq(users.email, normalized)).limit(1);
+    if (!existing) {
+      throw new AuthError('INVALID_CREDENTIALS', 'email not registered');
+    }
+    const passwordHash = await hashPassword(newPassword);
+    await this.db.update(users).set({ passwordHash }).where(eq(users.id, existing.id));
+    const accessToken = await signAccessToken({ sub: existing.externalId, plan: existing.plan });
+    return { user: toPublic(existing), accessToken };
+  }
+
   async login(input: LoginInput): Promise<AuthResult> {
     const email = input.email.trim().toLowerCase();
 

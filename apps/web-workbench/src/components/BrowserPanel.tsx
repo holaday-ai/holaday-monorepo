@@ -15,6 +15,17 @@ interface Props {
   awaitingUser?: boolean;
   /** Active task id — forwarded on user_input events so backend can correlate. */
   activeTaskId?: string | null;
+  /**
+   * Mobile/tablet layout mode. When `sheet`, the panel renders as a
+   * bottom-sheet rather than a fixed right column, with a backdrop
+   * + close handle. Default `rail` preserves the original desktop
+   * three-column layout.
+   */
+  layout?: 'rail' | 'sheet';
+  /** Sheet-only: whether the drawer is currently open. */
+  open?: boolean;
+  /** Sheet-only: close handler. */
+  onClose?: () => void;
 }
 
 /**
@@ -33,7 +44,10 @@ export function BrowserPanel({
   taskStatus,
   awaitingUser,
   activeTaskId,
-}: Props): JSX.Element {
+  layout = 'rail',
+  open = true,
+  onClose,
+}: Props): JSX.Element | null {
   const [collapsed, setCollapsed] = React.useState(false);
   // Interactive mode is in the global store so the TaskStream's
   // "Continue in browser" button can flip it on from the left panel.
@@ -174,29 +188,45 @@ export function BrowserPanel({
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
   }, [interactiveActive, sendInput]);
 
-  return (
+  if (layout === 'sheet' && !open) return null;
+
+  const isSheet = layout === 'sheet';
+  const section = (
     <section
       className={cn(
-        'relative flex h-full shrink-0 flex-col border-l border-black/[0.06] backdrop-blur-xl transition-[width] duration-200',
-        collapsed ? 'w-10' : 'w-[400px]',
+        'relative flex flex-col border-l border-border backdrop-blur-xl',
+        isSheet
+          ? 'fixed inset-x-0 bottom-0 z-[75] h-[75vh] rounded-t-xl border-t border-l-0 shadow-2xl animate-fade-in'
+          : 'h-full shrink-0 transition-[width] duration-200',
+        !isSheet && (collapsed ? 'w-10' : 'w-[400px]'),
       )}
-      style={{ backgroundColor: 'rgba(255,255,255,0.7)' }}
+      style={{ backgroundColor: 'hsl(var(--card))' }}
     >
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={() => setCollapsed((c) => !c)}
-        aria-label={collapsed ? '展开浏览器' : '收起浏览器'}
-        className="absolute left-0 top-3 h-6 w-6 -translate-x-1/2 rounded-full border border-black/[0.06] bg-white shadow-sm hover:bg-white"
-      >
-        {collapsed ? (
-          <ChevronLeft className="h-3.5 w-3.5" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5" />
-        )}
-      </Button>
+      {!isSheet && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-label={collapsed ? '展开浏览器' : '收起浏览器'}
+          className="absolute left-0 top-3 h-6 w-6 -translate-x-1/2 rounded-full border border-border bg-card shadow-sm"
+        >
+          {collapsed ? (
+            <ChevronLeft className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5" />
+          )}
+        </Button>
+      )}
+      {isSheet && (
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="关闭浏览器抽屉"
+          className="absolute left-1/2 top-2 h-1.5 w-10 -translate-x-1/2 rounded-full bg-muted-foreground/30"
+        />
+      )}
 
-      {collapsed ? (
+      {!isSheet && collapsed ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="rotate-180 text-[11px] tracking-wider text-muted-foreground [writing-mode:vertical-rl]">
             浏览器
@@ -204,7 +234,7 @@ export function BrowserPanel({
         </div>
       ) : (
         <>
-          <header className="flex h-11 items-center gap-2 border-b border-black/[0.06] px-3">
+          <header className="flex h-11 items-center gap-2 border-b border-border px-3 pt-2">
             <StatusDot status={status} />
             <div className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
               {frame?.url ?? 'about:blank'}
@@ -223,7 +253,7 @@ export function BrowserPanel({
                 'inline-flex h-6 w-6 items-center justify-center rounded-md border transition-colors',
                 interactive
                   ? 'border-sky-300 bg-sky-100 text-sky-700'
-                  : 'border-transparent bg-transparent text-muted-foreground hover:bg-black/5',
+                  : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5',
               )}
             >
               {interactive ? (
@@ -299,7 +329,7 @@ export function BrowserPanel({
               <EmptyBrowserState taskStatus={taskStatus} />
             )}
           </div>
-          <footer className="flex h-7 items-center justify-between border-t border-black/[0.06] px-3 text-[11px] text-muted-foreground">
+          <footer className="flex h-7 items-center justify-between border-t border-border px-3 text-[11px] text-muted-foreground">
             <span>{frame ? `${frame.viewport.width}×${frame.viewport.height}` : '—'}</span>
             <span>{frame ? `第 ${frame.tickIndex + 1} 帧` : ''}</span>
           </footer>
@@ -307,6 +337,20 @@ export function BrowserPanel({
       )}
     </section>
   );
+  if (isSheet) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="关闭浏览器抽屉"
+          className="fixed inset-0 z-[70] bg-black/30 backdrop-blur-sm animate-fade-in"
+        />
+        {section}
+      </>
+    );
+  }
+  return section;
 }
 
 /**

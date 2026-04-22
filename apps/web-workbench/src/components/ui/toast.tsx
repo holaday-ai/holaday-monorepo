@@ -56,8 +56,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
             className={cn(
               'pointer-events-auto flex items-start gap-2 rounded-lg border px-3 py-2 text-left text-sm shadow-lg backdrop-blur-md animate-fade-in',
               t.kind === 'error'
-                ? 'border-red-200 bg-red-50/95 text-red-900'
-                : 'border-black/10 bg-white/95 text-foreground',
+                ? 'border-red-200 bg-red-50/95 text-red-900 dark:border-red-500/40 dark:bg-red-950/90 dark:text-red-100'
+                : 'border-border bg-popover/95 text-popover-foreground',
             )}
           >
             <AlertCircle

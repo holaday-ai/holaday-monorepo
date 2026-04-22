@@ -70,3 +70,42 @@
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 }
+
+/*
+ * Skeleton shimmer used by the initial bootstrap placeholder. Uses a
+ * low-amplitude opacity pulse to keep it unobtrusive against both the
+ * white + dark backgrounds. Tailwind's animate-pulse would also work
+ * but tweaking the cycle here keeps all skeleton-specific tuning in
+ * one place.
+ */
+@keyframes hola-skel {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.8; }
+}
+.hola-skel {
+  animation: hola-skel 1.4s ease-in-out infinite;
+  background-color: hsl(var(--muted));
+  border-radius: 0.5rem;
+}
+
+/*
+ * "typing" triple-dot used in the agent block while the backend is
+ * still planning. Three spans each animate with a 0.15s delay offset
+ * to produce the wave. Keep identical in both themes.
+ */
+@keyframes hola-typing {
+  0% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+  60%, 100% { opacity: 0.25; transform: translateY(0); }
+}
+.hola-typing-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 1.5px;
+  background-color: currentColor;
+  border-radius: 9999px;
+  animation: hola-typing 1.2s infinite;
+}
+.hola-typing-dot:nth-child(2) { animation-delay: 0.15s; }
+.hola-typing-dot:nth-child(3) { animation-delay: 0.3s; }

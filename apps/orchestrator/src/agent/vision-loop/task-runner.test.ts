@@ -464,6 +464,103 @@ describe('startVisionLoopTask — DegradationChain on Layer 4 timeout', () => {
     expect(degrades[0]?.strategy).toBe('profile_rotation');
     expect(clearCookiesCalls.length).toBeGreaterThanOrEqual(1);
   }, 15_000);
+
+  it('escalates through successive tiers on repeated timeouts (regression)', async () => {
+    // Three successive wait_for_human actions. Each Layer 4 timeout must
+    // invoke tryNext with the PREVIOUS tier's level, so level 1 → 2 → 3
+    // appears in the onDegrade stream. Guards against the
+    // lastDegradationLevel state getting reset back to 0 between ticks.
+    const fakePage = { url: () => 'https://x.test/', title: async () => '' };
+    const executor = {
+      getPage: async () => fakePage,
+      screenshot: async () => ({ base64: 'AAA=', viewportWidth: 1280, viewportHeight: 800 }),
+      click: async () => ({ ok: true }),
+      type: async () => ({ ok: true }),
+      pressKey: async () => ({ ok: true }),
+      scroll: async () => ({ ok: true }),
+      wait: async () => ({ ok: true }),
+      accessibilitySnapshot: async () => ({
+        text: '- heading "Just a moment..."',
+        refs: [],
+        url: 'https://x.test/',
+        title: 'Just a moment',
+      }),
+      resetPageForTask: async () => {},
+      navigate: async () => ({ ok: true }),
+      browser: {
+        contexts: () => [
+          {
+            clearCookies: async () => {},
+            addInitScript: async () => {},
+          },
+        ],
+      },
+    } as unknown as PlaywrightExecutor;
+
+    let tickCount = 0;
+    const commander: VisionLoopCommander = {
+      async decideNextAction(ctx) {
+        tickCount += 1;
+        const vp = ctx.observation;
+        const terminal = tickCount > 3;
+        return {
+          action: terminal
+            ? { kind: 'done' as const, summary: 'ok' }
+            : { kind: 'wait_for_human' as const, reason: 'Cloudflare' },
+          image: {
+            base64: 'AA==',
+            originalWidth: vp.viewportWidth || 1,
+            originalHeight: vp.viewportHeight || 1,
+            resizedWidth: vp.viewportWidth || 1,
+            resizedHeight: vp.viewportHeight || 1,
+            scaleX: 1,
+            scaleY: 1,
+          },
+          toolUseId: `tu_${tickCount}`,
+          elapsedMs: 5,
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+        };
+      },
+    };
+
+    const prev = {
+      timeout: process.env.CAPTCHA_WAIT_TIMEOUT_MS,
+      poll: process.env.CAPTCHA_POLL_INTERVAL_MS,
+    };
+    process.env.CAPTCHA_WAIT_TIMEOUT_MS = '60';
+    process.env.CAPTCHA_POLL_INTERVAL_MS = '15';
+
+    const degrades: Array<{ level: number; strategy: string }> = [];
+    await startVisionLoopTask({
+      taskId: 'tsk_deg_multi',
+      userId: 'usr_test',
+      intent: 'browse a protected site repeatedly',
+      commander,
+      playwrightExecutor: executor,
+      maxSteps: 5,
+      onCaptchaDetected: () => {},
+      onCaptchaResolved: () => {},
+      onDegrade: (info) => {
+        degrades.push(info);
+      },
+    });
+
+    if (prev.timeout === undefined) delete process.env.CAPTCHA_WAIT_TIMEOUT_MS;
+    else process.env.CAPTCHA_WAIT_TIMEOUT_MS = prev.timeout;
+    if (prev.poll === undefined) delete process.env.CAPTCHA_POLL_INTERVAL_MS;
+    else process.env.CAPTCHA_POLL_INTERVAL_MS = prev.poll;
+
+    expect(degrades.length).toBeGreaterThanOrEqual(2);
+    // Levels must be strictly increasing — lastDegradationLevel must
+    // advance each call, not reset to 0.
+    const levels = degrades.map((d) => d.level);
+    for (let i = 1; i < levels.length; i += 1) {
+      expect(levels[i]).toBeGreaterThan(levels[i - 1] as number);
+    }
+  }, 20_000);
 });
 
 describe('startVisionLoopTask — Layer 5 threshold latch', () => {
