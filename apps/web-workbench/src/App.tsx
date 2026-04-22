@@ -58,7 +58,9 @@ function AppShell(): JSX.Element {
   const setSelectedTask = useTaskStore((s) => s.setSelectedTask);
   const refreshTasks = useTaskStore((s) => s.refreshTasks);
   const createTask = useTaskStore((s) => s.createTask);
+  const replyToTask = useTaskStore((s) => s.replyToTask);
   const deleteTask = useTaskStore((s) => s.deleteTask);
+  const awaitingUserByTask = useTaskStore((s) => s.awaitingUserByTask);
   const applyServerMessage = useTaskStore((s) => s.applyServerMessage);
   const reset = useTaskStore((s) => s.reset);
   const screencastByTask = useTaskStore((s) => s.screencastByTask);
@@ -261,7 +263,17 @@ function AppShell(): JSX.Element {
         busy={loading}
         greetingName={greetingName || undefined}
         inputRef={inputRef}
+        replyMode={Boolean(selectedTaskId && awaitingUserByTask[selectedTaskId])}
         onSubmit={async (intent) => {
+          // Supercar: when the current task is parked on an awaiting_user
+          // question, route the composer to tasks.reply so the agent's
+          // existing loop resumes. Otherwise spawn a fresh task.
+          if (selectedTaskId && awaitingUserByTask[selectedTaskId]) {
+            const res = await replyToTask(selectedTaskId, intent);
+            if ('error' in res) toast.show(`回复失败：${res.error}`, 'error');
+            else if (!res.ok) toast.show('这个任务已经不在等待回复了', 'error');
+            return;
+          }
           const res = await createTask(intent);
           if ('error' in res) toast.show(`发送失败：${res.error}`, 'error');
         }}

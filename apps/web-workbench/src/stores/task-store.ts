@@ -2,6 +2,7 @@ import type { ServerMessage } from '@holaday/shared-types';
 import { create } from 'zustand';
 import { trpc } from '@/lib/trpc';
 import type {
+  UiAwaitingUser,
   UiCaptchaWait,
   UiDegradeEvent,
   UiExecutorFallback,
@@ -9,6 +10,8 @@ import type {
   UiStep,
   UiTask,
   UiTaskStatus,
+  UiThinkingEvent,
+  UiWebSearchEvent,
 } from '@/types/task';
 
 /**
@@ -37,6 +40,12 @@ export interface TaskStore {
   executorFallbackByTask: Record<string, UiExecutorFallback>;
   /** Latest degradation-chain attempt per task — most recent wins. */
   degradeByTask: Record<string, UiDegradeEvent>;
+  /** Supercar: current "agent asked a question" state per task. Cleared on reply. */
+  awaitingUserByTask: Record<string, UiAwaitingUser>;
+  /** Supercar: most recent web_search event per task. */
+  webSearchByTask: Record<string, UiWebSearchEvent>;
+  /** Supercar: latest extended-thinking summary per task. */
+  thinkingByTask: Record<string, UiThinkingEvent>;
   /** BrowserPanel interactive-mode toggle, shared app-wide so the
    *  terminal summary's "Continue in browser" button can flip it on. */
   browserInteractive: boolean;
@@ -46,6 +55,7 @@ export interface TaskStore {
   refreshTasks(): Promise<void>;
   createTask(intent: string): Promise<{ taskId: string } | { error: string }>;
   deleteTask(taskId: string): Promise<{ ok: true } | { error: string }>;
+  replyToTask(taskId: string, message: string): Promise<{ ok: boolean } | { error: string }>;
   applyServerMessage(msg: ServerMessage): void;
   reset(): void;
 }
@@ -60,6 +70,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   captchaWaitByTask: {},
   executorFallbackByTask: {},
   degradeByTask: {},
+  awaitingUserByTask: {},
+  webSearchByTask: {},
+  thinkingByTask: {},
   browserInteractive: false,
   setBrowserInteractive(v) {
     set({ browserInteractive: v });
@@ -168,6 +181,27 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         };
       });
       return { ok: true as const };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      set({ error: msg });
+      return { error: msg };
+    }
+  },
+
+  async replyToTask(taskId, message) {
+    try {
+      const res = await trpc.tasks.reply.mutate({ taskId, message });
+      if (res.ok) {
+        // Optimistically clear the awaiting-user state so the composer
+        // flips back to the default mode. The agent's actual response
+        // will flow in through subsequent tick frames.
+        set((prev) => {
+          const next = { ...prev.awaitingUserByTask };
+          delete next[taskId];
+          return { awaitingUserByTask: next };
+        });
+      }
+      return { ok: res.ok };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       set({ error: msg });
@@ -369,6 +403,33 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       }));
       return;
     }
+    if (msg.type === 'server.supercar.awaiting_user') {
+      set((prev) => ({
+        awaitingUserByTask: {
+          ...prev.awaitingUserByTask,
+          [msg.taskId]: { question: msg.question, at: Date.now() },
+        },
+      }));
+      return;
+    }
+    if (msg.type === 'server.supercar.web_search') {
+      set((prev) => ({
+        webSearchByTask: {
+          ...prev.webSearchByTask,
+          [msg.taskId]: { iteration: msg.iteration, query: msg.query, at: Date.now() },
+        },
+      }));
+      return;
+    }
+    if (msg.type === 'server.supercar.thinking') {
+      set((prev) => ({
+        thinkingByTask: {
+          ...prev.thinkingByTask,
+          [msg.taskId]: { summary: msg.summary, at: Date.now() },
+        },
+      }));
+      return;
+    }
     // Other frames (vision.observe / vision.act / user.confirm / ...)
     // aren't UI-relevant yet; silently ignore.
   },
@@ -383,6 +444,10 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       screencastByTask: {},
       captchaWaitByTask: {},
       executorFallbackByTask: {},
+      degradeByTask: {},
+      awaitingUserByTask: {},
+      webSearchByTask: {},
+      thinkingByTask: {},
     });
   },
 }));

@@ -105,6 +105,36 @@ export interface UiExecutorFallback {
   at: number;
 }
 
+/**
+ * Supercar: agent asked the user a follow-up question and the loop is
+ * parked until they reply. Cleared once tasks.reply lands a message.
+ */
+export interface UiAwaitingUser {
+  question: string;
+  at: number;
+}
+
+/**
+ * Supercar: web_search events arrive independently of tick ticks (the
+ * search is server-side; there's no DOM to screencast). We log the last
+ * few so the UI can show "Claude 正在搜索 …" without cluttering steps.
+ */
+export interface UiWebSearchEvent {
+  iteration: number;
+  query: string;
+  at: number;
+}
+
+/**
+ * Supercar: summarised extended-thinking text for the most recent
+ * iteration. Rendered in a collapsible card so operators can inspect
+ * Claude's reasoning without it dominating the stream.
+ */
+export interface UiThinkingEvent {
+  summary: string;
+  at: number;
+}
+
 export function isActive(status: UiTaskStatus): boolean {
   return status === 'executing' || status === 'paused';
 }

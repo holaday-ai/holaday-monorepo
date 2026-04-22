@@ -5,8 +5,10 @@ import {
   ChevronRight,
   ExternalLink,
   Loader2,
+  MessageCircleQuestion,
   MousePointerClick,
   Puzzle,
+  Search,
 } from 'lucide-react';
 import * as React from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
@@ -15,11 +17,13 @@ import { StepCard } from '@/components/StepCard';
 import { useTaskStore } from '@/stores/task-store';
 import { cn } from '@/lib/utils';
 import type {
+  UiAwaitingUser,
   UiCaptchaWait,
   UiDegradeEvent,
   UiExecutorFallback,
   UiStep,
   UiTask,
+  UiWebSearchEvent,
 } from '@/types/task';
 import { humanizeStep, humanizedGlyph } from '@/utils/step-humanize';
 
@@ -55,18 +59,24 @@ export function TaskStream({ task }: Props): JSX.Element {
   const executorFallback = useTaskStore((s) => s.executorFallbackByTask[task.taskId]);
   const degrade = useTaskStore((s) => s.degradeByTask[task.taskId]);
   const screencast = useTaskStore((s) => s.screencastByTask[task.taskId]);
+  const awaitingUser = useTaskStore((s) => s.awaitingUserByTask[task.taskId]);
+  const webSearch = useTaskStore((s) => s.webSearchByTask[task.taskId]);
+  const thinkingEvent = useTaskStore((s) => s.thinkingByTask[task.taskId]);
   const setBrowserInteractive = useTaskStore((s) => s.setBrowserInteractive);
   const scrollAnchorRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ block: 'end' });
-  }, [steps.length, task.status, captchaWait, executorFallback, degrade]);
+  }, [steps.length, task.status, captchaWait, executorFallback, degrade, awaitingUser, webSearch]);
 
   const terminal =
     task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled';
 
   const humanLines = React.useMemo(() => buildHumanLines(steps), [steps]);
-  const thinking = pickThinking(steps);
+  // Prefer the live thinking event from the supercar loop; fall back to
+  // the (currently null) legacy picker so the hook stays in place if we
+  // ever add thinking to the vision-loop path too.
+  const thinking = thinkingEvent?.summary ?? pickThinking(steps);
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 px-6 pb-4 pt-8">
@@ -83,6 +93,8 @@ export function TaskStream({ task }: Props): JSX.Element {
         captchaWait={captchaWait}
         degrade={degrade}
         executorFallback={executorFallback}
+        awaitingUser={awaitingUser}
+        webSearch={webSearch}
       />
 
       <div ref={scrollAnchorRef} />
@@ -132,6 +144,8 @@ function AgentBlock({
   captchaWait,
   degrade,
   executorFallback,
+  awaitingUser,
+  webSearch,
 }: {
   task: UiTask;
   steps: UiStep[];
@@ -143,6 +157,8 @@ function AgentBlock({
   captchaWait: UiCaptchaWait | undefined;
   degrade: UiDegradeEvent | undefined;
   executorFallback: UiExecutorFallback | undefined;
+  awaitingUser: UiAwaitingUser | undefined;
+  webSearch: UiWebSearchEvent | undefined;
 }): JSX.Element {
   const [detailOpen, setDetailOpen] = React.useState(false);
   const hasAnyActivity =
@@ -150,6 +166,8 @@ function AgentBlock({
     Boolean(captchaWait) ||
     Boolean(degrade) ||
     Boolean(executorFallback) ||
+    Boolean(awaitingUser) ||
+    Boolean(webSearch) ||
     Boolean(task.resultText);
 
   return (
@@ -164,9 +182,13 @@ function AgentBlock({
 
         {humanLines.length > 0 && <HumanLineList lines={humanLines} />}
 
+        {webSearch && !awaitingUser && <WebSearchLine event={webSearch} />}
+
         {captchaWait && <CaptchaWaitBanner wait={captchaWait} />}
         {degrade && !executorFallback && <DegradeBanner event={degrade} />}
         {executorFallback && <ExecutorFallbackBanner fallback={executorFallback} />}
+
+        {awaitingUser && <AwaitingUserBanner wait={awaitingUser} />}
 
         {terminal && task.resultText && (
           <TerminalSummary
@@ -192,6 +214,48 @@ function AgentBlock({
           </DetailToggle>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Yellow-highlighted card shown when the agent parked on a clarifying
+ * question. The composer below (InputArea) flips to "回复 HOLA DAY..."
+ * mode so Enter sends a reply instead of spawning a new task.
+ */
+function AwaitingUserBanner({ wait }: { wait: UiAwaitingUser }): JSX.Element {
+  return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-[0_1px_2px_rgba(0,0,0,0.03)] dark:border-amber-900/50 dark:bg-amber-950/30">
+      <div className="flex items-start gap-2.5">
+        <MessageCircleQuestion className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+            HOLA DAY 想跟你确认
+          </div>
+          <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-amber-950 dark:text-amber-100">
+            {wait.question}
+          </p>
+          <p className="mt-2 text-[11px] text-amber-700/80 dark:text-amber-500/80">
+            在下方输入框回答，任务会继续。
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Inline "正在搜索 …" line for web_search events. Small on purpose —
+ * search iterations are usually quick and we don't want them to push
+ * the primary step stream around.
+ */
+function WebSearchLine({ event }: { event: UiWebSearchEvent }): JSX.Element {
+  return (
+    <div className="flex items-start gap-2 text-sm leading-relaxed text-muted-foreground">
+      <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-500" />
+      <span className="min-w-0 flex-1">
+        正在联网搜索 <span className="text-foreground">"{event.query}"</span>
+      </span>
     </div>
   );
 }

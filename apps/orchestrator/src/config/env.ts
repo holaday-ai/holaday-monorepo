@@ -69,6 +69,39 @@ const schema = z.object({
    */
   VISION_MODE: z.enum(['screenshot', 'accessibility', 'auto']).default('auto'),
 
+  /**
+   * Agent-loop implementation selector.
+   *   supercar → Anthropic official computer_20251124 + web_search_20260209
+   *              + adaptive thinking via @anthropic-ai/sdk. New default.
+   *   legacy   → the hand-rolled vision-loop commander
+   *              (apps/orchestrator/src/agent/vision-loop/*).
+   * Default: 'supercar'. Flip to 'legacy' without redeploy to A/B the
+   * two stacks on the same Chromium.
+   */
+  AGENT_MODE: z.enum(['supercar', 'legacy']).default('supercar'),
+
+  /**
+   * Model ID the supercar loop drives. Computer use requires a model
+   * that supports `computer_20251124`: Opus 4.7, Opus 4.6, Sonnet 4.6,
+   * or Opus 4.5. Default matches the project spec (sonnet-4-6 balances
+   * cost + quality for long agentic runs).
+   */
+  SUPERCAR_MODEL: z.string().default('claude-sonnet-4-6'),
+
+  /**
+   * Per-task iteration cap in the supercar loop. Each iteration is one
+   * Claude API round-trip (may include computer + web_search tool uses).
+   * 50 matches the project spec; raise when dogfooding long research
+   * tasks, lower to contain runaway costs.
+   */
+  SUPERCAR_MAX_ITERATIONS: z.coerce.number().int().positive().default(50),
+
+  /**
+   * Whole-task wall clock in ms. The loop exits with status=`timeout`
+   * and hands whatever partial summary it has to the user.
+   */
+  SUPERCAR_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
+
   S3_ENDPOINT: z.string().url().optional(),
   S3_ACCESS_KEY: z.string().optional(),
   S3_SECRET_KEY: z.string().optional(),

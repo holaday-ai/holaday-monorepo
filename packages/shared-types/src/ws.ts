@@ -467,6 +467,43 @@ export const serverVisionScreencastSchema = z.object({
   timestamp: z.string(),
 });
 
+/**
+ * Supercar-specific frames. The supercar agent loop reuses
+ * `server.vision.tick.*` and `server.vision.screencast` for iteration
+ * progress, but three things don't map cleanly to the vision shapes:
+ *
+ *   `server.supercar.web_search` — server-side web search invocation,
+ *     no DOM action and no screencast. Carries the query so the UI can
+ *     render "正在搜索：<q>".
+ *
+ *   `server.supercar.awaiting_user` — model paused on a clarifying
+ *     question. UI renders yellow-highlighted card + enables the reply
+ *     composer; `tasks.reply` mutation unblocks the loop.
+ *
+ *   `server.supercar.thinking` — summarised extended-thinking output
+ *     for the current turn. Shown as a subtle, collapsed step card so
+ *     operators can see Claude's reasoning without cluttering the
+ *     primary flow.
+ */
+export const serverSupercarWebSearchSchema = z.object({
+  type: z.literal('server.supercar.web_search'),
+  taskId: z.string(),
+  iteration: z.number().int().nonnegative(),
+  query: z.string(),
+});
+
+export const serverSupercarAwaitingUserSchema = z.object({
+  type: z.literal('server.supercar.awaiting_user'),
+  taskId: z.string(),
+  question: z.string(),
+});
+
+export const serverSupercarThinkingSchema = z.object({
+  type: z.literal('server.supercar.thinking'),
+  taskId: z.string(),
+  summary: z.string(),
+});
+
 export const serverMessageSchema = z.discriminatedUnion('type', [
   serverWelcomeSchema,
   serverErrorSchema,
@@ -486,6 +523,9 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverVisionCaptchaResolvedSchema,
   serverVisionExecutorFallbackSchema,
   serverVisionDegradeSchema,
+  serverSupercarWebSearchSchema,
+  serverSupercarAwaitingUserSchema,
+  serverSupercarThinkingSchema,
 ]);
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;

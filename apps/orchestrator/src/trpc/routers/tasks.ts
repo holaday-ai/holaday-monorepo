@@ -14,6 +14,12 @@ import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
 import { visionLoopTaskQueue } from '../../agent/vision-loop/task-queue.js';
 import { startVisionLoopTask } from '../../agent/vision-loop/task-runner.js';
+import {
+  runSupercarTask,
+  supercarAbort,
+  supercarReply,
+  type SupercarOutcome,
+} from '../../agent/supercar/index.js';
 import { skills } from '../../db/schema/skills.js';
 import { taskEvents } from '../../db/schema/task-events.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
@@ -46,6 +52,189 @@ export const tasksRouter = router({
       .limit(1);
     if (!userRow) {
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+    }
+
+    // Supercar path — Anthropic's official computer_20251124 +
+    // web_search_20260209 tools driving Playwright directly, with
+    // adaptive thinking + prompt caching. This is the default starting
+    // with the superstar rewrite; flip AGENT_MODE=legacy to fall back
+    // to the hand-rolled vision-loop. Requires a connected Playwright
+    // executor — we can't run computer use without a browser.
+    if (appEnv.AGENT_MODE === 'supercar' && ctx.playwrightExecutor && appEnv.ANTHROPIC_API_KEY) {
+      const taskId = newExternalId('task');
+      const repo = new TaskRepository(ctx.db);
+      await repo.insertTask(
+        {
+          taskId,
+          status: 'executing',
+          plan: [],
+          cursor: 0,
+          pendingConfirm: null,
+        },
+        { userId: userRow.id, intent: input.intent },
+      );
+
+      const classification = classifyDomain(input.intent);
+      ctx.logger.info(
+        { taskId, domain: classification.domain, confidence: classification.confidence },
+        'supercar: task domain classified',
+      );
+
+      const userId = ctx.userId;
+      const [taskDbRow] = await ctx.db
+        .select({ id: tasksTable.id })
+        .from(tasksTable)
+        .where(eq(tasksTable.externalId, taskId))
+        .limit(1);
+      const taskDbId = taskDbRow?.id;
+
+      const runFn = () =>
+        runSupercarTask({
+          taskId,
+          intent: input.intent,
+          executor: ctx.playwrightExecutor!,
+          domain: classification.domain,
+          onTick(ev) {
+            // Synthesise a tick.start + tick.end pair per iteration so
+            // the existing UI step cards light up without frontend
+            // changes. actionKind is the first client-side tool the
+            // model invoked this turn, or "text" when Claude just
+            // spoke (e.g. mid-turn thinking → commentary).
+            const actionKind = ev.toolsInTurn[0] ?? 'text';
+            const actionSummary = ev.textPreamble
+              ? truncateString(ev.textPreamble, 80)
+              : ev.toolsInTurn.join(', ') || 'thinking';
+            const now = Date.now();
+            try {
+              broadcastToUser(userId, {
+                type: 'server.vision.tick.start',
+                taskId,
+                tickIndex: ev.iteration,
+                mode: 'screenshot',
+              });
+              broadcastToUser(userId, {
+                type: 'server.vision.tick.end',
+                taskId,
+                tickIndex: ev.iteration,
+                mode: 'screenshot',
+                actionKind,
+                actionSummary,
+                durationMs: ev.apiLatencyMs,
+                ok: true,
+              });
+            } catch (err) {
+              ctx.logger.warn({ err, taskId }, 'supercar: broadcast tick failed');
+            }
+            // Persist the iteration to task_steps so history survives
+            // reloads — same shape the legacy vision-loop uses.
+            if (taskDbId) {
+              void (async () => {
+                try {
+                  await ctx.db.insert(taskSteps).values({
+                    externalId: newExternalId('taskStep'),
+                    taskId: taskDbId,
+                    seq: ev.iteration,
+                    kind: actionKind,
+                    status: 'done',
+                    riskLevel: 'low',
+                    input: { summary: actionSummary },
+                    output: { apiLatencyMs: ev.apiLatencyMs, tools: ev.toolsInTurn },
+                    startedAt: new Date(now - ev.apiLatencyMs),
+                    completedAt: new Date(now),
+                  });
+                } catch (err) {
+                  ctx.logger.warn(
+                    { err, taskId, iteration: ev.iteration },
+                    'supercar: persist step failed',
+                  );
+                }
+              })();
+            }
+          },
+          onScreencast(ev) {
+            try {
+              broadcastToUser(userId, {
+                type: 'server.vision.screencast',
+                taskId,
+                tickIndex: ev.iteration,
+                imageBase64: ev.imageBase64,
+                url: ev.url,
+                viewport: { width: ev.viewportWidth, height: ev.viewportHeight },
+                timestamp: new Date().toISOString(),
+              });
+            } catch (err) {
+              ctx.logger.warn({ err, taskId }, 'supercar: broadcast screencast failed');
+            }
+          },
+          onWebSearch(ev) {
+            // Broadcasts as a synthetic tick so the UI shows a step
+            // card for the search. No screencast — web_search is
+            // server-side and has no DOM to capture.
+            try {
+              broadcastToUser(userId, {
+                type: 'server.supercar.web_search',
+                taskId,
+                iteration: ev.iteration,
+                query: ev.query,
+              });
+            } catch (err) {
+              ctx.logger.warn({ err, taskId }, 'supercar: broadcast web_search failed');
+            }
+          },
+          onAwaitingUser(ev) {
+            try {
+              broadcastToUser(userId, {
+                type: 'server.supercar.awaiting_user',
+                taskId,
+                question: ev.question,
+              });
+            } catch (err) {
+              ctx.logger.warn({ err, taskId }, 'supercar: broadcast awaiting_user failed');
+            }
+          },
+          onThinking(summary) {
+            try {
+              broadcastToUser(userId, {
+                type: 'server.supercar.thinking',
+                taskId,
+                summary: truncateString(summary, 2_000),
+              });
+            } catch (err) {
+              ctx.logger.warn({ err, taskId }, 'supercar: broadcast thinking failed');
+            }
+          },
+        })
+          .then(async (outcome) => {
+            ctx.logger.info(
+              { taskId, status: outcome.status, iterations: outcome.iterations, toolsUsed: outcome.toolsUsed },
+              'supercar: task terminated',
+            );
+            await persistSupercarOutcome(repo, taskId, outcome);
+            try {
+              broadcastToUser(userId, buildTaskTerminalMessage(taskId, outcome));
+            } catch (err) {
+              ctx.logger.warn({ err, taskId }, 'supercar: broadcast terminal failed');
+            }
+          })
+          .catch((err) => {
+            ctx.logger.error({ err, taskId }, 'supercar: loop threw');
+          });
+
+      void visionLoopTaskQueue.enqueue(userId, runFn, (position) => {
+        if (position > 1) {
+          try {
+            broadcastToUser(userId, {
+              type: 'server.task.queued',
+              taskId,
+              position,
+            });
+          } catch (err) {
+            ctx.logger.warn({ err, taskId }, 'supercar: broadcast queued failed');
+          }
+        }
+      });
+
+      return { taskId, status: 'executing' as const, steps: [] };
     }
 
     // Vision-loop path — the new control plane. Claude looks at each
@@ -771,6 +960,63 @@ export const tasksRouter = router({
     }),
 
   /**
+   * Supercar-only: resume a task that parked on `server.supercar.awaiting_user`.
+   * Returns `{ ok: false }` when the task isn't currently waiting (already
+   * finished, unknown id, wrong user). Does NOT load the full task state —
+   * the only valid state for reply is an in-memory handle registered by
+   * the running loop, so we bail fast when it's missing.
+   */
+  reply: protectedProcedure
+    .input(z.object({ taskId: z.string().min(1), message: z.string().min(1).max(4_000) }))
+    .mutation(async ({ ctx, input }) => {
+      const [userRow] = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.externalId, ctx.userId))
+        .limit(1);
+      if (!userRow) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+      }
+      const [taskRow] = await ctx.db
+        .select({ id: tasksTable.id })
+        .from(tasksTable)
+        .where(and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)))
+        .limit(1);
+      if (!taskRow) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
+      }
+      const delivered = supercarReply(input.taskId, input.message);
+      return { ok: delivered };
+    }),
+
+  /**
+   * Supercar-only: abort a running task. Sets the in-memory abort flag;
+   * the next loop iteration exits with status=cancelled.
+   */
+  abort: protectedProcedure
+    .input(z.object({ taskId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const [userRow] = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.externalId, ctx.userId))
+        .limit(1);
+      if (!userRow) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+      }
+      const [taskRow] = await ctx.db
+        .select({ id: tasksTable.id })
+        .from(tasksTable)
+        .where(and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)))
+        .limit(1);
+      if (!taskRow) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
+      }
+      const aborted = supercarAbort(input.taskId);
+      return { ok: aborted };
+    }),
+
+  /**
    * Remove one of the caller's tasks. Cascades to task_steps / task_events
    * via the schema's onDelete. Scoped hard — the WHERE clause requires
    * both the externalId AND caller's userId so a user cannot delete
@@ -901,6 +1147,105 @@ export const tasksRouter = router({
 
 import { sql as sqlFilter } from 'drizzle-orm';
 const sqlEmpty = sqlFilter``;
+
+/**
+ * Truncate helper shared between supercar broadcast hooks — keeps WS
+ * frames and step summaries bounded so a rogue thinking block can't
+ * wedge a socket write.
+ */
+function truncateString(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return `${s.slice(0, max - 1)}…`;
+}
+
+/**
+ * Persist a supercar run's terminal state via the same
+ * `persistVisionOutcome` the legacy vision-loop uses. Maps the
+ * supercar-specific statuses back to the tasks.status enum.
+ */
+async function persistSupercarOutcome(
+  repo: TaskRepository,
+  taskId: string,
+  outcome: SupercarOutcome,
+): Promise<void> {
+  try {
+    if (outcome.status === 'completed') {
+      await repo.persistVisionOutcome(taskId, {
+        status: 'completed',
+        summary: outcome.summary ?? '',
+        tickCount: outcome.iterations,
+      });
+    } else if (outcome.status === 'awaiting_user') {
+      // Shouldn't land here in the happy path — the loop returns a
+      // terminal status after the reply, not awaiting_user. Persist as
+      // paused so the UI still renders sensibly if it did.
+      await repo.persistVisionOutcome(taskId, {
+        status: 'paused',
+        reason: outcome.question ?? 'awaiting user reply',
+        tickCount: outcome.iterations,
+      });
+    } else if (outcome.status === 'cancelled') {
+      await repo.persistVisionOutcome(taskId, {
+        status: 'cancelled',
+        tickCount: outcome.iterations,
+      });
+    } else if (outcome.status === 'timeout') {
+      await repo.persistVisionOutcome(taskId, {
+        status: 'failed',
+        reason: outcome.reason ?? 'supercar: task timeout',
+        tickCount: outcome.iterations,
+      });
+    } else {
+      // 'failed'
+      await repo.persistVisionOutcome(taskId, {
+        status: 'failed',
+        reason: outcome.reason ?? 'supercar: task failed',
+        tickCount: outcome.iterations,
+      });
+    }
+  } catch (err) {
+    // Best-effort — persistence failure is logged by the caller's .then().
+    // Rethrow so the caller's logger catches it.
+    throw err instanceof Error ? err : new Error(String(err));
+  }
+}
+
+/**
+ * Translate a supercar outcome to the `server.task.terminal` frame the
+ * web workbench + extension already understand. `timeout` collapses to
+ * `failed` over the wire so the schema doesn't need to widen.
+ */
+function buildTaskTerminalMessage(
+  taskId: string,
+  outcome: SupercarOutcome,
+): import('@holaday/shared-types').ServerMessage {
+  if (outcome.status === 'completed') {
+    return {
+      type: 'server.task.terminal',
+      taskId,
+      status: 'completed',
+      ...(outcome.summary ? { summary: outcome.summary } : {}),
+    };
+  }
+  if (outcome.status === 'cancelled') {
+    return { type: 'server.task.terminal', taskId, status: 'cancelled' };
+  }
+  if (outcome.status === 'awaiting_user') {
+    return {
+      type: 'server.task.terminal',
+      taskId,
+      status: 'paused',
+      ...(outcome.question ? { reason: outcome.question } : {}),
+    };
+  }
+  // failed / timeout
+  return {
+    type: 'server.task.terminal',
+    taskId,
+    status: 'failed',
+    ...(outcome.reason ? { reason: outcome.reason } : {}),
+  };
+}
 
 function toNumber(v: unknown): number {
   if (typeof v === 'number') return v;

@@ -13,6 +13,11 @@ interface Props {
   greetingName?: string;
   /** Ref to focus the composer textarea via keyboard shortcut. */
   inputRef?: React.Ref<HTMLTextAreaElement>;
+  /**
+   * Supercar: when true the composer's placeholder + copy flip to
+   * "reply to agent" mode. Drives the App's onSubmit branching too.
+   */
+  replyMode?: boolean;
 }
 
 /**
@@ -30,6 +35,7 @@ export function MainPanel({
   onOpenBrowser,
   greetingName,
   inputRef,
+  replyMode,
 }: Props): JSX.Element {
   return (
     <main className="flex h-full flex-1 flex-col bg-background">
@@ -66,7 +72,12 @@ export function MainPanel({
           </div>
         )}
       </div>
-      <InputArea onSubmit={onSubmit} busy={busy} inputRef={inputRef} />
+      <InputArea
+        onSubmit={onSubmit}
+        busy={busy}
+        inputRef={inputRef}
+        replyMode={replyMode}
+      />
     </main>
   );
 }

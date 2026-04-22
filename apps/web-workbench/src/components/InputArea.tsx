@@ -8,6 +8,12 @@ interface Props {
   busy?: boolean;
   /** Forwarded ref for keyboard-shortcut focus (Cmd+N / slash). */
   inputRef?: React.Ref<HTMLTextAreaElement>;
+  /**
+   * Supercar: flips the placeholder + shortcut hint to reply mode.
+   * Doesn't change submit behaviour — App's onSubmit already branches
+   * to tasks.reply when the current task is awaiting a user reply.
+   */
+  replyMode?: boolean;
 }
 
 /**
@@ -18,7 +24,7 @@ interface Props {
  * the footer minimal — the model / mode selector is product-team UI,
  * not useful to end users, so it's gone.
  */
-export function InputArea({ onSubmit, busy, inputRef }: Props): JSX.Element {
+export function InputArea({ onSubmit, busy, inputRef, replyMode }: Props): JSX.Element {
   const [value, setValue] = React.useState('');
   // Local submitting flag — decouples the button spinner from the
   // global `busy` prop (which is driven by the store-level `loading`
@@ -56,7 +62,7 @@ export function InputArea({ onSubmit, busy, inputRef }: Props): JSX.Element {
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="描述你想让 HOLA DAY 做什么..."
+          placeholder={replyMode ? '回复 HOLA DAY...' : '描述你想让 HOLA DAY 做什么...'}
           rows={2}
           className="resize-none border-0 bg-transparent px-4 py-3 pr-14 text-sm shadow-none focus-visible:ring-0"
           style={{ maxHeight: '10rem' }}
