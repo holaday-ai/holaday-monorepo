@@ -48,7 +48,12 @@ export function createHttpApp(deps: HttpAppDeps) {
   // login-CSRF class where an attacker tricks a signed-in victim into
   // completing the attacker's OAuth flow.
   // ---------------------------------------------------------------------
-  app.get('/api/auth/google', (req, res) => {
+  // Nginx strips `/api/` via the trailing-slash proxy_pass, so the
+  // route we register here is `/auth/google`. The redirect_uri we
+  // hand to Google (and the <a href> in the SPA) is the browser-
+  // facing `/api/auth/google[/callback]` — nginx maps that to the
+  // backend route below.
+  app.get('/auth/google', (req, res) => {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
     if (!clientId || !clientSecret) {
@@ -83,7 +88,7 @@ export function createHttpApp(deps: HttpAppDeps) {
     res.redirect(302, `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
   });
 
-  app.get('/api/auth/google/callback', async (req, res) => {
+  app.get('/auth/google/callback', async (req, res) => {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
     if (!clientId || !clientSecret) {
