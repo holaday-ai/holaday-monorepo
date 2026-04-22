@@ -451,21 +451,39 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           viewportHeight: shot.viewportHeight ?? displayHeight,
         });
 
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: toolUse.id,
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: 'image/jpeg',
-                data: shot.base64,
+        // Anthropic requires that a tool_result marked is_error:true
+        // contains ONLY text blocks — an image + is_error combo 400s
+        // with "all content must be type `text` if `is_error` is true".
+        // So split the shape: on failure we send a text description,
+        // on success we send the fresh screenshot.
+        if (execResult.ok) {
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: [
+              {
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: 'image/jpeg',
+                  data: shot.base64,
+                },
               },
-            },
-          ],
-          ...(execResult.ok ? {} : { is_error: true }),
-        });
+            ],
+          });
+        } else {
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: [
+              {
+                type: 'text',
+                text: `computer action failed: ${execResult.summary}`,
+              },
+            ],
+            is_error: true,
+          });
+        }
       }
 
       messages.push({ role: 'user', content: toolResults });
