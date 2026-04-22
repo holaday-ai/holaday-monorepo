@@ -1,6 +1,6 @@
-import { AlertCircle, Puzzle } from 'lucide-react';
+import { AlertCircle, ExternalLink, MousePointerClick, Puzzle } from 'lucide-react';
 import * as React from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { StepCard } from '@/components/StepCard';
 import { useTaskStore } from '@/stores/task-store';
@@ -38,6 +38,8 @@ export function TaskStream({ task }: Props): JSX.Element {
   const captchaWait = useTaskStore((s) => s.captchaWaitByTask[task.taskId]);
   const executorFallback = useTaskStore((s) => s.executorFallbackByTask[task.taskId]);
   const degrade = useTaskStore((s) => s.degradeByTask[task.taskId]);
+  const screencast = useTaskStore((s) => s.screencastByTask[task.taskId]);
+  const setBrowserInteractive = useTaskStore((s) => s.setBrowserInteractive);
   const scrollAnchorRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -70,7 +72,12 @@ export function TaskStream({ task }: Props): JSX.Element {
       {executorFallback && <ExecutorFallbackBanner fallback={executorFallback} />}
 
       {terminal && task.resultText && (
-        <TerminalSummary status={task.status} text={task.resultText} />
+        <TerminalSummary
+          status={task.status}
+          text={task.resultText}
+          currentUrl={screencast?.url ?? null}
+          onContinueInBrowser={() => setBrowserInteractive(true)}
+        />
       )}
 
       <div ref={scrollAnchorRef} />
@@ -211,9 +218,13 @@ function UserBubble({ intent }: { intent: string }): JSX.Element {
 function TerminalSummary({
   status,
   text,
+  currentUrl,
+  onContinueInBrowser,
 }: {
   status: UiTask['status'];
   text: string;
+  currentUrl?: string | null;
+  onContinueInBrowser?: () => void;
 }): JSX.Element {
   if (status === 'failed' || status === 'cancelled') {
     return (
@@ -225,14 +236,69 @@ function TerminalSummary({
       </div>
     );
   }
+  const hasRealUrl =
+    !!currentUrl &&
+    currentUrl !== 'about:blank' &&
+    !currentUrl.startsWith('chrome://');
   return (
     <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-5 py-4">
       <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-emerald-700">
         已完成
       </div>
       <div className="prose prose-sm prose-neutral max-w-none">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+          {text}
+        </ReactMarkdown>
       </div>
+      {(hasRealUrl || onContinueInBrowser) && (
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-emerald-200/70 pt-3 text-xs">
+          {onContinueInBrowser && (
+            <button
+              type="button"
+              onClick={onContinueInBrowser}
+              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-white/80 px-3 py-1.5 font-medium text-emerald-800 shadow-sm transition hover:bg-white"
+            >
+              <MousePointerClick className="h-3.5 w-3.5" />
+              在浏览器中继续操作
+            </button>
+          )}
+          {hasRealUrl && (
+            <a
+              href={currentUrl ?? '#'}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-white/80 px-3 py-1.5 font-medium text-emerald-800 shadow-sm transition hover:bg-white"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              在新标签页打开
+              <span className="max-w-[180px] truncate text-emerald-700/70">
+                {currentUrl}
+              </span>
+            </a>
+          )}
+        </div>
+      )}
     </div>
   );
 }
+
+// All markdown links open in a new tab (noopener/noreferrer). Primary
+// use case is summary text containing URLs the agent produced —
+// letting them hijack the current tab drops the user out of the
+// workbench (Bug 4). Also annotates visually with an external-link
+// icon so users know a click navigates away.
+const MARKDOWN_COMPONENTS: Components = {
+  // biome-ignore lint/a11y/useAnchorContent: react-markdown passes children
+  a: ({ href, children, ...rest }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-800"
+      {...rest}
+    >
+      {children}
+      <ExternalLink className="h-3 w-3" aria-hidden />
+    </a>
+  ),
+};

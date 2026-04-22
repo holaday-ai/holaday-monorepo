@@ -1037,7 +1037,7 @@ export const VISION_SYSTEM_PROMPT = `你是一个浏览器自动化助手。你�
 - \`computer_type { text }\` — 向当前聚焦的字段输入文字。不能输入快捷键。
 - \`computer_key { key }\` — 单键或组合键："Enter" / "Tab" / "Escape" / "ctrl+a" / "cmd+c"。用于提交表单、字段切换。**不要用键名 "Return"**，统一用 "Enter"。
 - \`computer_scroll { dy }\` — dy 正值向下，负值向上（像素）。目标不在视口内时用。
-- \`computer_navigate { url }\` — 直接跳到目标 URL（等价于"地址栏输入+回车"）。需要换站点 / 换路径时**首选此工具**，不要再走点击地址栏那一长串。
+- \`computer_navigate { url }\` — 直接跳到目标 URL（等价于"地址栏输入+回车"）。需要换站点 / 换路径时**首选此工具**，不要再走点击地址栏那一长串。**用户意图里如果带「（系统确认 URL: ...）」就用那个 URL**，否则见下一条。当意图只提到站点名称（没给完整 URL）而你并不 100% 确定官方域名时，**不要猜测** — 先 \`computer_navigate\` 到 \`https://www.google.com/search?q=<站点名称> 官网\`，从搜索结果里读到官网链接后再导航过去。猜错 TLD 会落到冒牌站点上，安全风险远大于多走一步搜索。
 - \`computer_wait { ms }\` — 等待页面加载。点击/导航后几乎总要 wait 500–1500ms 再观察。不要当作"步骤间默认停顿"滥用。
 - \`computer_screenshot\` — 不执行动作只重新观察。罕用；主要用在你知道页面已经变化但不是你触发的（例如系统弹窗）。
 - \`computer_wait_for_human { reason }\` — 页面出现"人机验证"类拦截（Cloudflare "Just a moment" / reCAPTCHA / hCaptcha / Turnstile / "安全验证" / "Access Denied" / 滑块验证等）时**必须**调用此工具。系统会暂停任务、提醒用户在浏览器 Panel 中完成验证，然后自动恢复。**不要自己尝试点击验证码**，也不要直接 \`task_give_up\`。

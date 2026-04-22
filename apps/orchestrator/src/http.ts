@@ -32,6 +32,44 @@ export function createHttpApp(deps: HttpAppDeps) {
     });
   });
 
+  // Google OAuth2 endpoint — placeholder that 501s when the deploy has
+  // no GOOGLE_CLIENT_ID configured, and redirects to Google's consent
+  // page when it does. The callback + token-swap is TODO (tracked
+  // separately); frontend hides the button when `auth.loginOptions`
+  // reports `google: false`, so no user should hit this by accident.
+  app.get('/api/auth/google', (req, res) => {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    if (!clientId || !clientSecret) {
+      res.status(501).json({
+        error: 'google_oauth_not_configured',
+        message: 'Google 登录未配置（GOOGLE_CLIENT_ID / _SECRET 未设置）',
+      });
+      return;
+    }
+    const host = req.get('host');
+    const redirectUri = `https://${host}/api/auth/google/callback`;
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'openid email profile',
+      access_type: 'online',
+      prompt: 'select_account',
+    });
+    res.redirect(302, `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+  });
+
+  app.get('/api/auth/google/callback', (_req, res) => {
+    // Full token-swap + session cookie lands in a follow-up; for now
+    // return a 501 so the 1st-half flow above can be tested without
+    // claiming completion.
+    res.status(501).json({
+      error: 'google_oauth_callback_not_implemented',
+      message: 'Google 登录 callback 还在实现中',
+    });
+  });
+
   app.use(
     '/trpc',
     createExpressMiddleware({

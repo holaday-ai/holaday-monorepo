@@ -3,7 +3,8 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { send as wsSend } from '@/lib/ws';
 import { cn } from '@/lib/utils';
-import type { UiScreencast, UiTaskStatus } from '@/types/task';
+import { useTaskStore } from '@/stores/task-store';
+import type { UiScreencast, UiStep, UiTaskStatus } from '@/types/task';
 
 interface Props {
   /** Latest screencast frame for the selected task (if any). */
@@ -34,7 +35,26 @@ export function BrowserPanel({
   activeTaskId,
 }: Props): JSX.Element {
   const [collapsed, setCollapsed] = React.useState(false);
-  const [interactive, setInteractive] = React.useState(false);
+  // Interactive mode is in the global store so the TaskStream's
+  // "Continue in browser" button can flip it on from the left panel.
+  const interactive = useTaskStore((s) => s.browserInteractive);
+  const setInteractive = useTaskStore((s) => s.setBrowserInteractive);
+  // Recent steps for the in-panel activity overlay. Limit to the last
+  // 3 non-terminal actions.
+  const steps = useTaskStore((s) =>
+    activeTaskId ? (s.stepsByTask[activeTaskId] ?? []) : [],
+  );
+  const recentSteps = React.useMemo(
+    () => steps.filter((s) => !TERMINAL_KINDS.has(s.actionKind ?? '')).slice(-3),
+    [steps],
+  );
+  const [activityVisible, setActivityVisible] = React.useState(true);
+  // Click-ripple visualisation on the screencast image. When the
+  // agent (or the user in interactive mode) clicks, we animate a red
+  // dot at the mapped coordinates for ~600ms so viewers can trace the
+  // action.
+  const [ripple, setRipple] = React.useState<{ x: number; y: number; id: number } | null>(null);
+  const rippleIdRef = React.useRef(0);
   const imgRef = React.useRef<HTMLImageElement | null>(null);
   const status: DotStatus = awaitingUser
     ? 'error'
@@ -75,15 +95,27 @@ export function BrowserPanel({
     [frame],
   );
 
+  const flashRipple = React.useCallback((clientX: number, clientY: number) => {
+    const img = imgRef.current;
+    if (!img) return;
+    const rect = img.getBoundingClientRect();
+    const id = ++rippleIdRef.current;
+    setRipple({ x: clientX - rect.left, y: clientY - rect.top, id });
+    setTimeout(() => {
+      setRipple((r) => (r?.id === id ? null : r));
+    }, 600);
+  }, []);
+
   const onClick = React.useCallback(
     (e: React.MouseEvent<HTMLImageElement>) => {
       if (!interactiveActive) return;
       const pt = mapToViewport(e);
       if (!pt) return;
       e.preventDefault();
+      flashRipple(e.clientX, e.clientY);
       sendInput({ kind: 'click', x: pt.x, y: pt.y, button: 'left' });
     },
-    [interactiveActive, mapToViewport, sendInput],
+    [interactiveActive, mapToViewport, sendInput, flashRipple],
   );
 
   const onWheel = React.useCallback(
@@ -172,7 +204,7 @@ export function BrowserPanel({
             </div>
             <button
               type="button"
-              onClick={() => setInteractive((v) => !v)}
+              onClick={() => setInteractive(!interactive)}
               title={interactive ? '退出交互模式' : '进入交互模式'}
               aria-label="toggle interactive mode"
               aria-pressed={interactive}
@@ -212,21 +244,45 @@ export function BrowserPanel({
                   等待浏览器加载页面...
                 </div>
               ) : (
-                // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard capture is handled via window listener in interactive mode
-                <img
-                  ref={imgRef}
-                  src={`data:image/jpeg;base64,${frame.imageBase64}`}
-                  alt={`screencast tick ${frame.tickIndex + 1}`}
-                  onClick={onClick}
-                  onWheel={onWheel}
-                  draggable={false}
-                  className={cn(
-                    'max-h-full max-w-full rounded-md border object-contain shadow-sm',
-                    interactiveActive
-                      ? 'cursor-pointer border-sky-400 ring-2 ring-sky-300'
-                      : 'border-black/[0.06]',
+                <div className="relative">
+                  {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard capture is handled via window listener in interactive mode */}
+                  <img
+                    ref={imgRef}
+                    src={`data:image/jpeg;base64,${frame.imageBase64}`}
+                    alt={`screencast tick ${frame.tickIndex + 1}`}
+                    onClick={onClick}
+                    onWheel={onWheel}
+                    draggable={false}
+                    className={cn(
+                      'max-h-full max-w-full rounded-md border object-contain shadow-sm',
+                      interactiveActive
+                        ? 'cursor-pointer border-sky-400 ring-2 ring-sky-300'
+                        : 'border-black/[0.06]',
+                    )}
+                  />
+                  {ripple && (
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute block h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-500/70 animate-click-pulse"
+                      style={{ left: ripple.x, top: ripple.y }}
+                    />
                   )}
-                />
+                  {activityVisible && recentSteps.length > 0 && (
+                    <ActivityOverlay
+                      steps={recentSteps}
+                      onClose={() => setActivityVisible(false)}
+                    />
+                  )}
+                  {!activityVisible && recentSteps.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setActivityVisible(true)}
+                      className="absolute bottom-2 right-2 rounded bg-black/40 px-2 py-1 text-[10px] text-white backdrop-blur hover:bg-black/60"
+                    >
+                      显示操作日志
+                    </button>
+                  )}
+                </div>
               )
             ) : (
               <div className="text-center text-xs text-muted-foreground">
@@ -243,6 +299,73 @@ export function BrowserPanel({
     </section>
   );
 }
+
+/**
+ * Floating activity overlay on the bottom of the screencast image.
+ * Shows up to 3 most-recent non-terminal actions so users can see the
+ * agent narrate its work without reading the left-panel step stream.
+ */
+function ActivityOverlay({
+  steps,
+  onClose,
+}: {
+  steps: UiStep[];
+  onClose: () => void;
+}): JSX.Element {
+  return (
+    <div className="pointer-events-none absolute inset-x-2 bottom-2 rounded-md bg-black/55 px-3 py-2 text-[11px] text-white backdrop-blur-md">
+      <div className="pointer-events-auto mb-1 flex items-center justify-between text-[10px] uppercase tracking-wider text-white/70">
+        <span>最近操作</span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded px-1 hover:bg-white/10"
+          aria-label="收起操作日志"
+        >
+          收起
+        </button>
+      </div>
+      <ul className="space-y-0.5 font-mono leading-snug">
+        {steps.map((s) => (
+          <li key={s.tickIndex} className="flex items-start gap-1.5">
+            <span className="shrink-0 text-white/50">{activityGlyph(s.actionKind)}</span>
+            <span className="min-w-0 flex-1 truncate">{summariseAction(s)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function activityGlyph(kind?: string): string {
+  switch (kind) {
+    case 'click':
+    case 'click_ref':
+      return '🖱';
+    case 'type':
+    case 'type_in_ref':
+      return '⌨️';
+    case 'key':
+    case 'press_key':
+      return '⏎';
+    case 'scroll':
+      return '↕';
+    case 'navigate':
+      return '→';
+    case 'wait':
+      return '⏳';
+    case 'wait_for_human':
+      return '🧑';
+    default:
+      return '•';
+  }
+}
+
+function summariseAction(step: UiStep): string {
+  return step.actionSummary || step.actionKind || `步骤 ${step.tickIndex + 1}`;
+}
+
+const TERMINAL_KINDS: ReadonlySet<string> = new Set(['done', 'give_up', 'screenshot']);
 
 export function isBlankUrl(url: string | undefined | null): boolean {
   if (!url) return true;

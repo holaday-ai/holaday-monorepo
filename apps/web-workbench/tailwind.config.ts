@@ -89,12 +89,17 @@ export default {
           '0%, 100%': { opacity: '0.4' },
           '50%': { opacity: '1' },
         },
+        'click-pulse': {
+          '0%': { transform: 'translate(-50%, -50%) scale(0.4)', opacity: '1' },
+          '100%': { transform: 'translate(-50%, -50%) scale(3)', opacity: '0' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
         'fade-in': 'fade-in 0.2s ease-out',
         'pulse-dot': 'pulse-dot 1.4s ease-in-out infinite',
+        'click-pulse': 'click-pulse 600ms ease-out forwards',
       },
     },
   },

@@ -76,6 +76,39 @@ export class AuthService {
     return { user: toPublic(row), accessToken };
   }
 
+  /**
+   * Passwordless email-code login. Caller has already validated the
+   * verification code; we just issue a token for the matching user,
+   * creating one if the email is new (email-code flow doubles as
+   * signup — no password set, user can add one via settings later).
+   */
+  async loginOrRegisterByEmail(email: string): Promise<AuthResult> {
+    const normalized = email.trim().toLowerCase();
+    const [existing] = await this.db.select().from(users).where(eq(users.email, normalized)).limit(1);
+    if (existing) {
+      const accessToken = await signAccessToken({
+        sub: existing.externalId,
+        plan: existing.plan,
+      });
+      return { user: toPublic(existing), accessToken };
+    }
+    const externalId = newExternalId('user');
+    // Stash a random, un-learnable password hash so the password login
+    // path still refuses (email-code users can /auth/setPassword later).
+    const passwordHash = await hashPassword(
+      `email-code-only-${externalId}-${Math.random().toString(36).slice(2)}`,
+    );
+    await this.db.insert(users).values({ externalId, email: normalized, passwordHash });
+    const [row] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.externalId, externalId))
+      .limit(1);
+    if (!row) throw new Error('user disappeared after insert');
+    const accessToken = await signAccessToken({ sub: row.externalId, plan: row.plan });
+    return { user: toPublic(row), accessToken };
+  }
+
   async login(input: LoginInput): Promise<AuthResult> {
     const email = input.email.trim().toLowerCase();
 

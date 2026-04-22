@@ -1,8 +1,11 @@
+import Anthropic from '@anthropic-ai/sdk';
 import { newExternalId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { and, asc, desc, eq, lt } from 'drizzle-orm';
 import { z } from 'zod';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
+import { injectResolvedUrl, resolveIntentUrl } from '../../agent/url-resolver.js';
+import { env as appEnv } from '../../config/env.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import type { PlannedStep } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
@@ -19,6 +22,12 @@ import { broadcastToUser, updateTaskStateForUser } from '../../ws/server.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 const taskController = new TaskController();
+
+// Module-scope Anthropic client for url-resolver. Cheap to construct
+// but no reason to pay per request — cache once at import time.
+const anthropicForResolver: Anthropic | null = appEnv.ANTHROPIC_API_KEY
+  ? new Anthropic()
+  : null;
 
 const taskIdInput = z.object({ taskId: z.string().min(1) });
 
@@ -72,11 +81,28 @@ export const tasksRouter = router({
       // queueing intentional follow-ups) FIFO onto a single
       // Playwright Page — no racing clicks. Different users don't
       // block each other.
+      // Bug 1 — URL resolver. Turn colloquial references ("openclaw")
+      // into authoritative URLs before the commander starts guessing.
+      // One Claude call per task create; null on vague intents (safe
+      // fall-through to the commander's search-first prompt).
+      const resolved = await resolveIntentUrl(input.intent, {
+        client: anthropicForResolver,
+      });
+      const enrichedIntent = resolved
+        ? injectResolvedUrl(input.intent, resolved)
+        : input.intent;
+      if (resolved && resolved.source === 'model') {
+        ctx.logger.info(
+          { taskId, token: resolved.token, url: resolved.url },
+          'urlResolve: injected resolved URL into intent',
+        );
+      }
+
       // Per-task domain specialisation. Classifier is keyword-only
       // (no LLM call), safe to run on every create. If the commander
       // supports per-task specialisation, clone it with the classified
       // domain; otherwise fall back to the generic singleton.
-      const classification = classifyDomain(input.intent);
+      const classification = classifyDomain(enrichedIntent);
       const commander = ctx.visionCommander.withDomain
         ? ctx.visionCommander.withDomain(classification.domain)
         : ctx.visionCommander;
@@ -90,11 +116,22 @@ export const tasksRouter = router({
         'vision-loop domain classification',
       );
       const userId = ctx.userId;
+      // Resolve the tasks.id once — every onTickEnd needs it to insert
+      // the task_steps row. Avoids a DB lookup on every tick.
+      const [taskDbRow] = await ctx.db
+        .select({ id: tasksTable.id })
+        .from(tasksTable)
+        .where(eq(tasksTable.externalId, taskId))
+        .limit(1);
+      const taskDbId = taskDbRow?.id;
       const runTaskFn = () =>
         startVisionLoopTask({
           userId: ctx.userId,
           taskId,
-          intent: input.intent,
+          // Pass the URL-enriched intent to the vision loop. The
+          // *displayed* intent (saved to the tasks row above + shown
+          // in the UI's user bubble) stays the user's original text.
+          intent: enrichedIntent,
           commander,
           // Phase D Step 3: when PlaywrightExecutor is wired at boot,
           // the runner bypasses the WS/SW path and drives Chrome
@@ -117,6 +154,42 @@ export const tasksRouter = router({
             }
           },
           onTickEnd(info) {
+            // Bug 4 — persist every tick as a task_steps row so task
+            // history survives page reloads + clicking back into old
+            // tasks. Fire-and-forget: DB failure logs but must not
+            // stall the loop.
+            if (taskDbId) {
+              void (async () => {
+                try {
+                  await ctx.db
+                    .insert(taskSteps)
+                    .values({
+                      externalId: newExternalId('taskStep'),
+                      taskId: taskDbId,
+                      seq: info.tickIndex,
+                      kind: info.actionKind,
+                      status: info.ok ? 'done' : 'failed',
+                      riskLevel: 'low',
+                      input: { summary: info.actionSummary },
+                      output: {
+                        durationMs: info.durationMs,
+                        mode: info.mode,
+                        ...(info.message ? { message: info.message } : {}),
+                        ...(info.antiBot ? { antiBot: info.antiBot } : {}),
+                      },
+                      ...(info.ok ? {} : { errorMessage: (info.message ?? '').slice(0, 2000) }),
+                      startedAt: new Date(Date.now() - info.durationMs),
+                      completedAt: new Date(),
+                    })
+                    .onDuplicateKeyUpdate({ set: {} });
+                } catch (err) {
+                  ctx.logger.warn(
+                    { err, taskId, tickIndex: info.tickIndex },
+                    'persist step row failed',
+                  );
+                }
+              })();
+            }
             try {
               broadcastToUser(userId, {
                 type: 'server.vision.tick.end',
@@ -655,6 +728,7 @@ export const tasksRouter = router({
           kind: taskSteps.kind,
           status: taskSteps.status,
           riskLevel: taskSteps.riskLevel,
+          input: taskSteps.input,
           output: taskSteps.output,
           errorCode: taskSteps.errorCode,
           errorMessage: taskSteps.errorMessage,
@@ -682,9 +756,10 @@ export const tasksRouter = router({
           kind: s.kind,
           status: s.status,
           riskLevel: s.riskLevel,
-          // MariaDB JSON column arrives as a string on some driver
+          // MariaDB JSON columns arrive as strings on some driver
           // configs; the repo's normalizeJson handles that, inline
           // the parse here so callers get a real object.
+          input: normalizeOutput(s.input),
           output: normalizeOutput(s.output),
           errorCode: s.errorCode,
           errorMessage: s.errorMessage,

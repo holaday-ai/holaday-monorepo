@@ -37,6 +37,10 @@ export interface TaskStore {
   executorFallbackByTask: Record<string, UiExecutorFallback>;
   /** Latest degradation-chain attempt per task — most recent wins. */
   degradeByTask: Record<string, UiDegradeEvent>;
+  /** BrowserPanel interactive-mode toggle, shared app-wide so the
+   *  terminal summary's "Continue in browser" button can flip it on. */
+  browserInteractive: boolean;
+  setBrowserInteractive(v: boolean): void;
 
   setSelectedTask(taskId: string | null): void;
   refreshTasks(): Promise<void>;
@@ -55,9 +59,65 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   captchaWaitByTask: {},
   executorFallbackByTask: {},
   degradeByTask: {},
+  browserInteractive: false,
+  setBrowserInteractive(v) {
+    set({ browserInteractive: v });
+  },
 
   setSelectedTask(taskId) {
     set({ selectedTaskId: taskId });
+    // Bug 4 — hydrate persisted steps + result when the user picks a
+    // task from the side nav. Without this, a closed-and-reopened tab
+    // shows an empty task because all the WS-driven step-state was
+    // in-memory only.
+    if (taskId) {
+      void (async () => {
+        try {
+          const detail = await trpc.tasks.detail.query({ taskId });
+          const steps: UiStep[] = (detail.steps ?? []).map((s, idx) => {
+            const out = (s.output ?? {}) as {
+              message?: string;
+              mode?: string;
+              durationMs?: number;
+              antiBot?: UiStep['antiBot'];
+            };
+            const summary =
+              ((s.input ?? {}) as { summary?: string }).summary ?? s.kind;
+            const startedAt = s.startedAt
+              ? new Date(s.startedAt as unknown as string | number | Date).getTime()
+              : Date.now();
+            return {
+              tickIndex: typeof s.seq === 'number' ? s.seq : idx,
+              status: s.status === 'done' ? 'done' : 'failed',
+              actionKind: s.kind,
+              actionSummary: summary,
+              durationMs: out.durationMs ?? 0,
+              ...(out.message ? { message: out.message } : {}),
+              ...(out.antiBot ? { antiBot: out.antiBot } : {}),
+              startedAt,
+            };
+          });
+          set((prev) => {
+            const resultText = extractSummary(detail.result) ?? undefined;
+            return {
+              stepsByTask: { ...prev.stepsByTask, [taskId]: steps },
+              tasks: prev.tasks.map((t) =>
+                t.taskId === taskId
+                  ? {
+                      ...t,
+                      status: detail.status as UiTaskStatus,
+                      tickCount: Math.max(t.tickCount, steps.length),
+                      ...(resultText ? { resultText } : {}),
+                    }
+                  : t,
+              ),
+            };
+          });
+        } catch (err) {
+          set({ error: err instanceof Error ? err.message : String(err) });
+        }
+      })();
+    }
   },
 
   async refreshTasks() {
@@ -299,6 +359,21 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
 }
 
 type ListRow = Awaited<ReturnType<typeof trpc.tasks.list.query>>['tasks'][number];
+
+/**
+ * Pull a human-readable summary string out of the task.detail.result
+ * JSON blob. The orchestrator shoves different shapes in here:
+ *   { summary: "..." }  — on status=completed
+ *   { reason:  "..." }  — on status=failed / paused
+ * Returns null when result is absent or doesn't match either shape.
+ */
+function extractSummary(result: unknown): string | null {
+  if (!result || typeof result !== 'object') return null;
+  const r = result as Record<string, unknown>;
+  if (typeof r.summary === 'string' && r.summary.length > 0) return r.summary;
+  if (typeof r.reason === 'string' && r.reason.length > 0) return r.reason;
+  return null;
+}
 
 function toUiTask(row: ListRow): UiTask {
   return {

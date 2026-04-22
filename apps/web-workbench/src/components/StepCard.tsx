@@ -130,6 +130,8 @@ function stepTitle(step: UiStep): string {
       return '截图';
     case 'navigate':
       return '跳转页面';
+    case 'wait_for_human':
+      return '等待人工验证';
     case 'done':
       return '任务完成';
     case 'give_up':
