@@ -8,6 +8,28 @@
  */
 const TOKEN_KEY = 'holaday.access_token';
 
+/**
+ * OAuth callback handoff: the `/api/auth/google/callback` handler
+ * redirects back to `/#token=<JWT>` after a successful token swap.
+ * On module load we pick that up, persist it, and clean the hash so
+ * the token doesn't linger in the browser history. Must run BEFORE
+ * App.tsx reads `getAccessToken` at initial render.
+ */
+(function consumeOAuthFragment(): void {
+  if (typeof window === 'undefined' || !window.location.hash) return;
+  const m = /(?:^|[#&])token=([^&]+)/.exec(window.location.hash);
+  if (!m || !m[1]) return;
+  try {
+    localStorage.setItem(TOKEN_KEY, decodeURIComponent(m[1]));
+  } catch {
+    /* see setAccessToken */
+  }
+  // Strip the token from the URL without a page reload so it can't
+  // leak into referrers / shared links. History replaceState keeps
+  // the current pathname + search but nukes the hash.
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+})();
+
 export function getAccessToken(): string | null {
   try {
     return localStorage.getItem(TOKEN_KEY);
