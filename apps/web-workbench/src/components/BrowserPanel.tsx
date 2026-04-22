@@ -39,13 +39,20 @@ export function BrowserPanel({
   // "Continue in browser" button can flip it on from the left panel.
   const interactive = useTaskStore((s) => s.browserInteractive);
   const setInteractive = useTaskStore((s) => s.setBrowserInteractive);
-  // Recent steps for the in-panel activity overlay. Limit to the last
-  // 3 non-terminal actions.
+  // Recent steps for the in-panel activity overlay. Select WITHOUT a
+  // fresh-array fallback — zustand treats each new `[]` as a changed
+  // snapshot and infinite-loops the component (getSnapshot cache warn,
+  // then React unmounts the tree → white screen). Instead, keep the
+  // possibly-undefined value and default inside the memo so the
+  // selector return is referentially stable per render.
   const steps = useTaskStore((s) =>
-    activeTaskId ? (s.stepsByTask[activeTaskId] ?? []) : [],
+    activeTaskId ? s.stepsByTask[activeTaskId] : undefined,
   );
   const recentSteps = React.useMemo(
-    () => steps.filter((s) => !TERMINAL_KINDS.has(s.actionKind ?? '')).slice(-3),
+    () =>
+      (steps ?? EMPTY_STEPS)
+        .filter((s) => !TERMINAL_KINDS.has(s.actionKind ?? ''))
+        .slice(-3),
     [steps],
   );
   const [activityVisible, setActivityVisible] = React.useState(true);
@@ -366,6 +373,11 @@ function summariseAction(step: UiStep): string {
 }
 
 const TERMINAL_KINDS: ReadonlySet<string> = new Set(['done', 'give_up', 'screenshot']);
+
+// Module-level stable empty array so zustand selectors that fall back
+// to "no steps yet" return the SAME reference on every render — a new
+// `[]` literal breaks getSnapshot's structural-equality check.
+const EMPTY_STEPS: UiStep[] = [];
 
 export function isBlankUrl(url: string | undefined | null): boolean {
   if (!url) return true;
