@@ -180,8 +180,7 @@ export const tasksRouter = router({
                       ...(info.ok ? {} : { errorMessage: (info.message ?? '').slice(0, 2000) }),
                       startedAt: new Date(Date.now() - info.durationMs),
                       completedAt: new Date(),
-                    })
-                    .onDuplicateKeyUpdate({ set: {} });
+                    });
                 } catch (err) {
                   ctx.logger.warn(
                     { err, taskId, tickIndex: info.tickIndex },
