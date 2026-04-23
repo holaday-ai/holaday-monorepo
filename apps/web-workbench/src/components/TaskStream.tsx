@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
+  Globe,
   Loader2,
   MessageCircleQuestion,
   MousePointerClick,
@@ -25,7 +26,7 @@ import type {
   UiTask,
   UiWebSearchEvent,
 } from '@/types/task';
-import { humanizeStep, humanizedGlyph } from '@/utils/step-humanize';
+import { friendlyHost, humanizeStep, humanizedGlyph } from '@/utils/step-humanize';
 
 interface Props {
   task: UiTask;
@@ -182,6 +183,8 @@ function AgentBlock({
 
         {humanLines.length > 0 && <HumanLineList lines={humanLines} />}
 
+        {screencastUrl && !terminal && <CurrentUrlChip url={screencastUrl} />}
+
         {webSearch && !awaitingUser && <WebSearchLine event={webSearch} />}
 
         {captchaWait && <CaptchaWaitBanner wait={captchaWait} />}
@@ -240,6 +243,36 @@ function AwaitingUserBanner({ wait }: { wait: UiAwaitingUser }): JSX.Element {
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Compact "agent is on SITE" chip shown in the stream while a task is
+ * executing. Gives visibility of the agent's current location even
+ * when the BrowserPanel is collapsed or off-screen on mobile. Hidden
+ * once the task reaches a terminal status — the TerminalSummary's
+ * "在新标签页打开 <url>" affordance takes over from there.
+ */
+function CurrentUrlChip({ url }: { url: string }): JSX.Element | null {
+  if (!url || url === 'about:blank' || url.startsWith('chrome://')) return null;
+  let host = '';
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return null;
+  }
+  const label = friendlyHost(host);
+  return (
+    <div className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground">
+      <Globe className="h-3 w-3 shrink-0 text-emerald-500" />
+      <span className="truncate text-foreground/80">
+        当前页：<span className="font-medium">{label}</span>
+      </span>
+      <span className="shrink-0 text-muted-foreground/60">·</span>
+      <span className="max-w-[240px] truncate text-muted-foreground/70" title={url}>
+        {url}
+      </span>
     </div>
   );
 }
