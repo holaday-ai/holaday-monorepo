@@ -88,7 +88,7 @@ export function FeedbackDialog({ open, onClose, onSubmit }: Props): JSX.Element 
           disabled={pending}
           className="mt-3 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         />
-        {notice && <div className="mt-2 text-xs text-emerald-700 dark:text-emerald-400">{notice}</div>}
+        {notice && <div className="mt-2 text-xs text-blue-700 dark:text-blue-400">{notice}</div>}
         {error && <div className="mt-2 text-xs text-destructive">{error}</div>}
         <div className="mt-3 flex items-center justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose} disabled={pending}>

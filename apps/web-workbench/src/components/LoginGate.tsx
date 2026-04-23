@@ -251,7 +251,7 @@ export function LoginGate({ onAuthenticated }: Props): JSX.Element {
               codeSent={codeSent}
               pending={pending}
             />
-            {notice && <div className="text-xs text-emerald-700 dark:text-emerald-400">{notice}</div>}
+            {notice && <div className="text-xs text-blue-700 dark:text-blue-400">{notice}</div>}
             {error && <div className="text-xs text-destructive">{error}</div>}
             <Button type="submit" className="w-full" disabled={pending || code.length !== 6}>
               {pending ? '验证中…' : '验证并登录'}
@@ -282,7 +282,7 @@ export function LoginGate({ onAuthenticated }: Props): JSX.Element {
               autoComplete="new-password"
               label="确认新密码"
             />
-            {notice && <div className="text-xs text-emerald-700 dark:text-emerald-400">{notice}</div>}
+            {notice && <div className="text-xs text-blue-700 dark:text-blue-400">{notice}</div>}
             {error && <div className="text-xs text-destructive">{error}</div>}
             <Button type="submit" className="w-full" disabled={pending || code.length !== 6}>
               {pending ? '重置中…' : '重置密码并登录'}

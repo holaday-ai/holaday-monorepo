@@ -33,7 +33,7 @@ export function TaskListItem({ task, selected, onSelect, onContextMenu }: Props)
         <div
           className={cn(
             'mt-0.5 truncate text-xs',
-            task.status === 'completed' && 'text-emerald-600',
+            task.status === 'completed' && 'text-blue-600',
             task.status === 'failed' && 'text-red-500',
             (task.status === 'executing' || task.status === 'paused') && 'text-muted-foreground',
             task.status === 'cancelled' && 'text-muted-foreground',
@@ -54,7 +54,7 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
         'mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full',
         status === 'executing' && 'animate-pulse-dot bg-blue-500',
         status === 'paused' && 'bg-amber-500',
-        status === 'completed' && 'bg-emerald-500',
+        status === 'completed' && 'bg-blue-500',
         status === 'failed' && 'bg-red-500',
         status === 'cancelled' && 'bg-muted-foreground/40',
       )}

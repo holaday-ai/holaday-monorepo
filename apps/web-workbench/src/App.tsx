@@ -255,6 +255,7 @@ function AppShell(): JSX.Element {
         userPlan={me?.plan ?? 'free'}
         onLogout={handleLogout}
         onOpenFeedback={() => setFeedbackOpen(true)}
+        onOpenSearch={() => setSearchOpen(true)}
         mobileOpen={sidebarOpen}
         onMobileClose={() => setSidebarOpen(false)}
       />

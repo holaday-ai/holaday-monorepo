@@ -111,7 +111,7 @@ function StatusBadge({ step }: { step: UiStep }): JSX.Element {
       className={cn(
         'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white',
         step.status === 'running' && 'animate-pulse-dot bg-blue-500',
-        step.status === 'done' && 'bg-emerald-500',
+        step.status === 'done' && 'bg-blue-500',
         step.status === 'failed' && 'bg-red-500',
       )}
       aria-label={`步骤 ${step.tickIndex + 1} · ${step.status}`}

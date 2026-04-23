@@ -38,7 +38,7 @@ export function MainPanel({
   replyMode,
 }: Props): JSX.Element {
   return (
-    <main className="flex h-full flex-1 flex-col bg-background">
+    <main className="flex h-full min-w-0 flex-[2] flex-col bg-background lg:min-w-[420px]">
       <div className="flex h-11 items-center border-b border-border px-3 lg:hidden">
         <Button
           variant="ghost"

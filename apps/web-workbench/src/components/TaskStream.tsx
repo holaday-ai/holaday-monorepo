@@ -265,7 +265,7 @@ function CurrentUrlChip({ url }: { url: string }): JSX.Element | null {
   const label = friendlyHost(host);
   return (
     <div className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground">
-      <Globe className="h-3 w-3 shrink-0 text-emerald-500" />
+      <Globe className="h-3 w-3 shrink-0 text-blue-500" />
       <span className="truncate text-foreground/80">
         当前页：<span className="font-medium">{label}</span>
       </span>
@@ -345,7 +345,7 @@ function LineBadge({
   return (
     <Check
       aria-hidden
-      className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500"
+      className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-500"
       strokeWidth={3}
       aria-label={glyph}
     />
@@ -530,19 +530,19 @@ function TerminalSummary({
   const hasRealUrl =
     !!currentUrl && currentUrl !== 'about:blank' && !currentUrl.startsWith('chrome://');
   return (
-    <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-5 py-4 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+    <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-5 py-4 dark:border-blue-500/30 dark:bg-blue-500/10">
       <div className="prose prose-sm prose-neutral max-w-none">
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
           {text}
         </ReactMarkdown>
       </div>
       {(hasRealUrl || onContinueInBrowser) && (
-        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-emerald-200/70 pt-3 text-xs">
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-blue-200/70 pt-3 text-xs">
           {onContinueInBrowser && (
             <button
               type="button"
               onClick={onContinueInBrowser}
-              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-card px-3 py-1.5 font-medium text-emerald-800 shadow-sm transition hover:bg-emerald-50 dark:border-emerald-500/40 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
+              className="inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-card px-3 py-1.5 font-medium text-blue-800 shadow-sm transition hover:bg-blue-50 dark:border-blue-500/40 dark:text-blue-300 dark:hover:bg-blue-500/10"
             >
               <MousePointerClick className="h-3.5 w-3.5" />
               在浏览器中继续操作
@@ -553,11 +553,11 @@ function TerminalSummary({
               href={currentUrl ?? '#'}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-card px-3 py-1.5 font-medium text-emerald-800 shadow-sm transition hover:bg-emerald-50 dark:border-emerald-500/40 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
+              className="inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-card px-3 py-1.5 font-medium text-blue-800 shadow-sm transition hover:bg-blue-50 dark:border-blue-500/40 dark:text-blue-300 dark:hover:bg-blue-500/10"
             >
               <ExternalLink className="h-3.5 w-3.5" />
               在新标签页打开
-              <span className="max-w-[180px] truncate text-emerald-700/70">{currentUrl}</span>
+              <span className="max-w-[180px] truncate text-blue-700/70">{currentUrl}</span>
             </a>
           )}
         </div>
@@ -577,7 +577,7 @@ const MARKDOWN_COMPONENTS: Components = {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300"
+      className="inline-flex items-center gap-1 text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
       {...rest}
     >
       {children}

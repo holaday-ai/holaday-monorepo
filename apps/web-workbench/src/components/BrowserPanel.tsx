@@ -247,8 +247,12 @@ export function BrowserPanel({
         'relative flex flex-col border-l border-border backdrop-blur-xl',
         isSheet
           ? 'fixed inset-x-0 bottom-0 z-[75] h-[75vh] rounded-t-xl border-t border-l-0 shadow-2xl animate-fade-in'
-          : 'h-full shrink-0 transition-[width] duration-200',
-        !isSheet && (collapsed ? 'w-10' : 'w-[400px]'),
+          : 'h-full transition-[flex,width] duration-200',
+        // Desktop: grow to ~60% of the available width (flex weight 3
+        // against MainPanel's 2). min-w keeps the viewport usable on
+        // narrow screens; max-w yields gracefully on very wide ones so
+        // the browser stream doesn't get scaled past its native res.
+        !isSheet && (collapsed ? 'w-10 shrink-0' : 'flex-[3] min-w-[560px]'),
       )}
       style={{ backgroundColor: 'hsl(var(--card))' }}
     >
@@ -586,7 +590,7 @@ function StatusDot({ status }: { status: DotStatus }): JSX.Element {
       className={cn(
         'inline-block h-2 w-2 rounded-full',
         status === 'idle' && 'bg-muted-foreground/40',
-        status === 'live' && 'animate-pulse-dot bg-emerald-500',
+        status === 'live' && 'animate-pulse-dot bg-blue-500',
         status === 'error' && 'bg-red-500',
       )}
     />

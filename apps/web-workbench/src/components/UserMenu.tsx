@@ -9,6 +9,13 @@ interface Props {
   plan: string;
   onLogout(): void;
   onOpenFeedback?(): void;
+  /**
+   * Codex-rail layout — renders just the avatar (no name / plan text)
+   * and anchors the popover to the avatar rather than the whole row.
+   * Used inside the 64px-wide collapsed sidebar rail where the text
+   * would overflow. Expanded sidebar uses compact=false (default).
+   */
+  compact?: boolean;
 }
 
 /**
@@ -22,6 +29,7 @@ export function UserMenu({
   plan,
   onLogout,
   onOpenFeedback,
+  compact = false,
 }: Props): JSX.Element {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
@@ -53,23 +61,33 @@ export function UserMenu({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={compact ? `用户菜单：${displayName || email || ''}` : undefined}
+        title={compact ? displayName || email || '用户' : undefined}
         className={cn(
-          'flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-foreground/5',
+          'flex items-center rounded-md transition-colors hover:bg-foreground/5',
+          compact
+            ? 'h-10 w-10 justify-center'
+            : 'w-full gap-3 px-2 py-1.5 text-left',
           open && 'bg-foreground/5',
         )}
       >
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-400 to-pink-400 text-sm font-semibold text-white">
           {initial}
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{displayName || email || '未命名'}</div>
-          <div className="truncate text-[11px] text-muted-foreground">{planLabel}</div>
-        </div>
+        {!compact && (
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium">{displayName || email || '未命名'}</div>
+            <div className="truncate text-[11px] text-muted-foreground">{planLabel}</div>
+          </div>
+        )}
       </button>
       {open && (
         <div
           role="menu"
-          className="absolute bottom-full left-0 right-0 mb-2 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg animate-fade-in"
+          className={cn(
+            'absolute bottom-full z-50 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg animate-fade-in',
+            compact ? 'left-full mb-0 ml-2 min-w-[220px]' : 'left-0 right-0 mb-2',
+          )}
         >
           {email && (
             <div className="truncate border-b border-border px-3 py-2 text-[11px] text-muted-foreground">
