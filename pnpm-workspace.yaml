@@ -1,3 +1,5 @@
 packages:
   - "apps/*"
   - "packages/*"
+patchedDependencies:
+  '@novnc/novnc': patches/@novnc__novnc.patch

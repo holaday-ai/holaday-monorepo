@@ -1,10 +1,32 @@
 import { ChevronLeft, ChevronRight, Globe, MousePointerClick, Power } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
+import { VncViewport, type VncStatus } from '@/components/VncViewport';
 import { send as wsSend } from '@/lib/ws';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
 import type { UiScreencast, UiStep, UiTaskStatus } from '@/types/task';
+
+/**
+ * VNC bridge URL. Relative path lets the browser auto-resolve the
+ * scheme (wss on HTTPS, ws on HTTP dev) and host. The nginx block on
+ * production strips `/vnc/` and proxies to websockify on :6080. In
+ * dev, vite's proxy can forward the same path if desired; absent a
+ * proxy the component gracefully reports 'error' and we fall back to
+ * the static JPEG screencast.
+ *
+ * `VITE_VNC_PATH` overrides the default for environments that can't
+ * use the production proxy path (e.g. a secondary orchestrator). Set
+ * to empty string to disable the VNC layer entirely and stick with
+ * screencast-only rendering.
+ */
+const VNC_PATH = (import.meta.env.VITE_VNC_PATH as string | undefined) ?? '/vnc/websockify';
+function buildVncUrl(): string | null {
+  if (!VNC_PATH) return null;
+  if (typeof window === 'undefined') return null;
+  const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${scheme}://${window.location.host}${VNC_PATH}`;
+}
 
 interface Props {
   /** Latest screencast frame for the selected task (if any). */
@@ -53,6 +75,22 @@ export function BrowserPanel({
   // "Continue in browser" button can flip it on from the left panel.
   const interactive = useTaskStore((s) => s.browserInteractive);
   const setInteractive = useTaskStore((s) => s.setBrowserInteractive);
+
+  // VNC live stream — memoised so prop identity is stable across
+  // re-renders (the viewport's effect re-runs on any URL change).
+  const vncUrl = React.useMemo(() => buildVncUrl(), []);
+  const [vncStatus, setVncStatus] = React.useState<VncStatus>('idle');
+  const handleVncStatus = React.useCallback((status: VncStatus) => {
+    setVncStatus(status);
+  }, []);
+  // Default to the VNC layer when we have a URL, and fall back to the
+  // legacy JPEG screencast only when VNC actively errors. Idle /
+  // connecting / connected / disconnected all stay on the VNC path;
+  // the transient states overlay their own banners rather than
+  // flipping the whole viewport. This keeps the mount stable so the
+  // RFB instance stays alive across panel redraws instead of churning
+  // a new WebSocket every tick.
+  const useVnc = Boolean(vncUrl) && vncStatus !== 'error';
 
   // When the agent parks on awaiting-user (captcha, login wall, user
   // question the model injected), auto-flip the panel to interactive
@@ -291,7 +329,46 @@ export function BrowserPanel({
               interactiveActive ? 'bg-sky-50/40' : 'bg-muted/40',
             )}
           >
-            {frame ? (
+            {useVnc ? (
+              <div className="relative h-full w-full">
+                <VncViewport
+                  wsUrl={vncUrl}
+                  viewOnly={!interactiveActive}
+                  onStatusChange={handleVncStatus}
+                  className={cn(
+                    'rounded-md border shadow-sm',
+                    interactiveActive
+                      ? 'border-sky-400 ring-2 ring-sky-300'
+                      : 'border-black/[0.06]',
+                  )}
+                />
+                {(vncStatus === 'idle' || vncStatus === 'connecting') && (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/30 text-xs text-muted-foreground">
+                    连接实时画面…
+                  </div>
+                )}
+                {vncStatus === 'disconnected' && (
+                  <div className="pointer-events-none absolute right-2 top-2 rounded bg-amber-500/90 px-2 py-0.5 text-[10px] font-semibold text-white">
+                    画面已断开，重连中
+                  </div>
+                )}
+                {activityVisible && recentSteps.length > 0 && (
+                  <ActivityOverlay
+                    steps={recentSteps}
+                    onClose={() => setActivityVisible(false)}
+                  />
+                )}
+                {!activityVisible && recentSteps.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setActivityVisible(true)}
+                    className="absolute bottom-2 right-2 rounded bg-black/40 px-2 py-1 text-[10px] text-white backdrop-blur hover:bg-black/60"
+                  >
+                    显示操作日志
+                  </button>
+                )}
+              </div>
+            ) : frame ? (
               isBlankUrl(frame.url) ? (
                 <div className="text-center text-xs text-muted-foreground/80">
                   等待浏览器加载页面...

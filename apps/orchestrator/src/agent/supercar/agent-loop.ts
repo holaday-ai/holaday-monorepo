@@ -354,7 +354,6 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // click / type reads this var, so the swap is transparent to the
   // rest of the loop.
   let executor: PlaywrightExecutor = opts.executor;
-  let executorLaneLabel: 'headless' | 'headed' = 'headless';
   /** Fire at most once — multiple swaps mid-task cause page flicker. */
   let executorSwapped = false;
   async function swapToHeadedIfAvailable(reason: string): Promise<boolean> {
@@ -363,11 +362,10 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     executorSwapped = true;
     const priorUrl = page.url();
     logger.info(
-      { taskId: opts.taskId, reason, priorUrl },
+      { taskId: opts.taskId, reason, priorUrl, lane: 'headed' },
       'supercar: swapping to headed executor',
     );
     executor = opts.headedExecutor;
-    executorLaneLabel = 'headed';
     try {
       await executor.resetPageForTask();
       const hp = (await executor.getPage()) as unknown as PageLike;

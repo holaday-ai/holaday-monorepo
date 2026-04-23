@@ -1,0 +1,13 @@
+diff --git a/lib/util/browser.js b/lib/util/browser.js
+index 8121bc15babc99bb9483bba18e84f674e34f82d0..ec05acf45f6e6335d6cd7246bdd93fbe1cdefef2 100644
+--- a/lib/util/browser.js
++++ b/lib/util/browser.js
+@@ -176,7 +176,7 @@ function _checkWebCodecsH264DecodeSupport2() {
+   }));
+   return _checkWebCodecsH264DecodeSupport2.apply(this, arguments);
+ }
+-exports.supportsWebCodecsH264Decode = supportsWebCodecsH264Decode = await _checkWebCodecsH264DecodeSupport();
++exports.supportsWebCodecsH264Decode = supportsWebCodecsH264Decode = false; // patched: TLA removed for Rollup CJS compat
+ 
+ /*
+  * The functions for detection of platforms and browsers below are exported

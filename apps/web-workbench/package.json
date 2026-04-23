@@ -13,6 +13,7 @@
     "@ai-sdk/react": "^1.1.0",
     "@holaday/orchestrator": "workspace:*",
     "@holaday/shared-types": "workspace:*",
+    "@novnc/novnc": "^1.6.0",
     "@radix-ui/react-slot": "^1.1.1",
     "@trpc/client": "11.0.0",
     "@trpc/server": "11.0.0",
