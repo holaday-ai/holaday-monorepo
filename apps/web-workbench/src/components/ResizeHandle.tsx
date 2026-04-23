@@ -67,22 +67,42 @@ export function ResizeHandle({ onDrag, onDragEnd, className }: Props): JSX.Eleme
       onPointerMove={onPointerMove}
       onPointerUp={stopDrag}
       onPointerCancel={stopDrag}
+      // 8px hit area — the visible bar underneath is smaller but the
+      // drag target stays wide enough to hit reliably.
       className={cn(
-        'group relative hidden h-full w-1 shrink-0 cursor-col-resize touch-none select-none lg:block',
-        dragging && 'bg-blue-500/60',
+        'group relative z-20 hidden h-full w-2 shrink-0 cursor-col-resize touch-none select-none lg:block',
         className,
       )}
     >
-      {/* 1px visual divider at rest, full-width blue band on hover */}
+      {/* 2px bar at rest, 4px blue bar on hover / drag */}
       <span
         aria-hidden
         className={cn(
-          'absolute inset-y-0 left-1/2 -translate-x-1/2 transition-colors',
+          'absolute inset-y-0 left-1/2 -translate-x-1/2 transition-all',
           dragging
-            ? 'w-1 bg-blue-500/80'
-            : 'w-px bg-border group-hover:w-1 group-hover:bg-blue-400/60',
+            ? 'w-[3px] bg-blue-500/80'
+            : 'w-px bg-border group-hover:w-[3px] group-hover:bg-blue-400/80',
         )}
       />
+      {/* Grip dots in the middle — visual cue that this is grabbable */}
+      <span
+        aria-hidden
+        className={cn(
+          'absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col gap-0.5 transition-opacity',
+          dragging ? 'opacity-100' : 'opacity-40 group-hover:opacity-100',
+        )}
+      >
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className={cn(
+              'h-0.5 w-0.5 rounded-full',
+              dragging || 'bg-muted-foreground/70',
+              dragging && 'bg-blue-500',
+            )}
+          />
+        ))}
+      </span>
     </div>
   );
 }

@@ -85,7 +85,13 @@ export function VncViewport({
 }: Props): JSX.Element {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const rfbRef = React.useRef<RFBInstance | null>(null);
+  // Ref mirror of viewOnly so the async RFB construction can read
+  // the current value without caring about stale closures.
+  const viewOnlyRef = React.useRef(viewOnly);
 
+  // Main effect: construct RFB when wsUrl / password change. Do NOT
+  // include `viewOnly` in deps — flipping it should never rebuild the
+  // WebSocket. The secondary effect below syncs viewOnly live.
   React.useEffect(() => {
     if (!wsUrl) {
       onStatusChange?.('idle');
@@ -97,10 +103,6 @@ export function VncViewport({
     onStatusChange?.('connecting');
     let disposed = false;
 
-    // The `RFB` ctor throws synchronously on bad URLs — wrap so the
-    // effect never bubbles the error into React's reconciler. The
-    // dynamic import itself can also reject (chunk failed to load on
-    // flaky networks); treat that as an error state too.
     let rfb: RFBInstance | null = null;
     const onConnect = () => {
       if (disposed) return;
@@ -130,16 +132,17 @@ export function VncViewport({
           return;
         }
         // Panel UX tuning:
-        //   scaleViewport=true   — scale canvas to fit our container
-        //                          without resizing the remote X
-        //                          session (which would flicker).
-        //   resizeSession=false  — match scaleViewport; we don't own
-        //                          the remote display geometry.
-        //   background='transparent' — let our card surface color
-        //                          show through when blank.
+        //   scaleViewport=true   — noVNC fits the canvas to the
+        //                          container via CSS transform without
+        //                          resizing the remote X session.
+        //   resizeSession=false  — we don't own the remote display
+        //                          geometry; Xvfb :98 is sized by
+        //                          holaday-chromium-headed start.sh.
         rfb.scaleViewport = true;
         rfb.resizeSession = false;
-        rfb.viewOnly = viewOnly;
+        // Read viewOnly off the current prop at construction time.
+        // Later flips are handled by the secondary effect.
+        rfb.viewOnly = viewOnlyRef.current;
         rfb.background = 'transparent';
         rfb.addEventListener('connect', onConnect);
         rfb.addEventListener('disconnect', onDisconnect);
@@ -167,22 +170,54 @@ export function VncViewport({
       }
       rfbRef.current = null;
     };
-  }, [wsUrl, password, viewOnly, onStatusChange]);
+    // Deliberate: `viewOnly` is NOT in deps — we'd otherwise tear
+    // down the socket every time the user toggles interactive mode.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wsUrl, password, onStatusChange]);
 
-  // Reflect live mode changes without tearing down the whole RFB.
-  // Flipping viewOnly on an already-connected instance just gates input
-  // forwarding on their end — cheap and flicker-free.
   React.useEffect(() => {
+    viewOnlyRef.current = viewOnly;
     const rfb = rfbRef.current;
     if (rfb) rfb.viewOnly = viewOnly;
   }, [viewOnly]);
 
+  // Re-trigger noVNC's scale calculation whenever the container
+  // resizes. noVNC only recomputes on window 'resize' and on
+  // `scaleViewport` setter writes — Panel drag-resize changes our
+  // container bounding box without firing window resize, so without
+  // this ResizeObserver the remote frame stays at whatever size it
+  // was when the first 'resize' happened (usually fullscreen at
+  // mount), and the canvas overflows or letterboxes.
+  //
+  // Toggling scaleViewport from true to true writes to the setter,
+  // which is exactly what triggers the internal _resize(). That's a
+  // documented pattern in noVNC issues.
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      const rfb = rfbRef.current;
+      if (rfb) rfb.scaleViewport = true;
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, []);
+
   return (
     <div
       ref={containerRef}
-      className={cn('h-full w-full', className)}
-      // noVNC inserts a <canvas> as the only child; give it room to
-      // breathe and keep our own layout chrome off of it.
+      // `min-h-0 min-w-0` — needed so this div can SHRINK inside a
+      // flex parent; without them the intrinsic size of the canvas
+      // child would push the parent wider than intended, defeating
+      // the whole draggable-split layout.
+      // `overflow-hidden` — canvas has fixed intrinsic dimensions
+      // (remote Xvfb geometry), and without overflow clipping a
+      // brief sizing gap at mount shows a full 1920x1080 canvas
+      // bleeding out of the panel.
+      className={cn(
+        'vnc-viewport-host relative h-full w-full min-h-0 min-w-0 overflow-hidden',
+        className,
+      )}
     />
   );
 }

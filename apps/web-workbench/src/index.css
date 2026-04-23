@@ -109,3 +109,34 @@
 }
 .hola-typing-dot:nth-child(2) { animation-delay: 0.15s; }
 .hola-typing-dot:nth-child(3) { animation-delay: 0.3s; }
+
+/*
+ * noVNC RFB inserts its own screen / canvas DOM inside the container
+ * our <VncViewport> exposes. We can't style those elements via React
+ * props, so constrain them here by ancestor selector.
+ *
+ * Rules:
+ *   - Any descendant canvas / screen div never exceeds our host box.
+ *   - Host box is flex-centered so the canvas lands in the middle
+ *     during the brief window before noVNC finishes its scaleViewport
+ *     pass.
+ *   - Cursor stays `auto` so interactive mode shows the OS cursor
+ *     noVNC forwards from the remote.
+ */
+.vnc-viewport-host {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.vnc-viewport-host canvas {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+/* noVNC ships its canvas wrapped in a div that sometimes gets fixed
+ * px sizes from scaleViewport. Relax them so they conform to our
+ * flex layout instead of overflowing. */
+.vnc-viewport-host > div {
+  max-width: 100%;
+  max-height: 100%;
+}
