@@ -90,13 +90,21 @@ export const tasksRouter = router({
         .limit(1);
       const taskDbId = taskDbRow?.id;
 
-      // Phase 6-2: resolve lane inputs. Primary browser executor comes
-      // from the router's headless lane (falls back to the raw
-      // `playwrightExecutor` if the router isn't wired on this
-      // deploy). Lane 2+ inputs are pulled off the router; any null
-      // here makes the agent-loop skip that lane silently.
-      const primaryExecutor =
+      // Phase 8.1: HEADED Brave is the primary browser. Phase 6-2
+      // shipped with headless as primary + headed as a stuck/anti-bot
+      // fallback, but that meant the user watched the Panel VNC stream
+      // (wired to the headed Xvfb) while the agent was actually
+      // driving the hidden headless instance — they never matched
+      // up in the UI. Demoting headless to "last-resort fallback"
+      // makes the UI stream and the agent's focus the same browser.
+      //
+      // Empty headed lane (dev boxes without Xvfb + Brave) falls back
+      // to headless → plain injected executor → router-less deploy
+      // ancestor. Each null just hops to the next layer.
+      const headedExec = ctx.executionRouter?.getExecutor('headed') ?? null;
+      const headlessExec =
         ctx.executionRouter?.getExecutor('headless') ?? ctx.playwrightExecutor ?? null;
+      const primaryExecutor = headedExec ?? headlessExec;
       if (!primaryExecutor) {
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
@@ -109,7 +117,13 @@ export const tasksRouter = router({
           intent: input.intent,
           executor: primaryExecutor,
           domain: classification.domain,
-          headedExecutor: ctx.executionRouter?.getExecutor('headed') ?? null,
+          // Swap target: the NON-primary browser. When headed was
+          // used as primary, a stuck/anti-bot signal falls back to
+          // headless (in case Brave is what's being fingerprinted).
+          // When headless is primary (Brave unavailable), swap
+          // points at nothing — agent-loop no-ops the swap.
+          headedExecutor:
+            primaryExecutor === headedExec ? headlessExec ?? null : null,
           braveAdapter: ctx.executionRouter?.brave ?? null,
           zapierAdapter: ctx.executionRouter?.zapier ?? null,
           apifyAdapter: ctx.executionRouter?.apify ?? null,

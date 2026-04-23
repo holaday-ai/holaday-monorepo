@@ -1006,16 +1006,12 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           text:
             `⚠️ 提示：页面截图已连续 ${stuckCount} 次未变化，当前操作可能未生效。\n\n` +
             `先尝试以下浏览器内的方案，不要直接放弃 computer 工具：\n` +
-            `1. **切到移动版网站**（反爬通常更宽松）：\n` +
-            `   - 携程 → m.ctrip.com\n` +
-            `   - 京东 → m.jd.com\n` +
-            `   - 淘宝 → m.taobao.com\n` +
-            `   - Boss直聘 → m.zhipin.com\n` +
-            `   - 拼多多 → mobile.yangkeduo.com\n` +
-            `2. **换备选站点**：携程卡住 → 飞猪（fliggy.com）/ 去哪儿（qunar.com）；京东卡住 → 拼多多\n` +
-            `3. **重置页面**：先 navigate 到 about:blank，再重新访问目标\n` +
-            `4. **等一下**：wait 3-5 秒后再点击，某些站点首次加载慢\n` +
-            `5. **找直链**：热榜 / 话题页（如 douyin.com/hot）通常不需要登录`,
+            `1. **等一下**：wait 3-5 秒后再点击，某些站点首次加载慢\n` +
+            `2. **让用户帮忙**：如果看起来像验证码/滑块，输出"检测到验证码，请在右侧 panel 手动完成"并停住\n` +
+            `3. **换路径**：同站点的 /explore /hot /discover 分类页通常不需要登录\n` +
+            `4. **换备选站点**：携程→飞猪/去哪儿、京东→拼多多、Boss直聘→拉勾\n` +
+            `5. **重置页面**：先 navigate 到 about:blank，再重新访问目标\n` +
+            `6. **最后选项**：切移动版 m.xxx.com（m.jd.com / m.ctrip.com / m.zhipin.com）`,
         });
       }
 
