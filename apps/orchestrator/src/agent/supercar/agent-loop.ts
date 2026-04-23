@@ -530,6 +530,34 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               type: 'web_search_20260209',
               name: 'web_search',
             },
+            // Custom `navigate` tool. The sole way to change the page's
+            // URL in this environment — `page.screenshot()` captures
+            // only the viewport, not the Chrome UI chrome, so Claude
+            // can't see (or click) the address bar. Without this,
+            // every task starts on about:blank and stays there.
+            //
+            // Phase 1-6 "browser" wins were all Claude silently routing
+            // around this missing capability by spawning Python +
+            // Playwright inside the server-side code_execution sandbox.
+            // The computer tool itself never successfully drove a
+            // page.goto. Adding this tool makes the browser path
+            // actually work.
+            {
+              type: 'custom',
+              name: 'navigate',
+              description:
+                '跳转浏览器标签到指定 URL。**本环境不显示地址栏，这是唯一的导航方式** —— 不要尝试用 key "ctrl+l" + type 的组合。返回跳转后的页面截图。',
+              input_schema: {
+                type: 'object',
+                properties: {
+                  url: {
+                    type: 'string',
+                    description: '完整 URL（包含 https://）。示例：https://m.jd.com/search?keyword=airpods',
+                  },
+                },
+                required: ['url'],
+              },
+            },
           ] as Anthropic.Beta.BetaToolUnion[],
           betas: [COMPUTER_USE_BETA],
           thinking: { type: 'adaptive' },
@@ -649,6 +677,104 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       // multiple parallel tool_uses that all observe the same frame.
       let turnChangedScreenshot = false;
       for (const toolUse of toolUseBlocks) {
+        // -------- Custom `navigate` tool --------
+        if (toolUse.name === 'navigate') {
+          const navInput = (toolUse.input as { url?: string } | null) ?? {};
+          const targetUrl = typeof navInput.url === 'string' ? navInput.url.trim() : '';
+          if (!targetUrl) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [{ type: 'text', text: 'navigate tool_use missing required `url` parameter' }],
+              is_error: true,
+            });
+            continue;
+          }
+          // Basic URL shape guard. We don't want to route chrome://
+          // or file:// here; those require separate plumbing.
+          if (!/^https?:\/\//i.test(targetUrl)) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [
+                {
+                  type: 'text',
+                  text: `navigate: URL must start with http:// or https:// (got ${targetUrl.slice(0, 80)})`,
+                },
+              ],
+              is_error: true,
+            });
+            continue;
+          }
+          const navPage = (await executor.getPage()) as unknown as PageLike & {
+            goto: (
+              url: string,
+              opts?: { waitUntil?: string; timeout?: number },
+            ) => Promise<unknown>;
+          };
+          try {
+            await navPage.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+          } catch (err) {
+            // goto can fail on net::ERR_* but the page might still
+            // have partial content — take a screenshot anyway so
+            // Claude sees what's there.
+            logger.info(
+              {
+                taskId: opts.taskId,
+                iteration,
+                url: targetUrl,
+                err: err instanceof Error ? err.message : String(err),
+              },
+              'supercar: navigate goto errored (continuing to screenshot)',
+            );
+          }
+          const navShot = await executor.screenshot(navPage);
+          if (navShot.error || !navShot.base64) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [
+                { type: 'text', text: `navigate to ${targetUrl}: screenshot failed: ${navShot.error ?? '?'}` },
+              ],
+              is_error: true,
+            });
+            continue;
+          }
+          const navHash = createHash('md5').update(navShot.base64).digest('hex');
+          if (lastScreenshotHash !== navHash) {
+            turnChangedScreenshot = true;
+            lastScreenshotHash = navHash;
+          }
+          const navUrl = navPage.url();
+          await safeCall(opts.onScreencast, {
+            iteration,
+            imageBase64: navShot.base64,
+            url: navUrl,
+            viewportWidth: navShot.viewportWidth ?? displayWidth,
+            viewportHeight: navShot.viewportHeight ?? displayHeight,
+          });
+          logger.info(
+            { taskId: opts.taskId, iteration, requested: targetUrl, landed: navUrl },
+            'supercar: navigate completed',
+          );
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: [
+              { type: 'text', text: `已导航到 ${navUrl}` },
+              {
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: 'image/jpeg',
+                  data: navShot.base64,
+                },
+              },
+            ],
+          });
+          continue;
+        }
+
         if (toolUse.name !== 'computer') {
           // Unknown custom tool — tell the model we can't run it so it
           // can back off instead of looping forever.
