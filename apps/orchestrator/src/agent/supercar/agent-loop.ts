@@ -243,7 +243,14 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     viewportHeight: displayHeight,
   });
 
-  const systemPrompt = buildSupercarSystemPrompt({ domain: opts.domain ?? null });
+  // Pass the raw intent to the prompt composer so the role-matcher can
+  // pick a specialisation (小红书运营 / 法律检索 / PM / ...). The role
+  // addon appends after the domain fragment, before the cache
+  // breakpoint gets placed on the composed string.
+  const systemPrompt = buildSupercarSystemPrompt({
+    domain: opts.domain ?? null,
+    intent: opts.intent,
+  });
 
   type MsgParam = Anthropic.Beta.BetaMessageParam;
   type ContentBlockParam = Anthropic.Beta.BetaContentBlockParam;

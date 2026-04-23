@@ -11,3 +11,5 @@ export {
   type RunSupercarOptions,
 } from './agent-loop.js';
 export { buildSupercarSystemPrompt, SUPERCAR_CORE_PROMPT } from './system-prompt.js';
+export { matchRole, matchRoleWithDebug } from './role-matcher.js';
+export { ROLES, type AgentRole } from './roles/index.js';

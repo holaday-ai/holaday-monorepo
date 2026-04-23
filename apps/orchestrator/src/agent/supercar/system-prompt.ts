@@ -10,6 +10,8 @@
 
 import { buildDomainPrompt } from '../vision-loop/domain/enricher.js';
 import type { DomainName } from '../vision-loop/domain/classifier.js';
+import { matchRole } from './role-matcher.js';
+import type { AgentRole } from './roles/index.js';
 
 /**
  * The immutable part of the supercar prompt. Do not interpolate
@@ -82,18 +84,38 @@ const SUPERCAR_CORE_PROMPT = `你是 HOLA DAY，专业的 AI 任务执行助手�
 - 如果因为反爬导致部分信息缺失，明确告知用户：哪些数据拿到了、哪些没拿到、用户可以怎么补充。`;
 
 /**
- * Compose the full system prompt with optional domain specialisation.
- * The stable core prompt above always comes first; the domain fragment
- * appends at the end. Cache breakpoint gets placed on the final block
- * at the call site — see agent-loop.ts.
+ * Compose the full system prompt with optional domain + role
+ * specialisation. Order: core → domain → role. Core is stable
+ * (cache-warm) and rarely changes; domain depends only on the
+ * keyword-classified domain (handful of distinct values, each one
+ * cache-friendly); role depends on the intent (less cache-friendly —
+ * placed last so domain-level cache hits still fire when the role
+ * changes within a domain).
+ *
+ * Caller (agent-loop.ts) attaches the ephemeral cache breakpoint to
+ * the composed string as one block, so the entire prompt hits cache
+ * on every turn of a single task.
+ *
+ * Pass `intent` to enable role matching. Pass `role` directly to
+ * bypass matching (useful for tests + future "user picks a role"
+ * UI). Omitting both means generic prompt — still valid.
  */
 export function buildSupercarSystemPrompt(opts: {
   domain?: DomainName | null;
+  /** User intent — if present, matchRole() runs to pick a specialisation. */
+  intent?: string;
+  /** Explicit role override — bypasses matcher when set. */
+  role?: AgentRole | null;
 } = {}): string {
   const domain = opts.domain ?? 'general';
   const domainFragment = buildDomainPrompt(domain);
-  if (!domainFragment) return SUPERCAR_CORE_PROMPT;
-  return `${SUPERCAR_CORE_PROMPT}\n\n${domainFragment}`;
+
+  const role = opts.role !== undefined ? opts.role : opts.intent ? matchRole(opts.intent) : null;
+
+  const parts = [SUPERCAR_CORE_PROMPT];
+  if (domainFragment) parts.push(domainFragment);
+  if (role) parts.push(role.systemAddon);
+  return parts.join('\n\n');
 }
 
 export { SUPERCAR_CORE_PROMPT };
