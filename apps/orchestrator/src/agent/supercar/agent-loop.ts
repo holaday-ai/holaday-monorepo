@@ -31,10 +31,33 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import { createHash } from 'node:crypto';
 import type { PageLike, PlaywrightExecutor } from '../vision-loop/playwright-executor.js';
 import { logger } from '../../config/logger.js';
 import type { DomainName } from '../vision-loop/domain/classifier.js';
 import { buildSupercarSystemPrompt } from './system-prompt.js';
+
+/**
+ * Anti-crawl stuck detection thresholds.
+ *
+ * When the same page screenshot repeats across N consecutive computer
+ * actions, the site is almost certainly blocking us (captcha, 403
+ * curtain, Cloudflare challenge, cookie wall). Spinning another 50
+ * iterations won't help — Sonnet keeps emitting clicks that the page
+ * silently ignores. Two tiers:
+ *
+ *   - STUCK_WARN_THRESHOLD (3): append a prompt-injection hint to the
+ *     next tool_result so Claude sees "try web_search or swap sites"
+ *     advice without losing its context.
+ *   - STUCK_EXIT_THRESHOLD (5): inject a final user turn forcing Claude
+ *     to summarise with what it has and stop using computer actions.
+ *
+ * Exact MD5 hash comparison — JPEG compression is deterministic for
+ * identical input, and cursor-move-only diffs produce different bytes
+ * (which we want: cursor motion IS progress).
+ */
+const STUCK_WARN_THRESHOLD = 3;
+const STUCK_EXIT_THRESHOLD = 5;
 
 export type SupercarStatus = 'completed' | 'failed' | 'awaiting_user' | 'timeout' | 'cancelled';
 
@@ -245,6 +268,17 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   const toolsUsed = new Set<string>();
   let iteration = 0;
   let cancelled = false;
+  // MD5 of the most recent screenshot we showed Claude. Compared after
+  // each computer action's fresh shot — identical bytes means the page
+  // didn't react to the action (reset on every real change).
+  let lastScreenshotHash: string | null = createHash('md5').update(initialShot.base64).digest('hex');
+  // Monotonic count of consecutive no-change screenshots. Reset to 0 on
+  // any hash change.
+  let stuckCount = 0;
+  // Once we cross STUCK_EXIT_THRESHOLD we inject a "stop browsing, wrap
+  // up" user turn exactly once. This flag prevents re-injecting on every
+  // subsequent iteration while Claude finalises.
+  let stuckForceFinalised = false;
   // Captured from the first response that materialised a server-side
   // code_execution sandbox (Sonnet 4.6 + computer-use-2025-11-24 beta
   // auto-enables this). Re-passed on every subsequent messages.create
@@ -412,6 +446,11 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       // Execute every client-side tool call from this turn. web_search
       // is server-side so it never appears in `tool_use`.
       const toolResults: ContentBlockParam[] = [];
+      // Track whether ANY computer action in this turn produced a new
+      // screenshot. We only update stuckCount once per turn (not once
+      // per action), so Claude doesn't get penalised for emitting
+      // multiple parallel tool_uses that all observe the same frame.
+      let turnChangedScreenshot = false;
       for (const toolUse of toolUseBlocks) {
         if (toolUse.name !== 'computer') {
           // Unknown custom tool — tell the model we can't run it so it
@@ -441,6 +480,15 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             is_error: true,
           });
           continue;
+        }
+
+        // Hash this frame; if it differs from the last we showed Claude
+        // the page moved, and we're not stuck. Only flag the turn if at
+        // least ONE action moved the page.
+        const shotHash = createHash('md5').update(shot.base64).digest('hex');
+        if (lastScreenshotHash !== shotHash) {
+          turnChangedScreenshot = true;
+          lastScreenshotHash = shotHash;
         }
 
         await safeCall(opts.onScreencast, {
@@ -486,7 +534,56 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         }
       }
 
-      messages.push({ role: 'user', content: toolResults });
+      // Update stuck counter — one increment per turn, not per action.
+      // Only increment if the turn had at least one computer tool_use
+      // AND none of those actions moved the page.
+      const hadComputerAction = toolUseBlocks.some((b) => b.name === 'computer');
+      if (hadComputerAction && !turnChangedScreenshot) {
+        stuckCount++;
+      } else if (hadComputerAction && turnChangedScreenshot) {
+        stuckCount = 0;
+      }
+      // Both stuck advisories go in the same user message as the
+      // tool_results. Mixing text + tool_result blocks in one user turn
+      // is legal per the Anthropic schema — tool_result blocks just
+      // need to come before any free-form text.
+      const nudgeContent: ContentBlockParam[] = [];
+      if (stuckCount >= STUCK_EXIT_THRESHOLD && !stuckForceFinalised) {
+        stuckForceFinalised = true;
+        logger.warn(
+          { taskId: opts.taskId, iteration, stuckCount },
+          'supercar: stuck past exit threshold — forcing task finalisation',
+        );
+        nudgeContent.push({
+          type: 'text',
+          text:
+            `⚠️ 系统检测：页面已连续 ${stuckCount} 次无响应（hash 未变），判定为反爬拦截。\n\n` +
+            `请立即停止 computer 工具操作，按以下顺序处理：\n` +
+            `1. 如果你已经获取到足够信息，直接汇总输出（markdown 格式）\n` +
+            `2. 如果信息不足，改用 web_search 工具搜索同一问题\n` +
+            `3. 在最终输出中明确告知用户：目标网站暂时无法访问，已通过其他途径获取信息\n\n` +
+            `绝对不要再对当前网站使用 computer 工具。`,
+        });
+      } else if (stuckCount >= STUCK_WARN_THRESHOLD) {
+        logger.info(
+          { taskId: opts.taskId, iteration, stuckCount },
+          'supercar: stuck warning — nudging Claude toward fallback',
+        );
+        nudgeContent.push({
+          type: 'text',
+          text:
+            `⚠️ 提示：页面截图已连续 ${stuckCount} 次未变化，当前网站可能被反爬拦截或页面卡死。\n\n` +
+            `建议切换策略：\n` +
+            `• 纯信息类查询 → 改用 web_search 工具\n` +
+            `• 需要访问特定网站 → 尝试移动版（如 m.jd.com / m.ctrip.com / m.taobao.com）或备选同类网站\n` +
+            `• 如果已获得部分信息，先汇总输出`,
+        });
+      }
+
+      messages.push({
+        role: 'user',
+        content: nudgeContent.length > 0 ? [...toolResults, ...nudgeContent] : toolResults,
+      });
     }
 
     if (cancelled) {
