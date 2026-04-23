@@ -3,6 +3,7 @@ import { BrowserPanel } from '@/components/BrowserPanel';
 import { FeedbackDialog } from '@/components/FeedbackDialog';
 import { LoginGate } from '@/components/LoginGate';
 import { MainPanel } from '@/components/MainPanel';
+import { ResizeHandle } from '@/components/ResizeHandle';
 import { SearchOverlay } from '@/components/SearchOverlay';
 import { Sidebar } from '@/components/Sidebar';
 import { AppSkeleton } from '@/components/Skeleton';
@@ -51,6 +52,54 @@ function AppShell(): JSX.Element {
   );
   const toast = useToast();
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
+
+  // Explicit px width for the BrowserPanel on desktop. `null` means
+  // "no user preference yet" — fall through to the default flex
+  // weight (3:2 in favour of the Panel). Once the user drags the
+  // handle we switch to explicit basis and persist to localStorage.
+  const [panelPx, setPanelPx] = React.useState<number | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const raw = window.localStorage.getItem('holaday.panelPx');
+    const n = raw ? Number.parseInt(raw, 10) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : null;
+  });
+  // Snapshot of `panelPx` at drag start — drag math works off deltas
+  // rather than absolute positions so slow frames / jitter don't
+  // accumulate error.
+  const dragStartPxRef = React.useRef<number | null>(null);
+  const contentRowRef = React.useRef<HTMLDivElement | null>(null);
+  const computeInitialPanelPx = React.useCallback((): number => {
+    const row = contentRowRef.current;
+    if (!row) return 720;
+    // Default split: panel is 60% of the (content minus sidebar)
+    // horizontal budget. Min 560 / max row-width - 420 for chat.
+    const rect = row.getBoundingClientRect();
+    return Math.max(560, Math.round(rect.width * 0.6));
+  }, []);
+  const onPanelResizeDrag = React.useCallback(
+    (dx: number) => {
+      const row = contentRowRef.current;
+      if (!row) return;
+      if (dragStartPxRef.current === null) {
+        dragStartPxRef.current = panelPx ?? computeInitialPanelPx();
+      }
+      const rowWidth = row.getBoundingClientRect().width;
+      // Dragging the handle right SHRINKS the panel (panel is on the
+      // right of the handle), so subtract dx.
+      const raw = dragStartPxRef.current - dx;
+      const min = 420;
+      const max = Math.max(min, rowWidth - 420);
+      const next = Math.min(max, Math.max(min, raw));
+      setPanelPx(next);
+    },
+    [panelPx, computeInitialPanelPx],
+  );
+  const onPanelResizeEnd = React.useCallback(() => {
+    dragStartPxRef.current = null;
+    if (panelPx != null) {
+      window.localStorage.setItem('holaday.panelPx', String(panelPx));
+    }
+  }, [panelPx]);
 
   const tasks = useTaskStore((s) => s.tasks);
   const selectedTaskId = useTaskStore((s) => s.selectedTaskId);
@@ -230,7 +279,7 @@ function AppShell(): JSX.Element {
   const greetingName = me?.displayName || (me?.email ? firstSegment(me.email) : '');
 
   return (
-    <div className="relative flex h-full min-h-0 w-full overflow-hidden">
+    <div className="relative flex h-full min-h-0 w-full overflow-hidden" ref={contentRowRef}>
       <Sidebar
         tasks={tasks}
         selectedTaskId={selectedTaskId}
@@ -281,7 +330,15 @@ function AppShell(): JSX.Element {
         onOpenSidebar={() => setSidebarOpen(true)}
         onOpenBrowser={() => setBrowserSheetOpen(true)}
       />
-      <div className="hidden lg:block">
+      <ResizeHandle onDrag={onPanelResizeDrag} onDragEnd={onPanelResizeEnd} />
+      <div
+        className="hidden h-full lg:flex lg:flex-col lg:shrink-0"
+        style={
+          panelPx != null
+            ? { flex: `0 0 ${panelPx}px` }
+            : { flex: '3 1 0', minWidth: 560 }
+        }
+      >
         <BrowserPanel
           frame={selectedTask ? (screencastByTask[selectedTask.taskId] ?? null) : null}
           taskStatus={selectedTask?.status ?? null}

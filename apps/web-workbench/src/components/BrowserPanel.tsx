@@ -97,12 +97,16 @@ export function BrowserPanel({
   // mode — the user almost certainly needs to click into the browser
   // to unblock it. Only auto-enable; never auto-disable, so a user who
   // deliberately toggled off stays in view-only mode on their next
-  // task's captcha.
+  // task's captcha. Trigger condition covers both rendering lanes:
+  //   - VNC: live connection present.
+  //   - JPEG fallback: a real frame (not about:blank).
   React.useEffect(() => {
-    if (awaitingUser && !interactive && frame && !isBlankUrl(frame.url)) {
-      setInteractive(true);
-    }
-  }, [awaitingUser, interactive, frame, setInteractive]);
+    if (!awaitingUser || interactive) return;
+    const hasLiveViewport = useVnc
+      ? vncStatus === 'connected' || vncStatus === 'connecting'
+      : Boolean(frame) && !isBlankUrl(frame?.url);
+    if (hasLiveViewport) setInteractive(true);
+  }, [awaitingUser, interactive, useVnc, vncStatus, frame, setInteractive]);
   // Recent steps for the in-panel activity overlay. Select WITHOUT a
   // fresh-array fallback — zustand treats each new `[]` as a changed
   // snapshot and infinite-loops the component (getSnapshot cache warn,
@@ -131,10 +135,13 @@ export function BrowserPanel({
     ? 'error'
     : deriveDotStatus(taskStatus, Boolean(frame));
 
-  // Interactive mode only makes sense when there's a real frame. If the
-  // tab is on about:blank there's nothing to click; silently clamp off
-  // so the toggle doesn't "activate" on nothing.
-  const interactiveActive = interactive && Boolean(frame) && !isBlankUrl(frame?.url);
+  // Interactive mode only makes sense when there's something to drive.
+  // VNC lane: the RFB canvas always has content once connected, so
+  // `interactive` alone is the gate. JPEG fallback lane: needs a real
+  // frame, otherwise there's nothing to map clicks against.
+  const interactiveActive = useVnc
+    ? interactive && (vncStatus === 'connected' || vncStatus === 'connecting')
+    : interactive && Boolean(frame) && !isBlankUrl(frame?.url);
 
   const sendInput = React.useCallback(
     (payload: Omit<UserInputEvent, 'type' | 'taskId'>) => {
@@ -247,12 +254,11 @@ export function BrowserPanel({
         'relative flex flex-col border-l border-border backdrop-blur-xl',
         isSheet
           ? 'fixed inset-x-0 bottom-0 z-[75] h-[75vh] rounded-t-xl border-t border-l-0 shadow-2xl animate-fade-in'
-          : 'h-full transition-[flex,width] duration-200',
-        // Desktop: grow to ~60% of the available width (flex weight 3
-        // against MainPanel's 2). min-w keeps the viewport usable on
-        // narrow screens; max-w yields gracefully on very wide ones so
-        // the browser stream doesn't get scaled past its native res.
-        !isSheet && (collapsed ? 'w-10 shrink-0' : 'flex-[3] min-w-[560px]'),
+          : 'h-full transition-[width] duration-150',
+        // Desktop: fill the parent wrapper (App owns the flex-basis /
+        // resize logic). The collapsed rail stays a local state the
+        // wrapper's flex-basis doesn't fight — just w-10 overrides.
+        !isSheet && (collapsed ? 'w-10 shrink-0' : 'h-full w-full'),
       )}
       style={{ backgroundColor: 'hsl(var(--card))' }}
     >
