@@ -53,53 +53,68 @@ function AppShell(): JSX.Element {
   const toast = useToast();
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
 
-  // Explicit px width for the BrowserPanel on desktop. `null` means
-  // "no user preference yet" — fall through to the default flex
-  // weight (3:2 in favour of the Panel). Once the user drags the
-  // handle we switch to explicit basis and persist to localStorage.
+  // Explicit px width for the BrowserPanel on desktop.
+  // Seed from localStorage, but clamp to sanity: a 420px stored value
+  // (the old min clamp) on a 1500px viewport is useless. If the
+  // stored value is outside [560, viewport*0.85], ignore and fall
+  // back to the 60%-of-content default.
+  const contentRowRef = React.useRef<HTMLDivElement | null>(null);
   const [panelPx, setPanelPx] = React.useState<number | null>(() => {
     if (typeof window === 'undefined') return null;
     const raw = window.localStorage.getItem('holaday.panelPx');
     const n = raw ? Number.parseInt(raw, 10) : NaN;
-    return Number.isFinite(n) && n > 0 ? n : null;
+    if (!Number.isFinite(n) || n <= 0) return null;
+    const maxSensible = window.innerWidth * 0.85;
+    if (n < 560 || n > maxSensible) {
+      // Stored value doesn't make sense for this viewport → ignore.
+      // Don't delete it — user's other viewport might want it back.
+      return null;
+    }
+    return n;
   });
-  // Snapshot of `panelPx` at drag start — drag math works off deltas
-  // rather than absolute positions so slow frames / jitter don't
-  // accumulate error.
+  // Snapshot of panelPx at drag start. Ref avoids stale-closure bugs
+  // when the drag callback re-identities between frames.
   const dragStartPxRef = React.useRef<number | null>(null);
-  const contentRowRef = React.useRef<HTMLDivElement | null>(null);
+  const panelPxRef = React.useRef(panelPx);
+  React.useEffect(() => {
+    panelPxRef.current = panelPx;
+  }, [panelPx]);
+
   const computeInitialPanelPx = React.useCallback((): number => {
     const row = contentRowRef.current;
-    if (!row) return 720;
+    if (!row) return Math.max(720, Math.round(window.innerWidth * 0.55));
     // Default split: panel is 60% of the (content minus sidebar)
-    // horizontal budget. Min 560 / max row-width - 420 for chat.
+    // horizontal budget. Min 560, floor of 720 so "just opened on a
+    // 1500px laptop" lands at a readable ~800px panel rather than
+    // the 560 min.
     const rect = row.getBoundingClientRect();
-    return Math.max(560, Math.round(rect.width * 0.6));
+    return Math.max(720, Math.min(rect.width - 420, Math.round(rect.width * 0.6)));
   }, []);
   const onPanelResizeDrag = React.useCallback(
     (dx: number) => {
       const row = contentRowRef.current;
       if (!row) return;
       if (dragStartPxRef.current === null) {
-        dragStartPxRef.current = panelPx ?? computeInitialPanelPx();
+        dragStartPxRef.current = panelPxRef.current ?? computeInitialPanelPx();
       }
       const rowWidth = row.getBoundingClientRect().width;
       // Dragging the handle right SHRINKS the panel (panel is on the
       // right of the handle), so subtract dx.
       const raw = dragStartPxRef.current - dx;
       const min = 420;
-      const max = Math.max(min, rowWidth - 420);
+      const max = Math.max(min, rowWidth - 360);
       const next = Math.min(max, Math.max(min, raw));
       setPanelPx(next);
     },
-    [panelPx, computeInitialPanelPx],
+    [computeInitialPanelPx],
   );
   const onPanelResizeEnd = React.useCallback(() => {
     dragStartPxRef.current = null;
-    if (panelPx != null) {
-      window.localStorage.setItem('holaday.panelPx', String(panelPx));
+    const current = panelPxRef.current;
+    if (current != null) {
+      window.localStorage.setItem('holaday.panelPx', String(current));
     }
-  }, [panelPx]);
+  }, []);
 
   const tasks = useTaskStore((s) => s.tasks);
   const selectedTaskId = useTaskStore((s) => s.selectedTaskId);

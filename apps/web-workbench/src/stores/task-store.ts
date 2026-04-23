@@ -73,7 +73,13 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   awaitingUserByTask: {},
   webSearchByTask: {},
   thinkingByTask: {},
-  browserInteractive: false,
+  // Default ON: with the VNC lane live, view-only is the defensive
+  // crouch. Users that never toggle this flag still get interactive
+  // clicks, which matches the product promise ("watch the agent,
+  // take over when you want to"). The toggle in the Panel header
+  // still flips it off for "don't let me accidentally click the
+  // captcha solution the agent is staring at".
+  browserInteractive: true,
   setBrowserInteractive(v) {
     set({ browserInteractive: v });
   },
