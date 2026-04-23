@@ -56,6 +56,7 @@ export interface TaskStore {
   createTask(intent: string): Promise<{ taskId: string } | { error: string }>;
   deleteTask(taskId: string): Promise<{ ok: true } | { error: string }>;
   replyToTask(taskId: string, message: string): Promise<{ ok: boolean } | { error: string }>;
+  abortTask(taskId: string): Promise<{ ok: boolean } | { error: string }>;
   applyServerMessage(msg: ServerMessage): void;
   reset(): void;
 }
@@ -206,6 +207,28 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
           delete next[taskId];
           return { awaitingUserByTask: next };
         });
+      }
+      return { ok: res.ok };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      set({ error: msg });
+      return { error: msg };
+    }
+  },
+
+  async abortTask(taskId) {
+    try {
+      const res = await trpc.tasks.abort.mutate({ taskId });
+      // Optimistic status flip so the UI doesn't keep showing the
+      // task as executing until the terminal frame arrives. The
+      // server's own terminal broadcast (status='cancelled') will
+      // overwrite this in applyServerMessage on the same tick.
+      if (res.ok) {
+        set((prev) => ({
+          tasks: prev.tasks.map((t) =>
+            t.taskId === taskId ? { ...t, status: 'cancelled' as const } : t,
+          ),
+        }));
       }
       return { ok: res.ok };
     } catch (err) {

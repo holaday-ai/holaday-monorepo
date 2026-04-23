@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Globe, MousePointerClick, Power } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Globe, MousePointerClick, Power, Square } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { VncViewport, type VncStatus } from '@/components/VncViewport';
@@ -75,6 +75,18 @@ export function BrowserPanel({
   // "Continue in browser" button can flip it on from the left panel.
   const interactive = useTaskStore((s) => s.browserInteractive);
   const setInteractive = useTaskStore((s) => s.setBrowserInteractive);
+  const abortTask = useTaskStore((s) => s.abortTask);
+  const [aborting, setAborting] = React.useState(false);
+  const isExecuting = taskStatus === 'executing';
+  const onStopClick = React.useCallback(async () => {
+    if (!activeTaskId || aborting) return;
+    setAborting(true);
+    try {
+      await abortTask(activeTaskId);
+    } finally {
+      setAborting(false);
+    }
+  }, [activeTaskId, aborting, abortTask]);
 
   // VNC live stream — memoised so prop identity is stable across
   // re-renders (the viewport's effect re-runs on any URL change).
@@ -299,6 +311,24 @@ export function BrowserPanel({
             <div className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
               {frame?.url ?? 'about:blank'}
             </div>
+            {isExecuting && activeTaskId && (
+              <button
+                type="button"
+                onClick={onStopClick}
+                disabled={aborting}
+                title="停止当前任务"
+                aria-label="停止当前任务"
+                className={cn(
+                  'inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[11px] font-medium transition-colors',
+                  aborting
+                    ? 'cursor-wait border-border bg-muted text-muted-foreground'
+                    : 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300',
+                )}
+              >
+                <Square className="h-3 w-3" strokeWidth={2.5} />
+                停止
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setInteractive(!interactive)}
