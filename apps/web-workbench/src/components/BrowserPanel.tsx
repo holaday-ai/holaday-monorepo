@@ -53,6 +53,18 @@ export function BrowserPanel({
   // "Continue in browser" button can flip it on from the left panel.
   const interactive = useTaskStore((s) => s.browserInteractive);
   const setInteractive = useTaskStore((s) => s.setBrowserInteractive);
+
+  // When the agent parks on awaiting-user (captcha, login wall, user
+  // question the model injected), auto-flip the panel to interactive
+  // mode — the user almost certainly needs to click into the browser
+  // to unblock it. Only auto-enable; never auto-disable, so a user who
+  // deliberately toggled off stays in view-only mode on their next
+  // task's captcha.
+  React.useEffect(() => {
+    if (awaitingUser && !interactive && frame && !isBlankUrl(frame.url)) {
+      setInteractive(true);
+    }
+  }, [awaitingUser, interactive, frame, setInteractive]);
   // Recent steps for the in-panel activity overlay. Select WITHOUT a
   // fresh-array fallback — zustand treats each new `[]` as a changed
   // snapshot and infinite-loops the component (getSnapshot cache warn,

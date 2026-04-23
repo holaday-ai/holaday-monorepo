@@ -495,6 +495,42 @@ export async function dispatchUserInput(
       },
       'dispatched user_input to PlaywrightExecutor',
     );
+
+    // After the user's action lands, capture a fresh frame and push
+    // it back. Otherwise the screencast only updates when the agent
+    // takes its next tool action — which can be never during a
+    // user-driven captcha solve or free-drive session. Without this
+    // the panel visibly "freezes" after the click, even though the
+    // remote page has actually moved.
+    if (userId) {
+      try {
+        const freshPage = (await executor.getPage()) as unknown as Parameters<
+          PlaywrightExecutor['screenshot']
+        >[0];
+        const shot = await executor.screenshot(freshPage);
+        if (!shot.error && shot.base64) {
+          broadcastToUser(userId, {
+            type: 'server.vision.screencast',
+            taskId: msg.taskId ?? '',
+            // Interactive-mode frames don't belong to any agent tick;
+            // -1 is the sentinel the UI uses to skip "第 N 帧" chrome.
+            tickIndex: -1,
+            imageBase64: shot.base64,
+            url: (freshPage as unknown as { url: () => string }).url(),
+            viewport: {
+              width: shot.viewportWidth ?? 1280,
+              height: shot.viewportHeight ?? 800,
+            },
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          'user_input post-action screencast capture failed',
+        );
+      }
+    }
   } catch (err) {
     logger.error(
       {
