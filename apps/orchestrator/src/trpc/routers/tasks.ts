@@ -15,6 +15,8 @@ import { classify as classifyDomain } from '../../agent/vision-loop/domain/class
 import { visionLoopTaskQueue } from '../../agent/vision-loop/task-queue.js';
 import { startVisionLoopTask } from '../../agent/vision-loop/task-runner.js';
 import {
+  classifyAsCrossPlatformAutomation,
+  classifyAsSimpleSearch,
   runSupercarTask,
   supercarAbort,
   supercarReply,
@@ -88,12 +90,32 @@ export const tasksRouter = router({
         .limit(1);
       const taskDbId = taskDbRow?.id;
 
+      // Phase 6-2: resolve lane inputs. Primary browser executor comes
+      // from the router's headless lane (falls back to the raw
+      // `playwrightExecutor` if the router isn't wired on this
+      // deploy). Lane 2+ inputs are pulled off the router; any null
+      // here makes the agent-loop skip that lane silently.
+      const primaryExecutor =
+        ctx.executionRouter?.getExecutor('headless') ?? ctx.playwrightExecutor ?? null;
+      if (!primaryExecutor) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'no browser executor available',
+        });
+      }
       const runFn = () =>
         runSupercarTask({
           taskId,
           intent: input.intent,
-          executor: ctx.playwrightExecutor!,
+          executor: primaryExecutor,
           domain: classification.domain,
+          headedExecutor: ctx.executionRouter?.getExecutor('headed') ?? null,
+          braveAdapter: ctx.executionRouter?.brave ?? null,
+          zapierAdapter: ctx.executionRouter?.zapier ?? null,
+          apifyAdapter: ctx.executionRouter?.apify ?? null,
+          isSimpleSearch: classifyAsSimpleSearch(input.intent),
+          isCrossPlatformAutomation: classifyAsCrossPlatformAutomation(input.intent),
+          zapierWebhookPath: process.env.ZAPIER_WEBHOOK_PATH ?? null,
           onTick(ev) {
             // Synthesise a tick.start + tick.end pair per iteration so
             // the existing UI step cards light up without frontend

@@ -3,6 +3,7 @@ import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import express from 'express';
 import { pinoHttp } from 'pino-http';
 import type { Planner } from './agent/planner.js';
+import type { ExecutionRouter } from './agent/supercar/index.js';
 import type { VisionLoopCommander } from './agent/vision-loop/commander.js';
 import type { PlaywrightExecutor } from './agent/vision-loop/playwright-executor.js';
 import { bearerAuth } from './auth/middleware.js';
@@ -17,6 +18,7 @@ export interface HttpAppDeps {
   planner: Planner;
   visionCommander?: VisionLoopCommander;
   playwrightExecutor?: PlaywrightExecutor | null;
+  executionRouter?: ExecutionRouter;
 }
 
 export function createHttpApp(deps: HttpAppDeps) {
@@ -204,6 +206,7 @@ export function createHttpApp(deps: HttpAppDeps) {
         planner: deps.planner,
         ...(deps.visionCommander ? { visionCommander: deps.visionCommander } : {}),
         ...(deps.playwrightExecutor ? { playwrightExecutor: deps.playwrightExecutor } : {}),
+        ...(deps.executionRouter ? { executionRouter: deps.executionRouter } : {}),
       }),
     }),
   );

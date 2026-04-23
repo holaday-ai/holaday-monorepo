@@ -40,6 +40,9 @@ import {
 import type { PageLike, PlaywrightExecutor } from '../vision-loop/playwright-executor.js';
 import { logger } from '../../config/logger.js';
 import type { DomainName } from '../vision-loop/domain/classifier.js';
+import type { ApifyAdapter } from './adapters/apify.js';
+import type { BraveSearchAdapter } from './adapters/brave-search.js';
+import type { ZapierAdapter } from './adapters/zapier.js';
 import { buildSupercarSystemPrompt } from './system-prompt.js';
 
 /**
@@ -182,6 +185,35 @@ export interface RunSupercarOptions {
    * `server.vision.captcha_resolved`.
    */
   onAntiBotResolved?: (ev: SupercarAntiBotResolvedEvent) => void | Promise<void>;
+
+  // --- Phase 6-2: 5-lane router inputs ---
+  /**
+   * Optional headed executor (Lane 2). When provided, the loop swaps
+   * the active executor over to this on high-confidence anti-bot
+   * signals or when stuckCount crosses STUCK_WARN_THRESHOLD. At most
+   * one swap per task; swapping back is not supported.
+   */
+  headedExecutor?: PlaywrightExecutor | null;
+  /** Brave Search adapter (Lane 3). When provided AND the simple-search classifier matched, the loop short-circuits before the first API call. */
+  braveAdapter?: BraveSearchAdapter | null;
+  /** Zapier adapter (Lane 4). When provided AND the intent looks like a workflow trigger, the loop short-circuits. */
+  zapierAdapter?: ZapierAdapter | null;
+  /**
+   * Apify adapter (Lane 5). When provided AND the intent has a
+   * registered actor AND the browser gets stuck, the loop delegates
+   * to the actor and folds the scraped items into the summary.
+   */
+  apifyAdapter?: ApifyAdapter | null;
+  /** Simple-search classifier output. Drives the Brave short-circuit. */
+  isSimpleSearch?: boolean;
+  /** Cross-platform-automation classifier output. Drives the Zapier short-circuit. */
+  isCrossPlatformAutomation?: boolean;
+  /**
+   * Optional Zapier webhook path (e.g. "/hooks/catch/12345/abc/"). Only
+   * used when isCrossPlatformAutomation + zapierAdapter are both set.
+   * Absent → Zapier lane is skipped even if classifier matched.
+   */
+  zapierWebhookPath?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +274,73 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     };
   }
 
+  // ---------------------------------------------------------------
+  // Phase 6-2: non-browser lane short-circuits (before any model call)
+  // ---------------------------------------------------------------
+  // Lane 3 — Brave. Pure info queries never need a browser; returning
+  // the SERP directly as markdown saves a ~10× cost + latency hit.
+  if (opts.isSimpleSearch && opts.braveAdapter) {
+    const r = await opts.braveAdapter.search(opts.intent, 10);
+    if ('results' in r && r.results.length > 0) {
+      const body =
+        `# 搜索结果（Brave）\n\n` +
+        r.results
+          .map(
+            (h, i) =>
+              `${i + 1}. **${h.title || h.url}**\n   ${h.snippet || ''}\n   ${h.url}`,
+          )
+          .join('\n\n');
+      logger.info(
+        { taskId: opts.taskId, lane: 'brave', count: r.results.length },
+        'supercar: short-circuit via Brave Search',
+      );
+      return {
+        status: 'completed',
+        summary: body,
+        iterations: 0,
+        toolsUsed: ['brave_search'],
+      };
+    }
+    // Fall through to browser path on empty / error.
+    logger.info(
+      { taskId: opts.taskId, err: 'error' in r ? r.error : 'no results' },
+      'supercar: Brave returned no usable output — falling through to browser',
+    );
+  }
+
+  // Lane 4 — Zapier. Only triggers when the caller supplied BOTH the
+  // classifier match AND an explicit webhook path; we don't guess
+  // routes. The hook returns a run id the user can track in Zapier.
+  if (opts.isCrossPlatformAutomation && opts.zapierAdapter && opts.zapierWebhookPath) {
+    const r = await opts.zapierAdapter.trigger(opts.zapierWebhookPath, {
+      intent: opts.intent,
+      task_id: opts.taskId,
+    });
+    if ('ok' in r) {
+      logger.info(
+        { taskId: opts.taskId, lane: 'zapier', runId: r.runId ?? null },
+        'supercar: triggered Zap via webhook',
+      );
+      const lines = [
+        `# 已触发 Zap 工作流`,
+        '',
+        `任务已通过 Zapier 触发，后台异步执行。`,
+      ];
+      if (r.runId) lines.push(`- Run ID: \`${r.runId}\``);
+      if (r.statusUrl) lines.push(`- 查看进度：${r.statusUrl}`);
+      return {
+        status: 'completed',
+        summary: lines.join('\n'),
+        iterations: 0,
+        toolsUsed: ['zapier'],
+      };
+    }
+    logger.warn(
+      { taskId: opts.taskId, err: r.error },
+      'supercar: Zapier trigger failed — falling through to browser',
+    );
+  }
+
   const client = new Anthropic({ apiKey });
   const model = opts.model ?? process.env.SUPERCAR_MODEL ?? 'claude-sonnet-4-6';
   const maxIterations =
@@ -250,19 +349,61 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     opts.timeoutMs ?? Number.parseInt(process.env.SUPERCAR_TIMEOUT_MS ?? '600000', 10);
   const deadline = Date.now() + timeoutMs;
 
+  // Browser executor is LET, not const — Phase 6-2 swaps it to the
+  // headed lane on anti-bot strikes. Every subsequent screenshot /
+  // click / type reads this var, so the swap is transparent to the
+  // rest of the loop.
+  let executor: PlaywrightExecutor = opts.executor;
+  let executorLaneLabel: 'headless' | 'headed' = 'headless';
+  /** Fire at most once — multiple swaps mid-task cause page flicker. */
+  let executorSwapped = false;
+  async function swapToHeadedIfAvailable(reason: string): Promise<boolean> {
+    if (executorSwapped) return false;
+    if (!opts.headedExecutor) return false;
+    executorSwapped = true;
+    const priorUrl = page.url();
+    logger.info(
+      { taskId: opts.taskId, reason, priorUrl },
+      'supercar: swapping to headed executor',
+    );
+    executor = opts.headedExecutor;
+    executorLaneLabel = 'headed';
+    try {
+      await executor.resetPageForTask();
+      const hp = (await executor.getPage()) as unknown as PageLike;
+      // Re-navigate to the prior URL so Claude sees the same
+      // destination on the next tool_result. If the prior URL is
+      // about:blank (we never navigated), skip — Claude will navigate
+      // fresh on its next tool call.
+      if (priorUrl && priorUrl !== 'about:blank') {
+        await (hp as unknown as { goto: (u: string) => Promise<void> }).goto(priorUrl);
+      }
+    } catch (err) {
+      logger.warn(
+        { taskId: opts.taskId, err: err instanceof Error ? err.message : String(err) },
+        'supercar: swap re-navigate failed — continuing',
+      );
+    }
+    return true;
+  }
+
   // Park the tab on a fresh about:blank so stale overlays from prior
   // tasks don't leak into the first screenshot.
   try {
-    await opts.executor.resetPageForTask();
+    await executor.resetPageForTask();
   } catch (err) {
     logger.warn({ err, taskId: opts.taskId }, 'supercar: resetPageForTask failed — continuing');
   }
 
-  const page = (await opts.executor.getPage()) as unknown as PageLike;
+  let page = (await executor.getPage()) as unknown as PageLike;
+  // Note: `page` is const-ish in spirit but the executor swap above
+  // re-reads it via getPage() inside the helper, so downstream uses
+  // can rely on always calling executor.getPage() to pick up the new
+  // browser. The loop-body already does so on every iteration.
 
   // Initial observation — the model needs to see the current page to
   // ground its first action.
-  const initialShot = await opts.executor.screenshot(page);
+  const initialShot = await executor.screenshot(page);
   if (initialShot.error || !initialShot.base64) {
     return {
       status: 'failed',
@@ -333,6 +474,8 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // while the captcha banner sits there, and to fire onAntiBotResolved
   // the moment the page has moved on.
   let activeAntiBotSignal: AntiBotSignal | null = null;
+  /** One-shot guard for the Apify fallback path; runs at most once per task. */
+  let apifyAttempted = false;
   // Captured from the first response that materialised a server-side
   // code_execution sandbox (Sonnet 4.6 + computer-use-2025-11-24 beta
   // auto-enables this). Re-passed on every subsequent messages.create
@@ -521,9 +664,9 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         }
 
         // Execute the computer use action and return a fresh screenshot.
-        const execResult = await executeComputerAction(opts.executor, toolUse.input as ComputerActionInput);
-        const freshPage = (await opts.executor.getPage()) as unknown as PageLike;
-        const shot = await opts.executor.screenshot(freshPage);
+        const execResult = await executeComputerAction(executor, toolUse.input as ComputerActionInput);
+        const freshPage = (await executor.getPage()) as unknown as PageLike;
+        const shot = await executor.screenshot(freshPage);
         if (shot.error || !shot.base64) {
           toolResults.push({
             type: 'tool_result',
@@ -598,6 +741,54 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         stuckCount = 0;
       }
 
+      // Lane 5 — Apify fallback the moment we've hit the stuck bar AND
+      // the intent's site has a registered scraper actor. Runs once
+      // per task; on success we fold the dataset into the summary and
+      // exit before spending more API turns on a browser that clearly
+      // isn't cooperating.
+      if (
+        !apifyAttempted &&
+        stuckCount >= 3 &&
+        opts.apifyAdapter
+      ) {
+        const match = opts.apifyAdapter.findActorForIntent(opts.intent);
+        if (match) {
+          apifyAttempted = true;
+          logger.info(
+            { taskId: opts.taskId, actor: match.actorId, stuckCount },
+            'supercar: delegating to Apify actor',
+          );
+          const input = match.buildInput(opts.intent);
+          const r = await opts.apifyAdapter.run(match.actorId, input);
+          if ('items' in r && r.items.length > 0) {
+            const itemsPreview = r.items
+              .slice(0, 10)
+              .map((it, i) => `${i + 1}. \`\`\`json\n${JSON.stringify(it, null, 2).slice(0, 400)}\n\`\`\``)
+              .join('\n\n');
+            return {
+              status: 'completed',
+              summary:
+                `# ${match.hostLabel} — 通过 Apify Actor 获取（浏览器路径被反爬拦截）\n\n` +
+                `Actor: \`${match.actorId}\`\n结果数：${r.items.length}（展示前 10 条）\n\n${itemsPreview}`,
+              iterations: iteration,
+              toolsUsed: [...toolsUsed, 'apify'],
+            };
+          }
+          // Apify failed — log and keep going in the browser.
+          logger.warn(
+            { taskId: opts.taskId, err: 'error' in r ? r.error : 'empty' },
+            'supercar: Apify actor returned no usable data — falling back to browser',
+          );
+        }
+      }
+
+      // Lane 2 escalation on pure stuck (no explicit anti-bot signal).
+      // Triggers at the warn threshold so the headed browser gets a
+      // chance before we inject the "try mobile sites" hint text.
+      if (!executorSwapped && stuckCount >= STUCK_WARN_THRESHOLD) {
+        await swapToHeadedIfAvailable(`stuck:${stuckCount}`);
+      }
+
       // Anti-bot pattern scan. Runs on the freshest page text we can
       // get — fails open (no page text = no detection) so transient
       // evaluate errors don't break the loop. One scan per turn, not
@@ -605,7 +796,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       // detections.
       let antiBotHintText: string | null = null;
       if (hadComputerAction && toolUseBlocks.length > 0) {
-        const snapshotText = await readPageText(opts.executor);
+        const snapshotText = await readPageText(executor);
         const signal = snapshotText ? detectAntiBot({ snapshotText }) : null;
         if (signal && signal.confidence === 'high') {
           // Fire onAntiBotSignal at most once per distinct signal type;
@@ -629,6 +820,18 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             `- 如果是 **Cloudflare 质询页**：等 5 秒让它自动放行，或切 m.xxx.com 移动版绕开\n` +
             `- 如果是**明确的 403 / 访问被拒**：换站点（见移动版备选表）\n` +
             `- 不要继续点击同一元素——先换路径`;
+
+          // Lane 2 escalation: swap the active executor to the headed
+          // browser. Real GPU + real fingerprint defeats most of the
+          // cheap "serve blank HTML to headless UAs" blocks even
+          // without the model changing tactics. One-shot — the flag
+          // prevents re-swapping on subsequent detections.
+          const swapped = await swapToHeadedIfAvailable(`antibot:${signal.type}`);
+          if (swapped) {
+            antiBotHintText +=
+              `\n\n🔄 系统已自动切换到 **headed 浏览器**（Lane 2，真实渲染指纹）。` +
+              `下一个 computer action 会在新浏览器里执行，之前的页面状态已重放到当前 URL。`;
+          }
         } else if (activeAntiBotSignal && !signal) {
           // Banner cleared on this turn — notify UI.
           logger.info(

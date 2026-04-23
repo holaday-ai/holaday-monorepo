@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import type { Planner } from '../agent/planner.js';
+import type { ExecutionRouter } from '../agent/supercar/index.js';
 import type { VisionLoopCommander } from '../agent/vision-loop/commander.js';
 import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
 import { logger } from '../config/logger.js';
@@ -21,6 +22,13 @@ export interface AppContextDeps {
   planner: Planner;
   visionCommander?: VisionLoopCommander;
   playwrightExecutor?: PlaywrightExecutor | null;
+  /**
+   * 5-lane router (Phase 6-2). When present, supercar uses it to pick
+   * between headless / headed browsers + Brave / Zapier / Apify
+   * adapters per task. Undefined pre-Phase-6-2 deploys — tasks.ts
+   * falls back to the single `playwrightExecutor` path in that case.
+   */
+  executionRouter?: ExecutionRouter;
 }
 
 export function makeCreateContext(deps: AppContextDeps) {
@@ -33,6 +41,7 @@ export function makeCreateContext(deps: AppContextDeps) {
       planner: deps.planner,
       visionCommander: deps.visionCommander,
       playwrightExecutor: deps.playwrightExecutor ?? null,
+      executionRouter: deps.executionRouter ?? null,
       userId: (req as Request & { userId?: string }).userId,
     };
   };

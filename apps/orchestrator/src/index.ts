@@ -8,6 +8,13 @@ import { DrizzleLlmCallRecorder } from './agent/llm-call-recorder.js';
 import { AnthropicPlanner } from './agent/planners/anthropic.js';
 import { StubPlanner } from './agent/planners/stub.js';
 import {
+  createApifyAdapter,
+  createBraveSearchAdapter,
+  createExecutionRouter,
+  createZapierAdapter,
+  type ExecutionRouter,
+} from './agent/supercar/index.js';
+import {
   AnthropicVisionLoopCommander,
   shouldUseLegacyPlanner,
 } from './agent/vision-loop/commander.js';
@@ -82,8 +89,56 @@ async function main() {
     logger.info('EXECUTOR_MODE=legacy — skipping Playwright init');
   }
 
+  // --- Lane 2: headed Chromium via HEADED_CDP_ENDPOINT (optional) ---
+  // A separate PlaywrightExecutor instance wired to a dedicated headed
+  // Chrome (Xvfb + GUI + real GPU context) that the router swaps to
+  // when the headless primary hits high-confidence anti-bot signals.
+  // Optional: unset env or failed connect leaves headedExecutor=null
+  // and the router reports the lane as 'unavailable' — the app still
+  // runs, it just never has a second browser to escalate to.
+  let headedExecutor: PlaywrightExecutor | null = null;
+  const headedEndpoint = process.env.HEADED_CDP_ENDPOINT;
+  if (headedEndpoint) {
+    const candidate = new PlaywrightExecutor();
+    const r = await candidate.connect(headedEndpoint);
+    if (r.ok) {
+      headedExecutor = candidate;
+      logger.info({ endpoint: headedEndpoint }, 'Lane 2 (headed CDP) ready');
+    } else {
+      logger.warn(
+        { endpoint: headedEndpoint, error: r.error },
+        'Lane 2 (headed CDP) unavailable — connect failed',
+      );
+    }
+  } else {
+    logger.info('HEADED_CDP_ENDPOINT unset — Lane 2 disabled');
+  }
+
+  // --- Lanes 3/4/5: adapter stubs. Each one becomes a functional lane
+  // the moment its API key lands in .env. Missing key → adapter null →
+  // router reports 'unavailable' and the lane is silently skipped.
+  const braveAdapter = createBraveSearchAdapter(process.env.BRAVE_API_KEY ?? null);
+  const zapierAdapter = createZapierAdapter(process.env.ZAPIER_API_KEY ?? null);
+  const apifyAdapter = createApifyAdapter(process.env.APIFY_API_TOKEN ?? null);
+
+  const executionRouter: ExecutionRouter = createExecutionRouter({
+    headless: playwrightExecutor,
+    headed: headedExecutor,
+    brave: braveAdapter,
+    zapier: zapierAdapter,
+    apify: apifyAdapter,
+  });
+  for (const lane of ['headless', 'headed', 'brave', 'zapier', 'apify'] as const) {
+    const status = executionRouter.status(lane);
+    logger.info(
+      { lane, status },
+      status === 'ready' ? `Lane ready: ${lane}` : `Lane unavailable: ${lane}`,
+    );
+  }
+
   const app = createHttpApp({
     planner,
+    executionRouter,
     ...(visionCommander ? { visionCommander } : {}),
     ...(playwrightExecutor ? { playwrightExecutor } : {}),
   });
@@ -119,6 +174,9 @@ async function main() {
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     if (playwrightExecutor) {
       await playwrightExecutor.disconnect().catch(() => {});
+    }
+    if (headedExecutor) {
+      await headedExecutor.disconnect().catch(() => {});
     }
     process.exit(0);
   };
