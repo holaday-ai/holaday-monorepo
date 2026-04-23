@@ -32,6 +32,11 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { createHash } from 'node:crypto';
+import {
+  type AntiBotSignal,
+  describeSignal,
+  detectAntiBot,
+} from '../vision-loop/anti-bot-detector.js';
 import type { PageLike, PlaywrightExecutor } from '../vision-loop/playwright-executor.js';
 import { logger } from '../../config/logger.js';
 import type { DomainName } from '../vision-loop/domain/classifier.js';
@@ -41,23 +46,28 @@ import { buildSupercarSystemPrompt } from './system-prompt.js';
  * Anti-crawl stuck detection thresholds.
  *
  * When the same page screenshot repeats across N consecutive computer
- * actions, the site is almost certainly blocking us (captcha, 403
- * curtain, Cloudflare challenge, cookie wall). Spinning another 50
- * iterations won't help — Sonnet keeps emitting clicks that the page
- * silently ignores. Two tiers:
+ * actions, the site is probably blocking us. But "probably" is doing
+ * a lot of work here — the model genuinely needs a few turns to load
+ * a site, scroll, observe, then act. If we bail too early we get the
+ * anti-pattern the Phase 5 benchmark caught: every stuck hit degrades
+ * to web_search and the agent never actually drives the browser.
  *
- *   - STUCK_WARN_THRESHOLD (3): append a prompt-injection hint to the
- *     next tool_result so Claude sees "try web_search or swap sites"
- *     advice without losing its context.
- *   - STUCK_EXIT_THRESHOLD (5): inject a final user turn forcing Claude
- *     to summarise with what it has and stop using computer actions.
+ * Raised from (3 / 5) to (6 / 12) so the model gets:
+ *   - 6 quiet turns before it's warned with mobile-site + retry hints
+ *   - another 6 turns after the warning to try alternate tactics
+ *   - only then does the hard "stop browsing, wrap up" nudge land
+ *
+ * Goal: the browser path gets a real chance to succeed before we
+ * concede to search. The matching prompt push on the model side
+ * ("try m.xxx.com, reset with about:blank, swap alternate hostname
+ * before giving up") lives in system-prompt.ts.
  *
  * Exact MD5 hash comparison — JPEG compression is deterministic for
  * identical input, and cursor-move-only diffs produce different bytes
  * (which we want: cursor motion IS progress).
  */
-const STUCK_WARN_THRESHOLD = 3;
-const STUCK_EXIT_THRESHOLD = 5;
+const STUCK_WARN_THRESHOLD = 6;
+const STUCK_EXIT_THRESHOLD = 12;
 
 export type SupercarStatus = 'completed' | 'failed' | 'awaiting_user' | 'timeout' | 'cancelled';
 
@@ -114,6 +124,24 @@ export interface SupercarScreencastEvent {
   viewportHeight: number;
 }
 
+export interface SupercarAntiBotEvent {
+  iteration: number;
+  signal: AntiBotSignal;
+  /**
+   * Milliseconds the UI should show the "please solve this captcha"
+   * prompt before we abandon the wait. The agent doesn't actually
+   * pause on this (it keeps trying alternate tactics); this is how
+   * long the UI's captcha banner stays visible by default.
+   */
+  waitTimeoutMs: number;
+}
+
+export interface SupercarAntiBotResolvedEvent {
+  iteration: number;
+  /** Why the banner cleared: 'auto' = next screenshot had no anti-bot markers. */
+  reason: 'auto';
+}
+
 export interface RunSupercarOptions {
   /** External task id (task_…). Correlates hooks and WS frames. */
   taskId: string;
@@ -141,6 +169,19 @@ export interface RunSupercarOptions {
   onWebSearch?: (ev: SupercarWebSearchEvent) => void | Promise<void>;
   onAwaitingUser?: (ev: SupercarAwaitingUserEvent) => void | Promise<void>;
   onThinking?: (summary: string) => void | Promise<void>;
+  /**
+   * Fired when detectAntiBot flags a fresh HIGH-confidence signal on
+   * the page text (captcha / cloudflare / block). Called once per
+   * detection — not per turn the banner remains visible. Caller
+   * typically broadcasts `server.vision.captcha_detected`.
+   */
+  onAntiBotSignal?: (ev: SupercarAntiBotEvent) => void | Promise<void>;
+  /**
+   * Fired when a previously-flagged anti-bot banner clears on the
+   * next screenshot. Caller typically broadcasts
+   * `server.vision.captcha_resolved`.
+   */
+  onAntiBotResolved?: (ev: SupercarAntiBotResolvedEvent) => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +327,12 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // up" user turn exactly once. This flag prevents re-injecting on every
   // subsequent iteration while Claude finalises.
   let stuckForceFinalised = false;
+  // Tracks whether the LAST detected signal is still "in effect" — set
+  // on first HIGH-confidence detection, cleared on a turn that has
+  // none. Used to avoid re-firing onAntiBotSignal every single turn
+  // while the captcha banner sits there, and to fire onAntiBotResolved
+  // the moment the page has moved on.
+  let activeAntiBotSignal: AntiBotSignal | null = null;
   // Captured from the first response that materialised a server-side
   // code_execution sandbox (Sonnet 4.6 + computer-use-2025-11-24 beta
   // auto-enables this). Re-passed on every subsequent messages.create
@@ -550,11 +597,57 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       } else if (hadComputerAction && turnChangedScreenshot) {
         stuckCount = 0;
       }
+
+      // Anti-bot pattern scan. Runs on the freshest page text we can
+      // get — fails open (no page text = no detection) so transient
+      // evaluate errors don't break the loop. One scan per turn, not
+      // per tool_use, so parallel tool_uses don't fire redundant
+      // detections.
+      let antiBotHintText: string | null = null;
+      if (hadComputerAction && toolUseBlocks.length > 0) {
+        const snapshotText = await readPageText(opts.executor);
+        const signal = snapshotText ? detectAntiBot({ snapshotText }) : null;
+        if (signal && signal.confidence === 'high') {
+          // Fire onAntiBotSignal at most once per distinct signal type;
+          // don't spam the UI every turn while the banner sits there.
+          if (!activeAntiBotSignal || activeAntiBotSignal.type !== signal.type) {
+            activeAntiBotSignal = signal;
+            logger.info(
+              { taskId: opts.taskId, iteration, type: signal.type, rawMatch: signal.rawMatch },
+              'supercar: anti-bot signal detected',
+            );
+            await safeCall(opts.onAntiBotSignal, {
+              iteration,
+              signal,
+              waitTimeoutMs: 60_000,
+            });
+          }
+          antiBotHintText =
+            `🤖 检测到 **${describeSignal(signal)}**（匹配关键词："${signal.rawMatch.slice(0, 40)}"）。\n\n` +
+            `这不是普通的页面未响应——是网站的反爬 / 人机验证机制。处理方式：\n` +
+            `- 如果是**滑动验证 / 拖动滑块**：用户可以在右侧 panel 交互模式下手动完成，然后告诉你继续\n` +
+            `- 如果是 **Cloudflare 质询页**：等 5 秒让它自动放行，或切 m.xxx.com 移动版绕开\n` +
+            `- 如果是**明确的 403 / 访问被拒**：换站点（见移动版备选表）\n` +
+            `- 不要继续点击同一元素——先换路径`;
+        } else if (activeAntiBotSignal && !signal) {
+          // Banner cleared on this turn — notify UI.
+          logger.info(
+            { taskId: opts.taskId, iteration, prev: activeAntiBotSignal.type },
+            'supercar: anti-bot signal cleared',
+          );
+          await safeCall(opts.onAntiBotResolved, { iteration, reason: 'auto' });
+          activeAntiBotSignal = null;
+        }
+      }
+
       // Both stuck advisories go in the same user message as the
       // tool_results. Mixing text + tool_result blocks in one user turn
       // is legal per the Anthropic schema — tool_result blocks just
       // need to come before any free-form text.
       const nudgeContent: ContentBlockParam[] = [];
+      if (antiBotHintText) {
+        nudgeContent.push({ type: 'text', text: antiBotHintText });
+      }
       if (stuckCount >= STUCK_EXIT_THRESHOLD && !stuckForceFinalised) {
         stuckForceFinalised = true;
         logger.warn(
@@ -574,16 +667,28 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       } else if (stuckCount >= STUCK_WARN_THRESHOLD) {
         logger.info(
           { taskId: opts.taskId, iteration, stuckCount },
-          'supercar: stuck warning — nudging Claude toward fallback',
+          'supercar: stuck warning — nudging Claude to try alternate browser tactics',
         );
+        // The warn nudge is browser-first. We explicitly do NOT mention
+        // web_search here — the benchmark showed Claude treats any
+        // search mention as a green light to abandon the browser path.
+        // Mobile sites first, then alternate hostnames, then reset;
+        // web_search appears only in the hard exit nudge above.
         nudgeContent.push({
           type: 'text',
           text:
-            `⚠️ 提示：页面截图已连续 ${stuckCount} 次未变化，当前网站可能被反爬拦截或页面卡死。\n\n` +
-            `建议切换策略：\n` +
-            `• 纯信息类查询 → 改用 web_search 工具\n` +
-            `• 需要访问特定网站 → 尝试移动版（如 m.jd.com / m.ctrip.com / m.taobao.com）或备选同类网站\n` +
-            `• 如果已获得部分信息，先汇总输出`,
+            `⚠️ 提示：页面截图已连续 ${stuckCount} 次未变化，当前操作可能未生效。\n\n` +
+            `先尝试以下浏览器内的方案，不要直接放弃 computer 工具：\n` +
+            `1. **切到移动版网站**（反爬通常更宽松）：\n` +
+            `   - 携程 → m.ctrip.com\n` +
+            `   - 京东 → m.jd.com\n` +
+            `   - 淘宝 → m.taobao.com\n` +
+            `   - Boss直聘 → m.zhipin.com\n` +
+            `   - 拼多多 → mobile.yangkeduo.com\n` +
+            `2. **换备选站点**：携程卡住 → 飞猪（fliggy.com）/ 去哪儿（qunar.com）；京东卡住 → 拼多多\n` +
+            `3. **重置页面**：先 navigate 到 about:blank，再重新访问目标\n` +
+            `4. **等一下**：wait 3-5 秒后再点击，某些站点首次加载慢\n` +
+            `5. **找直链**：热榜 / 话题页（如 douyin.com/hot）通常不需要登录`,
         });
       }
 
@@ -855,5 +960,38 @@ async function safeCall<T>(fn: ((ev: T) => void | Promise<void>) | undefined, ev
     await fn(ev);
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'supercar: callback threw');
+  }
+}
+
+/**
+ * Grab the currently-visible text on the page for anti-bot scanning.
+ * Capped at 4KB so a giant DOM doesn't make the regex scan dominate
+ * per-turn latency — captcha / block copy lives near the top of the
+ * page and is always short. Returns empty string (not null) on any
+ * failure so the caller's `if (snapshotText)` branch fails open.
+ */
+async function readPageText(executor: PlaywrightExecutor): Promise<string> {
+  try {
+    const page = (await executor.getPage()) as unknown as {
+      evaluate: <T>(fn: () => T) => Promise<T>;
+    };
+    const text = await Promise.race([
+      page.evaluate<string>(() => {
+        // innerText filters out <script> / <style> blocks and collapses
+        // whitespace, which is exactly what we want the regex scanner
+        // to see. Fallback to textContent for pages that aren't fully
+        // hydrated yet (Cloudflare interstitial has the content in a
+        // <noscript> sibling and textContent picks it up regardless).
+        const body = (globalThis as { document?: { body?: unknown } }).document?.body as
+          | { innerText?: string; textContent?: string }
+          | undefined;
+        if (!body) return '';
+        return (body.innerText ?? body.textContent ?? '').slice(0, 4096);
+      }),
+      new Promise<string>((resolve) => setTimeout(() => resolve(''), 1500)),
+    ]);
+    return text ?? '';
+  } catch {
+    return '';
   }
 }

@@ -203,6 +203,35 @@ export const tasksRouter = router({
               ctx.logger.warn({ err, taskId }, 'supercar: broadcast thinking failed');
             }
           },
+          onAntiBotSignal(ev) {
+            // Reuse the vision-loop captcha_detected frame shape so the
+            // task-store's existing captcha-wait banner lights up
+            // without any frontend changes. BrowserPanel auto-flips to
+            // interactive mode (Phase 2) when this fires, so the user
+            // can solve a slider captcha in-panel.
+            try {
+              broadcastToUser(userId, {
+                type: 'server.vision.captcha_detected',
+                taskId,
+                antiBotType: ev.signal.type,
+                message: describeSignal(ev.signal),
+                waitTimeoutMs: ev.waitTimeoutMs,
+              });
+            } catch (err) {
+              ctx.logger.warn({ err, taskId }, 'supercar: broadcast captcha_detected failed');
+            }
+          },
+          onAntiBotResolved(ev) {
+            try {
+              broadcastToUser(userId, {
+                type: 'server.vision.captcha_resolved',
+                taskId,
+                reason: ev.reason,
+              });
+            } catch (err) {
+              ctx.logger.warn({ err, taskId }, 'supercar: broadcast captcha_resolved failed');
+            }
+          },
         })
           .then(async (outcome) => {
             ctx.logger.info(
