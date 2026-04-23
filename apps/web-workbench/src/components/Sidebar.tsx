@@ -395,10 +395,10 @@ interface GroupProps {
 function TaskGroup({ title, children }: GroupProps): JSX.Element {
   return (
     <section className="mt-3 first:mt-1">
-      <div className="px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <div className="px-3 py-0.5 text-[10px] font-medium tracking-wide text-muted-foreground/60">
         {title}
       </div>
-      <div className="mt-1 space-y-1">{children}</div>
+      <div className="mt-0.5 space-y-px">{children}</div>
     </section>
   );
 }

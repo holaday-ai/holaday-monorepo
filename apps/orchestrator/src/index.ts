@@ -147,6 +147,32 @@ async function main() {
     logger.info({ port: env.HTTP_PORT }, 'HTTP server listening');
   });
 
+  // Boot-time stale-task sweep. Any task still in a non-terminal
+  // status after an orchestrator restart can't make progress — the
+  // in-memory queue + agent-loop handle are gone. Mark them failed
+  // with a clear error code so the UI shows them as terminal and the
+  // queue starts clean. 2-minute cutoff because the orchestrator boot
+  // itself takes ~5-10s; anything older than that is definitely stale.
+  try {
+    const { sql } = await import('drizzle-orm');
+    const rows = await db.execute(sql`
+      UPDATE tasks
+         SET status = 'failed',
+             error_code = 'ORCHESTRATOR_RESTART',
+             error_message = 'orchestrator restarted while task was in-flight; marked failed on boot sweep',
+             updated_at = NOW(3),
+             completed_at = NOW(3)
+       WHERE status IN ('pending','executing','planning')
+         AND created_at < NOW() - INTERVAL 2 MINUTE
+    `);
+    const changed = (rows as unknown as { affectedRows?: number }).affectedRows ?? 0;
+    if (changed > 0) {
+      logger.warn({ count: changed }, 'boot sweep: marked stale in-flight tasks as failed');
+    }
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'boot sweep failed (non-fatal)');
+  }
+
   const recovery = await loadRehydratedTasks();
   logger.info(recovery, 'restart recovery: rehydrated in-flight tasks');
 

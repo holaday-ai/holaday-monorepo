@@ -9,10 +9,9 @@ interface Props {
 }
 
 /**
- * One row in the sidebar task list. Status is signalled by a small
- * colour dot on the left (blue=active, emerald=completed, red=failed,
- * grey=cancelled) — the long status text is pushed to the subtitle so
- * the intent stays legible.
+ * One row in the sidebar task list, Claude-style. Single-line intent
+ * with a colour-coded status dot to its left; no subtitle row. A 2px
+ * blue left-bar marks the selected row. Hover tints the background.
  */
 export function TaskListItem({ task, selected, onSelect, onContextMenu }: Props): JSX.Element {
   const active = isActive(task.status);
@@ -21,28 +20,33 @@ export function TaskListItem({ task, selected, onSelect, onContextMenu }: Props)
       type="button"
       onClick={() => onSelect(task.taskId)}
       onContextMenu={onContextMenu ? (e) => onContextMenu(task.taskId, e) : undefined}
+      title={`${task.intent}\n${subtitleFor(task)}`}
       className={cn(
-        'group relative flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left transition-colors',
+        'group relative flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors',
         'hover:bg-foreground/5',
-        selected && 'bg-accent shadow-sm',
+        selected && 'bg-foreground/[0.06]',
       )}
     >
+      {/* 2px left indicator bar for the selected row — Claude's
+       *  selection affordance. Uses absolute positioning so the row
+       *  content flow stays consistent with unselected rows. */}
+      {selected && (
+        <span
+          aria-hidden
+          className="absolute inset-y-1 left-0 w-[2px] rounded-r bg-blue-500"
+        />
+      )}
       <StatusDot status={task.status} />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-foreground">{task.intent}</div>
-        <div
-          className={cn(
-            'mt-0.5 truncate text-xs',
-            task.status === 'completed' && 'text-blue-600',
-            task.status === 'failed' && 'text-red-500',
-            (task.status === 'executing' || task.status === 'paused') && 'text-muted-foreground',
-            task.status === 'cancelled' && 'text-muted-foreground',
-          )}
-        >
-          {subtitleFor(task)}
-        </div>
-      </div>
-      {active && <span className="sr-only">进行中</span>}
+      <span
+        className={cn(
+          'min-w-0 flex-1 truncate text-[13px] leading-5',
+          task.status === 'failed' ? 'text-muted-foreground' : 'text-foreground',
+          selected && 'font-medium',
+        )}
+      >
+        {task.intent}
+      </span>
+      {active && <span className="sr-only">进行中 · {subtitleFor(task)}</span>}
     </button>
   );
 }
@@ -51,12 +55,15 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
   return (
     <span
       className={cn(
-        'mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full',
+        'inline-block h-2 w-2 shrink-0 rounded-full',
         status === 'executing' && 'animate-pulse-dot bg-blue-500',
         status === 'paused' && 'bg-amber-500',
-        status === 'completed' && 'bg-blue-500',
+        // Completed: hollow grey dot — done is neutral, not
+        // celebrated. Matches Claude's sidebar where completed tasks
+        // fade into the background.
+        status === 'completed' && 'border border-muted-foreground/40 bg-transparent',
         status === 'failed' && 'bg-red-500',
-        status === 'cancelled' && 'bg-muted-foreground/40',
+        status === 'cancelled' && 'bg-muted-foreground/30',
       )}
       aria-hidden
     />

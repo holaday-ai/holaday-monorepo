@@ -75,6 +75,25 @@ export function BrowserPanel({
   // "Continue in browser" button can flip it on from the left panel.
   const interactive = useTaskStore((s) => s.browserInteractive);
   const setInteractive = useTaskStore((s) => s.setBrowserInteractive);
+
+  // When the selected task has no screencast of its own (e.g. a
+  // pending task the user clicked into before it produced frames),
+  // fall back to the most recently-updated frame from ANY task so
+  // the URL header still reflects what the live VNC stream is
+  // showing. Brave is a shared singleton, so whatever URL another
+  // task left it on is also what's on screen right now.
+  const screencastByTask = useTaskStore((s) => s.screencastByTask);
+  const latestFrame = React.useMemo<UiScreencast | null>(() => {
+    const all = Object.values(screencastByTask);
+    if (all.length === 0) return null;
+    // Latest by timestamp; string ISO compare is correct for
+    // same-locale UTC ISO-8601.
+    return all.reduce((best, cur) =>
+      !best || cur.timestamp > best.timestamp ? cur : best,
+    null as UiScreencast | null) ?? null;
+  }, [screencastByTask]);
+  const displayFrame = frame ?? latestFrame;
+  const displayUrl = displayFrame?.url ?? 'about:blank';
   const abortTask = useTaskStore((s) => s.abortTask);
   const [aborting, setAborting] = React.useState(false);
   const isExecuting = taskStatus === 'executing';
@@ -308,8 +327,11 @@ export function BrowserPanel({
         <>
           <header className="flex h-11 items-center gap-2 border-b border-border px-3 pt-2">
             <StatusDot status={status} />
-            <div className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-              {frame?.url ?? 'about:blank'}
+            <div
+              className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+              title={displayUrl}
+            >
+              {displayUrl}
             </div>
             {isExecuting && activeTaskId && (
               <button

@@ -63,6 +63,29 @@ export function createVisionLoopTaskQueue(): VisionLoopTaskQueue {
   // because the popup wants "is there work in flight or waiting".
   const state = new Map<string, { running: boolean; pending: QueuedEntry[] }>();
 
+  // Hard upper bound for any single queued task. Covers the
+  // pathological case where the vision-loop / supercar runner never
+  // returns (frozen CDP connection, stuck Anthropic stream, etc.) —
+  // without this, one zombie task blocks every subsequent task for
+  // the same user indefinitely. Slightly longer than the supercar
+  // per-task timeout (10min) so the inner timeout normally wins.
+  const QUEUE_HARD_TIMEOUT_MS = 15 * 60 * 1000;
+
+  async function runWithHardTimeout(run: QueuedTaskFn): Promise<void> {
+    let timer: NodeJS.Timeout | null = null;
+    const timeoutPromise = new Promise<void>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`queue hard timeout after ${QUEUE_HARD_TIMEOUT_MS}ms`)),
+        QUEUE_HARD_TIMEOUT_MS,
+      );
+    });
+    try {
+      await Promise.race([run(), timeoutPromise]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   async function drain(userId: string): Promise<void> {
     const bucket = state.get(userId);
     if (!bucket) return;
@@ -70,9 +93,10 @@ export function createVisionLoopTaskQueue(): VisionLoopTaskQueue {
       const next = bucket.pending.shift();
       if (!next) break;
       try {
-        await next.run();
+        await runWithHardTimeout(next.run);
       } catch {
-        // Errors in user-provided run() are their problem; keep draining.
+        // Errors in user-provided run() (or timeout) are their
+        // problem; keep draining so the next task isn't starved.
       } finally {
         // Settle THIS task's enqueue() promise regardless of success —
         // the caller just cares that their task has finished running,
