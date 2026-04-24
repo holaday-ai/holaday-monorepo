@@ -168,6 +168,14 @@ export class PlaywrightExecutor {
    * that class of quirk.
    */
   private activePage: Page | null = null;
+  /**
+   * Endpoint remembered from connect() so we can silently reconnect
+   * when the CDP WebSocket goes idle. Playwright's `connectOverCDP`
+   * doesn't auto-reconnect — after an idle timeout or a Brave tab
+   * cycle the Browser handle stays non-null but `contexts()` returns
+   * empty. We detect that in getPage() and redial using this value.
+   */
+  private cdpEndpoint: string | null = null;
   /** Dependency-injection seam for tests that want to bypass connect(). */
   private readonly chromium: {
     connectOverCDP: (endpoint: string) => Promise<Browser>;
@@ -207,6 +215,7 @@ export class PlaywrightExecutor {
     if (this.browser) return { ok: true };
     try {
       this.browser = await this.chromium.connectOverCDP(cdpEndpoint);
+      this.cdpEndpoint = cdpEndpoint;
       if (isStealthEnabled()) {
         await this.applyStealthToContexts(this.browser);
       }
@@ -320,6 +329,57 @@ export class PlaywrightExecutor {
   }
 
   /**
+   * Heal a stale CDP connection.
+   *
+   * Symptom: `browser.contexts()` returns [] even though the Chromium
+   * itself is alive and serves /json/version. Playwright's
+   * connectOverCDP WebSocket has silently gone away (idle timeout,
+   * Brave tab cycle, network flap) and no reconnection is attempted
+   * by the library. The Browser handle stays non-null so callers get
+   * a surprising "no browser context" rather than a clean
+   * "disconnected" signal.
+   *
+   * Called from getPage / resetPageForTask on the no-context path.
+   * Returns true when a fresh browser handle with ≥1 context was
+   * obtained, false when reconnect can't help (e.g. endpoint missing,
+   * Chromium is actually down). On success, side effects: replace
+   * this.browser, clear this.activePage, re-run stealth + banner
+   * dismissals exactly like a first-time connect.
+   */
+  private async reconnectIfStale(): Promise<boolean> {
+    const endpoint = this.cdpEndpoint;
+    if (!endpoint) return false;
+    // Drop whatever we were holding — next connectOverCDP gives us a
+    // fresh Browser. We can't `close()` the old handle because that
+    // can block on the dead WebSocket.
+    this.browser = null;
+    this.activePage = null;
+    try {
+      const browser = await this.chromium.connectOverCDP(endpoint);
+      this.browser = browser;
+      if (browser.contexts().length === 0) {
+        logger.warn(
+          { endpoint },
+          'reconnectIfStale: reconnected but still 0 contexts — giving up',
+        );
+        return false;
+      }
+      if (isStealthEnabled()) {
+        await this.applyStealthToContexts(browser);
+      }
+      await this.dismissBraveBanners(browser);
+      logger.info({ endpoint }, 'reconnectIfStale: reconnected CDP after stale');
+      return true;
+    } catch (err) {
+      logger.warn(
+        { endpoint, err: err instanceof Error ? err.message : String(err) },
+        'reconnectIfStale: connectOverCDP failed',
+      );
+      return false;
+    }
+  }
+
+  /**
    * Get the active Page for a given tab. Without a `tabId`, returns
    * the first page of the first context — the user's visible tab in
    * a single-window Chrome. Phase D doesn't try to match a specific
@@ -331,12 +391,27 @@ export class PlaywrightExecutor {
    * should wrap in try/catch + fall back to legacy on failure.
    */
   async getPage(_tabId?: number): Promise<Page> {
-    const browser = this.browser;
+    let browser = this.browser;
     if (!browser) throw new Error('PlaywrightExecutor not connected — call connect() first');
-    const contexts = browser.contexts();
-    const ctx = contexts[0];
-    if (!ctx)
-      throw new Error('PlaywrightExecutor: no browser context (is Chrome actually running?)');
+    let ctx = browser.contexts()[0];
+    if (!ctx) {
+      // Stale CDP. Try one redial — if the underlying Chromium is
+      // actually up (common case: idle WebSocket, not crash) this
+      // gets us a live context back.
+      const recovered = await this.reconnectIfStale();
+      if (!recovered || !this.browser) {
+        throw new Error(
+          'PlaywrightExecutor: no browser context (is Chrome actually running?)',
+        );
+      }
+      browser = this.browser;
+      ctx = browser.contexts()[0];
+      if (!ctx) {
+        throw new Error(
+          'PlaywrightExecutor: no browser context after reconnect',
+        );
+      }
+    }
     // Prefer the pinned activePage. It was either set by resetPageForTask
     // (fresh ctx.newPage at task start) or by navigate()'s fallback when
     // a goto left the prior page stuck. Only re-pick from ctx.pages()[0]
@@ -793,8 +868,15 @@ export class PlaywrightExecutor {
       // active page (or Chromium's startup about:blank) has been seen
       // to leave navigation stuck in prod; newPage() gives a clean
       // target and navigate() can goto from there with full confidence.
-      const ctx = this.browser.contexts()[0];
-      if (!ctx) return;
+      let ctx = this.browser.contexts()[0];
+      if (!ctx) {
+        // Stale CDP (same failure mode getPage recovers from). Try a
+        // reconnect; if that fails we bail silently — the outer loop
+        // will throw a proper error on the next getPage() anyway.
+        if (!(await this.reconnectIfStale()) || !this.browser) return;
+        ctx = this.browser.contexts()[0];
+        if (!ctx) return;
+      }
       const fresh = await ctx.newPage();
       const prior = this.activePage;
       this.activePage = fresh;
