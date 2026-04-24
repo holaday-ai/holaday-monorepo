@@ -139,6 +139,15 @@ export function spawnBrave(
 ): SpawnedProcess {
   mkdirSync(opts.userDataDir, { recursive: true });
   const windowSize = opts.windowSize ?? '1720,1440';
+  // Round-2 change: dropped --kiosk + --start-fullscreen + --disable-infobars.
+  // Users now see Brave's normal chrome (address bar + tab bar) in the
+  // VNC stream — the address bar is essential context ("what site am
+  // I on?") and multi-tab is needed for action tasks.
+  //
+  // Added:
+  //   --homepage=about:blank      so the new-tab default isn't Google
+  //   --disable-features=ExternalProtocolDialog   stops "Open xdg-open?" popups
+  //   --deny-permission-prompts   auto-rejects geolocation / notifications
   const args = [
     `--remote-debugging-port=${opts.cdpPort}`,
     '--remote-debugging-address=127.0.0.1',
@@ -150,19 +159,19 @@ export function spawnBrave(
     '--no-default-browser-check',
     '--no-sandbox',
     '--disable-dev-shm-usage',
-    '--disable-infobars',
     '--hide-crash-restore-bubble',
     '--disable-session-crashed-bubble',
     '--disable-restore-session-state',
-    '--disable-features=CalculateNativeWinOcclusion,ChromeWhatsNewUI,InfiniteSessionRestore,Translate,BravePrivateProductAnalytics,BraveWelcomePage,BraveRewards,BraveAIChat,BraveTalk,BraveVPN,ImportData,BraveNTPBrandedWallpaper',
+    '--disable-features=CalculateNativeWinOcclusion,ChromeWhatsNewUI,InfiniteSessionRestore,Translate,BravePrivateProductAnalytics,BraveWelcomePage,BraveRewards,BraveAIChat,BraveTalk,BraveVPN,ImportData,BraveNTPBrandedWallpaper,ExternalProtocolDialog',
     '--disable-background-networking',
     '--disable-sync',
     '--disable-translate',
+    '--deny-permission-prompts',
+    '--homepage=about:blank',
     '--lang=zh-CN',
     `--window-size=${windowSize}`,
     '--window-position=0,0',
-    '--kiosk',
-    '--start-fullscreen',
+    '--start-maximized',
     'about:blank',
   ];
   const label = `brave:${opts.cdpPort}`;

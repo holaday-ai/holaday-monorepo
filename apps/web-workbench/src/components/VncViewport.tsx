@@ -222,12 +222,33 @@ export function VncViewport({
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container || typeof ResizeObserver === 'undefined') return;
+    // noVNC's internal _resize is async; the canvas recomputes its
+    // transform but can land on the prior container box if we're
+    // mid-drag. We fire twice — once on the raw observer tick and
+    // again after a rAF+timeout — so the final scale always reflects
+    // the settled container width. Without the second pass users
+    // see the right edge of the viewport clipped during drag resize.
+    let raf = 0;
+    let t = 0;
     const ro = new ResizeObserver(() => {
       const rfb = rfbRef.current;
-      if (rfb) rfb.scaleViewport = true;
+      if (!rfb) return;
+      rfb.scaleViewport = true;
+      cancelAnimationFrame(raf);
+      clearTimeout(t);
+      raf = requestAnimationFrame(() => {
+        t = window.setTimeout(() => {
+          const r = rfbRef.current;
+          if (r) r.scaleViewport = true;
+        }, 120);
+      });
     });
     ro.observe(container);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(raf);
+      clearTimeout(t);
+    };
   }, []);
 
   return (

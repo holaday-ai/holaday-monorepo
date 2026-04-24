@@ -106,27 +106,24 @@ export function TaskStream({ task }: Props): JSX.Element {
         terminal={terminal}
         screencastUrl={screencast?.url ?? null}
         onContinueInBrowser={() => {
-          // Three things on "continue in browser":
+          // Two things on "continue in browser":
           //   1. Force interactive mode on so the VNC canvas accepts
           //      clicks / keyboard without a second toggle press.
-          //   2. Scroll the BrowserPanel into view on the viewport.
-          //      On narrow desktops the Panel is offscreen or hidden
-          //      behind the MainPanel overflow; the button sits in
-          //      the chat stream and users shouldn't have to hunt.
-          //   3. Flash a focus outline on the VNC container so the
+          //   2. Flash a focus ring on the VNC container so the
           //      user's eye lands on the right area.
+          //
+          // We used to also call scrollIntoView on the Panel, but on
+          // some desktop layouts that scrolled the whole app shell
+          // horizontally and visibly shifted the sidebar — a regression
+          // BOSS flagged in Round 2 review. The Panel is already on
+          // screen at desktop widths; no scroll needed.
           setBrowserInteractive(true);
-          // Wait for the "interactive" CSS transition to settle so
-          // scrollIntoView lands on the final size of the Panel.
           setTimeout(() => {
             if (typeof document === 'undefined') return;
             const panel = document.querySelector<HTMLElement>(
               '.vnc-viewport-host',
             );
             if (panel) {
-              panel.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
-              // Flash ring via a transient data attribute the CSS
-              // can animate — zero dep, no re-render.
               panel.setAttribute('data-flash', '1');
               window.setTimeout(() => panel.removeAttribute('data-flash'), 1500);
             }

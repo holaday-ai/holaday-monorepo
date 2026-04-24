@@ -46,6 +46,10 @@ function AppShell(): JSX.Element {
   const [feedbackOpen, setFeedbackOpen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
+  // Panel "full-screen": Sidebar + MainPanel hidden, BrowserPanel
+  // takes the whole app shell. Toggled from the Panel header button
+  // and from Escape (via the existing keyboard handler below).
+  const [panelFullscreen, setPanelFullscreen] = React.useState(false);
   const [me, setMe] = React.useState<MeProfile | null>(null);
   const [bootstrapped, setBootstrapped] = React.useState(false);
   const [online, setOnline] = React.useState<boolean>(() =>
@@ -266,6 +270,10 @@ function AppShell(): JSX.Element {
           setBrowserSheetOpen(false);
           return;
         }
+        if (panelFullscreen) {
+          setPanelFullscreen(false);
+          return;
+        }
         if (selectedTaskId && !inField) {
           setSelectedTask(null);
         }
@@ -279,7 +287,7 @@ function AppShell(): JSX.Element {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [authed, searchOpen, feedbackOpen, browserSheetOpen, selectedTaskId, setSelectedTask]);
+  }, [authed, searchOpen, feedbackOpen, browserSheetOpen, panelFullscreen, selectedTaskId, setSelectedTask]);
 
   const handleLogout = React.useCallback(() => {
     clearAccessToken();
@@ -301,6 +309,7 @@ function AppShell(): JSX.Element {
 
   return (
     <div className="relative flex h-full min-h-0 w-full overflow-hidden" ref={contentRowRef}>
+      {!panelFullscreen && (
       <Sidebar
         tasks={tasks}
         selectedTaskId={selectedTaskId}
@@ -335,6 +344,8 @@ function AppShell(): JSX.Element {
         mobileOpen={sidebarOpen}
         onMobileClose={() => setSidebarOpen(false)}
       />
+      )}
+      {!panelFullscreen && (
       <MainPanel
         task={selectedTask}
         busy={loading}
@@ -357,13 +368,20 @@ function AppShell(): JSX.Element {
         onOpenSidebar={() => setSidebarOpen(true)}
         onOpenBrowser={() => setBrowserSheetOpen(true)}
       />
-      <ResizeHandle onDrag={onPanelResizeDrag} onDragEnd={onPanelResizeEnd} />
+      )}
+      {!panelFullscreen && <ResizeHandle onDrag={onPanelResizeDrag} onDragEnd={onPanelResizeEnd} />}
       <div
-        className="hidden h-full lg:flex lg:flex-col lg:shrink-0"
+        className={
+          panelFullscreen
+            ? 'flex h-full w-full flex-col'
+            : 'hidden h-full lg:flex lg:flex-col lg:shrink-0'
+        }
         style={
-          panelPx != null
-            ? { flex: `0 0 ${panelPx}px` }
-            : { flex: '3 1 0', minWidth: 560 }
+          panelFullscreen
+            ? undefined
+            : panelPx != null
+              ? { flex: `0 0 ${panelPx}px` }
+              : { flex: '3 1 0', minWidth: 560 }
         }
       >
         <BrowserPanel
@@ -374,9 +392,11 @@ function AppShell(): JSX.Element {
           }
           activeTaskId={selectedTaskId}
           poolUserId={me?.multiUser ? me.userId : null}
+          fullscreen={panelFullscreen}
+          onToggleFullscreen={() => setPanelFullscreen((v) => !v)}
         />
       </div>
-      <div className="lg:hidden">
+      <div className={panelFullscreen ? 'hidden' : 'lg:hidden'}>
         <BrowserPanel
           layout="sheet"
           open={browserSheetOpen}

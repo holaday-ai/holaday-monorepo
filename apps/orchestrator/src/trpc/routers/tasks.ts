@@ -1190,9 +1190,21 @@ export const tasksRouter = router({
       if (!exec) return { ok: false as const, reason: 'no_executor' };
       try {
         const page = await exec.getPage();
-        if (input.direction === 'back') await page.goBack({ timeout: 5_000 });
-        else if (input.direction === 'forward') await page.goForward({ timeout: 5_000 });
-        else await page.reload({ timeout: 10_000 });
+        // waitUntil: 'domcontentloaded' — the default 'load' waits for
+        // every sub-resource and times out on heavy SPAs (ctrip /
+        // jd homepage can easily break 30s). Back/forward on a fresh
+        // tab with no history returns null (not an error) — the
+        // caller silently gets ok:true which is fine.
+        const navOpts = { timeout: 15_000, waitUntil: 'domcontentloaded' as const };
+        if (input.direction === 'back') {
+          const r = await page.goBack(navOpts);
+          if (!r) return { ok: false as const, reason: 'no_history' };
+        } else if (input.direction === 'forward') {
+          const r = await page.goForward(navOpts);
+          if (!r) return { ok: false as const, reason: 'no_history' };
+        } else {
+          await page.reload(navOpts);
+        }
         return { ok: true as const };
       } catch (err) {
         ctx.logger.warn(

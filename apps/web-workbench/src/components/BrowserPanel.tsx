@@ -4,6 +4,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Globe,
+  Maximize2,
+  Minimize2,
   MousePointerClick,
   Power,
   RotateCw,
@@ -90,6 +92,15 @@ interface Props {
    * `null` falls back to the legacy singleton behaviour.
    */
   poolUserId?: string | null;
+  /**
+   * Round-2 remote-desktop mode. When true, the caller has hidden
+   * the sidebar + chat area and wants the panel to own the viewport.
+   * The header shows a Minimize icon instead of Maximize so the
+   * user can exit — Escape also exits via the keyboard handler up
+   * in WorkbenchApp.
+   */
+  fullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 }
 
 /**
@@ -112,6 +123,8 @@ export function BrowserPanel({
   open = true,
   onClose,
   poolUserId = null,
+  fullscreen = false,
+  onToggleFullscreen,
 }: Props): JSX.Element | null {
   const [collapsed, setCollapsed] = React.useState(false);
   // Interactive mode is in the global store so the TaskStream's
@@ -420,6 +433,25 @@ export function BrowserPanel({
                 <Power className="h-3.5 w-3.5" />
               )}
             </button>
+            {onToggleFullscreen && (
+              <button
+                type="button"
+                onClick={onToggleFullscreen}
+                title={fullscreen ? '退出全屏 (Esc)' : '全屏浏览器模式'}
+                aria-label="toggle fullscreen panel"
+                aria-pressed={fullscreen}
+                className={cn(
+                  'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors',
+                  'hover:bg-foreground/5 hover:text-foreground',
+                )}
+              >
+                {fullscreen ? (
+                  <Minimize2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Maximize2 className="h-3.5 w-3.5" />
+                )}
+              </button>
+            )}
           </header>
           {awaitingUser && (
             <div

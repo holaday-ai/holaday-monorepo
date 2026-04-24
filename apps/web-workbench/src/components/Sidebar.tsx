@@ -301,11 +301,10 @@ export function Sidebar({
       </aside>
 
       {menu && (onDeleteTask || onRetryTask || onRenameTask) && (
-        <div
+        <ContextMenuShell anchorX={menu.x} anchorY={menu.y}><div
           role="menu"
           onClick={(e) => e.stopPropagation()}
-          className="fixed z-[60] min-w-[160px] rounded-md border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg animate-fade-in"
-          style={{ top: menu.y, left: menu.x }}
+          className="min-w-[160px] rounded-md border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg animate-fade-in"
         >
           <button
             type="button"
@@ -403,9 +402,61 @@ export function Sidebar({
               删除任务
             </button>
           )}
-        </div>
+        </div></ContextMenuShell>
       )}
     </>
+  );
+}
+
+/**
+ * Context-menu positioner that flips direction when the anchor is
+ * close to the viewport's bottom / right edge. Measures its own
+ * size via ref in a layout effect, then re-anchors via `bottom` /
+ * `right` so the menu always lands on-screen. Keeps the anchor
+ * pixel (the raw click point) in the same place — only the menu's
+ * extent direction changes.
+ */
+function ContextMenuShell({
+  anchorX,
+  anchorY,
+  children,
+}: {
+  anchorX: number;
+  anchorY: number;
+  children: React.ReactNode;
+}): JSX.Element {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const [pos, setPos] = React.useState<React.CSSProperties>({
+    top: anchorY,
+    left: anchorX,
+    visibility: 'hidden',
+  });
+  React.useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const { offsetWidth: w, offsetHeight: h } = el;
+    const margin = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const style: React.CSSProperties = { position: 'fixed', visibility: 'visible' };
+    if (anchorY + h + margin > vh) {
+      // Too close to the bottom — anchor by `bottom` so the menu
+      // grows upward from the cursor.
+      style.bottom = Math.max(margin, vh - anchorY);
+    } else {
+      style.top = anchorY;
+    }
+    if (anchorX + w + margin > vw) {
+      style.right = Math.max(margin, vw - anchorX);
+    } else {
+      style.left = anchorX;
+    }
+    setPos(style);
+  }, [anchorX, anchorY]);
+  return (
+    <div ref={ref} className="z-[60]" style={pos}>
+      {children}
+    </div>
   );
 }
 
