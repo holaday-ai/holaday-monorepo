@@ -35,6 +35,10 @@ interface Props {
   userPlan: string;
   onLogout(): void;
   onOpenFeedback?(): void;
+  /** Count of tasks in status='failed' — feeds UserMenu badge. */
+  failedTaskCount?: number;
+  /** "清除所有失败任务" handler; hidden when count=0 or handler absent. */
+  onClearFailedTasks?(): void;
   /** Mobile drawer state — ignored at md+ breakpoints. */
   mobileOpen?: boolean;
   onMobileClose?: () => void;
@@ -69,6 +73,8 @@ export function Sidebar({
   userPlan,
   onLogout,
   onOpenFeedback,
+  failedTaskCount = 0,
+  onClearFailedTasks,
   mobileOpen,
   onMobileClose,
 }: Props): JSX.Element {
@@ -166,6 +172,8 @@ export function Sidebar({
             userEmail={userEmail}
             userPlan={userPlan}
             onLogout={onLogout}
+            failedTaskCount={failedTaskCount}
+            {...(onClearFailedTasks ? { onClearFailedTasks } : {})}
             {...(onOpenFeedback ? { onOpenFeedback } : {})}
           />
         ) : (
@@ -293,6 +301,8 @@ export function Sidebar({
                 email={userEmail}
                 plan={userPlan}
                 onLogout={onLogout}
+                failedTaskCount={failedTaskCount}
+                {...(onClearFailedTasks ? { onClearFailedTasks } : {})}
                 {...(onOpenFeedback ? { onOpenFeedback } : {})}
               />
             </footer>
@@ -469,6 +479,8 @@ interface CollapsedRailProps {
   userPlan: string;
   onLogout: () => void;
   onOpenFeedback?: () => void;
+  failedTaskCount?: number;
+  onClearFailedTasks?: () => void;
 }
 
 /**
@@ -493,6 +505,8 @@ function CollapsedRail({
   userPlan,
   onLogout,
   onOpenFeedback,
+  failedTaskCount = 0,
+  onClearFailedTasks,
 }: CollapsedRailProps): JSX.Element {
   return (
     <div className="hidden h-full flex-col items-center gap-1 py-3 md:flex">
@@ -536,6 +550,8 @@ function CollapsedRail({
           plan={userPlan}
           onLogout={onLogout}
           compact
+          failedTaskCount={failedTaskCount}
+          {...(onClearFailedTasks ? { onClearFailedTasks } : {})}
           {...(onOpenFeedback ? { onOpenFeedback } : {})}
         />
       </div>

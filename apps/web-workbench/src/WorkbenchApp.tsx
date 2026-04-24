@@ -46,6 +46,7 @@ function AppShell(): JSX.Element {
   const [feedbackOpen, setFeedbackOpen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
+  const [confirmClearFailed, setConfirmClearFailed] = React.useState(false);
   // Panel "full-screen": Sidebar + MainPanel hidden, BrowserPanel
   // takes the whole app shell. Toggled from the Panel header button
   // and from Escape (via the existing keyboard handler below).
@@ -341,6 +342,8 @@ function AppShell(): JSX.Element {
         onLogout={handleLogout}
         onOpenFeedback={() => setFeedbackOpen(true)}
         onOpenSearch={() => setSearchOpen(true)}
+        failedTaskCount={tasks.filter((t) => t.status === 'failed').length}
+        onClearFailedTasks={() => setConfirmClearFailed(true)}
         mobileOpen={sidebarOpen}
         onMobileClose={() => setSidebarOpen(false)}
       />
@@ -450,6 +453,41 @@ function AppShell(): JSX.Element {
           const res = await deleteTask(taskId);
           if ('error' in res) toast.show(`删除失败：${res.error}`, 'error');
           else toast.show('任务已删除');
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmClearFailed}
+        title="清除所有失败任务？"
+        description="这些任务的记录和步骤都会被删除，操作无法恢复。进行中的任务不受影响。"
+        confirmLabel={`清除 ${tasks.filter((t) => t.status === 'failed').length} 个`}
+        destructive
+        onClose={() => setConfirmClearFailed(false)}
+        onConfirm={async () => {
+          setConfirmClearFailed(false);
+          const failed = tasks.filter((t) => t.status === 'failed');
+          if (failed.length === 0) return;
+          // Issue deletes in parallel — each one is a cheap DB write.
+          // Errors toast individually; a partial failure doesn't block
+          // the rest. We swallow individual rejects so Promise.all
+          // fulfils even if one fails.
+          const results = await Promise.all(
+            failed.map((t) =>
+              deleteTask(t.taskId).then(
+                (r) => r,
+                (err) => ({ error: err instanceof Error ? err.message : String(err) }),
+              ),
+            ),
+          );
+          const errs = results.filter((r): r is { error: string } => 'error' in r);
+          if (errs.length === 0) toast.show(`已清除 ${failed.length} 个失败任务`);
+          else if (errs.length === failed.length)
+            toast.show(`清除失败：${errs[0]?.error ?? 'unknown'}`, 'error');
+          else
+            toast.show(
+              `清除了 ${failed.length - errs.length} 个，${errs.length} 个失败`,
+              'error',
+            );
         }}
       />
 

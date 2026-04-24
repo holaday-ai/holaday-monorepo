@@ -296,6 +296,16 @@ export class BrowserPool {
           `PlaywrightExecutor.connect failed: ${connectResult.error}`,
         );
       }
+      // Round-3 #8: Brave's first-run privacy ribbon + "managed by
+      // your organisation" toast show up 1-3s AFTER the initial
+      // connect, i.e. after our dismissBraveBanners pass in
+      // connect() already ran. Schedule a second sweep 3s out so
+      // the VNC stream doesn't lose a ribbon's worth of vertical
+      // space for the first few iterations of the first task.
+      // Fire-and-forget; executor errors are logged internally.
+      setTimeout(() => {
+        void executor.dismissChromeBanners().catch(() => {});
+      }, 3_000);
 
       const now = Date.now();
       const instance: BrowserInstance = {

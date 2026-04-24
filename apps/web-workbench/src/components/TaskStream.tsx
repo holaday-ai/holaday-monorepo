@@ -14,6 +14,7 @@ import {
 import * as React from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { StepCard } from '@/components/StepCard';
 import { useTaskStore } from '@/stores/task-store';
 import { cn } from '@/lib/utils';
@@ -651,6 +652,14 @@ function TerminalSummary({
   currentUrl?: string | null;
   onContinueInBrowser?: () => void;
 }): JSX.Element {
+  // Round-3 #4: external-link confirm. Both markdown anchors and
+  // the "在新标签页打开 [url]" button funnel through pendingLink —
+  // users get a confirm modal before leaving the workbench.
+  const [pendingLink, setPendingLink] = React.useState<string | null>(null);
+  const md = React.useMemo(
+    () => makeMarkdownComponents({ onExternalClick: (href) => setPendingLink(href) }),
+    [],
+  );
   if (status === 'failed' || status === 'cancelled') {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
@@ -666,7 +675,7 @@ function TerminalSummary({
   return (
     <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-5 py-4 dark:border-blue-500/30 dark:bg-blue-500/10">
       <div className="prose prose-sm prose-neutral max-w-none">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>
           {text}
         </ReactMarkdown>
       </div>
@@ -679,43 +688,149 @@ function TerminalSummary({
               className="inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-card px-3 py-1.5 font-medium text-blue-800 shadow-sm transition hover:bg-blue-50 dark:border-blue-500/40 dark:text-blue-300 dark:hover:bg-blue-500/10"
             >
               <MousePointerClick className="h-3.5 w-3.5" />
-              在浏览器中继续操作
+              在内置浏览器中继续操作
             </button>
           )}
           {hasRealUrl && (
-            <a
-              href={currentUrl ?? '#'}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              type="button"
+              onClick={() => setPendingLink(currentUrl ?? null)}
               className="inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-card px-3 py-1.5 font-medium text-blue-800 shadow-sm transition hover:bg-blue-50 dark:border-blue-500/40 dark:text-blue-300 dark:hover:bg-blue-500/10"
             >
               <ExternalLink className="h-3.5 w-3.5" />
               在新标签页打开
               <span className="max-w-[180px] truncate text-blue-700/70">{currentUrl}</span>
-            </a>
+            </button>
           )}
         </div>
       )}
+      <ExternalLinkConfirm
+        href={pendingLink}
+        onClose={() => setPendingLink(null)}
+        onConfirm={(href) => {
+          setPendingLink(null);
+          window.open(href, '_blank', 'noopener,noreferrer');
+        }}
+      />
     </div>
   );
 }
 
-// All markdown links open in a new tab (noopener/noreferrer). Primary
-// use case is summary text containing URLs the agent produced —
-// letting them hijack the current tab drops the user out of the
-// workbench.
-const MARKDOWN_COMPONENTS: Components = {
-  // biome-ignore lint/a11y/useAnchorContent: react-markdown passes children
-  a: ({ href, children, ...rest }) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-      {...rest}
-    >
-      {children}
-      <ExternalLink className="h-3 w-3" aria-hidden />
-    </a>
-  ),
-};
+/**
+ * Small confirm wrapper for outbound clicks. Keeps the existing
+ * ConfirmDialog component consistent with the delete-task modal
+ * (same blurred backdrop + dark card). Href is shown truncated so
+ * the user can spot a suspicious redirect before opening it.
+ */
+function ExternalLinkConfirm({
+  href,
+  onClose,
+  onConfirm,
+}: {
+  href: string | null;
+  onClose: () => void;
+  onConfirm: (href: string) => void;
+}): JSX.Element {
+  const open = href !== null;
+  return (
+    <ConfirmDialog
+      open={open}
+      title="即将打开外部链接"
+      description={
+        open
+          ? `部分外部页面可能需要登录或无法正常访问。确认打开？\n\n${href}`
+          : undefined
+      }
+      confirmLabel="打开"
+      cancelLabel="取消"
+      onClose={onClose}
+      onConfirm={() => {
+        if (href) onConfirm(href);
+      }}
+    />
+  );
+}
+
+/**
+ * Build a markdown component map with an optional external-link
+ * confirm hook. Used inside TerminalSummary (and the "open in new
+ * tab" button) so the agent's output links (a) always open in a
+ * new tab (noopener/noreferrer) and (b) route through a Chinese
+ * confirm dialog rather than leaving the workbench silently.
+ *
+ * Table + table cell + code block overrides here make comparison
+ * summaries legible in both light and dark themes, and wrap wide
+ * tables in an overflow-x scroller so a 6-column price-compare
+ * doesn't blow out the chat width on narrow viewports.
+ */
+function makeMarkdownComponents(opts: {
+  onExternalClick?: (href: string) => void;
+}): Components {
+  return {
+    a: ({ href, children, ...rest }) => (
+      <a
+        href={href ?? '#'}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={
+          opts.onExternalClick && href
+            ? (e) => {
+                e.preventDefault();
+                opts.onExternalClick?.(href);
+              }
+            : undefined
+        }
+        className="inline-flex items-center gap-1 text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+        {...rest}
+      >
+        {children}
+        <ExternalLink className="h-3 w-3" aria-hidden />
+      </a>
+    ),
+    table: ({ children, ...rest }) => (
+      <div className="my-3 -mx-1 overflow-x-auto">
+        <table
+          className="min-w-full border-collapse rounded-md border border-border text-left text-[13px]"
+          {...rest}
+        >
+          {children}
+        </table>
+      </div>
+    ),
+    thead: ({ children, ...rest }) => (
+      <thead className="bg-muted/60 text-[12px] font-medium text-foreground" {...rest}>
+        {children}
+      </thead>
+    ),
+    tbody: ({ children, ...rest }) => <tbody {...rest}>{children}</tbody>,
+    tr: ({ children, ...rest }) => (
+      <tr className="border-b border-border last:border-b-0" {...rest}>
+        {children}
+      </tr>
+    ),
+    th: ({ children, ...rest }) => (
+      <th
+        className="whitespace-nowrap border-r border-border px-3 py-2 text-left last:border-r-0"
+        {...rest}
+      >
+        {children}
+      </th>
+    ),
+    td: ({ children, ...rest }) => (
+      <td
+        className="border-r border-border px-3 py-2 align-top last:border-r-0"
+        {...rest}
+      >
+        {children}
+      </td>
+    ),
+    code: ({ children, ...rest }) => (
+      <code
+        className="rounded bg-muted/70 px-1 py-0.5 text-[12px] text-foreground"
+        {...rest}
+      >
+        {children}
+      </code>
+    ),
+  };
+}

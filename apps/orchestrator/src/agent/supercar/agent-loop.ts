@@ -1356,13 +1356,23 @@ async function synthesizeBraveResults(opts: {
     )
     .join('\n\n');
   const system = `你是一个简洁的问答助手。用户问了一个信息类问题，我会把 Brave Search 的前 8 条结果喂给你。你要：
-- 用 2-4 句话直接回答用户的问题
-- 需要具体数字就给数字（价格、薪资、评分等）
-- 可以加 1-3 个行内引用：\`[网站名](URL)\`，只引用你真的用到的来源
+- **单点事实查询**（定义 / 新闻 / 某一个数字）→ 用 2-4 句话直接回答，可以加 1-3 个行内引用 \`[网站名](URL)\`
+- **对比 / 比价 / 排名 / 多来源汇总**（"京东和淘宝哪个便宜"、"薪资对比"、"酒店排行"）→ **必须**用 markdown 表格输出，**不要**用段落描述
 - 用中文回答（除非用户用英文问）
 - **不要列出所有搜索结果**。不要写 "搜索结果如下" / "根据以下来源"。
 - **不要原样复制 snippet**。要综合、对比、给结论。
-- 信息不足时直接说 "搜索结果里没提到 X"，不要编`;
+- 信息不足时直接说 "搜索结果里没提到 X"，不要编
+
+对比类输出示例（必须复刻）：
+
+| 平台 | 产品 | 价格 | 链接 |
+|------|------|------|------|
+| 京东 | AirPods Pro 2 | ¥1,899 | [京东](URL) |
+| 淘宝 | AirPods Pro 2 | ¥1,849 | [淘宝](URL) |
+
+**结论：淘宝便宜 ¥50。**
+
+第一列通常是"平台 / 来源"类锚点；末尾用 \`**结论：...**\` 一句话定论。`;
   const user = `用户问题：${opts.intent}
 
 搜索结果：
@@ -1372,7 +1382,11 @@ ${context}`;
     const client = new Anthropic({ apiKey: opts.apiKey });
     const resp = await client.messages.create({
       model: opts.model,
-      max_tokens: 400,
+      // Bumped from 400 → 800 so multi-row comparison tables don't
+      // truncate mid-row. Still a fixed upper bound — for a full
+      // research report the agent uses the browser loop, not this
+      // single-shot synthesis.
+      max_tokens: 800,
       system,
       messages: [{ role: 'user', content: user }],
     });

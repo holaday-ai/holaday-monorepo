@@ -20,6 +20,7 @@ import { send as wsSend } from '@/lib/ws';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
 import type { UiScreencast, UiStep, UiTaskStatus } from '@/types/task';
+import { liveStatusLabel } from '@/utils/step-humanize';
 
 /**
  * VNC bridge URL. Relative path lets the browser auto-resolve the
@@ -170,14 +171,20 @@ export function BrowserPanel({
   const handleVncStatus = React.useCallback((status: VncStatus) => {
     setVncStatus(status);
   }, []);
-  // Default to the VNC layer when we have a URL, and fall back to the
-  // legacy JPEG screencast only when VNC actively errors. Idle /
-  // connecting / connected / disconnected all stay on the VNC path;
-  // the transient states overlay their own banners rather than
-  // flipping the whole viewport. This keeps the mount stable so the
-  // RFB instance stays alive across panel redraws instead of churning
-  // a new WebSocket every tick.
-  const useVnc = Boolean(vncUrl) && vncStatus !== 'error';
+  // Round-3 #5: completed / failed / cancelled tasks get the last
+  // screencast frame, NOT the live VNC stream. The live stream
+  // always reflects whatever the user's browser is doing *right
+  // now* — which for a task the user finished an hour ago is the
+  // wrong frame, usually because they've already done something
+  // else since. Pinning to displayFrame keeps the "proof of what
+  // completed" visible across task switches. Running tasks stay
+  // on VNC so the user sees live agent motion.
+  const taskTerminal =
+    taskStatus === 'completed' ||
+    taskStatus === 'failed' ||
+    taskStatus === 'cancelled';
+  const useVnc =
+    Boolean(vncUrl) && vncStatus !== 'error' && !taskTerminal;
 
   // When the agent parks on awaiting-user (captcha, login wall, user
   // question the model injected), auto-flip the panel to interactive
@@ -677,8 +684,19 @@ function activityGlyph(kind?: string): string {
   }
 }
 
+/**
+ * Round-3 #9: the 最近操作 overlay no longer leaks raw tool names
+ * (`computer`, `navigate`, `web_search`). If actionSummary is
+ * present and not an identifier-looking string we use it; otherwise
+ * we fall through to liveStatusLabel() which maps kind → Chinese
+ * progress text ("正在操作浏览器…" etc.). Last-resort "步骤 N"
+ * stays so the row is never empty.
+ */
 function summariseAction(step: UiStep): string {
-  return step.actionSummary || step.actionKind || `步骤 ${step.tickIndex + 1}`;
+  const s = step.actionSummary?.trim();
+  if (s && !/^[a-z_][a-z0-9_]*$/.test(s)) return s;
+  if (step.actionKind) return liveStatusLabel(step.actionKind);
+  return `步骤 ${step.tickIndex + 1}`;
 }
 
 const TERMINAL_KINDS: ReadonlySet<string> = new Set(['done', 'give_up', 'screenshot']);

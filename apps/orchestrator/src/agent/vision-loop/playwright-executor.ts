@@ -253,6 +253,18 @@ export class PlaywrightExecutor {
    * This function targets in-page dismissibles that slip past the
    * policy on first launch.
    */
+  /**
+   * Public entry point for the Round-3 "post-spawn re-dismiss" pass.
+   * Calls the internal banner sweep against whichever browser this
+   * executor is attached to; no-ops if not connected. Safe to call
+   * on any schedule (once, twice, every minute) — the sweep only
+   * clicks elements it recognises.
+   */
+  async dismissChromeBanners(): Promise<void> {
+    if (!this.browser) return;
+    await this.dismissBraveBanners(this.browser);
+  }
+
   private async dismissBraveBanners(browser: Browser): Promise<void> {
     const contexts = browser.contexts();
     for (const ctx of contexts) {

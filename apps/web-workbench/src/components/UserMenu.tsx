@@ -7,6 +7,7 @@ import {
   Moon,
   Settings as SettingsIcon,
   Sun,
+  Trash2,
   User as UserIcon,
 } from 'lucide-react';
 import * as React from 'react';
@@ -20,6 +21,10 @@ interface Props {
   plan: string;
   onLogout(): void;
   onOpenFeedback?(): void;
+  /** Count of failed tasks — shows/hides the 批量清除 menu item. */
+  failedTaskCount?: number;
+  /** Invoked when the user picks "清除所有失败任务". Caller confirms + deletes. */
+  onClearFailedTasks?(): void;
   /**
    * Codex-rail layout — renders just the avatar (no name / plan text)
    * and anchors the popover to the avatar rather than the whole row.
@@ -40,6 +45,8 @@ export function UserMenu({
   plan,
   onLogout,
   onOpenFeedback,
+  failedTaskCount = 0,
+  onClearFailedTasks,
   compact = false,
 }: Props): JSX.Element {
   const [open, setOpen] = React.useState(false);
@@ -142,6 +149,17 @@ export function UserMenu({
           </div>
           <ThemeSwitcher mode={mode} onChange={setMode} />
           <div className="mt-1 border-t border-border pt-1">
+            {onClearFailedTasks && failedTaskCount > 0 && (
+              <MenuItem
+                icon={<Trash2 className="h-3.5 w-3.5" />}
+                onClick={() => {
+                  setOpen(false);
+                  onClearFailedTasks();
+                }}
+              >
+                清除失败任务（{failedTaskCount}）
+              </MenuItem>
+            )}
             {onOpenFeedback && (
               <MenuItem
                 icon={<MessageSquare className="h-3.5 w-3.5" />}
