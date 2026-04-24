@@ -1,6 +1,7 @@
 import {
   ChevronLeft,
   ChevronRight,
+  Clipboard,
   ListTree,
   Plus,
   RotateCcw,
@@ -256,6 +257,27 @@ export function Sidebar({
               用相同意图重试
             </button>
           )}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={async () => {
+              const { intent } = menu;
+              setMenu(null);
+              try {
+                // navigator.clipboard is async and gated on secure
+                // context — wrap so a rejected promise doesn't
+                // crash the component. Users on http:// dev get a
+                // console warning but nothing user-visible.
+                await navigator.clipboard?.writeText(intent);
+              } catch (err) {
+                console.warn('[TaskMenu] clipboard copy failed', err);
+              }
+            }}
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-foreground/5"
+          >
+            <Clipboard className="h-3.5 w-3.5" />
+            复制任务文本
+          </button>
           {onDeleteTask && (
             <button
               type="button"

@@ -1,3 +1,4 @@
+import { MoreHorizontal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { type UiTask, isActive } from '@/types/task';
 
@@ -5,7 +6,7 @@ interface Props {
   task: UiTask;
   selected: boolean;
   onSelect: (taskId: string) => void;
-  onContextMenu?(taskId: string, event: React.MouseEvent): void;
+  onContextMenu?(taskId: string, event: React.MouseEvent | React.PointerEvent): void;
 }
 
 /**
@@ -46,6 +47,31 @@ export function TaskListItem({ task, selected, onSelect, onContextMenu }: Props)
       >
         {task.intent}
       </span>
+      {/* Hover 3-dot menu — discoverable affordance for users who
+       *  don't know about right-click. Opens the same context menu
+       *  as right-click would. Hidden at rest (opacity-0), fades in
+       *  on row hover; focus-visible shows it too for keyboard nav. */}
+      {onContextMenu && (
+        <span
+          role="button"
+          aria-label="任务菜单"
+          tabIndex={0}
+          onClick={(e) => {
+            e.stopPropagation();
+            onContextMenu(task.taskId, e);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              e.stopPropagation();
+              onContextMenu(task.taskId, e as unknown as React.MouseEvent);
+            }
+          }}
+          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-foreground/10 focus-visible:opacity-100 group-hover:opacity-100"
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" />
+        </span>
+      )}
       {active && <span className="sr-only">进行中 · {subtitleFor(task)}</span>}
     </button>
   );

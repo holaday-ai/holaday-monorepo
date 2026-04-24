@@ -239,6 +239,16 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   },
 
   async createTask(intent) {
+    // Reject intents that are obviously control commands typed into
+    // the wrong box (e.g. user typing "停止" into the composer
+    // because they didn't see the Stop button). Fails client-side
+    // with a clear error — no server round-trip, no orphan row.
+    const trimmed = intent.trim();
+    if (CONTROL_WORDS.has(trimmed.toLowerCase())) {
+      const msg = `"${trimmed}" 是控制词，不是任务指令。要停止任务请用 Panel 右上角的"停止"按钮。`;
+      set({ error: msg });
+      return { error: msg };
+    }
     try {
       const res = await trpc.tasks.create.mutate({ intent });
       // Optimistic insert at the top so the UI feels instant; the next
@@ -480,6 +490,24 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     });
   },
 }));
+
+// Short-list of control-shaped strings that should NEVER become a new
+// task intent. Matched case-insensitive + whole-string; a task legitimately
+// asking the agent to "停止" some external action would be phrased as a
+// full sentence and wouldn't match.
+const CONTROL_WORDS: ReadonlySet<string> = new Set([
+  '停止',
+  '取消',
+  '暂停',
+  '结束',
+  '关闭',
+  'stop',
+  'cancel',
+  'pause',
+  'abort',
+  'kill',
+  'quit',
+]);
 
 // Dev helper — pins the store on `window.__taskStore` so browser-based
 // smoke tests can inject fake server frames without spinning up the
