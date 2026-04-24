@@ -3,6 +3,7 @@ import type { Planner } from '../agent/planner.js';
 import type { ExecutionRouter } from '../agent/supercar/index.js';
 import type { VisionLoopCommander } from '../agent/vision-loop/commander.js';
 import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
+import type { BrowserPool } from '../browser-pool/index.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
 
@@ -29,6 +30,13 @@ export interface AppContextDeps {
    * falls back to the single `playwrightExecutor` path in that case.
    */
   executionRouter?: ExecutionRouter;
+  /**
+   * Phase 8 per-user pool. Non-null when MULTI_USER=true at boot. When
+   * both the pool AND the caller's userId is in the canary allow-list
+   * (MULTI_USER_USERS) tasks.ts routes traffic through a dedicated
+   * per-user browser instead of the shared headed-singleton lane.
+   */
+  browserPool?: BrowserPool | null;
 }
 
 export function makeCreateContext(deps: AppContextDeps) {
@@ -42,6 +50,7 @@ export function makeCreateContext(deps: AppContextDeps) {
       visionCommander: deps.visionCommander,
       playwrightExecutor: deps.playwrightExecutor ?? null,
       executionRouter: deps.executionRouter ?? null,
+      browserPool: deps.browserPool ?? null,
       userId: (req as Request & { userId?: string }).userId,
     };
   };

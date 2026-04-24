@@ -19,6 +19,9 @@ interface MeProfile {
   email: string;
   displayName: string | null;
   plan: string;
+  /** Phase 8.2 canary flag — when true, the VNC panel connects to
+   *  this user's dedicated Brave via /vnc-ws/:userId. */
+  multiUser: boolean;
 }
 
 /**
@@ -150,6 +153,10 @@ function AppShell(): JSX.Element {
           email: res.email,
           displayName: res.displayName,
           plan: res.plan,
+          // Server adds this in Phase 8.2; older orchestrators (pre-
+          // 8.2) don't set it, so fall back to false to keep the UI
+          // on the shared /vnc/websockify path.
+          multiUser: Boolean((res as { multiUser?: boolean }).multiUser),
         }),
       () => {
         /* swallow — auth.me failure isn't fatal. */
@@ -366,6 +373,7 @@ function AppShell(): JSX.Element {
             selectedTask ? Boolean(captchaWaitByTask[selectedTask.taskId]) : false
           }
           activeTaskId={selectedTaskId}
+          poolUserId={me?.multiUser ? me.userId : null}
         />
       </div>
       <div className="lg:hidden">
@@ -379,6 +387,7 @@ function AppShell(): JSX.Element {
             selectedTask ? Boolean(captchaWaitByTask[selectedTask.taskId]) : false
           }
           activeTaskId={selectedTaskId}
+          poolUserId={me?.multiUser ? me.userId : null}
         />
       </div>
 

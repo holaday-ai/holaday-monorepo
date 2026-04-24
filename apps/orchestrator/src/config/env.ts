@@ -119,6 +119,14 @@ const schema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  /**
+   * Canary allow-list. Comma-separated external user IDs that opt in
+   * to per-user isolation when MULTI_USER=true. Empty string means
+   * "all users" (once MULTI_USER is on) — standard flag + whitelist
+   * pattern. Use a single userId during canary, then clear the var
+   * to graduate everyone.
+   */
+  MULTI_USER_USERS: z.string().default(''),
   /** Hard cap on concurrent browser quartets. Each one uses ~400 MB. */
   MAX_BROWSER_INSTANCES: z.coerce.number().int().positive().max(50).default(5),
   /** Directory that houses per-user browser state (cookies, sessions, cache). */

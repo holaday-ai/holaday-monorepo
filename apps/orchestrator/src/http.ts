@@ -6,6 +6,7 @@ import type { Planner } from './agent/planner.js';
 import type { ExecutionRouter } from './agent/supercar/index.js';
 import type { VisionLoopCommander } from './agent/vision-loop/commander.js';
 import type { PlaywrightExecutor } from './agent/vision-loop/playwright-executor.js';
+import type { BrowserPool } from './browser-pool/index.js';
 import { bearerAuth } from './auth/middleware.js';
 import { AuthService } from './auth/service.js';
 import { env } from './config/env.js';
@@ -19,6 +20,7 @@ export interface HttpAppDeps {
   visionCommander?: VisionLoopCommander;
   playwrightExecutor?: PlaywrightExecutor | null;
   executionRouter?: ExecutionRouter;
+  browserPool?: BrowserPool | null;
 }
 
 export function createHttpApp(deps: HttpAppDeps) {
@@ -207,6 +209,7 @@ export function createHttpApp(deps: HttpAppDeps) {
         ...(deps.visionCommander ? { visionCommander: deps.visionCommander } : {}),
         ...(deps.playwrightExecutor ? { playwrightExecutor: deps.playwrightExecutor } : {}),
         ...(deps.executionRouter ? { executionRouter: deps.executionRouter } : {}),
+        ...(deps.browserPool ? { browserPool: deps.browserPool } : {}),
       }),
     }),
   );

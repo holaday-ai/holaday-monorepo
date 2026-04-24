@@ -104,7 +104,36 @@ export const tasksRouter = router({
       const headedExec = ctx.executionRouter?.getExecutor('headed') ?? null;
       const headlessExec =
         ctx.executionRouter?.getExecutor('headless') ?? ctx.playwrightExecutor ?? null;
-      const primaryExecutor = headedExec ?? headlessExec;
+
+      // Phase 8.2: when the caller is in MULTI_USER_USERS allow-list,
+      // replace the shared headed singleton with their own pool slot.
+      // The pool's executor is a freshly-connected PlaywrightExecutor
+      // pointing at a dedicated Brave + Xvfb + VNC quartet — the rest
+      // of the supercar loop sees a plain PlaywrightExecutor and
+      // doesn't know the difference. If allocate throws (capacity
+      // exceeded, spawn timeout) we surface a typed error so the UI
+      // can show "browser-pool busy" rather than an opaque 500.
+      let perUserExec = null;
+      if (ctx.browserPool && shouldUseBrowserPool(ctx.userId)) {
+        try {
+          const instance = await ctx.browserPool.allocate(ctx.userId);
+          perUserExec = instance.executor;
+          ctx.logger.info(
+            { taskId, userId: ctx.userId, cdpPort: instance.cdpPort, displayNum: instance.display },
+            'pool: allocated browser for task',
+          );
+        } catch (err) {
+          ctx.logger.error(
+            { err: err instanceof Error ? err.message : String(err), userId: ctx.userId },
+            'pool: allocate failed — falling back to shared headed singleton',
+          );
+          // Swallow + fall through: rather than hard-fail the task we
+          // degrade to the shared Brave. User still gets a working
+          // task; the alert-worthy event lands in logs.
+        }
+      }
+
+      const primaryExecutor = perUserExec ?? headedExec ?? headlessExec;
       if (!primaryExecutor) {
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
@@ -121,9 +150,16 @@ export const tasksRouter = router({
           // used as primary, a stuck/anti-bot signal falls back to
           // headless (in case Brave is what's being fingerprinted).
           // When headless is primary (Brave unavailable), swap
-          // points at nothing — agent-loop no-ops the swap.
+          // points at nothing — agent-loop no-ops the swap. Per-user
+          // pool mode has no fallback — the user's own Brave is the
+          // only tab they're watching, swapping to a shared headless
+          // would stream frames of the wrong page.
           headedExecutor:
-            primaryExecutor === headedExec ? headlessExec ?? null : null,
+            perUserExec
+              ? null
+              : primaryExecutor === headedExec
+                ? headlessExec ?? null
+                : null,
           braveAdapter: ctx.executionRouter?.brave ?? null,
           zapierAdapter: ctx.executionRouter?.zapier ?? null,
           apifyAdapter: ctx.executionRouter?.apify ?? null,
@@ -136,6 +172,13 @@ export const tasksRouter = router({
             // changes. actionKind is the first client-side tool the
             // model invoked this turn, or "text" when Claude just
             // spoke (e.g. mid-turn thinking → commentary).
+            //
+            // Also bump the per-user pool's lastActiveAt so an active
+            // task never trips the 30-min idle GC — pool.touch is a
+            // no-op when the user isn't on a pool slot.
+            if (ctx.browserPool && perUserExec) {
+              ctx.browserPool.touch(ctx.userId);
+            }
             const actionKind = ev.toolsInTurn[0] ?? 'text';
             const actionSummary = ev.textPreamble
               ? truncateString(ev.textPreamble, 80)
@@ -1093,7 +1136,16 @@ export const tasksRouter = router({
    * executor is the headed lane (guarded in the router).
    */
   resetBrowser: protectedProcedure.mutation(async ({ ctx }) => {
+    // Pool users reset their own Brave; everyone else resets the
+    // shared headed singleton. peek() never allocates — we don't
+    // want a fresh quartet just for a new-task nudge, and if the
+    // user doesn't yet have one there's nothing to reset.
+    const poolInstance =
+      ctx.browserPool && shouldUseBrowserPool(ctx.userId)
+        ? ctx.browserPool.peek(ctx.userId)
+        : null;
     const exec =
+      poolInstance?.executor ??
       ctx.executionRouter?.getExecutor('headed') ??
       ctx.executionRouter?.getExecutor('headless') ??
       ctx.playwrightExecutor ??
@@ -1125,7 +1177,12 @@ export const tasksRouter = router({
   browserNav: protectedProcedure
     .input(z.object({ direction: z.enum(['back', 'forward', 'reload']) }))
     .mutation(async ({ ctx, input }) => {
+      const poolInstance =
+        ctx.browserPool && shouldUseBrowserPool(ctx.userId)
+          ? ctx.browserPool.peek(ctx.userId)
+          : null;
       const exec =
+        poolInstance?.executor ??
         ctx.executionRouter?.getExecutor('headed') ??
         ctx.executionRouter?.getExecutor('headless') ??
         ctx.playwrightExecutor ??
@@ -1329,6 +1386,30 @@ const sqlEmpty = sqlFilter``;
 function truncateString(s: string, max: number): string {
   if (s.length <= max) return s;
   return `${s.slice(0, max - 1)}…`;
+}
+
+/**
+ * Canary gate for the per-user BrowserPool. Returns true when the
+ * caller should be routed to their own browser instance instead of
+ * the shared headed singleton.
+ *
+ * Policy:
+ *   - MULTI_USER_USERS empty → every authenticated user gets pool
+ *     mode (only relevant once we're confident in the rollout).
+ *   - MULTI_USER_USERS non-empty → comma-separated allow-list; only
+ *     exact matches are opted in. Use this during canary.
+ *
+ * Callers gate on `ctx.browserPool != null` before invoking — this
+ * helper doesn't know whether the pool was actually constructed.
+ */
+function shouldUseBrowserPool(userId: string): boolean {
+  const raw = appEnv.MULTI_USER_USERS.trim();
+  if (!raw) return true;
+  const allowed = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return allowed.includes(userId);
 }
 
 /**

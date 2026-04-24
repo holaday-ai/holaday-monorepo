@@ -12,6 +12,7 @@ import {
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { VncViewport, type VncStatus } from '@/components/VncViewport';
+import { getAccessToken } from '@/lib/auth';
 import { trpc } from '@/lib/trpc';
 import { send as wsSend } from '@/lib/ws';
 import { cn } from '@/lib/utils';
@@ -32,10 +33,33 @@ import type { UiScreencast, UiStep, UiTaskStatus } from '@/types/task';
  * screencast-only rendering.
  */
 const VNC_PATH = (import.meta.env.VITE_VNC_PATH as string | undefined) ?? '/vnc/websockify';
-function buildVncUrl(): string | null {
-  if (!VNC_PATH) return null;
+
+/**
+ * Build the VNC WebSocket URL for the current panel session.
+ *
+ * Two modes:
+ *   - Legacy shared singleton (`poolUserId = null`): connects to the
+ *     fixed `/vnc/websockify` path at port 6080 via nginx. Matches the
+ *     pre-Phase-8 deployment where every user shares one Brave.
+ *   - Per-user pool (`poolUserId != null`): connects to
+ *     `/vnc-ws/<userId>?token=<JWT>` served by the orchestrator's own
+ *     upgrade handler. The token is read off localStorage so a page
+ *     reload reconnects transparently; the URL itself isn't persisted
+ *     anywhere.
+ *
+ * Returns null when VNC is explicitly disabled via VITE_VNC_PATH.
+ */
+function buildVncUrl(poolUserId: string | null): string | null {
   if (typeof window === 'undefined') return null;
   const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  if (poolUserId) {
+    const token = getAccessToken();
+    if (!token) return null;
+    return `${scheme}://${window.location.host}/vnc-ws/${encodeURIComponent(
+      poolUserId,
+    )}?token=${encodeURIComponent(token)}`;
+  }
+  if (!VNC_PATH) return null;
   return `${scheme}://${window.location.host}${VNC_PATH}`;
 }
 
@@ -59,6 +83,13 @@ interface Props {
   open?: boolean;
   /** Sheet-only: close handler. */
   onClose?: () => void;
+  /**
+   * Phase 8.2 per-user pool mode. When non-null, the VNC URL points
+   * at `/vnc-ws/<userId>` served by the orchestrator's upgrade
+   * handler instead of the shared `/vnc/websockify` nginx path.
+   * `null` falls back to the legacy singleton behaviour.
+   */
+  poolUserId?: string | null;
 }
 
 /**
@@ -80,6 +111,7 @@ export function BrowserPanel({
   layout = 'rail',
   open = true,
   onClose,
+  poolUserId = null,
 }: Props): JSX.Element | null {
   const [collapsed, setCollapsed] = React.useState(false);
   // Interactive mode is in the global store so the TaskStream's
@@ -120,7 +152,7 @@ export function BrowserPanel({
 
   // VNC live stream — memoised so prop identity is stable across
   // re-renders (the viewport's effect re-runs on any URL change).
-  const vncUrl = React.useMemo(() => buildVncUrl(), []);
+  const vncUrl = React.useMemo(() => buildVncUrl(poolUserId), [poolUserId]);
   const [vncStatus, setVncStatus] = React.useState<VncStatus>('idle');
   const handleVncStatus = React.useCallback((status: VncStatus) => {
     setVncStatus(status);
