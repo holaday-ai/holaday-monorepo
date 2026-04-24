@@ -283,6 +283,19 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // BOSS flagged that output as "搜索结果堆给用户" noise. One small
   // Haiku-tier synthesis gives prose output with only the links it
   // actually cited, comparable to what the browser loop would emit.
+  // Diagnostic: always log which decision we took here. When BOSS
+  // sees a "simple search" task take the browser path, the first
+  // question is "did classifyAsSimpleSearch fire?" and this log line
+  // answers it without requiring a separate reproduction.
+  logger.info(
+    {
+      taskId: opts.taskId,
+      isSimpleSearch: Boolean(opts.isSimpleSearch),
+      braveAdapterPresent: Boolean(opts.braveAdapter),
+      intentPreview: opts.intent.slice(0, 80),
+    },
+    'supercar: routing decision',
+  );
   if (opts.isSimpleSearch && opts.braveAdapter) {
     const r = await opts.braveAdapter.search(opts.intent, 10);
     if ('results' in r && r.results.length > 0) {
@@ -305,9 +318,16 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         toolsUsed: ['brave_search'],
       };
     }
-    // Fall through to browser path on empty / error.
-    logger.info(
-      { taskId: opts.taskId, err: 'error' in r ? r.error : 'no results' },
+    // Fall through to browser path on empty / error. Surface the
+    // exact reason at warn level — BOSS needs this to tell "Brave
+    // was rate-limited" apart from "classifier didn't match".
+    logger.warn(
+      {
+        taskId: opts.taskId,
+        err: 'error' in r ? r.error : null,
+        resultCount: 'results' in r ? r.results.length : 0,
+        intent: opts.intent,
+      },
       'supercar: Brave returned no usable output — falling through to browser',
     );
   }
