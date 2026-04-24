@@ -14,6 +14,7 @@ import {
   createZapierAdapter,
   type ExecutionRouter,
 } from './agent/supercar/index.js';
+import { BrowserPool, reapOrphans } from './browser-pool/index.js';
 import {
   AnthropicVisionLoopCommander,
   shouldUseLegacyPlanner,
@@ -136,6 +137,55 @@ async function main() {
     );
   }
 
+  // --- Phase 8: per-user BrowserPool (opt-in).
+  // When MULTI_USER=true we reap any orphaned quartets from a prior
+  // orchestrator crash, build the pool, and start its idle GC. The
+  // pool is NOT wired into the task router in this commit — routing
+  // lands in a follow-up so we can flip the env flag without moving
+  // live traffic. Unhealthy startup (reaper fails, pool constructor
+  // throws) degrades to MULTI_USER=false behaviour, never aborts boot.
+  let browserPool: BrowserPool | null = null;
+  if (env.MULTI_USER) {
+    try {
+      const poolConfig = {
+        maxInstances: env.MAX_BROWSER_INSTANCES,
+        idleTimeoutMs: env.BROWSER_IDLE_TIMEOUT_MS,
+        baseDir: env.BROWSER_POOL_DIR,
+        cdpPortStart: env.BROWSER_CDP_PORT_START,
+        vncPortStart: env.BROWSER_VNC_PORT_START,
+        wsPortStart: env.BROWSER_WS_PORT_START,
+        displayStart: env.BROWSER_DISPLAY_START,
+        screenSize: env.BROWSER_SCREEN_SIZE,
+      };
+      const reaped = await reapOrphans(poolConfig, logger);
+      logger.info(
+        { scanned: reaped.scanned, killed: reaped.killed, pids: reaped.pids },
+        'MULTI_USER: orphan reaper done',
+      );
+      browserPool = new BrowserPool(poolConfig, logger);
+      browserPool.startGc();
+      logger.info(
+        {
+          capacity: poolConfig.maxInstances,
+          baseDir: poolConfig.baseDir,
+          cdpPorts: `${poolConfig.cdpPortStart}..${
+            poolConfig.cdpPortStart + poolConfig.maxInstances - 1
+          }`,
+          idleTimeoutMs: poolConfig.idleTimeoutMs,
+        },
+        'MULTI_USER: BrowserPool ready (not yet routed — task flow still on singleton)',
+      );
+    } catch (err) {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        'MULTI_USER init failed — falling back to single-instance mode',
+      );
+      browserPool = null;
+    }
+  } else {
+    logger.info('MULTI_USER=false — using single-instance holaday-chromium-headed');
+  }
+
   const app = createHttpApp({
     planner,
     executionRouter,
@@ -203,6 +253,14 @@ async function main() {
     }
     if (headedExecutor) {
       await headedExecutor.disconnect().catch(() => {});
+    }
+    if (browserPool) {
+      await browserPool.shutdown().catch((err) => {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          'BrowserPool shutdown errored (continuing)',
+        );
+      });
     }
     process.exit(0);
   };

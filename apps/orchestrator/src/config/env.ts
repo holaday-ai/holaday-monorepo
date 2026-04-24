@@ -106,6 +106,33 @@ const schema = z.object({
   S3_ACCESS_KEY: z.string().optional(),
   S3_SECRET_KEY: z.string().optional(),
   S3_BUCKET: z.string().optional(),
+
+  /**
+   * Phase 8 — per-user browser isolation. When `true` the orchestrator
+   * spins up a dedicated Xvfb + Brave + x11vnc + websockify quartet
+   * for each active user and routes their task traffic + VNC stream
+   * to those ports. When `false` (default) every user shares the
+   * legacy holaday-chromium-headed singleton — same behaviour as
+   * before Phase 8 so a bad rollout is reversible in one env flip.
+   */
+  MULTI_USER: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /** Hard cap on concurrent browser quartets. Each one uses ~400 MB. */
+  MAX_BROWSER_INSTANCES: z.coerce.number().int().positive().max(50).default(5),
+  /** Directory that houses per-user browser state (cookies, sessions, cache). */
+  BROWSER_POOL_DIR: z.string().default('/var/lib/holaday-browsers'),
+  /** Idle kill threshold. Defaults to 30 min; user-data-dir is preserved. */
+  BROWSER_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(1_800_000),
+  /** First port in the contiguous pool used for per-user resources.
+   *  Slot i consumes display :(100+i), CDP (cdp+i), RFB (vnc+i), WS (ws+i). */
+  BROWSER_CDP_PORT_START: z.coerce.number().int().positive().default(9300),
+  BROWSER_VNC_PORT_START: z.coerce.number().int().positive().default(5910),
+  BROWSER_WS_PORT_START: z.coerce.number().int().positive().default(6090),
+  BROWSER_DISPLAY_START: z.coerce.number().int().nonnegative().default(100),
+  /** Xvfb screen geometry — matches the singleton's current default. */
+  BROWSER_SCREEN_SIZE: z.string().default('1720x1440x24'),
 });
 
 export type Env = z.infer<typeof schema>;
