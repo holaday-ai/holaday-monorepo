@@ -140,8 +140,7 @@ export const tasksRouter = router({
           message: 'no browser executor available',
         });
       }
-      const runFn = () =>
-        runSupercarTask({
+      const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
           taskId,
           intent: input.intent,
           executor: primaryExecutor,
@@ -311,7 +310,9 @@ export const tasksRouter = router({
               ctx.logger.warn({ err, taskId }, 'supercar: broadcast captcha_resolved failed');
             }
           },
-        })
+        };
+      const runFn = () =>
+        runSupercarWithRetry(supercarArgs, { userId, taskId, logger: ctx.logger })
           .then(async (outcome) => {
             ctx.logger.info(
               { taskId, status: outcome.status, iterations: outcome.iterations, toolsUsed: outcome.toolsUsed },
@@ -1504,13 +1505,133 @@ function buildTaskTerminalMessage(
       ...(outcome.question ? { reason: outcome.question } : {}),
     };
   }
-  // failed / timeout
+  // failed / timeout — translate the internal reason into a
+  // user-facing Chinese explanation + one actionable suggestion.
+  const friendly = friendlyFailureReason(outcome.status, outcome.reason);
   return {
     type: 'server.task.terminal',
     taskId,
     status: 'failed',
-    ...(outcome.reason ? { reason: outcome.reason } : {}),
+    reason: friendly,
   };
+}
+
+/**
+ * Translate internal supercar reasons to user-facing Chinese text.
+ *
+ * Goal is to give the user two things every time:
+ *   1. What went wrong, in plain Chinese (not "task timeout (600s) elapsed").
+ *   2. One actionable suggestion (重试 / 手动登录 / 充值 / 简化任务).
+ *
+ * We pattern-match on the raw reason string rather than adding a
+ * typed enum to SupercarOutcome — the loop emits reasons from many
+ * code paths (Anthropic errors, URL resolver, playwright throws)
+ * and a regex map is robust to new message shapes without a
+ * coordinated schema bump. Unknown reasons fall through to a
+ * generic but still friendly template so the user never sees raw
+ * English stack trace bullets.
+ */
+/**
+ * Run the supercar loop with one automatic retry on flaky failures.
+ *
+ * Retryable: the first run returned failed/timeout with iterations
+ * < 3 and a reason that looks like AI-service-hiccup or transient
+ * browser flake (overloaded, 429, 529, timeout, ECONNRESET, no
+ * browser context). A 2nd attempt gets a fresh agent-loop state +
+ * re-spawned page, so the odds of recovering are real.
+ *
+ * Non-retryable: > 2 iterations (agent did some work, probably
+ * hit a real wall), login/captcha/credit/api-key failures,
+ * cancelled, awaiting_user, completed. Those get returned as-is.
+ *
+ * We emit a lightweight `server.supercar.retrying` frame on the
+ * WS so the UI can surface "正在重试…" without waiting for the
+ * second attempt's first tick. Unknown to the client → ignored,
+ * which is fine.
+ */
+async function runSupercarWithRetry(
+  args: Parameters<typeof runSupercarTask>[0],
+  meta: { userId: string; taskId: string; logger: import('pino').Logger },
+): Promise<Awaited<ReturnType<typeof runSupercarTask>>> {
+  const first = await runSupercarTask(args);
+  if (!shouldAutoRetry(first)) return first;
+  meta.logger.info(
+    { taskId: meta.taskId, iterations: first.iterations, reason: first.reason },
+    'supercar: auto-retrying once after flaky failure',
+  );
+  try {
+    broadcastToUser(meta.userId, {
+      type: 'server.task.info',
+      taskId: meta.taskId,
+      message: '正在重试…',
+    } as never);
+  } catch {
+    /* broadcast best-effort */
+  }
+  const second = await runSupercarTask(args);
+  meta.logger.info(
+    {
+      taskId: meta.taskId,
+      firstStatus: first.status,
+      secondStatus: second.status,
+      secondIterations: second.iterations,
+    },
+    'supercar: retry completed',
+  );
+  return second;
+}
+
+function shouldAutoRetry(outcome: SupercarOutcome): boolean {
+  if (outcome.status !== 'failed' && outcome.status !== 'timeout') return false;
+  if (outcome.iterations >= 3) return false;
+  const r = (outcome.reason ?? '').toLowerCase();
+  if (/timeout|elapsed|超时/.test(r)) return true;
+  if (/429|rate ?limit|too many requests/.test(r)) return true;
+  if (/529|overloaded|overload/.test(r)) return true;
+  if (/econn|fetch failed|network/.test(r)) return true;
+  if (/no browser context|connectovercdp/.test(r)) return true;
+  return false;
+}
+
+function friendlyFailureReason(
+  status: SupercarOutcome['status'],
+  raw: string | undefined,
+): string {
+  const r = (raw ?? '').toLowerCase();
+  if (status === 'timeout' || /timeout|elapsed|time ?out|超时/.test(r)) {
+    return '任务超时。可能原因：目标网站响应缓慢或被反爬拦截。建议：重试，或把任务描述简化后再试。';
+  }
+  if (/429|rate ?limit|too many requests/.test(r)) {
+    return 'AI 服务当前繁忙（限速），请稍后再试。';
+  }
+  if (/529|overloaded|overload/.test(r)) {
+    return 'AI 服务暂时过载，请几秒后重试。';
+  }
+  if (/credit|balance|insufficient|payment required|402/.test(r)) {
+    return 'API 额度不足。请联系管理员续费或等下一计费周期。';
+  }
+  if (/401|unauthorized|invalid api key|authentication/.test(r)) {
+    return 'AI 服务认证失败，请联系管理员检查 API key。';
+  }
+  if (/captcha|recaptcha|人机验证|滑块|verify/.test(r)) {
+    return '遇到验证码。建议：在右侧 Panel 中手动完成验证，登录态会保存，下次无需重复。';
+  }
+  if (/login|signin|sign ?in|passport|oauth|需要登录|登录墙/.test(r)) {
+    return '该网站需要登录才能继续。建议：在右侧 Panel 中手动登录一次，登录态会保存，然后重试任务。';
+  }
+  if (/missing anthropic_api_key/.test(r)) {
+    return 'AI 服务未配置。请联系管理员检查部署。';
+  }
+  if (/no browser|no playwright|connectovercdp/.test(r)) {
+    return '浏览器暂时不可用，请稍后重试。';
+  }
+  if (/network|econn|fetch failed|dns/.test(r)) {
+    return '网络错误。请检查连接后重试。';
+  }
+  if (raw && raw.trim().length > 0) {
+    return `任务执行失败：${raw.trim()}。建议：简化任务描述后重试。`;
+  }
+  return '任务执行失败。建议：简化任务描述后重试。';
 }
 
 function toNumber(v: unknown): number {

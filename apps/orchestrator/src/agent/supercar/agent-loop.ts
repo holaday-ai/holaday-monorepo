@@ -277,27 +277,31 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // ---------------------------------------------------------------
   // Phase 6-2: non-browser lane short-circuits (before any model call)
   // ---------------------------------------------------------------
-  // Lane 3 — Brave. Pure info queries never need a browser; returning
-  // the SERP directly as markdown saves a ~10× cost + latency hit.
+  // Lane 3 — Brave. Pure info queries never need a browser; pipe the
+  // SERP through a single Claude synthesis call and return a concise
+  // answer. Round-2b change: we no longer dump 10 links as markdown —
+  // BOSS flagged that output as "搜索结果堆给用户" noise. One small
+  // Haiku-tier synthesis gives prose output with only the links it
+  // actually cited, comparable to what the browser loop would emit.
   if (opts.isSimpleSearch && opts.braveAdapter) {
     const r = await opts.braveAdapter.search(opts.intent, 10);
     if ('results' in r && r.results.length > 0) {
-      const body =
-        `# 搜索结果（Brave）\n\n` +
-        r.results
-          .map(
-            (h, i) =>
-              `${i + 1}. **${h.title || h.url}**\n   ${h.snippet || ''}\n   ${h.url}`,
-          )
-          .join('\n\n');
       logger.info(
         { taskId: opts.taskId, lane: 'brave', count: r.results.length },
         'supercar: short-circuit via Brave Search',
       );
+      const synthesized = await synthesizeBraveResults({
+        apiKey,
+        intent: opts.intent,
+        results: r.results,
+        model: opts.model ?? process.env.SUPERCAR_MODEL ?? 'claude-sonnet-4-6',
+        logger,
+        taskId: opts.taskId,
+      });
       return {
         status: 'completed',
-        summary: body,
-        iterations: 0,
+        summary: synthesized,
+        iterations: 1,
         toolsUsed: ['brave_search'],
       };
     }
@@ -1317,4 +1321,78 @@ async function readPageText(executor: PlaywrightExecutor): Promise<string> {
   } catch {
     return '';
   }
+}
+
+/**
+ * Feed Brave Search hits to Claude and return a tight prose answer.
+ *
+ * Round-2b output-quality fix. The prior behaviour dumped all 10
+ * hits verbatim as a numbered list — readable for a developer, but
+ * BOSS read it as "系统把搜索结果抛回来了". Claude synthesises:
+ * a two-to-four-sentence answer in Chinese, with at most the two
+ * or three citations it actually used rendered as
+ * `[网站名](URL)` inline. Upstream cost is one Sonnet call of
+ * ~600 input / 200 output tokens — the single call replaces
+ * the 30+ browser iterations this shortcut was designed to skip,
+ * so it's still net cheaper than the browser path.
+ *
+ * Fails soft: on Anthropic error we fall back to a compact
+ * markdown list so the user always gets SOMETHING. The fallback
+ * is shorter (top-5 hits, no snippets) than the old raw dump.
+ */
+async function synthesizeBraveResults(opts: {
+  apiKey: string;
+  intent: string;
+  results: ReadonlyArray<{ title?: string; snippet?: string; url: string }>;
+  model: string;
+  logger: import('pino').Logger;
+  taskId: string;
+}): Promise<string> {
+  const hits = opts.results.slice(0, 8);
+  const context = hits
+    .map(
+      (h, i) =>
+        `[${i + 1}] ${h.title || h.url}\n${h.snippet || '(no snippet)'}\nurl: ${h.url}`,
+    )
+    .join('\n\n');
+  const system = `你是一个简洁的问答助手。用户问了一个信息类问题，我会把 Brave Search 的前 8 条结果喂给你。你要：
+- 用 2-4 句话直接回答用户的问题
+- 需要具体数字就给数字（价格、薪资、评分等）
+- 可以加 1-3 个行内引用：\`[网站名](URL)\`，只引用你真的用到的来源
+- 用中文回答（除非用户用英文问）
+- **不要列出所有搜索结果**。不要写 "搜索结果如下" / "根据以下来源"。
+- **不要原样复制 snippet**。要综合、对比、给结论。
+- 信息不足时直接说 "搜索结果里没提到 X"，不要编`;
+  const user = `用户问题：${opts.intent}
+
+搜索结果：
+${context}`;
+
+  try {
+    const client = new Anthropic({ apiKey: opts.apiKey });
+    const resp = await client.messages.create({
+      model: opts.model,
+      max_tokens: 400,
+      system,
+      messages: [{ role: 'user', content: user }],
+    });
+    const out = resp.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map((b) => b.text.trim())
+      .filter(Boolean)
+      .join('\n\n')
+      .trim();
+    if (out) return out;
+    opts.logger.warn({ taskId: opts.taskId }, 'brave-synthesis: empty response, using fallback');
+  } catch (err) {
+    opts.logger.warn(
+      { taskId: opts.taskId, err: err instanceof Error ? err.message : String(err) },
+      'brave-synthesis: Anthropic call failed, using fallback',
+    );
+  }
+  // Fallback: compact list, not the old dump.
+  return hits
+    .slice(0, 5)
+    .map((h, i) => `${i + 1}. [${h.title || h.url}](${h.url})`)
+    .join('\n');
 }

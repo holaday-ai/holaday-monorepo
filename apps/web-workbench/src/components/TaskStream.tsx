@@ -245,9 +245,16 @@ function AgentBlock({
         {/* Live progress pill — one line, spinner + current tool
          *  label. Shows while task is non-terminal and we have at
          *  least one step. Replaces the old stack of "完成一步操作"
-         *  rows. */}
+         *  rows. The pill is *never* red while the task is still
+         *  running; a single failed tick does not mean the task is
+         *  failing. Only the task-level status controls colour. */}
         {showInlineProgress && steps.length > 0 && (
-          <LiveStatus kind={latestRunningKind} status={latestRunningStatus} />
+          <LiveStatus
+            kind={latestRunningKind}
+            taskTerminal={terminal}
+            taskStatus={task.status}
+            lastStepStatus={latestRunningStatus}
+          />
         )}
 
         {showInlineProgress && screencastUrl && <CurrentUrlChip url={screencastUrl} />}
@@ -382,21 +389,35 @@ function WebSearchLine({ event }: { event: UiWebSearchEvent }): JSX.Element {
  */
 function LiveStatus({
   kind,
-  status,
+  taskTerminal,
+  taskStatus,
+  lastStepStatus,
 }: {
   kind: string | undefined;
-  status: UiStep['status'];
+  taskTerminal: boolean;
+  taskStatus: UiTask['status'];
+  lastStepStatus: UiStep['status'];
 }): JSX.Element {
+  // Color policy (Round-2b fix):
+  //   - Task still running (not terminal) → always blue spinner,
+  //     even if the most recent tick has status='failed'. The agent
+  //     retries opaquely; the user shouldn't see red mid-flight.
+  //   - Task terminal + failed → red + AlertCircle
+  //   - Otherwise → neutral
+  const red = taskTerminal && taskStatus === 'failed';
   const label = liveStatusLabel(kind);
-  const isFailed = status === 'failed';
+  // Intentionally unread: reserved for a future "warn but keep
+  // running" variant that would render in amber when a non-terminal
+  // task has a recently-failed tick. Not wired yet.
+  void lastStepStatus;
   return (
     <div
       className={cn(
         'flex items-center gap-2 text-[13px] leading-5',
-        isFailed ? 'text-red-600' : 'text-muted-foreground',
+        red ? 'text-red-600' : 'text-muted-foreground',
       )}
     >
-      {isFailed ? (
+      {red ? (
         <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
       ) : (
         <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
