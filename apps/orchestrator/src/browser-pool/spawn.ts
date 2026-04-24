@@ -162,7 +162,11 @@ export function spawnBrave(
     '--hide-crash-restore-bubble',
     '--disable-session-crashed-bubble',
     '--disable-restore-session-state',
-    '--disable-features=CalculateNativeWinOcclusion,ChromeWhatsNewUI,InfiniteSessionRestore,Translate,BravePrivateProductAnalytics,BraveWelcomePage,BraveRewards,BraveAIChat,BraveTalk,BraveVPN,ImportData,BraveNTPBrandedWallpaper,ExternalProtocolDialog',
+    // ExternalProtocolDialog + ExternalProtocolPrompts (plural) —
+    // different Chromium versions name the feature differently;
+    // include both so the "Open xdg-open?" popup is suppressed on
+    // every Brave we might run against.
+    '--disable-features=CalculateNativeWinOcclusion,ChromeWhatsNewUI,InfiniteSessionRestore,Translate,BravePrivateProductAnalytics,BraveWelcomePage,BraveRewards,BraveAIChat,BraveTalk,BraveVPN,ImportData,BraveNTPBrandedWallpaper,ExternalProtocolDialog,ExternalProtocolPrompts',
     '--disable-background-networking',
     '--disable-sync',
     '--disable-translate',

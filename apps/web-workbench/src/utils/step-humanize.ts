@@ -38,6 +38,12 @@ export function humanizeStep(step: UiStep): string | null {
     case 'computer':
     case 'web_search':
     case 'bash':
+    case 'code_execution':
+    case 'run_code':
+    case 'python':
+    case 'str_replace_editor':
+    case 'file_editor':
+    case 'text_editor':
       return null;
 
     // Terminal-ish semantics — keep.
@@ -106,6 +112,14 @@ export function liveStatusLabel(kind: string | undefined): string {
       return '正在联网搜索…';
     case 'bash':
       return '正在执行命令…';
+    case 'code_execution':
+    case 'run_code':
+    case 'python':
+      return '正在执行代码…';
+    case 'str_replace_editor':
+    case 'file_editor':
+    case 'text_editor':
+      return '正在编辑文件…';
     case 'text':
     case '':
     case undefined:

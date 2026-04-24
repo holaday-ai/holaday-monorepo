@@ -160,19 +160,38 @@ export function classifyAsSimpleSearch(intent: string): boolean {
   const lower = t.toLowerCase();
 
   // Disqualifiers: any action verb forces browser/zapier lane.
-  const ACTION_VERBS = [
+  //
+  // Chinese verbs are straight substring matches — CJK characters
+  // have no word boundaries and our list is action-specific
+  // enough that substrings don't overlap with innocent content.
+  //
+  // English verbs MUST use word-boundary anchors. The earlier
+  // substring approach matched 'book' inside 'MacBook', silently
+  // flipping every "compare MacBook prices" prompt into the
+  // browser lane. `\b` is the JS regex boundary — no match
+  // between two letters, so `\bbook\b` no longer matches
+  // "macbook", and `\bbuy\b` doesn't fire on "buyer".
+  const CN_ACTION_VERBS = [
     '订', '预订', '预定', '买', '购买', '下单', '付款', '支付', '转账',
     '注册', '登录', '登陆', '登入', '退订', '退款', '取消',
     '发送', '发帖', '发布', '评论', '点赞', '关注', '加关注', '转发',
     '投递', '申请', '报名', '提交', '填写', '填表',
     '删除', '修改', '编辑', '更新',
-    'book', 'buy', 'order', 'register', 'sign up', 'sign in', 'log in', 'login',
-    'send', 'post', 'submit', 'apply', 'subscribe', 'unsubscribe', 'cancel',
-    'delete', 'update', 'pay', 'transfer', 'comment', 'like', 'follow',
-    'help me ', // "help me book", "help me buy", ...
   ];
-  for (const v of ACTION_VERBS) {
+  for (const v of CN_ACTION_VERBS) {
     if (lower.includes(v)) return false;
+  }
+  const EN_ACTION_PATTERNS: RegExp[] = [
+    /\bbook\b/, /\bbuy\b/, /\border\b/, /\bregister\b/,
+    /\bsign\s+up\b/, /\bsign\s+in\b/, /\blog\s+in\b/, /\blogin\b/,
+    /\bsend\b/, /\bpost\b/, /\bsubmit\b/, /\bapply\b/,
+    /\bsubscribe\b/, /\bunsubscribe\b/, /\bcancel\b/,
+    /\bdelete\b/, /\bupdate\b/, /\bpay\b/, /\btransfer\b/,
+    /\bcomment\b/, /\blike\b/, /\bfollow\b/,
+    /\bhelp me (?:book|buy|order|register|send|post|submit|apply)\b/,
+  ];
+  for (const p of EN_ACTION_PATTERNS) {
+    if (p.test(lower)) return false;
   }
 
   // Round-1 signal: price / salary / comparison intents are almost
@@ -193,6 +212,19 @@ export function classifyAsSimpleSearch(intent: string): boolean {
   }
   for (const hint of SALARY_HINTS) {
     if (lower.includes(hint)) return true;
+  }
+  // Single-fact queries that often arrive verbless — "今天上海天气"
+  // / "明天汇率" / "比特币现在多少". These are classic
+  // web-search-route cases; adding them avoids another 30-iteration
+  // browser run over the forecast page.
+  const FACT_NOUNS = [
+    '天气', '气温', '温度', '下雨',
+    '汇率', '股价', '市值',
+    '新闻', '头条',
+    '航班', '航班号',
+  ];
+  for (const n of FACT_NOUNS) {
+    if (lower.includes(n)) return true;
   }
 
   // Multi-platform retail compare — "京东 淘宝 airpods" style. Two
