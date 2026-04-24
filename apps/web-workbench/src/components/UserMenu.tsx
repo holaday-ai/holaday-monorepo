@@ -1,5 +1,16 @@
-import { LogOut, MessageSquare, Monitor, Moon, Sun } from 'lucide-react';
+import {
+  CreditCard,
+  History,
+  LogOut,
+  MessageSquare,
+  Monitor,
+  Moon,
+  Settings as SettingsIcon,
+  Sun,
+  User as UserIcon,
+} from 'lucide-react';
 import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { type ThemeMode, useTheme } from '@/stores/theme-store';
 
@@ -33,7 +44,16 @@ export function UserMenu({
 }: Props): JSX.Element {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
   const { mode, setMode } = useTheme();
+
+  const go = React.useCallback(
+    (path: string) => {
+      setOpen(false);
+      navigate(path);
+    },
+    [navigate],
+  );
 
   React.useEffect(() => {
     if (!open) return;
@@ -94,6 +114,29 @@ export function UserMenu({
               {email}
             </div>
           )}
+          <div className="border-b border-border py-1">
+            <MenuItem icon={<UserIcon className="h-3.5 w-3.5" />} onClick={() => go('/profile')}>
+              个人资料
+            </MenuItem>
+            <MenuItem
+              icon={<SettingsIcon className="h-3.5 w-3.5" />}
+              onClick={() => go('/settings')}
+            >
+              设置
+            </MenuItem>
+            <MenuItem
+              icon={<CreditCard className="h-3.5 w-3.5" />}
+              onClick={() => go('/plan')}
+            >
+              套餐与账单
+            </MenuItem>
+            <MenuItem
+              icon={<History className="h-3.5 w-3.5" />}
+              onClick={() => go('/history')}
+            >
+              任务历史
+            </MenuItem>
+          </div>
           <div className="px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
             外观
           </div>

@@ -6,6 +6,8 @@ import { trpc } from '@/lib/trpc';
 
 interface Props {
   onAuthenticated: () => void;
+  /** Initial form mode. Defaults to `login`. Used by /register route. */
+  initialMode?: Mode;
 }
 
 type Mode = 'login' | 'register' | 'emailCode' | 'forgot';
@@ -20,8 +22,8 @@ type Mode = 'login' | 'register' | 'emailCode' | 'forgot';
  * Google OAuth button only appears when the server advertises the
  * feature via `auth.loginOptions` (env-gated on GOOGLE_CLIENT_ID).
  */
-export function LoginGate({ onAuthenticated }: Props): JSX.Element {
-  const [mode, setMode] = React.useState<Mode>('login');
+export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JSX.Element {
+  const [mode, setMode] = React.useState<Mode>(initialMode);
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [confirm, setConfirm] = React.useState('');

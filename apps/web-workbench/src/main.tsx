@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
 import { bootstrapTheme } from './stores/theme-store';
 import './index.css';
@@ -13,6 +14,8 @@ if (!rootEl) throw new Error('#root not found in index.html');
 
 ReactDOM.createRoot(rootEl).render(
   <React.StrictMode>
-    <App />
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
   </React.StrictMode>,
 );
