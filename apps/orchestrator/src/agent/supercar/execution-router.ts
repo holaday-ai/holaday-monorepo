@@ -175,6 +175,41 @@ export function classifyAsSimpleSearch(intent: string): boolean {
     if (lower.includes(v)) return false;
   }
 
+  // Round-1 signal: price / salary / comparison intents are almost
+  // always information queries that burn 30+ iterations bouncing
+  // between product pages when routed through the browser. These
+  // short-circuit to web_search even without a leading query verb.
+  const PRICE_HINTS = [
+    '价格', '多少钱', '最低价', '最便宜', '比价', '比较价格',
+    '性价比', '哪个便宜', '哪款便宜', '对比一下', '对比',
+    'price', 'cheapest', 'compare price',
+  ];
+  const SALARY_HINTS = [
+    '薪资', '薪水', '工资', '待遇', '薪酬', '年薪', '月薪', '时薪',
+    'salary', 'wage', 'compensation',
+  ];
+  for (const hint of PRICE_HINTS) {
+    if (lower.includes(hint)) return true;
+  }
+  for (const hint of SALARY_HINTS) {
+    if (lower.includes(hint)) return true;
+  }
+
+  // Multi-platform retail compare — "京东 淘宝 airpods" style. Two
+  // or more of the big marketplaces named in the same intent is a
+  // strong signal the user wants a compare, not a single-site
+  // action. Word-boundary-ish check so 'jd.com' and 'tb' don't
+  // false-positive on unrelated strings.
+  const RETAIL_HOSTS = [
+    '京东', '淘宝', '天猫', '拼多多', '抖音商城', '小红书商城',
+    'jd', 'taobao', 'tmall', 'pdd',
+  ];
+  const matched = new Set<string>();
+  for (const host of RETAIL_HOSTS) {
+    if (lower.includes(host)) matched.add(host);
+  }
+  if (matched.size >= 2) return true;
+
   // Positive: starts with an info-query verb.
   const QUERY_STARTS = [
     '查', '看', '搜', '搜索', '找', '列', '整理',

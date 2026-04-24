@@ -1,70 +1,65 @@
 import type { UiStep } from '@/types/task';
 
 /**
- * Translate one agent tick into a single line of plain user-facing
- * language. The goal is "看起来像助手在解释自己在做什么", not a
- * debug log — technical details (exact URLs, millisecond timings,
- * screenshot counters) belong in the collapsed "详细步骤" panel, not
- * the main conversation stream.
+ * Humanized step filter — Claude-style chat output.
  *
- * Returning null means "hide this step entirely from the humanized
- * stream". Use for actions the user doesn't care about:
- *   - screenshot: an internal snapshot, never the point
- *   - wait:       pure throttle; noise
- *   - done:       the terminal summary block already renders the payoff
+ * The rule is strict: **tool invocations are not user-facing**. A user
+ * reading the chat should see only the model's own voice (text
+ * preambles) and a final result. Step rows labelled with the machine
+ * tool name (computer / navigate / web_search / bash / screenshot /
+ * wait / done / click / type / key / scroll) are UI chrome — the
+ * raw log belongs behind the "查看详细步骤" toggle.
  *
- * The collapsed detail view still shows the raw StepCards for anyone
- * who wants to audit every tick.
+ * Returning null means "hide from the main flow". The TaskStream
+ * wraps a LiveStatus indicator around the most recent running tool
+ * so the user still knows something is happening, they just don't
+ * see "完成一步操作" stacked five deep.
+ *
+ * The exceptions — `give_up` and `wait_for_human` — aren't tool
+ * calls; they're terminal signals the model produced for the user.
+ * They stay visible.
  */
 export function humanizeStep(step: UiStep): string | null {
   const kind = step.actionKind ?? '';
   switch (kind) {
+    // Tool calls. All hidden from the main flow — LiveStatus below
+    // renders a single live spinner + label instead.
     case 'screenshot':
     case 'wait':
-      return null;
     case 'done':
-      return null;
     case 'navigate':
-      return describeNavigate(step);
     case 'click':
     case 'click_ref':
-      return describeClick(step);
     case 'type':
     case 'type_in_ref':
-      return describeType(step);
     case 'key':
     case 'press_key':
-      return describeKey(step);
     case 'scroll':
-      return '正在浏览页面…';
+    case 'computer':
+    case 'web_search':
+    case 'bash':
+      return null;
+
+    // Terminal-ish semantics — keep.
     case 'give_up':
       return '任务无法完成';
     case 'wait_for_human':
       return '需要您完成验证';
-    // Supercar's per-iteration tool name is one of:
-    //   computer  — the Anthropic computer-use tool (click/type/screenshot)
-    //   text      — the model "spoke" this turn (textPreamble carries
-    //               the natural-language sentence it emitted)
-    //   web_search — handled by WebSearchLine, skip here
-    // For `text` we want the model's actual sentence to surface as the
-    // agent's voice; for `computer` we return a compact status so the
-    // user doesn't see a wall of "computer" rows.
+
+    // The agent's own voice. Supercar populates actionSummary with
+    // the textPreamble when toolsInTurn[0] === 'text', which means
+    // Claude spoke without calling a tool this turn. That's the one
+    // thing we DO want to surface.
     case 'text':
       return pickAgentText(step);
-    case 'computer':
-      return describeComputer(step);
-    case 'web_search':
-      return null;
+
     default:
       if (!kind) return null;
-      // Suppress anything that still looks like a raw tool name —
-      // lowercase identifier, no spaces. Unknown rich summaries still
-      // fall through so we don't accidentally silence structured text.
-      if (/^[a-z_][a-z0-9_]*$/.test(kind)) {
-        return step.actionSummary && !/^[a-z_][a-z0-9_]*$/.test(step.actionSummary)
-          ? step.actionSummary
-          : null;
-      }
+      // Anything else: if it looks like a raw identifier (snake_case,
+      // lowercase), drop it; otherwise surface the summary so we
+      // don't silently swallow future tool names the humanizer
+      // doesn't know about.
+      if (/^[a-z_][a-z0-9_]*$/.test(kind)) return null;
       return step.actionSummary || null;
   }
 }
@@ -72,117 +67,58 @@ export function humanizeStep(step: UiStep): string | null {
 function pickAgentText(step: UiStep): string | null {
   const s = step.actionSummary?.trim();
   if (!s) return null;
-  // The server populates actionSummary with either the textPreamble or
-  // the joined tool names. If it's just "text" or "thinking" we have
-  // nothing useful — drop the row rather than render a debug label.
-  if (s === 'text' || s === 'thinking') return null;
+  // Defensive: drop known "label-only" values that sometimes land
+  // in actionSummary when the server couldn't extract a preamble.
+  if (s === 'text' || s === 'thinking' || s === 'computer') return null;
+  // Suppress the old humanizer's placeholder strings — these are
+  // pre-Round-1 artefacts that used to stack on screen.
+  if (s === '完成一步操作' || s === '正在操作浏览器…') return null;
   return s;
 }
 
-function describeComputer(step: UiStep): string {
-  const s = step.actionSummary?.trim();
-  // When the commander included a text preamble alongside the computer
-  // call, surface the preamble as the agent's voice. Otherwise fall
-  // back to a compact status so the stream doesn't repeat "computer"
-  // on every iteration.
-  if (s && s !== 'computer' && !/^[a-z_][a-z0-9_]*$/.test(s)) return s;
-  return step.status === 'running' ? '正在操作浏览器…' : '完成一步操作';
-}
-
 /**
- * Very short badge to label each line in the humanized stream. Mirrors
- * the icon set used in BrowserPanel's activity overlay so the user
- * builds one mental model across panels.
+ * One-line friendly label for a tool kind, used by the LiveStatus
+ * indicator at the bottom of the running stream. Matches the rhythm
+ * of Claude's "正在 … 中" progress captions.
  */
-export function humanizedGlyph(kind: string | undefined): string {
+export function liveStatusLabel(kind: string | undefined): string {
   switch (kind) {
     case 'navigate':
-      return '→';
+      return '正在打开页面…';
     case 'click':
     case 'click_ref':
-      return '·';
+      return '正在点击…';
     case 'type':
     case 'type_in_ref':
-      return '✎';
+      return '正在输入…';
     case 'key':
     case 'press_key':
-      return '⏎';
+      return '正在发送按键…';
     case 'scroll':
-      return '↕';
-    case 'wait_for_human':
-      return '!';
-    case 'give_up':
-      return '×';
+      return '正在浏览页面…';
+    case 'screenshot':
+      return '正在截图…';
+    case 'wait':
+      return '等待页面加载…';
+    case 'computer':
+      return '正在操作浏览器…';
+    case 'web_search':
+      return '正在联网搜索…';
+    case 'bash':
+      return '正在执行命令…';
+    case 'text':
+    case '':
+    case undefined:
+      return '正在思考…';
     default:
-      return '·';
+      return '正在处理…';
   }
-}
-
-function describeNavigate(step: UiStep): string {
-  const summary = step.actionSummary ?? '';
-  const url = extractUrl(summary);
-  if (!url) return '正在打开页面…';
-  try {
-    const u = new URL(url);
-    const hostLabel = friendlyHost(u.hostname);
-    if (step.status === 'running') return `正在打开 ${hostLabel}…`;
-    return `已打开 ${hostLabel}`;
-  } catch {
-    return step.status === 'running' ? '正在打开页面…' : '已打开页面';
-  }
-}
-
-function describeClick(step: UiStep): string {
-  const label = extractQuoted(step.actionSummary);
-  if (label) return step.status === 'running' ? `正在点击"${label}"…` : `点击了"${label}"`;
-  return step.status === 'running' ? '正在点击页面元素…' : '已点击页面元素';
-}
-
-function describeType(step: UiStep): string {
-  const text = extractTypedText(step.actionSummary);
-  if (text) return step.status === 'running' ? `正在输入"${text}"…` : `输入了"${text}"`;
-  return step.status === 'running' ? '正在填写内容…' : '已填写内容';
-}
-
-function describeKey(step: UiStep): string {
-  const key = extractQuoted(step.actionSummary) ?? step.actionSummary ?? '';
-  if (!key) return '按下按键';
-  if (/enter/i.test(key)) return '按下回车';
-  if (/tab/i.test(key)) return '切换焦点';
-  if (/esc/i.test(key)) return '按下 Esc';
-  return `按下 ${key}`;
-}
-
-/**
- * Pull the first URL-looking substring out of a free-form action
- * summary. Accepts http(s) and protocol-relative; everything else falls
- * through to null so we don't turn `javascript:void(0)` into a link.
- */
-export function extractUrl(summary: string): string | null {
-  if (!summary) return null;
-  const m = /(https?:\/\/[^\s]+)/i.exec(summary);
-  if (!m) return null;
-  return (m[1] ?? '').replace(/[),.]+$/, '');
-}
-
-function extractQuoted(summary: string | undefined): string | null {
-  if (!summary) return null;
-  const m = /['"]([^'"\n]{1,40})['"]/.exec(summary);
-  return m?.[1] ?? null;
-}
-
-function extractTypedText(summary: string | undefined): string | null {
-  if (!summary) return null;
-  const quoted = extractQuoted(summary);
-  if (quoted) return quoted;
-  const m = /(?:输入|type)\s*[:：]?\s*(.{1,40})/i.exec(summary);
-  return m?.[1]?.trim() ?? null;
 }
 
 /**
  * Strip the common `www.` prefix and map a handful of brand hostnames
- * to their Chinese name. Fall through to the hostname as-is for anything
- * unrecognised — a bare `example.com` reads fine.
+ * to their Chinese name. Still used by the Panel URL chip + terminal
+ * summary even though the humanizer no longer emits navigation rows.
  */
 export function friendlyHost(hostname: string): string {
   const h = hostname.replace(/^www\./, '').toLowerCase();
@@ -208,4 +144,15 @@ const BRAND_LABELS: Readonly<Record<string, string>> = {
   'xiaohongshu.com': '小红书',
   'douyin.com': '抖音',
   'bilibili.com': '哔哩哔哩',
+  'ctrip.com': '携程',
 };
+
+/**
+ * Kept for backwards compatibility — TaskStream still imports it for
+ * the list-marker glyph. Empty string is a safe default; nothing
+ * renders the glyph anymore after the Round 1 rewrite but keeping
+ * the export avoids a rebuild of every consumer.
+ */
+export function humanizedGlyph(_kind: string | undefined): string {
+  return '·';
+}

@@ -26,7 +26,7 @@ import type {
   UiTask,
   UiWebSearchEvent,
 } from '@/types/task';
-import { friendlyHost, humanizeStep, humanizedGlyph } from '@/utils/step-humanize';
+import { friendlyHost, humanizeStep, humanizedGlyph, liveStatusLabel } from '@/utils/step-humanize';
 
 interface Props {
   task: UiTask;
@@ -203,6 +203,23 @@ function AgentBlock({
   webSearch: UiWebSearchEvent | undefined;
 }): JSX.Element {
   const [detailOpen, setDetailOpen] = React.useState(false);
+
+  // Round-1 streaming rework: after humanizeStep filters tool_use
+  // rows out of the main flow, the remaining lines are (almost)
+  // entirely agent text preambles — Claude's own voice. We still
+  // render a single LiveStatus below them while the task is
+  // in-flight, derived from the latest non-null actionKind. If a
+  // user wants the raw tool log they pop the "查看详细步骤" toggle.
+  const latestRunningKind = React.useMemo<string | undefined>(() => {
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const s = steps[i];
+      if (!s) continue;
+      if (s.actionKind) return s.actionKind;
+    }
+    return undefined;
+  }, [steps]);
+  const latestRunningStatus = steps[steps.length - 1]?.status ?? 'done';
+
   const hasAnyActivity =
     humanLines.length > 0 ||
     Boolean(captchaWait) ||
@@ -212,11 +229,6 @@ function AgentBlock({
     Boolean(webSearch) ||
     Boolean(task.resultText);
 
-  // Claude-style collapse: while the task is running we show the
-  // humanized play-by-play in the main flow; once it reaches a
-  // terminal status the play-by-play folds into the "查看详细步骤"
-  // toggle so the user's eye lands on the summary. They can still
-  // expand to audit every iteration.
   const showInlineProgress = !terminal;
 
   return (
@@ -231,6 +243,14 @@ function AgentBlock({
 
         {showInlineProgress && humanLines.length > 0 && (
           <HumanLineList lines={humanLines} />
+        )}
+
+        {/* Live progress pill — one line, spinner + current tool
+         *  label. Shows while task is non-terminal and we have at
+         *  least one step. Replaces the old stack of "完成一步操作"
+         *  rows. */}
+        {showInlineProgress && steps.length > 0 && (
+          <LiveStatus kind={latestRunningKind} status={latestRunningStatus} />
         )}
 
         {showInlineProgress && screencastUrl && <CurrentUrlChip url={screencastUrl} />}
@@ -348,6 +368,43 @@ function WebSearchLine({ event }: { event: UiWebSearchEvent }): JSX.Element {
       <span className="min-w-0 flex-1">
         正在联网搜索 <span className="text-foreground">"{event.query}"</span>
       </span>
+    </div>
+  );
+}
+
+/**
+ * Single-line live progress indicator. Shown while the task is still
+ * running; content is driven by the latest tick's actionKind (text →
+ * "正在思考…", navigate → "正在打开页面…", etc.). Spinner animates;
+ * the row replaces itself as new ticks arrive, so the chat stream
+ * stays calm instead of accumulating twenty "完成一步操作" rows.
+ *
+ * When the latest tick has status='done' we don't dim the spinner —
+ * a done tick means "last tool finished, next one is about to fire",
+ * which from the user's POV is still "working".
+ */
+function LiveStatus({
+  kind,
+  status,
+}: {
+  kind: string | undefined;
+  status: UiStep['status'];
+}): JSX.Element {
+  const label = liveStatusLabel(kind);
+  const isFailed = status === 'failed';
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-2 text-[13px] leading-5',
+        isFailed ? 'text-red-600' : 'text-muted-foreground',
+      )}
+    >
+      {isFailed ? (
+        <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      ) : (
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+      )}
+      <span>{label}</span>
     </div>
   );
 }
