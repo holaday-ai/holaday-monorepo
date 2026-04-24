@@ -918,6 +918,7 @@ export const tasksRouter = router({
           id: tasksTable.id,
           externalId: tasksTable.externalId,
           intent: tasksTable.intent,
+          title: tasksTable.title,
           status: tasksTable.status,
           pauseReason: tasksTable.pauseReason,
           errorCode: tasksTable.errorCode,
@@ -936,6 +937,7 @@ export const tasksRouter = router({
         tasks: rows.map((r) => ({
           taskId: r.externalId,
           intent: r.intent,
+          title: r.title,
           status: r.status,
           pauseReason: r.pauseReason,
           errorCode: r.errorCode,
@@ -997,6 +999,7 @@ export const tasksRouter = router({
       return {
         taskId: taskRow.externalId,
         intent: taskRow.intent,
+        title: taskRow.title,
         status: taskRow.status,
         pauseReason: taskRow.pauseReason,
         errorCode: taskRow.errorCode,
@@ -1160,6 +1163,49 @@ export const tasksRouter = router({
         await tx.delete(tasksTable).where(eq(tasksTable.id, taskRow.id));
       });
       return { ok: true as const, taskId: input.taskId };
+    }),
+
+  /**
+   * Rename a task (sets the display `title` column). Pass an empty
+   * string to clear the override — the UI will then fall back to the
+   * auto-summary of `intent`. 255-char cap mirrors the column.
+   */
+  rename: protectedProcedure
+    .input(
+      z.object({
+        taskId: z.string().min(1),
+        title: z.string().max(255),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [userRow] = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.externalId, ctx.userId))
+        .limit(1);
+      if (!userRow) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+      }
+      // Verify ownership before the UPDATE so we return a proper
+      // NOT_FOUND (vs. silently succeeding on 0 affected rows) and
+      // don't leak unrelated task existence via error messages.
+      const [taskRow] = await ctx.db
+        .select({ id: tasksTable.id })
+        .from(tasksTable)
+        .where(
+          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)),
+        )
+        .limit(1);
+      if (!taskRow) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
+      }
+      const trimmed = input.title.trim();
+      const nextTitle = trimmed.length === 0 ? null : trimmed;
+      await ctx.db
+        .update(tasksTable)
+        .set({ title: nextTitle })
+        .where(eq(tasksTable.id, taskRow.id));
+      return { ok: true as const, taskId: input.taskId, title: nextTitle };
     }),
 
   /**

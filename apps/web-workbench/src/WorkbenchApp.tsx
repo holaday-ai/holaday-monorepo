@@ -120,6 +120,7 @@ function AppShell(): JSX.Element {
   const createTask = useTaskStore((s) => s.createTask);
   const replyToTask = useTaskStore((s) => s.replyToTask);
   const deleteTask = useTaskStore((s) => s.deleteTask);
+  const renameTask = useTaskStore((s) => s.renameTask);
   const awaitingUserByTask = useTaskStore((s) => s.awaitingUserByTask);
   const applyServerMessage = useTaskStore((s) => s.applyServerMessage);
   const reset = useTaskStore((s) => s.reset);
@@ -313,6 +314,10 @@ function AppShell(): JSX.Element {
         onRetryTask={async (intent) => {
           const res = await createTask(intent);
           if ('error' in res) toast.show(`重试失败：${res.error}`, 'error');
+        }}
+        onRenameTask={async (taskId, title) => {
+          const res = await renameTask(taskId, title);
+          if ('error' in res) toast.show(`重命名失败：${res.error}`, 'error');
         }}
         userEmail={me?.email ?? null}
         userDisplayName={me?.displayName ?? firstSegment(me?.email ?? '') ?? ''}

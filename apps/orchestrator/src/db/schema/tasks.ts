@@ -40,6 +40,12 @@ export const tasks = mysqlTable(
      */
     pauseReason: varchar('pause_reason', { length: 32 }),
     intent: text('intent').notNull(),
+    /**
+     * User-renamed display title. When null, the UI falls back to
+     * summariseIntent(intent). Stays null on creation — only set when
+     * the user explicitly renames via the sidebar context menu.
+     */
+    title: varchar('title', { length: 255 }),
     plan: json('plan'),
     result: json('result'),
     errorCode: varchar('error_code', { length: 64 }),

@@ -210,6 +210,14 @@ export class PlaywrightExecutor {
       if (isStealthEnabled()) {
         await this.applyStealthToContexts(this.browser);
       }
+      // Best-effort: dismiss Brave's persistent chrome-side banners
+      // (privacy report invite, --no-sandbox warning, "unsupported
+      // command-line flag") that otherwise take up vertical space in
+      // every screenshot. Runs once per connect, on every existing
+      // context — the policy file suppresses most of these at the
+      // browser level but a fresh profile still gets the first-run
+      // invites.
+      await this.dismissBraveBanners(this.browser);
       return { ok: true };
     } catch (err) {
       this.browser = null;
@@ -217,6 +225,57 @@ export class PlaywrightExecutor {
         ok: false,
         error: `connectOverCDP(${cdpEndpoint}) failed: ${errMsg(err)}`,
       };
+    }
+  }
+
+  /**
+   * Click through Brave's chrome-side dismissible banners on each
+   * open page. Safe to call on any browser — the selector checks
+   * all shortcut to no-ops on plain Chromium.
+   *
+   * Banners we target:
+   *   - "Got it" / "Disable" (privacy report, command-line flag warning)
+   *   - aria-label="Close" (generic dismiss X on notification ribbons)
+   *
+   * This runs inside page.evaluate so it only sees DOM the page
+   * actually rendered — Brave's actual banners live in the browser
+   * chrome (outside any page DOM) and can't be reached this way.
+   * Those are governed by /etc/brave/policies/managed/holaday.json.
+   * This function targets in-page dismissibles that slip past the
+   * policy on first launch.
+   */
+  private async dismissBraveBanners(browser: Browser): Promise<void> {
+    const contexts = browser.contexts();
+    for (const ctx of contexts) {
+      for (const page of ctx.pages()) {
+        try {
+          // The orchestrator is a Node build (no DOM lib), so `document`
+          // and HTMLElement aren't typed here. The callback body runs
+          // inside the page's JS context where both exist — we cast
+          // through `any` so tsc accepts it without forcing a lib.dom
+          // dependency on the whole package.
+          await page.evaluate(() => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const doc = (globalThis as any).document;
+            if (!doc) return;
+            const labels = new Set(['Got it', 'Disable', 'Dismiss']);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            doc.querySelectorAll('button').forEach((b: any) => {
+              const txt = (b.textContent ?? '').trim();
+              if (labels.has(txt)) b.click();
+            });
+            doc
+              .querySelectorAll('[aria-label="Close"]')
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              .forEach((el: any) => {
+                if (typeof el.click === 'function') el.click();
+              });
+          });
+        } catch {
+          // Page might be about:blank, chrome://, or mid-navigation —
+          // evaluate rejects in all those cases. Safe to skip.
+        }
+      }
     }
   }
 

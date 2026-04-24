@@ -10,6 +10,8 @@ export type UiTaskStatus = 'executing' | 'paused' | 'completed' | 'failed' | 'ca
 export interface UiTask {
   taskId: string;
   intent: string;
+  /** User-renamed display title. Falls back to summariseIntent(intent) when null. */
+  title: string | null;
   status: UiTaskStatus;
   /** Observed tick count — shown in the sidebar subtitle. */
   tickCount: number;

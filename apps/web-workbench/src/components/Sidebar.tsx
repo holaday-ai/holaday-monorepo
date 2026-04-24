@@ -3,6 +3,7 @@ import {
   ChevronRight,
   Clipboard,
   ListTree,
+  Pencil,
   Pin,
   PinOff,
   Plus,
@@ -26,6 +27,7 @@ interface Props {
   onSelectTask: (taskId: string) => void;
   onNewTask: () => void;
   onDeleteTask?(taskId: string): void | Promise<void>;
+  onRenameTask?(taskId: string, title: string): void | Promise<void>;
   onRetryTask?(intent: string): void | Promise<void>;
   onOpenSearch?(): void;
   userEmail: string | null;
@@ -59,6 +61,7 @@ export function Sidebar({
   onSelectTask,
   onNewTask,
   onDeleteTask,
+  onRenameTask,
   onRetryTask,
   onOpenSearch,
   userEmail,
@@ -104,6 +107,7 @@ export function Sidebar({
     | { taskId: string; intent: string; x: number; y: number; deletable: boolean }
     | null
   >(null);
+  const [renamingId, setRenamingId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!menu) return;
@@ -140,10 +144,10 @@ export function Sidebar({
           // Mobile: always full-width drawer when open.
           'w-72',
           // Desktop: icon rail (collapsed) or task list (expanded).
-          // Expanded width bumped 56 → 64 (224px → 256px) so typical
-          // Chinese task titles fit before truncation. Matches the
-          // Claude reference density BOSS flagged.
-          desktopCollapsed ? 'md:w-16' : 'md:w-64',
+          // Expanded width bumped 64 → 72 (256px → 288px) so longer
+          // Chinese task titles stop truncating at the 8-char mark;
+          // still comfortably narrower than Codex's 320px.
+          desktopCollapsed ? 'md:w-16' : 'md:w-72',
           'md:static md:translate-x-0',
           'fixed inset-y-0 left-0 z-50',
           mobileOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full md:shadow-none',
@@ -217,6 +221,7 @@ export function Sidebar({
                       key={t.taskId}
                       task={t}
                       selected={t.taskId === selectedTaskId}
+                      renaming={renamingId === t.taskId}
                       onSelect={(id) => {
                         onSelectTask(id);
                         onMobileClose?.();
@@ -231,6 +236,13 @@ export function Sidebar({
                           deletable: isTaskDeletable(t.status),
                         });
                       }}
+                      onRenameCommit={(id, title) => {
+                        setRenamingId(null);
+                        if (onRenameTask && (title.trim() !== (t.title ?? '').trim())) {
+                          void onRenameTask(id, title);
+                        }
+                      }}
+                      onRenameCancel={() => setRenamingId(null)}
                     />
                   ))}
                 </TaskGroup>
@@ -242,6 +254,7 @@ export function Sidebar({
                       key={t.taskId}
                       task={t}
                       selected={t.taskId === selectedTaskId}
+                      renaming={renamingId === t.taskId}
                       onSelect={(id) => {
                         onSelectTask(id);
                         onMobileClose?.();
@@ -256,6 +269,13 @@ export function Sidebar({
                           deletable: isTaskDeletable(t.status),
                         });
                       }}
+                      onRenameCommit={(id, title) => {
+                        setRenamingId(null);
+                        if (onRenameTask && (title.trim() !== (t.title ?? '').trim())) {
+                          void onRenameTask(id, title);
+                        }
+                      }}
+                      onRenameCancel={() => setRenamingId(null)}
                     />
                   ))}
                 </TaskGroup>
@@ -280,7 +300,7 @@ export function Sidebar({
         )}
       </aside>
 
-      {menu && (onDeleteTask || onRetryTask) && (
+      {menu && (onDeleteTask || onRetryTask || onRenameTask) && (
         <div
           role="menu"
           onClick={(e) => e.stopPropagation()}
@@ -309,6 +329,21 @@ export function Sidebar({
               </>
             )}
           </button>
+          {onRenameTask && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                const { taskId } = menu;
+                setMenu(null);
+                setRenamingId(taskId);
+              }}
+              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-foreground/5"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              重命名
+            </button>
+          )}
           {onRetryTask && (
             <button
               type="button"

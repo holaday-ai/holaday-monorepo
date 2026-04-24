@@ -60,6 +60,7 @@ export interface TaskStore {
   refreshTasks(): Promise<void>;
   createTask(intent: string): Promise<{ taskId: string } | { error: string }>;
   deleteTask(taskId: string): Promise<{ ok: true } | { error: string }>;
+  renameTask(taskId: string, title: string): Promise<{ ok: true } | { error: string }>;
   replyToTask(taskId: string, message: string): Promise<{ ok: boolean } | { error: string }>;
   abortTask(taskId: string): Promise<{ ok: boolean } | { error: string }>;
   applyServerMessage(msg: ServerMessage): void;
@@ -211,6 +212,28 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     }
   },
 
+  async renameTask(taskId, title) {
+    const trimmed = title.trim();
+    const nextTitle = trimmed.length === 0 ? null : trimmed;
+    // Optimistic update — snap the new title immediately so the inline
+    // edit UI doesn't lag a round-trip behind user input.
+    set((prev) => ({
+      tasks: prev.tasks.map((t) =>
+        t.taskId === taskId ? { ...t, title: nextTitle } : t,
+      ),
+    }));
+    try {
+      await trpc.tasks.rename.mutate({ taskId, title: trimmed });
+      return { ok: true as const };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      set({ error: msg });
+      // Roll back optimistic change by pulling the server's truth.
+      void get().refreshTasks();
+      return { error: msg };
+    }
+  },
+
   async replyToTask(taskId, message) {
     try {
       const res = await trpc.tasks.reply.mutate({ taskId, message });
@@ -273,6 +296,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       const optimistic: UiTask = {
         taskId: res.taskId,
         intent,
+        title: null,
         status: (res.status as UiTaskStatus) ?? 'executing',
         tickCount: 0,
         createdAt: now,
@@ -580,6 +604,7 @@ function toUiTask(row: ListRow): UiTask {
   return {
     taskId: row.taskId,
     intent: row.intent,
+    title: typeof (row as { title?: unknown }).title === 'string' ? ((row as { title: string }).title) : null,
     status: normaliseStatus(row.status),
     // The list endpoint doesn't expose tickCount directly; we leave 0
     // for now and let G4's ws events fill it in as ticks stream.

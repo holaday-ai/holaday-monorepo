@@ -33,7 +33,13 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
   const filtered = React.useMemo(() => {
     if (!query.trim()) return tasks.slice(0, 30);
     const q = query.trim().toLowerCase();
-    return tasks.filter((t) => t.intent.toLowerCase().includes(q)).slice(0, 30);
+    return tasks
+      .filter(
+        (t) =>
+          t.intent.toLowerCase().includes(q) ||
+          (t.title ? t.title.toLowerCase().includes(q) : false),
+      )
+      .slice(0, 30);
   }, [query, tasks]);
 
   React.useEffect(() => {
@@ -118,7 +124,9 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                   i === active ? 'bg-foreground/5' : 'hover:bg-foreground/5',
                 )}
               >
-                <span className="truncate text-sm text-foreground">{t.intent}</span>
+                <span className="truncate text-sm text-foreground">
+                  {t.title && t.title.trim().length > 0 ? t.title : t.intent}
+                </span>
                 <span className="truncate text-[11px] text-muted-foreground">
                   {statusLabel(t.status)}
                 </span>

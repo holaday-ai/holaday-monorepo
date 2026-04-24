@@ -1,4 +1,5 @@
 import { MoreHorizontal } from 'lucide-react';
+import * as React from 'react';
 import { cn } from '@/lib/utils';
 import { type UiTask, isActive } from '@/types/task';
 import { summariseIntent } from '@/utils/summarise-intent';
@@ -6,8 +7,31 @@ import { summariseIntent } from '@/utils/summarise-intent';
 interface Props {
   task: UiTask;
   selected: boolean;
+  /**
+   * Inline-edit mode: when this matches task.taskId the row replaces
+   * its label with a text input seeded from the current display title.
+   * Enter commits (calls onRenameCommit), Escape cancels.
+   */
+  renaming?: boolean;
   onSelect: (taskId: string) => void;
   onContextMenu?(taskId: string, event: React.MouseEvent | React.PointerEvent): void;
+  onRenameCommit?(taskId: string, title: string): void;
+  onRenameCancel?(): void;
+}
+
+/**
+ * Resolves the display label for a task row. Priority:
+ *   1. user-set task.title (raw, no summarisation — respect the choice)
+ *   2. summariseIntent(task.intent) — rule-based cleanup
+ *   3. raw task.intent — ultimate fallback so the row is never empty
+ */
+export function taskDisplayTitle(task: UiTask, maxLen = 24): string {
+  if (task.title && task.title.trim().length > 0) {
+    const t = task.title.trim();
+    return t.length <= maxLen ? t : `${t.slice(0, maxLen - 1)}…`;
+  }
+  const summary = summariseIntent(task.intent, maxLen);
+  return summary || task.intent;
 }
 
 /**
@@ -15,23 +39,34 @@ interface Props {
  * with a colour-coded status dot to its left; no subtitle row. A 2px
  * blue left-bar marks the selected row. Hover tints the background.
  */
-export function TaskListItem({ task, selected, onSelect, onContextMenu }: Props): JSX.Element {
+export function TaskListItem({
+  task,
+  selected,
+  renaming,
+  onSelect,
+  onContextMenu,
+  onRenameCommit,
+  onRenameCancel,
+}: Props): JSX.Element {
   const active = isActive(task.status);
   return (
     <button
       type="button"
-      onClick={() => onSelect(task.taskId)}
+      onClick={() => {
+        // Swallow the outer click while the inline input is focused —
+        // clicking elsewhere should cancel (handled by onBlur below),
+        // not re-select the row and clobber the in-progress edit.
+        if (renaming) return;
+        onSelect(task.taskId);
+      }}
       onContextMenu={onContextMenu ? (e) => onContextMenu(task.taskId, e) : undefined}
-      title={`${task.intent}\n${subtitleFor(task)}`}
+      title={renaming ? undefined : `${task.intent}\n${subtitleFor(task)}`}
       className={cn(
         'group relative flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors',
         'hover:bg-foreground/5',
         selected && 'bg-foreground/[0.06]',
       )}
     >
-      {/* 2px left indicator bar for the selected row — Claude's
-       *  selection affordance. Uses absolute positioning so the row
-       *  content flow stays consistent with unselected rows. */}
       {selected && (
         <span
           aria-hidden
@@ -39,20 +74,24 @@ export function TaskListItem({ task, selected, onSelect, onContextMenu }: Props)
         />
       )}
       <StatusDot status={task.status} />
-      <span
-        className={cn(
-          'min-w-0 flex-1 truncate text-[13px] leading-5',
-          task.status === 'failed' ? 'text-muted-foreground' : 'text-foreground',
-          selected && 'font-medium',
-        )}
-      >
-        {summariseIntent(task.intent, 24)}
-      </span>
-      {/* Hover 3-dot menu — discoverable affordance for users who
-       *  don't know about right-click. Opens the same context menu
-       *  as right-click would. Hidden at rest (opacity-0), fades in
-       *  on row hover; focus-visible shows it too for keyboard nav. */}
-      {onContextMenu && (
+      {renaming && onRenameCommit ? (
+        <RenameInput
+          initial={task.title ?? summariseIntent(task.intent, 40) ?? task.intent}
+          onCommit={(next) => onRenameCommit(task.taskId, next)}
+          onCancel={onRenameCancel ?? (() => {})}
+        />
+      ) : (
+        <span
+          className={cn(
+            'min-w-0 flex-1 truncate text-[13px] leading-5',
+            task.status === 'failed' ? 'text-muted-foreground' : 'text-foreground',
+            selected && 'font-medium',
+          )}
+        >
+          {taskDisplayTitle(task)}
+        </span>
+      )}
+      {!renaming && onContextMenu && (
         <span
           role="button"
           aria-label="任务菜单"
@@ -73,8 +112,52 @@ export function TaskListItem({ task, selected, onSelect, onContextMenu }: Props)
           <MoreHorizontal className="h-3.5 w-3.5" />
         </span>
       )}
-      {active && <span className="sr-only">进行中 · {subtitleFor(task)}</span>}
+      {active && !renaming && <span className="sr-only">进行中 · {subtitleFor(task)}</span>}
     </button>
+  );
+}
+
+/**
+ * Auto-focused, auto-selected text input. Enter commits the trimmed
+ * value, Escape cancels, blur commits (matches common patterns like
+ * Finder / VS Code file rename).
+ */
+function RenameInput({
+  initial,
+  onCommit,
+  onCancel,
+}: {
+  initial: string;
+  onCommit(next: string): void;
+  onCancel(): void;
+}): JSX.Element {
+  const [value, setValue] = React.useState(initial);
+  const ref = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+  }, []);
+  return (
+    <input
+      ref={ref}
+      value={value}
+      maxLength={255}
+      onChange={(e) => setValue(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          onCommit(value);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          onCancel();
+        }
+      }}
+      onBlur={() => onCommit(value)}
+      className="min-w-0 flex-1 rounded border border-blue-500/40 bg-background px-1.5 py-0 text-[13px] leading-5 shadow-sm focus-visible:outline-none"
+    />
   );
 }
 
@@ -98,9 +181,6 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
 }
 
 function subtitleFor(task: UiTask): string {
-  // Queued tasks report a per-user FIFO slot until the first tick
-  // arrives; once we observe real progress (tickCount > 0) we fall
-  // through to the normal status line.
   if (task.queuePosition && task.queuePosition > 1 && task.tickCount === 0) {
     return `排队中 · 第 ${task.queuePosition} 位`;
   }
@@ -110,9 +190,6 @@ function subtitleFor(task: UiTask): string {
     case 'paused':
       return task.tickCount === 0 ? '已暂停' : `已暂停 · ${task.tickCount} 步`;
     case 'completed':
-      // Legacy rows seeded before we persisted per-tick step rows show
-      // tickCount=0; rendering "已完成 · 0 步" looks broken. Summarise
-      // with just "已完成" instead when we have no step data.
       return task.tickCount === 0 ? '已完成' : `已完成 · ${task.tickCount} 步`;
     case 'failed':
       return task.tickCount === 0 ? '失败' : `失败 · ${task.tickCount} 步`;
