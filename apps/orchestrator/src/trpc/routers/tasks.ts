@@ -56,6 +56,24 @@ export const tasksRouter = router({
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
     }
 
+    // Diagnostic (temporary, Round-4): log the supercar-gate inputs on
+    // every tasks.create so BOSS can tell from pm2 logs exactly why a
+    // task fell into the legacy branch. Happens BEFORE the gate so
+    // the log always lands, regardless of which path is taken.
+    ctx.logger.info(
+      {
+        gate: 'supercar-vs-legacy',
+        AGENT_MODE: appEnv.AGENT_MODE,
+        playwrightExecutorPresent: Boolean(ctx.playwrightExecutor),
+        anthropicKeyPresent: Boolean(appEnv.ANTHROPIC_API_KEY),
+        willUseSupercar:
+          appEnv.AGENT_MODE === 'supercar' &&
+          Boolean(ctx.playwrightExecutor) &&
+          Boolean(appEnv.ANTHROPIC_API_KEY),
+      },
+      'tasks.create: control-plane decision',
+    );
+
     // Supercar path — Anthropic's official computer_20251124 +
     // web_search_20260209 tools driving Playwright directly, with
     // adaptive thinking + prompt caching. This is the default starting
