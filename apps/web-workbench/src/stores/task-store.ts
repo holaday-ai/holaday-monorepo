@@ -51,6 +51,11 @@ export interface TaskStore {
   browserInteractive: boolean;
   setBrowserInteractive(v: boolean): void;
 
+  /** Task ids the user has pinned to the top of the sidebar.
+   *  Persisted in localStorage — no backend column yet. */
+  pinnedTaskIds: ReadonlySet<string>;
+  togglePin(taskId: string): void;
+
   setSelectedTask(taskId: string | null): void;
   refreshTasks(): Promise<void>;
   createTask(intent: string): Promise<{ taskId: string } | { error: string }>;
@@ -83,6 +88,17 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   browserInteractive: true,
   setBrowserInteractive(v) {
     set({ browserInteractive: v });
+  },
+
+  pinnedTaskIds: readPinnedFromStorage(),
+  togglePin(taskId) {
+    set((prev) => {
+      const next = new Set(prev.pinnedTaskIds);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      writePinnedToStorage(next);
+      return { pinnedTaskIds: next };
+    });
   },
 
   setSelectedTask(taskId) {
@@ -490,6 +506,33 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     });
   },
 }));
+
+// Pinned-task persistence. Trivial JSON array of taskIds in
+// localStorage — no sync across devices, no backend column. Good
+// enough until we have user preferences as a first-class backend
+// feature.
+const PINNED_KEY = 'holaday.pinnedTasks';
+function readPinnedFromStorage(): ReadonlySet<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = window.localStorage.getItem(PINNED_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((x) => typeof x === 'string'));
+  } catch {
+    return new Set();
+  }
+}
+function writePinnedToStorage(ids: ReadonlySet<string>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(PINNED_KEY, JSON.stringify([...ids]));
+  } catch {
+    // Quota / private-mode failure — losing the pin list is
+    // acceptable vs crashing the set-state call.
+  }
+}
 
 // Short-list of control-shaped strings that should NEVER become a new
 // task intent. Matched case-insensitive + whole-string; a task legitimately

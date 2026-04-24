@@ -3,6 +3,8 @@ import {
   ChevronRight,
   Clipboard,
   ListTree,
+  Pin,
+  PinOff,
   Plus,
   RotateCcw,
   Search,
@@ -14,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { TaskListItem } from '@/components/TaskListItem';
 import { UserMenu } from '@/components/UserMenu';
 import { cn } from '@/lib/utils';
+import { useTaskStore } from '@/stores/task-store';
 import type { UiTask } from '@/types/task';
 import { bucketByTime, isTaskDeletable } from '@/utils/time-buckets';
 
@@ -66,7 +69,21 @@ export function Sidebar({
   mobileOpen,
   onMobileClose,
 }: Props): JSX.Element {
-  const buckets = React.useMemo(() => bucketByTime(tasks), [tasks]);
+  const pinnedIds = useTaskStore((s) => s.pinnedTaskIds);
+  const togglePin = useTaskStore((s) => s.togglePin);
+  // Partition: pinned tasks show as their own top group; unpinned
+  // tasks get the normal time-bucketed grouping. Pinned group keeps
+  // pin order (most-recently-pinned first by tasks array position).
+  const { pinnedTasks, unpinnedTasks } = React.useMemo(() => {
+    const pinned: UiTask[] = [];
+    const rest: UiTask[] = [];
+    for (const t of tasks) {
+      if (pinnedIds.has(t.taskId)) pinned.push(t);
+      else rest.push(t);
+    }
+    return { pinnedTasks: pinned, unpinnedTasks: rest };
+  }, [tasks, pinnedIds]);
+  const buckets = React.useMemo(() => bucketByTime(unpinnedTasks), [unpinnedTasks]);
 
   const [collapsed, setCollapsed] = React.useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
@@ -123,7 +140,10 @@ export function Sidebar({
           // Mobile: always full-width drawer when open.
           'w-72',
           // Desktop: icon rail (collapsed) or task list (expanded).
-          desktopCollapsed ? 'md:w-16' : 'md:w-56',
+          // Expanded width bumped 56 → 64 (224px → 256px) so typical
+          // Chinese task titles fit before truncation. Matches the
+          // Claude reference density BOSS flagged.
+          desktopCollapsed ? 'md:w-16' : 'md:w-64',
           'md:static md:translate-x-0',
           'fixed inset-y-0 left-0 z-50',
           mobileOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full md:shadow-none',
@@ -190,6 +210,31 @@ export function Sidebar({
             </header>
 
             <div className="flex-1 overflow-y-auto px-2 pb-4">
+              {pinnedTasks.length > 0 && (
+                <TaskGroup title="置顶">
+                  {pinnedTasks.map((t) => (
+                    <TaskListItem
+                      key={t.taskId}
+                      task={t}
+                      selected={t.taskId === selectedTaskId}
+                      onSelect={(id) => {
+                        onSelectTask(id);
+                        onMobileClose?.();
+                      }}
+                      onContextMenu={(id, e) => {
+                        e.preventDefault();
+                        setMenu({
+                          taskId: id,
+                          intent: t.intent,
+                          x: e.clientX,
+                          y: e.clientY,
+                          deletable: isTaskDeletable(t.status),
+                        });
+                      }}
+                    />
+                  ))}
+                </TaskGroup>
+              )}
               {buckets.map((bucket) => (
                 <TaskGroup key={bucket.key} title={bucket.title}>
                   {bucket.tasks.map((t) => (
@@ -242,6 +287,28 @@ export function Sidebar({
           className="fixed z-[60] min-w-[160px] rounded-md border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg animate-fade-in"
           style={{ top: menu.y, left: menu.x }}
         >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              const { taskId } = menu;
+              setMenu(null);
+              togglePin(taskId);
+            }}
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-foreground/5"
+          >
+            {pinnedIds.has(menu.taskId) ? (
+              <>
+                <PinOff className="h-3.5 w-3.5" />
+                取消置顶
+              </>
+            ) : (
+              <>
+                <Pin className="h-3.5 w-3.5" />
+                置顶
+              </>
+            )}
+          </button>
           {onRetryTask && (
             <button
               type="button"

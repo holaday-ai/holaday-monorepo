@@ -1,6 +1,7 @@
 import { MoreHorizontal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { type UiTask, isActive } from '@/types/task';
+import { summariseIntent } from '@/utils/summarise-intent';
 
 interface Props {
   task: UiTask;
@@ -45,7 +46,7 @@ export function TaskListItem({ task, selected, onSelect, onContextMenu }: Props)
           selected && 'font-medium',
         )}
       >
-        {task.intent}
+        {summariseIntent(task.intent, 24)}
       </span>
       {/* Hover 3-dot menu — discoverable affordance for users who
        *  don't know about right-click. Opens the same context menu
