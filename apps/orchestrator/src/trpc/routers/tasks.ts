@@ -1112,6 +1112,41 @@ export const tasksRouter = router({
   }),
 
   /**
+   * User-initiated browser chrome navigation on the attached Brave
+   * instance. Used by the Panel header's back / forward / reload
+   * buttons — the agent loop owns URL changes but the user also needs
+   * trivial browser-style navigation when they decide to poke around
+   * the rendered site themselves.
+   *
+   * Fire-and-forget semantics; errors are swallowed and reported as
+   * `{ok:false, reason}` so the UI can show a subtle toast rather
+   * than a TRPC error banner for something as cheap as "no page yet".
+   */
+  browserNav: protectedProcedure
+    .input(z.object({ direction: z.enum(['back', 'forward', 'reload']) }))
+    .mutation(async ({ ctx, input }) => {
+      const exec =
+        ctx.executionRouter?.getExecutor('headed') ??
+        ctx.executionRouter?.getExecutor('headless') ??
+        ctx.playwrightExecutor ??
+        null;
+      if (!exec) return { ok: false as const, reason: 'no_executor' };
+      try {
+        const page = await exec.getPage();
+        if (input.direction === 'back') await page.goBack({ timeout: 5_000 });
+        else if (input.direction === 'forward') await page.goForward({ timeout: 5_000 });
+        else await page.reload({ timeout: 10_000 });
+        return { ok: true as const };
+      } catch (err) {
+        ctx.logger.warn(
+          { err: err instanceof Error ? err.message : String(err), direction: input.direction },
+          'tasks.browserNav: nav failed (non-fatal)',
+        );
+        return { ok: false as const, reason: 'nav_failed' };
+      }
+    }),
+
+  /**
    * Remove one of the caller's tasks. Cascades to task_steps / task_events
    * via the schema's onDelete. Scoped hard — the WHERE clause requires
    * both the externalId AND caller's userId so a user cannot delete

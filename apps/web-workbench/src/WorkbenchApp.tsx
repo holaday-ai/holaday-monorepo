@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { BrowserPanel } from '@/components/BrowserPanel';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { FeedbackDialog } from '@/components/FeedbackDialog';
 import { LoginGate } from '@/components/LoginGate';
 import { MainPanel } from '@/components/MainPanel';
@@ -41,6 +42,7 @@ function AppShell(): JSX.Element {
   const [browserSheetOpen, setBrowserSheetOpen] = React.useState(false);
   const [feedbackOpen, setFeedbackOpen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
+  const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
   const [me, setMe] = React.useState<MeProfile | null>(null);
   const [bootstrapped, setBootstrapped] = React.useState(false);
   const [online, setOnline] = React.useState<boolean>(() =>
@@ -304,12 +306,10 @@ function AppShell(): JSX.Element {
           // forget; errors are logged server-side.
           void trpc.tasks.resetBrowser.mutate().catch(() => {});
         }}
-        onDeleteTask={async (taskId) => {
-          const ok = window.confirm('删除这个任务？任务记录和步骤都会清除。');
-          if (!ok) return;
-          const res = await deleteTask(taskId);
-          if ('error' in res) toast.show(`删除失败：${res.error}`, 'error');
-          else toast.show('任务已删除');
+        onDeleteTask={(taskId) => {
+          // Defer the actual delete until the user confirms in the
+          // modal below; onConfirm pulls the id back out of state.
+          setConfirmDelete(taskId);
         }}
         onRetryTask={async (intent) => {
           const res = await createTask(intent);
@@ -404,6 +404,23 @@ function AppShell(): JSX.Element {
             toast.show(`反馈发送失败：${msg}`, 'error');
             return { error: msg };
           }
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="确认删除此任务？"
+        description="任务记录和所有步骤都会清除，操作无法恢复。"
+        confirmLabel="删除"
+        destructive
+        onClose={() => setConfirmDelete(null)}
+        onConfirm={async () => {
+          const taskId = confirmDelete;
+          setConfirmDelete(null);
+          if (!taskId) return;
+          const res = await deleteTask(taskId);
+          if ('error' in res) toast.show(`删除失败：${res.error}`, 'error');
+          else toast.show('任务已删除');
         }}
       />
 

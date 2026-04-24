@@ -42,6 +42,12 @@ export interface TaskStore {
   degradeByTask: Record<string, UiDegradeEvent>;
   /** Supercar: current "agent asked a question" state per task. Cleared on reply. */
   awaitingUserByTask: Record<string, UiAwaitingUser>;
+  /**
+   * Follow-up user messages for a task. The initial intent renders as
+   * the first user bubble; every `tasks.reply` succeeds pushes the
+   * typed text here so the conversation stays visible after send.
+   */
+  userRepliesByTask: Record<string, Array<{ at: number; text: string }>>;
   /** Supercar: most recent web_search event per task. */
   webSearchByTask: Record<string, UiWebSearchEvent>;
   /** Supercar: latest extended-thinking summary per task. */
@@ -78,6 +84,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   executorFallbackByTask: {},
   degradeByTask: {},
   awaitingUserByTask: {},
+  userRepliesByTask: {},
   webSearchByTask: {},
   thinkingByTask: {},
   // Default ON: with the VNC lane live, view-only is the defensive
@@ -191,6 +198,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         delete executorFallbackByTask[taskId];
         const degradeByTask = { ...prev.degradeByTask };
         delete degradeByTask[taskId];
+        const userRepliesByTask = { ...prev.userRepliesByTask };
+        delete userRepliesByTask[taskId];
         const nextTasks = prev.tasks.filter((t) => t.taskId !== taskId);
         const nextSelected =
           prev.selectedTaskId === taskId ? (nextTasks[0]?.taskId ?? null) : prev.selectedTaskId;
@@ -202,6 +211,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
           captchaWaitByTask,
           executorFallbackByTask,
           degradeByTask,
+          userRepliesByTask,
         };
       });
       return { ok: true as const };
@@ -235,6 +245,19 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   },
 
   async replyToTask(taskId, message) {
+    // Pin the user's text into the conversation stream before the
+    // round-trip returns — the old behaviour wiped the composer and
+    // left no trace of what the user said, which read like the reply
+    // had vanished. If the mutation fails the message stays visible
+    // (the toast explains) so the user can retry without retyping.
+    const trimmed = message.trim();
+    const entry = { at: Date.now(), text: trimmed };
+    set((prev) => ({
+      userRepliesByTask: {
+        ...prev.userRepliesByTask,
+        [taskId]: [...(prev.userRepliesByTask[taskId] ?? []), entry],
+      },
+    }));
     try {
       const res = await trpc.tasks.reply.mutate({ taskId, message });
       if (res.ok) {
@@ -525,6 +548,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       executorFallbackByTask: {},
       degradeByTask: {},
       awaitingUserByTask: {},
+      userRepliesByTask: {},
       webSearchByTask: {},
       thinkingByTask: {},
     });

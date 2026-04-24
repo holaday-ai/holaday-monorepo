@@ -1,7 +1,18 @@
-import { ChevronLeft, ChevronRight, Globe, MousePointerClick, Power, Square } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
+  Globe,
+  MousePointerClick,
+  Power,
+  RotateCw,
+  Square,
+} from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { VncViewport, type VncStatus } from '@/components/VncViewport';
+import { trpc } from '@/lib/trpc';
 import { send as wsSend } from '@/lib/ws';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
@@ -327,6 +338,9 @@ export function BrowserPanel({
         <>
           <header className="flex h-11 items-center gap-2 border-b border-border px-3 pt-2">
             <StatusDot status={status} />
+            <NavButton direction="back" title="后退" />
+            <NavButton direction="forward" title="前进" />
+            <NavButton direction="reload" title="刷新" />
             <div
               className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
               title={displayUrl}
@@ -665,5 +679,48 @@ function StatusDot({ status }: { status: DotStatus }): JSX.Element {
         status === 'error' && 'bg-red-500',
       )}
     />
+  );
+}
+
+/**
+ * Small 20x20 icon button that fires `tasks.browserNav` on the shared
+ * Brave instance. Fire-and-forget — the VNC stream updates within a
+ * tick so we don't need to block the UI or show a result toast. A
+ * silent failure on no_executor / nav_failed is fine; the user just
+ * clicks again.
+ */
+function NavButton({
+  direction,
+  title,
+}: {
+  direction: 'back' | 'forward' | 'reload';
+  title: string;
+}): JSX.Element {
+  const [pending, setPending] = React.useState(false);
+  const Icon = direction === 'back' ? ArrowLeft : direction === 'forward' ? ArrowRight : RotateCw;
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      disabled={pending}
+      onClick={async () => {
+        setPending(true);
+        try {
+          await trpc.tasks.browserNav.mutate({ direction });
+        } catch {
+          /* silent — see docstring */
+        } finally {
+          setPending(false);
+        }
+      }}
+      className={cn(
+        'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors',
+        'hover:bg-foreground/5 hover:text-foreground',
+        pending && 'opacity-50',
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" />
+    </button>
   );
 }

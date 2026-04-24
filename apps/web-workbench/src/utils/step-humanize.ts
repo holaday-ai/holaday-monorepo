@@ -41,10 +41,52 @@ export function humanizeStep(step: UiStep): string | null {
       return '任务无法完成';
     case 'wait_for_human':
       return '需要您完成验证';
+    // Supercar's per-iteration tool name is one of:
+    //   computer  — the Anthropic computer-use tool (click/type/screenshot)
+    //   text      — the model "spoke" this turn (textPreamble carries
+    //               the natural-language sentence it emitted)
+    //   web_search — handled by WebSearchLine, skip here
+    // For `text` we want the model's actual sentence to surface as the
+    // agent's voice; for `computer` we return a compact status so the
+    // user doesn't see a wall of "computer" rows.
+    case 'text':
+      return pickAgentText(step);
+    case 'computer':
+      return describeComputer(step);
+    case 'web_search':
+      return null;
     default:
       if (!kind) return null;
+      // Suppress anything that still looks like a raw tool name —
+      // lowercase identifier, no spaces. Unknown rich summaries still
+      // fall through so we don't accidentally silence structured text.
+      if (/^[a-z_][a-z0-9_]*$/.test(kind)) {
+        return step.actionSummary && !/^[a-z_][a-z0-9_]*$/.test(step.actionSummary)
+          ? step.actionSummary
+          : null;
+      }
       return step.actionSummary || null;
   }
+}
+
+function pickAgentText(step: UiStep): string | null {
+  const s = step.actionSummary?.trim();
+  if (!s) return null;
+  // The server populates actionSummary with either the textPreamble or
+  // the joined tool names. If it's just "text" or "thinking" we have
+  // nothing useful — drop the row rather than render a debug label.
+  if (s === 'text' || s === 'thinking') return null;
+  return s;
+}
+
+function describeComputer(step: UiStep): string {
+  const s = step.actionSummary?.trim();
+  // When the commander included a text preamble alongside the computer
+  // call, surface the preamble as the agent's voice. Otherwise fall
+  // back to a compact status so the stream doesn't repeat "computer"
+  // on every iteration.
+  if (s && s !== 'computer' && !/^[a-z_][a-z0-9_]*$/.test(s)) return s;
+  return step.status === 'running' ? '正在操作浏览器…' : '完成一步操作';
 }
 
 /**

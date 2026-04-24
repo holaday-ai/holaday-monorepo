@@ -37,6 +37,7 @@ interface Props {
 // fresh `[]` via `?? []` triggers React's getSnapshot cache warning
 // and can loop infinitely under StrictMode.
 const EMPTY_STEPS: UiStep[] = [];
+const EMPTY_REPLIES: Array<{ at: number; text: string }> = [];
 
 /**
  * Conversational stream for one task. Emulates Claude's chat layout:
@@ -56,6 +57,8 @@ const EMPTY_STEPS: UiStep[] = [];
  */
 export function TaskStream({ task }: Props): JSX.Element {
   const steps = useTaskStore((s) => s.stepsByTask[task.taskId]) ?? EMPTY_STEPS;
+  const userReplies =
+    useTaskStore((s) => s.userRepliesByTask[task.taskId]) ?? EMPTY_REPLIES;
   const captchaWait = useTaskStore((s) => s.captchaWaitByTask[task.taskId]);
   const executorFallback = useTaskStore((s) => s.executorFallbackByTask[task.taskId]);
   const degrade = useTaskStore((s) => s.degradeByTask[task.taskId]);
@@ -68,7 +71,16 @@ export function TaskStream({ task }: Props): JSX.Element {
 
   React.useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ block: 'end' });
-  }, [steps.length, task.status, captchaWait, executorFallback, degrade, awaitingUser, webSearch]);
+  }, [
+    steps.length,
+    userReplies.length,
+    task.status,
+    captchaWait,
+    executorFallback,
+    degrade,
+    awaitingUser,
+    webSearch,
+  ]);
 
   const terminal =
     task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled';
@@ -82,6 +94,9 @@ export function TaskStream({ task }: Props): JSX.Element {
   return (
     <div className="mx-auto max-w-3xl space-y-4 px-6 pb-4 pt-8">
       <UserBubble intent={task.intent} />
+      {userReplies.map((r) => (
+        <UserBubble key={r.at} intent={r.text} />
+      ))}
 
       <AgentBlock
         task={task}
@@ -197,6 +212,13 @@ function AgentBlock({
     Boolean(webSearch) ||
     Boolean(task.resultText);
 
+  // Claude-style collapse: while the task is running we show the
+  // humanized play-by-play in the main flow; once it reaches a
+  // terminal status the play-by-play folds into the "查看详细步骤"
+  // toggle so the user's eye lands on the summary. They can still
+  // expand to audit every iteration.
+  const showInlineProgress = !terminal;
+
   return (
     <div className="flex items-start gap-3">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-pink-500 text-[11px] font-semibold text-white">
@@ -207,9 +229,11 @@ function AgentBlock({
 
         {!hasAnyActivity && !terminal && <BoardingLine />}
 
-        {humanLines.length > 0 && <HumanLineList lines={humanLines} />}
+        {showInlineProgress && humanLines.length > 0 && (
+          <HumanLineList lines={humanLines} />
+        )}
 
-        {screencastUrl && !terminal && <CurrentUrlChip url={screencastUrl} />}
+        {showInlineProgress && screencastUrl && <CurrentUrlChip url={screencastUrl} />}
 
         {webSearch && !awaitingUser && <WebSearchLine event={webSearch} />}
 
@@ -229,7 +253,16 @@ function AgentBlock({
         )}
 
         {steps.length > 0 && (
-          <DetailToggle open={detailOpen} count={steps.length} onToggle={() => setDetailOpen((v) => !v)}>
+          <DetailToggle
+            open={detailOpen}
+            count={steps.length}
+            onToggle={() => setDetailOpen((v) => !v)}
+          >
+            {terminal && humanLines.length > 0 && (
+              <div className="mt-2">
+                <HumanLineList lines={humanLines} />
+              </div>
+            )}
             <div className="mt-2 space-y-2">
               {steps.map((step, i) => (
                 <StepCard
