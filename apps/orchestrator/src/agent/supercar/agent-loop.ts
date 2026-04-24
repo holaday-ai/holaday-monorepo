@@ -1355,24 +1355,31 @@ async function synthesizeBraveResults(opts: {
         `[${i + 1}] ${h.title || h.url}\n${h.snippet || '(no snippet)'}\nurl: ${h.url}`,
     )
     .join('\n\n');
-  const system = `你是一个简洁的问答助手。用户问了一个信息类问题，我会把 Brave Search 的前 8 条结果喂给你。你要：
-- **单点事实查询**（定义 / 新闻 / 某一个数字）→ 用 2-4 句话直接回答，可以加 1-3 个行内引用 \`[网站名](URL)\`
-- **对比 / 比价 / 排名 / 多来源汇总**（"京东和淘宝哪个便宜"、"薪资对比"、"酒店排行"）→ **必须**用 markdown 表格输出，**不要**用段落描述
-- 用中文回答（除非用户用英文问）
-- **不要列出所有搜索结果**。不要写 "搜索结果如下" / "根据以下来源"。
-- **不要原样复制 snippet**。要综合、对比、给结论。
-- 信息不足时直接说 "搜索结果里没提到 X"，不要编
+  const system = `你是一个极简问答助手。用户问了一个信息类问题，我会把 Brave Search 的前 8 条结果喂给你。回复风格必须严格按下面规则：
 
-对比类输出示例（必须复刻）：
+- 像聊天，不像报告。简短直接。**总字数 ≤ 100 字**（表格本身不算）。
+- 单点事实（定义 / 新闻 / 一个数字）→ **一句话**直接回答。
+- 对比 / 比价 / 排名 / 多来源 → 用 markdown 表格，**不超过 4 列**，表格后一句话结论，句号结束。
+- 中文回答（用户用英文则英文）。
+- **禁止**：
+  - "购买建议" / "注意事项" / "温馨提示" / "数据来源" / 免责声明 / 风险提示
+  - 加粗小标题（"## 结论"、"**建议**"）
+  - emoji、开场铺垫（"根据以下信息…"）
+  - bullet 列表超过 3 条
+  - 原样复制 snippet、"搜索结果如下" 之类
 
-| 平台 | 产品 | 价格 | 链接 |
-|------|------|------|------|
-| 京东 | AirPods Pro 2 | ¥1,899 | [京东](URL) |
-| 淘宝 | AirPods Pro 2 | ¥1,849 | [淘宝](URL) |
+示范：
 
-**结论：淘宝便宜 ¥50。**
+| 平台 | 价格 | 国补后 |
+|------|------|--------|
+| 京东 | ¥10,999 | ¥8,944 |
+| 天猫 | ¥10,999 | ¥8,999 |
 
-第一列通常是"平台 / 来源"类锚点；末尾用 \`**结论：...**\` 一句话定论。`;
+京东便宜约 ¥55，教育优惠可到 ¥8,249。
+
+— 只有表格 + 一行结论。没有其它段落。
+
+信息不足就说"搜索结果里没提到 X"，一句话，不要编。`;
   const user = `用户问题：${opts.intent}
 
 搜索结果：
@@ -1382,11 +1389,13 @@ ${context}`;
     const client = new Anthropic({ apiKey: opts.apiKey });
     const resp = await client.messages.create({
       model: opts.model,
-      // Bumped from 400 → 800 so multi-row comparison tables don't
-      // truncate mid-row. Still a fixed upper bound — for a full
-      // research report the agent uses the browser loop, not this
-      // single-shot synthesis.
-      max_tokens: 800,
+      // Round-3b retighten: 800 → 300. The new system prompt caps
+      // output at ~100 zh chars + one 2-4 row compact table, which
+      // sits well under 300 output tokens (a single Chinese char is
+      // ~1-2 tokens). The lower cap does double duty as a style
+      // enforcer — it physically cannot emit the old "购买建议 +
+      // 数据来源 + 温馨提示" pyramid even if the model tried.
+      max_tokens: 300,
       system,
       messages: [{ role: 'user', content: user }],
     });
