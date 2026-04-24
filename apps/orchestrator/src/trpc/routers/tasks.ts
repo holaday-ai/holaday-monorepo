@@ -1082,6 +1082,33 @@ export const tasksRouter = router({
     }),
 
   /**
+   * Navigate the headed Brave singleton to about:blank so the VNC
+   * stream doesn't show a stale URL from a previous task while the
+   * user types the next intent. Idempotent + fire-and-forget — we
+   * don't surface errors because there's nothing the user can do
+   * about a CDP hiccup except try again. Only runs if the primary
+   * executor is the headed lane (guarded in the router).
+   */
+  resetBrowser: protectedProcedure.mutation(async ({ ctx }) => {
+    const exec =
+      ctx.executionRouter?.getExecutor('headed') ??
+      ctx.executionRouter?.getExecutor('headless') ??
+      ctx.playwrightExecutor ??
+      null;
+    if (!exec) return { ok: false as const, reason: 'no_executor' };
+    try {
+      await exec.resetPageForTask();
+      return { ok: true as const };
+    } catch (err) {
+      ctx.logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'tasks.resetBrowser: reset failed (non-fatal)',
+      );
+      return { ok: false as const, reason: 'reset_failed' };
+    }
+  }),
+
+  /**
    * Remove one of the caller's tasks. Cascades to task_steps / task_events
    * via the schema's onDelete. Scoped hard — the WHERE clause requires
    * both the externalId AND caller's userId so a user cannot delete

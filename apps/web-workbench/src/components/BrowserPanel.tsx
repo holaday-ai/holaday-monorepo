@@ -376,8 +376,21 @@ export function BrowserPanel({
             </button>
           </header>
           {awaitingUser && (
-            <div className="animate-pulse-dot border-b border-amber-300/60 bg-amber-100/80 px-3 py-1.5 text-center text-[11px] font-semibold text-amber-900">
-              需要您操作 · 请在 Chrome 中完成验证
+            <div
+              role="alert"
+              className="flex animate-pulse-dot items-center gap-3 border-b-2 border-amber-400 bg-amber-100 px-4 py-3 text-amber-900 shadow-inner dark:border-amber-500 dark:bg-amber-500/20 dark:text-amber-100"
+            >
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-500 text-base font-bold text-white">
+                !
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold">
+                  需要您手动完成验证
+                </div>
+                <div className="mt-0.5 text-xs text-amber-900/80 dark:text-amber-100/80">
+                  交互模式已开启，直接在下方画面里点击验证码 / 滑动滑块即可。完成后 agent 会继续。
+                </div>
+              </div>
             </div>
           )}
           {interactiveActive && (

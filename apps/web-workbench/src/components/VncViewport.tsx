@@ -88,6 +88,15 @@ export function VncViewport({
   // Ref mirror of viewOnly so the async RFB construction can read
   // the current value without caring about stale closures.
   const viewOnlyRef = React.useRef(viewOnly);
+  // Exponential-backoff reconnect. Bumped whenever RFB emits a
+  // 'disconnect' event; the main effect's deps include this value so
+  // bumping re-runs the effect with a fresh WebSocket. Rest stays at
+  // 0 when the connection is healthy.
+  const [reconnectEpoch, setReconnectEpoch] = React.useState(0);
+  const reconnectTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Attempt count scoped to the current gap — resets to 0 on every
+  // 'connect' event so a fresh disconnect starts backoff over.
+  const attemptRef = React.useRef(0);
 
   // Main effect: construct RFB when wsUrl / password change. Do NOT
   // include `viewOnly` in deps — flipping it should never rebuild the
@@ -106,11 +115,23 @@ export function VncViewport({
     let rfb: RFBInstance | null = null;
     const onConnect = () => {
       if (disposed) return;
+      attemptRef.current = 0;
       onStatusChange?.('connected');
     };
     const onDisconnect = () => {
       if (disposed) return;
       onStatusChange?.('disconnected');
+      // Schedule an auto-reconnect with exponential backoff. Attempt
+      // 1 → 500ms, 2 → 1s, 3 → 2s, ... capped at 30s. Keeps retrying
+      // indefinitely; user tearing down the component disposes the
+      // timer via the cleanup return.
+      attemptRef.current += 1;
+      const delay = Math.min(30_000, 500 * 2 ** (attemptRef.current - 1));
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = setTimeout(() => {
+        if (disposed) return;
+        setReconnectEpoch((n) => n + 1);
+      }, delay);
     };
     const onError = () => {
       if (disposed) return;
@@ -157,6 +178,10 @@ export function VncViewport({
 
     return () => {
       disposed = true;
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
       if (rfb) {
         rfb.removeEventListener('connect', onConnect);
         rfb.removeEventListener('disconnect', onDisconnect);
@@ -172,8 +197,10 @@ export function VncViewport({
     };
     // Deliberate: `viewOnly` is NOT in deps — we'd otherwise tear
     // down the socket every time the user toggles interactive mode.
+    // `reconnectEpoch` IS — bumping it forces a fresh RFB with the
+    // same wsUrl, which is how auto-reconnect lands.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsUrl, password, onStatusChange]);
+  }, [wsUrl, password, onStatusChange, reconnectEpoch]);
 
   React.useEffect(() => {
     viewOnlyRef.current = viewOnly;

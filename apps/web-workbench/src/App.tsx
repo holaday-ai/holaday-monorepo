@@ -302,6 +302,10 @@ function AppShell(): JSX.Element {
         onNewTask={() => {
           setSelectedTask(null);
           setTimeout(() => inputRef.current?.focus(), 50);
+          // Reset Brave to about:blank so the VNC stream stops
+          // showing a stale URL from the previous task. Fire-and-
+          // forget; errors are logged server-side.
+          void trpc.tasks.resetBrowser.mutate().catch(() => {});
         }}
         onDeleteTask={async (taskId) => {
           const ok = window.confirm('删除这个任务？任务记录和步骤都会清除。');
