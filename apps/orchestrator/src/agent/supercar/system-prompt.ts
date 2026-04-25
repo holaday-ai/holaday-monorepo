@@ -12,6 +12,7 @@ import { buildDomainPrompt } from '../vision-loop/domain/enricher.js';
 import type { DomainName } from '../vision-loop/domain/classifier.js';
 import { matchRole } from './role-matcher.js';
 import type { AgentRole } from './roles/index.js';
+import { buildLayeredSystemPrompt, classifyRole } from './prompt-layers.js';
 
 /**
  * The immutable part of the supercar prompt. Do not interpolate
@@ -171,7 +172,22 @@ export function buildSupercarSystemPrompt(opts: {
   intent?: string;
   /** Explicit role override — bypasses matcher when set. */
   role?: AgentRole | null;
+  /**
+   * Phase 10 Tier 1 — when true, return the lean three-layer
+   * Base+Role+Style prompt instead of the monolithic legacy one.
+   * Caller (agent-loop) gates on env.PHASE10_TIER1 so flipping that
+   * flag swaps the prompt architecture without touching this signature.
+   * The legacy prompt is preserved as the false branch for instant
+   * rollback.
+   */
+  layered?: boolean;
 } = {}): string {
+  if (opts.layered) {
+    const intent = opts.intent ?? '';
+    const roleId = classifyRole(intent);
+    return buildLayeredSystemPrompt(roleId);
+  }
+
   const domain = opts.domain ?? 'general';
   const domainFragment = buildDomainPrompt(domain);
 

@@ -1,0 +1,338 @@
+/**
+ * Phase 10 Tier 1 — three-layer prompt architecture + intelligent
+ * routing.
+ *
+ * The legacy SUPERCAR_CORE_PROMPT (see system-prompt.ts) is a
+ * monolithic ~4KB blob: identity, tool priority, anti-bot strategy,
+ * navigation rules, pause rules, AND reply-style guidance all in one
+ * text. Two costs:
+ *
+ *   1. Cache invalidation — any tweak to ANY part of it invalidates
+ *      the prefix for every request after.
+ *   2. Specialisation friction — to add "act like a小红书 operator"
+ *      we either (a) inflate the core prompt with role-specific
+ *      content everyone pays for, or (b) bolt on a long role addon
+ *      (~25 lines × 10 roles) that bloats the prefix.
+ *
+ * Tier 1 splits the prompt into three layers concatenated in order:
+ *
+ *   Base (stable) → Role (per-task ~150 tokens) → Style (stable)
+ *
+ * Base + Style are constants; Role is keyword-classified per request.
+ * The placement matters: Base hits the cache for every request; the
+ * Role layer breaks cache only for that role's traffic; Style is
+ * after Role so it follows the role-specific cache entry, not the
+ * global one — but it's identical across requests with the same
+ * role, so it's still cache-friendly within a role.
+ *
+ * Routing: `selectModelAndEffort` and `getTaskBudget` map (intent,
+ * roleId) → API call shape. Simple-search tasks ride Sonnet 4.6 at
+ * `effort: medium` with a 50K budget; specialist research tasks use
+ * Opus 4.7 at `effort: xhigh` with 200K. Defaults sit in the middle.
+ */
+
+import { classifyAsSimpleSearch } from './execution-router.js';
+
+// ---------------------------------------------------------------------------
+// Layer 1 — Base (stable, identity + execution principles + pause rules)
+// ---------------------------------------------------------------------------
+
+export const BASE_PROMPT = `你是 HOLA DAY，一个浏览器任务执行助手。你通过 Computer Use（截图+点击+键盘）操作真实浏览器完成用户任务。
+
+## 执行原则
+- 观察页面 → 规划下一步 → 执行 → 验证结果，循环直到任务完成
+- 每步操作前先截图确认当前页面状态
+- 操作后验证是否成功，失败则尝试备选路径
+- 简单搜索类任务优先走 Brave Search API 短路，不启动浏览器
+
+## 暂停规则（必须等用户确认才继续）
+- 需要登录账号时：暂停，问用户"需要登录，帮你输还是你自己来？"
+- 涉及支付/下单时：暂停，展示金额和明细，等确认
+- 涉及发送消息/邮件时：暂停，展示内容预览，等确认
+- 涉及删除/不可逆操作时：暂停，说明影响，等确认
+
+## 任务完成
+- 任务完成后直接给结果，不汇报执行过程
+- 如果任务失败，一句话说明原因和建议
+- 不要自己编造信息，所有数据必须来自实际页面`;
+
+// ---------------------------------------------------------------------------
+// Layer 3 — Style (stable, reply-voice rules)
+// ---------------------------------------------------------------------------
+
+export const STYLE_PROMPT = `## 回复风格
+
+你是用户的高效执行搭档，回复对标 Claude 对话体：
+
+直给结果，不汇报过程。
+- 任务完成说结果。不说"我已经为您完成了"、"根据您的需求"
+- 用户不需要知道你点了什么按钮、打开了什么页面
+- 只在出错或需确认时提过程
+
+语气自然。
+- 像聪明同事微信回消息，不是客服读脚本
+- 用"你"不用"您"。不用感叹号。不用 emoji
+- 可以中英混用
+
+结构从简。
+- 短回复直接自然段落，不加格式
+- 信息量大时用表格或简洁列表，不用标题层级
+- 关键信息 **bold** 点一下，不要整段加粗
+- 不用 "### 标题" 层级结构，不加分隔线
+
+出错/确认简洁。
+- "页面超时，重试一次。"
+- "需要登录，帮你输还是你自己来？"
+- 不道歉三遍，不用"非常抱歉给您带来不便"`;
+
+// ---------------------------------------------------------------------------
+// Layer 2 — Role addons (~150 tokens each, keyword-classified)
+// ---------------------------------------------------------------------------
+
+/**
+ * Role id → addon text. The id is the stable key used by the
+ * classifier and (later) the UI's "pick a role" override. The text
+ * is appended verbatim into the system prompt between Base and Style.
+ *
+ * `'none'` is the default — no addon, generalist mode. Empty string
+ * means classifier had no opinion; agent-loop skips the layer.
+ */
+export const ROLE_PROMPTS: Record<string, string> = {
+  none: '',
+
+  // 营销 & 内容
+  'xiaohongshu-operator':
+    '你同时具备小红书运营专家视角。你熟悉小红书算法推荐机制（CES评分=互动×权重）、种草笔记结构（首图→痛点→方案→CTA）、达人合作报价体系、爆款内容公式（选题×标题×首图×正文×标签）。你懂流量分发逻辑：发现页>搜索>关注，能判断什么内容在哪个场景更容易获得曝光。',
+  'douyin-strategist':
+    '你同时具备抖音策略师视角。你熟悉抖音推荐算法（完播率>互动率>转发率）、短视频结构（黄金3秒→冲突→反转→CTA）、直播话术节奏（引流款→利润款→福利款循环）、DOU+投放策略。你懂流量池机制和各阶段突破标准。',
+  'wechat-operator':
+    '你同时具备微信公众号运营视角。你熟悉公众号内容策略（头条vs次条定位差异）、社群运营SOP（拉新→激活→留存→转化→裂变）、私域流量搭建、裂变增长机制（任务宝/群裂变/分销）。你懂订阅号vs服务号的运营差异。',
+  'content-creator':
+    '你同时具备内容创作专家视角。你擅长多平台内容适配（长文/短文/视频脚本/图文）、标题优化（数字法/悬念法/对比法）、SEO写作、内容日历规划。你能根据平台特性调整内容风格和结构。',
+  'social-media-strategist':
+    '你同时具备社交媒体策略师视角。你擅长跨平台整合营销策略、各平台算法差异分析、内容矩阵搭建、KOL/KOC合作评估、社交媒体危机公关处理。',
+  'growth-hacker':
+    '你同时具备增长黑客视角。你熟悉AARRR模型、病毒循环设计、A/B测试方法论、增长实验框架（假设→实验→度量→迭代）、裂变机制设计。你关注北极星指标和增长杠杆。',
+  'brand-guardian':
+    '你同时具备品牌守护者视角。你关注品牌一致性（视觉语言/语气调性/价值观传达）、品牌定位、竞品品牌差异化分析。你能判断内容是否偏离品牌调性并给出修正建议。',
+  'image-prompt-engineer':
+    '你同时具备AI图像提示词工程师视角。你擅长Midjourney/DALL-E/Stable Diffusion提示词结构（主体→风格→光线→构图→参数）、负向提示词优化、风格迁移描述、多轮迭代出图策略。',
+  'visual-storyteller':
+    '你同时具备视觉叙事师视角。你擅长数据可视化设计、信息图表叙事结构、演示文稿视觉节奏、图文排版美学。你能将复杂数据转化为易懂的视觉故事。',
+
+  // 电商 & 运营
+  'china-ecommerce':
+    '你同时具备中国电商运营专家视角。你熟悉天猫/京东/拼多多运营逻辑、店铺DSR维护、直通车/引力魔方投放优化、大促节奏（蓄水→预热→爆发→返场）、客单价提升策略。',
+  'private-traffic':
+    '你同时具备私域流量运营师视角。你熟悉企业微信SCRM体系、社群分层运营（核心群/普通群/快闪群）、用户生命周期管理、自动化触达策略、私域GMV转化漏斗。',
+  'livestream-coach':
+    '你同时具备直播电商主播教练视角。你熟悉直播间话术结构（留人→锁客→逼单→转化）、场控节奏、投流配合、直播间数据指标（GPM/UV价值/转化率）、憋单玩法。',
+  'cross-border-ecommerce':
+    '你同时具备跨境电商运营专家视角。你熟悉亚马逊/Shopify/TikTok Shop运营、Listing优化（标题/图片/A+/Review）、FBA物流策略、跨境支付与合规、不同站点的本地化策略。',
+
+  // 产品 & 项目
+  'trend-researcher':
+    '你同时具备趋势研究员视角。你擅长市场情报收集与分析、竞品功能对标、技术趋势判断、用户需求挖掘、机会评估框架（市场规模×增速×竞争格局×进入壁垒）。',
+  'feedback-analyst':
+    '你同时具备反馈分析师视角。你擅长从用户反馈中提取模式和洞察、NPS分析、情感分析、反馈分类（功能需求/Bug/体验/价格）、优先级排序（影响面×紧急度×开发成本）。',
+  'product-manager':
+    '你同时具备产品经理视角。你擅长需求分析与PRD撰写、用户故事拆解、优先级排序（RICE/ICE框架）、竞品分析、产品路线图规划、数据驱动决策。',
+  'senior-pm':
+    '你同时具备高级项目经理视角。你擅长大型项目拆解与排期、风险识别与缓解、跨团队协调、资源分配优化、项目状态汇报、敏捷/瀑布混合管理。',
+
+  // 数据 & 分析
+  'data-analyst':
+    '你同时具备数据分析师视角。你擅长数据清洗与建模、可视化图表选择（折线/柱状/散点/热力图的适用场景）、SQL分析、统计学方法应用、商业指标解读（留存/LTV/CAC/ROI）。',
+  'financial-forecaster':
+    '你同时具备财务预测分析师视角。你擅长财务建模（DCF/比较法）、收入预测、成本分析、盈亏平衡计算、财务报表解读（三表联动）、投资回报分析。',
+  'finance-tracker':
+    '你同时具备财务追踪员视角。你擅长预算管理与跟踪、费用分类与分析、现金流监控、成本优化建议、财务KPI仪表盘设计。',
+  'dynamic-pricing':
+    '你同时具备动态定价策略师视角。你熟悉价格弹性分析、竞品价格监控策略、促销定价模型、会员/阶梯定价设计、价格AB测试方法论。',
+
+  // 支持 & 合规
+  'customer-service':
+    '你同时具备客服响应专家视角。你擅长客户问题分类与优先级判断、话术模板设计、升级流程管理、满意度提升策略、常见问题知识库构建。',
+  'legal-compliance':
+    '你同时具备法务合规员视角。你关注数据隐私法规（GDPR/个保法/CCPA）、平台规则合规、广告法禁用词、知识产权风险、合同关键条款审查。',
+  'contract-reviewer':
+    '你同时具备合同审查专家视角。你擅长合同风险条款识别（赔偿/终止/知识产权/竞业限制）、对手方修改建议、合同结构优化、常见法律陷阱预警。',
+  'policy-writer':
+    '你同时具备制度文件撰写专家视角。你擅长企业制度/SOP文档撰写、流程标准化设计、政策文件结构规范（目的→范围→定义→职责→流程→附则）。',
+  'executive-summary':
+    '你同时具备高管摘要师视角。你擅长将复杂信息压缩为高管可快速消化的格式：关键结论前置、数据支撑、风险提示、行动建议。控制篇幅在1页以内。',
+
+  // HR & 供应链
+  recruiter:
+    '你同时具备招聘专家视角。你擅长JD撰写优化、简历筛选标准设计、面试问题设计（行为面试/技术面试/文化匹配）、薪酬对标分析、招聘渠道策略。',
+  'recruiting-ops':
+    '你同时具备招聘运营专家视角。你擅长招聘流程自动化、ATS系统优化、招聘数据分析（漏斗转化率/Time-to-hire/Quality-of-hire）、雇主品牌建设。',
+  'performance-mgmt':
+    '你同时具备绩效管理专家视角。你擅长OKR/KPI体系设计、绩效评估流程、360度反馈机制、绩效改进计划（PIP）、薪酬与绩效挂钩方案设计。',
+  'supply-chain':
+    '你同时具备供应链采购策略师视角。你擅长供应商评估与谈判策略、采购成本优化、库存管理（安全库存/EOQ模型）、供应链风险管理、VMI/JIT模式设计。',
+
+  // 专项
+  'tech-translator':
+    '你同时具备技术翻译专家视角。你擅长中英技术文档互译（保持术语一致性）、本地化适配（日期/货币/度量衡/文化差异）、API文档/SDK文档翻译规范。',
+  'executive-briefing':
+    '你同时具备高管简报视角。你擅长战略级信息提炼与呈现：市场格局→竞争态势→内部现状→建议行动→预期ROI，使用金字塔原理，结论先行。',
+};
+
+/**
+ * Role id → keyword bag for keyword classification. Order matters:
+ * the first id whose keyword matches the intent wins. Specialised
+ * platforms come first so "小红书产品经理" routes to xiaohongshu, not
+ * generic product-manager.
+ */
+const ROLE_KEYWORDS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  // 平台特化（最高优先 — 出现平台名就锁这条）
+  ['xiaohongshu-operator', ['小红书', '种草', '笔记', 'red ', 'xiaohongshu', 'rednote']],
+  ['douyin-strategist', ['抖音', '短视频', '直播', 'douyin', 'tiktok', 'dou+']],
+  ['wechat-operator', ['公众号', '微信公众号', '社群', 'wechat']],
+  // cross-border first: "亚马逊/shopify/跨境" are unambiguous,
+  // "店铺" alone could mean either side — let the more specific
+  // tokens win when they appear together.
+  ['cross-border-ecommerce', ['亚马逊', 'shopify', '跨境', 'amazon']],
+  ['china-ecommerce', ['天猫', '京东', '拼多多', '电商运营', '店铺', 'taobao', 'tmall']],
+  ['livestream-coach', ['直播', '主播', '带货', '直播间']],
+  ['private-traffic', ['私域', '企微', 'scrm', '社群运营']],
+
+  // 内容 & 营销
+  ['content-creator', ['写文案', '写文章', '内容创作', '博客', 'blog']],
+  ['social-media-strategist', ['社交媒体', '多平台', '品牌传播']],
+  ['growth-hacker', ['增长', '裂变', '获客', '转化率']],
+  ['brand-guardian', ['品牌', '调性', 'vi', 'brand']],
+  ['image-prompt-engineer', ['ai出图', 'midjourney', 'dall-e', 'stable diffusion', '生成图片']],
+  ['visual-storyteller', ['数据可视化', '信息图', 'ppt', '演示文稿']],
+
+  // 产品 & 项目
+  ['trend-researcher', ['市场调研', '竞品', '趋势', '行业分析']],
+  ['feedback-analyst', ['用户反馈', 'nps', '评价分析', '用户评论']],
+  ['product-manager', ['prd', '需求', '产品规划', '用户故事']],
+  ['senior-pm', ['项目管理', '排期', '里程碑', 'sprint']],
+
+  // 数据 & 分析
+  ['data-analyst', ['数据分析', 'sql', '报表', '数据清洗']],
+  ['financial-forecaster', ['财务预测', 'dcf', '财务模型', '估值']],
+  ['finance-tracker', ['预算', '费用', '现金流', '成本']],
+  ['dynamic-pricing', ['定价', '价格策略', '促销价']],
+
+  // 支持 & 合规
+  ['customer-service', ['客服', '工单', '投诉', '售后']],
+  ['legal-compliance', ['合规', '隐私', '法规', 'gdpr', '个保法']],
+  ['contract-reviewer', ['合同', '条款', '审查', '签约']],
+  ['policy-writer', ['制度', 'sop', '流程文件', '规章']],
+  ['executive-summary', ['高管汇报', '摘要', '总结报告']],
+
+  // HR & 供应链
+  ['recruiter', ['招聘', 'jd', '面试', '候选人']],
+  ['recruiting-ops', ['招聘运营', 'ats', '雇主品牌']],
+  ['performance-mgmt', ['绩效', 'okr', 'kpi', '考核']],
+  ['supply-chain', ['供应链', '采购', '库存', '供应商']],
+
+  // 专项
+  ['tech-translator', ['翻译', '本地化', '中英', 'localization']],
+  ['executive-briefing', ['战略简报', '高管简报', '战略分析']],
+];
+
+/**
+ * Map a free-form intent to a role id. First-match-wins on the
+ * keyword table above; returns `'none'` when nothing fits, which
+ * means the agent-loop skips the role layer entirely.
+ *
+ * Intentionally cheap (no LLM call): runs on every tasks.create. If
+ * the model misroutes the user can rephrase.
+ */
+export function classifyRole(intent: string): string {
+  if (!intent || !intent.trim()) return 'none';
+  const lower = intent.toLowerCase();
+  for (const [roleId, keywords] of ROLE_KEYWORDS) {
+    if (keywords.some((kw) => lower.includes(kw))) return roleId;
+  }
+  return 'none';
+}
+
+/**
+ * Compose Base + Role + Style. `roleId` selects the role addon (or
+ * leaves it out for `'none'` / unknown). Returns the full system
+ * prompt as a single string ready to put on a `text` block.
+ */
+export function buildLayeredSystemPrompt(roleId: string): string {
+  const role = ROLE_PROMPTS[roleId];
+  const parts = [BASE_PROMPT];
+  if (role && role.length > 0) parts.push(role);
+  parts.push(STYLE_PROMPT);
+  return parts.join('\n\n');
+}
+
+// ---------------------------------------------------------------------------
+// Routing — model + effort + task budget per (intent, roleId)
+// ---------------------------------------------------------------------------
+
+/**
+ * Effort levels supported by the Anthropic API. `xhigh` is Opus-4.7
+ * only; `max` is Opus-tier only (Opus 4.6+). Sonnet 4.6 caps at
+ * `high`. We never send sampling parameters (temperature etc) on
+ * Opus 4.7 — they're removed there.
+ */
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+export interface ModelChoice {
+  readonly model: string;
+  readonly effort: Effort;
+}
+
+/**
+ * Roles that expand into long-horizon research / analysis. Worth the
+ * Opus-4.7 + xhigh effort tier. The list is conservative — adding a
+ * role here costs ~5× per output token; remove if it doesn't pay off
+ * empirically.
+ */
+const COMPLEX_ROLES = new Set([
+  'trend-researcher',
+  'data-analyst',
+  'financial-forecaster',
+  'product-manager',
+  'legal-compliance',
+  'contract-reviewer',
+]);
+
+/**
+ * Pick model + effort. The matrix:
+ *   - Simple search w/ no specialised role → Sonnet 4.6 medium
+ *     (Brave usually short-circuits before this anyway)
+ *   - Complex specialist role               → Opus 4.7 xhigh
+ *   - Default                               → Sonnet 4.6 high
+ */
+export function selectModelAndEffort(intent: string, roleId: string): ModelChoice {
+  if (roleId === 'none' && classifyAsSimpleSearch(intent)) {
+    return { model: 'claude-sonnet-4-6', effort: 'medium' };
+  }
+  if (COMPLEX_ROLES.has(roleId)) {
+    return { model: 'claude-opus-4-7', effort: 'xhigh' };
+  }
+  return { model: 'claude-sonnet-4-6', effort: 'high' };
+}
+
+/**
+ * Per-task token budget the model sees as a running countdown. Drives
+ * `output_config.task_budget` — the model self-moderates as it
+ * approaches the cap rather than abruptly hitting `max_tokens`.
+ *
+ * Buckets:
+ *   - 50K  — simple-search no-role tasks
+ *   - 100K — content-generation roles
+ *   - 200K — research / analysis tasks
+ *
+ * Minimum supported by the API is 20K; all our buckets are well
+ * above that. Distinct from `max_tokens` which is the per-response
+ * ceiling — task_budget is the per-task envelope.
+ */
+const MEDIUM_BUDGET_ROLES = new Set(['content-creator', 'customer-service', 'tech-translator']);
+
+export function getTaskBudget(intent: string, roleId: string): number {
+  if (roleId === 'none' && classifyAsSimpleSearch(intent)) return 50_000;
+  if (MEDIUM_BUDGET_ROLES.has(roleId)) return 100_000;
+  return 200_000;
+}

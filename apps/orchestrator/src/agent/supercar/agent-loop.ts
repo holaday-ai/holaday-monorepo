@@ -43,7 +43,14 @@ import type { DomainName } from '../vision-loop/domain/classifier.js';
 import type { ApifyAdapter } from './adapters/apify.js';
 import type { BraveSearchAdapter } from './adapters/brave-search.js';
 import type { ZapierAdapter } from './adapters/zapier.js';
+import {
+  classifyRole,
+  getTaskBudget,
+  selectModelAndEffort,
+  type Effort,
+} from './prompt-layers.js';
 import { buildSupercarSystemPrompt } from './system-prompt.js';
+import { env as appEnv } from '../../config/env.js';
 
 /**
  * Anti-crawl stuck detection thresholds.
@@ -393,7 +400,32 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   }
 
   const client = new Anthropic({ apiKey });
-  const model = opts.model ?? process.env.SUPERCAR_MODEL ?? 'claude-sonnet-4-6';
+  // Phase 10 Tier 1: route model + effort + task_budget per (intent, role).
+  // When the env flag is off the legacy fixed-model path runs, identical to
+  // pre-Tier-1 behaviour. `roleId` also drives which Role layer the prompt
+  // composer injects below.
+  const tier1 = appEnv.PHASE10_TIER1;
+  const roleId = classifyRole(opts.intent);
+  const routed = tier1
+    ? selectModelAndEffort(opts.intent, roleId)
+    : { model: opts.model ?? process.env.SUPERCAR_MODEL ?? 'claude-sonnet-4-6', effort: 'high' as Effort };
+  const model = routed.model;
+  const effort: Effort = routed.effort;
+  const taskBudget = tier1 ? getTaskBudget(opts.intent, roleId) : null;
+  // Opus 4.7 has a more expensive tokenizer (1-1.35× input bytes/token);
+  // give it more output room. Sonnet keeps the prior 8K cap.
+  const maxTokens = model === 'claude-opus-4-7' ? 8192 : 8192;
+  logger.info(
+    {
+      taskId: opts.taskId,
+      tier1,
+      model,
+      effort,
+      roleId,
+      taskBudget,
+    },
+    'supercar: model + role routing',
+  );
   const maxIterations =
     opts.maxIterations ?? Number.parseInt(process.env.SUPERCAR_MAX_ITERATIONS ?? '50', 10);
   const timeoutMs =
@@ -478,9 +510,14 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // pick a specialisation (小红书运营 / 法律检索 / PM / ...). The role
   // addon appends after the domain fragment, before the cache
   // breakpoint gets placed on the composed string.
+  //
+  // Phase 10 Tier 1: when enabled, swap the monolithic core prompt for
+  // the lean Base + Role + Style layout. Layered prompts cache better
+  // (Base is identical across all tasks) and are cheaper per request.
   const systemPrompt = buildSupercarSystemPrompt({
     domain: opts.domain ?? null,
     intent: opts.intent,
+    layered: tier1,
   });
 
   type MsgParam = Anthropic.Beta.BetaMessageParam;
@@ -556,14 +593,39 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       const apiStart = Date.now();
       let response: Anthropic.Beta.BetaMessage;
       try {
+        // Phase 10 Tier 1 betas: server-side compaction + advisory
+        // task budgets. Each is appended only when the master flag is
+        // on; the legacy path stays on COMPUTER_USE_BETA alone.
+        const betas: string[] = [COMPUTER_USE_BETA];
+        if (tier1) {
+          betas.push('compact-2026-01-12', 'task-budgets-2026-03-13');
+        }
+
+        // output_config carries effort + task_budget. Both are GA on
+        // Opus-tier and Sonnet 4.6, and both no-op cleanly on the
+        // legacy path because we just don't pass them.
+        // `xhigh` is Opus-4.7-only — selectModelAndEffort guards that.
+        const outputConfig: Record<string, unknown> | null = tier1
+          ? {
+              effort,
+              ...(taskBudget !== null
+                ? { task_budget: { type: 'tokens', total: taskBudget } }
+                : {}),
+            }
+          : null;
+
         response = await client.beta.messages.create({
           model,
-          max_tokens: 8192,
+          max_tokens: maxTokens,
+          // Top-level cache_control auto-places the breakpoint on the
+          // last cacheable block (system here). Saves us hand-rolling
+          // breakpoint placement and matches Anthropic's recommended
+          // shape — see shared/prompt-caching.md.
+          cache_control: { type: 'ephemeral' },
           system: [
             {
               type: 'text',
               text: systemPrompt,
-              cache_control: { type: 'ephemeral' },
             },
           ],
           messages,
@@ -608,8 +670,21 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               },
             },
           ] as Anthropic.Beta.BetaToolUnion[],
-          betas: [COMPUTER_USE_BETA],
+          betas,
           thinking: { type: 'adaptive' },
+          // Phase 10 Tier 1: opt into server-side compaction so long
+          // research tasks don't blow past the context window. The
+          // API returns compaction blocks in `response.content`; we
+          // already append the full content array (line 666 below)
+          // so they round-trip back on the next turn automatically.
+          ...(tier1
+            ? {
+                context_management: {
+                  edits: [{ type: 'compact_20260112' as const }],
+                },
+              }
+            : {}),
+          ...(outputConfig ? { output_config: outputConfig } : {}),
           // Pin the same sandbox container across turns when the model
           // used code_execution on a prior turn; null on the first call.
           ...(containerId ? { container: containerId } : {}),

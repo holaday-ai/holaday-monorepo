@@ -141,6 +141,30 @@ const schema = z.object({
   BROWSER_DISPLAY_START: z.coerce.number().int().nonnegative().default(100),
   /** Xvfb screen geometry — matches the singleton's current default. */
   BROWSER_SCREEN_SIZE: z.string().default('1720x1440x24'),
+
+  /**
+   * Phase 10 Tier 1 — Agent intelligence upgrade master switch. When
+   * `true`, supercar enables five coordinated changes:
+   *   1. Three-layer system prompt (Base + Role + Style) instead of
+   *      monolithic core prompt
+   *   2. Top-level prompt caching `cache_control: ephemeral` on every
+   *      messages.create — the entire prefix caches across turns
+   *   3. Server-side context compaction via the
+   *      `compact-2026-01-12` beta when the conversation approaches
+   *      the 1M context window
+   *   4. Per-task token budgets (`output_config.task_budget`) — the
+   *      model sees a running countdown and self-moderates
+   *   5. Intelligent model routing: simple-search → Sonnet 4.6, complex
+   *      research → Opus 4.7 with `effort: xhigh`
+   *
+   * Default `false` so a bad rollout is reversible in one env flip.
+   * The five sub-features all gate on this flag — flipping it false
+   * restores the pre-Phase-10 behaviour exactly.
+   */
+  PHASE10_TIER1: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
 });
 
 export type Env = z.infer<typeof schema>;
