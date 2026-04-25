@@ -1,0 +1,60 @@
+import { sql } from 'drizzle-orm';
+import {
+  bigint,
+  datetime,
+  index,
+  int,
+  json,
+  mysqlTable,
+  uniqueIndex,
+  varchar,
+} from 'drizzle-orm/mysql-core';
+
+/**
+ * `payments` — one row per checkout attempt.
+ *
+ * Money stored as `amount_cents` (unsigned int) instead of DECIMAL —
+ * floating-point math on plan upgrades isn't worth the headache and
+ * USD/CNY both fit comfortably in 32-bit cents up to $42M.
+ *
+ * `status` lifecycle:
+ *   pending   → created an order, waiting for capture / webhook
+ *   completed → payment captured, plan upgraded
+ *   failed    → user abandoned, gateway declined, or webhook said no
+ *   refunded  → manual or gateway refund applied
+ *
+ * `metadata` keeps gateway-specific blobs (full PayPal capture, WeChat
+ * notify body, etc.) so we can investigate disputes without a separate
+ * audit table.
+ */
+export const payments = mysqlTable(
+  'payments',
+  {
+    id: bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement(),
+    externalId: varchar('external_id', { length: 32 }).notNull(),
+    userExternalId: varchar('user_external_id', { length: 32 }).notNull(),
+    provider: varchar('provider', { length: 16 }).notNull(),
+    providerOrderId: varchar('provider_order_id', { length: 128 }),
+    providerCaptureId: varchar('provider_capture_id', { length: 128 }),
+    plan: varchar('plan', { length: 32 }).notNull(),
+    amountCents: int('amount_cents', { unsigned: true }).notNull(),
+    currency: varchar('currency', { length: 8 }).notNull().default('USD'),
+    status: varchar('status', { length: 16 }).notNull().default('pending'),
+    metadata: json('metadata'),
+    createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP(3)`),
+    updatedAt: datetime('updated_at', { mode: 'date', fsp: 3 })
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP(3)`)
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    uniqueIndex('uk_payments_external_id').on(t.externalId),
+    index('ix_payments_user_status').on(t.userExternalId, t.status),
+    index('ix_payments_provider_order').on(t.provider, t.providerOrderId),
+  ],
+);
+
+export type Payment = typeof payments.$inferSelect;
+export type NewPayment = typeof payments.$inferInsert;

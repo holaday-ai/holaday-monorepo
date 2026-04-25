@@ -13,6 +13,8 @@ export const ID_PREFIXES = {
   skill: 'skl',
   session: 'sess',
   llmCall: 'llm',
+  payment: 'pay',
+  verificationCode: 'vc',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;
