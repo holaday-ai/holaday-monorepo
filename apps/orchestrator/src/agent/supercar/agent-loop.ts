@@ -150,8 +150,15 @@ export interface RunSupercarOptions {
   taskId: string;
   /** Free-form user intent — the first user message. */
   intent: string;
-  /** Connected Playwright executor. Required — computer use cannot run without a browser. */
-  executor: PlaywrightExecutor;
+  /**
+   * Connected Playwright executor. Nullable to support the
+   * Brave-only fast lane: simple-search tasks short-circuit at line
+   * 299 without ever touching a browser, so we accept the call even
+   * when the headless singleton is dead. The model loop below the
+   * Brave block guards against null and fails the task with a clear
+   * reason rather than crashing on `executor.observe()`.
+   */
+  executor: PlaywrightExecutor | null;
   /** API key; defaults to `ANTHROPIC_API_KEY`. */
   apiKey?: string;
   /** Override the default model (`claude-sonnet-4-6`). */
@@ -363,6 +370,26 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       { taskId: opts.taskId, err: r.error },
       'supercar: Zapier trigger failed — falling through to browser',
     );
+  }
+
+  // Past every non-browser short-circuit. Anything below this point
+  // dispatches tool calls against `executor`, so a null one is fatal
+  // — fail the task with a clear reason rather than crash on the
+  // first `executor.observe()`. Reaching here with no executor means
+  // a simple-search task arrived via the relaxed tasks.ts gate, the
+  // Brave fast lane returned empty/error, and the legacy headless
+  // singleton is also down — there is no browser to fall back to.
+  if (!opts.executor) {
+    logger.warn(
+      { taskId: opts.taskId, isSimpleSearch: Boolean(opts.isSimpleSearch) },
+      'supercar: no executor available after non-browser short-circuits — failing task',
+    );
+    return {
+      status: 'failed',
+      reason: 'browser unavailable (Brave/Chromium down) and Brave Search fallback returned no usable results',
+      iterations: 0,
+      toolsUsed: opts.isSimpleSearch ? ['brave_search'] : [],
+    };
   }
 
   const client = new Anthropic({ apiKey });

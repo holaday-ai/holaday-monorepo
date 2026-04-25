@@ -56,6 +56,22 @@ export const tasksRouter = router({
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
     }
 
+    // Compute these once — used both by the diagnostic log AND by the
+    // gate. Hoisting them up avoids re-classifying the intent twice.
+    const isSimpleSearchIntent = classifyAsSimpleSearch(input.intent);
+    const braveAdapterReady = Boolean(ctx.executionRouter?.brave);
+    /**
+     * Brave-only fast lane: simple-search intents (price compare /
+     * fact lookup / SERP-ish queries) short-circuit through Brave at
+     * agent-loop.ts:299 BEFORE any browser tool call. So even when
+     * the headless singleton is down (Brave crashed, dbus dead,
+     * connect-on-boot failed), we can still serve these tasks via
+     * Brave alone. The supercar gate below admits them on this
+     * ticket; runSupercarTask's null-executor guard handles the
+     * Brave-empty edge case.
+     */
+    const canShortCircuitBrave = isSimpleSearchIntent && braveAdapterReady;
+
     // Diagnostic (temporary, Round-4): log the supercar-gate inputs on
     // every tasks.create so BOSS can tell from pm2 logs exactly why a
     // task fell into the legacy branch. Happens BEFORE the gate so
@@ -66,10 +82,13 @@ export const tasksRouter = router({
         AGENT_MODE: appEnv.AGENT_MODE,
         playwrightExecutorPresent: Boolean(ctx.playwrightExecutor),
         anthropicKeyPresent: Boolean(appEnv.ANTHROPIC_API_KEY),
+        isSimpleSearchIntent,
+        braveAdapterReady,
+        canShortCircuitBrave,
         willUseSupercar:
           appEnv.AGENT_MODE === 'supercar' &&
-          Boolean(ctx.playwrightExecutor) &&
-          Boolean(appEnv.ANTHROPIC_API_KEY),
+          Boolean(appEnv.ANTHROPIC_API_KEY) &&
+          (Boolean(ctx.playwrightExecutor) || canShortCircuitBrave),
       },
       'tasks.create: control-plane decision',
     );
@@ -78,9 +97,18 @@ export const tasksRouter = router({
     // web_search_20260209 tools driving Playwright directly, with
     // adaptive thinking + prompt caching. This is the default starting
     // with the superstar rewrite; flip AGENT_MODE=legacy to fall back
-    // to the hand-rolled vision-loop. Requires a connected Playwright
-    // executor — we can't run computer use without a browser.
-    if (appEnv.AGENT_MODE === 'supercar' && ctx.playwrightExecutor && appEnv.ANTHROPIC_API_KEY) {
+    // to the hand-rolled vision-loop.
+    //
+    // Browser requirement is conditional: simple-search tasks can
+    // ride the Brave fast lane without one (canShortCircuitBrave),
+    // so the legacy vision-loop fall-through is no longer triggered
+    // every time the headless singleton dies — Brave handles the
+    // common "对比京东淘宝" / "查 X 价格" intents standalone.
+    if (
+      appEnv.AGENT_MODE === 'supercar' &&
+      appEnv.ANTHROPIC_API_KEY &&
+      (ctx.playwrightExecutor || canShortCircuitBrave)
+    ) {
       const taskId = newExternalId('task');
       const repo = new TaskRepository(ctx.db);
       await repo.insertTask(
@@ -180,7 +208,7 @@ export const tasksRouter = router({
           braveAdapter: ctx.executionRouter?.brave ?? null,
           zapierAdapter: ctx.executionRouter?.zapier ?? null,
           apifyAdapter: ctx.executionRouter?.apify ?? null,
-          isSimpleSearch: classifyAsSimpleSearch(input.intent),
+          isSimpleSearch: isSimpleSearchIntent,
           isCrossPlatformAutomation: classifyAsCrossPlatformAutomation(input.intent),
           zapierWebhookPath: process.env.ZAPIER_WEBHOOK_PATH ?? null,
           onTick(ev) {
