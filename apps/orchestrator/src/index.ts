@@ -15,6 +15,7 @@ import {
   type ExecutionRouter,
 } from './agent/supercar/index.js';
 import { BrowserPool, reapOrphans } from './browser-pool/index.js';
+import { createPayPalAdapter } from './payment/index.js';
 import { createVncProxy } from './browser-pool/vnc-proxy.js';
 import {
   AnthropicVisionLoopCommander,
@@ -187,12 +188,28 @@ async function main() {
     logger.info('MULTI_USER=false — using single-instance holaday-chromium-headed');
   }
 
+  // --- Phase 9: PayPal Checkout adapter (sandbox by default).
+  // Constructs only when both client id + secret are present; null
+  // otherwise so the payment router can return PRECONDITION_FAILED
+  // and the SPA hides the upgrade button gracefully.
+  const paypalAdapter = createPayPalAdapter({
+    clientId: process.env.PAYPAL_CLIENT_ID ?? null,
+    clientSecret: process.env.PAYPAL_CLIENT_SECRET ?? null,
+    env: process.env.PAYPAL_ENV === 'live' ? 'live' : 'sandbox',
+  });
+  if (paypalAdapter) {
+    logger.info({ env: paypalAdapter.env }, 'PayPal adapter ready');
+  } else {
+    logger.info('PayPal adapter disabled — PAYPAL_CLIENT_ID/_SECRET not set');
+  }
+
   const app = createHttpApp({
     planner,
     executionRouter,
     ...(visionCommander ? { visionCommander } : {}),
     ...(playwrightExecutor ? { playwrightExecutor } : {}),
     ...(browserPool ? { browserPool } : {}),
+    ...(paypalAdapter ? { paypalAdapter } : {}),
   });
 
   const httpServer = app.listen(env.HTTP_PORT, () => {

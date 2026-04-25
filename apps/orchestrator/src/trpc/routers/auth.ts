@@ -137,7 +137,9 @@ export const authRouter = router({
         externalId: users.externalId,
         email: users.email,
         displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
         plan: users.plan,
+        planExpiresAt: users.planExpiresAt,
       })
       .from(users)
       .where(eq(users.externalId, ctx.userId))
@@ -155,7 +157,9 @@ export const authRouter = router({
       userId: row.externalId,
       email: row.email,
       displayName: row.displayName,
+      avatarUrl: row.avatarUrl,
       plan: row.plan,
+      planExpiresAt: row.planExpiresAt,
       multiUser,
     };
   }),

@@ -1,5 +1,5 @@
 import { newExternalId } from '@holaday/shared-types';
-import { eq } from 'drizzle-orm';
+import { eq, or } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { users } from '../db/schema/users.js';
 import { signAccessToken } from './jwt.js';
@@ -10,7 +10,15 @@ export interface PublicUser {
   email: string;
   plan: string;
   displayName: string | null;
+  avatarUrl: string | null;
   createdAt: Date;
+}
+
+export interface GoogleProfile {
+  email: string;
+  googleId: string;
+  name?: string | null;
+  avatarUrl?: string | null;
 }
 
 export interface AuthResult {
@@ -110,6 +118,72 @@ export class AuthService {
   }
 
   /**
+   * Google-OAuth identity resolution. Three lanes:
+   *   1. row matched by google_id → return it (user came back through Google)
+   *   2. row matched by email     → link google_id + refresh avatar/displayName
+   *                                 (legacy password account adopting Google)
+   *   3. no match                 → create a fresh row, email_verified=true
+   *                                 because Google already verified it
+   *
+   * Always returns email_verified=true on the resulting row — Google
+   * gates this method behind its own email_verified check at the OAuth
+   * layer, so by the time we get here, ownership is proven.
+   */
+  async loginOrRegisterByGoogle(profile: GoogleProfile): Promise<AuthResult> {
+    const email = profile.email.trim().toLowerCase();
+    const [existing] = await this.db
+      .select()
+      .from(users)
+      .where(or(eq(users.googleId, profile.googleId), eq(users.email, email)))
+      .limit(1);
+
+    if (existing) {
+      const patch: Partial<typeof users.$inferInsert> = {};
+      if (!existing.googleId) patch.googleId = profile.googleId;
+      if (!existing.emailVerified) patch.emailVerified = true;
+      if (profile.avatarUrl && profile.avatarUrl !== existing.avatarUrl) {
+        patch.avatarUrl = profile.avatarUrl;
+      }
+      if (profile.name && !existing.displayName) patch.displayName = profile.name;
+      if (Object.keys(patch).length > 0) {
+        await this.db.update(users).set(patch).where(eq(users.id, existing.id));
+      }
+      const [row] = await this.db
+        .select()
+        .from(users)
+        .where(eq(users.id, existing.id))
+        .limit(1);
+      if (!row) throw new Error('user disappeared after google upsert');
+      const accessToken = await signAccessToken({ sub: row.externalId, plan: row.plan });
+      return { user: toPublic(row), accessToken };
+    }
+
+    // Fresh user. Sentinel password hash so the password-login path
+    // can never authenticate them — they must come back via Google.
+    const externalId = newExternalId('user');
+    const passwordHash = await hashPassword(
+      `google-only-${externalId}-${Math.random().toString(36).slice(2)}`,
+    );
+    await this.db.insert(users).values({
+      externalId,
+      email,
+      passwordHash,
+      googleId: profile.googleId,
+      avatarUrl: profile.avatarUrl ?? null,
+      displayName: profile.name ?? null,
+      emailVerified: true,
+    });
+    const [row] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.externalId, externalId))
+      .limit(1);
+    if (!row) throw new Error('user disappeared after insert');
+    const accessToken = await signAccessToken({ sub: row.externalId, plan: row.plan });
+    return { user: toPublic(row), accessToken };
+  }
+
+  /**
    * Replace the user's password hash. Caller must have already
    * verified proof of ownership (we use an email verification code in
    * the forgot-password flow). Returns the updated user + a fresh
@@ -150,6 +224,7 @@ function toPublic(row: typeof users.$inferSelect): PublicUser {
     email: row.email,
     plan: row.plan,
     displayName: row.displayName,
+    avatarUrl: row.avatarUrl,
     createdAt: row.createdAt,
   };
 }

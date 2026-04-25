@@ -6,6 +6,7 @@ import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executo
 import type { BrowserPool } from '../browser-pool/index.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
+import type { PayPalAdapter } from '../payment/index.js';
 
 /**
  * Context factory. `planner` and `visionCommander` are both injected by the
@@ -37,6 +38,12 @@ export interface AppContextDeps {
    * per-user browser instead of the shared headed-singleton lane.
    */
   browserPool?: BrowserPool | null;
+  /**
+   * Phase 9 PayPal adapter. Non-null when PAYPAL_CLIENT_ID/_SECRET are
+   * set. The payment router throws PRECONDITION_FAILED when this is
+   * null so the SPA can show a "PayPal not configured" message.
+   */
+  paypalAdapter?: PayPalAdapter | null;
 }
 
 export function makeCreateContext(deps: AppContextDeps) {
@@ -51,6 +58,7 @@ export function makeCreateContext(deps: AppContextDeps) {
       playwrightExecutor: deps.playwrightExecutor ?? null,
       executionRouter: deps.executionRouter ?? null,
       browserPool: deps.browserPool ?? null,
+      paypalAdapter: deps.paypalAdapter ?? null,
       userId: (req as Request & { userId?: string }).userId,
     };
   };
