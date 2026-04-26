@@ -88,7 +88,15 @@ export const tasksRouter = router({
     // Basic → 'none' unless the role is open-pool AND in the user's
     // pick. Pro → all roles allowed.
     const detectedRole = classifyRole(input.intent);
-    const gatedRole = gateRoleForUser(detectedRole, planId, selectedRoles);
+    let gatedRole = gateRoleForUser(detectedRole, planId, selectedRoles);
+    // Pro upgrade: when the classifier picked an open-pool role that
+    // has a Pro-only counterpart, swap up. Today the only such pair
+    // is xiaohongshu-{operator → expert}; the basic role stays for
+    // Basic-plan users to keep the upsell visible. If we add more
+    // tiered roles, encode them here as a flat map.
+    if (planId === 'pro' && gatedRole === 'xiaohongshu-operator') {
+      gatedRole = 'xiaohongshu-expert';
+    }
     const routed = selectModelAndEffort(input.intent, gatedRole);
     const isOpus = routed.model === 'claude-opus-4-7';
 

@@ -103,6 +103,12 @@ export const ROLE_PROMPTS: Record<string, string> = {
   // 营销 & 内容
   'xiaohongshu-operator':
     '你同时具备小红书运营专家视角。你熟悉小红书算法推荐机制（CES评分=互动×权重）、种草笔记结构（首图→痛点→方案→CTA）、达人合作报价体系、爆款内容公式（选题×标题×首图×正文×标签）。你懂流量分发逻辑：发现页>搜索>关注，能判断什么内容在哪个场景更容易获得曝光。',
+  // 专业版独享高阶版本：相比 operator 多一层全域增长策略 + 商业化路径设计
+  // + 矩阵冷启动剧本 + 跨平台引流。pro 用户调用 xiaohongshu-operator 时由
+  // tasks.create 自动 upgrade 为 expert（见 routers/tasks.ts 的 finalRole
+  // 计算）。基础版用户保留 operator 以体现付费层级差异。
+  'xiaohongshu-expert':
+    '你同时具备小红书全域增长专家视角。除运营基础（算法/笔记结构/CES评分）外，你擅长：账号矩阵搭建（主账号+子账号定位差/导流路径）、冷启动剧本（前30篇笔记节奏与选题分布、SEO关键词卡位）、商业化路径设计（蒲公英/品牌合作/直播切片/私域闭环）、达人投放ROI测算与组合策略（头部+腰部+尾部配比）、跨平台联动（抖音/B站/视频号导流回小红书的内容改造）、数据归因（搜索流量vs推荐流量vs粉丝流量的判断与优化）。给出建议时附上具体可复制的执行 SOP 和量化指标。',
   'douyin-strategist':
     '你同时具备抖音策略师视角。你熟悉抖音推荐算法（完播率>互动率>转发率）、短视频结构（黄金3秒→冲突→反转→CTA）、直播话术节奏（引流款→利润款→福利款循环）、DOU+投放策略。你懂流量池机制和各阶段突破标准。',
   'wechat-operator':
@@ -294,8 +300,14 @@ const COMPLEX_ROLES = new Set([
   'data-analyst',
   'financial-forecaster',
   'product-manager',
+  'senior-pm',
   'legal-compliance',
   'contract-reviewer',
+  'executive-briefing',
+  'executive-summary',
+  'dynamic-pricing',
+  'brand-guardian',
+  'xiaohongshu-expert',
 ]);
 
 /**
