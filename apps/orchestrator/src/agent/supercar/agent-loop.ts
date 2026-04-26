@@ -606,6 +606,12 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
 
       const apiStart = Date.now();
       let response: Anthropic.Beta.BetaMessage;
+      // Phase 10 follow-up: bound each API call at 120s and retry
+      // once on timeout. Without this, a stalled Anthropic backend
+      // can leave the task in 'executing' indefinitely (the outer
+      // SUPERCAR_TIMEOUT_MS deadline only fires between iterations,
+      // never during an in-flight await).
+      const API_TIMEOUT_MS = 120_000;
       try {
         // Phase 10 Tier 1 betas: server-side compaction + advisory
         // task budgets. Each is appended only when the master flag is
@@ -628,7 +634,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             }
           : null;
 
-        response = await client.beta.messages.create({
+        const buildApiCall = () => client.beta.messages.create({
           model,
           max_tokens: maxTokens,
           // Top-level cache_control auto-places the breakpoint on the
@@ -703,12 +709,34 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           // used code_execution on a prior turn; null on the first call.
           ...(containerId ? { container: containerId } : {}),
         });
+
+        try {
+          response = await callWithTimeout(buildApiCall(), API_TIMEOUT_MS, `iter ${iteration} api`);
+        } catch (firstErr) {
+          if (!(firstErr instanceof IterationTimeoutError)) throw firstErr;
+          logger.warn(
+            { taskId: opts.taskId, iteration, apiTimeoutMs: API_TIMEOUT_MS },
+            'supercar: api call timed out, retrying once',
+          );
+          // Reissue the same args. Anthropic API is stateless from our
+          // side; a retry restarts the model from scratch with the
+          // identical messages history.
+          response = await callWithTimeout(buildApiCall(), API_TIMEOUT_MS, `iter ${iteration} api retry`);
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        logger.error({ taskId: opts.taskId, iteration, err: message }, 'supercar: messages.create threw');
+        const isTimeout = err instanceof IterationTimeoutError;
+        logger.error(
+          { taskId: opts.taskId, iteration, err: message, isTimeout },
+          isTimeout
+            ? 'supercar: api call timed out twice — failing task'
+            : 'supercar: messages.create threw',
+        );
         return {
           status: 'failed',
-          reason: `Anthropic API error: ${message}`,
+          reason: isTimeout
+            ? `iteration ${iteration}: API call timed out twice (${API_TIMEOUT_MS}ms each)`
+            : `Anthropic API error: ${message}`,
           iterations: iteration,
           toolsUsed: Array.from(toolsUsed),
         };
@@ -720,6 +748,8 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       // firing (cache_read_input_tokens > 0 on the second turn of the
       // same task = caching works; cache_creation_input_tokens > 0 on
       // the first turn = breakpoint placed correctly).
+      const toolUseCount = response.content.filter((b) => b.type === 'tool_use').length;
+      const textBlockCount = response.content.filter((b) => b.type === 'text').length;
       logger.info(
         {
           taskId: opts.taskId,
@@ -730,6 +760,12 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           cacheReadInputTokens: response.usage?.cache_read_input_tokens ?? 0,
           cacheCreationInputTokens: response.usage?.cache_creation_input_tokens ?? 0,
           apiLatencyMs,
+          // stop_reason + block counts let us tell at a glance why the
+          // loop will exit / continue. Critical for diagnosing the
+          // 'model wrote a complete answer but loop hung' class of bug.
+          stopReason: response.stop_reason,
+          toolUseCount,
+          textBlockCount,
         },
         'supercar: api usage',
       );
@@ -794,14 +830,50 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         if (looksLikePendingQuestion(finalText)) {
           // Park on a user reply. `supercarReply` resolves the promise;
           // `supercarAbort` rejects with a sentinel we swap to
-          // cancelled.
+          // cancelled. Capped at AWAITING_USER_TIMEOUT_MS so a model
+          // response that ends with a polite question (e.g. "需要补
+          // 充哪部分？" after writing a complete PRD) doesn't park
+          // the task in 'executing' forever — it's the actual bug
+          // observed on tsk_SFsgUXHMrxgQSpJ5SXTqb.
+          const AWAITING_USER_TIMEOUT_MS = 5 * 60 * 1000;
           await safeCall(opts.onAwaitingUser, { question: finalText, at: new Date() });
-          const replyOrAbort = await new Promise<string>((resolve) => {
+          let waitTimer: NodeJS.Timeout | null = null;
+          const replyPromise = new Promise<string>((resolve) => {
             handle.resolveReply = resolve;
           });
+          const timeoutPromise = new Promise<string>((resolve) => {
+            waitTimer = setTimeout(
+              () => resolve('__SUPERCAR_AWAITING_TIMEOUT__'),
+              AWAITING_USER_TIMEOUT_MS,
+            );
+          });
+          const replyOrAbort = await Promise.race([replyPromise, timeoutPromise]);
+          if (waitTimer) clearTimeout(waitTimer);
+          handle.resolveReply = null;
           if (replyOrAbort === '__SUPERCAR_ABORT__' || cancelled) {
             return {
               status: 'cancelled',
+              iterations: iteration,
+              toolsUsed: Array.from(toolsUsed),
+            };
+          }
+          if (replyOrAbort === '__SUPERCAR_AWAITING_TIMEOUT__') {
+            // No user reply within the cap. The model already produced
+            // a complete answer (the trailing question is courteous,
+            // not load-bearing). Surface what we have and let the user
+            // submit a follow-up if they really want to extend it.
+            logger.info(
+              {
+                taskId: opts.taskId,
+                iteration,
+                awaitingMs: AWAITING_USER_TIMEOUT_MS,
+                finalTextLen: finalText.length,
+              },
+              'supercar: awaiting-user timed out — completing with available text',
+            );
+            return {
+              status: 'completed',
+              summary: finalText,
               iterations: iteration,
               toolsUsed: Array.from(toolsUsed),
             };
@@ -1430,6 +1502,37 @@ function looksLikePendingQuestion(text: string): boolean {
   const lines = trimmed.split('\n').map((l) => l.trim()).filter(Boolean);
   const last = lines[lines.length - 1] ?? '';
   return last.endsWith('？') || last.endsWith('?');
+}
+
+/**
+ * Sentinel error class so callers can distinguish a wall-clock
+ * timeout from any other rejection — `instanceof` is more reliable
+ * than string-matching the message and survives error wrapping.
+ */
+class IterationTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'IterationTimeoutError';
+  }
+}
+
+/**
+ * Race a promise against a wall-clock timer. Resolves with the
+ * promise's value if it completes first; rejects with an
+ * `IterationTimeoutError` after `ms` milliseconds. Always clears
+ * the timer in `finally` so a long-running winning promise doesn't
+ * leak a pending Node timer.
+ */
+async function callWithTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new IterationTimeoutError(`${label} timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([p, timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /**
