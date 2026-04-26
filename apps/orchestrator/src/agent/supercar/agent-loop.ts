@@ -288,6 +288,27 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     };
   }
 
+  // Phase 10 Tier 1 — visibility log up-front. Fires for EVERY supercar
+  // entry, including ones that exit via the Brave / Zapier short-circuits
+  // below before the model loop ever runs. Without it the routing
+  // decision is invisible whenever Brave handles the task.
+  const tier1Diag = appEnv.PHASE10_TIER1;
+  if (tier1Diag) {
+    const roleIdDiag = classifyRole(opts.intent);
+    const routedDiag = selectModelAndEffort(opts.intent, roleIdDiag);
+    logger.info(
+      {
+        taskId: opts.taskId,
+        tier1: true,
+        model: routedDiag.model,
+        effort: routedDiag.effort,
+        roleId: roleIdDiag,
+        taskBudget: getTaskBudget(opts.intent, roleIdDiag),
+      },
+      'supercar: model + role routing',
+    );
+  }
+
   // ---------------------------------------------------------------
   // Phase 6-2: non-browser lane short-circuits (before any model call)
   // ---------------------------------------------------------------
@@ -415,17 +436,10 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // Opus 4.7 has a more expensive tokenizer (1-1.35× input bytes/token);
   // give it more output room. Sonnet keeps the prior 8K cap.
   const maxTokens = model === 'claude-opus-4-7' ? 8192 : 8192;
-  logger.info(
-    {
-      taskId: opts.taskId,
-      tier1,
-      model,
-      effort,
-      roleId,
-      taskBudget,
-    },
-    'supercar: model + role routing',
-  );
+  // Note: the routing decision is logged earlier (right after the
+  // ANTHROPIC_API_KEY check) under 'supercar: model + role routing'
+  // so it's visible even when Brave / Zapier short-circuit before
+  // the model loop runs. No need to log again here.
   const maxIterations =
     opts.maxIterations ?? Number.parseInt(process.env.SUPERCAR_MAX_ITERATIONS ?? '50', 10);
   const timeoutMs =

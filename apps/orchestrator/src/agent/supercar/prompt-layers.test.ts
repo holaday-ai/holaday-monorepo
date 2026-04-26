@@ -109,7 +109,7 @@ describe('selectModelAndEffort', () => {
 
   it('xhigh is only paired with Opus 4.7', () => {
     // Pure invariant — never xhigh on Sonnet.
-    const cases = [
+    const cases: Array<[string, string]> = [
       ['none', '查天气'],
       ['xiaohongshu-operator', '写小红书笔记'],
       ['content-creator', '写文案'],
