@@ -168,6 +168,27 @@ export class BrowserPool {
     return this.instances.get(userId) ?? null;
   }
 
+  /**
+   * Cheap synchronous "would allocate likely succeed?" check used by
+   * the tasks.ts supercar gate. Returns true when this user already
+   * has a ready instance (allocate would be a fast no-op) OR there's
+   * at least one free slot. The actual spawn could still fail (Brave
+   * crash, port collision) — callers must tolerate that. The gate
+   * does, via runSupercarTask's null-executor guard which fails the
+   * task gracefully rather than crashing.
+   *
+   * NOT a guarantee — just a hint that admitting the task to the
+   * supercar branch isn't obviously hopeless. Cheaper than calling
+   * allocate eagerly per task creation (which would burn 5s on
+   * cold-start spawn for every task that lands in the gate).
+   */
+  canAllocate(userId: string): boolean {
+    if (this.shuttingDown) return false;
+    const existing = this.instances.get(userId);
+    if (existing && existing.status === 'ready') return true;
+    return this.allocator.availableCount() > 0;
+  }
+
   /** Start the idle-timeout GC loop. Safe to call multiple times. */
   startGc(): void {
     if (this.gcTimer) return;

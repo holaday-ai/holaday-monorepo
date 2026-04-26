@@ -71,6 +71,24 @@ export const tasksRouter = router({
      * Brave-empty edge case.
      */
     const canShortCircuitBrave = isSimpleSearchIntent && braveAdapterReady;
+    /**
+     * Per-user pool fast lane: when the global headless singleton is
+     * dead but this user has (or can spawn) their own pool slot, we
+     * can still run supercar — the per-user Brave is functionally
+     * equivalent to the singleton from runSupercarTask's view. Sync
+     * `canAllocate` peek; the actual `allocate` happens inside the
+     * branch and may fail under race (Brave crash mid-spawn). When
+     * it does, primaryExecutor stays null and runSupercarTask's null
+     * guard fails the task gracefully — the gate doesn't have to
+     * second-guess. Without this third condition, every PRD / 笔记
+     * / 分析 task fell through to vision-loop the moment the
+     * singleton crashed, defeating Phase 8 + Phase 10 entirely.
+     */
+    const browserPoolEligible = Boolean(
+      ctx.browserPool &&
+        shouldUseBrowserPool(ctx.userId) &&
+        ctx.browserPool.canAllocate(ctx.userId),
+    );
 
     // Diagnostic (temporary, Round-4): log the supercar-gate inputs on
     // every tasks.create so BOSS can tell from pm2 logs exactly why a
@@ -85,10 +103,11 @@ export const tasksRouter = router({
         isSimpleSearchIntent,
         braveAdapterReady,
         canShortCircuitBrave,
+        browserPoolEligible,
         willUseSupercar:
           appEnv.AGENT_MODE === 'supercar' &&
           Boolean(appEnv.ANTHROPIC_API_KEY) &&
-          (Boolean(ctx.playwrightExecutor) || canShortCircuitBrave),
+          (Boolean(ctx.playwrightExecutor) || canShortCircuitBrave || browserPoolEligible),
       },
       'tasks.create: control-plane decision',
     );
@@ -107,7 +126,7 @@ export const tasksRouter = router({
     if (
       appEnv.AGENT_MODE === 'supercar' &&
       appEnv.ANTHROPIC_API_KEY &&
-      (ctx.playwrightExecutor || canShortCircuitBrave)
+      (ctx.playwrightExecutor || canShortCircuitBrave || browserPoolEligible)
     ) {
       const taskId = newExternalId('task');
       const repo = new TaskRepository(ctx.db);
@@ -179,13 +198,17 @@ export const tasksRouter = router({
         }
       }
 
+      // primaryExecutor may be null when:
+      //   - the gate admitted via canShortCircuitBrave (simple-search,
+      //     no browser needed — Brave handles it); or
+      //   - the gate admitted via browserPoolEligible but pool.allocate
+      //     above raced and lost (Brave crashed mid-spawn).
+      // runSupercarTask's null-executor guard handles both: Brave/Zapier
+      // short-circuits fire first, and if neither matches it returns
+      // status='failed' with a clear "browser unavailable" reason.
+      // That marks the task failed in the DB rather than 500ing the
+      // tasks.create call, which would lose the audit trail.
       const primaryExecutor = perUserExec ?? headedExec ?? headlessExec;
-      if (!primaryExecutor) {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'no browser executor available',
-        });
-      }
       const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
           taskId,
           intent: input.intent,
