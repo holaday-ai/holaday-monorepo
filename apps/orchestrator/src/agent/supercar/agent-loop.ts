@@ -228,6 +228,15 @@ export interface RunSupercarOptions {
    * Absent → Zapier lane is skipped even if classifier matched.
    */
   zapierWebhookPath?: string | null;
+  /**
+   * Phase 10 Tier 2 — explicit role id, after the caller has applied
+   * the user's plan/selected-roles permission gate. When set, the
+   * loop uses this verbatim instead of recomputing `classifyRole`,
+   * so a Free-plan user can never accidentally get a Pro-only role
+   * even if `classifyRole` would have matched on their intent.
+   * Tests that don't care about gating can leave it undefined.
+   */
+  roleIdOverride?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -294,7 +303,10 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // decision is invisible whenever Brave handles the task.
   const tier1Diag = appEnv.PHASE10_TIER1;
   if (tier1Diag) {
-    const roleIdDiag = classifyRole(opts.intent);
+    // Honour the gated role override here too — the diag log should
+    // reflect what the loop will actually use, not the raw classifier
+    // output that was about to be stripped by the gate.
+    const roleIdDiag = opts.roleIdOverride ?? classifyRole(opts.intent);
     const routedDiag = selectModelAndEffort(opts.intent, roleIdDiag);
     logger.info(
       {
@@ -303,6 +315,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         model: routedDiag.model,
         effort: routedDiag.effort,
         roleId: roleIdDiag,
+        roleGated: opts.roleIdOverride != null,
         taskBudget: getTaskBudget(opts.intent, roleIdDiag),
       },
       'supercar: model + role routing',
@@ -426,7 +439,12 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // pre-Tier-1 behaviour. `roleId` also drives which Role layer the prompt
   // composer injects below.
   const tier1 = appEnv.PHASE10_TIER1;
-  const roleId = classifyRole(opts.intent);
+  // Use the caller's gated role when supplied; only fall back to
+  // classifying the raw intent for legacy callers (tests, the smoke
+  // path) that don't have a user context. The gate matters because
+  // the role text is hand-written for paid tiers — leaking it to
+  // Free users devalues the upsell.
+  const roleId = opts.roleIdOverride ?? classifyRole(opts.intent);
   const routed = tier1
     ? selectModelAndEffort(opts.intent, roleId)
     : { model: opts.model ?? process.env.SUPERCAR_MODEL ?? 'claude-sonnet-4-6', effort: 'high' as Effort };

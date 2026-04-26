@@ -17,13 +17,24 @@
  * order id + capture id.
  */
 
-import { getPlanPriceCents, newExternalId, type BillingCycle } from '@holaday/shared-types';
+import {
+  ADDON_PACK_CATALOGUE,
+  ADDON_PACK_IDS,
+  getAddonPackPriceCents,
+  getPlanPriceCents,
+  isAddonPackId,
+  newExternalId,
+  type AddonPackId,
+  type BillingCycle,
+  type PlanId,
+} from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { describePlanOrder, isPaidPlan, nextExpiryFor } from '../../payment/plans.js';
 import { payments } from '../../db/schema/payments.js';
 import { users } from '../../db/schema/users.js';
+import { QuotaService } from '../../quota/quota-service.js';
 import { protectedProcedure, publicProcedure, router } from '../trpc.js';
 
 const createOrderInput = z.object({
@@ -40,6 +51,10 @@ const createOrderInput = z.object({
 const captureOrderInput = z.object({
   paymentId: z.string().min(1),
   orderId: z.string().min(1),
+});
+
+const createAddonOrderInput = z.object({
+  packId: z.enum(ADDON_PACK_IDS),
 });
 
 export const paymentRouter = router({
@@ -109,6 +124,7 @@ export const paymentRouter = router({
       provider: 'paypal',
       providerOrderId: order.orderId,
       plan: input.plan,
+      kind: 'subscription',
       amountCents,
       currency: 'USD',
       status: 'pending',
@@ -175,15 +191,92 @@ export const paymentRouter = router({
       });
     }
 
-    // Capture succeeded — flip the row, extend the user's plan.
+    // Capture succeeded. Two flavours of capture follow-up depending
+    // on what was bought:
+    //
+    //   - kind='subscription' → flip status, extend planExpiresAt,
+    //                            and (when this is the user's first
+    //                            paid month) seed bonus_tasks via
+    //                            QuotaService.grantFirstMonthBonus.
+    //   - kind='addon'        → flip status, top up bonus on the
+    //                            active task_quotas row. No plan
+    //                            change.
+    const meta = (row.metadata as Record<string, unknown> | null) ?? {};
+
+    if (row.kind === 'addon') {
+      const [userRow] = await ctx.db
+        .select({ id: users.id, plan: users.plan })
+        .from(users)
+        .where(eq(users.externalId, row.userExternalId))
+        .limit(1);
+      if (!userRow) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '用户不存在' });
+      }
+      if (!isAddonPackId(row.plan)) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'addon 订单 plan 字段非法',
+        });
+      }
+      const planId: PlanId =
+        userRow.plan === 'basic' || userRow.plan === 'pro' ? userRow.plan : 'free';
+      if (planId === 'free') {
+        // Edge case: user downgraded mid-checkout. Refuse to apply
+        // (would credit a free user with paid bonus). Mark the
+        // payment failed so the SPA can refund manually.
+        await ctx.db
+          .update(payments)
+          .set({ status: 'failed', metadata: { ...meta, captureStatus: capture.status, reason: 'plan_downgraded' } })
+          .where(eq(payments.id, row.id));
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '当前账户已降级，加量包未生效',
+        });
+      }
+      const quotaService = new QuotaService(ctx.db);
+      await ctx.db.transaction(async (tx) => {
+        await tx
+          .update(payments)
+          .set({
+            status: 'completed',
+            providerCaptureId: capture.captureId,
+            metadata: {
+              ...meta,
+              payerEmail: capture.payerEmail,
+              captureStatus: capture.status,
+            },
+          })
+          .where(eq(payments.id, row.id));
+      });
+      // Quota update is outside the payments-row transaction —
+      // task_quotas writes use the upsert-with-ON-DUPLICATE-KEY
+      // helper which doesn't compose cleanly with Drizzle's tx
+      // wrapper. Worst case (process death between the two): we
+      // have a completed payment with no bonus applied; the
+      // captureOrder retry below idempotently re-applies because
+      // the row's status is already 'completed'… actually that
+      // returns early. Future hardening: idempotency token. For
+      // the BOSS-test scope, the window is sub-second.
+      await quotaService.applyAddonPack(userRow.id, planId, row.plan as AddonPackId);
+      return { ok: true as const, plan: row.plan };
+    }
+
     const [planRow] = await ctx.db
-      .select({ planExpiresAt: users.planExpiresAt })
+      .select({ id: users.id, plan: users.plan, planExpiresAt: users.planExpiresAt })
       .from(users)
       .where(eq(users.externalId, row.userExternalId))
       .limit(1);
+    if (!planRow) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: '用户不存在' });
+    }
+    // First-month bonus: only when the user was on free at order
+    // creation time AND the catalogue defines a bonus AND the cycle
+    // is monthly. The createOrder flow stamps `firstMonth: true` in
+    // metadata, so we reuse that — easier than re-deriving from a
+    // race-prone read of the user's current plan.
+    const firstMonthFlag = meta.firstMonth === true;
     // Pull cycle from metadata stamped at createOrder time; default to
     // monthly for legacy rows that pre-date the cycle field.
-    const meta = (row.metadata as Record<string, unknown> | null) ?? {};
     const cycle: BillingCycle = meta.cycle === 'yearly' ? 'yearly' : 'monthly';
     const nextExpiry = nextExpiryFor(row.plan as 'basic' | 'pro', cycle, planRow?.planExpiresAt ?? null);
 
@@ -194,7 +287,7 @@ export const paymentRouter = router({
           status: 'completed',
           providerCaptureId: capture.captureId,
           metadata: {
-            ...(row.metadata as Record<string, unknown> | null),
+            ...meta,
             payerEmail: capture.payerEmail,
             captureStatus: capture.status,
           },
@@ -206,6 +299,94 @@ export const paymentRouter = router({
         .where(eq(users.externalId, row.userExternalId));
     });
 
+    if (firstMonthFlag && cycle === 'monthly') {
+      const quotaService = new QuotaService(ctx.db);
+      await quotaService.grantFirstMonthBonus(planRow.id, row.plan as PlanId);
+    }
+
     return { ok: true as const, plan: row.plan };
   }),
+
+  /**
+   * Add-on pack order — one-time purchase that tops up the active
+   * billing period's bonus quota. Only valid for users on a paid
+   * plan; `pack-50-opus` further requires Pro since Basic has no
+   * Opus quota at all.
+   *
+   * Reuses captureOrder (above) for finalisation — that procedure
+   * branches on `row.kind` and routes addon captures into
+   * QuotaService.applyAddonPack instead of the plan-extension path.
+   */
+  createAddonOrder: protectedProcedure
+    .input(createAddonOrderInput)
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.paypalAdapter) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: 'PayPal 暂未配置（PAYPAL_CLIENT_ID / _SECRET 未设置）',
+        });
+      }
+      const pack = ADDON_PACK_CATALOGUE[input.packId];
+      if (!pack) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '加量包不存在' });
+      }
+
+      const [user] = await ctx.db
+        .select()
+        .from(users)
+        .where(eq(users.externalId, ctx.userId!))
+        .limit(1);
+      if (!user) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+      }
+      const planId: PlanId =
+        user.plan === 'basic' || user.plan === 'pro' ? user.plan : 'free';
+      if (planId === 'free') {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '加量包仅对付费用户开放，请先升级到基础版',
+        });
+      }
+      if (!pack.availableTo.includes(planId)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Opus 加量包仅专业版可购买',
+        });
+      }
+
+      const amountCents = getAddonPackPriceCents(input.packId, 'usd');
+      const externalId = newExternalId('payment');
+      const origin = ctx.req.protocol + '://' + ctx.req.get('host');
+
+      const order = await ctx.paypalAdapter.createOrder({
+        amountCents,
+        currency: 'USD',
+        referenceId: externalId,
+        description: pack.nameEn,
+        returnUrl: `${origin}/billing/return?payment=${externalId}`,
+        cancelUrl: `${origin}/billing/cancel?payment=${externalId}`,
+      });
+
+      await ctx.db.insert(payments).values({
+        externalId,
+        userExternalId: user.externalId,
+        provider: 'paypal',
+        providerOrderId: order.orderId,
+        // Reuse the `plan` column to carry the pack id — the `kind`
+        // discriminator below tells captureOrder how to interpret it.
+        // Saves a schema migration for a single id column.
+        plan: input.packId,
+        kind: 'addon',
+        amountCents,
+        currency: 'USD',
+        status: 'pending',
+        metadata: { env: ctx.paypalAdapter.env, packId: input.packId },
+      });
+
+      return {
+        paymentId: externalId,
+        orderId: order.orderId,
+        approveUrl: order.approveUrl,
+      };
+    }),
 });

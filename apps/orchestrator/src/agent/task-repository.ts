@@ -25,6 +25,18 @@ export interface InsertTaskContext {
   /** Internal sessions.id, if any. */
   sessionId?: number | null;
   intent: string;
+  /**
+   * Role injected into the supercar prompt for this task (or
+   * 'none'/null when no role addon was used). Populated by the
+   * Phase 10 Tier 2 routing in tasks.create.
+   */
+  roleId?: string | null;
+  /**
+   * Whether this task burned an Opus quota slot. Pro plan only —
+   * Phase 10 Tier 1 routes complex roles to Opus 4.7. Defaults to
+   * false when omitted.
+   */
+  opusUsed?: boolean;
 }
 
 export class TaskRepository {
@@ -39,6 +51,8 @@ export class TaskRepository {
         status: state.status,
         intent: ctx.intent,
         plan: serializePlan(state.plan),
+        roleId: ctx.roleId ?? null,
+        opusUsed: ctx.opusUsed ?? false,
       });
       const taskRowId = readInsertId(insert);
 

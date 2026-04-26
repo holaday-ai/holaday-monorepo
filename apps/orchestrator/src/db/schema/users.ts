@@ -1,5 +1,15 @@
 import { sql } from 'drizzle-orm';
-import { bigint, boolean, datetime, index, mysqlTable, uniqueIndex, varchar } from 'drizzle-orm/mysql-core';
+import {
+  bigint,
+  boolean,
+  datetime,
+  index,
+  int,
+  json,
+  mysqlTable,
+  uniqueIndex,
+  varchar,
+} from 'drizzle-orm/mysql-core';
 
 /**
  * `users` — account.
@@ -23,6 +33,20 @@ export const users = mysqlTable(
     googleId: varchar('google_id', { length: 64 }),
     avatarUrl: varchar('avatar_url', { length: 512 }),
     emailVerified: boolean('email_verified').notNull().default(false),
+    /**
+     * Open-pool role ids the Basic-plan user has actively chosen
+     * (max 5). Pro plan ignores this — they get all 33 by default.
+     * Stored as JSON so future schemas can carry per-pick metadata
+     * (last-used, popularity rank) without a migration.
+     */
+    selectedRoles: json('selected_roles').$type<string[] | null>(),
+    /**
+     * Number of role-set changes the user has made in the current
+     * `roleChangesPeriodStart` month. Resets via app code when
+     * `roleChangesPeriodStart` rolls into a new month.
+     */
+    roleChangesThisMonth: int('role_changes_this_month').notNull().default(0),
+    roleChangesPeriodStart: datetime('role_changes_period_start', { mode: 'date', fsp: 3 }),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
       .notNull()
       .default(sql`CURRENT_TIMESTAMP(3)`),

@@ -5,6 +5,7 @@ export * from './sessions.js';
 export * from './tasks.js';
 export * from './task-steps.js';
 export * from './task-events.js';
+export * from './task-quotas.js';
 export * from './llm-calls.js';
 export * from './verification-codes.js';
 export * from './payments.js';

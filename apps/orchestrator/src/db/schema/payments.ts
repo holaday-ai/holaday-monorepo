@@ -37,6 +37,15 @@ export const payments = mysqlTable(
     providerOrderId: varchar('provider_order_id', { length: 128 }),
     providerCaptureId: varchar('provider_capture_id', { length: 128 }),
     plan: varchar('plan', { length: 32 }).notNull(),
+    /**
+     * What this payment buys. 'subscription' (default; matches the
+     * 0006 behaviour) extends `users.plan_expires_at` on capture.
+     * 'addon' tops up the active `task_quotas.bonus_tasks` /
+     * `bonus_opus` instead. The same `plan` column carries either a
+     * plan id ('basic'/'pro') or an addon pack id ('pack-20', …);
+     * `kind` is the discriminator.
+     */
+    kind: varchar('kind', { length: 16 }).notNull().default('subscription'),
     amountCents: int('amount_cents', { unsigned: true }).notNull(),
     currency: varchar('currency', { length: 8 }).notNull().default('USD'),
     status: varchar('status', { length: 16 }).notNull().default('pending'),

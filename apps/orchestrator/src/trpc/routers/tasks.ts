@@ -1,5 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { newExternalId } from '@holaday/shared-types';
+import {
+  PLAN_CATALOGUE,
+  gateRoleForUser,
+  newExternalId,
+  type PlanId,
+} from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { and, asc, desc, eq, lt } from 'drizzle-orm';
 import { z } from 'zod';
@@ -22,6 +27,15 @@ import {
   supercarReply,
   type SupercarOutcome,
 } from '../../agent/supercar/index.js';
+import {
+  classifyRole,
+  selectModelAndEffort,
+} from '../../agent/supercar/prompt-layers.js';
+import {
+  QuotaService,
+  getConcurrencyLimit,
+  quotaErrorFor,
+} from '../../quota/quota-service.js';
 import { skills } from '../../db/schema/skills.js';
 import { taskEvents } from '../../db/schema/task-events.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
@@ -48,13 +62,74 @@ const createInput = z.object({
 export const tasksRouter = router({
   create: protectedProcedure.input(createInput).mutation(async ({ ctx, input }) => {
     const [userRow] = await ctx.db
-      .select({ id: users.id })
+      .select({
+        id: users.id,
+        plan: users.plan,
+        selectedRoles: users.selectedRoles,
+      })
       .from(users)
       .where(eq(users.externalId, ctx.userId))
       .limit(1);
     if (!userRow) {
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
     }
+
+    // Phase 10 Tier 2 — quota + concurrency gate. Both block task
+    // creation BEFORE the row is inserted, so the user gets a clean
+    // error rather than a half-spawned task. Role classification is
+    // also done here so we can record role_id + opus_used on the
+    // task row at insert time (avoids a follow-up UPDATE).
+    const planId: PlanId =
+      userRow.plan === 'basic' || userRow.plan === 'pro' ? userRow.plan : 'free';
+    const selectedRoles = (userRow.selectedRoles ?? []) as string[];
+
+    // Role gate. classifyRole runs the same keyword classifier the
+    // agent-loop uses; gateRoleForUser then drops it back to 'none'
+    // when the plan / selection forbids it. Free → always 'none'.
+    // Basic → 'none' unless the role is open-pool AND in the user's
+    // pick. Pro → all roles allowed.
+    const detectedRole = classifyRole(input.intent);
+    const gatedRole = gateRoleForUser(detectedRole, planId, selectedRoles);
+    const routed = selectModelAndEffort(input.intent, gatedRole);
+    const isOpus = routed.model === 'claude-opus-4-7';
+
+    // Free + Basic don't have an Opus quota; selectModelAndEffort
+    // only routes to Opus for COMPLEX_ROLES, all of which are
+    // pro-exclusive. So in practice isOpus is true only for Pro
+    // users — but defend against future config drift by clamping
+    // here rather than relying on prompt-layers' invariants.
+    const willConsumeOpus = isOpus && planId === 'pro';
+
+    const quotaService = new QuotaService(ctx.db);
+    const concurrentCount = await quotaService.getActiveTaskCount(userRow.id);
+    if (concurrentCount >= getConcurrencyLimit(planId)) {
+      throw new TRPCError({
+        code: 'TOO_MANY_REQUESTS',
+        message:
+          planId === 'pro'
+            ? '已有 3 个任务在执行中，请等待完成'
+            : '当前有任务在执行中，请等待完成或升级专业版',
+      });
+    }
+    const consume = await quotaService.tryConsume(userRow.id, planId, willConsumeOpus);
+    if (!consume.ok) {
+      // Pro running out of Opus mid-task should downgrade to Sonnet
+      // automatically rather than block the task. Re-attempt with
+      // isOpus=false so the regular pool absorbs it.
+      if (consume.reason === 'opus_limit' && planId === 'pro') {
+        const fallback = await quotaService.tryConsume(userRow.id, planId, false);
+        if (!fallback.ok) {
+          throw quotaErrorFor(fallback.reason);
+        }
+        ctx.logger.info(
+          { userId: ctx.userId, taskIntent: input.intent.slice(0, 60) },
+          'quota: opus exhausted — task will run on Sonnet',
+        );
+      } else {
+        throw quotaErrorFor(consume.reason);
+      }
+    }
+    const opusActuallyConsumed = consume.ok && willConsumeOpus;
 
     // Compute these once — used both by the diagnostic log AND by the
     // gate. Hoisting them up avoids re-classifying the intent twice.
@@ -138,7 +213,12 @@ export const tasksRouter = router({
           cursor: 0,
           pendingConfirm: null,
         },
-        { userId: userRow.id, intent: input.intent },
+        {
+          userId: userRow.id,
+          intent: input.intent,
+          roleId: gatedRole === 'none' ? null : gatedRole,
+          opusUsed: opusActuallyConsumed,
+        },
       );
 
       const classification = classifyDomain(input.intent);
@@ -234,6 +314,10 @@ export const tasksRouter = router({
           isSimpleSearch: isSimpleSearchIntent,
           isCrossPlatformAutomation: classifyAsCrossPlatformAutomation(input.intent),
           zapierWebhookPath: process.env.ZAPIER_WEBHOOK_PATH ?? null,
+          // Pass the post-gate role so prompt-layers cannot accidentally
+          // resurrect the raw classifier match. Gated value is 'none' for
+          // free users, 'none' or open-pool for basic, anything for pro.
+          roleIdOverride: gatedRole,
           onTick(ev) {
             // Synthesise a tick.start + tick.end pair per iteration so
             // the existing UI step cards light up without frontend
@@ -436,7 +520,12 @@ export const tasksRouter = router({
           cursor: 0,
           pendingConfirm: null,
         },
-        { userId: userRow.id, intent: input.intent },
+        {
+          userId: userRow.id,
+          intent: input.intent,
+          roleId: gatedRole === 'none' ? null : gatedRole,
+          opusUsed: opusActuallyConsumed,
+        },
       );
       // Start the loop asynchronously. We return to the popup
       // immediately with the taskId; the loop proceeds in the
@@ -821,7 +910,12 @@ export const tasksRouter = router({
     });
 
     const repo = new TaskRepository(ctx.db);
-    await repo.insertTask(state, { userId: userRow.id, intent: input.intent });
+    await repo.insertTask(state, {
+      userId: userRow.id,
+      intent: input.intent,
+      roleId: gatedRole === 'none' ? null : gatedRole,
+      opusUsed: opusActuallyConsumed,
+    });
 
     // Drive the first dispatch out to any connected WS clients.
     // Without this the task sits in `executing` in the DB but the

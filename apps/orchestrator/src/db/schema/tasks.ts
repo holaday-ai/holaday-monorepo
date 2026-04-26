@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  boolean,
   datetime,
   index,
   json,
@@ -46,6 +47,21 @@ export const tasks = mysqlTable(
      * the user explicitly renames via the sidebar context menu.
      */
     title: varchar('title', { length: 255 }),
+    /**
+     * Phase 10 Tier 2 — role injected into the supercar prompt for
+     * this task (or null if vision-loop / pre-Tier-2). Populated at
+     * task creation by `classifyRole + gateRoleForUser`. Powers the
+     * role-popularity heatmap and audits which roles drove value.
+     */
+    roleId: varchar('role_id', { length: 48 }),
+    /**
+     * Whether the task burned an Opus quota slot (Pro only). Phase 10
+     * Tier 1 routes complex roles to Opus 4.7; this flag captures
+     * whether that happened so the quota counter and the Pro user's
+     * Opus-remaining display stay in sync without recomputing the
+     * routing decision after the fact.
+     */
+    opusUsed: boolean('opus_used').notNull().default(false),
     plan: json('plan'),
     result: json('result'),
     errorCode: varchar('error_code', { length: 64 }),
@@ -65,6 +81,7 @@ export const tasks = mysqlTable(
     index('ix_tasks_user_id_created_at').on(t.userId, t.createdAt),
     index('ix_tasks_status').on(t.status),
     index('ix_tasks_session_id').on(t.sessionId),
+    index('ix_tasks_role_id').on(t.roleId),
   ],
 );
 
