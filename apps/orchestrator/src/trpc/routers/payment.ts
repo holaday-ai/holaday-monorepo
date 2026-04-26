@@ -17,7 +17,7 @@
  * order id + capture id.
  */
 
-import { newExternalId } from '@holaday/shared-types';
+import { getPlanPriceCents, newExternalId, type BillingCycle } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -28,6 +28,13 @@ import { protectedProcedure, publicProcedure, router } from '../trpc.js';
 
 const createOrderInput = z.object({
   plan: z.enum(['basic', 'pro']),
+  /**
+   * Billing cycle. `monthly` is 30 days, `yearly` is 365 with a built-in
+   * ~17% discount baked into the catalogue prices. Yearly does not
+   * stack with the firstMonth promo (the savings already live in the
+   * yearly rate).
+   */
+  cycle: z.enum(['monthly', 'yearly']).default('monthly'),
 });
 
 const captureOrderInput = z.object({
@@ -73,15 +80,22 @@ export const paymentRouter = router({
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
     }
 
+    // First-month promo eligibility: only when the user has never
+    // had a paid plan (i.e. still on free). Returning customers
+    // resubscribing after a lapse pay the regular monthly rate.
+    // Yearly cycle skips the promo regardless — discount is in the
+    // catalogue's yearly column itself.
+    const isFirstMonth = user.plan === 'free';
+    const amountCents = getPlanPriceCents(input.plan, input.cycle, 'usd', isFirstMonth);
+
     const externalId = newExternalId('payment');
-    const planDef = await import('@holaday/shared-types').then((m) => m.PLAN_CATALOGUE[input.plan]);
     const origin = ctx.req.protocol + '://' + ctx.req.get('host');
 
     const order = await ctx.paypalAdapter.createOrder({
-      amountCents: planDef.usdAmountCents,
+      amountCents,
       currency: 'USD',
       referenceId: externalId,
-      description: describePlanOrder(input.plan),
+      description: describePlanOrder(input.plan, input.cycle),
       // Approval popup posts back to these URLs. The SPA listens for the
       // popup-close event and triggers captureOrder via tRPC; the
       // return/cancel pages just need to exist + not 404.
@@ -95,10 +109,14 @@ export const paymentRouter = router({
       provider: 'paypal',
       providerOrderId: order.orderId,
       plan: input.plan,
-      amountCents: planDef.usdAmountCents,
+      amountCents,
       currency: 'USD',
       status: 'pending',
-      metadata: { env: ctx.paypalAdapter.env },
+      // Stash cycle + firstMonth flag in metadata so captureOrder /
+      // the webhook can pick the right expiry math without a schema
+      // migration. `cycle` is always present; `firstMonth` is only
+      // true on the promo path.
+      metadata: { env: ctx.paypalAdapter.env, cycle: input.cycle, firstMonth: isFirstMonth },
     });
 
     return {
@@ -163,7 +181,11 @@ export const paymentRouter = router({
       .from(users)
       .where(eq(users.externalId, row.userExternalId))
       .limit(1);
-    const nextExpiry = nextExpiryFor(row.plan as 'basic' | 'pro', planRow?.planExpiresAt ?? null);
+    // Pull cycle from metadata stamped at createOrder time; default to
+    // monthly for legacy rows that pre-date the cycle field.
+    const meta = (row.metadata as Record<string, unknown> | null) ?? {};
+    const cycle: BillingCycle = meta.cycle === 'yearly' ? 'yearly' : 'monthly';
+    const nextExpiry = nextExpiryFor(row.plan as 'basic' | 'pro', cycle, planRow?.planExpiresAt ?? null);
 
     await ctx.db.transaction(async (tx) => {
       await tx

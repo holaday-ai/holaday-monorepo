@@ -16,6 +16,7 @@ import { db } from './db/client.js';
 import { payments } from './db/schema/payments.js';
 import { users } from './db/schema/users.js';
 import { nextExpiryFor, type PayPalAdapter, type PlanId } from './payment/index.js';
+import type { BillingCycle } from '@holaday/shared-types';
 import { makeCreateContext } from './trpc/context.js';
 import { appRouter } from './trpc/router.js';
 
@@ -290,7 +291,11 @@ export function createHttpApp(deps: HttpAppDeps) {
         res.status(200).send('already completed');
         return;
       }
-      const expiry = nextExpiryFor(row.plan as PlanId, null);
+      // Pull cycle from the metadata stamped at createOrder time;
+      // legacy rows pre-dating the field default to monthly.
+      const meta = (row.metadata as Record<string, unknown> | null) ?? {};
+      const cycle: BillingCycle = meta.cycle === 'yearly' ? 'yearly' : 'monthly';
+      const expiry = nextExpiryFor(row.plan as PlanId, cycle, null);
       await db.transaction(async (tx) => {
         await tx
           .update(payments)

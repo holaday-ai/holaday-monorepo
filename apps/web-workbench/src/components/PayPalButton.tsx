@@ -14,7 +14,7 @@
  */
 
 import * as React from 'react';
-import type { PlanId } from '@holaday/shared-types';
+import type { BillingCycle, PlanId } from '@holaday/shared-types';
 import { trpc } from '@/lib/trpc';
 
 declare global {
@@ -65,13 +65,15 @@ function loadPayPalSdk(clientId: string, env: 'sandbox' | 'live'): Promise<void>
 
 interface Props {
   plan: Exclude<PlanId, 'free'>;
+  /** Billing cycle to charge. Yearly skips the first-month promo. */
+  cycle: BillingCycle;
   clientId: string;
   env: 'sandbox' | 'live';
   onSuccess: () => void;
   onError?: (message: string) => void;
 }
 
-export function PayPalButton({ plan, clientId, env, onSuccess, onError }: Props): JSX.Element {
+export function PayPalButton({ plan, cycle, clientId, env, onSuccess, onError }: Props): JSX.Element {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = React.useState<'loading' | 'ready' | 'error'>('loading');
 
@@ -90,7 +92,7 @@ export function PayPalButton({ plan, clientId, env, onSuccess, onError }: Props)
             .Buttons({
               style: { layout: 'vertical', shape: 'rect', height: 40 },
               createOrder: async () => {
-                const r = await trpc.payment.createOrder.mutate({ plan });
+                const r = await trpc.payment.createOrder.mutate({ plan, cycle });
                 pendingPaymentId = r.paymentId;
                 return r.orderId;
               },
@@ -134,7 +136,7 @@ export function PayPalButton({ plan, clientId, env, onSuccess, onError }: Props)
     return () => {
       cancelled = true;
     };
-  }, [plan, clientId, env, onSuccess, onError]);
+  }, [plan, cycle, clientId, env, onSuccess, onError]);
 
   return (
     <div className="w-full">
