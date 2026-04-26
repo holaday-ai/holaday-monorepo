@@ -1598,6 +1598,29 @@ async function readPageText(executor: PlaywrightExecutor): Promise<string> {
  * markdown list so the user always gets SOMETHING. The fallback
  * is shorter (top-5 hits, no snippets) than the old raw dump.
  */
+/**
+ * Strip HTML tags + decode the handful of entities Brave actually
+ * emits in titles/snippets (`<strong>` for hit highlighting,
+ * `&amp;` / `&quot;` etc.). Brave returns highlighted snippets as
+ * raw HTML; if we feed those verbatim to Sonnet, the model sometimes
+ * echoes the tags into its synthesis output and the user sees raw
+ * `<strong>` text. Killing the tags at the input layer is the only
+ * truly reliable fix — the system prompt's "禁止原样复制 snippet"
+ * line was a soft rule the model occasionally broke.
+ */
+function stripHtmlForBraveContext(s: string): string {
+  if (!s) return '';
+  return s
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .trim();
+}
+
 async function synthesizeBraveResults(opts: {
   apiKey: string;
   intent: string;
@@ -1607,13 +1630,17 @@ async function synthesizeBraveResults(opts: {
   taskId: string;
 }): Promise<string> {
   const hits = opts.results.slice(0, 8);
+  // Sanitise BEFORE building the context block so Sonnet never sees
+  // raw HTML — eliminates the "<strong> echoes into the reply" class
+  // of bug at the source.
   const context = hits
-    .map(
-      (h, i) =>
-        `[${i + 1}] ${h.title || h.url}\n${h.snippet || '(no snippet)'}\nurl: ${h.url}`,
-    )
+    .map((h, i) => {
+      const title = stripHtmlForBraveContext(h.title || h.url);
+      const snippet = stripHtmlForBraveContext(h.snippet || '') || '(no snippet)';
+      return `[${i + 1}] ${title}\n${snippet}\nurl: ${h.url}`;
+    })
     .join('\n\n');
-  const system = `你是一个极简问答助手。用户问了一个信息类问题，我会把 Brave Search 的前 8 条结果喂给你。回复风格必须严格按下面规则：
+  const system = `你是一个极简问答助手。用户问了一个信息类问题，我会把搜索引擎返回的前 8 条结果喂给你。回复风格必须严格按下面规则：
 
 - 像聊天，不像报告。简短直接。**总字数 ≤ 100 字**（表格本身不算）。
 - 单点事实（定义 / 新闻 / 一个数字）→ **一句话**直接回答。
@@ -1625,6 +1652,8 @@ async function synthesizeBraveResults(opts: {
   - emoji、开场铺垫（"根据以下信息…"）
   - bullet 列表超过 3 条
   - 原样复制 snippet、"搜索结果如下" 之类
+  - 任何 HTML 标签（<strong>、<em>、<br> 等）—— 用 markdown 等价语法
+  - 标题里写"搜索结果"、"Brave"、"来源" 这类元信息，用户不需要知道
 
 示范：
 
@@ -1647,14 +1676,17 @@ ${context}`;
     const client = new Anthropic({ apiKey: opts.apiKey });
     const resp = await client.messages.create({
       model: opts.model,
-      // Round-3b retighten: 800 → 300. The new system prompt caps
-      // output at ~100 zh chars + one 2-4 row compact table, which
-      // sits well under 300 output tokens (a single Chinese char is
-      // ~1-2 tokens). The lower cap does double duty as a style
-      // enforcer — it physically cannot emit the old "购买建议 +
-      // 数据来源 + 温馨提示" pyramid even if the model tried.
-      max_tokens: 300,
-      system,
+      // Headroom for a 4-row × 4-col compare table + one-line
+      // conclusion in Chinese (~2 tokens per char). 300 was too tight
+      // and occasionally truncated the conclusion mid-sentence; 1024
+      // covers worst case while still gating prose pyramids via the
+      // system prompt's "≤100 字" rule.
+      max_tokens: 1024,
+      // Cache the system prompt — every Brave-synthesis call is
+      // identical, so the entire system block (~600 tokens) hits the
+      // 5-min TTL cache after the first call. Saves ~60% of input
+      // tokens on repeat queries.
+      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: user }],
     });
     const out = resp.content
@@ -1663,7 +1695,20 @@ ${context}`;
       .filter(Boolean)
       .join('\n\n')
       .trim();
-    if (out) return out;
+    if (out) {
+      opts.logger.info(
+        {
+          taskId: opts.taskId,
+          inputTokens: resp.usage?.input_tokens ?? 0,
+          outputTokens: resp.usage?.output_tokens ?? 0,
+          cacheReadInputTokens: resp.usage?.cache_read_input_tokens ?? 0,
+          cacheCreationInputTokens: resp.usage?.cache_creation_input_tokens ?? 0,
+          stopReason: resp.stop_reason,
+        },
+        'brave-synthesis: api usage',
+      );
+      return out;
+    }
     opts.logger.warn({ taskId: opts.taskId }, 'brave-synthesis: empty response, using fallback');
   } catch (err) {
     opts.logger.warn(
@@ -1671,9 +1716,15 @@ ${context}`;
       'brave-synthesis: Anthropic call failed, using fallback',
     );
   }
-  // Fallback: compact list, not the old dump.
+  // Fallback when Sonnet synthesis fails or returns empty: clean
+  // markdown-link list with HTML stripped. Intentionally NO mention
+  // of "Brave" / "搜索结果" / source attribution — that's
+  // implementation detail the user shouldn't see.
   return hits
     .slice(0, 5)
-    .map((h, i) => `${i + 1}. [${h.title || h.url}](${h.url})`)
+    .map((h, i) => {
+      const title = stripHtmlForBraveContext(h.title || h.url);
+      return `${i + 1}. [${title}](${h.url})`;
+    })
     .join('\n');
 }
