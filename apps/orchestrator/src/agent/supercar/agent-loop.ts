@@ -715,6 +715,25 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       }
       const apiLatencyMs = Date.now() - apiStart;
 
+      // Phase 10 Tier 1 verification: log per-call usage so we can
+      // confirm the prompt cache + compaction features are actually
+      // firing (cache_read_input_tokens > 0 on the second turn of the
+      // same task = caching works; cache_creation_input_tokens > 0 on
+      // the first turn = breakpoint placed correctly).
+      logger.info(
+        {
+          taskId: opts.taskId,
+          iteration,
+          model,
+          inputTokens: response.usage?.input_tokens ?? 0,
+          outputTokens: response.usage?.output_tokens ?? 0,
+          cacheReadInputTokens: response.usage?.cache_read_input_tokens ?? 0,
+          cacheCreationInputTokens: response.usage?.cache_creation_input_tokens ?? 0,
+          apiLatencyMs,
+        },
+        'supercar: api usage',
+      );
+
       // Append the full assistant content — NEVER just the text, and
       // NEVER a filtered subset. The Anthropic API validates thinking-
       // block signatures against the exact content structure of the
