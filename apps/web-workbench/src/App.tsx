@@ -8,6 +8,7 @@ import { PrivacyPage } from '@/pages/PrivacyPage';
 import { ProfilePage } from '@/pages/ProfilePage';
 import { RegisterPage } from '@/pages/RegisterPage';
 import { RequireAuth } from '@/pages/RequireAuth';
+import { RolesPage } from '@/pages/RolesPage';
 import { ServerErrorPage } from '@/pages/ServerErrorPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TermsPage } from '@/pages/TermsPage';
@@ -43,6 +44,14 @@ export function App(): JSX.Element {
           element={
             <RequireAuth>
               <SettingsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings/roles"
+          element={
+            <RequireAuth>
+              <RolesPage />
             </RequireAuth>
           }
         />

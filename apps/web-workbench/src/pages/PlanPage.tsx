@@ -1,13 +1,18 @@
-import { Check } from 'lucide-react';
+import { Check, Plus } from 'lucide-react';
 import * as React from 'react';
 import {
+  ADDON_PACK_CATALOGUE,
+  ADDON_PACK_IDS,
   PLAN_CATALOGUE,
   formatPrice,
+  getAddonPackPriceCents,
   getPlanPriceCents,
+  type AddonPackId,
   type BillingCycle,
   type Currency,
   type PlanId,
 } from '@holaday/shared-types';
+import { AddonPackButton } from '@/components/AddonPackButton';
 import { PayPalButton } from '@/components/PayPalButton';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
@@ -55,6 +60,7 @@ export function PlanPage(): JSX.Element {
   const [currentPlan, setCurrentPlan] = React.useState<string>('free');
   const [paymentOpts, setPaymentOpts] = React.useState<PaymentOptions | null>(null);
   const [openPayFor, setOpenPayFor] = React.useState<PlanId | null>(null);
+  const [openAddonFor, setOpenAddonFor] = React.useState<AddonPackId | null>(null);
   const [cycle, setCycle] = React.useState<BillingCycle>('monthly');
   const [currency] = React.useState<Currency>(() => detectCurrency());
   const zh = isZhLocale();
@@ -336,6 +342,98 @@ export function PlanPage(): JSX.Element {
           );
         })}
       </div>
+
+      {/* Add-on packs — only when the user is on a paid plan and PayPal */}
+      {/* is wired. Free users see the plan-tier upgrade UI above; the    */}
+      {/* add-on flow assumes they already pay and just need a top-up.    */}
+      {(currentPlan === 'basic' || currentPlan === 'pro') &&
+        paymentOpts?.paypal &&
+        paymentOpts.paypalClientId && (
+          <div className="mt-12">
+            <div className="mb-4 text-center">
+              <h3 className="text-lg font-semibold tracking-tight">
+                {zh ? '加量包' : 'Add-on packs'}
+              </h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {zh
+                  ? '本月额度不够用？一次性购买，加量本周期立即生效'
+                  : 'Need more this period? One-time top-ups, applied instantly'}
+              </p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {ADDON_PACK_IDS.map((packId) => {
+                const pack = ADDON_PACK_CATALOGUE[packId];
+                const allowed = pack.availableTo.includes(currentPlan as 'basic' | 'pro');
+                const priceCents = getAddonPackPriceCents(packId, currency);
+                const isOpen = openAddonFor === packId;
+                return (
+                  <div
+                    key={packId}
+                    className={cn(
+                      'flex flex-col rounded-2xl border bg-card p-5 shadow-sm',
+                      allowed ? 'border-border' : 'border-border/40 opacity-60',
+                    )}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h4 className="text-base font-semibold">
+                          {zh ? pack.nameZh : pack.nameEn}
+                        </h4>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {zh
+                            ? `本周期内 +${pack.tasks} 次任务${
+                                pack.opus > 0 ? ` · +${pack.opus} 次 Opus` : ''
+                              }`
+                            : `+${pack.tasks} tasks${
+                                pack.opus > 0 ? ` · +${pack.opus} Opus` : ''
+                              } this period`}
+                        </p>
+                      </div>
+                      <Plus className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div className="mt-4 flex items-baseline gap-2">
+                      <span className="text-2xl font-semibold tracking-tight">
+                        {formatPrice(priceCents, currency)}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {zh ? '一次性' : 'one-time'}
+                      </span>
+                    </div>
+                    {!allowed ? (
+                      <div className="mt-4 text-xs text-muted-foreground">
+                        {zh ? '专业版可购买' : 'Pro plan only'}
+                      </div>
+                    ) : isOpen && paymentOpts.paypalClientId ? (
+                      <div className="mt-4">
+                        <AddonPackButton
+                          packId={packId}
+                          clientId={paymentOpts.paypalClientId}
+                          env={paymentOpts.paypalEnv ?? 'sandbox'}
+                          onSuccess={() => {
+                            setOpenAddonFor(null);
+                            toast.show(
+                              zh ? '加量包已生效，立即可用' : 'Top-up applied',
+                            );
+                          }}
+                          onError={handlePaymentError}
+                        />
+                      </div>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-4 w-full"
+                        onClick={() => setOpenAddonFor(packId)}
+                      >
+                        {zh ? '购买' : 'Buy'}
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
       {/* CN-locale note: PayPal still settles in USD */}
       {currency === 'cny' && (

@@ -1,4 +1,6 @@
+import { ChevronRight } from 'lucide-react';
 import * as React from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
@@ -43,6 +45,21 @@ export function SettingsPage(): JSX.Element {
   return (
     <PageShell title="设置" subtitle="语言、通知与浏览器偏好" width="3xl">
       <div className="space-y-6">
+        <Section title="AI 视角">
+          <Link
+            to="/settings/roles"
+            className="-mx-4 flex items-center justify-between gap-4 rounded-md px-4 py-3 transition-colors hover:bg-foreground/[0.04]"
+          >
+            <div>
+              <div className="text-sm font-medium">专业角色</div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                挑选 AI 处理任务时使用的视角（基础版自选 5 个 / 专业版全部 33 个）
+              </p>
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </Link>
+        </Section>
+
         <Section title="语言偏好">
           <Row label="界面语言">
             <div className="inline-flex gap-1 rounded-md bg-muted p-0.5 text-xs">

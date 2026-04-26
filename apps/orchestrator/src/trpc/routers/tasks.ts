@@ -1,6 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
 import {
-  PLAN_CATALOGUE,
   gateRoleForUser,
   newExternalId,
   type PlanId,

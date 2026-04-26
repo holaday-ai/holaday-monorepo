@@ -1,0 +1,149 @@
+/**
+ * AddonPackButton — same shape as PayPalButton but routes the
+ * createOrder leg to `payment.createAddonOrder`. The capture leg
+ * is shared with subscription orders (server discriminates on
+ * `payments.kind`), so this component reuses captureOrder verbatim.
+ *
+ * Kept separate from PayPalButton because:
+ *   - The createOrder input shape differs (`packId` vs `plan + cycle`).
+ *   - Add-on flows can charge users who already have a paid plan,
+ *     while PayPalButton is anchored to "upgrade from free → paid".
+ *   - Letting them diverge means each block can evolve copy / styling
+ *     without polluting the other.
+ */
+
+import * as React from 'react';
+import type { AddonPackId } from '@holaday/shared-types';
+import { trpc } from '@/lib/trpc';
+
+declare global {
+  interface Window {
+    paypal?: {
+      Buttons: (config: PayPalButtonsConfig) => { render: (selector: HTMLElement) => Promise<void> };
+    };
+  }
+}
+
+interface PayPalButtonsConfig {
+  style?: { layout?: 'vertical' | 'horizontal'; shape?: 'rect' | 'pill'; color?: string; height?: number };
+  createOrder: () => Promise<string>;
+  onApprove: (data: { orderID: string }) => Promise<void>;
+  onError?: (err: unknown) => void;
+  onCancel?: () => void;
+}
+
+const SDK_LOADERS = new Map<string, Promise<void>>();
+
+function loadPayPalSdk(clientId: string, env: 'sandbox' | 'live'): Promise<void> {
+  const cacheKey = `${env}:${clientId}`;
+  const existing = SDK_LOADERS.get(cacheKey);
+  if (existing) return existing;
+  const promise = new Promise<void>((resolve, reject) => {
+    if (window.paypal) {
+      resolve();
+      return;
+    }
+    const script = document.createElement('script');
+    const params = new URLSearchParams({
+      'client-id': clientId,
+      currency: 'USD',
+      intent: 'capture',
+    });
+    script.src = `https://www.paypal.com/sdk/js?${params.toString()}`;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('PayPal SDK failed to load'));
+    document.head.appendChild(script);
+  });
+  SDK_LOADERS.set(cacheKey, promise);
+  return promise;
+}
+
+interface Props {
+  packId: AddonPackId;
+  clientId: string;
+  env: 'sandbox' | 'live';
+  onSuccess: () => void;
+  onError?: (message: string) => void;
+}
+
+export function AddonPackButton({
+  packId,
+  clientId,
+  env,
+  onSuccess,
+  onError,
+}: Props): JSX.Element {
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const [status, setStatus] = React.useState<'loading' | 'ready' | 'error'>('loading');
+
+  React.useEffect(() => {
+    let cancelled = false;
+    loadPayPalSdk(clientId, env)
+      .then(async () => {
+        if (cancelled || !containerRef.current || !window.paypal) return;
+        setStatus('ready');
+        containerRef.current.replaceChildren();
+        let pendingPaymentId: string | null = null;
+        try {
+          await window.paypal
+            .Buttons({
+              style: { layout: 'vertical', shape: 'rect', height: 36 },
+              createOrder: async () => {
+                const r = await trpc.payment.createAddonOrder.mutate({ packId });
+                pendingPaymentId = r.paymentId;
+                return r.orderId;
+              },
+              onApprove: async (data) => {
+                if (!pendingPaymentId) {
+                  onError?.('内部错误：缺少支付 ID');
+                  return;
+                }
+                try {
+                  await trpc.payment.captureOrder.mutate({
+                    paymentId: pendingPaymentId,
+                    orderId: data.orderID,
+                  });
+                  onSuccess();
+                } catch (err) {
+                  onError?.(err instanceof Error ? err.message : '支付确认失败');
+                }
+              },
+              onError: (err) => {
+                onError?.(err instanceof Error ? err.message : 'PayPal SDK 错误');
+              },
+              onCancel: () => {
+                /* user closed popup */
+              },
+            })
+            .render(containerRef.current);
+        } catch (err) {
+          if (!cancelled) {
+            setStatus('error');
+            onError?.(err instanceof Error ? err.message : '加载 PayPal 按钮失败');
+          }
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setStatus('error');
+          onError?.(err instanceof Error ? err.message : 'PayPal SDK 加载失败');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [packId, clientId, env, onSuccess, onError]);
+
+  return (
+    <div className="w-full">
+      <div ref={containerRef} className="min-h-[36px]" />
+      {status === 'loading' && (
+        <div className="text-center text-[10px] text-muted-foreground">加载 PayPal 中...</div>
+      )}
+      {status === 'error' && (
+        <div className="text-center text-[10px] text-destructive">PayPal 加载失败</div>
+      )}
+    </div>
+  );
+}

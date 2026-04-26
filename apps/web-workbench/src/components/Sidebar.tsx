@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
+import { QuotaIndicator } from '@/components/QuotaIndicator';
 import { TaskListItem } from '@/components/TaskListItem';
 import { UserMenu } from '@/components/UserMenu';
 import { cn } from '@/lib/utils';
@@ -295,16 +296,24 @@ export function Sidebar({
               )}
             </div>
 
-            <footer className="border-t border-black/[0.06] px-2 py-2">
-              <UserMenu
-                displayName={userDisplayName}
-                email={userEmail}
-                plan={userPlan}
-                onLogout={onLogout}
-                failedTaskCount={failedTaskCount}
-                {...(onClearFailedTasks ? { onClearFailedTasks } : {})}
-                {...(onOpenFeedback ? { onOpenFeedback } : {})}
-              />
+            <footer className="border-t border-black/[0.06] px-0 py-2">
+              {/* Quota strip first — the user's daily/monthly headroom */}
+              {/* is the primary "what can I still do" signal. Refetches  */}
+              {/* keyed off the task list length: every create/terminal  */}
+              {/* event changes the array, which is good enough to keep  */}
+              {/* the bar live without subscribing to WS task events.    */}
+              <QuotaIndicator refreshKey={tasks.length} />
+              <div className="px-2">
+                <UserMenu
+                  displayName={userDisplayName}
+                  email={userEmail}
+                  plan={userPlan}
+                  onLogout={onLogout}
+                  failedTaskCount={failedTaskCount}
+                  {...(onClearFailedTasks ? { onClearFailedTasks } : {})}
+                  {...(onOpenFeedback ? { onOpenFeedback } : {})}
+                />
+              </div>
             </footer>
           </>
         )}
