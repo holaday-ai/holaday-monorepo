@@ -147,7 +147,21 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
             };
           });
           set((prev) => {
-            const resultText = extractSummary(detail.result) ?? undefined;
+            const rawResultText = extractSummary(detail.result);
+            // Failed-task path stores the same technical English in
+            // `result.reason` as in `error_message`; humanise both so
+            // the SPA never renders raw "exhausted maxIterations" /
+            // "Anthropic API error 4xx" / etc. Only failed/cancelled
+            // tasks go through the transformer — completed tasks'
+            // summary is the agent's own reply text and shouldn't be
+            // touched.
+            const isFailed =
+              detail.status === 'failed' || detail.status === 'cancelled';
+            const resultText = rawResultText
+              ? isFailed
+                ? humaniseTaskError(rawResultText)
+                : rawResultText
+              : undefined;
             return {
               stepsByTask: { ...prev.stepsByTask, [taskId]: steps },
               tasks: prev.tasks.map((t) =>
