@@ -382,7 +382,23 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // Forcing the model loop ensures the attachment blocks reach the
   // first user message.
   const hasAttachments = (opts.attachments?.length ?? 0) > 0;
-  if (opts.isSimpleSearch && opts.braveAdapter && !hasAttachments) {
+  // Same carve-out for file-generation intents: the model needs to
+  // reach the loop so create_file can fire. classifyAsSimpleSearch
+  // matches on "导出"/"CSV"/"价格" tokens that legitimate file-export
+  // requests also contain ("把销售数据导出成 CSV"), so the classifier
+  // alone can't distinguish. We re-check intent for export keywords
+  // here when create_file is wired — if both true, take the loop.
+  const looksLikeFileExport =
+    (opts.createFileFormats?.length ?? 0) > 0 &&
+    /(导出|生成|保存为|另存为|输出.*文件|create[_\s-]?file|export\s+(?:to|as)|save\s+as|generate\s+(?:a\s+)?(?:csv|xlsx|pdf|docx?|pptx?|excel|word|powerpoint))/i.test(
+      opts.intent,
+    );
+  if (
+    opts.isSimpleSearch &&
+    opts.braveAdapter &&
+    !hasAttachments &&
+    !looksLikeFileExport
+  ) {
     const r = await opts.braveAdapter.search(opts.intent, 10);
     if ('results' in r && r.results.length > 0) {
       logger.info(
