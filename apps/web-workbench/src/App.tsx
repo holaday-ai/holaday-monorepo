@@ -2,10 +2,12 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { ToastProvider } from '@/components/ui/toast';
 import { BillingPage } from '@/pages/BillingPage';
 import { HistoryPage } from '@/pages/HistoryPage';
+import { LoginPage } from '@/pages/LoginPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { PlanPage } from '@/pages/PlanPage';
 import { PrivacyPage } from '@/pages/PrivacyPage';
 import { ProfilePage } from '@/pages/ProfilePage';
+import { RedirectIfAuthed } from '@/pages/RedirectIfAuthed';
 import { RegisterPage } from '@/pages/RegisterPage';
 import { RequireAuth } from '@/pages/RequireAuth';
 import { RolesPage } from '@/pages/RolesPage';
@@ -26,7 +28,25 @@ export function App(): JSX.Element {
     <ToastProvider>
       <Routes>
         <Route path="/" element={<WorkbenchApp />} />
-        <Route path="/register" element={<RegisterPage />} />
+        {/* QA #15 — both auth pages bounce already-authenticated
+         *  visitors back to the workbench. /login is also added as
+         *  a dedicated route so external campaign links don't 404. */}
+        <Route
+          path="/login"
+          element={
+            <RedirectIfAuthed>
+              <LoginPage />
+            </RedirectIfAuthed>
+          }
+        />
+        <Route
+          path="/register"
+          element={
+            <RedirectIfAuthed>
+              <RegisterPage />
+            </RedirectIfAuthed>
+          }
+        />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/terms" element={<TermsPage />} />
         <Route path="/500" element={<ServerErrorPage />} />

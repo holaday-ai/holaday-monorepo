@@ -1,4 +1,6 @@
 import { AlertTriangle, Check, Loader2, X } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import type { UiStep } from '@/types/task';
 
@@ -67,8 +69,19 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
           </div>
         </div>
         {step.actionSummary && (
-          <div className="mt-1.5 rounded-md bg-muted px-3 py-2 font-mono text-xs leading-relaxed text-foreground/80">
-            {step.actionSummary}
+          // QA #14 — actionSummary may contain markdown (the agent's
+          // self-narrated step description occasionally has **bold**
+          // emphasis, inline code, or short links). Render through
+          // ReactMarkdown so those don't surface as raw asterisks /
+          // backticks. Keep the muted padded box; drop the prior
+          // font-mono since markdown body text reads better in the
+          // default sans stack. The typography overrides keep
+          // paragraphs flush with the box and the lists / code spans
+          // tight.
+          <div className="prose prose-sm prose-neutral mt-1.5 max-w-none rounded-md bg-muted px-3 py-2 leading-relaxed text-foreground/80 prose-p:my-0 prose-p:text-xs prose-strong:font-semibold prose-strong:text-foreground prose-code:rounded prose-code:bg-muted-foreground/10 prose-code:px-1 prose-code:text-[11px] dark:prose-invert">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {step.actionSummary}
+            </ReactMarkdown>
             {step.status === 'running' && <Cursor />}
           </div>
         )}

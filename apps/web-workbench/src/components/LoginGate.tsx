@@ -174,7 +174,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
     <div className="flex h-full items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm space-y-4 rounded-xl border border-border bg-card p-8 shadow-sm">
         <div className="space-y-1 text-center">
-          <div className="text-lg font-semibold tracking-tight">HOLA DAY Workbench</div>
+          <div className="text-lg font-semibold tracking-tight">HOLA DAY</div>
           <div className="text-xs text-muted-foreground">
             {mode === 'register' && '创建新账号'}
             {mode === 'forgot' && '重置密码'}
@@ -301,14 +301,20 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
           </form>
         )}
 
-        {loginOptions.google && mode !== 'register' && mode !== 'forgot' && (
+        {/* Google OAuth — same kickoff URL on both login + register
+         *  (the callback's loginOrRegisterByGoogle path upserts on
+         *  email match), so Bug #16 is just a matter of un-gating
+         *  register here. Keep `forgot` excluded — there's no
+         *  password-reset flow via Google. Button label flips
+         *  copy ("登录" / "注册") to match the user's mental model. */}
+        {loginOptions.google && mode !== 'forgot' && (
           <>
             <div className="relative text-center text-[10px] uppercase text-muted-foreground">
               <span className="relative z-10 bg-card px-2">或</span>
               <div className="absolute inset-y-1/2 left-0 right-0 border-t border-border" />
             </div>
             <Button type="button" variant="outline" className="w-full" onClick={handleGoogle}>
-              使用 Google 登录
+              {mode === 'register' ? '使用 Google 注册' : '使用 Google 登录'}
             </Button>
           </>
         )}
