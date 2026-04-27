@@ -140,6 +140,7 @@ export const authRouter = router({
         avatarUrl: users.avatarUrl,
         plan: users.plan,
         planExpiresAt: users.planExpiresAt,
+        selectedRoles: users.selectedRoles,
       })
       .from(users)
       .where(eq(users.externalId, ctx.userId))
@@ -161,6 +162,11 @@ export const authRouter = router({
       plan: row.plan,
       planExpiresAt: row.planExpiresAt,
       multiUser,
+      // Phase 10 Tier 2 — exposes the basic-plan user's selected
+      // role ids (or null when never set). Drives the workbench's
+      // "你还没选角色" onboarding banner; saves the SPA a separate
+      // roles.list round-trip on every page load.
+      selectedRoles: (row.selectedRoles ?? []) as string[],
     };
   }),
 });

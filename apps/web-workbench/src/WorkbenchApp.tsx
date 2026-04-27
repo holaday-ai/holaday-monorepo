@@ -22,6 +22,8 @@ interface MeProfile {
   /** Phase 8.2 canary flag — when true, the VNC panel connects to
    *  this user's dedicated Brave via /vnc-ws/:userId. */
   multiUser: boolean;
+  /** Phase 10 Tier 2 — open-pool role ids picked by this user. */
+  selectedRoles?: string[];
 }
 
 /**
@@ -355,6 +357,8 @@ function AppShell(): JSX.Element {
         greetingName={greetingName || undefined}
         inputRef={inputRef}
         replyMode={Boolean(selectedTaskId && awaitingUserByTask[selectedTaskId])}
+        userPlan={me?.plan}
+        userSelectedRoles={me?.selectedRoles ?? null}
         onSubmit={async (intent) => {
           // Supercar: when the current task is parked on an awaiting_user
           // question, route the composer to tasks.reply so the agent's

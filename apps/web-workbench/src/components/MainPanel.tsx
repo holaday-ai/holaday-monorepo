@@ -1,5 +1,6 @@
 import { Globe, Menu, Sparkles } from 'lucide-react';
 import { InputArea } from '@/components/InputArea';
+import { RoleNudgeBanner } from '@/components/RoleNudgeBanner';
 import { TaskStream } from '@/components/TaskStream';
 import { Button } from '@/components/ui/button';
 import type { UiTask } from '@/types/task';
@@ -18,6 +19,10 @@ interface Props {
    * "reply to agent" mode. Drives the App's onSubmit branching too.
    */
   replyMode?: boolean;
+  /** Plan id from auth.me — drives the role-nudge banner visibility. */
+  userPlan?: string;
+  /** selected_roles list from auth.me — empty/null triggers the nudge. */
+  userSelectedRoles?: readonly string[] | null;
 }
 
 /**
@@ -36,6 +41,8 @@ export function MainPanel({
   greetingName,
   inputRef,
   replyMode,
+  userPlan,
+  userSelectedRoles,
 }: Props): JSX.Element {
   return (
     <main className="flex h-full min-w-0 flex-[2] flex-col bg-background lg:min-w-[420px]">
@@ -72,6 +79,9 @@ export function MainPanel({
           </div>
         )}
       </div>
+      {userPlan ? (
+        <RoleNudgeBanner plan={userPlan} selectedRoles={userSelectedRoles ?? null} />
+      ) : null}
       <InputArea
         onSubmit={onSubmit}
         busy={busy}
