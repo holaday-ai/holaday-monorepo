@@ -1,5 +1,6 @@
 import type { ServerMessage } from '@holaday/shared-types';
 import { create } from 'zustand';
+import { humaniseTaskError } from '@/lib/error-copy';
 import { trpc } from '@/lib/trpc';
 import type {
   UiAwaitingUser,
@@ -354,7 +355,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
                 ...t,
                 status: msg.status,
                 ...(msg.summary ? { resultText: msg.summary } : {}),
-                ...(msg.reason ? { resultText: msg.reason } : {}),
+                ...(msg.reason ? { resultText: humaniseTaskError(msg.reason) } : {}),
               }
             : t,
         ),
@@ -639,7 +640,9 @@ function toUiTask(row: ListRow): UiTask {
     // The list endpoint doesn't expose tickCount directly; we leave 0
     // for now and let G4's ws events fill it in as ticks stream.
     tickCount: 0,
-    ...(typeof row.errorMessage === 'string' ? { resultText: row.errorMessage } : {}),
+    ...(typeof row.errorMessage === 'string'
+      ? { resultText: humaniseTaskError(row.errorMessage) }
+      : {}),
     // tRPC serializes Date to string over the wire; coerce back.
     createdAt: new Date(row.createdAt as unknown as string | number | Date),
   };

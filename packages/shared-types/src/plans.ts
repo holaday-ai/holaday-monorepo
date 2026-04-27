@@ -88,7 +88,7 @@ export const PLAN_CATALOGUE: Readonly<Record<PlanId, PlanDefinition>> = {
     rolesAllowed: 5,
     featuresZh: [
       'Sonnet 模型',
-      '完整浏览器（Brave 反检测）',
+      '完整浏览器（智能反检测）',
       '30 天任务历史',
       '1 并发',
       '自选 5 个专业角色',

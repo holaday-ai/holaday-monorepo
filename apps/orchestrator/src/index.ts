@@ -254,7 +254,10 @@ async function main() {
       UPDATE tasks
          SET status = 'failed',
              error_code = 'ORCHESTRATOR_RESTART',
-             error_message = 'orchestrator restarted while task was in-flight; marked failed on boot sweep',
+             -- User-facing error_message; the stable diagnostic is in
+             -- error_code above. Keep this short + actionable since the
+             -- SPA renders it verbatim inside the failed-task card.
+             error_message = '服务重启导致任务中断，重新发送一次即可。',
              updated_at = NOW(3),
              completed_at = NOW(3)
        WHERE status IN ('pending','executing','planning')

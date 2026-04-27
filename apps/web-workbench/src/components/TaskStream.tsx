@@ -277,6 +277,25 @@ function AgentBlock({
             onContinueInBrowser={onContinueInBrowser}
           />
         )}
+        {/* Phase 11 QA #11 — terminal-but-empty fallback. Catches the
+         *  edge case where a task is marked completed/failed in the DB
+         *  but the result column never got a summary written (e.g.
+         *  agent crashed mid-write, WS update raced with a refresh).
+         *  Without this the panel renders just the H avatar — looks
+         *  like the SPA broke. The retry hint mirrors the failed-card
+         *  copy so the next-step is obvious. */}
+        {terminal && !task.resultText && (
+          <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-foreground/70">
+              {task.status === 'failed' || task.status === 'cancelled'
+                ? '任务结束'
+                : '没有回复内容'}
+            </div>
+            <div>
+              这个任务已经结束，但没有收到回复内容。重新发送一次相同意图通常就行。
+            </div>
+          </div>
+        )}
 
         {steps.length > 0 && (
           <DetailToggle

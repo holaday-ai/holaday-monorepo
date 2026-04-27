@@ -143,8 +143,8 @@ export function PlanPage(): JSX.Element {
         </h2>
         <p className="mt-2 text-sm text-muted-foreground">
           {zh
-            ? '所有套餐都包含高质量模型、实时 VNC 观察、随时接管。'
-            : 'All plans include premium models, real-time VNC observation, and instant takeover.'}
+            ? '所有套餐都包含高质量模型、实时屏幕同步、随时接管。'
+            : 'All plans include premium models, real-time screen sync, and instant takeover.'}
         </p>
       </div>
 
@@ -319,11 +319,11 @@ export function PlanPage(): JSX.Element {
                   className="w-full"
                   onClick={() =>
                     toast.show(
-                      zh ? '降级到 Free 请发邮件给 sales@holaday.ai' : 'Email sales@holaday.ai to downgrade',
+                      zh ? '降级到体验版请发邮件给 sales@holaday.ai' : 'Email sales@holaday.ai to downgrade',
                     )
                   }
                 >
-                  {zh ? '降级到 Free' : 'Downgrade'}
+                  {zh ? '降级到体验版' : 'Downgrade'}
                 </Button>
               ) : isOpen && (zh && cnOpts?.enabled) ? (
                 // zh locale + CN gateway live → show 微信/支付宝/PayPal trio
