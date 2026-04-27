@@ -14,6 +14,7 @@ import { clearAccessToken, getAccessToken } from '@/lib/auth';
 import { trpc } from '@/lib/trpc';
 import { type ConnStatus, connect, disconnect, onServerMessage, onStatus } from '@/lib/ws';
 import { useTaskStore } from '@/stores/task-store';
+import { isQuotaExhausted, useQuotaStatus } from '@/lib/use-quota-status';
 import { applyHistoryRetention } from '@/utils/time-buckets';
 
 interface MeProfile {
@@ -334,6 +335,13 @@ function AppShell(): JSX.Element {
       [tasks, historyDays, retentionPinned],
     );
 
+  // Quota state for the input gate. Refresh trigger is the same task
+  // list length the QuotaIndicator uses, so terminal events update
+  // both bar + input gate in lockstep. The hook caches by key so
+  // both consumers share one round-trip per refresh.
+  const { snap: quotaSnap } = useQuotaStatus(tasks.length);
+  const quotaExhausted = isQuotaExhausted(quotaSnap);
+
   return (
     <div className="relative flex h-full min-h-0 w-full overflow-hidden" ref={contentRowRef}>
       {!panelFullscreen && (
@@ -385,6 +393,7 @@ function AppShell(): JSX.Element {
         replyMode={Boolean(selectedTaskId && awaitingUserByTask[selectedTaskId])}
         userPlan={me?.plan}
         userSelectedRoles={me?.selectedRoles ?? null}
+        quotaExhausted={quotaExhausted}
         onSubmit={async (intent) => {
           // Supercar: when the current task is parked on an awaiting_user
           // question, route the composer to tasks.reply so the agent's

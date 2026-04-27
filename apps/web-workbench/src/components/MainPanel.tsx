@@ -23,6 +23,13 @@ interface Props {
   userPlan?: string;
   /** selected_roles list from auth.me — empty/null triggers the nudge. */
   userSelectedRoles?: readonly string[] | null;
+  /**
+   * Phase 10 polish — when true, the composer renders the
+   * "quota exhausted" card instead of the textarea + send button.
+   * Caller computes this from `quota.status` so a server-side
+   * TOO_MANY_REQUESTS isn't the only signal the user gets.
+   */
+  quotaExhausted?: boolean;
 }
 
 /**
@@ -43,6 +50,7 @@ export function MainPanel({
   replyMode,
   userPlan,
   userSelectedRoles,
+  quotaExhausted,
 }: Props): JSX.Element {
   return (
     <main className="flex h-full min-w-0 flex-[2] flex-col bg-background lg:min-w-[420px]">
@@ -87,6 +95,8 @@ export function MainPanel({
         busy={busy}
         inputRef={inputRef}
         replyMode={replyMode}
+        quotaExhausted={quotaExhausted}
+        quotaPlan={userPlan}
       />
     </main>
   );
