@@ -142,6 +142,38 @@ function AppShell(): JSX.Element {
   const screencastByTask = useTaskStore((s) => s.screencastByTask);
   const captchaWaitByTask = useTaskStore((s) => s.captchaWaitByTask);
   const storeError = useTaskStore((s) => s.error);
+  // Phase 10 polish — sidebar history retention + input quota gate.
+  // The hooks below MUST live above the `if (!authed)` early return
+  // farther down; otherwise hook count differs between the logged-out
+  // render and the authenticated one, and React surfaces it as #310
+  // when zustand's useSyncExternalStore detects a snapshot mismatch
+  // on the transition. Existing useTaskStore selectors (above) are
+  // co-located here for the same reason — keep all hooks in one
+  // unconditional block at the top of the component.
+  const pinnedIds = useTaskStore((s) => s.pinnedTaskIds);
+  const planForRetention: PlanId =
+    me?.plan === 'basic' || me?.plan === 'pro' ? me.plan : 'free';
+  const historyDays = PLAN_CATALOGUE[planForRetention].historyDays;
+  // selectedTaskId from above is captured by closure — no need to
+  // wait for the useTaskStore selector that reads it (already at
+  // line 131). retentionPinned is rebuilt only when pinnedIds or
+  // selectedTaskId changes; the new Set() is intentional, since
+  // applyHistoryRetention treats the set as opaque ReadonlySet.
+  const retentionPinned = React.useMemo(() => {
+    const set = new Set(pinnedIds);
+    if (selectedTaskId) set.add(selectedTaskId);
+    return set;
+  }, [pinnedIds, selectedTaskId]);
+  const { visible: visibleTasks, hiddenCount: hiddenByRetentionCount } =
+    React.useMemo(
+      () => applyHistoryRetention(tasks, historyDays, retentionPinned),
+      [tasks, historyDays, retentionPinned],
+    );
+  // Quota gate for the composer. Refresh keyed off the task list
+  // length so terminal events update both the sidebar's QuotaIndicator
+  // and the input gate in the same round-trip via tRPC batching.
+  const { snap: quotaSnap } = useQuotaStatus(tasks.length);
+  const quotaExhausted = isQuotaExhausted(quotaSnap);
 
   // Bootstrap: fetch user profile + tasks list once. Flip `bootstrapped`
   // on both the resolved and the fail path so a slow / broken endpoint
@@ -312,35 +344,6 @@ function AppShell(): JSX.Element {
 
   const selectedTask = tasks.find((t) => t.taskId === selectedTaskId) ?? null;
   const greetingName = me?.displayName || (me?.email ? firstSegment(me.email) : '');
-
-  // Phase 10 polish — per-plan history retention for the sidebar.
-  // We hide rather than delete: the row stays in the DB so a future
-  // upgrade restores history without a backfill. Pinned tasks bypass
-  // the cutoff so a user keeps access to anything they explicitly
-  // marked important. Selected task also bypasses so the user
-  // doesn't fall into a "selected task disappeared" state if they
-  // happen to have an old task open.
-  const pinnedIds = useTaskStore((s) => s.pinnedTaskIds);
-  const planForRetention: PlanId =
-    me?.plan === 'basic' || me?.plan === 'pro' ? me.plan : 'free';
-  const historyDays = PLAN_CATALOGUE[planForRetention].historyDays;
-  const retentionPinned = React.useMemo(() => {
-    const set = new Set(pinnedIds);
-    if (selectedTaskId) set.add(selectedTaskId);
-    return set;
-  }, [pinnedIds, selectedTaskId]);
-  const { visible: visibleTasks, hiddenCount: hiddenByRetentionCount } =
-    React.useMemo(
-      () => applyHistoryRetention(tasks, historyDays, retentionPinned),
-      [tasks, historyDays, retentionPinned],
-    );
-
-  // Quota state for the input gate. Refresh trigger is the same task
-  // list length the QuotaIndicator uses, so terminal events update
-  // both bar + input gate in lockstep. The hook caches by key so
-  // both consumers share one round-trip per refresh.
-  const { snap: quotaSnap } = useQuotaStatus(tasks.length);
-  const quotaExhausted = isQuotaExhausted(quotaSnap);
 
   return (
     <div className="relative flex h-full min-h-0 w-full overflow-hidden" ref={contentRowRef}>
