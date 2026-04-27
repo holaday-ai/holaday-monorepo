@@ -389,4 +389,118 @@ export const paymentRouter = router({
         approveUrl: order.approveUrl,
       };
     }),
+
+  // ----------------------------------------------------------------
+  // Phase 11 — China gateway proxies. The actual WX/Alipay calls
+  // happen on hd-pay.orangebench.tech (Aliyun); this router just
+  // forwards the click event with the user id derived from the
+  // bearer token, then polls the local payments table for status.
+  //
+  // All three procs gracefully no-op when the gateway URL or
+  // shared secret aren't configured (CN_PAYMENT_URL /
+  // INTERNAL_SHARED_SECRET unset). cnOptions.enabled drives the
+  // SPA's "show 微信/支付宝 buttons or not" decision; mirrors the
+  // existing payment.options shape for PayPal.
+  // ----------------------------------------------------------------
+  cnOptions: publicProcedure.query(() => ({
+    enabled: Boolean(process.env.CN_PAYMENT_URL && process.env.INTERNAL_SHARED_SECRET),
+  })),
+  createCnOrder: protectedProcedure
+    .input(
+      z.object({
+        provider: z.enum(['wechat', 'alipay']),
+        purchase: z.discriminatedUnion('kind', [
+          z.object({
+            kind: z.literal('subscription'),
+            planId: z.enum(['basic', 'pro']),
+            cycle: z.enum(['monthly', 'yearly']).default('monthly'),
+          }),
+          z.object({ kind: z.literal('addon'), packId: z.enum(ADDON_PACK_IDS) }),
+        ]),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const cnUrl = process.env.CN_PAYMENT_URL;
+      const secret = process.env.INTERNAL_SHARED_SECRET;
+      if (!cnUrl || !secret) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '微信/支付宝 暂未配置（CN_PAYMENT_URL / INTERNAL_SHARED_SECRET 未设置）',
+        });
+      }
+      const [user] = await ctx.db
+        .select()
+        .from(users)
+        .where(eq(users.externalId, ctx.userId!))
+        .limit(1);
+      if (!user) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+      }
+      const purchase =
+        input.purchase.kind === 'subscription'
+          ? {
+              kind: 'subscription' as const,
+              planId: input.purchase.planId,
+              cycle: input.purchase.cycle,
+              isFirstMonth: user.plan === 'free',
+            }
+          : { kind: 'addon' as const, packId: input.purchase.packId };
+      const res = await fetch(`${cnUrl.replace(/\/$/, '')}/payment/create`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-internal-secret': secret },
+        body: JSON.stringify({
+          provider: input.provider,
+          userId: ctx.userId,
+          purchase,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        ctx.logger.warn(
+          { status: res.status, body: body.slice(0, 400) },
+          'cn-payment: create call failed',
+        );
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: `cn-payment ${res.status}: ${body.slice(0, 200)}`,
+        });
+      }
+      // The gateway's create response shape:
+      //   wechat → { provider: 'wechat', outTradeNo, codeUrl, amountCents, description }
+      //   alipay → { provider: 'alipay', outTradeNo, payUrl,  amountCents, description }
+      // The SPA uses outTradeNo as the polling key.
+      const data = (await res.json()) as Record<string, unknown>;
+      return data;
+    }),
+  /**
+   * Polled by the SPA after the user scans / pays. Returns 'pending'
+   * until the gateway calls back to /api/internal/payment/confirm
+   * (which writes the payments row), then 'completed' / 'failed'.
+   *
+   * The SPA polls every 3s for up to ~10min, then gives up — long
+   * enough for slow wallets and bank confirmations.
+   */
+  cnStatus: protectedProcedure
+    .input(z.object({ outTradeNo: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const [row] = await ctx.db
+        .select({
+          status: payments.status,
+          plan: payments.plan,
+          kind: payments.kind,
+          providerCaptureId: payments.providerCaptureId,
+        })
+        .from(payments)
+        .where(eq(payments.providerCaptureId, input.outTradeNo))
+        .limit(1);
+      // Until the cn-payment gateway POSTs to /api/internal/payment/
+      // confirm, no row exists for this outTradeNo. Surface 'pending'
+      // so the SPA keeps polling.
+      if (!row) return { status: 'pending' as const };
+      return {
+        status: row.status as 'pending' | 'completed' | 'failed',
+        plan: row.plan,
+        kind: row.kind ?? 'subscription',
+      };
+    }),
 });

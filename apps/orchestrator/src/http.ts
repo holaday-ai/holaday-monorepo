@@ -23,7 +23,14 @@ import {
   UPLOAD_BYTE_LIMIT,
 } from './files/file-service.js';
 import { nextExpiryFor, type PayPalAdapter, type PlanId } from './payment/index.js';
-import type { BillingCycle } from '@holaday/shared-types';
+import { QuotaService } from './quota/quota-service.js';
+import {
+  ADDON_PACK_CATALOGUE,
+  isAddonPackId,
+  newExternalId,
+  type AddonPackId,
+  type BillingCycle,
+} from '@holaday/shared-types';
 import { makeCreateContext } from './trpc/context.js';
 import { appRouter } from './trpc/router.js';
 
@@ -479,6 +486,174 @@ export function createHttpApp(deps: HttpAppDeps) {
         'file download route crashed',
       );
       res.status(500).json({ error: 'download_failed' });
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // Phase 11 — internal bridge from the Aliyun cn-payment gateway.
+  //
+  //   POST /api/internal/payment/confirm
+  //   Headers: x-internal-secret = INTERNAL_SHARED_SECRET (env)
+  //   Body: { userId, planId, cycle, provider, transactionId,
+  //           amountCents, kind, addonPackId? }
+  //
+  // Idempotent: keys on (provider, transactionId). Duplicate POSTs
+  // (cn-payment retries on Vultr 5xx) return ok: true without
+  // double-charging or stacking expiries / addon grants.
+  //
+  // The shared secret lives in BOTH .env files (Vultr +
+  // hd-pay.orangebench.tech). Mismatch → 401 + payment stuck pending
+  // (cn-payment will retry from logs).
+  // ---------------------------------------------------------------------
+  const internalConfirmService = new QuotaService(db);
+  app.post('/api/internal/payment/confirm', async (req, res) => {
+    const expectedSecret = process.env.INTERNAL_SHARED_SECRET;
+    if (!expectedSecret) {
+      logger.error('internal-confirm: INTERNAL_SHARED_SECRET unset — refusing all calls');
+      res.status(503).json({ error: 'internal_secret_not_configured' });
+      return;
+    }
+    const provided = req.headers['x-internal-secret'];
+    if (provided !== expectedSecret) {
+      logger.warn(
+        { presentedLength: typeof provided === 'string' ? provided.length : -1 },
+        'internal-confirm: shared-secret mismatch',
+      );
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    const body = (req.body ?? {}) as {
+      userId?: string;
+      planId?: string;
+      cycle?: string;
+      provider?: string;
+      transactionId?: string;
+      amountCents?: number;
+      kind?: string;
+      addonPackId?: string;
+    };
+    const required: Array<keyof typeof body> = ['userId', 'transactionId', 'amountCents', 'kind', 'provider'];
+    for (const k of required) {
+      if (body[k] == null) {
+        res.status(400).json({ error: `missing field: ${String(k)}` });
+        return;
+      }
+    }
+    const provider = body.provider as 'wechat' | 'alipay';
+    const transactionId = body.transactionId!;
+    const amountCents = Number(body.amountCents);
+    const kind = body.kind as 'subscription' | 'addon';
+
+    try {
+      // Idempotency check: if a payments row already records this
+      // (provider, transactionId), no-op. ix_payments_provider_order
+      // covers the (provider, providerOrderId) lookup; reuse the
+      // capture id field to key off the transactionId, which is
+      // what both WX and Alipay return.
+      const [existing] = await db
+        .select()
+        .from(payments)
+        .where(eq(payments.providerCaptureId, transactionId))
+        .limit(1);
+      if (existing && existing.status === 'completed') {
+        res.status(200).json({ ok: true, deduped: true });
+        return;
+      }
+
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.externalId, body.userId!))
+        .limit(1);
+      if (!user) {
+        res.status(404).json({ error: 'unknown_user' });
+        return;
+      }
+
+      const externalId = newExternalId('payment');
+
+      if (kind === 'subscription') {
+        const planId = body.planId as PlanId;
+        const cycle = body.cycle as BillingCycle;
+        if (planId !== 'basic' && planId !== 'pro') {
+          res.status(400).json({ error: 'bad_plan' });
+          return;
+        }
+        if (cycle !== 'monthly' && cycle !== 'yearly') {
+          res.status(400).json({ error: 'bad_cycle' });
+          return;
+        }
+        const expiry = nextExpiryFor(planId, cycle, user.planExpiresAt ?? null);
+        await db.transaction(async (tx) => {
+          await tx.insert(payments).values({
+            externalId,
+            userExternalId: user.externalId,
+            provider,
+            providerOrderId: null,
+            providerCaptureId: transactionId,
+            plan: planId,
+            amountCents,
+            currency: 'CNY',
+            status: 'completed',
+            kind: 'subscription',
+            metadata: { cycle, source: 'cn-payment-gateway' },
+          });
+          await tx
+            .update(users)
+            .set({ plan: planId, planExpiresAt: expiry })
+            .where(eq(users.externalId, user.externalId));
+        });
+        logger.info(
+          { userId: user.externalId, planId, cycle, provider, transactionId },
+          'internal-confirm: subscription completed',
+        );
+        res.status(200).json({ ok: true });
+        return;
+      }
+
+      if (kind === 'addon') {
+        const packId = body.addonPackId;
+        if (!packId || !isAddonPackId(packId)) {
+          res.status(400).json({ error: 'bad_addon_pack' });
+          return;
+        }
+        const pack = ADDON_PACK_CATALOGUE[packId as AddonPackId];
+        await db.insert(payments).values({
+          externalId,
+          userExternalId: user.externalId,
+          provider,
+          providerOrderId: null,
+          providerCaptureId: transactionId,
+          plan: packId,
+          amountCents,
+          currency: 'CNY',
+          status: 'completed',
+          kind: 'addon',
+          metadata: { source: 'cn-payment-gateway', tasks: pack.tasks, opus: pack.opus },
+        });
+        await internalConfirmService.applyAddonPack(
+          user.id,
+          (user.plan === 'pro' ? 'pro' : 'basic'),
+          packId as AddonPackId,
+        );
+        logger.info(
+          { userId: user.externalId, packId, provider, transactionId },
+          'internal-confirm: addon pack applied',
+        );
+        res.status(200).json({ ok: true });
+        return;
+      }
+
+      res.status(400).json({ error: 'bad_kind' });
+    } catch (err) {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err), provider, transactionId },
+        'internal-confirm: handler crashed',
+      );
+      // 500 invites cn-payment to retry, which is the right behaviour
+      // for transient DB failures. The idempotency check above keeps
+      // a successful retry from double-applying.
+      res.status(500).json({ error: 'internal_error' });
     }
   });
 

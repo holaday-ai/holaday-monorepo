@@ -13,6 +13,7 @@ import {
   type PlanId,
 } from '@holaday/shared-types';
 import { AddonPackButton } from '@/components/AddonPackButton';
+import { CnPaymentDialog, type CnProvider, type CnPurchase } from '@/components/CnPaymentDialog';
 import { PayPalButton } from '@/components/PayPalButton';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
@@ -24,6 +25,10 @@ interface PaymentOptions {
   paypal: boolean;
   paypalClientId: string | null;
   paypalEnv: 'sandbox' | 'live' | null;
+}
+
+interface CnPaymentOptions {
+  enabled: boolean;
 }
 
 /**
@@ -59,11 +64,18 @@ export function PlanPage(): JSX.Element {
   const toast = useToast();
   const [currentPlan, setCurrentPlan] = React.useState<string>('free');
   const [paymentOpts, setPaymentOpts] = React.useState<PaymentOptions | null>(null);
+  const [cnOpts, setCnOpts] = React.useState<CnPaymentOptions | null>(null);
   const [openPayFor, setOpenPayFor] = React.useState<PlanId | null>(null);
   const [openAddonFor, setOpenAddonFor] = React.useState<AddonPackId | null>(null);
   const [cycle, setCycle] = React.useState<BillingCycle>('monthly');
   const [currency] = React.useState<Currency>(() => detectCurrency());
   const zh = isZhLocale();
+  // Phase 11 — CN-payment dialog state. provider + purchase together
+  // describe what the dialog should kick off; null = dialog closed.
+  const [cnDialog, setCnDialog] = React.useState<{
+    provider: CnProvider;
+    purchase: CnPurchase;
+  } | null>(null);
 
   const refreshUser = React.useCallback(() => {
     trpc.auth.me.query().then(
@@ -79,6 +91,10 @@ export function PlanPage(): JSX.Element {
     trpc.payment.options.query().then(
       (res) => setPaymentOpts(res),
       () => setPaymentOpts({ paypal: false, paypalClientId: null, paypalEnv: null }),
+    );
+    trpc.payment.cnOptions.query().then(
+      (res) => setCnOpts(res),
+      () => setCnOpts({ enabled: false }),
     );
   }, [refreshUser]);
 
@@ -309,7 +325,46 @@ export function PlanPage(): JSX.Element {
                 >
                   {zh ? '降级到 Free' : 'Downgrade'}
                 </Button>
+              ) : isOpen && (zh && cnOpts?.enabled) ? (
+                // zh locale + CN gateway live → show 微信/支付宝/PayPal trio
+                <div className="flex flex-col gap-2">
+                  <Button
+                    variant="default"
+                    className="w-full"
+                    onClick={() =>
+                      setCnDialog({
+                        provider: 'wechat',
+                        purchase: { kind: 'subscription', planId: planId as Exclude<PlanId, 'free'>, cycle },
+                      })
+                    }
+                  >
+                    微信支付
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() =>
+                      setCnDialog({
+                        provider: 'alipay',
+                        purchase: { kind: 'subscription', planId: planId as Exclude<PlanId, 'free'>, cycle },
+                      })
+                    }
+                  >
+                    支付宝
+                  </Button>
+                  {paymentOpts?.paypal && paymentOpts.paypalClientId && (
+                    <PayPalButton
+                      plan={planId as Exclude<PlanId, 'free'>}
+                      cycle={cycle}
+                      clientId={paymentOpts.paypalClientId}
+                      env={paymentOpts.paypalEnv ?? 'sandbox'}
+                      onSuccess={() => handlePaymentSuccess(planId)}
+                      onError={handlePaymentError}
+                    />
+                  )}
+                </div>
               ) : isOpen && paymentOpts?.paypal && paymentOpts.paypalClientId ? (
+                // Non-zh or CN gateway not configured → PayPal-only (legacy path)
                 <PayPalButton
                   plan={planId as Exclude<PlanId, 'free'>}
                   cycle={cycle}
@@ -323,8 +378,10 @@ export function PlanPage(): JSX.Element {
                   variant={featured ? 'default' : 'outline'}
                   className="w-full"
                   onClick={() => {
-                    if (!paymentOpts) return;
-                    if (!paymentOpts.paypal) {
+                    if (!paymentOpts && !cnOpts) return;
+                    const anyEnabled =
+                      (cnOpts?.enabled && zh) || paymentOpts?.paypal;
+                    if (!anyEnabled) {
                       toast.show(
                         zh
                           ? '支付暂未开放，联系 sales@holaday.ai'
@@ -449,6 +506,29 @@ export function PlanPage(): JSX.Element {
         <div className="mx-auto mt-3 max-w-xl rounded-md border border-amber-300/50 bg-amber-50/50 p-3 text-center text-xs text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-200">
           {zh ? '⚠ PayPal 处于 sandbox 模式 — 任何支付都不会实际扣款' : '⚠ PayPal in sandbox mode — no real charges'}
         </div>
+      )}
+
+      {/* Phase 11 — CN payment dialog. Mounted page-level so the QR /
+          Alipay-redirect view sits above whatever card the user
+          clicked from. */}
+      {cnDialog && (
+        <CnPaymentDialog
+          provider={cnDialog.provider}
+          purchase={cnDialog.purchase}
+          onClose={() => setCnDialog(null)}
+          onSuccess={() => {
+            const planLabel =
+              cnDialog.purchase.kind === 'subscription'
+                ? PLAN_CATALOGUE[cnDialog.purchase.planId][zh ? 'nameZh' : 'nameEn']
+                : '加量包';
+            toast.show(`${planLabel} 支付成功`);
+            setCnDialog(null);
+            setOpenPayFor(null);
+            setOpenAddonFor(null);
+            refreshUser();
+          }}
+          onError={(msg) => handlePaymentError(msg)}
+        />
       )}
     </PageShell>
   );
