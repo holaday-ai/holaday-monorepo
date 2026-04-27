@@ -199,6 +199,12 @@ function AppShell(): JSX.Element {
           // 8.2) don't set it, so fall back to false to keep the UI
           // on the shared /vnc/websockify path.
           multiUser: Boolean((res as { multiUser?: boolean }).multiUser),
+          // Phase 10 Tier 2 — server returns selected_roles list. Pre-
+          // 10 orchestrators omit the field; an absent value behaves
+          // the same as an empty list (banner shows for basic users
+          // until they pick).
+          selectedRoles:
+            (res as { selectedRoles?: string[] }).selectedRoles ?? [],
         }),
       () => {
         /* swallow — auth.me failure isn't fatal. */
