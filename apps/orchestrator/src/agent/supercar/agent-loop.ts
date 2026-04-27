@@ -697,10 +697,17 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         // Opus-tier and Sonnet 4.6, and both no-op cleanly on the
         // legacy path because we just don't pass them.
         // `xhigh` is Opus-4.7-only — selectModelAndEffort guards that.
+        // `task_budget` is rejected by Sonnet 4.6 with effort='medium'
+        // (returns 400 "model does not support user-configurable task
+        // budgets"). The simple-search routing picks medium + Sonnet
+        // 4.6 specifically, so suppress task_budget on that combo —
+        // matters now that attachment-bearing simple-search tasks
+        // skip the Brave short-circuit and actually reach the model.
+        const supportsTaskBudget = effort !== 'medium';
         const outputConfig: Record<string, unknown> | null = tier1
           ? {
               effort,
-              ...(taskBudget !== null
+              ...(taskBudget !== null && supportsTaskBudget
                 ? { task_budget: { type: 'tokens', total: taskBudget } }
                 : {}),
             }
