@@ -37,3 +37,47 @@ export function bucketByTime(tasks: UiTask[], now: Date = new Date()): TaskBucke
 export function isTaskDeletable(status: UiTask['status']): boolean {
   return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
+
+/**
+ * Per-plan history-retention filter. Splits the task list into the
+ * tasks the user can still see (within their plan's `historyDays`)
+ * and the count of older ones that are hidden (still on the server,
+ * just not surfaced — we deliberately do NOT delete data, since BOSS
+ * pointed out that real deletion would generate refund + complaint
+ * tickets).
+ *
+ * Hidden count drives the "升级查看更早的任务" hint at the bottom of
+ * the sidebar list. Pinned tasks bypass the cutoff so a user can
+ * still get back to a task they explicitly marked important even
+ * after their plan stops showing it by default.
+ */
+export interface RetentionResult {
+  visible: UiTask[];
+  hiddenCount: number;
+}
+
+export function applyHistoryRetention(
+  tasks: UiTask[],
+  historyDays: number,
+  pinnedIds?: ReadonlySet<string>,
+  now: Date = new Date(),
+): RetentionResult {
+  const cutoff = now.getTime() - historyDays * 86_400_000;
+  const visible: UiTask[] = [];
+  let hiddenCount = 0;
+  for (const t of tasks) {
+    if (pinnedIds && pinnedIds.has(t.taskId)) {
+      visible.push(t);
+      continue;
+    }
+    const ms = t.createdAt instanceof Date ? t.createdAt.getTime() : new Date(t.createdAt).getTime();
+    // Tasks with unparseable createdAt stay visible — better to show
+    // garbage than silently hide a real task on a clock skew.
+    if (!Number.isFinite(ms) || ms >= cutoff) {
+      visible.push(t);
+    } else {
+      hiddenCount += 1;
+    }
+  }
+  return { visible, hiddenCount };
+}

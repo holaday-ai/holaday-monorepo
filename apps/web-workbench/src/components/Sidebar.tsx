@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { QuotaIndicator } from '@/components/QuotaIndicator';
 import { TaskListItem } from '@/components/TaskListItem';
@@ -43,6 +44,15 @@ interface Props {
   /** Mobile drawer state — ignored at md+ breakpoints. */
   mobileOpen?: boolean;
   onMobileClose?: () => void;
+  /**
+   * Phase 10 polish — number of tasks the SPA hid because they're
+   * older than the user's plan retention window. Drives the
+   * "升级查看更早的任务" hint at the bottom of the task list. 0 = no
+   * hint rendered.
+   */
+  hiddenTaskCount?: number;
+  /** Plan retention window in days — used in the hint copy. */
+  historyDays?: number;
 }
 
 const COLLAPSED_KEY = 'holaday.sidebar.collapsed';
@@ -78,6 +88,8 @@ export function Sidebar({
   onClearFailedTasks,
   mobileOpen,
   onMobileClose,
+  hiddenTaskCount = 0,
+  historyDays,
 }: Props): JSX.Element {
   const pinnedIds = useTaskStore((s) => s.pinnedTaskIds);
   const togglePin = useTaskStore((s) => s.togglePin);
@@ -289,10 +301,17 @@ export function Sidebar({
                   ))}
                 </TaskGroup>
               ))}
-              {tasks.length === 0 && (
+              {tasks.length === 0 && hiddenTaskCount === 0 && (
                 <div className="px-3 py-6 text-center text-xs text-muted-foreground">
                   还没有任务，发一条试试看
                 </div>
+              )}
+              {hiddenTaskCount > 0 && (
+                <RetentionHint
+                  hiddenCount={hiddenTaskCount}
+                  historyDays={historyDays ?? null}
+                  plan={userPlan}
+                />
               )}
             </div>
 
@@ -600,6 +619,44 @@ function TaskGroup({ title, children }: GroupProps): JSX.Element {
       </div>
       <div className="mt-0.5 space-y-px">{children}</div>
     </section>
+  );
+}
+
+/**
+ * Footer-of-list hint shown when the plan's retention window has
+ * hidden some tasks. Click → /plan. The historyDays + plan combo
+ * tells the user exactly what their cutoff is and what upgrading
+ * would buy ("基础版可看 30 天 / 专业版可看 90 天").
+ */
+function RetentionHint({
+  hiddenCount,
+  historyDays,
+  plan,
+}: {
+  hiddenCount: number;
+  historyDays: number | null;
+  plan: string;
+}): JSX.Element {
+  const navigate = useNavigate();
+  const upgradeCopy =
+    plan === 'free'
+      ? '升级到基础版查看 30 天 / 专业版查看 90 天'
+      : plan === 'basic'
+        ? '升级到专业版查看 90 天历史'
+        : '升级查看更早的任务';
+  return (
+    <button
+      type="button"
+      onClick={() => navigate('/plan')}
+      className="mx-2 mt-3 block w-[calc(100%-1rem)] rounded-md border border-dashed border-border bg-card/40 px-3 py-2 text-left text-[11px] text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-foreground/[0.03]"
+    >
+      <div className="font-medium text-foreground/80">
+        {hiddenCount} 个更早的任务已隐藏
+      </div>
+      <div className="mt-0.5">
+        当前套餐保留 {historyDays ?? '?'} 天 · {upgradeCopy}
+      </div>
+    </button>
   );
 }
 

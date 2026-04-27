@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { PLAN_CATALOGUE, type PlanId } from '@holaday/shared-types';
 import { BrowserPanel } from '@/components/BrowserPanel';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { FeedbackDialog } from '@/components/FeedbackDialog';
@@ -13,6 +14,7 @@ import { clearAccessToken, getAccessToken } from '@/lib/auth';
 import { trpc } from '@/lib/trpc';
 import { type ConnStatus, connect, disconnect, onServerMessage, onStatus } from '@/lib/ws';
 import { useTaskStore } from '@/stores/task-store';
+import { applyHistoryRetention } from '@/utils/time-buckets';
 
 interface MeProfile {
   userId: string;
@@ -310,11 +312,35 @@ function AppShell(): JSX.Element {
   const selectedTask = tasks.find((t) => t.taskId === selectedTaskId) ?? null;
   const greetingName = me?.displayName || (me?.email ? firstSegment(me.email) : '');
 
+  // Phase 10 polish — per-plan history retention for the sidebar.
+  // We hide rather than delete: the row stays in the DB so a future
+  // upgrade restores history without a backfill. Pinned tasks bypass
+  // the cutoff so a user keeps access to anything they explicitly
+  // marked important. Selected task also bypasses so the user
+  // doesn't fall into a "selected task disappeared" state if they
+  // happen to have an old task open.
+  const pinnedIds = useTaskStore((s) => s.pinnedTaskIds);
+  const planForRetention: PlanId =
+    me?.plan === 'basic' || me?.plan === 'pro' ? me.plan : 'free';
+  const historyDays = PLAN_CATALOGUE[planForRetention].historyDays;
+  const retentionPinned = React.useMemo(() => {
+    const set = new Set(pinnedIds);
+    if (selectedTaskId) set.add(selectedTaskId);
+    return set;
+  }, [pinnedIds, selectedTaskId]);
+  const { visible: visibleTasks, hiddenCount: hiddenByRetentionCount } =
+    React.useMemo(
+      () => applyHistoryRetention(tasks, historyDays, retentionPinned),
+      [tasks, historyDays, retentionPinned],
+    );
+
   return (
     <div className="relative flex h-full min-h-0 w-full overflow-hidden" ref={contentRowRef}>
       {!panelFullscreen && (
       <Sidebar
-        tasks={tasks}
+        tasks={visibleTasks}
+        hiddenTaskCount={hiddenByRetentionCount}
+        historyDays={historyDays}
         selectedTaskId={selectedTaskId}
         onSelectTask={setSelectedTask}
         onNewTask={() => {
