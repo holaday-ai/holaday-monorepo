@@ -22,35 +22,26 @@ interface State {
 }
 
 /**
- * Lightweight cached fetcher for `quota.status`. Multiple components
- * (QuotaIndicator, InputArea, future: addon buy buttons) all need the
- * same numbers, and tRPC's batch link only dedupes concurrent calls
- * inside the same tick. This hook caches the last response in a
- * module-level ref keyed by `refreshKey`, so a sidebar + composer
- * mount on the same trigger only burn one round-trip.
- *
- * Stale-while-revalidate: the cache is returned immediately on
- * subsequent calls with the same refreshKey, and refetched on key
- * change. Keeps the input transition smooth (no flicker between
- * "loading" and "exhausted") when a task creation flips the gate.
+ * Plain fetcher for `quota.status` keyed by `refreshKey`. No cache —
+ * the earlier stale-while-revalidate version triggered a React
+ * useSyncExternalStore stability error in prod (#310) when combined
+ * with the workbench's existing zustand subscriptions, since the
+ * cached object identity flipped between renders inside the
+ * useState initializer. Plain hook keeps the API the same and lets
+ * tRPC's batch link dedupe overlapping calls when QuotaIndicator
+ * and the input gate refetch on the same task-list change.
  */
-const cache = new Map<string, QuotaSnapshot>();
-
 export function useQuotaStatus(refreshKey?: number | string): State {
-  const cacheKey = String(refreshKey ?? 'default');
-  const initial = cache.get(cacheKey) ?? null;
-  const [snap, setSnap] = React.useState<QuotaSnapshot | null>(initial);
-  const [loading, setLoading] = React.useState<boolean>(initial == null);
+  const [snap, setSnap] = React.useState<QuotaSnapshot | null>(null);
+  const [loading, setLoading] = React.useState<boolean>(true);
 
   React.useEffect(() => {
     let cancelled = false;
-    setLoading((prev) => prev || snap == null);
+    setLoading(true);
     trpc.quota.status.query().then(
       (res) => {
         if (cancelled) return;
-        const next = res as QuotaSnapshot;
-        cache.set(cacheKey, next);
-        setSnap(next);
+        setSnap(res as QuotaSnapshot);
         setLoading(false);
       },
       () => {
@@ -61,9 +52,7 @@ export function useQuotaStatus(refreshKey?: number | string): State {
     return () => {
       cancelled = true;
     };
-  // intentionally only refetch on cacheKey changes
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cacheKey]);
+  }, [refreshKey]);
 
   return { snap, loading };
 }
