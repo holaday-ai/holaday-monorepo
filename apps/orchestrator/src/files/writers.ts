@@ -18,6 +18,9 @@
  */
 
 import { Buffer } from 'node:buffer';
+import { promises as fs } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { utils as xlsxUtils, write as xlsxWrite, type WorkSheet } from 'xlsx';
 import PDFDocument from 'pdfkit';
 import { Document, Packer, Paragraph, HeadingLevel } from 'docx';
@@ -205,12 +208,41 @@ function renderXlsx(content: string): Buffer {
   return Buffer.from(xlsxWrite(wb, { type: 'buffer', bookType: 'xlsx' }));
 }
 
+// pdfkit's default Helvetica has no CJK glyphs; we ship a Noto Sans
+// SC sidecar so 中文 / 日本語 / 한국어 mixed content renders. The
+// font file is committed under apps/orchestrator/assets/fonts/.
+// Resolved relative to this source file (works under tsx + the
+// production tsx-direct boot) so the path is stable regardless of
+// where the orchestrator is invoked from.
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const CJK_FONT_PATH = path.resolve(__dirname, '../../assets/fonts/NotoSansSC-Regular.ttf');
+
+let cjkFontBuffer: Buffer | null = null;
+async function loadCjkFont(): Promise<Buffer | null> {
+  if (cjkFontBuffer) return cjkFontBuffer;
+  try {
+    cjkFontBuffer = await fs.readFile(CJK_FONT_PATH);
+    return cjkFontBuffer;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * PDF: content is plain text or markdown-ish. We don't render full
  * markdown — pdfkit's text renderer handles paragraph breaks and
  * basic line wrapping, which is enough for "agent dumped a report".
+ *
+ * CJK support: when the Noto Sans SC sidecar font is present,
+ * register it and use it as the default. fontkit (pdfkit's font
+ * backend) sniffs OTF vs TTF from magic bytes regardless of file
+ * extension, so the .ttf-named OTF we ship works fine. Missing font
+ * falls back to Helvetica + .notdef rectangles for CJK glyphs;
+ * English content still renders.
  */
-function renderPdf(content: string): Promise<Buffer> {
+async function renderPdf(content: string): Promise<Buffer> {
+  const cjk = await loadCjkFont();
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({ size: 'A4', margin: 56 });
@@ -218,13 +250,12 @@ function renderPdf(content: string): Promise<Buffer> {
       doc.on('data', (chunk: Buffer) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
-      doc.fontSize(11).font('Helvetica');
-      // pdfkit's default font has no CJK glyphs; the user-visible
-      // output for Chinese will fall back to the .notdef glyph (an
-      // empty rectangle). A future polish pass can ship a CJK
-      // sidecar font and switch on heuristic. For BOSS smoke,
-      // English / numeric content (the typical "export this table"
-      // case) renders correctly.
+      if (cjk) {
+        doc.registerFont('cjk', cjk);
+        doc.font('cjk').fontSize(11);
+      } else {
+        doc.fontSize(11).font('Helvetica');
+      }
       doc.text(content, { align: 'left' });
       doc.end();
     } catch (err) {

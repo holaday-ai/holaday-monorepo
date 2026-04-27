@@ -43,6 +43,12 @@ export const taskFiles = mysqlTable(
     mimetype: varchar('mimetype', { length: 96 }).notNull(),
     sizeBytes: int('size_bytes', { unsigned: true }).notNull(),
     storagePath: varchar('storage_path', { length: 512 }).notNull(),
+    /**
+     * 'active' | 'expired'. Cron flips to 'expired' AFTER the on-disk
+     * bytes have been unlinked. Audit-only — the download endpoint
+     * already 404s on expires_at < now() regardless of this column.
+     */
+    status: varchar('status', { length: 16 }).notNull().default('active'),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
       .notNull()
       .default(sql`CURRENT_TIMESTAMP(3)`),
@@ -53,6 +59,7 @@ export const taskFiles = mysqlTable(
     index('ix_task_files_user_id').on(t.userId),
     index('ix_task_files_task_kind').on(t.taskId, t.kind),
     index('ix_task_files_expires_at').on(t.expiresAt),
+    index('ix_task_files_status_expires').on(t.status, t.expiresAt),
   ],
 );
 

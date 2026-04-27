@@ -16,13 +16,9 @@
 
 import type Anthropic from '@anthropic-ai/sdk';
 import { read as xlsxRead, utils as xlsxUtils } from 'xlsx';
-// pdf-parse 2.x is ESM with a named `pdf()` export rather than a
-// default. Use a star import so the dispatch below works regardless
-// of whether the consumed module shape is { pdf, default: pdf } or
-// { default: pdf }; either way `pdfModule.pdf` resolves the parser.
-import * as pdfModule from 'pdf-parse';
-
-const pdfParse = (pdfModule as unknown as { pdf: (b: Buffer) => Promise<{ text?: string }> }).pdf;
+// pdf-parse 2.x exposes a `PDFParse` class instead of the legacy
+// callable. Construct per-call (cheap) and pull text via getText().
+import { PDFParse } from 'pdf-parse';
 
 type ContentBlockParam = Anthropic.Beta.BetaContentBlockParam;
 
@@ -97,9 +93,13 @@ function parseImage(buffer: Buffer, mt: string): ParsedFile {
 }
 
 async function parsePdf(buffer: Buffer, filename: string): Promise<ParsedFile> {
+  let parser: InstanceType<typeof PDFParse> | null = null;
   try {
-    const result = await pdfParse(buffer);
-    const text = (result?.text ?? '').trim();
+    // PDFParse expects a Uint8Array or { data: Uint8Array }. A Node
+    // Buffer is a Uint8Array subclass, so it passes through directly.
+    parser = new PDFParse({ data: buffer });
+    const result = await parser.getText();
+    const text = ((result as { text?: string })?.text ?? '').trim();
     return wrapText(text, filename, '```pdf');
   } catch (err) {
     return {
@@ -111,6 +111,14 @@ async function parsePdf(buffer: Buffer, filename: string): Promise<ParsedFile> {
       ],
       truncated: false,
     };
+  } finally {
+    // PDFParse holds a worker handle; destroying it lets node exit
+    // cleanly when the caller is a one-shot script.
+    if (parser) {
+      await parser.destroy().catch(() => {
+        /* best-effort cleanup */
+      });
+    }
   }
 }
 
