@@ -403,7 +403,15 @@ function AppShell(): JSX.Element {
         userPlan={me?.plan}
         userSelectedRoles={me?.selectedRoles ?? null}
         quotaExhausted={quotaExhausted}
-        onSubmit={async (intent) => {
+        attachmentsAllowed={planForRetention !== 'free'}
+        attachmentByteCap={
+          planForRetention === 'pro'
+            ? 10 * 1024 * 1024
+            : planForRetention === 'basic'
+              ? 5 * 1024 * 1024
+              : 0
+        }
+        onSubmit={async (intent, fileIds) => {
           // Supercar: when the current task is parked on an awaiting_user
           // question, route the composer to tasks.reply so the agent's
           // existing loop resumes. Otherwise spawn a fresh task.
@@ -413,7 +421,7 @@ function AppShell(): JSX.Element {
             else if (!res.ok) toast.show('这个任务已经不在等待回复了', 'error');
             return;
           }
-          const res = await createTask(intent);
+          const res = await createTask(intent, fileIds);
           if ('error' in res) toast.show(`发送失败：${res.error}`, 'error');
         }}
         onOpenSidebar={() => setSidebarOpen(true)}

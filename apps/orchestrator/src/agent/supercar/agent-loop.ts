@@ -237,6 +237,16 @@ export interface RunSupercarOptions {
    * Tests that don't care about gating can leave it undefined.
    */
   roleIdOverride?: string;
+  /**
+   * Phase 10 Tier 3 — pre-parsed user-uploaded file blocks. The
+   * caller (tasks.create) reads each fileId, runs it through
+   * parseFileForPrompt, and passes the resulting content blocks
+   * here. They get prepended to the agent's first user message so
+   * the model sees the attachment alongside the original intent.
+   * Empty / undefined → no attachment, identical to pre-T3
+   * behaviour.
+   */
+  attachments?: Anthropic.Beta.BetaContentBlockParam[];
 }
 
 // ---------------------------------------------------------------------------
@@ -555,20 +565,30 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   type MsgParam = Anthropic.Beta.BetaMessageParam;
   type ContentBlockParam = Anthropic.Beta.BetaContentBlockParam;
 
+  // Phase 10 Tier 3: attachments slot in between the intent text and
+  // the initial screenshot. Order matters — the model reads the
+  // intent first, then the file context, then "here's the browser
+  // state" — that progression mirrors how a human would brief a
+  // colleague ("here's what I want, here's the data, here's where
+  // we are right now"). Empty attachments array no-ops cleanly.
+  const initialContent: ContentBlockParam[] = [
+    { type: 'text', text: opts.intent },
+  ];
+  if (opts.attachments && opts.attachments.length > 0) {
+    initialContent.push(...opts.attachments);
+  }
+  initialContent.push({
+    type: 'image',
+    source: {
+      type: 'base64',
+      media_type: 'image/jpeg',
+      data: initialShot.base64,
+    },
+  });
   const messages: MsgParam[] = [
     {
       role: 'user',
-      content: [
-        { type: 'text', text: opts.intent },
-        {
-          type: 'image',
-          source: {
-            type: 'base64',
-            media_type: 'image/jpeg',
-            data: initialShot.base64,
-          },
-        },
-      ] as ContentBlockParam[],
+      content: initialContent,
     },
   ];
 

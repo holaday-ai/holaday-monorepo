@@ -64,7 +64,10 @@ export interface TaskStore {
 
   setSelectedTask(taskId: string | null): void;
   refreshTasks(): Promise<void>;
-  createTask(intent: string): Promise<{ taskId: string } | { error: string }>;
+  createTask(
+    intent: string,
+    fileIds?: string[],
+  ): Promise<{ taskId: string } | { error: string }>;
   deleteTask(taskId: string): Promise<{ ok: true } | { error: string }>;
   renameTask(taskId: string, title: string): Promise<{ ok: true } | { error: string }>;
   replyToTask(taskId: string, message: string): Promise<{ ok: boolean } | { error: string }>;
@@ -300,7 +303,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     }
   },
 
-  async createTask(intent) {
+  async createTask(intent, fileIds) {
     // Reject intents that are obviously control commands typed into
     // the wrong box (e.g. user typing "停止" into the composer
     // because they didn't see the Stop button). Fails client-side
@@ -312,7 +315,10 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       return { error: msg };
     }
     try {
-      const res = await trpc.tasks.create.mutate({ intent });
+      const res = await trpc.tasks.create.mutate({
+        intent,
+        ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
+      });
       // Optimistic insert at the top so the UI feels instant; the next
       // refreshTasks() will pick up the canonical server row.
       const now = new Date();

@@ -30,6 +30,8 @@ import {
   classifyRole,
   selectModelAndEffort,
 } from '../../agent/supercar/prompt-layers.js';
+import { FileService } from '../../files/file-service.js';
+import { parseFileForPrompt } from '../../files/parsers.js';
 import {
   QuotaService,
   getConcurrencyLimit,
@@ -56,6 +58,13 @@ const taskIdInput = z.object({ taskId: z.string().min(1) });
 const createInput = z.object({
   intent: z.string().min(1).max(4_000),
   occupation: z.string().optional(),
+  /**
+   * Phase 10 Tier 3 — external ids for files the user uploaded
+   * BEFORE this tasks.create call (via POST /files/upload). The
+   * server reads them, parses each into the right Anthropic content
+   * block, and prepends them to the agent's first user message.
+   */
+  fileIds: z.array(z.string()).max(5).optional(),
 });
 
 export const tasksRouter = router({
@@ -137,6 +146,29 @@ export const tasksRouter = router({
       }
     }
     const opusActuallyConsumed = consume.ok && willConsumeOpus;
+
+    // Phase 10 Tier 3 — resolve attachments BEFORE the supercar / vision
+    // branch decision. We read the buffers + parse them up front so the
+    // user message we hand the agent is fully baked; both paths get
+    // identical attachment semantics. Failures (missing file, expired
+    // row, parse error) log + skip — the task still runs without that
+    // file rather than failing creation outright.
+    const fileService = new FileService(ctx.db, ctx.logger);
+    const attachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
+    if (input.fileIds && input.fileIds.length > 0) {
+      const loaded = await fileService.loadMany(input.fileIds, userRow.id);
+      for (const f of loaded) {
+        try {
+          const parsed = await parseFileForPrompt(f.buffer, f.row.filename, f.row.mimetype);
+          attachmentBlocks.push(...parsed.blocks);
+        } catch (err) {
+          ctx.logger.warn(
+            { err: err instanceof Error ? err.message : String(err), fileId: f.row.externalId },
+            'tasks.create: file parse failed — skipping',
+          );
+        }
+      }
+    }
 
     // Compute these once — used both by the diagnostic log AND by the
     // gate. Hoisting them up avoids re-classifying the intent twice.
@@ -227,6 +259,22 @@ export const tasksRouter = router({
           opusUsed: opusActuallyConsumed,
         },
       );
+      // Phase 10 Tier 3 — back-fill task_files.task_id once the task
+      // row exists. Best-effort so a failed link doesn't kill the run;
+      // worst case the file is orphaned (still readable by id, just
+      // not linkable from /tasks/:id).
+      if (input.fileIds && input.fileIds.length > 0) {
+        const [taskDb] = await ctx.db
+          .select({ id: tasksTable.id })
+          .from(tasksTable)
+          .where(eq(tasksTable.externalId, taskId))
+          .limit(1);
+        if (taskDb) {
+          await fileService
+            .linkToTask(input.fileIds, taskDb.id, userRow.id)
+            .catch((err) => ctx.logger.warn({ err }, 'tasks.create: file link failed'));
+        }
+      }
 
       const classification = classifyDomain(input.intent);
       ctx.logger.info(
@@ -325,6 +373,9 @@ export const tasksRouter = router({
           // resurrect the raw classifier match. Gated value is 'none' for
           // free users, 'none' or open-pool for basic, anything for pro.
           roleIdOverride: gatedRole,
+          // Phase 10 Tier 3 — attachments parsed above, prepended to
+          // the agent's first user message before the screenshot.
+          ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
           onTick(ev) {
             // Synthesise a tick.start + tick.end pair per iteration so
             // the existing UI step cards light up without frontend

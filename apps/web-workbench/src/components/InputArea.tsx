@@ -1,11 +1,15 @@
-import { ArrowUp, Loader2, Plus, Sparkles } from 'lucide-react';
+import { ArrowUp, Loader2, Paperclip, Plus, Sparkles } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { AttachmentChip, type DraftAttachment } from '@/components/AttachmentChip';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { useToast } from '@/components/ui/toast';
+import { isUploadError, uploadFile } from '@/lib/upload-file';
+import { cn } from '@/lib/utils';
 
 interface Props {
-  onSubmit: (intent: string) => Promise<void> | void;
+  onSubmit: (intent: string, fileIds: string[]) => Promise<void> | void;
   busy?: boolean;
   /** Forwarded ref for keyboard-shortcut focus (Cmd+N / slash). */
   inputRef?: React.Ref<HTMLTextAreaElement>;
@@ -28,7 +32,18 @@ interface Props {
    * choices since free can't buy add-on packs).
    */
   quotaPlan?: string;
+  /**
+   * Phase 10 Tier 3 — plan-level attachment ability. 'free' shows the
+   * button greyed with an upsell tooltip; 'basic'/'pro' enables it.
+   * Drives the BYTE_CAP_HINT copy too.
+   */
+  attachmentsAllowed?: boolean;
+  /** Plan-specific size cap for the inline hint and pre-flight check. */
+  attachmentByteCap?: number;
 }
+
+const ACCEPT = '.csv,.xlsx,.xls,.pdf,.txt,.json,.md,.png,.jpg,.jpeg,.webp,.gif';
+const MAX_ATTACHMENTS = 5;
 
 /**
  * Bottom-of-panel composer. Enter submits, Shift+Enter inserts a
@@ -45,14 +60,15 @@ export function InputArea({
   replyMode,
   quotaExhausted,
   quotaPlan,
+  attachmentsAllowed,
+  attachmentByteCap,
 }: Props): JSX.Element {
-  const [value, setValue] = React.useState('');
   const navigate = useNavigate();
-  if (quotaExhausted) {
-    return (
-      <QuotaExhaustedCard plan={quotaPlan ?? 'free'} navigate={navigate} />
-    );
-  }
+  const toast = useToast();
+  const [value, setValue] = React.useState('');
+  const [attachments, setAttachments] = React.useState<DraftAttachment[]>([]);
+  const [dragActive, setDragActive] = React.useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
   // Local submitting flag — decouples the button spinner from the
   // global `busy` prop (which is driven by the store-level `loading`
   // flag that covers list refresh too). We flip this while the
@@ -60,13 +76,90 @@ export function InputArea({
   // *this* submit.
   const [submitting, setSubmitting] = React.useState(false);
 
+  if (quotaExhausted) {
+    return (
+      <QuotaExhaustedCard plan={quotaPlan ?? 'free'} navigate={navigate} />
+    );
+  }
+
+  function pickFiles(): void {
+    if (!attachmentsAllowed) {
+      toast.show('免费版不支持文件上传，升级到基础版即可使用');
+      return;
+    }
+    fileInputRef.current?.click();
+  }
+
+  async function ingestFiles(files: FileList | File[]): Promise<void> {
+    if (!attachmentsAllowed) {
+      toast.show('免费版不支持文件上传，升级到基础版即可使用');
+      return;
+    }
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    if (attachments.length + list.length > MAX_ATTACHMENTS) {
+      toast.show(`最多附 ${MAX_ATTACHMENTS} 个文件`);
+      return;
+    }
+    for (const file of list) {
+      // Pre-flight size check — fail-fast client-side before the
+      // multipart roundtrip so the user gets immediate feedback.
+      if (attachmentByteCap && file.size > attachmentByteCap) {
+        toast.show(`文件 "${file.name}" 超过 ${(attachmentByteCap / (1024 * 1024)).toFixed(0)}MB 上限`);
+        continue;
+      }
+      const draft: DraftAttachment = {
+        fileId: '',
+        filename: file.name,
+        mimetype: file.type || 'application/octet-stream',
+        size: file.size,
+        status: 'uploading',
+      };
+      setAttachments((prev) => [...prev, draft]);
+      try {
+        const meta = await uploadFile(file);
+        setAttachments((prev) =>
+          prev.map((a) =>
+            a === draft || (a.filename === draft.filename && a.fileId === '')
+              ? { ...a, fileId: meta.fileId, status: 'ready' as const }
+              : a,
+          ),
+        );
+      } catch (err) {
+        const msg = isUploadError(err) ? err.message : err instanceof Error ? err.message : '上传失败';
+        setAttachments((prev) =>
+          prev.map((a) =>
+            a.filename === draft.filename && a.fileId === ''
+              ? { ...a, status: 'error' as const, errorMessage: msg }
+              : a,
+          ),
+        );
+        toast.show(msg);
+      }
+    }
+  }
+
+  function removeAttachment(index: number): void {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  }
+
   async function handleSubmit(): Promise<void> {
     const trimmed = value.trim();
     if (!trimmed || submitting || busy) return;
+    // Block submit while any attachment is still uploading; let
+    // failed ones submit (they'll just be ignored server-side).
+    if (attachments.some((a) => a.status === 'uploading')) {
+      toast.show('文件上传中，请稍候');
+      return;
+    }
+    const fileIds = attachments
+      .filter((a) => a.status === 'ready' && a.fileId)
+      .map((a) => a.fileId);
     setSubmitting(true);
     setValue('');
+    setAttachments([]);
     try {
-      await onSubmit(trimmed);
+      await onSubmit(trimmed, fileIds);
     } finally {
       setSubmitting(false);
     }
@@ -82,8 +175,51 @@ export function InputArea({
   const disabled = submitting || Boolean(busy);
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 pb-6">
-      <div className="relative rounded-2xl border border-input bg-background shadow-[0_2px_12px_rgba(0,0,0,0.04)] focus-within:border-foreground/20 focus-within:shadow-[0_4px_24px_rgba(0,0,0,0.08)]">
+    <div
+      className="mx-auto w-full max-w-3xl px-6 pb-6"
+      onDragEnter={(e) => {
+        if (!attachmentsAllowed) return;
+        if (e.dataTransfer.types.includes('Files')) {
+          e.preventDefault();
+          setDragActive(true);
+        }
+      }}
+      onDragOver={(e) => {
+        if (dragActive) e.preventDefault();
+      }}
+      onDragLeave={(e) => {
+        // dragLeave fires on every child; only clear when leaving
+        // the outer container.
+        if (e.currentTarget === e.target) setDragActive(false);
+      }}
+      onDrop={(e) => {
+        if (!attachmentsAllowed) return;
+        e.preventDefault();
+        setDragActive(false);
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          void ingestFiles(e.dataTransfer.files);
+        }
+      }}
+    >
+      <div
+        className={cn(
+          'relative rounded-2xl border bg-background shadow-[0_2px_12px_rgba(0,0,0,0.04)] focus-within:border-foreground/20 focus-within:shadow-[0_4px_24px_rgba(0,0,0,0.08)]',
+          dragActive
+            ? 'border-foreground/30 ring-2 ring-foreground/10'
+            : 'border-input',
+        )}
+      >
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 border-b border-border px-3 py-2">
+            {attachments.map((a, i) => (
+              <AttachmentChip
+                key={`${a.filename}-${i}`}
+                attachment={a}
+                onRemove={() => removeAttachment(i)}
+              />
+            ))}
+          </div>
+        )}
         <Textarea
           ref={inputRef}
           value={value}
@@ -94,6 +230,34 @@ export function InputArea({
           className="resize-none border-0 bg-transparent px-4 py-3 pr-14 text-sm shadow-none focus-visible:ring-0"
           style={{ maxHeight: '10rem' }}
           disabled={disabled}
+        />
+        {!replyMode && (
+          <button
+            type="button"
+            onClick={pickFiles}
+            aria-label={attachmentsAllowed ? '附加文件' : '升级基础版可附加文件'}
+            title={attachmentsAllowed ? '附加文件' : '升级基础版可附加文件'}
+            className={cn(
+              'absolute bottom-2.5 left-2.5 inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors',
+              attachmentsAllowed
+                ? 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground'
+                : 'cursor-not-allowed text-muted-foreground/40',
+            )}
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={ACCEPT}
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files) void ingestFiles(e.target.files);
+            // Reset so picking the same file twice still fires.
+            e.target.value = '';
+          }}
         />
         <Button
           size="icon"

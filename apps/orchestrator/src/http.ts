@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import { eq } from 'drizzle-orm';
 import express from 'express';
+import multer from 'multer';
 import { pinoHttp } from 'pino-http';
 import type { Planner } from './agent/planner.js';
 import type { ExecutionRouter } from './agent/supercar/index.js';
@@ -15,6 +16,12 @@ import { logger } from './config/logger.js';
 import { db } from './db/client.js';
 import { payments } from './db/schema/payments.js';
 import { users } from './db/schema/users.js';
+import {
+  ACCEPTED_EXTENSIONS,
+  ACCEPTED_MIMES,
+  FileService,
+  UPLOAD_BYTE_LIMIT,
+} from './files/file-service.js';
 import { nextExpiryFor, type PayPalAdapter, type PlanId } from './payment/index.js';
 import type { BillingCycle } from '@holaday/shared-types';
 import { makeCreateContext } from './trpc/context.js';
@@ -327,6 +334,151 @@ export function createHttpApp(deps: HttpAppDeps) {
       // is transiently down. Pure programming bugs will retry too,
       // but the DB writes are idempotent.
       res.status(500).send('internal');
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // Phase 10 Tier 3 — Files API.
+  //
+  //   POST /files/upload    multipart/form-data  → { fileId, filename, size, mimetype }
+  //                         body field: `file`
+  //                         auth: bearer (uses bearerAuth middleware that
+  //                               populated req.userId above).
+  //                         Per-plan size cap enforced server-side; SPA
+  //                         hides the button entirely on free.
+  //   GET  /files/:id/download                  → file bytes
+  //                         auth: bearer; verifies the file's user_id
+  //                               matches req.userId.
+  //                         Output kind enforces a 24h expires_at; reads
+  //                         past that 404.
+  //
+  // multer's memoryStorage keeps the buffer in process for the duration
+  // of the request — fine for the 10MB cap. Disk-storage would race
+  // with FileService.storeUpload's directory layout, and the buffer
+  // copy cost at 10MB is negligible.
+  // ---------------------------------------------------------------------
+  const fileService = new FileService(db, logger);
+  // Use the most permissive cap (Pro: 10MB) at the multer layer; the
+  // service layer re-validates against the caller's specific plan,
+  // so a Basic user uploading 8MB still 403s with the right message.
+  const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+      fileSize: Math.max(...Object.values(UPLOAD_BYTE_LIMIT)),
+      files: 1,
+    },
+  });
+
+  app.post('/files/upload', upload.single('file'), async (req, res) => {
+    const userExternalId = (req as express.Request & { userId?: string }).userId;
+    if (!userExternalId) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    if (!req.file) {
+      res.status(400).json({ error: 'no file in upload' });
+      return;
+    }
+    try {
+      const [user] = await db
+        .select({ id: users.id, plan: users.plan })
+        .from(users)
+        .where(eq(users.externalId, userExternalId))
+        .limit(1);
+      if (!user) {
+        res.status(401).json({ error: 'unknown user' });
+        return;
+      }
+      const planId: PlanId =
+        user.plan === 'basic' || user.plan === 'pro' ? user.plan : 'free';
+      const cap = UPLOAD_BYTE_LIMIT[planId];
+      if (cap === 0) {
+        res.status(403).json({
+          error: 'plan_does_not_allow_uploads',
+          message: '免费版不支持文件上传，升级到基础版即可使用',
+        });
+        return;
+      }
+      if (req.file.size > cap) {
+        res.status(413).json({
+          error: 'file_too_large',
+          message: `文件超过当前套餐限制（${planId === 'basic' ? '5MB' : '10MB'}）`,
+        });
+        return;
+      }
+      // Validate mimetype OR fallback by file extension. Some browsers
+      // send 'application/octet-stream' for less common formats; the
+      // extension whitelist catches the legitimate cases without
+      // turning the door wide open.
+      const filename = req.file.originalname || 'upload';
+      const dotIdx = filename.lastIndexOf('.');
+      const ext = dotIdx >= 0 ? filename.slice(dotIdx).toLowerCase() : '';
+      const mimeOk = ACCEPTED_MIMES.has(req.file.mimetype.toLowerCase());
+      const extOk = ext.length > 0 && ACCEPTED_EXTENSIONS.has(ext);
+      if (!mimeOk && !extOk) {
+        res.status(415).json({
+          error: 'unsupported_file_type',
+          message: `不支持的文件类型：${req.file.mimetype || '未知'}`,
+        });
+        return;
+      }
+      const stored = await fileService.storeUpload({
+        userIdInternal: user.id,
+        userExternalId,
+        filename,
+        mimetype: req.file.mimetype || 'application/octet-stream',
+        buffer: req.file.buffer,
+      });
+      res.status(200).json({
+        fileId: stored.externalId,
+        filename: stored.filename,
+        mimetype: stored.mimetype,
+        size: stored.sizeBytes,
+      });
+    } catch (err) {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        'file upload route crashed',
+      );
+      res.status(500).json({ error: 'upload_failed' });
+    }
+  });
+
+  app.get('/files/:id/download', async (req, res) => {
+    const userExternalId = (req as express.Request & { userId?: string }).userId;
+    if (!userExternalId) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    const fileId = String(req.params.id ?? '');
+    try {
+      const [user] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.externalId, userExternalId))
+        .limit(1);
+      if (!user) {
+        res.status(401).json({ error: 'unknown user' });
+        return;
+      }
+      const loaded = await fileService.loadForUser(fileId, userExternalId);
+      if (!loaded || loaded.row.userId !== user.id) {
+        res.status(404).json({ error: 'not_found' });
+        return;
+      }
+      res.setHeader('content-type', loaded.row.mimetype);
+      res.setHeader(
+        'content-disposition',
+        `attachment; filename*=UTF-8''${encodeURIComponent(loaded.row.filename)}`,
+      );
+      res.setHeader('content-length', loaded.buffer.length.toString());
+      res.status(200).send(loaded.buffer);
+    } catch (err) {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err), fileId },
+        'file download route crashed',
+      );
+      res.status(500).json({ error: 'download_failed' });
     }
   });
 

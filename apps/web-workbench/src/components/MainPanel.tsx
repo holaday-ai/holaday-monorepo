@@ -7,7 +7,7 @@ import type { UiTask } from '@/types/task';
 
 interface Props {
   task: UiTask | null;
-  onSubmit: (intent: string) => Promise<void> | void;
+  onSubmit: (intent: string, fileIds: string[]) => Promise<void> | void;
   busy?: boolean;
   onOpenSidebar?: () => void;
   onOpenBrowser?: () => void;
@@ -30,6 +30,10 @@ interface Props {
    * TOO_MANY_REQUESTS isn't the only signal the user gets.
    */
   quotaExhausted?: boolean;
+  /** Phase 10 Tier 3 — drives the paperclip button enabled state. */
+  attachmentsAllowed?: boolean;
+  /** Plan-specific attachment byte cap (5MB basic / 10MB pro). */
+  attachmentByteCap?: number;
 }
 
 /**
@@ -51,6 +55,8 @@ export function MainPanel({
   userPlan,
   userSelectedRoles,
   quotaExhausted,
+  attachmentsAllowed,
+  attachmentByteCap,
 }: Props): JSX.Element {
   return (
     <main className="flex h-full min-w-0 flex-[2] flex-col bg-background lg:min-w-[420px]">
@@ -83,7 +89,10 @@ export function MainPanel({
           <TaskStream task={task} />
         ) : (
           <div className="mx-auto max-w-3xl px-6 pt-12">
-            <EmptyState greetingName={greetingName} onPick={(intent) => void onSubmit(intent)} />
+            <EmptyState
+              greetingName={greetingName}
+              onPick={(intent) => void onSubmit(intent, [])}
+            />
           </div>
         )}
       </div>
@@ -97,6 +106,8 @@ export function MainPanel({
         replyMode={replyMode}
         quotaExhausted={quotaExhausted}
         quotaPlan={userPlan}
+        attachmentsAllowed={attachmentsAllowed}
+        attachmentByteCap={attachmentByteCap}
       />
     </main>
   );
