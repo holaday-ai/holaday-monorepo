@@ -375,7 +375,14 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     },
     'supercar: routing decision',
   );
-  if (opts.isSimpleSearch && opts.braveAdapter) {
+  // Phase 10 Tier 3 — file attachments disable Brave / Zapier fast
+  // lanes. The whole point of attaching a file is for the agent to
+  // read it; short-circuiting through a search synthesis throws the
+  // attachment away and produces "我没有访问附件的能力" replies.
+  // Forcing the model loop ensures the attachment blocks reach the
+  // first user message.
+  const hasAttachments = (opts.attachments?.length ?? 0) > 0;
+  if (opts.isSimpleSearch && opts.braveAdapter && !hasAttachments) {
     const r = await opts.braveAdapter.search(opts.intent, 10);
     if ('results' in r && r.results.length > 0) {
       logger.info(
@@ -414,7 +421,13 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // Lane 4 — Zapier. Only triggers when the caller supplied BOTH the
   // classifier match AND an explicit webhook path; we don't guess
   // routes. The hook returns a run id the user can track in Zapier.
-  if (opts.isCrossPlatformAutomation && opts.zapierAdapter && opts.zapierWebhookPath) {
+  // Same attachment carve-out as the Brave lane above.
+  if (
+    opts.isCrossPlatformAutomation &&
+    opts.zapierAdapter &&
+    opts.zapierWebhookPath &&
+    !hasAttachments
+  ) {
     const r = await opts.zapierAdapter.trigger(opts.zapierWebhookPath, {
       intent: opts.intent,
       task_id: opts.taskId,
