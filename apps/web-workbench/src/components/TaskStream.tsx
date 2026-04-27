@@ -15,6 +15,7 @@ import * as React from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
 import { StepCard } from '@/components/StepCard';
 import { useTaskStore } from '@/stores/task-store';
 import { cn } from '@/lib/utils';
@@ -824,13 +825,53 @@ function makeMarkdownComponents(opts: {
         {children}
       </td>
     ),
-    code: ({ children, ...rest }) => (
-      <code
-        className="rounded bg-muted/70 px-1 py-0.5 text-[12px] text-foreground"
-        {...rest}
-      >
-        {children}
-      </code>
-    ),
+    code: ({ children, className, ...rest }) => {
+      // Phase 10 Tier 3 — fenced ```holaday-file blocks carry the
+      // create_file tool result as JSON. Extract + render the
+      // FileDownloadCard inline; fall back to a normal code element
+      // when the JSON is malformed (catches model truncation).
+      if (className === 'language-holaday-file') {
+        const raw = Array.isArray(children)
+          ? children.join('')
+          : typeof children === 'string'
+            ? children
+            : '';
+        const payload = parseHoladayFilePayload(raw);
+        if (payload) return <FileDownloadCard payload={payload} />;
+      }
+      return (
+        <code
+          className={cn(
+            'rounded bg-muted/70 px-1 py-0.5 text-[12px] text-foreground',
+            className,
+          )}
+          {...rest}
+        >
+          {children}
+        </code>
+      );
+    },
+    // ReactMarkdown wraps fenced code in <pre><code>; when our `code`
+    // override returns a non-<code> node (the FileDownloadCard) we
+    // need the surrounding <pre> to NOT add its default styling, or
+    // the card ends up trapped in a grey rectangle. Detect the same
+    // language tag on the inner code child and render the children
+    // bare in that case.
+    pre: ({ children, ...rest }) => {
+      const child = Array.isArray(children) ? children[0] : children;
+      const lang =
+        child &&
+        typeof child === 'object' &&
+        'props' in (child as { props?: { className?: string } }) &&
+        (child as { props?: { className?: string } }).props?.className;
+      if (lang === 'language-holaday-file') {
+        return <>{children}</>;
+      }
+      return (
+        <pre className="my-2 overflow-x-auto rounded-md bg-muted/60 p-3 text-[12px]" {...rest}>
+          {children}
+        </pre>
+      );
+    },
   };
 }

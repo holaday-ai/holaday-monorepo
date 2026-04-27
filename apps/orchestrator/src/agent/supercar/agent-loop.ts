@@ -247,6 +247,27 @@ export interface RunSupercarOptions {
    * behaviour.
    */
   attachments?: Anthropic.Beta.BetaContentBlockParam[];
+  /**
+   * Phase 10 Tier 3 — per-plan format whitelist for the `create_file`
+   * tool. When non-empty, the tool is exposed to the model with
+   * `format` constrained to this list; an empty / undefined list
+   * suppresses the tool entirely (Free plan). The list is also
+   * re-checked at execution time below as a defence-in-depth
+   * (a model can't smuggle a forbidden format past the schema).
+   */
+  createFileFormats?: readonly string[];
+  /**
+   * Callback invoked when the model calls `create_file`. The caller
+   * (tasks.create) wires this to FileService.storeOutput so the
+   * returned download URL points at /api/files/:id/download. Absent
+   * → tool returns an error result asking the model to ask the user
+   * to enable file output.
+   */
+  onCreateFile?: (input: {
+    filename: string;
+    format: string;
+    content: string;
+  }) => Promise<{ fileId: string; filename: string; size: number; downloadUrl: string } | { error: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -727,6 +748,42 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                 required: ['url'],
               },
             },
+            // Phase 10 Tier 3 — create_file. Only injected when the
+            // caller's plan whitelist is non-empty. The format enum is
+            // narrowed per-plan (Basic gets text-shaped formats only;
+            // Pro gets all). Server-side check below also re-validates,
+            // so a model that hallucinates 'xlsx' on Basic still fails
+            // safely instead of producing a paid-tier file.
+            ...(opts.createFileFormats && opts.createFileFormats.length > 0
+              ? [
+                  {
+                    type: 'custom' as const,
+                    name: 'create_file',
+                    description:
+                      '为用户生成一个可下载的文件。任务结果若需以文件形式交付（数据表/报告/演示稿/JSON 数据等），调用此工具。文件 24 小时内可供用户下载。',
+                    input_schema: {
+                      type: 'object',
+                      properties: {
+                        filename: {
+                          type: 'string',
+                          description: '含扩展名的文件名，例如 sales-report.xlsx',
+                        },
+                        format: {
+                          type: 'string',
+                          enum: [...opts.createFileFormats],
+                          description:
+                            '文件格式。csv/txt/md/json 直接传文本；xlsx 传 JSON（数组的数组、对象数组、或 {sheetName: rows} 字典）；pdf/docx 传纯文本或 Markdown 风格段落；pptx 传 {"slides":[{"title":"...","bullets":["..."]}]}',
+                        },
+                        content: {
+                          type: 'string',
+                          description: '文件内容。结构按 format 描述。',
+                        },
+                      },
+                      required: ['filename', 'format', 'content'],
+                    },
+                  },
+                ]
+              : []),
           ] as Anthropic.Beta.BetaToolUnion[],
           betas,
           thinking: { type: 'adaptive' },
@@ -1039,6 +1096,114 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               },
             ],
           });
+          continue;
+        }
+
+        // -------- Custom `create_file` tool (Phase 10 Tier 3) --------
+        if (toolUse.name === 'create_file') {
+          const inp = (toolUse.input as {
+            filename?: string;
+            format?: string;
+            content?: string;
+          } | null) ?? {};
+          const filename = typeof inp.filename === 'string' ? inp.filename.trim() : '';
+          const format = typeof inp.format === 'string' ? inp.format.trim() : '';
+          const content = typeof inp.content === 'string' ? inp.content : '';
+          if (!filename || !format) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [{ type: 'text', text: 'create_file: filename and format are required' }],
+              is_error: true,
+            });
+            continue;
+          }
+          // Server-side plan defence — even though the schema enum
+          // only listed allowed formats, a model can sometimes invent
+          // values. Reject anything outside the per-plan whitelist
+          // with a concrete error the model can recover from.
+          const allowed = opts.createFileFormats ?? [];
+          if (!allowed.includes(format)) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [
+                {
+                  type: 'text',
+                  text: `create_file: 当前套餐不支持 ${format} 格式（可用：${allowed.join(', ') || '无'}）`,
+                },
+              ],
+              is_error: true,
+            });
+            continue;
+          }
+          if (!opts.onCreateFile) {
+            // Caller hasn't wired the persistence callback. Tell the
+            // model to skip and ask the user to enable file output.
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [{ type: 'text', text: 'create_file: 当前会话未启用文件生成，请把内容直接写在回复里' }],
+              is_error: true,
+            });
+            continue;
+          }
+          try {
+            const result = await opts.onCreateFile({ filename, format, content });
+            if ('error' in result) {
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolUse.id,
+                content: [{ type: 'text', text: `create_file: ${result.error}` }],
+                is_error: true,
+              });
+              continue;
+            }
+            toolsUsed.add('create_file');
+            // Tell the model the file was created. The download URL +
+            // file id round-trip back to the SPA via the task summary
+            // — agent-loop.ts doesn't render the card itself; instead
+            // a clear "[文件已生成]" line plus the JSON shape lets
+            // ReactMarkdown extract a download chip via a custom
+            // `code` renderer. Future polish: persist this on the task
+            // row directly instead of relying on text scraping.
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [
+                {
+                  type: 'text',
+                  text:
+                    `已生成文件 ${result.filename}（${formatBytesAgent(result.size)}）。\n` +
+                    '在最终回复里附上一行（保留代码块）让用户能下载：\n' +
+                    '```holaday-file\n' +
+                    JSON.stringify(
+                      {
+                        fileId: result.fileId,
+                        filename: result.filename,
+                        size: result.size,
+                        downloadUrl: result.downloadUrl,
+                      },
+                      null,
+                      2,
+                    ) +
+                    '\n```',
+                },
+              ],
+            });
+          } catch (err) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [
+                {
+                  type: 'text',
+                  text: `create_file: 写文件失败：${err instanceof Error ? err.message : String(err)}`,
+                },
+              ],
+              is_error: true,
+            });
+          }
           continue;
         }
 
@@ -1765,4 +1930,14 @@ ${context}`;
       return `${i + 1}. [${title}](${h.url})`;
     })
     .join('\n');
+}
+
+/**
+ * Format a byte count for inclusion in a tool_result text block.
+ * Local helper so the agent-loop doesn't pull a frontend formatter.
+ */
+function formatBytesAgent(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

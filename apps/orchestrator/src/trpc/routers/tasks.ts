@@ -30,8 +30,13 @@ import {
   classifyRole,
   selectModelAndEffort,
 } from '../../agent/supercar/prompt-layers.js';
-import { FileService } from '../../files/file-service.js';
+import { FileService, taskInternalIdFor } from '../../files/file-service.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
+import {
+  allowedFormatsForPlan,
+  isCreateFileFormat,
+  renderFile,
+} from '../../files/writers.js';
 import {
   QuotaService,
   getConcurrencyLimit,
@@ -376,6 +381,44 @@ export const tasksRouter = router({
           // Phase 10 Tier 3 — attachments parsed above, prepended to
           // the agent's first user message before the screenshot.
           ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
+          // Phase 10 Tier 3 — per-plan create_file format whitelist.
+          // Empty list (free) suppresses the tool entirely; basic gets
+          // text-shaped formats only; pro gets office formats too.
+          createFileFormats: allowedFormatsForPlan(planId),
+          // Closure that lazily resolves the task's DB id (the supercar
+          // queue runs async; the row exists by the time the model
+          // calls a tool). Stores the buffer + index row, then returns
+          // a download URL the model embeds in the final summary.
+          async onCreateFile({ filename, format, content }) {
+            if (!isCreateFileFormat(format)) {
+              return { error: `unsupported format: ${format}` };
+            }
+            try {
+              const rendered = await renderFile(format, content);
+              const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+              if (taskInternalId == null) {
+                return { error: 'task row not found' };
+              }
+              const stored = await fileService.storeOutput({
+                userIdInternal: userRow.id,
+                userExternalId: ctx.userId,
+                taskIdInternal: taskInternalId,
+                filename,
+                mimetype: rendered.mimetype,
+                buffer: rendered.buffer,
+              });
+              return {
+                fileId: stored.externalId,
+                filename: stored.filename,
+                size: stored.sizeBytes,
+                downloadUrl: `/api/files/${stored.externalId}/download`,
+              };
+            } catch (err) {
+              return {
+                error: err instanceof Error ? err.message : String(err),
+              };
+            }
+          },
           onTick(ev) {
             // Synthesise a tick.start + tick.end pair per iteration so
             // the existing UI step cards light up without frontend
