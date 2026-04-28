@@ -113,13 +113,46 @@ export class SmsAdapter {
     }
     const code = String(Math.floor(100000 + Math.random() * 900000));
     try {
-      await this.client.sendSms(
+      // sendSms returns { body: { Code, Message, BizId, RequestId } }.
+      // A 200 HTTP response is NOT delivery success — the API uses the
+      // body's Code field for that. Common rejections:
+      //   isv.SMS_SIGNATURE_ILLEGAL          — sign string wrong
+      //   isv.SMS_TEMPLATE_ILLEGAL           — template code wrong
+      //   isv.SMS_SIGN_NAME_NOT_MATCH_TEMPLATE — sign + template not bound
+      //   isv.MOBILE_NUMBER_ILLEGAL          — phone format wrong
+      //   isv.AMOUNT_NOT_ENOUGH              — account balance zero
+      //   isv.DAY_LIMIT_CONTROL              — daily send cap hit
+      const resp = (await this.client.sendSms(
         new SendSmsRequest({
           phoneNumbers: phone,
           signName: this.env.ALIYUN_SMS_SIGN_NAME,
           templateCode: this.env.ALIYUN_SMS_TEMPLATE_CODE,
           templateParam: JSON.stringify({ code }),
         }),
+      )) as { body?: { Code?: string; Message?: string; BizId?: string; RequestId?: string } };
+      const body = resp.body ?? {};
+      if (body.Code !== 'OK') {
+        this.logger.error(
+          {
+            kind: 'sms',
+            phone: maskPhone(phone),
+            code: body.Code,
+            message: body.Message,
+            requestId: body.RequestId,
+            signName: this.env.ALIYUN_SMS_SIGN_NAME,
+            templateCode: this.env.ALIYUN_SMS_TEMPLATE_CODE,
+          },
+          'sms: aliyun rejected (200 with non-OK Code)',
+        );
+        return {
+          ok: false,
+          error: 'aliyun_error',
+          message: `${body.Code ?? 'UNKNOWN'}: ${body.Message ?? 'unknown error'}`,
+        };
+      }
+      this.logger.info(
+        { kind: 'sms', phone: maskPhone(phone), bizId: body.BizId, requestId: body.RequestId },
+        'sms: aliyun accepted (Code=OK)',
       );
     } catch (err) {
       this.logger.error(
