@@ -34,3 +34,7 @@ export async function getStoredUser(): Promise<StoredUser | null> {
 export async function setStoredUser(user: StoredUser): Promise<void> {
   await chrome.storage.local.set({ [USER_KEY]: user });
 }
+
+export async function clearStoredUser(): Promise<void> {
+  await chrome.storage.local.remove(USER_KEY);
+}

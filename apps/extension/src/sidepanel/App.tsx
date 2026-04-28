@@ -53,10 +53,6 @@ interface TaskView {
   visionProgress?: VisionProgressView;
 }
 
-interface LoginResponse {
-  result: { data: { user: StoredUser; accessToken: string } };
-}
-
 interface MeResponse {
   result: {
     data: {
@@ -79,8 +75,6 @@ export function App() {
   const [token, setToken] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
 
   const [pageContext, setPageContext] = useState<PageContext | null>(null);
   const [intent, setIntent] = useState('');
@@ -237,27 +231,50 @@ export function App() {
     }
   }
 
-  async function login(): Promise<void> {
+  /**
+   * "我已登录，重试" button: nudges the SW to retry the
+   * localStorage-based auto-login from any open workbench tab. If
+   * the SW lifts a token, fetch the user via auth.me and hydrate
+   * the UI directly (instead of waiting for the storage.onChanged
+   * round trip). On failure, surfaces a hint about what to check.
+   */
+  async function retryAutoLogin(): Promise<void> {
     setStatus('loading');
     setError(null);
     try {
-      const res = await fetch(`${ORCHESTRATOR_HTTP}/trpc/auth.login`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+      const liftedToken = await new Promise<string | null>((resolve) => {
+        chrome.runtime.sendMessage(
+          { type: 'holaday.tryAutoLogin' },
+          (resp: { ok?: boolean; token?: string | null } | undefined) => {
+            resolve(resp?.token ?? null);
+          },
+        );
       });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
-        throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+      if (!liftedToken) {
+        setStatus('error');
+        setError(
+          '没找到已登录的 holaday.ai 标签页。请到 holaday.ai 登录后再点重试。',
+        );
+        return;
       }
-      const body = (await res.json()) as LoginResponse;
-      const data = body.result.data;
-      await setAccessToken(data.accessToken);
-      await setStoredUser(data.user);
-      setUser(data.user);
-      setToken(data.accessToken);
+      const fetchedUser = await fetchMe(liftedToken);
+      if (!fetchedUser) {
+        // Token was lifted but rejected by auth.me — likely expired
+        // or signed with a different secret. Drop it so the next
+        // retry doesn't keep looping with bad creds.
+        try {
+          await clearAccessToken();
+        } catch {
+          /* best-effort */
+        }
+        setStatus('error');
+        setError('从 holaday.ai 取到的 token 已失效，请到 holaday.ai 重新登录。');
+        return;
+      }
+      await setStoredUser(fetchedUser);
+      setUser(fetchedUser);
+      setToken(liftedToken);
       setStatus('connected');
-      chrome.runtime.sendMessage({ type: 'holaday.connect', token: data.accessToken });
     } catch (err) {
       setStatus('error');
       setError(err instanceof Error ? err.message : String(err));
@@ -314,30 +331,19 @@ export function App() {
       <div style={containerStyle}>
         <header style={brandHeader}>HOLA DAY</header>
         <div style={panelStyle}>
-          <div style={{ fontSize: 12, color: '#374151', marginBottom: 8 }}>
-            侧边栏需要先登录。已经在 holaday.ai 登录的用户重新进入侧边栏会自动同步登录态。
+          <div style={{ fontSize: 13, color: '#374151', marginBottom: 4, lineHeight: 1.55 }}>
+            请先到 <strong>holaday.ai</strong> 登录后重新打开侧边栏。
           </div>
-          <input
-            type="email"
-            placeholder="邮箱"
-            value={email}
-            onChange={(e) => setEmail(e.currentTarget.value)}
-            style={inputStyle}
-          />
-          <input
-            type="password"
-            placeholder="密码"
-            value={password}
-            onChange={(e) => setPassword(e.currentTarget.value)}
-            style={inputStyle}
-          />
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6, lineHeight: 1.5 }}>
+            侧边栏会从已登录的 holaday.ai 标签自动同步登录态，无需在这里再输一遍。
+          </div>
           <button
             type="button"
             disabled={status === 'loading'}
-            onClick={() => void login()}
+            onClick={() => void retryAutoLogin()}
             style={primaryBtn}
           >
-            {status === 'loading' ? '登录中...' : '登录'}
+            {status === 'loading' ? '同步中...' : '我已登录，重试'}
           </button>
           {error ? <div style={errorStyle}>{error}</div> : null}
         </div>

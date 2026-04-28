@@ -8,6 +8,7 @@ import {
 import { ORCHESTRATOR_WS } from '../shared/config.js';
 
 type Listener = (msg: ServerMessage) => void;
+type UnauthorizedListener = () => void;
 
 interface State {
   socket: WebSocket | null;
@@ -15,6 +16,14 @@ interface State {
   pingTimer: ReturnType<typeof setInterval> | null;
   closedByUser: boolean;
   listeners: Set<Listener>;
+  /**
+   * Phase 14 — fires when the orchestrator closes us with code 4401
+   * (or sends `server.error` with code='UNAUTHORIZED'). The SW uses
+   * this to clear the stale token from chrome.storage so the next
+   * ensureConnected runs auto-login from a fresh state instead of
+   * looping forever on a bad token.
+   */
+  unauthorizedListeners: Set<UnauthorizedListener>;
 }
 
 const state: State = {
@@ -23,11 +32,17 @@ const state: State = {
   pingTimer: null,
   closedByUser: false,
   listeners: new Set(),
+  unauthorizedListeners: new Set(),
 };
 
 export function onServerMessage(fn: Listener): () => void {
   state.listeners.add(fn);
   return () => state.listeners.delete(fn);
+}
+
+export function onUnauthorized(fn: UnauthorizedListener): () => void {
+  state.unauthorizedListeners.add(fn);
+  return () => state.unauthorizedListeners.delete(fn);
 }
 
 export function send(msg: ClientMessage): boolean {
@@ -49,18 +64,55 @@ export function disconnect(): void {
  *
  * Reconnect with exponential back-off (cap 30s). PoC A1 success = first
  * `server.welcome` message arrives back here.
+ *
+ * Idempotent on the SAME token: a healthy socket short-circuits so the
+ * keepalive alarm tick (every ~30s) doesn't churn the connection. To
+ * swap to a different token (e.g. the SW just lifted a fresher one
+ * from a workbench tab) call `reconnect(newToken)` instead — `connect`
+ * intentionally never tears down a live socket.
  */
 export function connect(token: string): void {
   if (!token) throw new Error('connect() requires a token');
-  // Idempotent: a healthy socket means the SW has already connected for
-  // this user. The MV3 keepalive alarm fires every ~30s and lands here;
-  // we don't want to churn the connection just because we got tickled.
   if (
     state.socket &&
     (state.socket.readyState === WebSocket.OPEN || state.socket.readyState === WebSocket.CONNECTING)
   ) {
     return;
   }
+  state.closedByUser = false;
+  openSocket(token);
+}
+
+/**
+ * Phase 14 — explicit token swap. The chrome.storage.onChanged listener
+ * fires this when the stored access_token VALUE changes (auto-login
+ * lifted a fresher one, popup re-authed, etc.). Without this path the
+ * old socket would keep streaming under the stale token until its TTL
+ * expired or the orchestrator booted us, and the user would see the
+ * old session in the Side Panel.
+ *
+ * Implementation: mark closedByUser so the close handler doesn't
+ * schedule a reconnect on the OLD token, close the existing socket,
+ * then open a new one. The new socket's close handler is socket-
+ * tagged (see openSocket) so it can ignore the OLD socket's
+ * delayed close event without clobbering the new state.
+ */
+export function reconnect(token: string): void {
+  if (!token) throw new Error('reconnect() requires a token');
+  if (state.socket) {
+    state.closedByUser = true;
+    try {
+      state.socket.close(1000, 'token swap');
+    } catch {
+      /* socket may already be closing */
+    }
+    state.socket = null;
+    if (state.pingTimer) {
+      clearInterval(state.pingTimer);
+      state.pingTimer = null;
+    }
+  }
+  state.reconnectAttempt = 0;
   state.closedByUser = false;
   openSocket(token);
 }
@@ -75,6 +127,7 @@ function openSocket(token: string): void {
   state.socket = ws;
 
   ws.addEventListener('open', () => {
+    if (state.socket !== ws) return; // stale event after a token swap
     state.reconnectAttempt = 0;
     // Header path may have been stripped by some proxies; fallback hello.
     send({ type: 'client.hello', token, extensionVersion: chrome.runtime.getManifest().version });
@@ -85,19 +138,40 @@ function openSocket(token: string): void {
   });
 
   ws.addEventListener('message', (event) => {
+    if (state.socket !== ws) return;
     const result = parseServerMessage(typeof event.data === 'string' ? event.data : '');
     if (!result.success) {
       console.warn('[holaday] bad server frame', result.error);
       return;
     }
+    // 4401-equivalent: orchestrator may emit server.error code=UNAUTHORIZED
+    // before closing the socket. Surface it as an "unauthorized" event so
+    // the SW clears the stale token instead of looping with bad creds.
+    if (
+      result.data.type === 'server.error' &&
+      result.data.code === 'UNAUTHORIZED'
+    ) {
+      for (const fn of state.unauthorizedListeners) fn();
+    }
     for (const fn of state.listeners) fn(result.data);
   });
 
   ws.addEventListener('close', (event) => {
+    // Tag-by-socket: a delayed close from the OLD socket (after a
+    // reconnect/token-swap) would otherwise clobber state.socket
+    // (which now points at the NEW socket) and stop heartbeats.
+    if (state.socket !== ws) return;
     if (state.pingTimer) clearInterval(state.pingTimer);
     state.pingTimer = null;
     state.socket = null;
-    if (state.closedByUser || event.code === 4401) return;
+    if (event.code === 4401) {
+      // Orchestrator rejected our auth. Surface to the SW so it
+      // clears the bad token; do NOT auto-reconnect — that would
+      // just loop on the same bad creds.
+      for (const fn of state.unauthorizedListeners) fn();
+      return;
+    }
+    if (state.closedByUser) return;
     scheduleReconnect(token);
   });
 

@@ -45,10 +45,23 @@ import { PlaywrightCrxAdapter } from '@holaday/browser-driver/crx';
 import { MockDriver } from '@holaday/browser-driver/mock';
 import type { ServerMessage } from '@holaday/shared-types';
 import { tryAutoLogin } from '../shared/auto-login.js';
-import { getAccessToken, setAccessToken } from '../shared/storage.js';
+import {
+  clearAccessToken,
+  clearStoredUser,
+  getAccessToken,
+  setAccessToken,
+} from '../shared/storage.js';
 import { captureVisionObservation, executeCdpAction, getActiveTabId } from './cdp-actions.js';
 import { buildLoginStatesMessage, readLoginStates } from './cookie-bridge.js';
-import { connect, disconnect, isConnected, onServerMessage, send } from './ws-client.js';
+import {
+  connect,
+  disconnect,
+  isConnected,
+  onServerMessage,
+  onUnauthorized,
+  reconnect,
+  send,
+} from './ws-client.js';
 
 /**
  * Token storage key — must match `apps/extension/src/shared/storage.ts`.
@@ -738,20 +751,53 @@ chrome.runtime.onStartup.addListener(() => {
   void ensureConnected();
 });
 
-// Auto-reconnect when the popup writes a fresh token (login) or clears
-// it (logout). This is what closes the gap "popup logged in but SW
-// never noticed" — without it the user would have to manually trigger
-// a chrome.runtime.sendMessage to wake the SW.
+// Auto-reconnect on token changes. Phase 14 fix: detect VALUE
+// change (not just appearance/removal). When auto-login lifts a
+// fresher token over a stale one, the previous version called the
+// idempotent `connect()` which short-circuited because the OLD
+// socket was still in OPEN state — so the new token never made
+// it onto the wire. `reconnect()` explicitly closes the old
+// socket and opens a new one with the new token.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   const change = changes[TOKEN_STORAGE_KEY];
   if (!change) return;
-  if (typeof change.newValue === 'string' && change.newValue) {
-    connect(change.newValue);
-  } else if (change.oldValue && !change.newValue) {
+  const oldVal = typeof change.oldValue === 'string' ? change.oldValue : null;
+  const newVal = typeof change.newValue === 'string' && change.newValue ? change.newValue : null;
+  if (newVal && newVal !== oldVal) {
+    // Token appeared OR replaced. Force a fresh socket.
+    state.tasks.clear();
+    reconnect(newVal);
+    console.info('[holaday] storage.onChanged: token changed, reconnected WS');
+  } else if (!newVal && oldVal) {
     disconnect();
     state.tasks.clear();
+    console.info('[holaday] storage.onChanged: token cleared, WS disconnected');
   }
+});
+
+// Phase 14 — orchestrator rejected our auth (close 4401 or
+// server.error code='UNAUTHORIZED'). Drop the stale token + user
+// from chrome.storage and re-fire ensureConnected so auto-login
+// gets a fresh attempt from the workbench tab. Without this the
+// SW would just sit on the bad token until the user manually
+// signed out via the popup.
+onUnauthorized(() => {
+  console.warn('[holaday] ws: UNAUTHORIZED — clearing stale token + user');
+  void (async () => {
+    try {
+      await clearAccessToken();
+      await clearStoredUser();
+    } catch (err) {
+      console.warn('[holaday] failed to clear stale credentials', err);
+    }
+    // Re-fire ensureConnected so the next auto-login pass tries
+    // the workbench tab again. ensureConnected will see no
+    // stored token and run tryAutoLogin → if a workbench tab
+    // exists with a (different, valid) token, that's the path
+    // that recovers the session.
+    await ensureConnected();
+  })();
 });
 
 // Keepalive: chrome.alarms survive SW death. When the SW is recycled,
