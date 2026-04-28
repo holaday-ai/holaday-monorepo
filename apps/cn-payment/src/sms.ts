@@ -12,12 +12,16 @@
  * (phone) operations, no shared mutable state besides the map.
  */
 
+import { createRequire } from 'node:module';
 import type { Logger } from 'pino';
-// SDK ships as CJS with `exports.default = Client`. Under tsx + ESM
-// resolution the default-import sometimes hands back the namespace
-// object instead of the class, so reach into `.default` explicitly
-// when present.
-import * as DysmsapiNs from '@alicloud/dysmsapi20170525';
+// SDK ships as CJS with `module.exports = { default: Client, ... }`.
+// Under tsx + ESM resolution the `import * as` form sometimes hands
+// back the wrapped namespace and `import default` hands back the
+// namespace too — both shapes mean `new Dysmsapi()` throws "is not
+// a constructor". createRequire bypasses ESM interop entirely and
+// hands back the raw CJS exports object, where `.default` is the
+// class regardless of node loader version.
+const require = createRequire(import.meta.url);
 import { SendSmsRequest } from '@alicloud/dysmsapi20170525/dist/models/SendSmsRequest.js';
 import * as OpenApi from '@alicloud/openapi-client';
 import type { Env } from './config/env.js';
@@ -25,9 +29,13 @@ import type { Env } from './config/env.js';
 type DysmsapiCtor = new (config: InstanceType<typeof OpenApi.Config>) => {
   sendSms(req: InstanceType<typeof SendSmsRequest>): Promise<unknown>;
 };
+const dysmsapiModule = require('@alicloud/dysmsapi20170525') as {
+  default?: DysmsapiCtor;
+} & DysmsapiCtor;
 const Dysmsapi: DysmsapiCtor =
-  (DysmsapiNs as unknown as { default?: DysmsapiCtor }).default ??
-  (DysmsapiNs as unknown as DysmsapiCtor);
+  typeof dysmsapiModule === 'function'
+    ? dysmsapiModule
+    : (dysmsapiModule.default as DysmsapiCtor);
 
 interface CodeEntry {
   code: string;
