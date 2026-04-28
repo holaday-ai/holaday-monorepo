@@ -793,17 +793,16 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           betas.push('compact-2026-01-12', 'task-budgets-2026-03-13');
         }
 
-        // output_config carries effort + task_budget. Both are GA on
-        // Opus-tier and Sonnet 4.6, and both no-op cleanly on the
-        // legacy path because we just don't pass them.
-        // `xhigh` is Opus-4.7-only — selectModelAndEffort guards that.
-        // `task_budget` is rejected by Sonnet 4.6 with effort='medium'
-        // (returns 400 "model does not support user-configurable task
-        // budgets"). The simple-search routing picks medium + Sonnet
-        // 4.6 specifically, so suppress task_budget on that combo —
-        // matters now that attachment-bearing simple-search tasks
-        // skip the Brave short-circuit and actually reach the model.
-        const supportsTaskBudget = effort !== 'medium';
+        // output_config carries effort + task_budget. `effort` is GA
+        // on both Opus and Sonnet 4.6; `task_budget` is the moving
+        // target — the Anthropic API now returns 400 "model does not
+        // support user-configurable task budgets" for all Sonnet
+        // 4.6 calls, regardless of effort. The beta is currently
+        // Opus-tier-only. Restrict the field accordingly so Sonnet
+        // calls don't 400 on us; Opus 4.7 still gets the budget hint.
+        // `xhigh` is Opus-4.7-only — selectModelAndEffort guards
+        // that, so the safer key here is the model id itself.
+        const supportsTaskBudget = model === 'claude-opus-4-7';
         const outputConfig: Record<string, unknown> | null = tier1
           ? {
               effort,
