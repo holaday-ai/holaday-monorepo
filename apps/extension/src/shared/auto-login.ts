@@ -1,46 +1,89 @@
 /**
- * Phase 14 — opportunistic auto-login.
+ * Phase 14 — opportunistic auto-login (v2).
  *
- * If the user is already signed in to holaday.ai in this Chrome
- * profile, lift their JWT out of cookie/local-storage so the
- * extension comes online without a separate sign-in. Strictly
- * read-only — never overwrites a token the user explicitly stored
- * via the popup login flow.
+ * The web workbench stores the JWT in `localStorage` under
+ * `holaday.access_token` (apps/web-workbench/src/lib/auth.ts).
+ * It's NOT a cookie — chrome.cookies cannot reach it. To lift
+ * the token we have to run a tiny script in the page world of an
+ * open holaday.ai (or local-dev) tab and read localStorage from
+ * there.
  *
- * Lookup order (first hit wins):
- *   1. chrome.cookies on `holaday.ai` → cookie name `holaday_token`
- *      or `auth_token`. The web workbench currently uses
- *      localStorage rather than a cookie, so this branch is a
- *      forward-compatibility hook for the day we set a server
- *      cookie on login.
- *   2. (Future) read `localStorage.getItem('holaday.access_token')`
- *      via chrome.scripting on a holaday.ai tab — costs a tab
- *      lookup and only works when the user has the page open, so
- *      we keep it gated behind manual invocation rather than firing
- *      on every SW boot.
+ * Strict: only reads, never writes. Returns null when:
+ *   - no matching tab is open;
+ *   - the matching tab has no token in localStorage;
+ *   - chrome.scripting rejects (chrome:// pages, NTP, etc.).
  *
- * The function returns null when nothing was found; the caller
- * decides whether to leave the SW disconnected or surface a "sign
- * in via Side Panel" CTA.
+ * The caller (background/index.ts) only invokes this when it has
+ * NO token in chrome.storage already, so we never overwrite a
+ * token the user explicitly installed via the popup login flow.
  */
 
-const HOLADAY_DOMAIN = 'holaday.ai';
-const COOKIE_NAMES = ['holaday_token', 'auth_token'] as const;
+/** Same key the web-workbench uses — see web-workbench/src/lib/auth.ts. */
+const TOKEN_KEY = 'holaday.access_token';
 
-export async function tryAutoLogin(): Promise<string | null> {
-  // chrome.cookies.get throws when the extension lacks the
-  // `cookies` permission for the requested URL — we have it
-  // declared in manifest.config.ts, so the only realistic failure
-  // is a transient Chrome bug. Catch + return null in any case.
-  let cookies: chrome.cookies.Cookie[] = [];
+/**
+ * URL patterns to scan for an open workbench tab. Order matters
+ * (first hit wins): production first, then common dev origins.
+ * Patterns mirror Chrome's match-pattern grammar — host wildcards
+ * cover hd-* subdomains the workbench may move under.
+ */
+const WORKBENCH_TAB_PATTERNS = [
+  'https://holaday.ai/*',
+  'https://*.holaday.ai/*',
+  'http://localhost:5173/*',
+  'http://127.0.0.1:5173/*',
+  'http://localhost:4173/*',
+] as const;
+
+/** Page-world function: reads localStorage and returns the token or null. */
+function readTokenFromPage(key: string): string | null {
   try {
-    cookies = await chrome.cookies.getAll({ domain: HOLADAY_DOMAIN });
+    return window.localStorage.getItem(key);
   } catch {
     return null;
   }
-  for (const name of COOKIE_NAMES) {
-    const c = cookies.find((it) => it.name === name && it.value);
-    if (c?.value) return c.value;
+}
+
+async function readTokenFromTab(tabId: number): Promise<string | null> {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: readTokenFromPage,
+      args: [TOKEN_KEY],
+    });
+    const value = results[0]?.result;
+    return typeof value === 'string' && value.length > 0 ? value : null;
+  } catch {
+    // chrome.scripting throws on restricted schemes (chrome://, the
+    // Web Store, etc.) and when the host permission isn't granted
+    // for that origin. We have <all_urls> so the latter shouldn't
+    // happen, but tabs may close mid-call. Best-effort.
+    return null;
+  }
+}
+
+export async function tryAutoLogin(): Promise<string | null> {
+  let candidates: chrome.tabs.Tab[] = [];
+  try {
+    candidates = await chrome.tabs.query({ url: [...WORKBENCH_TAB_PATTERNS] });
+  } catch {
+    return null;
+  }
+  if (candidates.length === 0) return null;
+
+  // Active tab in the focused window first — that's most likely the
+  // one the user just signed in on. Fall through to other matching
+  // tabs (a stale dev tab in the background may still have a token).
+  const sorted = [...candidates].sort((a, b) => {
+    const aScore = (a.active ? 2 : 0) + (a.lastAccessed ?? 0) / 1e13;
+    const bScore = (b.active ? 2 : 0) + (b.lastAccessed ?? 0) / 1e13;
+    return bScore - aScore;
+  });
+
+  for (const tab of sorted) {
+    if (typeof tab.id !== 'number') continue;
+    const token = await readTokenFromTab(tab.id);
+    if (token) return token;
   }
   return null;
 }

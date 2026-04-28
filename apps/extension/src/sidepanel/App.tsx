@@ -57,6 +57,17 @@ interface LoginResponse {
   result: { data: { user: StoredUser; accessToken: string } };
 }
 
+interface MeResponse {
+  result: {
+    data: {
+      userId: string;
+      email: string;
+      displayName: string | null;
+      plan: string;
+    };
+  };
+}
+
 interface CreateTaskResponse {
   result: { data: { taskId: string; status: TaskStatus } };
 }
@@ -78,21 +89,85 @@ export function App() {
   const [tasks, setTasks] = useState<TaskView[]>([]);
 
   // Mount: restore session, hydrate task snapshot from SW, refresh
-  // page context. Re-runs page-context refresh on tab activation.
+  // page context. When no stored token, nudge the SW to try the
+  // localStorage-based auto-login from any open workbench tab — if
+  // it succeeds, hydrate the user via auth.me so the header shows
+  // the real account instead of the login form.
   useEffect(() => {
     void (async () => {
       const stored = await getStoredUser();
-      const tok = await getAccessToken();
+      let tok = await getAccessToken();
       if (stored && tok) {
         setUser(stored);
         setToken(tok);
         setStatus('connected');
         chrome.runtime.sendMessage({ type: 'holaday.connect', token: tok });
+      } else if (!tok) {
+        const liftedToken = await new Promise<string | null>((resolve) => {
+          chrome.runtime.sendMessage(
+            { type: 'holaday.tryAutoLogin' },
+            (resp: { ok?: boolean; token?: string | null } | undefined) => {
+              resolve(resp?.token ?? null);
+            },
+          );
+        });
+        if (liftedToken) {
+          tok = liftedToken;
+          const fetchedUser = await fetchMe(liftedToken);
+          if (fetchedUser) {
+            await setStoredUser(fetchedUser);
+            setUser(fetchedUser);
+            setToken(liftedToken);
+            setStatus('connected');
+          } else {
+            // Token was rejected (expired, signed with a different
+            // secret, or pointing at a deleted user). Drop it so the
+            // panel falls back to the manual login form.
+            try {
+              await clearAccessToken();
+            } catch {
+              /* best-effort */
+            }
+          }
+        }
       }
       chrome.runtime.sendMessage({ type: 'holaday.tasks' }, (resp) => {
         if (resp?.tasks) setTasks(resp.tasks as TaskView[]);
       });
     })();
+  }, []);
+
+  // Cross-context sync: if the popup logs in / out in another window,
+  // or the SW lifts a token via the keepalive alarm, the storage
+  // change fires here and the panel reflects the new session
+  // without a refresh.
+  useEffect(() => {
+    const listener = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: chrome.storage.AreaName,
+    ) => {
+      if (area !== 'local') return;
+      const tokenChange = changes['holaday.access_token'];
+      if (!tokenChange) return;
+      void (async () => {
+        const newToken = (tokenChange.newValue as string | undefined) ?? null;
+        if (newToken) {
+          const fetchedUser = await fetchMe(newToken);
+          if (fetchedUser) {
+            await setStoredUser(fetchedUser);
+            setUser(fetchedUser);
+            setToken(newToken);
+            setStatus('connected');
+          }
+        } else {
+          setUser(null);
+          setToken(null);
+          setStatus('idle');
+        }
+      })();
+    };
+    chrome.storage.onChanged.addListener(listener);
+    return () => chrome.storage.onChanged.removeListener(listener);
   }, []);
 
   useEffect(() => {
@@ -135,6 +210,32 @@ export function App() {
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
   }, []);
+
+  /**
+   * Pull the authenticated user record so we can show real name +
+   * plan in the header after auto-login. Returns null on any error
+   * so the caller treats it as "auto-login failed, fall back to
+   * manual login form".
+   */
+  async function fetchMe(authToken: string): Promise<StoredUser | null> {
+    try {
+      const res = await fetch(`${ORCHESTRATOR_HTTP}/trpc/auth.me`, {
+        method: 'GET',
+        headers: { authorization: `Bearer ${authToken}` },
+      });
+      if (!res.ok) return null;
+      const body = (await res.json()) as MeResponse;
+      const u = body.result.data;
+      return {
+        externalId: u.userId,
+        email: u.email,
+        plan: u.plan,
+        displayName: u.displayName,
+      };
+    } catch {
+      return null;
+    }
+  }
 
   async function login(): Promise<void> {
     setStatus('loading');

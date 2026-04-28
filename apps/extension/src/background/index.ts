@@ -671,28 +671,28 @@ function onTaskControl(msg: Extract<ServerMessage, { type: 'server.task.control'
  * concurrently. The MV3 SW gets killed after ~30s of idle so this
  * function is the single point we rely on to come back from the dead.
  */
-async function ensureConnected(): Promise<void> {
-  if (isConnected()) return;
+async function ensureConnected(): Promise<{ token: string | null }> {
+  if (isConnected()) return { token: await getAccessToken() };
   let token = await getAccessToken();
-  // Phase 14 — opportunistic auto-login. If the user has a holaday.ai
-  // session cookie in this Chrome profile, lift the JWT into our
-  // local storage so the SW comes online without a separate sign-in
-  // through the popup. Strict: only fires when we have nothing
-  // already stored — never overwrites a token the user explicitly
-  // installed.
+  // Phase 14 — opportunistic auto-login. The web workbench stores
+  // the JWT in localStorage on holaday.ai (and dev origins). We run
+  // a tiny script in any open workbench tab to lift it. Strict:
+  // only fires when we have nothing already stored — never
+  // overwrites a token the user explicitly installed via the popup.
   if (!token) {
     const lifted = await tryAutoLogin();
     if (lifted) {
       try {
         await setAccessToken(lifted);
         token = lifted;
-        console.info('[holaday] auto-login: imported token from holaday.ai cookie');
+        console.info('[holaday] auto-login: imported token from workbench tab');
       } catch (err) {
         console.warn('[holaday] auto-login: setAccessToken failed', err);
       }
     }
   }
   if (token) connect(token);
+  return { token };
 }
 
 // Phase 14 — periodic login-state report. The SW samples the user's
@@ -792,6 +792,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === 'holaday.tasks') {
     sendResponse({ tasks: tasksSnapshot() });
     return true;
+  }
+  if (msg?.type === 'holaday.tryAutoLogin') {
+    // Phase 14 — Side Panel mount nudges the SW to attempt
+    // localStorage-based auto-login synchronously (rather than
+    // waiting up to 30s for the keepalive alarm). Returns the
+    // lifted token so the panel can immediately fetch auth.me
+    // and populate the user card. ensureConnected is idempotent
+    // when a token is already in storage.
+    void ensureConnected().then(({ token }) => {
+      sendResponse({ ok: Boolean(token), token: token ?? null });
+    });
+    return true; // keep response channel open for async resolve
   }
   return false;
 });
