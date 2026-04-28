@@ -67,6 +67,21 @@ export class StatsService {
   }
 
   /**
+   * Convenience wrapper around `scoreLanes` for the common "give me
+   * the best lane name" case. Returns null when no usable history —
+   * caller falls back to the default route. The minimum sample
+   * size + the score formula are inherited from scoreLanes.
+   */
+  async getOptimalLane(opts: {
+    userIdInternal: number;
+    targetSite: string;
+    minSamples?: number;
+  }): Promise<string | null> {
+    const ranked = await this.scoreLanes(opts);
+    return ranked[0]?.lane ?? null;
+  }
+
+  /**
    * Score the available lanes for a (user, targetSite) tuple over
    * the last 30 days. Returns highest-score-first; empty array
    * means no usable history → caller should fall back to the

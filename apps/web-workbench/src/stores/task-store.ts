@@ -410,6 +410,17 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       }));
       return;
     }
+    if (msg.type === 'server.task.plan_step') {
+      // Phase 13 Dim 1 follow-up — incremental status update.
+      // Replace the planStatus array wholesale; the orchestrator
+      // sends the whole snapshot so the SPA doesn't merge diffs.
+      set((prev) => ({
+        tasks: prev.tasks.map((t) =>
+          t.taskId === msg.taskId ? { ...t, planStatus: msg.planStatus } : t,
+        ),
+      }));
+      return;
+    }
     if (msg.type === 'server.vision.tick.start') {
       set((prev) => {
         const existing = prev.stepsByTask[msg.taskId] ?? [];

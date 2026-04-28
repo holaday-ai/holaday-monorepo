@@ -50,6 +50,7 @@ import {
   type Effort,
 } from './prompt-layers.js';
 import { buildSupercarSystemPrompt } from './system-prompt.js';
+import { classifyError as classifyToolError, extractDomain as extractDomainStat } from './stats-service.js';
 import { env as appEnv } from '../../config/env.js';
 
 /**
@@ -292,6 +293,31 @@ export interface RunSupercarOptions {
   }) => void | Promise<void>;
   /** Phase 13 Dim 1 — pre-generated plan output to broadcast on first tick. */
   planText?: string | null;
+  /**
+   * Phase 13 Dim 1 follow-up — initial plan-step status array.
+   * When provided alongside `planText`, the loop appends a small
+   * tracker hint to each tool_result user message so the model
+   * embeds `[STEP N status]` markers in its text blocks; the loop
+   * parses those markers and forwards every update through
+   * `onPlanStepUpdate`.
+   */
+  planSteps?: Array<{
+    idx: number;
+    status: 'pending' | 'running' | 'done' | 'failed';
+    note?: string;
+  }>;
+  /**
+   * Phase 13 Dim 1 follow-up — fired whenever the loop parses a
+   * plan-step marker out of the model's text. Caller (tasks.create)
+   * wires this to a DB UPDATE on `tasks.plan_status` + a WS
+   * broadcast `server.task.plan_step` so the SPA's PlanCard
+   * updates state pills live.
+   */
+  onPlanStepUpdate?: (steps: Array<{
+    idx: number;
+    status: 'pending' | 'running' | 'done' | 'failed';
+    note?: string;
+  }>) => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -705,6 +731,17 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   let activeAntiBotSignal: AntiBotSignal | null = null;
   /** One-shot guard for the Apify fallback path; runs at most once per task. */
   let apifyAttempted = false;
+  // Phase 13 Dim 1 follow-up — local plan-step state. Mutates as
+  // markers parse out of the model's text. Caller seeded it from
+  // tasks.plan_status; we copy to avoid mutating the caller's
+  // reference.
+  type PlanStepLocal = {
+    idx: number;
+    status: 'pending' | 'running' | 'done' | 'failed';
+    note?: string;
+  };
+  const currentPlanSteps: PlanStepLocal[] = (opts.planSteps ?? []).map((s) => ({ ...s }));
+  const planTrackerEnabled = currentPlanSteps.length > 0 && opts.planText != null;
   // Captured from the first response that materialised a server-side
   // code_execution sandbox (Sonnet 4.6 + computer-use-2025-11-24 beta
   // auto-enables this). Re-passed on every subsequent messages.create
@@ -733,6 +770,12 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     while (iteration < maxIterations && Date.now() < deadline && !cancelled) {
       iteration++;
 
+      // Phase 13 Dim 6 — per-iteration timer for stats. Wall time
+      // from the top of the iteration to the messages.push at the
+      // bottom; covers the API call, tool dispatch, screenshot,
+      // anti-bot detection, the full round-trip the model
+      // experienced this iteration. Used by onStatsRecord below.
+      const iterationStart = Date.now();
       const apiStart = Date.now();
       let response: Anthropic.Beta.BetaMessage;
       // Phase 10 follow-up: bound each API call at 120s and retry
@@ -949,6 +992,37 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       // signature and the next call 400s with "thinking blocks cannot
       // be modified".
       messages.push({ role: 'assistant', content: response.content });
+
+      // Phase 13 Dim 1 follow-up — scan response text blocks for
+      // `[STEP N status]` markers the planner reminder asked for.
+      // Markers are 1-based externally (匹配 plan 文本里的序号);
+      // currentPlanSteps is 0-indexed, so subtract 1 on apply.
+      // Multiple markers in one turn are honoured in order.
+      if (planTrackerEnabled) {
+        let mutated = false;
+        for (const block of response.content) {
+          if (block.type !== 'text' || !block.text) continue;
+          const matches = block.text.matchAll(
+            /\[STEP\s+(\d+)\s+(done|running|failed|pending)\]/gi,
+          );
+          for (const m of matches) {
+            const oneBased = Number.parseInt(m[1] ?? '0', 10);
+            const status = (m[2] ?? '').toLowerCase() as PlanStepLocal['status'];
+            const idx = oneBased - 1;
+            if (idx < 0 || idx >= currentPlanSteps.length) continue;
+            const target = currentPlanSteps[idx]!;
+            if (target.status === status) continue;
+            target.status = status;
+            mutated = true;
+          }
+        }
+        if (mutated) {
+          // Snapshot the array for the callback so the caller
+          // can mutate without races against the next turn.
+          const snapshot = currentPlanSteps.map((s) => ({ ...s }));
+          void Promise.resolve(opts.onPlanStepUpdate?.(snapshot));
+        }
+      }
 
       // Bug: Sonnet 4.6 under computer-use-2025-11-24 implicitly enables
       // server-side code_execution alongside web_search. The first call
@@ -1526,9 +1600,86 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         });
       }
 
+      // Phase 13 Dim 6 — emit one stats record per iteration that
+      // actually invoked a client-side tool. Skip iterations that
+      // produced only text (end_turn / awaiting_user) — those don't
+      // map to a "lane" cleanly. The lane id mirrors the tool kind
+      // since it directly maps to which back-end the agent drove.
+      if (toolUseBlocks.length > 0) {
+        const firstTool = toolUseBlocks[0];
+        const laneUsed =
+          firstTool?.name === 'navigate'
+            ? 'navigate'
+            : firstTool?.name === 'computer'
+              ? 'browser_cdp'
+              : firstTool?.name === 'create_file'
+                ? 'create_file'
+                : 'other';
+        let currentUrl: string | null = null;
+        try {
+          const page = await executor?.getPage?.();
+          if (page && typeof page.url === 'function') currentUrl = page.url();
+        } catch {
+          // Page might be torn down between turns; non-fatal.
+        }
+        const targetSite = extractDomainStat(currentUrl);
+        // toolResults is typed as the wider BetaContentBlockParam[]; only
+        // the tool_result variant carries is_error + content. Narrow
+        // via type discriminator before reading those fields.
+        type ToolResultBlock = Anthropic.Beta.BetaToolResultBlockParam;
+        const errorBlocks = toolResults.filter(
+          (r): r is ToolResultBlock => r.type === 'tool_result' && r.is_error === true,
+        );
+        const anyError = errorBlocks.length > 0;
+        const errorMessage = anyError
+          ? errorBlocks
+              .flatMap((r) =>
+                Array.isArray(r.content)
+                  ? (r.content as Array<{ type?: string; text?: string }>)
+                  : [],
+              )
+              .map((b) => (b?.type === 'text' ? b.text : null))
+              .filter(Boolean)
+              .join(' | ')
+          : null;
+        void opts.onStatsRecord?.({
+          laneUsed,
+          targetSite,
+          success: !anyError,
+          latencyMs: Date.now() - iterationStart,
+          errorType: anyError ? classifyToolError(errorMessage ?? '') : null,
+        });
+      }
+
+      // Phase 13 Dim 1 follow-up — append a plan-tracker reminder
+      // so the model embeds [STEP N status] markers in its text
+      // blocks next turn. Cheap (~30 tokens) and only fires when a
+      // plan exists. Skipped on the iteration where the model
+      // already terminated (stop_reason='end_turn' would mean no
+      // next turn anyway).
+      let plannerReminder: ContentBlockParam[] = [];
+      if (planTrackerEnabled && response.stop_reason !== 'end_turn') {
+        const stateLines = currentPlanSteps
+          .map((s) => `${s.idx + 1}. ${s.status}`)
+          .join('\n');
+        plannerReminder = [
+          {
+            type: 'text',
+            text:
+              `[plan tracker] 当前执行计划进度：\n${stateLines}\n` +
+              `回复时在 thinking 或正文里插入 \`[STEP N status]\` 标记，N 是 1-based 步骤号，status 是 ` +
+              `\`done\` / \`running\` / \`failed\`。比如刚开始执行第二步就写 \`[STEP 2 running]\`。` +
+              `不需要每步都重复，只在状态变化时打一次。`,
+          },
+        ];
+      }
+
       messages.push({
         role: 'user',
-        content: nudgeContent.length > 0 ? [...toolResults, ...nudgeContent] : toolResults,
+        content:
+          nudgeContent.length > 0 || plannerReminder.length > 0
+            ? [...toolResults, ...nudgeContent, ...plannerReminder]
+            : toolResults,
       });
     }
 

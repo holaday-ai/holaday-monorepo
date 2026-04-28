@@ -463,6 +463,25 @@ export const serverTaskPlanSchema = z.object({
 });
 
 /**
+ * Phase 13 Dim 1 follow-up — incremental plan-step status update.
+ * Fires whenever the agent loop parses a `[STEP N status]` marker
+ * out of the model's text. Carries the WHOLE updated array (not a
+ * delta) so the SPA's reducer can replace state in one shot
+ * without merging partial diffs.
+ */
+export const serverTaskPlanStepSchema = z.object({
+  type: z.literal('server.task.plan_step'),
+  taskId: z.string(),
+  planStatus: z.array(
+    z.object({
+      idx: z.number().int().nonnegative(),
+      status: z.enum(['pending', 'running', 'done', 'failed']),
+      note: z.string().optional(),
+    }),
+  ),
+});
+
+/**
  * Per-tick screencast frame — G5. Sends the raw JPEG the runner
  * already captured to drive the commander, so the web workbench can
  * render a poor-man's screencast in the right-hand panel. Only fires
@@ -540,6 +559,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverVisionScreencastSchema,
   serverTaskQueuedSchema,
   serverTaskPlanSchema,
+  serverTaskPlanStepSchema,
   serverVisionCaptchaDetectedSchema,
   serverVisionCaptchaResolvedSchema,
   serverVisionExecutorFallbackSchema,

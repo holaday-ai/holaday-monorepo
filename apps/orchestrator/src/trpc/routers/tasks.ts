@@ -35,6 +35,7 @@ import { MemoryService } from '../../agent/supercar/memory-service.js';
 import {
   StatsService,
   classifyTaskType,
+  extractDomain,
 } from '../../agent/supercar/stats-service.js';
 import { FileService, taskInternalIdFor } from '../../files/file-service.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
@@ -407,11 +408,79 @@ export const tasksRouter = router({
       // backend hiccup never stalls the agent.
       const statsService = new StatsService(ctx.db, ctx.logger);
       const taskTypeForStats = classifyTaskType(input.intent);
+      // Phase 13 Dim 6 — optimal-lane hint from prior stats. Best-
+      // effort observability: derives the target site from any URL
+      // mention in the intent (e.g. "在 jd.com 搜..."), then logs
+      // the historically winning lane for (this user, that site).
+      // Routing decisions are unchanged this commit; the log line
+      // exists so we can validate the recommender empirically before
+      // wiring it to the gate. Null target_site → no lookup.
+      const intentSiteMatch = input.intent.match(
+        /\b(?:https?:\/\/)?((?:[a-z0-9-]+\.)+(?:com|cn|net|org|tech|ai|io|co))\b/i,
+      );
+      const intentTargetSite = intentSiteMatch
+        ? extractDomain(intentSiteMatch[1] ?? null)
+        : null;
+      if (intentTargetSite) {
+        try {
+          const optimalLane = await statsService.getOptimalLane({
+            userIdInternal: userRow.id,
+            targetSite: intentTargetSite,
+          });
+          if (optimalLane) {
+            ctx.logger.info(
+              {
+                taskId,
+                taskType: taskTypeForStats,
+                targetSite: intentTargetSite,
+                optimalLane,
+              },
+              'router: optimal lane from stats',
+            );
+          } else {
+            ctx.logger.info(
+              { taskId, targetSite: intentTargetSite },
+              'router: no usable stats history for site (default route)',
+            );
+          }
+        } catch (err) {
+          ctx.logger.warn(
+            { err: err instanceof Error ? err.message : String(err) },
+            'router: stats lookup failed (non-fatal)',
+          );
+        }
+      }
       const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
           taskId,
           intent: input.intent,
           ...(memoryPreamble ? { memoryPreamble } : {}),
           ...(planResult.planText ? { planText: planResult.planText } : {}),
+          ...(planResult.planStatus ? { planSteps: planResult.planStatus } : {}),
+          // Phase 13 Dim 1 follow-up — persist + broadcast every
+          // plan-step state change as the model emits markers. Best-
+          // effort: a DB blip or broadcast failure logs and continues
+          // (the loop already has the up-to-date state in memory).
+          onPlanStepUpdate: (steps) => {
+            void ctx.db
+              .update(tasksTable)
+              .set({ planStatus: steps as unknown })
+              .where(eq(tasksTable.externalId, taskId))
+              .catch((err) =>
+                ctx.logger.warn({ err, taskId }, 'plan-step persist failed'),
+              );
+            try {
+              broadcastToUser(ctx.userId, {
+                type: 'server.task.plan_step',
+                taskId,
+                planStatus: steps,
+              });
+            } catch (err) {
+              ctx.logger.warn(
+                { err, taskId },
+                'plan-step broadcast failed',
+              );
+            }
+          },
           onStatsRecord: ({ laneUsed, targetSite, success, latencyMs, errorType }) => {
             void statsService.record({
               userIdInternal: userRow.id,
