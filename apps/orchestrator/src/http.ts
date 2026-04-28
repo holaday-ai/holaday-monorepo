@@ -506,7 +506,12 @@ export function createHttpApp(deps: HttpAppDeps) {
   // (cn-payment will retry from logs).
   // ---------------------------------------------------------------------
   const internalConfirmService = new QuotaService(db);
-  app.post('/api/internal/payment/confirm', async (req, res) => {
+  // NB: route registered WITHOUT the `/api/` prefix because nginx
+  // strips it (location /api/ → proxy_pass http://127.0.0.1:4001/;
+  // — the trailing slash on the upstream URL is what strips it).
+  // External callers still hit https://holaday.ai/api/internal/...,
+  // and the gateway's `VULTR_INTERNAL_URL` keeps that public form.
+  app.post('/internal/payment/confirm', async (req, res) => {
     const expectedSecret = process.env.INTERNAL_SHARED_SECRET;
     if (!expectedSecret) {
       logger.error('internal-confirm: INTERNAL_SHARED_SECRET unset — refusing all calls');
@@ -670,7 +675,8 @@ export function createHttpApp(deps: HttpAppDeps) {
   // hands back a freshly-signed JWT for the gateway to relay back
   // to the SPA. Same shared-secret guard as the payment-confirm path.
   // ---------------------------------------------------------------------
-  app.post('/api/internal/auth/sms-login', async (req, res) => {
+  // Same nginx-strip note as /internal/payment/confirm above.
+  app.post('/internal/auth/sms-login', async (req, res) => {
     const expectedSecret = process.env.INTERNAL_SHARED_SECRET;
     if (!expectedSecret) {
       logger.error('sms-login: INTERNAL_SHARED_SECRET unset — refusing all calls');
