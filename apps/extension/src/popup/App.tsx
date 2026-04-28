@@ -299,6 +299,24 @@ export function App() {
     setStatus('idle');
   }
 
+  /**
+   * Phase 14 — open the Side Panel for the current window. chrome.sidePanel.open
+   * must run inside a user-gesture context, which a button click satisfies.
+   * Closing the popup right after lets Chrome focus the panel cleanly without
+   * the popup eating the next click.
+   */
+  async function openSidePanel(): Promise<void> {
+    try {
+      const win = await chrome.windows.getCurrent();
+      if (typeof win.id === 'number') {
+        await chrome.sidePanel.open({ windowId: win.id });
+      }
+      window.close();
+    } catch (err) {
+      console.warn('[holaday] open side panel failed', err);
+    }
+  }
+
   async function createTask() {
     if (!intent.trim() || !token) return;
     setSubmitting(true);
@@ -486,6 +504,14 @@ export function App() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
+          <button
+            type="button"
+            onClick={() => void openSidePanel()}
+            style={miniBtn}
+            title="在侧边栏中以页面上下文提交任务"
+          >
+            侧边栏
+          </button>
           <button
             type="button"
             onClick={() => void toggleDebugMode()}

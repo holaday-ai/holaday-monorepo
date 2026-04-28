@@ -221,6 +221,47 @@ function applyRehydrationForUser(state: ClientState): void {
 
 const clientsByUser = new Map<string, Set<ClientState>>();
 
+/**
+ * Phase 14 — extension-reported login states. Per-user map of
+ * domain → boolean. Updated whenever a Chrome extension client
+ * sends `client.extension.login_states`. Read by the playbook
+ * router in tasks.ts to log "user has Chrome login for X" when
+ * the matched playbook is loginRequired and the extension is
+ * connected. In-memory only; resets on orchestrator restart and
+ * fills back in within ~5 minutes (the extension's alarms tick).
+ *
+ * Stale entries (older than 30 min) are treated as null at read
+ * time — the domain map is upserted in full on every report so
+ * an absent key means "extension never told us about that site",
+ * which is also "unknown".
+ */
+interface ExtensionLoginStateEntry {
+  states: Map<string, boolean>;
+  updatedAt: number;
+}
+const EXTENSION_STATE_TTL_MS = 30 * 60 * 1000;
+const extensionLoginStateByUser = new Map<string, ExtensionLoginStateEntry>();
+
+function setExtensionLoginStates(userId: string, raw: Record<string, boolean>): void {
+  const states = new Map<string, boolean>();
+  for (const [k, v] of Object.entries(raw)) states.set(k.toLowerCase(), v);
+  extensionLoginStateByUser.set(userId, { states, updatedAt: Date.now() });
+}
+
+/**
+ * Lookup: did the user's Chrome report a logged-in state for `domain`
+ * within the freshness TTL? Returns null when unknown (extension never
+ * reported, report expired, or no extension). Domain is matched
+ * case-insensitively against the bare host the extension shipped.
+ */
+export function getExtensionLoginState(userId: string, domain: string): boolean | null {
+  const entry = extensionLoginStateByUser.get(userId);
+  if (!entry) return null;
+  if (Date.now() - entry.updatedAt > EXTENSION_STATE_TTL_MS) return null;
+  const v = entry.states.get(domain.toLowerCase());
+  return v ?? null;
+}
+
 function addClientForUser(userId: string, client: ClientState): void {
   const set = clientsByUser.get(userId) ?? new Set();
   set.add(client);
@@ -421,6 +462,21 @@ async function handleClientMessage(
 
   if (msg.type === 'client.vision.user_input') {
     await dispatchUserInput(msg, injectedExecutor, state.userId ?? null);
+    return;
+  }
+
+  if (msg.type === 'client.extension.login_states') {
+    if (state.userId) {
+      setExtensionLoginStates(state.userId, msg.states);
+      logger.debug(
+        {
+          userId: state.userId,
+          clientId: state.id,
+          domains: Object.keys(msg.states).length,
+        },
+        'extension: login states updated',
+      );
+    }
     return;
   }
 }

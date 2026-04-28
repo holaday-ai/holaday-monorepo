@@ -149,6 +149,28 @@ export const clientVisionUserInputSchema = z.object({
   button: z.enum(['left', 'right', 'middle']).optional(),
 });
 
+/**
+ * Phase 14 — Chrome extension login-state report. Extension's cookie
+ * bridge reads the user's cookies for tracked sites every ~5 minutes
+ * (alarms-driven) and ships a domain → boolean map. Server stashes
+ * this in a per-user state so the playbook router can log "user is
+ * logged into X on their Chrome" when the matched playbook flags
+ * that domain as login-required.
+ *
+ * Domain keys are bare hosts (no scheme, no www) — same shape as
+ * `extractDomain()` produces server-side. Cap at 32 entries to keep
+ * the message tractable; cookie reads are bounded by a curated
+ * `TRACKED_DOMAINS` list in the extension.
+ */
+export const clientExtensionLoginStatesSchema = z.object({
+  type: z.literal('client.extension.login_states'),
+  states: z
+    .record(z.string().min(1).max(64), z.boolean())
+    .refine((rec) => Object.keys(rec).length <= 32, {
+      message: 'too many domains in login_states (max 32)',
+    }),
+});
+
 export const clientMessageSchema = z.discriminatedUnion('type', [
   clientHelloSchema,
   clientPongSchema,
@@ -158,6 +180,7 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
   clientVisionObservationSchema,
   clientVisionActedSchema,
   clientVisionUserInputSchema,
+  clientExtensionLoginStatesSchema,
 ]);
 
 export type ClientMessage = z.infer<typeof clientMessageSchema>;

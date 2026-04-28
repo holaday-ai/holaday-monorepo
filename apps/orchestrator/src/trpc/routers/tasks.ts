@@ -58,7 +58,12 @@ import { taskEvents } from '../../db/schema/task-events.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
 import { tasks as tasksTable } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
-import { broadcastToUser, updateTaskStateForUser } from '../../ws/server.js';
+import {
+  broadcastToUser,
+  getExtensionLoginState,
+  hasConnectedSwClient,
+  updateTaskStateForUser,
+} from '../../ws/server.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 const taskController = new TaskController();
@@ -479,6 +484,29 @@ export const tasksRouter = router({
               },
               'router: cold-start lane from playbook',
             );
+            // Phase 14 (extension follow-up) — when the matched
+            // playbook flags this site as login-required AND the
+            // user has a live extension WS connection AND the
+            // extension reports them as logged in there, log a
+            // hint so we can later wire the chrome-extension
+            // transport as a higher-priority lane than headed.
+            // Read-only observability this commit; no routing
+            // change. Treats the playbook's own domain as
+            // canonical (covers the case where intent has no URL).
+            if (
+              playbookForRouter.loginRequired !== false &&
+              hasConnectedSwClient(ctx.userId) &&
+              getExtensionLoginState(ctx.userId, playbookForRouter.domain) === true
+            ) {
+              ctx.logger.info(
+                {
+                  taskId,
+                  targetSite: playbookForRouter.domain,
+                  loginRequired: playbookForRouter.loginRequired,
+                },
+                'router: extension lane available with verified login state',
+              );
+            }
           } else {
             ctx.logger.info(
               { taskId, targetSite: routerTargetSite },

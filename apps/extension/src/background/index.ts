@@ -44,8 +44,10 @@ import type { DriverAction, HolaDayBrowserDriver } from '@holaday/browser-driver
 import { PlaywrightCrxAdapter } from '@holaday/browser-driver/crx';
 import { MockDriver } from '@holaday/browser-driver/mock';
 import type { ServerMessage } from '@holaday/shared-types';
-import { getAccessToken } from '../shared/storage.js';
+import { tryAutoLogin } from '../shared/auto-login.js';
+import { getAccessToken, setAccessToken } from '../shared/storage.js';
 import { captureVisionObservation, executeCdpAction, getActiveTabId } from './cdp-actions.js';
+import { buildLoginStatesMessage, readLoginStates } from './cookie-bridge.js';
 import { connect, disconnect, isConnected, onServerMessage, send } from './ws-client.js';
 
 /**
@@ -214,6 +216,11 @@ onServerMessage((msg) => {
   if (msg.type === 'server.welcome') {
     state.lastWelcomeAt = Date.now();
     console.info('[holaday] welcome', msg);
+    // Phase 14 — first welcome after a (re)connect is the right moment
+    // to ship the current login-state snapshot. Forces lastLoginStatesAt
+    // to 0 so the throttle in maybeReportLoginStates always fires.
+    lastLoginStatesAt = 0;
+    void maybeReportLoginStates();
     return;
   }
   if (msg.type === 'server.error') {
@@ -666,8 +673,56 @@ function onTaskControl(msg: Extract<ServerMessage, { type: 'server.task.control'
  */
 async function ensureConnected(): Promise<void> {
   if (isConnected()) return;
-  const token = await getAccessToken();
+  let token = await getAccessToken();
+  // Phase 14 — opportunistic auto-login. If the user has a holaday.ai
+  // session cookie in this Chrome profile, lift the JWT into our
+  // local storage so the SW comes online without a separate sign-in
+  // through the popup. Strict: only fires when we have nothing
+  // already stored — never overwrites a token the user explicitly
+  // installed.
+  if (!token) {
+    const lifted = await tryAutoLogin();
+    if (lifted) {
+      try {
+        await setAccessToken(lifted);
+        token = lifted;
+        console.info('[holaday] auto-login: imported token from holaday.ai cookie');
+      } catch (err) {
+        console.warn('[holaday] auto-login: setAccessToken failed', err);
+      }
+    }
+  }
   if (token) connect(token);
+}
+
+// Phase 14 — periodic login-state report. The SW samples the user's
+// cookies for tracked domains and ships a domain → boolean map over
+// the existing WS so the orchestrator's playbook router can log
+// "user has Chrome login for X" when a matched playbook is login-
+// required. Runs at most once every LOGIN_STATES_PERIOD_MS, gated
+// on the WS being open. Best-effort: cookie-read errors fall through
+// to `false` per-domain.
+const LOGIN_STATES_PERIOD_MS = 5 * 60 * 1000;
+let lastLoginStatesAt = 0;
+
+async function maybeReportLoginStates(): Promise<void> {
+  if (!isConnected()) return;
+  const now = Date.now();
+  if (now - lastLoginStatesAt < LOGIN_STATES_PERIOD_MS) return;
+  lastLoginStatesAt = now;
+  try {
+    const states = await readLoginStates();
+    const ok = send(buildLoginStatesMessage(states));
+    if (!ok) {
+      // WS closed between the readiness check and the send — clear
+      // the throttle so the next alarm tick retries immediately
+      // instead of waiting 5 minutes.
+      lastLoginStatesAt = 0;
+    }
+  } catch (err) {
+    console.warn('[holaday] cookie-bridge: report failed', err);
+    lastLoginStatesAt = 0;
+  }
 }
 
 // Install/startup are the obvious wake-ups, but in MV3 they fire only on
@@ -705,7 +760,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // HEARTBEAT_INTERVAL_MS — see shared-types/ws.ts.
 chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: KEEPALIVE_PERIOD_MIN });
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === KEEPALIVE_ALARM) void ensureConnected();
+  if (alarm.name === KEEPALIVE_ALARM) {
+    void ensureConnected().then(() => maybeReportLoginStates());
+  }
 });
 
 // Top-level boot reconnect. Runs whenever the SW module is (re)loaded —

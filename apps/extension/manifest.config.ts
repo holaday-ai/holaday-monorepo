@@ -32,6 +32,12 @@ export default defineManifest({
     'cookies',
     'webNavigation',
     'alarms',
+    // Side Panel surface (Phase 14). Side Panel needs Chrome 114+;
+    // we already require 120 via minimum_chrome_version above so
+    // gating is implicit. Action click continues to open the popup
+    // (preserves Phase 0 UX); Side Panel is opened explicitly from
+    // the popup's "在侧边栏打开" button.
+    'sidePanel',
     // playwright-crx uses chrome.debugger as its transport; required to
     // drive pages with goto/click/extract/etc. Chrome will show the
     // "HOLA DAY is debugging this browser" banner while attached — that's
@@ -40,6 +46,10 @@ export default defineManifest({
   ],
 
   host_permissions: ['<all_urls>'],
+
+  side_panel: {
+    default_path: 'src/sidepanel/index.html',
+  },
 
   content_scripts: [
     {
