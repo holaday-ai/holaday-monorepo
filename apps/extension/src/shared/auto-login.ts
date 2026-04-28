@@ -1,79 +1,98 @@
 /**
- * Phase 14 — opportunistic auto-login (v2).
+ * Phase 14 — opportunistic auto-login (v3).
  *
- * The web workbench stores the JWT in `localStorage` under
- * `holaday.access_token` (apps/web-workbench/src/lib/auth.ts).
- * It's NOT a cookie — chrome.cookies cannot reach it. To lift
- * the token we have to run a tiny script in the page world of an
- * open holaday.ai (or local-dev) tab and read localStorage from
- * there.
+ * The web workbench stores its JWT in `localStorage` under
+ * `holaday.access_token` (apps/web-workbench/src/lib/auth.ts), not
+ * a cookie — chrome.cookies cannot reach it. We `executeScript`
+ * into any open workbench tab and read localStorage from its page
+ * world.
  *
- * Strict: only reads, never writes. Returns null when:
- *   - no matching tab is open;
- *   - the matching tab has no token in localStorage;
- *   - chrome.scripting rejects (chrome:// pages, NTP, etc.).
+ * Why we don't pass `url: [...]` to chrome.tabs.query: Chrome's
+ * tab-URL match patterns reject patterns that contain a port
+ * (e.g. `http://localhost:5173/*`) — and a single invalid entry in
+ * the array silently fails the whole query. The previous version
+ * swallowed that failure and returned null, leaving BOSS staring
+ * at "Demo user" with no diagnostic. v3 queries ALL tabs and
+ * filters client-side via regex, then logs every step at info /
+ * warn so the SW DevTools console makes failures obvious.
  *
- * The caller (background/index.ts) only invokes this when it has
- * NO token in chrome.storage already, so we never overwrite a
- * token the user explicitly installed via the popup login flow.
+ * Strict: only reads, never writes. Caller (background/index.ts)
+ * only invokes this when chrome.storage has no token already.
  */
 
-/** Same key the web-workbench uses — see web-workbench/src/lib/auth.ts. */
 const TOKEN_KEY = 'holaday.access_token';
 
 /**
- * URL patterns to scan for an open workbench tab. Order matters
- * (first hit wins): production first, then common dev origins.
- * Patterns mirror Chrome's match-pattern grammar — host wildcards
- * cover hd-* subdomains the workbench may move under.
+ * URLs we'll consider "the workbench". Same rule as a chrome.tabs
+ * match pattern but expressed as RegExp so port-ful localhost
+ * variants are accepted. Anchored at the start of the URL so a
+ * page that merely LINKS to holaday.ai doesn't qualify.
  */
-const WORKBENCH_TAB_PATTERNS = [
-  'https://holaday.ai/*',
-  'https://*.holaday.ai/*',
-  'http://localhost:5173/*',
-  'http://127.0.0.1:5173/*',
-  'http://localhost:4173/*',
+const WORKBENCH_URL_PATTERNS: readonly RegExp[] = [
+  /^https:\/\/holaday\.ai(?:[/:]|$)/i,
+  /^https:\/\/[a-z0-9-]+\.holaday\.ai(?:[/:]|$)/i,
+  /^http:\/\/localhost(?::\d+)?\//i,
+  /^http:\/\/127\.0\.0\.1(?::\d+)?\//i,
 ] as const;
 
-/** Page-world function: reads localStorage and returns the token or null. */
-function readTokenFromPage(key: string): string | null {
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
+function isWorkbenchUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  return WORKBENCH_URL_PATTERNS.some((re) => re.test(url));
 }
 
-async function readTokenFromTab(tabId: number): Promise<string | null> {
+async function readTokenFromTab(tabId: number, url: string): Promise<string | null> {
   try {
+    // Inline closure-free arrow function. Doesn't reference any
+    // bundler-injected helpers or imported symbols, so the
+    // function source serializes cleanly when chrome.scripting
+    // calls .toString() to ship it to the page world.
     const results = await chrome.scripting.executeScript({
       target: { tabId },
-      func: readTokenFromPage,
-      args: [TOKEN_KEY],
+      func: () => {
+        try {
+          return window.localStorage.getItem('holaday.access_token');
+        } catch {
+          return null;
+        }
+      },
     });
     const value = results[0]?.result;
-    return typeof value === 'string' && value.length > 0 ? value : null;
-  } catch {
-    // chrome.scripting throws on restricted schemes (chrome://, the
-    // Web Store, etc.) and when the host permission isn't granted
-    // for that origin. We have <all_urls> so the latter shouldn't
-    // happen, but tabs may close mid-call. Best-effort.
+    if (typeof value === 'string' && value.length > 0) {
+      return value;
+    }
+    console.info(
+      `[holaday] auto-login: tab ${tabId} (${url}) has no token in localStorage`,
+    );
+    return null;
+  } catch (err) {
+    console.warn(
+      `[holaday] auto-login: executeScript on tab ${tabId} (${url}) failed`,
+      err instanceof Error ? err.message : err,
+    );
     return null;
   }
 }
 
 export async function tryAutoLogin(): Promise<string | null> {
-  let candidates: chrome.tabs.Tab[] = [];
+  let allTabs: chrome.tabs.Tab[];
   try {
-    candidates = await chrome.tabs.query({ url: [...WORKBENCH_TAB_PATTERNS] });
-  } catch {
+    allTabs = await chrome.tabs.query({});
+  } catch (err) {
+    console.warn(
+      '[holaday] auto-login: tabs.query({}) failed',
+      err instanceof Error ? err.message : err,
+    );
     return null;
   }
+
+  const candidates = allTabs.filter((t) => isWorkbenchUrl(t.url));
+  console.info(
+    `[holaday] auto-login: scanning ${candidates.length} workbench tab(s) of ${allTabs.length} total`,
+  );
   if (candidates.length === 0) return null;
 
-  // Active tab in the focused window first — that's most likely the
-  // one the user just signed in on. Fall through to other matching
-  // tabs (a stale dev tab in the background may still have a token).
+  // Active focused tab first, then most-recently-accessed. lastAccessed
+  // is a ms timestamp; division puts it on the same scale as the boolean.
   const sorted = [...candidates].sort((a, b) => {
     const aScore = (a.active ? 2 : 0) + (a.lastAccessed ?? 0) / 1e13;
     const bScore = (b.active ? 2 : 0) + (b.lastAccessed ?? 0) / 1e13;
@@ -82,8 +101,21 @@ export async function tryAutoLogin(): Promise<string | null> {
 
   for (const tab of sorted) {
     if (typeof tab.id !== 'number') continue;
-    const token = await readTokenFromTab(tab.id);
-    if (token) return token;
+    const token = await readTokenFromTab(tab.id, tab.url ?? '');
+    if (token) {
+      console.info(
+        `[holaday] auto-login: lifted token from tab ${tab.id} (${tab.url}) — ${token.length} chars`,
+      );
+      return token;
+    }
   }
+  console.info('[holaday] auto-login: no token found in any candidate tab');
   return null;
 }
+
+/** Exposed for the diagnostics pages / unit tests; safe to call. */
+export const _internals = {
+  TOKEN_KEY,
+  WORKBENCH_URL_PATTERNS,
+  isWorkbenchUrl,
+};
