@@ -13,10 +13,21 @@
  */
 
 import type { Logger } from 'pino';
-import Dysmsapi from '@alicloud/dysmsapi20170525';
+// SDK ships as CJS with `exports.default = Client`. Under tsx + ESM
+// resolution the default-import sometimes hands back the namespace
+// object instead of the class, so reach into `.default` explicitly
+// when present.
+import * as DysmsapiNs from '@alicloud/dysmsapi20170525';
 import { SendSmsRequest } from '@alicloud/dysmsapi20170525/dist/models/SendSmsRequest.js';
 import * as OpenApi from '@alicloud/openapi-client';
 import type { Env } from './config/env.js';
+
+type DysmsapiCtor = new (config: InstanceType<typeof OpenApi.Config>) => {
+  sendSms(req: InstanceType<typeof SendSmsRequest>): Promise<unknown>;
+};
+const Dysmsapi: DysmsapiCtor =
+  (DysmsapiNs as unknown as { default?: DysmsapiCtor }).default ??
+  (DysmsapiNs as unknown as DysmsapiCtor);
 
 interface CodeEntry {
   code: string;
@@ -37,7 +48,7 @@ export type SmsVerifyResult =
   | { ok: false; error: 'invalid_code' | 'expired' };
 
 export class SmsAdapter {
-  private readonly client: InstanceType<typeof Dysmsapi> | null;
+  private readonly client: InstanceType<DysmsapiCtor> | null;
   private readonly codes = new Map<string, CodeEntry>();
 
   constructor(
