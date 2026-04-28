@@ -7,6 +7,8 @@ export * from './task-steps.js';
 export * from './task-events.js';
 export * from './task-files.js';
 export * from './task-quotas.js';
+export * from './execution-memory.js';
+export * from './execution-stats.js';
 export * from './llm-calls.js';
 export * from './verification-codes.js';
 export * from './payments.js';

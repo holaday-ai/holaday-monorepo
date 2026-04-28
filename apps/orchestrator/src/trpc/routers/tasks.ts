@@ -30,6 +30,12 @@ import {
   classifyRole,
   selectModelAndEffort,
 } from '../../agent/supercar/prompt-layers.js';
+import { generatePlan, shouldSkipPlan } from '../../agent/supercar/plan-service.js';
+import { MemoryService } from '../../agent/supercar/memory-service.js';
+import {
+  StatsService,
+  classifyTaskType,
+} from '../../agent/supercar/stats-service.js';
 import { FileService, taskInternalIdFor } from '../../files/file-service.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
 import {
@@ -249,6 +255,29 @@ export const tasksRouter = router({
     ) {
       const taskId = newExternalId('task');
       const repo = new TaskRepository(ctx.db);
+
+      // Phase 13 Dim 1 — first-frame plan. Skipped for simple-search
+      // (Brave fast-lane handles them), trivial intents, and any
+      // intent shorter than 8 chars. Plan failures are non-fatal —
+      // generatePlan returns { planText: null, planStatus: null }
+      // and the loop continues without one. Run in parallel with
+      // memory retrieval below to keep the tasks.create RTT close
+      // to its pre-Phase-13 footprint.
+      const skipPlan = isSimpleSearchIntent || shouldSkipPlan(input.intent);
+      const memoryService = new MemoryService(ctx.db, ctx.logger);
+      const [planResult, relevantMemories] = await Promise.all([
+        skipPlan
+          ? Promise.resolve({ planText: null, planStatus: null })
+          : generatePlan({
+              apiKey: appEnv.ANTHROPIC_API_KEY,
+              intent: input.intent,
+              logger: ctx.logger,
+              taskId,
+            }),
+        memoryService.pickRelevant(userRow.id, input.intent),
+      ]);
+      const memoryPreamble = memoryService.formatForPrompt(relevantMemories);
+
       await repo.insertTask(
         {
           taskId,
@@ -264,6 +293,29 @@ export const tasksRouter = router({
           opusUsed: opusActuallyConsumed,
         },
       );
+      // Phase 13 Dim 1 — persist plan onto the task row and broadcast
+      // it to the SPA so the user sees upcoming steps before any
+      // tool fires. Best-effort: write failures log + continue.
+      if (planResult.planText) {
+        await ctx.db
+          .update(tasksTable)
+          .set({
+            planText: planResult.planText,
+            planStatus: planResult.planStatus as unknown,
+          })
+          .where(eq(tasksTable.externalId, taskId))
+          .catch((err) => ctx.logger.warn({ err, taskId }, 'plan persist failed'));
+        try {
+          broadcastToUser(ctx.userId, {
+            type: 'server.task.plan',
+            taskId,
+            planText: planResult.planText,
+            planStatus: planResult.planStatus ?? [],
+          });
+        } catch (err) {
+          ctx.logger.warn({ err, taskId }, 'plan broadcast failed');
+        }
+      }
       // Phase 10 Tier 3 — back-fill task_files.task_id once the task
       // row exists. Best-effort so a failed link doesn't kill the run;
       // worst case the file is orphaned (still readable by id, just
@@ -349,9 +401,29 @@ export const tasksRouter = router({
       // That marks the task failed in the DB rather than 500ing the
       // tasks.create call, which would lose the audit trail.
       const primaryExecutor = perUserExec ?? headedExec ?? headlessExec;
+      // Phase 13 Dim 6 — single StatsService instance shared across
+      // all stats records the loop emits. Wiring is best-effort
+      // (StatsService.record swallows its own errors), so a stats
+      // backend hiccup never stalls the agent.
+      const statsService = new StatsService(ctx.db, ctx.logger);
+      const taskTypeForStats = classifyTaskType(input.intent);
       const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
           taskId,
           intent: input.intent,
+          ...(memoryPreamble ? { memoryPreamble } : {}),
+          ...(planResult.planText ? { planText: planResult.planText } : {}),
+          onStatsRecord: ({ laneUsed, targetSite, success, latencyMs, errorType }) => {
+            void statsService.record({
+              userIdInternal: userRow.id,
+              taskExternalId: taskId,
+              taskType: taskTypeForStats,
+              targetSite,
+              laneUsed,
+              success,
+              latencyMs,
+              errorType,
+            });
+          },
           executor: primaryExecutor,
           domain: classification.domain,
           // Swap target: the NON-primary browser. When headed was
@@ -577,6 +649,24 @@ export const tasksRouter = router({
               broadcastToUser(userId, buildTaskTerminalMessage(taskId, outcome));
             } catch (err) {
               ctx.logger.warn({ err, taskId }, 'supercar: broadcast terminal failed');
+            }
+            // Phase 13 Dim 5 — memory extraction. Run only on
+            // completed tasks to avoid storing tips from the
+            // partial / failed state of the agent. Best-effort:
+            // rejections log + continue (the user's task is done
+            // regardless of memory outcome).
+            if (outcome.status === 'completed' && outcome.summary && appEnv.ANTHROPIC_API_KEY) {
+              void memoryService
+                .extractAndStore({
+                  apiKey: appEnv.ANTHROPIC_API_KEY,
+                  userIdInternal: userRow.id,
+                  intent: input.intent,
+                  summary: outcome.summary,
+                  taskId,
+                })
+                .catch((err) =>
+                  ctx.logger.warn({ err, taskId }, 'memory: extract crashed'),
+                );
             }
           })
           .catch((err) => {
@@ -1313,6 +1403,11 @@ export const tasksRouter = router({
         errorCode: taskRow.errorCode,
         errorMessage: taskRow.errorMessage,
         result: normalizeOutput(taskRow.result),
+        // Phase 13 Dim 1 — surface plan body so a re-opened tab
+        // re-renders the PlanCard from persisted state instead of
+        // waiting for a (now-impossible) WS replay.
+        planText: taskRow.planText,
+        planStatus: normalizeOutput(taskRow.planStatus),
         createdAt: taskRow.createdAt,
         completedAt: taskRow.completedAt,
         steps: stepRows.map((s) => ({

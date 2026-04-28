@@ -24,6 +24,18 @@ export interface UiTask {
    * once the first tick.start lands (task is actually executing).
    */
   queuePosition?: number;
+  /**
+   * Phase 13 Dim 1 — pre-execution plan body (markdown). Set on
+   * `server.task.plan` arrival or hydrated from tasks.detail.
+   * Absent for simple-search / trivial intents that skip plan.
+   */
+  planText?: string;
+  /** Per-step status array, parallel to the bullet list count. */
+  planStatus?: Array<{
+    idx: number;
+    status: 'pending' | 'running' | 'done' | 'failed';
+    note?: string;
+  }>;
 }
 
 /**

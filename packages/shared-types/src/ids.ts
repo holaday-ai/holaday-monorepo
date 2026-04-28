@@ -16,6 +16,7 @@ export const ID_PREFIXES = {
   payment: 'pay',
   verificationCode: 'vc',
   file: 'file',
+  memory: 'mem',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

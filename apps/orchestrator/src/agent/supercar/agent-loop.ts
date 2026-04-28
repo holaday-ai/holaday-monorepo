@@ -268,6 +268,30 @@ export interface RunSupercarOptions {
     format: string;
     content: string;
   }) => Promise<{ fileId: string; filename: string; size: number; downloadUrl: string } | { error: string }>;
+
+  // --- Phase 13 Dim 5/6: cross-task memory + execution stats ---
+  /**
+   * Pre-rendered memory preamble (output of MemoryService.formatForPrompt).
+   * Caller fetches the user's relevant memories and passes the
+   * formatted block here; the loop appends it to the first user
+   * message after the intent. Empty / undefined → no preamble.
+   */
+  memoryPreamble?: string;
+  /**
+   * Stats sink: invoked after each tool_result is synthesized so
+   * the loop can persist the (lane, latency, success, error_type)
+   * tuple. Caller wires this to StatsService.record. Errors in
+   * the sink are swallowed by StatsService itself.
+   */
+  onStatsRecord?: (input: {
+    laneUsed: string;
+    targetSite: string | null;
+    success: boolean;
+    latencyMs: number;
+    errorType: string | null;
+  }) => void | Promise<void>;
+  /** Phase 13 Dim 1 — pre-generated plan output to broadcast on first tick. */
+  planText?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -399,6 +423,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     !hasAttachments &&
     !looksLikeFileExport
   ) {
+    const braveStart = Date.now();
     const r = await opts.braveAdapter.search(opts.intent, 10);
     if ('results' in r && r.results.length > 0) {
       logger.info(
@@ -412,6 +437,15 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         model: opts.model ?? process.env.SUPERCAR_MODEL ?? 'claude-sonnet-4-6',
         logger,
         taskId: opts.taskId,
+      });
+      // Phase 13 Dim 6 — stat the lane outcome. Best-effort; sink
+      // swallows its own errors.
+      void opts.onStatsRecord?.({
+        laneUsed: 'brave_api',
+        targetSite: 'brave_search',
+        success: true,
+        latencyMs: Date.now() - braveStart,
+        errorType: null,
       });
       return {
         status: 'completed',
@@ -621,8 +655,15 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // state" — that progression mirrors how a human would brief a
   // colleague ("here's what I want, here's the data, here's where
   // we are right now"). Empty attachments array no-ops cleanly.
+  //
+  // Phase 13 Dim 5: memory preamble lands AFTER the intent + a blank
+  // line, so the agent reads it as supplementary context rather than
+  // part of the user request. Empty preamble no-ops.
+  const intentBlock = opts.memoryPreamble && opts.memoryPreamble.trim().length > 0
+    ? `${opts.intent}\n\n${opts.memoryPreamble}`
+    : opts.intent;
   const initialContent: ContentBlockParam[] = [
-    { type: 'text', text: opts.intent },
+    { type: 'text', text: intentBlock },
   ];
   if (opts.attachments && opts.attachments.length > 0) {
     initialContent.push(...opts.attachments);

@@ -162,6 +162,16 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
                 ? humaniseTaskError(rawResultText)
                 : rawResultText
               : undefined;
+            // Phase 13 Dim 1 — hydrate plan body + status from the
+            // persisted columns (server.task.plan was a one-shot
+            // broadcast at task start; this picks up the plan when
+            // the user re-opens a tab later).
+            const detailWithPlan = detail as typeof detail & {
+              planText?: string | null;
+              planStatus?: UiTask['planStatus'] | null;
+            };
+            const planText = detailWithPlan.planText ?? undefined;
+            const planStatus = (detailWithPlan.planStatus as UiTask['planStatus']) ?? undefined;
             return {
               stepsByTask: { ...prev.stepsByTask, [taskId]: steps },
               tasks: prev.tasks.map((t) =>
@@ -171,6 +181,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
                       status: detail.status as UiTaskStatus,
                       tickCount: Math.max(t.tickCount, steps.length),
                       ...(resultText ? { resultText } : {}),
+                      ...(planText ? { planText } : {}),
+                      ...(planStatus ? { planStatus } : {}),
                     }
                   : t,
               ),
@@ -380,6 +392,20 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       set((prev) => ({
         tasks: prev.tasks.map((t) =>
           t.taskId === msg.taskId ? { ...t, queuePosition: msg.position } : t,
+        ),
+      }));
+      return;
+    }
+    if (msg.type === 'server.task.plan') {
+      // Phase 13 Dim 1 — first-frame plan arrival. Stash on the
+      // matching task; the TaskStream renders <PlanCard> when this
+      // is set. Idempotent: a reconnected WS replay just overwrites
+      // with the same body.
+      set((prev) => ({
+        tasks: prev.tasks.map((t) =>
+          t.taskId === msg.taskId
+            ? { ...t, planText: msg.planText, planStatus: msg.planStatus }
+            : t,
         ),
       }));
       return;

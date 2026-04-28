@@ -443,6 +443,26 @@ export const serverTaskQueuedSchema = z.object({
 });
 
 /**
+ * Phase 13 Dim 1 — first-frame plan emitted before any tool call.
+ * Carries the markdown-ish plan body and a parallel status array
+ * the SPA renders as a step list with state icons. Updates land
+ * via subsequent vision/tick events that drive plan_status entries
+ * client-side; this initial frame just bootstraps the UI.
+ */
+export const serverTaskPlanSchema = z.object({
+  type: z.literal('server.task.plan'),
+  taskId: z.string(),
+  planText: z.string(),
+  planStatus: z.array(
+    z.object({
+      idx: z.number().int().nonnegative(),
+      status: z.enum(['pending', 'running', 'done', 'failed']),
+      note: z.string().optional(),
+    }),
+  ),
+});
+
+/**
  * Per-tick screencast frame — G5. Sends the raw JPEG the runner
  * already captured to drive the commander, so the web workbench can
  * render a poor-man's screencast in the right-hand panel. Only fires
@@ -519,6 +539,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverVisionTickEndSchema,
   serverVisionScreencastSchema,
   serverTaskQueuedSchema,
+  serverTaskPlanSchema,
   serverVisionCaptchaDetectedSchema,
   serverVisionCaptchaResolvedSchema,
   serverVisionExecutorFallbackSchema,

@@ -1,6 +1,7 @@
 import { authRouter } from './routers/auth.js';
 import { feedbackRouter } from './routers/feedback.js';
 import { llmCallsRouter } from './routers/llm-calls.js';
+import { memoryRouter } from './routers/memory.js';
 import { paymentRouter } from './routers/payment.js';
 import { quotaRouter } from './routers/quota.js';
 import { rolesRouter } from './routers/roles.js';
@@ -16,6 +17,7 @@ export const appRouter = router({
   tasks: tasksRouter,
   llmCalls: llmCallsRouter,
   feedback: feedbackRouter,
+  memory: memoryRouter,
   payment: paymentRouter,
   quota: quotaRouter,
   roles: rolesRouter,

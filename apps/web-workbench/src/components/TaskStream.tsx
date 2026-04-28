@@ -16,6 +16,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
+import { PlanCard } from '@/components/PlanCard';
 import { StepCard } from '@/components/StepCard';
 import { useTaskStore } from '@/stores/task-store';
 import { cn } from '@/lib/utils';
@@ -236,6 +237,17 @@ function AgentBlock({
         H
       </div>
       <div className="min-w-0 flex-1 space-y-3">
+        {/* Phase 13 Dim 1 — plan card lands above thinking + steps so
+         *  the user sees the upcoming-step list as soon as the
+         *  orchestrator emits server.task.plan (or on tab re-open
+         *  via tasks.detail hydration). */}
+        {task.planText && (
+          <PlanCard
+            planText={task.planText}
+            {...(task.planStatus ? { planStatus: task.planStatus } : {})}
+          />
+        )}
+
         {thinking && <ThinkingBlock text={thinking} />}
 
         {!hasAnyActivity && !terminal && <BoardingLine />}

@@ -63,6 +63,19 @@ export const tasks = mysqlTable(
      */
     opusUsed: boolean('opus_used').notNull().default(false),
     plan: json('plan'),
+    /**
+     * Phase 13 — first-frame plan output (markdown-ish text) emitted
+     * BEFORE any tool calls so the SPA can render the upcoming steps
+     * up-front. Null for simple-search tasks that skip the plan phase.
+     */
+    planText: text('plan_text'),
+    /**
+     * Per-step status array, parallel to the bullet list in
+     * `planText`. Each entry: { idx, status: 'pending'|'running'|
+     * 'done'|'failed', note?: string }. Updated as the loop
+     * progresses.
+     */
+    planStatus: json('plan_status'),
     result: json('result'),
     errorCode: varchar('error_code', { length: 64 }),
     errorMessage: text('error_message'),
