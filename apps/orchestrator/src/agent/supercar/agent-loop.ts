@@ -1071,7 +1071,14 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       // If the model didn't invoke any client-side tool, the turn is
       // finished. Decide between completed / awaiting_user.
       if (toolUseBlocks.length === 0) {
-        const finalText = textPreamble.trim();
+        // Phase 13 Dim 1 follow-up — strip plan-tracker markers from
+        // the user-visible summary. The parser above has already
+        // consumed them into planStatus updates; leaving them in
+        // the rendered text shows users `[STEP 1 done]` lines that
+        // mean nothing to them.
+        const finalText = textPreamble
+          .replace(/\[STEP\s+\d+\s+(?:done|running|failed|pending)\]\s*\n*/gi, '')
+          .trim();
         if (looksLikePendingQuestion(finalText)) {
           // Park on a user reply. `supercarReply` resolves the promise;
           // `supercarAbort` rejects with a sentinel we swap to
