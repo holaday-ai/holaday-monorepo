@@ -19,7 +19,8 @@ import { applyHistoryRetention } from '@/utils/time-buckets';
 
 interface MeProfile {
   userId: string;
-  email: string;
+  /** Nullable since Phase 12 — SMS-first users have no email yet. */
+  email: string | null;
   displayName: string | null;
   plan: string;
   /** Phase 8.2 canary flag — when true, the VNC panel connects to

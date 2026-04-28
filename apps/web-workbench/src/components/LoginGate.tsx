@@ -10,7 +10,7 @@ interface Props {
   initialMode?: Mode;
 }
 
-type Mode = 'login' | 'register' | 'emailCode' | 'forgot';
+type Mode = 'login' | 'register' | 'emailCode' | 'forgot' | 'phone';
 
 /**
  * Login / register / forgot-password card. Modes:
@@ -18,6 +18,7 @@ type Mode = 'login' | 'register' | 'emailCode' | 'forgot';
  *   - register     : email + password + confirm → auth.register → auto-login
  *   - emailCode    : email → auth.sendCode → 6-digit code → auth.verifyCode
  *   - forgot       : email → auth.sendCode → code + new password → auth.resetPassword
+ *   - phone        : 11-digit mobile → auth.smsSend → 6-digit code → auth.smsVerify
  *
  * Google OAuth button only appears when the server advertises the
  * feature via `auth.loginOptions` (env-gated on GOOGLE_CLIENT_ID).
@@ -25,6 +26,7 @@ type Mode = 'login' | 'register' | 'emailCode' | 'forgot';
 export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JSX.Element {
   const [mode, setMode] = React.useState<Mode>(initialMode);
   const [email, setEmail] = React.useState('');
+  const [phone, setPhone] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [confirm, setConfirm] = React.useState('');
   const [code, setCode] = React.useState('');
@@ -36,14 +38,19 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
   const [loginOptions, setLoginOptions] = React.useState<{
     google: boolean;
     emailCode: boolean;
-  }>({ google: false, emailCode: false });
+    sms: boolean;
+  }>({ google: false, emailCode: false, sms: false });
 
   // Fetch server-side login options once on mount.
   React.useEffect(() => {
     void (async () => {
       try {
         const res = await trpc.auth.loginOptions.query();
-        setLoginOptions({ google: !!res.google, emailCode: !!res.emailCode });
+        setLoginOptions({
+          google: !!res.google,
+          emailCode: !!res.emailCode,
+          sms: !!(res as { sms?: boolean }).sms,
+        });
       } catch {
         /* defaults: no optional methods */
       }
@@ -69,6 +76,9 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
     setConfirm('');
     setCode('');
     setCodeSent(false);
+    // Clear `phone` only when leaving phone mode so the user doesn't
+    // lose what they typed mid-tab-switch within the phone flow.
+    if (m !== 'phone') setPhone('');
   }
 
   async function handleLogin(e: React.FormEvent): Promise<void> {
@@ -166,6 +176,48 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
     }
   }
 
+  // ---------------------------------------------------------------
+  // Phase 12 — SMS login. Two phases:
+  //   1. send   → trpc.auth.smsSend → starts the 60s cooldown
+  //   2. verify → trpc.auth.smsVerify → returns { user, accessToken }
+  // The phone state is kept separate from `email` so the input
+  // doesn't collide with email-mode validation when the user
+  // tab-switches mid-flow.
+  // ---------------------------------------------------------------
+  async function handleSendSms(): Promise<void> {
+    resetTransient();
+    if (!/^1[3-9]\d{9}$/.test(phone)) {
+      setError('请输入 11 位中国大陆手机号');
+      return;
+    }
+    setPending(true);
+    try {
+      await trpc.auth.smsSend.mutate({ phone });
+      setCodeSent(true);
+      setCooldown(60);
+      setNotice(`验证码已发送到 ${phone.slice(0, 3)}****${phone.slice(-4)}，5 分钟内有效`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function handleVerifySms(e: React.FormEvent): Promise<void> {
+    e.preventDefault();
+    resetTransient();
+    setPending(true);
+    try {
+      const res = await trpc.auth.smsVerify.mutate({ phone, code });
+      setAccessToken(res.accessToken);
+      onAuthenticated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending(false);
+    }
+  }
+
   const handleGoogle = (): void => {
     window.location.href = '/api/auth/google';
   };
@@ -180,17 +232,23 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
             {mode === 'forgot' && '重置密码'}
             {mode === 'login' && '请登录继续'}
             {mode === 'emailCode' && '用邮箱验证码登录'}
+            {mode === 'phone' && '用手机验证码登录'}
           </div>
         </div>
 
-        {(mode === 'login' || mode === 'emailCode') && (
+        {(mode === 'login' || mode === 'emailCode' || mode === 'phone') && (
           <div className="flex gap-1 rounded-md bg-muted/50 p-1 text-xs">
             <TabButton active={mode === 'login'} onClick={() => switchMode('login')}>
               密码登录
             </TabButton>
             {loginOptions.emailCode && (
               <TabButton active={mode === 'emailCode'} onClick={() => switchMode('emailCode')}>
-                验证码登录
+                邮箱验证码
+              </TabButton>
+            )}
+            {loginOptions.sms && (
+              <TabButton active={mode === 'phone'} onClick={() => switchMode('phone')}>
+                手机登录
               </TabButton>
             )}
           </div>
@@ -249,6 +307,25 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
               code={code}
               onChange={setCode}
               onSend={handleSendCode}
+              cooldown={cooldown}
+              codeSent={codeSent}
+              pending={pending}
+            />
+            {notice && <div className="text-xs text-blue-700 dark:text-blue-400">{notice}</div>}
+            {error && <div className="text-xs text-destructive">{error}</div>}
+            <Button type="submit" className="w-full" disabled={pending || code.length !== 6}>
+              {pending ? '验证中…' : '验证并登录'}
+            </Button>
+          </form>
+        )}
+
+        {mode === 'phone' && (
+          <form onSubmit={handleVerifySms} className="space-y-3">
+            <PhoneInput value={phone} onChange={setPhone} />
+            <CodeRow
+              code={code}
+              onChange={setCode}
+              onSend={handleSendSms}
               cooldown={cooldown}
               codeSent={codeSent}
               pending={pending}
@@ -431,6 +508,43 @@ function EmailInput({
         onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       />
+    </label>
+  );
+}
+
+/**
+ * Phase 12 — phone-number input. Strips everything that isn't a
+ * digit on input so paste-from-formatted (e.g. "+86 138-0000-1234")
+ * lands as the canonical 11-digit form the backend regex expects.
+ * Caps at 11 digits to keep the input physically incapable of
+ * holding a +86 prefix.
+ */
+function PhoneInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}): JSX.Element {
+  return (
+    <label className="block space-y-1">
+      <span className="text-xs font-medium text-muted-foreground">手机号</span>
+      <div className="flex">
+        <span className="inline-flex shrink-0 items-center rounded-l-md border border-r-0 border-input bg-muted/40 px-3 text-xs text-muted-foreground">
+          +86
+        </span>
+        <input
+          type="tel"
+          inputMode="numeric"
+          required
+          maxLength={11}
+          autoComplete="tel-national"
+          placeholder="138 0000 0000"
+          value={value}
+          onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 11))}
+          className="w-full rounded-r-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        />
+      </div>
     </label>
   );
 }

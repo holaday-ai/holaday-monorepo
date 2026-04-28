@@ -7,7 +7,8 @@ import { hashPassword, verifyPassword } from './password.js';
 
 export interface PublicUser {
   externalId: string;
-  email: string;
+  /** Nullable since Phase 12 — SMS-first users have no email yet. */
+  email: string | null;
   plan: string;
   displayName: string | null;
   avatarUrl: string | null;
@@ -199,6 +200,65 @@ export class AuthService {
     await this.db.update(users).set({ passwordHash }).where(eq(users.id, existing.id));
     const accessToken = await signAccessToken({ sub: existing.externalId, plan: existing.plan });
     return { user: toPublic(existing), accessToken };
+  }
+
+  /**
+   * SMS-code login. Caller (the cn-payment gateway via the internal
+   * /api/internal/auth/sms-login endpoint) has already validated the
+   * verification code; we just upsert by phone and issue a token.
+   *
+   * Three branches mirror the Google flow:
+   *   1. row matched by phone → return + flip phone_verified=true
+   *      if it wasn't already
+   *   2. (no email-merge — phone is the primary key for SMS-first
+   *      users; a user wanting to merge an email account onto their
+   *      phone goes through /profile manually)
+   *   3. no match → fresh row with phone set, sentinel password
+   *      hash so the password lane never authenticates them, and a
+   *      masked display_name like 138****1234 so the UI has
+   *      something to show before they pick a real one.
+   */
+  async loginOrRegisterByPhone(phone: string): Promise<AuthResult> {
+    const normalized = phone.trim();
+    const [existing] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.phone, normalized))
+      .limit(1);
+    if (existing) {
+      if (!existing.phoneVerified) {
+        await this.db
+          .update(users)
+          .set({ phoneVerified: true })
+          .where(eq(users.id, existing.id));
+      }
+      const accessToken = await signAccessToken({
+        sub: existing.externalId,
+        plan: existing.plan,
+      });
+      return { user: toPublic(existing), accessToken };
+    }
+    const externalId = newExternalId('user');
+    const passwordHash = await hashPassword(
+      `sms-only-${externalId}-${Math.random().toString(36).slice(2)}`,
+    );
+    const masked = normalized.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2');
+    await this.db.insert(users).values({
+      externalId,
+      email: null,
+      passwordHash,
+      phone: normalized,
+      phoneVerified: true,
+      displayName: masked,
+    });
+    const [row] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.externalId, externalId))
+      .limit(1);
+    if (!row) throw new Error('user disappeared after sms insert');
+    const accessToken = await signAccessToken({ sub: row.externalId, plan: row.plan });
+    return { user: toPublic(row), accessToken };
   }
 
   async login(input: LoginInput): Promise<AuthResult> {

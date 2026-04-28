@@ -46,6 +46,12 @@ export const authRouter = router({
   loginOptions: publicProcedure.query(() => ({
     google: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
     emailCode: Boolean(process.env.RESEND_API_KEY) || process.env.NODE_ENV !== 'production',
+    // Phase 12 — SMS lane is enabled when the cn-payment / hd-auth
+    // gateway URL is configured. The gateway itself decides whether
+    // its Aliyun SMS adapter is wired; the SPA can show the tab the
+    // moment routing is in place, and a mis-configured gateway
+    // surfaces an error in send/verify rather than a missing tab.
+    sms: Boolean(process.env.ALIYUN_SMS_URL),
   })),
 
   register: publicProcedure.input(registerInput).mutation(async ({ ctx, input }) => {
@@ -99,6 +105,106 @@ export const authRouter = router({
     const svc = new AuthService(ctx.db);
     return await svc.loginOrRegisterByEmail(input.email);
   }),
+
+  // ---------------------------------------------------------------
+  // Phase 12 — SMS login (Aliyun SMS via hd-auth.orangebench.tech).
+  //
+  // Both procedures are pure proxies: Vultr can't reach Aliyun's SMS
+  // API directly (rate limit by source IP, signing complexity), so
+  // we delegate to the cn-payment gateway which holds the AK/SK and
+  // the in-memory code store. The gateway returns either { ok: true }
+  // for /send or a verified { token, user } payload for /verify.
+  //
+  // The gateway URL comes from ALIYUN_SMS_URL — `loginOptions.sms`
+  // gates the SPA's phone-login tab on the same env, so a missing
+  // URL means the tab is simply hidden rather than throwing here.
+  // ---------------------------------------------------------------
+  smsSend: publicProcedure
+    .input(z.object({ phone: z.string().regex(/^1[3-9]\d{9}$/) }))
+    .mutation(async ({ input }) => {
+      const url = process.env.ALIYUN_SMS_URL;
+      if (!url) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: 'sms gateway not configured',
+        });
+      }
+      const res = await fetch(`${url}/api/sms/send`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ phone: input.phone }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        cooldownMs?: number;
+        error?: string;
+        message?: string;
+      };
+      if (!res.ok || !body.ok) {
+        // Map the gateway's error codes onto TRPC ones the SPA's
+        // existing toast handler already understands.
+        if (body.error === 'too_frequent') {
+          throw new TRPCError({
+            code: 'TOO_MANY_REQUESTS',
+            message: '60 秒内只能发送一次',
+          });
+        }
+        if (body.error === 'invalid_phone') {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: '手机号格式错误' });
+        }
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: body.message ?? '短信发送失败',
+        });
+      }
+      return { ok: true as const, cooldownMs: body.cooldownMs ?? 60_000 };
+    }),
+
+  smsVerify: publicProcedure
+    .input(
+      z.object({
+        phone: z.string().regex(/^1[3-9]\d{9}$/),
+        code: z.string().regex(/^\d{6}$/),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const url = process.env.ALIYUN_SMS_URL;
+      if (!url) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: 'sms gateway not configured',
+        });
+      }
+      const res = await fetch(`${url}/api/sms/verify`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        accessToken?: string;
+        user?: import('../../auth/service.js').PublicUser;
+        error?: string;
+      };
+      if (!res.ok) {
+        if (body.error === 'invalid_code') {
+          throw new TRPCError({ code: 'UNAUTHORIZED', message: '验证码错误' });
+        }
+        if (body.error === 'expired') {
+          throw new TRPCError({ code: 'UNAUTHORIZED', message: '验证码已过期' });
+        }
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: body.error ?? '验证失败',
+        });
+      }
+      if (!body.accessToken || !body.user) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: '网关响应缺少 token',
+        });
+      }
+      return { user: body.user, accessToken: body.accessToken };
+    }),
 
   /**
    * Resolve the bearer token to the user's public profile. Powers the

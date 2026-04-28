@@ -29,6 +29,7 @@ import { loadEnv } from './config/env.js';
 import { logger } from './config/logger.js';
 import { WechatPayAdapter } from './wechat-pay.js';
 import { AlipayAdapter } from './alipay.js';
+import { SmsAdapter } from './sms.js';
 import { VultrSync } from './sync-to-vultr.js';
 
 async function main(): Promise<void> {
@@ -53,6 +54,7 @@ async function main(): Promise<void> {
   await wx.init();
   const alipay = new AlipayAdapter(env, logger);
   alipay.init();
+  const sms = new SmsAdapter(env, logger);
   const sync = new VultrSync(env, logger);
 
   app.get('/healthz', (_req, res) => {
@@ -63,6 +65,7 @@ async function main(): Promise<void> {
       providers: {
         wechat: wx.isReady() ? 'ready' : `unconfigured: ${wx.why()}`,
         alipay: alipay.isReady() ? 'ready' : `unconfigured: ${alipay.why()}`,
+        sms: sms.isReady() ? 'ready' : 'unconfigured: missing one or more aliyun sms credentials',
       },
     });
   });
@@ -261,6 +264,76 @@ async function main(): Promise<void> {
       // Per Alipay docs, return 'fail' to trigger retry.
       res.send('fail');
     }
+  });
+
+  // ------------------------------------------------------------------
+  // Phase 12 — SMS login (Aliyun SMS).
+  //
+  // The SPA → Vultr → here flow:
+  //   POST /api/sms/send   { phone }                   → { ok, cooldownMs }
+  //   POST /api/sms/verify { phone, code }             → { user, accessToken }
+  //
+  // Both endpoints are open to the Vultr orchestrator (the only
+  // public client). The same nginx vhost can serve them at both
+  // hd-pay.orangebench.tech (legacy alias) and hd-auth.orangebench.tech
+  // (the spec'd hostname); a single Node process handles both.
+  //
+  // Verify path bridges to Vultr's /api/internal/auth/sms-login via
+  // VultrSync.smsLogin so the JWT signing stays on the orchestrator
+  // (single source of truth for users + plan + token signing key).
+  // ------------------------------------------------------------------
+  const SmsSendInput = z.object({
+    phone: z.string().regex(/^1[3-9]\d{9}$/),
+  });
+  const SmsVerifyInput = z.object({
+    phone: z.string().regex(/^1[3-9]\d{9}$/),
+    code: z.string().regex(/^\d{6}$/),
+  });
+
+  app.post('/api/sms/send', async (req, res) => {
+    const parse = SmsSendInput.safeParse(req.body);
+    if (!parse.success) {
+      res.status(400).json({ error: 'invalid_phone' });
+      return;
+    }
+    const result = await sms.sendCode(parse.data.phone);
+    if (!result.ok) {
+      const status =
+        result.error === 'too_frequent'
+          ? 429
+          : result.error === 'sms_not_configured'
+            ? 503
+            : result.error === 'aliyun_error'
+              ? 502
+              : 400;
+      res.status(status).json(result);
+      return;
+    }
+    res.status(200).json({ ok: true, cooldownMs: result.cooldownMs });
+  });
+
+  app.post('/api/sms/verify', async (req, res) => {
+    const parse = SmsVerifyInput.safeParse(req.body);
+    if (!parse.success) {
+      res.status(400).json({ error: 'bad_request' });
+      return;
+    }
+    const verify = sms.verifyCode(parse.data.phone, parse.data.code);
+    if (!verify.ok) {
+      const status = verify.error === 'expired' ? 401 : 400;
+      res.status(status).json({ error: verify.error });
+      return;
+    }
+    const bridge = await sync.smsLogin(verify.phone);
+    if (!bridge.ok) {
+      logger.error(
+        { reason: bridge.reason },
+        'sms verify: Vultr bridge failed — user phone OK but token unissued',
+      );
+      res.status(502).json({ error: 'bridge_failed', reason: bridge.reason });
+      return;
+    }
+    res.status(200).json(bridge.result);
   });
 
   app.listen(env.PORT, () => {

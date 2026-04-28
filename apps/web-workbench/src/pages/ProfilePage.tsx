@@ -29,7 +29,7 @@ export function ProfilePage(): JSX.Element {
     trpc.auth.me.query().then(
       (res) => {
         if (!active) return;
-        setEmail(res.email);
+        setEmail(res.email ?? '');
         setDisplayName(res.displayName ?? '');
         setLoading(false);
       },

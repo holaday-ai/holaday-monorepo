@@ -30,6 +30,14 @@ const Env = z.object({
   ALIPAY_PRIVATE_KEY: z.string().optional(),
   ALIPAY_PUBLIC_KEY: z.string().optional(),
   ALIPAY_MODE: z.enum(['sandbox', 'production']).default('production'),
+
+  // Phase 12 — Aliyun SMS. All four required for the SMS lane to
+  // boot; if any are missing, /api/sms/send returns a typed
+  // sms_not_configured 503 instead of crashing.
+  ALIYUN_ACCESS_KEY_ID: z.string().optional(),
+  ALIYUN_ACCESS_KEY_SECRET: z.string().optional(),
+  ALIYUN_SMS_SIGN_NAME: z.string().optional(),
+  ALIYUN_SMS_TEMPLATE_CODE: z.string().optional(),
 });
 
 export type Env = z.infer<typeof Env>;

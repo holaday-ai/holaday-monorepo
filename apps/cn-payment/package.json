@@ -10,6 +10,8 @@
     "clean": "rimraf .turbo"
   },
   "dependencies": {
+    "@alicloud/dysmsapi20170525": "^4.5.1",
+    "@alicloud/openapi-client": "^0.4.15",
     "@holaday/shared-types": "workspace:*",
     "alipay-sdk": "^4.13.0",
     "express": "5.1.0",

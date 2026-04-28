@@ -657,6 +657,53 @@ export function createHttpApp(deps: HttpAppDeps) {
     }
   });
 
+  // ---------------------------------------------------------------------
+  // Phase 12 — internal bridge from the hd-auth gateway for SMS login.
+  //
+  //   POST /api/internal/auth/sms-login
+  //   Headers: x-internal-secret = INTERNAL_SHARED_SECRET (env)
+  //   Body: { phone: '13800138000' }
+  //   Returns: { user: PublicUser, accessToken: string }
+  //
+  // The gateway has already verified the SMS code; this endpoint
+  // upserts by phone via AuthService.loginOrRegisterByPhone and
+  // hands back a freshly-signed JWT for the gateway to relay back
+  // to the SPA. Same shared-secret guard as the payment-confirm path.
+  // ---------------------------------------------------------------------
+  app.post('/api/internal/auth/sms-login', async (req, res) => {
+    const expectedSecret = process.env.INTERNAL_SHARED_SECRET;
+    if (!expectedSecret) {
+      logger.error('sms-login: INTERNAL_SHARED_SECRET unset — refusing all calls');
+      res.status(503).json({ error: 'internal_secret_not_configured' });
+      return;
+    }
+    if (req.headers['x-internal-secret'] !== expectedSecret) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    const body = (req.body ?? {}) as { phone?: string };
+    const phone = typeof body.phone === 'string' ? body.phone.trim() : '';
+    if (!/^1[3-9]\d{9}$/.test(phone)) {
+      res.status(400).json({ error: 'invalid_phone' });
+      return;
+    }
+    try {
+      const svc = new AuthService(db);
+      const result = await svc.loginOrRegisterByPhone(phone);
+      logger.info(
+        { userId: result.user.externalId, plan: result.user.plan },
+        'sms-login: user authenticated via gateway',
+      );
+      res.status(200).json(result);
+    } catch (err) {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err), phone: phone.slice(0, 3) + '****' },
+        'sms-login: handler crashed',
+      );
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
   app.use(
     '/trpc',
     createExpressMiddleware({

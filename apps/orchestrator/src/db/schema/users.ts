@@ -24,7 +24,13 @@ export const users = mysqlTable(
   {
     id: bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement(),
     externalId: varchar('external_id', { length: 32 }).notNull(),
-    email: varchar('email', { length: 255 }).notNull(),
+    /**
+     * Phase 12 — email becomes nullable. SMS-first users have no
+     * email until they add one via /profile. MySQL UNIQUE treats
+     * multiple NULLs as distinct, so the uk_users_email index stays
+     * correct.
+     */
+    email: varchar('email', { length: 255 }),
     passwordHash: varchar('password_hash', { length: 255 }).notNull(),
     plan: varchar('plan', { length: 32 }).notNull().default('free'),
     planExpiresAt: datetime('plan_expires_at', { mode: 'date', fsp: 3 }),
@@ -33,6 +39,9 @@ export const users = mysqlTable(
     googleId: varchar('google_id', { length: 64 }),
     avatarUrl: varchar('avatar_url', { length: 512 }),
     emailVerified: boolean('email_verified').notNull().default(false),
+    /** Phase 12 — canonical 11-digit Chinese mobile, no +86 prefix. */
+    phone: varchar('phone', { length: 20 }),
+    phoneVerified: boolean('phone_verified').notNull().default(false),
     /**
      * Open-pool role ids the Basic-plan user has actively chosen
      * (max 5). Pro plan ignores this — they get all 33 by default.
@@ -59,6 +68,7 @@ export const users = mysqlTable(
     uniqueIndex('uk_users_external_id').on(t.externalId),
     uniqueIndex('uk_users_email').on(t.email),
     uniqueIndex('uk_users_google_id').on(t.googleId),
+    uniqueIndex('uk_users_phone').on(t.phone),
     index('ix_users_plan').on(t.plan),
     index('ix_users_plan_expires_at').on(t.planExpiresAt),
   ],
