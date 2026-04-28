@@ -29,13 +29,11 @@ import type { Env } from './config/env.js';
 type DysmsapiCtor = new (config: InstanceType<typeof OpenApi.Config>) => {
   sendSms(req: InstanceType<typeof SendSmsRequest>): Promise<unknown>;
 };
-const dysmsapiModule = require('@alicloud/dysmsapi20170525') as {
-  default?: DysmsapiCtor;
-} & DysmsapiCtor;
+const dysmsapiModule: unknown = require('@alicloud/dysmsapi20170525');
 const Dysmsapi: DysmsapiCtor =
   typeof dysmsapiModule === 'function'
-    ? dysmsapiModule
-    : (dysmsapiModule.default as DysmsapiCtor);
+    ? (dysmsapiModule as DysmsapiCtor)
+    : ((dysmsapiModule as { default: DysmsapiCtor }).default);
 
 interface CodeEntry {
   code: string;
