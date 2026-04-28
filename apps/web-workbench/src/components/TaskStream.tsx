@@ -274,7 +274,16 @@ function AgentBlock({
             status={task.status}
             text={task.resultText}
             currentUrl={screencastUrl}
-            onContinueInBrowser={onContinueInBrowser}
+            // QA #17 — hide "在内置浏览器中继续操作" on completed tasks.
+            // The button targets the BrowserPanel which only has a live
+            // CDP session while the agent is still running; after a
+            // successful completion the pool slot has been released
+            // and clicking does nothing. Failed / cancelled paths
+            // still get the button — they sometimes have a stuck
+            // page the user wants to inspect manually before retrying.
+            onContinueInBrowser={
+              task.status === 'completed' ? undefined : onContinueInBrowser
+            }
           />
         )}
         {/* Phase 11 QA #11 — terminal-but-empty fallback. Catches the

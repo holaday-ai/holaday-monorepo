@@ -6,7 +6,12 @@ import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageShell, Section } from '@/pages/PageShell';
 
-type StatusFilter = 'all' | 'succeeded' | 'failed' | 'running';
+// Filter values use the same vocabulary as the orchestrator's
+// `tasks.status` column ('completed' / 'failed' / 'executing' / …)
+// so a single string compares against the raw API row without
+// translation. The earlier 'succeeded' value never matched anything
+// because the DB has no such status.
+type StatusFilter = 'all' | 'completed' | 'failed' | 'running';
 type RangeFilter = '7d' | '30d' | 'all';
 
 interface HistoryTask {
@@ -63,9 +68,16 @@ export function HistoryPage(): JSX.Element {
     return tasks.filter((t) => {
       if (status !== 'all') {
         if (status === 'running') {
-          if (t.status !== 'running' && t.status !== 'pending' && t.status !== 'awaiting_user') {
-            return false;
-          }
+          // The orchestrator surfaces several non-terminal statuses;
+          // treat them all as "running" for the chip's purposes.
+          const RUNNING = new Set([
+            'executing',
+            'pending',
+            'planning',
+            'paused',
+            'awaiting_user',
+          ]);
+          if (!RUNNING.has(t.status)) return false;
         } else if (t.status !== status) {
           return false;
         }
@@ -95,7 +107,7 @@ export function HistoryPage(): JSX.Element {
                 onChange={setStatus}
                 options={[
                   { id: 'all', label: '全部' },
-                  { id: 'succeeded', label: '成功' },
+                  { id: 'completed', label: '已完成' },
                   { id: 'failed', label: '失败' },
                   { id: 'running', label: '进行中' },
                 ]}
@@ -204,23 +216,35 @@ function FilterGroup<T extends string>({
 }
 
 function StatusIcon({ status }: { status: string }): JSX.Element {
-  if (status === 'succeeded') {
-    return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />;
+  if (status === 'completed') {
+    return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />;
   }
-  if (status === 'failed') {
+  if (status === 'failed' || status === 'cancelled') {
     return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />;
   }
   return <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-indigo-400" />;
 }
 
+/**
+ * Translate the orchestrator's raw `tasks.status` value into the
+ * UI label. Covers every status the DB column can hold today; the
+ * default returns the raw string so a future enum extension is
+ * surfaced visibly instead of silently dropped.
+ */
 function friendlyStatus(status: string): string {
   switch (status) {
-    case 'succeeded':
-      return '成功';
+    case 'completed':
+      return '已完成';
     case 'failed':
       return '失败';
-    case 'running':
-      return '进行中';
+    case 'cancelled':
+      return '已取消';
+    case 'executing':
+      return '执行中';
+    case 'planning':
+      return '规划中';
+    case 'paused':
+      return '已暂停';
     case 'pending':
       return '排队中';
     case 'awaiting_user':
