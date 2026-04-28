@@ -37,6 +37,10 @@ import {
   classifyTaskType,
   extractDomain,
 } from '../../agent/supercar/stats-service.js';
+import {
+  formatForPrompt as formatPlaybooksForPrompt,
+  matchPlaybooks,
+} from '../../agent/supercar/playbook-service.js';
 import { FileService, taskInternalIdFor } from '../../files/file-service.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
 import {
@@ -278,6 +282,22 @@ export const tasksRouter = router({
         memoryService.pickRelevant(userRow.id, input.intent),
       ]);
       const memoryPreamble = memoryService.formatForPrompt(relevantMemories);
+      // Phase 14 — site-playbook injection. Match the user's intent
+      // against the playbook catalogue (中文 name / domain / English
+      // name); render the matched tips into a user-message preamble.
+      // Empty when no site is mentioned — keeps unrelated tasks
+      // unaffected. matchPlaybooks is a small in-memory loop over
+      // ~25 entries (microseconds). The matched array is also reused
+      // below by the router cold-start recommendation when stats has
+      // < 3 samples for the target site.
+      const matchedPlaybooks = matchPlaybooks(input.intent);
+      const playbookContext = formatPlaybooksForPrompt(matchedPlaybooks);
+      if (matchedPlaybooks.length > 0) {
+        ctx.logger.info(
+          { taskId, sites: matchedPlaybooks.map((p) => p.domain) },
+          'playbook: injected site context',
+        );
+      }
 
       await repo.insertTask(
         {
@@ -421,25 +441,47 @@ export const tasksRouter = router({
       const intentTargetSite = intentSiteMatch
         ? extractDomain(intentSiteMatch[1] ?? null)
         : null;
-      if (intentTargetSite) {
+      // Phase 14 — playbook-driven cold-start lane recommendation.
+      // The "router: cold-start lane from playbook" log fires when:
+      //   (a) intent has a URL but stats < 3 samples, OR
+      //   (b) intent has no URL but a playbook matched by name.
+      // The intent-only branch is a best-effort observability hook;
+      // routing decisions still go through the legacy gate this
+      // commit. Stats stay primary once they exceed the sample
+      // threshold (priority order in router-decision.ts).
+      const playbookForRouter = matchedPlaybooks[0] ?? null;
+      const routerTargetSite = intentTargetSite ?? playbookForRouter?.domain ?? null;
+      if (routerTargetSite) {
         try {
           const optimalLane = await statsService.getOptimalLane({
             userIdInternal: userRow.id,
-            targetSite: intentTargetSite,
+            targetSite: routerTargetSite,
           });
           if (optimalLane) {
             ctx.logger.info(
               {
                 taskId,
                 taskType: taskTypeForStats,
-                targetSite: intentTargetSite,
+                targetSite: routerTargetSite,
                 optimalLane,
+                source: 'stats',
               },
               'router: optimal lane from stats',
             );
+          } else if (playbookForRouter) {
+            ctx.logger.info(
+              {
+                taskId,
+                taskType: taskTypeForStats,
+                targetSite: routerTargetSite,
+                recommendedLane: playbookForRouter.preferredLane,
+                source: 'playbook',
+              },
+              'router: cold-start lane from playbook',
+            );
           } else {
             ctx.logger.info(
-              { taskId, targetSite: intentTargetSite },
+              { taskId, targetSite: routerTargetSite },
               'router: no usable stats history for site (default route)',
             );
           }
@@ -454,6 +496,7 @@ export const tasksRouter = router({
           taskId,
           intent: input.intent,
           ...(memoryPreamble ? { memoryPreamble } : {}),
+          ...(playbookContext ? { playbookContext } : {}),
           ...(planResult.planText ? { planText: planResult.planText } : {}),
           ...(planResult.planStatus ? { planSteps: planResult.planStatus } : {}),
           // Phase 13 Dim 1 follow-up — persist + broadcast every

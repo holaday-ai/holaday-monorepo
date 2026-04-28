@@ -279,6 +279,13 @@ export interface RunSupercarOptions {
    */
   memoryPreamble?: string;
   /**
+   * Phase 14 — site-playbook context. Pre-rendered block from
+   * `composePlaybookPreamble(intent)`. Lands in the same first user
+   * message after memoryPreamble (still NOT in system prompt — keeps
+   * cache hits intact). Empty / undefined → no preamble.
+   */
+  playbookContext?: string;
+  /**
    * Stats sink: invoked after each tool_result is synthesized so
    * the loop can persist the (lane, latency, success, error_type)
    * tuple. Caller wires this to StatsService.record. Errors in
@@ -685,9 +692,16 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // Phase 13 Dim 5: memory preamble lands AFTER the intent + a blank
   // line, so the agent reads it as supplementary context rather than
   // part of the user request. Empty preamble no-ops.
-  const intentBlock = opts.memoryPreamble && opts.memoryPreamble.trim().length > 0
-    ? `${opts.intent}\n\n${opts.memoryPreamble}`
-    : opts.intent;
+  // Phase 14: playbook context lands AFTER the memory preamble (so
+  // user-specific memories take precedence) and BEFORE attachments.
+  const intentParts: string[] = [opts.intent];
+  if (opts.memoryPreamble && opts.memoryPreamble.trim().length > 0) {
+    intentParts.push(opts.memoryPreamble);
+  }
+  if (opts.playbookContext && opts.playbookContext.trim().length > 0) {
+    intentParts.push(opts.playbookContext);
+  }
+  const intentBlock = intentParts.join('\n\n');
   const initialContent: ContentBlockParam[] = [
     { type: 'text', text: intentBlock },
   ];
