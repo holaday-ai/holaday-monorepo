@@ -20,6 +20,15 @@ interface Props {
    */
   replyMode?: boolean;
   /**
+   * Phase 14 audit follow-up — when a terminal task is selected,
+   * the next message defaults to a 追问 of that task (server skips
+   * quota and feeds the parent context to the agent). User can
+   * dismiss via the chip's ✕ to start a fresh task instead.
+   * Caller (WorkbenchApp) computes both the target id + chip label.
+   */
+  followUpTarget?: { taskId: string; title: string } | null;
+  onCancelFollowUp?: () => void;
+  /**
    * Phase 10 polish — when set, renders the quota-exhausted card
    * INSTEAD of the composer. The textarea + send button are gated
    * client-side so a free user who hammers Enter doesn't have to
@@ -58,6 +67,8 @@ export function InputArea({
   busy,
   inputRef,
   replyMode,
+  followUpTarget,
+  onCancelFollowUp,
   quotaExhausted,
   quotaPlan,
   attachmentsAllowed,
@@ -209,6 +220,21 @@ export function InputArea({
             : 'border-input',
         )}
       >
+        {followUpTarget && !replyMode && (
+          <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <span className="shrink-0 font-medium text-foreground">继续追问</span>
+            <span className="min-w-0 flex-1 truncate">"{followUpTarget.title}"</span>
+            <button
+              type="button"
+              onClick={onCancelFollowUp}
+              aria-label="取消追问，发新任务"
+              title="取消追问，发新任务"
+              className="shrink-0 rounded px-1.5 py-0.5 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 border-b border-border px-3 py-2">
             {attachments.map((a, i) => (
@@ -225,7 +251,13 @@ export function InputArea({
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={replyMode ? '回复 HOLA DAY...' : '描述你想让 HOLA DAY 做什么...'}
+          placeholder={
+            replyMode
+              ? '回复 HOLA DAY...'
+              : followUpTarget
+                ? '追问这个任务...'
+                : '描述你想让 HOLA DAY 做什么...'
+          }
           rows={2}
           className="resize-none border-0 bg-transparent px-4 py-3 pr-14 text-sm shadow-none focus-visible:ring-0"
           style={{ maxHeight: '10rem' }}

@@ -68,6 +68,13 @@ export interface TaskStore {
   createTask(
     intent: string,
     fileIds?: string[],
+    /**
+     * Phase 14 audit follow-up — when set, server treats this as
+     * a 追问 of the parent task: skips quota and prepends the
+     * parent's intent + summary so the agent has full context.
+     * The parent must be in a terminal state (completed/failed/cancelled).
+     */
+    replyToTaskId?: string,
   ): Promise<{ taskId: string } | { error: string }>;
   deleteTask(taskId: string): Promise<{ ok: true } | { error: string }>;
   renameTask(taskId: string, title: string): Promise<{ ok: true } | { error: string }>;
@@ -330,7 +337,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     }
   },
 
-  async createTask(intent, fileIds) {
+  async createTask(intent, fileIds, replyToTaskId) {
     // Reject intents that are obviously control commands typed into
     // the wrong box (e.g. user typing "停止" into the composer
     // because they didn't see the Stop button). Fails client-side
@@ -345,6 +352,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       const res = await trpc.tasks.create.mutate({
         intent,
         ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
+        ...(replyToTaskId ? { replyToTaskId } : {}),
       });
       // Optimistic insert at the top so the UI feels instant; the next
       // refreshTasks() will pick up the canonical server row.

@@ -59,6 +59,13 @@ function AppShell(): JSX.Element {
   const [panelFullscreen, setPanelFullscreen] = React.useState(false);
   const [me, setMe] = React.useState<MeProfile | null>(null);
   const [bootstrapped, setBootstrapped] = React.useState(false);
+  /**
+   * Phase 14 audit follow-up — when user is viewing a terminal
+   * task, the next message defaults to a 追问. They can dismiss
+   * the chip via ✕ to send a new task instead. Dismissal is
+   * scoped to one task id; switching tasks resets it.
+   */
+  const [followUpDismissedTaskId, setFollowUpDismissedTaskId] = React.useState<string | null>(null);
   const [online, setOnline] = React.useState<boolean>(() =>
     typeof navigator !== 'undefined' ? navigator.onLine : true,
   );
@@ -352,6 +359,27 @@ function AppShell(): JSX.Element {
   const selectedTask = tasks.find((t) => t.taskId === selectedTaskId) ?? null;
   const greetingName = me?.displayName || (me?.email ? firstSegment(me.email) : '');
 
+  // Phase 14 audit follow-up — chip + replyToTaskId wiring.
+  // Active when the selected task is in a terminal state AND not
+  // currently parked on an awaiting_user question (replyMode wins
+  // over follow-up — that's a tasks.reply, not a new task) AND
+  // the user hasn't explicitly dismissed it for this task.
+  const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+  const isReplyMode = Boolean(
+    selectedTaskId && awaitingUserByTask[selectedTaskId],
+  );
+  const followUpTarget =
+    selectedTask &&
+    selectedTaskId &&
+    TERMINAL_STATUSES.has(selectedTask.status) &&
+    !isReplyMode &&
+    followUpDismissedTaskId !== selectedTaskId
+      ? {
+          taskId: selectedTaskId,
+          title: (selectedTask.title || selectedTask.intent || '').slice(0, 40),
+        }
+      : null;
+
   return (
     <div className="relative flex h-full min-h-0 w-full overflow-hidden" ref={contentRowRef}>
       {!panelFullscreen && (
@@ -400,7 +428,11 @@ function AppShell(): JSX.Element {
         busy={loading}
         greetingName={greetingName || undefined}
         inputRef={inputRef}
-        replyMode={Boolean(selectedTaskId && awaitingUserByTask[selectedTaskId])}
+        replyMode={isReplyMode}
+        followUpTarget={followUpTarget}
+        onCancelFollowUp={() => {
+          if (selectedTaskId) setFollowUpDismissedTaskId(selectedTaskId);
+        }}
         userPlan={me?.plan}
         userSelectedRoles={me?.selectedRoles ?? null}
         quotaExhausted={quotaExhausted}
@@ -413,15 +445,21 @@ function AppShell(): JSX.Element {
               : 0
         }
         onSubmit={async (intent, fileIds) => {
-          // Supercar: when the current task is parked on an awaiting_user
-          // question, route the composer to tasks.reply so the agent's
-          // existing loop resumes. Otherwise spawn a fresh task.
-          if (selectedTaskId && awaitingUserByTask[selectedTaskId]) {
+          // 1) In-flight awaiting_user → tasks.reply, resumes the existing loop.
+          if (isReplyMode && selectedTaskId) {
             const res = await replyToTask(selectedTaskId, intent);
             if ('error' in res) toast.show(`回复失败：${res.error}`, 'error');
             else if (!res.ok) toast.show('这个任务已经不在等待回复了', 'error');
             return;
           }
+          // 2) Terminal task selected + chip not dismissed → 追问 (free,
+          //    parent context auto-injected server-side).
+          if (followUpTarget) {
+            const res = await createTask(intent, fileIds, followUpTarget.taskId);
+            if ('error' in res) toast.show(`追问失败：${res.error}`, 'error');
+            return;
+          }
+          // 3) Default — fresh task.
           const res = await createTask(intent, fileIds);
           if ('error' in res) toast.show(`发送失败：${res.error}`, 'error');
         }}
