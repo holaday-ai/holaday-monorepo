@@ -17,6 +17,14 @@ interface Props {
   onContextMenu?(taskId: string, event: React.MouseEvent | React.PointerEvent): void;
   onRenameCommit?(taskId: string, title: string): void;
   onRenameCancel?(): void;
+  /**
+   * O1 — batch-select mode. When `true`, the row swaps its onClick
+   * from "select task" to "toggle batch checkbox" and renders a
+   * leading checkbox. Caller (Sidebar) owns the selection set.
+   */
+  batchMode?: boolean;
+  batchChecked?: boolean;
+  onBatchToggle?(taskId: string): void;
 }
 
 /**
@@ -47,16 +55,20 @@ export function TaskListItem({
   onContextMenu,
   onRenameCommit,
   onRenameCancel,
+  batchMode,
+  batchChecked,
+  onBatchToggle,
 }: Props): JSX.Element {
   const active = isActive(task.status);
   return (
     <button
       type="button"
       onClick={() => {
-        // Swallow the outer click while the inline input is focused —
-        // clicking elsewhere should cancel (handled by onBlur below),
-        // not re-select the row and clobber the in-progress edit.
         if (renaming) return;
+        if (batchMode) {
+          onBatchToggle?.(task.taskId);
+          return;
+        }
         onSelect(task.taskId);
       }}
       onContextMenu={onContextMenu ? (e) => onContextMenu(task.taskId, e) : undefined}
@@ -64,14 +76,28 @@ export function TaskListItem({
       className={cn(
         'group relative flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors',
         'hover:bg-foreground/5',
-        selected && 'bg-foreground/[0.06]',
+        selected && !batchMode && 'bg-foreground/[0.06]',
+        batchMode && batchChecked && 'bg-blue-50/50 dark:bg-blue-500/10',
       )}
     >
-      {selected && (
+      {selected && !batchMode && (
         <span
           aria-hidden
           className="absolute inset-y-1 left-0 w-[2px] rounded-r bg-blue-500"
         />
+      )}
+      {batchMode && (
+        <span
+          aria-hidden
+          className={cn(
+            'flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors',
+            batchChecked
+              ? 'border-foreground bg-foreground text-background'
+              : 'border-muted-foreground/40',
+          )}
+        >
+          {batchChecked && <span className="text-[10px] leading-none">✓</span>}
+        </span>
       )}
       <StatusDot status={task.status} />
       {renaming && onRenameCommit ? (

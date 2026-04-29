@@ -776,25 +776,31 @@ function TerminalSummary({
           {modelLabel === 'opus' ? 'Claude Opus 4.7 · 深度思考' : 'Claude Sonnet 4.6'}
         </div>
       )}
-      {/* O5 — suggestion chips. Click → fills + submits the new
-        intent (the parent's onSubmit branch picks up the active
-        followUpTarget if the user is still viewing this task,
-        which means the chip routes through replyToTaskId for free
-        context inheritance). */}
+      {/* O5 — Manus-style suggestion cards. Each chip is a full
+        clickable row with → arrow on the right, not a tag. Stacks
+        on mobile, wraps on desktop. Click → fires onSuggestionPick
+        which routes through the parent's onSubmit (existing
+        followUpTarget detection inherits replyToTaskId for free
+        parent context). */}
       {suggestions.length > 0 && onSuggestionPick && revealed === displayText && (
-        <div className="mt-3 flex flex-wrap gap-1.5 border-t border-blue-200/50 pt-3 dark:border-blue-500/20">
-          <span className="self-center text-[11px] text-muted-foreground dark:text-foreground/60">
-            继续：
-          </span>
+        <div className="mt-4 flex flex-col gap-1.5 border-t border-blue-200/50 pt-3 dark:border-blue-500/20">
+          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground dark:text-foreground/60">
+            继续探索
+          </div>
           {suggestions.map((s, i) => (
             <button
               key={`${i}-${s.slice(0, 10)}`}
               type="button"
               onClick={() => onSuggestionPick(s)}
-              className="inline-flex items-center gap-1 rounded-full border border-blue-300/60 bg-card px-3 py-1 text-[11px] font-medium text-blue-800 transition hover:bg-blue-100 dark:border-blue-500/40 dark:text-blue-300 dark:hover:bg-blue-500/15"
+              className="group flex w-full items-center justify-between gap-3 rounded-lg border border-blue-200/70 bg-card px-3 py-2 text-left text-xs text-foreground/90 transition hover:border-blue-300 hover:bg-blue-50/70 hover:text-foreground dark:border-blue-500/30 dark:hover:border-blue-400/60 dark:hover:bg-blue-500/15"
             >
-              <span aria-hidden>↪</span>
-              {s}
+              <span className="min-w-0 flex-1 truncate">{s}</span>
+              <span
+                aria-hidden
+                className="shrink-0 text-blue-700/70 transition-transform group-hover:translate-x-0.5 dark:text-blue-300/80"
+              >
+                →
+              </span>
             </button>
           ))}
         </div>

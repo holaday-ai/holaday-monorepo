@@ -26,6 +26,13 @@ interface Props {
   /** Invoked when the user picks "清除所有失败任务". Caller confirms + deletes. */
   onClearFailedTasks?(): void;
   /**
+   * O12 — when supplied, "设置" menu item opens an in-app modal
+   * instead of navigating to /settings. Modal is owned by the
+   * caller (WorkbenchApp) so phone + plan info don't have to be
+   * fetched twice.
+   */
+  onOpenSettings?(): void;
+  /**
    * Codex-rail layout — renders just the avatar (no name / plan text)
    * and anchors the popover to the avatar rather than the whole row.
    * Used inside the 64px-wide collapsed sidebar rail where the text
@@ -45,6 +52,7 @@ export function UserMenu({
   plan,
   onLogout,
   onOpenFeedback,
+  onOpenSettings,
   failedTaskCount = 0,
   onClearFailedTasks,
   compact = false,
@@ -127,7 +135,14 @@ export function UserMenu({
             </MenuItem>
             <MenuItem
               icon={<SettingsIcon className="h-3.5 w-3.5" />}
-              onClick={() => go('/settings')}
+              onClick={() => {
+                if (onOpenSettings) {
+                  setOpen(false);
+                  onOpenSettings();
+                } else {
+                  go('/settings');
+                }
+              }}
             >
               设置
             </MenuItem>

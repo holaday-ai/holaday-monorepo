@@ -127,20 +127,35 @@ const createInput = z.object({
  * dimensions in the same intent → refuse.
  */
 const CODE_VERBS = [
-  '写代码', '写程序', '编程', '编写', '写一个', '写一段',
-  '开发', '搭建', '搭一个', '建一个', '构建', '调试', '部署',
+  '写代码', '写程序', '编程', '编写', '写一个', '写一段', '写个',
+  '做', '做个', '做一个',
+  '开发', '搭建', '搭一个', '搭个', '建', '建个', '建一个', '构建',
+  '调试', '部署', '上线',
   '修复 bug', '修 bug', 'debug', '重构', '实现一个',
-  'write code', 'build a', 'develop', 'deploy', 'compile', 'refactor',
+  'write code', 'build a', 'build me', 'develop', 'deploy', 'compile', 'refactor',
 ];
 const CODE_SUBJECTS = [
   '网站', '网页', '后台', '前端', '后端', '应用', '系统', '组件',
-  '函数', '接口', 'api', 'sdk', '库', '插件', '小程序', '页面',
-  '脚本', '程序', '代码', '小工具',
+  '函数', '接口', 'api', 'sdk', '库', '插件', '扩展', '小程序', '页面',
+  '脚本', '程序', '代码', '小工具', '数据库', '服务器',
   'website', 'webapp', 'web app', 'app', 'component', 'function',
   'script', 'plugin', 'package', 'module', 'library',
 ];
+// Full-phrase fast-path. The verb-AND-subject double-keyword check
+// can miss compact intents like "做个网站" because "做" is too
+// generic to whitelist on its own (BOSS reported false-negative).
+// These exact substrings light up regardless of the strict pair check.
+const CODE_PHRASES = [
+  '做个网站', '做一个网站', '建个网站', '建一个网站', '搭个网站', '搭一个网站',
+  '帮我做网站', '帮我建网站', '帮我搭网站', '帮我建站', '建站',
+  '写个网站', '写个 app', '写个app', '写个应用', '做个 app', '做个app',
+  '做个小程序', '建个小程序',
+  '帮我开发', '帮我编程', '帮我写代码',
+  'build me a website', 'build a website', 'make me an app', 'build a webapp',
+];
 function looksLikeCodeIntent(intent: string): boolean {
   const lower = intent.toLowerCase();
+  if (CODE_PHRASES.some((p) => lower.includes(p))) return true;
   const hasVerb = CODE_VERBS.some((v) => lower.includes(v));
   if (!hasVerb) return false;
   return CODE_SUBJECTS.some((s) => lower.includes(s));

@@ -37,6 +37,8 @@ interface Props {
   userPlan: string;
   onLogout(): void;
   onOpenFeedback?(): void;
+  /** O12 — open the in-app settings modal instead of navigating. */
+  onOpenSettings?(): void;
   /** Count of tasks in status='failed' — feeds UserMenu badge. */
   failedTaskCount?: number;
   /** "清除所有失败任务" handler; hidden when count=0 or handler absent. */
@@ -84,6 +86,7 @@ export function Sidebar({
   userPlan,
   onLogout,
   onOpenFeedback,
+  onOpenSettings,
   failedTaskCount = 0,
   onClearFailedTasks,
   mobileOpen,
@@ -106,6 +109,42 @@ export function Sidebar({
     return { pinnedTasks: pinned, unpinnedTasks: rest };
   }, [tasks, pinnedIds]);
   const buckets = React.useMemo(() => bucketByTime(unpinnedTasks), [unpinnedTasks]);
+
+  // O1 — batch select + bulk delete. Toggle entered via the
+  // "批量管理" footer button; while on, every task row swaps from
+  // "click to open" to "click to toggle checkbox", and a sticky
+  // bottom bar shows the count + 全选 / 删除选中 / 取消. Uses the
+  // existing onDeleteTask one-by-one (no new endpoint), confirmed
+  // through window.confirm to keep the surface area minimal.
+  const [batchMode, setBatchMode] = React.useState(false);
+  const [batchSelected, setBatchSelected] = React.useState<Set<string>>(new Set());
+  const toggleBatchSelect = React.useCallback((id: string) => {
+    setBatchSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  const exitBatchMode = React.useCallback(() => {
+    setBatchMode(false);
+    setBatchSelected(new Set());
+  }, []);
+  const selectAllVisible = React.useCallback(() => {
+    setBatchSelected(new Set(tasks.map((t) => t.taskId)));
+  }, [tasks]);
+  const deleteSelected = React.useCallback(async () => {
+    if (batchSelected.size === 0 || !onDeleteTask) return;
+    if (!window.confirm(`删除选中的 ${batchSelected.size} 个任务？此操作不可撤销。`)) return;
+    for (const id of batchSelected) {
+      try {
+        await onDeleteTask(id);
+      } catch {
+        /* swallow per-id; toast comes from caller */
+      }
+    }
+    exitBatchMode();
+  }, [batchSelected, onDeleteTask, exitBatchMode]);
 
   const [collapsed, setCollapsed] = React.useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
@@ -187,6 +226,7 @@ export function Sidebar({
             onLogout={onLogout}
             failedTaskCount={failedTaskCount}
             {...(onClearFailedTasks ? { onClearFailedTasks } : {})}
+            {...(onOpenSettings ? { onOpenSettings } : {})}
             {...(onOpenFeedback ? { onOpenFeedback } : {})}
           />
         ) : (
@@ -264,6 +304,9 @@ export function Sidebar({
                         }
                       }}
                       onRenameCancel={() => setRenamingId(null)}
+                      batchMode={batchMode}
+                      batchChecked={batchSelected.has(t.taskId)}
+                      onBatchToggle={toggleBatchSelect}
                     />
                   ))}
                 </TaskGroup>
@@ -297,6 +340,9 @@ export function Sidebar({
                         }
                       }}
                       onRenameCancel={() => setRenamingId(null)}
+                      batchMode={batchMode}
+                      batchChecked={batchSelected.has(t.taskId)}
+                      onBatchToggle={toggleBatchSelect}
                     />
                   ))}
                 </TaskGroup>
@@ -316,6 +362,56 @@ export function Sidebar({
             </div>
 
             <footer className="border-t border-black/[0.06] px-0 py-2">
+              {/* O1 — batch action bar / batch entry. When batchMode
+                  is on, render the count + 全选 / 删除选中 / 取消
+                  controls; otherwise show a small "批量管理" entry
+                  button alongside the quota indicator. */}
+              {batchMode ? (
+                <div className="mx-2 mb-2 flex items-center justify-between gap-2 rounded-md border border-blue-200 bg-blue-50/60 px-2 py-1.5 text-[11px] text-blue-900 dark:border-blue-500/30 dark:bg-blue-500/15 dark:text-blue-100">
+                  <span className="font-medium">已选 {batchSelected.size}</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={selectAllVisible}
+                      className="rounded px-2 py-0.5 hover:bg-blue-200/50 dark:hover:bg-blue-500/25"
+                    >
+                      全选
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void deleteSelected()}
+                      disabled={batchSelected.size === 0}
+                      className={cn(
+                        'rounded px-2 py-0.5 font-medium',
+                        batchSelected.size === 0
+                          ? 'cursor-not-allowed opacity-50'
+                          : 'bg-red-600 text-white hover:bg-red-700',
+                      )}
+                    >
+                      删除选中
+                    </button>
+                    <button
+                      type="button"
+                      onClick={exitBatchMode}
+                      className="rounded px-2 py-0.5 hover:bg-blue-200/50 dark:hover:bg-blue-500/25"
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                onDeleteTask && (
+                  <div className="mb-1 flex items-center justify-end px-2">
+                    <button
+                      type="button"
+                      onClick={() => setBatchMode(true)}
+                      className="rounded px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                    >
+                      批量管理
+                    </button>
+                  </div>
+                )
+              )}
               {/* Quota strip first — the user's daily/monthly headroom */}
               {/* is the primary "what can I still do" signal. Refetches  */}
               {/* keyed off the task list length: every create/terminal  */}
@@ -331,6 +427,7 @@ export function Sidebar({
                   failedTaskCount={failedTaskCount}
                   {...(onClearFailedTasks ? { onClearFailedTasks } : {})}
                   {...(onOpenFeedback ? { onOpenFeedback } : {})}
+                  {...(onOpenSettings ? { onOpenSettings } : {})}
                 />
               </div>
             </footer>
@@ -507,6 +604,7 @@ interface CollapsedRailProps {
   userPlan: string;
   onLogout: () => void;
   onOpenFeedback?: () => void;
+  onOpenSettings?: () => void;
   failedTaskCount?: number;
   onClearFailedTasks?: () => void;
 }
@@ -533,6 +631,7 @@ function CollapsedRail({
   userPlan,
   onLogout,
   onOpenFeedback,
+  onOpenSettings,
   failedTaskCount = 0,
   onClearFailedTasks,
 }: CollapsedRailProps): JSX.Element {
@@ -581,6 +680,7 @@ function CollapsedRail({
           failedTaskCount={failedTaskCount}
           {...(onClearFailedTasks ? { onClearFailedTasks } : {})}
           {...(onOpenFeedback ? { onOpenFeedback } : {})}
+          {...(onOpenSettings ? { onOpenSettings } : {})}
         />
       </div>
     </div>

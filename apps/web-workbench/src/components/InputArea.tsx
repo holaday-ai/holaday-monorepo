@@ -1,4 +1,11 @@
-import { ArrowUp, Loader2, Paperclip, Plus, Sparkles } from 'lucide-react';
+import {
+  ArrowUp,
+  FileText,
+  Image as ImageIcon,
+  Loader2,
+  Plus,
+  Sparkles,
+} from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AttachmentChip, type DraftAttachment } from '@/components/AttachmentChip';
@@ -55,7 +62,8 @@ interface Props {
   attachmentByteCap?: number;
 }
 
-const ACCEPT = '.csv,.xlsx,.xls,.pdf,.txt,.json,.md,.png,.jpg,.jpeg,.webp,.gif';
+const ACCEPT_FILES = '.csv,.xlsx,.xls,.pdf,.txt,.json,.md';
+const ACCEPT_IMAGES = '.png,.jpg,.jpeg,.webp,.gif,image/*';
 const MAX_ATTACHMENTS = 5;
 
 /**
@@ -84,6 +92,21 @@ export function InputArea({
   const [attachments, setAttachments] = React.useState<DraftAttachment[]>([]);
   const [dragActive, setDragActive] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const imageInputRef = React.useRef<HTMLInputElement>(null);
+  // O14 — + button menu state. Closes on outside click and after
+  // an option fires. Only relevant when attachmentsAllowed; the
+  // free-plan path returns the same upgrade toast on either option.
+  const [plusMenuOpen, setPlusMenuOpen] = React.useState(false);
+  const plusMenuRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!plusMenuOpen) return;
+    const onDocClick = (e: MouseEvent): void => {
+      if (plusMenuRef.current?.contains(e.target as Node)) return;
+      setPlusMenuOpen(false);
+    };
+    window.addEventListener('mousedown', onDocClick);
+    return () => window.removeEventListener('mousedown', onDocClick);
+  }, [plusMenuOpen]);
   // Local submitting flag — decouples the button spinner from the
   // global `busy` prop (which is driven by the store-level `loading`
   // flag that covers list refresh too). We flip this while the
@@ -111,13 +134,6 @@ export function InputArea({
     );
   }
 
-  function pickFiles(): void {
-    if (!attachmentsAllowed) {
-      toast.show('免费版不支持文件上传，升级到基础版即可使用');
-      return;
-    }
-    fileInputRef.current?.click();
-  }
 
   async function ingestFiles(files: FileList | File[]): Promise<void> {
     if (!attachmentsAllowed) {
@@ -362,30 +378,81 @@ export function InputArea({
           disabled={disabled}
         />
         {!replyMode && (
-          <button
-            type="button"
-            onClick={pickFiles}
-            aria-label={attachmentsAllowed ? '附加文件' : '升级基础版可附加文件'}
-            title={attachmentsAllowed ? '附加文件' : '升级基础版可附加文件'}
-            className={cn(
-              'absolute bottom-2.5 left-2.5 inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors',
-              attachmentsAllowed
-                ? 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground'
-                : 'cursor-not-allowed text-muted-foreground/40',
+          <div ref={plusMenuRef} className="absolute bottom-2.5 left-2.5">
+            <button
+              type="button"
+              onClick={() => {
+                if (!attachmentsAllowed) {
+                  toast.show('免费版不支持附件，升级基础版可上传文件 / 图片');
+                  return;
+                }
+                setPlusMenuOpen((v) => !v);
+              }}
+              aria-label={attachmentsAllowed ? '添加附件' : '升级基础版可添加附件'}
+              aria-expanded={plusMenuOpen}
+              title={attachmentsAllowed ? '添加附件' : '升级基础版可添加附件'}
+              className={cn(
+                'inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors',
+                attachmentsAllowed
+                  ? 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground'
+                  : 'cursor-not-allowed text-muted-foreground/40',
+                plusMenuOpen && 'bg-foreground/[0.05] text-foreground',
+              )}
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+            {plusMenuOpen && attachmentsAllowed && (
+              <div
+                role="menu"
+                className="absolute bottom-10 left-0 z-30 w-40 overflow-hidden rounded-md border border-border bg-popover py-1 shadow-lg"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setPlusMenuOpen(false);
+                    fileInputRef.current?.click();
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-foreground/[0.05]"
+                >
+                  <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span>上传文件</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setPlusMenuOpen(false);
+                    imageInputRef.current?.click();
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-foreground/[0.05]"
+                >
+                  <ImageIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span>上传图片</span>
+                </button>
+              </div>
             )}
-          >
-            <Paperclip className="h-4 w-4" />
-          </button>
+          </div>
         )}
         <input
           ref={fileInputRef}
           type="file"
-          accept={ACCEPT}
+          accept={ACCEPT_FILES}
           multiple
           className="hidden"
           onChange={(e) => {
             if (e.target.files) void ingestFiles(e.target.files);
-            // Reset so picking the same file twice still fires.
+            e.target.value = '';
+          }}
+        />
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept={ACCEPT_IMAGES}
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files) void ingestFiles(e.target.files);
             e.target.value = '';
           }}
         />
@@ -413,29 +480,31 @@ export function InputArea({
             type="button"
             onClick={() => setTaskModePersist('auto')}
             aria-pressed={taskMode === 'auto'}
-            title="Auto — 直接执行任务"
+            title="自动执行 — AI 直接操作浏览器完成任务"
             className={cn(
-              'rounded px-2 py-0.5 font-medium transition-colors',
+              'inline-flex items-center gap-1 rounded px-2 py-0.5 font-medium transition-colors',
               taskMode === 'auto'
                 ? 'bg-foreground text-background'
                 : 'text-muted-foreground hover:bg-foreground/[0.05]',
             )}
           >
-            Auto
+            <span aria-hidden>⚡</span>
+            <span>自动执行</span>
           </button>
           <button
             type="button"
             onClick={() => setTaskModePersist('plan')}
             aria-pressed={taskMode === 'plan'}
-            title="Plan — 先列计划，等你确认再执行"
+            title="先出方案 — AI 先列执行计划，你确认后再操作浏览器"
             className={cn(
-              'rounded px-2 py-0.5 font-medium transition-colors',
+              'inline-flex items-center gap-1 rounded px-2 py-0.5 font-medium transition-colors',
               taskMode === 'plan'
                 ? 'bg-foreground text-background'
                 : 'text-muted-foreground hover:bg-foreground/[0.05]',
             )}
           >
-            Plan
+            <span aria-hidden>📋</span>
+            <span>先出方案</span>
           </button>
           <span className="ml-2 hidden md:inline">
             按 <Kbd>/</Kbd> 聚焦 · <Kbd>⌘K</Kbd> 搜索任务

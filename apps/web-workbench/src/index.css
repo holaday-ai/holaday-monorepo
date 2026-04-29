@@ -34,25 +34,31 @@
   }
 
   .dark {
-    --background: 240 10% 3.9%;
+    /* B3 — softer dark bg. Pure-black (0 0% 0%) was harsh; previous
+     * 240 10% 3.9% read almost black with a blue undertone. 0 0% 7%
+     * (#121212) is the Material-design recommended dark elevation
+     * — easier on the eye over long sessions, still clearly "dark
+     * mode" not "high-contrast". muted-foreground also bumped to
+     * 64.9% → 70% for AA contrast against the slightly lighter bg. */
+    --background: 0 0% 7%;
     --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
+    --card: 0 0% 9%;
     --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
+    --popover: 0 0% 9%;
     --popover-foreground: 0 0% 98%;
     --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
-    --secondary: 240 3.7% 15.9%;
+    --primary-foreground: 0 0% 7%;
+    --secondary: 0 0% 14%;
     --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
+    --muted: 0 0% 14%;
+    --muted-foreground: 0 0% 70%;
+    --accent: 0 0% 14%;
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
+    --border: 0 0% 18%;
+    --input: 0 0% 14%;
+    --ring: 0 0% 84%;
   }
 }
 

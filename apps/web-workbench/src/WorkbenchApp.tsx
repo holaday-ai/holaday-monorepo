@@ -7,6 +7,7 @@ import { LoginGate } from '@/components/LoginGate';
 import { MainPanel } from '@/components/MainPanel';
 import { ResizeHandle } from '@/components/ResizeHandle';
 import { SearchOverlay } from '@/components/SearchOverlay';
+import { SettingsModal } from '@/components/SettingsModal';
 import { Sidebar } from '@/components/Sidebar';
 import { AppSkeleton } from '@/components/Skeleton';
 import { useToast } from '@/components/ui/toast';
@@ -21,6 +22,8 @@ interface MeProfile {
   userId: string;
   /** Nullable since Phase 12 — SMS-first users have no email yet. */
   email: string | null;
+  /** Phase 12 SMS users — 11-digit mainland mobile. */
+  phone?: string | null;
   displayName: string | null;
   plan: string;
   /** Phase 8.2 canary flag — when true, the VNC panel connects to
@@ -28,6 +31,28 @@ interface MeProfile {
   multiUser: boolean;
   /** Phase 10 Tier 2 — open-pool role ids picked by this user. */
   selectedRoles?: string[];
+}
+
+/**
+ * B5 — humanise the displayName so legacy SMS-registered users (whose
+ * displayName is the masked "138****1234") see "用户_<last4>" in the
+ * UI instead of leaking their phone number into the avatar / greeting.
+ * The new-registration path already stores 用户_XXXX (auth/service.ts);
+ * this is the read-side fallback for rows that were inserted before
+ * that fix landed.
+ */
+function preferredDisplayName(me: MeProfile | null): string {
+  if (!me) return '';
+  const raw = me.displayName?.trim();
+  // Heuristic: any string that contains a phone-mask sequence
+  // (3 digits + asterisks + 4 digits) we treat as the legacy
+  // masked phone and replace with the prettier 用户_XXXX form.
+  // Falls back to email prefix or the literal phone last4.
+  const looksMasked = raw ? /\d{3}\**\d{4}/.test(raw) : false;
+  if (raw && !looksMasked) return raw;
+  if (me.phone) return `用户_${me.phone.slice(-4)}`;
+  if (me.email) return firstSegment(me.email);
+  return '用户';
 }
 
 /**
@@ -50,6 +75,7 @@ function AppShell(): JSX.Element {
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const [browserSheetOpen, setBrowserSheetOpen] = React.useState(false);
   const [feedbackOpen, setFeedbackOpen] = React.useState(false);
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
   const [confirmClearFailed, setConfirmClearFailed] = React.useState(false);
@@ -357,7 +383,7 @@ function AppShell(): JSX.Element {
   if (!bootstrapped) return <AppSkeleton />;
 
   const selectedTask = tasks.find((t) => t.taskId === selectedTaskId) ?? null;
-  const greetingName = me?.displayName || (me?.email ? firstSegment(me.email) : '');
+  const greetingName = preferredDisplayName(me);
 
   // Phase 14 audit follow-up — chip + replyToTaskId wiring.
   // Active when the selected task is in a terminal state AND not
@@ -392,15 +418,26 @@ function AppShell(): JSX.Element {
         onNewTask={() => {
           setSelectedTask(null);
           setTimeout(() => inputRef.current?.focus(), 50);
-          // Reset the panel by navigating Brave to Google. Doubles as
-          // a product affordance: "you're connected to the open
-          // internet through HOLA DAY" — way more inviting than
-          // about:blank for a user who just signed up. Fire-and-
-          // forget; errors are logged server-side, the user just
-          // sees the previous frame for a beat longer.
-          void trpc.tasks.browserNav
-            .mutate({ direction: 'goto', url: 'https://www.google.com' })
-            .catch(() => {});
+          // B2 — wake the per-user pool browser THEN navigate to
+          // Google. Without the wake step, browserNav fails silently
+          // ('no_executor') when the pool instance has been reaped,
+          // leaving the panel showing a stale frame or hibernation
+          // card. wakeBrowser is idempotent (returns 'ready' if
+          // already alive), so paying it on every new-task is cheap.
+          // Fire-and-forget — errors land in toast.
+          void (async () => {
+            try {
+              const w = await trpc.tasks.wakeBrowser.mutate();
+              if (w.status === 'ready') {
+                await trpc.tasks.browserNav.mutate({
+                  direction: 'goto',
+                  url: 'https://www.google.com',
+                });
+              }
+            } catch {
+              /* fire-and-forget */
+            }
+          })();
         }}
         onDeleteTask={(taskId) => {
           // Defer the actual delete until the user confirms in the
@@ -416,10 +453,11 @@ function AppShell(): JSX.Element {
           if ('error' in res) toast.show(`重命名失败：${res.error}`, 'error');
         }}
         userEmail={me?.email ?? null}
-        userDisplayName={me?.displayName ?? firstSegment(me?.email ?? '') ?? ''}
+        userDisplayName={preferredDisplayName(me)}
         userPlan={me?.plan ?? 'free'}
         onLogout={handleLogout}
         onOpenFeedback={() => setFeedbackOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
         onOpenSearch={() => setSearchOpen(true)}
         failedTaskCount={tasks.filter((t) => t.status === 'failed').length}
         onClearFailedTasks={() => setConfirmClearFailed(true)}
@@ -450,6 +488,19 @@ function AppShell(): JSX.Element {
               : 0
         }
         onSubmit={async (intent, fileIds, mode) => {
+          // B6 diagnostic — surfaces in browser console which branch
+          // fires for each submit. BOSS reported "follow-up still
+          // creates a new task"; the routing is technically correct
+          // (server creates a new task row + injects parent context)
+          // but the visual outcome looks the same as fresh-task. Log
+          // helps verify the FE actually sent replyToTaskId.
+          // eslint-disable-next-line no-console
+          console.info('[holaday] onSubmit', {
+            isReplyMode,
+            followUpTaskId: followUpTarget?.taskId ?? null,
+            selectedTaskId,
+            mode,
+          });
           // 1) In-flight awaiting_user → tasks.reply, resumes the existing loop.
           if (isReplyMode && selectedTaskId) {
             const res = await replyToTask(selectedTaskId, intent);
@@ -464,6 +515,7 @@ function AppShell(): JSX.Element {
           if (followUpTarget) {
             const res = await createTask(intent, fileIds, followUpTarget.taskId);
             if ('error' in res) toast.show(`追问失败：${res.error}`, 'error');
+            else toast.show('已基于上一个任务追问');
             return;
           }
           // 3) Default — fresh task. Pass mode through so Plan flips
@@ -540,6 +592,15 @@ function AppShell(): JSX.Element {
             return { error: msg };
           }
         }}
+      />
+
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        displayName={preferredDisplayName(me)}
+        email={me?.email ?? null}
+        phone={me?.phone ?? null}
+        plan={me?.plan ?? 'free'}
       />
 
       <ConfirmDialog

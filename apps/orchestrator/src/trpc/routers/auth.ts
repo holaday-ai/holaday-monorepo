@@ -242,6 +242,7 @@ export const authRouter = router({
       .select({
         externalId: users.externalId,
         email: users.email,
+        phone: users.phone,
         displayName: users.displayName,
         avatarUrl: users.avatarUrl,
         plan: users.plan,
@@ -262,6 +263,7 @@ export const authRouter = router({
     return {
       userId: row.externalId,
       email: row.email,
+      phone: row.phone,
       displayName: row.displayName,
       avatarUrl: row.avatarUrl,
       plan: row.plan,
