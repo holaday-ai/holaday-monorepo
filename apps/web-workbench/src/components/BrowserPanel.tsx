@@ -171,20 +171,24 @@ export function BrowserPanel({
   const handleVncStatus = React.useCallback((status: VncStatus) => {
     setVncStatus(status);
   }, []);
-  // Round-3 #5: completed / failed / cancelled tasks get the last
-  // screencast frame, NOT the live VNC stream. The live stream
-  // always reflects whatever the user's browser is doing *right
-  // now* — which for a task the user finished an hour ago is the
-  // wrong frame, usually because they've already done something
-  // else since. Pinning to displayFrame keeps the "proof of what
-  // completed" visible across task switches. Running tasks stay
-  // on VNC so the user sees live agent motion.
+  // Round-3 #5 (legacy): completed / failed / cancelled tasks used
+  // to switch to the static JPEG screencast — the rationale was
+  // that the SHARED singleton Brave would have moved on to another
+  // user's task, so the live VNC frame wouldn't match the task the
+  // user was inspecting. With per-user pool browsers (poolUserId
+  // set) that's no longer true: the user's Brave only renders THEIR
+  // tasks, so a "completed task" frame on the live VNC IS still the
+  // correct frame. Keeping VNC live also lets users use HOLA DAY's
+  // browser as a remote desktop after the agent finishes — exactly
+  // the China-edge product premise.
   const taskTerminal =
     taskStatus === 'completed' ||
     taskStatus === 'failed' ||
     taskStatus === 'cancelled';
   const useVnc =
-    Boolean(vncUrl) && vncStatus !== 'error' && !taskTerminal;
+    Boolean(vncUrl) &&
+    vncStatus !== 'error' &&
+    (poolUserId != null || !taskTerminal);
 
   // When the agent parks on awaiting-user (captcha, login wall, user
   // question the model injected), auto-flip the panel to interactive
