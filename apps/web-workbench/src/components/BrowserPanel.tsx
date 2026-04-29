@@ -329,6 +329,21 @@ export function BrowserPanel({
     [interactiveActive, mapToViewport, sendInput, flashRipple],
   );
 
+  // CJK input bar — sends `insert_text` (atomic) so Chinese composed
+  // in the user's local IME lands in the focused element on the
+  // remote Brave. Shown only in interactive mode (no point typing
+  // when the user can't drive). The window keydown listener above
+  // forwards plain ASCII keystrokes via `type` / `key` paths; CJK
+  // composition input bypasses that route entirely (browsers swallow
+  // composing keystrokes from the keydown handler).
+  const sendInsertText = React.useCallback(
+    (text: string) => {
+      if (!interactiveActive || !text) return;
+      sendInput({ kind: 'insert_text', text });
+    },
+    [interactiveActive, sendInput],
+  );
+
   const onWheel = React.useCallback(
     (e: React.WheelEvent<HTMLImageElement>) => {
       if (!interactiveActive) return;
@@ -593,6 +608,9 @@ export function BrowserPanel({
                     显示操作日志
                   </button>
                 )}
+                {interactiveActive && (
+                  <CjkInputBar onSend={sendInsertText} fullscreen={fullscreen} />
+                )}
               </div>
             ) : frame ? (
               isBlankUrl(frame.url) ? (
@@ -637,6 +655,9 @@ export function BrowserPanel({
                     >
                       显示操作日志
                     </button>
+                  )}
+                  {interactiveActive && (
+                    <CjkInputBar onSend={sendInsertText} fullscreen={fullscreen} />
                   )}
                 </div>
               )
@@ -703,6 +724,76 @@ function ActivityOverlay({
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * CJK input bar. Floats at the bottom of the panel viewport when
+ * interactive mode is on. The Brave on Xvfb has no IME (fcitx5 /
+ * ibus aren't installed in the per-user data-dir image), so users
+ * type Chinese in their LOCAL OS IME, hit 发送 / Enter, and we ship
+ * the composed text via `client.vision.user_input` kind=insert_text.
+ * Server side it lands as `page.keyboard.insertText(text)` —
+ * atomic, bypasses keystroke simulation.
+ *
+ * Caller is responsible for clicking the target input first (the
+ * insert lands in whatever has focus on the remote page). The bar
+ * deliberately doesn't try to manage focus: the user already
+ * clicked through VNC to focus, this is just the typing channel.
+ */
+function CjkInputBar({
+  onSend,
+  fullscreen,
+}: {
+  onSend: (text: string) => void;
+  fullscreen: boolean;
+}): JSX.Element {
+  const [value, setValue] = React.useState('');
+  const handleSend = (): void => {
+    const t = value.trim();
+    if (!t) return;
+    onSend(t);
+    setValue('');
+  };
+  return (
+    <div
+      className={cn(
+        'pointer-events-auto absolute left-1/2 z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-lg border bg-background/95 px-2 py-1.5 shadow-lg backdrop-blur',
+        fullscreen ? 'bottom-4' : 'bottom-2',
+      )}
+      style={{ minWidth: 280, maxWidth: '70%' }}
+    >
+      <input
+        type="text"
+        value={value}
+        placeholder="中文 / 任意文本输入（先点击页面上的输入框获得焦点）"
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          // Enter sends; Shift+Enter is reserved (no multi-line in this bar).
+          // Also: stop propagation so the window-level keydown listener
+          // (interactive ASCII forwarder) doesn't double-fire each keystroke.
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleSend();
+          }
+          e.stopPropagation();
+        }}
+        className="min-w-0 flex-1 border-0 bg-transparent px-2 py-1 text-xs outline-none placeholder:text-muted-foreground/70"
+      />
+      <button
+        type="button"
+        onClick={handleSend}
+        disabled={!value.trim()}
+        className={cn(
+          'shrink-0 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors',
+          value.trim()
+            ? 'bg-foreground text-background hover:bg-foreground/85'
+            : 'bg-muted text-muted-foreground',
+        )}
+      >
+        发送
+      </button>
     </div>
   );
 }
@@ -840,7 +931,7 @@ export function isBlankUrl(url: string | undefined | null): boolean {
 interface UserInputEvent {
   type: 'client.vision.user_input';
   taskId?: string;
-  kind: 'click' | 'scroll' | 'type' | 'key';
+  kind: 'click' | 'scroll' | 'type' | 'key' | 'insert_text';
   x?: number;
   y?: number;
   text?: string;

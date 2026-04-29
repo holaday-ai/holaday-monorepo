@@ -63,3 +63,40 @@ describe('client.extension.login_states schema', () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe('client.vision.user_input — kind=insert_text (CJK input bar)', () => {
+  it('accepts insert_text with Chinese text', () => {
+    const result = parseClientMessage(
+      JSON.stringify({
+        type: 'client.vision.user_input',
+        kind: 'insert_text',
+        text: '你好世界，搜索一下今天的天气',
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (result.success && result.data.type === 'client.vision.user_input') {
+      expect(result.data.kind).toBe('insert_text');
+      expect(result.data.text).toBe('你好世界，搜索一下今天的天气');
+    }
+  });
+
+  it('rejects insert_text with text > 4000 chars', () => {
+    const result = parseClientMessage(
+      JSON.stringify({
+        type: 'client.vision.user_input',
+        kind: 'insert_text',
+        text: 'a'.repeat(4_001),
+      }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it('keeps the existing type/click/scroll/key kinds unchanged', () => {
+    for (const kind of ['type', 'click', 'scroll', 'key'] as const) {
+      const r = parseClientMessage(
+        JSON.stringify({ type: 'client.vision.user_input', kind, text: 'x' }),
+      );
+      expect(r.success).toBe(true);
+    }
+  });
+});

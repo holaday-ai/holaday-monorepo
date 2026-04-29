@@ -13,6 +13,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import type { Planner } from '../agent/planner.js';
 import { TaskController, type TaskState } from '../agent/task-controller.js';
 import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
+import type { BrowserPool } from '../browser-pool/browser-pool.js';
 import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
@@ -74,6 +75,7 @@ export async function loadRehydratedTasks(): Promise<{ userCount: number; taskCo
  */
 let injectedPlanner: Planner | null = null;
 let injectedExecutor: PlaywrightExecutor | null = null;
+let injectedBrowserPool: BrowserPool | null = null;
 
 export interface WsServerOpts {
   planner?: Planner | null;
@@ -85,11 +87,22 @@ export interface WsServerOpts {
    * handler no-ops in that case.
    */
   playwrightExecutor?: PlaywrightExecutor | null;
+  /**
+   * Phase 14 audit follow-up — pool-aware user-input dispatch.
+   * Without this, `dispatchUserInput` falls back to the global
+   * `injectedExecutor` (the SHARED singleton) which lands clicks on
+   * the WRONG browser for users on a per-user pool slot. When the
+   * pool is wired, dispatch first looks up the caller's per-user
+   * executor via `pool.peek(userId).executor` and only falls back to
+   * the singleton if the caller has no pool instance.
+   */
+  browserPool?: BrowserPool | null;
 }
 
 export function createWsServer(port: number, opts: WsServerOpts = {}) {
   injectedPlanner = opts.planner ?? null;
   injectedExecutor = opts.playwrightExecutor ?? null;
+  injectedBrowserPool = opts.browserPool ?? null;
 
   const wss = new WebSocketServer({ port, handleProtocols });
 
@@ -461,7 +474,16 @@ async function handleClientMessage(
   }
 
   if (msg.type === 'client.vision.user_input') {
-    await dispatchUserInput(msg, injectedExecutor, state.userId ?? null);
+    // Pool-aware: prefer the caller's per-user pool executor over
+    // the shared singleton. Without this, clicks/insert_text from a
+    // user on the per-user pool would land on whatever browser the
+    // singleton is pinned to (worst-case: another user's session).
+    const perUserExec =
+      state.userId && injectedBrowserPool
+        ? injectedBrowserPool.peek(state.userId)?.executor ?? null
+        : null;
+    const exec = perUserExec ?? injectedExecutor;
+    await dispatchUserInput(msg, exec, state.userId ?? null);
     return;
   }
 
@@ -524,6 +546,11 @@ export async function dispatchUserInput(
       case 'type': {
         if (!msg.text) return;
         await executor.type(page, msg.text);
+        break;
+      }
+      case 'insert_text': {
+        if (!msg.text) return;
+        await executor.insertText(page, msg.text);
         break;
       }
       case 'key': {

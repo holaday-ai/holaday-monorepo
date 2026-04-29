@@ -136,10 +136,21 @@ export const clientVisionActedSchema = z.object({
 export const clientVisionUserInputSchema = z.object({
   type: z.literal('client.vision.user_input'),
   taskId: z.string().optional(),
-  kind: z.enum(['click', 'scroll', 'type', 'key']),
+  kind: z.enum(['click', 'scroll', 'type', 'key', 'insert_text']),
   x: z.number().int().optional(),
   y: z.number().int().optional(),
-  /** For kind=type: the literal text to type. */
+  /**
+   * For kind=type: the literal text to type via simulated keystrokes
+   *   (page.keyboard.type). Does NOT work for CJK / non-Latin —
+   *   chrome's input layer can't synthesise composed characters
+   *   without an IME on the X server.
+   * For kind=insert_text: text inserted atomically via
+   *   page.keyboard.insertText, bypassing keyboard simulation.
+   *   This is the path the SPA's CJK input bar uses — user types
+   *   in their LOCAL IME (macOS / Windows / Linux), then the
+   *   composed text is shipped here and atomic-inserted into the
+   *   focused element on the remote Brave.
+   */
   text: z.string().max(4_000).optional(),
   /** For kind=key: named key or chord ("Enter", "ctrl+a"). */
   key: z.string().min(1).max(64).optional(),

@@ -105,6 +105,15 @@ export interface PageLike {
   keyboard: {
     type(text: string): Promise<void>;
     press(key: string): Promise<void>;
+    /**
+     * Atomic text insertion — Playwright 1.x exposes this. Bypasses
+     * keystroke simulation, required for CJK without IME on the
+     * remote X server. Optional on PageLike so unit-test stubs
+     * (which only mock the surfaces they exercise) don't need to
+     * implement it; the production Playwright `Page.keyboard` does.
+     * Callers must runtime-check before invoking.
+     */
+    insertText?(text: string): Promise<void>;
   };
   /**
    * Playwright 1.55+ replaced the tree-returning `page.accessibility`
@@ -689,6 +698,39 @@ export class PlaywrightExecutor {
       return { ok: true, message: `typed ${text.length} chars` };
     } catch (err) {
       return { ok: false, message: `type failed: ${errMsg(err)}` };
+    }
+  }
+
+  /**
+   * Atomic text insertion — bypasses keyboard simulation. Required
+   * for CJK / non-Latin input because page.keyboard.type() emits
+   * per-character keydown/keyup events, and Chinese characters can't
+   * be produced by single keystrokes without a server-side IME
+   * (fcitx5 / ibus). The remote Brave on Xvfb has no IME, so all CJK
+   * goes through this path: user composes in their LOCAL OS IME,
+   * the SPA ships the composed text via `client.vision.user_input`
+   * kind='insert_text', and this method fires Playwright's atomic
+   * insertText API which writes directly to the focused element.
+   *
+   * Caller is responsible for ensuring focus is on the right input —
+   * a click/click_ref before insertText is the expected pre-step.
+   */
+  async insertText(page: PageLike, text: string): Promise<ActionResult> {
+    if (!page.keyboard.insertText) {
+      return {
+        ok: false,
+        message: 'insertText not supported by underlying page (stub or older Playwright)',
+      };
+    }
+    try {
+      await withTimeout(
+        page.keyboard.insertText(text),
+        TYPE_TIMEOUT_MS,
+        `insertText ${text.length} chars`,
+      );
+      return { ok: true, message: `inserted ${text.length} chars` };
+    } catch (err) {
+      return { ok: false, message: `insertText failed: ${errMsg(err)}` };
     }
   }
 

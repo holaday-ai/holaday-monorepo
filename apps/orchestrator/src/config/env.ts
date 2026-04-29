@@ -165,8 +165,15 @@ const schema = z.object({
   BROWSER_VNC_PORT_START: z.coerce.number().int().positive().default(5910),
   BROWSER_WS_PORT_START: z.coerce.number().int().positive().default(6090),
   BROWSER_DISPLAY_START: z.coerce.number().int().nonnegative().default(100),
-  /** Xvfb screen geometry — matches the singleton's current default. */
-  BROWSER_SCREEN_SIZE: z.string().default('1720x1440x24'),
+  /**
+   * Xvfb screen geometry. Default 1920×1080×24 (16:9) matches the
+   * vast majority of laptop / desktop browsers — the previous
+   * 1720×1440 (≈5:4) caused fat letterbox bars on every common
+   * 16:9 viewport in fullscreen panel mode (BOSS reported "两侧大量
+   * 留白"). Brave inside the Xvfb sees the same size + auto-fills
+   * via --window-size + --start-maximized in spawn.ts.
+   */
+  BROWSER_SCREEN_SIZE: z.string().default('1920x1080x24'),
 
   /**
    * Phase 10 Tier 1 — Agent intelligence upgrade master switch. When

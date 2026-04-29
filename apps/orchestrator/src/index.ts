@@ -277,6 +277,10 @@ async function main() {
   const ws = createWsServer(env.WS_PORT, {
     planner,
     playwrightExecutor: playwrightExecutor ?? null,
+    // Pool-aware user-input dispatch (Phase 14 audit follow-up). When
+    // the pool is up, panel clicks / insert_text route to the caller's
+    // own Brave instead of the shared singleton.
+    browserPool,
   });
   logger.info(
     { port: env.WS_PORT, selfHeal: env.ANTHROPIC_API_KEY ? 'anthropic' : 'stub-noop' },
