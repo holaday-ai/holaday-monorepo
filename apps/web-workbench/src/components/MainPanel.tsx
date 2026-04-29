@@ -7,7 +7,11 @@ import type { UiTask } from '@/types/task';
 
 interface Props {
   task: UiTask | null;
-  onSubmit: (intent: string, fileIds: string[]) => Promise<void> | void;
+  onSubmit: (
+    intent: string,
+    fileIds: string[],
+    mode?: 'auto' | 'plan',
+  ) => Promise<void> | void;
   busy?: boolean;
   onOpenSidebar?: () => void;
   onOpenBrowser?: () => void;
@@ -91,7 +95,10 @@ export function MainPanel({
       </div>
       <div className="flex-1 overflow-y-auto">
         {task ? (
-          <TaskStream task={task} />
+          <TaskStream
+            task={task}
+            onPickSuggestion={(text) => void onSubmit(text, [])}
+          />
         ) : (
           <div className="mx-auto max-w-3xl px-6 pt-12">
             <EmptyState

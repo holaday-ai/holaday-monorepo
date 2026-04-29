@@ -242,14 +242,20 @@ export class AuthService {
     const passwordHash = await hashPassword(
       `sms-only-${externalId}-${Math.random().toString(36).slice(2)}`,
     );
-    const masked = normalized.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2');
+    // Default displayName: 用户_XXXX (last 4 digits of phone). The
+    // previous "138****1234" exposed the full phone in every place
+    // displayName surfaces (sidebar avatar, top greeting). 用户_XXXX
+    // is short, doesn't leak the area code, and reads as "未起名"
+    // which nudges users to set a real one in /settings.
+    const last4 = normalized.slice(-4);
+    const defaultName = `用户_${last4}`;
     await this.db.insert(users).values({
       externalId,
       email: null,
       passwordHash,
       phone: normalized,
       phoneVerified: true,
-      displayName: masked,
+      displayName: defaultName,
     });
     const [row] = await this.db
       .select()

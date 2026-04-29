@@ -449,7 +449,7 @@ function AppShell(): JSX.Element {
               ? 5 * 1024 * 1024
               : 0
         }
-        onSubmit={async (intent, fileIds) => {
+        onSubmit={async (intent, fileIds, mode) => {
           // 1) In-flight awaiting_user → tasks.reply, resumes the existing loop.
           if (isReplyMode && selectedTaskId) {
             const res = await replyToTask(selectedTaskId, intent);
@@ -458,14 +458,17 @@ function AppShell(): JSX.Element {
             return;
           }
           // 2) Terminal task selected + chip not dismissed → 追问 (free,
-          //    parent context auto-injected server-side).
+          //    parent context auto-injected server-side). Plan mode is
+          //    skipped on follow-ups — the parent already established
+          //    intent context, no value in pausing again.
           if (followUpTarget) {
             const res = await createTask(intent, fileIds, followUpTarget.taskId);
             if ('error' in res) toast.show(`追问失败：${res.error}`, 'error');
             return;
           }
-          // 3) Default — fresh task.
-          const res = await createTask(intent, fileIds);
+          // 3) Default — fresh task. Pass mode through so Plan flips
+          //    the agent into "list plan first, wait for approval".
+          const res = await createTask(intent, fileIds, undefined, mode);
           if ('error' in res) toast.show(`发送失败：${res.error}`, 'error');
         }}
         onOpenSidebar={() => setSidebarOpen(true)}

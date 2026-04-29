@@ -102,10 +102,61 @@ const createInput = z.object({
    * would still hammer the agent loop.
    */
   replyToTaskId: z.string().min(1).optional(),
+  /**
+   * O4 — execution mode. 'auto' (default) runs the agent immediately.
+   * 'plan' instructs the agent to first emit a plan + wait for user
+   * approval (the agent stops on awaiting_user; user replies "执行"
+   * via tasks.reply to continue). Quota is consumed on submit either
+   * way — the plan-mode pause is a UX moment, not a billing dodge.
+   */
+  mode: z.enum(['auto', 'plan']).optional(),
 });
+
+/**
+ * O15 — friendly refusal for coding / app-building intents. HOLA DAY
+ * is a browser-task agent, not a code IDE; trying to satisfy a "帮我
+ * 写一个 React 组件" prompt burns Anthropic budget on something Claude
+ * Code or Cursor does much better. Match BEFORE quota consumption so
+ * the user sees a fast no-cost rejection instead of "executing → fail
+ * after 8 turns".
+ *
+ * Pattern: requires a CODE keyword (write/build/develop/debug/deploy
+ * + 中文 写代码/编程/开发) AND a SUBJECT keyword (网站/网页/app/组件/
+ * 接口/api/sdk/库). A standalone "写" without subject is too vague to
+ * reject; "做个网站" alone could be a website-research task. Both
+ * dimensions in the same intent → refuse.
+ */
+const CODE_VERBS = [
+  '写代码', '写程序', '编程', '编写', '写一个', '写一段',
+  '开发', '搭建', '搭一个', '建一个', '构建', '调试', '部署',
+  '修复 bug', '修 bug', 'debug', '重构', '实现一个',
+  'write code', 'build a', 'develop', 'deploy', 'compile', 'refactor',
+];
+const CODE_SUBJECTS = [
+  '网站', '网页', '后台', '前端', '后端', '应用', '系统', '组件',
+  '函数', '接口', 'api', 'sdk', '库', '插件', '小程序', '页面',
+  '脚本', '程序', '代码', '小工具',
+  'website', 'webapp', 'web app', 'app', 'component', 'function',
+  'script', 'plugin', 'package', 'module', 'library',
+];
+function looksLikeCodeIntent(intent: string): boolean {
+  const lower = intent.toLowerCase();
+  const hasVerb = CODE_VERBS.some((v) => lower.includes(v));
+  if (!hasVerb) return false;
+  return CODE_SUBJECTS.some((s) => lower.includes(s));
+}
 
 export const tasksRouter = router({
   create: protectedProcedure.input(createInput).mutation(async ({ ctx, input }) => {
+    // O15 — code-task refusal lands BEFORE user lookup so even an
+    // unauthenticated-token-in-fail-path doesn't get scaffolding.
+    if (looksLikeCodeIntent(input.intent)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message:
+          'HOLA DAY 专注浏览器任务执行（搜索 / 操作 / 比价 / 抓内容）。代码开发请用 Claude Code 或 Cursor 等专业工具。',
+      });
+    }
     const [userRow] = await ctx.db
       .select({
         id: users.id,
@@ -184,9 +235,25 @@ export const tasksRouter = router({
      * The DB still stores `input.intent` verbatim — that's what the
      * user actually typed and what they expect to see in history.
      */
-    const effectiveIntent = parentContextBlock
-      ? `${parentContextBlock}${input.intent}`
-      : input.intent;
+    // O4 plan-mode preamble. Cache-safe: appended to the first user
+    // message (not the system prompt), so cache hit rate stays
+    // intact. The agent obeys this by emitting a plan and stopping
+    // on a question-suffix line, which the supercar awaiting_user
+    // detector parks the loop on; tasks.reply ("执行" / "开始" /
+    // "go" or any free-form approval) unblocks it.
+    const planPreamble =
+      input.mode === 'plan'
+        ? [
+            '【执行模式】先列计划，等用户确认',
+            '请先输出 2-5 步执行计划（用编号列表），不要立刻调任何工具。',
+            '末尾用一句问句问用户是否同意：例如"按这个计划执行吗？"',
+            '用户回复"执行"/"开始"/"go"/"按计划做" → 继续；回复修改意见 → 调整后再问；',
+            '从计划开始到用户回复期间，禁止调 navigate/computer/web_search/create_file。',
+            '',
+          ].join('\n')
+        : '';
+    const effectiveIntent =
+      planPreamble + (parentContextBlock ? parentContextBlock : '') + input.intent;
 
     // Phase 10 Tier 2 — quota + concurrency gate. Both block task
     // creation BEFORE the row is inserted, so the user gets a clean
@@ -1564,6 +1631,7 @@ export const tasksRouter = router({
           errorCode: tasksTable.errorCode,
           errorMessage: tasksTable.errorMessage,
           result: tasksTable.result,
+          opusUsed: tasksTable.opusUsed,
           createdAt: tasksTable.createdAt,
           updatedAt: tasksTable.updatedAt,
           completedAt: tasksTable.completedAt,

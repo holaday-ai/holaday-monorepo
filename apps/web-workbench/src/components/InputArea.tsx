@@ -9,7 +9,11 @@ import { isUploadError, uploadFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
 
 interface Props {
-  onSubmit: (intent: string, fileIds: string[]) => Promise<void> | void;
+  onSubmit: (
+    intent: string,
+    fileIds: string[],
+    mode?: 'auto' | 'plan',
+  ) => Promise<void> | void;
   busy?: boolean;
   /** Forwarded ref for keyboard-shortcut focus (Cmd+N / slash). */
   inputRef?: React.Ref<HTMLTextAreaElement>;
@@ -86,6 +90,20 @@ export function InputArea({
   // mutation is in flight so the spinner is tied specifically to
   // *this* submit.
   const [submitting, setSubmitting] = React.useState(false);
+  // O4 — Auto/Plan toggle. Default Auto. Persisted in localStorage so
+  // the user's last choice sticks across page reloads.
+  const [taskMode, setTaskMode] = React.useState<'auto' | 'plan'>(() => {
+    if (typeof window === 'undefined') return 'auto';
+    return window.localStorage.getItem('holaday.taskMode') === 'plan' ? 'plan' : 'auto';
+  });
+  const setTaskModePersist = React.useCallback((m: 'auto' | 'plan') => {
+    setTaskMode(m);
+    try {
+      window.localStorage.setItem('holaday.taskMode', m);
+    } catch {
+      /* private mode / quota — ignore */
+    }
+  }, []);
 
   if (quotaExhausted) {
     return (
@@ -126,6 +144,27 @@ export function InputArea({
         size: file.size,
         status: 'uploading',
       };
+      // O17 — read image bytes locally for a thumbnail preview while
+      // upload runs in parallel. Fire-and-forget; if the read fails
+      // (rare for browser-supplied File objects) the chip just shows
+      // the generic image icon. Cap at ~2MB worth of base64 so we
+      // don't blow up React state on a 10MB photo upload — bigger
+      // images render via mime-type icon only.
+      if (draft.mimetype.startsWith('image/') && file.size < 2_000_000) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (typeof reader.result !== 'string') return;
+          const url = reader.result;
+          setAttachments((prev) =>
+            prev.map((a) =>
+              a.filename === draft.filename && a.size === draft.size && !a.previewDataUrl
+                ? { ...a, previewDataUrl: url }
+                : a,
+            ),
+          );
+        };
+        reader.readAsDataURL(file);
+      }
       setAttachments((prev) => [...prev, draft]);
       try {
         const meta = await uploadFile(file);
@@ -154,9 +193,28 @@ export function InputArea({
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }
 
+  // O6 — 3-second undo countdown. The pending dispatch state holds the
+  // actual onSubmit invocation behind a 3 s timer; user clicking the
+  // undo button or pressing the input again cancels before any API
+  // call happens. After the timer fires, normal submission proceeds.
+  const [pendingSend, setPendingSend] = React.useState<{
+    intent: string;
+    fileIds: string[];
+    secondsLeft: number;
+  } | null>(null);
+  const pendingTimerRef = React.useRef<number | null>(null);
+  const cancelPendingSend = React.useCallback((): void => {
+    if (pendingTimerRef.current != null) {
+      window.clearInterval(pendingTimerRef.current);
+      pendingTimerRef.current = null;
+    }
+    setPendingSend(null);
+  }, []);
+  React.useEffect(() => () => cancelPendingSend(), [cancelPendingSend]);
+
   async function handleSubmit(): Promise<void> {
     const trimmed = value.trim();
-    if (!trimmed || submitting || busy) return;
+    if (!trimmed || submitting || busy || pendingSend) return;
     // Block submit while any attachment is still uploading; let
     // failed ones submit (they'll just be ignored server-side).
     if (attachments.some((a) => a.status === 'uploading')) {
@@ -166,14 +224,34 @@ export function InputArea({
     const fileIds = attachments
       .filter((a) => a.status === 'ready' && a.fileId)
       .map((a) => a.fileId);
-    setSubmitting(true);
+    // Stash the input + clear the composer immediately so the user
+    // sees their message land in the conversation while the 3 s
+    // countdown runs. Timer counts down in 1 s ticks; on hit 0 it
+    // dispatches the actual onSubmit. User cancel removes the
+    // pending state without ever calling onSubmit (no quota burn).
     setValue('');
     setAttachments([]);
-    try {
-      await onSubmit(trimmed, fileIds);
-    } finally {
-      setSubmitting(false);
-    }
+    setPendingSend({ intent: trimmed, fileIds, secondsLeft: 3 });
+    pendingTimerRef.current = window.setInterval(() => {
+      setPendingSend((cur) => {
+        if (!cur) return null;
+        if (cur.secondsLeft <= 1) {
+          if (pendingTimerRef.current != null) {
+            window.clearInterval(pendingTimerRef.current);
+            pendingTimerRef.current = null;
+          }
+          // Fire the actual submission. Fire-and-forget so React's
+          // setState batching doesn't deadlock — onSubmit's own
+          // error path surfaces toasts already.
+          setSubmitting(true);
+          void Promise.resolve(onSubmit(cur.intent, cur.fileIds, taskMode)).finally(() => {
+            setSubmitting(false);
+          });
+          return null;
+        }
+        return { ...cur, secondsLeft: cur.secondsLeft - 1 };
+      });
+    }, 1_000);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
@@ -183,7 +261,7 @@ export function InputArea({
     }
   }
 
-  const disabled = submitting || Boolean(busy);
+  const disabled = submitting || Boolean(busy) || pendingSend != null;
 
   return (
     <div
@@ -220,7 +298,26 @@ export function InputArea({
             : 'border-input',
         )}
       >
-        {followUpTarget && !replyMode && (
+        {pendingSend && (
+          <div className="flex items-center gap-2 border-b-2 border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500 dark:bg-amber-500/15 dark:text-amber-100">
+            <span className="shrink-0 font-semibold">即将发送</span>
+            <span className="min-w-0 flex-1 truncate">"{pendingSend.intent}"</span>
+            <span className="shrink-0 tabular-nums">{pendingSend.secondsLeft}s</span>
+            <button
+              type="button"
+              onClick={() => {
+                // Restore the composer + drop the pending dispatch.
+                // No API call happened, no quota burned.
+                setValue(pendingSend.intent);
+                cancelPendingSend();
+              }}
+              className="shrink-0 rounded px-2 py-0.5 font-medium text-amber-900 hover:bg-amber-200 dark:text-amber-100 dark:hover:bg-amber-500/30"
+            >
+              撤回
+            </button>
+          </div>
+        )}
+        {followUpTarget && !replyMode && !pendingSend && (
           <div className="flex items-center gap-2 border-b-2 border-sky-300 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:border-sky-500 dark:bg-sky-500/15 dark:text-sky-100">
             <span aria-hidden className="shrink-0 text-sm">↪</span>
             <span className="shrink-0 font-semibold">追问</span>
@@ -307,9 +404,43 @@ export function InputArea({
         </Button>
       </div>
       <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[11px] text-muted-foreground">
-        <span className="hidden md:inline">
-          按 <Kbd>/</Kbd> 聚焦 · <Kbd>⌘K</Kbd> 搜索任务
-        </span>
+        <div className="flex items-center gap-1">
+          {/* O4 — Auto/Plan toggle. Auto = 默认直接执行；Plan =
+              先输出执行计划，等用户确认。Per-button buttons (not
+              a single segmented control) keep keyboard focus
+              traversal predictable. */}
+          <button
+            type="button"
+            onClick={() => setTaskModePersist('auto')}
+            aria-pressed={taskMode === 'auto'}
+            title="Auto — 直接执行任务"
+            className={cn(
+              'rounded px-2 py-0.5 font-medium transition-colors',
+              taskMode === 'auto'
+                ? 'bg-foreground text-background'
+                : 'text-muted-foreground hover:bg-foreground/[0.05]',
+            )}
+          >
+            Auto
+          </button>
+          <button
+            type="button"
+            onClick={() => setTaskModePersist('plan')}
+            aria-pressed={taskMode === 'plan'}
+            title="Plan — 先列计划，等你确认再执行"
+            className={cn(
+              'rounded px-2 py-0.5 font-medium transition-colors',
+              taskMode === 'plan'
+                ? 'bg-foreground text-background'
+                : 'text-muted-foreground hover:bg-foreground/[0.05]',
+            )}
+          >
+            Plan
+          </button>
+          <span className="ml-2 hidden md:inline">
+            按 <Kbd>/</Kbd> 聚焦 · <Kbd>⌘K</Kbd> 搜索任务
+          </span>
+        </div>
         <span>Enter 发送 · Shift+Enter 换行</span>
       </div>
     </div>

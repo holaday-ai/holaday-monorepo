@@ -33,6 +33,14 @@ import { friendlyHost, humanizeStep, humanizedGlyph, liveStatusLabel } from '@/u
 
 interface Props {
   task: UiTask;
+  /**
+   * O5 — fired when the user clicks a suggestion chip rendered under
+   * a terminal summary. The handler should treat the text as a fresh
+   * intent submission. Caller (MainPanel) wires this to the same
+   * onSubmit branch that input-area Enter uses, so the existing
+   * follow-up auto-detection inherits parent context.
+   */
+  onPickSuggestion?: (intent: string) => void;
 }
 
 // Stable empty-array reference so the zustand selector below returns
@@ -58,7 +66,7 @@ const EMPTY_REPLIES: Array<{ at: number; text: string }> = [];
  * 百度…" or "点击了'搜索'"), with a spinner-adorned status row for the
  * still-running tick.
  */
-export function TaskStream({ task }: Props): JSX.Element {
+export function TaskStream({ task, onPickSuggestion }: Props): JSX.Element {
   const steps = useTaskStore((s) => s.stepsByTask[task.taskId]) ?? EMPTY_STEPS;
   const userReplies =
     useTaskStore((s) => s.userRepliesByTask[task.taskId]) ?? EMPTY_REPLIES;
@@ -108,6 +116,7 @@ export function TaskStream({ task }: Props): JSX.Element {
         thinking={thinking}
         terminal={terminal}
         screencastUrl={screencast?.url ?? null}
+        onSuggestionPick={onPickSuggestion}
         onContinueInBrowser={() => {
           // Two things on "continue in browser":
           //   1. Force interactive mode on so the VNC canvas accepts
@@ -183,6 +192,7 @@ function AgentBlock({
   terminal,
   screencastUrl,
   onContinueInBrowser,
+  onSuggestionPick,
   captchaWait,
   degrade,
   executorFallback,
@@ -196,6 +206,7 @@ function AgentBlock({
   terminal: boolean;
   screencastUrl: string | null;
   onContinueInBrowser(): void;
+  onSuggestionPick?: (intent: string) => void;
   captchaWait: UiCaptchaWait | undefined;
   degrade: UiDegradeEvent | undefined;
   executorFallback: UiExecutorFallback | undefined;
@@ -286,6 +297,7 @@ function AgentBlock({
             status={task.status}
             text={task.resultText}
             currentUrl={screencastUrl}
+            modelLabel={task.modelLabel}
             // QA #17 — hide "在内置浏览器中继续操作" on completed tasks.
             // The button targets the BrowserPanel which only has a live
             // CDP session while the agent is still running; after a
@@ -296,6 +308,7 @@ function AgentBlock({
             onContinueInBrowser={
               task.status === 'completed' ? undefined : onContinueInBrowser
             }
+            onSuggestionPick={onSuggestionPick}
           />
         )}
         {/* Phase 11 QA #11 — terminal-but-empty fallback. Catches the
@@ -687,12 +700,44 @@ function TerminalSummary({
   text,
   currentUrl,
   onContinueInBrowser,
+  modelLabel,
+  onSuggestionPick,
 }: {
   status: UiTask['status'];
   text: string;
   currentUrl?: string | null;
   onContinueInBrowser?: () => void;
+  modelLabel?: 'sonnet' | 'opus';
+  onSuggestionPick?: (intent: string) => void;
 }): JSX.Element {
+  // O5 — pull a fenced ```suggestions JSON block out of the model's
+  // text so we can render it as clickable chips below the summary.
+  // The visible text has the block stripped so users don't see raw
+  // JSON. Failures (missing block / bad JSON) just leave suggestions
+  // empty — the UI is purely additive.
+  const { displayText, suggestions } = React.useMemo(() => {
+    const re = /```suggestions\s*\n([\s\S]*?)\n```/i;
+    const m = re.exec(text);
+    if (!m || !m[1]) return { displayText: text, suggestions: [] as string[] };
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(m[1]);
+    } catch {
+      return { displayText: text, suggestions: [] as string[] };
+    }
+    const list =
+      parsed && typeof parsed === 'object' && Array.isArray((parsed as { suggestions?: unknown }).suggestions)
+        ? ((parsed as { suggestions: unknown[] }).suggestions
+            .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+            .map((s) => s.trim())
+            .slice(0, 3))
+        : [];
+    return { displayText: text.replace(re, '').trim(), suggestions: list };
+  }, [text]);
+  // O10 — typewriter reveal of the SUMMARY text only (failed cards
+  // skip this so users see the failure reason immediately). Resets
+  // when text changes (new task / re-render with fresh content).
+  const revealed = useTypewriterReveal(displayText, 80);
   // Round-3 #4: external-link confirm. Both markdown anchors and
   // the "在新标签页打开 [url]" button funnel through pendingLink —
   // users get a confirm modal before leaving the workbench.
@@ -707,19 +752,53 @@ function TerminalSummary({
         <div className="mb-1 text-xs font-semibold uppercase tracking-wider">
           {status === 'failed' ? '任务失败' : '已取消'}
         </div>
-        <div className="whitespace-pre-wrap">{text}</div>
+        <div className="whitespace-pre-wrap">{displayText}</div>
+        {modelLabel && (
+          <div className="mt-2 text-[11px] text-red-700/70 dark:text-red-300/70">
+            {modelLabel === 'opus' ? 'Claude Opus 4.7' : 'Claude Sonnet 4.6'}
+          </div>
+        )}
       </div>
     );
   }
   const hasRealUrl =
     !!currentUrl && currentUrl !== 'about:blank' && !currentUrl.startsWith('chrome://');
   return (
-    <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-5 py-4 dark:border-blue-500/30 dark:bg-blue-500/10">
-      <div className="prose prose-sm prose-neutral max-w-none">
+    <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-5 py-4 text-foreground dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-foreground">
+      <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>
-          {text}
+          {revealed}
         </ReactMarkdown>
       </div>
+      {/* O3 — model info line. Tiny, non-intrusive. */}
+      {modelLabel && (
+        <div className="mt-3 text-[11px] text-muted-foreground dark:text-foreground/60">
+          {modelLabel === 'opus' ? 'Claude Opus 4.7 · 深度思考' : 'Claude Sonnet 4.6'}
+        </div>
+      )}
+      {/* O5 — suggestion chips. Click → fills + submits the new
+        intent (the parent's onSubmit branch picks up the active
+        followUpTarget if the user is still viewing this task,
+        which means the chip routes through replyToTaskId for free
+        context inheritance). */}
+      {suggestions.length > 0 && onSuggestionPick && revealed === displayText && (
+        <div className="mt-3 flex flex-wrap gap-1.5 border-t border-blue-200/50 pt-3 dark:border-blue-500/20">
+          <span className="self-center text-[11px] text-muted-foreground dark:text-foreground/60">
+            继续：
+          </span>
+          {suggestions.map((s, i) => (
+            <button
+              key={`${i}-${s.slice(0, 10)}`}
+              type="button"
+              onClick={() => onSuggestionPick(s)}
+              className="inline-flex items-center gap-1 rounded-full border border-blue-300/60 bg-card px-3 py-1 text-[11px] font-medium text-blue-800 transition hover:bg-blue-100 dark:border-blue-500/40 dark:text-blue-300 dark:hover:bg-blue-500/15"
+            >
+              <span aria-hidden>↪</span>
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
       {(hasRealUrl || onContinueInBrowser) && (
         <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-blue-200/70 pt-3 text-xs">
           {onContinueInBrowser && (
@@ -755,6 +834,45 @@ function TerminalSummary({
       />
     </div>
   );
+}
+
+/**
+ * O10 typewriter hook. Reveals `full` one chunk per frame at
+ * roughly `speedCharsPerSec` chars/second. Markdown rendering
+ * tolerates partial input (incomplete fences fall through to plain
+ * text and resolve once the rest arrives), so we don't need to
+ * pause at token boundaries.
+ *
+ * Reset on text change; once the full string is revealed, returns
+ * the original. Idempotent across re-renders for the same `full`
+ * value via the seenRef cache — no flicker on a re-mount of the
+ * same content.
+ */
+function useTypewriterReveal(full: string, speedCharsPerSec: number): string {
+  const [revealed, setRevealed] = React.useState<string>(full);
+  const seenRef = React.useRef<string>('');
+  React.useEffect(() => {
+    if (!full) {
+      setRevealed('');
+      return;
+    }
+    if (seenRef.current === full) {
+      // Already typed (or remount with cached); show full immediately.
+      setRevealed(full);
+      return;
+    }
+    seenRef.current = full;
+    setRevealed('');
+    let i = 0;
+    const step = Math.max(1, Math.round(speedCharsPerSec / 30)); // ~30 fps
+    const interval = window.setInterval(() => {
+      i = Math.min(i + step, full.length);
+      setRevealed(full.slice(0, i));
+      if (i >= full.length) window.clearInterval(interval);
+    }, 1000 / 30);
+    return () => window.clearInterval(interval);
+  }, [full, speedCharsPerSec]);
+  return revealed;
 }
 
 /**

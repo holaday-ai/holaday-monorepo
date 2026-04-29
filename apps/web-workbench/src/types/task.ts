@@ -36,6 +36,13 @@ export interface UiTask {
     status: 'pending' | 'running' | 'done' | 'failed';
     note?: string;
   }>;
+  /**
+   * O3 — model used for this task. Inferred from `opusUsed` on the
+   * server (true → 'opus', else 'sonnet'). Drives the small "Claude
+   * Sonnet 4.6 · 深度思考" line under the terminal summary so users
+   * can see what their task ran on.
+   */
+  modelLabel?: 'sonnet' | 'opus';
 }
 
 /**

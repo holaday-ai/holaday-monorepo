@@ -11,6 +11,14 @@ export interface DraftAttachment {
   status: 'uploading' | 'ready' | 'error';
   /** Server message when status === 'error'. */
   errorMessage?: string;
+  /**
+   * O17 — for image attachments, a `data:image/...;base64,...` URL
+   * read off the local File via FileReader. Lets the chip render a
+   * 32×32 thumbnail instead of just a generic image icon. Set
+   * synchronously before upload starts so the preview is visible
+   * during the uploading state too.
+   */
+  previewDataUrl?: string;
 }
 
 interface Props {
@@ -31,6 +39,10 @@ interface Props {
 export function AttachmentChip({ attachment, onRemove }: Props): JSX.Element {
   const isError = attachment.status === 'error';
   const isUploading = attachment.status === 'uploading';
+  const hasImagePreview =
+    attachment.mimetype.startsWith('image/') &&
+    typeof attachment.previewDataUrl === 'string' &&
+    attachment.previewDataUrl.length > 0;
   return (
     <div
       className={cn(
@@ -40,7 +52,18 @@ export function AttachmentChip({ attachment, onRemove }: Props): JSX.Element {
           : 'border-border bg-card',
       )}
     >
-      {isUploading ? (
+      {hasImagePreview ? (
+        <img
+          src={attachment.previewDataUrl}
+          alt=""
+          aria-hidden
+          draggable={false}
+          className={cn(
+            'h-7 w-7 shrink-0 rounded object-cover',
+            isUploading && 'opacity-60',
+          )}
+        />
+      ) : isUploading ? (
         <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
       ) : (
         <FileTypeIcon mimetype={attachment.mimetype} />

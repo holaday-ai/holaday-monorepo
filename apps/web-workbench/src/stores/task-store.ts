@@ -75,6 +75,8 @@ export interface TaskStore {
      * The parent must be in a terminal state (completed/failed/cancelled).
      */
     replyToTaskId?: string,
+    /** O4 — 'plan' makes agent emit + wait-for-approval before executing. */
+    mode?: 'auto' | 'plan',
   ): Promise<{ taskId: string } | { error: string }>;
   deleteTask(taskId: string): Promise<{ ok: true } | { error: string }>;
   renameTask(taskId: string, title: string): Promise<{ ok: true } | { error: string }>;
@@ -337,7 +339,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     }
   },
 
-  async createTask(intent, fileIds, replyToTaskId) {
+  async createTask(intent, fileIds, replyToTaskId, mode) {
     // Reject intents that are obviously control commands typed into
     // the wrong box (e.g. user typing "停止" into the composer
     // because they didn't see the Stop button). Fails client-side
@@ -353,6 +355,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         intent,
         ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
         ...(replyToTaskId ? { replyToTaskId } : {}),
+        ...(mode === 'plan' ? { mode } : {}),
       });
       // Optimistic insert at the top so the UI feels instant; the next
       // refreshTasks() will pick up the canonical server row.
@@ -691,6 +694,7 @@ function extractSummary(result: unknown): string | null {
 }
 
 function toUiTask(row: ListRow): UiTask {
+  const opusUsed = (row as { opusUsed?: unknown }).opusUsed === true;
   return {
     taskId: row.taskId,
     intent: row.intent,
@@ -704,6 +708,7 @@ function toUiTask(row: ListRow): UiTask {
       : {}),
     // tRPC serializes Date to string over the wire; coerce back.
     createdAt: new Date(row.createdAt as unknown as string | number | Date),
+    modelLabel: opusUsed ? 'opus' : 'sonnet',
   };
 }
 
