@@ -25,6 +25,27 @@ describe('classifyAsSimpleSearch', () => {
     });
   });
 
+  describe('should NOT classify as simple search — "打开/访问/前往 X" navigation intents', () => {
+    // Phase 14 audit — these should fall through to the agent loop
+    // so the model can call the `navigate` tool. If they ever start
+    // matching simple-search, the Brave fast lane would intercept
+    // and return text search results instead of opening the page,
+    // which is precisely the "打开 Google 失败" symptom BOSS hit.
+    it.each([
+      '打开 Google',
+      '打开 google.com',
+      '打开 google',
+      '打开淘宝',
+      '访问 jd.com',
+      '前往 boss直聘',
+      '进入 GitHub',
+      'open google',
+      'go to taobao',
+    ])('false: %s', (intent) => {
+      expect(classifyAsSimpleSearch(intent)).toBe(false);
+    });
+  });
+
   describe('should NOT classify as simple search (action verb present)', () => {
     it.each([
       '帮我在京东上买一台 MacBook',
