@@ -355,6 +355,31 @@ export function getConcurrencyLimit(plan: PlanId): number {
 }
 
 /**
+ * Plan-aware "too many concurrent tasks" copy. Phase 14 audit
+ * follow-up: BOSS asked us to treat the concurrency wall as a
+ * conversion moment, not an apology. The free / basic copy
+ * surfaces the next-plan-up's limit + price hook so the SPA can
+ * render an "升级" CTA inline. Pro hits a true ceiling (5) — no
+ * higher tier to upsell — so we just acknowledge it.
+ *
+ * The numbers come from PLAN_CATALOGUE so we don't drift if the
+ * limits change again (e.g. a "team" plan in Phase 15).
+ */
+export function concurrencyExhaustedMessage(plan: PlanId): string {
+  const free = PLAN_CATALOGUE.free.concurrency;
+  const basic = PLAN_CATALOGUE.basic.concurrency;
+  const pro = PLAN_CATALOGUE.pro.concurrency;
+  switch (plan) {
+    case 'free':
+      return `免费版同时只能跑 ${free} 个任务，请等执行完。升级基础版可同时跑 ${basic} 个，升级专业版 ${pro} 个。`;
+    case 'basic':
+      return `基础版同时上限 ${basic} 个任务，请等执行完。升级专业版可同时跑 ${pro} 个。`;
+    case 'pro':
+      return `专业版同时上限 ${pro} 个任务，请等已有任务完成。`;
+  }
+}
+
+/**
  * Translate a denied-consume reason into a user-facing TRPCError.
  * Keeps the wording in one place so the SPA can rely on `code` for
  * routing (TOO_MANY_REQUESTS for limit hits, FORBIDDEN for plan
