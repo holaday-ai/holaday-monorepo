@@ -86,6 +86,21 @@ const createInput = z.object({
    * block, and prepends them to the agent's first user message.
    */
   fileIds: z.array(z.string()).max(5).optional(),
+  /**
+   * Phase 14 audit follow-up — multi-turn追问. When the user is
+   * looking at a completed/failed task and types a follow-up
+   * (e.g. "为什么失败"), the SPA passes the parent task's
+   * external id here. Server then:
+   *   1. Validates the parent belongs to the same user and is in
+   *      a terminal state (completed / failed / cancelled).
+   *   2. Skips quota consumption — follow-ups are free; they
+   *      reuse the cost the user already paid.
+   *   3. Prepends a "前一个任务"<intent>"，结果：<summary>" block
+   *      to the agent's intent so the model has full context.
+   * Concurrency limit still applies — a runaway loop of follow-ups
+   * would still hammer the agent loop.
+   */
+  replyToTaskId: z.string().min(1).optional(),
 });
 
 export const tasksRouter = router({
@@ -102,6 +117,75 @@ export const tasksRouter = router({
     if (!userRow) {
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
     }
+
+    // Phase 14 audit follow-up — multi-turn 追问. When `replyToTaskId`
+    // is set, the new task piggybacks on a previously completed/failed
+    // task: skips quota and prefixes the agent's intent with the parent's
+    // intent + result so the model has full context for "为什么失败" /
+    // "再试一次" style follow-ups.
+    let parentContextBlock = '';
+    let isFollowUp = false;
+    if (input.replyToTaskId) {
+      const [parent] = await ctx.db
+        .select({
+          intent: tasksTable.intent,
+          status: tasksTable.status,
+          result: tasksTable.result,
+          errorMessage: tasksTable.errorMessage,
+        })
+        .from(tasksTable)
+        .where(
+          and(
+            eq(tasksTable.externalId, input.replyToTaskId),
+            eq(tasksTable.userId, userRow.id),
+          ),
+        )
+        .limit(1);
+      if (!parent) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: '找不到要追问的任务（可能已删除或不属于你）',
+        });
+      }
+      const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
+      if (!TERMINAL.has(parent.status)) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '只能追问已完成/失败/取消的任务，正在执行的任务请用回复',
+        });
+      }
+      const parentResult = (parent.result ?? null) as
+        | { summary?: string; reason?: string }
+        | null;
+      const summary = parentResult?.summary?.trim() ?? '';
+      const reason =
+        parentResult?.reason?.trim() ?? (parent.errorMessage ?? '').trim();
+      const outcomeLine =
+        parent.status === 'completed' && summary
+          ? `结果：${summary}`
+          : reason
+            ? `${parent.status === 'failed' ? '失败原因' : '终止原因'}：${reason}`
+            : `状态：${parent.status}（无详细输出）`;
+      parentContextBlock = [
+        '---',
+        '【追问上下文】',
+        `前一个任务："${parent.intent}"`,
+        outcomeLine,
+        '---',
+        '',
+      ].join('\n');
+      isFollowUp = true;
+    }
+
+    /**
+     * The intent the AGENT sees. For a follow-up, the parent's
+     * intent + outcome are prepended so the model has full context.
+     * The DB still stores `input.intent` verbatim — that's what the
+     * user actually typed and what they expect to see in history.
+     */
+    const effectiveIntent = parentContextBlock
+      ? `${parentContextBlock}${input.intent}`
+      : input.intent;
 
     // Phase 10 Tier 2 — quota + concurrency gate. Both block task
     // creation BEFORE the row is inserted, so the user gets a clean
@@ -148,25 +232,41 @@ export const tasksRouter = router({
             : '当前有任务在执行中，请等待完成或升级专业版',
       });
     }
-    const consume = await quotaService.tryConsume(userRow.id, planId, willConsumeOpus);
-    if (!consume.ok) {
-      // Pro running out of Opus mid-task should downgrade to Sonnet
-      // automatically rather than block the task. Re-attempt with
-      // isOpus=false so the regular pool absorbs it.
-      if (consume.reason === 'opus_limit' && planId === 'pro') {
-        const fallback = await quotaService.tryConsume(userRow.id, planId, false);
-        if (!fallback.ok) {
-          throw quotaErrorFor(fallback.reason);
+    // Follow-ups are free — they reuse the cost of the parent task. Skip
+    // tryConsume entirely so a quota-exhausted user can still ask
+    // "为什么失败" without paying again. opus_used flag stays false on
+    // the DB row for the same reason (the follow-up doesn't count).
+    let opusActuallyConsumed = false;
+    if (!isFollowUp) {
+      const consume = await quotaService.tryConsume(userRow.id, planId, willConsumeOpus);
+      if (!consume.ok) {
+        // Pro running out of Opus mid-task should downgrade to Sonnet
+        // automatically rather than block the task. Re-attempt with
+        // isOpus=false so the regular pool absorbs it.
+        if (consume.reason === 'opus_limit' && planId === 'pro') {
+          const fallback = await quotaService.tryConsume(userRow.id, planId, false);
+          if (!fallback.ok) {
+            throw quotaErrorFor(fallback.reason);
+          }
+          ctx.logger.info(
+            { userId: ctx.userId, taskIntent: input.intent.slice(0, 60) },
+            'quota: opus exhausted — task will run on Sonnet',
+          );
+        } else {
+          throw quotaErrorFor(consume.reason);
         }
-        ctx.logger.info(
-          { userId: ctx.userId, taskIntent: input.intent.slice(0, 60) },
-          'quota: opus exhausted — task will run on Sonnet',
-        );
-      } else {
-        throw quotaErrorFor(consume.reason);
       }
+      opusActuallyConsumed = consume.ok && willConsumeOpus;
+    } else {
+      ctx.logger.info(
+        {
+          userId: ctx.userId,
+          replyToTaskId: input.replyToTaskId,
+          taskIntent: input.intent.slice(0, 60),
+        },
+        'tasks.create: follow-up reply mode (quota skipped)',
+      );
     }
-    const opusActuallyConsumed = consume.ok && willConsumeOpus;
 
     // Phase 10 Tier 3 — resolve attachments BEFORE the supercar / vision
     // branch decision. We read the buffers + parse them up front so the
@@ -522,7 +622,11 @@ export const tasksRouter = router({
       }
       const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
           taskId,
-          intent: input.intent,
+          // Phase 14 audit follow-up — feed the agent the parent-task
+          // context block when this is a 追问. DB still stores
+          // `input.intent` (what the user typed); only the model sees
+          // the prefixed version.
+          intent: effectiveIntent,
           ...(memoryPreamble ? { memoryPreamble } : {}),
           ...(playbookContext ? { playbookContext } : {}),
           ...(planResult.planText ? { planText: planResult.planText } : {}),
