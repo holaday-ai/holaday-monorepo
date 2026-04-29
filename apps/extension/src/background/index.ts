@@ -234,6 +234,14 @@ onServerMessage((msg) => {
     // to 0 so the throttle in maybeReportLoginStates always fires.
     lastLoginStatesAt = 0;
     void maybeReportLoginStates();
+    // Successful auth → reset the failure counter + known-bad
+    // tracking so a future genuine failure starts fresh. Also
+    // cancels any pending backoff retry that's no longer needed.
+    if (pendingAuthRetry) {
+      clearTimeout(pendingAuthRetry);
+      pendingAuthRetry = null;
+    }
+    void resetAuthFailureState();
     return;
   }
   if (msg.type === 'server.error') {
@@ -678,23 +686,69 @@ function onTaskControl(msg: Extract<ServerMessage, { type: 'server.task.control'
 // ---------- WS lifecycle ↔ MV3 SW lifecycle ----------
 
 /**
- * Try to (re)open the WS using whatever token is in storage. Idempotent
- * on the ws-client side, so multiple call sites — onInstalled, onStartup,
- * keepalive alarm, storage change, popup nudge — are all safe to fire
- * concurrently. The MV3 SW gets killed after ~30s of idle so this
- * function is the single point we rely on to come back from the dead.
+ * Auth-failure circuit breaker. The orchestrator can reject a token for
+ * many reasons (expired, signed with a different secret, deleted user).
+ * Without a brake the SW would loop forever:
+ *   ensureConnected → auto-login lifts SAME bad token → setAccessToken
+ *   → storage.onChanged → reconnect → 4401 → onUnauthorized → repeat.
+ *
+ * Two guardrails persisted in chrome.storage so they survive SW restart:
+ *   - AUTH_FAILURES_KEY: count of consecutive 4401/UNAUTHORIZED events.
+ *     At MAX_AUTH_FAILURES the SW freezes auto-retry — only a user-
+ *     initiated retry (Side Panel button) clears the counter.
+ *   - KNOWN_BAD_TOKEN_KEY: the most recently rejected token. ensureConnected
+ *     refuses to re-import the same value, so even before the count cap
+ *     fires we don't hammer the same bad creds.
+ *
+ * Backoff between auto-retries: 1s → 2s → 4s, then frozen.
  */
-async function ensureConnected(): Promise<{ token: string | null }> {
+const AUTH_FAILURES_KEY = 'holaday.auth.consecutive_failures';
+const KNOWN_BAD_TOKEN_KEY = 'holaday.auth.known_bad_token';
+const MAX_AUTH_FAILURES = 3;
+const RETRY_BACKOFF_MS = [1_000, 2_000, 4_000];
+let pendingAuthRetry: ReturnType<typeof setTimeout> | null = null;
+
+async function getAuthFailures(): Promise<number> {
+  const v = (await chrome.storage.local.get(AUTH_FAILURES_KEY))[AUTH_FAILURES_KEY];
+  return typeof v === 'number' ? v : 0;
+}
+async function getKnownBadToken(): Promise<string | null> {
+  const v = (await chrome.storage.local.get(KNOWN_BAD_TOKEN_KEY))[KNOWN_BAD_TOKEN_KEY];
+  return typeof v === 'string' && v.length > 0 ? v : null;
+}
+async function resetAuthFailureState(): Promise<void> {
+  await chrome.storage.local.remove([AUTH_FAILURES_KEY, KNOWN_BAD_TOKEN_KEY]);
+}
+
+/**
+ * Try to (re)open the WS using whatever token is in storage. Multiple
+ * call sites converge here — onInstalled, onStartup, keepalive alarm,
+ * storage change, popup nudge — and the MV3 SW gets killed after
+ * ~30s of idle so this is the single recovery path. Skips entirely
+ * once the failure counter has hit the freeze threshold; the user
+ * has to click the Side Panel "我已登录，重试" button (which calls
+ * resetAuthFailureState) to give it another shot.
+ */
+async function ensureConnected(): Promise<{ token: string | null; frozen?: boolean }> {
   if (isConnected()) return { token: await getAccessToken() };
+  const failures = await getAuthFailures();
+  if (failures >= MAX_AUTH_FAILURES) {
+    console.warn(
+      `[holaday] auth: frozen (${failures}/${MAX_AUTH_FAILURES} consecutive failures); manual retry required`,
+    );
+    return { token: null, frozen: true };
+  }
   let token = await getAccessToken();
-  // Phase 14 — opportunistic auto-login. The web workbench stores
-  // the JWT in localStorage on holaday.ai (and dev origins). We run
-  // a tiny script in any open workbench tab to lift it. Strict:
-  // only fires when we have nothing already stored — never
-  // overwrites a token the user explicitly installed via the popup.
   if (!token) {
     const lifted = await tryAutoLogin();
     if (lifted) {
+      const knownBad = await getKnownBadToken();
+      if (knownBad && lifted === knownBad) {
+        console.warn(
+          '[holaday] ensureConnected: lifted token matches last-rejected; not retrying',
+        );
+        return { token: null };
+      }
       try {
         await setAccessToken(lifted);
         token = lifted;
@@ -777,26 +831,45 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 // Phase 14 — orchestrator rejected our auth (close 4401 or
-// server.error code='UNAUTHORIZED'). Drop the stale token + user
-// from chrome.storage and re-fire ensureConnected so auto-login
-// gets a fresh attempt from the workbench tab. Without this the
-// SW would just sit on the bad token until the user manually
-// signed out via the popup.
+// server.error code='UNAUTHORIZED'). Drop the stale token + user,
+// remember the token as known-bad so ensureConnected refuses to
+// re-import the same value, and schedule the next attempt with
+// 1s/2s/4s backoff. After MAX_AUTH_FAILURES the SW freezes —
+// only a Side Panel "我已登录，重试" click clears the state.
 onUnauthorized(() => {
-  console.warn('[holaday] ws: UNAUTHORIZED — clearing stale token + user');
   void (async () => {
+    const rejected = await getAccessToken();
+    const prev = await getAuthFailures();
+    const next = prev + 1;
     try {
+      // Persist BEFORE clearing the token, otherwise getAccessToken
+      // returns null on the next ensureConnected and we lose the
+      // "this token is bad" signal.
+      await chrome.storage.local.set({ [AUTH_FAILURES_KEY]: next });
+      if (rejected) {
+        await chrome.storage.local.set({ [KNOWN_BAD_TOKEN_KEY]: rejected });
+      }
       await clearAccessToken();
       await clearStoredUser();
     } catch (err) {
-      console.warn('[holaday] failed to clear stale credentials', err);
+      console.warn('[holaday] auth: failed to persist failure state', err);
     }
-    // Re-fire ensureConnected so the next auto-login pass tries
-    // the workbench tab again. ensureConnected will see no
-    // stored token and run tryAutoLogin → if a workbench tab
-    // exists with a (different, valid) token, that's the path
-    // that recovers the session.
-    await ensureConnected();
+    if (next >= MAX_AUTH_FAILURES) {
+      console.warn(
+        `[holaday] auth: frozen after ${next}/${MAX_AUTH_FAILURES} failures; manual retry required`,
+      );
+      return;
+    }
+    const delay =
+      RETRY_BACKOFF_MS[Math.min(next - 1, RETRY_BACKOFF_MS.length - 1)] ?? 4_000;
+    console.info(
+      `[holaday] auth: rejected (attempt ${next}/${MAX_AUTH_FAILURES}); next retry in ${delay}ms`,
+    );
+    if (pendingAuthRetry) clearTimeout(pendingAuthRetry);
+    pendingAuthRetry = setTimeout(() => {
+      pendingAuthRetry = null;
+      void ensureConnected();
+    }, delay);
   })();
 });
 
@@ -840,15 +913,25 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg?.type === 'holaday.tryAutoLogin') {
-    // Phase 14 — Side Panel mount nudges the SW to attempt
-    // localStorage-based auto-login synchronously (rather than
-    // waiting up to 30s for the keepalive alarm). Returns the
-    // lifted token so the panel can immediately fetch auth.me
-    // and populate the user card. ensureConnected is idempotent
-    // when a token is already in storage.
-    void ensureConnected().then(({ token }) => {
-      sendResponse({ ok: Boolean(token), token: token ?? null });
-    });
+    // Phase 14 — Side Panel mount + "我已登录，重试" button nudge
+    // the SW to attempt localStorage-based auto-login synchronously
+    // (rather than waiting up to 30s for the keepalive alarm). A
+    // user-initiated retry also counts as ground for un-freezing
+    // the auth circuit breaker — clear the failure counter +
+    // known-bad token so the next ensureConnected runs fresh.
+    void (async () => {
+      if (pendingAuthRetry) {
+        clearTimeout(pendingAuthRetry);
+        pendingAuthRetry = null;
+      }
+      await resetAuthFailureState();
+      const { token, frozen } = await ensureConnected();
+      sendResponse({
+        ok: Boolean(token),
+        token: token ?? null,
+        ...(frozen ? { frozen: true } : {}),
+      });
+    })();
     return true; // keep response channel open for async resolve
   }
   return false;

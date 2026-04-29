@@ -125,6 +125,16 @@ function openSocket(token: string): void {
   const protocols = [WS_SUBPROTOCOL, `jwt.${token}`];
   const ws = new WebSocket(ORCHESTRATOR_WS, protocols);
   state.socket = ws;
+  // Phase 14 — server may signal UNAUTHORIZED via BOTH a server.error
+  // frame AND a 4401 close. Fire the listeners only once per socket,
+  // otherwise the SW's auth-failure counter doubles and we hit the
+  // freeze threshold with one real failure.
+  let unauthorizedFired = false;
+  const fireUnauthorized = (): void => {
+    if (unauthorizedFired) return;
+    unauthorizedFired = true;
+    for (const fn of state.unauthorizedListeners) fn();
+  };
 
   ws.addEventListener('open', () => {
     if (state.socket !== ws) return; // stale event after a token swap
@@ -151,7 +161,7 @@ function openSocket(token: string): void {
       result.data.type === 'server.error' &&
       result.data.code === 'UNAUTHORIZED'
     ) {
-      for (const fn of state.unauthorizedListeners) fn();
+      fireUnauthorized();
     }
     for (const fn of state.listeners) fn(result.data);
   });
@@ -168,7 +178,7 @@ function openSocket(token: string): void {
       // Orchestrator rejected our auth. Surface to the SW so it
       // clears the bad token; do NOT auto-reconnect — that would
       // just loop on the same bad creds.
-      for (const fn of state.unauthorizedListeners) fn();
+      fireUnauthorized();
       return;
     }
     if (state.closedByUser) return;
