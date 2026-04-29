@@ -168,9 +168,44 @@ export function BrowserPanel({
   // re-renders (the viewport's effect re-runs on any URL change).
   const vncUrl = React.useMemo(() => buildVncUrl(poolUserId), [poolUserId]);
   const [vncStatus, setVncStatus] = React.useState<VncStatus>('idle');
+  // P3 hibernation detection: count consecutive failed attempts. The
+  // pool's idle GC reaps after 5 min, after which /vnc-ws/ rejects
+  // with HTTP 409 ("browser not allocated") which surfaces in noVNC
+  // as a 'disconnected' event. After ≥3 consecutive failures we
+  // assume the browser is hibernated and offer the wake card. Reset
+  // to 0 on a successful 'connect'.
+  const [vncAttemptFails, setVncAttemptFails] = React.useState(0);
   const handleVncStatus = React.useCallback((status: VncStatus) => {
     setVncStatus(status);
+    setVncAttemptFails((n) => {
+      if (status === 'connected') return 0;
+      if (status === 'disconnected' || status === 'error') return n + 1;
+      return n;
+    });
   }, []);
+  const hibernated = poolUserId != null && vncAttemptFails >= 3;
+  // P3 wake call — fire-and-forget allocate, then reset the attempt
+  // counter so VncViewport's reconnect tries fresh. Server-side this
+  // takes ~3-5s (cold spawn); the user sees the spinner during that
+  // window before VNC reconnects.
+  const [waking, setWaking] = React.useState(false);
+  const onWake = React.useCallback(async () => {
+    if (waking) return;
+    setWaking(true);
+    try {
+      const res = await trpc.tasks.wakeBrowser.mutate();
+      if (res.status === 'ready') {
+        // Reset counter; VncViewport's auto-reconnect timer will fire
+        // and the new connection should land on the freshly-allocated
+        // instance.
+        setVncAttemptFails(0);
+      }
+    } catch {
+      // Non-fatal — user can click again.
+    } finally {
+      setWaking(false);
+    }
+  }, [waking]);
   // Round-3 #5 (legacy): completed / failed / cancelled tasks used
   // to switch to the static JPEG screencast — the rationale was
   // that the SHARED singleton Brave would have moved on to another
@@ -514,7 +549,13 @@ export function BrowserPanel({
               interactiveActive ? 'bg-sky-50/40' : 'bg-muted/40',
             )}
           >
-            {useVnc ? (
+            {hibernated ? (
+              <HibernationCard
+                lastFrame={displayFrame}
+                onWake={onWake}
+                waking={waking}
+              />
+            ) : useVnc ? (
               <div className="relative h-full w-full">
                 <VncViewport
                   wsUrl={vncUrl}
@@ -662,6 +703,63 @@ function ActivityOverlay({
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * P3 hibernation card. Shown when the user's pool browser has been
+ * reaped by idle GC and VNC has failed to reconnect ≥3 times. The
+ * last screencast frame fades into the background so users see what
+ * was on screen ("oh yeah, that's the page I was on") and a single
+ * 唤醒 button respawns Brave + reconnects VNC. Cookies persist in
+ * the user-data-dir so logged-in sessions survive the hibernation.
+ */
+function HibernationCard({
+  lastFrame,
+  onWake,
+  waking,
+}: {
+  lastFrame: UiScreencast | null;
+  onWake: () => void;
+  waking: boolean;
+}): JSX.Element {
+  const showLastFrame = lastFrame && !isBlankUrl(lastFrame.url);
+  return (
+    <div className="relative flex h-full w-full items-center justify-center">
+      {showLastFrame && (
+        <img
+          src={`data:image/jpeg;base64,${lastFrame.imageBase64}`}
+          alt=""
+          aria-hidden
+          draggable={false}
+          className="absolute inset-0 h-full w-full rounded-md object-contain opacity-25"
+        />
+      )}
+      <div className="relative flex flex-col items-center gap-3 rounded-lg border border-border bg-background/95 px-6 py-5 shadow-lg backdrop-blur">
+        <div className="text-3xl" aria-hidden>
+          ⏾
+        </div>
+        <div className="text-center">
+          <div className="text-sm font-semibold text-foreground">浏览器已休眠</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            上次访问的页面和登录状态已保存
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onWake}
+          disabled={waking}
+          className={cn(
+            'inline-flex items-center gap-2 rounded-md px-4 py-2 text-xs font-medium transition-colors',
+            waking
+              ? 'cursor-wait bg-muted text-muted-foreground'
+              : 'bg-foreground text-background hover:bg-foreground/85',
+          )}
+        >
+          {waking ? '唤醒中…' : '唤醒浏览器'}
+        </button>
+      </div>
     </div>
   );
 }

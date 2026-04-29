@@ -1737,6 +1737,56 @@ export const tasksRouter = router({
    * about a CDP hiccup except try again. Only runs if the primary
    * executor is the headed lane (guarded in the router).
    */
+  /**
+   * P3 wake mechanism — explicit "bring my browser back" path. After
+   * the 5-minute idle GC reaps the user's pool instance, the SPA
+   * shows a hibernation card; the wake button calls this. Returns
+   * pool stats so the panel can probe-and-redraw, then the SPA
+   * triggers a fresh VNC connection.
+   *
+   * No quota cost — this is just respawning the per-user Brave
+   * (cookies preserved in user-data-dir, so logins don't re-prompt).
+   * Concurrency limit doesn't apply either: the user isn't starting
+   * a new TASK, just lighting up the browser.
+   *
+   * Returns:
+   *   { status: 'ready' }   — instance is alive and ready to stream
+   *   { status: 'spawning' } — allocate is still cold-starting
+   *                            (~3-5 s); SPA should show a spinner
+   *                            and let VNC retry on its own
+   *   { status: 'unavailable' } — pool not configured / capacity full
+   */
+  wakeBrowser: protectedProcedure.mutation(async ({ ctx }) => {
+    if (!ctx.browserPool) {
+      return { status: 'unavailable' as const, reason: 'pool_disabled' };
+    }
+    try {
+      const inst = await ctx.browserPool.allocate(ctx.userId);
+      ctx.logger.info(
+        { userId: ctx.userId, cdpPort: inst.cdpPort, status: inst.status },
+        'tasks.wakeBrowser: instance ready',
+      );
+      return {
+        status: 'ready' as const,
+        cdpPort: inst.cdpPort,
+        // The SPA's VNC URL builder pulls userId off auth.me — no
+        // need to echo it back here. Returning cdpPort lets ops
+        // dashboards correlate "wake" calls with pool slots.
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      ctx.logger.warn(
+        { userId: ctx.userId, err: msg },
+        'tasks.wakeBrowser: allocate failed',
+      );
+      // PoolCapacityError surfaces the same way as a generic spawn
+      // error to the SPA — the user's recourse is identical (wait,
+      // try again later). Distinguishing them in the response would
+      // just be more cases the SPA has to switch on.
+      return { status: 'unavailable' as const, reason: msg.slice(0, 200) };
+    }
+  }),
+
   resetBrowser: protectedProcedure.mutation(async ({ ctx }) => {
     // Pool users reset their own Brave; everyone else resets the
     // shared headed singleton. peek() never allocates — we don't

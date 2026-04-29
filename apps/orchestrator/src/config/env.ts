@@ -143,14 +143,22 @@ const schema = z.object({
   /** Directory that houses per-user browser state (cookies, sessions, cache). */
   BROWSER_POOL_DIR: z.string().default('/var/lib/holaday-browsers'),
   /**
-   * Idle kill threshold. Default 30 s — task-level lifecycle, not
-   * per-user persistence. Cookies survive in BROWSER_POOL_DIR; the
-   * Brave process gets reaped quickly so a single 20-slot box can
-   * cycle through 100s of users per hour. agent-loop calls
-   * `pool.touch(userId)` every turn so an active task never trips
-   * the GC mid-flight.
+   * Idle kill threshold. Default 5 min — gives users a usable window
+   * to switch between the workbench tabs / use the panel as a remote
+   * desktop after a task ends without losing their Brave instance.
+   * Cookies survive in BROWSER_POOL_DIR regardless; the GC just
+   * cycles the live process so a single 20-slot box still serves
+   * dozens of distinct users per hour.
+   *
+   * `pool.touch(userId)` keeps the GC away from active sessions:
+   *   - agent-loop touches every turn (in-flight task)
+   *   - vnc-proxy touches every relayed frame (user actively
+   *     watching / driving the panel)
+   * 5 min is the post-disconnect grace window — gives the user time
+   * to close + reopen the panel (sleep / hibernate, switch tabs)
+   * without paying a 3-5s cold-start spawn on every return.
    */
-  BROWSER_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  BROWSER_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
   /** First port in the contiguous pool used for per-user resources.
    *  Slot i consumes display :(100+i), CDP (cdp+i), RFB (vnc+i), WS (ws+i). */
   BROWSER_CDP_PORT_START: z.coerce.number().int().positive().default(9300),

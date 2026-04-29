@@ -118,7 +118,7 @@ export function createVncProxy(opts: VncProxyOptions): VncProxy {
       wss.handleUpgrade(req, socket, head, (client) => {
         const upstreamUrl = `ws://127.0.0.1:${instance.wsPort}/`;
         const upstream = new WebSocket(upstreamUrl, ['binary']);
-        pipe(client, upstream, callerUserId, log);
+        pipe(client, upstream, callerUserId, log, opts.pool);
         opts.pool.touch(callerUserId);
       });
     }, (err: unknown) => {
@@ -185,22 +185,35 @@ function reject(socket: Duplex, status: number, reason: string): void {
  * transformation — websockify speaks binary VNC and noVNC speaks
  * binary VNC, we're just the middleman.
  *
- * touch() is called on every frame in the caller→upstream direction
- * so the pool GC doesn't reap an actively-watched session. The
- * reverse direction alone isn't enough of a signal because a stuck
- * Brave can stream its last frame for minutes.
+ * pool.touch() fires on every relayed frame (BOTH directions) at most
+ * once per TOUCH_THROTTLE_MS to keep the GC away from an actively-
+ * watched session. Throttled because RFB FramebufferUpdate frames
+ * arrive at 30+ fps under heavy paint and we don't need to write
+ * lastActiveAt that often. Without this, a user just *watching* a
+ * task (no input) would lose their browser to the 5-minute idle GC
+ * even though the pixels are flowing.
  */
+const TOUCH_THROTTLE_MS = 1_000;
+
 function pipe(
   client: WebSocket,
   upstream: WebSocket,
   userId: string,
   log: Logger,
+  pool: BrowserPool,
 ): void {
   // Don't relay frames until upstream has finished its handshake.
   // Buffer a small window in case the client races the
   // initial-RFB-VERSION bytes.
   const clientBacklog: Array<[data: Buffer, isBinary: boolean]> = [];
   let upstreamReady = false;
+  let lastTouchAt = Date.now();
+  function maybeTouch(): void {
+    const now = Date.now();
+    if (now - lastTouchAt < TOUCH_THROTTLE_MS) return;
+    lastTouchAt = now;
+    pool.touch(userId);
+  }
 
   upstream.on('open', () => {
     upstreamReady = true;
@@ -224,6 +237,7 @@ function pipe(
     if (client.readyState !== client.OPEN) return;
     const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
     client.send(buf, { binary: isBinary });
+    maybeTouch();
   });
 
   client.on('message', (data, isBinary) => {
@@ -233,6 +247,7 @@ function pipe(
       return;
     }
     upstream.send(buf, { binary: isBinary });
+    maybeTouch();
   });
 
   client.on('error', (err) => {
