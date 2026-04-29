@@ -58,7 +58,14 @@ export class PoolCapacityError extends Error {
   }
 }
 
-const GC_INTERVAL_MS = 60_000;
+/**
+ * Phase 14 audit follow-up — GC cadence dropped from 60 s to 15 s
+ * to match the new 30 s idle timeout (was 30 min). Anything longer
+ * means an idle instance lingers up to GC_INTERVAL_MS past the
+ * timeout, which on a 20-slot box would trickle into capacity
+ * pressure under burst load.
+ */
+const GC_INTERVAL_MS = 15_000;
 const KILL_GRACE_MS = 3_000;
 
 interface InFlightAllocation {

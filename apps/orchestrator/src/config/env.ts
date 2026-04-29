@@ -126,13 +126,31 @@ const schema = z.object({
    * pattern. Use a single userId during canary, then clear the var
    * to graduate everyone.
    */
+  /**
+   * Phase 14 audit follow-up — kept for backward compat with existing
+   * .env files but no longer consulted by tasks.ts (the allowlist
+   * gate was retired so every authenticated user gets a pool slot).
+   * Will be deleted in a follow-up cleanup once we're sure no
+   * external tooling reads it.
+   */
   MULTI_USER_USERS: z.string().default(''),
-  /** Hard cap on concurrent browser quartets. Each one uses ~400 MB. */
-  MAX_BROWSER_INSTANCES: z.coerce.number().int().positive().max(50).default(5),
+  /**
+   * Hard cap on concurrent browser quartets. Each one uses ~400 MB
+   * RAM. Default 20 sized for a single 8 GB VPS (≈ 8 GB / 400 MB =
+   * 20 instances). Multi-VPS scaling lifts this via env override.
+   */
+  MAX_BROWSER_INSTANCES: z.coerce.number().int().positive().max(100).default(20),
   /** Directory that houses per-user browser state (cookies, sessions, cache). */
   BROWSER_POOL_DIR: z.string().default('/var/lib/holaday-browsers'),
-  /** Idle kill threshold. Defaults to 30 min; user-data-dir is preserved. */
-  BROWSER_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(1_800_000),
+  /**
+   * Idle kill threshold. Default 30 s — task-level lifecycle, not
+   * per-user persistence. Cookies survive in BROWSER_POOL_DIR; the
+   * Brave process gets reaped quickly so a single 20-slot box can
+   * cycle through 100s of users per hour. agent-loop calls
+   * `pool.touch(userId)` every turn so an active task never trips
+   * the GC mid-flight.
+   */
+  BROWSER_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   /** First port in the contiguous pool used for per-user resources.
    *  Slot i consumes display :(100+i), CDP (cdp+i), RFB (vnc+i), WS (ws+i). */
   BROWSER_CDP_PORT_START: z.coerce.number().int().positive().default(9300),
