@@ -24,7 +24,18 @@ type Mode = 'login' | 'register' | 'emailCode' | 'forgot' | 'phone';
  * feature via `auth.loginOptions` (env-gated on GOOGLE_CLIENT_ID).
  */
 export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JSX.Element {
-  const [mode, setMode] = React.useState<Mode>(initialMode);
+  // Chinese-locale visitors default to the SMS tab — phone+code is the
+  // dominant onboarding path in mainland China; email/password feels
+  // foreign. Other locales keep the existing email/password default.
+  // The /register route still forces register mode (initialMode prop
+  // explicitly passed), so this only affects the bare /login path.
+  const [mode, setMode] = React.useState<Mode>(() => {
+    if (initialMode !== 'login') return initialMode;
+    if (typeof navigator !== 'undefined' && navigator.language?.startsWith('zh')) {
+      return 'phone';
+    }
+    return initialMode;
+  });
   const [email, setEmail] = React.useState('');
   const [phone, setPhone] = React.useState('');
   const [password, setPassword] = React.useState('');

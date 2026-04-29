@@ -466,12 +466,10 @@ export function BrowserPanel({
             <NavButton direction="back" title="后退" />
             <NavButton direction="forward" title="前进" />
             <NavButton direction="reload" title="刷新" />
-            <div
-              className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
-              title={displayUrl}
-            >
-              {displayUrl}
-            </div>
+            <UrlBar
+              displayUrl={displayUrl}
+              interactiveActive={interactiveActive}
+            />
             {isExecuting && activeTaskId && (
               <button
                 type="button"
@@ -495,10 +493,10 @@ export function BrowserPanel({
               onClick={() => setInteractive(!interactive)}
               title={
                 interactive
-                  ? '退出交互模式'
-                  : '开启交互模式 — 直接在这个浏览器里点击、滚动、输入'
+                  ? '退出接管 — 让 AI 继续操作'
+                  : '接管浏览器 — 你的鼠标键盘直接控制 Brave'
               }
-              aria-label="toggle interactive mode"
+              aria-label="toggle browser takeover"
               aria-pressed={interactive}
               className={cn(
                 'inline-flex h-6 w-6 items-center justify-center rounded-md border transition-colors',
@@ -553,8 +551,8 @@ export function BrowserPanel({
             </div>
           )}
           {interactiveActive && !fullscreen && (
-            <div className="border-b border-sky-300/60 bg-sky-50 px-3 py-1.5 text-center text-[11px] font-medium text-sky-800">
-              交互模式 · 点击 / 滚动 / 键盘输入会转发到浏览器
+            <div className="border-b border-sky-300/60 bg-sky-50 px-3 py-1.5 text-center text-[11px] font-medium text-sky-800 dark:border-sky-500/60 dark:bg-sky-500/15 dark:text-sky-100">
+              你正在直接操作浏览器 · 点工具栏的接管按钮可让 AI 继续
             </div>
           )}
           <div
@@ -975,6 +973,98 @@ function StatusDot({ status }: { status: DotStatus }): JSX.Element {
         status === 'idle' && 'bg-muted-foreground/40',
         status === 'live' && 'animate-pulse-dot bg-blue-500',
         status === 'error' && 'bg-red-500',
+      )}
+    />
+  );
+}
+
+/**
+ * Editable URL bar in the panel header. Mirrors a real browser's
+ * address bar:
+ *   - Renders the page's current URL (the prop wins on every prop
+ *     change, so the agent's own navigations land here).
+ *   - User typing replaces the displayed value locally; pressing
+ *     Enter fires `tasks.browserNav.mutate({direction:'goto', url})`
+ *     so the remote Brave navigates.
+ *   - Escape reverts the local edit to the prop value.
+ *   - Disabled appearance + cursor-not-allowed when there's no
+ *     active page — typing here would error against `no_executor`.
+ *
+ * Compact ~24 px tall to fit in the existing 44 px header next to
+ * the status dot and back/forward/reload buttons.
+ */
+function UrlBar({
+  displayUrl,
+  interactiveActive,
+}: {
+  displayUrl: string;
+  interactiveActive: boolean;
+}): JSX.Element {
+  // Local editing state. Resync to the prop whenever the agent
+  // navigates (or the user clicks back/forward) so the bar always
+  // reflects the live page url unless the user is mid-edit.
+  const [draft, setDraft] = React.useState(displayUrl);
+  const [editing, setEditing] = React.useState(false);
+  const [pending, setPending] = React.useState(false);
+  React.useEffect(() => {
+    if (!editing) setDraft(displayUrl);
+  }, [displayUrl, editing]);
+
+  const submit = async (): Promise<void> => {
+    const target = draft.trim();
+    if (!target || target === displayUrl) {
+      setEditing(false);
+      return;
+    }
+    setPending(true);
+    try {
+      const res = await trpc.tasks.browserNav.mutate({
+        direction: 'goto',
+        url: target,
+      });
+      if (!res.ok) {
+        // Soft failure: snap back. The most likely reason is
+        // `no_executor` (browser hibernated) — the panel's
+        // hibernation card / wake button is the recovery surface.
+        setDraft(displayUrl);
+      }
+    } catch {
+      setDraft(displayUrl);
+    } finally {
+      setPending(false);
+      setEditing(false);
+    }
+  };
+
+  return (
+    <input
+      type="text"
+      spellCheck={false}
+      autoComplete="off"
+      value={draft}
+      title={draft}
+      placeholder="输入 URL 回车跳转"
+      onFocus={() => setEditing(true)}
+      onBlur={() => setEditing(false)}
+      onChange={(e) => setDraft(e.target.value)}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          void submit();
+        } else if (e.key === 'Escape') {
+          setDraft(displayUrl);
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      disabled={pending}
+      aria-label="浏览器地址栏 (Enter 跳转, Esc 还原)"
+      className={cn(
+        'min-w-0 flex-1 truncate rounded-md border bg-transparent px-2 py-1 font-mono text-[11px] outline-none transition-colors',
+        'border-transparent text-muted-foreground hover:border-border hover:bg-muted/40',
+        'focus:border-foreground/20 focus:bg-background focus:text-foreground focus:ring-0',
+        interactiveActive && 'border-sky-300/40',
+        pending && 'cursor-wait opacity-60',
       )}
     />
   );

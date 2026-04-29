@@ -392,10 +392,15 @@ function AppShell(): JSX.Element {
         onNewTask={() => {
           setSelectedTask(null);
           setTimeout(() => inputRef.current?.focus(), 50);
-          // Reset Brave to about:blank so the VNC stream stops
-          // showing a stale URL from the previous task. Fire-and-
-          // forget; errors are logged server-side.
-          void trpc.tasks.resetBrowser.mutate().catch(() => {});
+          // Reset the panel by navigating Brave to Google. Doubles as
+          // a product affordance: "you're connected to the open
+          // internet through HOLA DAY" — way more inviting than
+          // about:blank for a user who just signed up. Fire-and-
+          // forget; errors are logged server-side, the user just
+          // sees the previous frame for a beat longer.
+          void trpc.tasks.browserNav
+            .mutate({ direction: 'goto', url: 'https://www.google.com' })
+            .catch(() => {});
         }}
         onDeleteTask={(taskId) => {
           // Defer the actual delete until the user confirms in the

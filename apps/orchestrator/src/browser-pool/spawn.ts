@@ -119,7 +119,7 @@ export interface SpawnBraveOptions {
   display: number;
   cdpPort: number;
   userDataDir: string;
-  /** Defaults to 1920,1080 — matches the Xvfb screen geometry. */
+  /** Defaults to 1280,800 — matches the Xvfb screen geometry. */
   windowSize?: string;
 }
 
@@ -138,7 +138,7 @@ export function spawnBrave(
   logger: Logger,
 ): SpawnedProcess {
   mkdirSync(opts.userDataDir, { recursive: true });
-  const windowSize = opts.windowSize ?? '1920,1080';
+  const windowSize = opts.windowSize ?? '1280,800';
   // Round-2 change: dropped --kiosk + --start-fullscreen + --disable-infobars.
   // Users now see Brave's normal chrome (address bar + tab bar) in the
   // VNC stream — the address bar is essential context ("what site am

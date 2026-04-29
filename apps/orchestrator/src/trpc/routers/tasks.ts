@@ -1827,7 +1827,16 @@ export const tasksRouter = router({
    * than a TRPC error banner for something as cheap as "no page yet".
    */
   browserNav: protectedProcedure
-    .input(z.object({ direction: z.enum(['back', 'forward', 'reload']) }))
+    .input(
+      z.object({
+        direction: z.enum(['back', 'forward', 'reload', 'goto']),
+        // For direction='goto': the URL to navigate to. Required for
+        // goto, ignored otherwise. Cap at 2KB to keep the request
+        // body bounded; longer URLs are almost certainly someone
+        // shoving form data into the address bar.
+        url: z.string().max(2048).optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const poolInstance =
         ctx.browserPool && shouldUseBrowserPool(ctx.userId)
@@ -1854,6 +1863,22 @@ export const tasksRouter = router({
         } else if (input.direction === 'forward') {
           const r = await page.goForward(navOpts);
           if (!r) return { ok: false as const, reason: 'no_history' };
+        } else if (input.direction === 'goto') {
+          if (!input.url) {
+            return { ok: false as const, reason: 'missing_url' };
+          }
+          // Normalise: bare hostname → https; anything else passes
+          // through. Reject schemes other than http(s) so users can't
+          // emit `javascript:` / `file:` / `data:` URLs at the remote
+          // browser via the panel address bar.
+          let target = input.url.trim();
+          if (!/^[a-z][a-z0-9+.-]*:/i.test(target)) {
+            target = `https://${target}`;
+          }
+          if (!/^https?:\/\//i.test(target)) {
+            return { ok: false as const, reason: 'bad_scheme' };
+          }
+          await page.goto(target, navOpts);
         } else {
           await page.reload(navOpts);
         }

@@ -221,17 +221,18 @@ export function InputArea({
         )}
       >
         {followUpTarget && !replyMode && (
-          <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            <span className="shrink-0 font-medium text-foreground">继续追问</span>
+          <div className="flex items-center gap-2 border-b-2 border-sky-300 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:border-sky-500 dark:bg-sky-500/15 dark:text-sky-100">
+            <span aria-hidden className="shrink-0 text-sm">↪</span>
+            <span className="shrink-0 font-semibold">追问</span>
             <span className="min-w-0 flex-1 truncate">"{followUpTarget.title}"</span>
             <button
               type="button"
               onClick={onCancelFollowUp}
               aria-label="取消追问，发新任务"
               title="取消追问，发新任务"
-              className="shrink-0 rounded px-1.5 py-0.5 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground"
+              className="shrink-0 rounded px-1.5 py-0.5 text-sky-900/70 hover:bg-sky-200 hover:text-sky-900 dark:text-sky-100/70 dark:hover:bg-sky-500/30 dark:hover:text-sky-100"
             >
-              ✕
+              ✕ 发新任务
             </button>
           </div>
         )}

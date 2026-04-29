@@ -166,14 +166,20 @@ const schema = z.object({
   BROWSER_WS_PORT_START: z.coerce.number().int().positive().default(6090),
   BROWSER_DISPLAY_START: z.coerce.number().int().nonnegative().default(100),
   /**
-   * Xvfb screen geometry. Default 1920×1080×24 (16:9) matches the
-   * vast majority of laptop / desktop browsers — the previous
-   * 1720×1440 (≈5:4) caused fat letterbox bars on every common
-   * 16:9 viewport in fullscreen panel mode (BOSS reported "两侧大量
-   * 留白"). Brave inside the Xvfb sees the same size + auto-fills
-   * via --window-size + --start-maximized in spawn.ts.
+   * Xvfb screen geometry. Default 1280×800×24 (16:10) — sized so the
+   * non-fullscreen side panel (~600 px wide) renders Brave at
+   * roughly half scale, where text remains readable. Previously
+   * 1920×1080 forced noVNC's scaleViewport to compress 1920 px of
+   * remote width into ~600 px of local width = 0.31× scale, making
+   * 14 px Chinese text render at ~4 px (illegible). 1280 width
+   * scales to ~0.47× in the panel which keeps 12 px+ readable.
+   *
+   * Fullscreen panel users see a slightly upscaled canvas (good
+   * enough for "remote desktop" feel; sharper than 1920 letterboxed
+   * on 16:9). For users who genuinely need 1920×1080 (large
+   * external displays), override the env var.
    */
-  BROWSER_SCREEN_SIZE: z.string().default('1920x1080x24'),
+  BROWSER_SCREEN_SIZE: z.string().default('1280x800x24'),
 
   /**
    * Phase 10 Tier 1 — Agent intelligence upgrade master switch. When
