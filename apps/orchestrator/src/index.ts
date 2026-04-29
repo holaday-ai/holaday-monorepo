@@ -9,7 +9,6 @@ import { AnthropicPlanner } from './agent/planners/anthropic.js';
 import { StubPlanner } from './agent/planners/stub.js';
 import {
   createApifyAdapter,
-  createBraveSearchAdapter,
   createExecutionRouter,
   createZapierAdapter,
   type ExecutionRouter,
@@ -117,21 +116,21 @@ async function main() {
     logger.info('HEADED_CDP_ENDPOINT unset — Lane 2 disabled');
   }
 
-  // --- Lanes 3/4/5: adapter stubs. Each one becomes a functional lane
+  // --- Lanes 4/5: adapter stubs. Each one becomes a functional lane
   // the moment its API key lands in .env. Missing key → adapter null →
   // router reports 'unavailable' and the lane is silently skipped.
-  const braveAdapter = createBraveSearchAdapter(process.env.BRAVE_API_KEY ?? null);
+  // (Lane 3 / Brave Search retired — search now goes through Anthropic's
+  // built-in web_search_20260209 tool inside the model loop.)
   const zapierAdapter = createZapierAdapter(process.env.ZAPIER_API_KEY ?? null);
   const apifyAdapter = createApifyAdapter(process.env.APIFY_API_TOKEN ?? null);
 
   const executionRouter: ExecutionRouter = createExecutionRouter({
     headless: playwrightExecutor,
     headed: headedExecutor,
-    brave: braveAdapter,
     zapier: zapierAdapter,
     apify: apifyAdapter,
   });
-  for (const lane of ['headless', 'headed', 'brave', 'zapier', 'apify'] as const) {
+  for (const lane of ['headless', 'headed', 'zapier', 'apify'] as const) {
     const status = executionRouter.status(lane);
     logger.info(
       { lane, status },

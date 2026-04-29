@@ -28,9 +28,10 @@ describe('classifyAsSimpleSearch', () => {
   describe('should NOT classify as simple search — "打开/访问/前往 X" navigation intents', () => {
     // Phase 14 audit — these should fall through to the agent loop
     // so the model can call the `navigate` tool. If they ever start
-    // matching simple-search, the Brave fast lane would intercept
-    // and return text search results instead of opening the page,
-    // which is precisely the "打开 Google 失败" symptom BOSS hit.
+    // matching simple-search, tasks.ts would skip the planner step
+    // (skipPlan = isSimpleSearchIntent || ...) and the agent could
+    // misroute to web_search instead of opening the page, which is
+    // precisely the "打开 Google 失败" symptom BOSS hit.
     it.each([
       '打开 Google',
       '打开 google.com',

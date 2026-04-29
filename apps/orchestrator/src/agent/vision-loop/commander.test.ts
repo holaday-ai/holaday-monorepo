@@ -213,7 +213,10 @@ describe('AnthropicVisionLoopCommander.decideNextAction', () => {
     const decision = await c.decideNextAction(await freshContext());
     expect(decision.action.kind).toBe('give_up');
     if (decision.action.kind === 'give_up') {
-      expect(decision.action.reason).toMatch(/network timeout/);
+      // After the error-translator wiring, technical strings like
+      // "network timeout" are mapped to a Chinese user-facing
+      // message. The raw English no longer appears in the reason.
+      expect(decision.action.reason).toMatch(/网络连接超时/);
     }
     // Usage zeros on error — we didn't successfully bill any tokens.
     expect(decision.inputTokens).toBe(0);
@@ -570,7 +573,10 @@ describe('AnthropicVisionLoopCommander.decideNextActionAccessibility', () => {
     const decision = await c.decideNextActionAccessibility(freshA11yContext());
     expect(decision.action.kind).toBe('give_up');
     if (decision.action.kind === 'give_up') {
-      expect(decision.action.reason).toMatch(/Anthropic API error.*simulated 429/);
+      // Translated by error-translator: "simulated 429" is not a
+      // recognised pattern, so it falls through to the generic
+      // friendly fallback.
+      expect(decision.action.reason).toMatch(/任务执行中遇到了问题/);
     }
   });
 

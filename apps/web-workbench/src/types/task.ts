@@ -144,6 +144,14 @@ export interface UiWebSearchEvent {
   iteration: number;
   query: string;
   at: number;
+  /**
+   * Search-engine sources Claude saw for this query. Backend extracts
+   * these from `web_search_tool_result` content blocks and attaches
+   * to the event. Optional because they only land after the API
+   * returns the result block (which may arrive a beat after the
+   * `web_search` server_tool_use event itself).
+   */
+  sources?: ReadonlyArray<{ title: string; url: string; snippet?: string }>;
 }
 
 /**

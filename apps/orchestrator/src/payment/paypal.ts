@@ -15,8 +15,7 @@
  *   The official `@paypal/checkout-server-sdk` is unmaintained (last
  *   release 2021) and bloats the install with axios + promise polyfills.
  *   The v2 REST API is small enough to call directly — same pattern
- *   we use for Brave (apps/orchestrator/src/agent/supercar/adapters/
- *   brave-search.ts) and Resend (apps/orchestrator/src/auth/email-code.ts).
+ *   we use for Resend (apps/orchestrator/src/auth/email-code.ts).
  *
  * Env switches:
  *   PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET — required to construct.
@@ -68,8 +67,8 @@ const LIVE_BASE = 'https://api-m.paypal.com';
 
 /**
  * Construct a PayPal adapter, or null when credentials aren't set.
- * Mirrors createBraveSearchAdapter / createResendSender — keeps the
- * boot sequence "feature on/off" check in a single boolean.
+ * Mirrors createResendSender — keeps the boot sequence "feature
+ * on/off" check in a single boolean.
  */
 export function createPayPalAdapter(opts: {
   clientId: string | null;

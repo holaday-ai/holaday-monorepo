@@ -24,11 +24,6 @@ export {
   type TaskSignals,
 } from './execution-router.js';
 export {
-  createBraveSearchAdapter,
-  type BraveSearchAdapter,
-  type BraveSearchResult,
-} from './adapters/brave-search.js';
-export {
   createZapierAdapter,
   type ZapierAdapter,
   type ZapierTriggerResult,

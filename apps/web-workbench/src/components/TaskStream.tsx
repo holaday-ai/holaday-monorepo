@@ -17,6 +17,7 @@ import remarkGfm from 'remark-gfm';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
 import { PlanCard } from '@/components/PlanCard';
+import { SearchResultCard } from '@/components/SearchResultCard';
 import { StepCard } from '@/components/StepCard';
 import { useTaskStore } from '@/stores/task-store';
 import { cn } from '@/lib/utils';
@@ -416,17 +417,25 @@ function CurrentUrlChip({ url }: { url: string }): JSX.Element | null {
 }
 
 /**
- * Inline "正在搜索 …" line for web_search events. Small on purpose —
- * search iterations are usually quick and we don't want them to push
- * the primary step stream around.
+ * Inline "正在搜索 …" line for web_search events. When the event
+ * carries `sources` (extracted from Anthropic's web_search_tool_result
+ * block), the cards render below the query line so the user can see
+ * exactly which pages Claude pulled from.
  */
 function WebSearchLine({ event }: { event: UiWebSearchEvent }): JSX.Element {
   return (
-    <div className="flex items-start gap-2 text-sm leading-relaxed text-muted-foreground">
-      <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-500" />
-      <span className="min-w-0 flex-1">
-        正在联网搜索 <span className="text-foreground">"{event.query}"</span>
-      </span>
+    <div className="flex flex-col gap-1">
+      <div className="flex items-start gap-2 text-sm leading-relaxed text-muted-foreground">
+        <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-500" />
+        <span className="min-w-0 flex-1">
+          正在联网搜索 <span className="text-foreground">"{event.query}"</span>
+        </span>
+      </div>
+      {event.sources && event.sources.length > 0 && (
+        <div className="ml-5">
+          <SearchResultCard sources={event.sources} />
+        </div>
+      )}
     </div>
   );
 }

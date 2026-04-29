@@ -587,7 +587,12 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       set((prev) => ({
         webSearchByTask: {
           ...prev.webSearchByTask,
-          [msg.taskId]: { iteration: msg.iteration, query: msg.query, at: Date.now() },
+          [msg.taskId]: {
+            iteration: msg.iteration,
+            query: msg.query,
+            at: Date.now(),
+            ...(msg.sources && msg.sources.length > 0 ? { sources: msg.sources } : {}),
+          },
         },
       }));
       return;

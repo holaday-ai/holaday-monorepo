@@ -374,18 +374,6 @@ export const tasksRouter = router({
     // Compute these once — used both by the diagnostic log AND by the
     // gate. Hoisting them up avoids re-classifying the intent twice.
     const isSimpleSearchIntent = classifyAsSimpleSearch(input.intent);
-    const braveAdapterReady = Boolean(ctx.executionRouter?.brave);
-    /**
-     * Brave-only fast lane: simple-search intents (price compare /
-     * fact lookup / SERP-ish queries) short-circuit through Brave at
-     * agent-loop.ts:299 BEFORE any browser tool call. So even when
-     * the headless singleton is down (Brave crashed, dbus dead,
-     * connect-on-boot failed), we can still serve these tasks via
-     * Brave alone. The supercar gate below admits them on this
-     * ticket; runSupercarTask's null-executor guard handles the
-     * Brave-empty edge case.
-     */
-    const canShortCircuitBrave = isSimpleSearchIntent && braveAdapterReady;
     /**
      * Per-user pool fast lane: when the global headless singleton is
      * dead but this user has (or can spawn) their own pool slot, we
@@ -395,9 +383,9 @@ export const tasksRouter = router({
      * branch and may fail under race (Brave crash mid-spawn). When
      * it does, primaryExecutor stays null and runSupercarTask's null
      * guard fails the task gracefully — the gate doesn't have to
-     * second-guess. Without this third condition, every PRD / 笔记
-     * / 分析 task fell through to vision-loop the moment the
-     * singleton crashed, defeating Phase 8 + Phase 10 entirely.
+     * second-guess. Without this condition, every PRD / 笔记 / 分析
+     * task fell through to vision-loop the moment the singleton
+     * crashed, defeating Phase 8 + Phase 10 entirely.
      */
     const browserPoolEligible = Boolean(
       ctx.browserPool &&
@@ -405,10 +393,9 @@ export const tasksRouter = router({
         ctx.browserPool.canAllocate(ctx.userId),
     );
 
-    // Diagnostic (temporary, Round-4): log the supercar-gate inputs on
-    // every tasks.create so BOSS can tell from pm2 logs exactly why a
-    // task fell into the legacy branch. Happens BEFORE the gate so
-    // the log always lands, regardless of which path is taken.
+    // Diagnostic: log the supercar-gate inputs on every tasks.create
+    // so BOSS can tell from pm2 logs exactly why a task fell into the
+    // legacy branch. Happens BEFORE the gate so the log always lands.
     ctx.logger.info(
       {
         gate: 'supercar-vs-legacy',
@@ -416,13 +403,11 @@ export const tasksRouter = router({
         playwrightExecutorPresent: Boolean(ctx.playwrightExecutor),
         anthropicKeyPresent: Boolean(appEnv.ANTHROPIC_API_KEY),
         isSimpleSearchIntent,
-        braveAdapterReady,
-        canShortCircuitBrave,
         browserPoolEligible,
         willUseSupercar:
           appEnv.AGENT_MODE === 'supercar' &&
           Boolean(appEnv.ANTHROPIC_API_KEY) &&
-          (Boolean(ctx.playwrightExecutor) || canShortCircuitBrave || browserPoolEligible),
+          (Boolean(ctx.playwrightExecutor) || browserPoolEligible),
       },
       'tasks.create: control-plane decision',
     );
@@ -432,27 +417,21 @@ export const tasksRouter = router({
     // adaptive thinking + prompt caching. This is the default starting
     // with the superstar rewrite; flip AGENT_MODE=legacy to fall back
     // to the hand-rolled vision-loop.
-    //
-    // Browser requirement is conditional: simple-search tasks can
-    // ride the Brave fast lane without one (canShortCircuitBrave),
-    // so the legacy vision-loop fall-through is no longer triggered
-    // every time the headless singleton dies — Brave handles the
-    // common "对比京东淘宝" / "查 X 价格" intents standalone.
     if (
       appEnv.AGENT_MODE === 'supercar' &&
       appEnv.ANTHROPIC_API_KEY &&
-      (ctx.playwrightExecutor || canShortCircuitBrave || browserPoolEligible)
+      (ctx.playwrightExecutor || browserPoolEligible)
     ) {
       const taskId = newExternalId('task');
       const repo = new TaskRepository(ctx.db);
 
       // Phase 13 Dim 1 — first-frame plan. Skipped for simple-search
-      // (Brave fast-lane handles them), trivial intents, and any
-      // intent shorter than 8 chars. Plan failures are non-fatal —
-      // generatePlan returns { planText: null, planStatus: null }
-      // and the loop continues without one. Run in parallel with
-      // memory retrieval below to keep the tasks.create RTT close
-      // to its pre-Phase-13 footprint.
+      // (the model's web_search tool handles those in one shot),
+      // trivial intents, and any intent shorter than 8 chars. Plan
+      // failures are non-fatal — generatePlan returns { planText:
+      // null, planStatus: null } and the loop continues without one.
+      // Run in parallel with memory retrieval below to keep the
+      // tasks.create RTT close to its pre-Phase-13 footprint.
       const skipPlan = isSimpleSearchIntent || shouldSkipPlan(input.intent);
       const memoryService = new MemoryService(ctx.db, ctx.logger);
       const [planResult, relevantMemories] = await Promise.all([
@@ -764,7 +743,6 @@ export const tasksRouter = router({
               : primaryExecutor === headedExec
                 ? headlessExec ?? null
                 : null,
-          braveAdapter: ctx.executionRouter?.brave ?? null,
           zapierAdapter: ctx.executionRouter?.zapier ?? null,
           apifyAdapter: ctx.executionRouter?.apify ?? null,
           isSimpleSearch: isSimpleSearchIntent,
@@ -897,13 +875,16 @@ export const tasksRouter = router({
           onWebSearch(ev) {
             // Broadcasts as a synthetic tick so the UI shows a step
             // card for the search. No screencast — web_search is
-            // server-side and has no DOM to capture.
+            // server-side and has no DOM to capture. Sources (when
+            // present) are forwarded so the SearchResultCard can
+            // render favicon + title + snippet rows.
             try {
               broadcastToUser(userId, {
                 type: 'server.supercar.web_search',
                 taskId,
                 iteration: ev.iteration,
                 query: ev.query,
+                ...(ev.sources && ev.sources.length > 0 ? { sources: ev.sources } : {}),
               });
             } catch (err) {
               ctx.logger.warn({ err, taskId }, 'supercar: broadcast web_search failed');

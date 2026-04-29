@@ -1,5 +1,5 @@
 /**
- * ExecutionRouter — 5-lane priority router for supercar tasks.
+ * ExecutionRouter — 4-lane priority router for supercar tasks.
  *
  * Decides which execution path a given set of TaskSignals should use.
  * Pure function: `route()` takes signals in, returns a lane id out. No
@@ -8,15 +8,14 @@
  * are trivially re-runnable and diff-able across a task's lifetime.
  *
  * Lane priority (first match wins):
- *   1. brave    — simple search intent AND brave adapter ready
- *   2. zapier   — cross-platform automation intent AND zapier adapter ready
- *   3. headed   — high-confidence anti-bot signal AND headed executor ready
- *   4. apify    — stuckCount ≥ 3 AND the task has a registered actor
+ *   1. zapier   — cross-platform automation intent AND zapier adapter ready
+ *   2. headed   — high-confidence anti-bot signal AND headed executor ready
+ *   3. apify    — stuckCount ≥ 3 AND the task has a registered actor
  *                 AND apify adapter ready
- *   5. headed   — stuckCount ≥ 6 AND headed executor ready
+ *   4. headed   — stuckCount ≥ 6 AND headed executor ready
  *                 (last-gasp swap if the headless primary keeps stalling
  *                 even without an explicit anti-bot marker)
- *   6. headless — default: the fast, cheap primary browser
+ *   5. headless — default: the fast, cheap primary browser
  *
  * When the preferred lane is 'unavailable' the router falls through to
  * the next candidate — never returns an unavailable lane — so callers
@@ -27,14 +26,16 @@
  * router's fallback chain guarantees `route()` always returns a lane
  * the caller can actually use (at minimum headless, assuming the
  * default Chromium process is up).
+ *
+ * Lane 3 (Brave Search API) was retired — simple-search intents now
+ * stay in the model loop and use Anthropic's built-in web_search tool.
  */
 
 import type { PlaywrightExecutor } from '../vision-loop/playwright-executor.js';
-import type { BraveSearchAdapter } from './adapters/brave-search.js';
 import type { ZapierAdapter } from './adapters/zapier.js';
 import type { ApifyAdapter } from './adapters/apify.js';
 
-export type LaneId = 'headless' | 'headed' | 'brave' | 'zapier' | 'apify';
+export type LaneId = 'headless' | 'headed' | 'zapier' | 'apify';
 export type LaneStatus = 'ready' | 'unavailable';
 
 export interface TaskSignals {
@@ -60,7 +61,6 @@ export interface ExecutionRouter {
   /** Return the executor for a browser lane, or null for the non-browser lanes. */
   getExecutor(lane: LaneId): PlaywrightExecutor | null;
   /** Access adapters directly when short-circuiting past the loop. */
-  readonly brave: BraveSearchAdapter | null;
   readonly zapier: ZapierAdapter | null;
   readonly apify: ApifyAdapter | null;
 }
@@ -68,7 +68,6 @@ export interface ExecutionRouter {
 export interface ExecutionRouterDeps {
   readonly headless: PlaywrightExecutor | null;
   readonly headed: PlaywrightExecutor | null;
-  readonly brave: BraveSearchAdapter | null;
   readonly zapier: ZapierAdapter | null;
   readonly apify: ApifyAdapter | null;
 }
@@ -80,8 +79,6 @@ export function createExecutionRouter(deps: ExecutionRouterDeps): ExecutionRoute
         return deps.headless ? 'ready' : 'unavailable';
       case 'headed':
         return deps.headed ? 'ready' : 'unavailable';
-      case 'brave':
-        return deps.brave ? 'ready' : 'unavailable';
       case 'zapier':
         return deps.zapier ? 'ready' : 'unavailable';
       case 'apify':
@@ -101,18 +98,15 @@ export function createExecutionRouter(deps: ExecutionRouterDeps): ExecutionRoute
   }
 
   function route(signals: TaskSignals): LaneId {
-    // 1. Brave for pure info queries — fastest path, zero browser cost.
-    if (signals.isSimpleSearch && status('brave') === 'ready') return 'brave';
-
-    // 2. Zapier for "trigger a workflow on another platform" intents.
+    // 1. Zapier for "trigger a workflow on another platform" intents.
     if (signals.isCrossPlatformAutomation && status('zapier') === 'ready') return 'zapier';
 
-    // 3. Explicit anti-bot signal — jump straight to headed browser if
+    // 2. Explicit anti-bot signal — jump straight to headed browser if
     //    we have one; headed has real fingerprint + GPU context that
     //    bypasses most of the cheap "no DOM text" server-side walls.
     if (signals.antiBotHigh && status('headed') === 'ready') return 'headed';
 
-    // 4. Stuck + there's a pre-built Apify actor for this domain.
+    // 3. Stuck + there's a pre-built Apify actor for this domain.
     //    This is the pragmatic "let a maintained scraper do it" path —
     //    for sites like Xiaohongshu / Douyin / Boss直聘 where even the
     //    headed browser gets served blank.
@@ -120,12 +114,12 @@ export function createExecutionRouter(deps: ExecutionRouterDeps): ExecutionRoute
       return 'apify';
     }
 
-    // 5. Last-gasp headed swap when the primary has stalled enough that
+    // 4. Last-gasp headed swap when the primary has stalled enough that
     //    it's probably not coming back. Threshold kept above
     //    STUCK_WARN_THRESHOLD (6) in agent-loop so we try retries first.
     if (signals.stuckCount >= 6 && status('headed') === 'ready') return 'headed';
 
-    // 6. Default lane — the headless primary.
+    // 5. Default lane — the headless primary.
     return fallbackBrowser();
   }
 
@@ -139,7 +133,6 @@ export function createExecutionRouter(deps: ExecutionRouterDeps): ExecutionRoute
     status,
     route,
     getExecutor,
-    brave: deps.brave,
     zapier: deps.zapier,
     apify: deps.apify,
   };

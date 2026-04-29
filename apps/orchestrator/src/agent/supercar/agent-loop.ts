@@ -41,8 +41,9 @@ import type { PageLike, PlaywrightExecutor } from '../vision-loop/playwright-exe
 import { logger } from '../../config/logger.js';
 import type { DomainName } from '../vision-loop/domain/classifier.js';
 import type { ApifyAdapter } from './adapters/apify.js';
-import type { BraveSearchAdapter } from './adapters/brave-search.js';
 import type { ZapierAdapter } from './adapters/zapier.js';
+import { translateError } from '../error-translator.js';
+import { classifyTaskType, filterTools } from '../tool-registry.js';
 import {
   classifyRole,
   getTaskBudget,
@@ -124,6 +125,13 @@ export interface SupercarAwaitingUserEvent {
 export interface SupercarWebSearchEvent {
   iteration: number;
   query: string;
+  /**
+   * Sources Anthropic returned for this query. Extracted from the
+   * paired `web_search_tool_result` content block. Empty array if
+   * the result block didn't ship sources (e.g. Anthropic returned an
+   * error result for safe-search reasons).
+   */
+  sources?: Array<{ title: string; url: string; snippet?: string }>;
 }
 
 export interface SupercarScreencastEvent {
@@ -159,11 +167,8 @@ export interface RunSupercarOptions {
   /** Free-form user intent — the first user message. */
   intent: string;
   /**
-   * Connected Playwright executor. Nullable to support the
-   * Brave-only fast lane: simple-search tasks short-circuit at line
-   * 299 without ever touching a browser, so we accept the call even
-   * when the headless singleton is dead. The model loop below the
-   * Brave block guards against null and fails the task with a clear
+   * Connected Playwright executor. Nullable: when null and no other
+   * lane handles the task, runSupercarTask fails fast with a clear
    * reason rather than crashing on `executor.observe()`.
    */
   executor: PlaywrightExecutor | null;
@@ -209,8 +214,6 @@ export interface RunSupercarOptions {
    * one swap per task; swapping back is not supported.
    */
   headedExecutor?: PlaywrightExecutor | null;
-  /** Brave Search adapter (Lane 3). When provided AND the simple-search classifier matched, the loop short-circuits before the first API call. */
-  braveAdapter?: BraveSearchAdapter | null;
   /** Zapier adapter (Lane 4). When provided AND the intent looks like a workflow trigger, the loop short-circuits. */
   zapierAdapter?: ZapierAdapter | null;
   /**
@@ -219,7 +222,11 @@ export interface RunSupercarOptions {
    * to the actor and folds the scraped items into the summary.
    */
   apifyAdapter?: ApifyAdapter | null;
-  /** Simple-search classifier output. Drives the Brave short-circuit. */
+  /**
+   * Simple-search classifier output. Used today only as input to the
+   * `skipPlan` decision in tasks.ts (no Brave fast lane any more —
+   * search now goes through the model's web_search tool inside the loop).
+   */
   isSimpleSearch?: boolean;
   /** Cross-platform-automation classifier output. Drives the Zapier short-circuit. */
   isCrossPlatformAutomation?: boolean;
@@ -386,9 +393,8 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   }
 
   // Phase 10 Tier 1 — visibility log up-front. Fires for EVERY supercar
-  // entry, including ones that exit via the Brave / Zapier short-circuits
-  // below before the model loop ever runs. Without it the routing
-  // decision is invisible whenever Brave handles the task.
+  // entry, including ones that exit via the Zapier short-circuit
+  // below before the model loop ever runs.
   const tier1Diag = appEnv.PHASE10_TIER1;
   if (tier1Diag) {
     // Honour the gated role override here too — the diag log should
@@ -413,98 +419,26 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // ---------------------------------------------------------------
   // Phase 6-2: non-browser lane short-circuits (before any model call)
   // ---------------------------------------------------------------
-  // Lane 3 — Brave. Pure info queries never need a browser; pipe the
-  // SERP through a single Claude synthesis call and return a concise
-  // answer. Round-2b change: we no longer dump 10 links as markdown —
-  // BOSS flagged that output as "搜索结果堆给用户" noise. One small
-  // Haiku-tier synthesis gives prose output with only the links it
-  // actually cited, comparable to what the browser loop would emit.
-  // Diagnostic: always log which decision we took here. When BOSS
-  // sees a "simple search" task take the browser path, the first
-  // question is "did classifyAsSimpleSearch fire?" and this log line
-  // answers it without requiring a separate reproduction.
+  // Diagnostic: log routing inputs once per entry so BOSS can correlate
+  // pm2 logs to which lane handled the task.
   logger.info(
     {
       taskId: opts.taskId,
       isSimpleSearch: Boolean(opts.isSimpleSearch),
-      braveAdapterPresent: Boolean(opts.braveAdapter),
       intentPreview: opts.intent.slice(0, 80),
     },
     'supercar: routing decision',
   );
-  // Phase 10 Tier 3 — file attachments disable Brave / Zapier fast
-  // lanes. The whole point of attaching a file is for the agent to
-  // read it; short-circuiting through a search synthesis throws the
-  // attachment away and produces "我没有访问附件的能力" replies.
-  // Forcing the model loop ensures the attachment blocks reach the
-  // first user message.
+  // Phase 10 Tier 3 — file attachments disable the Zapier fast lane.
+  // The whole point of attaching a file is for the agent to read it;
+  // short-circuiting through a webhook trigger throws the attachment
+  // away. Forcing the model loop ensures the attachment blocks reach
+  // the first user message.
   const hasAttachments = (opts.attachments?.length ?? 0) > 0;
-  // Same carve-out for file-generation intents: the model needs to
-  // reach the loop so create_file can fire. classifyAsSimpleSearch
-  // matches on "导出"/"CSV"/"价格" tokens that legitimate file-export
-  // requests also contain ("把销售数据导出成 CSV"), so the classifier
-  // alone can't distinguish. We re-check intent for export keywords
-  // here when create_file is wired — if both true, take the loop.
-  const looksLikeFileExport =
-    (opts.createFileFormats?.length ?? 0) > 0 &&
-    /(导出|生成|保存为|另存为|输出.*文件|create[_\s-]?file|export\s+(?:to|as)|save\s+as|generate\s+(?:a\s+)?(?:csv|xlsx|pdf|docx?|pptx?|excel|word|powerpoint))/i.test(
-      opts.intent,
-    );
-  if (
-    opts.isSimpleSearch &&
-    opts.braveAdapter &&
-    !hasAttachments &&
-    !looksLikeFileExport
-  ) {
-    const braveStart = Date.now();
-    const r = await opts.braveAdapter.search(opts.intent, 10);
-    if ('results' in r && r.results.length > 0) {
-      logger.info(
-        { taskId: opts.taskId, lane: 'brave', count: r.results.length },
-        'supercar: short-circuit via Brave Search',
-      );
-      const synthesized = await synthesizeBraveResults({
-        apiKey,
-        intent: opts.intent,
-        results: r.results,
-        model: opts.model ?? process.env.SUPERCAR_MODEL ?? 'claude-sonnet-4-6',
-        logger,
-        taskId: opts.taskId,
-      });
-      // Phase 13 Dim 6 — stat the lane outcome. Best-effort; sink
-      // swallows its own errors.
-      void opts.onStatsRecord?.({
-        laneUsed: 'brave_api',
-        targetSite: 'brave_search',
-        success: true,
-        latencyMs: Date.now() - braveStart,
-        errorType: null,
-      });
-      return {
-        status: 'completed',
-        summary: synthesized,
-        iterations: 1,
-        toolsUsed: ['brave_search'],
-      };
-    }
-    // Fall through to browser path on empty / error. Surface the
-    // exact reason at warn level — BOSS needs this to tell "Brave
-    // was rate-limited" apart from "classifier didn't match".
-    logger.warn(
-      {
-        taskId: opts.taskId,
-        err: 'error' in r ? r.error : null,
-        resultCount: 'results' in r ? r.results.length : 0,
-        intent: opts.intent,
-      },
-      'supercar: Brave returned no usable output — falling through to browser',
-    );
-  }
 
   // Lane 4 — Zapier. Only triggers when the caller supplied BOTH the
   // classifier match AND an explicit webhook path; we don't guess
   // routes. The hook returns a run id the user can track in Zapier.
-  // Same attachment carve-out as the Brave lane above.
   if (
     opts.isCrossPlatformAutomation &&
     opts.zapierAdapter &&
@@ -543,20 +477,17 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // Past every non-browser short-circuit. Anything below this point
   // dispatches tool calls against `executor`, so a null one is fatal
   // — fail the task with a clear reason rather than crash on the
-  // first `executor.observe()`. Reaching here with no executor means
-  // a simple-search task arrived via the relaxed tasks.ts gate, the
-  // Brave fast lane returned empty/error, and the legacy headless
-  // singleton is also down — there is no browser to fall back to.
+  // first `executor.observe()`.
   if (!opts.executor) {
     logger.warn(
       { taskId: opts.taskId, isSimpleSearch: Boolean(opts.isSimpleSearch) },
-      'supercar: no executor available after non-browser short-circuits — failing task',
+      'supercar: no executor available — failing task',
     );
     return {
       status: 'failed',
-      reason: 'browser unavailable (Brave/Chromium down) and Brave Search fallback returned no usable results',
+      reason: '浏览器暂时不可用，请稍后再试。',
       iterations: 0,
-      toolsUsed: opts.isSimpleSearch ? ['brave_search'] : [],
+      toolsUsed: [],
     };
   }
 
@@ -583,8 +514,8 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   const maxTokens = model === 'claude-opus-4-7' ? 8192 : 8192;
   // Note: the routing decision is logged earlier (right after the
   // ANTHROPIC_API_KEY check) under 'supercar: model + role routing'
-  // so it's visible even when Brave / Zapier short-circuit before
-  // the model loop runs. No need to log again here.
+  // so it's visible even when Zapier short-circuits before the model
+  // loop runs. No need to log again here.
   const maxIterations =
     opts.maxIterations ?? Number.parseInt(process.env.SUPERCAR_MAX_ITERATIONS ?? '50', 10);
   const timeoutMs =
@@ -826,6 +757,13 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             }
           : null;
 
+        // Tool whitelist: filter the inline beta tool array by the
+        // task type's registry. Today supercar always runs hybrid
+        // (browser + web_search), so every tool below survives — but
+        // when the registry adds new task types, the filter will
+        // gate accordingly. BANNED_TOOLS (bash, shell, ...) can never
+        // reach the model regardless of how the array was assembled.
+        const supercarTaskType = classifyTaskType(opts.intent);
         const buildApiCall = () => client.beta.messages.create({
           model,
           max_tokens: maxTokens,
@@ -841,7 +779,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             },
           ],
           messages,
-          tools: [
+          tools: filterTools([
             {
               type: 'computer_20251124',
               name: 'computer',
@@ -917,7 +855,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                   },
                 ]
               : []),
-          ] as Anthropic.Beta.BetaToolUnion[],
+          ], supercarTaskType) as Anthropic.Beta.BetaToolUnion[],
           betas,
           thinking: { type: 'adaptive' },
           // Phase 10 Tier 1: opt into server-side compaction so long
@@ -960,11 +898,17 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             ? 'supercar: api call timed out twice — failing task'
             : 'supercar: messages.create threw',
         );
+        // User-facing reason goes through translateError so technical
+        // strings ("Anthropic API error: 400 invalid_request_error",
+        // "ETIMEDOUT") never reach the SSE stream / task summary.
+        // Original message is preserved in the logger.error above for
+        // ops debugging.
+        const friendly = isTimeout
+          ? '请求处理时间过长，正在重试。'
+          : translateError(message, opts.intent);
         return {
           status: 'failed',
-          reason: isTimeout
-            ? `iteration ${iteration}: API call timed out twice (${API_TIMEOUT_MS}ms each)`
-            : `Anthropic API error: ${message}`,
+          reason: friendly,
           iterations: iteration,
           toolsUsed: Array.from(toolsUsed),
         };
@@ -1070,7 +1014,11 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           toolsUsed.add(serverUse.name);
           if (serverUse.name === 'web_search') {
             const query = (serverUse.input as { query?: string } | null)?.query ?? '';
-            await safeCall(opts.onWebSearch, { iteration, query });
+            // Extract sources from the matching web_search_tool_result
+            // block in the SAME response.content array — Anthropic
+            // emits them paired (server_tool_use → web_search_tool_result).
+            const sources = extractWebSearchSources(response.content, serverUse.id);
+            await safeCall(opts.onWebSearch, { iteration, query, sources });
           }
         }
       }
@@ -2006,6 +1954,41 @@ async function safeCall<T>(fn: ((ev: T) => void | Promise<void>) | undefined, ev
  * page and is always short. Returns empty string (not null) on any
  * failure so the caller's `if (snapshotText)` branch fails open.
  */
+/**
+ * Walk a response.content array and find the web_search_tool_result
+ * block paired with the given server_tool_use id, returning a flat
+ * `{ title, url, snippet? }[]` for the UI. Anthropic's beta types for
+ * search results are loose; this duck-types every candidate field.
+ *
+ * Returns an empty array when no result block matches OR when the
+ * matching block carries an error / no usable entries. Never throws.
+ */
+function extractWebSearchSources(
+  content: ReadonlyArray<unknown>,
+  serverUseId: string,
+): Array<{ title: string; url: string; snippet?: string }> {
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue;
+    const b = block as { type?: string; tool_use_id?: string; content?: unknown };
+    if (b.type !== 'web_search_tool_result') continue;
+    if (b.tool_use_id !== serverUseId) continue;
+    const items = Array.isArray(b.content) ? b.content : [];
+    const out: { title: string; url: string; snippet?: string }[] = [];
+    for (const item of items) {
+      if (!item || typeof item !== 'object') continue;
+      const r = item as { type?: string; title?: string; url?: string; snippet?: string };
+      if (r.type !== 'web_search_result') continue;
+      const url = typeof r.url === 'string' ? r.url.trim() : '';
+      const title = typeof r.title === 'string' ? r.title.trim() : '';
+      if (!url || !title) continue;
+      const snippet = typeof r.snippet === 'string' ? r.snippet.trim() : undefined;
+      out.push(snippet ? { title, url, snippet } : { title, url });
+    }
+    return out;
+  }
+  return [];
+}
+
 async function readPageText(executor: PlaywrightExecutor): Promise<string> {
   try {
     const page = (await executor.getPage()) as unknown as {
@@ -2030,163 +2013,6 @@ async function readPageText(executor: PlaywrightExecutor): Promise<string> {
   } catch {
     return '';
   }
-}
-
-/**
- * Feed Brave Search hits to Claude and return a tight prose answer.
- *
- * Round-2b output-quality fix. The prior behaviour dumped all 10
- * hits verbatim as a numbered list — readable for a developer, but
- * BOSS read it as "系统把搜索结果抛回来了". Claude synthesises:
- * a two-to-four-sentence answer in Chinese, with at most the two
- * or three citations it actually used rendered as
- * `[网站名](URL)` inline. Upstream cost is one Sonnet call of
- * ~600 input / 200 output tokens — the single call replaces
- * the 30+ browser iterations this shortcut was designed to skip,
- * so it's still net cheaper than the browser path.
- *
- * Fails soft: on Anthropic error we fall back to a compact
- * markdown list so the user always gets SOMETHING. The fallback
- * is shorter (top-5 hits, no snippets) than the old raw dump.
- */
-/**
- * Strip HTML tags + decode the handful of entities Brave actually
- * emits in titles/snippets (`<strong>` for hit highlighting,
- * `&amp;` / `&quot;` etc.). Brave returns highlighted snippets as
- * raw HTML; if we feed those verbatim to Sonnet, the model sometimes
- * echoes the tags into its synthesis output and the user sees raw
- * `<strong>` text. Killing the tags at the input layer is the only
- * truly reliable fix — the system prompt's "禁止原样复制 snippet"
- * line was a soft rule the model occasionally broke.
- */
-function stripHtmlForBraveContext(s: string): string {
-  if (!s) return '';
-  return s
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&nbsp;/g, ' ')
-    .trim();
-}
-
-async function synthesizeBraveResults(opts: {
-  apiKey: string;
-  intent: string;
-  results: ReadonlyArray<{ title?: string; snippet?: string; url: string }>;
-  model: string;
-  logger: import('pino').Logger;
-  taskId: string;
-}): Promise<string> {
-  const hits = opts.results.slice(0, 8);
-  // Sanitise BEFORE building the context block so Sonnet never sees
-  // raw HTML — eliminates the "<strong> echoes into the reply" class
-  // of bug at the source.
-  const context = hits
-    .map((h, i) => {
-      const title = stripHtmlForBraveContext(h.title || h.url);
-      const snippet = stripHtmlForBraveContext(h.snippet || '') || '(no snippet)';
-      return `[${i + 1}] ${title}\n${snippet}\nurl: ${h.url}`;
-    })
-    .join('\n\n');
-  const system = `你是一个极简问答助手。用户问了一个信息类问题，我会把搜索引擎返回的前 8 条结果喂给你。回复风格必须严格按下面规则：
-
-- 像聊天，不像报告。简短直接。**总字数 ≤ 100 字**（表格本身不算）。
-- 单点事实（定义 / 新闻 / 一个数字）→ **一句话**直接回答。
-- 对比 / 比价 / 排名 / 多来源 → 用 markdown 表格，**不超过 4 列**，表格后一句话结论，句号结束。
-- 多条新闻 / 多个独立事项 → 简洁列表（每条一句话 + 行内来源链接），**不分段加标题**。
-- 中文回答（用户用英文则英文）。
-- **来源标注（必做）**：每个具体事实/数字的旁边用 markdown 行内链接 \`[出处名](URL)\` 标出。出处名用网站域名或品牌名（如"京东"、"维基百科"），不要写"来源"二字。表格里把链接放在数据所在单元格内。绝不在末尾另起一段"数据来源"或"参考链接"。
-- **格式禁令（任何情况下都不准用）**：
-  - markdown 标题：\`#\` / \`##\` / \`###\` / \`####\`（一级到四级标题全禁，**没有例外**）
-  - 水平分隔线：\`---\` / \`***\` / \`___\` 整行
-  - 加粗小标题语义（"**结论**"、"**建议**" 后跟段落）
-  - emoji
-  - HTML 标签（<strong>、<em>、<br> 等）— 用 markdown 等价
-- **内容禁令**：
-  - 开场铺垫："以下是..."、"根据以下信息..."、"为您整理..."、"汇总如下..."、"经过分析..." — 一律去掉，直接进答案。
-  - 末尾收尾："以上就是..."、"希望对你有帮助"、"如有需要"、"温馨提示"、"购买建议"、"注意事项"、"数据来源"区块、免责声明、风险提示
-  - bullet 列表超过 5 条
-  - 原样复制 snippet、"搜索结果如下"、"Brave"、"搜索引擎"等元信息
-
-示范 1（比价）：
-
-| 平台 | 价格 | 国补后 |
-|------|------|--------|
-| [京东](https://www.jd.com/...) | ¥10,999 | ¥8,944 |
-| [天猫](https://www.tmall.com/...) | ¥10,999 | ¥8,999 |
-
-京东便宜约 ¥55，[教育优惠](https://www.apple.com.cn/shop/...)可到 ¥8,249。
-
-示范 2（多条新闻 — 注意没有标题、没有分隔线、没有开场白）：
-
-- OpenAI 发布 GPT-5.5，多模态能力提升 30% [TechCrunch](https://...)。
-- 字节跳动开源全新视频模型 Seedance，主打长镜头一致性 [36氪](https://...)。
-- 苹果 WWDC 预告含 visionOS 4，主打多人协作模式 [9to5Mac](https://...)。
-
-信息不足就说"搜索结果里没提到 X"，一句话，不要编。`;
-  const user = `用户问题：${opts.intent}
-
-搜索结果：
-${context}`;
-
-  try {
-    const client = new Anthropic({ apiKey: opts.apiKey });
-    const resp = await client.messages.create({
-      model: opts.model,
-      // Headroom for a 4-row × 4-col compare table + one-line
-      // conclusion in Chinese (~2 tokens per char). 300 was too tight
-      // and occasionally truncated the conclusion mid-sentence; 1024
-      // covers worst case while still gating prose pyramids via the
-      // system prompt's "≤100 字" rule.
-      max_tokens: 1024,
-      // Cache the system prompt — every Brave-synthesis call is
-      // identical, so the entire system block (~600 tokens) hits the
-      // 5-min TTL cache after the first call. Saves ~60% of input
-      // tokens on repeat queries.
-      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: user }],
-    });
-    const out = resp.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text.trim())
-      .filter(Boolean)
-      .join('\n\n')
-      .trim();
-    if (out) {
-      opts.logger.info(
-        {
-          taskId: opts.taskId,
-          inputTokens: resp.usage?.input_tokens ?? 0,
-          outputTokens: resp.usage?.output_tokens ?? 0,
-          cacheReadInputTokens: resp.usage?.cache_read_input_tokens ?? 0,
-          cacheCreationInputTokens: resp.usage?.cache_creation_input_tokens ?? 0,
-          stopReason: resp.stop_reason,
-        },
-        'brave-synthesis: api usage',
-      );
-      return out;
-    }
-    opts.logger.warn({ taskId: opts.taskId }, 'brave-synthesis: empty response, using fallback');
-  } catch (err) {
-    opts.logger.warn(
-      { taskId: opts.taskId, err: err instanceof Error ? err.message : String(err) },
-      'brave-synthesis: Anthropic call failed, using fallback',
-    );
-  }
-  // Fallback when Sonnet synthesis fails or returns empty: clean
-  // markdown-link list with HTML stripped. Intentionally NO mention
-  // of "Brave" / "搜索结果" / source attribution — that's
-  // implementation detail the user shouldn't see.
-  return hits
-    .slice(0, 5)
-    .map((h, i) => {
-      const title = stripHtmlForBraveContext(h.title || h.url);
-      return `${i + 1}. [${title}](${h.url})`;
-    })
-    .join('\n');
 }
 
 /**

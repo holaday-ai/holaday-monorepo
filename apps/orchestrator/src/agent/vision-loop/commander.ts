@@ -26,6 +26,9 @@
 
 import type Anthropic from '@anthropic-ai/sdk';
 import { type LlmCallRecorder, NoopLlmCallRecorder } from '../llm-call-recorder.js';
+import { translateError } from '../error-translator.js';
+import { validateMessageChain } from '../message-chain.js';
+import { filterTools } from '../tool-registry.js';
 import { A11Y_TOOLS, type A11yAction, decodeA11yToolUse } from './actions-a11y.js';
 import { VISION_TOOLS, type VisionAction, decodeToolUse } from './actions.js';
 import type { DomainName } from './domain/classifier.js';
@@ -369,6 +372,22 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
       return synthesiseGiveUp(`message build failed: ${message}`, startedAt, image);
     }
 
+    // 2.5. Defensive: validate message chain pairs every tool_use
+    //      with a tool_result. buildMessages already does this
+    //      correctly, but the guard catches future regressions and
+    //      any edge case where ctx.history arrives malformed.
+    messages = validateMessageChain(messages);
+
+    // 2.6. Filter tools by task type. Vision-loop is by definition a
+    //      browser-driving path (no web_search exposure), so we pin
+    //      the registry to 'browser' rather than re-classifying the
+    //      intent — search-flavoured intents like "搜 X" still need
+    //      the click/type/navigate tools when they reach this path.
+    //      The filter is defensive: today every VISION_TOOLS entry
+    //      survives, but BANNED_TOOLS additions can never reach the
+    //      model regardless.
+    const allowedTools = filterTools(VISION_TOOLS, 'browser');
+
     // 3. Call Anthropic. `tool_choice: { type: 'any' }` forces the
     //    model to emit SOME tool_use every tick; that's the whole
     //    protocol — we never want a text-only response.
@@ -380,7 +399,7 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
             model: this.model,
             max_tokens: this.maxTokens,
             system: this.systemPrompt,
-            tools: VISION_TOOLS as unknown as Anthropic.Tool[],
+            tools: allowedTools as unknown as Anthropic.Tool[],
             tool_choice: { type: 'any' },
             messages,
           }),
@@ -401,7 +420,13 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
         cacheCreationInputTokens: 0,
         errorMessage: message.slice(0, 512),
       });
-      return synthesiseGiveUp(`Anthropic API error: ${message}`, startedAt, image);
+      // User-facing reason goes through translateError — the raw
+      // Anthropic message ("400 invalid_request_error", "rate_limit",
+      // ...) leaks technical detail and shows poorly in the task card.
+      // The original message still hits the recorder above for ops
+      // debugging.
+      const friendly = translateError(message, ctx.intent);
+      return synthesiseGiveUp(friendly, startedAt, image);
     }
 
     const elapsedMs = Date.now() - startedAt;
@@ -492,6 +517,10 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
       return synthesiseA11yGiveUp(`message build failed: ${message}`, startedAt);
     }
 
+    messages = validateMessageChain(messages);
+    // Same browser-by-definition pin as the vision path above.
+    const allowedA11yTools = filterTools(A11Y_TOOLS, 'browser');
+
     let response: Anthropic.Message;
     try {
       response = await retryAsync(
@@ -500,7 +529,7 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
             model: this.model,
             max_tokens: this.maxTokens,
             system: this.a11ySystemPrompt,
-            tools: A11Y_TOOLS as unknown as Anthropic.Tool[],
+            tools: allowedA11yTools as unknown as Anthropic.Tool[],
             tool_choice: { type: 'any' },
             messages,
           }),
@@ -520,7 +549,8 @@ export class AnthropicVisionLoopCommander implements VisionLoopCommander {
         errorMessage: message.slice(0, 512),
         purpose: 'commander.accessibility',
       });
-      return synthesiseA11yGiveUp(`Anthropic API error: ${message}`, startedAt);
+      const friendly = translateError(message, ctx.intent);
+      return synthesiseA11yGiveUp(friendly, startedAt);
     }
 
     const elapsedMs = Date.now() - startedAt;

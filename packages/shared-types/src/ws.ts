@@ -563,6 +563,20 @@ export const serverSupercarWebSearchSchema = z.object({
   taskId: z.string(),
   iteration: z.number().int().nonnegative(),
   query: z.string(),
+  /**
+   * Optional sources extracted from the paired
+   * `web_search_tool_result` content block. Lets the UI render
+   * favicon/title/snippet cards beneath the "正在搜索：X" line.
+   */
+  sources: z
+    .array(
+      z.object({
+        title: z.string(),
+        url: z.string(),
+        snippet: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 
 export const serverSupercarAwaitingUserSchema = z.object({
