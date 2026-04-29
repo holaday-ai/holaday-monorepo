@@ -254,12 +254,11 @@ export const authRouter = router({
     if (!row) {
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
     }
-    // Phase 8.2 canary flag: does this user's traffic go through the
-    // per-user BrowserPool (their own Brave) or the shared singleton?
-    // Frontend uses this to pick which VNC URL to connect to.
-    const multiUser = Boolean(
-      ctx.browserPool && isOnMultiUserList(ctx.userId),
-    );
+    // Phase 14 audit follow-up — the per-user BrowserPool now serves
+    // every authenticated user (no allow-list). When the pool is up,
+    // every user gets their own Brave; the SPA's VNC viewer always
+    // points at /vnc-ws/<userId>.
+    const multiUser = ctx.browserPool != null;
     return {
       userId: row.externalId,
       email: row.email,
@@ -277,12 +276,3 @@ export const authRouter = router({
   }),
 });
 
-function isOnMultiUserList(userId: string): boolean {
-  const raw = (process.env.MULTI_USER_USERS ?? '').trim();
-  if (!raw) return true; // empty allow-list = all users
-  return raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .includes(userId);
-}

@@ -50,6 +50,7 @@ import {
 } from '../../files/writers.js';
 import {
   QuotaService,
+  concurrencyExhaustedMessage,
   getConcurrencyLimit,
   quotaErrorFor,
 } from '../../quota/quota-service.js';
@@ -226,10 +227,7 @@ export const tasksRouter = router({
     if (concurrentCount >= getConcurrencyLimit(planId)) {
       throw new TRPCError({
         code: 'TOO_MANY_REQUESTS',
-        message:
-          planId === 'pro'
-            ? '已有 3 个任务在执行中，请等待完成'
-            : '当前有任务在执行中，请等待完成或升级专业版',
+        message: concurrencyExhaustedMessage(planId),
       });
     }
     // Follow-ups are free — they reuse the cost of the parent task. Skip
@@ -2005,27 +2003,28 @@ function truncateString(s: string, max: number): string {
 }
 
 /**
- * Canary gate for the per-user BrowserPool. Returns true when the
- * caller should be routed to their own browser instance instead of
- * the shared headed singleton.
+ * Per-user BrowserPool eligibility. Phase 14 audit follow-up:
+ * the canary allow-list (MULTI_USER_USERS env) was retired so every
+ * authenticated user gets a pool slot. Reasoning:
  *
- * Policy:
- *   - MULTI_USER_USERS empty → every authenticated user gets pool
- *     mode (only relevant once we're confident in the rollout).
- *   - MULTI_USER_USERS non-empty → comma-separated allow-list; only
- *     exact matches are opted in. Use this during canary.
+ *   - The legacy fallback (vision-loop SW transport) needs a Chrome
+ *     extension that web users don't have, so anyone NOT on the
+ *     allow-list silently lands in a path that times out at tick 0
+ *     and fails their first task. That defeats the China-edge entry
+ *     point's product premise.
+ *   - Capacity is now enforced by MAX_BROWSER_INSTANCES + the per-plan
+ *     concurrency limit + the GC's 30s idle timeout, NOT by user
+ *     identity. Pool-full is a per-task signal, not a per-user signal.
  *
- * Callers gate on `ctx.browserPool != null` before invoking — this
- * helper doesn't know whether the pool was actually constructed.
+ * The function is kept (rather than inlined to `true`) so callers
+ * stay readable AND so future "blacklist abusive userIds" logic has
+ * an obvious place to land. `_userId` is unused today.
+ *
+ * Callers still must gate on `ctx.browserPool != null` because the
+ * pool is only constructed when MULTI_USER=true at boot.
  */
-function shouldUseBrowserPool(userId: string): boolean {
-  const raw = appEnv.MULTI_USER_USERS.trim();
-  if (!raw) return true;
-  const allowed = raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return allowed.includes(userId);
+function shouldUseBrowserPool(_userId: string): boolean {
+  return true;
 }
 
 /**
