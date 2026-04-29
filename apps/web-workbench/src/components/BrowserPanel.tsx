@@ -388,6 +388,25 @@ export function BrowserPanel({
         </div>
       ) : (
         <>
+          {/*
+           * Fullscreen renders WITHOUT the header / footer / banners —
+           * BOSS reported the chrome was eating the top of the page
+           * (Google logo blocked). In fullscreen, only a small floating
+           * exit button + the canvas itself. Everything else falls back
+           * to the usual stacked layout.
+           */}
+          {fullscreen && onToggleFullscreen && (
+            <button
+              type="button"
+              onClick={onToggleFullscreen}
+              title="退出全屏 (Esc)"
+              aria-label="exit fullscreen"
+              className="absolute right-3 top-3 z-50 inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/20 bg-black/50 text-white shadow-lg backdrop-blur-md transition-colors hover:bg-black/70"
+            >
+              <Minimize2 className="h-4 w-4" />
+            </button>
+          )}
+          {!fullscreen && (
           <header className="flex h-11 items-center gap-2 border-b border-border px-3 pt-2">
             <StatusDot status={status} />
             <NavButton direction="back" title="后退" />
@@ -460,6 +479,7 @@ export function BrowserPanel({
               </button>
             )}
           </header>
+          )}
           {awaitingUser && (
             <div
               role="alert"
@@ -478,14 +498,15 @@ export function BrowserPanel({
               </div>
             </div>
           )}
-          {interactiveActive && (
+          {interactiveActive && !fullscreen && (
             <div className="border-b border-sky-300/60 bg-sky-50 px-3 py-1.5 text-center text-[11px] font-medium text-sky-800">
               交互模式 · 点击 / 滚动 / 键盘输入会转发到浏览器
             </div>
           )}
           <div
             className={cn(
-              'flex flex-1 items-center justify-center overflow-hidden p-3',
+              'flex flex-1 items-center justify-center overflow-hidden',
+              fullscreen ? 'p-0' : 'p-3',
               interactiveActive ? 'bg-sky-50/40' : 'bg-muted/40',
             )}
           >
@@ -578,10 +599,12 @@ export function BrowserPanel({
               <EmptyBrowserState taskStatus={taskStatus} />
             )}
           </div>
-          <footer className="flex h-7 items-center justify-between border-t border-border px-3 text-[11px] text-muted-foreground">
-            <span>{frame ? `${frame.viewport.width}×${frame.viewport.height}` : '—'}</span>
-            <span>{frame ? `第 ${frame.tickIndex + 1} 帧` : ''}</span>
-          </footer>
+          {!fullscreen && (
+            <footer className="flex h-7 items-center justify-between border-t border-border px-3 text-[11px] text-muted-foreground">
+              <span>{frame ? `${frame.viewport.width}×${frame.viewport.height}` : '—'}</span>
+              <span>{frame ? `第 ${frame.tickIndex + 1} 帧` : ''}</span>
+            </footer>
+          )}
         </>
       )}
     </section>

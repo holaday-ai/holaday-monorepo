@@ -217,28 +217,22 @@ async function main() {
   });
 
   // Per-user VNC WebSocket proxy — only live when the pool is active.
-  // Nginx rewrites /vnc-ws/* → 127.0.0.1:4001/vnc-ws/* so this upgrade
-  // handler only fires on pool traffic; /ws (tRPC-WS at :4002) is
-  // untouched.
+  // Nginx (Vultr or Aliyun edge) rewrites /vnc-ws/* → 127.0.0.1:4001/vnc-ws/*
+  // so this upgrade handler only fires on pool traffic; /ws (tRPC-WS
+  // at :4002) is untouched.
+  //
+  // Phase 14 audit follow-up — the MULTI_USER_USERS allowlist gate was
+  // retired here too. The proxy still requires JWT auth + checks the
+  // user owns a live pool instance, so dropping the allowlist doesn't
+  // open it to abuse — it just stops blocking new free-plan users
+  // from streaming THEIR OWN browser.
   if (browserPool) {
-    const allowedUserIds = env.MULTI_USER_USERS.trim()
-      ? new Set(
-          env.MULTI_USER_USERS.split(',')
-            .map((s) => s.trim())
-            .filter(Boolean),
-        )
-      : undefined;
-    const vncProxy = createVncProxy(
-      allowedUserIds
-        ? { pool: browserPool, logger, allowedUserIds }
-        : { pool: browserPool, logger },
-    );
+    const vncProxy = createVncProxy({ pool: browserPool, logger });
     httpServer.on('upgrade', (req, socket, head) => {
       vncProxy.handleUpgrade(req, socket, head as Buffer);
     });
     logger.info(
-      { allowList: allowedUserIds ? [...allowedUserIds] : 'all users' },
-      'VNC WS proxy mounted at /vnc-ws/:userId',
+      'VNC WS proxy mounted at /vnc-ws/:userId (open to all authed users)',
     );
   }
 
