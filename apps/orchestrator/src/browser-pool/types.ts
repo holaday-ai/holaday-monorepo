@@ -54,6 +54,22 @@ export interface PoolConfig {
   displayStart: number;
   /** Xvfb screen geometry, e.g. '1720x1440x24'. */
   screenSize: string;
+  /**
+   * Phase 17 — fired once per allocate, AFTER the PlaywrightExecutor
+   * connects + status flips to 'ready'. Used by the cookie-sync
+   * service to drain `pending_cookies` into the freshly-spawned
+   * Brave context. Best-effort: implementations should swallow
+   * errors so a transient sync failure can't block task dispatch.
+   *
+   * Hook receives the user's external id (usr_…) and the
+   * PlaywrightExecutor; resolve a BrowserContext from
+   * `executor.getPage().then(p => p.context())`. Optional — pool
+   * boots without it for tests / smoke environments.
+   */
+  onInstanceReady?: (
+    userExternalId: string,
+    executor: import('../agent/vision-loop/playwright-executor.js').PlaywrightExecutor,
+  ) => Promise<void> | void;
 }
 
 /**

@@ -190,8 +190,29 @@ function openSocket(token: string): void {
   });
 }
 
+/**
+ * Hard cap on consecutive network reconnect attempts. Layered ON TOP
+ * of the auth-failure circuit breaker in background/index.ts (which
+ * freezes after MAX_AUTH_FAILURES and tracks known-bad tokens). The
+ * auth path covers 4401-loop scenarios; THIS cap covers the other
+ * tail: orchestrator sleep / network blip / TLS handshake failure
+ * where the close code isn't 4401 so the auth breaker never trips.
+ *
+ * Without this, scheduleReconnect would happily backoff to its 30s
+ * ceiling and then keep retrying every ~30s indefinitely, burning
+ * battery + connection slots. After the cap fires the SW only tries
+ * again on a wake event (alarm tick → ensureConnected → connect).
+ */
+const MAX_NETWORK_RECONNECTS = 10;
+
 function scheduleReconnect(token: string): void {
   state.reconnectAttempt += 1;
+  if (state.reconnectAttempt > MAX_NETWORK_RECONNECTS) {
+    console.warn(
+      `[holaday] ws: ${MAX_NETWORK_RECONNECTS} reconnects failed, giving up until next wake event`,
+    );
+    return;
+  }
   const backoff = Math.min(30_000, 500 * 2 ** state.reconnectAttempt);
   const jitter = Math.floor(Math.random() * 250);
   setTimeout(() => {

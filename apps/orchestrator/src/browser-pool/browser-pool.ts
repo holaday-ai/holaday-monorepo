@@ -350,6 +350,19 @@ export class BrowserPool {
         status: 'ready',
       };
       this.instances.set(userId, instance);
+      // Phase 17 — fire the post-allocate hook (cookie sync drain).
+      // Best-effort: log + continue on failure so a transient sync
+      // problem can't block task dispatch.
+      if (this.config.onInstanceReady) {
+        void Promise.resolve(this.config.onInstanceReady(userId, executor)).catch(
+          (err) => {
+            this.logger.warn(
+              { userId, err: err instanceof Error ? err.message : String(err) },
+              'pool: onInstanceReady hook threw',
+            );
+          },
+        );
+      }
       return instance;
     } catch (err) {
       // Unwind any half-started processes so we don't leak PIDs.

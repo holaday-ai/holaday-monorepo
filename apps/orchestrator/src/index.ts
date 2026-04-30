@@ -8,6 +8,7 @@ import { DrizzleLlmCallRecorder } from './agent/llm-call-recorder.js';
 import { AnthropicPlanner } from './agent/planners/anthropic.js';
 import { StubPlanner } from './agent/planners/stub.js';
 import { startScheduledRunner } from './agent/scheduled-runner.js';
+import { injectPendingCookies } from './cookies/sync-service.js';
 import {
   createApifyAdapter,
   createExecutionRouter,
@@ -158,6 +159,24 @@ async function main() {
         wsPortStart: env.BROWSER_WS_PORT_START,
         displayStart: env.BROWSER_DISPLAY_START,
         screenSize: env.BROWSER_SCREEN_SIZE,
+        // Phase 17 — drain pending cookies (extension-shipped) into
+        // the freshly-spawned context. Best-effort: errors logged
+        // inside the helper, never bubble up to block allocate.
+        onInstanceReady: async (
+          userExternalId: string,
+          executor: PlaywrightExecutor,
+        ): Promise<void> => {
+          try {
+            const page = await executor.getPage();
+            const ctx = page.context();
+            await injectPendingCookies({ db, context: ctx, userExternalId });
+          } catch (err) {
+            logger.warn(
+              { err: err instanceof Error ? err.message : String(err), userExternalId },
+              'pool: onInstanceReady cookie-sync drain failed',
+            );
+          }
+        },
       };
       const reaped = await reapOrphans(poolConfig, logger);
       logger.info(

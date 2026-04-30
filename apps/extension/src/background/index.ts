@@ -53,6 +53,7 @@ import {
 } from '../shared/storage.js';
 import { captureVisionObservation, executeCdpAction, getActiveTabId } from './cdp-actions.js';
 import { buildLoginStatesMessage, readLoginStates } from './cookie-bridge.js';
+import { runCookieSync } from './cookie-sync.js';
 import {
   connect,
   disconnect,
@@ -234,6 +235,10 @@ onServerMessage((msg) => {
     // to 0 so the throttle in maybeReportLoginStates always fires.
     lastLoginStatesAt = 0;
     void maybeReportLoginStates();
+    // Phase 17 — also kick off a full cookie-value sync on welcome,
+    // throttled at most once per WELCOME_COOKIE_SYNC_DEBOUNCE_MS.
+    // Best-effort: errors logged + swallowed.
+    void maybeRunCookieSync('welcome');
     // Successful auth → reset the failure counter + known-bad
     // tracking so a future genuine failure starts fresh. Also
     // cancels any pending backoff retry that's no longer needed.
@@ -772,6 +777,40 @@ async function ensureConnected(): Promise<{ token: string | null; frozen?: boole
 const LOGIN_STATES_PERIOD_MS = 5 * 60 * 1000;
 let lastLoginStatesAt = 0;
 
+/**
+ * Phase 17 — cookie-value sync throttle. Welcome + alarm both call
+ * this; the timestamp dedupes so a tight reconnect cycle doesn't
+ * burn the orchestrator with redundant POSTs.
+ *
+ * The interval matches the `30 * 60 * 1000` spec target (30 min)
+ * for the alarm path; the welcome path is allowed to fire whenever
+ * it does so freshly-authed users get an instant sync.
+ */
+const COOKIE_SYNC_PERIOD_MS = 30 * 60 * 1000;
+let lastCookieSyncAt = 0;
+
+async function maybeRunCookieSync(reason: 'welcome' | 'alarm' | 'manual'): Promise<void> {
+  const now = Date.now();
+  if (reason === 'alarm' && now - lastCookieSyncAt < COOKIE_SYNC_PERIOD_MS) return;
+  lastCookieSyncAt = now;
+  try {
+    const res = await runCookieSync();
+    if (res === null) {
+      // No token — silent skip, sync will retry on next welcome.
+      return;
+    }
+    console.info(
+      `[holaday] cookie-sync (${reason}): synced ${res.synced} cookies across ${res.domains.length} domains${
+        res.deferred ? ' (parked, no live Brave)' : ' (immediate inject)'
+      }`,
+    );
+  } catch (err) {
+    console.warn('[holaday] cookie-sync failed', err);
+    // Reset throttle so the next attempt isn't gated by the failed run.
+    lastCookieSyncAt = 0;
+  }
+}
+
 async function maybeReportLoginStates(): Promise<void> {
   if (!isConnected()) return;
   const now = Date.now();
@@ -880,7 +919,12 @@ onUnauthorized(() => {
 chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: KEEPALIVE_PERIOD_MIN });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === KEEPALIVE_ALARM) {
-    void ensureConnected().then(() => maybeReportLoginStates());
+    void ensureConnected().then(() => {
+      void maybeReportLoginStates();
+      // Phase 17 — internally throttled to once per 30 min, so safe
+      // to fire from the keepalive cadence (30 s).
+      void maybeRunCookieSync('alarm');
+    });
   }
 });
 

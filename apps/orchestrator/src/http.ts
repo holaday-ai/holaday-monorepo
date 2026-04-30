@@ -17,6 +17,12 @@ import { db } from './db/client.js';
 import { payments } from './db/schema/payments.js';
 import { users } from './db/schema/users.js';
 import {
+  injectPendingCookies,
+  MAX_COOKIES_PER_SYNC,
+  type SyncableCookie,
+  upsertPendingCookies,
+} from './cookies/sync-service.js';
+import {
   ACCEPTED_EXTENSIONS,
   ACCEPTED_MIMES,
   FileService,
@@ -488,6 +494,92 @@ export function createHttpApp(deps: HttpAppDeps) {
       res.status(500).json({ error: 'download_failed' });
     }
   });
+
+  // ---------------------------------------------------------------------
+  // Phase 17 — extension cookie sync.
+  //
+  //   POST /cookies/sync
+  //   Headers: Authorization: Bearer <jwt>
+  //   Body: { cookies: SyncableCookie[] }
+  //
+  // Two paths from receipt: if the user has a live Brave instance,
+  // inject immediately so the next agent task is already logged in.
+  // Otherwise upsert into pending_cookies and let BrowserPool's
+  // onInstanceReady hook drain on the next allocate.
+  //
+  // Per-route json parser bumps the limit to 5MB — power users can
+  // legitimately ship a few hundred KB of cookies across the
+  // curated domain list, comfortably above the global 1MB cap.
+  // ---------------------------------------------------------------------
+  app.post(
+    '/cookies/sync',
+    express.json({ limit: '5mb' }),
+    async (req, res) => {
+      const userExternalId = (req as express.Request & { userId?: string }).userId;
+      if (!userExternalId) {
+        res.status(401).json({ error: 'unauthorized' });
+        return;
+      }
+      const body = (req.body ?? {}) as { cookies?: unknown };
+      if (!Array.isArray(body.cookies)) {
+        res.status(400).json({ error: 'body.cookies must be an array' });
+        return;
+      }
+      if (body.cookies.length === 0) {
+        res.json({ synced: 0, domains: [], deferred: false });
+        return;
+      }
+      if (body.cookies.length > MAX_COOKIES_PER_SYNC) {
+        res.status(400).json({
+          error: 'too_many_cookies',
+          message: `最多同步 ${MAX_COOKIES_PER_SYNC} 条`,
+        });
+        return;
+      }
+      const cookies = body.cookies as SyncableCookie[];
+      const [user] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.externalId, userExternalId))
+        .limit(1);
+      if (!user) {
+        res.status(401).json({ error: 'unknown user' });
+        return;
+      }
+      const domains = Array.from(
+        new Set(cookies.map((c) => c.domain).filter((d): d is string => typeof d === 'string')),
+      );
+      // Upsert into pending_cookies first — that way even if the
+      // immediate-inject path throws (transient executor death),
+      // the next allocate still drains them.
+      await upsertPendingCookies(db, user.id, cookies);
+
+      // Try the immediate inject when the user has a live executor.
+      let deferred = true;
+      const live = deps.browserPool?.peek(userExternalId);
+      if (live && live.status === 'ready') {
+        try {
+          const page = await live.executor.getPage();
+          const ctx = page.context();
+          await injectPendingCookies({ db, context: ctx, userExternalId });
+          deferred = false;
+        } catch (err) {
+          logger.warn(
+            {
+              err: err instanceof Error ? err.message : String(err),
+              userExternalId,
+            },
+            'cookie-sync: immediate inject failed; will retry on next allocate',
+          );
+        }
+      }
+      res.json({
+        synced: cookies.length,
+        domains,
+        deferred,
+      });
+    },
+  );
 
   // ---------------------------------------------------------------------
   // Phase 11 — internal bridge from the Aliyun cn-payment gateway.
