@@ -82,7 +82,10 @@ export function MainPanel({
         <div className="ml-2 min-w-0 flex-1 truncate text-sm font-medium">
           {task ? task.intent : 'HOLA DAY'}
         </div>
-        {task && onOpenBrowser && (
+        {/* Phase 18 — globe always available on mobile so the empty
+            state can also open the BrowserPanel (was previously gated
+            on `task` so first-time users had no way in). */}
+        {onOpenBrowser && (
           <Button
             variant="ghost"
             size="icon"

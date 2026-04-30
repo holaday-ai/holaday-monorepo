@@ -284,7 +284,7 @@ export function InputArea({
 
   return (
     <div
-      className="mx-auto w-full max-w-3xl px-6 pb-6"
+      className="mx-auto w-full max-w-3xl px-3 pb-4 sm:px-6 sm:pb-6"
       onDragEnter={(e) => {
         if (!attachmentsAllowed) return;
         if (e.dataTransfer.types.includes('Files')) {

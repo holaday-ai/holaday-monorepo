@@ -507,6 +507,23 @@ function AppShell(): JSX.Element {
           void refreshProjects();
         }}
         onCreateProject={() => navigate('/projects?create=1')}
+        onOpenBrowser={() => {
+          // Phase 18 — sidebar 浏览器 entry. Mobile (< lg) opens
+          // the BrowserPanel sheet; desktop the panel is already
+          // visible in the right rail, so we just kick wakeBrowser
+          // so the user's Brave is ready when they arrive at it.
+          // Fire-and-forget — wake errors land in toast via the
+          // existing onNewTask path's handling.
+          setBrowserSheetOpen(true);
+          void (async () => {
+            try {
+              await trpc.tasks.wakeBrowser.mutate();
+            } catch {
+              /* swallow — wakeBrowser errors are surfaced when the
+                 first task tries to drive the browser */
+            }
+          })();
+        }}
         userEmail={me?.email ?? null}
         userDisplayName={preferredDisplayName(me)}
         userPlan={me?.plan ?? 'free'}

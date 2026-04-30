@@ -71,6 +71,13 @@ interface Props {
    */
   projectFilter?: { projectId: string; name: string } | null;
   onClearProjectFilter?(): void;
+  /**
+   * Phase 18 — invoked when the 浏览器 feature entry is clicked.
+   * Caller (WorkbenchApp) wakes the user's Brave instance and
+   * surfaces the BrowserPanel (slide-in sheet on mobile, focuses
+   * the existing right-rail on desktop).
+   */
+  onOpenBrowser?(): void;
   onOpenSearch?(): void;
   userEmail: string | null;
   userDisplayName: string;
@@ -126,6 +133,7 @@ export function Sidebar({
   onCreateProject,
   projectFilter,
   onClearProjectFilter,
+  onOpenBrowser,
   onOpenSearch,
   userEmail,
   userDisplayName,
@@ -340,7 +348,16 @@ export function Sidebar({
               )}
             </header>
 
-            <FeatureNav />
+            <FeatureNav
+              onOpenBrowser={
+                onOpenBrowser
+                  ? () => {
+                      onMobileClose?.();
+                      onOpenBrowser();
+                    }
+                  : undefined
+              }
+            />
 
             {projectFilter && (
               <div className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-indigo-300/40 bg-indigo-50/40 px-2.5 py-1.5 text-[12px] dark:border-indigo-500/30 dark:bg-indigo-500/10">
@@ -999,6 +1016,13 @@ interface FeatureItem {
   label: string;
   /** When set the row is clickable and routes here. */
   href?: string;
+  /**
+   * Phase 18 — when set, click invokes the parent-supplied
+   * `onOpenBrowser` instead of navigating. Used by 浏览器 entry to
+   * open the live BrowserPanel (wakeBrowser + slide in the sheet
+   * on mobile / expand panel on desktop) rather than a route.
+   */
+  action?: 'openBrowser';
 }
 
 const FEATURES: readonly FeatureItem[] = [
@@ -1006,7 +1030,7 @@ const FEATURES: readonly FeatureItem[] = [
   { icon: Sparkles, label: '专家技能', href: '/skills' },
   { icon: Plug, label: 'MCP 连接', href: '/connections' },
   { icon: FolderOpen, label: '文件库', href: '/files' },
-  { icon: Globe, label: '浏览器' },
+  { icon: Globe, label: '浏览器', action: 'openBrowser' },
   { icon: Layers, label: '项目', href: '/projects' },
   { icon: Star, label: '收藏', href: '/starred' },
 ];
@@ -1017,17 +1041,28 @@ const FEATURES: readonly FeatureItem[] = [
  * those rows render as clickable nav links; the rest stay disabled
  * with the tooltip. Compact density (32px row).
  */
-function FeatureNav(): JSX.Element {
+function FeatureNav({
+  onOpenBrowser,
+}: {
+  /** Phase 18 — invoked when the 浏览器 entry is clicked. */
+  onOpenBrowser?: () => void;
+}): JSX.Element {
   const navigate = useNavigate();
   return (
     <nav className="px-2 pb-2">
-      {FEATURES.map(({ icon: Icon, label, href }) => {
-        if (href) {
+      {FEATURES.map(({ icon: Icon, label, href, action }) => {
+        if (href || action) {
           return (
             <button
               key={label}
               type="button"
-              onClick={() => navigate(href)}
+              onClick={() => {
+                if (action === 'openBrowser') {
+                  onOpenBrowser?.();
+                } else if (href) {
+                  navigate(href);
+                }
+              }}
               className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
             >
               <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
