@@ -1,19 +1,4 @@
-import {
-  Clock,
-  CreditCard,
-  ExternalLink,
-  FolderOpen,
-  Globe,
-  HelpCircle,
-  Monitor,
-  Moon,
-  Plug,
-  Settings as SettingsIcon,
-  Sparkles,
-  Sun,
-  User as UserIcon,
-  X,
-} from 'lucide-react';
+import { CreditCard, Monitor, Moon, Sun, User as UserIcon, X } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -82,23 +67,19 @@ export function SettingsModal({
           </button>
         </header>
         <div className="flex flex-1 min-h-0">
-          {/* Manus-style left nav: grouped sections (账户 + 功能) and
-              a bottom 获取帮助 row anchored at the bottom. Functional
-              entries are disabled with "即将推出" affordances so the
-              roadmap is visible without misleading clicks. */}
-          <nav className="flex w-48 shrink-0 flex-col border-r border-border bg-muted/40 p-2 text-sm">
-            <NavGroupLabel>账户</NavGroupLabel>
+          {/* Sidebar tabs */}
+          <nav className="w-44 shrink-0 border-r border-border bg-muted/40 p-2 text-sm">
             <TabButton
               active={activeTab === 'profile'}
               onClick={() => setActiveTab('profile')}
               icon={<UserIcon className="h-3.5 w-3.5" />}
-              label="账户"
+              label="个人资料"
             />
             <TabButton
               active={activeTab === 'preferences'}
               onClick={() => setActiveTab('preferences')}
-              icon={<SettingsIcon className="h-3.5 w-3.5" />}
-              label="通用"
+              icon={<Monitor className="h-3.5 w-3.5" />}
+              label="设置"
             />
             <TabButton
               active={activeTab === 'billing'}
@@ -106,32 +87,6 @@ export function SettingsModal({
               icon={<CreditCard className="h-3.5 w-3.5" />}
               label="计划与账单"
             />
-
-            <NavGroupLabel className="mt-3">功能</NavGroupLabel>
-            <DisabledNavItem icon={<Clock className="h-3.5 w-3.5" />} label="定时任务" />
-            <DisabledNavItem
-              icon={<Sparkles className="h-3.5 w-3.5" />}
-              label="专家技能"
-            />
-            <DisabledNavItem icon={<Plug className="h-3.5 w-3.5" />} label="MCP 连接" />
-            <DisabledNavItem
-              icon={<FolderOpen className="h-3.5 w-3.5" />}
-              label="文件库"
-            />
-            <DisabledNavItem icon={<Globe className="h-3.5 w-3.5" />} label="云浏览器" />
-
-            <div className="mt-auto pt-3">
-              <a
-                href="https://github.com/holaday-ai/holaday-monorepo/issues"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
-              >
-                <HelpCircle className="h-3.5 w-3.5" />
-                <span>获取帮助</span>
-                <ExternalLink className="ml-auto h-3 w-3 opacity-60" />
-              </a>
-            </div>
           </nav>
           <div className="flex-1 overflow-y-auto p-5 text-sm">
             {activeTab === 'profile' && (
@@ -171,45 +126,6 @@ function TabButton({
       {icon}
       <span>{label}</span>
     </button>
-  );
-}
-
-function NavGroupLabel({
-  children,
-  className,
-}: {
-  children: React.ReactNode;
-  className?: string;
-}): JSX.Element {
-  return (
-    <div
-      className={cn(
-        'px-2.5 pb-1 pt-2 text-[10px] font-medium tracking-wider text-muted-foreground/70',
-        className,
-      )}
-    >
-      {children}
-    </div>
-  );
-}
-
-function DisabledNavItem({
-  icon,
-  label,
-}: {
-  icon: React.ReactNode;
-  label: string;
-}): JSX.Element {
-  return (
-    <div
-      title={`${label} · 即将推出`}
-      aria-disabled
-      className="flex w-full cursor-not-allowed items-center gap-2 rounded-md px-2.5 py-1.5 text-muted-foreground/70 opacity-60"
-    >
-      {icon}
-      <span className="truncate">{label}</span>
-      <span className="ml-auto text-[10px] text-muted-foreground/50">即将推出</span>
-    </div>
   );
 }
 

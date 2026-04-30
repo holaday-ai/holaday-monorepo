@@ -408,7 +408,12 @@ export function BrowserPanel({
         // wrapper's flex-basis doesn't fight — just w-10 overrides.
         !isSheet && (collapsed ? 'w-10 shrink-0' : 'h-full w-full'),
       )}
-      style={{ backgroundColor: 'hsl(var(--card))' }}
+      // Phase 13 B3 follow-up — was hsl(var(--card)) (#171717 in dark
+      // mode), which read as a slightly-different black band next to
+      // the #121212 main area. Switching to --background means the
+      // panel and the rest of the workbench are tonally identical;
+      // the border-l divider is the only visible separator.
+      style={{ backgroundColor: 'hsl(var(--background))' }}
     >
       {!isSheet && (
         <Button
