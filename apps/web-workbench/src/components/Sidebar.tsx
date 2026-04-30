@@ -659,7 +659,12 @@ export function Sidebar({
               {moveOpen && (
                 <div
                   role="menu"
-                  className="absolute left-full top-0 z-[61] ml-1 min-w-[180px] max-h-72 overflow-y-auto rounded-md border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg animate-fade-in"
+                  // Phase 18b — submenu positioning: mobile (<sm) stacks
+                  // below the parent menu item (full width of the
+                  // outer context menu) so it can't overflow off the
+                  // right edge on a 390px viewport. Desktop (≥sm)
+                  // keeps the original adjacent-right placement.
+                  className="absolute z-[61] inset-x-0 top-full mt-1 max-h-72 overflow-y-auto rounded-md border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg animate-fade-in sm:inset-x-auto sm:left-full sm:top-0 sm:ml-1 sm:mt-0 sm:min-w-[180px]"
                 >
                   {/* "无项目" — clear assignment */}
                   <button

@@ -782,6 +782,35 @@ async function resetAuthFailureState(): Promise<void> {
 }
 
 /**
+ * Phase 18b — full auth reset. Wipes EVERY auth-related storage
+ * key (token + user + failure counter + bad-token marker) and
+ * pulls down any live socket. Called from:
+ *   - the popup "重置连接" button (user-initiated, frozen state)
+ *   - `chrome.runtime.onInstalled` (auto, on install/update so an
+ *     extension upgrade can't inherit a stuck state from before)
+ *
+ * Different from `resetAuthFailureState` which only clears the
+ * circuit-breaker bookkeeping — that's the right scope for the
+ * Side Panel "我已登录，重试" button (don't drop the token, just
+ * give it another shot). This one is a hard reset.
+ */
+async function resetAllAuthState(): Promise<void> {
+  if (pendingAuthRetry) {
+    clearTimeout(pendingAuthRetry);
+    pendingAuthRetry = null;
+  }
+  await chrome.storage.local.remove([
+    TOKEN_STORAGE_KEY,
+    'holaday.user',
+    AUTH_FAILURES_KEY,
+    KNOWN_BAD_TOKEN_KEY,
+  ]);
+  // Ensure no live socket is left holding the cleared token.
+  disconnect();
+  state.tasks.clear();
+}
+
+/**
  * Try to (re)open the WS using whatever token is in storage. Multiple
  * call sites converge here — onInstalled, onStartup, keepalive alarm,
  * storage change, popup nudge — and the MV3 SW gets killed after
@@ -892,8 +921,18 @@ async function maybeReportLoginStates(): Promise<void> {
 // many times during a session, and neither event fires for those.
 // That's why ensureConnected ALSO runs on the keepalive alarm and on
 // every storage write below.
-chrome.runtime.onInstalled.addListener(() => {
-  void ensureConnected();
+chrome.runtime.onInstalled.addListener((details) => {
+  // Phase 18b — install / upgrade clears any persisted auth state
+  // so a stuck "frozen 3/3" or stale known-bad-token from a prior
+  // version can't keep blocking the new build. The auto-login path
+  // re-imports a fresh token from any open holaday.ai tab on the
+  // very next ensureConnected tick, so a clean install never
+  // requires a manual login.
+  if (details.reason === 'install' || details.reason === 'update') {
+    void resetAllAuthState().then(() => ensureConnected());
+  } else {
+    void ensureConnected();
+  }
 });
 
 chrome.runtime.onStartup.addListener(() => {
@@ -1012,6 +1051,23 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg?.type === 'holaday.tasks') {
     sendResponse({ tasks: tasksSnapshot() });
+    return true;
+  }
+  if (msg?.type === 'holaday.resetConnection') {
+    // Phase 18b — popup "重置连接" button. Hard reset of every
+    // auth-related storage key + live socket, then immediately
+    // tries auto-login from the current holaday.ai tab. Unlike
+    // tryAutoLogin (which is the soft thaw — keep the token,
+    // just clear the failure counter), this nukes the lot.
+    void (async () => {
+      await resetAllAuthState();
+      const { token, frozen } = await ensureConnected();
+      sendResponse({
+        ok: Boolean(token),
+        token: token ?? null,
+        ...(frozen ? { frozen: true } : {}),
+      });
+    })();
     return true;
   }
   if (msg?.type === 'holaday.tryAutoLogin') {

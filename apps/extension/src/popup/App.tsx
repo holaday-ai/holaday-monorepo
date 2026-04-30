@@ -300,6 +300,33 @@ export function App() {
   }
 
   /**
+   * Phase 18b — hard reset of the auth state. Triggers the SW's
+   * resetConnection handler which wipes token + user + failure
+   * counter + known-bad-token + the live socket, then immediately
+   * tries auto-login from any open holaday.ai tab. The popup's
+   * own React state (user, token, tasks) is also reset so the
+   * UI returns to the "Sign in" view; if auto-login picked up a
+   * fresh token from a workbench tab the storage-change listener
+   * (line 246-262) will rehydrate user + token within a tick.
+   */
+  async function resetConnection(): Promise<void> {
+    setStatus('loading');
+    setError(null);
+    try {
+      await new Promise<void>((resolve) => {
+        chrome.runtime.sendMessage({ type: 'holaday.resetConnection' }, () => resolve());
+      });
+      setUser(null);
+      setToken(null);
+      setTasks([]);
+      setStatus('idle');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setStatus('error');
+    }
+  }
+
+  /**
    * Phase 14 — open the Side Panel for the current window. chrome.sidePanel.open
    * must run inside a user-gesture context, which a button click satisfies.
    * Closing the popup right after lets Chrome focus the panel cleanly without
@@ -489,6 +516,19 @@ export function App() {
             {status === 'loading' ? 'Signing in...' : 'Sign in'}
           </button>
           {error ? <div style={errStyle}>{error}</div> : null}
+          {/* Phase 18b — escape hatch for users stuck in the
+              auth-failure freeze. Most users will never see this
+              button (the SW only freezes after 3 consecutive
+              4401s), but when they do, the existing flow has no
+              way out without reinstalling. */}
+          <button
+            type="button"
+            onClick={() => void resetConnection()}
+            style={resetBtnStyle}
+            title="清除扩展存储的登录态 + 失败计数，重新尝试连接"
+          >
+            重置连接
+          </button>
         </div>
       </div>
     );
@@ -556,6 +596,17 @@ export function App() {
           ) : null}
         </div>
         {error ? <div style={errStyle}>{error}</div> : null}
+        {/* Phase 18b — same escape hatch in the authed view, in
+            case the user has a stale token cached locally that
+            keeps tripping the orchestrator's auth check. */}
+        <button
+          type="button"
+          onClick={() => void resetConnection()}
+          style={resetBtnStyle}
+          title="清除扩展存储的登录态 + 失败计数，重新尝试连接"
+        >
+          重置连接
+        </button>
       </div>
 
       <div style={{ marginTop: 12, borderTop: '1px solid #eee', paddingTop: 8 }}>
@@ -1353,6 +1404,16 @@ const headerRow: React.CSSProperties = {
   alignItems: 'flex-start',
 };
 const errStyle: React.CSSProperties = { color: 'crimson', fontSize: 12 };
+const resetBtnStyle: React.CSSProperties = {
+  marginTop: 4,
+  padding: '4px 10px',
+  fontSize: 11,
+  background: 'transparent',
+  color: '#6b7280',
+  border: '1px solid #d1d5db',
+  borderRadius: 4,
+  cursor: 'pointer',
+};
 function debugToggleBtn(on: boolean): React.CSSProperties {
   return {
     fontSize: 12,
