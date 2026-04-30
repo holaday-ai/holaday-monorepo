@@ -711,16 +711,72 @@ const AUTH_FAILURES_KEY = 'holaday.auth.consecutive_failures';
 const KNOWN_BAD_TOKEN_KEY = 'holaday.auth.known_bad_token';
 const MAX_AUTH_FAILURES = 3;
 const RETRY_BACKOFF_MS = [1_000, 2_000, 4_000];
+/**
+ * Phase 17b — known-bad-token expiry. Storing a forever-marker
+ * caused a stuck state: the user re-logs in on holaday.ai, the
+ * cookie sets a fresh JWT, but if the orchestrator regenerated the
+ * SAME token (server-side session extension) or the ext lifted a
+ * stale token from a tab that hadn't refreshed yet, the value
+ * matched the bad marker and the SW silently refused to retry.
+ *
+ * 5 min covers transient orchestrator hiccups + a one-tab-stale
+ * window without making the user wait. After expiry the marker
+ * auto-clears on the next read; manual Side Panel "我已登录，重试"
+ * still works as a hard reset.
+ */
+const KNOWN_BAD_TOKEN_TTL_MS = 5 * 60 * 1000;
 let pendingAuthRetry: ReturnType<typeof setTimeout> | null = null;
 
 async function getAuthFailures(): Promise<number> {
   const v = (await chrome.storage.local.get(AUTH_FAILURES_KEY))[AUTH_FAILURES_KEY];
   return typeof v === 'number' ? v : 0;
 }
+
+/**
+ * Read the most-recently-rejected token, honouring the 5-minute
+ * TTL. Returns null when the marker is missing, expired, or in
+ * the legacy bare-string format (which we treat as expired so a
+ * SW upgrade doesn't keep the user in the stuck state).
+ *
+ * Side effect: an expired / legacy marker is removed in the
+ * background so subsequent reads short-circuit on the absent key.
+ */
 async function getKnownBadToken(): Promise<string | null> {
   const v = (await chrome.storage.local.get(KNOWN_BAD_TOKEN_KEY))[KNOWN_BAD_TOKEN_KEY];
-  return typeof v === 'string' && v.length > 0 ? v : null;
+  // Legacy: bare string from before this commit. Drop it — treating
+  // it as expired matches the new TTL semantics and unsticks any
+  // user who upgraded the extension while in the freeze state.
+  if (typeof v === 'string') {
+    void chrome.storage.local.remove(KNOWN_BAD_TOKEN_KEY);
+    return null;
+  }
+  if (!v || typeof v !== 'object') return null;
+  const obj = v as { token?: unknown; ts?: unknown };
+  if (typeof obj.token !== 'string' || obj.token.length === 0) return null;
+  if (typeof obj.ts !== 'number') return null;
+  const ageMs = Date.now() - obj.ts;
+  if (ageMs > KNOWN_BAD_TOKEN_TTL_MS) {
+    // Expired — wipe so the next read doesn't pay this branch.
+    void chrome.storage.local.remove(KNOWN_BAD_TOKEN_KEY);
+    console.info(
+      `[holaday] auth: known-bad-token expired (${Math.round(ageMs / 1000)}s old); will retry`,
+    );
+    return null;
+  }
+  return obj.token;
 }
+
+/**
+ * Stamp `token` as known-bad with the current timestamp. The
+ * record auto-expires via `getKnownBadToken` after
+ * KNOWN_BAD_TOKEN_TTL_MS.
+ */
+async function setKnownBadToken(token: string): Promise<void> {
+  await chrome.storage.local.set({
+    [KNOWN_BAD_TOKEN_KEY]: { token, ts: Date.now() },
+  });
+}
+
 async function resetAuthFailureState(): Promise<void> {
   await chrome.storage.local.remove([AUTH_FAILURES_KEY, KNOWN_BAD_TOKEN_KEY]);
 }
@@ -886,7 +942,9 @@ onUnauthorized(() => {
       // "this token is bad" signal.
       await chrome.storage.local.set({ [AUTH_FAILURES_KEY]: next });
       if (rejected) {
-        await chrome.storage.local.set({ [KNOWN_BAD_TOKEN_KEY]: rejected });
+        // Phase 17b — write via the helper so the value carries a
+        // timestamp that getKnownBadToken can age out after the TTL.
+        await setKnownBadToken(rejected);
       }
       await clearAccessToken();
       await clearStoredUser();
