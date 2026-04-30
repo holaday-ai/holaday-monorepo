@@ -74,6 +74,11 @@ export interface TaskStore {
   refreshTasks(): Promise<void>;
   /** Phase 16 — toggle the starred flag on a task. Optimistic. */
   toggleStarred(taskId: string): Promise<void>;
+  /**
+   * Phase 16b — move a task into a project (or out of one when
+   * projectId === null). Optimistic; reverts the row on server error.
+   */
+  moveTaskToProject(taskId: string, projectId: string | null): Promise<void>;
   createTask(
     intent: string,
     fileIds?: string[],
@@ -255,6 +260,23 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
           t.taskId === taskId
             ? { ...t, starred: before.starred ?? false, starredAt: before.starredAt ?? null }
             : t,
+        ),
+      }));
+    }
+  },
+
+  async moveTaskToProject(taskId, projectId) {
+    const before = get().tasks.find((t) => t.taskId === taskId);
+    if (!before) return;
+    set((prev) => ({
+      tasks: prev.tasks.map((t) => (t.taskId === taskId ? { ...t, projectId } : t)),
+    }));
+    try {
+      await trpc.tasks.moveToProject.mutate({ taskId, projectId });
+    } catch {
+      set((prev) => ({
+        tasks: prev.tasks.map((t) =>
+          t.taskId === taskId ? { ...t, projectId: before.projectId ?? null } : t,
         ),
       }));
     }

@@ -7,6 +7,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { DrizzleLlmCallRecorder } from './agent/llm-call-recorder.js';
 import { AnthropicPlanner } from './agent/planners/anthropic.js';
 import { StubPlanner } from './agent/planners/stub.js';
+import { startScheduledRunner } from './agent/scheduled-runner.js';
 import {
   createApifyAdapter,
   createExecutionRouter,
@@ -213,6 +214,25 @@ async function main() {
 
   const httpServer = app.listen(env.HTTP_PORT, () => {
     logger.info({ port: env.HTTP_PORT }, 'HTTP server listening');
+  });
+
+  // Phase 16b — start the scheduled-tasks polling loop. Pure
+  // in-process setInterval (no BullMQ); single-instance safe. The
+  // dispatch callback is a stub for v1 — it just logs the fire.
+  // Wiring through to real task creation needs the supercar entry
+  // point exposed as a service rather than a tRPC mutation; that's
+  // a follow-up. The schedule infrastructure is ready in advance so
+  // users can create / list / pause schedules end-to-end and watch
+  // the next_run_at advance correctly.
+  startScheduledRunner({
+    db,
+    dispatch: async ({ scheduledTaskId, intent }) => {
+      logger.info(
+        { scheduledTaskId, intentPreview: intent.slice(0, 80) },
+        'scheduled-runner: would dispatch (full wiring pending)',
+      );
+      return null;
+    },
   });
 
   // Per-user VNC WebSocket proxy — only live when the pool is active.

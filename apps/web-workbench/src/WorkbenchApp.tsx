@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PLAN_CATALOGUE, type PlanId } from '@holaday/shared-types';
 import { BrowserPanel } from '@/components/BrowserPanel';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -17,6 +18,7 @@ import { type ConnStatus, connect, disconnect, onServerMessage, onStatus } from 
 import { useTaskStore } from '@/stores/task-store';
 import { isQuotaExhausted, useQuotaStatus } from '@/lib/use-quota-status';
 import { applyHistoryRetention } from '@/utils/time-buckets';
+import type { UiProject } from '@/types/task';
 
 interface MeProfile {
   userId: string;
@@ -83,8 +85,28 @@ function AppShell(): JSX.Element {
   // takes the whole app shell. Toggled from the Panel header button
   // and from Escape (via the existing keyboard handler below).
   const [panelFullscreen, setPanelFullscreen] = React.useState(false);
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // Phase 16b — when ?project=prj_… is present in the URL the
+  // sidebar filters down to that project's tasks (the route stays /
+  // — workbench just shows a filter chip + the filtered list).
+  const projectFilter = searchParams.get('project');
   const [me, setMe] = React.useState<MeProfile | null>(null);
   const [bootstrapped, setBootstrapped] = React.useState(false);
+  // Phase 16b — projects list, loaded once on mount + refreshed
+  // after a move-to-project (so the right-click submenu and the
+  // /projects page see new task counts). Empty until first fetch
+  // resolves; the right-click submenu hides "无项目" + the list
+  // when projects is undefined, so an empty state renders cleanly.
+  const [projects, setProjects] = React.useState<UiProject[]>([]);
+  const refreshProjects = React.useCallback(async () => {
+    try {
+      const list = await trpc.projects.list.query();
+      setProjects(list as UiProject[]);
+    } catch {
+      // Silent — the right-click menu just won't show options.
+    }
+  }, []);
   /**
    * Phase 14 audit follow-up — when user is viewing a terminal
    * task, the next message defaults to a 追问. They can dismiss
@@ -171,6 +193,7 @@ function AppShell(): JSX.Element {
   const deleteTask = useTaskStore((s) => s.deleteTask);
   const renameTask = useTaskStore((s) => s.renameTask);
   const toggleStarred = useTaskStore((s) => s.toggleStarred);
+  const moveTaskToProject = useTaskStore((s) => s.moveTaskToProject);
   const awaitingUserByTask = useTaskStore((s) => s.awaitingUserByTask);
   const applyServerMessage = useTaskStore((s) => s.applyServerMessage);
   const reset = useTaskStore((s) => s.reset);
@@ -204,6 +227,17 @@ function AppShell(): JSX.Element {
       () => applyHistoryRetention(tasks, historyDays, retentionPinned),
       [tasks, historyDays, retentionPinned],
     );
+  // Phase 16b — apply project filter on top of retention. When
+  // projectFilter is set, only tasks linked to that project survive;
+  // the sidebar groups still render normally below the filter chip.
+  const filteredTasks = React.useMemo(() => {
+    if (!projectFilter) return visibleTasks;
+    return visibleTasks.filter((t) => t.projectId === projectFilter);
+  }, [visibleTasks, projectFilter]);
+  const activeProject = React.useMemo(
+    () => projects.find((p) => p.projectId === projectFilter) ?? null,
+    [projects, projectFilter],
+  );
   // Quota gate for the composer. Refresh keyed off the task list
   // length so terminal events update both the sidebar's QuotaIndicator
   // and the input gate in the same round-trip via tRPC batching.
@@ -248,6 +282,10 @@ function AppShell(): JSX.Element {
     Promise.allSettled([listFuture, meFuture]).then(finish);
     // Cap: never leave users on a skeleton longer than 1.5 s.
     const timer = setTimeout(finish, 1500);
+    // Phase 16b — projects load in parallel; not gating the
+    // skeleton (the right-click menu just renders no entries
+    // until this resolves).
+    void refreshProjects();
     connect();
     const offMsg = onServerMessage(applyServerMessage);
     const offStatus = onStatus(setWsStatus);
@@ -256,7 +294,7 @@ function AppShell(): JSX.Element {
       offMsg();
       offStatus();
     };
-  }, [authed, refreshTasks, applyServerMessage]);
+  }, [authed, refreshTasks, applyServerMessage, refreshProjects]);
 
   // Auth invalidated by server (bad / expired token).
   React.useEffect(() => {
@@ -411,8 +449,14 @@ function AppShell(): JSX.Element {
     <div className="relative flex h-full min-h-0 w-full overflow-hidden" ref={contentRowRef}>
       {!panelFullscreen && (
       <Sidebar
-        tasks={visibleTasks}
-        hiddenTaskCount={hiddenByRetentionCount}
+        tasks={filteredTasks}
+        hiddenTaskCount={projectFilter ? 0 : hiddenByRetentionCount}
+        projectFilter={
+          activeProject
+            ? { projectId: activeProject.projectId, name: activeProject.name }
+            : null
+        }
+        onClearProjectFilter={() => navigate('/')}
         historyDays={historyDays}
         selectedTaskId={selectedTaskId}
         onSelectTask={setSelectedTask}
@@ -454,6 +498,15 @@ function AppShell(): JSX.Element {
           if ('error' in res) toast.show(`重命名失败：${res.error}`, 'error');
         }}
         onToggleStarred={(taskId) => void toggleStarred(taskId)}
+        projects={projects}
+        onMoveTaskToProject={async (taskId, projectId) => {
+          await moveTaskToProject(taskId, projectId);
+          // Refresh project task counts in the background so the
+          // sidebar's submenu and the /projects page see the latest
+          // numbers on next open.
+          void refreshProjects();
+        }}
+        onCreateProject={() => navigate('/projects?create=1')}
         userEmail={me?.email ?? null}
         userDisplayName={preferredDisplayName(me)}
         userPlan={me?.plan ?? 'free'}

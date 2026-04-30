@@ -1,9 +1,11 @@
 import {
+  Check,
   ChevronLeft,
   ChevronRight,
   Clipboard,
   Clock,
   FolderOpen,
+  FolderPlus,
   Globe,
   Layers,
   ListTree,
@@ -29,7 +31,7 @@ import { useToast } from '@/components/ui/toast';
 import { UserMenu } from '@/components/UserMenu';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
-import type { UiTask } from '@/types/task';
+import type { UiProject, UiTask } from '@/types/task';
 import { bucketByTime, isTaskDeletable } from '@/utils/time-buckets';
 
 interface Props {
@@ -42,6 +44,33 @@ interface Props {
   onRetryTask?(intent: string): void | Promise<void>;
   /** Phase 16 — toggle a task's starred flag. Wires through to the store. */
   onToggleStarred?(taskId: string): void | Promise<void>;
+  /**
+   * Phase 16b — projects available for the right-click "移到项目"
+   * submenu. Empty array hides the menu item; absent prop also hides
+   * it. Loaded once at App level via projects.list and refreshed when
+   * the user creates a new project.
+   */
+  projects?: readonly UiProject[];
+  /**
+   * Phase 16b — fired when the user picks a destination project (or
+   * clears with projectId=null). Optimistic move happens in the
+   * store; the prop just lets the App refresh the projects list
+   * task counts.
+   */
+  onMoveTaskToProject?(taskId: string, projectId: string | null): void | Promise<void>;
+  /**
+   * Phase 16b — open the "+ 新建项目" inline form. The form is in
+   * /projects; this just navigates there with `?create=1` so the
+   * page auto-opens the form.
+   */
+  onCreateProject?(): void;
+  /**
+   * Phase 16b — when set, the sidebar shows a project-filter chip
+   * above the task list (the WorkbenchApp has already filtered
+   * the tasks array down to that project).
+   */
+  projectFilter?: { projectId: string; name: string } | null;
+  onClearProjectFilter?(): void;
   onOpenSearch?(): void;
   userEmail: string | null;
   userDisplayName: string;
@@ -92,6 +121,11 @@ export function Sidebar({
   onRenameTask,
   onRetryTask,
   onToggleStarred,
+  projects: projectsProp,
+  onMoveTaskToProject,
+  onCreateProject,
+  projectFilter,
+  onClearProjectFilter,
   onOpenSearch,
   userEmail,
   userDisplayName,
@@ -183,10 +217,21 @@ export function Sidebar({
   }, []);
 
   const [menu, setMenu] = React.useState<
-    | { taskId: string; intent: string; x: number; y: number; deletable: boolean }
+    | {
+        taskId: string;
+        intent: string;
+        projectId: string | null;
+        x: number;
+        y: number;
+        deletable: boolean;
+      }
     | null
   >(null);
   const [renamingId, setRenamingId] = React.useState<string | null>(null);
+  // Phase 16b — when set, the right-click menu's "移到项目" item has
+  // been hovered and the submenu is showing the project list. Resets
+  // when the user clicks an option or the outer menu closes.
+  const [moveOpen, setMoveOpen] = React.useState(false);
 
   React.useEffect(() => {
     if (!menu) return;
@@ -297,6 +342,23 @@ export function Sidebar({
 
             <FeatureNav />
 
+            {projectFilter && (
+              <div className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-indigo-300/40 bg-indigo-50/40 px-2.5 py-1.5 text-[12px] dark:border-indigo-500/30 dark:bg-indigo-500/10">
+                <FolderOpen className="h-3.5 w-3.5 shrink-0 text-indigo-600 dark:text-indigo-300" />
+                <span className="min-w-0 flex-1 truncate text-foreground">
+                  项目：{projectFilter.name}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onClearProjectFilter?.()}
+                  aria-label="清除项目筛选"
+                  className="rounded p-0.5 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+
             <div className="flex-1 overflow-y-auto px-2 pb-4">
               {pinnedTasks.length > 0 && (
                 <TaskGroup title="置顶">
@@ -312,9 +374,11 @@ export function Sidebar({
                       }}
                       onContextMenu={(id, e) => {
                         e.preventDefault();
+                        setMoveOpen(false);
                         setMenu({
                           taskId: id,
                           intent: t.intent,
+                          projectId: t.projectId ?? null,
                           x: e.clientX,
                           y: e.clientY,
                           deletable: isTaskDeletable(t.status),
@@ -349,9 +413,11 @@ export function Sidebar({
                       }}
                       onContextMenu={(id, e) => {
                         e.preventDefault();
+                        setMoveOpen(false);
                         setMenu({
                           taskId: id,
                           intent: t.intent,
+                          projectId: t.projectId ?? null,
                           x: e.clientX,
                           y: e.clientY,
                           deletable: isTaskDeletable(t.status),
@@ -386,9 +452,11 @@ export function Sidebar({
                       }}
                       onContextMenu={(id, e) => {
                         e.preventDefault();
+                        setMoveOpen(false);
                         setMenu({
                           taskId: id,
                           intent: t.intent,
+                          projectId: t.projectId ?? null,
                           x: e.clientX,
                           y: e.clientY,
                           deletable: isTaskDeletable(t.status),
@@ -557,6 +625,96 @@ export function Sidebar({
               <RotateCcw className="h-3.5 w-3.5" />
               用相同意图重试
             </button>
+          )}
+          {onMoveTaskToProject && (
+            <div className="relative">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => setMoveOpen((v) => !v)}
+                aria-expanded={moveOpen}
+                className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-foreground/5"
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+                <span className="flex-1">移到项目</span>
+                <ChevronRight className="h-3 w-3 opacity-60" />
+              </button>
+              {moveOpen && (
+                <div
+                  role="menu"
+                  className="absolute left-full top-0 z-[61] ml-1 min-w-[180px] max-h-72 overflow-y-auto rounded-md border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg animate-fade-in"
+                >
+                  {/* "无项目" — clear assignment */}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={async () => {
+                      const { taskId } = menu;
+                      setMenu(null);
+                      setMoveOpen(false);
+                      await onMoveTaskToProject(taskId, null);
+                    }}
+                    className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left transition-colors hover:bg-foreground/5"
+                  >
+                    <Check
+                      className={cn(
+                        'h-3.5 w-3.5 shrink-0',
+                        menu.projectId == null ? 'opacity-100' : 'opacity-0',
+                      )}
+                    />
+                    <span className="text-muted-foreground">无项目</span>
+                  </button>
+                  {(projectsProp ?? []).length > 0 && (
+                    <div className="my-1 border-t border-border" />
+                  )}
+                  {(projectsProp ?? []).map((p) => {
+                    const active = menu.projectId === p.projectId;
+                    return (
+                      <button
+                        key={p.projectId}
+                        type="button"
+                        role="menuitem"
+                        onClick={async () => {
+                          const { taskId } = menu;
+                          setMenu(null);
+                          setMoveOpen(false);
+                          await onMoveTaskToProject(taskId, p.projectId);
+                        }}
+                        className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left transition-colors hover:bg-foreground/5"
+                      >
+                        <Check
+                          className={cn(
+                            'h-3.5 w-3.5 shrink-0',
+                            active ? 'opacity-100' : 'opacity-0',
+                          )}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-foreground">
+                          {p.name}
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {onCreateProject && (
+                    <>
+                      <div className="my-1 border-t border-border" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setMenu(null);
+                          setMoveOpen(false);
+                          onCreateProject();
+                        }}
+                        className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-foreground/5"
+                      >
+                        <FolderPlus className="h-3.5 w-3.5" />
+                        新建项目
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           )}
           <button
             type="button"
@@ -844,10 +1002,10 @@ interface FeatureItem {
 }
 
 const FEATURES: readonly FeatureItem[] = [
-  { icon: Clock, label: '定时任务' },
+  { icon: Clock, label: '定时任务', href: '/scheduled' },
   { icon: Sparkles, label: '专家技能', href: '/skills' },
-  { icon: Plug, label: 'MCP 连接' },
-  { icon: FolderOpen, label: '文件库' },
+  { icon: Plug, label: 'MCP 连接', href: '/connections' },
+  { icon: FolderOpen, label: '文件库', href: '/files' },
   { icon: Globe, label: '浏览器' },
   { icon: Layers, label: '项目', href: '/projects' },
   { icon: Star, label: '收藏', href: '/starred' },

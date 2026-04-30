@@ -1,6 +1,6 @@
 import { FolderOpen, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
@@ -16,11 +16,13 @@ import type { UiProject } from '@/types/task';
  */
 export function ProjectsPage(): JSX.Element {
   const toast = useToast();
-  const _navigate = useNavigate();
-  void _navigate;
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [projects, setProjects] = React.useState<UiProject[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const [creating, setCreating] = React.useState(false);
+  // Auto-open the create form when arrived via Sidebar's
+  // right-click "新建项目" submenu (passes ?create=1).
+  const [creating, setCreating] = React.useState(searchParams.get('create') === '1');
   const [newName, setNewName] = React.useState('');
   const [creatingNow, setCreatingNow] = React.useState(false);
 
@@ -163,10 +165,14 @@ export function ProjectsPage(): JSX.Element {
               key={p.projectId}
               className="group flex flex-col gap-2 rounded-xl border border-border bg-card p-4 transition-colors hover:border-foreground/20 hover:bg-foreground/[0.02]"
             >
-              <div className="flex items-start gap-2">
+              <button
+                type="button"
+                onClick={() => navigate(`/?project=${p.projectId}`)}
+                className="flex items-start gap-2 text-left"
+              >
                 <FolderOpen className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-foreground">
+                  <div className="truncate text-sm font-medium text-foreground hover:underline">
                     {p.name}
                   </div>
                   {p.description && (
@@ -174,6 +180,11 @@ export function ProjectsPage(): JSX.Element {
                       {p.description}
                     </div>
                   )}
+                </div>
+              </button>
+              <div className="flex items-center justify-between">
+                <div className="text-[11px] text-muted-foreground">
+                  {p.taskCount} 个任务
                 </div>
                 <button
                   type="button"
@@ -184,7 +195,6 @@ export function ProjectsPage(): JSX.Element {
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
-              <div className="text-[11px] text-muted-foreground">{p.taskCount} 个任务</div>
             </div>
           ))}
         </div>

@@ -19,6 +19,8 @@ export const ID_PREFIXES = {
   memory: 'mem',
   // Phase 16 — user-owned task grouping.
   project: 'prj',
+  // Phase 16b — scheduled task triggers (cron-style).
+  scheduledTask: 'sch',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

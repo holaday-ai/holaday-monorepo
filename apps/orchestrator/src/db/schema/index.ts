@@ -3,6 +3,7 @@ export * from './user-profiles.js';
 export * from './skills.js';
 export * from './sessions.js';
 export * from './projects.js';
+export * from './scheduled-tasks.js';
 export * from './tasks.js';
 export * from './task-steps.js';
 export * from './task-events.js';

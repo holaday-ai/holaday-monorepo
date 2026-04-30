@@ -6,12 +6,15 @@ import { LoginPage } from '@/pages/LoginPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { PlanPage } from '@/pages/PlanPage';
 import { PrivacyPage } from '@/pages/PrivacyPage';
+import { ConnectionsPage } from '@/pages/ConnectionsPage';
+import { FilesPage } from '@/pages/FilesPage';
 import { ProfilePage } from '@/pages/ProfilePage';
 import { ProjectsPage } from '@/pages/ProjectsPage';
 import { RedirectIfAuthed } from '@/pages/RedirectIfAuthed';
 import { RegisterPage } from '@/pages/RegisterPage';
 import { RequireAuth } from '@/pages/RequireAuth';
 import { RolesPage } from '@/pages/RolesPage';
+import { ScheduledPage } from '@/pages/ScheduledPage';
 import { ServerErrorPage } from '@/pages/ServerErrorPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { SkillsPage } from '@/pages/SkillsPage';
@@ -132,6 +135,30 @@ export function App(): JSX.Element {
           element={
             <RequireAuth>
               <StarredPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/files"
+          element={
+            <RequireAuth>
+              <FilesPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/scheduled"
+          element={
+            <RequireAuth>
+              <ScheduledPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/connections"
+          element={
+            <RequireAuth>
+              <ConnectionsPage />
             </RequireAuth>
           }
         />

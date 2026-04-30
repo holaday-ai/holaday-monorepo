@@ -1634,6 +1634,12 @@ export const tasksRouter = router({
         .object({
           cursor: z.number().int().positive().optional(),
           limit: z.number().int().min(1).max(100).default(20),
+          /**
+           * Phase 16b — when set, only return tasks linked to this
+           * project. The id is the external prj_… form; we translate
+           * to the bigint id once before the WHERE clause.
+           */
+          projectId: z.string().min(1).optional(),
         })
         .default({ limit: 20 }),
     )
@@ -1648,6 +1654,24 @@ export const tasksRouter = router({
       }
       const conds = [eq(tasksTable.userId, userRow.id)];
       if (input.cursor) conds.push(lt(tasksTable.id, input.cursor));
+      if (input.projectId) {
+        const [projRow] = await ctx.db
+          .select({ id: projects.id })
+          .from(projects)
+          .where(
+            and(
+              eq(projects.externalId, input.projectId),
+              eq(projects.userId, userRow.id),
+            ),
+          )
+          .limit(1);
+        if (!projRow) {
+          // Unknown project for this user → return empty rather
+          // than 404 so the SPA renders an empty state.
+          return { tasks: [], nextCursor: null };
+        }
+        conds.push(eq(tasksTable.projectId, projRow.id));
+      }
       const rows = await ctx.db
         .select({
           id: tasksTable.id,
