@@ -1,4 +1,4 @@
-import { MoreHorizontal } from 'lucide-react';
+import { MoreHorizontal, Star } from 'lucide-react';
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 import { type UiTask, isActive } from '@/types/task';
@@ -25,6 +25,14 @@ interface Props {
   batchMode?: boolean;
   batchChecked?: boolean;
   onBatchToggle?(taskId: string): void;
+  /**
+   * Phase 16 — when present, the row renders a Star icon on the
+   * trailing edge that toggles the task's starred flag. The icon is
+   * filled when task.starred = true (visible always), or outline +
+   * group-hover-only when not starred (so unfilled rows don't
+   * advertise themselves).
+   */
+  onToggleStarred?(taskId: string): void;
 }
 
 /**
@@ -58,6 +66,7 @@ export function TaskListItem({
   batchMode,
   batchChecked,
   onBatchToggle,
+  onToggleStarred,
 }: Props): JSX.Element {
   const active = isActive(task.status);
   return (
@@ -115,6 +124,36 @@ export function TaskListItem({
           )}
         >
           {taskDisplayTitle(task)}
+        </span>
+      )}
+      {!renaming && onToggleStarred && (
+        <span
+          role="button"
+          aria-label={task.starred ? '取消收藏' : '收藏'}
+          aria-pressed={Boolean(task.starred)}
+          tabIndex={0}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleStarred(task.taskId);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggleStarred(task.taskId);
+            }
+          }}
+          className={cn(
+            'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded transition-opacity hover:bg-foreground/10 focus-visible:opacity-100',
+            task.starred
+              ? 'text-amber-500 opacity-100'
+              : 'text-muted-foreground opacity-0 group-hover:opacity-100',
+          )}
+        >
+          <Star
+            className="h-3.5 w-3.5"
+            fill={task.starred ? 'currentColor' : 'none'}
+          />
         </span>
       )}
       {!renaming && onContextMenu && (

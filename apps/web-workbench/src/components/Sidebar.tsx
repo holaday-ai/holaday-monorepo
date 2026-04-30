@@ -40,6 +40,8 @@ interface Props {
   onDeleteTask?(taskId: string): void | Promise<void>;
   onRenameTask?(taskId: string, title: string): void | Promise<void>;
   onRetryTask?(intent: string): void | Promise<void>;
+  /** Phase 16 — toggle a task's starred flag. Wires through to the store. */
+  onToggleStarred?(taskId: string): void | Promise<void>;
   onOpenSearch?(): void;
   userEmail: string | null;
   userDisplayName: string;
@@ -89,6 +91,7 @@ export function Sidebar({
   onDeleteTask,
   onRenameTask,
   onRetryTask,
+  onToggleStarred,
   onOpenSearch,
   userEmail,
   userDisplayName,
@@ -108,14 +111,23 @@ export function Sidebar({
   // Partition: pinned tasks show as their own top group; unpinned
   // tasks get the normal time-bucketed grouping. Pinned group keeps
   // pin order (most-recently-pinned first by tasks array position).
-  const { pinnedTasks, unpinnedTasks } = React.useMemo(() => {
+  const { pinnedTasks, starredTasks, unpinnedTasks } = React.useMemo(() => {
     const pinned: UiTask[] = [];
+    const starred: UiTask[] = [];
     const rest: UiTask[] = [];
     for (const t of tasks) {
       if (pinnedIds.has(t.taskId)) pinned.push(t);
+      else if (t.starred) starred.push(t);
       else rest.push(t);
     }
-    return { pinnedTasks: pinned, unpinnedTasks: rest };
+    // Sort starred by starredAt desc (most-recently-starred first).
+    // null starredAt sinks to the bottom.
+    starred.sort((a, b) => {
+      const ta = a.starredAt ? new Date(a.starredAt).getTime() : 0;
+      const tb = b.starredAt ? new Date(b.starredAt).getTime() : 0;
+      return tb - ta;
+    });
+    return { pinnedTasks: pinned, starredTasks: starred, unpinnedTasks: rest };
   }, [tasks, pinnedIds]);
   const buckets = React.useMemo(() => bucketByTime(unpinnedTasks), [unpinnedTasks]);
 
@@ -318,6 +330,44 @@ export function Sidebar({
                       batchMode={batchMode}
                       batchChecked={batchSelected.has(t.taskId)}
                       onBatchToggle={toggleBatchSelect}
+                      onToggleStarred={onToggleStarred}
+                    />
+                  ))}
+                </TaskGroup>
+              )}
+              {starredTasks.length > 0 && (
+                <TaskGroup title={`收藏 (${starredTasks.length})`}>
+                  {starredTasks.map((t) => (
+                    <TaskListItem
+                      key={t.taskId}
+                      task={t}
+                      selected={t.taskId === selectedTaskId}
+                      renaming={renamingId === t.taskId}
+                      onSelect={(id) => {
+                        onSelectTask(id);
+                        onMobileClose?.();
+                      }}
+                      onContextMenu={(id, e) => {
+                        e.preventDefault();
+                        setMenu({
+                          taskId: id,
+                          intent: t.intent,
+                          x: e.clientX,
+                          y: e.clientY,
+                          deletable: isTaskDeletable(t.status),
+                        });
+                      }}
+                      onRenameCommit={(id, title) => {
+                        setRenamingId(null);
+                        if (onRenameTask && (title.trim() !== (t.title ?? '').trim())) {
+                          void onRenameTask(id, title);
+                        }
+                      }}
+                      onRenameCancel={() => setRenamingId(null)}
+                      batchMode={batchMode}
+                      batchChecked={batchSelected.has(t.taskId)}
+                      onBatchToggle={toggleBatchSelect}
+                      onToggleStarred={onToggleStarred}
                     />
                   ))}
                 </TaskGroup>
@@ -354,6 +404,7 @@ export function Sidebar({
                       batchMode={batchMode}
                       batchChecked={batchSelected.has(t.taskId)}
                       onBatchToggle={toggleBatchSelect}
+                      onToggleStarred={onToggleStarred}
                     />
                   ))}
                 </TaskGroup>
@@ -788,42 +839,59 @@ function BrandMark(): JSX.Element {
 interface FeatureItem {
   icon: typeof Clock;
   label: string;
+  /** When set the row is clickable and routes here. */
+  href?: string;
 }
 
 const FEATURES: readonly FeatureItem[] = [
   { icon: Clock, label: '定时任务' },
-  { icon: Sparkles, label: '专家技能' },
+  { icon: Sparkles, label: '专家技能', href: '/skills' },
   { icon: Plug, label: 'MCP 连接' },
   { icon: FolderOpen, label: '文件库' },
   { icon: Globe, label: '浏览器' },
-  { icon: Layers, label: '项目' },
-  { icon: Star, label: '收藏' },
+  { icon: Layers, label: '项目', href: '/projects' },
+  { icon: Star, label: '收藏', href: '/starred' },
 ];
 
 /**
- * Disabled feature nav between the "+ 新任务" CTA and the task list.
- * Each row shows a lucide icon + Chinese label, greyed out, with a
- * "即将推出" tooltip on hover. Compact density (32px row) keeps the
- * sidebar from getting too tall on lower viewports while still
- * advertising the roadmap.
+ * Feature nav between the "+ 新任务" CTA and the task list. Phase 16
+ * graduates 收藏 / 项目 / 专家技能 from "即将推出" to live routes —
+ * those rows render as clickable nav links; the rest stay disabled
+ * with the tooltip. Compact density (32px row).
  */
 function FeatureNav(): JSX.Element {
+  const navigate = useNavigate();
   return (
     <nav className="px-2 pb-2">
-      {FEATURES.map(({ icon: Icon, label }) => (
-        <button
-          key={label}
-          type="button"
-          disabled
-          aria-disabled
-          title={`${label} · 即将推出`}
-          className="flex w-full cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground/70 opacity-60 transition-colors"
-        >
-          <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          <span className="truncate">{label}</span>
-          <span className="ml-auto text-[10px] text-muted-foreground/50">即将推出</span>
-        </button>
-      ))}
+      {FEATURES.map(({ icon: Icon, label, href }) => {
+        if (href) {
+          return (
+            <button
+              key={label}
+              type="button"
+              onClick={() => navigate(href)}
+              className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+            >
+              <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span className="truncate">{label}</span>
+            </button>
+          );
+        }
+        return (
+          <button
+            key={label}
+            type="button"
+            disabled
+            aria-disabled
+            title={`${label} · 即将推出`}
+            className="flex w-full cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground/70 opacity-60 transition-colors"
+          >
+            <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span className="truncate">{label}</span>
+            <span className="ml-auto text-[10px] text-muted-foreground/50">即将推出</span>
+          </button>
+        );
+      })}
     </nav>
   );
 }

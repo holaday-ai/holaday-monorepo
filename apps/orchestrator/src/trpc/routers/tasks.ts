@@ -5,7 +5,7 @@ import {
   type PlanId,
 } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
-import { and, asc, desc, eq, lt } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, lt } from 'drizzle-orm';
 import { z } from 'zod';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { injectResolvedUrl, resolveIntentUrl } from '../../agent/url-resolver.js';
@@ -55,6 +55,7 @@ import {
   getConcurrencyLimit,
   quotaErrorFor,
 } from '../../quota/quota-service.js';
+import { projects } from '../../db/schema/projects.js';
 import { skills } from '../../db/schema/skills.js';
 import { taskEvents } from '../../db/schema/task-events.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
@@ -1659,6 +1660,9 @@ export const tasksRouter = router({
           errorMessage: tasksTable.errorMessage,
           result: tasksTable.result,
           opusUsed: tasksTable.opusUsed,
+          starred: tasksTable.starred,
+          starredAt: tasksTable.starredAt,
+          projectId: tasksTable.projectId,
           createdAt: tasksTable.createdAt,
           updatedAt: tasksTable.updatedAt,
           completedAt: tasksTable.completedAt,
@@ -1667,6 +1671,21 @@ export const tasksRouter = router({
         .where(and(...conds))
         .orderBy(desc(tasksTable.id))
         .limit(input.limit);
+
+      // Resolve project external ids in one round-trip — mapping
+      // bigint project_id back to the public prj_… string the SPA
+      // uses for routing. Tasks with no project skip the lookup.
+      const internalProjectIds = Array.from(
+        new Set(rows.map((r) => r.projectId).filter((v): v is number => v != null)),
+      );
+      const projectExtById = new Map<number, string>();
+      if (internalProjectIds.length > 0) {
+        const projectRows = await ctx.db
+          .select({ id: projects.id, externalId: projects.externalId })
+          .from(projects)
+          .where(inArray(projects.id, internalProjectIds));
+        for (const p of projectRows) projectExtById.set(p.id, p.externalId);
+      }
 
       return {
         tasks: rows.map((r) => ({
@@ -1678,6 +1697,9 @@ export const tasksRouter = router({
           errorCode: r.errorCode,
           errorMessage: r.errorMessage,
           result: normalizeOutput(r.result),
+          starred: Boolean(r.starred),
+          starredAt: r.starredAt,
+          projectId: r.projectId != null ? projectExtById.get(r.projectId) ?? null : null,
           createdAt: r.createdAt,
           updatedAt: r.updatedAt,
           completedAt: r.completedAt,
@@ -2155,6 +2177,105 @@ export const tasksRouter = router({
         avgElapsedMs,
         totalInputTokens,
         totalOutputTokens,
+      };
+    }),
+
+  /**
+   * Phase 16 — toggle the task's starred ("收藏") flag. Sets
+   * starredAt to now() when starring; clears it when unstarring so
+   * the sidebar can sort the 收藏 group by most-recently-pinned.
+   * Idempotent: starring an already-starred task no-ops gracefully.
+   */
+  star: protectedProcedure
+    .input(z.object({ taskId: z.string().min(1), starred: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const [userRow] = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.externalId, ctx.userId))
+        .limit(1);
+      if (!userRow) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+      }
+      const [taskRow] = await ctx.db
+        .select({ id: tasksTable.id })
+        .from(tasksTable)
+        .where(
+          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)),
+        )
+        .limit(1);
+      if (!taskRow) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
+      }
+      await ctx.db
+        .update(tasksTable)
+        .set({
+          starred: input.starred,
+          starredAt: input.starred ? new Date() : null,
+        })
+        .where(eq(tasksTable.id, taskRow.id));
+      return { ok: true as const, taskId: input.taskId, starred: input.starred };
+    }),
+
+  /**
+   * Phase 16 — assign / unassign a task to a project. Pass
+   * projectId = null to remove the task from its current project
+   * (returns it to the default 所有任务 list).
+   */
+  moveToProject: protectedProcedure
+    .input(
+      z.object({
+        taskId: z.string().min(1),
+        projectId: z.string().min(1).nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [userRow] = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.externalId, ctx.userId))
+        .limit(1);
+      if (!userRow) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+      }
+      const [taskRow] = await ctx.db
+        .select({ id: tasksTable.id })
+        .from(tasksTable)
+        .where(
+          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)),
+        )
+        .limit(1);
+      if (!taskRow) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
+      }
+      let projectInternalId: number | null = null;
+      if (input.projectId) {
+        const [projRow] = await ctx.db
+          .select({ id: projects.id })
+          .from(projects)
+          .where(
+            and(
+              eq(projects.externalId, input.projectId),
+              eq(projects.userId, userRow.id),
+            ),
+          )
+          .limit(1);
+        if (!projRow) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: `project ${input.projectId} not found`,
+          });
+        }
+        projectInternalId = projRow.id;
+      }
+      await ctx.db
+        .update(tasksTable)
+        .set({ projectId: projectInternalId })
+        .where(eq(tasksTable.id, taskRow.id));
+      return {
+        ok: true as const,
+        taskId: input.taskId,
+        projectId: input.projectId,
       };
     }),
 });

@@ -170,6 +170,7 @@ function AppShell(): JSX.Element {
   const replyToTask = useTaskStore((s) => s.replyToTask);
   const deleteTask = useTaskStore((s) => s.deleteTask);
   const renameTask = useTaskStore((s) => s.renameTask);
+  const toggleStarred = useTaskStore((s) => s.toggleStarred);
   const awaitingUserByTask = useTaskStore((s) => s.awaitingUserByTask);
   const applyServerMessage = useTaskStore((s) => s.applyServerMessage);
   const reset = useTaskStore((s) => s.reset);
@@ -452,6 +453,7 @@ function AppShell(): JSX.Element {
           const res = await renameTask(taskId, title);
           if ('error' in res) toast.show(`重命名失败：${res.error}`, 'error');
         }}
+        onToggleStarred={(taskId) => void toggleStarred(taskId)}
         userEmail={me?.email ?? null}
         userDisplayName={preferredDisplayName(me)}
         userPlan={me?.plan ?? 'free'}

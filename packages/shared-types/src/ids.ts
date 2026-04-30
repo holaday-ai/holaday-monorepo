@@ -17,6 +17,8 @@ export const ID_PREFIXES = {
   verificationCode: 'vc',
   file: 'file',
   memory: 'mem',
+  // Phase 16 — user-owned task grouping.
+  project: 'prj',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

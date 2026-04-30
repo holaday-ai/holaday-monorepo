@@ -72,6 +72,8 @@ export interface TaskStore {
 
   setSelectedTask(taskId: string | null): void;
   refreshTasks(): Promise<void>;
+  /** Phase 16 — toggle the starred flag on a task. Optimistic. */
+  toggleStarred(taskId: string): Promise<void>;
   createTask(
     intent: string,
     fileIds?: string[],
@@ -228,6 +230,33 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       }));
     } catch (err) {
       set({ loading: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+
+  async toggleStarred(taskId) {
+    // Optimistic local flip first so the star icon swaps instantly.
+    // On server failure we re-flip and surface the error via toast
+    // (caller usually doesn't show one — the row reverting is the
+    // visible signal that something went wrong).
+    const before = get().tasks.find((t) => t.taskId === taskId);
+    if (!before) return;
+    const next = !before.starred;
+    set((prev) => ({
+      tasks: prev.tasks.map((t) =>
+        t.taskId === taskId ? { ...t, starred: next, starredAt: next ? new Date() : null } : t,
+      ),
+    }));
+    try {
+      await trpc.tasks.star.mutate({ taskId, starred: next });
+    } catch {
+      // revert
+      set((prev) => ({
+        tasks: prev.tasks.map((t) =>
+          t.taskId === taskId
+            ? { ...t, starred: before.starred ?? false, starredAt: before.starredAt ?? null }
+            : t,
+        ),
+      }));
     }
   },
 
@@ -718,6 +747,7 @@ function extractSummary(result: unknown): string | null {
 
 function toUiTask(row: ListRow): UiTask {
   const opusUsed = (row as { opusUsed?: unknown }).opusUsed === true;
+  const r = row as { starred?: unknown; starredAt?: unknown; projectId?: unknown };
   return {
     taskId: row.taskId,
     intent: row.intent,
@@ -732,6 +762,9 @@ function toUiTask(row: ListRow): UiTask {
     // tRPC serializes Date to string over the wire; coerce back.
     createdAt: new Date(row.createdAt as unknown as string | number | Date),
     modelLabel: opusUsed ? 'opus' : 'sonnet',
+    starred: r.starred === true,
+    starredAt: r.starredAt ? new Date(r.starredAt as string | number | Date) : null,
+    projectId: typeof r.projectId === 'string' ? r.projectId : null,
   };
 }
 

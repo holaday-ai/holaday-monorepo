@@ -10,6 +10,7 @@ import {
   uniqueIndex,
   varchar,
 } from 'drizzle-orm/mysql-core';
+import { projects } from './projects.js';
 import { sessions } from './sessions.js';
 import { skills } from './skills.js';
 import { users } from './users.js';
@@ -62,6 +63,24 @@ export const tasks = mysqlTable(
      * routing decision after the fact.
      */
     opusUsed: boolean('opus_used').notNull().default(false),
+    /**
+     * Phase 16 — user-toggled favourite ("收藏") flag. starredAt is
+     * the timestamp of the most recent star action; cleared on
+     * unstar so the sidebar can sort the 收藏 group most-recent-first
+     * with a single column.
+     */
+    starred: boolean('starred').notNull().default(false),
+    starredAt: datetime('starred_at', { mode: 'date', fsp: 3 }),
+    /**
+     * Phase 16 — optional project this task belongs to. Null = the
+     * default 所有任务 bucket. ON DELETE SET NULL preserves tasks
+     * when a project is deleted (the task history is more valuable
+     * than the project label).
+     */
+    projectId: bigint('project_id', { mode: 'number', unsigned: true }).references(
+      () => projects.id,
+      { onDelete: 'set null' },
+    ),
     plan: json('plan'),
     /**
      * Phase 13 — first-frame plan output (markdown-ish text) emitted
@@ -95,6 +114,8 @@ export const tasks = mysqlTable(
     index('ix_tasks_status').on(t.status),
     index('ix_tasks_session_id').on(t.sessionId),
     index('ix_tasks_role_id').on(t.roleId),
+    index('ix_tasks_user_starred').on(t.userId, t.starred),
+    index('ix_tasks_project_id').on(t.projectId),
   ],
 );
 

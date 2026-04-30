@@ -43,6 +43,40 @@ export interface UiTask {
    * can see what their task ran on.
    */
   modelLabel?: 'sonnet' | 'opus';
+  /** Phase 16 — favourite ("收藏") flag. Drives the sidebar 收藏 group. */
+  starred?: boolean;
+  /** When the task was last starred. Cleared on unstar. */
+  starredAt?: Date | null;
+  /** Phase 16 — external project id (prj_…), or null if unfiled. */
+  projectId?: string | null;
+}
+
+/**
+ * Phase 16 — user-owned project metadata fetched from
+ * `projects.list`. Drives the sidebar 项目 list and the
+ * ProjectView's header.
+ */
+export interface UiProject {
+  projectId: string;
+  name: string;
+  description: string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  taskCount: number;
+}
+
+/**
+ * Phase 16 — one entry on the SkillsPage. `enabled` reflects the
+ * server's view of users.selected_roles; `toggle()` mutates it.
+ */
+export interface UiSkill {
+  id: string;
+  name: string;
+  /** lucide-react export name. Resolved client-side via a static lookup. */
+  icon: string;
+  category: '运营' | '商业分析' | '法律' | '产品' | '其他';
+  description: string;
+  enabled: boolean;
 }
 
 /**
