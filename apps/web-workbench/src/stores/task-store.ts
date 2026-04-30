@@ -53,6 +53,13 @@ export interface TaskStore {
   webSearchByTask: Record<string, UiWebSearchEvent>;
   /** Supercar: latest extended-thinking summary per task. */
   thinkingByTask: Record<string, UiThinkingEvent>;
+  /**
+   * O5 — backend-generated follow-up suggestions per task. Populated
+   * when the orchestrator's `generateSuggestions` call resolves
+   * after a task's terminal frame. TaskStream prefers this over the
+   * markdown-parsed in-summary block.
+   */
+  suggestionsByTask: Record<string, string[]>;
   /** BrowserPanel interactive-mode toggle, shared app-wide so the
    *  terminal summary's "Continue in browser" button can flip it on. */
   browserInteractive: boolean;
@@ -100,6 +107,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   userRepliesByTask: {},
   webSearchByTask: {},
   thinkingByTask: {},
+  suggestionsByTask: {},
   // Default ON: with the VNC lane live, view-only is the defensive
   // crouch. Users that never toggle this flag still get interactive
   // clicks, which matches the product promise ("watch the agent,
@@ -606,6 +614,15 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       }));
       return;
     }
+    if (msg.type === 'server.supercar.suggestions') {
+      set((prev) => ({
+        suggestionsByTask: {
+          ...prev.suggestionsByTask,
+          [msg.taskId]: msg.suggestions,
+        },
+      }));
+      return;
+    }
     // Other frames (vision.observe / vision.act / user.confirm / ...)
     // aren't UI-relevant yet; silently ignore.
   },
@@ -625,6 +642,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       userRepliesByTask: {},
       webSearchByTask: {},
       thinkingByTask: {},
+      suggestionsByTask: {},
     });
   },
 }));

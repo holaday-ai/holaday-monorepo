@@ -2,13 +2,21 @@ import {
   ChevronLeft,
   ChevronRight,
   Clipboard,
+  Clock,
+  FolderOpen,
+  Globe,
+  Layers,
   ListTree,
   Pencil,
   Pin,
   PinOff,
+  Plug,
   Plus,
   RotateCcw,
   Search,
+  Share2,
+  Sparkles,
+  Star,
   Trash2,
   X,
 } from 'lucide-react';
@@ -17,6 +25,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { QuotaIndicator } from '@/components/QuotaIndicator';
 import { TaskListItem } from '@/components/TaskListItem';
+import { useToast } from '@/components/ui/toast';
 import { UserMenu } from '@/components/UserMenu';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
@@ -274,6 +283,8 @@ export function Sidebar({
               )}
             </header>
 
+            <FeatureNav />
+
             <div className="flex-1 overflow-y-auto px-2 pb-4">
               {pinnedTasks.length > 0 && (
                 <TaskGroup title="置顶">
@@ -418,6 +429,9 @@ export function Sidebar({
               {/* event changes the array, which is good enough to keep  */}
               {/* the bar live without subscribing to WS task events.    */}
               <QuotaIndicator refreshKey={tasks.length} />
+              <div className="px-2 pb-1 pt-1">
+                <ShareInviteRow />
+              </div>
               <div className="px-2">
                 <UserMenu
                   displayName={userDisplayName}
@@ -768,5 +782,77 @@ function BrandMark(): JSX.Element {
     >
       H
     </span>
+  );
+}
+
+interface FeatureItem {
+  icon: typeof Clock;
+  label: string;
+}
+
+const FEATURES: readonly FeatureItem[] = [
+  { icon: Clock, label: '定时任务' },
+  { icon: Sparkles, label: '专家技能' },
+  { icon: Plug, label: 'MCP 连接' },
+  { icon: FolderOpen, label: '文件库' },
+  { icon: Globe, label: '浏览器' },
+  { icon: Layers, label: '项目' },
+  { icon: Star, label: '收藏' },
+];
+
+/**
+ * Disabled feature nav between the "+ 新任务" CTA and the task list.
+ * Each row shows a lucide icon + Chinese label, greyed out, with a
+ * "即将推出" tooltip on hover. Compact density (32px row) keeps the
+ * sidebar from getting too tall on lower viewports while still
+ * advertising the roadmap.
+ */
+function FeatureNav(): JSX.Element {
+  return (
+    <nav className="px-2 pb-2">
+      {FEATURES.map(({ icon: Icon, label }) => (
+        <button
+          key={label}
+          type="button"
+          disabled
+          aria-disabled
+          title={`${label} · 即将推出`}
+          className="flex w-full cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground/70 opacity-60 transition-colors"
+        >
+          <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span className="truncate">{label}</span>
+          <span className="ml-auto text-[10px] text-muted-foreground/50">即将推出</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/**
+ * "与好友分享 HOLA DAY" row above the user card. Click copies the
+ * invite link (current origin) to clipboard + flashes a toast.
+ * Falls back silently when navigator.clipboard is unavailable
+ * (insecure context / rare browser).
+ */
+function ShareInviteRow(): JSX.Element {
+  const toast = useToast();
+  const onShare = React.useCallback(async () => {
+    const url = typeof window !== 'undefined' ? window.location.origin : '';
+    try {
+      await navigator.clipboard?.writeText(url);
+      toast.show('邀请链接已复制');
+    } catch {
+      toast.show('复制失败，请手动复制地址栏链接');
+    }
+  }, [toast]);
+  return (
+    <button
+      type="button"
+      onClick={() => void onShare()}
+      className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+    >
+      <Share2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      <span>与好友分享 HOLA DAY</span>
+    </button>
   );
 }

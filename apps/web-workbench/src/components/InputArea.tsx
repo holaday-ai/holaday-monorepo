@@ -1,10 +1,13 @@
 import {
   ArrowUp,
+  Check,
+  ChevronDown,
   FileText,
   Image as ImageIcon,
   Loader2,
   Plus,
   Sparkles,
+  X,
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -335,7 +338,6 @@ export function InputArea({
         )}
         {followUpTarget && !replyMode && !pendingSend && (
           <div className="flex items-center gap-2 border-b-2 border-sky-300 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:border-sky-500 dark:bg-sky-500/15 dark:text-sky-100">
-            <span aria-hidden className="shrink-0 text-sm">↪</span>
             <span className="shrink-0 font-semibold">追问</span>
             <span className="min-w-0 flex-1 truncate">"{followUpTarget.title}"</span>
             <button
@@ -343,9 +345,10 @@ export function InputArea({
               onClick={onCancelFollowUp}
               aria-label="取消追问，发新任务"
               title="取消追问，发新任务"
-              className="shrink-0 rounded px-1.5 py-0.5 text-sky-900/70 hover:bg-sky-200 hover:text-sky-900 dark:text-sky-100/70 dark:hover:bg-sky-500/30 dark:hover:text-sky-100"
+              className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-sky-900/70 hover:bg-sky-200 hover:text-sky-900 dark:text-sky-100/70 dark:hover:bg-sky-500/30 dark:hover:text-sky-100"
             >
-              ✕ 发新任务
+              <X className="h-3 w-3" aria-hidden />
+              发新任务
             </button>
           </div>
         )}
@@ -471,48 +474,127 @@ export function InputArea({
         </Button>
       </div>
       <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[11px] text-muted-foreground">
-        <div className="flex items-center gap-1">
-          {/* O4 — Auto/Plan toggle. Auto = 默认直接执行；Plan =
-              先输出执行计划，等用户确认。Per-button buttons (not
-              a single segmented control) keep keyboard focus
-              traversal predictable. */}
-          <button
-            type="button"
-            onClick={() => setTaskModePersist('auto')}
-            aria-pressed={taskMode === 'auto'}
-            title="自动执行 — AI 直接操作浏览器完成任务"
-            className={cn(
-              'inline-flex items-center gap-1 rounded px-2 py-0.5 font-medium transition-colors',
-              taskMode === 'auto'
-                ? 'bg-foreground text-background'
-                : 'text-muted-foreground hover:bg-foreground/[0.05]',
-            )}
-          >
-            <span aria-hidden>⚡</span>
-            <span>自动执行</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setTaskModePersist('plan')}
-            aria-pressed={taskMode === 'plan'}
-            title="先出方案 — AI 先列执行计划，你确认后再操作浏览器"
-            className={cn(
-              'inline-flex items-center gap-1 rounded px-2 py-0.5 font-medium transition-colors',
-              taskMode === 'plan'
-                ? 'bg-foreground text-background'
-                : 'text-muted-foreground hover:bg-foreground/[0.05]',
-            )}
-          >
-            <span aria-hidden>📋</span>
-            <span>先出方案</span>
-          </button>
-          <span className="ml-2 hidden md:inline">
+        <div className="flex items-center gap-2">
+          <TaskModeSelector mode={taskMode} onChange={setTaskModePersist} />
+          <span className="hidden md:inline">
             按 <Kbd>/</Kbd> 聚焦 · <Kbd>⌘K</Kbd> 搜索任务
           </span>
         </div>
         <span>Enter 发送 · Shift+Enter 换行</span>
       </div>
     </div>
+  );
+}
+
+/**
+ * Single ghost-button + popover dropdown for picking the task mode.
+ * Replaces the prior pair of emoji pill buttons. Click the button →
+ * popover with two options, each a row carrying title + small
+ * sub-label and a leading check mark on the active choice.
+ *
+ * Closes on outside click, Escape, or option pick. Persists mode
+ * via the parent's onChange (already writes localStorage).
+ */
+function TaskModeSelector({
+  mode,
+  onChange,
+}: {
+  mode: 'auto' | 'plan';
+  onChange: (m: 'auto' | 'plan') => void;
+}): JSX.Element {
+  const [open, setOpen] = React.useState(false);
+  const wrapRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent): void => {
+      if (wrapRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('mousedown', onDocClick);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDocClick);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+  const label = mode === 'auto' ? '自动执行' : '先出方案';
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={cn(
+          'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground',
+          open && 'bg-foreground/[0.05] text-foreground',
+        )}
+      >
+        <span>{label}</span>
+        <ChevronDown className="h-3 w-3 opacity-70" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute bottom-7 left-0 z-30 w-56 overflow-hidden rounded-md border border-border bg-popover py-1 shadow-lg"
+        >
+          <ModeOption
+            active={mode === 'auto'}
+            onPick={() => {
+              onChange('auto');
+              setOpen(false);
+            }}
+            title="自动执行"
+            sub="AI 直接执行任务"
+          />
+          <ModeOption
+            active={mode === 'plan'}
+            onPick={() => {
+              onChange('plan');
+              setOpen(false);
+            }}
+            title="先出方案"
+            sub="AI 先列计划，你确认后再执行"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ModeOption({
+  active,
+  onPick,
+  title,
+  sub,
+}: {
+  active: boolean;
+  onPick: () => void;
+  title: string;
+  sub: string;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onPick}
+      className="flex w-full items-start gap-2 px-3 py-2 text-left text-[12px] hover:bg-foreground/[0.05]"
+    >
+      <Check
+        className={cn(
+          'mt-0.5 h-3.5 w-3.5 shrink-0',
+          active ? 'text-foreground' : 'opacity-0',
+        )}
+        aria-hidden
+      />
+      <span className="min-w-0 flex-1">
+        <span className="block font-medium text-foreground">{title}</span>
+        <span className="block text-[11px] text-muted-foreground">{sub}</span>
+      </span>
+    </button>
   );
 }
 

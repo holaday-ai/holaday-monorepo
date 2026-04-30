@@ -78,6 +78,7 @@ export function TaskStream({ task, onPickSuggestion }: Props): JSX.Element {
   const awaitingUser = useTaskStore((s) => s.awaitingUserByTask[task.taskId]);
   const webSearch = useTaskStore((s) => s.webSearchByTask[task.taskId]);
   const thinkingEvent = useTaskStore((s) => s.thinkingByTask[task.taskId]);
+  const serverSuggestions = useTaskStore((s) => s.suggestionsByTask[task.taskId]);
   const setBrowserInteractive = useTaskStore((s) => s.setBrowserInteractive);
   const scrollAnchorRef = React.useRef<HTMLDivElement>(null);
 
@@ -147,6 +148,7 @@ export function TaskStream({ task, onPickSuggestion }: Props): JSX.Element {
         executorFallback={executorFallback}
         awaitingUser={awaitingUser}
         webSearch={webSearch}
+        serverSuggestions={serverSuggestions}
       />
 
       <div ref={scrollAnchorRef} />
@@ -199,6 +201,7 @@ function AgentBlock({
   executorFallback,
   awaitingUser,
   webSearch,
+  serverSuggestions,
 }: {
   task: UiTask;
   steps: UiStep[];
@@ -213,6 +216,7 @@ function AgentBlock({
   executorFallback: UiExecutorFallback | undefined;
   awaitingUser: UiAwaitingUser | undefined;
   webSearch: UiWebSearchEvent | undefined;
+  serverSuggestions?: string[];
 }): JSX.Element {
   const [detailOpen, setDetailOpen] = React.useState(false);
 
@@ -310,6 +314,7 @@ function AgentBlock({
               task.status === 'completed' ? undefined : onContinueInBrowser
             }
             onSuggestionPick={onSuggestionPick}
+            serverSuggestions={serverSuggestions}
           />
         )}
         {/* Phase 11 QA #11 — terminal-but-empty fallback. Catches the
@@ -711,6 +716,7 @@ function TerminalSummary({
   onContinueInBrowser,
   modelLabel,
   onSuggestionPick,
+  serverSuggestions,
 }: {
   status: UiTask['status'];
   text: string;
@@ -718,13 +724,21 @@ function TerminalSummary({
   onContinueInBrowser?: () => void;
   modelLabel?: 'sonnet' | 'opus';
   onSuggestionPick?: (intent: string) => void;
+  /**
+   * O5 — backend-generated suggestions arriving via
+   * `server.supercar.suggestions`. When present, takes precedence
+   * over the markdown-parsed in-summary block (the new
+   * generate-after-task path is more reliable than asking the agent
+   * to emit a JSON block in its summary).
+   */
+  serverSuggestions?: string[];
 }): JSX.Element {
-  // O5 — pull a fenced ```suggestions JSON block out of the model's
-  // text so we can render it as clickable chips below the summary.
-  // The visible text has the block stripped so users don't see raw
-  // JSON. Failures (missing block / bad JSON) just leave suggestions
-  // empty — the UI is purely additive.
-  const { displayText, suggestions } = React.useMemo(() => {
+  // Legacy: pull a fenced ```suggestions JSON block out of the
+  // model's text. Kept as a fallback for tasks that completed before
+  // the backend generator landed (or when the generator failed).
+  // The visible text always has the block stripped so users don't
+  // see raw JSON regardless of which suggestion source wins.
+  const { displayText, suggestions: parsedSuggestions } = React.useMemo(() => {
     const re = /```suggestions\s*\n([\s\S]*?)\n```/i;
     const m = re.exec(text);
     if (!m || !m[1]) return { displayText: text, suggestions: [] as string[] };
@@ -732,7 +746,7 @@ function TerminalSummary({
     try {
       parsed = JSON.parse(m[1]);
     } catch {
-      return { displayText: text, suggestions: [] as string[] };
+      return { displayText: text.replace(re, '').trim(), suggestions: [] as string[] };
     }
     const list =
       parsed && typeof parsed === 'object' && Array.isArray((parsed as { suggestions?: unknown }).suggestions)
@@ -743,6 +757,13 @@ function TerminalSummary({
         : [];
     return { displayText: text.replace(re, '').trim(), suggestions: list };
   }, [text]);
+  // Backend suggestions take precedence; fall back to whatever the
+  // model embedded in its text. Either way, the chip render path
+  // below sees a single canonical `suggestions` array.
+  const suggestions =
+    serverSuggestions && serverSuggestions.length > 0
+      ? serverSuggestions
+      : parsedSuggestions;
   // O10 — typewriter reveal of the SUMMARY text only (failed cards
   // skip this so users see the failure reason immediately). Resets
   // when text changes (new task / re-render with fresh content).
@@ -785,15 +806,15 @@ function TerminalSummary({
           {modelLabel === 'opus' ? 'Claude Opus 4.7 · 深度思考' : 'Claude Sonnet 4.6'}
         </div>
       )}
-      {/* O5 — Manus-style suggestion cards. Each chip is a full
-        clickable row with → arrow on the right, not a tag. Stacks
-        on mobile, wraps on desktop. Click → fires onSuggestionPick
-        which routes through the parent's onSubmit (existing
-        followUpTarget detection inherits replyToTaskId for free
-        parent context). */}
+      {/* Plain-text suggestion links. Cleaner than the prior blue
+          card style — each row is just a borderless ghost button
+          with a leading → arrow that translates on hover. Click
+          fires onSuggestionPick which routes through the parent's
+          onSubmit (followUpTarget detection inherits
+          replyToTaskId for free parent context). */}
       {suggestions.length > 0 && onSuggestionPick && revealed === displayText && (
-        <div className="mt-4 flex flex-col gap-1.5 border-t border-blue-200/50 pt-3 dark:border-blue-500/20">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground dark:text-foreground/60">
+        <div className="mt-4 flex flex-col gap-0.5 border-t border-border/40 pt-3">
+          <div className="mb-1 text-[11px] font-medium tracking-wider text-muted-foreground">
             继续探索
           </div>
           {suggestions.map((s, i) => (
@@ -801,15 +822,15 @@ function TerminalSummary({
               key={`${i}-${s.slice(0, 10)}`}
               type="button"
               onClick={() => onSuggestionPick(s)}
-              className="group flex w-full items-center justify-between gap-3 rounded-lg border border-blue-200/70 bg-card px-3 py-2 text-left text-xs text-foreground/90 transition hover:border-blue-300 hover:bg-blue-50/70 hover:text-foreground dark:border-blue-500/30 dark:hover:border-blue-400/60 dark:hover:bg-blue-500/15"
+              className="group flex w-full items-center gap-2 rounded px-1 py-1 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
             >
-              <span className="min-w-0 flex-1 truncate">{s}</span>
               <span
                 aria-hidden
-                className="shrink-0 text-blue-700/70 transition-transform group-hover:translate-x-0.5 dark:text-blue-300/80"
+                className="shrink-0 text-muted-foreground/70 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
               >
                 →
               </span>
+              <span className="min-w-0 flex-1 truncate group-hover:underline">{s}</span>
             </button>
           ))}
         </div>

@@ -32,6 +32,7 @@ import {
 } from '../../agent/supercar/prompt-layers.js';
 import { generatePlan, shouldSkipPlan } from '../../agent/supercar/plan-service.js';
 import { MemoryService } from '../../agent/supercar/memory-service.js';
+import { generateSuggestions } from '../../agent/suggestions-generator.js';
 import {
   StatsService,
   classifyTaskType,
@@ -971,6 +972,36 @@ export const tasksRouter = router({
                 })
                 .catch((err) =>
                   ctx.logger.warn({ err, taskId }, 'memory: extract crashed'),
+                );
+
+              // O5 — backend-generated suggestions. The agent's
+              // in-summary `suggestions` block is unreliable
+              // (model omits it under some prompts); a dedicated
+              // Sonnet call is more consistent. Fire-and-forget so
+              // the user gets the terminal frame immediately and
+              // suggestions trickle in a second later.
+              void generateSuggestions({
+                apiKey: appEnv.ANTHROPIC_API_KEY,
+                intent: input.intent,
+                summary: outcome.summary,
+              })
+                .then((suggestions) => {
+                  if (suggestions.length === 0) return;
+                  try {
+                    broadcastToUser(userId, {
+                      type: 'server.supercar.suggestions',
+                      taskId,
+                      suggestions,
+                    });
+                  } catch (err) {
+                    ctx.logger.warn(
+                      { err, taskId },
+                      'suggestions: broadcast failed',
+                    );
+                  }
+                })
+                .catch((err) =>
+                  ctx.logger.warn({ err, taskId }, 'suggestions: generate crashed'),
                 );
             }
           })

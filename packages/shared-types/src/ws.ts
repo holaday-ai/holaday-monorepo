@@ -585,6 +585,19 @@ export const serverSupercarAwaitingUserSchema = z.object({
   question: z.string(),
 });
 
+/**
+ * Backend-generated follow-up suggestions, broadcast after a task
+ * reaches `completed`. Replaces the prior reliance on the model
+ * emitting an in-summary JSON suggestions block (which it sometimes
+ * skipped). Frontend stashes the array and TaskStream renders it as
+ * `→ <text>` rows beneath the terminal summary.
+ */
+export const serverSupercarSuggestionsSchema = z.object({
+  type: z.literal('server.supercar.suggestions'),
+  taskId: z.string(),
+  suggestions: z.array(z.string()).max(5),
+});
+
 export const serverSupercarThinkingSchema = z.object({
   type: z.literal('server.supercar.thinking'),
   taskId: z.string(),
@@ -614,6 +627,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverVisionDegradeSchema,
   serverSupercarWebSearchSchema,
   serverSupercarAwaitingUserSchema,
+  serverSupercarSuggestionsSchema,
   serverSupercarThinkingSchema,
 ]);
 

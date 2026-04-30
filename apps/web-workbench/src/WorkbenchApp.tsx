@@ -521,7 +521,24 @@ function AppShell(): JSX.Element {
           // 3) Default — fresh task. Pass mode through so Plan flips
           //    the agent into "list plan first, wait for approval".
           const res = await createTask(intent, fileIds, undefined, mode);
-          if ('error' in res) toast.show(`发送失败：${res.error}`, 'error');
+          if ('error' in res) {
+            // O15 — server returns BAD_REQUEST with this exact prefix
+            // when the intent looks like a code task. Surface as an
+            // informational toast (no "发送失败：" prefix, no error
+            // styling) so the user understands the rejection isn't a
+            // failure of HOLA DAY but a positioning choice.
+            const codeRejected =
+              res.error.includes('HOLA DAY 专注浏览器任务') ||
+              res.error.includes('代码开发请用') ||
+              res.error.includes('Claude Code 或 Cursor');
+            if (codeRejected) {
+              toast.show(
+                'HOLA DAY 专注浏览器任务执行（搜索、填表、数据采集等）。代码开发建议使用 Claude Code 或 Cursor。',
+              );
+            } else {
+              toast.show(`发送失败：${res.error}`, 'error');
+            }
+          }
         }}
         onOpenSidebar={() => setSidebarOpen(true)}
         onOpenBrowser={() => setBrowserSheetOpen(true)}

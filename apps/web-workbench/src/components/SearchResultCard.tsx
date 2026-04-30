@@ -28,16 +28,19 @@ export function SearchResultCard({ sources, initialVisible = 6 }: Props): JSX.El
   const visible = expanded ? sources : sources.slice(0, initialVisible);
   const hidden = sources.length - visible.length;
   return (
-    <div className="mt-2 flex flex-col gap-1.5">
-      {visible.map((s, i) => (
-        <SourceRow key={`${s.url}-${i}`} source={s} />
-      ))}
+    <div className="mt-2 flex flex-col">
+      <div className="divide-y divide-border/40">
+        {visible.map((s, i) => (
+          <SourceRow key={`${s.url}-${i}`} source={s} />
+        ))}
+      </div>
       {hidden > 0 && !expanded && (
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="self-start text-[12px] text-muted-foreground hover:text-foreground"
+          className="mt-1.5 inline-flex items-center gap-1 self-start text-xs text-muted-foreground hover:text-foreground"
         >
+          <span aria-hidden className="text-[10px]">▾</span>
           展开 {hidden} 条更多来源
         </button>
       )}
@@ -53,7 +56,7 @@ function SourceRow({ source }: { source: SearchSource }): JSX.Element {
       href={source.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="group flex items-start gap-2 rounded-md border border-border/40 bg-background/40 px-2 py-1.5 text-[12px] transition-colors hover:border-border hover:bg-foreground/[0.03]"
+      className="group flex items-start gap-2.5 px-1 py-2 transition-colors hover:bg-foreground/[0.03]"
     >
       <img
         src={faviconUrl}
@@ -68,13 +71,13 @@ function SourceRow({ source }: { source: SearchSource }): JSX.Element {
       />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="text-[11px] text-muted-foreground">{domain}</span>
+          <span className="text-xs text-muted-foreground">{domain}</span>
         </div>
-        <div className="truncate font-medium text-foreground group-hover:underline">
+        <div className="truncate text-sm font-medium text-foreground group-hover:underline">
           {source.title}
         </div>
         {source.snippet && (
-          <div className="line-clamp-2 text-muted-foreground/80">{source.snippet}</div>
+          <div className="line-clamp-2 text-xs text-muted-foreground">{source.snippet}</div>
         )}
       </div>
     </a>
