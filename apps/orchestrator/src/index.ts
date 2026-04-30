@@ -9,6 +9,7 @@ import { AnthropicPlanner } from './agent/planners/anthropic.js';
 import { StubPlanner } from './agent/planners/stub.js';
 import { startScheduledRunner } from './agent/scheduled-runner.js';
 import { injectPendingCookies } from './cookies/sync-service.js';
+import { createScreencastProxy } from './streaming/screencast-proxy.js';
 import {
   createApifyAdapter,
   createExecutionRouter,
@@ -266,11 +267,25 @@ async function main() {
   // from streaming THEIR OWN browser.
   if (browserPool) {
     const vncProxy = createVncProxy({ pool: browserPool, logger });
+    // Phase 19 — CDP screencast proxy mounted SIDE-BY-SIDE with VNC.
+    // Both run; the SPA's BrowserPanel picks which transport to use
+    // via a localStorage feature flag (holaday.streamTransport=cdp).
+    // Default stays on VNC until BOSS verifies CDP path live in prod.
+    // See streaming/screencast-proxy.ts for the protocol contract.
+    const screencastProxy = createScreencastProxy({ pool: browserPool, logger });
     httpServer.on('upgrade', (req, socket, head) => {
+      const url = req.url ?? '';
+      // Try the CDP path first (cheaper regex, fewer matches), then
+      // fall through to VNC. Each handler is no-op when its path
+      // pattern doesn't match.
+      if (url.startsWith('/screencast-ws/')) {
+        screencastProxy.handleUpgrade(req, socket, head as Buffer);
+        return;
+      }
       vncProxy.handleUpgrade(req, socket, head as Buffer);
     });
     logger.info(
-      'VNC WS proxy mounted at /vnc-ws/:userId (open to all authed users)',
+      'VNC WS proxy mounted at /vnc-ws/:userId; CDP screencast at /screencast-ws/:userId',
     );
   }
 

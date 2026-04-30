@@ -13,6 +13,10 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
+import {
+  CdpScreencastViewport,
+  type CdpScreencastStatus,
+} from '@/components/CdpScreencastViewport';
 import { VncViewport, type VncStatus } from '@/components/VncViewport';
 import { getAccessToken } from '@/lib/auth';
 import { trpc } from '@/lib/trpc';
@@ -64,6 +68,40 @@ function buildVncUrl(poolUserId: string | null): string | null {
   }
   if (!VNC_PATH) return null;
   return `${scheme}://${window.location.host}${VNC_PATH}`;
+}
+
+/**
+ * Phase 19 — sister of buildVncUrl for the new CDP screencast
+ * transport. Only the per-user pool path supports it (the legacy
+ * shared-Brave VNC stream is VNC-only). Returns null when CDP
+ * isn't usable for this user.
+ */
+function buildScreencastUrl(poolUserId: string | null): string | null {
+  if (typeof window === 'undefined') return null;
+  if (!poolUserId) return null;
+  const token = getAccessToken();
+  if (!token) return null;
+  const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${scheme}://${window.location.host}/screencast-ws/${encodeURIComponent(
+    poolUserId,
+  )}?token=${encodeURIComponent(token)}`;
+}
+
+/**
+ * Phase 19 — runtime feature flag. Read each render so a user can
+ * flip the value in DevTools and reload to swap transports. Default
+ * stays on VNC until BOSS confirms CDP works in prod, at which
+ * point we flip the default + delete VNC in a follow-up commit.
+ */
+function readStreamTransport(): 'vnc' | 'cdp' {
+  if (typeof window === 'undefined') return 'vnc';
+  try {
+    return window.localStorage.getItem('holaday.streamTransport') === 'cdp'
+      ? 'cdp'
+      : 'vnc';
+  } catch {
+    return 'vnc';
+  }
 }
 
 interface Props {
@@ -164,9 +202,25 @@ export function BrowserPanel({
     }
   }, [activeTaskId, aborting, abortTask]);
 
+  // Phase 19 — pick the live-stream transport per user. The flag
+  // is a localStorage opt-in (`holaday.streamTransport='cdp'`); the
+  // default 'vnc' keeps the existing path unchanged until BOSS
+  // verifies CDP screencast in prod. Read once on mount — flipping
+  // the localStorage value mid-session requires a reload, which
+  // matches how feature flags usually work and avoids tearing down
+  // a live socket on every render.
+  const streamTransport = React.useMemo(() => readStreamTransport(), []);
+  const usingCdp = streamTransport === 'cdp';
   // VNC live stream — memoised so prop identity is stable across
   // re-renders (the viewport's effect re-runs on any URL change).
-  const vncUrl = React.useMemo(() => buildVncUrl(poolUserId), [poolUserId]);
+  const vncUrl = React.useMemo(
+    () => (usingCdp ? null : buildVncUrl(poolUserId)),
+    [poolUserId, usingCdp],
+  );
+  const screencastUrlForCdp = React.useMemo(
+    () => (usingCdp ? buildScreencastUrl(poolUserId) : null),
+    [poolUserId, usingCdp],
+  );
   const [vncStatus, setVncStatus] = React.useState<VncStatus>('idle');
   // P3 hibernation detection: count consecutive failed attempts. The
   // pool's idle GC reaps after 5 min, after which /vnc-ws/ rejects
@@ -220,10 +274,15 @@ export function BrowserPanel({
     taskStatus === 'completed' ||
     taskStatus === 'failed' ||
     taskStatus === 'cancelled';
-  const useVnc =
-    Boolean(vncUrl) &&
-    vncStatus !== 'error' &&
-    (poolUserId != null || !taskTerminal);
+  // When CDP is the active transport, "useVnc" still gates the
+  // canvas-vs-frame branch but the inner viewport renders
+  // CdpScreencastViewport. The flag stays the same name to keep
+  // the existing render-tree branching unchanged.
+  const useVnc = usingCdp
+    ? Boolean(screencastUrlForCdp) && (poolUserId != null || !taskTerminal)
+    : Boolean(vncUrl) &&
+      vncStatus !== 'error' &&
+      (poolUserId != null || !taskTerminal);
 
   // When the agent parks on awaiting-user (captcha, login wall, user
   // question the model injected), auto-flip the panel to interactive
@@ -575,17 +634,36 @@ export function BrowserPanel({
               />
             ) : useVnc ? (
               <div className="relative h-full w-full">
-                <VncViewport
-                  wsUrl={vncUrl}
-                  viewOnly={!interactiveActive}
-                  onStatusChange={handleVncStatus}
-                  className={cn(
-                    'rounded-md border shadow-sm',
-                    interactiveActive
-                      ? 'border-sky-400 ring-2 ring-sky-300'
-                      : 'border-black/[0.06]',
-                  )}
-                />
+                {usingCdp ? (
+                  <CdpScreencastViewport
+                    wsUrl={screencastUrlForCdp}
+                    viewOnly={!interactiveActive}
+                    onStatusChange={(s: CdpScreencastStatus) =>
+                      // Reuse the VNC status state — the enum values
+                      // overlap exactly so the existing
+                      // "connecting…" / hibernation banners just work.
+                      handleVncStatus(s as VncStatus)
+                    }
+                    className={cn(
+                      'rounded-md border shadow-sm',
+                      interactiveActive
+                        ? 'border-sky-400 ring-2 ring-sky-300'
+                        : 'border-black/[0.06]',
+                    )}
+                  />
+                ) : (
+                  <VncViewport
+                    wsUrl={vncUrl}
+                    viewOnly={!interactiveActive}
+                    onStatusChange={handleVncStatus}
+                    className={cn(
+                      'rounded-md border shadow-sm',
+                      interactiveActive
+                        ? 'border-sky-400 ring-2 ring-sky-300'
+                        : 'border-black/[0.06]',
+                    )}
+                  />
+                )}
                 {(vncStatus === 'idle' || vncStatus === 'connecting') && (
                   <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/30 text-xs text-muted-foreground">
                     连接实时画面…
