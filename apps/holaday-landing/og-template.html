@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>HOLA DAY OG</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@700;800;900&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 1200px; height: 630px;
+      font-family: 'Outfit', -apple-system, "PingFang SC", sans-serif;
+      color: #fff;
+      background: #E50B6B;
+      overflow: hidden;
+    }
+    .stage {
+      position: relative;
+      width: 1200px; height: 630px;
+      padding: 80px 88px;
+      display: flex; flex-direction: column; justify-content: space-between;
+      background:
+        radial-gradient(circle at 85% 12%, rgba(255,255,255,0.18), transparent 42%),
+        radial-gradient(circle at 8% 92%, rgba(0,0,0,0.22), transparent 38%),
+        linear-gradient(140deg, #E50B6B 0%, #C41D5F 100%);
+    }
+    .top-row { display: flex; align-items: center; gap: 28px; }
+    .pill {
+      width: 156px; height: 84px;
+      background: #fff; border-radius: 60px;
+      position: relative;
+      box-shadow: 0 8px 0 rgba(0,0,0,0.18);
+      border: 6px solid #000;
+    }
+    .pill::after {
+      content: ''; position: absolute; left: 50%; top: 0; bottom: 0;
+      width: 6px; background: #000; transform: translateX(-50%);
+    }
+    .pill .h, .pill .d {
+      position: absolute; top: 16px; bottom: 16px; width: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-family: 'Outfit'; font-weight: 900; color: #000;
+      font-size: 38px; letter-spacing: -0.04em;
+    }
+    .pill .h { left: 0; }
+    .pill .d { right: 0; }
+    .brand-text {
+      font-weight: 900; font-size: 60px; letter-spacing: -0.02em;
+      color: #fff;
+    }
+    .headline {
+      font-weight: 800;
+      font-size: 96px;
+      line-height: 1.04;
+      letter-spacing: -0.025em;
+      max-width: 980px;
+    }
+    .headline em { font-style: normal; color: #FFE5EE; }
+    .footer-row {
+      display: flex; justify-content: space-between; align-items: flex-end;
+    }
+    .tagline {
+      font-weight: 600; font-size: 30px;
+      color: rgba(255,255,255,0.92);
+      max-width: 720px; line-height: 1.35;
+    }
+    .url {
+      font-weight: 700; font-size: 26px;
+      color: #fff;
+      padding: 14px 22px;
+      background: rgba(0,0,0,0.22);
+      border-radius: 14px;
+      letter-spacing: 0.02em;
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <div class="top-row">
+      <div class="pill">
+        <div class="h">H</div>
+        <div class="d">D</div>
+      </div>
+      <div class="brand-text">HOLA DAY</div>
+    </div>
+
+    <div class="headline">
+      把工作交给 <em>AI</em>，<br>去做你真正想做的事。
+    </div>
+
+    <div class="footer-row">
+      <div class="tagline">AI 任务执行助手 · 浏览器自动操作 · 中英双语</div>
+      <div class="url">holaday.ai</div>
+    </div>
+  </div>
+</body>
+</html>

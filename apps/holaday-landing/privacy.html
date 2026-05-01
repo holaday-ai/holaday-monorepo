@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>隐私政策 — HOLA DAY</title>
+  <meta name="description" content="HOLA DAY 隐私政策 — 我们如何收集、使用和保护你的数据。">
+  <link rel="canonical" href="https://holaday.ai/privacy">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --pink: #E50B6B; --pink-deep: #C41D5F;
+      --ink: #0A0A0A; --text: #1A1A1A; --text-muted: #71717A;
+      --bg: #FFFFFF; --bg-soft: #FAFAFA;
+      --border: #E4E4E7; --border-strong: #D4D4D8;
+      --container-narrow: 760px; --container: 1180px;
+      --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      --font-display: 'Outfit', var(--font-sans);
+    }
+    html { -webkit-text-size-adjust: 100%; }
+    body { font-family: var(--font-sans); color: var(--text); background: var(--bg); line-height: 1.7; -webkit-font-smoothing: antialiased; }
+    a { color: var(--pink); }
+    a:hover { color: var(--pink-deep); }
+    .container { width: 100%; max-width: var(--container); margin-inline: auto; padding-inline: 24px; }
+    .container-narrow { width: 100%; max-width: var(--container-narrow); margin-inline: auto; padding-inline: 24px; }
+    .nav { border-bottom: 1px solid var(--border); }
+    .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+    .nav-logo img { height: 32px; }
+    .nav a.btn { display: inline-flex; align-items: center; height: 38px; padding: 0 16px; border: 1px solid var(--border-strong); border-radius: 10px; color: var(--text); font-size: 14px; font-weight: 600; text-decoration: none; }
+    .nav a.btn:hover { border-color: var(--ink); color: var(--ink); }
+    .doc-header { padding: 64px 0 32px; border-bottom: 1px solid var(--border); }
+    .doc-eyebrow { color: var(--pink); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+    h1.doc-title { font-family: var(--font-display); font-size: clamp(32px, 4vw, 44px); font-weight: 800; letter-spacing: -0.02em; color: var(--ink); margin-top: 8px; }
+    .doc-meta { margin-top: 12px; color: var(--text-muted); font-size: 14px; }
+    .doc-body { padding: 48px 0 96px; }
+    .doc-body h2 { font-family: var(--font-display); font-size: 22px; font-weight: 700; color: var(--ink); margin-top: 40px; margin-bottom: 12px; letter-spacing: -0.01em; }
+    .doc-body h3 { font-family: var(--font-display); font-size: 17px; font-weight: 700; color: var(--ink); margin-top: 28px; margin-bottom: 8px; }
+    .doc-body p { margin-bottom: 14px; color: var(--text); }
+    .doc-body ul, .doc-body ol { margin-bottom: 16px; padding-left: 22px; color: var(--text); }
+    .doc-body li { margin-bottom: 6px; }
+    .doc-body strong { color: var(--ink); font-weight: 600; }
+    .toc { padding: 16px 18px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 32px; }
+    .toc-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 600; margin-bottom: 8px; }
+    .toc ol { margin: 0; padding-left: 18px; font-size: 14px; }
+    .toc li { margin-bottom: 4px; }
+    .data-table { margin: 16px 0; width: 100%; border-collapse: collapse; font-size: 14px; }
+    .data-table th, .data-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .data-table th { background: var(--bg-soft); color: var(--ink); font-weight: 600; }
+    footer { padding: 32px 0 48px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 13px; text-align: center; }
+    footer a { color: var(--text-muted); margin: 0 12px; }
+    footer a:hover { color: var(--ink); }
+  </style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="container nav-inner">
+    <a href="/" class="nav-logo" aria-label="HOLA DAY 首页">
+      <img src="/landing-assets/logo-full.svg" alt="HOLA DAY">
+    </a>
+    <a class="btn" href="/">返回首页</a>
+  </div>
+</header>
+
+<section class="doc-header">
+  <div class="container-narrow">
+    <div class="doc-eyebrow">Privacy Policy</div>
+    <h1 class="doc-title">隐私政策</h1>
+    <div class="doc-meta">最近更新：2026 年 5 月 2 日</div>
+  </div>
+</section>
+
+<main class="doc-body">
+  <div class="container-narrow">
+
+    <div class="toc">
+      <div class="toc-title">目录</div>
+      <ol>
+        <li><a href="#collect">我们收集的信息</a></li>
+        <li><a href="#use">信息用途</a></li>
+        <li><a href="#storage">存储位置与保留期限</a></li>
+        <li><a href="#third">第三方服务</a></li>
+        <li><a href="#cookie">Cookie 与本地存储</a></li>
+        <li><a href="#share">数据共享</a></li>
+        <li><a href="#rights">您的权利</a></li>
+        <li><a href="#security">安全措施</a></li>
+        <li><a href="#minor">未成年人保护</a></li>
+        <li><a href="#changes">政策更新</a></li>
+        <li><a href="#contact">联系方式</a></li>
+      </ol>
+    </div>
+
+    <p>HOLA DAY（以下简称"我们"）尊重并保护用户隐私。本《隐私政策》说明我们在您使用本服务时
+       会收集哪些信息、如何使用、如何保护，以及您拥有哪些权利。请仔细阅读。</p>
+
+    <h2 id="collect">1. 我们收集的信息</h2>
+    <table class="data-table">
+      <thead><tr><th>类别</th><th>具体内容</th><th>来源</th></tr></thead>
+      <tbody>
+        <tr><td>账号信息</td><td>邮箱、手机号、密码（加密存储）、昵称</td><td>注册时由您提供</td></tr>
+        <tr><td>任务内容</td><td>您提交的任务描述、AI 生成的执行步骤、截图、产出文件</td><td>使用过程中产生</td></tr>
+        <tr><td>浏览器 Cookie</td><td>通过 HOLA DAY 浏览器扩展同步到云端浏览器的登录态 Cookie</td><td>需您主动安装扩展并授权同步</td></tr>
+        <tr><td>使用数据</td><td>登录时间、任务次数、API 调用统计、错误日志</td><td>系统自动采集</td></tr>
+        <tr><td>设备与网络</td><td>IP 地址、浏览器 User-Agent、操作系统</td><td>HTTP 请求自动携带</td></tr>
+        <tr><td>支付信息</td><td>订单金额、支付时间、支付平台流水号（不存储完整卡号或密码）</td><td>第三方支付平台回传</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="use">2. 信息用途</h2>
+    <p>我们仅在以下范围内使用您的信息：</p>
+    <ul>
+      <li>提供、维护、改进本服务（执行任务、生成结果、保存历史）</li>
+      <li>账号管理与安全保护（登录验证、异常检测、防止滥用）</li>
+      <li>处理订阅、续费、退款</li>
+      <li>客户支持与故障排查</li>
+      <li>统计分析（脱敏后用于产品优化，不针对个人）</li>
+      <li>必要的法律合规要求</li>
+    </ul>
+    <p>我们<strong>不会</strong>将您的任务内容用于训练公开发布的 AI 模型，
+       也<strong>不会</strong>将您的个人信息出售或出租给第三方。</p>
+
+    <h2 id="storage">3. 存储位置与保留期限</h2>
+    <p><strong>主要数据存储在以下两个地理位置：</strong></p>
+    <ul>
+      <li>账号、任务、文件等核心数据：新加坡 / 香港数据中心（Vultr）</li>
+      <li>中国大陆用户访问加速节点 + 中国境内支付通知：阿里云（杭州区域）</li>
+    </ul>
+    <p><strong>保留期限：</strong></p>
+    <ul>
+      <li>账号信息：账号有效期内长期保存；账号注销后 30 日内删除（备份按公司数据生命周期 90 日内清除）</li>
+      <li>任务内容与产出文件：默认 24 小时后自动清理；登录态用户的历史任务记录保存 90 天</li>
+      <li>支付与开票数据：依据税务法规保存 7 年</li>
+      <li>系统日志：90 天</li>
+    </ul>
+
+    <h2 id="third">4. 第三方服务</h2>
+    <p>本服务依赖以下第三方提供基础能力。这些服务有各自的隐私政策，您使用本服务即视为同意相关第三方处理必要的数据：</p>
+    <ul>
+      <li><strong>Anthropic API</strong>：AI 大模型推理（任务描述与上下文会发送给 Anthropic，由其按其隐私政策处理）</li>
+      <li><strong>Resend</strong>：发送验证码、通知邮件（仅传递邮箱地址与邮件正文）</li>
+      <li><strong>阿里云短信服务</strong>：发送中国大陆手机短信验证码（仅传递手机号与签名/模板参数）</li>
+      <li><strong>微信支付 / 支付宝</strong>：处理中国大陆用户的人民币订阅支付（订单金额、订单号；不接触卡号）</li>
+      <li><strong>Stripe / PayPal</strong>：处理国际用户的美元订阅支付</li>
+      <li><strong>Cloudflare</strong>：CDN 加速、DDoS 防护（短暂记录访问 IP 与 UA）</li>
+    </ul>
+
+    <h2 id="cookie">5. Cookie 与本地存储</h2>
+    <p>本服务使用以下 Cookie / localStorage：</p>
+    <ul>
+      <li><strong>必要型</strong>：登录态 token、CSRF token、用户偏好（主题、语言）— 不可关闭</li>
+      <li><strong>功能型</strong>：上次选择的传输方式（VNC / CDP）、面板布局 — 由您主动设置</li>
+    </ul>
+    <p>本服务<strong>不使用</strong>第三方追踪 Cookie 或广告 Cookie。</p>
+
+    <h2 id="share">6. 数据共享</h2>
+    <p>我们仅在以下情形向第三方提供您的数据：</p>
+    <ul>
+      <li>经您明确授权（如您主动通过 MCP 连接外部服务）</li>
+      <li>提供基础服务所必需（见上文"第三方服务"）</li>
+      <li>响应法律要求（如司法机关合法调取）</li>
+      <li>保护本服务、用户或公众的合法权益（如阻止欺诈）</li>
+    </ul>
+
+    <h2 id="rights">7. 您的权利</h2>
+    <p>您对自己的个人数据享有以下权利：</p>
+    <ul>
+      <li><strong>查看权</strong>：通过账号设置查看您的资料、任务历史、支付记录</li>
+      <li><strong>更正权</strong>：随时修改您的资料</li>
+      <li><strong>删除权</strong>：注销账号或删除特定任务记录</li>
+      <li><strong>导出权</strong>：通过邮件请求导出您的全部数据（处理时限：30 个自然日内）</li>
+      <li><strong>撤回授权</strong>：随时关闭浏览器扩展、停用 MCP 连接</li>
+    </ul>
+    <p>如需行使上述权利，请联系：<a href="mailto:support@holaday.ai">support@holaday.ai</a></p>
+
+    <h2 id="security">8. 安全措施</h2>
+    <p>我们采取以下措施保护您的数据：</p>
+    <ul>
+      <li>传输：全站强制 HTTPS（TLS 1.2+）</li>
+      <li>存储：密码使用 bcrypt 不可逆加密；敏感字段加密存储</li>
+      <li>访问控制：最小权限原则、操作审计日志</li>
+      <li>云端浏览器实例按用户隔离（per-user pool），任务结束 5 分钟后自动回收</li>
+      <li>定期安全审计与依赖更新</li>
+    </ul>
+    <p>尽管我们采取业界标准的安全措施，但任何系统都无法保证 100% 安全。
+       如发生数据泄露，我们将依法及时通知受影响的用户。</p>
+
+    <h2 id="minor">9. 未成年人保护</h2>
+    <p>本服务面向 16 周岁及以上用户。我们不会有意收集未满 16 周岁用户的个人信息；
+       如发现，将立即删除相关数据并注销账号。</p>
+
+    <h2 id="changes">10. 政策更新</h2>
+    <p>本政策可能不时更新。重大变更将通过站内通知或邮件告知。
+       建议您定期查看本页面以了解最新版本。继续使用本服务即视为接受更新后的政策。</p>
+
+    <h2 id="contact">11. 联系方式</h2>
+    <p>如对本政策、您的数据或任何隐私相关问题有疑问，请联系：
+       <a href="mailto:support@holaday.ai">support@holaday.ai</a></p>
+
+  </div>
+</main>
+
+<footer>
+  <a href="/">首页</a>
+  <a href="/terms">服务条款</a>
+  <a href="/privacy">隐私政策</a>
+  <div style="margin-top: 12px;">© 2025–2026 HOLA DAY</div>
+</footer>
+
+</body>
+</html>

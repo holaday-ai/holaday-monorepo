@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 130" fill="none">
+  <!-- pill outer shape with subtle 3D depth -->
+  <rect x="6" y="6" width="228" height="118" rx="59" fill="#C41D5F"/>
+  <rect x="6" y="6" width="228" height="110" rx="55" fill="#E50B6B"/>
+  <rect x="6" y="6" width="228" height="118" rx="59" fill="none" stroke="#000" stroke-width="9"/>
+  <!-- vertical centerline divider -->
+  <line x1="120" y1="9" x2="120" y2="120" stroke="#000" stroke-width="9" stroke-linecap="round"/>
+  <!-- left half: stylized H built from 5 black blocks -->
+  <g fill="#000">
+    <rect x="33" y="28" width="22" height="28"/>
+    <rect x="33" y="68" width="22" height="28"/>
+    <rect x="85" y="28" width="22" height="28"/>
+    <rect x="85" y="68" width="22" height="28"/>
+    <rect x="33" y="54" width="74" height="20"/>
+  </g>
+  <!-- right half: stylized D built from blocks + side bar -->
+  <g fill="#000">
+    <rect x="133" y="28" width="74" height="20"/>
+    <rect x="133" y="76" width="74" height="20"/>
+    <rect x="133" y="48" width="22" height="28"/>
+    <rect x="185" y="48" width="22" height="28"/>
+  </g>
+</svg>

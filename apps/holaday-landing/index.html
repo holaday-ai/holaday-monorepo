@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HOLA DAY — AI 任务执行助手 | 把工作交给 AI</title>
+  <meta name="description" content="HOLA DAY 是你的 AI 任务执行助手。说一句话，它帮你搜索、操作浏览器、分析数据、整理文档，直到完成。免费体验。">
+  <meta name="keywords" content="AI助手,任务执行,AI Agent,浏览器自动化,智能办公,HOLA DAY">
+
+  <meta property="og:title" content="HOLA DAY — AI 任务执行助手">
+  <meta property="og:description" content="把工作交给 AI，去做你真正想做的事。HOLA DAY 帮你搜索、操作、分析、整理。">
+  <meta property="og:image" content="https://holaday.ai/og-image.png">
+  <meta property="og:url" content="https://holaday.ai">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="HOLA DAY">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="HOLA DAY — AI 任务执行助手">
+  <meta name="twitter:description" content="把工作交给 AI，去做你真正想做的事。">
+  <meta name="twitter:image" content="https://holaday.ai/og-image.png">
+
+  <link rel="canonical" href="https://holaday.ai">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --pink: #E50B6B;
+      --pink-deep: #C41D5F;
+      --pink-soft: #FFE5EE;
+      --ink: #0A0A0A;
+      --text: #1A1A1A;
+      --text-muted: #71717A;
+      --text-subtle: #A1A1AA;
+      --bg: #FFFFFF;
+      --bg-soft: #FAFAFA;
+      --border: #E4E4E7;
+      --border-strong: #D4D4D8;
+      --radius-sm: 6px;
+      --radius: 10px;
+      --radius-lg: 16px;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+      --shadow: 0 4px 14px rgba(0,0,0,0.06);
+      --shadow-lg: 0 18px 40px -12px rgba(229, 11, 107, 0.18);
+      --container: 1180px;
+      --gutter: 24px;
+      --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      --font-display: 'Outfit', var(--font-sans);
+    }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+    body {
+      font-family: var(--font-sans);
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    a { color: inherit; text-decoration: none; }
+    img, svg { display: block; max-width: 100%; }
+    button { font: inherit; cursor: pointer; border: 0; background: none; }
+
+    .container { width: 100%; max-width: var(--container); margin-inline: auto; padding-inline: var(--gutter); }
+
+    /* ---------- Nav ---------- */
+    .nav {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(255,255,255,0.85);
+      backdrop-filter: saturate(180%) blur(12px);
+      -webkit-backdrop-filter: saturate(180%) blur(12px);
+      border-bottom: 1px solid transparent;
+      transition: border-color .15s ease;
+    }
+    .nav.scrolled { border-bottom-color: var(--border); }
+    .nav-inner {
+      display: flex; align-items: center; justify-content: space-between;
+      height: 64px;
+    }
+    .nav-logo { display: flex; align-items: center; gap: 10px; }
+    .nav-logo img { height: 32px; width: auto; }
+    .nav-links { display: flex; align-items: center; gap: 32px; }
+    .nav-link {
+      font-size: 14px; font-weight: 500; color: var(--text-muted);
+      transition: color .15s ease;
+    }
+    .nav-link:hover { color: var(--text); }
+    .nav-cta-row { display: flex; align-items: center; gap: 12px; }
+
+    /* ---------- Buttons ---------- */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      height: 42px; padding: 0 18px;
+      font-size: 14px; font-weight: 600;
+      border-radius: var(--radius);
+      transition: transform .12s ease, background .15s ease, box-shadow .15s ease, border-color .15s ease;
+      white-space: nowrap;
+    }
+    .btn-primary {
+      background: var(--pink); color: #fff;
+      box-shadow: 0 1px 2px rgba(229,11,107,0.2);
+    }
+    .btn-primary:hover { background: var(--pink-deep); box-shadow: 0 6px 18px rgba(229,11,107,0.32); transform: translateY(-1px); }
+    .btn-ghost {
+      background: transparent; color: var(--text);
+      border: 1px solid var(--border-strong);
+    }
+    .btn-ghost:hover { border-color: var(--ink); }
+    .btn-link {
+      color: var(--text-muted); padding: 0 4px; height: auto;
+    }
+    .btn-link:hover { color: var(--text); }
+    .btn-lg { height: 50px; padding: 0 24px; font-size: 15px; }
+
+    /* ---------- Hero ---------- */
+    .hero { padding: 80px 0 96px; }
+    .hero-eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 14px; border: 1px solid var(--border); border-radius: 999px;
+      font-size: 13px; color: var(--text-muted); margin-bottom: 28px;
+      background: var(--bg-soft);
+    }
+    .hero-eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--pink); }
+    .hero h1 {
+      font-family: var(--font-display);
+      font-size: clamp(38px, 6vw, 72px);
+      font-weight: 800;
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+      color: var(--ink);
+      max-width: 920px;
+    }
+    .hero h1 .accent { color: var(--pink); }
+    .hero-sub {
+      margin-top: 24px;
+      max-width: 640px;
+      font-size: clamp(16px, 1.5vw, 19px);
+      color: var(--text-muted);
+      line-height: 1.55;
+    }
+    .hero-cta { margin-top: 40px; display: flex; gap: 12px; flex-wrap: wrap; }
+    .hero-stats { margin-top: 36px; display: flex; gap: 32px; flex-wrap: wrap; color: var(--text-muted); font-size: 13px; }
+    .hero-stats .stat strong { color: var(--ink); font-weight: 700; }
+
+    .hero-visual {
+      margin-top: 72px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: linear-gradient(180deg, var(--bg-soft), #fff);
+      overflow: hidden;
+      box-shadow: var(--shadow-lg);
+      position: relative;
+    }
+    .browser-chrome {
+      display: flex; align-items: center; gap: 8px;
+      padding: 14px 16px; border-bottom: 1px solid var(--border);
+      background: #fff;
+    }
+    .browser-dots { display: flex; gap: 6px; }
+    .browser-dots span { width: 11px; height: 11px; border-radius: 50%; background: var(--border-strong); }
+    .browser-dots span:first-child { background: #FF5F56; }
+    .browser-dots span:nth-child(2) { background: #FFBD2E; }
+    .browser-dots span:nth-child(3) { background: #27C93F; }
+    .browser-url {
+      flex: 1; height: 28px; border-radius: var(--radius-sm);
+      background: var(--bg-soft); border: 1px solid var(--border);
+      display: flex; align-items: center; padding: 0 12px;
+      font-size: 12px; color: var(--text-muted);
+    }
+    .mock-app {
+      display: grid;
+      grid-template-columns: 280px 1fr 380px;
+      min-height: 420px;
+      background: #fff;
+    }
+    .mock-sidebar {
+      border-right: 1px solid var(--border); padding: 20px;
+      display: flex; flex-direction: column; gap: 8px;
+      background: var(--bg-soft);
+    }
+    .mock-sidebar .item { padding: 8px 12px; border-radius: var(--radius-sm); font-size: 13px; color: var(--text-muted); }
+    .mock-sidebar .item.active { background: rgba(229,11,107,0.08); color: var(--pink); font-weight: 600; }
+    .mock-canvas {
+      padding: 28px; display: flex; flex-direction: column; gap: 16px;
+    }
+    .mock-canvas .prompt {
+      padding: 14px 16px; border-radius: var(--radius);
+      background: var(--pink-soft); color: var(--pink-deep);
+      font-size: 14px; max-width: 80%; align-self: flex-end;
+    }
+    .mock-canvas .reply {
+      padding: 14px 16px; border-radius: var(--radius);
+      background: var(--bg-soft); border: 1px solid var(--border);
+      font-size: 14px; max-width: 90%;
+    }
+    .mock-canvas .reply .step {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 13px; color: var(--text-muted); margin-top: 6px;
+    }
+    .mock-canvas .reply .step .check {
+      width: 16px; height: 16px; border-radius: 50%; background: var(--pink); color: #fff;
+      display: inline-flex; align-items: center; justify-content: center; font-size: 10px;
+    }
+    .mock-browser {
+      border-left: 1px solid var(--border); padding: 20px;
+      background: var(--bg-soft);
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .mock-browser .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-subtle); }
+    .mock-browser .frame {
+      flex: 1; border-radius: var(--radius-sm); border: 1px solid var(--border);
+      background: linear-gradient(135deg, #f8f8f8, #ececec); min-height: 280px;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-subtle); font-size: 12px;
+    }
+    @media (max-width: 880px) {
+      .mock-app { grid-template-columns: 1fr; }
+      .mock-sidebar, .mock-browser { display: none; }
+    }
+
+    /* ---------- Sections ---------- */
+    section { padding: 96px 0; }
+    .section-eyebrow {
+      display: inline-block; font-size: 13px; font-weight: 600;
+      color: var(--pink); letter-spacing: 0.04em; text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+    .section-title {
+      font-family: var(--font-display);
+      font-size: clamp(30px, 4vw, 44px);
+      font-weight: 800; line-height: 1.15;
+      letter-spacing: -0.02em; color: var(--ink);
+      max-width: 720px;
+    }
+    .section-sub {
+      margin-top: 16px; max-width: 640px;
+      font-size: 17px; color: var(--text-muted); line-height: 1.55;
+    }
+
+    /* ---------- How it works ---------- */
+    .how-grid {
+      margin-top: 60px;
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
+    }
+    .step-card {
+      padding: 32px; border: 1px solid var(--border); border-radius: var(--radius-lg);
+      background: var(--bg);
+      position: relative;
+      transition: border-color .2s ease, transform .2s ease;
+    }
+    .step-card:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+    .step-num {
+      width: 40px; height: 40px; border-radius: 50%;
+      background: var(--pink); color: #fff;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-family: var(--font-display); font-weight: 700; font-size: 16px;
+      margin-bottom: 20px;
+    }
+    .step-title { font-family: var(--font-display); font-size: 20px; font-weight: 700; color: var(--ink); margin-bottom: 10px; }
+    .step-text { color: var(--text-muted); font-size: 15px; line-height: 1.55; }
+    .step-examples {
+      margin-top: 18px; display: flex; flex-direction: column; gap: 8px;
+    }
+    .step-examples .example {
+      padding: 10px 12px; background: var(--bg-soft); border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 13px; color: var(--text); line-height: 1.45;
+    }
+    @media (max-width: 880px) {
+      .how-grid { grid-template-columns: 1fr; }
+    }
+
+    /* ---------- Capabilities ---------- */
+    .cap-grid {
+      margin-top: 60px;
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
+    }
+    .cap-card {
+      padding: 28px; border: 1px solid var(--border); border-radius: var(--radius-lg);
+      transition: border-color .2s ease, transform .2s ease;
+    }
+    .cap-card:hover { border-color: var(--pink); transform: translateY(-2px); }
+    .cap-icon {
+      width: 44px; height: 44px; border-radius: var(--radius);
+      background: var(--pink-soft); color: var(--pink);
+      display: inline-flex; align-items: center; justify-content: center;
+      margin-bottom: 18px;
+    }
+    .cap-title { font-family: var(--font-display); font-size: 17px; font-weight: 700; color: var(--ink); margin-bottom: 8px; }
+    .cap-text { color: var(--text-muted); font-size: 14px; line-height: 1.55; }
+    .cap-card .badge { display: inline-block; margin-top: 12px; padding: 3px 8px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--text-muted); }
+    @media (max-width: 880px) {
+      .cap-grid { grid-template-columns: 1fr; }
+    }
+
+    /* ---------- Use cases ---------- */
+    .uc-section { background: var(--bg-soft); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .uc-grid {
+      margin-top: 56px;
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;
+    }
+    .uc-card {
+      display: flex; align-items: center; gap: 18px;
+      padding: 22px 24px; background: #fff; border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: border-color .2s ease, transform .2s ease;
+    }
+    .uc-card:hover { border-color: var(--pink); transform: translateY(-1px); }
+    .uc-role {
+      flex-shrink: 0; min-width: 130px; font-family: var(--font-display);
+      font-weight: 700; color: var(--ink); font-size: 16px;
+    }
+    .uc-prompt { color: var(--text-muted); font-size: 14px; line-height: 1.5; }
+    .uc-prompt::before { content: '"'; color: var(--pink); font-weight: 700; }
+    .uc-prompt::after { content: '"'; color: var(--pink); font-weight: 700; }
+    @media (max-width: 880px) {
+      .uc-grid { grid-template-columns: 1fr; }
+      .uc-card { flex-direction: column; align-items: flex-start; }
+    }
+
+    /* ---------- Pricing ---------- */
+    .price-grid {
+      margin-top: 56px;
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;
+    }
+    .price-card {
+      padding: 32px 28px; border: 1px solid var(--border); border-radius: var(--radius-lg);
+      background: #fff; display: flex; flex-direction: column;
+    }
+    .price-card.featured {
+      border-color: var(--pink); border-width: 2px;
+      box-shadow: var(--shadow-lg);
+      position: relative;
+    }
+    .price-card.featured::before {
+      content: '推荐'; position: absolute; top: -12px; right: 24px;
+      padding: 4px 10px; background: var(--pink); color: #fff;
+      font-size: 11px; font-weight: 700; border-radius: 999px;
+      letter-spacing: 0.05em;
+    }
+    .price-name { font-family: var(--font-display); font-size: 18px; font-weight: 700; color: var(--ink); }
+    .price-tagline { color: var(--text-muted); font-size: 13px; margin-top: 4px; min-height: 36px; }
+    .price-amount { margin-top: 20px; display: flex; align-items: baseline; gap: 6px; }
+    .price-amount .num { font-family: var(--font-display); font-size: 44px; font-weight: 800; color: var(--ink); letter-spacing: -0.02em; }
+    .price-amount .period { color: var(--text-muted); font-size: 14px; }
+    .price-amount .currency { color: var(--ink); font-size: 22px; font-weight: 700; }
+    .price-intl { color: var(--text-subtle); font-size: 12px; margin-top: 4px; }
+    .price-features { list-style: none; margin: 24px 0 28px; display: flex; flex-direction: column; gap: 12px; }
+    .price-features li { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: var(--text); }
+    .price-features li svg { flex-shrink: 0; color: var(--pink); margin-top: 2px; }
+    .price-card .btn { margin-top: auto; width: 100%; }
+    @media (max-width: 880px) {
+      .price-grid { grid-template-columns: 1fr; }
+    }
+
+    /* ---------- CTA strip ---------- */
+    .cta-strip {
+      margin-top: 96px;
+      padding: 64px 40px;
+      background: linear-gradient(135deg, var(--pink), var(--pink-deep));
+      border-radius: var(--radius-lg);
+      color: #fff; text-align: center;
+    }
+    .cta-strip h2 { font-family: var(--font-display); font-size: clamp(26px, 3vw, 36px); font-weight: 800; letter-spacing: -0.02em; }
+    .cta-strip p { margin-top: 12px; opacity: 0.92; font-size: 16px; }
+    .cta-strip .btn { margin-top: 28px; background: #fff; color: var(--pink-deep); }
+    .cta-strip .btn:hover { background: #fff; transform: translateY(-1px); box-shadow: 0 12px 24px rgba(0,0,0,0.18); }
+
+    /* ---------- Footer ---------- */
+    footer { padding: 64px 0 40px; border-top: 1px solid var(--border); margin-top: 96px; }
+    .footer-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 40px; }
+    .footer-brand img { height: 28px; width: auto; }
+    .footer-brand p { margin-top: 14px; color: var(--text-muted); font-size: 13px; max-width: 280px; line-height: 1.55; }
+    .footer-col h4 { font-family: var(--font-display); font-size: 13px; font-weight: 700; color: var(--ink); margin-bottom: 14px; letter-spacing: 0.04em; text-transform: uppercase; }
+    .footer-col a { display: block; font-size: 14px; color: var(--text-muted); padding: 4px 0; transition: color .15s ease; }
+    .footer-col a:hover { color: var(--text); }
+    .footer-bottom { margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; color: var(--text-subtle); font-size: 13px; }
+    @media (max-width: 880px) {
+      .footer-grid { grid-template-columns: 1fr 1fr; }
+      .footer-brand { grid-column: 1 / -1; }
+    }
+
+    /* ---------- Reveal on scroll ---------- */
+    .reveal { opacity: 0; transform: translateY(16px); transition: opacity .6s ease, transform .6s ease; }
+    .reveal.shown { opacity: 1; transform: none; }
+    @media (prefers-reduced-motion: reduce) {
+      .reveal { opacity: 1; transform: none; transition: none; }
+      html { scroll-behavior: auto; }
+    }
+
+    /* ---------- Mobile nav ---------- */
+    @media (max-width: 720px) {
+      .nav-links .nav-link { display: none; }
+      .nav-links .btn-ghost { display: none; }
+      .hero { padding: 56px 0 64px; }
+      section { padding: 72px 0; }
+      .cta-strip { padding: 48px 24px; }
+      .uc-card { padding: 18px; }
+    }
+  </style>
+</head>
+
+<body>
+
+<header class="nav" id="nav">
+  <div class="container nav-inner">
+    <a href="/" class="nav-logo" aria-label="HOLA DAY 首页">
+      <img src="/landing-assets/logo-full.svg" alt="HOLA DAY">
+    </a>
+    <nav class="nav-links" aria-label="主导航">
+      <a class="nav-link" href="#how">功能</a>
+      <a class="nav-link" href="#capabilities">能力</a>
+      <a class="nav-link" href="#pricing">定价</a>
+      <div class="nav-cta-row">
+        <a class="btn btn-ghost" href="/login">登录</a>
+        <a class="btn btn-primary" href="/register">开始使用</a>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-eyebrow"><span class="dot"></span>实时浏览器执行 · 中英双语 · 免费体验</div>
+      <h1>把工作交给 <span class="accent">AI</span><br>去做你真正想做的事。</h1>
+      <p class="hero-sub">
+        HOLA DAY 是你的 AI 任务执行助手。说一句话，它帮你搜索、操作浏览器、分析数据、整理文档 —— 直到完成。
+      </p>
+      <div class="hero-cta">
+        <a class="btn btn-primary btn-lg" href="/register">免费开始 →</a>
+        <a class="btn btn-ghost btn-lg" href="#how">查看演示</a>
+      </div>
+      <div class="hero-stats">
+        <div class="stat"><strong>33</strong> 个专家技能</div>
+        <div class="stat"><strong>10+</strong> 个国内外站点适配</div>
+        <div class="stat"><strong>&lt;1s</strong> 任务下发延迟</div>
+      </div>
+
+      <!-- Mock product surface -->
+      <div class="hero-visual reveal">
+        <div class="browser-chrome">
+          <div class="browser-dots"><span></span><span></span><span></span></div>
+          <div class="browser-url">holaday.ai/app</div>
+        </div>
+        <div class="mock-app">
+          <aside class="mock-sidebar">
+            <div class="item active">今天</div>
+            <div class="item">收藏的任务</div>
+            <div class="item">定时任务</div>
+            <div class="item">技能库</div>
+            <div class="item">连接</div>
+          </aside>
+          <section class="mock-canvas">
+            <div class="prompt">帮我去携程查一下明天飞东京最便宜的机票，按时间排序。</div>
+            <div class="reply">
+              <div>正在为你执行……</div>
+              <div class="step"><span class="check">✓</span> 已打开 trip.com / flights</div>
+              <div class="step"><span class="check">✓</span> 已选择 上海 → 东京 / 明天</div>
+              <div class="step"><span class="check">✓</span> 已应用价格升序排序</div>
+              <div class="step"><span class="check">✓</span> 截图 + 整理 5 个最便宜的航班</div>
+            </div>
+          </section>
+          <aside class="mock-browser">
+            <div class="label">Live Browser</div>
+            <div class="frame">实时画面 · CDP screencast</div>
+          </aside>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section id="how">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-eyebrow">How it works</div>
+        <h2 class="section-title">三步搞定，不用学新工具。</h2>
+        <p class="section-sub">不需要 prompt 工程，不需要 RPA 配置。说人话，HOLA DAY 自己想办法完成。</p>
+      </div>
+      <div class="how-grid">
+        <div class="step-card reveal">
+          <div class="step-num">1</div>
+          <div class="step-title">说出你的任务</div>
+          <p class="step-text">中文、英文、口语化、甚至带表情，都行。复杂任务会自动拆成步骤。</p>
+          <div class="step-examples">
+            <div class="example">"帮我在小红书搜最近爆款笔记的标题套路"</div>
+            <div class="example">"把这份 PDF 里的销售数据整理成表格"</div>
+            <div class="example">"去京东对比 iPhone 16 各型号价格"</div>
+          </div>
+        </div>
+        <div class="step-card reveal">
+          <div class="step-num">2</div>
+          <div class="step-title">AI 自动执行</div>
+          <p class="step-text">HOLA DAY 在云端打开真实浏览器，搜索、操作、分析 —— 全程实时可见，可随时介入。</p>
+          <div class="step-examples">
+            <div class="example">实时画面流（CDP screencast）</div>
+            <div class="example">每一步都有 AI 自检 + 失败重试</div>
+            <div class="example">需要登录时弹出，授权后继续</div>
+          </div>
+        </div>
+        <div class="step-card reveal">
+          <div class="step-num">3</div>
+          <div class="step-title">收到结果 + 下一步建议</div>
+          <p class="step-text">任务结束直接给你结果，必要时附上截图、链接、文件。还会建议接下来可以做什么。</p>
+          <div class="step-examples">
+            <div class="example">结构化文本 / 表格 / 导出文件</div>
+            <div class="example">引用来源 + 截图证据</div>
+            <div class="example">追问继续，无需重新开始</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Capabilities -->
+  <section id="capabilities">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-eyebrow">Capabilities</div>
+        <h2 class="section-title">一个助手，覆盖你 80% 的网页工作。</h2>
+        <p class="section-sub">从搜索到操作到分析，HOLA DAY 把过去要在 5 个工具间切换的活，合并到一个对话里。</p>
+      </div>
+      <div class="cap-grid">
+        <div class="cap-card reveal">
+          <div class="cap-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M2 12h20"/></svg>
+          </div>
+          <div class="cap-title">浏览器操作</div>
+          <p class="cap-text">自动打开网站、填表、点击、滚动、截图、下载。Cookie 同步让登录态在云端继续可用。</p>
+        </div>
+        <div class="cap-card reveal">
+          <div class="cap-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 6-6"/></svg>
+          </div>
+          <div class="cap-title">数据分析</div>
+          <p class="cap-text">读取 PDF / Excel / 网页表格，做汇总、对比、可视化，输出结构化结果。</p>
+        </div>
+        <div class="cap-card reveal">
+          <div class="cap-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          </div>
+          <div class="cap-title">智能搜索</div>
+          <p class="cap-text">跨多个来源搜索 + 综合，标注引用，避免单源偏差。中英文都能查。</p>
+        </div>
+        <div class="cap-card reveal">
+          <div class="cap-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </div>
+          <div class="cap-title">专家技能</div>
+          <p class="cap-text">33 个行业专家角色（律师、产品经理、品牌策划……），输出可交付的专业级文档。</p>
+        </div>
+        <div class="cap-card reveal">
+          <div class="cap-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <div class="cap-title">定时任务</div>
+          <p class="cap-text">每天 / 每周 / 自定义周期自动执行。早报、监控、定时抓取，让 HOLA DAY 替你盯着。</p>
+        </div>
+        <div class="cap-card reveal">
+          <div class="cap-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          </div>
+          <div class="cap-title">MCP 连接 <span class="badge">即将推出</span></div>
+          <p class="cap-text">通过 Model Context Protocol 连接 Gmail、Google Drive、Notion、Slack 等外部服务。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Use cases -->
+  <section class="uc-section">
+    <div class="container">
+      <div class="reveal">
+        <div class="section-eyebrow">Who uses it</div>
+        <h2 class="section-title">为重复劳动而生，为决策而用。</h2>
+        <p class="section-sub">无论是高管的信息扫描、运营的竞品监控，还是分析师的数据汇总 —— HOLA DAY 把"你本可以委派的工作"真正委派出去。</p>
+      </div>
+      <div class="uc-grid">
+        <div class="uc-card reveal"><div class="uc-role">CEO / COO</div><div class="uc-prompt">帮我查一下竞品最新动态并写一份简报。</div></div>
+        <div class="uc-card reveal"><div class="uc-role">电商运营</div><div class="uc-prompt">去淘宝看看头部店铺的主图和定价策略。</div></div>
+        <div class="uc-card reveal"><div class="uc-role">金融分析师</div><div class="uc-prompt">搜索这家公司的最新财报，做一份要点摘要。</div></div>
+        <div class="uc-card reveal"><div class="uc-role">内容创作者</div><div class="uc-prompt">在小红书搜最近的爆款笔记，归纳标题套路。</div></div>
+        <div class="uc-card reveal"><div class="uc-role">法律研究</div><div class="uc-prompt">查《劳动合同法》第 39 条的最新司法解释。</div></div>
+        <div class="uc-card reveal"><div class="uc-role">求职者</div><div class="uc-prompt">在 LinkedIn 搜深圳的 AI 产品经理职位。</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing -->
+  <section id="pricing">
+    <div class="container">
+      <div class="reveal" style="text-align:center; margin: 0 auto;">
+        <div class="section-eyebrow">Pricing</div>
+        <h2 class="section-title" style="margin: 0 auto;">简单的定价，先免费用一下。</h2>
+        <p class="section-sub" style="margin: 16px auto 0;">每个套餐都包含完整的浏览器执行能力，区别在于额度和并发。随时升级或降级。</p>
+      </div>
+      <div class="price-grid">
+        <div class="price-card reveal">
+          <div class="price-name">免费体验</div>
+          <div class="price-tagline">想看看 HOLA DAY 能帮到你什么</div>
+          <div class="price-amount"><span class="currency">¥</span><span class="num">0</span><span class="period">/月</span></div>
+          <div class="price-intl">国际用户：$0 / 月</div>
+          <ul class="price-features">
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>3 次任务 / 天</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>1 个并发</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>完整浏览器执行能力</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>实时画面流</li>
+          </ul>
+          <a class="btn btn-ghost" href="/register">开始使用</a>
+        </div>
+        <div class="price-card featured reveal">
+          <div class="price-name">基础版</div>
+          <div class="price-tagline">适合日常工作中等强度使用</div>
+          <div class="price-amount"><span class="currency">¥</span><span class="num">29</span><span class="period">/月</span></div>
+          <div class="price-intl">国际用户：$9.90 / 月</div>
+          <ul class="price-features">
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>100 次任务 / 月</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>3 个并发</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>5 个专家技能</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>定时任务</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>历史 + 收藏</li>
+          </ul>
+          <a class="btn btn-primary" href="/register">开始使用</a>
+        </div>
+        <div class="price-card reveal">
+          <div class="price-name">专业版</div>
+          <div class="price-tagline">高强度使用 + 全部专家技能</div>
+          <div class="price-amount"><span class="currency">¥</span><span class="num">99</span><span class="period">/月</span></div>
+          <div class="price-intl">国际用户：$29.90 / 月</div>
+          <ul class="price-features">
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>150 次任务 / 月</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>15 次 Opus 高级模型 / 月</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>5 个并发</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>全部 33 个专家技能</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>优先支持</li>
+          </ul>
+          <a class="btn btn-ghost" href="/register">开始使用</a>
+        </div>
+      </div>
+
+      <div class="cta-strip reveal">
+        <h2>把今天的零碎工作丢给 AI</h2>
+        <p>注册 30 秒，免费做你的第一个任务。</p>
+        <a class="btn btn-lg" href="/register">免费开始 →</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <img src="/landing-assets/logo-full.svg" alt="HOLA DAY">
+        <p>HOLA DAY 是你的 AI 任务执行助手。把工作交给 AI，去做你真正想做的事。</p>
+      </div>
+      <div class="footer-col">
+        <h4>产品</h4>
+        <a href="#how">功能</a>
+        <a href="#capabilities">能力</a>
+        <a href="#pricing">定价</a>
+      </div>
+      <div class="footer-col">
+        <h4>法律</h4>
+        <a href="/terms">服务条款</a>
+        <a href="/privacy">隐私政策</a>
+      </div>
+      <div class="footer-col">
+        <h4>联系</h4>
+        <a href="mailto:support@holaday.ai">support@holaday.ai</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <div>© 2025–2026 HOLA DAY. All rights reserved.</div>
+      <div>Made with care · Singapore / Hong Kong / Hangzhou</div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // shadow under nav on scroll
+  const nav = document.getElementById('nav');
+  const onScroll = () => nav.classList.toggle('scrolled', window.scrollY > 4);
+  document.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  // reveal-on-scroll
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (e.isIntersecting) { e.target.classList.add('shown'); io.unobserve(e.target); }
+    }
+  }, { rootMargin: '0px 0px -8% 0px', threshold: 0.05 });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+</script>
+
+</body>
+</html>
