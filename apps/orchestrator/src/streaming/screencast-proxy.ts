@@ -93,13 +93,46 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
           return reject(socket, 403, 'forbidden');
         }
 
-        const instance = opts.pool.peek(callerUserId);
+        // Phase 19c — auto-allocate on absent. The screencast WS
+        // targets the per-user pool, but tasks today still run on
+        // the legacy headless singleton (boot log: "BrowserPool
+        // ready (not yet routed — task flow still on singleton)"),
+        // so submitting a task does NOT populate this pool slot.
+        // Without auto-alloc, the screencast viewport polls
+        // forever and never attaches because nothing else allocates.
+        // Same code path as `tasks.wakeBrowser` — pool.allocate is
+        // idempotent + dedupes concurrent calls per userId, so a
+        // 5s-poll viewport doesn't spawn duplicates.
+        let instance = opts.pool.peek(callerUserId);
         if (!instance || instance.status !== 'ready') {
           log.info(
-            { callerUserId, status: instance?.status ?? 'absent' },
-            'no browser allocated yet — rejecting screencast',
+            { callerUserId, prev: instance?.status ?? 'absent' },
+            'screencast: no instance — auto-allocating',
           );
-          return reject(socket, 409, 'browser not allocated');
+          opts.pool
+            .allocate(callerUserId)
+            .then((newInstance) => {
+              log.info(
+                { callerUserId, cdpPort: newInstance.cdpPort },
+                'screencast: auto-allocate ok, accepting upgrade',
+              );
+              wss.handleUpgrade(req, socket, head, (ws) => {
+                void wireUpClient({ ws, callerUserId, instance: newInstance });
+              });
+            })
+            .catch((err: unknown) => {
+              const msg = err instanceof Error ? err.message : String(err);
+              log.warn(
+                { callerUserId, err: msg },
+                'screencast: auto-allocate failed',
+              );
+              // Common cause: PoolCapacityError (all 20 slots in
+              // use). Surface as 409 like the old rejection path so
+              // the viewport's poll loop sees a recognisable close
+              // code rather than a TCP reset.
+              reject(socket, 409, 'browser allocate failed');
+            });
+          return;
         }
 
         wss.handleUpgrade(req, socket, head, (ws) => {
