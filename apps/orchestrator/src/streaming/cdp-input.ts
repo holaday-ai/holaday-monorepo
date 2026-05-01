@@ -59,28 +59,40 @@ function modifiersBitmask(m: {
 }
 
 export class CdpInputHandler {
+  /**
+   * @param getSession Returns the streamer's CURRENT CDP session,
+   *   or null if torn down. Looked up lazily on every dispatch so
+   *   the handler survives the streamer's hard-restart (phase 19e
+   *   watchdog) without needing to be reconstructed.
+   */
   constructor(
-    private readonly cdpSession: CDPSession,
+    private readonly getSession: () => CDPSession | null,
     private readonly logger: Logger,
   ) {}
 
   /**
    * Dispatch a single input message. Per-message errors are logged
    * + swallowed so one malformed event from the SPA can't kill the
-   * input pipeline.
+   * input pipeline. Drops the message silently if the streamer's
+   * session is currently torn down (mid-restart).
    */
   async handle(msg: InputMessage): Promise<void> {
+    const session = this.getSession();
+    if (!session) {
+      this.logger.debug({ type: msg.type }, 'cdp-input: no session, dropping');
+      return;
+    }
     try {
       switch (msg.type) {
         case 'mouseMove':
-          await this.cdpSession.send('Input.dispatchMouseEvent', {
+          await session.send('Input.dispatchMouseEvent', {
             type: 'mouseMoved',
             x: msg.x,
             y: msg.y,
           });
           return;
         case 'mouseDown':
-          await this.cdpSession.send('Input.dispatchMouseEvent', {
+          await session.send('Input.dispatchMouseEvent', {
             type: 'mousePressed',
             x: msg.x,
             y: msg.y,
@@ -89,7 +101,7 @@ export class CdpInputHandler {
           });
           return;
         case 'mouseUp':
-          await this.cdpSession.send('Input.dispatchMouseEvent', {
+          await session.send('Input.dispatchMouseEvent', {
             type: 'mouseReleased',
             x: msg.x,
             y: msg.y,
@@ -98,7 +110,7 @@ export class CdpInputHandler {
           });
           return;
         case 'scroll':
-          await this.cdpSession.send('Input.dispatchMouseEvent', {
+          await session.send('Input.dispatchMouseEvent', {
             type: 'mouseWheel',
             x: msg.x,
             y: msg.y,
@@ -107,7 +119,7 @@ export class CdpInputHandler {
           });
           return;
         case 'keyDown':
-          await this.cdpSession.send('Input.dispatchKeyEvent', {
+          await session.send('Input.dispatchKeyEvent', {
             type: 'keyDown',
             ...(msg.key ? { key: msg.key } : {}),
             ...(msg.code ? { code: msg.code } : {}),
@@ -116,7 +128,7 @@ export class CdpInputHandler {
           });
           return;
         case 'keyUp':
-          await this.cdpSession.send('Input.dispatchKeyEvent', {
+          await session.send('Input.dispatchKeyEvent', {
             type: 'keyUp',
             ...(msg.key ? { key: msg.key } : {}),
             ...(msg.code ? { code: msg.code } : {}),
@@ -125,7 +137,7 @@ export class CdpInputHandler {
           });
           return;
         case 'insertText':
-          await this.cdpSession.send('Input.insertText', { text: msg.text });
+          await session.send('Input.insertText', { text: msg.text });
           return;
       }
     } catch (err) {

@@ -189,14 +189,18 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       userLog.info('screencast: page acquired, starting streamer');
       streamer = new CdpStreamer({ page, ws: args.ws, logger: userLog });
       await streamer.start();
-      const session = streamer.getSession();
-      if (!session) {
+      if (!streamer.getSession()) {
         userLog.warn('screencast: streamer started but session is null');
         await teardown('no-session');
         return;
       }
       userLog.info('screencast: streamer running; input handler attached');
-      inputHandler = new CdpInputHandler(session, userLog);
+      // Pass a getter (not the session itself) so input keeps
+      // working across the streamer's hard-restart (phase 19e
+      // watchdog) — the streamer swaps in a fresh session, the
+      // handler picks it up on the next dispatch.
+      const streamerRef = streamer;
+      inputHandler = new CdpInputHandler(() => streamerRef.getSession(), userLog);
 
       args.ws.on('message', (raw) => {
         if (!inputHandler) return;
