@@ -211,6 +211,16 @@ export function BrowserPanel({
   // a live socket on every render.
   const streamTransport = React.useMemo(() => readStreamTransport(), []);
   const usingCdp = streamTransport === 'cdp';
+  // One-time mount diagnostic so BOSS can confirm in DevTools console
+  // which transport actually got picked. Helps distinguish "flag not
+  // taking effect" from "transport selected but failing".
+  React.useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.info(
+      `[holaday] BrowserPanel transport = ${streamTransport}` +
+        (poolUserId ? ` (pool user=${poolUserId})` : ' (no pool slot)'),
+    );
+  }, [streamTransport, poolUserId]);
   // VNC live stream — memoised so prop identity is stable across
   // re-renders (the viewport's effect re-runs on any URL change).
   const vncUrl = React.useMemo(

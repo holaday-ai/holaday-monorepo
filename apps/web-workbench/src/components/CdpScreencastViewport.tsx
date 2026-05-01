@@ -95,45 +95,90 @@ export function CdpScreencastViewport({
     onStatusChangeRef.current?.(status);
   }, [status]);
 
-  // ---- WS lifecycle ----
+  // ---- WS lifecycle with exponential backoff reconnect ----
+  // Without this, a single transient failure (server reaped the
+  // Brave instance, brief network blip, orchestrator restart) leaves
+  // the panel stuck on 'disconnected' forever — VNC's RFB has its
+  // own internal reconnect, but our raw WebSocket needs explicit
+  // retry logic. Backoff: 1s, 2s, 4s, 8s, 16s; cap at 5 attempts
+  // before giving up so the BrowserPanel's hibernation card path
+  // (which fires at vncAttemptFails >= 3) gets reached cleanly.
   React.useEffect(() => {
     if (!wsUrl) {
       setStatus('idle');
       return;
     }
-    setStatus('connecting');
     let disposed = false;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    let attempt = 0;
+    const MAX_ATTEMPTS = 5;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let activeWs: WebSocket | null = null;
+    // One-time mount diagnostic so BOSS can confirm in DevTools
+    // which transport the panel actually picked.
+    // eslint-disable-next-line no-console
+    console.info(
+      '[holaday] CDP screencast viewport mounted; wsUrl =',
+      wsUrl.replace(/token=[^&]+/, 'token=…'),
+    );
 
-    ws.onopen = () => {
+    function connect(): void {
       if (disposed) return;
-      setStatus('connected');
-    };
-    ws.onmessage = (event) => {
-      if (disposed) return;
-      let msg: { type?: string; data?: string } | null = null;
-      try {
-        msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
-      } catch {
-        return; // swallow malformed
-      }
-      if (!msg || msg.type !== 'frame' || typeof msg.data !== 'string') return;
-      drawFrame(msg.data);
-    };
-    ws.onerror = () => {
-      if (disposed) return;
-      setStatus('error');
-    };
-    ws.onclose = () => {
-      if (disposed) return;
-      setStatus('disconnected');
-    };
+      attempt += 1;
+      setStatus('connecting');
+      const ws = new WebSocket(wsUrl!);
+      activeWs = ws;
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        if (disposed) return;
+        attempt = 0; // reset backoff on a successful connect
+        setStatus('connected');
+        // eslint-disable-next-line no-console
+        console.info('[holaday] CDP screencast WS open');
+      };
+      ws.onmessage = (event) => {
+        if (disposed) return;
+        let msg: { type?: string; data?: string } | null = null;
+        try {
+          msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
+        } catch {
+          return; // swallow malformed
+        }
+        if (!msg || msg.type !== 'frame' || typeof msg.data !== 'string') return;
+        drawFrame(msg.data);
+      };
+      ws.onerror = (e) => {
+        if (disposed) return;
+        // eslint-disable-next-line no-console
+        console.warn('[holaday] CDP screencast WS error', e);
+        setStatus('error');
+      };
+      ws.onclose = (event) => {
+        if (disposed) return;
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[holaday] CDP screencast WS closed (code=${event.code}, reason=${event.reason || '(none)'}, attempt=${attempt}/${MAX_ATTEMPTS})`,
+        );
+        setStatus('disconnected');
+        if (attempt >= MAX_ATTEMPTS) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            '[holaday] CDP screencast: max reconnect attempts reached; surrendering until next mount',
+          );
+          return;
+        }
+        const delay = Math.min(16_000, 1_000 * 2 ** (attempt - 1));
+        retryTimer = setTimeout(() => connect(), delay);
+      };
+    }
+
+    connect();
 
     return () => {
       disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
       try {
-        ws.close();
+        activeWs?.close();
       } catch {
         /* ignore */
       }

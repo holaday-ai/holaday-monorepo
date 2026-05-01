@@ -59,6 +59,19 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     if (!m) return; // not our path; leave for next handler
 
     const requestedUserId = decodeURIComponent(m[1] ?? '');
+    // Log every upgrade attempt at info so BOSS can correlate
+    // user reports against pm2 logs. Included in the line:
+    // requested user, whether token presence flag, source IP.
+    log.info(
+      {
+        requestedUserId,
+        hasToken:
+          Boolean(extractBearerFromSubprotocol(req)) ||
+          Boolean(extractTokenFromQuery(url)),
+        ip: req.socket.remoteAddress,
+      },
+      'screencast: upgrade attempt',
+    );
     const token = extractBearerFromSubprotocol(req) ?? extractTokenFromQuery(url);
     if (!token) {
       return reject(socket, 401, 'missing bearer token');
@@ -135,10 +148,12 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     });
 
     try {
+      userLog.info('screencast: ws upgraded ok, fetching page');
       // PlaywrightExecutor.getPage returns the user's pinned tab.
       // newCDPSession opens a session parallel to Playwright's
       // internal one — see cdp-streamer.ts head comment.
       const page = await args.instance!.executor.getPage();
+      userLog.info('screencast: page acquired, starting streamer');
       streamer = new CdpStreamer({ page, ws: args.ws, logger: userLog });
       await streamer.start();
       const session = streamer.getSession();
@@ -147,6 +162,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         await teardown('no-session');
         return;
       }
+      userLog.info('screencast: streamer running; input handler attached');
       inputHandler = new CdpInputHandler(session, userLog);
 
       args.ws.on('message', (raw) => {
