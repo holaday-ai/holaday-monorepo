@@ -588,6 +588,23 @@ export const tasksRouter = router({
       // That marks the task failed in the DB rather than 500ing the
       // tasks.create call, which would lose the audit trail.
       const primaryExecutor = perUserExec ?? headedExec ?? headlessExec;
+      // Phase 19c follow-up — log which executor lane this task
+      // landed on. Lets BOSS confirm in pm2 logs that the per-user
+      // pool path is actually winning (and falling back to a
+      // singleton lane is the exception, not the rule). Helps
+      // future "agent operates on a different browser than the
+      // user is watching" reports get diagnosed in one log line.
+      const executorLane = perUserExec
+        ? 'per-user-pool'
+        : primaryExecutor === headedExec
+          ? 'singleton-headed-fallback'
+          : primaryExecutor === headlessExec
+            ? 'singleton-headless-fallback'
+            : 'none';
+      ctx.logger.info(
+        { taskId, userId: ctx.userId, executorLane },
+        'task: executor lane selected',
+      );
       // Phase 13 Dim 6 — single StatsService instance shared across
       // all stats records the loop emits. Wiring is best-effort
       // (StatsService.record swallows its own errors), so a stats

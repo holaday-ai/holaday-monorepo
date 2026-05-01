@@ -195,7 +195,15 @@ async function main() {
           }`,
           idleTimeoutMs: poolConfig.idleTimeoutMs,
         },
-        'MULTI_USER: BrowserPool ready (not yet routed — task flow still on singleton)',
+        // Phase 19c follow-up — the prior wording ("not yet routed —
+        // task flow still on singleton") was stale. Tasks have been
+        // routing through the per-user pool since the
+        // `shouldUseBrowserPool` gate flipped to unconditional-true:
+        // tasks.ts line ~561 calls pool.allocate(userId) then sets
+        // `primaryExecutor = perUserExec ?? headedSingleton ??
+        // headlessSingleton`. The singleton lanes are now the
+        // fallback for "pool.allocate threw" only.
+        'MULTI_USER: BrowserPool ready — task flow routed through per-user pool (singleton lanes are fallback only)',
       );
     } catch (err) {
       logger.error(
