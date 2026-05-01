@@ -683,18 +683,18 @@ function ExecutorFallbackBanner({
 function DegradeBanner({ event }: { event: UiDegradeEvent }): JSX.Element {
   const label = STRATEGY_LABELS[event.strategy] ?? event.strategy;
   return (
-    <div className="flex animate-fade-in items-start gap-3 rounded-xl border border-violet-300 bg-violet-50/70 px-4 py-3 dark:border-violet-500/40 dark:bg-violet-500/10">
-      <Puzzle className="mt-0.5 h-5 w-5 shrink-0 text-violet-600" />
+    <div className="flex animate-fade-in items-start gap-3 rounded-xl border border-pink-300 bg-pink-50/70 px-4 py-3 dark:border-pink-500/40 dark:bg-pink-500/10">
+      <Puzzle className="mt-0.5 h-5 w-5 shrink-0 text-pink-600" />
       <div className="min-w-0 flex-1 text-sm">
-        <div className="font-semibold text-violet-900">
+        <div className="font-semibold text-pink-900 dark:text-pink-100">
           正在尝试替代方案（level {event.level}）
         </div>
-        <div className="mt-1 text-xs text-violet-900/80">
+        <div className="mt-1 text-xs text-pink-900/80 dark:text-pink-100/80">
           策略：<span className="font-medium">{label}</span>
           {event.ok ? '' : '（未生效，继续升级）'}
         </div>
         {event.nextUrl ? (
-          <div className="mt-1 text-xs text-violet-900/80">下一步导航：{event.nextUrl}</div>
+          <div className="mt-1 text-xs text-pink-900/80 dark:text-pink-100/80">下一步导航：{event.nextUrl}</div>
         ) : null}
       </div>
     </div>

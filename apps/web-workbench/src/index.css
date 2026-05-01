@@ -17,19 +17,25 @@
     --card-foreground: 240 10% 3.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 240 10% 3.9%;
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
+    /* Phase 20b — brand pink (#E50B6B) replaces the neutral default
+     * primary so all `bg-primary` / `text-primary` / `ring-primary`
+     * surfaces (buttons, focus rings, selected sidebar items, pricing
+     * "推荐" badge, etc.) pick up the brand color automatically. */
+    --primary: 338 93% 48%;
+    --primary-foreground: 0 0% 100%;
     --secondary: 240 4.8% 95.9%;
     --secondary-foreground: 240 5.9% 10%;
     --muted: 240 4.8% 95.9%;
     --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
+    /* Brand accent — slightly lighter pink (#E63574) for hover/active
+     * surfaces that previously used a muted neutral. */
+    --accent: 338 80% 55%;
+    --accent-foreground: 0 0% 100%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
-    --ring: 240 5.9% 10%;
+    --ring: 338 93% 48%;
     --radius: 0.625rem;
   }
 
@@ -46,19 +52,21 @@
     --card-foreground: 0 0% 98%;
     --popover: 0 0% 9%;
     --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 7%;
+    /* Phase 20b — same brand pink in dark mode. White foreground
+     * stays legible on the saturated pink in both themes. */
+    --primary: 338 93% 48%;
+    --primary-foreground: 0 0% 100%;
     --secondary: 0 0% 14%;
     --secondary-foreground: 0 0% 98%;
     --muted: 0 0% 14%;
     --muted-foreground: 0 0% 70%;
-    --accent: 0 0% 14%;
-    --accent-foreground: 0 0% 98%;
+    --accent: 338 80% 55%;
+    --accent-foreground: 0 0% 100%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
     --border: 0 0% 18%;
     --input: 0 0% 14%;
-    --ring: 0 0% 84%;
+    --ring: 338 93% 48%;
   }
 }
 
