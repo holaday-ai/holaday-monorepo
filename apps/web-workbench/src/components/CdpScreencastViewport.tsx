@@ -95,14 +95,22 @@ export function CdpScreencastViewport({
     onStatusChangeRef.current?.(status);
   }, [status]);
 
-  // ---- WS lifecycle with exponential backoff reconnect ----
-  // Without this, a single transient failure (server reaped the
-  // Brave instance, brief network blip, orchestrator restart) leaves
-  // the panel stuck on 'disconnected' forever — VNC's RFB has its
-  // own internal reconnect, but our raw WebSocket needs explicit
-  // retry logic. Backoff: 1s, 2s, 4s, 8s, 16s; cap at 5 attempts
-  // before giving up so the BrowserPanel's hibernation card path
-  // (which fires at vncAttemptFails >= 3) gets reached cleanly.
+  // ---- WS lifecycle: always-be-trying-to-connect ----
+  // Browser hibernation is a normal state — the per-user pool's idle
+  // GC reaps Brave after 5 min of inactivity, and the user can wake
+  // it any time by submitting a task. The screencast WS must be
+  // ready to attach the moment a fresh instance comes up, so we
+  // retry indefinitely instead of capping attempts.
+  //
+  // Backoff: 0.5s, 1s, 2s, 4s, capped at 5s. Beyond the cap the
+  // viewport polls /screencast-ws/ every 5 s — a few hundred bytes
+  // per attempt, negligible cost, but means "user wakes browser"
+  // → screencast attaches within ≤ 5 s without any explicit
+  // event-coupling between the BrowserPanel's wake button and
+  // this viewport.
+  //
+  // The viewport tears down only on unmount or `wsUrl` change
+  // (e.g. user logged out, switched accounts).
   React.useEffect(() => {
     if (!wsUrl) {
       setStatus('idle');
@@ -110,7 +118,6 @@ export function CdpScreencastViewport({
     }
     let disposed = false;
     let attempt = 0;
-    const MAX_ATTEMPTS = 5;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let activeWs: WebSocket | null = null;
     // One-time mount diagnostic so BOSS can confirm in DevTools
@@ -155,19 +162,23 @@ export function CdpScreencastViewport({
       };
       ws.onclose = (event) => {
         if (disposed) return;
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[holaday] CDP screencast WS closed (code=${event.code}, reason=${event.reason || '(none)'}, attempt=${attempt}/${MAX_ATTEMPTS})`,
-        );
-        setStatus('disconnected');
-        if (attempt >= MAX_ATTEMPTS) {
+        // Only log the first few closes verbatim — beyond that the
+        // viewport is in steady "polling for a wake" state and
+        // chatty per-close logs would drown the console. After 5
+        // we drop to one line per ~minute (every 12th attempt).
+        if (attempt <= 5 || attempt % 12 === 0) {
           // eslint-disable-next-line no-console
           console.warn(
-            '[holaday] CDP screencast: max reconnect attempts reached; surrendering until next mount',
+            `[holaday] CDP screencast WS closed (code=${event.code}, reason=${event.reason || '(none)'}, attempt=${attempt})`,
           );
-          return;
         }
-        const delay = Math.min(16_000, 1_000 * 2 ** (attempt - 1));
+        setStatus('disconnected');
+        // Backoff: doubles up to a 5 s ceiling, then stays at 5 s
+        // forever. Browser hibernation is the expected steady state;
+        // the viewport keeps trying so a wake (task submit, manual
+        // wake button) attaches within 5 s without any external
+        // trigger.
+        const delay = Math.min(5_000, 500 * 2 ** Math.min(attempt - 1, 4));
         retryTimer = setTimeout(() => connect(), delay);
       };
     }
