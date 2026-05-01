@@ -137,16 +137,27 @@ export class CdpStreamer {
         } catch {
           /* swallow — same socket-close window as above */
         }
+        // Cross-origin navigation in Chromium spawns a new renderer
+        // process (site isolation). The previous startScreencast
+        // call was bound to the old RenderFrameHost, so frames stop
+        // arriving — symptom: URL bar updates, canvas freezes on
+        // the prior page. Re-arming startScreencast on the new
+        // session is idempotent on the CDP side; this catches it
+        // at the earliest moment we know the new frame exists.
+        void this.armScreencast('frame-navigated', params.frame.url);
+      });
+
+      cdp.on('Page.loadEventFired', () => {
+        if (!this.streaming) return;
+        // Belt-and-suspenders: frameNavigated fires before the new
+        // renderer is fully ready in some cases. loadEventFired is
+        // after document load — re-arming here covers the window
+        // where the early arm raced the renderer swap.
+        void this.armScreencast('load-event-fired', null);
       });
 
       await cdp.send('Page.enable');
-      await cdp.send('Page.startScreencast', {
-        format: 'jpeg',
-        quality: this.opts.quality,
-        maxWidth: this.opts.maxWidth,
-        maxHeight: this.opts.maxHeight,
-        everyNthFrame: 1,
-      });
+      await this.armScreencast('initial-start', null);
       this.opts.logger.info(
         { quality: this.opts.quality, maxWidth: this.opts.maxWidth },
         'cdp-streamer: started',
@@ -155,6 +166,33 @@ export class CdpStreamer {
       this.streaming = false;
       this.opts.logger.warn({ err: errMsg(err) }, 'cdp-streamer: start failed');
       throw err;
+    }
+  }
+
+  /**
+   * (Re-)issue Page.startScreencast on the current CDP session.
+   * Called once at start() and again on top-level navigation /
+   * load events to defeat the Chromium renderer-swap unbind.
+   * Failures are logged but not propagated — a transient arm
+   * failure shouldn't kill the streamer; the next nav will retry.
+   */
+  private async armScreencast(reason: string, url: string | null): Promise<void> {
+    const cdp = this.cdpSession;
+    if (!cdp || !this.streaming) return;
+    try {
+      await cdp.send('Page.startScreencast', {
+        format: 'jpeg',
+        quality: this.opts.quality,
+        maxWidth: this.opts.maxWidth,
+        maxHeight: this.opts.maxHeight,
+        everyNthFrame: 1,
+      });
+      this.opts.logger.info({ reason, url }, 'cdp-streamer: armed screencast');
+    } catch (err) {
+      this.opts.logger.warn(
+        { reason, url, err: errMsg(err) },
+        'cdp-streamer: arm screencast failed',
+      );
     }
   }
 
