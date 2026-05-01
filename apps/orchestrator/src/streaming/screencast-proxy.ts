@@ -181,13 +181,18 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     });
 
     try {
-      userLog.info('screencast: ws upgraded ok, fetching page');
-      // PlaywrightExecutor.getPage returns the user's pinned tab.
-      // newCDPSession opens a session parallel to Playwright's
-      // internal one — see cdp-streamer.ts head comment.
-      const page = await args.instance!.executor.getPage();
-      userLog.info('screencast: page acquired, starting streamer');
-      streamer = new CdpStreamer({ page, ws: args.ws, logger: userLog });
+      userLog.info('screencast: ws upgraded, starting streamer');
+      // Pass a getter (not a fixed Page) so the streamer can
+      // re-resolve to the executor's CURRENT active page after a
+      // hard-restart. resetPageForTask closes our pinned page at
+      // every task start, so a fixed reference would die after the
+      // first task — see cdp-streamer.ts CdpStreamerOptions.getPage.
+      const executor = args.instance!.executor;
+      streamer = new CdpStreamer({
+        getPage: () => executor.getPage(),
+        ws: args.ws,
+        logger: userLog,
+      });
       await streamer.start();
       if (!streamer.getSession()) {
         userLog.warn('screencast: streamer started but session is null');

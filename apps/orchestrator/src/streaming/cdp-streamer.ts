@@ -43,7 +43,17 @@ import type { Logger } from 'pino';
 import type { WebSocket } from 'ws';
 
 export interface CdpStreamerOptions {
-  page: Page;
+  /**
+   * Resolves to the executor's CURRENT active page. Called once at
+   * start() and again on every hard-restart, so we always bind to
+   * the live page even after `PlaywrightExecutor.resetPageForTask`
+   * closes the page we were holding (it does that at the top of
+   * every task — see playwright-executor.ts ~line 918). Holding a
+   * stable page reference here would silently die after the first
+   * task swap; the new session would then throw "no object with
+   * guid page@..." on every retry.
+   */
+  getPage: () => Promise<Page>;
   /** Connected client socket; the streamer pipes frames to this. */
   ws: WebSocket;
   /** Per-instance logger (already child-tagged with userId). */
@@ -112,7 +122,8 @@ export class CdpStreamer {
     }
     this.streaming = true;
     try {
-      this.cdpSession = await this.opts.page.context().newCDPSession(this.opts.page);
+      const page = await this.opts.getPage();
+      this.cdpSession = await page.context().newCDPSession(page);
       this.wireListeners(this.cdpSession);
       await this.cdpSession.send('Page.enable');
       await this.armScreencast('initial-start', null);
@@ -291,10 +302,17 @@ export class CdpStreamer {
         /* same — best effort */
       }
     }
-    this.cdpSession = await this.opts.page.context().newCDPSession(this.opts.page);
+    // Re-resolve the live page. The page we held at start() may
+    // have been closed by `executor.resetPageForTask()` when a new
+    // task started — that's the most common cause of a watchdog
+    // stall. getPage() returns the executor's current activePage
+    // (a fresh ctx.newPage() in the reset case), which is the
+    // page the agent is now operating on.
+    const page = await this.opts.getPage();
+    this.cdpSession = await page.context().newCDPSession(page);
     this.wireListeners(this.cdpSession);
     await this.cdpSession.send('Page.enable');
-    await this.armScreencast('hard-restart', null);
+    await this.armScreencast('hard-restart', page.url());
   }
 
   /**
