@@ -222,7 +222,7 @@ function StatusIcon({ status }: { status: string }): JSX.Element {
   if (status === 'failed' || status === 'cancelled') {
     return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />;
   }
-  return <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-indigo-400" />;
+  return <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-pink-400" />;
 }
 
 /**

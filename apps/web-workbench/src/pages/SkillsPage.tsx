@@ -1,15 +1,37 @@
 import {
   BarChart3,
   BookOpen,
+  Calculator,
+  ClipboardList,
+  Compass,
+  DollarSign,
+  FileCheck,
+  FileText,
+  Globe,
+  Headphones,
   Heart,
+  Image,
+  Kanban,
+  Languages,
   Layers,
   type LucideIcon,
   Mail,
+  MessageCircle,
   MessageSquare,
+  Palette,
+  PenTool,
+  Presentation,
   Scale,
+  Share2,
+  Shield,
   ShoppingBag,
   Sparkles,
+  Target,
+  Truck,
   TrendingUp,
+  UserCheck,
+  UserPlus,
+  Users,
   Video,
 } from 'lucide-react';
 import * as React from 'react';
@@ -21,7 +43,21 @@ import type { UiSkill } from '@/types/task';
 
 type Category = UiSkill['category'];
 
-const CATEGORY_ORDER: readonly Category[] = ['运营', '商业分析', '产品', '法律', '其他'];
+// Phase 20b — full 9-category set + '其他' fallback. Anything not in
+// this list is silently dropped from the page; all categories used in
+// `agent/skills/skill-meta.ts` MUST appear here.
+const CATEGORY_ORDER: readonly Category[] = [
+  '运营',
+  '内容',
+  '商业分析',
+  '产品',
+  '法律',
+  '人力',
+  '行政',
+  '财务',
+  '翻译',
+  '其他',
+];
 
 /**
  * Static lookup of the lucide icons referenced by the backend's
@@ -40,6 +76,29 @@ const ICONS: Record<string, LucideIcon> = {
   Layers,
   Mail,
   BookOpen,
+  // Phase 20b — icons for the 25 new specialist roles
+  Users,
+  Globe,
+  Share2,
+  PenTool,
+  Shield,
+  Palette,
+  Image,
+  Compass,
+  MessageCircle,
+  DollarSign,
+  Truck,
+  Kanban,
+  FileCheck,
+  UserPlus,
+  UserCheck,
+  Target,
+  ClipboardList,
+  FileText,
+  Presentation,
+  Headphones,
+  Calculator,
+  Languages,
 };
 
 /**
@@ -176,7 +235,7 @@ function SkillCard({
       className={cn(
         'group relative flex flex-col items-start gap-2 rounded-xl border p-4 text-left transition-all',
         skill.enabled
-          ? 'border-indigo-400/60 bg-indigo-50/50 shadow-sm dark:border-indigo-500/40 dark:bg-indigo-500/10'
+          ? 'border-primary/60 bg-primary/5 shadow-sm dark:border-primary/40 dark:bg-primary/10'
           : 'border-border bg-card hover:border-foreground/20 hover:bg-foreground/[0.02]',
         pending && 'opacity-60',
       )}
@@ -185,7 +244,7 @@ function SkillCard({
         className={cn(
           'flex h-9 w-9 items-center justify-center rounded-lg transition-colors',
           skill.enabled
-            ? 'bg-indigo-500 text-white'
+            ? 'bg-primary text-primary-foreground'
             : 'bg-muted text-muted-foreground group-hover:bg-foreground/10',
         )}
       >
@@ -197,7 +256,7 @@ function SkillCard({
         className={cn(
           'absolute right-3 top-3 rounded-md px-2 py-0.5 text-[10px] font-medium',
           skill.enabled
-            ? 'bg-indigo-500 text-white'
+            ? 'bg-primary text-primary-foreground'
             : 'border border-border text-muted-foreground',
         )}
       >

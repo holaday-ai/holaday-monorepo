@@ -106,7 +106,7 @@ export function UserMenu({
           open && 'bg-foreground/5',
         )}
       >
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-400 to-pink-400 text-sm font-semibold text-white">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-pink-400 to-pink-600 text-sm font-semibold text-white">
           {initial}
         </div>
         {!compact && (

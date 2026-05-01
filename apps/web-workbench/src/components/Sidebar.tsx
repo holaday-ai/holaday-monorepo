@@ -360,8 +360,8 @@ export function Sidebar({
             />
 
             {projectFilter && (
-              <div className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-indigo-300/40 bg-indigo-50/40 px-2.5 py-1.5 text-[12px] dark:border-indigo-500/30 dark:bg-indigo-500/10">
-                <FolderOpen className="h-3.5 w-3.5 shrink-0 text-indigo-600 dark:text-indigo-300" />
+              <div className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-pink-300/40 bg-pink-50/40 px-2.5 py-1.5 text-[12px] dark:border-pink-500/30 dark:bg-pink-500/10">
+                <FolderOpen className="h-3.5 w-3.5 shrink-0 text-pink-600 dark:text-pink-300" />
                 <span className="min-w-0 flex-1 truncate text-foreground">
                   项目：{projectFilter.name}
                 </span>
@@ -1009,7 +1009,7 @@ function BrandMark(): JSX.Element {
   return (
     <span
       aria-hidden
-      className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-indigo-500 to-pink-500 text-[12px] font-bold text-white"
+      className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-pink-500 to-pink-700 text-[12px] font-bold text-white"
     >
       H
     </span>

@@ -98,7 +98,7 @@ export function UsagePage(): JSX.Element {
             sub={`失败 ${failed} · 进行中 ${running}`}
           />
           <StatCard
-            icon={<Clock className="h-4 w-4 text-indigo-500" />}
+            icon={<Clock className="h-4 w-4 text-pink-500" />}
             label="剩余额度"
             value={loading ? '—' : String(remaining)}
             sub={`${pct}% 已使用`}

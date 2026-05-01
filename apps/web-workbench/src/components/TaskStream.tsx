@@ -249,7 +249,7 @@ function AgentBlock({
 
   return (
     <div className="flex items-start gap-3">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-pink-500 text-[11px] font-semibold text-white">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-pink-500 to-pink-700 text-[11px] font-semibold text-white">
         H
       </div>
       <div className="min-w-0 flex-1 space-y-3">
@@ -610,7 +610,7 @@ function UserBubble({ intent }: { intent: string }): JSX.Element {
       <div className="max-w-[80%] rounded-2xl bg-muted px-4 py-2.5 text-sm leading-relaxed text-foreground">
         {intent}
       </div>
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-400 to-pink-400 text-xs font-semibold text-white">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-pink-400 to-pink-600 text-xs font-semibold text-white">
         Y
       </div>
     </div>

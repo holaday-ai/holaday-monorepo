@@ -99,7 +99,7 @@ export function ProfilePage(): JSX.Element {
         <Section>
           <div className="flex flex-col items-start gap-6 md:flex-row md:items-center">
             <div className="relative">
-              <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-indigo-400 to-pink-400 text-2xl font-semibold text-white">
+              <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-pink-400 to-pink-600 text-2xl font-semibold text-white">
                 {avatar ? (
                   <img src={avatar} alt="" className="h-full w-full object-cover" />
                 ) : (

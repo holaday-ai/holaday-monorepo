@@ -74,7 +74,17 @@ export interface UiSkill {
   name: string;
   /** lucide-react export name. Resolved client-side via a static lookup. */
   icon: string;
-  category: '运营' | '商业分析' | '法律' | '产品' | '其他';
+  category:
+    | '运营'
+    | '内容'
+    | '商业分析'
+    | '产品'
+    | '法律'
+    | '人力'
+    | '行政'
+    | '财务'
+    | '翻译'
+    | '其他';
   description: string;
   enabled: boolean;
 }
