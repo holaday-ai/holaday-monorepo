@@ -88,19 +88,19 @@ function buildScreencastUrl(poolUserId: string | null): string | null {
 }
 
 /**
- * Phase 19 — runtime feature flag. Read each render so a user can
- * flip the value in DevTools and reload to swap transports. Default
- * stays on VNC until BOSS confirms CDP works in prod, at which
- * point we flip the default + delete VNC in a follow-up commit.
+ * Phase 19f — CDP is now the default. VNC is kept as a manual
+ * fallback: set `localStorage.holaday.streamTransport='vnc'` and
+ * reload to opt back in. The VNC path will be deleted in a
+ * follow-up once CDP has soaked in prod.
  */
 function readStreamTransport(): 'vnc' | 'cdp' {
-  if (typeof window === 'undefined') return 'vnc';
+  if (typeof window === 'undefined') return 'cdp';
   try {
-    return window.localStorage.getItem('holaday.streamTransport') === 'cdp'
-      ? 'cdp'
-      : 'vnc';
+    return window.localStorage.getItem('holaday.streamTransport') === 'vnc'
+      ? 'vnc'
+      : 'cdp';
   } catch {
-    return 'vnc';
+    return 'cdp';
   }
 }
 
