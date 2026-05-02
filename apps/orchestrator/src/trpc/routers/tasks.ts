@@ -5,7 +5,7 @@ import {
   type PlanId,
 } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
-import { and, asc, desc, eq, inArray, lt } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { injectResolvedUrl, resolveIntentUrl } from '../../agent/url-resolver.js';
@@ -14,6 +14,8 @@ import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import type { PlannedStep } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
 import { TaskRepository } from '../../agent/task-repository.js';
+import { classifyExecutionMode } from '../../agent/intent-classifier.js';
+import { tryAcquire as rateLimitTryAcquire } from '../../quota/rate-limiter.js';
 import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
 import { visionLoopTaskQueue } from '../../agent/vision-loop/task-queue.js';
@@ -71,13 +73,25 @@ import { protectedProcedure, router } from '../trpc.js';
 
 const taskController = new TaskController();
 
-// Phase 20d's quota bypass was reverted in phase 20e — it removed the
-// natural concurrency cap (1/3/5 per plan) which let a single user
-// land 155 tasks at once and choke the executor pool. To re-enable
-// for testing without the flood risk, the proper place is a per-user
-// concurrency override (capped at e.g. 10) plus a global queue-depth
-// guard, neither of which exist yet — see the follow-up plan in the
-// 20e commit message.
+/**
+ * Phase 21a — controlled quota bypass for the test account, replacing
+ * the unbounded 20d bypass that caused the 155-task flood. Three guards
+ * together keep flooding impossible:
+ *   - BYPASS_CONCURRENCY: caps simultaneous tasks at 10 instead of
+ *     unlimited (20d was unlimited, 20e reverted to the plan's 1/3/5).
+ *   - BYPASS_RATE: token-bucket on submissions, 20/minute.
+ *   - GLOBAL_QUEUE_DEPTH_LIMIT: applies to ALL users, bypass or not,
+ *     so a runaway loop in code anywhere can't take the system down.
+ *
+ * Plan limits (daily/monthly task counter) are still skipped for
+ * bypass users so smoke testing isn't blocked by the 3/day cap.
+ */
+const QUOTA_BYPASS_USERS: ReadonlySet<string> = new Set([
+  'usr_EeYpvsvLtyDzN4VLQi7BT',
+]);
+const BYPASS_CONCURRENCY = 10;
+const BYPASS_RATE = { max: 20, windowMs: 60_000 };
+const GLOBAL_QUEUE_DEPTH_LIMIT = 50;
 
 // Module-scope Anthropic client for url-resolver. Cheap to construct
 // but no reason to pay per request — cache once at import time.
@@ -120,6 +134,16 @@ const createInput = z.object({
    * way — the plan-mode pause is a UX moment, not a billing dodge.
    */
   mode: z.enum(['auto', 'plan']).optional(),
+  /**
+   * Phase 21a — explicit skill/role id chosen for this task. When
+   * present, the looksLikeCodeIntent guard is skipped: the user has
+   * picked a domain expert, so "帮我写个网站翻译脚本" under 技术翻译
+   * is intended, not a stray app-building request. The resolved
+   * AgentRole isn't used here in the gate — the supercar layer
+   * picks roles via classifyRole on its own — but having the id on
+   * the wire lets us short-circuit the guard cleanly.
+   */
+  skillId: z.string().min(1).max(64).optional(),
 });
 
 /**
@@ -175,7 +199,18 @@ export const tasksRouter = router({
   create: protectedProcedure.input(createInput).mutation(async ({ ctx, input }) => {
     // O15 — code-task refusal lands BEFORE user lookup so even an
     // unauthenticated-token-in-fail-path doesn't get scaffolding.
-    if (looksLikeCodeIntent(input.intent)) {
+    //
+    // Phase 21a — whitelist this guard when the user has signaled
+    // they're operating in a specialist context: either explicit
+    // skillId on the task, or the role classifier (keyword-only,
+    // free) matched something. A user asking 技术翻译专家 to "帮我
+    // 写个网站本地化脚本" knows what they want; a guard that says
+    // "用 Cursor" insults them. The guard is meant to catch raw
+    // free-form attempts to build apps in HOLA DAY, not legitimate
+    // expert-mode scripting.
+    const intentImpliesRole = classifyRole(input.intent) !== 'none';
+    const inSpecialistContext = Boolean(input.skillId) || intentImpliesRole;
+    if (!inSpecialistContext && looksLikeCodeIntent(input.intent)) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message:
@@ -315,19 +350,85 @@ export const tasksRouter = router({
     const willConsumeOpus = isOpus && planId === 'pro';
 
     const quotaService = new QuotaService(ctx.db);
-    const concurrentCount = await quotaService.getActiveTaskCount(userRow.id);
-    if (concurrentCount >= getConcurrencyLimit(planId)) {
+    const isBypass = QUOTA_BYPASS_USERS.has(ctx.userId);
+
+    // Phase 21a P0 — global queue-depth guard. Applies to ALL users,
+    // bypass or not, so a runaway client (or a bug elsewhere) can't
+    // pile tasks faster than the executor pool drains. Counts across
+    // pending/executing/planning, the same set the boot sweep cleans
+    // up on restart. The query hits an index on `status`, so this is
+    // sub-ms even at high concurrency.
+    const [activeRow] = await ctx.db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(tasksTable)
+      .where(inArray(tasksTable.status, ['pending', 'executing', 'planning']));
+    const queueDepth = Number(activeRow?.count ?? 0);
+    if (queueDepth >= GLOBAL_QUEUE_DEPTH_LIMIT) {
+      ctx.logger.warn(
+        { userId: ctx.userId, queueDepth, limit: GLOBAL_QUEUE_DEPTH_LIMIT },
+        'tasks.create: rejected — global queue depth exceeded',
+      );
       throw new TRPCError({
         code: 'TOO_MANY_REQUESTS',
-        message: concurrencyExhaustedMessage(planId),
+        message: `系统繁忙（队列深度 ${queueDepth}/${GLOBAL_QUEUE_DEPTH_LIMIT}），请稍后再试。`,
       });
     }
+
+    // Phase 21a P0 — per-user concurrency. Bypass users get a higher
+    // ceiling (10) than the per-plan default (1/3/5) but it's NOT
+    // unlimited (the unbounded 20d bypass is what caused the 155-task
+    // flood; 20e reverted that, 21a re-enables with this cap).
+    const concurrencyLimit = isBypass ? BYPASS_CONCURRENCY : getConcurrencyLimit(planId);
+    const concurrentCount = await quotaService.getActiveTaskCount(userRow.id);
+    if (concurrentCount >= concurrencyLimit) {
+      throw new TRPCError({
+        code: 'TOO_MANY_REQUESTS',
+        message: isBypass
+          ? `bypass 并发上限 ${BYPASS_CONCURRENCY}（当前 ${concurrentCount}），请稍后再试。`
+          : concurrencyExhaustedMessage(planId),
+      });
+    }
+
+    // Phase 21a P0 — per-bypass-user submission rate limit. In-memory
+    // sliding window (see quota/rate-limiter.ts). Only fires for users
+    // in QUOTA_BYPASS_USERS today; non-bypass users are governed by
+    // their plan's monthly/daily counter (see tryConsume below) which
+    // is already a different shape of throttle.
+    if (isBypass) {
+      const rl = rateLimitTryAcquire(ctx.userId, BYPASS_RATE);
+      if (!rl.ok) {
+        ctx.logger.warn(
+          { userId: ctx.userId, count: rl.count, retryAfterMs: rl.retryAfterMs },
+          'tasks.create: bypass rate limit hit',
+        );
+        throw new TRPCError({
+          code: 'TOO_MANY_REQUESTS',
+          message: `bypass 速率上限 ${BYPASS_RATE.max}/分钟，约 ${Math.ceil(rl.retryAfterMs / 1000)} 秒后重试。`,
+        });
+      }
+    }
+
     // Follow-ups are free — they reuse the cost of the parent task. Skip
     // tryConsume entirely so a quota-exhausted user can still ask
     // "为什么失败" without paying again. opus_used flag stays false on
     // the DB row for the same reason (the follow-up doesn't count).
+    //
+    // Bypass users also skip tryConsume — they're not on a metered
+    // plan for testing purposes. Concurrency + rate-limit + global
+    // queue-depth (above) provide all the throttling we need.
     let opusActuallyConsumed = false;
-    if (!isFollowUp) {
+    if (isBypass) {
+      opusActuallyConsumed = willConsumeOpus;
+      ctx.logger.info(
+        {
+          userId: ctx.userId,
+          queueDepth,
+          concurrentCount,
+          taskIntent: input.intent.slice(0, 60),
+        },
+        'tasks.create: bypass admit (concurrency + rate-limit ok)',
+      );
+    } else if (!isFollowUp) {
       const consume = await quotaService.tryConsume(userRow.id, planId, willConsumeOpus);
       if (!consume.ok) {
         // Pro running out of Opus mid-task should downgrade to Sonnet
@@ -557,6 +658,23 @@ export const tasksRouter = router({
       const headlessExec =
         ctx.executionRouter?.getExecutor('headless') ?? ctx.playwrightExecutor ?? null;
 
+      // Phase 21a P0 — task router. Haiku classifier decides whether
+      // this task needs the browser at all. 'generate' mode (translate
+      // / write / analyze / summarize) skips pool.allocate so we don't
+      // spin up a Brave+Xvfb+VNC quartet for tasks that only need a
+      // text response. The supercar loop still gets the singleton
+      // headed/headless executor as a safety net (full no-browser
+      // path lands in 21b — see commit message). Default on any
+      // failure is 'browser', which preserves pre-21a behaviour.
+      const executionMode = await classifyExecutionMode({
+        intent: input.intent,
+        logger: ctx.logger.child({ taskId, userId: ctx.userId, stage: 'router' }),
+      });
+      ctx.logger.info(
+        { taskId, userId: ctx.userId, executionMode },
+        'tasks.create: execution mode classified',
+      );
+
       // Phase 8.2: when the caller is in MULTI_USER_USERS allow-list,
       // replace the shared headed singleton with their own pool slot.
       // The pool's executor is a freshly-connected PlaywrightExecutor
@@ -565,8 +683,15 @@ export const tasksRouter = router({
       // doesn't know the difference. If allocate throws (capacity
       // exceeded, spawn timeout) we surface a typed error so the UI
       // can show "browser-pool busy" rather than an opaque 500.
+      //
+      // 21a — also skip when executionMode='generate' (no per-user
+      // browser slot needed for pure-generation tasks).
       let perUserExec = null;
-      if (ctx.browserPool && shouldUseBrowserPool(ctx.userId)) {
+      if (
+        ctx.browserPool &&
+        shouldUseBrowserPool(ctx.userId) &&
+        executionMode === 'browser'
+      ) {
         try {
           const instance = await ctx.browserPool.allocate(ctx.userId);
           perUserExec = instance.executor;
