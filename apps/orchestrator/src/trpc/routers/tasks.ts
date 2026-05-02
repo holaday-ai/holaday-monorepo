@@ -89,7 +89,7 @@ const taskController = new TaskController();
 const QUOTA_BYPASS_USERS: ReadonlySet<string> = new Set([
   'usr_EeYpvsvLtyDzN4VLQi7BT',
 ]);
-const BYPASS_CONCURRENCY = 10;
+const BYPASS_CONCURRENCY = 50;
 const BYPASS_RATE = { max: 20, windowMs: 60_000 };
 const GLOBAL_QUEUE_DEPTH_LIMIT = 50;
 
