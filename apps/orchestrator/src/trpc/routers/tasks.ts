@@ -71,6 +71,23 @@ import { protectedProcedure, router } from '../trpc.js';
 
 const taskController = new TaskController();
 
+/**
+ * Phase 20d — quota bypass for BOSS's primary test account so end-to-end
+ * smoke testing isn't blocked by free-tier daily / basic-tier monthly
+ * limits. The set is checked in tasks.create BEFORE both the concurrency
+ * gate and the tryConsume call, so a bypassed user can create tasks
+ * unconditionally on whatever plan they're on. Single hardcoded id; if
+ * this ever needs to grow, move to a DB column on `users` (e.g.
+ * `quota_bypass boolean`) or to an env var.
+ *
+ * The `opusActuallyConsumed` flag still tracks the truthful "did we
+ * route to Opus" so analytics stay accurate, the quota-counter rows
+ * just don't get incremented.
+ */
+const QUOTA_BYPASS_USERS: ReadonlySet<string> = new Set([
+  'usr_EeYpvsvLtyDzN4VLQi7BT',
+]);
+
 // Module-scope Anthropic client for url-resolver. Cheap to construct
 // but no reason to pay per request — cache once at import time.
 const anthropicForResolver: Anthropic | null = appEnv.ANTHROPIC_API_KEY
@@ -307,8 +324,9 @@ export const tasksRouter = router({
     const willConsumeOpus = isOpus && planId === 'pro';
 
     const quotaService = new QuotaService(ctx.db);
+    const quotaBypass = QUOTA_BYPASS_USERS.has(ctx.userId);
     const concurrentCount = await quotaService.getActiveTaskCount(userRow.id);
-    if (concurrentCount >= getConcurrencyLimit(planId)) {
+    if (!quotaBypass && concurrentCount >= getConcurrencyLimit(planId)) {
       throw new TRPCError({
         code: 'TOO_MANY_REQUESTS',
         message: concurrencyExhaustedMessage(planId),
@@ -319,7 +337,16 @@ export const tasksRouter = router({
     // "为什么失败" without paying again. opus_used flag stays false on
     // the DB row for the same reason (the follow-up doesn't count).
     let opusActuallyConsumed = false;
-    if (!isFollowUp) {
+    if (quotaBypass) {
+      // Bypass user — skip the consume call entirely so quota counters
+      // don't tick. Track the truthful Opus routing decision so
+      // analytics still see "this task ran on Opus" if applicable.
+      opusActuallyConsumed = willConsumeOpus;
+      ctx.logger.info(
+        { userId: ctx.userId, taskIntent: input.intent.slice(0, 60) },
+        'tasks.create: quota bypass (whitelist)',
+      );
+    } else if (!isFollowUp) {
       const consume = await quotaService.tryConsume(userRow.id, planId, willConsumeOpus);
       if (!consume.ok) {
         // Pro running out of Opus mid-task should downgrade to Sonnet
