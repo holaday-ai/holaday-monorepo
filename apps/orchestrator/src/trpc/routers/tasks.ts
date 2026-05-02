@@ -15,7 +15,13 @@ import type { PlannedStep } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { classifyExecutionMode } from '../../agent/intent-classifier.js';
+import { runGenerateTask } from '../../agent/generate-runner.js';
 import { tryAcquire as rateLimitTryAcquire } from '../../quota/rate-limiter.js';
+import {
+  trackStart as trackerStart,
+  trackEnd as trackerEnd,
+  getActiveByMode as trackerGetActiveByMode,
+} from '../../quota/concurrency-tracker.js';
 import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
 import { visionLoopTaskQueue } from '../../agent/vision-loop/task-queue.js';
@@ -74,14 +80,13 @@ import { protectedProcedure, router } from '../trpc.js';
 const taskController = new TaskController();
 
 /**
- * Phase 21a — controlled quota bypass for the test account, replacing
- * the unbounded 20d bypass that caused the 155-task flood. Three guards
- * together keep flooding impossible:
- *   - BYPASS_CONCURRENCY: caps simultaneous tasks at 10 instead of
- *     unlimited (20d was unlimited, 20e reverted to the plan's 1/3/5).
- *   - BYPASS_RATE: token-bucket on submissions, 20/minute.
- *   - GLOBAL_QUEUE_DEPTH_LIMIT: applies to ALL users, bypass or not,
- *     so a runaway loop in code anywhere can't take the system down.
+ * Phase 21b — controlled quota bypass for the test account.
+ *
+ * 21a's BYPASS_CONCURRENCY (single number) is split per-mode in 21b
+ * so a flood of cheap generate tasks can't starve the limited browser
+ * pool, and vice-versa. Per-mode counts come from the in-memory
+ * concurrency tracker (quota/concurrency-tracker.ts), populated at
+ * task admit and decremented when the runner resolves.
  *
  * Plan limits (daily/monthly task counter) are still skipped for
  * bypass users so smoke testing isn't blocked by the 3/day cap.
@@ -89,9 +94,10 @@ const taskController = new TaskController();
 const QUOTA_BYPASS_USERS: ReadonlySet<string> = new Set([
   'usr_EeYpvsvLtyDzN4VLQi7BT',
 ]);
-const BYPASS_CONCURRENCY = 50;
-const BYPASS_RATE = { max: 20, windowMs: 60_000 };
-const GLOBAL_QUEUE_DEPTH_LIMIT = 50;
+const BYPASS_BROWSER_CONCURRENCY = 10;
+const BYPASS_GENERATE_CONCURRENCY = 20;
+const BYPASS_RATE = { max: 30, windowMs: 60_000 };
+const GLOBAL_QUEUE_DEPTH_LIMIT = 100;
 
 // Module-scope Anthropic client for url-resolver. Cheap to construct
 // but no reason to pay per request — cache once at import time.
@@ -352,6 +358,17 @@ export const tasksRouter = router({
     const quotaService = new QuotaService(ctx.db);
     const isBypass = QUOTA_BYPASS_USERS.has(ctx.userId);
 
+    // Phase 21b — classify execution mode FIRST so the concurrency
+    // gate can apply per-mode caps (bypass users have separate
+    // browser/generate budgets). Adds ~500ms latency on cache miss;
+    // skill-hint + keyword fast paths inside the classifier short-
+    // circuit most cases for free.
+    const executionMode = await classifyExecutionMode({
+      intent: input.intent,
+      skillId: input.skillId,
+      logger: ctx.logger.child({ userId: ctx.userId, stage: 'router' }),
+    });
+
     // Phase 21a P0 — global queue-depth guard. Applies to ALL users,
     // bypass or not, so a runaway client (or a bug elsewhere) can't
     // pile tasks faster than the executor pool drains. Counts across
@@ -374,17 +391,28 @@ export const tasksRouter = router({
       });
     }
 
-    // Phase 21a P0 — per-user concurrency. Bypass users get a higher
-    // ceiling (10) than the per-plan default (1/3/5) but it's NOT
-    // unlimited (the unbounded 20d bypass is what caused the 155-task
-    // flood; 20e reverted that, 21a re-enables with this cap).
-    const concurrencyLimit = isBypass ? BYPASS_CONCURRENCY : getConcurrencyLimit(planId);
-    const concurrentCount = await quotaService.getActiveTaskCount(userRow.id);
+    // Phase 21b — per-user concurrency. Bypass users get split
+    // browser/generate budgets (10 + 20 = 30 max active); the count
+    // comes from the in-memory tracker so we know which mode each
+    // active task is in. Non-bypass users keep the plan-derived total
+    // count via QuotaService.getActiveTaskCount (1/3/5 across all modes).
+    let concurrencyLimit: number;
+    let concurrentCount: number;
+    if (isBypass) {
+      concurrencyLimit =
+        executionMode === 'generate'
+          ? BYPASS_GENERATE_CONCURRENCY
+          : BYPASS_BROWSER_CONCURRENCY;
+      concurrentCount = trackerGetActiveByMode(ctx.userId, executionMode);
+    } else {
+      concurrencyLimit = getConcurrencyLimit(planId);
+      concurrentCount = await quotaService.getActiveTaskCount(userRow.id);
+    }
     if (concurrentCount >= concurrencyLimit) {
       throw new TRPCError({
         code: 'TOO_MANY_REQUESTS',
         message: isBypass
-          ? `bypass 并发上限 ${BYPASS_CONCURRENCY}（当前 ${concurrentCount}），请稍后再试。`
+          ? `bypass ${executionMode} 并发上限 ${concurrencyLimit}（当前 ${concurrentCount}），请稍后再试。`
           : concurrencyExhaustedMessage(planId),
       });
     }
@@ -504,6 +532,115 @@ export const tasksRouter = router({
         ctx.browserPool.canAllocate(ctx.userId),
     );
 
+    // ===== Phase 21b — generate-mode fork =====
+    // Pure-generation tasks (write a PRD, translate this, summarize that)
+    // skip the supercar agent loop entirely. One Anthropic call with
+    // web_search available, persists outcome, broadcasts terminal frame,
+    // returns immediately. No pool slot, no Playwright, no plan-step
+    // state machine. Falls through to the existing supercar branch
+    // below for executionMode === 'browser'.
+    if (executionMode === 'generate' && appEnv.ANTHROPIC_API_KEY && anthropicForResolver) {
+      const taskId = newExternalId('task');
+      const repo = new TaskRepository(ctx.db);
+
+      await repo.insertTask(
+        {
+          taskId,
+          status: 'executing',
+          plan: [],
+          cursor: 0,
+          pendingConfirm: null,
+        },
+        {
+          userId: userRow.id,
+          intent: input.intent,
+          roleId: gatedRole === 'none' ? null : gatedRole,
+          opusUsed: opusActuallyConsumed,
+        },
+      );
+
+      ctx.logger.info(
+        { taskId, userId: ctx.userId, executorLane: 'generate', executionMode },
+        'task: executor lane selected',
+      );
+      trackerStart(ctx.userId, taskId, 'generate');
+
+      // Fire-and-forget — generate doesn't share Brave instances so
+      // there's no per-user FIFO queue to enqueue into. Concurrent
+      // generate tasks parallelize on the Anthropic API.
+      const anthropicClient = anthropicForResolver;
+      void (async () => {
+        let outcome;
+        try {
+          outcome = await runGenerateTask({
+            taskId,
+            userId: ctx.userId,
+            intent: input.intent,
+            skillId:
+              gatedRole !== 'none'
+                ? gatedRole
+                : input.skillId ?? undefined,
+            client: anthropicClient,
+            logger: ctx.logger,
+            ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
+          });
+        } catch (err) {
+          ctx.logger.error({ err, taskId }, 'generate: runner threw');
+          outcome = {
+            status: 'failed' as const,
+            summary: '',
+            reason: err instanceof Error ? err.message : 'generate: unknown error',
+            inputTokens: 0,
+            outputTokens: 0,
+            durationMs: 0,
+          };
+        }
+
+        try {
+          if (outcome.status === 'completed') {
+            await repo.persistVisionOutcome(taskId, {
+              status: 'completed',
+              summary: outcome.summary,
+              tickCount: 1,
+            });
+          } else {
+            await repo.persistVisionOutcome(taskId, {
+              status: 'failed',
+              reason: outcome.reason ?? 'generate: api failed',
+              tickCount: 1,
+            });
+          }
+        } catch (err) {
+          ctx.logger.error({ err, taskId }, 'generate: persist failed');
+        }
+
+        try {
+          if (outcome.status === 'completed') {
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'completed',
+              ...(outcome.summary ? { summary: outcome.summary } : {}),
+            });
+          } else {
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'failed',
+              ...(outcome.reason ? { reason: outcome.reason } : {}),
+            });
+          }
+        } catch (err) {
+          ctx.logger.warn({ err, taskId }, 'generate: broadcast terminal failed');
+        }
+
+        trackerEnd(ctx.userId, taskId);
+      })();
+
+      return { taskId, status: 'executing' as const, steps: [] };
+    }
+    // ===== end generate-mode fork =====
+
     // Diagnostic: log the supercar-gate inputs on every tasks.create
     // so BOSS can tell from pm2 logs exactly why a task fell into the
     // legacy branch. Happens BEFORE the gate so the log always lands.
@@ -589,6 +726,10 @@ export const tasksRouter = router({
           opusUsed: opusActuallyConsumed,
         },
       );
+      // Phase 21b — record this task in the in-memory concurrency
+      // tracker so per-mode caps work for bypass users. Untracked in
+      // the runFn .then() after persistSupercarOutcome below.
+      trackerStart(ctx.userId, taskId, 'browser');
       // Phase 13 Dim 1 — persist plan onto the task row and broadcast
       // it to the SPA so the user sees upcoming steps before any
       // tool fires. Best-effort: write failures log + continue.
@@ -658,21 +799,15 @@ export const tasksRouter = router({
       const headlessExec =
         ctx.executionRouter?.getExecutor('headless') ?? ctx.playwrightExecutor ?? null;
 
-      // Phase 21a P0 — task router. Haiku classifier decides whether
-      // this task needs the browser at all. 'generate' mode (translate
-      // / write / analyze / summarize) skips pool.allocate so we don't
-      // spin up a Brave+Xvfb+VNC quartet for tasks that only need a
-      // text response. The supercar loop still gets the singleton
-      // headed/headless executor as a safety net (full no-browser
-      // path lands in 21b — see commit message). Default on any
-      // failure is 'browser', which preserves pre-21a behaviour.
-      const executionMode = await classifyExecutionMode({
-        intent: input.intent,
-        logger: ctx.logger.child({ taskId, userId: ctx.userId, stage: 'router' }),
-      });
+      // Phase 21b — executionMode was decided up at the admission
+      // gate (so per-mode concurrency could apply). It's reused here
+      // to gate pool.allocate; for 'generate' we don't need a per-
+      // user pool slot. Note that this branch only fires for the
+      // BROWSER execution mode under 21b — pure-generate tasks fork
+      // off into runGenerateTask before reaching the supercar gate.
       ctx.logger.info(
         { taskId, userId: ctx.userId, executionMode },
-        'tasks.create: execution mode classified',
+        'tasks.create: supercar branch — execution mode',
       );
 
       // Phase 8.2: when the caller is in MULTI_USER_USERS allow-list,
@@ -1158,6 +1293,13 @@ export const tasksRouter = router({
           })
           .catch((err) => {
             ctx.logger.error({ err, taskId }, 'supercar: loop threw');
+          })
+          .finally(() => {
+            // Phase 21b — release the per-mode concurrency slot. Lives
+            // in finally() so a thrown loop also frees the slot; the
+            // task DB row is independently marked failed by the catch
+            // block above (or by the existing boot sweep on restart).
+            trackerEnd(userId, taskId);
           });
 
       void visionLoopTaskQueue.enqueue(userId, runFn, (position) => {

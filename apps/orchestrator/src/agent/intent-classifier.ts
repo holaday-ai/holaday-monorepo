@@ -80,6 +80,14 @@ function cacheSet(key: string, mode: ExecutionMode): void {
 
 export interface ClassifyOpts {
   intent: string;
+  /**
+   * Optional explicit skill id chosen by the user. When the skill id
+   * is in our hardcoded "obviously generate-leaning" or "obviously
+   * browser-leaning" set, we short-circuit without the Haiku call.
+   * Ambiguous skills (financial_analyst, product_manager, etc.) fall
+   * through to the keyword pass and Haiku.
+   */
+  skillId?: string;
   /** Per-task logger (already child-tagged). */
   logger: Logger;
   /** Override Anthropic client. Tests + null-key environments. */
@@ -94,10 +102,93 @@ const DEFAULT_MODEL = 'claude-haiku-4-5';
 const DEFAULT_TIMEOUT_MS = 4_000;
 
 /**
- * Classify a task intent. Defaults to 'browser' on any failure
- * (network error, parse error, timeout) — the existing browser
- * lane is the safe fallback because every browser task can also be
- * answered by the model alone, but the reverse isn't true.
+ * Phase 21b — keyword fast paths. Both lists are checked first; if
+ * the intent contains a marker from exactly one list, we return that
+ * mode immediately without calling Haiku. Mixed (markers from both)
+ * or no-match falls through to Haiku.
+ *
+ * Lists are intentionally short. False positives are worse than
+ * misses — if an intent is ambiguous we want the LLM's judgment.
+ */
+const BROWSER_KEYWORDS: readonly string[] = [
+  // Verbs — explicit browser actions
+  '打开', '访问', '登录', '下载', '比价', '抓取', '截图', '填表', '操作页面',
+  'open ', 'visit ', 'log in', 'log into', 'sign in', 'download',
+  // Sites — Chinese-market platforms (case-insensitive substring)
+  '小红书', '淘宝', '天猫', '京东', '拼多多', '抖音', 'bilibili', 'b站',
+  '携程', '飞猪', '美团', '大众点评', '高德', '百度地图',
+  '微博', '知乎', '豆瓣', '虎扑',
+  // Sites — international
+  'github', 'linkedin', 'amazon', 'shopify', 'twitter', 'reddit',
+  'youtube', 'instagram', 'tiktok',
+  // Phrases that imply the agent must SEE current page state
+  '搜索 google', '在 google', 'on google',
+];
+
+const GENERATE_KEYWORDS: readonly string[] = [
+  // Verbs — pure generation
+  '写一份', '写一段', '写一篇', '写个方案', '写文案', '设计方案',
+  '翻译', '总结', '提炼', '改写', '润色', '校对',
+  '制定计划', '出方案', '出报告', '输出简报', '撰写', '起草',
+  '审查合同', '审查条款', '设计 sop', '设计sop', '建立模型', '建模',
+  '做预测', '做分析', '估算', '推算', '复盘',
+  '起一个名字', '起几个名字', '起名',
+  'translate', 'summarize', 'summarise', 'draft a', 'write a ',
+  'write me', 'review the contract', 'analyze ',
+];
+
+/**
+ * Skill-id → mode hints. Only listed when the skill is unambiguous.
+ * Skills that could go either way (data-analyst, financial_analyst,
+ * trend-researcher, etc.) are absent here and fall through to the
+ * keyword + Haiku pass.
+ */
+const SKILL_HINTS: ReadonlyMap<string, ExecutionMode> = new Map([
+  // Generate-leaning (text/analysis/translation work)
+  ['content-creator', 'generate'],
+  ['brand-guardian', 'generate'],
+  ['visual-storyteller', 'generate'],
+  ['image-prompt-engineer', 'generate'],
+  ['contract-reviewer', 'generate'],
+  ['policy-writer', 'generate'],
+  ['exec-summarizer', 'generate'],
+  ['exec-briefing', 'generate'],
+  ['customer-service', 'generate'],
+  ['finance-tracker', 'generate'],
+  ['tech-translator', 'generate'],
+  ['email_writer', 'generate'],
+  // Browser-leaning (need to interact with platforms)
+  ['xiaohongshu', 'browser'],
+  ['douyin', 'browser'],
+  ['wechat_gongzhong', 'browser'],
+  ['ecommerce_cn', 'browser'],
+  ['cross-border-ecom', 'browser'],
+  ['livestream-coach', 'browser'],
+  ['social-media-strategist', 'browser'],
+]);
+
+function keywordPass(intent: string): ExecutionMode | null {
+  const lower = intent.toLowerCase();
+  const browserHit = BROWSER_KEYWORDS.some((kw) => lower.includes(kw));
+  const generateHit = GENERATE_KEYWORDS.some((kw) => lower.includes(kw));
+  if (browserHit && !generateHit) return 'browser';
+  if (generateHit && !browserHit) return 'generate';
+  return null;
+}
+
+/**
+ * Classify a task intent. Returns 'browser' or 'generate'. Defaults
+ * to 'browser' on any failure (network error, parse error, timeout)
+ * — the browser lane is the safe fallback because every browser
+ * task can also be answered by the model alone, but the reverse
+ * isn't true.
+ *
+ * Decision order:
+ *   1. Empty intent → 'browser' (defensive)
+ *   2. LRU cache → previous decision for this intent
+ *   3. Skill hint → unambiguous skill ids return their mapped mode
+ *   4. Keyword fast-path → exclusive marker hit returns its mode
+ *   5. Haiku call → final tiebreaker
  */
 export async function classifyExecutionMode(opts: ClassifyOpts): Promise<ExecutionMode> {
   const intent = opts.intent.trim();
@@ -108,6 +199,30 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
   if (cached) {
     opts.logger.debug({ mode: cached, cache: 'hit' }, 'intent-classifier: cache hit');
     return cached;
+  }
+
+  // Skill-hint short-circuit
+  if (opts.skillId) {
+    const hinted = SKILL_HINTS.get(opts.skillId);
+    if (hinted) {
+      cacheSet(key, hinted);
+      opts.logger.info(
+        { mode: hinted, source: 'skill-hint', skillId: opts.skillId },
+        'intent-classifier: decided',
+      );
+      return hinted;
+    }
+  }
+
+  // Keyword fast-path
+  const kw = keywordPass(intent);
+  if (kw) {
+    cacheSet(key, kw);
+    opts.logger.info(
+      { mode: kw, source: 'keyword' },
+      'intent-classifier: decided',
+    );
+    return kw;
   }
 
   const client = opts.client ?? new Anthropic();
