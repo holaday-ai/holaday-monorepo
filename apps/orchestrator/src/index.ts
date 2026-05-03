@@ -359,10 +359,12 @@ async function main() {
   // for a pm2 restart. This sweep runs every 60s and marks any task
   // that's been at 'executing' with no updated_at change for more than
   // ZOMBIE_REAP_THRESHOLD_MIN as failed. The threshold is intentionally
-  // generous (15 min) — any legitimately long-running task ticks the
-  // updated_at via persist hooks within that window.
+  // generous (Phase 24: 20 min, was 15 min) — per-task pool means one
+  // task can legitimately hold its instance for the full 20-min window
+  // (long research, multi-page extraction). Any task touching the DB
+  // via persist hooks within that window keeps itself out of the reap.
   const ZOMBIE_REAP_INTERVAL_MS = 60_000;
-  const ZOMBIE_REAP_THRESHOLD_MIN = 15;
+  const ZOMBIE_REAP_THRESHOLD_MIN = 20;
   const { sql: sqlForReaper } = await import('drizzle-orm');
   const zombieReaperTimer = setInterval(() => {
     void (async () => {

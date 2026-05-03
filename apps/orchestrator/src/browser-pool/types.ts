@@ -31,6 +31,14 @@ export interface BrowserSlot {
 }
 
 export interface BrowserInstance extends BrowserSlot {
+  /**
+   * Phase 24 — instances are now keyed by taskId (one task = one
+   * Brave). userId is retained as the OWNER reference: cookie-sync
+   * needs it to drain pending_cookies on instance ready, and the
+   * screencast / VNC proxies use peekActiveForUser(userId) to find
+   * which task's Brave to attach to (panel-side stays user-keyed).
+   */
+  taskId: string;
   userId: string;
   userDataDir: string;
   executor: PlaywrightExecutor;
@@ -80,7 +88,14 @@ export interface PoolStats {
   active: number;
   idle: number;
   capacity: number;
+  /**
+   * Phase 24 — historically named `byUser` for back-compat with
+   * /trpc/health consumers. Each entry now also carries `taskId`
+   * since the pool keys per-task; multiple entries can share a
+   * userId when one user has several concurrent tasks.
+   */
   byUser: Array<{
+    taskId: string;
     userId: string;
     cdpPort: number;
     status: InstanceStatus;

@@ -102,7 +102,11 @@ export function createVncProxy(opts: VncProxyOptions): VncProxy {
         return reject(socket, 403, 'user not on canary allow-list');
       }
 
-      const instance = opts.pool.peek(callerUserId);
+      // Phase 24 — find the user's most recently active task
+      // instance. Per-task pool keys by taskId; peekActiveForUser
+      // surfaces whichever task this user is currently watching
+      // (most-recently-touched).
+      const instance = opts.pool.peekActiveForUser(callerUserId);
       if (!instance || instance.status !== 'ready') {
         log.info(
           { callerUserId, status: instance?.status ?? 'absent' },
@@ -118,8 +122,8 @@ export function createVncProxy(opts: VncProxyOptions): VncProxy {
       wss.handleUpgrade(req, socket, head, (client) => {
         const upstreamUrl = `ws://127.0.0.1:${instance.wsPort}/`;
         const upstream = new WebSocket(upstreamUrl, ['binary']);
-        pipe(client, upstream, callerUserId, log, opts.pool);
-        opts.pool.touch(callerUserId);
+        pipe(client, upstream, instance.taskId, log, opts.pool);
+        opts.pool.touch(instance.taskId);
       });
     }, (err: unknown) => {
       log.warn({ err: (err as Error).message }, 'jwt verify threw');
@@ -198,7 +202,7 @@ const TOUCH_THROTTLE_MS = 1_000;
 function pipe(
   client: WebSocket,
   upstream: WebSocket,
-  userId: string,
+  taskId: string,
   log: Logger,
   pool: BrowserPool,
 ): void {
@@ -212,7 +216,7 @@ function pipe(
     const now = Date.now();
     if (now - lastTouchAt < TOUCH_THROTTLE_MS) return;
     lastTouchAt = now;
-    pool.touch(userId);
+    pool.touch(taskId);
   }
 
   upstream.on('open', () => {
@@ -224,12 +228,12 @@ function pipe(
   });
 
   upstream.on('error', (err) => {
-    log.warn({ userId, err: err.message }, 'upstream ws error');
+    log.warn({ taskId, err: err.message }, 'upstream ws error');
     client.close(1011, 'upstream error');
   });
 
   upstream.on('close', (code, reason) => {
-    log.debug({ userId, code, reasonLen: reason?.length ?? 0 }, 'upstream closed');
+    log.debug({ taskId, code, reasonLen: reason?.length ?? 0 }, 'upstream closed');
     if (client.readyState === client.OPEN) client.close(1011, 'upstream closed');
   });
 
@@ -251,12 +255,12 @@ function pipe(
   });
 
   client.on('error', (err) => {
-    log.warn({ userId, err: err.message }, 'client ws error');
+    log.warn({ taskId, err: err.message }, 'client ws error');
     if (upstream.readyState === upstream.OPEN) upstream.close(1011, 'client error');
   });
 
   client.on('close', (code, reason) => {
-    log.debug({ userId, code, reasonLen: reason?.length ?? 0 }, 'client closed');
+    log.debug({ taskId, code, reasonLen: reason?.length ?? 0 }, 'client closed');
     if (upstream.readyState === upstream.OPEN) upstream.close(1000, 'client gone');
   });
 }

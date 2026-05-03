@@ -12,7 +12,9 @@
  *   - Creating the task row (status='executing') BEFORE invoking us.
  *   - Persisting the outcome (persistVisionOutcome) AFTER we return.
  *   - Broadcasting the terminal frame to the user's WS connection.
- *   - Calling concurrency-tracker.trackEnd in a finally block.
+ *
+ * (Phase 24 dropped the in-memory concurrency tracker; per-user
+ * concurrency is gated upstream via DB count of in-flight tasks.)
  *
  * We intentionally do NOT touch any of the above ourselves — the
  * caller already has the repo + WS broadcaster wired up, and keeping

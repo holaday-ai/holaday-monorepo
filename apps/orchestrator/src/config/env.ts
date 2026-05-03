@@ -135,11 +135,14 @@ const schema = z.object({
    */
   MULTI_USER_USERS: z.string().default(''),
   /**
-   * Hard cap on concurrent browser quartets. Each one uses ~400 MB
-   * RAM. Default 20 sized for a single 8 GB VPS (≈ 8 GB / 400 MB =
-   * 20 instances). Multi-VPS scaling lifts this via env override.
+   * Hard cap on concurrent browser quartets. Each one uses ~400-600 MB
+   * RAM. Phase 24 default dropped from 20 to 10 because per-task
+   * isolation means each task spawns its own quartet (was: shared
+   * per-user). 10 fits the current 8 GB Vultr VPS comfortably with
+   * ~2-3 GB headroom for orchestrator + system; multi-VPS scaling
+   * lifts this via env override.
    */
-  MAX_BROWSER_INSTANCES: z.coerce.number().int().positive().max(100).default(20),
+  MAX_BROWSER_INSTANCES: z.coerce.number().int().positive().max(100).default(10),
   /** Directory that houses per-user browser state (cookies, sessions, cache). */
   BROWSER_POOL_DIR: z.string().default('/var/lib/holaday-browsers'),
   /**

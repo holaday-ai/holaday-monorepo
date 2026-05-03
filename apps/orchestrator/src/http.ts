@@ -555,8 +555,13 @@ export function createHttpApp(deps: HttpAppDeps) {
       await upsertPendingCookies(db, user.id, cookies);
 
       // Try the immediate inject when the user has a live executor.
+      // Phase 24 — peekActiveForUser finds whichever active task
+      // instance the user currently has (if any). Cookies get
+      // injected into that task's context immediately; if no task
+      // is active, deferred=true means the next task spawn will
+      // pick them up via onInstanceReady.
       let deferred = true;
-      const live = deps.browserPool?.peek(userExternalId);
+      const live = deps.browserPool?.peekActiveForUser(userExternalId);
       if (live && live.status === 'ready') {
         try {
           const page = await live.executor.getPage();

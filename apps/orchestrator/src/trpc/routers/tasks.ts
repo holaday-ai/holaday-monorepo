@@ -17,11 +17,6 @@ import { TaskRepository } from '../../agent/task-repository.js';
 import { classifyExecutionMode } from '../../agent/intent-classifier.js';
 import { runGenerateTask } from '../../agent/generate-runner.js';
 import { tryAcquire as rateLimitTryAcquire } from '../../quota/rate-limiter.js';
-import {
-  trackStart as trackerStart,
-  trackEnd as trackerEnd,
-  getActiveByMode as trackerGetActiveByMode,
-} from '../../quota/concurrency-tracker.js';
 import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
 import { visionLoopTaskQueue } from '../../agent/vision-loop/task-queue.js';
@@ -80,13 +75,15 @@ import { protectedProcedure, router } from '../trpc.js';
 const taskController = new TaskController();
 
 /**
- * Phase 21b — controlled quota bypass for the test account.
+ * Phase 24 — controlled quota bypass for the test account.
  *
- * 21a's BYPASS_CONCURRENCY (single number) is split per-mode in 21b
- * so a flood of cheap generate tasks can't starve the limited browser
- * pool, and vice-versa. Per-mode counts come from the in-memory
- * concurrency tracker (quota/concurrency-tracker.ts), populated at
- * task admit and decremented when the runner resolves.
+ * The per-mode (browser / generate) split that 21b had was needed
+ * because the per-user shared Brave was a single contended resource.
+ * Phase 24's per-task pool means there's no shared resource to
+ * starve — every task gets its own Brave (capped by pool capacity)
+ * and generate tasks don't touch the pool at all. So bypass becomes
+ * a single number again, sized to match pool capacity (a bypass
+ * user can saturate the pool entirely, fine for testing).
  *
  * Plan limits (daily/monthly task counter) are still skipped for
  * bypass users so smoke testing isn't blocked by the 3/day cap.
@@ -94,8 +91,7 @@ const taskController = new TaskController();
 const QUOTA_BYPASS_USERS: ReadonlySet<string> = new Set([
   'usr_EeYpvsvLtyDzN4VLQi7BT',
 ]);
-const BYPASS_BROWSER_CONCURRENCY = 10;
-const BYPASS_GENERATE_CONCURRENCY = 20;
+const BYPASS_CONCURRENCY = 10;
 const BYPASS_RATE = { max: 30, windowMs: 60_000 };
 const GLOBAL_QUEUE_DEPTH_LIMIT = 100;
 
@@ -391,28 +387,21 @@ export const tasksRouter = router({
       });
     }
 
-    // Phase 21b — per-user concurrency. Bypass users get split
-    // browser/generate budgets (10 + 20 = 30 max active); the count
-    // comes from the in-memory tracker so we know which mode each
-    // active task is in. Non-bypass users keep the plan-derived total
-    // count via QuotaService.getActiveTaskCount (1/3/5 across all modes).
-    let concurrencyLimit: number;
-    let concurrentCount: number;
-    if (isBypass) {
-      concurrencyLimit =
-        executionMode === 'generate'
-          ? BYPASS_GENERATE_CONCURRENCY
-          : BYPASS_BROWSER_CONCURRENCY;
-      concurrentCount = trackerGetActiveByMode(ctx.userId, executionMode);
-    } else {
-      concurrencyLimit = getConcurrencyLimit(planId);
-      concurrentCount = await quotaService.getActiveTaskCount(userRow.id);
-    }
+    // Phase 24 — per-user concurrency. With per-task browsers (one
+    // task = one Brave) the in-memory mode tracker is no longer
+    // needed — the DB total count of active tasks is the source of
+    // truth. Bypass users still get a higher ceiling (matches pool
+    // capacity so a single bypass user can saturate the pool, fine
+    // for testing). Non-bypass users get their plan limit (1/3/5).
+    const concurrencyLimit = isBypass
+      ? BYPASS_CONCURRENCY
+      : getConcurrencyLimit(planId);
+    const concurrentCount = await quotaService.getActiveTaskCount(userRow.id);
     if (concurrentCount >= concurrencyLimit) {
       throw new TRPCError({
         code: 'TOO_MANY_REQUESTS',
         message: isBypass
-          ? `bypass ${executionMode} 并发上限 ${concurrencyLimit}（当前 ${concurrentCount}），请稍后再试。`
+          ? `bypass 并发上限 ${concurrencyLimit}（当前 ${concurrentCount}），请稍后再试。`
           : concurrencyExhaustedMessage(planId),
       });
     }
@@ -529,7 +518,7 @@ export const tasksRouter = router({
     const browserPoolEligible = Boolean(
       ctx.browserPool &&
         shouldUseBrowserPool(ctx.userId) &&
-        ctx.browserPool.canAllocate(ctx.userId),
+        ctx.browserPool.canAllocate(),
     );
 
     // ===== Phase 21b — generate-mode fork =====
@@ -563,7 +552,6 @@ export const tasksRouter = router({
         { taskId, userId: ctx.userId, executorLane: 'generate', executionMode },
         'task: executor lane selected',
       );
-      trackerStart(ctx.userId, taskId, 'generate');
 
       // Fire-and-forget — generate doesn't share Brave instances so
       // there's no per-user FIFO queue to enqueue into. Concurrent
@@ -633,8 +621,6 @@ export const tasksRouter = router({
         } catch (err) {
           ctx.logger.warn({ err, taskId }, 'generate: broadcast terminal failed');
         }
-
-        trackerEnd(ctx.userId, taskId);
       })();
 
       return { taskId, status: 'executing' as const, steps: [] };
@@ -726,10 +712,6 @@ export const tasksRouter = router({
           opusUsed: opusActuallyConsumed,
         },
       );
-      // Phase 21b — record this task in the in-memory concurrency
-      // tracker so per-mode caps work for bypass users. Untracked in
-      // the runFn .then() after persistSupercarOutcome below.
-      trackerStart(ctx.userId, taskId, 'browser');
       // Phase 13 Dim 1 — persist plan onto the task row and broadcast
       // it to the SPA so the user sees upcoming steps before any
       // tool fires. Best-effort: write failures log + continue.
@@ -828,14 +810,12 @@ export const tasksRouter = router({
         executionMode === 'browser'
       ) {
         try {
-          // trackRef:true so this task's reference counts toward the
-          // per-user refcount; runFn .finally below calls releaseRef
-          // to decrement. Symmetry is what prevents the 22a-broken
-          // "task 1 finishes, kills shared Brave, tasks 2-N fail"
-          // pattern.
-          const instance = await ctx.browserPool.allocate(ctx.userId, {
-            trackRef: true,
-          });
+          // Phase 24 — keyed by taskId, not userId. One task = one
+          // Brave (no shared instance, no refcount). The runFn
+          // .finally below calls release(taskId) to tear down
+          // immediately on completion. Per-user concurrency is gated
+          // upstream via getActiveTaskCount + plan limits.
+          const instance = await ctx.browserPool.allocate(taskId, ctx.userId);
           perUserExec = instance.executor;
           ctx.logger.info(
             { taskId, userId: ctx.userId, cdpPort: instance.cdpPort, displayNum: instance.display },
@@ -843,7 +823,7 @@ export const tasksRouter = router({
           );
         } catch (err) {
           ctx.logger.error(
-            { err: err instanceof Error ? err.message : String(err), userId: ctx.userId },
+            { err: err instanceof Error ? err.message : String(err), userId: ctx.userId, taskId },
             'pool: allocate failed — falling back to shared headed singleton',
           );
           // Swallow + fall through: rather than hard-fail the task we
@@ -1101,7 +1081,7 @@ export const tasksRouter = router({
             // task never trips the 30-min idle GC — pool.touch is a
             // no-op when the user isn't on a pool slot.
             if (ctx.browserPool && perUserExec) {
-              ctx.browserPool.touch(ctx.userId);
+              ctx.browserPool.touch(taskId);
             }
             const actionKind = ev.toolsInTurn[0] ?? 'text';
             const actionSummary = ev.textPreamble
@@ -1338,46 +1318,30 @@ export const tasksRouter = router({
             }
           })
           .finally(() => {
-            // Phase 21b — release the per-mode concurrency slot.
-            trackerEnd(userId, taskId);
-            // Phase 22a follow-up — releaseRef (refcounted) instead
-            // of release. The per-user pool is idempotent:
-            // multiple concurrent tasks for the same user share ONE
-            // Brave instance. Calling unconditional release() after
-            // every task finish broke that — when 15 tasks for one
-            // user landed in the queue, task #1 finishing tore down
-            // the instance, and tasks #2-15 (queued, sharing the
-            // same primaryExecutor reference captured at admit
-            // time) all threw "PlaywrightExecutor not connected".
-            // releaseRef decrements the per-user refcount and only
-            // actually tears down on the LAST reference, so the
-            // shared-instance design is preserved while still
-            // freeing the slot promptly once the user is truly done.
+            // Phase 24 — release the per-task Brave immediately on
+            // completion. One task = one Brave; no shared instance,
+            // no refcount. The per-user concurrency limit is enforced
+            // upstream at admit time via getActiveTaskCount.
             if (didAllocatePool && ctx.browserPool) {
               void ctx.browserPool
-                .releaseRef(ctx.userId, `task-${taskId}-done`)
+                .release(taskId, `task-${taskId}-done`)
                 .catch((relErr) => {
                   ctx.logger.warn(
                     { err: relErr, taskId, userId: ctx.userId },
-                    'pool: post-task releaseRef failed',
+                    'pool: post-task release failed',
                   );
                 });
             }
           });
 
-      void visionLoopTaskQueue.enqueue(userId, runFn, (position) => {
-        if (position > 1) {
-          try {
-            broadcastToUser(userId, {
-              type: 'server.task.queued',
-              taskId,
-              position,
-            });
-          } catch (err) {
-            ctx.logger.warn({ err, taskId }, 'supercar: broadcast queued failed');
-          }
-        }
-      });
+      // Phase 24 — fire the runFn directly (no per-user FIFO queue).
+      // Per-task isolation removes the need for serialisation — each
+      // task gets its own Brave, can run in parallel up to the user's
+      // plan-derived concurrency limit (already gated at admit time
+      // via getActiveTaskCount). The visionLoopTaskQueue's 15-min
+      // hard-timeout is replaced by the runtime zombie reaper at
+      // 20-min cutoff in index.ts.
+      void runFn();
 
       return { taskId, status: 'executing' as const, steps: [] };
     }
@@ -1722,27 +1686,10 @@ export const tasksRouter = router({
             }
           });
 
-      void visionLoopTaskQueue.enqueue(ctx.userId, runTaskFn, (position) => {
-        if (position > 1) {
-          ctx.logger.info(
-            { taskId, userId: ctx.userId, queuePosition: position },
-            'vision loop task queued behind earlier work',
-          );
-          // G6: surface the queue position to any connected web
-          // workbench so the sidebar can show "排队中 · 第 N 位".
-          // Best-effort — broadcastToUser is a noop if nobody's
-          // listening, and a throw here must not block enqueue.
-          try {
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.queued',
-              taskId,
-              position,
-            });
-          } catch (err) {
-            ctx.logger.warn({ err, taskId }, 'broadcast task.queued failed');
-          }
-        }
-      });
+      // Phase 24 — fire directly (no per-user FIFO queue). Per-task
+      // isolation removes the need for serialisation; per-user
+      // concurrency is gated upstream at admit time.
+      void runTaskFn();
       return {
         taskId,
         status: 'executing' as const,
@@ -2273,34 +2220,25 @@ export const tasksRouter = router({
    *   { status: 'unavailable' } — pool not configured / capacity full
    */
   wakeBrowser: protectedProcedure.mutation(async ({ ctx }) => {
+    // Phase 24 — wakeBrowser is now a no-op. Pre-warming a Brave
+    // before the user submits a task made sense in the per-user
+    // model (one Brave shared across the user's tasks). Per-task
+    // means there's no instance until a task exists, so there's
+    // nothing to pre-warm. Kept as a no-op endpoint so the SPA's
+    // existing call doesn't 404 — frontend can drop the call in a
+    // later phase. Returns the existing instance if the user has
+    // any active task; null otherwise.
     if (!ctx.browserPool) {
       return { status: 'unavailable' as const, reason: 'pool_disabled' };
     }
-    try {
-      const inst = await ctx.browserPool.allocate(ctx.userId);
-      ctx.logger.info(
-        { userId: ctx.userId, cdpPort: inst.cdpPort, status: inst.status },
-        'tasks.wakeBrowser: instance ready',
-      );
-      return {
-        status: 'ready' as const,
-        cdpPort: inst.cdpPort,
-        // The SPA's VNC URL builder pulls userId off auth.me — no
-        // need to echo it back here. Returning cdpPort lets ops
-        // dashboards correlate "wake" calls with pool slots.
-      };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      ctx.logger.warn(
-        { userId: ctx.userId, err: msg },
-        'tasks.wakeBrowser: allocate failed',
-      );
-      // PoolCapacityError surfaces the same way as a generic spawn
-      // error to the SPA — the user's recourse is identical (wait,
-      // try again later). Distinguishing them in the response would
-      // just be more cases the SPA has to switch on.
-      return { status: 'unavailable' as const, reason: msg.slice(0, 200) };
+    const existing = ctx.browserPool.peekActiveForUser(ctx.userId);
+    if (existing) {
+      return { status: 'ready' as const, cdpPort: existing.cdpPort };
     }
+    return {
+      status: 'unavailable' as const,
+      reason: 'no_active_task — submit a task to spawn a browser',
+    };
   }),
 
   resetBrowser: protectedProcedure.mutation(async ({ ctx }) => {
@@ -2308,9 +2246,15 @@ export const tasksRouter = router({
     // shared headed singleton. peek() never allocates — we don't
     // want a fresh quartet just for a new-task nudge, and if the
     // user doesn't yet have one there's nothing to reset.
+    // Phase 24 — peekActiveForUser finds the user's most recently
+    // active task instance. If they have multiple concurrent tasks,
+    // resetting clobbers the most recent one's page. That's a
+    // reasonable default: the SPA's "reset browser" button is meant
+    // for the panel-visible browser, which is what peekActiveForUser
+    // returns.
     const poolInstance =
       ctx.browserPool && shouldUseBrowserPool(ctx.userId)
-        ? ctx.browserPool.peek(ctx.userId)
+        ? ctx.browserPool.peekActiveForUser(ctx.userId)
         : null;
     const exec =
       poolInstance?.executor ??
@@ -2354,9 +2298,12 @@ export const tasksRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // Phase 24 — peekActiveForUser routes the panel's address-bar
+      // navigation to whichever task's Brave the user is currently
+      // viewing (most-recently-active).
       const poolInstance =
         ctx.browserPool && shouldUseBrowserPool(ctx.userId)
-          ? ctx.browserPool.peek(ctx.userId)
+          ? ctx.browserPool.peekActiveForUser(ctx.userId)
           : null;
       const exec =
         poolInstance?.executor ??

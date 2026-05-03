@@ -6,7 +6,7 @@
  * orchestrator uses just BrowserPool + PoolCapacityError.
  */
 
-export { BrowserPool, PoolCapacityError, userIdToDirName } from './browser-pool.js';
+export { BrowserPool, PoolCapacityError, taskIdToDirName } from './browser-pool.js';
 export { reapOrphans, type ReaperResult } from './reaper.js';
 export type {
   BrowserInstance,
