@@ -149,7 +149,22 @@ export class BrowserPool {
       // 'allocating' / 'draining' fall through to the inFlight check.
     }
     const pending = this.inFlight.get(userId);
-    if (pending) return pending.promise;
+    if (pending) {
+      // Phase 23 hotfix — followers awaiting an in-flight spawn MUST
+      // also bump the refcount when they take this branch. Without
+      // this, 15 concurrent admits would all share the spawner's
+      // single +1 (refcount stays at 1); when the first task
+      // finishes and calls releaseRef, the count drops to 0 and the
+      // shared instance is torn down out from under the other 14
+      // queued tasks. They then throw "PlaywrightExecutor not
+      // connected" on the next executor.getPage() call.
+      // Pre-22a-hotfix tests were sequential so the followers always
+      // saw the existing-ready path (which DID bump); only concurrent
+      // admits during a cold spawn exercise this branch.
+      const inst = await pending.promise;
+      if (trackRef) this.bumpRef(userId, 'allocate-inflight');
+      return inst;
+    }
 
     const promise = this.spawnInstance(userId);
     this.inFlight.set(userId, { userId, promise });

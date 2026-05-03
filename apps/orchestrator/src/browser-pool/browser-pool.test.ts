@@ -207,4 +207,78 @@ describe('BrowserPool refcount (phase 22a hotfix)', () => {
       expect(pool.peek(u2)).not.toBeNull();
     });
   });
+
+  describe('Phase 23 regression: 15 concurrent allocates while spawn is in-flight', () => {
+    /**
+     * BOSS's 15-task batch wreck (07:10:39 UTC). One task succeeded,
+     * 14 failed with "PlaywrightExecutor not connected". Diagnosis:
+     * the followers hit the inFlight branch of `allocate` (instance
+     * not yet in the map because the first spawn hasn't completed),
+     * which returned the pending promise WITHOUT bumping refcount.
+     * Refcount stayed at 1; first task's releaseRef tore the
+     * instance down; the other 14 then referenced a dead executor.
+     *
+     * The pre-existing sequential tests (Test C above) couldn't catch
+     * this because each `await pool.allocate()` resolved before the
+     * next ran — the followers always saw the existing-ready path,
+     * which DID bump correctly. This test forces concurrency.
+     */
+    it('all 15 callers bump refcount even when 14 hit the inFlight branch', async () => {
+      const u = 'usr_concurrent';
+
+      // Block the first spawn so the next 14 allocates hit inFlight
+      // instead of the existing-ready path. We override spawnSpy with
+      // a deferred resolution; the makePool spawnSpy's normal body
+      // (set-on-map-and-return) is replicated inside the deferred
+      // resolver so post-resolve state matches the real fast path.
+      let resolveSpawn!: (inst: BrowserInstance) => void;
+      const blocked = new Promise<BrowserInstance>((resolve) => {
+        resolveSpawn = resolve;
+      });
+      spawnSpy.mockImplementationOnce(async (userId: string) => {
+        const inst = await blocked;
+        (
+          pool as unknown as { instances: Map<string, BrowserInstance> }
+        ).instances.set(userId, inst);
+        return inst;
+      });
+
+      // Fire 15 concurrent allocates. The first reaches `inFlight.set`
+      // before yielding; the next 14 see a pending promise and take
+      // the inFlight branch.
+      const allocates = Array.from({ length: 15 }, () =>
+        pool.allocate(u, { trackRef: true }),
+      );
+
+      // Microtask flush so all 15 entries' sync prefix runs.
+      await new Promise<void>((r) => setImmediate(r));
+
+      // Release the spawn — instance becomes ready, all promises resolve.
+      const stubInst = makeStubInstance(u, 0);
+      resolveSpawn(stubInst);
+
+      const results = await Promise.all(allocates);
+
+      // All 15 must have received the same shared instance.
+      expect(spawnSpy).toHaveBeenCalledTimes(1);
+      for (const r of results) {
+        expect(r).toBe(stubInst);
+      }
+
+      // THE BUG (pre-fix): refCount is 1 because the inFlight branch
+      // skipped bumpRef. THE FIX: refCount is 15.
+      expect(refCount(pool, u)).toBe(15);
+
+      // Drain — first 14 releaseRef calls should be partial decrements,
+      // last one triggers actual teardown. Mirrors prod queue draining.
+      for (let i = 0; i < 14; i++) {
+        const after = await pool.releaseRef(u, `task-${i}-done`);
+        expect(after).toBeGreaterThan(0);
+        expect(pool.peek(u)).not.toBeNull();
+      }
+      const final = await pool.releaseRef(u, 'task-14-done');
+      expect(final).toBe(0);
+      expect(pool.peek(u)).toBeNull();
+    });
+  });
 });
