@@ -47,6 +47,7 @@ export interface HttpAppDeps {
   executionRouter?: ExecutionRouter;
   browserPool?: BrowserPool | null;
   taskQueue?: import('./queue/task-queue.js').TaskQueue | null;
+  firecrawl?: import('./firecrawl/firecrawl-lane.js').FirecrawlLane | null;
   paypalAdapter?: PayPalAdapter | null;
 }
 
@@ -819,6 +820,7 @@ export function createHttpApp(deps: HttpAppDeps) {
         ...(deps.executionRouter ? { executionRouter: deps.executionRouter } : {}),
         ...(deps.browserPool ? { browserPool: deps.browserPool } : {}),
         ...(deps.taskQueue ? { taskQueue: deps.taskQueue } : {}),
+        ...(deps.firecrawl ? { firecrawl: deps.firecrawl } : {}),
         ...(deps.paypalAdapter ? { paypalAdapter: deps.paypalAdapter } : {}),
       }),
     }),

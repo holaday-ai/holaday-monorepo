@@ -493,6 +493,13 @@ export interface RunSupercarOptions {
    */
   apifyAdapter?: ApifyAdapter | null;
   /**
+   * Phase 24 RC follow-up — Firecrawl adapter. When provided, the
+   * agent's `scrape_website` and `search_ecommerce` tools delegate
+   * to Firecrawl instead of Apify. Cheaper + faster for the generic-
+   * page case; Apify stays as a fallback when only it's configured.
+   */
+  firecrawl?: import('../../firecrawl/firecrawl-lane.js').FirecrawlLane | null;
+  /**
    * Simple-search classifier output. Used today only as input to the
    * `skipPlan` decision in tasks.ts (no Brave fast lane any more —
    * search now goes through the model's web_search tool inside the loop).
@@ -1186,14 +1193,15 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                   },
                 ]
               : []),
-            // Phase 23 Step 3 — Apify-backed escape hatches. Exposed
-            // only when the orchestrator boots with APIFY_API_TOKEN
-            // (createApifyAdapter returns null without it). The model
-            // sees these tools as a Tier-3 fallback after browser
-            // attempts + search engines fail; the descriptions below
-            // explicitly tell the model to RETURN to the browser
-            // afterwards to present results, not just emit text.
-            ...(opts.apifyAdapter
+            // Phase 23 Step 3 / Phase 24 RC follow-up — escape-hatch
+            // tools backed by Firecrawl (preferred when configured)
+            // OR Apify (fallback). Exposed only when AT LEAST ONE
+            // adapter is wired. The model sees these tools as a
+            // Tier-3 fallback after browser attempts + search
+            // engines fail; the descriptions tell the model to
+            // RETURN to the browser afterwards to present results,
+            // not just emit text.
+            ...(opts.firecrawl || opts.apifyAdapter
               ? [
                   {
                     type: 'custom' as const,
@@ -1731,16 +1739,21 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           continue;
         }
 
-        // -------- Phase 23 Step 3 — `scrape_website` Apify tool --------
+        // -------- `scrape_website` — Firecrawl-preferred, Apify fallback --------
         if (toolUse.name === 'scrape_website') {
-          if (!opts.apifyAdapter) {
-            // Defensive — the tool was exposed only when apifyAdapter
-            // is non-null, but guard in case the schema dispatch races
-            // a config reload.
+          if (!opts.firecrawl && !opts.apifyAdapter) {
+            // Defensive — the tool was exposed only when at least
+            // one adapter is wired, but guard against a config-
+            // reload race.
             toolResults.push({
               type: 'tool_result',
               tool_use_id: toolUse.id,
-              content: [{ type: 'text', text: 'scrape_website: apify adapter not configured' }],
+              content: [
+                {
+                  type: 'text',
+                  text: 'scrape_website: no scraper adapter configured (FIRECRAWL_API_KEY / APIFY_API_TOKEN both missing)',
+                },
+              ],
               is_error: true,
             });
             continue;
@@ -1760,32 +1773,65 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             continue;
           }
           logger.info(
-            { taskId: opts.taskId, iteration, url },
+            {
+              taskId: opts.taskId,
+              iteration,
+              url,
+              backend: opts.firecrawl ? 'firecrawl' : 'apify',
+            },
             'supercar: scrape_website invoked',
           );
           try {
-            const result = await opts.apifyAdapter.run(APIFY_SCRAPE_WEBSITE_ACTOR, {
-              startUrls: [{ url }],
-              maxRequestsPerCrawl: 1,
-              maxResults: 1,
-              ...(inp.extractionPrompt ? { extractionPrompt: inp.extractionPrompt } : {}),
-            });
-            if ('error' in result) {
+            // Phase 24 RC follow-up — Firecrawl is the preferred
+            // backend (cheaper, returns markdown directly). Apify
+            // stays as a fallback for older deployments where the
+            // Firecrawl key isn't yet provisioned.
+            if (opts.firecrawl) {
+              const r = await opts.firecrawl.scrape(url);
+              if (!r.ok) {
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: toolUse.id,
+                  content: [{ type: 'text', text: `scrape_website: ${r.error}` }],
+                  is_error: true,
+                });
+                continue;
+              }
+              toolsUsed.add('scrape_website');
+              const head = `# scrape_website 结果\n来源: ${r.url}${r.title ? ` — ${r.title}` : ''}\n\n---\n\n`;
+              const body = r.markdown.length > 30_000
+                ? `${r.markdown.slice(0, 29_988)}\n\n…(truncated)`
+                : r.markdown;
+              const tail = '\n\n---\n**记得回到浏览器中整理 / 呈现这些信息，让用户看到执行过程**';
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: toolUse.id,
-                content: [{ type: 'text', text: `scrape_website: ${result.error}` }],
-                is_error: true,
+                content: [{ type: 'text', text: head + body + tail }],
               });
-              continue;
+            } else if (opts.apifyAdapter) {
+              const result = await opts.apifyAdapter.run(APIFY_SCRAPE_WEBSITE_ACTOR, {
+                startUrls: [{ url }],
+                maxRequestsPerCrawl: 1,
+                maxResults: 1,
+                ...(inp.extractionPrompt ? { extractionPrompt: inp.extractionPrompt } : {}),
+              });
+              if ('error' in result) {
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: toolUse.id,
+                  content: [{ type: 'text', text: `scrape_website: ${result.error}` }],
+                  is_error: true,
+                });
+                continue;
+              }
+              toolsUsed.add('scrape_website');
+              const summary = formatScrapeWebsiteResult(result.items, url);
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolUse.id,
+                content: [{ type: 'text', text: summary }],
+              });
             }
-            toolsUsed.add('scrape_website');
-            const summary = formatScrapeWebsiteResult(result.items, url);
-            toolResults.push({
-              type: 'tool_result',
-              tool_use_id: toolUse.id,
-              content: [{ type: 'text', text: summary }],
-            });
           } catch (err) {
             toolResults.push({
               type: 'tool_result',
@@ -1804,11 +1850,16 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
 
         // -------- Phase 23 Step 3 — `search_ecommerce` Apify tool --------
         if (toolUse.name === 'search_ecommerce') {
-          if (!opts.apifyAdapter) {
+          if (!opts.firecrawl && !opts.apifyAdapter) {
             toolResults.push({
               type: 'tool_result',
               tool_use_id: toolUse.id,
-              content: [{ type: 'text', text: 'search_ecommerce: apify adapter not configured' }],
+              content: [
+                {
+                  type: 'text',
+                  text: 'search_ecommerce: no scraper adapter configured (FIRECRAWL_API_KEY / APIFY_API_TOKEN both missing)',
+                },
+              ],
               is_error: true,
             });
             continue;
@@ -1844,34 +1895,98 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             });
             continue;
           }
-          const actorId = APIFY_ECOMMERCE_ACTORS[platform];
           logger.info(
-            { taskId: opts.taskId, iteration, platform, query, actorId },
+            {
+              taskId: opts.taskId,
+              iteration,
+              platform,
+              query,
+              backend: opts.firecrawl ? 'firecrawl' : 'apify',
+            },
             'supercar: search_ecommerce invoked',
           );
           try {
-            const result = await opts.apifyAdapter.run(actorId, {
-              search: query,
-              query,
-              maxItems: maxResults,
-              maxResults,
-            });
-            if ('error' in result) {
+            // Phase 24 RC follow-up — Firecrawl-preferred. Firecrawl
+            // /search returns generic markdown rather than the
+            // structured {name, price, rating, url} shape Apify's
+            // per-platform scrapers emit; we widen the platform-
+            // specific query with the platform's site-name prefix
+            // so Firecrawl's search is biased toward jd / amazon /
+            // taobao results, then hand the markdown bundle to the
+            // model (which is good at reading product cards).
+            if (opts.firecrawl) {
+              const platformName =
+                platform === 'jd' ? '京东 jd.com' :
+                platform === 'taobao' ? '淘宝 taobao.com' :
+                'amazon.com';
+              const r = await opts.firecrawl.search(
+                `${platformName} ${query}`,
+                { limit: maxResults },
+              );
+              if (!r.ok) {
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: toolUse.id,
+                  content: [{ type: 'text', text: `search_ecommerce: ${r.error}` }],
+                  is_error: true,
+                });
+                continue;
+              }
+              if (r.results.length === 0) {
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: toolUse.id,
+                  content: [
+                    {
+                      type: 'text',
+                      text: `search_ecommerce(${platform}): "${query}" 没有结果。试试更通用的关键词或换平台。`,
+                    },
+                  ],
+                });
+                continue;
+              }
+              toolsUsed.add('search_ecommerce');
+              const head = `# search_ecommerce 结果 (${platform}, query="${query}", ${r.results.length} pages)\n\n`;
+              const blocks = r.results
+                .slice(0, maxResults)
+                .map((res) => {
+                  const md = res.markdown.length > 6_000
+                    ? `${res.markdown.slice(0, 5_988)}\n\n…(truncated)`
+                    : res.markdown;
+                  return `## ${res.title ?? res.url}\n来源: ${res.url}\n\n${md}`;
+                })
+                .join('\n\n---\n\n');
+              const tail = '\n\n---\n**记得回到浏览器中整理 / 呈现这些信息（产品名/价格/链接），让用户看到执行过程**';
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: toolUse.id,
-                content: [{ type: 'text', text: `search_ecommerce: ${result.error}` }],
-                is_error: true,
+                content: [{ type: 'text', text: head + blocks + tail }],
               });
-              continue;
+            } else if (opts.apifyAdapter) {
+              const actorId = APIFY_ECOMMERCE_ACTORS[platform];
+              const result = await opts.apifyAdapter.run(actorId, {
+                search: query,
+                query,
+                maxItems: maxResults,
+                maxResults,
+              });
+              if ('error' in result) {
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: toolUse.id,
+                  content: [{ type: 'text', text: `search_ecommerce: ${result.error}` }],
+                  is_error: true,
+                });
+                continue;
+              }
+              toolsUsed.add('search_ecommerce');
+              const summary = formatSearchEcommerceResult(result.items, platform, query);
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolUse.id,
+                content: [{ type: 'text', text: summary }],
+              });
             }
-            toolsUsed.add('search_ecommerce');
-            const summary = formatSearchEcommerceResult(result.items, platform, query);
-            toolResults.push({
-              type: 'tool_result',
-              tool_use_id: toolUse.id,
-              content: [{ type: 'text', text: summary }],
-            });
           } catch (err) {
             toolResults.push({
               type: 'tool_result',
@@ -2090,9 +2205,15 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       if (antiBotHintText) {
         nudgeContent.push({ type: 'text', text: antiBotHintText });
       }
+      // Phase 24 RC follow-up — `hasApifyTools` was the original
+      // flag name, but the rescue nudge is correct whenever EITHER
+      // scrape backend (Firecrawl OR Apify) is wired. Keep the
+      // parameter name for backward compat in the helper signature
+      // but compute it from the union.
+      const hasScrapeBackend = Boolean(opts.firecrawl || opts.apifyAdapter);
       const nudge = buildStuckNudge({
         stuckCount,
-        hasApifyTools: Boolean(opts.apifyAdapter),
+        hasApifyTools: hasScrapeBackend,
         alreadyForcedExit: stuckForceFinalised,
       });
       if (nudge) {
@@ -2103,7 +2224,8 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               taskId: opts.taskId,
               iteration,
               stuckCount,
-              hasApifyTools: Boolean(opts.apifyAdapter),
+              hasScrapeBackend,
+              backend: opts.firecrawl ? 'firecrawl' : opts.apifyAdapter ? 'apify' : 'none',
             },
             'supercar: stuck past exit threshold — injecting rescue nudge',
           );

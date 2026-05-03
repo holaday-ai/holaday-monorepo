@@ -1,42 +1,34 @@
 /**
- * Phase 24 RC follow-up — task execution-mode classifier.
+ * Phase 24 RC follow-up — three-route task execution classifier.
  *
- * Routes a user's task to one of two backends:
- *   - 'generate' — single Anthropic call, no browser slot, no Brave.
- *     Pure text generation / analysis / translation work.
- *   - 'browser'  — full per-task BrowserPool dispatch, agent loop,
- *     screencast surface. The expensive path.
+ * Routes a user's task to one of three backends:
+ *   - 'generate' — pure text generation, single Anthropic call. No
+ *     web access. (Translation / SOPs / 方案 / pure analysis.)
+ *   - 'scrape'   — needs page content but NOT live interaction.
+ *     Firecrawl /scrape or /search returns markdown in 2-3s; the
+ *     LLM then synthesises an answer from those bytes. (查询 /
+ *     研究 / 对比 / "搜索 X 上的Y" / "分析 https://X".)
+ *   - 'browser'  — needs to drive a live page (login, fill form,
+ *     submit, click, multi-step flow). The expensive per-task
+ *     BrowserPool path.
  *
- * RC data showed 72/165 timeouts were generate tasks routed to the
- * 10-slot pool. Default flipped from 'browser' → 'generate'. The
- * browser path is now opt-in: only intents that *plausibly need a
- * live page* trigger it.
+ * Decision rules (priority order — first match wins):
  *
- * Browser triggers (any single match wins):
- *   1. Explicit URL — http://, https://, or www-prefixed bare host.
- *   2. Browser-action verb — 搜索/查找/打开/登录/操作/下单/比价/
- *      抓取/截图/填表/访问/下载, plus English equivalents.
- *   3. Named site — 京东/淘宝/小红书/知乎/微博/B站/GitHub/LinkedIn
- *      etc. (the live-page-only platforms users typically reference
- *      by name).
+ *   1. Skill hint — unambiguous skill ids force a route.
+ *   2. INTERACTION verb (登录/打开/下单/操作/提交/点击/填写/比价/...)
+ *      → 'browser'. The agent is being asked to drive a live page.
+ *   3. URL OR site name OR search/info verb → 'scrape'. The user
+ *      wants info that lives on the web; Firecrawl is the cheap path.
+ *   4. Otherwise → 'generate'.
  *
- * No Anthropic call. RC-era classifier called Haiku as a tiebreaker
- * which (a) cost ~$0.0001 × 165 = trivial but non-zero per RC run
- * and (b) added 200-500ms of admit latency to every task. Pure
- * keyword routing is deterministic, free, and reflects intent
- * accurately enough — borderline cases land on `generate`, which is
- * cheap to fix in-context.
- *
- * Skill hints still short-circuit when the skill is unambiguous —
- * a content-creator role is generate even if the user's prompt
- * mentions 知乎; a xiaohongshu skill is browser even on a
- * generate-leaning prompt.
+ * Keyword-only (no Anthropic call) — same cost-saving rationale as
+ * the pre-Firecrawl two-route classifier.
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from 'pino';
 
-export type ExecutionMode = 'browser' | 'generate';
+export type ExecutionMode = 'browser' | 'generate' | 'scrape';
 
 interface CacheEntry {
   mode: ExecutionMode;
@@ -44,12 +36,6 @@ interface CacheEntry {
   at: number;
 }
 
-/**
- * Process-lifetime cache. Keyword pass is already <1ms — the cache
- * is mostly here so the structured log line for each task captures
- * a stable `source` value across re-classifications of the same
- * intent (e.g. retries).
- */
 const CACHE = new Map<string, CacheEntry>();
 const CACHE_MAX = 500;
 const CACHE_TTL_MS = 60 * 60 * 1_000;
@@ -82,67 +68,70 @@ function cacheSet(key: string, mode: ExecutionMode, source: string): void {
 export interface ClassifyOpts {
   intent: string;
   /**
-   * Optional explicit skill id chosen by the user. When the skill id
-   * is in our hardcoded "obviously generate-leaning" or "obviously
-   * browser-leaning" set, we short-circuit before keyword scanning.
-   * Ambiguous skills (financial-analyst, product-manager, etc.) fall
-   * through.
+   * Optional explicit skill id. Unambiguous skills short-circuit
+   * the keyword pass. Ambiguous skills fall through.
    */
   skillId?: string;
-  /** Per-task logger (already child-tagged). */
   logger: Logger;
-  /**
-   * Accepted for backwards compatibility with the pre-RC Haiku-call
-   * signature. NOT invoked — the classifier is now keyword-only and
-   * never makes an API call. Kept so existing call sites compile
-   * without churn.
-   */
+  /** Accepted for backwards-compat with the pre-RC Haiku-call signature. NOT invoked. */
   client?: Anthropic | null;
-  /** Accepted for backwards compatibility — unused. */
   model?: string;
-  /** Accepted for backwards compatibility — unused. */
   timeoutMs?: number;
 }
 
 /**
- * Browser-action verbs. Substring match (case-insensitive) on the
- * intent text. Conservative list: a verb here means "the agent is
- * being asked to do something on a live web page". Words that LOOK
- * action-y but commonly appear in generate-only prompts (e.g.
- * "分析" / "总结" / "整理") are NOT in this list — they don't imply
- * live web interaction.
+ * INTERACTION verbs — explicit asks to drive a live page. Substring
+ * match (case-insensitive). Any one of these forces 'browser', even
+ * when the intent ALSO matches a scrape signal (URL / site / search
+ * verb). The user wants the agent to ACT on a page, not just read.
  */
-const BROWSER_VERBS: readonly string[] = [
-  '搜索', '查找', '打开', '访问', '登录', '操作', '下单', '比价',
-  '抓取', '截图', '填表', '下载', '点击', '滑动',
+const INTERACTION_VERBS: readonly string[] = [
+  '登录', '打开', '访问', '下单', '操作', '提交', '点击', '填写', '填表',
+  '比价', '抓取', '截图', '下载',
   // English
   'open ', 'visit ', 'log in', 'log into', 'sign in', 'sign into',
-  'download', 'click ', 'navigate to',
+  'submit ', 'click ', 'navigate to', 'fill in', 'fill out', 'download',
 ];
 
 /**
- * Named sites. Substring match (case-insensitive). Mentioning one
- * of these by name is a strong signal the user wants the agent to
- * visit that platform — e.g. "京东最近什么手机促销" implies looking
- * at jd.com, not summarising from training data.
+ * SEARCH verbs — the user wants to find information that lives on
+ * the web. These route to 'scrape' (Firecrawl's /search), NOT to
+ * 'browser' (which is for interaction). Cheap path: a few seconds
+ * + a single LLM synthesis call.
  */
-const BROWSER_SITES: readonly string[] = [
-  // Chinese-market platforms
+const SEARCH_VERBS: readonly string[] = [
+  '搜索', '查找', '查询', '研究', '对比', '调研',
+  // English
+  'search ', 'find ', 'research ', 'compare ', 'look up',
+];
+
+/**
+ * INFO-only verbs — same scrape route as SEARCH_VERBS but the user
+ * has already pointed at a specific URL or site. "总结 https://X" /
+ * "分析 jd.com 的促销" — Firecrawl /scrape on the URL/site is the
+ * right tool, even though the verb is "总结" (which would be
+ * generate-only without the URL).
+ */
+const INFO_VERBS: readonly string[] = [
+  '查看', '分析', '提取', '抓取', '总结', '看一下', '看看',
+  // English
+  'summarize ', 'summarise ', 'analyze ', 'analyse ', 'extract ',
+];
+
+/**
+ * Named sites. Mentioning one of these by name is a strong signal
+ * the user wants info from that platform — route to 'scrape'
+ * unless an INTERACTION verb is also present.
+ */
+const SITE_NAMES: readonly string[] = [
   '小红书', '淘宝', '天猫', '京东', '拼多多', '抖音', 'bilibili', 'b站',
   '携程', '飞猪', '美团', '大众点评', '高德', '百度地图',
   '微博', '知乎', '豆瓣', '虎扑', 'boss直聘', '拉勾',
-  // International
   'github', 'linkedin', 'amazon', 'shopify', 'twitter', 'reddit',
   'youtube', 'instagram', 'tiktok', 'gmail', 'producthunt',
 ];
 
-/**
- * Skill-id → mode hints. Only listed when the skill is unambiguous.
- * Skills that could go either way (data-analyst, financial-analyst,
- * etc.) are absent and fall through to the keyword pass.
- */
 const SKILL_HINTS: ReadonlyMap<string, ExecutionMode> = new Map([
-  // Generate-leaning (text/analysis/translation work)
   ['content-creator', 'generate'],
   ['brand-guardian', 'generate'],
   ['visual-storyteller', 'generate'],
@@ -155,7 +144,6 @@ const SKILL_HINTS: ReadonlyMap<string, ExecutionMode> = new Map([
   ['finance-tracker', 'generate'],
   ['tech-translator', 'generate'],
   ['email_writer', 'generate'],
-  // Browser-leaning (need to interact with platforms)
   ['xiaohongshu', 'browser'],
   ['douyin', 'browser'],
   ['wechat_gongzhong', 'browser'],
@@ -165,49 +153,55 @@ const SKILL_HINTS: ReadonlyMap<string, ExecutionMode> = new Map([
   ['social-media-strategist', 'browser'],
 ]);
 
-/**
- * Loose URL match. Triggers on http://, https://, or a www-prefixed
- * bare host. Bare hosts WITHOUT www (e.g. "看一下 zhihu.com") are
- * NOT matched here — those land on the named-site list if they're
- * common platforms, or on a verb match if the user said "打开 X.com",
- * or fall to generate (model often answers them from training data
- * better than the agent stack does).
- */
 const URL_REGEX = /\b(?:https?:\/\/|www\.)\S+/i;
 
-interface KeywordHit {
-  source: 'url' | 'verb' | 'site';
-  match: string;
-}
-
-function scanForBrowserSignal(intent: string): KeywordHit | null {
-  if (URL_REGEX.test(intent)) {
-    const m = intent.match(URL_REGEX);
-    return { source: 'url', match: m ? m[0].slice(0, 64) : 'url' };
-  }
-  const lower = intent.toLowerCase();
-  for (const verb of BROWSER_VERBS) {
-    if (lower.includes(verb)) return { source: 'verb', match: verb.trim() };
-  }
-  for (const site of BROWSER_SITES) {
-    if (lower.includes(site)) return { source: 'site', match: site };
+function hasAny(haystack: string, needles: readonly string[]): string | null {
+  const lower = haystack.toLowerCase();
+  for (const n of needles) {
+    if (lower.includes(n)) return n.trim();
   }
   return null;
 }
 
-/**
- * Classify a task intent into 'browser' or 'generate'. Synchronous
- * in spirit (no I/O), but kept async for signature compatibility
- * with the previous Haiku-backed implementation — call sites that
- * `await` it remain unchanged.
- *
- * Decision order:
- *   1. Empty intent → 'generate' (default).
- *   2. Cache hit → previous decision for this intent.
- *   3. Skill hint → unambiguous skill ids return their mapped mode.
- *   4. Keyword pass — URL / verb / site hit → 'browser'.
- *   5. Otherwise → 'generate'.
- */
+interface RouteDecision {
+  mode: ExecutionMode;
+  source: string;
+  match?: string;
+}
+
+function decide(intent: string): RouteDecision {
+  // 1. Interaction verb wins outright — agent must drive a live page.
+  const interaction = hasAny(intent, INTERACTION_VERBS);
+  if (interaction) {
+    return { mode: 'browser', source: 'kw:interaction', match: interaction };
+  }
+
+  // 2. URL / site / search-verb / info-verb → scrape.
+  const urlMatch = URL_REGEX.exec(intent);
+  if (urlMatch) {
+    return { mode: 'scrape', source: 'kw:url', match: urlMatch[0].slice(0, 64) };
+  }
+  const search = hasAny(intent, SEARCH_VERBS);
+  if (search) {
+    return { mode: 'scrape', source: 'kw:search-verb', match: search };
+  }
+  const site = hasAny(intent, SITE_NAMES);
+  if (site) {
+    return { mode: 'scrape', source: 'kw:site', match: site };
+  }
+  const info = hasAny(intent, INFO_VERBS);
+  if (info) {
+    // Info verbs without a URL/site are usually pure text-on-already-
+    // provided-content (e.g. "分析这段商业模式"). Only route to scrape
+    // when the user gave us SOMETHING to scrape (URL/site checked
+    // above). Falling through to generate matches that intent.
+    return { mode: 'generate', source: 'default' };
+  }
+
+  // 3. Default — pure text generation.
+  return { mode: 'generate', source: 'default' };
+}
+
 export async function classifyExecutionMode(opts: ClassifyOpts): Promise<ExecutionMode> {
   const intent = opts.intent.trim();
   if (!intent) {
@@ -240,21 +234,15 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
     }
   }
 
-  const hit = scanForBrowserSignal(intent);
-  if (hit) {
-    cacheSet(key, 'browser', `kw:${hit.source}`);
-    opts.logger.info(
-      { mode: 'browser', source: `kw:${hit.source}`, match: hit.match },
-      'intent-classifier: decided',
-    );
-    return 'browser';
-  }
-
-  // Default — no browser signal found.
-  cacheSet(key, 'generate', 'default');
+  const d = decide(intent);
+  cacheSet(key, d.mode, d.source);
   opts.logger.info(
-    { mode: 'generate', source: 'default' },
+    {
+      mode: d.mode,
+      source: d.source,
+      ...(d.match ? { match: d.match } : {}),
+    },
     'intent-classifier: decided',
   );
-  return 'generate';
+  return d.mode;
 }

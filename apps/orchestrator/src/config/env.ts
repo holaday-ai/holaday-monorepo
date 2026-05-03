@@ -38,6 +38,22 @@ const schema = z.object({
   ANTHROPIC_API_KEY: z.string().optional().default(''),
 
   /**
+   * Phase 24 RC follow-up — Firecrawl API key. When set, the
+   * orchestrator boots the firecrawl-lane adapter so:
+   *   - tasks.create's 'scrape' execution mode can fetch pages /
+   *     search results via Firecrawl instead of spinning a Brave;
+   *   - supercar's `scrape_website` tool delegates to Firecrawl
+   *     instead of Apify.
+   * Empty string = adapter not constructed; scrape-mode tasks fail
+   * with a clear "FIRECRAWL_API_KEY not configured" reason instead
+   * of silently degrading to browser. Set on Vultr / Aliyun .env;
+   * keep in sync with the secret.
+   */
+  FIRECRAWL_API_KEY: z.string().optional().default(''),
+  /** Override the Firecrawl base URL — defaults to api.firecrawl.dev. */
+  FIRECRAWL_BASE_URL: z.string().url().default('https://api.firecrawl.dev'),
+
+  /**
    * Phase D Step 3 rollout switch.
    *   playwright → boot connects PlaywrightExecutor to Chrome's
    *                CDP (needs Chrome launched with

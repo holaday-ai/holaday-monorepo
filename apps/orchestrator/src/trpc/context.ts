@@ -8,6 +8,7 @@ import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
 import type { PayPalAdapter } from '../payment/index.js';
 import type { TaskQueue } from '../queue/task-queue.js';
+import type { FirecrawlLane } from '../firecrawl/firecrawl-lane.js';
 
 /**
  * Context factory. `planner` and `visionCommander` are both injected by the
@@ -47,6 +48,15 @@ export interface AppContextDeps {
    */
   taskQueue?: TaskQueue | null;
   /**
+   * Phase 24 RC follow-up — Firecrawl adapter. Non-null when
+   * FIRECRAWL_API_KEY is set at boot. The 'scrape' execution mode
+   * uses this to fetch live page content / search results without
+   * spinning up a Brave; supercar's `scrape_website` tool also
+   * delegates to it when the user falls back to the agent loop.
+   * Null = scrape-mode tasks fail with a configured-key reason.
+   */
+  firecrawl?: FirecrawlLane | null;
+  /**
    * Phase 9 PayPal adapter. Non-null when PAYPAL_CLIENT_ID/_SECRET are
    * set. The payment router throws PRECONDITION_FAILED when this is
    * null so the SPA can show a "PayPal not configured" message.
@@ -67,6 +77,7 @@ export function makeCreateContext(deps: AppContextDeps) {
       executionRouter: deps.executionRouter ?? null,
       browserPool: deps.browserPool ?? null,
       taskQueue: deps.taskQueue ?? null,
+      firecrawl: deps.firecrawl ?? null,
       paypalAdapter: deps.paypalAdapter ?? null,
       userId: (req as Request & { userId?: string }).userId,
     };

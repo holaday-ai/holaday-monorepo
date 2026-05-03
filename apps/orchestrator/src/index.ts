@@ -270,6 +270,26 @@ async function main() {
     logger.info('PayPal adapter disabled — PAYPAL_CLIENT_ID/_SECRET not set');
   }
 
+  // Phase 24 RC follow-up — Firecrawl adapter for the new 'scrape'
+  // execution mode + supercar's scrape_website tool. Boots only when
+  // FIRECRAWL_API_KEY is in env; otherwise scrape-mode tasks fail
+  // loudly with a "not configured" reason instead of silently
+  // routing to the (much more expensive) browser path.
+  let firecrawlLane: import('./firecrawl/firecrawl-lane.js').FirecrawlLane | null = null;
+  if (env.FIRECRAWL_API_KEY) {
+    const { createFirecrawlLane } = await import('./firecrawl/firecrawl-lane.js');
+    firecrawlLane = createFirecrawlLane({
+      apiKey: env.FIRECRAWL_API_KEY,
+      baseUrl: env.FIRECRAWL_BASE_URL,
+    });
+    logger.info(
+      { baseUrl: env.FIRECRAWL_BASE_URL, keyPrefix: env.FIRECRAWL_API_KEY.slice(0, 6) },
+      'Firecrawl adapter ready',
+    );
+  } else {
+    logger.info('Firecrawl adapter disabled — FIRECRAWL_API_KEY not set');
+  }
+
   const app = createHttpApp({
     planner,
     executionRouter,
@@ -277,6 +297,7 @@ async function main() {
     ...(playwrightExecutor ? { playwrightExecutor } : {}),
     ...(browserPool ? { browserPool } : {}),
     ...(taskQueue ? { taskQueue } : {}),
+    ...(firecrawlLane ? { firecrawl: firecrawlLane } : {}),
     ...(paypalAdapter ? { paypalAdapter } : {}),
   });
 

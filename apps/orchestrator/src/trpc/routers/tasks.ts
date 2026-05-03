@@ -16,6 +16,7 @@ import { TaskController } from '../../agent/task-controller.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { classifyExecutionMode } from '../../agent/intent-classifier.js';
 import { runGenerateTask } from '../../agent/generate-runner.js';
+import { runScrapeTask } from '../../agent/scrape-runner.js';
 import { tryAcquire as rateLimitTryAcquire } from '../../quota/rate-limiter.js';
 import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
@@ -632,6 +633,141 @@ export const tasksRouter = router({
     }
     // ===== end generate-mode fork =====
 
+    // ===== scrape-mode fork (Phase 24 RC follow-up) =====
+    // Tasks classified as 'scrape' want page content but NOT live
+    // browser interaction. Firecrawl pulls markdown in 2-3s, then
+    // Claude synthesises an answer from those bytes. Cost is roughly
+    // 5-10× cheaper than the browser path; latency 5-10× faster.
+    //
+    // If FIRECRAWL_API_KEY is missing at boot, ctx.firecrawl is null
+    // and the scrape branch persists a clear failure (rather than
+    // silently degrading to the browser path which is what the
+    // classifier explicitly avoided routing to).
+    if (executionMode === 'scrape' && appEnv.ANTHROPIC_API_KEY && anthropicForResolver) {
+      const taskId = newExternalId('task');
+      const repo = new TaskRepository(ctx.db);
+
+      await repo.insertTask(
+        {
+          taskId,
+          status: 'executing',
+          plan: [],
+          cursor: 0,
+          pendingConfirm: null,
+        },
+        {
+          userId: userRow.id,
+          intent: input.intent,
+          roleId: gatedRole === 'none' ? null : gatedRole,
+          opusUsed: opusActuallyConsumed,
+        },
+      );
+
+      ctx.logger.info(
+        { taskId, userId: ctx.userId, executorLane: 'scrape', executionMode },
+        'task: executor lane selected',
+      );
+
+      // Defensive — if the adapter wasn't configured at boot, fail
+      // loudly with the exact reason. SPA / translateError surfaces
+      // a clear "Firecrawl 未配置" instead of "服务繁忙".
+      if (!ctx.firecrawl) {
+        try {
+          await repo.persistVisionOutcome(taskId, {
+            status: 'failed',
+            reason: 'scrape: Firecrawl 未配置（FIRECRAWL_API_KEY 缺失），任务无法执行',
+            tickCount: 0,
+          });
+        } catch (err) {
+          ctx.logger.warn({ err, taskId }, 'scrape: persist failed-row write threw');
+        }
+        try {
+          broadcastToUser(ctx.userId, {
+            type: 'server.task.terminal',
+            taskId,
+            status: 'failed',
+            reason: 'Firecrawl 未配置',
+          });
+        } catch {
+          /* swallow — best-effort */
+        }
+        return { taskId, status: 'executing' as const, steps: [] };
+      }
+
+      const firecrawl = ctx.firecrawl;
+      const anthropicClient = anthropicForResolver;
+      void (async () => {
+        let outcome;
+        try {
+          outcome = await runScrapeTask({
+            taskId,
+            userId: ctx.userId,
+            intent: input.intent,
+            skillId:
+              gatedRole !== 'none'
+                ? gatedRole
+                : input.skillId ?? undefined,
+            client: anthropicClient,
+            firecrawl,
+            logger: ctx.logger,
+          });
+        } catch (err) {
+          ctx.logger.error({ err, taskId }, 'scrape: runner threw');
+          outcome = {
+            status: 'failed' as const,
+            summary: '',
+            reason: err instanceof Error ? err.message : 'scrape: unknown error',
+            inputTokens: 0,
+            outputTokens: 0,
+            durationMs: 0,
+            source: 'scrape' as const,
+            sources: [] as string[],
+          };
+        }
+
+        try {
+          if (outcome.status === 'completed') {
+            await repo.persistVisionOutcome(taskId, {
+              status: 'completed',
+              summary: outcome.summary,
+              tickCount: 1,
+            });
+          } else {
+            await repo.persistVisionOutcome(taskId, {
+              status: 'failed',
+              reason: outcome.reason ?? 'scrape: api failed',
+              tickCount: 1,
+            });
+          }
+        } catch (err) {
+          ctx.logger.error({ err, taskId }, 'scrape: persist failed');
+        }
+
+        try {
+          if (outcome.status === 'completed') {
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'completed',
+              ...(outcome.summary ? { summary: outcome.summary } : {}),
+            });
+          } else {
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'failed',
+              ...(outcome.reason ? { reason: outcome.reason } : {}),
+            });
+          }
+        } catch (err) {
+          ctx.logger.warn({ err, taskId }, 'scrape: broadcast terminal failed');
+        }
+      })();
+
+      return { taskId, status: 'executing' as const, steps: [] };
+    }
+    // ===== end scrape-mode fork =====
+
     // Diagnostic: log the supercar-gate inputs on every tasks.create
     // so BOSS can tell from pm2 logs exactly why a task fell into the
     // legacy branch. Happens BEFORE the gate so the log always lands.
@@ -1072,6 +1208,7 @@ export const tasksRouter = router({
                 : null,
           zapierAdapter: ctx.executionRouter?.zapier ?? null,
           apifyAdapter: ctx.executionRouter?.apify ?? null,
+          firecrawl: ctx.firecrawl ?? null,
           isSimpleSearch: isSimpleSearchIntent,
           isCrossPlatformAutomation: classifyAsCrossPlatformAutomation(input.intent),
           zapierWebhookPath: process.env.ZAPIER_WEBHOOK_PATH ?? null,
