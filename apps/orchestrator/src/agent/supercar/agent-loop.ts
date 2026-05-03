@@ -81,6 +81,98 @@ import { env as appEnv } from '../../config/env.js';
 const STUCK_WARN_THRESHOLD = 6;
 const STUCK_EXIT_THRESHOLD = 12;
 
+/**
+ * Phase 23 Step 3 — Apify actor IDs for the agent-callable scrape /
+ * ecommerce tools. Public Apify marketplace defaults; can be swapped
+ * without env config (just edit the const). If the actor id is wrong,
+ * the run-sync API surfaces a clear 404 in the tool_result, which the
+ * model can recover from by trying the browser path again.
+ *
+ * `apify/website-content-crawler` — generic content scraper, returns
+ * { url, title, text, html, ... } per page. We constrain to a single
+ * page so the dataset is small.
+ *
+ * Ecommerce actors return platform-specific shapes; the formatter
+ * normalises them to { name, price, rating, url } before handing back
+ * to the model.
+ */
+export const APIFY_SCRAPE_WEBSITE_ACTOR = 'apify/website-content-crawler';
+export const APIFY_ECOMMERCE_ACTORS: Readonly<
+  Record<'amazon' | 'jd' | 'taobao', string>
+> = {
+  amazon: 'epctex/amazon-search-scraper',
+  jd: 'apify/jd-product-scraper',
+  taobao: 'dtrungtin/taobao-products-scraper',
+};
+
+/** Trim a long string at a UTF-8 grapheme-safe-ish boundary. */
+function truncateText(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return `${s.slice(0, max)}\n...[truncated, ${s.length - max} more chars]`;
+}
+
+/**
+ * Format `apify/website-content-crawler` items into a text summary the
+ * model can consume. The actor returns dataset items shaped like
+ * { url, title, text, markdown, ... }; we prefer markdown when present.
+ * Output capped to ~30KB so a verbose page doesn't blow out the context
+ * window or run into cache fragmentation.
+ *
+ * Exported for unit tests (see agent-loop.apify-tools.test.ts).
+ */
+export function formatScrapeWebsiteResult(items: readonly unknown[], requestedUrl: string): string {
+  if (items.length === 0) {
+    return `scrape_website: 没有抓取到内容 (url=${requestedUrl})。试试浏览器或换个 URL。`;
+  }
+  const first = items[0] as {
+    url?: string;
+    title?: string;
+    text?: string;
+    markdown?: string;
+  };
+  const finalUrl = first.url ?? requestedUrl;
+  const title = first.title ?? '(untitled)';
+  const body = first.markdown ?? first.text ?? '';
+  const head = `# scrape_website 结果\n来源: ${finalUrl}\n标题: ${title}\n\n---\n\n`;
+  return head + truncateText(body, 30_000) + '\n\n---\n**记得回到浏览器继续完成任务**';
+}
+
+/**
+ * Normalise platform-specific scraper output to { name, price, rating, url }
+ * and serialise as JSON. Different actors emit different field names; we
+ * probe a handful of common shapes (title/name, price/priceText, rating/
+ * stars, url/productUrl) and fall through to passing the raw object so
+ * the model can still reason about it.
+ */
+export function formatSearchEcommerceResult(
+  items: readonly unknown[],
+  platform: string,
+  query: string,
+): string {
+  if (items.length === 0) {
+    return `search_ecommerce(${platform}): "${query}" 没有结果。试试更通用的关键词或换平台。`;
+  }
+  const normalised = items.slice(0, 30).map((raw) => {
+    const r = raw as Record<string, unknown>;
+    const name = (r.title ?? r.name ?? r.productName ?? r.itemName ?? '') as string;
+    const price = (r.price ?? r.priceText ?? r.salePrice ?? r.currentPrice ?? '') as
+      | string
+      | number;
+    const rating = (r.rating ?? r.stars ?? r.averageRating ?? r.score ?? '') as
+      | string
+      | number;
+    const url = (r.url ?? r.productUrl ?? r.link ?? r.itemUrl ?? '') as string;
+    return { name, price, rating, url };
+  });
+  const head = `# search_ecommerce 结果 (${platform}, query="${query}", ${items.length} items)\n\n`;
+  const json = JSON.stringify(normalised, null, 2);
+  return (
+    head +
+    truncateText(json, 28_000) +
+    '\n\n---\n**记得回到浏览器中打开商品页或做对比表，让用户看到执行过程**'
+  );
+}
+
 export type SupercarStatus = 'completed' | 'failed' | 'awaiting_user' | 'timeout' | 'cancelled';
 
 /**
@@ -855,6 +947,63 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                   },
                 ]
               : []),
+            // Phase 23 Step 3 — Apify-backed escape hatches. Exposed
+            // only when the orchestrator boots with APIFY_API_TOKEN
+            // (createApifyAdapter returns null without it). The model
+            // sees these tools as a Tier-3 fallback after browser
+            // attempts + search engines fail; the descriptions below
+            // explicitly tell the model to RETURN to the browser
+            // afterwards to present results, not just emit text.
+            ...(opts.apifyAdapter
+              ? [
+                  {
+                    type: 'custom' as const,
+                    name: 'scrape_website',
+                    description:
+                      '后台抓取网页内容（不经过当前浏览器标签）。**适用场景**：当浏览器无法加载目标网站、被反爬拦截、或加载超时（已经尝试过 navigate + 重试无效）时使用。**关键约束**：拿到数据后，你**必须**回到浏览器继续完成任务的后续步骤——比如打开一个能展示这些数据的页面（Google Sheets 等）、在当前页做对比、或导航到具体链接做进一步操作。**不要**把抓取到的纯文字直接当作最终回复——那会让用户看不到执行过程。返回页面文本（截断到 ~30KB）。',
+                    input_schema: {
+                      type: 'object',
+                      properties: {
+                        url: {
+                          type: 'string',
+                          description: '完整 URL（含 https://）。例：https://www.example.com/article',
+                        },
+                        extractionPrompt: {
+                          type: 'string',
+                          description:
+                            '可选：告诉 scraper 重点提取什么（默认抓取主要正文）。例："产品名、价格、评分"',
+                        },
+                      },
+                      required: ['url'],
+                    },
+                  },
+                  {
+                    type: 'custom' as const,
+                    name: 'search_ecommerce',
+                    description:
+                      '搜索主流电商平台的商品（amazon / 京东 / 淘宝），后台调用 platform-specific scraper。**适用场景**：用户要查商品/比价时，浏览器路径被反爬阻止；或者搜索引擎给不出商品级别的结构化数据。**关键约束**：拿到 JSON 列表后，你**必须**回到浏览器中整理和呈现结果——比如打开第一个商品详情页让用户看，或在当前页面做对比表格。返回 { name, price, rating, url } 的 JSON 数组。',
+                    input_schema: {
+                      type: 'object',
+                      properties: {
+                        platform: {
+                          type: 'string',
+                          enum: ['amazon', 'jd', 'taobao'],
+                          description: '电商平台',
+                        },
+                        query: {
+                          type: 'string',
+                          description: '搜索关键词，例如 "mechanical keyboard"',
+                        },
+                        maxResults: {
+                          type: 'number',
+                          description: '最多返回的商品条数。默认 10，上限 30。',
+                        },
+                      },
+                      required: ['platform', 'query'],
+                    },
+                  },
+                ]
+              : []),
           ], supercarTaskType) as Anthropic.Beta.BetaToolUnion[],
           betas,
           thinking: { type: 'adaptive' },
@@ -1318,6 +1467,163 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                 {
                   type: 'text',
                   text: `create_file: 写文件失败：${err instanceof Error ? err.message : String(err)}`,
+                },
+              ],
+              is_error: true,
+            });
+          }
+          continue;
+        }
+
+        // -------- Phase 23 Step 3 — `scrape_website` Apify tool --------
+        if (toolUse.name === 'scrape_website') {
+          if (!opts.apifyAdapter) {
+            // Defensive — the tool was exposed only when apifyAdapter
+            // is non-null, but guard in case the schema dispatch races
+            // a config reload.
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [{ type: 'text', text: 'scrape_website: apify adapter not configured' }],
+              is_error: true,
+            });
+            continue;
+          }
+          const inp = (toolUse.input as {
+            url?: string;
+            extractionPrompt?: string;
+          } | null) ?? {};
+          const url = typeof inp.url === 'string' ? inp.url.trim() : '';
+          if (!url || !/^https?:\/\//i.test(url)) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [{ type: 'text', text: 'scrape_website: url must be http(s) URL' }],
+              is_error: true,
+            });
+            continue;
+          }
+          logger.info(
+            { taskId: opts.taskId, iteration, url },
+            'supercar: scrape_website invoked',
+          );
+          try {
+            const result = await opts.apifyAdapter.run(APIFY_SCRAPE_WEBSITE_ACTOR, {
+              startUrls: [{ url }],
+              maxRequestsPerCrawl: 1,
+              maxResults: 1,
+              ...(inp.extractionPrompt ? { extractionPrompt: inp.extractionPrompt } : {}),
+            });
+            if ('error' in result) {
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolUse.id,
+                content: [{ type: 'text', text: `scrape_website: ${result.error}` }],
+                is_error: true,
+              });
+              continue;
+            }
+            toolsUsed.add('scrape_website');
+            const summary = formatScrapeWebsiteResult(result.items, url);
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [{ type: 'text', text: summary }],
+            });
+          } catch (err) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [
+                {
+                  type: 'text',
+                  text: `scrape_website: ${err instanceof Error ? err.message : String(err)}`,
+                },
+              ],
+              is_error: true,
+            });
+          }
+          continue;
+        }
+
+        // -------- Phase 23 Step 3 — `search_ecommerce` Apify tool --------
+        if (toolUse.name === 'search_ecommerce') {
+          if (!opts.apifyAdapter) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [{ type: 'text', text: 'search_ecommerce: apify adapter not configured' }],
+              is_error: true,
+            });
+            continue;
+          }
+          const inp = (toolUse.input as {
+            platform?: string;
+            query?: string;
+            maxResults?: number;
+          } | null) ?? {};
+          const platform = inp.platform as keyof typeof APIFY_ECOMMERCE_ACTORS | undefined;
+          const query = typeof inp.query === 'string' ? inp.query.trim() : '';
+          const maxResults = Math.min(Math.max(Number(inp.maxResults ?? 10) || 10, 1), 30);
+          if (!platform || !(platform in APIFY_ECOMMERCE_ACTORS)) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [
+                {
+                  type: 'text',
+                  text: `search_ecommerce: platform must be one of ${Object.keys(APIFY_ECOMMERCE_ACTORS).join(', ')}`,
+                },
+              ],
+              is_error: true,
+            });
+            continue;
+          }
+          if (!query) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [{ type: 'text', text: 'search_ecommerce: query is required' }],
+              is_error: true,
+            });
+            continue;
+          }
+          const actorId = APIFY_ECOMMERCE_ACTORS[platform];
+          logger.info(
+            { taskId: opts.taskId, iteration, platform, query, actorId },
+            'supercar: search_ecommerce invoked',
+          );
+          try {
+            const result = await opts.apifyAdapter.run(actorId, {
+              search: query,
+              query,
+              maxItems: maxResults,
+              maxResults,
+            });
+            if ('error' in result) {
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolUse.id,
+                content: [{ type: 'text', text: `search_ecommerce: ${result.error}` }],
+                is_error: true,
+              });
+              continue;
+            }
+            toolsUsed.add('search_ecommerce');
+            const summary = formatSearchEcommerceResult(result.items, platform, query);
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [{ type: 'text', text: summary }],
+            });
+          } catch (err) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [
+                {
+                  type: 'text',
+                  text: `search_ecommerce: ${err instanceof Error ? err.message : String(err)}`,
                 },
               ],
               is_error: true,
