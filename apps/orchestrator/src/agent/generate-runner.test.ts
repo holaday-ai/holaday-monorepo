@@ -149,7 +149,11 @@ describe('runGenerateTask (phase 22a)', () => {
   });
 
   describe('Empty response: no text blocks → failed', () => {
-    it('reports a friendly empty-response reason', async () => {
+    it('reports a friendly empty-response reason after retries are exhausted', async () => {
+      // Phase 24 RC follow-up — runGenerateTask now retries empty
+      // responses once before giving up. The mock client returns
+      // empty text on every call (so both attempts come back empty);
+      // outcome message reflects the post-retry exhaustion.
       const client = makeClient({ textOut: '' });
       const outcome = await runGenerateTask({
         taskId: 'tsk_empty',
@@ -159,7 +163,7 @@ describe('runGenerateTask (phase 22a)', () => {
         logger: makeLogger(),
       });
       expect(outcome.status).toBe('failed');
-      expect(outcome.reason).toMatch(/没有返回|empty/i);
+      expect(outcome.reason).toMatch(/没有返回|empty|空内容/i);
       expect(outcome.summary).toBe('');
     });
   });

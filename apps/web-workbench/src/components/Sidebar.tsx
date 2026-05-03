@@ -499,6 +499,11 @@ export function Sidebar({
                   还没有任务，发一条试试看
                 </div>
               )}
+              {/* Phase 24 RC follow-up — load-more pager so users can
+                  page past the first 50 tasks. Hidden until the first
+                  refresh sets tasksHasMore=true; once the cursor is
+                  exhausted the button hides itself again. */}
+              <LoadMoreTasksButton />
               {hiddenTaskCount > 0 && (
                 <RetentionHint
                   hiddenCount={hiddenTaskCount}
@@ -973,6 +978,29 @@ function TaskGroup({ title, children }: GroupProps): JSX.Element {
  * tells the user exactly what their cutoff is and what upgrading
  * would buy ("基础版可看 30 天 / 专业版可看 90 天").
  */
+/**
+ * Phase 24 RC follow-up — sidebar pager. Hidden when the first page
+ * already loaded everything (`tasksHasMore=false`). The button stays
+ * visible while loading so users can see progress; the store throttles
+ * concurrent calls via its `loadingMore` flag.
+ */
+function LoadMoreTasksButton(): JSX.Element | null {
+  const hasMore = useTaskStore((s) => s.tasksHasMore);
+  const loadingMore = useTaskStore((s) => s.loadingMore);
+  const loadMore = useTaskStore((s) => s.loadMoreTasks);
+  if (!hasMore) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => void loadMore()}
+      disabled={loadingMore}
+      className="mx-3 my-2 block w-[calc(100%-1.5rem)] rounded-md border border-black/[0.06] px-2 py-1.5 text-center text-xs text-muted-foreground hover:bg-muted/40 disabled:opacity-60"
+    >
+      {loadingMore ? '加载中…' : '加载更多任务'}
+    </button>
+  );
+}
+
 function RetentionHint({
   hiddenCount,
   historyDays,

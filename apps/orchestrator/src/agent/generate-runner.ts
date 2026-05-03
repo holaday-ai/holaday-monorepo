@@ -120,85 +120,114 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
     abortController.abort();
   }, timeoutMs);
 
-  try {
-    const res = await opts.client.messages.create(
+  // Phase 24 RC follow-up — empty-content retry. RC data showed
+  // 7/165 generate tasks landed an empty `text` block on the first
+  // call (model returned a server_tool_use without producing visible
+  // output). One retry usually resolves it. Bound at 2 attempts so
+  // a genuinely-stuck prompt fails fast instead of looping.
+  const MAX_ATTEMPTS = 2;
+  const requestArgs = {
+    model: opts.model ?? DEFAULT_MODEL,
+    max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
+    // Cache the system addon — when 100 tasks fire under the same
+    // role-id in a window, the role addon is a cache hit on every
+    // request after the first.
+    system: [{ type: 'text' as const, text: system, cache_control: { type: 'ephemeral' as const } }],
+    messages: [
       {
-        model: opts.model ?? DEFAULT_MODEL,
-        max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
-      // Cache the system addon — when 100 tasks fire under the same
-      // role-id in a window, the role addon is a cache hit on every
-      // request after the first.
-      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
-      messages: [
-        {
-          role: 'user',
-          content:
-            opts.attachments && opts.attachments.length > 0
-              ? ([
-                  ...opts.attachments,
-                  { type: 'text', text: opts.intent },
-                ] as unknown as never)
-              : opts.intent,
-        },
-      ],
-        // Allow but don't force web_search. Up to 5 server-side queries
-        // per turn. The model uses zero for "translate this" and a few
-        // for "give me a 2026 industry brief" — pay-per-use, not blocked.
-        tools: [
-          {
-            type: 'web_search_20260209',
-            name: 'web_search',
-            max_uses: 5,
-          } as unknown as never,
-        ],
+        role: 'user' as const,
+        content:
+          opts.attachments && opts.attachments.length > 0
+            ? ([
+                ...opts.attachments,
+                { type: 'text', text: opts.intent },
+              ] as unknown as never)
+            : opts.intent,
       },
-      { signal: abortController.signal },
-    );
+    ],
+    // Allow but don't force web_search. Up to 5 server-side queries
+    // per turn. The model uses zero for "translate this" and a few
+    // for "give me a 2026 industry brief" — pay-per-use, not blocked.
+    tools: [
+      {
+        type: 'web_search_20260209',
+        name: 'web_search',
+        max_uses: 5,
+      } as unknown as never,
+    ],
+  };
 
-    // Concatenate text blocks — anything that isn't text (server-tool-use
-    // results, etc.) gets dropped silently. Most generate tasks will
-    // just be one or two text blocks.
-    const summary = res.content
-      .map((b) => (b.type === 'text' ? b.text : ''))
-      .join('')
-      .trim();
+  let lastInputTokens = 0;
+  let lastOutputTokens = 0;
 
-    const inputTokens = res.usage?.input_tokens ?? 0;
-    const outputTokens = res.usage?.output_tokens ?? 0;
-    const durationMs = Date.now() - start;
+  try {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const res = await opts.client.messages.create(requestArgs, {
+        signal: abortController.signal,
+      });
 
-    if (!summary) {
+      // Concatenate text blocks — anything that isn't text (server-tool-use
+      // results, etc.) gets dropped silently. Most generate tasks will
+      // just be one or two text blocks.
+      const summary = res.content
+        .map((b) => (b.type === 'text' ? b.text : ''))
+        .join('')
+        .trim();
+
+      lastInputTokens = res.usage?.input_tokens ?? 0;
+      lastOutputTokens = res.usage?.output_tokens ?? 0;
+      const durationMs = Date.now() - start;
+
+      if (summary) {
+        if (attempt > 1) {
+          log.info(
+            { attempt, summaryLen: summary.length },
+            'generate: empty-response retry succeeded',
+          );
+        }
+        log.info(
+          {
+            stopReason: res.stop_reason,
+            inputTokens: lastInputTokens,
+            outputTokens: lastOutputTokens,
+            durationMs,
+            summaryLen: summary.length,
+            attempts: attempt,
+          },
+          'generate: completed',
+        );
+        return {
+          status: 'completed',
+          summary,
+          inputTokens: lastInputTokens,
+          outputTokens: lastOutputTokens,
+          durationMs,
+        };
+      }
+
+      // Empty — log + retry (or fall through to failure below).
       log.warn(
-        { stopReason: res.stop_reason, inputTokens, outputTokens, durationMs },
-        'generate: empty response',
+        {
+          attempt,
+          maxAttempts: MAX_ATTEMPTS,
+          stopReason: res.stop_reason,
+          inputTokens: lastInputTokens,
+          outputTokens: lastOutputTokens,
+          durationMs,
+        },
+        attempt < MAX_ATTEMPTS
+          ? 'generate: empty response — retrying'
+          : 'generate: empty response (final attempt, giving up)',
       );
-      return {
-        status: 'failed',
-        summary: '',
-        reason: 'AI 没有返回任何内容，请重试。',
-        inputTokens,
-        outputTokens,
-        durationMs,
-      };
     }
 
-    log.info(
-      {
-        stopReason: res.stop_reason,
-        inputTokens,
-        outputTokens,
-        durationMs,
-        summaryLen: summary.length,
-      },
-      'generate: completed',
-    );
-
     return {
-      status: 'completed',
-      summary,
-      inputTokens,
-      outputTokens,
-      durationMs,
+      status: 'failed',
+      summary: '',
+      reason: 'AI 连续两次返回空内容，请重试或简化任务。',
+      inputTokens: lastInputTokens,
+      outputTokens: lastOutputTokens,
+      durationMs: Date.now() - start,
     };
   } catch (err) {
     const isAbort =

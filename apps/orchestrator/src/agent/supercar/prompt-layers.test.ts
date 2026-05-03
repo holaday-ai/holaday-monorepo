@@ -82,20 +82,24 @@ describe('buildLayeredSystemPrompt', () => {
 });
 
 describe('selectModelAndEffort', () => {
-  it('simple-search no-role → Sonnet 4.6 medium', () => {
+  // Phase 24 RC follow-up: assertions updated for the three-tier
+  // cost-optimised matrix. simple → Haiku, complex → Sonnet xhigh
+  // (NOT Opus), default → Sonnet high. See
+  // prompt-layers.model-tier.test.ts for the new tier coverage.
+  it('simple-search no-role → Haiku 4.5 medium', () => {
     expect(selectModelAndEffort('对比京东淘宝 MacBook 价格', 'none')).toEqual({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-haiku-4-5',
       effort: 'medium',
     });
   });
 
-  it('complex specialist role → Opus 4.7 xhigh', () => {
+  it('complex specialist role → Sonnet 4.6 xhigh (was Opus)', () => {
     expect(selectModelAndEffort('PRD 文档撰写', 'product-manager')).toEqual({
-      model: 'claude-opus-4-7',
+      model: 'claude-sonnet-4-6',
       effort: 'xhigh',
     });
     expect(selectModelAndEffort('合同审查', 'contract-reviewer')).toEqual({
-      model: 'claude-opus-4-7',
+      model: 'claude-sonnet-4-6',
       effort: 'xhigh',
     });
   });
@@ -107,17 +111,17 @@ describe('selectModelAndEffort', () => {
     });
   });
 
-  it('xhigh is only paired with Opus 4.7', () => {
-    // Pure invariant — never xhigh on Sonnet.
+  it('xhigh is only paired with Sonnet 4.6 (Opus retired from auto-routing)', () => {
     const cases: Array<[string, string]> = [
       ['none', '查天气'],
       ['xiaohongshu-operator', '写小红书笔记'],
       ['content-creator', '写文案'],
+      ['product-manager', '深度调研'],
     ];
     for (const [role, intent] of cases) {
       const r = selectModelAndEffort(intent, role);
       if (r.effort === 'xhigh') {
-        expect(r.model).toBe('claude-opus-4-7');
+        expect(r.model).toBe('claude-sonnet-4-6');
       }
     }
   });

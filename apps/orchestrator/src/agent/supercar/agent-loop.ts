@@ -844,11 +844,51 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
 
   // Initial observation — the model needs to see the current page to
   // ground its first action.
-  const initialShot = await executor.screenshot(page);
-  if (initialShot.error || !initialShot.base64) {
+  //
+  // Phase 24 RC follow-up — wrap in a small retry loop. RC data
+  // showed 36/165 tasks died here on a transient "Target page,
+  // context or browser has been closed" right after pool.allocate;
+  // a single retry usually clears it (Brave is still finishing
+  // hydration at the moment the agent first asks for a frame).
+  // 3 attempts × 2s gap = at most 6s of admit latency before we
+  // declare the slot unhealthy and fail the task.
+  const SCREENSHOT_MAX_ATTEMPTS = 3;
+  const SCREENSHOT_RETRY_GAP_MS = 2_000;
+  let initialShot: Awaited<ReturnType<typeof executor.screenshot>> | null = null;
+  for (let attempt = 1; attempt <= SCREENSHOT_MAX_ATTEMPTS; attempt++) {
+    const shot = await executor.screenshot(page);
+    if (!shot.error && shot.base64) {
+      if (attempt > 1) {
+        logger.info(
+          { taskId: opts.taskId, attempt },
+          'supercar: initial screenshot ok after retry',
+        );
+      }
+      initialShot = shot;
+      break;
+    }
+    logger.warn(
+      { taskId: opts.taskId, attempt, max: SCREENSHOT_MAX_ATTEMPTS, err: shot.error },
+      'supercar: initial screenshot attempt failed',
+    );
+    if (attempt < SCREENSHOT_MAX_ATTEMPTS) {
+      await new Promise<void>((resolve) => setTimeout(resolve, SCREENSHOT_RETRY_GAP_MS));
+      // Re-read the page in case the executor has swapped (Phase 6-2
+      // headed/headless lane swap, Phase 24 reset-for-task path).
+      try {
+        page = (await executor.getPage()) as unknown as PageLike;
+      } catch (err) {
+        logger.warn(
+          { taskId: opts.taskId, err: err instanceof Error ? err.message : String(err) },
+          'supercar: getPage between screenshot retries failed — continuing',
+        );
+      }
+    }
+  }
+  if (!initialShot || initialShot.error || !initialShot.base64) {
     return {
       status: 'failed',
-      reason: `initial screenshot failed: ${initialShot.error ?? 'unknown'}`,
+      reason: `initial screenshot failed after ${SCREENSHOT_MAX_ATTEMPTS} attempts: ${initialShot?.error ?? 'unknown'}`,
       iterations: 0,
       toolsUsed: [],
     };
@@ -2198,6 +2238,37 @@ interface ActionResult {
  *   - `key` / `hold_key` actions receive the key string in `input.text`
  *     per the Anthropic schema, with a `key` fallback just in case.
  */
+/**
+ * Phase 24 RC follow-up — strict coordinate validation.
+ *
+ * RC data showed 4/165 tasks crashed because the model emitted a
+ * malformed coordinate (string-typed numbers, NaN from over-eager
+ * arithmetic, or a single-element tuple). Truthy-only checks like
+ * `if (!input.coordinate)` accepted those and let them flow into
+ * page.mouse.click(NaN, NaN). Validate the shape AND the values
+ * before dispatch — a clean { ok: false } result tells the agent
+ * the coordinate was bad and it can re-observe + retry on the next
+ * tick. Coords must be a 2-element tuple of finite non-negative
+ * numbers; max 50000 catches absurd values from stale viewport
+ * arithmetic without rejecting any plausible 4K screen layout.
+ */
+function validateCoordinate(c: unknown): { ok: true; x: number; y: number } | { ok: false; reason: string } {
+  if (!Array.isArray(c)) return { ok: false, reason: 'not an array' };
+  if (c.length !== 2) return { ok: false, reason: `length ${c.length} (expected 2)` };
+  const x = c[0];
+  const y = c[1];
+  if (typeof x !== 'number' || typeof y !== 'number') {
+    return { ok: false, reason: `non-number entries (got ${typeof x},${typeof y})` };
+  }
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return { ok: false, reason: `non-finite (NaN/Infinity)` };
+  }
+  if (x < 0 || y < 0 || x > 50_000 || y > 50_000) {
+    return { ok: false, reason: `out of range (${x},${y})` };
+  }
+  return { ok: true, x, y };
+}
+
 async function executeComputerAction(
   executor: PlaywrightExecutor,
   input: ComputerActionInput,
@@ -2214,10 +2285,11 @@ async function executeComputerAction(
       case 'left_click':
       case 'right_click':
       case 'middle_click': {
-        if (!input.coordinate) return { ok: false, summary: `${action} without coordinate` };
+        const c = validateCoordinate(input.coordinate);
+        if (!c.ok) return { ok: false, summary: `${action}: invalid coordinate (${c.reason})` };
         const button: 'left' | 'right' | 'middle' =
           action === 'left_click' ? 'left' : action === 'right_click' ? 'right' : 'middle';
-        const [x, y] = input.coordinate;
+        const { x, y } = c;
         // Modifier-key click (`text` carries "shift" / "ctrl" / "alt" /
         // "super"). Route through page.keyboard.down + click + up so we
         // don't need a new executor method.
@@ -2237,8 +2309,9 @@ async function executeComputerAction(
       }
 
       case 'double_click': {
-        if (!input.coordinate) return { ok: false, summary: 'double_click without coordinate' };
-        const [x, y] = input.coordinate;
+        const c = validateCoordinate(input.coordinate);
+        if (!c.ok) return { ok: false, summary: `double_click: invalid coordinate (${c.reason})` };
+        const { x, y } = c;
         const r1 = await executor.click(page, x, y, 'left');
         if (!r1.ok) return { ok: false, summary: r1.message ?? 'double_click failed' };
         const r2 = await executor.click(page, x, y, 'left');
@@ -2246,8 +2319,9 @@ async function executeComputerAction(
       }
 
       case 'triple_click': {
-        if (!input.coordinate) return { ok: false, summary: 'triple_click without coordinate' };
-        const [x, y] = input.coordinate;
+        const c = validateCoordinate(input.coordinate);
+        if (!c.ok) return { ok: false, summary: `triple_click: invalid coordinate (${c.reason})` };
+        const { x, y } = c;
         for (let i = 0; i < 3; i++) {
           const r = await executor.click(page, x, y, 'left');
           if (!r.ok) return { ok: false, summary: r.message ?? 'triple_click failed' };
@@ -2284,9 +2358,10 @@ async function executeComputerAction(
       }
 
       case 'mouse_move': {
-        if (!input.coordinate) return { ok: false, summary: 'mouse_move without coordinate' };
-        await page.mouse.move(input.coordinate[0], input.coordinate[1]);
-        return { ok: true, summary: `mouse_move(${input.coordinate[0]},${input.coordinate[1]})` };
+        const c = validateCoordinate(input.coordinate);
+        if (!c.ok) return { ok: false, summary: `mouse_move: invalid coordinate (${c.reason})` };
+        await page.mouse.move(c.x, c.y);
+        return { ok: true, summary: `mouse_move(${c.x},${c.y})` };
       }
 
       case 'left_mouse_down':
@@ -2294,24 +2369,33 @@ async function executeComputerAction(
         const anyPage = page as unknown as {
           mouse: { down: () => Promise<void>; up: () => Promise<void>; move: (x: number, y: number) => Promise<void> };
         };
-        if (input.coordinate) await anyPage.mouse.move(input.coordinate[0], input.coordinate[1]);
+        if (input.coordinate !== undefined) {
+          const c = validateCoordinate(input.coordinate);
+          if (!c.ok) return { ok: false, summary: `${action}: invalid coordinate (${c.reason})` };
+          await anyPage.mouse.move(c.x, c.y);
+        }
         if (action === 'left_mouse_down') await anyPage.mouse.down();
         else await anyPage.mouse.up();
         return { ok: true, summary: action };
       }
 
       case 'left_click_drag': {
-        if (!input.start_coordinate || !input.coordinate) {
-          return { ok: false, summary: 'left_click_drag without start + end coordinates' };
+        const start = validateCoordinate(input.start_coordinate);
+        if (!start.ok) {
+          return { ok: false, summary: `left_click_drag: invalid start_coordinate (${start.reason})` };
+        }
+        const end = validateCoordinate(input.coordinate);
+        if (!end.ok) {
+          return { ok: false, summary: `left_click_drag: invalid coordinate (${end.reason})` };
         }
         const anyPage = page as unknown as {
           mouse: { down: () => Promise<void>; up: () => Promise<void>; move: (x: number, y: number) => Promise<void> };
         };
-        await anyPage.mouse.move(input.start_coordinate[0], input.start_coordinate[1]);
+        await anyPage.mouse.move(start.x, start.y);
         await anyPage.mouse.down();
-        await anyPage.mouse.move(input.coordinate[0], input.coordinate[1]);
+        await anyPage.mouse.move(end.x, end.y);
         await anyPage.mouse.up();
-        return { ok: true, summary: `drag ${input.start_coordinate.join(',')}→${input.coordinate.join(',')}` };
+        return { ok: true, summary: `drag (${start.x},${start.y})→(${end.x},${end.y})` };
       }
 
       case 'scroll': {

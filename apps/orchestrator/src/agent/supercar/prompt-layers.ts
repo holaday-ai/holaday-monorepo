@@ -371,19 +371,58 @@ const COMPLEX_ROLES = new Set([
 ]);
 
 /**
- * Pick model + effort. The matrix:
- *   - Simple search w/ no specialised role → Sonnet 4.6 medium
- *     (Brave usually short-circuits before this anyway)
- *   - Complex specialist role               → Opus 4.7 xhigh
- *   - Default                               → Sonnet 4.6 high
+ * Phase 24 RC follow-up — three-tier cost-optimised matrix:
+ *
+ *   simple  → Haiku 4.5 medium      (translation / glossary / SOP /
+ *                                    single-sentence query)
+ *   medium  → Sonnet 4.6 high       (default — analysis reports,
+ *                                    proposals, competitive teardowns)
+ *   complex → Sonnet 4.6 xhigh      (multi-step research, cross-domain
+ *                                    synthesis, COMPLEX_ROLES)
+ *
+ * Opus is no longer auto-routed. RC cost data showed it cost ~5×
+ * Sonnet xhigh per output token without a quality lift on our task
+ * mix; budget pressure won out. Keyword-only — no extra Anthropic
+ * call. `selectModelAndEffort` stays a pure function.
+ *
+ * Precedence: COMPLEX wins over SIMPLE wins over default. A prompt
+ * mentioning both "翻译" and "跨领域综合分析" goes complex (Sonnet
+ * xhigh) — the complex tag implies the more expensive ceiling is
+ * worth it.
  */
+const SIMPLE_KEYWORDS: readonly string[] = [
+  '翻译', '术语表', '一句话', '简单查询', '单一查询',
+  'sop', '标准操作流程',
+  'translate ', 'translate.', 'glossary',
+];
+
+const COMPLEX_KEYWORDS: readonly string[] = [
+  '多步骤', '跨领域', '综合分析', '深度研究', '深度调研',
+  '全面调研', '系统性分析', '战略研究',
+];
+
+function hasAny(intent: string, keywords: readonly string[]): boolean {
+  const lower = intent.toLowerCase();
+  for (const kw of keywords) {
+    if (lower.includes(kw)) return true;
+  }
+  return false;
+}
+
 export function selectModelAndEffort(intent: string, roleId: string): ModelChoice {
-  if (roleId === 'none' && classifyAsSimpleSearch(intent)) {
-    return { model: 'claude-sonnet-4-6', effort: 'medium' };
+  // Complex wins first — preserves "specialist role + simple-keyword
+  // prompt" routing to xhigh (a financial-forecaster asking for a
+  // quick calc still benefits from the higher reasoning budget).
+  if (COMPLEX_ROLES.has(roleId) || hasAny(intent, COMPLEX_KEYWORDS)) {
+    return { model: 'claude-sonnet-4-6', effort: 'xhigh' };
   }
-  if (COMPLEX_ROLES.has(roleId)) {
-    return { model: 'claude-opus-4-7', effort: 'xhigh' };
+  // Simple — Haiku is enough for translation / glossary / SOP /
+  // single-sentence queries. Massive cost saving when the daily
+  // task mix is predominantly these.
+  if (hasAny(intent, SIMPLE_KEYWORDS) || (roleId === 'none' && classifyAsSimpleSearch(intent))) {
+    return { model: 'claude-haiku-4-5', effort: 'medium' };
   }
+  // Default — Sonnet at high reasoning budget.
   return { model: 'claude-sonnet-4-6', effort: 'high' };
 }
 

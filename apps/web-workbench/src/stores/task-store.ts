@@ -72,6 +72,19 @@ export interface TaskStore {
 
   setSelectedTask(taskId: string | null): void;
   refreshTasks(): Promise<void>;
+  /**
+   * Phase 24 RC follow-up — older tasks beyond the first page. Cursor
+   * comes from the previous page's `nextCursor`; null means no more
+   * pages. The store appends to `tasks` and stops setting
+   * `tasksHasMore` once the server returns null.
+   */
+  loadMoreTasks(): Promise<void>;
+  /** Cursor for the NEXT page (server returns this as nextCursor). */
+  tasksCursor: number | null;
+  /** False once the server reports no more pages. */
+  tasksHasMore: boolean;
+  /** Loading flag specific to the load-more action (so the button can spin without re-blanking the list). */
+  loadingMore: boolean;
   /** Phase 16 — toggle the starred flag on a task. Optimistic. */
   toggleStarred(taskId: string): Promise<void>;
   /**
@@ -105,6 +118,10 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   selectedTaskId: null,
   loading: false,
   error: null,
+  // Phase 24 RC follow-up — pagination state.
+  tasksCursor: null,
+  tasksHasMore: false,
+  loadingMore: false,
   stepsByTask: {},
   screencastByTask: {},
   captchaWaitByTask: {},
@@ -227,6 +244,10 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       set((prev) => ({
         tasks,
         loading: false,
+        // Phase 24 RC follow-up — track cursor so 'load more' picks
+        // up from where the first page ended.
+        tasksCursor: res.nextCursor ?? null,
+        tasksHasMore: res.nextCursor != null,
         // keep the current selection if it still exists; otherwise pick the newest.
         selectedTaskId:
           prev.selectedTaskId && tasks.some((t) => t.taskId === prev.selectedTaskId)
@@ -235,6 +256,37 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       }));
     } catch (err) {
       set({ loading: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+
+  async loadMoreTasks() {
+    const { tasksCursor, tasksHasMore, loadingMore } = get();
+    if (loadingMore) return;
+    if (!tasksHasMore || tasksCursor == null) return;
+    set({ loadingMore: true });
+    try {
+      const res = await trpc.tasks.list.query({ limit: 50, cursor: tasksCursor });
+      const moreTasks: UiTask[] = res.tasks.map(toUiTask);
+      set((prev) => {
+        // De-dupe defensively in case a row landed on both pages
+        // (e.g. a task whose id equals the cursor boundary). Last
+        // write wins so the freshly-fetched row replaces the stale.
+        const seen = new Set<string>();
+        const merged: UiTask[] = [];
+        for (const t of [...prev.tasks, ...moreTasks]) {
+          if (seen.has(t.taskId)) continue;
+          seen.add(t.taskId);
+          merged.push(t);
+        }
+        return {
+          tasks: merged,
+          loadingMore: false,
+          tasksCursor: res.nextCursor ?? null,
+          tasksHasMore: res.nextCursor != null,
+        };
+      });
+    } catch (err) {
+      set({ loadingMore: false, error: err instanceof Error ? err.message : String(err) });
     }
   },
 
@@ -684,6 +736,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       selectedTaskId: null,
       loading: false,
       error: null,
+      tasksCursor: null,
+      tasksHasMore: false,
+      loadingMore: false,
       stepsByTask: {},
       screencastByTask: {},
       captchaWaitByTask: {},

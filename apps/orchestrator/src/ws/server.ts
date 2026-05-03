@@ -744,13 +744,10 @@ export async function dispatchVisionActionToSW(
       'must run on per-task pool Brave only (P0 safety guard).',
   );
 }
-function firstConnectedClient(userId: string): ClientState | null {
-  const set = clientsByUser.get(userId);
-  if (!set || set.size === 0) return null;
-  // Iterator-first; Phase B will pick by last-heartbeat freshness.
-  for (const c of set) return c;
-  return null;
-}
+// firstConnectedClient was the per-user "pick a client to drive"
+// helper used by the now-disabled extension-WS task path. P0 hotfix
+// removed its callers; the function itself is gone too rather than
+// kept as orphan code that could be re-attached by mistake.
 
 /**
  * Layer 5 — does `userId` have at least one authed WS client with an

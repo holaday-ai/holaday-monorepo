@@ -1,76 +1,77 @@
 /**
- * Phase 21a — task execution-mode classifier.
+ * Phase 24 RC follow-up — task execution-mode classifier.
  *
- * Decides whether a user's task should be routed to the browser
- * pool ('browser') or run as a pure-generation Anthropic call
- * ('generate'). Called from tasks.create BEFORE pool.allocate so a
- * 'generate' classification skips the per-user browser slot
- * entirely — that slot is a heavy quartet (Xvfb + Brave + x11vnc +
- * websockify) and spinning one up for "翻译这段" or "写一份方案"
- * is wasted resources.
+ * Routes a user's task to one of two backends:
+ *   - 'generate' — single Anthropic call, no browser slot, no Brave.
+ *     Pure text generation / analysis / translation work.
+ *   - 'browser'  — full per-task BrowserPool dispatch, agent loop,
+ *     screencast surface. The expensive path.
  *
- * Uses Haiku for the classification: cheap (~$0.0001 per call,
- * <500ms), and the decision is binary so we don't need Sonnet's
- * nuance. Result is cached in an in-memory LRU keyed on the trimmed
- * lower-cased intent — same intent within process lifetime returns
- * instantly.
+ * RC data showed 72/165 timeouts were generate tasks routed to the
+ * 10-slot pool. Default flipped from 'browser' → 'generate'. The
+ * browser path is now opt-in: only intents that *plausibly need a
+ * live page* trigger it.
  *
- * Phase 21a scope note: the 'generate' return value currently only
- * skips the per-user pool slot. The agent loop still gets a
- * singleton-headless executor as fallback (same as today's
- * pool-overflow behaviour), so pure-generation tasks still nominally
- * have a browser available. Full no-browser path (single Anthropic
- * call with web_search only, no executor at all) is phase 21b.
+ * Browser triggers (any single match wins):
+ *   1. Explicit URL — http://, https://, or www-prefixed bare host.
+ *   2. Browser-action verb — 搜索/查找/打开/登录/操作/下单/比价/
+ *      抓取/截图/填表/访问/下载, plus English equivalents.
+ *   3. Named site — 京东/淘宝/小红书/知乎/微博/B站/GitHub/LinkedIn
+ *      etc. (the live-page-only platforms users typically reference
+ *      by name).
+ *
+ * No Anthropic call. RC-era classifier called Haiku as a tiebreaker
+ * which (a) cost ~$0.0001 × 165 = trivial but non-zero per RC run
+ * and (b) added 200-500ms of admit latency to every task. Pure
+ * keyword routing is deterministic, free, and reflects intent
+ * accurately enough — borderline cases land on `generate`, which is
+ * cheap to fix in-context.
+ *
+ * Skill hints still short-circuit when the skill is unambiguous —
+ * a content-creator role is generate even if the user's prompt
+ * mentions 知乎; a xiaohongshu skill is browser even on a
+ * generate-leaning prompt.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from 'pino';
 
 export type ExecutionMode = 'browser' | 'generate';
 
-const PROMPT = `Classify this user task into ONE of two modes. Respond with ONLY the literal string "browser" or "generate", nothing else.
-
-- "browser": the task asks the agent to open a website, search a real-world site, fill a form, click, scroll, screenshot, or otherwise interact with a live page. Examples: "去京东查 iPhone 16 价格", "在小红书搜爆款笔记", "打开 google 搜...", "去 LinkedIn 找深圳的 PM".
-
-- "generate": the task is pure text generation, analysis, translation, planning, summarization, code review, or fictional writing — no live web interaction needed. Examples: "翻译这段话", "写一份产品方案", "把这份 PDF 整理成表格", "起一个产品名".
-
-Default to "browser" if the task plausibly needs current/real-time data the model can't have memorized.
-
-Task: """`;
-
-const PROMPT_SUFFIX = '"""';
-
 interface CacheEntry {
   mode: ExecutionMode;
+  source: string;
   at: number;
 }
 
-/** Process-lifetime cache. Cap is small (200) — the cost of a
- *  classifier miss is ~$0.0001 + 500ms, so we don't need a giant
- *  cache. LRU semantics via Map insertion order. */
+/**
+ * Process-lifetime cache. Keyword pass is already <1ms — the cache
+ * is mostly here so the structured log line for each task captures
+ * a stable `source` value across re-classifications of the same
+ * intent (e.g. retries).
+ */
 const CACHE = new Map<string, CacheEntry>();
-const CACHE_MAX = 200;
-const CACHE_TTL_MS = 60 * 60 * 1_000; // 1 hour
+const CACHE_MAX = 500;
+const CACHE_TTL_MS = 60 * 60 * 1_000;
 
 function cacheKey(intent: string): string {
   return intent.trim().toLowerCase().slice(0, 280);
 }
 
-function cacheGet(key: string): ExecutionMode | null {
+function cacheGet(key: string): CacheEntry | null {
   const entry = CACHE.get(key);
   if (!entry) return null;
   if (Date.now() - entry.at > CACHE_TTL_MS) {
     CACHE.delete(key);
     return null;
   }
-  // Refresh LRU position
   CACHE.delete(key);
   CACHE.set(key, entry);
-  return entry.mode;
+  return entry;
 }
 
-function cacheSet(key: string, mode: ExecutionMode): void {
-  CACHE.set(key, { mode, at: Date.now() });
+function cacheSet(key: string, mode: ExecutionMode, source: string): void {
+  CACHE.set(key, { mode, source, at: Date.now() });
   while (CACHE.size > CACHE_MAX) {
     const oldest = CACHE.keys().next().value;
     if (oldest) CACHE.delete(oldest);
@@ -83,65 +84,62 @@ export interface ClassifyOpts {
   /**
    * Optional explicit skill id chosen by the user. When the skill id
    * is in our hardcoded "obviously generate-leaning" or "obviously
-   * browser-leaning" set, we short-circuit without the Haiku call.
-   * Ambiguous skills (financial_analyst, product_manager, etc.) fall
-   * through to the keyword pass and Haiku.
+   * browser-leaning" set, we short-circuit before keyword scanning.
+   * Ambiguous skills (financial-analyst, product-manager, etc.) fall
+   * through.
    */
   skillId?: string;
   /** Per-task logger (already child-tagged). */
   logger: Logger;
-  /** Override Anthropic client. Tests + null-key environments. */
+  /**
+   * Accepted for backwards compatibility with the pre-RC Haiku-call
+   * signature. NOT invoked — the classifier is now keyword-only and
+   * never makes an API call. Kept so existing call sites compile
+   * without churn.
+   */
   client?: Anthropic | null;
-  /** Override model — defaults to Haiku 4.5 family. */
+  /** Accepted for backwards compatibility — unused. */
   model?: string;
-  /** Hard ceiling so a stalled API call can't block task creation. */
+  /** Accepted for backwards compatibility — unused. */
   timeoutMs?: number;
 }
 
-const DEFAULT_MODEL = 'claude-haiku-4-5';
-const DEFAULT_TIMEOUT_MS = 4_000;
-
 /**
- * Phase 21b — keyword fast paths. Both lists are checked first; if
- * the intent contains a marker from exactly one list, we return that
- * mode immediately without calling Haiku. Mixed (markers from both)
- * or no-match falls through to Haiku.
- *
- * Lists are intentionally short. False positives are worse than
- * misses — if an intent is ambiguous we want the LLM's judgment.
+ * Browser-action verbs. Substring match (case-insensitive) on the
+ * intent text. Conservative list: a verb here means "the agent is
+ * being asked to do something on a live web page". Words that LOOK
+ * action-y but commonly appear in generate-only prompts (e.g.
+ * "分析" / "总结" / "整理") are NOT in this list — they don't imply
+ * live web interaction.
  */
-const BROWSER_KEYWORDS: readonly string[] = [
-  // Verbs — explicit browser actions
-  '打开', '访问', '登录', '下载', '比价', '抓取', '截图', '填表', '操作页面',
-  'open ', 'visit ', 'log in', 'log into', 'sign in', 'download',
-  // Sites — Chinese-market platforms (case-insensitive substring)
-  '小红书', '淘宝', '天猫', '京东', '拼多多', '抖音', 'bilibili', 'b站',
-  '携程', '飞猪', '美团', '大众点评', '高德', '百度地图',
-  '微博', '知乎', '豆瓣', '虎扑',
-  // Sites — international
-  'github', 'linkedin', 'amazon', 'shopify', 'twitter', 'reddit',
-  'youtube', 'instagram', 'tiktok',
-  // Phrases that imply the agent must SEE current page state
-  '搜索 google', '在 google', 'on google',
+const BROWSER_VERBS: readonly string[] = [
+  '搜索', '查找', '打开', '访问', '登录', '操作', '下单', '比价',
+  '抓取', '截图', '填表', '下载', '点击', '滑动',
+  // English
+  'open ', 'visit ', 'log in', 'log into', 'sign in', 'sign into',
+  'download', 'click ', 'navigate to',
 ];
 
-const GENERATE_KEYWORDS: readonly string[] = [
-  // Verbs — pure generation
-  '写一份', '写一段', '写一篇', '写个方案', '写文案', '设计方案',
-  '翻译', '总结', '提炼', '改写', '润色', '校对',
-  '制定计划', '出方案', '出报告', '输出简报', '撰写', '起草',
-  '审查合同', '审查条款', '设计 sop', '设计sop', '建立模型', '建模',
-  '做预测', '做分析', '估算', '推算', '复盘',
-  '起一个名字', '起几个名字', '起名',
-  'translate', 'summarize', 'summarise', 'draft a', 'write a ',
-  'write me', 'review the contract', 'analyze ',
+/**
+ * Named sites. Substring match (case-insensitive). Mentioning one
+ * of these by name is a strong signal the user wants the agent to
+ * visit that platform — e.g. "京东最近什么手机促销" implies looking
+ * at jd.com, not summarising from training data.
+ */
+const BROWSER_SITES: readonly string[] = [
+  // Chinese-market platforms
+  '小红书', '淘宝', '天猫', '京东', '拼多多', '抖音', 'bilibili', 'b站',
+  '携程', '飞猪', '美团', '大众点评', '高德', '百度地图',
+  '微博', '知乎', '豆瓣', '虎扑', 'boss直聘', '拉勾',
+  // International
+  'github', 'linkedin', 'amazon', 'shopify', 'twitter', 'reddit',
+  'youtube', 'instagram', 'tiktok', 'gmail', 'producthunt',
 ];
 
 /**
  * Skill-id → mode hints. Only listed when the skill is unambiguous.
- * Skills that could go either way (data-analyst, financial_analyst,
- * trend-researcher, etc.) are absent here and fall through to the
- * keyword + Haiku pass.
+ * Skills that could go either way (data-analyst, financial-analyst,
+ * etc.) are absent and fall through to the keyword pass.
  */
 const SKILL_HINTS: ReadonlyMap<string, ExecutionMode> = new Map([
   // Generate-leaning (text/analysis/translation work)
@@ -167,45 +165,73 @@ const SKILL_HINTS: ReadonlyMap<string, ExecutionMode> = new Map([
   ['social-media-strategist', 'browser'],
 ]);
 
-function keywordPass(intent: string): ExecutionMode | null {
+/**
+ * Loose URL match. Triggers on http://, https://, or a www-prefixed
+ * bare host. Bare hosts WITHOUT www (e.g. "看一下 zhihu.com") are
+ * NOT matched here — those land on the named-site list if they're
+ * common platforms, or on a verb match if the user said "打开 X.com",
+ * or fall to generate (model often answers them from training data
+ * better than the agent stack does).
+ */
+const URL_REGEX = /\b(?:https?:\/\/|www\.)\S+/i;
+
+interface KeywordHit {
+  source: 'url' | 'verb' | 'site';
+  match: string;
+}
+
+function scanForBrowserSignal(intent: string): KeywordHit | null {
+  if (URL_REGEX.test(intent)) {
+    const m = intent.match(URL_REGEX);
+    return { source: 'url', match: m ? m[0].slice(0, 64) : 'url' };
+  }
   const lower = intent.toLowerCase();
-  const browserHit = BROWSER_KEYWORDS.some((kw) => lower.includes(kw));
-  const generateHit = GENERATE_KEYWORDS.some((kw) => lower.includes(kw));
-  if (browserHit && !generateHit) return 'browser';
-  if (generateHit && !browserHit) return 'generate';
+  for (const verb of BROWSER_VERBS) {
+    if (lower.includes(verb)) return { source: 'verb', match: verb.trim() };
+  }
+  for (const site of BROWSER_SITES) {
+    if (lower.includes(site)) return { source: 'site', match: site };
+  }
   return null;
 }
 
 /**
- * Classify a task intent. Returns 'browser' or 'generate'. Defaults
- * to 'browser' on any failure (network error, parse error, timeout)
- * — the browser lane is the safe fallback because every browser
- * task can also be answered by the model alone, but the reverse
- * isn't true.
+ * Classify a task intent into 'browser' or 'generate'. Synchronous
+ * in spirit (no I/O), but kept async for signature compatibility
+ * with the previous Haiku-backed implementation — call sites that
+ * `await` it remain unchanged.
  *
  * Decision order:
- *   1. Empty intent → 'browser' (defensive)
- *   2. LRU cache → previous decision for this intent
- *   3. Skill hint → unambiguous skill ids return their mapped mode
- *   4. Keyword fast-path → exclusive marker hit returns its mode
- *   5. Haiku call → final tiebreaker
+ *   1. Empty intent → 'generate' (default).
+ *   2. Cache hit → previous decision for this intent.
+ *   3. Skill hint → unambiguous skill ids return their mapped mode.
+ *   4. Keyword pass — URL / verb / site hit → 'browser'.
+ *   5. Otherwise → 'generate'.
  */
 export async function classifyExecutionMode(opts: ClassifyOpts): Promise<ExecutionMode> {
   const intent = opts.intent.trim();
-  if (!intent) return 'browser';
+  if (!intent) {
+    opts.logger.info(
+      { mode: 'generate', source: 'empty-intent' },
+      'intent-classifier: decided',
+    );
+    return 'generate';
+  }
 
   const key = cacheKey(intent);
   const cached = cacheGet(key);
   if (cached) {
-    opts.logger.debug({ mode: cached, cache: 'hit' }, 'intent-classifier: cache hit');
-    return cached;
+    opts.logger.info(
+      { mode: cached.mode, source: cached.source, cache: 'hit' },
+      'intent-classifier: decided',
+    );
+    return cached.mode;
   }
 
-  // Skill-hint short-circuit
   if (opts.skillId) {
     const hinted = SKILL_HINTS.get(opts.skillId);
     if (hinted) {
-      cacheSet(key, hinted);
+      cacheSet(key, hinted, `skill:${opts.skillId}`);
       opts.logger.info(
         { mode: hinted, source: 'skill-hint', skillId: opts.skillId },
         'intent-classifier: decided',
@@ -214,55 +240,21 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
     }
   }
 
-  // Keyword fast-path
-  const kw = keywordPass(intent);
-  if (kw) {
-    cacheSet(key, kw);
+  const hit = scanForBrowserSignal(intent);
+  if (hit) {
+    cacheSet(key, 'browser', `kw:${hit.source}`);
     opts.logger.info(
-      { mode: kw, source: 'keyword' },
+      { mode: 'browser', source: `kw:${hit.source}`, match: hit.match },
       'intent-classifier: decided',
-    );
-    return kw;
-  }
-
-  const client = opts.client ?? new Anthropic();
-  const model = opts.model ?? DEFAULT_MODEL;
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-
-  const ac = new AbortController();
-  const tt = setTimeout(() => ac.abort(), timeoutMs);
-
-  try {
-    const res = await client.messages.create(
-      {
-        model,
-        max_tokens: 8,
-        messages: [{ role: 'user', content: `${PROMPT}${intent}${PROMPT_SUFFIX}` }],
-      },
-      { signal: ac.signal },
-    );
-    clearTimeout(tt);
-    // Extract text from content blocks. The SDK's TextBlock type
-    // carries citations + other fields we don't care about; safer to
-    // narrow with a runtime check than to fight the type predicate.
-    const text = res.content
-      .map((b) => (b.type === 'text' ? b.text : ''))
-      .join('')
-      .toLowerCase()
-      .trim();
-    const mode: ExecutionMode = text.startsWith('generate') ? 'generate' : 'browser';
-    cacheSet(key, mode);
-    opts.logger.info(
-      { mode, raw: text.slice(0, 32), inputTokens: res.usage?.input_tokens, outputTokens: res.usage?.output_tokens },
-      'intent-classifier: decided',
-    );
-    return mode;
-  } catch (err) {
-    clearTimeout(tt);
-    opts.logger.warn(
-      { err: err instanceof Error ? err.message : String(err) },
-      'intent-classifier: failed — defaulting to browser',
     );
     return 'browser';
   }
+
+  // Default — no browser signal found.
+  cacheSet(key, 'generate', 'default');
+  opts.logger.info(
+    { mode: 'generate', source: 'default' },
+    'intent-classifier: decided',
+  );
+  return 'generate';
 }
