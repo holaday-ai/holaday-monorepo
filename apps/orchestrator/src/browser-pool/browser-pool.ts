@@ -78,6 +78,17 @@ export class BrowserPool {
   private readonly allocator: SlotAllocator;
   /** De-dupe concurrent allocate() calls for the same userId. */
   private readonly inFlight = new Map<string, InFlightAllocation>();
+  /**
+   * Phase 22a follow-up — per-user reference count. Incremented on
+   * each allocate() (including the idempotent "return existing" path),
+   * decremented by releaseRef(). The actual teardown only happens
+   * when the count hits 0. This preserves the per-user-shared-Brave
+   * design when a single user has many concurrent tasks (15 tasks
+   * for one userId share one Brave) while still letting tasks.ts
+   * proactively signal "I'm done with this slot" for prompt cleanup
+   * once everyone's done.
+   */
+  private readonly refCounts = new Map<string, number>();
   private gcTimer: NodeJS.Timeout | null = null;
   private shuttingDown = false;
 
@@ -94,15 +105,29 @@ export class BrowserPool {
    * — concurrent callers racing on the same userId will all resolve to
    * the same instance. A newly-returned instance has status='ready'
    * and its CDP port is reachable.
+   *
+   * `trackRef` controls whether this allocate counts toward the
+   * per-user refcount (which gates teardown — see releaseRef).
+   * Set true at task-admit sites (tasks.ts) so each pending task
+   * holds a reference until its runFn .finally calls releaseRef.
+   * Set false (default) at "I just want a handle" sites like
+   * tasks.wakeBrowser or screencast-proxy auto-allocate, which
+   * have no symmetric release call and would otherwise leak refs
+   * permanently.
    */
-  async allocate(userId: string): Promise<BrowserInstance> {
+  async allocate(
+    userId: string,
+    opts: { trackRef?: boolean } = {},
+  ): Promise<BrowserInstance> {
     if (this.shuttingDown) {
       throw new Error('BrowserPool: shutting down, cannot allocate');
     }
+    const trackRef = opts.trackRef === true;
     const existing = this.instances.get(userId);
     if (existing) {
       if (existing.status === 'ready') {
         existing.lastActiveAt = Date.now();
+        if (trackRef) this.bumpRef(userId, 'allocate-existing');
         return existing;
       }
       // Phase 22a — defensive reap. The exit handler in spawnInstance
@@ -130,10 +155,54 @@ export class BrowserPool {
     this.inFlight.set(userId, { userId, promise });
     try {
       const instance = await promise;
+      if (trackRef) this.bumpRef(userId, 'allocate-new');
       return instance;
     } finally {
       this.inFlight.delete(userId);
     }
+  }
+
+  private bumpRef(userId: string, source: string): void {
+    const next = (this.refCounts.get(userId) ?? 0) + 1;
+    this.refCounts.set(userId, next);
+    this.logger.debug({ userId, refCount: next, source }, 'pool: ref+');
+  }
+
+  /**
+   * Phase 22a follow-up — refcounted release.
+   *
+   * Decrements the per-user refcount. If other tasks still hold a
+   * reference (count > 0 after decrement), this is a no-op aside
+   * from the count update. Only when the LAST reference drops do
+   * we actually tear down the Brave/Xvfb/x11vnc/websockify quartet
+   * via the existing release() path.
+   *
+   * Use this instead of release() at task-completion sites; reserve
+   * release() for unconditional teardowns (idle GC, dead-child
+   * detection, shutdown).
+   *
+   * Returns the count after decrement so callers can log it.
+   */
+  async releaseRef(userId: string, reason = 'task-done'): Promise<number> {
+    const before = this.refCounts.get(userId) ?? 0;
+    if (before <= 1) {
+      // Last reference (or stale call without prior allocate) — full
+      // teardown via release(). release() resets the count to 0.
+      this.refCounts.delete(userId);
+      this.logger.info(
+        { userId, reason },
+        'pool: releaseRef — last reference, tearing down',
+      );
+      await this.release(userId, `lastref-${reason}`);
+      return 0;
+    }
+    const after = before - 1;
+    this.refCounts.set(userId, after);
+    this.logger.debug(
+      { userId, refCount: after, reason },
+      'pool: releaseRef — instance still in use, decrement only',
+    );
+    return after;
   }
 
   /**
@@ -152,8 +221,17 @@ export class BrowserPool {
    */
   async release(userId: string, reason = 'manual'): Promise<boolean> {
     const inst = this.instances.get(userId);
-    if (!inst) return false;
+    if (!inst) {
+      // Even with no instance, clear any stale refcount entry.
+      this.refCounts.delete(userId);
+      return false;
+    }
     if (inst.status === 'draining') return false;
+    // Force-reset refcount on unconditional teardown so a future
+    // allocate() starts at 0. Callers using releaseRef() should not
+    // hit this path; GC / dead-child / shutdown paths can land here
+    // with refCount > 0, and clearing prevents stale leak.
+    this.refCounts.delete(userId);
     inst.status = 'draining';
     this.logger.info({ userId, reason, cdpPort: inst.cdpPort }, 'pool: release');
     await this.tearDownInstance(inst).catch((err) => {

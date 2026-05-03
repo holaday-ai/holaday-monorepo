@@ -828,7 +828,14 @@ export const tasksRouter = router({
         executionMode === 'browser'
       ) {
         try {
-          const instance = await ctx.browserPool.allocate(ctx.userId);
+          // trackRef:true so this task's reference counts toward the
+          // per-user refcount; runFn .finally below calls releaseRef
+          // to decrement. Symmetry is what prevents the 22a-broken
+          // "task 1 finishes, kills shared Brave, tasks 2-N fail"
+          // pattern.
+          const instance = await ctx.browserPool.allocate(ctx.userId, {
+            trackRef: true,
+          });
           perUserExec = instance.executor;
           ctx.logger.info(
             { taskId, userId: ctx.userId, cdpPort: instance.cdpPort, displayNum: instance.display },
@@ -1333,22 +1340,26 @@ export const tasksRouter = router({
           .finally(() => {
             // Phase 21b — release the per-mode concurrency slot.
             trackerEnd(userId, taskId);
-            // Phase 22a — release the per-user pool slot immediately
-            // on task completion. Don't wait for the 5-min idle GC;
-            // under burst load that lets slots accumulate even after
-            // tasks complete. Only fires when this task actually
-            // allocated the per-user pool (didAllocatePool captures
-            // perUserExec at admission time). The release also tears
-            // down the Brave/Xvfb/x11vnc/websockify quartet — next
-            // task for this user pays the spawn cost (~3s) but the
-            // slot is immediately available for other users.
+            // Phase 22a follow-up — releaseRef (refcounted) instead
+            // of release. The per-user pool is idempotent:
+            // multiple concurrent tasks for the same user share ONE
+            // Brave instance. Calling unconditional release() after
+            // every task finish broke that — when 15 tasks for one
+            // user landed in the queue, task #1 finishing tore down
+            // the instance, and tasks #2-15 (queued, sharing the
+            // same primaryExecutor reference captured at admit
+            // time) all threw "PlaywrightExecutor not connected".
+            // releaseRef decrements the per-user refcount and only
+            // actually tears down on the LAST reference, so the
+            // shared-instance design is preserved while still
+            // freeing the slot promptly once the user is truly done.
             if (didAllocatePool && ctx.browserPool) {
               void ctx.browserPool
-                .release(ctx.userId, `task-${taskId}-done`)
+                .releaseRef(ctx.userId, `task-${taskId}-done`)
                 .catch((relErr) => {
                   ctx.logger.warn(
                     { err: relErr, taskId, userId: ctx.userId },
-                    'pool: post-task release failed',
+                    'pool: post-task releaseRef failed',
                   );
                 });
             }
