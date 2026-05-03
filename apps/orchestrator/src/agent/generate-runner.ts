@@ -82,7 +82,13 @@ export interface RunGenerateOpts {
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
 const DEFAULT_MAX_TOKENS = 8192;
-const DEFAULT_TIMEOUT_MS = 120_000;
+// Phase 24 RC follow-up — bumped 120s → 300s after RC's V2 SOP-write
+// task hit the wall on a long-form output. SOPs / contracts / detailed
+// proposals routinely run 90-150s of streaming; the old 120s margin
+// fired on the slowest 10% even when the model was making steady
+// progress. 300s is the supercar's per-call cap, matched here so a
+// single long generate never times out before its supercar cousin.
+const DEFAULT_TIMEOUT_MS = 300_000;
 
 /**
  * Run the task. Resolves with the outcome regardless of success — the

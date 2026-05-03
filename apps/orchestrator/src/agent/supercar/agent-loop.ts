@@ -773,9 +773,30 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // the role text is hand-written for paid tiers — leaking it to
   // Free users devalues the upsell.
   const roleId = opts.roleIdOverride ?? classifyRole(opts.intent);
-  const routed = tier1
+  const routedRaw = tier1
     ? selectModelAndEffort(opts.intent, roleId)
     : { model: opts.model ?? process.env.SUPERCAR_MODEL ?? 'claude-sonnet-4-6', effort: 'high' as Effort };
+  // Phase 24 RC follow-up — supercar requires Sonnet or Opus.
+  // selectModelAndEffort routes simple-search intents to Haiku 4.5 to
+  // save cost on the generate path; that's correct for the generate
+  // runner, but a browser-mode task running through supercar uses
+  // computer-use-2025-11-24 beta + adaptive thinking + the multi-tick
+  // tool loop, none of which are supported on Haiku. RC saw V5
+  // (simple-search browser intent → Haiku → 400 "adaptive thinking
+  // is not supported on this model") fail at iteration 1.
+  // Upgrade transparently here so the agent never sees the bad
+  // combination; log so we can audit cost lift if browser-mode
+  // simple-search tasks become a major share.
+  const routed: { model: string; effort: Effort } =
+    routedRaw.model === 'claude-haiku-4-5'
+      ? { model: 'claude-sonnet-4-6', effort: 'medium' }
+      : routedRaw;
+  if (routed.model !== routedRaw.model) {
+    logger.info(
+      { taskId: opts.taskId, originalModel: routedRaw.model, upgradedTo: routed.model },
+      'supercar: upgraded Haiku → Sonnet (adaptive-thinking compatibility)',
+    );
+  }
   const model = routed.model;
   const effort: Effort = routed.effort;
   const taskBudget = tier1 ? getTaskBudget(opts.intent, roleId) : null;
