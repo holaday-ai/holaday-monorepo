@@ -68,10 +68,19 @@ export interface RunGenerateOpts {
    * Empty / omitted = no attachments.
    */
   attachments?: ReadonlyArray<AttachmentBlock>;
+  /**
+   * Phase 22a — wall-clock cap on the API call. AbortController
+   * fires when the timer expires; any in-flight messages.create
+   * rejects with AbortError, which we catch + report as a failed
+   * outcome. Without this, an SDK hang (rare but observed) leaves
+   * the task at status='executing' forever.
+   */
+  timeoutMs?: number;
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
 const DEFAULT_MAX_TOKENS = 8192;
+const DEFAULT_TIMEOUT_MS = 120_000;
 
 /**
  * Run the task. Resolves with the outcome regardless of success — the
@@ -89,15 +98,31 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
   const roleId = explicitRole ?? classifyRole(opts.intent);
   const system = buildLayeredSystemPrompt(roleId);
 
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
   log.info(
-    { roleId, model: opts.model ?? DEFAULT_MODEL, intentPreview: opts.intent.slice(0, 80) },
+    {
+      roleId,
+      model: opts.model ?? DEFAULT_MODEL,
+      timeoutMs,
+      intentPreview: opts.intent.slice(0, 80),
+    },
     'generate: starting',
   );
 
+  // Phase 22a — wall-clock timeout. AbortSignal aborts the in-flight
+  // fetch; SDK rejects with AbortError, caught below.
+  const abortController = new AbortController();
+  const timeoutTimer = setTimeout(() => {
+    log.warn({ timeoutMs }, 'generate: timeout — aborting');
+    abortController.abort();
+  }, timeoutMs);
+
   try {
-    const res = await opts.client.messages.create({
-      model: opts.model ?? DEFAULT_MODEL,
-      max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
+    const res = await opts.client.messages.create(
+      {
+        model: opts.model ?? DEFAULT_MODEL,
+        max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
       // Cache the system addon — when 100 tasks fire under the same
       // role-id in a window, the role addon is a cache hit on every
       // request after the first.
@@ -114,17 +139,19 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
               : opts.intent,
         },
       ],
-      // Allow but don't force web_search. Up to 5 server-side queries
-      // per turn. The model uses zero for "translate this" and a few
-      // for "give me a 2026 industry brief" — pay-per-use, not blocked.
-      tools: [
-        {
-          type: 'web_search_20260209',
-          name: 'web_search',
-          max_uses: 5,
-        } as unknown as never,
-      ],
-    });
+        // Allow but don't force web_search. Up to 5 server-side queries
+        // per turn. The model uses zero for "translate this" and a few
+        // for "give me a 2026 industry brief" — pay-per-use, not blocked.
+        tools: [
+          {
+            type: 'web_search_20260209',
+            name: 'web_search',
+            max_uses: 5,
+          } as unknown as never,
+        ],
+      },
+      { signal: abortController.signal },
+    );
 
     // Concatenate text blocks — anything that isn't text (server-tool-use
     // results, etc.) gets dropped silently. Most generate tasks will
@@ -172,9 +199,20 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
       durationMs,
     };
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
+    const isAbort =
+      abortController.signal.aborted ||
+      (err instanceof Error &&
+        (err.name === 'AbortError' || /aborted/i.test(err.message)));
+    const reason = isAbort
+      ? `生成超时（>${Math.round(timeoutMs / 1000)} 秒），请重试或简化任务。`
+      : err instanceof Error
+        ? err.message
+        : String(err);
     const durationMs = Date.now() - start;
-    log.warn({ err: reason, durationMs }, 'generate: api call failed');
+    log.warn(
+      { err: reason, durationMs, isAbort, timeoutMs },
+      isAbort ? 'generate: timeout' : 'generate: api call failed',
+    );
     return {
       status: 'failed',
       summary: '',
@@ -183,5 +221,7 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
       outputTokens: 0,
       durationMs,
     };
+  } finally {
+    clearTimeout(timeoutTimer);
   }
 }

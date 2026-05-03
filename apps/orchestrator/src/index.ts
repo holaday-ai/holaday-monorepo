@@ -30,6 +30,22 @@ import { db } from './db/client.js';
 import { createHttpApp } from './http.js';
 import { createWsServer, loadRehydratedTasks } from './ws/server.js';
 
+/**
+ * Phase 22a — extract `affectedRows` from a drizzle `db.execute(UPDATE)`
+ * result. mysql2 returns `[ResultSetHeader, ...]` so the count is on
+ * `[0].affectedRows`; some shape variants surface it directly on the
+ * top-level object. Probe both so the boot sweep + zombie reaper logs
+ * the real count instead of a silent zero.
+ */
+function extractAffectedRows(result: unknown): number {
+  if (Array.isArray(result)) {
+    const head = result[0] as { affectedRows?: number } | undefined;
+    if (typeof head?.affectedRows === 'number') return head.affectedRows;
+  }
+  const direct = (result as { affectedRows?: number }).affectedRows;
+  return typeof direct === 'number' ? direct : 0;
+}
+
 async function main() {
   const recorder = new DrizzleLlmCallRecorder(db, {
     onError: (err, call) => {
@@ -318,13 +334,67 @@ async function main() {
        WHERE status IN ('pending','executing','planning')
          AND created_at < NOW() - INTERVAL 2 MINUTE
     `);
-    const changed = (rows as unknown as { affectedRows?: number }).affectedRows ?? 0;
+    // Phase 22a (#25 audit fix) — `db.execute(UPDATE)` returns
+    // `[ResultSetHeader, ...]` under mysql2 (the driver drizzle uses
+    // for MySQL); affectedRows is on `[0]`, not on `rows.affectedRows`.
+    // The pre-22a cast read `.affectedRows` off the array itself, which
+    // is undefined → log always reported 0 even when N rows were
+    // updated. Check both shapes for forward-compat with future
+    // drizzle/driver shape tweaks.
+    const changed = extractAffectedRows(rows);
     if (changed > 0) {
       logger.warn({ count: changed }, 'boot sweep: marked stale in-flight tasks as failed');
+    } else {
+      logger.info('boot sweep: no stale in-flight tasks to mark');
     }
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'boot sweep failed (non-fatal)');
   }
+
+  // Phase 22a — runtime zombie reaper. Boot sweep above only fires at
+  // restart; tasks that go zombie DURING a long-lived orchestrator
+  // session (uncaught throw in the runner that escaped the catch
+  // chains, Anthropic SDK hang past every internal timeout, DB blip
+  // mid-persist) used to sit at status='executing' until BOSS asked
+  // for a pm2 restart. This sweep runs every 60s and marks any task
+  // that's been at 'executing' with no updated_at change for more than
+  // ZOMBIE_REAP_THRESHOLD_MIN as failed. The threshold is intentionally
+  // generous (15 min) — any legitimately long-running task ticks the
+  // updated_at via persist hooks within that window.
+  const ZOMBIE_REAP_INTERVAL_MS = 60_000;
+  const ZOMBIE_REAP_THRESHOLD_MIN = 15;
+  const { sql: sqlForReaper } = await import('drizzle-orm');
+  const zombieReaperTimer = setInterval(() => {
+    void (async () => {
+      try {
+        const result = await db.execute(sqlForReaper`
+          UPDATE tasks
+             SET status = 'failed',
+                 error_code = 'EXECUTION_TIMEOUT',
+                 error_message = ${`任务执行超过 ${ZOMBIE_REAP_THRESHOLD_MIN} 分钟未更新，已自动标记失败。`},
+                 updated_at = NOW(3),
+                 completed_at = NOW(3)
+           WHERE status = 'executing'
+             AND updated_at < NOW() - INTERVAL ${ZOMBIE_REAP_THRESHOLD_MIN} MINUTE
+        `);
+        const changed = extractAffectedRows(result);
+        if (changed > 0) {
+          logger.warn(
+            { count: changed, thresholdMin: ZOMBIE_REAP_THRESHOLD_MIN },
+            'zombie reaper: marked stale executing tasks as failed',
+          );
+        }
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          'zombie reaper: sweep failed (non-fatal)',
+        );
+      }
+    })();
+  }, ZOMBIE_REAP_INTERVAL_MS);
+  // Don't keep the event loop alive on a sleeping timer; the HTTP
+  // server is what holds the process up.
+  zombieReaperTimer.unref?.();
 
   const recovery = await loadRehydratedTasks();
   logger.info(recovery, 'restart recovery: rehydrated in-flight tasks');

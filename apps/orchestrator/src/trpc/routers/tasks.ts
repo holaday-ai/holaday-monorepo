@@ -856,6 +856,9 @@ export const tasksRouter = router({
       // That marks the task failed in the DB rather than 500ing the
       // tasks.create call, which would lose the audit trail.
       const primaryExecutor = perUserExec ?? headedExec ?? headlessExec;
+      // Phase 22a — captured once at admit time so the runFn .finally
+      // below can release the slot without re-checking pool state.
+      const didAllocatePool = perUserExec !== null;
       // Phase 19c follow-up — log which executor lane this task
       // landed on. Lets BOSS confirm in pm2 logs that the per-user
       // pool path is actually winning (and falling back to a
@@ -1291,15 +1294,64 @@ export const tasksRouter = router({
                 );
             }
           })
-          .catch((err) => {
-            ctx.logger.error({ err, taskId }, 'supercar: loop threw');
+          .catch(async (err) => {
+            // Phase 22a — uncaught throws used to leave the task at
+            // status='executing' forever (the .then chain didn't run,
+            // so persistSupercarOutcome was never called). Persist a
+            // failed outcome here BEFORE logging so the task always
+            // reaches a terminal state. Wrapped in its own try so a
+            // DB blip during the recovery persist doesn't bubble up
+            // and tear down the .finally below.
+            const reason = err instanceof Error ? err.message : String(err);
+            ctx.logger.error(
+              { err, taskId },
+              'supercar: loop threw — persisting failed',
+            );
+            try {
+              await repo.persistVisionOutcome(taskId, {
+                status: 'failed',
+                reason: `runner threw: ${reason}`.slice(0, 500),
+                tickCount: 0,
+              });
+            } catch (persistErr) {
+              ctx.logger.error(
+                { err: persistErr, taskId },
+                'supercar: catch-block persist also failed',
+              );
+            }
+            try {
+              broadcastToUser(userId, {
+                type: 'server.task.terminal',
+                taskId,
+                status: 'failed',
+                reason: `runner threw: ${reason}`.slice(0, 200),
+              });
+            } catch {
+              /* swallow — broadcast is best-effort */
+            }
           })
           .finally(() => {
-            // Phase 21b — release the per-mode concurrency slot. Lives
-            // in finally() so a thrown loop also frees the slot; the
-            // task DB row is independently marked failed by the catch
-            // block above (or by the existing boot sweep on restart).
+            // Phase 21b — release the per-mode concurrency slot.
             trackerEnd(userId, taskId);
+            // Phase 22a — release the per-user pool slot immediately
+            // on task completion. Don't wait for the 5-min idle GC;
+            // under burst load that lets slots accumulate even after
+            // tasks complete. Only fires when this task actually
+            // allocated the per-user pool (didAllocatePool captures
+            // perUserExec at admission time). The release also tears
+            // down the Brave/Xvfb/x11vnc/websockify quartet — next
+            // task for this user pays the spawn cost (~3s) but the
+            // slot is immediately available for other users.
+            if (didAllocatePool && ctx.browserPool) {
+              void ctx.browserPool
+                .release(ctx.userId, `task-${taskId}-done`)
+                .catch((relErr) => {
+                  ctx.logger.warn(
+                    { err: relErr, taskId, userId: ctx.userId },
+                    'pool: post-task release failed',
+                  );
+                });
+            }
           });
 
       void visionLoopTaskQueue.enqueue(userId, runFn, (position) => {
@@ -1635,8 +1687,28 @@ export const tasksRouter = router({
               ctx.logger.warn({ err, taskId }, 'broadcast task.terminal failed');
             }
           })
-          .catch((err) => {
-            ctx.logger.error({ err, taskId }, 'vision loop threw');
+          .catch(async (err) => {
+            // Phase 22a — same fix as the supercar branch: persist a
+            // failed terminal state when the runner throws so the task
+            // doesn't sit at 'executing' forever. Independent try so a
+            // DB blip during recovery doesn't propagate.
+            const reason = err instanceof Error ? err.message : String(err);
+            ctx.logger.error(
+              { err, taskId },
+              'vision loop threw — persisting failed',
+            );
+            try {
+              await repo.persistVisionOutcome(taskId, {
+                status: 'failed',
+                reason: `vision loop threw: ${reason}`.slice(0, 500),
+                tickCount: 0,
+              });
+            } catch (persistErr) {
+              ctx.logger.error(
+                { err: persistErr, taskId },
+                'vision loop: catch-block persist also failed',
+              );
+            }
           });
 
       void visionLoopTaskQueue.enqueue(ctx.userId, runTaskFn, (position) => {

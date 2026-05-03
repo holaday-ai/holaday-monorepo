@@ -100,9 +100,28 @@ export class BrowserPool {
       throw new Error('BrowserPool: shutting down, cannot allocate');
     }
     const existing = this.instances.get(userId);
-    if (existing && existing.status === 'ready') {
-      existing.lastActiveAt = Date.now();
-      return existing;
+    if (existing) {
+      if (existing.status === 'ready') {
+        existing.lastActiveAt = Date.now();
+        return existing;
+      }
+      // Phase 22a — defensive reap. The exit handler in spawnInstance
+      // already auto-releases on child death, but if allocate races a
+      // crash (status flipped to 'dead' but release hasn't completed
+      // yet, OR an external observer set 'dead') we tear down + respawn
+      // so the user gets a fresh, working browser instead of the same
+      // broken handle.
+      if (existing.status === 'dead') {
+        this.logger.info(
+          { userId, cdpPort: existing.cdpPort },
+          'pool: allocate found dead instance — reaping before respawn',
+        );
+        await this.release(userId, 'reap-dead-on-allocate').catch(() => {
+          /* release errors are logged inside release() — don't block respawn */
+        });
+        // Fall through to the inFlight + spawn path below.
+      }
+      // 'allocating' / 'draining' fall through to the inFlight check.
     }
     const pending = this.inFlight.get(userId);
     if (pending) return pending.promise;
@@ -350,6 +369,37 @@ export class BrowserPool {
         status: 'ready',
       };
       this.instances.set(userId, instance);
+
+      // Phase 22a — auto-detect and reap dead instances. Brave / x11vnc
+      // / websockify can crash mid-task (sandbox SIGSEGV, OOM, X server
+      // disconnect); without this, the instance stays at status='ready'
+      // forever and every subsequent allocate(userId) returns the dead
+      // handle. Attach a SECOND exit listener (the wrap() in spawn.ts
+      // already attaches a logging-only one) that flips status to
+      // 'dead' and triggers an asynchronous release. The status check
+      // makes this a no-op when release() is the one killing the
+      // children (it sets 'draining' first).
+      const onChildDeath = (label: string) => () => {
+        if (instance.status === 'ready' || instance.status === 'allocating') {
+          this.logger.warn(
+            { userId, label, cdpPort: instance.cdpPort },
+            'pool: child died unexpectedly — marking dead + auto-releasing',
+          );
+          instance.status = 'dead';
+          void this.release(userId, `${label}-died`).catch((err) => {
+            this.logger.warn(
+              { userId, err: err instanceof Error ? err.message : String(err) },
+              'pool: auto-release after child death failed',
+            );
+          });
+        }
+        // status 'draining' or 'dead' => release in progress, no-op.
+      };
+      brave.child.on('exit', onChildDeath('brave'));
+      x11vnc.child.on('exit', onChildDeath('x11vnc'));
+      websockify.child.on('exit', onChildDeath('websockify'));
+      xvfb.child.on('exit', onChildDeath('xvfb'));
+
       // Phase 17 — fire the post-allocate hook (cookie sync drain).
       // Best-effort: log + continue on failure so a transient sync
       // problem can't block task dispatch.
