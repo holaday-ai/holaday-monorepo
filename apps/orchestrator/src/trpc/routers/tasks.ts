@@ -19,7 +19,6 @@ import { runGenerateTask } from '../../agent/generate-runner.js';
 import { tryAcquire as rateLimitTryAcquire } from '../../quota/rate-limiter.js';
 import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
-import { visionLoopTaskQueue } from '../../agent/vision-loop/task-queue.js';
 import { startVisionLoopTask } from '../../agent/vision-loop/task-runner.js';
 import {
   classifyAsCrossPlatformAutomation,

@@ -29,8 +29,55 @@ import type { Logger } from 'pino';
 import { WebSocket, WebSocketServer } from 'ws';
 import { verifyAccessToken } from '../auth/jwt.js';
 import type { BrowserPool } from '../browser-pool/index.js';
+import type { BrowserInstance } from '../browser-pool/types.js';
 import { CdpInputHandler, type InputMessage } from './cdp-input.js';
 import { CdpStreamer } from './cdp-streamer.js';
+
+/**
+ * Phase 24 fix #2 — `/screencast-ws/{arg}` route dispatcher.
+ *
+ * Discriminates by ID prefix so the same path supports both modes:
+ *   - `tsk_…` → look up the specific task's Brave via pool.peek(taskId)
+ *     and verify the JWT subject owns it. Lets the SPA show the
+ *     viewer for any task the user clicks, not just the most-recent.
+ *   - everything else → treated as a userId (legacy compat); falls
+ *     back to peekActiveForUser(callerUserId) which finds the user's
+ *     most-recently-active task instance.
+ *
+ * Pure function — testable without an http.Server.
+ */
+export type RoutePickResult =
+  | { kind: 'instance'; instance: BrowserInstance }
+  | { kind: 'forbidden'; reason: string }
+  | { kind: 'no-active'; reason: string };
+
+const TASK_ID_PREFIX = 'tsk_';
+
+export function pickInstanceForRoute(args: {
+  urlArg: string;
+  callerUserId: string;
+  peek: (taskId: string) => BrowserInstance | null;
+  peekActiveForUser: (userId: string) => BrowserInstance | null;
+}): RoutePickResult {
+  if (args.urlArg.startsWith(TASK_ID_PREFIX)) {
+    const inst = args.peek(args.urlArg);
+    if (!inst) return { kind: 'no-active', reason: 'task not active' };
+    if (inst.userId !== args.callerUserId) {
+      return { kind: 'forbidden', reason: 'caller does not own task' };
+    }
+    return { kind: 'instance', instance: inst };
+  }
+  // Legacy userId path. The pre-Phase-24 forbidden check rejected
+  // a non-empty arg that didn't match the JWT subject; preserve that
+  // so a stray /screencast-ws/usr_other can't peek at someone's
+  // browser even when the caller has no active task of their own.
+  if (args.urlArg && args.urlArg !== args.callerUserId) {
+    return { kind: 'forbidden', reason: 'subject mismatch' };
+  }
+  const inst = args.peekActiveForUser(args.callerUserId);
+  if (!inst) return { kind: 'no-active', reason: 'no active task for user' };
+  return { kind: 'instance', instance: inst };
+}
 
 export interface ScreencastProxyOptions {
   pool: BrowserPool;
@@ -58,13 +105,14 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     const m = pathPattern.exec(url);
     if (!m) return; // not our path; leave for next handler
 
-    const requestedUserId = decodeURIComponent(m[1] ?? '');
+    const urlArg = decodeURIComponent(m[1] ?? '');
     // Log every upgrade attempt at info so BOSS can correlate
     // user reports against pm2 logs. Included in the line:
-    // requested user, whether token presence flag, source IP.
+    // url arg (taskId or userId), token presence flag, source IP.
     log.info(
       {
-        requestedUserId,
+        urlArg,
+        argKind: urlArg.startsWith('tsk_') ? 'taskId' : 'userId',
         hasToken:
           Boolean(extractBearerFromSubprotocol(req)) ||
           Boolean(extractTokenFromQuery(url)),
@@ -85,31 +133,32 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         }
         const callerUserId = claims.sub;
 
-        if (requestedUserId && requestedUserId !== callerUserId) {
+        // Phase 24 fix #2 — dispatch by ID prefix. tsk_… targets a
+        // specific in-flight task; everything else falls through to
+        // the legacy peekActiveForUser path so existing SPA builds
+        // and curl probes keep working.
+        const picked = pickInstanceForRoute({
+          urlArg,
+          callerUserId,
+          peek: (taskId) => opts.pool.peek(taskId),
+          peekActiveForUser: (userId) => opts.pool.peekActiveForUser(userId),
+        });
+        if (picked.kind === 'forbidden') {
           log.warn(
-            { callerUserId, requestedUserId },
-            'subject mismatch — refusing cross-user screencast',
+            { callerUserId, urlArg, reason: picked.reason },
+            'screencast: refusing upgrade — forbidden',
           );
           return reject(socket, 403, 'forbidden');
         }
-
-        // Phase 24 — find the user's most recently active task
-        // instance. Per-task pool means there's no "the user's Brave"
-        // anymore — there's one Brave per active task. peekActiveForUser
-        // returns the most-recently-touched task instance for this
-        // user; that's the one whose execution the panel should mirror.
-        // No more auto-allocate: panels follow tasks now, not vice
-        // versa. If the user has no active task, close with 409 so the
-        // SPA shows "submit a task to see the browser".
-        const instance = opts.pool.peekActiveForUser(callerUserId);
-        if (!instance) {
+        if (picked.kind === 'no-active') {
           log.info(
-            { callerUserId },
-            'screencast: no active task instance — closing (submit a task to attach)',
+            { callerUserId, urlArg, reason: picked.reason },
+            'screencast: no active task instance — closing',
           );
           return reject(socket, 409, 'no active task');
         }
 
+        const instance = picked.instance;
         wss.handleUpgrade(req, socket, head, (ws) => {
           void wireUpClient({ ws, callerUserId, instance });
         });

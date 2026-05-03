@@ -75,15 +75,27 @@ function buildVncUrl(poolUserId: string | null): string | null {
  * transport. Only the per-user pool path supports it (the legacy
  * shared-Brave VNC stream is VNC-only). Returns null when CDP
  * isn't usable for this user.
+ *
+ * Phase 24 fix #2 — prefer the per-task route. When `activeTaskId`
+ * is set, the URL targets `/screencast-ws/<taskId>` so the panel
+ * mirrors that specific task's Brave even when the user has other
+ * concurrent tasks. The orchestrator dispatches by `tsk_` prefix and
+ * verifies the JWT subject owns the task. Falls back to the legacy
+ * userId path (most-recently-active task for the caller) when no
+ * task is selected — keeps the panel populated on idle dashboards.
  */
-function buildScreencastUrl(poolUserId: string | null): string | null {
+function buildScreencastUrl(
+  activeTaskId: string | null,
+  poolUserId: string | null,
+): string | null {
   if (typeof window === 'undefined') return null;
-  if (!poolUserId) return null;
+  const arg = activeTaskId ?? poolUserId;
+  if (!arg) return null;
   const token = getAccessToken();
   if (!token) return null;
   const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
   return `${scheme}://${window.location.host}/screencast-ws/${encodeURIComponent(
-    poolUserId,
+    arg,
   )}?token=${encodeURIComponent(token)}`;
 }
 
@@ -228,8 +240,8 @@ export function BrowserPanel({
     [poolUserId, usingCdp],
   );
   const screencastUrlForCdp = React.useMemo(
-    () => (usingCdp ? buildScreencastUrl(poolUserId) : null),
-    [poolUserId, usingCdp],
+    () => (usingCdp ? buildScreencastUrl(activeTaskId ?? null, poolUserId) : null),
+    [activeTaskId, poolUserId, usingCdp],
   );
   const [vncStatus, setVncStatus] = React.useState<VncStatus>('idle');
   // P3 hibernation detection: count consecutive failed attempts. The

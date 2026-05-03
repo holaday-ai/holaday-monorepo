@@ -78,8 +78,8 @@ import { env as appEnv } from '../../config/env.js';
  * identical input, and cursor-move-only diffs produce different bytes
  * (which we want: cursor motion IS progress).
  */
-const STUCK_WARN_THRESHOLD = 6;
-const STUCK_EXIT_THRESHOLD = 12;
+export const STUCK_WARN_THRESHOLD = 6;
+export const STUCK_EXIT_THRESHOLD = 12;
 
 /**
  * Phase 23 Step 3 — Apify actor IDs for the agent-callable scrape /
@@ -170,6 +170,103 @@ export function formatSearchEcommerceResult(
     head +
     truncateText(json, 28_000) +
     '\n\n---\n**记得回到浏览器中打开商品页或做对比表，让用户看到执行过程**'
+  );
+}
+
+/**
+ * Phase 24 fix #1 — stuck-tier nudge text builder.
+ *
+ * The supercar loop tracks `stuckCount` (consecutive turns where the
+ * page-screenshot hash didn't change). When the count crosses one of
+ * two thresholds, we inject a text block alongside the tool_results so
+ * the model gets a hint without losing its in-flight tool_use cycle.
+ *
+ *   - WARN tier (every turn while stuck >= STUCK_WARN_THRESHOLD):
+ *     browser-first guidance — wait, mobile sites, alternate hostnames,
+ *     reset. Phase 5 benchmark confirmed: mentioning search OR Apify
+ *     here pushes the model into abandoning the browser path on its
+ *     first stuck signal, before genuine retries have run their course.
+ *
+ *   - EXIT tier (one-shot when stuck >= STUCK_EXIT_THRESHOLD):
+ *     reality has not changed in 12+ turns. The browser path is dead
+ *     for this target. Pre-Phase-24 wording told the model to STOP
+ *     using computer tools and use web_search — but `scrape_website` /
+ *     `search_ecommerce` (Phase 23 step 3) are far better fits when
+ *     the orchestrator boots with an Apify adapter, because they
+ *     return structured page content the model can keep working with.
+ *     The new wording leads with Apify and keeps web_search as a
+ *     final fallback.
+ *
+ * Pure function: takes counts + flags, returns text + tier discriminator
+ * so the caller can log appropriately. No reads of process.env, no
+ * I/O, no clock — fully testable.
+ */
+export interface StuckNudgeInput {
+  stuckCount: number;
+  /** True when `opts.apifyAdapter` is configured (scrape_website / search_ecommerce tools registered). */
+  hasApifyTools: boolean;
+  /** Whether the EXIT-tier nudge has already fired this run. */
+  alreadyForcedExit: boolean;
+}
+
+export interface StuckNudgeResult {
+  /** 'exit-first' = first time crossing exit threshold this run. 'warn' = warn tier (every turn). */
+  tier: 'exit-first' | 'warn';
+  text: string;
+}
+
+export function buildStuckNudge(input: StuckNudgeInput): StuckNudgeResult | null {
+  if (input.stuckCount >= STUCK_EXIT_THRESHOLD && !input.alreadyForcedExit) {
+    return {
+      tier: 'exit-first',
+      text: buildExitNudgeText(input.stuckCount, input.hasApifyTools),
+    };
+  }
+  if (input.stuckCount >= STUCK_WARN_THRESHOLD) {
+    return { tier: 'warn', text: buildWarnNudgeText(input.stuckCount) };
+  }
+  return null;
+}
+
+function buildWarnNudgeText(stuckCount: number): string {
+  return (
+    `⚠️ 提示：页面截图已连续 ${stuckCount} 次未变化，当前操作可能未生效。\n\n` +
+    `先尝试以下浏览器内的方案，不要直接放弃 computer 工具：\n` +
+    `1. **等一下**：wait 3-5 秒后再点击，某些站点首次加载慢\n` +
+    `2. **让用户帮忙**：如果看起来像验证码/滑块，输出"检测到验证码，请在右侧 panel 手动完成"并停住\n` +
+    `3. **换路径**：同站点的 /explore /hot /discover 分类页通常不需要登录\n` +
+    `4. **换备选站点**：携程→飞猪/去哪儿、京东→拼多多、Boss直聘→拉勾\n` +
+    `5. **重置页面**：先 navigate 到 about:blank，再重新访问目标\n` +
+    `6. **最后选项**：切移动版 m.xxx.com（m.jd.com / m.ctrip.com / m.zhipin.com）`
+  );
+}
+
+function buildExitNudgeText(stuckCount: number, hasApifyTools: boolean): string {
+  const head =
+    `⚠️ 系统检测：页面已连续 ${stuckCount} 次无响应（hash 未变），浏览器路径暂时走不通。\n\n`;
+  if (hasApifyTools) {
+    // Apify-first rescue. The agent already has scrape_website /
+    // search_ecommerce in its tool list — most failures here are
+    // because the model didn't connect "browser is stuck" to "I have
+    // a backend scraper for this." Spell it out explicitly, including
+    // the URL the page is currently parked on.
+    return (
+      head +
+      `请按以下顺序处理（不要直接 task_done / 总结放弃）：\n` +
+      `1. **优先调用 \`scrape_website\`**：参数 url 用你刚才尝试访问的目标 URL（即页面停留的当前网址）。后台抓取通常能拿到内容。\n` +
+      `2. **电商类查询**：如果用户问的是商品/比价（amazon / 京东 / 淘宝），改用 \`search_ecommerce\`，platform + query 直接传。\n` +
+      `3. **拿到数据后必须回到浏览器**：打开能展示数据的页面（Google Sheets / 文档），或对照原站做整理。不要把抓到的纯文字当最终回复。\n` +
+      `4. **Apify 也失败时再用 \`web_search\`**：搜索引擎兜底信息，并在最终输出中说明"目标站点暂时无法访问，已通过其他途径获取"。\n\n` +
+      `当前状态：你仍然有 computer + scrape_website + search_ecommerce 三套工具。换一套继续推进，不要放弃任务。`
+    );
+  }
+  // Apify not configured — degrade to the legacy web_search guidance.
+  return (
+    head +
+    `请按以下顺序处理：\n` +
+    `1. 如果你已经获取到足够信息，直接汇总输出（markdown 格式）\n` +
+    `2. 如果信息不足，改用 \`web_search\` 工具搜索同一问题\n` +
+    `3. 在最终输出中明确告知用户：目标网站暂时无法访问，已通过其他途径获取信息`
   );
 }
 
@@ -1834,44 +1931,30 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       if (antiBotHintText) {
         nudgeContent.push({ type: 'text', text: antiBotHintText });
       }
-      if (stuckCount >= STUCK_EXIT_THRESHOLD && !stuckForceFinalised) {
-        stuckForceFinalised = true;
-        logger.warn(
-          { taskId: opts.taskId, iteration, stuckCount },
-          'supercar: stuck past exit threshold — forcing task finalisation',
-        );
-        nudgeContent.push({
-          type: 'text',
-          text:
-            `⚠️ 系统检测：页面已连续 ${stuckCount} 次无响应（hash 未变），判定为反爬拦截。\n\n` +
-            `请立即停止 computer 工具操作，按以下顺序处理：\n` +
-            `1. 如果你已经获取到足够信息，直接汇总输出（markdown 格式）\n` +
-            `2. 如果信息不足，改用 web_search 工具搜索同一问题\n` +
-            `3. 在最终输出中明确告知用户：目标网站暂时无法访问，已通过其他途径获取信息\n\n` +
-            `绝对不要再对当前网站使用 computer 工具。`,
-        });
-      } else if (stuckCount >= STUCK_WARN_THRESHOLD) {
-        logger.info(
-          { taskId: opts.taskId, iteration, stuckCount },
-          'supercar: stuck warning — nudging Claude to try alternate browser tactics',
-        );
-        // The warn nudge is browser-first. We explicitly do NOT mention
-        // web_search here — the benchmark showed Claude treats any
-        // search mention as a green light to abandon the browser path.
-        // Mobile sites first, then alternate hostnames, then reset;
-        // web_search appears only in the hard exit nudge above.
-        nudgeContent.push({
-          type: 'text',
-          text:
-            `⚠️ 提示：页面截图已连续 ${stuckCount} 次未变化，当前操作可能未生效。\n\n` +
-            `先尝试以下浏览器内的方案，不要直接放弃 computer 工具：\n` +
-            `1. **等一下**：wait 3-5 秒后再点击，某些站点首次加载慢\n` +
-            `2. **让用户帮忙**：如果看起来像验证码/滑块，输出"检测到验证码，请在右侧 panel 手动完成"并停住\n` +
-            `3. **换路径**：同站点的 /explore /hot /discover 分类页通常不需要登录\n` +
-            `4. **换备选站点**：携程→飞猪/去哪儿、京东→拼多多、Boss直聘→拉勾\n` +
-            `5. **重置页面**：先 navigate 到 about:blank，再重新访问目标\n` +
-            `6. **最后选项**：切移动版 m.xxx.com（m.jd.com / m.ctrip.com / m.zhipin.com）`,
-        });
+      const nudge = buildStuckNudge({
+        stuckCount,
+        hasApifyTools: Boolean(opts.apifyAdapter),
+        alreadyForcedExit: stuckForceFinalised,
+      });
+      if (nudge) {
+        if (nudge.tier === 'exit-first') {
+          stuckForceFinalised = true;
+          logger.warn(
+            {
+              taskId: opts.taskId,
+              iteration,
+              stuckCount,
+              hasApifyTools: Boolean(opts.apifyAdapter),
+            },
+            'supercar: stuck past exit threshold — injecting rescue nudge',
+          );
+        } else {
+          logger.info(
+            { taskId: opts.taskId, iteration, stuckCount },
+            'supercar: stuck warning — nudging Claude to try alternate browser tactics',
+          );
+        }
+        nudgeContent.push({ type: 'text', text: nudge.text });
       }
 
       // Phase 13 Dim 6 — emit one stats record per iteration that
