@@ -838,6 +838,34 @@ export const tasksRouter = router({
           // immediately on completion. Per-user concurrency is gated
           // upstream via getActiveTaskCount + plan limits.
           const instance = await ctx.browserPool.allocate(taskId, ctx.userId);
+          // P0 SAFETY GUARD — Phase 24 RC follow-up. The per-task pool
+          // allocates CDP ports in the inclusive range
+          // [cdpPortStart, cdpPortStart + maxInstances - 1] = [9300,
+          // 9309]. Any executor returned with a port outside that
+          // window CANNOT be a server-side pool Brave — it would have
+          // to be a singleton fallback, the headed lane (9223), or
+          // worst-case the user's local Chrome via the extension's
+          // chrome.debugger surface. Refuse to dispatch on anything
+          // we don't recognise; release the instance so no Brave
+          // leaks. The caller's catch below logs and falls through.
+          if (instance.cdpPort < 9300 || instance.cdpPort > 9309) {
+            ctx.logger.error(
+              {
+                taskId,
+                userId: ctx.userId,
+                cdpPort: instance.cdpPort,
+              },
+              'pool: P0 GUARD — allocated port outside server-pool range [9300,9309]; refusing to dispatch',
+            );
+            await ctx.browserPool
+              .release(taskId, `P0-guard-${taskId}`)
+              .catch(() => {
+                /* best-effort */
+              });
+            throw new Error(
+              `P0 guard: refusing to dispatch on cdpPort=${instance.cdpPort} (outside server-pool range)`,
+            );
+          }
           perUserExec = instance.executor;
           ctx.logger.info(
             { taskId, userId: ctx.userId, cdpPort: instance.cdpPort, displayNum: instance.display },

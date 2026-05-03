@@ -289,10 +289,40 @@ function removeClientForUser(userId: string, client: ClientState): void {
 }
 
 /**
+ * Message types that, if sent to a Chrome extension WS client, would
+ * drive the user's LOCAL Chrome via chrome.debugger. P0 guard
+ * (Phase 24 RC follow-up): drop them at the broadcast boundary so a
+ * legacy code path emitting these (e.g. TaskController's planned-step
+ * dispatch) cannot accidentally hijack the user's browser. The SPA
+ * web client doesn't act on these types either, so dropping is safe.
+ *
+ * Cookie-sync uses HTTP POST /cookies/sync, NOT WS — blocking these
+ * WS message types does not affect cookie sync.
+ */
+const TASK_EXECUTION_TYPES = new Set<string>([
+  'server.task.dispatch',
+  'server.vision.observe',
+  'server.vision.act',
+]);
+
+/**
  * Send a message to every WebSocket currently authenticated as `userId`.
  * Returns the number of recipients reached.
+ *
+ * P0 guard: task-execution message types (above) are dropped with a
+ * warning instead of being delivered. This prevents a legacy / fallback
+ * code path from routing task work to the user's local Chrome via the
+ * extension's chrome.debugger surface — task execution must run on
+ * the per-task pool Brave only.
  */
 export function broadcastToUser(userId: string, msg: ServerMessage): number {
+  if (TASK_EXECUTION_TYPES.has(msg.type)) {
+    logger.warn(
+      { userId, msgType: msg.type },
+      'broadcastToUser: P0 GUARD — task-execution message dropped (extension hijack prevention)',
+    );
+    return 0;
+  }
   const set = clientsByUser.get(userId);
   if (!set) return 0;
   let count = 0;
@@ -667,28 +697,24 @@ export async function requestVisionObservationFromSW(
   tickIndex: number,
   timeoutMs: number = VISION_RTT_TIMEOUT_MS,
 ): Promise<ObservationMsg> {
-  const client = firstConnectedClient(userId);
-  if (!client) throw new Error(`no SW connected for user ${userId}`);
-  const key = visionKey(taskId, tickIndex);
-  if (pendingObservations.has(key)) {
-    throw new Error(`duplicate vision.observe for ${key}`);
-  }
-  return new Promise<ObservationMsg>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      pendingObservations.delete(key);
-      reject(new Error(`vision.observe timeout at tick ${tickIndex}`));
-    }, timeoutMs);
-    pendingObservations.set(key, (m) => {
-      clearTimeout(timer);
-      pendingObservations.delete(key);
-      resolve(m);
-    });
-    send(client.socket, {
-      type: 'server.vision.observe',
-      taskId,
-      tickIndex,
-    });
-  });
+  // P0 SAFETY GUARD — Phase 24 RC follow-up.
+  // The Chrome extension WS path drives the USER'S LOCAL CHROME via
+  // chrome.debugger. Routing task screenshots through it surfaces a
+  // "HOLA DAY 已开始调试此浏览器" banner and opens task target URLs
+  // in the user's own browser tabs. The pool's per-task Brave is the
+  // ONLY legitimate execution surface; the extension WS exists only
+  // for cookie-sync HTTP. Throw aggressively so the caller sees a
+  // hard failure instead of silently hijacking the user's browser.
+  // The original implementation (firstConnectedClient → send) was
+  // ripped out — re-enabling extension-driven task execution requires
+  // a deliberate code change, not a feature flag.
+  void userId;
+  void timeoutMs;
+  void pendingObservations;
+  throw new Error(
+    `extension-WS task execution disabled — task ${taskId} tick ${tickIndex} ` +
+      'must run on per-task pool Brave only (P0 safety guard).',
+  );
 }
 
 /**
@@ -703,31 +729,21 @@ export async function dispatchVisionActionToSW(
   action: Extract<ServerMessage, { type: 'server.vision.act' }>['action'],
   timeoutMs: number = VISION_RTT_TIMEOUT_MS,
 ): Promise<ActedMsg> {
-  const client = firstConnectedClient(userId);
-  if (!client) throw new Error(`no SW connected for user ${userId}`);
-  const key = visionKey(taskId, tickIndex);
-  if (pendingActed.has(key)) {
-    throw new Error(`duplicate vision.act for ${key}`);
-  }
-  return new Promise<ActedMsg>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      pendingActed.delete(key);
-      reject(new Error(`vision.act timeout at tick ${tickIndex}`));
-    }, timeoutMs);
-    pendingActed.set(key, (m) => {
-      clearTimeout(timer);
-      pendingActed.delete(key);
-      resolve(m);
-    });
-    send(client.socket, {
-      type: 'server.vision.act',
-      taskId,
-      tickIndex,
-      action,
-    });
-  });
+  // P0 SAFETY GUARD — Phase 24 RC follow-up. See parallel guard in
+  // requestVisionObservationFromSW above. The extension's CDP surface
+  // is the user's LOCAL Chrome; dispatching VisionAction (click/type/
+  // navigate) through it drives the user's own tabs. We refuse at
+  // the dispatch boundary so no caller can accidentally hijack — the
+  // task fails loudly instead.
+  void userId;
+  void action;
+  void timeoutMs;
+  void pendingActed;
+  throw new Error(
+    `extension-WS task execution disabled — task ${taskId} tick ${tickIndex} ` +
+      'must run on per-task pool Brave only (P0 safety guard).',
+  );
 }
-
 function firstConnectedClient(userId: string): ClientState | null {
   const set = clientsByUser.get(userId);
   if (!set || set.size === 0) return null;
