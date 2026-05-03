@@ -270,6 +270,87 @@ function buildExitNudgeText(stuckCount: number, hasApifyTools: boolean): string 
   );
 }
 
+/**
+ * Phase 24 fix #3 — patch orphaned `server_tool_use` blocks.
+ *
+ * Sonnet 4.6 + computer-use-2025-11-24 implicitly enables the server-
+ * side `code_execution` tool. Anthropic NORMALLY emits the
+ * `server_tool_use(code_execution)` block paired with a matching
+ * `code_execution_tool_result` block in the same `response.content`.
+ * The API occasionally drops the result (sandbox cold-start race?) —
+ * when we then echo the assistant content back, the next
+ * `messages.create` rejects with:
+ *
+ *   "messages.1: code_execution tool use with id `srvtoolu_…` was found
+ *    without a corresponding code_execution_tool_result block"
+ *
+ * That kills the task at iteration 2 with no chance for the agent to
+ * recover (e.g. via `scrape_website`). We can't *drop* the orphan: the
+ * response carries thinking blocks whose signatures span the entire
+ * assistant content. So this helper INSERTS a synthetic `*_tool_result`
+ * block right after each orphaned `server_tool_use`, using the exact
+ * `*_tool_result_error` shape Anthropic emits when the tool itself
+ * fails. Insertion preserves block ordering, so thinking signatures
+ * stay valid; the model receives a clear "execution unavailable"
+ * signal and continues.
+ *
+ * Pure function. Returns a NEW array; original is not mutated. Empty
+ * `orphansFixed` means the content was clean — caller can fast-path.
+ */
+export interface PatchOrphansResult {
+  patched: Anthropic.Beta.BetaContentBlock[];
+  orphansFixed: Array<{ name: string; id: string }>;
+}
+
+export function patchOrphanServerToolUses(
+  content: ReadonlyArray<Anthropic.Beta.BetaContentBlock>,
+): PatchOrphansResult {
+  const seenResultIds = new Set<string>();
+  for (const block of content) {
+    const t = (block as { type?: string }).type;
+    if (
+      t === 'web_search_tool_result' ||
+      t === 'code_execution_tool_result' ||
+      t === 'bash_code_execution_tool_result' ||
+      t === 'text_editor_code_execution_tool_result'
+    ) {
+      const id = (block as { tool_use_id?: string }).tool_use_id;
+      if (id) seenResultIds.add(id);
+    }
+  }
+  const patched: Anthropic.Beta.BetaContentBlock[] = [];
+  const orphansFixed: Array<{ name: string; id: string }> = [];
+  for (const block of content) {
+    patched.push(block);
+    if ((block as { type?: string }).type !== 'server_tool_use') continue;
+    const su = block as { id?: string; name?: string };
+    if (!su.id || !su.name) continue;
+    if (seenResultIds.has(su.id)) continue;
+    if (su.name === 'code_execution') {
+      patched.push({
+        type: 'code_execution_tool_result',
+        tool_use_id: su.id,
+        content: {
+          type: 'code_execution_tool_result_error',
+          error_code: 'unavailable',
+        },
+      } as unknown as Anthropic.Beta.BetaContentBlock);
+      orphansFixed.push({ name: 'code_execution', id: su.id });
+    } else if (su.name === 'web_search') {
+      patched.push({
+        type: 'web_search_tool_result',
+        tool_use_id: su.id,
+        content: {
+          type: 'web_search_tool_result_error',
+          error_code: 'unavailable',
+        },
+      } as unknown as Anthropic.Beta.BetaContentBlock);
+      orphansFixed.push({ name: 'web_search', id: su.id });
+    }
+  }
+  return { patched, orphansFixed };
+}
+
 export type SupercarStatus = 'completed' | 'failed' | 'awaiting_user' | 'timeout' | 'cancelled';
 
 /**
@@ -1194,7 +1275,24 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       // original turn; dropping even one sibling block breaks the
       // signature and the next call 400s with "thinking blocks cannot
       // be modified".
-      messages.push({ role: 'assistant', content: response.content });
+      //
+      // Phase 24 fix #3 — Anthropic occasionally returns a
+      // `server_tool_use` (typically `code_execution` under
+      // computer-use-2025-11-24) without its paired `*_tool_result`
+      // block. Echoing that orphan triggers a 400 on the NEXT
+      // messages.create. patchOrphanServerToolUses INSERTS (never
+      // drops) a synthetic `*_tool_result_error` block right after
+      // each orphan — preserving the surrounding order so thinking
+      // signatures stay valid.
+      const { patched: assistantContent, orphansFixed } =
+        patchOrphanServerToolUses(response.content);
+      if (orphansFixed.length > 0) {
+        logger.warn(
+          { taskId: opts.taskId, iteration, orphansFixed },
+          'supercar: patched orphaned server_tool_use blocks (synthetic *_tool_result_error inserted)',
+        );
+      }
+      messages.push({ role: 'assistant', content: assistantContent });
 
       // Phase 13 Dim 1 follow-up — scan response text blocks for
       // `[STEP N status]` markers the planner reminder asked for.
