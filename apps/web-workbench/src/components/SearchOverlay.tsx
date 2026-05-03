@@ -146,6 +146,8 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
 
 function statusLabel(status: UiTask['status']): string {
   switch (status) {
+    case 'queued':
+      return '排队中';
     case 'executing':
       return '执行中';
     case 'paused':

@@ -800,6 +800,9 @@ function normaliseStatus(raw: string): UiTaskStatus {
     case 'cancelled':
     case 'paused':
     case 'executing':
+    // Phase 24 RC follow-up — `queued` is the new pre-executing state
+    // emitted by tasks.create when the BrowserPool is at capacity.
+    case 'queued':
       return raw;
     case 'awaiting_user':
       return 'paused';

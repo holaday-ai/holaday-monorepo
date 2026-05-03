@@ -696,10 +696,21 @@ export const tasksRouter = router({
         );
       }
 
+      // Phase 24 RC follow-up — TaskQueue gates dispatch when the
+      // per-task BrowserPool is at its 10-slot capacity. We seed the
+      // row with status='queued' so a 30-task burst doesn't show 30
+      // fake-executing rows while 20 of them are actually waiting.
+      // The queue's onStart callback flips the row to 'executing' the
+      // moment a slot frees; if the queue isn't wired (e.g. legacy
+      // boot without MULTI_USER) we fall back to the historical
+      // 'executing' seed.
+      const willQueueDispatch = Boolean(
+        ctx.taskQueue && executionMode === 'browser' && shouldUseBrowserPool(ctx.userId),
+      );
       await repo.insertTask(
         {
           taskId,
-          status: 'executing',
+          status: willQueueDispatch ? 'queued' : 'executing',
           plan: [],
           cursor: 0,
           pendingConfirm: null,
@@ -802,6 +813,12 @@ export const tasksRouter = router({
       //
       // 21a — also skip when executionMode='generate' (no per-user
       // browser slot needed for pure-generation tasks).
+      // Phase 24 RC follow-up — wrap allocate + supercarArgs build +
+      // runFn invocation in dispatchToBrave so the global TaskQueue
+      // can hold it past the 10-slot pool cap. Body unchanged from
+      // the pre-queue flow; only outer scheduling differs (taskQueue
+      // .enqueue vs `void runFn()`).
+      const dispatchToBrave = async (): Promise<void> => {
       let perUserExec = null;
       if (
         ctx.browserPool &&
@@ -1331,16 +1348,122 @@ export const tasksRouter = router({
                   );
                 });
             }
+            // Phase 24 RC follow-up — wake the TaskQueue worker so
+            // the next queued task fires immediately instead of
+            // waiting for the next 5s tick. Safe even when no queue
+            // is wired (the optional-chain shorts).
+            ctx.taskQueue?.signalSlotFreed();
           });
 
-      // Phase 24 — fire the runFn directly (no per-user FIFO queue).
-      // Per-task isolation removes the need for serialisation — each
-      // task gets its own Brave, can run in parallel up to the user's
-      // plan-derived concurrency limit (already gated at admit time
-      // via getActiveTaskCount). The visionLoopTaskQueue's 15-min
-      // hard-timeout is replaced by the runtime zombie reaper at
-      // 20-min cutoff in index.ts.
-      void runFn();
+      // Phase 24 — fire the runFn directly (pre-queue path). Per-task
+      // isolation removes the need for serialisation — each task gets
+      // its own Brave, can run in parallel up to the user's plan-
+      // derived concurrency limit (already gated at admit time via
+      // getActiveTaskCount).
+      await runFn();
+      };
+      // ↑ end of dispatchToBrave wrap
+
+      // Phase 24 RC follow-up — global pool-capacity-aware queue.
+      // Without this, a 30-task burst overruns the 10-slot pool;
+      // pool.allocate throws PoolCapacityError, the catch falls
+      // through to a shared singleton, and every overflow task races
+      // the same Brave on `initial screenshot failed`. The queue
+      // holds overflow in 'queued' status until pool capacity frees,
+      // then dispatches FIFO.
+      if (willQueueDispatch && ctx.taskQueue) {
+        const enqueueResult = ctx.taskQueue.enqueue({
+          taskId,
+          userId: ctx.userId,
+          runFn: dispatchToBrave,
+          onStart: async (): Promise<void> => {
+            try {
+              await ctx.db
+                .update(tasksTable)
+                .set({ status: 'executing', startedAt: new Date() })
+                .where(eq(tasksTable.externalId, taskId));
+              // No queued→executing WS frame — supercar's own
+              // `server.task.plan` / step events fire next from the
+              // dispatched runFn, and the SPA's task store reads the
+              // fresh row on its existing tRPC poll. Avoid adding a
+              // new message type for a transition that's already
+              // observable via the next event.
+            } catch (err) {
+              ctx.logger.warn(
+                { err: err instanceof Error ? err.message : String(err), taskId },
+                'task-queue: onStart DB update failed',
+              );
+            }
+          },
+          onTimeout: async (): Promise<void> => {
+            ctx.logger.warn(
+              { taskId, userId: ctx.userId },
+              'task-queue: queue timeout — marking failed',
+            );
+            try {
+              await ctx.db
+                .update(tasksTable)
+                .set({
+                  status: 'failed',
+                  errorMessage: 'queue timeout: 排队等待时间过长，请稍后重试',
+                  completedAt: new Date(),
+                })
+                .where(eq(tasksTable.externalId, taskId));
+              broadcastToUser(ctx.userId, {
+                type: 'server.task.terminal',
+                taskId,
+                status: 'failed',
+                reason: 'queue timeout',
+              });
+            } catch (err) {
+              ctx.logger.warn(
+                { err: err instanceof Error ? err.message : String(err), taskId },
+                'task-queue: onTimeout persist failed',
+              );
+            }
+          },
+        });
+        if (enqueueResult.kind === 'rejected') {
+          ctx.logger.warn(
+            { taskId, userId: ctx.userId, reason: enqueueResult.reason },
+            'task-queue: enqueue rejected (queue at depth cap)',
+          );
+          try {
+            await ctx.db
+              .update(tasksTable)
+              .set({
+                status: 'failed',
+                errorMessage: enqueueResult.reason,
+                completedAt: new Date(),
+              })
+              .where(eq(tasksTable.externalId, taskId));
+          } catch (err) {
+            ctx.logger.warn(
+              { err: err instanceof Error ? err.message : String(err), taskId },
+              'task-queue: rejection-row update failed',
+            );
+          }
+          throw new TRPCError({
+            code: 'TOO_MANY_REQUESTS',
+            message: enqueueResult.reason,
+          });
+        }
+        ctx.logger.info(
+          {
+            taskId,
+            userId: ctx.userId,
+            kind: enqueueResult.kind,
+            position: enqueueResult.position,
+            queueSize: ctx.taskQueue.size(),
+          },
+          'task-queue: task enqueued',
+        );
+        const statusOut = enqueueResult.kind === 'dispatched' ? 'executing' : 'queued';
+        return { taskId, status: statusOut as 'executing' | 'queued', steps: [] };
+      }
+
+      // Legacy / non-pool path — fire directly without queue gating.
+      void dispatchToBrave();
 
       return { taskId, status: 'executing' as const, steps: [] };
     }

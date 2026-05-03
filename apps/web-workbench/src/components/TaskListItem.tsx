@@ -231,6 +231,10 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
     <span
       className={cn(
         'inline-block h-2 w-2 shrink-0 rounded-full',
+        // Phase 24 RC follow-up — queued is a slow-pulse amber so the
+        // user can distinguish "waiting for a slot" from "actively
+        // executing" (fast blue pulse).
+        status === 'queued' && 'animate-pulse-dot bg-amber-400',
         status === 'executing' && 'animate-pulse-dot bg-blue-500',
         status === 'paused' && 'bg-amber-500',
         // Completed: hollow grey dot — done is neutral, not
@@ -250,6 +254,8 @@ function subtitleFor(task: UiTask): string {
     return `排队中 · 第 ${task.queuePosition} 位`;
   }
   switch (task.status) {
+    case 'queued':
+      return '排队中 · 等待空闲槽位';
     case 'executing':
       return task.tickCount === 0 ? '正在启动…' : `执行中 · 第 ${task.tickCount} 步`;
     case 'paused':

@@ -22,6 +22,12 @@ import type { ServerMessage } from '@holaday/shared-types';
 export type TaskStatus =
   | 'pending'
   | 'planning'
+  // Phase 24 RC follow-up — task admitted by gates but the per-task
+  // BrowserPool was at capacity (10 slots) when the request landed.
+  // The global TaskQueue holds it until a slot frees, then transitions
+  // to 'executing'. Queue depth caps at 100; per-task wait caps at
+  // 10min before auto-failing with reason 'queue timeout'.
+  | 'queued'
   | 'executing'
   | 'awaiting_user'
   | 'paused'

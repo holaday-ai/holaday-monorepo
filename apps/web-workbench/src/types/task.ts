@@ -5,7 +5,17 @@
  * from `tasks.list` + WS events; G2 seeds mock rows of the same shape
  * so the components compile against the final contract from day one.
  */
-export type UiTaskStatus = 'executing' | 'paused' | 'completed' | 'failed' | 'cancelled';
+// Phase 24 RC follow-up — `queued` is a new pre-executing state. The
+// backend's TaskQueue holds tasks here when the per-task BrowserPool
+// is at its 10-slot capacity; the row flips to 'executing' the moment
+// a slot frees and the queue dispatches.
+export type UiTaskStatus =
+  | 'queued'
+  | 'executing'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
 
 export interface UiTask {
   taskId: string;
@@ -209,5 +219,5 @@ export interface UiThinkingEvent {
 }
 
 export function isActive(status: UiTaskStatus): boolean {
-  return status === 'executing' || status === 'paused';
+  return status === 'queued' || status === 'executing' || status === 'paused';
 }

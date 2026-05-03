@@ -7,6 +7,7 @@ import type { BrowserPool } from '../browser-pool/index.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
 import type { PayPalAdapter } from '../payment/index.js';
+import type { TaskQueue } from '../queue/task-queue.js';
 
 /**
  * Context factory. `planner` and `visionCommander` are both injected by the
@@ -39,6 +40,13 @@ export interface AppContextDeps {
    */
   browserPool?: BrowserPool | null;
   /**
+   * Phase 24 RC follow-up — global pool-capacity-aware task queue.
+   * Wired only when browserPool is also wired. tasks.create's supercar
+   * branch enqueues every browser-mode task here; the queue throttles
+   * dispatch so a 30-task burst doesn't overrun the 10-slot pool.
+   */
+  taskQueue?: TaskQueue | null;
+  /**
    * Phase 9 PayPal adapter. Non-null when PAYPAL_CLIENT_ID/_SECRET are
    * set. The payment router throws PRECONDITION_FAILED when this is
    * null so the SPA can show a "PayPal not configured" message.
@@ -58,6 +66,7 @@ export function makeCreateContext(deps: AppContextDeps) {
       playwrightExecutor: deps.playwrightExecutor ?? null,
       executionRouter: deps.executionRouter ?? null,
       browserPool: deps.browserPool ?? null,
+      taskQueue: deps.taskQueue ?? null,
       paypalAdapter: deps.paypalAdapter ?? null,
       userId: (req as Request & { userId?: string }).userId,
     };

@@ -17,6 +17,7 @@ import {
   type ExecutionRouter,
 } from './agent/supercar/index.js';
 import { BrowserPool, reapOrphans } from './browser-pool/index.js';
+import { createTaskQueue, type TaskQueue } from './queue/task-queue.js';
 import { createPayPalAdapter } from './payment/index.js';
 import { createVncProxy } from './browser-pool/vnc-proxy.js';
 import {
@@ -165,6 +166,7 @@ async function main() {
   // live traffic. Unhealthy startup (reaper fails, pool constructor
   // throws) degrades to MULTI_USER=false behaviour, never aborts boot.
   let browserPool: BrowserPool | null = null;
+  let taskQueue: TaskQueue | null = null;
   if (env.MULTI_USER) {
     try {
       const poolConfig = {
@@ -221,12 +223,33 @@ async function main() {
         // fallback for "pool.allocate threw" only.
         'MULTI_USER: BrowserPool ready — task flow routed through per-user pool (singleton lanes are fallback only)',
       );
+      // Phase 24 RC follow-up — TaskQueue gates dispatch to the pool
+      // so a 30-task burst can't overrun the 10 slots. Tied to the
+      // pool's lifetime: lives only when MULTI_USER pool came up.
+      // The pool's own canAllocate() is the dispatch predicate; the
+      // queue tracks its own inFlight counter to pace burst dispatch
+      // (canAllocate is a snapshot — it stays true while a freshly-
+      // dispatched task is still in pool.allocate's spawn path).
+      const poolForQueue = browserPool;
+      taskQueue = createTaskQueue({
+        canDispatch: () => poolForQueue.canAllocate(),
+        capacity: poolConfig.maxInstances,
+        tickMs: 5000,
+        maxDepth: 100,
+        queueTimeoutMs: 10 * 60 * 1000,
+        logger: (level, msg, ctx) => logger[level](ctx ?? {}, msg),
+      });
+      logger.info(
+        { capacity: poolConfig.maxInstances, tickMs: 5000, maxDepth: 100, queueTimeoutMs: 600000 },
+        'TaskQueue ready — pool-capacity-aware FIFO active',
+      );
     } catch (err) {
       logger.error(
         { err: err instanceof Error ? err.message : String(err) },
         'MULTI_USER init failed — falling back to single-instance mode',
       );
       browserPool = null;
+      taskQueue = null;
     }
   } else {
     logger.info('MULTI_USER=false — using single-instance holaday-chromium-headed');
@@ -253,6 +276,7 @@ async function main() {
     ...(visionCommander ? { visionCommander } : {}),
     ...(playwrightExecutor ? { playwrightExecutor } : {}),
     ...(browserPool ? { browserPool } : {}),
+    ...(taskQueue ? { taskQueue } : {}),
     ...(paypalAdapter ? { paypalAdapter } : {}),
   });
 
@@ -432,6 +456,16 @@ async function main() {
     }
     if (headedExecutor) {
       await headedExecutor.disconnect().catch(() => {});
+    }
+    if (taskQueue) {
+      try {
+        taskQueue.stop();
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          'TaskQueue stop errored (continuing)',
+        );
+      }
     }
     if (browserPool) {
       await browserPool.shutdown().catch((err) => {

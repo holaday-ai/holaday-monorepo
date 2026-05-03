@@ -46,6 +46,7 @@ export interface HttpAppDeps {
   playwrightExecutor?: PlaywrightExecutor | null;
   executionRouter?: ExecutionRouter;
   browserPool?: BrowserPool | null;
+  taskQueue?: import('./queue/task-queue.js').TaskQueue | null;
   paypalAdapter?: PayPalAdapter | null;
 }
 
@@ -817,6 +818,7 @@ export function createHttpApp(deps: HttpAppDeps) {
         ...(deps.playwrightExecutor ? { playwrightExecutor: deps.playwrightExecutor } : {}),
         ...(deps.executionRouter ? { executionRouter: deps.executionRouter } : {}),
         ...(deps.browserPool ? { browserPool: deps.browserPool } : {}),
+        ...(deps.taskQueue ? { taskQueue: deps.taskQueue } : {}),
         ...(deps.paypalAdapter ? { paypalAdapter: deps.paypalAdapter } : {}),
       }),
     }),
