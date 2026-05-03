@@ -152,6 +152,41 @@ export function classifyAsSimpleSearch(intent: string): boolean {
   if (!t) return false;
   const lower = t.toLowerCase();
 
+  // Phase 22a follow-up — explicit-navigation disqualifier MUST run
+  // before the PRICE_HINTS / FACT_NOUNS positive checks below. The
+  // 22a regression: "打开 amazon.com 搜键盘 找销量最高的 3 个产品
+  // 告诉我名称、价格和评分" used to return true because "价格"
+  // (a PRICE_HINT) matched somewhere later in the intent — even
+  // though "打开 amazon.com" at the start clearly means "use the
+  // browser". The user asks for a fact (price) but DEMANDS the
+  // browser fetches it from a specific site, which web_search
+  // can't satisfy without losing the source-site requirement.
+  // Same shape for "打开 weather.com 查询天气" — FACT_NOUNS hit
+  // on "天气", but the user wants the browser to render that
+  // specific site, not a third-party search summary.
+  //
+  // Pattern: open / visit / navigate verb at the START of the
+  // intent (with optional leading "帮我" / "请"). Word-boundary
+  // anchored for English so "open" doesn't match inside other
+  // words. CJK substrings at offset 0..2 (allowing one optional
+  // leading honorific particle).
+  const NAV_PREFIXES_CN = ['打开', '访问', '前往', '进入', '跳转到', '跳到'];
+  const NAV_PREFIXES_LEAD = ['', '帮我', '请帮我', '请', '麻烦'];
+  for (const lead of NAV_PREFIXES_LEAD) {
+    for (const verb of NAV_PREFIXES_CN) {
+      if (lower.startsWith(`${lead}${verb}`)) return false;
+    }
+  }
+  const NAV_PATTERNS_EN: RegExp[] = [
+    /^\s*(?:please\s+|can\s+you\s+|could\s+you\s+)?open\b/i,
+    /^\s*(?:please\s+|can\s+you\s+|could\s+you\s+)?visit\b/i,
+    /^\s*(?:please\s+|can\s+you\s+|could\s+you\s+)?go\s+to\b/i,
+    /^\s*(?:please\s+|can\s+you\s+|could\s+you\s+)?navigate\s+to\b/i,
+  ];
+  for (const p of NAV_PATTERNS_EN) {
+    if (p.test(lower)) return false;
+  }
+
   // Disqualifiers: any action verb forces browser/zapier lane.
   //
   // Chinese verbs are straight substring matches — CJK characters

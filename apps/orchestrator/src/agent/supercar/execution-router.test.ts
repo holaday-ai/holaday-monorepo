@@ -47,6 +47,36 @@ describe('classifyAsSimpleSearch', () => {
     });
   });
 
+  describe('Phase 22a regression: nav-prefix MUST beat PRICE / FACT positive markers', () => {
+    // Pre-22a-fix: "打开 amazon.com 找产品告诉我价格和评分" returned true
+    // because "价格" sits in PRICE_HINTS, firing the early positive return
+    // before the (then-absent) nav-prefix disqualifier. Same for "天气"
+    // / "汇率" / "新闻" via FACT_NOUNS. These intents must route to the
+    // browser because the user is naming the SITE they want (amazon.com,
+    // weather.com), not asking for a generic fact lookup. web_search has
+    // no way to honor the site requirement.
+    it.each([
+      // PRICE_HINTS that used to false-positive after a nav-prefix
+      '打开 amazon.com 搜索 mechanical keyboard 找销量最高的 3 个产品 告诉我名称、价格和评分',
+      '打开 jd.com 看看这款手机的价格',
+      '访问 taobao.com 比较价格',
+      // FACT_NOUNS that used to false-positive after a nav-prefix
+      '打开 weather.com 查询今天洛杉矶的天气',
+      '访问 xe.com 查一下今天美元汇率',
+      '前往 finance.sina.com 看股价',
+      '进入 12306.cn 查明天上海到北京的航班',
+      // English variants
+      'open amazon.com and check the price of mechanical keyboards',
+      'visit weather.com and tell me today temperature in tokyo',
+      'go to github.com and look at my profile',
+      // Lead honorifics
+      '帮我打开 jd.com 比一下价格',
+      '请打开 weather.com 看看天气',
+    ])('false: %s', (intent) => {
+      expect(classifyAsSimpleSearch(intent)).toBe(false);
+    });
+  });
+
   describe('should NOT classify as simple search (action verb present)', () => {
     it.each([
       '帮我在京东上买一台 MacBook',
