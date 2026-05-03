@@ -223,26 +223,40 @@ export function BrowserPanel({
   // a live socket on every render.
   const streamTransport = React.useMemo(() => readStreamTransport(), []);
   const usingCdp = streamTransport === 'cdp';
-  // One-time mount diagnostic so BOSS can confirm in DevTools console
-  // which transport actually got picked. Helps distinguish "flag not
-  // taking effect" from "transport selected but failing".
+  // Phase 24 diagnostic — log the current task scope so DevTools can
+  // confirm the panel is actually receiving the expected taskId from
+  // its parent. Re-fires whenever the user picks a different task.
   React.useEffect(() => {
     // eslint-disable-next-line no-console
     console.info(
-      `[holaday] BrowserPanel transport = ${streamTransport}` +
-        (poolUserId ? ` (pool user=${poolUserId})` : ' (no pool slot)'),
+      `[holaday] BrowserPanel transport=${streamTransport} ` +
+        `activeTaskId=${activeTaskId ?? 'null'} ` +
+        `taskStatus=${taskStatus ?? 'null'} ` +
+        (poolUserId ? `poolUserId=${poolUserId}` : '(no pool slot)'),
     );
-  }, [streamTransport, poolUserId]);
+  }, [streamTransport, activeTaskId, taskStatus, poolUserId]);
+  // Phase 24: completed/failed/cancelled tasks have had their per-task
+  // Brave released — connecting to /screencast-ws/<taskId> would 409
+  // and bounce through the noVNC retry/error loop. Compute taskTerminal
+  // up front so the URL memo can short-circuit cleanly.
+  const taskTerminal =
+    taskStatus === 'completed' ||
+    taskStatus === 'failed' ||
+    taskStatus === 'cancelled';
   // VNC live stream — memoised so prop identity is stable across
   // re-renders (the viewport's effect re-runs on any URL change).
   const vncUrl = React.useMemo(
     () => (usingCdp ? null : buildVncUrl(poolUserId)),
     [poolUserId, usingCdp],
   );
-  const screencastUrlForCdp = React.useMemo(
-    () => (usingCdp ? buildScreencastUrl(activeTaskId ?? null, poolUserId) : null),
-    [activeTaskId, poolUserId, usingCdp],
-  );
+  const screencastUrlForCdp = React.useMemo(() => {
+    if (!usingCdp) return null;
+    // Per-task pool: terminal tasks have no live Brave. Fall through
+    // to the static frame fallback (last-frame JPEG) instead of
+    // hammering the WS into 409s.
+    if (activeTaskId && taskTerminal) return null;
+    return buildScreencastUrl(activeTaskId ?? null, poolUserId);
+  }, [activeTaskId, poolUserId, usingCdp, taskTerminal]);
   const [vncStatus, setVncStatus] = React.useState<VncStatus>('idle');
   // P3 hibernation detection: count consecutive failed attempts. The
   // pool's idle GC reaps after 5 min, after which /vnc-ws/ rejects
@@ -251,6 +265,13 @@ export function BrowserPanel({
   // assume the browser is hibernated and offer the wake card. Reset
   // to 0 on a successful 'connect'.
   const [vncAttemptFails, setVncAttemptFails] = React.useState(0);
+  // Phase 24: switching tasks must reset the attempt counter so a
+  // prior task's stale failures don't pop the hibernation card on a
+  // freshly-selected, freshly-running task.
+  React.useEffect(() => {
+    setVncAttemptFails(0);
+    setVncStatus('idle');
+  }, [activeTaskId]);
   const handleVncStatus = React.useCallback((status: VncStatus) => {
     setVncStatus(status);
     setVncAttemptFails((n) => {
@@ -259,7 +280,14 @@ export function BrowserPanel({
       return n;
     });
   }, []);
-  const hibernated = poolUserId != null && vncAttemptFails >= 3;
+  // Phase 24: hibernation is a userId-pool concept (idle GC after
+  // 5min). Per-task pool has no hibernation — terminal task = static
+  // frame, executing task = retry forever. Only fire the hibernation
+  // card on the LEGACY userId-scoped panel state (no task selected).
+  // This prevents the "浏览器已休眠" flicker BOSS reported on both
+  // executing tasks (transient WS hiccups) and terminal tasks (Brave
+  // released after task end).
+  const hibernated = poolUserId != null && vncAttemptFails >= 3 && !activeTaskId;
   // P3 wake call — fire-and-forget allocate, then reset the attempt
   // counter so VncViewport's reconnect tries fresh. Server-side this
   // takes ~3-5s (cold spawn); the user sees the spinner during that
@@ -292,10 +320,8 @@ export function BrowserPanel({
   // correct frame. Keeping VNC live also lets users use HOLA DAY's
   // browser as a remote desktop after the agent finishes — exactly
   // the China-edge product premise.
-  const taskTerminal =
-    taskStatus === 'completed' ||
-    taskStatus === 'failed' ||
-    taskStatus === 'cancelled';
+  // (taskTerminal hoisted above the screencast-URL memo so it can
+  // short-circuit terminal-task connections at the URL layer.)
   // When CDP is the active transport, "useVnc" still gates the
   // canvas-vs-frame branch but the inner viewport renders
   // CdpScreencastViewport. The flag stays the same name to keep
