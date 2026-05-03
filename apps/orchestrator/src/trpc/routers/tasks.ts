@@ -80,9 +80,15 @@ const taskController = new TaskController();
  * because the per-user shared Brave was a single contended resource.
  * Phase 24's per-task pool means there's no shared resource to
  * starve — every task gets its own Brave (capped by pool capacity)
- * and generate tasks don't touch the pool at all. So bypass becomes
- * a single number again, sized to match pool capacity (a bypass
- * user can saturate the pool entirely, fine for testing).
+ * and generate tasks don't touch the pool at all.
+ *
+ * RC follow-up: with the global TaskQueue gating dispatch to the
+ * 10-slot pool, this admit-time concurrency check no longer needs
+ * to mirror pool capacity. The queue handles the actual throttling
+ * (10 in flight, the rest sit in 'queued' status). Sizing this to
+ * match the queue's depth ceiling lets the test account submit a
+ * full RC batch (165 tasks) without hitting an admit-time wall
+ * before the queue can do its job.
  *
  * Plan limits (daily/monthly task counter) are still skipped for
  * bypass users so smoke testing isn't blocked by the 3/day cap.
@@ -90,7 +96,7 @@ const taskController = new TaskController();
 const QUOTA_BYPASS_USERS: ReadonlySet<string> = new Set([
   'usr_EeYpvsvLtyDzN4VLQi7BT',
 ]);
-const BYPASS_CONCURRENCY = 10;
+const BYPASS_CONCURRENCY = 100;
 const BYPASS_RATE = { max: 30, windowMs: 60_000 };
 const GLOBAL_QUEUE_DEPTH_LIMIT = 100;
 
