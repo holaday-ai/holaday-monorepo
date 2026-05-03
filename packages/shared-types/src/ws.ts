@@ -604,6 +604,36 @@ export const serverSupercarThinkingSchema = z.object({
   summary: z.string(),
 });
 
+/**
+ * Phase 24 RC follow-up — generate / scrape streaming deltas. Fires
+ * once per content_block_delta from the Anthropic stream so the SPA
+ * can render the model's output as it generates instead of waiting
+ * for the full message. Each `delta` is the raw new text (not a
+ * cumulative snapshot) — the SPA accumulates client-side.
+ *
+ * Browser-mode tasks DO NOT use this channel — they have screencast
+ * frames + step events instead. Only generate-runner and the LLM-
+ * synthesis phase of scrape-runner emit these.
+ */
+export const serverTaskStreamSchema = z.object({
+  type: z.literal('server.task.stream'),
+  taskId: z.string(),
+  delta: z.string(),
+});
+
+/**
+ * Phase 24 RC follow-up — coarse progress messages for runners that
+ * have a non-streaming pre-phase. Today: scrape-runner emits one
+ * "正在抓取网页数据..." before Firecrawl returns and (optionally) a
+ * "正在分析整理..." between Firecrawl and the LLM-stream. SPA shows
+ * this as a small caption above the streaming output.
+ */
+export const serverTaskProgressSchema = z.object({
+  type: z.literal('server.task.progress'),
+  taskId: z.string(),
+  message: z.string(),
+});
+
 export const serverMessageSchema = z.discriminatedUnion('type', [
   serverWelcomeSchema,
   serverErrorSchema,
@@ -629,6 +659,8 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverSupercarAwaitingUserSchema,
   serverSupercarSuggestionsSchema,
   serverSupercarThinkingSchema,
+  serverTaskStreamSchema,
+  serverTaskProgressSchema,
 ]);
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;

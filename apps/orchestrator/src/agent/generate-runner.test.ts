@@ -24,63 +24,88 @@ function makeLogger() {
 }
 
 /**
- * Build a minimal Anthropic client stub with a scripted messages.create.
- * The runner only ever calls .messages.create; everything else is unused.
+ * Build a minimal Anthropic client stub with a scripted messages.stream.
+ *
+ * Phase 24 RC follow-up — runner switched messages.create →
+ * messages.stream. The mock returns an EventEmitter-like object with
+ * on('text', ...) for delta subscription and finalMessage() for the
+ * canonical response. Tests can pass a textOut string and the mock
+ * fires one synthetic 'text' delta + resolves finalMessage() with a
+ * single text content block.
  */
 function makeClient(opts: {
   textOut?: string;
   rejectWith?: Error;
-  /** When true, the create call never resolves (simulates a hang). The
+  /** When true, the stream never resolves (simulates a hang). The
    *  test must rely on the runner's AbortController to break the wait. */
   hangForever?: boolean;
   inputTokens?: number;
   outputTokens?: number;
   stopReason?: string;
 }): Anthropic {
-  const create = vi.fn(
-    async (
+  const stream = vi.fn(
+    (
       _params: unknown,
       reqOpts?: { signal?: AbortSignal },
-    ): Promise<unknown> => {
-      if (opts.hangForever) {
-        return new Promise((_, reject) => {
-          // Honor abort — the runner aborts on its 120s timeout (or
-          // whatever timeoutMs is set in the test).
-          if (reqOpts?.signal) {
-            const onAbort = () => {
-              const err = new Error('Request was aborted.');
-              err.name = 'AbortError';
-              reject(err);
-            };
-            if (reqOpts.signal.aborted) onAbort();
-            else reqOpts.signal.addEventListener('abort', onAbort);
+    ): unknown => {
+      const listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
+      const emit = (event: string, ...args: unknown[]): void => {
+        const subs = listeners[event] ?? [];
+        for (const fn of subs) fn(...args);
+      };
+      const finalMessagePromise = new Promise<unknown>((resolve, reject) => {
+        // Defer one tick so callers have a chance to attach .on('text')
+        // before we synthesise the delta.
+        queueMicrotask(() => {
+          if (opts.hangForever) {
+            if (reqOpts?.signal) {
+              const onAbort = (): void => {
+                const err = new Error('Request was aborted.');
+                err.name = 'AbortError';
+                reject(err);
+              };
+              if (reqOpts.signal.aborted) onAbort();
+              else reqOpts.signal.addEventListener('abort', onAbort);
+            }
+            // Never resolves unless aborted.
+            return;
           }
-          // No resolve — never settles unless aborted.
+          if (opts.rejectWith) {
+            reject(opts.rejectWith);
+            return;
+          }
+          if (opts.textOut) emit('text', opts.textOut, opts.textOut);
+          resolve({
+            id: 'msg_test',
+            type: 'message',
+            role: 'assistant',
+            model: 'claude-sonnet-4-6',
+            stop_reason: opts.stopReason ?? 'end_turn',
+            stop_sequence: null,
+            content: opts.textOut
+              ? [{ type: 'text', text: opts.textOut, citations: null }]
+              : [],
+            usage: {
+              input_tokens: opts.inputTokens ?? 100,
+              output_tokens: opts.outputTokens ?? 50,
+            },
+          });
         });
-      }
-      if (opts.rejectWith) {
-        throw opts.rejectWith;
-      }
+      });
       return {
-        id: 'msg_test',
-        type: 'message',
-        role: 'assistant',
-        model: 'claude-sonnet-4-6',
-        stop_reason: opts.stopReason ?? 'end_turn',
-        stop_sequence: null,
-        content: opts.textOut
-          ? [{ type: 'text', text: opts.textOut, citations: null }]
-          : [],
-        usage: {
-          input_tokens: opts.inputTokens ?? 100,
-          output_tokens: opts.outputTokens ?? 50,
+        on(event: string, fn: (...args: unknown[]) => void) {
+          (listeners[event] ??= []).push(fn);
+          return this;
+        },
+        finalMessage() {
+          return finalMessagePromise;
         },
       };
     },
   );
   return {
     messages: {
-      create,
+      stream,
     },
   } as unknown as Anthropic;
 }

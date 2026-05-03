@@ -54,6 +54,19 @@ export interface TaskStore {
   /** Supercar: latest extended-thinking summary per task. */
   thinkingByTask: Record<string, UiThinkingEvent>;
   /**
+   * Phase 24 RC follow-up — running streaming buffer for generate
+   * and scrape mode tasks. Each `server.task.stream` delta gets
+   * appended; cleared when the task reaches a terminal status (the
+   * canonical `resultText` takes over from there).
+   */
+  streamingByTask: Record<string, string>;
+  /**
+   * Phase 24 RC follow-up — coarse progress message for runners with
+   * a non-streaming pre-phase (today: scrape's Firecrawl-fetch
+   * window). Latest-wins per task; cleared on terminal.
+   */
+  progressByTask: Record<string, string>;
+  /**
    * O5 — backend-generated follow-up suggestions per task. Populated
    * when the orchestrator's `generateSuggestions` call resolves
    * after a task's terminal frame. TaskStream prefers this over the
@@ -132,6 +145,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   webSearchByTask: {},
   thinkingByTask: {},
   suggestionsByTask: {},
+  streamingByTask: {},
+  progressByTask: {},
   // Default ON: with the VNC lane live, view-only is the defensive
   // crouch. Users that never toggle this flag still get interactive
   // clicks, which matches the product promise ("watch the agent,
@@ -496,17 +511,53 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
 
   applyServerMessage(msg) {
     if (msg.type === 'server.task.terminal') {
+      set((prev) => {
+        // Phase 24 RC follow-up — terminal frame arrives. Clear
+        // streaming + progress buffers for this task; the canonical
+        // resultText takes over.
+        const nextStreaming = { ...prev.streamingByTask };
+        delete nextStreaming[msg.taskId];
+        const nextProgress = { ...prev.progressByTask };
+        delete nextProgress[msg.taskId];
+        return {
+          tasks: prev.tasks.map((t) =>
+            t.taskId === msg.taskId
+              ? {
+                  ...t,
+                  status: msg.status,
+                  ...(msg.summary ? { resultText: msg.summary } : {}),
+                  ...(msg.reason ? { resultText: humaniseTaskError(msg.reason) } : {}),
+                }
+              : t,
+          ),
+          streamingByTask: nextStreaming,
+          progressByTask: nextProgress,
+        };
+      });
+      return;
+    }
+    if (msg.type === 'server.task.stream') {
+      // Phase 24 RC follow-up — append the delta to this task's
+      // streaming buffer. The render layer reads streamingByTask
+      // while the task is still executing, then switches to the
+      // canonical resultText on terminal.
       set((prev) => ({
-        tasks: prev.tasks.map((t) =>
-          t.taskId === msg.taskId
-            ? {
-                ...t,
-                status: msg.status,
-                ...(msg.summary ? { resultText: msg.summary } : {}),
-                ...(msg.reason ? { resultText: humaniseTaskError(msg.reason) } : {}),
-              }
-            : t,
-        ),
+        streamingByTask: {
+          ...prev.streamingByTask,
+          [msg.taskId]: (prev.streamingByTask[msg.taskId] ?? '') + msg.delta,
+        },
+      }));
+      return;
+    }
+    if (msg.type === 'server.task.progress') {
+      // Phase 24 RC follow-up — coarse progress note (latest wins).
+      // Used by scrape-runner to show "正在抓取网页数据…" in the
+      // window before the LLM stream starts producing tokens.
+      set((prev) => ({
+        progressByTask: {
+          ...prev.progressByTask,
+          [msg.taskId]: msg.message,
+        },
       }));
       return;
     }
@@ -749,6 +800,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       webSearchByTask: {},
       thinkingByTask: {},
       suggestionsByTask: {},
+      streamingByTask: {},
+      progressByTask: {},
     });
   },
 }));

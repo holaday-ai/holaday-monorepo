@@ -577,6 +577,21 @@ export const tasksRouter = router({
             client: anthropicClient,
             logger: ctx.logger,
             ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
+            // Phase 24 RC follow-up — stream LLM deltas to the SPA
+            // so users see incremental output instead of a blank
+            // panel for 30-90s. broadcast errors are swallowed by
+            // the runner; we never let WS issues stall the loop.
+            onStreamDelta: (delta) => {
+              try {
+                broadcastToUser(ctx.userId, {
+                  type: 'server.task.stream',
+                  taskId,
+                  delta,
+                });
+              } catch (err) {
+                ctx.logger.warn({ err, taskId }, 'generate: broadcast stream delta failed');
+              }
+            },
           });
         } catch (err) {
           ctx.logger.error({ err, taskId }, 'generate: runner threw');
@@ -710,6 +725,32 @@ export const tasksRouter = router({
             client: anthropicClient,
             firecrawl,
             logger: ctx.logger,
+            // Phase 24 RC follow-up — stream LLM deltas + push
+            // coarse Firecrawl-phase progress to the SPA. Same
+            // contract as generate-runner; broadcast errors are
+            // swallowed.
+            onStreamDelta: (delta) => {
+              try {
+                broadcastToUser(ctx.userId, {
+                  type: 'server.task.stream',
+                  taskId,
+                  delta,
+                });
+              } catch (err) {
+                ctx.logger.warn({ err, taskId }, 'scrape: broadcast stream delta failed');
+              }
+            },
+            onProgress: (message) => {
+              try {
+                broadcastToUser(ctx.userId, {
+                  type: 'server.task.progress',
+                  taskId,
+                  message,
+                });
+              } catch (err) {
+                ctx.logger.warn({ err, taskId }, 'scrape: broadcast progress failed');
+              }
+            },
           });
         } catch (err) {
           ctx.logger.error({ err, taskId }, 'scrape: runner threw');

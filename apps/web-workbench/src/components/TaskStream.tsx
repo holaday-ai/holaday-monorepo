@@ -219,6 +219,13 @@ function AgentBlock({
   serverSuggestions?: string[];
 }): JSX.Element {
   const [detailOpen, setDetailOpen] = React.useState(false);
+  // Phase 24 RC follow-up — generate / scrape streaming output. The
+  // buffer accumulates `server.task.stream` deltas; the progress
+  // string surfaces `server.task.progress` notes (e.g. "正在抓取
+  // 网页数据…" before the first delta lands). Both are cleared on
+  // terminal so the canonical resultText takes over.
+  const streamingText = useTaskStore((s) => s.streamingByTask[task.taskId]);
+  const progressMessage = useTaskStore((s) => s.progressByTask[task.taskId]);
 
   // Round-1 streaming rework: after humanizeStep filters tool_use
   // rows out of the main flow, the remaining lines are (almost)
@@ -296,6 +303,31 @@ function AgentBlock({
         {executorFallback && <ExecutorFallbackBanner fallback={executorFallback} />}
 
         {awaitingUser && <AwaitingUserBanner wait={awaitingUser} />}
+
+        {/* Phase 24 RC follow-up — incremental streaming output for
+         *  generate + scrape tasks. Renders while the task is still
+         *  executing; switches to the canonical TerminalSummary
+         *  (markdown) when the terminal frame lands. The progress
+         *  caption only shows for scrape tasks (they have a
+         *  Firecrawl-fetch window before the LLM stream starts).
+         *  No animation — the model's token cadence IS the typing
+         *  effect. */}
+        {!terminal && (progressMessage || streamingText) && (
+          <div className="rounded-xl border border-border bg-card px-4 py-3">
+            {progressMessage && !streamingText && (
+              <div className="text-xs text-muted-foreground">
+                <span className="inline-block animate-pulse">●</span>{' '}
+                {progressMessage}
+              </div>
+            )}
+            {streamingText && (
+              <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground font-sans">
+                {streamingText}
+                <span className="ml-0.5 inline-block h-3 w-1 animate-pulse bg-foreground/40 align-baseline" />
+              </pre>
+            )}
+          </div>
+        )}
 
         {terminal && task.resultText && (
           <TerminalSummary

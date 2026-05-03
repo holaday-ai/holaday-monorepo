@@ -47,6 +47,21 @@ export interface RunScrapeOpts {
   maxTokens?: number;
   /** Search-result fetch limit. Default 5. */
   searchLimit?: number;
+  /**
+   * Phase 24 RC follow-up — streaming delta callback for the LLM
+   * synthesis phase. Same shape as generate-runner's `onStreamDelta`.
+   * tasks.ts wires this to broadcastToUser({type:'server.task.stream',
+   * taskId, delta}).
+   */
+  onStreamDelta?: (delta: string) => void;
+  /**
+   * Phase 24 RC follow-up — coarse progress message hook. Fired
+   * twice per task today: once before Firecrawl ("正在抓取网页数据
+   * ...") and once between Firecrawl and the LLM stream
+   * ("正在分析整理..."). tasks.ts wires this to broadcastToUser
+   * ({type:'server.task.progress', taskId, message}).
+   */
+  onProgress?: (message: string) => void;
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
@@ -103,6 +118,18 @@ function formatScrapedContext(
   return { context: blocks.join('\n\n---\n\n'), usedSources: used };
 }
 
+function safeProgress(opts: RunScrapeOpts, message: string): void {
+  if (!opts.onProgress) return;
+  try {
+    opts.onProgress(message);
+  } catch (err) {
+    opts.logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'scrape: onProgress callback threw (swallowed)',
+    );
+  }
+}
+
 export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome> {
   const start = Date.now();
   const log = opts.logger.child({ taskId: opts.taskId, runner: 'scrape' });
@@ -112,6 +139,7 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
 
   if (url) {
     log.info({ url }, 'scrape-runner: scraping target URL');
+    safeProgress(opts, '正在抓取网页数据…');
     const r = await opts.firecrawl.scrape(url);
     if (!r.ok) {
       log.warn({ err: r.error, url }, 'scrape-runner: firecrawl.scrape failed');
@@ -143,6 +171,7 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
       };
     }
     log.info({ query }, 'scrape-runner: searching via firecrawl');
+    safeProgress(opts, '正在搜索网络数据…');
     const r = await opts.firecrawl.search(query, {
       limit: opts.searchLimit ?? DEFAULT_SEARCH_LIMIT,
     });
@@ -193,8 +222,18 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
   const abortController = new AbortController();
   const timer = setTimeout(() => abortController.abort(), timeoutMs);
 
+  // Phase 24 RC follow-up — Firecrawl is done, the LLM-synthesis
+  // phase begins. Push a coarse progress note before the first
+  // delta lands so the SPA can render "正在分析整理…" instead of
+  // a blank panel for the few seconds before the model warms up.
+  safeProgress(opts, '正在分析整理…');
+
   try {
-    const res = await opts.client.messages.create(
+    // Phase 24 RC follow-up — switched messages.create →
+    // messages.stream so the SPA renders the synthesis as it
+    // generates. Subscribe to 'text' events for the WS broadcast,
+    // then await finalMessage() for the canonical content + usage.
+    const stream = opts.client.messages.stream(
       {
         model: opts.model ?? DEFAULT_MODEL,
         max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
@@ -209,12 +248,28 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
       },
       { signal: abortController.signal },
     );
-    const summary = res.content
+    if (opts.onStreamDelta) {
+      const cb = opts.onStreamDelta;
+      stream.on('text', (delta: string): void => {
+        if (delta) {
+          try {
+            cb(delta);
+          } catch (err) {
+            log.warn(
+              { err: err instanceof Error ? err.message : String(err) },
+              'scrape: onStreamDelta callback threw (swallowed)',
+            );
+          }
+        }
+      });
+    }
+    const finalMessage = await stream.finalMessage();
+    const summary = finalMessage.content
       .map((b) => (b.type === 'text' ? b.text : ''))
       .join('')
       .trim();
-    const inputTokens = res.usage?.input_tokens ?? 0;
-    const outputTokens = res.usage?.output_tokens ?? 0;
+    const inputTokens = finalMessage.usage?.input_tokens ?? 0;
+    const outputTokens = finalMessage.usage?.output_tokens ?? 0;
     const durationMs = Date.now() - start;
     if (!summary) {
       return {
@@ -236,6 +291,7 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
         outputTokens,
         durationMs,
         summaryLen: summary.length,
+        streaming: true,
       },
       'scrape-runner: completed',
     );

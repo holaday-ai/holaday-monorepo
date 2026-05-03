@@ -86,16 +86,36 @@ describe('extractSearchQuery', () => {
 });
 
 describe('runScrapeTask — happy paths', () => {
+  // Phase 24 RC follow-up — runner switched messages.create →
+  // messages.stream. Mock returns an EventEmitter-like stream with
+  // .on('text', cb) for delta subscription and .finalMessage() for
+  // the canonical response.
   function makeAnthropic(textOut: string): {
-    client: { messages: { create: ReturnType<typeof vi.fn> } };
-    create: ReturnType<typeof vi.fn>;
+    client: { messages: { stream: ReturnType<typeof vi.fn> } };
+    stream: ReturnType<typeof vi.fn>;
   } {
-    const create = vi.fn(async () => ({
-      content: [{ type: 'text', text: textOut }],
-      stop_reason: 'end_turn',
-      usage: { input_tokens: 100, output_tokens: 200 },
-    }));
-    return { client: { messages: { create } }, create };
+    const stream = vi.fn(() => {
+      const listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
+      const finalPromise = Promise.resolve().then(() => {
+        const subs = listeners['text'] ?? [];
+        for (const fn of subs) fn(textOut, textOut);
+        return {
+          content: [{ type: 'text', text: textOut }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 100, output_tokens: 200 },
+        };
+      });
+      return {
+        on(event: string, fn: (...args: unknown[]) => void) {
+          (listeners[event] ??= []).push(fn);
+          return this;
+        },
+        finalMessage() {
+          return finalPromise;
+        },
+      };
+    });
+    return { client: { messages: { stream } }, stream };
   }
 
   it('routes a URL intent through firecrawl.scrape', async () => {
@@ -168,20 +188,20 @@ describe('runScrapeTask — failure surfacing', () => {
       })),
       search: vi.fn(),
     };
-    const create = vi.fn();
+    const stream = vi.fn();
     const out = await runScrapeTask({
       taskId: 'tsk_x',
       userId: 'u',
       intent: '总结 https://example.com 这篇',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      client: { messages: { create } } as any,
+      client: { messages: { stream } } as any,
       firecrawl,
       logger: fakeLogger(),
     });
 
     expect(out.status).toBe('failed');
     if (out.status === 'failed') expect(out.reason).toMatch(/firecrawl|api key/i);
-    expect(create).not.toHaveBeenCalled();
+    expect(stream).not.toHaveBeenCalled();
   });
 
   it('failed when firecrawl.search returns no results', async () => {
@@ -189,19 +209,19 @@ describe('runScrapeTask — failure surfacing', () => {
       scrape: vi.fn(),
       search: vi.fn(async () => ({ ok: true as const, results: [] })),
     };
-    const create = vi.fn();
+    const stream = vi.fn();
     const out = await runScrapeTask({
       taskId: 'tsk_y',
       userId: 'u',
       intent: '查找绝对没有结果的偏门关键词',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      client: { messages: { create } } as any,
+      client: { messages: { stream } } as any,
       firecrawl,
       logger: fakeLogger(),
     });
 
     expect(out.status).toBe('failed');
     if (out.status === 'failed') expect(out.reason).toMatch(/没有结果|no results/i);
-    expect(create).not.toHaveBeenCalled();
+    expect(stream).not.toHaveBeenCalled();
   });
 });

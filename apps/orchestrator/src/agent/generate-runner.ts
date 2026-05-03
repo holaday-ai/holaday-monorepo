@@ -78,6 +78,15 @@ export interface RunGenerateOpts {
    * the task at status='executing' forever.
    */
   timeoutMs?: number;
+  /**
+   * Phase 24 RC follow-up — streaming delta callback. Fired once
+   * per text-delta event from the Anthropic stream. tasks.ts wires
+   * this to `broadcastToUser({type:'server.task.stream', taskId,
+   * delta})`. Optional — when omitted, the runner still streams
+   * server-side (so retry-on-empty works) but the SPA won't see
+   * incremental output.
+   */
+  onStreamDelta?: (delta: string) => void;
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
@@ -168,20 +177,42 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
 
   try {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      const res = await opts.client.messages.create(requestArgs, {
+      // Phase 24 RC follow-up — switched messages.create →
+      // messages.stream so the SPA can render the model's output
+      // incrementally instead of waiting for the full response.
+      // The runner subscribes to 'text' events for the WS broadcast,
+      // then awaits finalMessage() to get the canonical content +
+      // usage numbers (same shape as the create() response).
+      const stream = opts.client.messages.stream(requestArgs, {
         signal: abortController.signal,
       });
+      if (opts.onStreamDelta) {
+        const cb = opts.onStreamDelta;
+        stream.on('text', (delta: string): void => {
+          if (delta) {
+            try {
+              cb(delta);
+            } catch (err) {
+              log.warn(
+                { err: err instanceof Error ? err.message : String(err) },
+                'generate: onStreamDelta callback threw (swallowed)',
+              );
+            }
+          }
+        });
+      }
+      const finalMessage = await stream.finalMessage();
 
       // Concatenate text blocks — anything that isn't text (server-tool-use
       // results, etc.) gets dropped silently. Most generate tasks will
       // just be one or two text blocks.
-      const summary = res.content
+      const summary = finalMessage.content
         .map((b) => (b.type === 'text' ? b.text : ''))
         .join('')
         .trim();
 
-      lastInputTokens = res.usage?.input_tokens ?? 0;
-      lastOutputTokens = res.usage?.output_tokens ?? 0;
+      lastInputTokens = finalMessage.usage?.input_tokens ?? 0;
+      lastOutputTokens = finalMessage.usage?.output_tokens ?? 0;
       const durationMs = Date.now() - start;
 
       if (summary) {
@@ -193,12 +224,13 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
         }
         log.info(
           {
-            stopReason: res.stop_reason,
+            stopReason: finalMessage.stop_reason,
             inputTokens: lastInputTokens,
             outputTokens: lastOutputTokens,
             durationMs,
             summaryLen: summary.length,
             attempts: attempt,
+            streaming: true,
           },
           'generate: completed',
         );
@@ -216,7 +248,7 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
         {
           attempt,
           maxAttempts: MAX_ATTEMPTS,
-          stopReason: res.stop_reason,
+          stopReason: finalMessage.stop_reason,
           inputTokens: lastInputTokens,
           outputTokens: lastOutputTokens,
           durationMs,
