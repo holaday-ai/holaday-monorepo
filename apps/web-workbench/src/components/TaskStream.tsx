@@ -317,33 +317,26 @@ function AgentBlock({
         {awaitingUser && <AwaitingUserBanner wait={awaitingUser} />}
 
         {/* Phase 24 RC follow-up — incremental streaming output for
-         *  generate + scrape tasks. Renders while the task is still
-         *  executing; switches to the canonical TerminalSummary
-         *  (markdown) when the terminal frame lands. The progress
-         *  caption only shows for scrape tasks (they have a
-         *  Firecrawl-fetch window before the LLM stream starts).
-         *  No animation — the model's token cadence IS the typing
-         *  effect. */}
-        {/* Render-side defensive belt — even if a stale buffer
-         *  somehow lingers (store guard caught the latest stale
-         *  delta but a prior accumulation snuck through), terminal
-         *  status MUST hide the streaming view. The explicit
-         *  status check (not just `!terminal`) belts the implicit
-         *  bool against any future regression to the `terminal`
-         *  derivation. resultText presence is the second guard:
-         *  if the canonical answer has landed, defer to it. */}
-        {/* RC audit fix — render streaming output via the SAME
-         *  ReactMarkdown surface TerminalSummary uses, so the
-         *  transition from "still streaming" to "task terminal"
-         *  is visually a no-op (only the supplementary controls —
-         *  copy button, suggestions — appear). Pre-fix the user
-         *  saw plain text → blank flash → markdown render and
-         *  perceived it as "two streaming passes". */}
-        {task.status !== 'completed' &&
-          task.status !== 'failed' &&
-          task.status !== 'cancelled' &&
-          !task.resultText &&
-          (progressMessage || streamingText) && (
+         *  generate + scrape tasks. Render gate (Bug 1 fix):
+         *
+         *    if task.resultText is set → TerminalSummary renders
+         *      (block below this one)
+         *    else if streamingText or progressMessage exist
+         *      → render the streaming/progress view
+         *
+         *  Status check intentionally absent. The store now keeps
+         *  buffers past terminal so this view bridges the ~200ms
+         *  window between server.task.terminal arriving and
+         *  task.resultText being merged from the API response.
+         *  Without the bridge, the streaming view disappeared and
+         *  TerminalSummary appeared, perceived as "two playbacks".
+         *
+         *  Render uses the SAME ReactMarkdown surface as
+         *  TerminalSummary (matching prose styles + blue panel)
+         *  so the transition to TerminalSummary is visually a
+         *  no-op — only the supplementary controls (copy button,
+         *  suggestion chips) light up when resultText lands. */}
+        {!task.resultText && (progressMessage || streamingText) && (
             <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-5 py-4 text-foreground dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-foreground">
               {progressMessage && !streamingText && (
                 <div className="text-xs text-muted-foreground">

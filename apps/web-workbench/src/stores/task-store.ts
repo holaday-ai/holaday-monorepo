@@ -56,16 +56,34 @@ export interface TaskStore {
   /**
    * Phase 24 RC follow-up — running streaming buffer for generate
    * and scrape mode tasks. Each `server.task.stream` delta gets
-   * appended; cleared when the task reaches a terminal status (the
-   * canonical `resultText` takes over from there).
+   * appended. PERSISTS past terminal — the render gate prefers
+   * `task.resultText` when set, falls back to this buffer when
+   * resultText hasn't loaded yet (covers the ~200ms gap between
+   * terminal arrival and tasks.detail merging the canonical
+   * summary). Without this, the streaming view disappeared on
+   * terminal then reappeared as TerminalSummary, perceived as
+   * "two playbacks".
    */
   streamingByTask: Record<string, string>;
   /**
    * Phase 24 RC follow-up — coarse progress message for runners with
    * a non-streaming pre-phase (today: scrape's Firecrawl-fetch
-   * window). Latest-wins per task; cleared on terminal.
+   * window). Latest-wins per task. PERSISTS past terminal — same
+   * rationale as streamingByTask.
    */
   progressByTask: Record<string, string>;
+  /**
+   * Phase 24 RC follow-up — set of taskIds that have reached a
+   * terminal state (server.task.terminal received). The
+   * stale-delta guard for stream / progress handlers checks THIS
+   * set instead of `prev.tasks.find(...).status` because the
+   * tasks array is populated asynchronously (initial list query)
+   * and a delta arriving before the task row is in the array
+   * would otherwise see status='unknown' and skip the guard.
+   * Set membership is the authoritative "this task is done"
+   * signal for the SPA's runtime.
+   */
+  terminalTaskIds: ReadonlySet<string>;
   /**
    * O5 — backend-generated follow-up suggestions per task. Populated
    * when the orchestrator's `generateSuggestions` call resolves
@@ -147,6 +165,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   suggestionsByTask: {},
   streamingByTask: {},
   progressByTask: {},
+  terminalTaskIds: new Set<string>(),
   // Default ON: with the VNC lane live, view-only is the defensive
   // crouch. Users that never toggle this flag still get interactive
   // clicks, which matches the product promise ("watch the agent,
@@ -512,9 +531,20 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   applyServerMessage(msg) {
     if (msg.type === 'server.task.terminal') {
       set((prev) => {
-        // Phase 24 RC follow-up — terminal frame arrives. Clear
-        // streaming + progress buffers for this task; the canonical
-        // resultText takes over.
+        // Phase 24 RC follow-up (Bug 1 fix): DO NOT clear streaming
+        // + progress buffers here. There's a ~200ms window between
+        // terminal arrival and tasks.detail merging the canonical
+        // summary; clearing buffers in that window leaves the
+        // streaming view rendering NOTHING, perceived as
+        // "content disappeared then reappeared". The render gate in
+        // TaskStream prefers `task.resultText` over the buffer when
+        // both are present, so retaining the buffer is harmless and
+        // bridges the gap.
+        //
+        // Bug 2 fix: also add to terminalTaskIds so stale-delta
+        // guards in stream/progress handlers can check Set
+        // membership directly (instead of looking at the tasks
+        // array's status, which races with tasks.list).
         // eslint-disable-next-line no-console
         console.warn('[HD-DEBUG] terminal', {
           taskId: msg.taskId,
@@ -523,10 +553,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
           hadProgress: Boolean(prev.progressByTask[msg.taskId]),
           hasSummary: Boolean((msg as { summary?: string }).summary),
         });
-        const nextStreaming = { ...prev.streamingByTask };
-        delete nextStreaming[msg.taskId];
-        const nextProgress = { ...prev.progressByTask };
-        delete nextProgress[msg.taskId];
+        const nextTerminalIds = new Set(prev.terminalTaskIds);
+        nextTerminalIds.add(msg.taskId);
         return {
           tasks: prev.tasks.map((t) =>
             t.taskId === msg.taskId
@@ -538,45 +566,36 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
                 }
               : t,
           ),
-          streamingByTask: nextStreaming,
-          progressByTask: nextProgress,
+          terminalTaskIds: nextTerminalIds,
+          // streamingByTask + progressByTask unchanged; buffers
+          // persist until resultText is rendered in their place.
         };
       });
       return;
     }
     if (msg.type === 'server.task.stream') {
       // Phase 24 RC follow-up — append the delta to this task's
-      // streaming buffer. The render layer reads streamingByTask
-      // while the task is still executing, then switches to the
-      // canonical resultText on terminal.
+      // streaming buffer. The render gate prefers task.resultText
+      // when set, otherwise renders the buffer.
       //
-      // Stale-delta guard: if this task has already reached a
-      // terminal state (network reorder dropped a delta after
-      // the terminal frame, or replay on WS reconnect), DROP the
-      // delta. Without this, the buffer that we cleared on terminal
-      // gets resurrected and the user sees the streaming view
-      // replay when they switch back to the completed task.
+      // Bug 2 fix: stale-delta guard reads `terminalTaskIds`
+      // (Set membership) instead of `prev.tasks.find().status`.
+      // The previous version saw status='unknown' whenever the
+      // delta arrived before tasks.list had loaded the task into
+      // the array — guard never fired, stale post-terminal
+      // deltas resurrected cleared buffers.
       set((prev) => {
-        const t = prev.tasks.find((x) => x.taskId === msg.taskId);
+        const isTerminal = prev.terminalTaskIds.has(msg.taskId);
         const bufferLen = (prev.streamingByTask[msg.taskId] ?? '').length;
-        // [HD-DEBUG] one-line trace per delta — `gated:true` means
-        // the stale-delta guard fired, the buffer was NOT updated.
         // eslint-disable-next-line no-console
         console.warn('[HD-DEBUG] stream delta', {
           taskId: msg.taskId,
-          taskStatus: t?.status ?? 'unknown',
+          isTerminal,
           bufferLen,
           delta: msg.delta.slice(0, 20),
-          gated:
-            !!t &&
-            (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled'),
+          gated: isTerminal,
         });
-        if (
-          t &&
-          (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled')
-        ) {
-          return prev;
-        }
+        if (isTerminal) return prev;
         return {
           streamingByTask: {
             ...prev.streamingByTask,
@@ -588,26 +607,18 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     }
     if (msg.type === 'server.task.progress') {
       // Phase 24 RC follow-up — coarse progress note (latest wins).
-      // Used by scrape-runner to show "正在抓取网页数据…" in the
-      // window before the LLM stream starts producing tokens.
-      // Same stale-message guard as server.task.stream above.
+      // Same stale-message guard as server.task.stream — Set
+      // membership, not tasks-array status.
       set((prev) => {
-        const t = prev.tasks.find((x) => x.taskId === msg.taskId);
+        const isTerminal = prev.terminalTaskIds.has(msg.taskId);
         // eslint-disable-next-line no-console
         console.warn('[HD-DEBUG] progress', {
           taskId: msg.taskId,
-          taskStatus: t?.status ?? 'unknown',
+          isTerminal,
           message: msg.message,
-          gated:
-            !!t &&
-            (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled'),
+          gated: isTerminal,
         });
-        if (
-          t &&
-          (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled')
-        ) {
-          return prev;
-        }
+        if (isTerminal) return prev;
         return {
           progressByTask: {
             ...prev.progressByTask,
@@ -858,6 +869,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       suggestionsByTask: {},
       streamingByTask: {},
       progressByTask: {},
+      terminalTaskIds: new Set<string>(),
     });
   },
 }));
