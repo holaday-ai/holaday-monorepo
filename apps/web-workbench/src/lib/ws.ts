@@ -147,6 +147,16 @@ function openSocket(token: string): void {
       console.warn('[web-workbench/ws] bad server frame', result.error);
       return;
     }
+    // [HD-DEBUG] one trace per server.task.* message arrival.
+    // Filter noise: ping / non-task frames are skipped.
+    if (result.data.type.startsWith('server.task.')) {
+      const m = result.data as { type: string; taskId?: string };
+      // biome-ignore lint/suspicious/noConsole: HD-DEBUG instrumentation
+      console.warn('[HD-DEBUG] WS msg', {
+        type: m.type,
+        taskId: m.taskId ?? '(none)',
+      });
+    }
     for (const fn of state.listeners) fn(result.data);
   });
 

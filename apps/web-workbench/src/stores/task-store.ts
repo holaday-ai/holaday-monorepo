@@ -515,6 +515,14 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         // Phase 24 RC follow-up — terminal frame arrives. Clear
         // streaming + progress buffers for this task; the canonical
         // resultText takes over.
+        // eslint-disable-next-line no-console
+        console.warn('[HD-DEBUG] terminal', {
+          taskId: msg.taskId,
+          status: msg.status,
+          prevBufferLen: (prev.streamingByTask[msg.taskId] ?? '').length,
+          hadProgress: Boolean(prev.progressByTask[msg.taskId]),
+          hasSummary: Boolean((msg as { summary?: string }).summary),
+        });
         const nextStreaming = { ...prev.streamingByTask };
         delete nextStreaming[msg.taskId];
         const nextProgress = { ...prev.progressByTask };
@@ -550,6 +558,19 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       // replay when they switch back to the completed task.
       set((prev) => {
         const t = prev.tasks.find((x) => x.taskId === msg.taskId);
+        const bufferLen = (prev.streamingByTask[msg.taskId] ?? '').length;
+        // [HD-DEBUG] one-line trace per delta — `gated:true` means
+        // the stale-delta guard fired, the buffer was NOT updated.
+        // eslint-disable-next-line no-console
+        console.warn('[HD-DEBUG] stream delta', {
+          taskId: msg.taskId,
+          taskStatus: t?.status ?? 'unknown',
+          bufferLen,
+          delta: msg.delta.slice(0, 20),
+          gated:
+            !!t &&
+            (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled'),
+        });
         if (
           t &&
           (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled')
@@ -572,6 +593,15 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       // Same stale-message guard as server.task.stream above.
       set((prev) => {
         const t = prev.tasks.find((x) => x.taskId === msg.taskId);
+        // eslint-disable-next-line no-console
+        console.warn('[HD-DEBUG] progress', {
+          taskId: msg.taskId,
+          taskStatus: t?.status ?? 'unknown',
+          message: msg.message,
+          gated:
+            !!t &&
+            (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled'),
+        });
         if (
           t &&
           (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled')

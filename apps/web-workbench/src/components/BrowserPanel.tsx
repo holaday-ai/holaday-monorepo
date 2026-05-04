@@ -275,6 +275,19 @@ export function BrowserPanel({
     if (activeTaskId && isNonPoolTask) return null;
     return buildScreencastUrl(activeTaskId ?? null, poolUserId);
   }, [activeTaskId, poolUserId, usingCdp, taskTerminal, isNonPoolTask]);
+  // [HD-DEBUG] log every URL change (or change to/from null). Token
+  // redacted so console dumps stay safe to share.
+  React.useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.warn('[HD-DEBUG] screencast URL', {
+      activeTaskId: activeTaskId ?? null,
+      taskTerminal,
+      isNonPoolTask,
+      url: screencastUrlForCdp
+        ? screencastUrlForCdp.replace(/token=[^&]+/, 'token=…')
+        : null,
+    });
+  }, [screencastUrlForCdp, activeTaskId, taskTerminal, isNonPoolTask]);
   const [vncStatus, setVncStatus] = React.useState<VncStatus>('idle');
   // P3 hibernation detection: count consecutive failed attempts. The
   // pool's idle GC reaps after 5 min, after which /vnc-ws/ rejects

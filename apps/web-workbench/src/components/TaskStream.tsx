@@ -226,6 +226,18 @@ function AgentBlock({
   // terminal so the canonical resultText takes over.
   const streamingText = useTaskStore((s) => s.streamingByTask[task.taskId]);
   const progressMessage = useTaskStore((s) => s.progressByTask[task.taskId]);
+  // [HD-DEBUG] one line per render. Useful for spotting wasted
+  // re-renders (delta count vs render count) and for confirming
+  // which branch the streaming-block render gate is taking.
+  // eslint-disable-next-line no-console
+  console.warn('[HD-DEBUG] TaskStream render', {
+    taskId: task.taskId,
+    status: task.status,
+    hasBuffer: Boolean(streamingText),
+    hasResultText: Boolean(task.resultText),
+    bufferLen: streamingText?.length ?? 0,
+    hasProgress: Boolean(progressMessage),
+  });
 
   // Round-1 streaming rework: after humanizeStep filters tool_use
   // rows out of the main flow, the remaining lines are (almost)

@@ -142,6 +142,12 @@ export function CdpScreencastViewport({
         setStatus('connected');
         // eslint-disable-next-line no-console
         console.info('[holaday] CDP screencast WS open');
+        // eslint-disable-next-line no-console
+        console.warn('[HD-DEBUG] screencast WS', {
+          event: 'open',
+          readyState: ws.readyState,
+          attempt,
+        });
       };
       ws.onmessage = (event) => {
         if (disposed) return;
@@ -158,10 +164,24 @@ export function CdpScreencastViewport({
         if (disposed) return;
         // eslint-disable-next-line no-console
         console.warn('[holaday] CDP screencast WS error', e);
+        // eslint-disable-next-line no-console
+        console.warn('[HD-DEBUG] screencast WS', {
+          event: 'error',
+          readyState: ws.readyState,
+          attempt,
+        });
         setStatus('error');
       };
       ws.onclose = (event) => {
         if (disposed) return;
+        // eslint-disable-next-line no-console
+        console.warn('[HD-DEBUG] screencast WS', {
+          event: 'close',
+          readyState: ws.readyState,
+          attempt,
+          code: event.code,
+          reason: event.reason || '(none)',
+        });
         // Only log the first few closes verbatim — beyond that the
         // viewport is in steady "polling for a wake" state and
         // chatty per-close logs would drown the console. After 5
