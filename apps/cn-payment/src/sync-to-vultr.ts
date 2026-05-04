@@ -17,6 +17,12 @@ export interface VultrConfirmPayload {
   cycle: 'monthly' | 'yearly';
   /** 'wechat' | 'alipay' */
   provider: 'wechat' | 'alipay';
+  /**
+   * Per-order id we generated at create-time. The SPA polls
+   * payment.cnStatus({ outTradeNo }), so the orchestrator needs
+   * this stored on the payments row to satisfy that lookup.
+   */
+  outTradeNo: string;
   transactionId: string;
   amountCents: number;
   /** 'subscription' | 'addon' — determines whether we extend plan or grant bonus tasks. */

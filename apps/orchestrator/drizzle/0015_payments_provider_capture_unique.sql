@@ -1,0 +1,36 @@
+-- Audit fix F2 — race-safe payment idempotency.
+--
+-- Before: only an ix_payments_provider_order index (non-unique). Two
+-- concurrent retries from the cn-payment gateway (or a duplicate
+-- PayPal capture) could each pass the SELECT-then-INSERT existence
+-- check and write two completed rows for the same (provider,
+-- transactionId), each carrying its own externalId.
+--
+-- After: a UNIQUE index on (provider, provider_capture_id) makes the
+-- second writer collide at the engine layer. Combined with the
+-- application's switch to ON DUPLICATE KEY UPDATE in
+-- /internal/payment/confirm, retries become safe noops instead of
+-- duplicate completions.
+--
+-- MySQL UNIQUE allows multiple NULLs, so pending PayPal rows (capture
+-- id not yet known) coexist fine — only completed/failed rows with a
+-- real capture id are constrained, which is exactly the dedup target.
+--
+-- Pre-flight: BOSS should sanity-check there are no existing
+-- duplicates before running this. The query below should return zero
+-- rows on a healthy prod (the SELECT-then-INSERT race window is
+-- sub-millisecond and cn-payment's notify retries are spaced seconds
+-- apart):
+--
+--   SELECT provider, provider_capture_id, COUNT(*) AS n
+--   FROM payments
+--   WHERE provider_capture_id IS NOT NULL
+--   GROUP BY provider, provider_capture_id
+--   HAVING n > 1;
+--
+-- If any rows come back, dedupe by keeping the earliest completed
+-- row per (provider, capture_id) and deleting the rest BEFORE
+-- applying this migration.
+
+CREATE UNIQUE INDEX `uk_payments_provider_capture`
+  ON `payments` (`provider`, `provider_capture_id`);

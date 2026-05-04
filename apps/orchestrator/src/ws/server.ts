@@ -8,14 +8,13 @@ import {
   WS_SUBPROTOCOL,
   parseClientMessage,
 } from '@holaday/shared-types';
-import { jwtVerify } from 'jose';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { Planner } from '../agent/planner.js';
 import { TaskController, type TaskState } from '../agent/task-controller.js';
 import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
 import type { BrowserPool } from '../browser-pool/browser-pool.js';
 import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js';
-import { env } from '../config/env.js';
+import { verifyAccessToken } from '../auth/jwt.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
 
@@ -41,8 +40,6 @@ interface ClientState {
 
 const taskController = new TaskController();
 const taskRepository = new TaskRepository(db);
-
-const jwtKey = new TextEncoder().encode(env.JWT_SECRET);
 
 const lastPingAt = new WeakMap<WebSocket, number>();
 
@@ -504,15 +501,37 @@ async function handleClientMessage(
   }
 
   if (msg.type === 'client.vision.user_input') {
-    // Pool-aware: prefer the caller's per-user pool executor over
-    // the shared singleton. Without this, clicks/insert_text from a
-    // user on the per-user pool would land on whatever browser the
-    // singleton is pinned to (worst-case: another user's session).
-    const perUserExec =
-      state.userId && injectedBrowserPool
-        ? injectedBrowserPool.peek(state.userId)?.executor ?? null
-        : null;
-    const exec = perUserExec ?? injectedExecutor;
+    // Pool-aware lookup with three tiers, in priority order:
+    //
+    //   1. peek(taskId) + owner check — the common multi-task case.
+    //      The pool is keyed on taskId (allocate(taskId, userId)),
+    //      so the previous `peek(state.userId)` call almost always
+    //      missed and silently fell through to the shared singleton —
+    //      worst case landing the user's click on another user's
+    //      Brave when the singleton was busy. Verify the matched
+    //      instance belongs to this user before using it.
+    //
+    //   2. peekActiveForUser(userId) — covers free-drive sessions
+    //      where the SPA didn't pin a taskId, and the legacy single-
+    //      task-per-user flow where peek(taskId) wouldn't match
+    //      because the SPA passed an old/missing id.
+    //
+    //   3. injectedExecutor — last-resort singleton, only when no
+    //      pool is wired (legacy boot / tests).
+    let exec: PlaywrightExecutor | null = null;
+    if (state.userId && injectedBrowserPool) {
+      if (msg.taskId) {
+        const inst = injectedBrowserPool.peek(msg.taskId);
+        if (inst && inst.userId === state.userId) {
+          exec = inst.executor;
+        }
+      }
+      if (!exec) {
+        const active = injectedBrowserPool.peekActiveForUser(state.userId);
+        if (active) exec = active.executor;
+      }
+    }
+    exec = exec ?? injectedExecutor;
     await dispatchUserInput(msg, exec, state.userId ?? null);
     return;
   }
@@ -977,13 +996,12 @@ function extractDiagnostic(data: unknown): Diagnostic | null {
 }
 
 async function verifyToken(token: string): Promise<string | null> {
-  try {
-    const { payload } = await jwtVerify(token, jwtKey, { algorithms: ['HS256'] });
-    if (typeof payload.sub === 'string') return payload.sub;
-    return null;
-  } catch {
-    return null;
-  }
+  // Delegate to the canonical verifyAccessToken so WS auth checks
+  // the same issuer + audience claims the HTTP /trpc bearerAuth
+  // checks. The previous local jwtVerify only validated the
+  // signature + algorithm, leaving WS strictly weaker than HTTP.
+  const claims = await verifyAccessToken(token);
+  return claims?.sub ?? null;
 }
 
 function send(socket: WebSocket, msg: ServerMessage) {

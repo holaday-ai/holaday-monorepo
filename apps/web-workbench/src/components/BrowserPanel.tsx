@@ -19,6 +19,7 @@ import {
 } from '@/components/CdpScreencastViewport';
 import { VncViewport, type VncStatus } from '@/components/VncViewport';
 import { getAccessToken } from '@/lib/auth';
+import { hdDebug } from '@/lib/hd-debug';
 import { trpc } from '@/lib/trpc';
 import { send as wsSend } from '@/lib/ws';
 import { cn } from '@/lib/utils';
@@ -56,14 +57,22 @@ const VNC_PATH = (import.meta.env.VITE_VNC_PATH as string | undefined) ?? '/vnc/
  *
  * Returns null when VNC is explicitly disabled via VITE_VNC_PATH.
  */
-function buildVncUrl(poolUserId: string | null): string | null {
+function buildVncUrl(
+  activeTaskId: string | null,
+  poolUserId: string | null,
+): string | null {
   if (typeof window === 'undefined') return null;
   const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  if (poolUserId) {
+  // Prefer the per-task route so concurrent tasks each get their
+  // own VNC stream; fall back to the legacy userId path (caller's
+  // most-recently-active task) when no task is selected. Mirrors
+  // buildScreencastUrl below.
+  const arg = activeTaskId ?? poolUserId;
+  if (arg) {
     const token = getAccessToken();
     if (!token) return null;
     return `${scheme}://${window.location.host}/vnc-ws/${encodeURIComponent(
-      poolUserId,
+      arg,
     )}?token=${encodeURIComponent(token)}`;
   }
   if (!VNC_PATH) return null;
@@ -246,8 +255,8 @@ export function BrowserPanel({
   // VNC live stream — memoised so prop identity is stable across
   // re-renders (the viewport's effect re-runs on any URL change).
   const vncUrl = React.useMemo(
-    () => (usingCdp ? null : buildVncUrl(poolUserId)),
-    [poolUserId, usingCdp],
+    () => (usingCdp ? null : buildVncUrl(activeTaskId ?? null, poolUserId)),
+    [activeTaskId, poolUserId, usingCdp],
   );
   // RC follow-up audit fix — generate / scrape tasks have NO pool
   // slot (no Brave allocated), so /screencast-ws/<taskId> 409s in a
@@ -278,8 +287,7 @@ export function BrowserPanel({
   // [HD-DEBUG] log every URL change (or change to/from null). Token
   // redacted so console dumps stay safe to share.
   React.useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.warn('[HD-DEBUG] screencast URL', {
+    hdDebug('screencast URL', {
       activeTaskId: activeTaskId ?? null,
       taskTerminal,
       isNonPoolTask,

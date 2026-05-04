@@ -19,21 +19,76 @@
 
 import type { BrowserContext } from 'playwright';
 import { eq, sql } from 'drizzle-orm';
+import { z } from 'zod';
 import { logger } from '../config/logger.js';
 import type { db as DbHandle } from '../db/client.js';
 import { pendingCookies } from '../db/schema/pending-cookies.js';
 import { users } from '../db/schema/users.js';
 
-export interface SyncableCookie {
-  domain: string;
-  name: string;
-  value: string;
-  path?: string;
-  secure?: boolean;
-  httpOnly?: boolean;
-  sameSite?: string;
-  /** Seconds since epoch (chrome.cookies format). Optional → session cookie. */
-  expirationDate?: number;
+/**
+ * Domains the extension is allowed to sync cookies for. Mirrors the
+ * extension's curated TRACKED_DOMAINS list — but enforced HERE, not
+ * just there, so a tampered or cloned extension can't widen the
+ * scope. A cookie's `domain` may include a leading dot or be a
+ * subdomain (e.g. `.tmall.com`, `login.taobao.com`); we accept any
+ * value that ends with `.<base>` or equals `<base>`.
+ *
+ * Ordered roughly by traffic — irrelevant for correctness, but the
+ * `endsWith` loop below short-circuits on the first match.
+ */
+const ALLOWED_BASE_DOMAINS = [
+  'jd.com',
+  'taobao.com',
+  'tmall.com',
+  'pinduoduo.com',
+  'ctrip.com',
+  'qunar.com',
+  'fliggy.com',
+  'zhipin.com',
+  'liepin.com',
+  'lagou.com',
+  'xiaohongshu.com',
+  'weibo.com',
+  'zhihu.com',
+  'meituan.com',
+  'dianping.com',
+  'xueqiu.com',
+  'tianyancha.com',
+  'qcc.com',
+  'github.com',
+] as const;
+
+/**
+ * zod schema for an inbound cookie. Caps lengths so a malformed
+ * payload can't blow up the JSON column or the CDP cookie-add
+ * (Chrome's own limit is ~4096 bytes per cookie).
+ */
+export const syncableCookieSchema = z.object({
+  domain: z.string().min(1).max(253),
+  name: z.string().min(1).max(256),
+  value: z.string().max(4096),
+  path: z.string().max(256).optional(),
+  secure: z.boolean().optional(),
+  httpOnly: z.boolean().optional(),
+  sameSite: z.string().max(32).optional(),
+  expirationDate: z.number().optional(),
+});
+
+export type SyncableCookie = z.infer<typeof syncableCookieSchema>;
+
+/**
+ * Domain-whitelist check. `cookieDomain` may have a leading dot or
+ * be a subdomain — we strip the dot and accept exact match or
+ * `.<base>` suffix. Invalid hostnames (uppercase, embedded slashes,
+ * etc.) fail closed.
+ */
+export function isAllowedCookieDomain(cookieDomain: string): boolean {
+  const d = cookieDomain.trim().toLowerCase().replace(/^\./, '');
+  if (!d || /[^a-z0-9.-]/.test(d)) return false;
+  for (const base of ALLOWED_BASE_DOMAINS) {
+    if (d === base || d.endsWith(`.${base}`)) return true;
+  }
+  return false;
 }
 
 /** Hard cap on a single sync payload. Power users can have a few hundred

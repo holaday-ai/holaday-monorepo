@@ -374,11 +374,11 @@ async function handleSuccessfulPayment(
       userId: attach.userId,
       planId: attach.planId,
       cycle: attach.cycle,
+      outTradeNo,
       transactionId,
       amountCents,
       kind: 'subscription',
     });
-    void outTradeNo;
     return;
   }
   await sync.confirm({
@@ -386,6 +386,7 @@ async function handleSuccessfulPayment(
     userId: attach.userId,
     planId: 'basic', // ignored on the Vultr side for kind='addon'
     cycle: 'monthly',
+    outTradeNo,
     transactionId,
     amountCents,
     kind: 'addon',

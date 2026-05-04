@@ -6,6 +6,7 @@ import {
   parseServerMessage,
 } from '@holaday/shared-types';
 import { getAccessToken } from '@/lib/auth';
+import { hdDebug } from '@/lib/hd-debug';
 
 /**
  * WebSocket client for the orchestrator. Patterned on the Chrome
@@ -147,12 +148,9 @@ function openSocket(token: string): void {
       console.warn('[web-workbench/ws] bad server frame', result.error);
       return;
     }
-    // [HD-DEBUG] one trace per server.task.* message arrival.
-    // Filter noise: ping / non-task frames are skipped.
     if (result.data.type.startsWith('server.task.')) {
       const m = result.data as { type: string; taskId?: string };
-      // biome-ignore lint/suspicious/noConsole: HD-DEBUG instrumentation
-      console.warn('[HD-DEBUG] WS msg', {
+      hdDebug('WS msg', {
         type: m.type,
         taskId: m.taskId ?? '(none)',
       });

@@ -68,7 +68,7 @@ export function createVncProxy(opts: VncProxyOptions): VncProxy {
     const url = req.url ?? '';
     const m = pathPattern.exec(url);
     if (!m) return; // not our path; leave for other upgrade handlers
-    const requestedUserId = decodeURIComponent(m[1] ?? '');
+    const urlArg = decodeURIComponent(m[1] ?? '');
 
     // Token can arrive two ways: (1) `?token=JWT` query param —
     // preferred for the browser, since RFB doesn't let us inject a
@@ -91,22 +91,42 @@ export function createVncProxy(opts: VncProxyOptions): VncProxy {
       }
       const callerUserId = claims.sub;
 
-      if (requestedUserId && requestedUserId !== callerUserId) {
-        log.warn(
-          { callerUserId, requestedUserId },
-          'subject mismatch — refusing cross-user VNC',
-        );
-        return reject(socket, 403, 'forbidden');
-      }
       if (opts.allowedUserIds && !opts.allowedUserIds.has(callerUserId)) {
         return reject(socket, 403, 'user not on canary allow-list');
       }
 
-      // Phase 24 — find the user's most recently active task
-      // instance. Per-task pool keys by taskId; peekActiveForUser
-      // surfaces whichever task this user is currently watching
-      // (most-recently-touched).
-      const instance = opts.pool.peekActiveForUser(callerUserId);
+      // Mirror the screencast-proxy dispatch: tsk_… targets a
+      // specific in-flight task and verifies the caller owns it,
+      // anything else falls back to the user's most-recently-active
+      // instance. The previous code path treated the URL arg as a
+      // userId only, so VNC always landed on peekActiveForUser even
+      // when the SPA explicitly knew which task it wanted to watch
+      // — visible as "wrong browser" when the user had multiple
+      // concurrent tasks.
+      let instance: ReturnType<BrowserPool['peek']>;
+      if (urlArg.startsWith('tsk_')) {
+        instance = opts.pool.peek(urlArg);
+        if (!instance) {
+          log.info({ taskId: urlArg }, 'task not active — rejecting VNC');
+          return reject(socket, 409, 'task not active');
+        }
+        if (instance.userId !== callerUserId) {
+          log.warn(
+            { callerUserId, taskId: urlArg, ownerUserId: instance.userId },
+            'subject mismatch — refusing cross-user VNC by taskId',
+          );
+          return reject(socket, 403, 'forbidden');
+        }
+      } else {
+        if (urlArg && urlArg !== callerUserId) {
+          log.warn(
+            { callerUserId, requestedUserId: urlArg },
+            'subject mismatch — refusing cross-user VNC',
+          );
+          return reject(socket, 403, 'forbidden');
+        }
+        instance = opts.pool.peekActiveForUser(callerUserId);
+      }
       if (!instance || instance.status !== 'ready') {
         log.info(
           { callerUserId, status: instance?.status ?? 'absent' },

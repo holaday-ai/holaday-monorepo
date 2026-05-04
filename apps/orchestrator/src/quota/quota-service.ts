@@ -193,54 +193,63 @@ export class QuotaService {
       if (def.tasks.opus == null) {
         return { ok: false, reason: 'opus_not_available' };
       }
-      const used = row.opusUsed;
-      const limit = def.tasks.opus + row.bonusOpus;
-      if (used >= limit) {
-        return { ok: false, reason: 'opus_limit' };
+      // Atomic bonus-first burn — the WHERE clause carries the
+      // limit so concurrent callers can't both pass an in-memory
+      // check and double-spend. If bonus is drained before our
+      // UPDATE lands, affectedRows=0 and we fall through to the
+      // regular pool. If that also hits the ceiling, affectedRows=0
+      // again and we surface the typed limit error.
+      const bonusBurn = await this.db
+        .update(taskQuotas)
+        .set({ bonusOpus: sql`${taskQuotas.bonusOpus} - 1` })
+        .where(
+          and(eq(taskQuotas.id, row.id), sql`${taskQuotas.bonusOpus} > 0`),
+        );
+      if (((bonusBurn as unknown as { affectedRows?: number }).affectedRows ?? 0) === 1) {
+        return { ok: true };
       }
-      // Bonus-first: decrement bonus_opus when it's positive,
-      // otherwise increment opus_used. SQL-side increments protect
-      // against the read-then-write race within reason.
-      if (row.bonusOpus > 0) {
-        await this.db
-          .update(taskQuotas)
-          .set({ bonusOpus: sql`${taskQuotas.bonusOpus} - 1` })
-          .where(
-            and(
-              eq(taskQuotas.id, row.id),
-              sql`${taskQuotas.bonusOpus} > 0`,
-            ),
-          );
-      } else {
-        await this.db
-          .update(taskQuotas)
-          .set({ opusUsed: sql`${taskQuotas.opusUsed} + 1` })
-          .where(eq(taskQuotas.id, row.id));
+      const opusLimit = def.tasks.opus;
+      const regBurn = await this.db
+        .update(taskQuotas)
+        .set({ opusUsed: sql`${taskQuotas.opusUsed} + 1` })
+        .where(
+          and(
+            eq(taskQuotas.id, row.id),
+            sql`${taskQuotas.opusUsed} < ${opusLimit}`,
+          ),
+        );
+      if (((regBurn as unknown as { affectedRows?: number }).affectedRows ?? 0) === 1) {
+        return { ok: true };
       }
-      return { ok: true };
+      return { ok: false, reason: 'opus_limit' };
     }
 
-    const totalAvailable = def.tasks.count + row.bonusTasks;
-    if (row.tasksUsed >= totalAvailable) {
-      return {
-        ok: false,
-        reason: def.tasks.period === 'day' ? 'daily_limit' : 'monthly_limit',
-      };
+    const tasksLimit = def.tasks.count;
+    const bonusBurn = await this.db
+      .update(taskQuotas)
+      .set({ bonusTasks: sql`${taskQuotas.bonusTasks} - 1` })
+      .where(
+        and(eq(taskQuotas.id, row.id), sql`${taskQuotas.bonusTasks} > 0`),
+      );
+    if (((bonusBurn as unknown as { affectedRows?: number }).affectedRows ?? 0) === 1) {
+      return { ok: true };
     }
-    if (row.bonusTasks > 0) {
-      await this.db
-        .update(taskQuotas)
-        .set({ bonusTasks: sql`${taskQuotas.bonusTasks} - 1` })
-        .where(
-          and(eq(taskQuotas.id, row.id), sql`${taskQuotas.bonusTasks} > 0`),
-        );
-    } else {
-      await this.db
-        .update(taskQuotas)
-        .set({ tasksUsed: sql`${taskQuotas.tasksUsed} + 1` })
-        .where(eq(taskQuotas.id, row.id));
+    const regBurn = await this.db
+      .update(taskQuotas)
+      .set({ tasksUsed: sql`${taskQuotas.tasksUsed} + 1` })
+      .where(
+        and(
+          eq(taskQuotas.id, row.id),
+          sql`${taskQuotas.tasksUsed} < ${tasksLimit}`,
+        ),
+      );
+    if (((regBurn as unknown as { affectedRows?: number }).affectedRows ?? 0) === 1) {
+      return { ok: true };
     }
-    return { ok: true };
+    return {
+      ok: false,
+      reason: def.tasks.period === 'day' ? 'daily_limit' : 'monthly_limit',
+    };
   }
 
   /**
@@ -287,14 +296,24 @@ export class QuotaService {
   }
 
   /**
-   * How many of this user's tasks are still in-flight. Counts
-   * `executing`, `awaiting_user`, and `paused` — the three states
-   * where a task is occupying server resources (browser session,
-   * model context). `pending` is excluded since it's the brief
-   * window before the executor picks the task up.
+   * How many of this user's tasks are still in-flight. Counts every
+   * non-terminal status — `pending`, `planning`, `queued`,
+   * `executing`, `awaiting_user`, and `paused`. Anything that a
+   * concurrent click could land in counts toward the cap, otherwise
+   * a Free user could click 50× during the brief
+   * pending/planning/queued windows and stack the queue past the
+   * concurrency contract. The terminal statuses (completed, failed,
+   * cancelled) are out by design.
    */
   async getActiveTaskCount(userIdInternal: number): Promise<number> {
-    const ACTIVE_STATUSES = ['executing', 'awaiting_user', 'paused'];
+    const ACTIVE_STATUSES = [
+      'pending',
+      'planning',
+      'queued',
+      'executing',
+      'awaiting_user',
+      'paused',
+    ];
     const [row] = await this.db
       .select({ c: sql<number>`COUNT(*)` })
       .from(tasks)

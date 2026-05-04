@@ -62,6 +62,13 @@ export const payments = mysqlTable(
     uniqueIndex('uk_payments_external_id').on(t.externalId),
     index('ix_payments_user_status').on(t.userExternalId, t.status),
     index('ix_payments_provider_order').on(t.provider, t.providerOrderId),
+    // Race-safe idempotency for capture writes — both PayPal's
+    // capture id and the WX/Alipay transactionId land in
+    // provider_capture_id. MySQL allows multiple NULLs in a UNIQUE
+    // index, so pending rows (capture id still NULL) don't fight.
+    // Only completed/failed captures collide, which is exactly the
+    // case we want to dedupe on retries.
+    uniqueIndex('uk_payments_provider_capture').on(t.provider, t.providerCaptureId),
   ],
 );
 

@@ -1049,13 +1049,20 @@ export const tasksRouter = router({
             'pool: allocated browser for task',
           );
         } catch (err) {
+          // No singleton fallback. The earlier behaviour ("degrade to
+          // shared Brave") could land a user's clicks on another
+          // user's session and bypassed the per-task hijack guards.
+          // Re-throw so dispatchToBrave aborts; the runFn .finally
+          // marks the task failed and the queue slot releases.
+          // Capacity errors should be rare since the queue gates on
+          // pool depth; treat them as alert-worthy when they hit.
           ctx.logger.error(
             { err: err instanceof Error ? err.message : String(err), userId: ctx.userId, taskId },
-            'pool: allocate failed — falling back to shared headed singleton',
+            'pool: allocate failed — refusing to fall back to singleton, failing task',
           );
-          // Swallow + fall through: rather than hard-fail the task we
-          // degrade to the shared Brave. User still gets a working
-          // task; the alert-worthy event lands in logs.
+          throw err instanceof Error
+            ? err
+            : new Error(`pool allocate failed: ${String(err)}`);
         }
       }
 
@@ -1405,6 +1412,17 @@ export const tasksRouter = router({
             } catch (err) {
               ctx.logger.warn({ err, taskId }, 'supercar: broadcast awaiting_user failed');
             }
+            // Persist the question so a refresh during the pause
+            // can rebuild the input box from tasks.detail. The
+            // status flip to 'awaiting_user' is owned by the
+            // supercar runner; we just stamp the question text.
+            ctx.db
+              .update(tasksTable)
+              .set({ awaitingQuestion: ev.question })
+              .where(eq(tasksTable.externalId, taskId))
+              .catch((err) => {
+                ctx.logger.warn({ err, taskId }, 'supercar: persist awaiting_question failed');
+              });
           },
           onThinking(summary) {
             try {
@@ -2439,6 +2457,11 @@ export const tasksRouter = router({
         title: taskRow.title,
         status: taskRow.status,
         pauseReason: taskRow.pauseReason,
+        // F11 follow-up — only meaningful while status='awaiting_user'.
+        // SPA gates on status, so leaving the column populated for
+        // historical rows is harmless. Returned alongside status so
+        // a refresh during a pause re-renders the input.
+        awaitingQuestion: taskRow.awaitingQuestion ?? null,
         errorCode: taskRow.errorCode,
         errorMessage: taskRow.errorMessage,
         result: normalizeOutput(taskRow.result),
@@ -3134,10 +3157,10 @@ async function runSupercarWithRetry(
   );
   try {
     broadcastToUser(meta.userId, {
-      type: 'server.task.info',
+      type: 'server.task.progress',
       taskId: meta.taskId,
       message: '正在重试…',
-    } as never);
+    });
   } catch {
     /* broadcast best-effort */
   }

@@ -1,6 +1,7 @@
 import type { ServerMessage } from '@holaday/shared-types';
 import { create } from 'zustand';
 import { humaniseTaskError } from '@/lib/error-copy';
+import { hdDebug } from '@/lib/hd-debug';
 import { trpc } from '@/lib/trpc';
 import type {
   UiAwaitingUser,
@@ -166,13 +167,12 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   streamingByTask: {},
   progressByTask: {},
   terminalTaskIds: new Set<string>(),
-  // Default ON: with the VNC lane live, view-only is the defensive
-  // crouch. Users that never toggle this flag still get interactive
-  // clicks, which matches the product promise ("watch the agent,
-  // take over when you want to"). The toggle in the Panel header
-  // still flips it off for "don't let me accidentally click the
-  // captcha solution the agent is staring at".
-  browserInteractive: true,
+  // Default OFF: the product story is "watch the agent" — the user
+  // observes by default and only takes over when they explicitly
+  // click the takeover button or the agent enters awaiting_user /
+  // captcha. Defaulting ON contradicted the framing and surfaced
+  // confusing "你正在直接操作浏览器" copy on completed tasks.
+  browserInteractive: false,
   setBrowserInteractive(v) {
     set({ browserInteractive: v });
   },
@@ -545,8 +545,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         // guards in stream/progress handlers can check Set
         // membership directly (instead of looking at the tasks
         // array's status, which races with tasks.list).
-        // eslint-disable-next-line no-console
-        console.warn('[HD-DEBUG] terminal', {
+        hdDebug('terminal', {
           taskId: msg.taskId,
           status: msg.status,
           prevBufferLen: (prev.streamingByTask[msg.taskId] ?? '').length,
@@ -587,8 +586,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       set((prev) => {
         const isTerminal = prev.terminalTaskIds.has(msg.taskId);
         const bufferLen = (prev.streamingByTask[msg.taskId] ?? '').length;
-        // eslint-disable-next-line no-console
-        console.warn('[HD-DEBUG] stream delta', {
+        hdDebug('stream delta', {
           taskId: msg.taskId,
           isTerminal,
           bufferLen,
@@ -611,8 +609,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       // membership, not tasks-array status.
       set((prev) => {
         const isTerminal = prev.terminalTaskIds.has(msg.taskId);
-        // eslint-disable-next-line no-console
-        console.warn('[HD-DEBUG] progress', {
+        hdDebug('progress', {
           taskId: msg.taskId,
           isTerminal,
           message: msg.message,
@@ -946,6 +943,21 @@ function extractSummary(result: unknown): string | null {
 function toUiTask(row: ListRow): UiTask {
   const opusUsed = (row as { opusUsed?: unknown }).opusUsed === true;
   const r = row as { starred?: unknown; starredAt?: unknown; projectId?: unknown };
+  // Root-cause fix for the "result text disappears on refresh" / brief
+  // post-terminal flash: tasks.list already ships `result` for every
+  // row, but toUiTask used to drop it and only map errorMessage. The
+  // detail-hydration that filled in resultText only fired on opening
+  // a task, so a completed task in the sidebar rendered with
+  // resultText=null until something else triggered a hydrate. The
+  // earlier streaming-buffer-persistence + terminalTaskIds Set patch
+  // bridged the gap; mapping result.summary here removes the gap
+  // entirely, so those guards mostly become belt-and-suspenders.
+  const summaryFromResult = extractSummary((row as { result?: unknown }).result);
+  const errorText =
+    typeof row.errorMessage === 'string'
+      ? humaniseTaskError(row.errorMessage)
+      : null;
+  const resultText = summaryFromResult ?? errorText ?? null;
   return {
     taskId: row.taskId,
     intent: row.intent,
@@ -954,9 +966,7 @@ function toUiTask(row: ListRow): UiTask {
     // The list endpoint doesn't expose tickCount directly; we leave 0
     // for now and let G4's ws events fill it in as ticks stream.
     tickCount: 0,
-    ...(typeof row.errorMessage === 'string'
-      ? { resultText: humaniseTaskError(row.errorMessage) }
-      : {}),
+    ...(resultText ? { resultText } : {}),
     // tRPC serializes Date to string over the wire; coerce back.
     createdAt: new Date(row.createdAt as unknown as string | number | Date),
     modelLabel: opusUsed ? 'opus' : 'sonnet',

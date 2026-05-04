@@ -284,26 +284,37 @@ export class PlaywrightExecutor {
           // inside the page's JS context where both exist — we cast
           // through `any` so tsc accepts it without forcing a lib.dom
           // dependency on the whole package.
-          await page.evaluate(() => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const doc = (globalThis as any).document;
-            if (!doc) return;
-            const labels = new Set(['Got it', 'Disable', 'Dismiss']);
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            doc.querySelectorAll('button').forEach((b: any) => {
-              const txt = (b.textContent ?? '').trim();
-              if (labels.has(txt)) b.click();
-            });
-            doc
-              .querySelectorAll('[aria-label="Close"]')
+          //
+          // 2-second cap because connect() chains this on every Brave
+          // resume; an evaluate() that hangs (service-worker stall,
+          // CDP debugger paused) used to block the entire connect
+          // path indefinitely. The banner dismissal is best-effort
+          // anyway — losing one cycle doesn't break the loop.
+          await withTimeout(
+            page.evaluate(() => {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              .forEach((el: any) => {
-                if (typeof el.click === 'function') el.click();
+              const doc = (globalThis as any).document;
+              if (!doc) return;
+              const labels = new Set(['Got it', 'Disable', 'Dismiss']);
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              doc.querySelectorAll('button').forEach((b: any) => {
+                const txt = (b.textContent ?? '').trim();
+                if (labels.has(txt)) b.click();
               });
-          });
+              doc
+                .querySelectorAll('[aria-label="Close"]')
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                .forEach((el: any) => {
+                  if (typeof el.click === 'function') el.click();
+                });
+            }),
+            2_000,
+            'dismissBraveBanners.evaluate',
+          );
         } catch {
-          // Page might be about:blank, chrome://, or mid-navigation —
-          // evaluate rejects in all those cases. Safe to skip.
+          // Page might be about:blank, chrome://, mid-navigation, or
+          // hung past 2 s. evaluate rejects in all those cases.
+          // Safe to skip — banner dismissal is best-effort.
         }
       }
     }

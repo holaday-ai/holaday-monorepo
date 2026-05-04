@@ -18,23 +18,47 @@ interface DayBar {
  * exists. Quota is derived from the plan tier using the same caps
  * PlanPage advertises — so the two screens stay consistent.
  */
+// Mirrors the orchestrator's task status enum. Only `completed` and
+// `failed` are terminal-success/failure; everything else is a flavor
+// of "still in flight" and lands in the running counter.
+const SUCCESS_STATUS = 'completed';
+const FAILED_STATUS = 'failed';
+const RUNNING_STATUSES = new Set([
+  'pending',
+  'planning',
+  'queued',
+  'executing',
+  'awaiting_user',
+  'paused',
+]);
+
 export function UsagePage(): JSX.Element {
-  const [plan, setPlan] = React.useState<string>('free');
   const [monthCount, setMonthCount] = React.useState(0);
   const [succeeded, setSucceeded] = React.useState(0);
   const [failed, setFailed] = React.useState(0);
   const [running, setRunning] = React.useState(0);
   const [bars, setBars] = React.useState<DayBar[]>([]);
+  const [quota, setQuota] = React.useState<number | null>(null);
+  const [bonusTasks, setBonusTasks] = React.useState(0);
+  const [tasksRemaining, setTasksRemaining] = React.useState<number | null>(null);
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
     let active = true;
     void Promise.all([
-      trpc.auth.me.query().catch(() => null),
       trpc.tasks.list.query({ limit: 200 }).catch(() => null),
-    ]).then(([me, tasks]) => {
+      // Quota API is the source of truth for tasksLimit / bonus /
+      // remaining — hardcoding caps here previously had Basic at
+      // 200 / Pro at 1000 while PLAN_CATALOGUE has them at 100 /
+      // 150 (+15 Opus). The status query bakes in bonus tasks too.
+      trpc.quota.status.query().catch(() => null),
+    ]).then(([tasks, quotaSnap]) => {
       if (!active) return;
-      if (me) setPlan(me.plan);
+      if (quotaSnap) {
+        setQuota(quotaSnap.tasksLimit);
+        setBonusTasks(quotaSnap.bonusTasks);
+        setTasksRemaining(quotaSnap.tasksRemaining);
+      }
       const now = new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
       let mCount = 0;
@@ -52,9 +76,9 @@ export function UsagePage(): JSX.Element {
         const ts = typeof t.createdAt === 'string' ? Date.parse(t.createdAt) : t.createdAt;
         if (!Number.isFinite(ts)) continue;
         if (ts >= monthStart) mCount += 1;
-        if (t.status === 'succeeded') sCount += 1;
-        else if (t.status === 'failed') fCount += 1;
-        else if (t.status === 'running' || t.status === 'pending' || t.status === 'awaiting_user') rCount += 1;
+        if (t.status === SUCCESS_STATUS) sCount += 1;
+        else if (t.status === FAILED_STATUS) fCount += 1;
+        else if (RUNNING_STATUSES.has(t.status)) rCount += 1;
         const k = dateKey(new Date(ts));
         if (byDay.has(k)) byDay.set(k, (byDay.get(k) ?? 0) + 1);
       }
@@ -76,9 +100,15 @@ export function UsagePage(): JSX.Element {
     };
   }, []);
 
-  const quota = plan === 'pro' ? 1000 : plan === 'basic' ? 200 : 20;
-  const remaining = Math.max(0, quota - monthCount);
-  const pct = Math.min(100, Math.round((monthCount / quota) * 100));
+  // While the quota API is loading, show — instead of fabricating a
+  // cap. Once loaded, total = base limit + bonus (paid add-on packs
+  // or first-month grants).
+  const totalQuota = quota == null ? null : quota + bonusTasks;
+  const remaining = tasksRemaining ?? (totalQuota == null ? 0 : Math.max(0, totalQuota - monthCount));
+  const pct =
+    totalQuota == null || totalQuota === 0
+      ? 0
+      : Math.min(100, Math.round(((totalQuota - remaining) / totalQuota) * 100));
   const maxBar = Math.max(1, ...bars.map((b) => b.count));
 
   return (
@@ -89,7 +119,13 @@ export function UsagePage(): JSX.Element {
             icon={<Activity className="h-4 w-4" />}
             label="本月任务"
             value={loading ? '—' : String(monthCount)}
-            sub={`配额 ${quota} 个`}
+            sub={
+              totalQuota == null
+                ? '配额 — 个'
+                : bonusTasks > 0
+                ? `配额 ${quota} + 加量 ${bonusTasks}`
+                : `配额 ${totalQuota} 个`
+            }
           />
           <StatCard
             icon={<CheckCircle2 className="h-4 w-4 text-emerald-500" />}
@@ -101,7 +137,7 @@ export function UsagePage(): JSX.Element {
             icon={<Clock className="h-4 w-4 text-pink-500" />}
             label="剩余额度"
             value={loading ? '—' : String(remaining)}
-            sub={`${pct}% 已使用`}
+            sub={totalQuota == null ? '加载中…' : `${pct}% 已使用`}
           />
         </div>
 
@@ -117,7 +153,7 @@ export function UsagePage(): JSX.Element {
               />
             </div>
             <span className="text-xs tabular-nums text-muted-foreground">
-              {monthCount} / {quota}
+              {monthCount} / {totalQuota ?? '—'}
             </span>
           </div>
           {pct >= 75 && (

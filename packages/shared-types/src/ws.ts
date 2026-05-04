@@ -529,7 +529,13 @@ export const serverTaskPlanStepSchema = z.object({
 export const serverVisionScreencastSchema = z.object({
   type: z.literal('server.vision.screencast'),
   taskId: z.string(),
-  tickIndex: z.number().int().nonnegative(),
+  /**
+   * Real ticks are 0+; the orchestrator also fires off-loop refresh
+   * frames after a panel-user-input lands and uses tickIndex=-1 as
+   * the sentinel for "not part of any agent tick — just paint this".
+   * Hence `int()` not `nonnegative()`.
+   */
+  tickIndex: z.number().int(),
   imageBase64: z.string(),
   url: z.string(),
   viewport: z.object({

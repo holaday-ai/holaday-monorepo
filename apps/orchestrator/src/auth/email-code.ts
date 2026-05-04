@@ -11,6 +11,7 @@
  * endpoint. In dev / unconfigured prod, the code is logged so the
  * operator can still test the flow.
  */
+import { randomInt } from 'node:crypto';
 import { logger } from '../config/logger.js';
 
 export const CODE_LENGTH = 6;
@@ -26,8 +27,14 @@ interface Entry {
 const store = new Map<string, Entry>();
 
 function genCode(): string {
+  // crypto.randomInt is the only stdlib RNG with cryptographic
+  // guarantees on Node. Math.random() is a deterministic PRNG seeded
+  // off process start state — predictable enough that an attacker
+  // who can observe a few codes could narrow the next one. Email
+  // verification codes don't need bank-grade entropy, but neither do
+  // they need to be guessable.
   let out = '';
-  for (let i = 0; i < CODE_LENGTH; i += 1) out += Math.floor(Math.random() * 10);
+  for (let i = 0; i < CODE_LENGTH; i += 1) out += randomInt(0, 10).toString();
   return out;
 }
 

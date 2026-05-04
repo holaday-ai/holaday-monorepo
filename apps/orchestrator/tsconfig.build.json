@@ -3,7 +3,12 @@
   "compilerOptions": {
     "rootDir": "src",
     "noEmit": false,
-    "declaration": true,
+    // Orchestrator is an app, not a library — nothing imports it as
+    // a typed package. Skipping declaration emit also bypasses the
+    // TS2742 cascade triggered by pnpm-hoisted Express types in
+    // tRPC/Drizzle generic inference. See the audit note (F16).
+    "declaration": false,
+    "declarationMap": false,
     "sourceMap": true
   },
   "include": ["src/**/*.ts"],

@@ -95,6 +95,13 @@ export const tasks = mysqlTable(
      * progresses.
      */
     planStatus: json('plan_status'),
+    /**
+     * Phase 24 follow-up — when the supercar agent suspends to ask
+     * the user a question, the question text lands here so a page
+     * refresh during the pause re-renders the input box. Cleared
+     * when the task next moves out of `awaiting_user`.
+     */
+    awaitingQuestion: text('awaiting_question'),
     result: json('result'),
     errorCode: varchar('error_code', { length: 64 }),
     errorMessage: text('error_message'),

@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { hdDebug } from '@/lib/hd-debug';
 import { cn } from '@/lib/utils';
 
 /**
@@ -142,8 +143,7 @@ export function CdpScreencastViewport({
         setStatus('connected');
         // eslint-disable-next-line no-console
         console.info('[holaday] CDP screencast WS open');
-        // eslint-disable-next-line no-console
-        console.warn('[HD-DEBUG] screencast WS', {
+        hdDebug('screencast WS', {
           event: 'open',
           readyState: ws.readyState,
           attempt,
@@ -164,8 +164,7 @@ export function CdpScreencastViewport({
         if (disposed) return;
         // eslint-disable-next-line no-console
         console.warn('[holaday] CDP screencast WS error', e);
-        // eslint-disable-next-line no-console
-        console.warn('[HD-DEBUG] screencast WS', {
+        hdDebug('screencast WS', {
           event: 'error',
           readyState: ws.readyState,
           attempt,
@@ -174,8 +173,7 @@ export function CdpScreencastViewport({
       };
       ws.onclose = (event) => {
         if (disposed) return;
-        // eslint-disable-next-line no-console
-        console.warn('[HD-DEBUG] screencast WS', {
+        hdDebug('screencast WS', {
           event: 'close',
           readyState: ws.readyState,
           attempt,

@@ -1,32 +1,23 @@
-import { CreditCard, Download, Plus } from 'lucide-react';
+import { CreditCard, Plus } from 'lucide-react';
 import * as React from 'react';
 import { Link } from 'react-router-dom';
+import { formatCny, getPlanPriceCents, type PaidPlanId } from '@holaday/shared-types';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { PageShell, Row, Section } from '@/pages/PageShell';
 
-interface Invoice {
-  id: string;
-  date: string;
-  amount: string;
-  status: '已支付' | '待支付' | '退款';
-}
-
-// Placeholder data — real billing backend not wired yet.
-const MOCK_INVOICES: Invoice[] = [
-  { id: 'INV-2026-0003', date: '2026-04-01', amount: '¥39.00', status: '已支付' },
-  { id: 'INV-2026-0002', date: '2026-03-01', amount: '¥39.00', status: '已支付' },
-  { id: 'INV-2026-0001', date: '2026-02-01', amount: '¥39.00', status: '已支付' },
-];
-
 export function BillingPage(): JSX.Element {
   const toast = useToast();
   const [plan, setPlan] = React.useState<string>('free');
+  const [planExpiresAt, setPlanExpiresAt] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     trpc.auth.me.query().then(
-      (res) => setPlan(res.plan),
+      (res) => {
+        setPlan(res.plan);
+        setPlanExpiresAt(res.planExpiresAt ?? null);
+      },
       () => {
         /* ignore */
       },
@@ -34,8 +25,16 @@ export function BillingPage(): JSX.Element {
   }, []);
 
   const planLabel = plan === 'pro' ? 'Pro' : plan === 'basic' ? 'Basic' : 'Free · 试用';
-  const nextBillingDate = plan === 'free' ? '—' : '2026-05-01';
-  const nextAmount = plan === 'pro' ? '¥129.00' : plan === 'basic' ? '¥39.00' : '—';
+  const isPaid = plan === 'pro' || plan === 'basic';
+  // Price comes from PLAN_CATALOGUE so it can't drift from the
+  // checkout sheet — hardcoding here previously had Basic at ¥39
+  // while the catalogue priced it at ¥29.
+  const nextAmountText = isPaid
+    ? formatCny(getPlanPriceCents(plan as PaidPlanId, 'monthly', 'cny', false))
+    : '—';
+  const nextBillingDate = isPaid && planExpiresAt
+    ? new Date(planExpiresAt).toISOString().slice(0, 10)
+    : '—';
 
   return (
     <PageShell title="账单与订阅" subtitle="支付方式和历史发票" width="4xl">
@@ -55,7 +54,7 @@ export function BillingPage(): JSX.Element {
             <span className="text-sm text-muted-foreground">{nextBillingDate}</span>
           </Row>
           <Row label="下次扣款金额">
-            <span className="text-sm text-muted-foreground">{nextAmount}</span>
+            <span className="text-sm text-muted-foreground">{nextAmountText}</span>
           </Row>
           {plan !== 'free' && (
             <div className="mt-4 flex justify-end">
@@ -95,55 +94,13 @@ export function BillingPage(): JSX.Element {
           </div>
         </Section>
 
-        <Section title="发票历史" description="最近的付款记录">
-          <div className="overflow-hidden rounded-lg border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-2 text-left font-medium">发票号</th>
-                  <th className="px-4 py-2 text-left font-medium">日期</th>
-                  <th className="px-4 py-2 text-left font-medium">金额</th>
-                  <th className="px-4 py-2 text-left font-medium">状态</th>
-                  <th className="px-4 py-2 text-right font-medium">操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {MOCK_INVOICES.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-xs text-muted-foreground">
-                      还没有账单记录
-                    </td>
-                  </tr>
-                ) : (
-                  MOCK_INVOICES.map((inv) => (
-                    <tr key={inv.id} className="hover:bg-muted/30">
-                      <td className="px-4 py-3 font-mono text-xs">{inv.id}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{inv.date}</td>
-                      <td className="px-4 py-3">{inv.amount}</td>
-                      <td className="px-4 py-3">
-                        <span className="rounded-full bg-muted px-2 py-0.5 text-[11px]">
-                          {inv.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() => toast.show('下载发票功能开发中')}
-                          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                        >
-                          <Download className="h-3 w-3" />
-                          PDF
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+        <Section title="账单记录" description="付款和发票历史">
+          <div className="rounded-lg border border-border bg-background px-6 py-10 text-center">
+            <p className="text-sm text-muted-foreground">账单记录即将开放</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              我们正在打磨账单导出与发票下载，敬请期待。
+            </p>
           </div>
-          <p className="mt-3 text-[11px] text-muted-foreground">
-            以上为示例数据。真实的订单和发票将在接入支付系统后显示。
-          </p>
         </Section>
       </div>
     </PageShell>

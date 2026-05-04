@@ -19,6 +19,7 @@ import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDown
 import { PlanCard } from '@/components/PlanCard';
 import { SearchResultCard } from '@/components/SearchResultCard';
 import { StepCard } from '@/components/StepCard';
+import { hdDebug } from '@/lib/hd-debug';
 import { useTaskStore } from '@/stores/task-store';
 import { cn } from '@/lib/utils';
 import type {
@@ -226,11 +227,7 @@ function AgentBlock({
   // terminal so the canonical resultText takes over.
   const streamingText = useTaskStore((s) => s.streamingByTask[task.taskId]);
   const progressMessage = useTaskStore((s) => s.progressByTask[task.taskId]);
-  // [HD-DEBUG] one line per render. Useful for spotting wasted
-  // re-renders (delta count vs render count) and for confirming
-  // which branch the streaming-block render gate is taking.
-  // eslint-disable-next-line no-console
-  console.warn('[HD-DEBUG] TaskStream render', {
+  hdDebug('TaskStream render', {
     taskId: task.taskId,
     status: task.status,
     hasBuffer: Boolean(streamingText),

@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import express from 'express';
 import multer from 'multer';
 import { pinoHttp } from 'pino-http';
@@ -18,7 +18,9 @@ import { payments } from './db/schema/payments.js';
 import { users } from './db/schema/users.js';
 import {
   injectPendingCookies,
+  isAllowedCookieDomain,
   MAX_COOKIES_PER_SYNC,
+  syncableCookieSchema,
   type SyncableCookie,
   upsertPendingCookies,
 } from './cookies/sync-service.js';
@@ -538,7 +540,38 @@ export function createHttpApp(deps: HttpAppDeps) {
         });
         return;
       }
-      const cookies = body.cookies as SyncableCookie[];
+      // zod-validate + domain-whitelist server-side. The extension's
+      // own TRACKED_DOMAINS gate is enforced HERE too so a tampered
+      // or repurposed extension can't widen the scope to arbitrary
+      // sites. Off-list cookies and malformed entries get dropped
+      // silently (logged) — never cause a 4xx, since users blame
+      // "the cookie sync broke" not "site X isn't tracked".
+      const validated: SyncableCookie[] = [];
+      let skippedSchema = 0;
+      let skippedDomain = 0;
+      for (const raw of body.cookies) {
+        const parsed = syncableCookieSchema.safeParse(raw);
+        if (!parsed.success) {
+          skippedSchema += 1;
+          continue;
+        }
+        if (!isAllowedCookieDomain(parsed.data.domain)) {
+          skippedDomain += 1;
+          continue;
+        }
+        validated.push(parsed.data);
+      }
+      if (skippedSchema > 0 || skippedDomain > 0) {
+        logger.warn(
+          { userExternalId, skippedSchema, skippedDomain, kept: validated.length },
+          'cookie-sync: dropped entries failing schema or domain whitelist',
+        );
+      }
+      const cookies = validated;
+      if (cookies.length === 0) {
+        res.json({ synced: 0, domains: [], deferred: false, dropped: { schema: skippedSchema, domain: skippedDomain } });
+        return;
+      }
       const [user] = await db
         .select({ id: users.id })
         .from(users)
@@ -631,6 +664,7 @@ export function createHttpApp(deps: HttpAppDeps) {
       planId?: string;
       cycle?: string;
       provider?: string;
+      outTradeNo?: string;
       transactionId?: string;
       amountCents?: number;
       kind?: string;
@@ -645,25 +679,11 @@ export function createHttpApp(deps: HttpAppDeps) {
     }
     const provider = body.provider as 'wechat' | 'alipay';
     const transactionId = body.transactionId!;
+    const outTradeNo = body.outTradeNo ?? null;
     const amountCents = Number(body.amountCents);
     const kind = body.kind as 'subscription' | 'addon';
 
     try {
-      // Idempotency check: if a payments row already records this
-      // (provider, transactionId), no-op. ix_payments_provider_order
-      // covers the (provider, providerOrderId) lookup; reuse the
-      // capture id field to key off the transactionId, which is
-      // what both WX and Alipay return.
-      const [existing] = await db
-        .select()
-        .from(payments)
-        .where(eq(payments.providerCaptureId, transactionId))
-        .limit(1);
-      if (existing && existing.status === 'completed') {
-        res.status(200).json({ ok: true, deduped: true });
-        return;
-      }
-
       const [user] = await db
         .select()
         .from(users)
@@ -688,30 +708,56 @@ export function createHttpApp(deps: HttpAppDeps) {
           return;
         }
         const expiry = nextExpiryFor(planId, cycle, user.planExpiresAt ?? null);
-        await db.transaction(async (tx) => {
-          await tx.insert(payments).values({
-            externalId,
-            userExternalId: user.externalId,
-            provider,
-            providerOrderId: null,
-            providerCaptureId: transactionId,
-            plan: planId,
-            amountCents,
-            currency: 'CNY',
-            status: 'completed',
-            kind: 'subscription',
-            metadata: { cycle, source: 'cn-payment-gateway' },
-          });
+        // Insert-or-noop on the (provider, capture_id) unique key.
+        // If a concurrent retry already wrote this transactionId, the
+        // INSERT noops via ON DUPLICATE KEY UPDATE and the subsequent
+        // SELECT shows that retry's externalId — we treat that as a
+        // dedup and skip the user-plan extension. Only the writer
+        // whose externalId actually landed extends the plan.
+        const deduped = await db.transaction(async (tx) => {
+          await tx
+            .insert(payments)
+            .values({
+              externalId,
+              userExternalId: user.externalId,
+              provider,
+              providerOrderId: outTradeNo,
+              providerCaptureId: transactionId,
+              plan: planId,
+              amountCents,
+              currency: 'CNY',
+              status: 'completed',
+              kind: 'subscription',
+              metadata: { cycle, source: 'cn-payment-gateway' },
+            })
+            .onDuplicateKeyUpdate({
+              set: { externalId: sql`external_id` },
+            });
+          const [winner] = await tx
+            .select({ externalId: payments.externalId })
+            .from(payments)
+            .where(
+              and(
+                eq(payments.provider, provider),
+                eq(payments.providerCaptureId, transactionId),
+              ),
+            )
+            .limit(1);
+          if (!winner) {
+            throw new Error('payments row vanished after upsert');
+          }
+          if (winner.externalId !== externalId) return true;
           await tx
             .update(users)
             .set({ plan: planId, planExpiresAt: expiry })
             .where(eq(users.externalId, user.externalId));
+          return false;
         });
         logger.info(
-          { userId: user.externalId, planId, cycle, provider, transactionId },
-          'internal-confirm: subscription completed',
+          { userId: user.externalId, planId, cycle, provider, transactionId, deduped },
+          deduped ? 'internal-confirm: subscription deduped' : 'internal-confirm: subscription completed',
         );
-        res.status(200).json({ ok: true });
+        res.status(200).json({ ok: true, deduped });
         return;
       }
 
@@ -722,29 +768,58 @@ export function createHttpApp(deps: HttpAppDeps) {
           return;
         }
         const pack = ADDON_PACK_CATALOGUE[packId as AddonPackId];
-        await db.insert(payments).values({
-          externalId,
-          userExternalId: user.externalId,
-          provider,
-          providerOrderId: null,
-          providerCaptureId: transactionId,
-          plan: packId,
-          amountCents,
-          currency: 'CNY',
-          status: 'completed',
-          kind: 'addon',
-          metadata: { source: 'cn-payment-gateway', tasks: pack.tasks, opus: pack.opus },
+        // Same insert-or-noop pattern as the subscription path. The
+        // applyAddonPack call lives outside the transaction because
+        // task_quotas upserts use their own onDuplicateKeyUpdate that
+        // doesn't compose with Drizzle's tx wrapper — so the txn is
+        // just the row insert + winner check, and we only fire the
+        // entitlement when we actually inserted (i.e. not a dup).
+        const deduped = await db.transaction(async (tx) => {
+          await tx
+            .insert(payments)
+            .values({
+              externalId,
+              userExternalId: user.externalId,
+              provider,
+              providerOrderId: outTradeNo,
+              providerCaptureId: transactionId,
+              plan: packId,
+              amountCents,
+              currency: 'CNY',
+              status: 'completed',
+              kind: 'addon',
+              metadata: { source: 'cn-payment-gateway', tasks: pack.tasks, opus: pack.opus },
+            })
+            .onDuplicateKeyUpdate({
+              set: { externalId: sql`external_id` },
+            });
+          const [winner] = await tx
+            .select({ externalId: payments.externalId })
+            .from(payments)
+            .where(
+              and(
+                eq(payments.provider, provider),
+                eq(payments.providerCaptureId, transactionId),
+              ),
+            )
+            .limit(1);
+          if (!winner) {
+            throw new Error('payments row vanished after upsert');
+          }
+          return winner.externalId !== externalId;
         });
-        await internalConfirmService.applyAddonPack(
-          user.id,
-          (user.plan === 'pro' ? 'pro' : 'basic'),
-          packId as AddonPackId,
-        );
+        if (!deduped) {
+          await internalConfirmService.applyAddonPack(
+            user.id,
+            (user.plan === 'pro' ? 'pro' : 'basic'),
+            packId as AddonPackId,
+          );
+        }
         logger.info(
-          { userId: user.externalId, packId, provider, transactionId },
-          'internal-confirm: addon pack applied',
+          { userId: user.externalId, packId, provider, transactionId, deduped },
+          deduped ? 'internal-confirm: addon deduped' : 'internal-confirm: addon pack applied',
         );
-        res.status(200).json({ ok: true });
+        res.status(200).json({ ok: true, deduped });
         return;
       }
 

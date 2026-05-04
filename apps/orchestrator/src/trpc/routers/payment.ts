@@ -29,7 +29,7 @@ import {
   type PlanId,
 } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { describePlanOrder, isPaidPlan, nextExpiryFor } from '../../payment/plans.js';
 import { payments } from '../../db/schema/payments.js';
@@ -234,30 +234,28 @@ export const paymentRouter = router({
         });
       }
       const quotaService = new QuotaService(ctx.db);
-      await ctx.db.transaction(async (tx) => {
-        await tx
-          .update(payments)
-          .set({
-            status: 'completed',
-            providerCaptureId: capture.captureId,
-            metadata: {
-              ...meta,
-              payerEmail: capture.payerEmail,
-              captureStatus: capture.status,
-            },
-          })
-          .where(eq(payments.id, row.id));
-      });
-      // Quota update is outside the payments-row transaction —
-      // task_quotas writes use the upsert-with-ON-DUPLICATE-KEY
-      // helper which doesn't compose cleanly with Drizzle's tx
-      // wrapper. Worst case (process death between the two): we
-      // have a completed payment with no bonus applied; the
-      // captureOrder retry below idempotently re-applies because
-      // the row's status is already 'completed'… actually that
-      // returns early. Future hardening: idempotency token. For
-      // the BOSS-test scope, the window is sub-second.
-      await quotaService.applyAddonPack(userRow.id, planId, row.plan as AddonPackId);
+      // Conditional pending→completed transition. Only the writer
+      // that flips the row applies the entitlement. A retry that
+      // races with this one (or arrives after a successful run)
+      // sees status='completed' already, affectedRows=0, and
+      // skips applyAddonPack — preventing a double bonus grant.
+      const updateResult = await ctx.db
+        .update(payments)
+        .set({
+          status: 'completed',
+          providerCaptureId: capture.captureId,
+          metadata: {
+            ...meta,
+            payerEmail: capture.payerEmail,
+            captureStatus: capture.status,
+          },
+        })
+        .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
+      const transitioned =
+        ((updateResult as unknown as { affectedRows?: number }).affectedRows ?? 0) === 1;
+      if (transitioned) {
+        await quotaService.applyAddonPack(userRow.id, planId, row.plan as AddonPackId);
+      }
       return { ok: true as const, plan: row.plan };
     }
 
@@ -280,8 +278,13 @@ export const paymentRouter = router({
     const cycle: BillingCycle = meta.cycle === 'yearly' ? 'yearly' : 'monthly';
     const nextExpiry = nextExpiryFor(row.plan as 'basic' | 'pro', cycle, planRow?.planExpiresAt ?? null);
 
-    await ctx.db.transaction(async (tx) => {
-      await tx
+    // Same single-finalize-per-payment guard as the addon branch:
+    // condition the UPDATE on status='pending' so a concurrent
+    // capture (or a retry after a network blip) becomes a noop. We
+    // only extend the user's plan / grant the first-month bonus
+    // when this call is the one that flipped the row.
+    const transitioned = await ctx.db.transaction(async (tx) => {
+      const updateResult = await tx
         .update(payments)
         .set({
           status: 'completed',
@@ -292,14 +295,18 @@ export const paymentRouter = router({
             captureStatus: capture.status,
           },
         })
-        .where(eq(payments.id, row.id));
+        .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
+      const affected =
+        (updateResult as unknown as { affectedRows?: number }).affectedRows ?? 0;
+      if (affected !== 1) return false;
       await tx
         .update(users)
         .set({ plan: row.plan, planExpiresAt: nextExpiry })
         .where(eq(users.externalId, row.userExternalId));
+      return true;
     });
 
-    if (firstMonthFlag && cycle === 'monthly') {
+    if (transitioned && firstMonthFlag && cycle === 'monthly') {
       const quotaService = new QuotaService(ctx.db);
       await quotaService.grantFirstMonthBonus(planRow.id, row.plan as PlanId);
     }
@@ -483,15 +490,19 @@ export const paymentRouter = router({
   cnStatus: protectedProcedure
     .input(z.object({ outTradeNo: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
+      // outTradeNo is the per-order id we generate at create-time;
+      // /internal/payment/confirm stores it to provider_order_id, so
+      // that's the column we look up here. (The capture-id column
+      // holds the gateway's transactionId, used for idempotency on
+      // confirm retries — different concern.)
       const [row] = await ctx.db
         .select({
           status: payments.status,
           plan: payments.plan,
           kind: payments.kind,
-          providerCaptureId: payments.providerCaptureId,
         })
         .from(payments)
-        .where(eq(payments.providerCaptureId, input.outTradeNo))
+        .where(eq(payments.providerOrderId, input.outTradeNo))
         .limit(1);
       // Until the cn-payment gateway POSTs to /api/internal/payment/
       // confirm, no row exists for this outTradeNo. Surface 'pending'
