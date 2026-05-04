@@ -320,12 +320,19 @@ function AgentBlock({
          *  bool against any future regression to the `terminal`
          *  derivation. resultText presence is the second guard:
          *  if the canonical answer has landed, defer to it. */}
+        {/* RC audit fix — render streaming output via the SAME
+         *  ReactMarkdown surface TerminalSummary uses, so the
+         *  transition from "still streaming" to "task terminal"
+         *  is visually a no-op (only the supplementary controls —
+         *  copy button, suggestions — appear). Pre-fix the user
+         *  saw plain text → blank flash → markdown render and
+         *  perceived it as "two streaming passes". */}
         {task.status !== 'completed' &&
           task.status !== 'failed' &&
           task.status !== 'cancelled' &&
           !task.resultText &&
           (progressMessage || streamingText) && (
-            <div className="rounded-xl border border-border bg-card px-4 py-3">
+            <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-5 py-4 text-foreground dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-foreground">
               {progressMessage && !streamingText && (
                 <div className="text-xs text-muted-foreground">
                   <span className="inline-block animate-pulse">●</span>{' '}
@@ -333,10 +340,12 @@ function AgentBlock({
                 </div>
               )}
               {streamingText && (
-                <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground font-sans">
-                  {streamingText}
+                <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {streamingText}
+                  </ReactMarkdown>
                   <span className="ml-0.5 inline-block h-3 w-1 animate-pulse bg-foreground/40 align-baseline" />
-                </pre>
+                </div>
               )}
             </div>
           )}

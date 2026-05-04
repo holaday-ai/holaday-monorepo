@@ -249,14 +249,32 @@ export function BrowserPanel({
     () => (usingCdp ? null : buildVncUrl(poolUserId)),
     [poolUserId, usingCdp],
   );
+  // RC follow-up audit fix — generate / scrape tasks have NO pool
+  // slot (no Brave allocated), so /screencast-ws/<taskId> 409s in a
+  // loop and the user sees "画面已断开，重连中" cycling every ~5s
+  // forever. Detect non-pool tasks via the streaming/progress
+  // buffers (those types only ever populate for generate/scrape
+  // runners) and skip the WS entirely. Browser tasks never populate
+  // those buffers, so they keep working unchanged.
+  const streamingForActive = useTaskStore((s) =>
+    activeTaskId ? s.streamingByTask[activeTaskId] : undefined,
+  );
+  const progressForActive = useTaskStore((s) =>
+    activeTaskId ? s.progressByTask[activeTaskId] : undefined,
+  );
+  const isNonPoolTask = Boolean(streamingForActive ?? progressForActive);
   const screencastUrlForCdp = React.useMemo(() => {
     if (!usingCdp) return null;
     // Per-task pool: terminal tasks have no live Brave. Fall through
     // to the static frame fallback (last-frame JPEG) instead of
     // hammering the WS into 409s.
     if (activeTaskId && taskTerminal) return null;
+    // RC audit fix — non-pool tasks (generate / scrape) never have
+    // a /screencast-ws/<taskId> backend; skip the WS so the
+    // disconnect banner doesn't flicker every 5 s.
+    if (activeTaskId && isNonPoolTask) return null;
     return buildScreencastUrl(activeTaskId ?? null, poolUserId);
-  }, [activeTaskId, poolUserId, usingCdp, taskTerminal]);
+  }, [activeTaskId, poolUserId, usingCdp, taskTerminal, isNonPoolTask]);
   const [vncStatus, setVncStatus] = React.useState<VncStatus>('idle');
   // P3 hibernation detection: count consecutive failed attempts. The
   // pool's idle GC reaps after 5 min, after which /vnc-ws/ rejects
@@ -280,6 +298,21 @@ export function BrowserPanel({
       return n;
     });
   }, []);
+  // RC audit fix — banner grace period. The "画面已断开，重连中"
+  // banner used to flip ON instantly when the WS closed, and stay on
+  // for the entire backoff window (up to 5 s). For transient closes
+  // (network jitter, CDP frame stalls) the banner would flash on/off
+  // a few times during a healthy stream. Defer the visible flag by
+  // 1.5 s so a fast reconnect leaves no banner trail.
+  const [showDisconnectBanner, setShowDisconnectBanner] = React.useState(false);
+  React.useEffect(() => {
+    if (vncStatus !== 'disconnected') {
+      setShowDisconnectBanner(false);
+      return;
+    }
+    const timer = setTimeout(() => setShowDisconnectBanner(true), 1500);
+    return () => clearTimeout(timer);
+  }, [vncStatus]);
   // Phase 24: hibernation is a userId-pool concept (idle GC after
   // 5min). Per-task pool has no hibernation — terminal task = static
   // frame, executing task = retry forever. Only fire the hibernation
@@ -717,7 +750,7 @@ export function BrowserPanel({
                     连接实时画面…
                   </div>
                 )}
-                {vncStatus === 'disconnected' && (
+                {vncStatus === 'disconnected' && showDisconnectBanner && (
                   <div className="pointer-events-none absolute right-2 top-2 rounded bg-amber-500/90 px-2 py-0.5 text-[10px] font-semibold text-white">
                     画面已断开，重连中
                   </div>
