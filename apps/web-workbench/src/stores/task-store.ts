@@ -541,24 +541,50 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       // streaming buffer. The render layer reads streamingByTask
       // while the task is still executing, then switches to the
       // canonical resultText on terminal.
-      set((prev) => ({
-        streamingByTask: {
-          ...prev.streamingByTask,
-          [msg.taskId]: (prev.streamingByTask[msg.taskId] ?? '') + msg.delta,
-        },
-      }));
+      //
+      // Stale-delta guard: if this task has already reached a
+      // terminal state (network reorder dropped a delta after
+      // the terminal frame, or replay on WS reconnect), DROP the
+      // delta. Without this, the buffer that we cleared on terminal
+      // gets resurrected and the user sees the streaming view
+      // replay when they switch back to the completed task.
+      set((prev) => {
+        const t = prev.tasks.find((x) => x.taskId === msg.taskId);
+        if (
+          t &&
+          (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled')
+        ) {
+          return prev;
+        }
+        return {
+          streamingByTask: {
+            ...prev.streamingByTask,
+            [msg.taskId]: (prev.streamingByTask[msg.taskId] ?? '') + msg.delta,
+          },
+        };
+      });
       return;
     }
     if (msg.type === 'server.task.progress') {
       // Phase 24 RC follow-up — coarse progress note (latest wins).
       // Used by scrape-runner to show "正在抓取网页数据…" in the
       // window before the LLM stream starts producing tokens.
-      set((prev) => ({
-        progressByTask: {
-          ...prev.progressByTask,
-          [msg.taskId]: msg.message,
-        },
-      }));
+      // Same stale-message guard as server.task.stream above.
+      set((prev) => {
+        const t = prev.tasks.find((x) => x.taskId === msg.taskId);
+        if (
+          t &&
+          (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled')
+        ) {
+          return prev;
+        }
+        return {
+          progressByTask: {
+            ...prev.progressByTask,
+            [msg.taskId]: msg.message,
+          },
+        };
+      });
       return;
     }
     if (msg.type === 'server.task.queued') {

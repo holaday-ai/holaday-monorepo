@@ -312,22 +312,34 @@ function AgentBlock({
          *  Firecrawl-fetch window before the LLM stream starts).
          *  No animation — the model's token cadence IS the typing
          *  effect. */}
-        {!terminal && (progressMessage || streamingText) && (
-          <div className="rounded-xl border border-border bg-card px-4 py-3">
-            {progressMessage && !streamingText && (
-              <div className="text-xs text-muted-foreground">
-                <span className="inline-block animate-pulse">●</span>{' '}
-                {progressMessage}
-              </div>
-            )}
-            {streamingText && (
-              <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground font-sans">
-                {streamingText}
-                <span className="ml-0.5 inline-block h-3 w-1 animate-pulse bg-foreground/40 align-baseline" />
-              </pre>
-            )}
-          </div>
-        )}
+        {/* Render-side defensive belt — even if a stale buffer
+         *  somehow lingers (store guard caught the latest stale
+         *  delta but a prior accumulation snuck through), terminal
+         *  status MUST hide the streaming view. The explicit
+         *  status check (not just `!terminal`) belts the implicit
+         *  bool against any future regression to the `terminal`
+         *  derivation. resultText presence is the second guard:
+         *  if the canonical answer has landed, defer to it. */}
+        {task.status !== 'completed' &&
+          task.status !== 'failed' &&
+          task.status !== 'cancelled' &&
+          !task.resultText &&
+          (progressMessage || streamingText) && (
+            <div className="rounded-xl border border-border bg-card px-4 py-3">
+              {progressMessage && !streamingText && (
+                <div className="text-xs text-muted-foreground">
+                  <span className="inline-block animate-pulse">●</span>{' '}
+                  {progressMessage}
+                </div>
+              )}
+              {streamingText && (
+                <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground font-sans">
+                  {streamingText}
+                  <span className="ml-0.5 inline-block h-3 w-1 animate-pulse bg-foreground/40 align-baseline" />
+                </pre>
+              )}
+            </div>
+          )}
 
         {terminal && task.resultText && (
           <TerminalSummary
