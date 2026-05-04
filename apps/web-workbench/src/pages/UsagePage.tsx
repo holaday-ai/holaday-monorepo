@@ -33,11 +33,17 @@ const RUNNING_STATUSES = new Set([
 ]);
 
 export function UsagePage(): JSX.Element {
-  const [monthCount, setMonthCount] = React.useState(0);
+  // Canonical "本月任务" count comes from quota.status — that's the
+  // counter the orchestrator's own gate consults, so it can't disagree
+  // with reality. tasks.list is still polled for the activity
+  // breakdown + 7-day histogram, but with limit:100 (was 200, the
+  // backend rejects anything above 100 and the page used to show 0
+  // for every counter).
   const [succeeded, setSucceeded] = React.useState(0);
   const [failed, setFailed] = React.useState(0);
   const [running, setRunning] = React.useState(0);
   const [bars, setBars] = React.useState<DayBar[]>([]);
+  const [tasksUsed, setTasksUsed] = React.useState<number | null>(null);
   const [quota, setQuota] = React.useState<number | null>(null);
   const [bonusTasks, setBonusTasks] = React.useState(0);
   const [tasksRemaining, setTasksRemaining] = React.useState<number | null>(null);
@@ -46,22 +52,16 @@ export function UsagePage(): JSX.Element {
   React.useEffect(() => {
     let active = true;
     void Promise.all([
-      trpc.tasks.list.query({ limit: 200 }).catch(() => null),
-      // Quota API is the source of truth for tasksLimit / bonus /
-      // remaining — hardcoding caps here previously had Basic at
-      // 200 / Pro at 1000 while PLAN_CATALOGUE has them at 100 /
-      // 150 (+15 Opus). The status query bakes in bonus tasks too.
+      trpc.tasks.list.query({ limit: 100 }).catch(() => null),
       trpc.quota.status.query().catch(() => null),
     ]).then(([tasks, quotaSnap]) => {
       if (!active) return;
       if (quotaSnap) {
+        setTasksUsed(quotaSnap.tasksUsed);
         setQuota(quotaSnap.tasksLimit);
         setBonusTasks(quotaSnap.bonusTasks);
         setTasksRemaining(quotaSnap.tasksRemaining);
       }
-      const now = new Date();
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-      let mCount = 0;
       let sCount = 0;
       let fCount = 0;
       let rCount = 0;
@@ -75,14 +75,12 @@ export function UsagePage(): JSX.Element {
       for (const t of (list as Array<{ createdAt: string | number; status: string }>) ?? []) {
         const ts = typeof t.createdAt === 'string' ? Date.parse(t.createdAt) : t.createdAt;
         if (!Number.isFinite(ts)) continue;
-        if (ts >= monthStart) mCount += 1;
         if (t.status === SUCCESS_STATUS) sCount += 1;
         else if (t.status === FAILED_STATUS) fCount += 1;
         else if (RUNNING_STATUSES.has(t.status)) rCount += 1;
         const k = dateKey(new Date(ts));
         if (byDay.has(k)) byDay.set(k, (byDay.get(k) ?? 0) + 1);
       }
-      setMonthCount(mCount);
       setSucceeded(sCount);
       setFailed(fCount);
       setRunning(rCount);
@@ -104,6 +102,7 @@ export function UsagePage(): JSX.Element {
   // cap. Once loaded, total = base limit + bonus (paid add-on packs
   // or first-month grants).
   const totalQuota = quota == null ? null : quota + bonusTasks;
+  const monthCount = tasksUsed ?? 0;
   const remaining = tasksRemaining ?? (totalQuota == null ? 0 : Math.max(0, totalQuota - monthCount));
   const pct =
     totalQuota == null || totalQuota === 0

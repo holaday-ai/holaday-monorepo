@@ -320,16 +320,46 @@ export function classifyRole(intent: string): string {
 }
 
 /**
- * Compose Base + Role + Style. `roleId` selects the role addon (or
- * leaves it out for `'none'` / unknown). Returns the full system
- * prompt as a single string ready to put on a `text` block.
+ * Compose Date + Base + Role + Style. `roleId` selects the role
+ * addon (or leaves it out for `'none'` / unknown). Returns the full
+ * system prompt as a single string ready to put on a `text` block.
+ *
+ * The date layer is computed at call time so a long-running process
+ * (orchestrator runs for days) doesn't bake stale "today is …" into
+ * its prompts. UTC ISO is the unambiguous machine form; CST is
+ * what the SPA users intuitively check against, since the product
+ * is China-facing.
  */
 export function buildLayeredSystemPrompt(roleId: string): string {
   const role = ROLE_PROMPTS[roleId];
-  const parts = [BASE_PROMPT];
+  const parts = [buildDatePrompt(), BASE_PROMPT];
   if (role && role.length > 0) parts.push(role);
   parts.push(STYLE_PROMPT);
   return parts.join('\n\n');
+}
+
+function buildDatePrompt(): string {
+  // Day-precision (not full ISO timestamp) on purpose — the system
+  // prompt is cached with `cache_control: ephemeral` (5-min TTL,
+  // refreshed on hits). Including HH:mm would bust that cache every
+  // minute and cost ~10× extra input tokens per task. Day boundary
+  // means the cache stays warm for 24 h of continuous traffic, and
+  // "今天/最新/本月" queries get the correct anchor regardless.
+  const now = new Date();
+  const cstDate = now.toLocaleDateString('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  // YYYY/MM/DD → YYYY-MM-DD for ISO-style readability.
+  const cstIso = cstDate.replace(/\//g, '-');
+  return [
+    '## 当前时间上下文',
+    `当前日期：${cstIso}（北京时间）`,
+    '用户时区：Asia/Shanghai (UTC+8)',
+    '查询"最新"、"今天"、"本月"等信息时以上述日期为准。',
+  ].join('\n');
 }
 
 // ---------------------------------------------------------------------------

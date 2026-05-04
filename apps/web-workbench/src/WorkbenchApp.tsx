@@ -13,6 +13,7 @@ import { Sidebar } from '@/components/Sidebar';
 import { AppSkeleton } from '@/components/Skeleton';
 import { useToast } from '@/components/ui/toast';
 import { clearAccessToken, getAccessToken } from '@/lib/auth';
+import { hdDebug } from '@/lib/hd-debug';
 import { trpc } from '@/lib/trpc';
 import { type ConnStatus, connect, disconnect, onServerMessage, onStatus } from '@/lib/ws';
 import { useTaskStore } from '@/stores/task-store';
@@ -566,8 +567,7 @@ function AppShell(): JSX.Element {
           // (server creates a new task row + injects parent context)
           // but the visual outcome looks the same as fresh-task. Log
           // helps verify the FE actually sent replyToTaskId.
-          // eslint-disable-next-line no-console
-          console.info('[holaday] onSubmit', {
+          hdDebug('onSubmit', {
             isReplyMode,
             followUpTaskId: followUpTarget?.taskId ?? null,
             selectedTaskId,

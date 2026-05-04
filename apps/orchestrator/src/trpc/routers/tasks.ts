@@ -1320,7 +1320,7 @@ export const tasksRouter = router({
             }
             const actionKind = ev.toolsInTurn[0] ?? 'text';
             const actionSummary = ev.textPreamble
-              ? truncateString(ev.textPreamble, 80)
+              ? truncateString(stripPlanTrackerMarkers(ev.textPreamble), 80)
               : ev.toolsInTurn.join(', ') || 'thinking';
             const now = Date.now();
             try {
@@ -2994,6 +2994,22 @@ const sqlEmpty = sqlFilter``;
 function truncateString(s: string, max: number): string {
   if (s.length <= max) return s;
   return `${s.slice(0, max - 1)}…`;
+}
+
+/**
+ * Strip `[STEP N done]` / `[STEP N running]` / `[STEP N pending]` plan-
+ * tracker markers from a free-text action summary. The supercar
+ * agent leaks these into its `textPreamble` mid-thought; the SPA's
+ * step-card view shows them verbatim, which looks like internal
+ * debug output to a user. Removing them at the broadcast/insert
+ * boundary keeps the tracker available to the model (it sees the
+ * raw output) while sparing the user the noise.
+ *
+ * Conservative regex: only matches `[STEP <digit(s)> <words>]` —
+ * won't eat user-typed bracket content.
+ */
+function stripPlanTrackerMarkers(s: string): string {
+  return s.replace(/\[STEP\s+\d+[^\]]*\]/g, '').replace(/\s+/g, ' ').trim();
 }
 
 /**

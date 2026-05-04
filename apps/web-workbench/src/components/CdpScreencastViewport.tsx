@@ -122,12 +122,11 @@ export function CdpScreencastViewport({
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let activeWs: WebSocket | null = null;
     // One-time mount diagnostic so BOSS can confirm in DevTools
-    // which transport the panel actually picked.
-    // eslint-disable-next-line no-console
-    console.info(
-      '[holaday] CDP screencast viewport mounted; wsUrl =',
-      wsUrl.replace(/token=[^&]+/, 'token=…'),
-    );
+    // which transport the panel actually picked. Gated through
+    // hdDebug — prod builds drop it.
+    hdDebug('CDP screencast viewport mounted', {
+      wsUrl: wsUrl.replace(/token=[^&]+/, 'token=…'),
+    });
 
     function connect(): void {
       if (disposed) return;
@@ -141,8 +140,6 @@ export function CdpScreencastViewport({
         if (disposed) return;
         attempt = 0; // reset backoff on a successful connect
         setStatus('connected');
-        // eslint-disable-next-line no-console
-        console.info('[holaday] CDP screencast WS open');
         hdDebug('screencast WS', {
           event: 'open',
           readyState: ws.readyState,
@@ -160,10 +157,8 @@ export function CdpScreencastViewport({
         if (!msg || msg.type !== 'frame' || typeof msg.data !== 'string') return;
         drawFrame(msg.data);
       };
-      ws.onerror = (e) => {
+      ws.onerror = () => {
         if (disposed) return;
-        // eslint-disable-next-line no-console
-        console.warn('[holaday] CDP screencast WS error', e);
         hdDebug('screencast WS', {
           event: 'error',
           readyState: ws.readyState,
@@ -180,16 +175,6 @@ export function CdpScreencastViewport({
           code: event.code,
           reason: event.reason || '(none)',
         });
-        // Only log the first few closes verbatim — beyond that the
-        // viewport is in steady "polling for a wake" state and
-        // chatty per-close logs would drown the console. After 5
-        // we drop to one line per ~minute (every 12th attempt).
-        if (attempt <= 5 || attempt % 12 === 0) {
-          // eslint-disable-next-line no-console
-          console.warn(
-            `[holaday] CDP screencast WS closed (code=${event.code}, reason=${event.reason || '(none)'}, attempt=${attempt})`,
-          );
-        }
         setStatus('disconnected');
         // Backoff: doubles up to a 5 s ceiling, then stays at 5 s
         // forever. Browser hibernation is the expected steady state;

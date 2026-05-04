@@ -144,8 +144,7 @@ function openSocket(token: string): void {
   ws.addEventListener('message', (event) => {
     const result = parseServerMessage(typeof event.data === 'string' ? event.data : '');
     if (!result.success) {
-      // biome-ignore lint/suspicious/noConsole: surfaced for debugging
-      console.warn('[web-workbench/ws] bad server frame', result.error);
+      hdDebug('ws bad frame', { error: result.error });
       return;
     }
     if (result.data.type.startsWith('server.task.')) {

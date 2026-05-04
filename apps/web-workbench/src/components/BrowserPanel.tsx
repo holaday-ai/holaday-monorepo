@@ -235,14 +235,14 @@ export function BrowserPanel({
   // Phase 24 diagnostic — log the current task scope so DevTools can
   // confirm the panel is actually receiving the expected taskId from
   // its parent. Re-fires whenever the user picks a different task.
+  // Gated through hdDebug so prod builds emit nothing.
   React.useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.info(
-      `[holaday] BrowserPanel transport=${streamTransport} ` +
-        `activeTaskId=${activeTaskId ?? 'null'} ` +
-        `taskStatus=${taskStatus ?? 'null'} ` +
-        (poolUserId ? `poolUserId=${poolUserId}` : '(no pool slot)'),
-    );
+    hdDebug('BrowserPanel scope', {
+      transport: streamTransport,
+      activeTaskId: activeTaskId ?? null,
+      taskStatus: taskStatus ?? null,
+      poolUserId: poolUserId ?? null,
+    });
   }, [streamTransport, activeTaskId, taskStatus, poolUserId]);
   // Phase 24: completed/failed/cancelled tasks have had their per-task
   // Brave released — connecting to /screencast-ws/<taskId> would 409
