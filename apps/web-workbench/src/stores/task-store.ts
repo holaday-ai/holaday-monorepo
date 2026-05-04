@@ -247,8 +247,59 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
             };
             const planText = detailWithPlan.planText ?? undefined;
             const planStatus = (detailWithPlan.planStatus as UiTask['planStatus']) ?? undefined;
+            // R7 — pull the final-state evidence out of result JSON.
+            // tasks.detail is the only path that ships finalScreenshot;
+            // tasks.list strips it. So this hydration is the SOLE way
+            // the SPA learns about the captured screenshot.
+            const resultObj = (detail.result ?? {}) as {
+              finalScreenshot?: string;
+              finalUrl?: string;
+            };
+            const finalScreenshot =
+              typeof resultObj.finalScreenshot === 'string' && resultObj.finalScreenshot.length > 0
+                ? resultObj.finalScreenshot
+                : undefined;
+            const finalUrl =
+              typeof resultObj.finalUrl === 'string' && resultObj.finalUrl.length > 0
+                ? resultObj.finalUrl
+                : undefined;
+            // R6 — rebuild webSearchByTask from persisted step.output.
+            // The WS-live state stores the LAST web_search per task
+            // (latest-wins). Hydration mirrors that: walk steps in
+            // ascending seq, take the last entry of the last step
+            // that carried `webSearches`. End state matches what a
+            // user-without-refresh would have seen.
+            let hydratedWebSearch: UiWebSearchEvent | null = null;
+            for (const s of detail.steps ?? []) {
+              const out = (s.output ?? {}) as {
+                webSearches?: ReadonlyArray<{
+                  query: string;
+                  sources?: ReadonlyArray<{ title: string; url: string; snippet?: string }>;
+                }>;
+              };
+              const arr = out.webSearches;
+              if (!arr || arr.length === 0) continue;
+              const last = arr[arr.length - 1];
+              if (!last) continue;
+              hydratedWebSearch = {
+                iteration: typeof s.seq === 'number' ? s.seq : 0,
+                query: last.query,
+                at: Date.now(),
+                ...(last.sources && last.sources.length > 0
+                  ? { sources: last.sources }
+                  : {}),
+              };
+            }
             return {
               stepsByTask: { ...prev.stepsByTask, [taskId]: steps },
+              ...(hydratedWebSearch
+                ? {
+                    webSearchByTask: {
+                      ...prev.webSearchByTask,
+                      [taskId]: hydratedWebSearch,
+                    },
+                  }
+                : {}),
               tasks: prev.tasks.map((t) =>
                 t.taskId === taskId
                   ? {
@@ -258,6 +309,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
                       ...(resultText ? { resultText } : {}),
                       ...(planText ? { planText } : {}),
                       ...(planStatus ? { planStatus } : {}),
+                      ...(finalScreenshot ? { finalScreenshot } : {}),
+                      ...(finalUrl ? { finalUrl } : {}),
                     }
                   : t,
               ),

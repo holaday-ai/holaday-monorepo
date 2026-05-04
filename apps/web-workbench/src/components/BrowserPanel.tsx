@@ -199,6 +199,26 @@ export function BrowserPanel({
   // showing. Brave is a shared singleton, so whatever URL another
   // task left it on is also what's on screen right now.
   const screencastByTask = useTaskStore((s) => s.screencastByTask);
+  // R7 — terminal-state evidence frame, synthesised from the
+  // captured-pre-release screenshot persisted on the task row.
+  // Lets the panel render the final-state image after refresh
+  // instead of leaving an empty about:blank when the live Brave is
+  // gone. Memoised so the synthetic UiScreencast keeps a stable
+  // identity across renders (preventing the inner viewport's
+  // useEffect from refiring).
+  const activeTask = useTaskStore((s) =>
+    activeTaskId ? s.tasks.find((t) => t.taskId === activeTaskId) ?? null : null,
+  );
+  const finalEvidenceFrame = React.useMemo<UiScreencast | null>(() => {
+    if (!activeTask?.finalScreenshot) return null;
+    return {
+      tickIndex: -1,
+      imageBase64: activeTask.finalScreenshot,
+      url: activeTask.finalUrl ?? 'about:blank',
+      viewport: { width: 0, height: 0 },
+      timestamp: new Date().toISOString(),
+    };
+  }, [activeTask?.finalScreenshot, activeTask?.finalUrl]);
   const latestFrame = React.useMemo<UiScreencast | null>(() => {
     const all = Object.values(screencastByTask);
     if (all.length === 0) return null;
@@ -208,7 +228,11 @@ export function BrowserPanel({
       !best || cur.timestamp > best.timestamp ? cur : best,
     null as UiScreencast | null) ?? null;
   }, [screencastByTask]);
-  const displayFrame = frame ?? latestFrame;
+  // For terminal tasks with captured evidence, the evidence frame
+  // is the canonical view (the agent's final state). Live `frame`
+  // would be stale-or-absent at terminal anyway. For active tasks,
+  // live frame still wins.
+  const displayFrame = frame ?? finalEvidenceFrame ?? latestFrame;
   const displayUrl = displayFrame?.url ?? 'about:blank';
   const abortTask = useTaskStore((s) => s.abortTask);
   const [aborting, setAborting] = React.useState(false);
@@ -844,6 +868,25 @@ export function BrowserPanel({
                   )}
                 </div>
               )
+            ) : finalEvidenceFrame ? (
+              // R7 — terminal task with captured evidence. Static
+              // image of the agent's last visible state, plus the
+              // URL it was on. No interactive overlay (live Brave is
+              // gone), no activity log, no CJK input.
+              <div className="relative flex h-full w-full flex-col">
+                <img
+                  src={`data:image/jpeg;base64,${finalEvidenceFrame.imageBase64}`}
+                  alt="任务完成时的浏览器截图"
+                  draggable={false}
+                  className="max-h-full max-w-full rounded-md border border-black/[0.06] object-contain shadow-sm"
+                />
+                <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2 rounded bg-black/55 px-2 py-1 text-[11px] text-white backdrop-blur">
+                  <span className="truncate">任务已完成 · 最终页面</span>
+                  {finalEvidenceFrame.url && finalEvidenceFrame.url !== 'about:blank' && (
+                    <span className="truncate font-mono opacity-80">{finalEvidenceFrame.url}</span>
+                  )}
+                </div>
+              </div>
             ) : (
               <EmptyBrowserState taskStatus={taskStatus} />
             )}

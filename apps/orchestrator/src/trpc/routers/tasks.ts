@@ -21,6 +21,7 @@ import { tryAcquire as rateLimitTryAcquire } from '../../quota/rate-limiter.js';
 import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
 import { startVisionLoopTask } from '../../agent/vision-loop/task-runner.js';
+import type { PlaywrightExecutor } from '../../agent/vision-loop/playwright-executor.js';
 import {
   classifyAsCrossPlatformAutomation,
   classifyAsSimpleSearch,
@@ -1190,6 +1191,16 @@ export const tasksRouter = router({
           );
         }
       }
+      // Per-task buffer of web_search results from the current
+      // iteration. onWebSearch pushes here; onTick (which fires once
+      // at the end of each iteration) flushes them into the persisted
+      // step's output JSON so a refresh-after-completion can rebuild
+      // webSearchByTask without replaying the WS frames. Local to
+      // dispatchToBrave so concurrent tasks don't share a buffer.
+      let pendingWebSearches: Array<{
+        readonly query: string;
+        readonly sources: ReadonlyArray<{ title: string; url: string; snippet?: string }>;
+      }> = [];
       const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
           taskId,
           // Phase 14 audit follow-up — feed the agent the parent-task
@@ -1345,6 +1356,11 @@ export const tasksRouter = router({
             }
             // Persist the iteration to task_steps so history survives
             // reloads — same shape the legacy vision-loop uses.
+            // Snapshot + reset pendingWebSearches so the async insert
+            // below sees this iteration's batch even if the next
+            // iteration starts before the insert finishes.
+            const webSearches = pendingWebSearches;
+            pendingWebSearches = [];
             if (taskDbId) {
               void (async () => {
                 try {
@@ -1356,7 +1372,11 @@ export const tasksRouter = router({
                     status: 'done',
                     riskLevel: 'low',
                     input: { summary: actionSummary },
-                    output: { apiLatencyMs: ev.apiLatencyMs, tools: ev.toolsInTurn },
+                    output: {
+                      apiLatencyMs: ev.apiLatencyMs,
+                      tools: ev.toolsInTurn,
+                      ...(webSearches.length > 0 ? { webSearches } : {}),
+                    },
                     startedAt: new Date(now - ev.apiLatencyMs),
                     completedAt: new Date(now),
                   });
@@ -1390,6 +1410,15 @@ export const tasksRouter = router({
             // server-side and has no DOM to capture. Sources (when
             // present) are forwarded so the SearchResultCard can
             // render favicon + title + snippet rows.
+            //
+            // Also buffer for the next onTick so the persisted step
+            // row carries the sources — this is what lets a SPA
+            // refresh-after-completion rebuild webSearchByTask from
+            // tasks.detail instead of needing a WS replay.
+            pendingWebSearches.push({
+              query: ev.query,
+              sources: ev.sources ?? [],
+            });
             try {
               broadcastToUser(userId, {
                 type: 'server.supercar.web_search',
@@ -1472,7 +1501,17 @@ export const tasksRouter = router({
               { taskId, status: outcome.status, iterations: outcome.iterations, toolsUsed: outcome.toolsUsed },
               'supercar: task terminated',
             );
-            await persistSupercarOutcome(repo, taskId, outcome);
+            // R7 — grab the final-state evidence BEFORE persistSupercar
+            // and pool.release. The BrowserPanel renders the static
+            // screenshot for terminal tasks instead of trying to
+            // reconnect the screencast WS to a torn-down Brave.
+            // Skip for non-browser-mode tasks (perUserExec is null
+            // when executionMode='generate' / 'scrape' — there's no
+            // browser to screenshot).
+            const finalState = perUserExec
+              ? await captureFinalState(perUserExec, ctx.logger, taskId)
+              : {};
+            await persistSupercarOutcome(repo, taskId, outcome, finalState);
             try {
               broadcastToUser(userId, buildTaskTerminalMessage(taskId, outcome));
             } catch (err) {
@@ -2394,7 +2433,12 @@ export const tasksRouter = router({
           pauseReason: r.pauseReason,
           errorCode: r.errorCode,
           errorMessage: r.errorMessage,
-          result: normalizeOutput(r.result),
+          // R7 — strip the base64 final-state screenshot from the list
+          // shape. It can be ~80KB per row (quality-80 JPEG, base64
+          // overhead 33%); 100 tasks would bloat the list response by
+          // ~8MB. tasks.detail still ships it for the BrowserPanel
+          // evidence view; the sidebar doesn't render screenshots.
+          result: stripFinalScreenshot(normalizeOutput(r.result)),
           starred: Boolean(r.starred),
           starredAt: r.starredAt,
           projectId: r.projectId != null ? projectExtById.get(r.projectId) ?? null : null,
@@ -3013,6 +3057,22 @@ function stripPlanTrackerMarkers(s: string): string {
 }
 
 /**
+ * R7 — strip the heavy `finalScreenshot` base64 from a result JSON
+ * blob. Used by tasks.list so the sidebar doesn't ship 8MB+ of
+ * screenshots no UI surface uses. tasks.detail keeps the field —
+ * that's where the BrowserPanel reads it from.
+ */
+function stripFinalScreenshot(result: unknown): unknown {
+  if (!result || typeof result !== 'object') return result;
+  if (Array.isArray(result)) return result;
+  const r = result as Record<string, unknown>;
+  if (!('finalScreenshot' in r)) return r;
+  const { finalScreenshot: _omitted, ...rest } = r;
+  void _omitted;
+  return rest;
+}
+
+/**
  * Per-user BrowserPool eligibility. Phase 14 audit follow-up:
  * the canary allow-list (MULTI_USER_USERS env) was retired so every
  * authenticated user gets a pool slot. Reasoning:
@@ -3046,6 +3106,7 @@ async function persistSupercarOutcome(
   repo: TaskRepository,
   taskId: string,
   outcome: SupercarOutcome,
+  finalState: { finalScreenshot?: string; finalUrl?: string } = {},
 ): Promise<void> {
   try {
     if (outcome.status === 'completed') {
@@ -3053,6 +3114,8 @@ async function persistSupercarOutcome(
         status: 'completed',
         summary: outcome.summary ?? '',
         tickCount: outcome.iterations,
+        ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
+        ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
       });
     } else if (outcome.status === 'awaiting_user') {
       // Shouldn't land here in the happy path — the loop returns a
@@ -3073,6 +3136,8 @@ async function persistSupercarOutcome(
         status: 'failed',
         reason: outcome.reason ?? 'supercar: task timeout',
         tickCount: outcome.iterations,
+        ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
+        ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
       });
     } else {
       // 'failed'
@@ -3080,12 +3145,58 @@ async function persistSupercarOutcome(
         status: 'failed',
         reason: outcome.reason ?? 'supercar: task failed',
         tickCount: outcome.iterations,
+        ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
+        ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
       });
     }
   } catch (err) {
     // Best-effort — persistence failure is logged by the caller's .then().
     // Rethrow so the caller's logger catches it.
     throw err instanceof Error ? err : new Error(String(err));
+  }
+}
+
+/**
+ * R7 — capture the per-task Brave's last visible state right before
+ * `pool.release(taskId)` tears it down. The SPA's BrowserPanel uses
+ * the result so a refresh-after-completion shows the user "this is
+ * what HOLA DAY was looking at when it finished" instead of a blank
+ * panel that retries the screencast WS forever.
+ *
+ * Best-effort: any executor / Playwright failure (already-closed
+ * tab, navigation in flight, viewport gone) returns an empty object
+ * and the persisted result simply omits the screenshot. The caller
+ * doesn't need to differentiate.
+ */
+async function captureFinalState(
+  executor: PlaywrightExecutor | null,
+  logger: import('pino').Logger,
+  taskId: string,
+): Promise<{ finalScreenshot?: string; finalUrl?: string }> {
+  if (!executor) return {};
+  try {
+    const page = await executor.getPage();
+    const shot = await executor.screenshot(
+      page as unknown as Parameters<PlaywrightExecutor['screenshot']>[0],
+      { timeoutMs: 5_000 },
+    );
+    if (shot.error || !shot.base64) return {};
+    let finalUrl: string | undefined;
+    try {
+      finalUrl = (page as unknown as { url: () => string }).url();
+    } catch {
+      finalUrl = undefined;
+    }
+    return {
+      finalScreenshot: shot.base64,
+      ...(finalUrl ? { finalUrl } : {}),
+    };
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err), taskId },
+      'captureFinalState: screenshot capture failed (non-fatal)',
+    );
+    return {};
   }
 }
 

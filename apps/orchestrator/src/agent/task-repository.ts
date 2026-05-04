@@ -244,12 +244,21 @@ export class TaskRepository {
   async persistVisionOutcome(
     taskExternalId: string,
     outcome:
-      | { status: 'completed'; summary: string; tickCount: number }
+      | {
+          status: 'completed';
+          summary: string;
+          tickCount: number;
+          /** R7 — final-state evidence captured pre-pool-release. */
+          finalScreenshot?: string;
+          finalUrl?: string;
+        }
       | {
           status: 'failed';
           reason: string;
           tickCount: number;
           errorCode?: string;
+          finalScreenshot?: string;
+          finalUrl?: string;
         }
       | { status: 'paused'; reason: string; tickCount: number }
       | { status: 'cancelled'; tickCount: number },
@@ -269,6 +278,8 @@ export class TaskRepository {
       update.completedAt = new Date();
       update.pauseReason = null;
       result.summary = outcome.summary;
+      if (outcome.finalScreenshot) result.finalScreenshot = outcome.finalScreenshot;
+      if (outcome.finalUrl) result.finalUrl = outcome.finalUrl;
       eventPayload = { ...eventPayload, summary: outcome.summary };
     } else if (outcome.status === 'failed') {
       update.completedAt = new Date();
@@ -276,6 +287,8 @@ export class TaskRepository {
       update.errorCode = outcome.errorCode ?? 'VISION_GAVE_UP';
       update.errorMessage = outcome.reason.slice(0, 2_000);
       result.reason = outcome.reason;
+      if (outcome.finalScreenshot) result.finalScreenshot = outcome.finalScreenshot;
+      if (outcome.finalUrl) result.finalUrl = outcome.finalUrl;
       eventPayload = { ...eventPayload, reason: outcome.reason };
     } else if (outcome.status === 'paused') {
       update.pauseReason = 'max_steps_reached';

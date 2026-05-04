@@ -59,6 +59,16 @@ export interface UiTask {
   starredAt?: Date | null;
   /** Phase 16 — external project id (prj_…), or null if unfiled. */
   projectId?: string | null;
+  /**
+   * R7 — base64 JPEG of the per-task Brave's final visible state,
+   * captured pre-pool-release on supercar terminal. Drives the
+   * BrowserPanel's "post-completion evidence" view so a refresh
+   * shows what the agent was looking at when it finished, not a
+   * blank panel that re-tries the screencast WS in vain.
+   */
+  finalScreenshot?: string;
+  /** R7 — URL the per-task Brave was on at terminal. */
+  finalUrl?: string;
 }
 
 /**
