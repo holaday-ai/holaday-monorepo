@@ -14,15 +14,14 @@ import { PageShell } from '@/pages/PageShell';
 export function StarredPage(): JSX.Element {
   const navigate = useNavigate();
   const tasks = useTaskStore((s) => s.tasks);
-  const selectAndHydrateTask = useTaskStore((s) => s.selectAndHydrateTask);
   const toggleStarred = useTaskStore((s) => s.toggleStarred);
-  const refreshTasks = useTaskStore((s) => s.refreshTasks);
+  const refreshTaskList = useTaskStore((s) => s.refreshTaskList);
 
   // Refresh once on mount so a freshly-loaded /starred bookmark sees
   // the latest server state even if the store was cold-empty.
   React.useEffect(() => {
-    if (tasks.length === 0) void refreshTasks();
-  }, [tasks.length, refreshTasks]);
+    if (tasks.length === 0) void refreshTaskList();
+  }, [tasks.length, refreshTaskList]);
 
   const starred = React.useMemo(() => {
     return tasks
@@ -35,8 +34,10 @@ export function StarredPage(): JSX.Element {
   }, [tasks]);
 
   function open(taskId: string): void {
-    selectAndHydrateTask(taskId);
-    navigate('/');
+    // navigate to /?task=… and let WorkbenchApp's URL→store effect
+    // pick it up. Avoids racing the store update against the route
+    // change.
+    navigate(`/?task=${encodeURIComponent(taskId)}`);
   }
 
   return (

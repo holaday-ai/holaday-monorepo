@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { PLAN_CATALOGUE, type PlanId } from '@holaday/shared-types';
 import { BrowserPanel } from '@/components/BrowserPanel';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -88,6 +88,7 @@ function AppShell(): JSX.Element {
   const [panelFullscreen, setPanelFullscreen] = React.useState(false);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   // Phase 16b — when ?project=prj_… is present in the URL the
   // sidebar filters down to that project's tasks (the route stays /
   // — workbench just shows a filter chip + the filtered list).
@@ -187,8 +188,9 @@ function AppShell(): JSX.Element {
   const tasks = useTaskStore((s) => s.tasks);
   const selectedTaskId = useTaskStore((s) => s.selectedTaskId);
   const loading = useTaskStore((s) => s.loading);
-  const selectAndHydrateTask = useTaskStore((s) => s.selectAndHydrateTask);
-  const refreshTasks = useTaskStore((s) => s.refreshTasks);
+  const selectTask = useTaskStore((s) => s.selectTask);
+  const enterNewTaskMode = useTaskStore((s) => s.enterNewTaskMode);
+  const refreshTaskList = useTaskStore((s) => s.refreshTaskList);
   const createTask = useTaskStore((s) => s.createTask);
   const replyToTask = useTaskStore((s) => s.replyToTask);
   const deleteTask = useTaskStore((s) => s.deleteTask);
@@ -245,9 +247,14 @@ function AppShell(): JSX.Element {
   const { snap: quotaSnap } = useQuotaStatus(tasks.length);
   const quotaExhausted = isQuotaExhausted(quotaSnap);
 
-  // Bootstrap: fetch user profile + tasks list once. Flip `bootstrapped`
-  // on both the resolved and the fail path so a slow / broken endpoint
-  // still hides the skeleton within a reasonable window.
+  // Bootstrap: single-shot state-machine entry. Reads the URL +
+  // location.state ONCE on mount, dispatches the right initial
+  // selection, then refreshes the list (which won't override the
+  // selection — the store's refreshTaskList only auto-picks when
+  // there's nothing selected and no `?task=` hint). Replaces the
+  // earlier mix of an inbound URL effect, an outbound URL-sync
+  // effect, and refreshTasks's auto-select — all of which used to
+  // fight each other for selectedTaskId in the same render cycle.
   React.useEffect(() => {
     if (!authed) return;
     let done = false;
@@ -257,7 +264,26 @@ function AppShell(): JSX.Element {
         setBootstrapped(true);
       }
     };
-    const listFuture = refreshTasks();
+
+    // Read URL + state once. location is authoritative for the
+    // initial selection decision (the navigation that brought the
+    // user here already updated it before this effect ran).
+    const urlTaskParam = new URLSearchParams(location.search).get('task');
+    const stateNewTask =
+      (location.state as { newTask?: boolean } | null)?.newTask === true;
+
+    if (stateNewTask) {
+      // Files page → 用于新任务. Drop any current selection / URL
+      // ?task= regardless of what was there.
+      enterNewTaskMode();
+    } else if (urlTaskParam) {
+      // Deep link / refresh-with-task. URL is the source of truth.
+      // source='url' so selectTask doesn't replaceState (URL already
+      // matches).
+      selectTask(urlTaskParam, 'url');
+    }
+
+    const listFuture = refreshTaskList();
     const meFuture = trpc.auth.me.query().then(
       (res) =>
         setMe({
@@ -265,14 +291,7 @@ function AppShell(): JSX.Element {
           email: res.email,
           displayName: res.displayName,
           plan: res.plan,
-          // Server adds this in Phase 8.2; older orchestrators (pre-
-          // 8.2) don't set it, so fall back to false to keep the UI
-          // on the shared /vnc/websockify path.
           multiUser: Boolean((res as { multiUser?: boolean }).multiUser),
-          // Phase 10 Tier 2 — server returns selected_roles list. Pre-
-          // 10 orchestrators omit the field; an absent value behaves
-          // the same as an empty list (banner shows for basic users
-          // until they pick).
           selectedRoles:
             (res as { selectedRoles?: string[] }).selectedRoles ?? [],
         }),
@@ -281,11 +300,7 @@ function AppShell(): JSX.Element {
       },
     );
     Promise.allSettled([listFuture, meFuture]).then(finish);
-    // Cap: never leave users on a skeleton longer than 1.5 s.
     const timer = setTimeout(finish, 1500);
-    // Phase 16b — projects load in parallel; not gating the
-    // skeleton (the right-click menu just renders no entries
-    // until this resolves).
     void refreshProjects();
     connect();
     const offMsg = onServerMessage(applyServerMessage);
@@ -295,40 +310,31 @@ function AppShell(): JSX.Element {
       offMsg();
       offStatus();
     };
-  }, [authed, refreshTasks, applyServerMessage, refreshProjects]);
+  }, [
+    authed,
+    refreshTaskList,
+    applyServerMessage,
+    refreshProjects,
+    selectTask,
+    enterNewTaskMode,
+  ]);
 
-  // P1.1 — deep link via `?task=tsk_xxx`. After bootstrap (so the
-  // tasks list is loaded), if the URL specifies a task, swap to it
-  // and hydrate the panel from tasks.detail. Re-runs whenever the
-  // query param changes so navigation history works too.
-  // Guards: only switch when the requested id differs from the
-  // current selection AND it exists in the loaded list (otherwise
-  // we'd flash an empty panel until the next refresh).
+  // P1.1 → state-machine: when URL `?task=` changes mid-session
+  // (history back/forward), pull the store into sync. selectTask
+  // is idempotent — same id is a no-op aside from re-hydrating.
+  // No outbound URL effect: selectTask itself writes the URL when
+  // source !== 'url', so sidebar / search / starred clicks update
+  // the URL without a separate sync effect.
   const taskParam = searchParams.get('task');
   React.useEffect(() => {
-    if (!bootstrapped || !taskParam) return;
-    if (taskParam === selectedTaskId) return;
-    selectAndHydrateTask(taskParam);
-  }, [bootstrapped, taskParam, selectedTaskId, selectAndHydrateTask]);
-
-  // Item 4 — outbound URL sync. The inbound direction (URL → store)
-  // already lives in the effect above; this one closes the loop by
-  // mirroring the store's `selectedTaskId` into `?task=`. Click in
-  // the sidebar / search overlay / starred / etc. now writes the
-  // URL automatically — no need to wrap every call site. Refresh
-  // preserves the active task. Both directions are guarded so they
-  // can't pingpong (each compares URL ↔ state before navigating /
-  // dispatching). Other params (e.g. `?project=`) preserved.
-  React.useEffect(() => {
     if (!bootstrapped) return;
-    const desired = selectedTaskId ?? null;
-    if ((taskParam ?? null) === desired) return;
-    const next = new URLSearchParams(searchParams);
-    if (desired) next.set('task', desired);
-    else next.delete('task');
-    const search = next.toString() ? `?${next.toString()}` : '';
-    navigate({ pathname: '/', search }, { replace: true });
-  }, [bootstrapped, selectedTaskId, taskParam, searchParams, navigate]);
+    if (taskParam) {
+      if (taskParam !== selectedTaskId) selectTask(taskParam, 'url');
+    } else if (selectedTaskId) {
+      // URL dropped ?task= via back-button → reflect in store.
+      enterNewTaskMode();
+    }
+  }, [bootstrapped, taskParam, selectedTaskId, selectTask, enterNewTaskMode]);
 
   // Auth invalidated by server (bad / expired token).
   React.useEffect(() => {
@@ -403,7 +409,7 @@ function AppShell(): JSX.Element {
       // Cmd/Ctrl + N: new task + focus composer.
       if (meta && e.key.toLowerCase() === 'n') {
         e.preventDefault();
-        selectAndHydrateTask(null);
+        enterNewTaskMode();
         setTimeout(() => inputRef.current?.focus(), 50);
         return;
       }
@@ -426,7 +432,7 @@ function AppShell(): JSX.Element {
           return;
         }
         if (selectedTaskId && !inField) {
-          selectAndHydrateTask(null);
+          enterNewTaskMode();
         }
         return;
       }
@@ -438,7 +444,7 @@ function AppShell(): JSX.Element {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [authed, searchOpen, feedbackOpen, browserSheetOpen, panelFullscreen, selectedTaskId, selectAndHydrateTask]);
+  }, [authed, searchOpen, feedbackOpen, browserSheetOpen, panelFullscreen, selectedTaskId, enterNewTaskMode]);
 
   const handleLogout = React.useCallback(() => {
     clearAccessToken();
@@ -493,9 +499,12 @@ function AppShell(): JSX.Element {
         onClearProjectFilter={() => navigate('/')}
         historyDays={historyDays}
         selectedTaskId={selectedTaskId}
-        onSelectTask={selectAndHydrateTask}
+        onSelectTask={(taskId) => {
+          if (taskId) selectTask(taskId, 'ui');
+          else enterNewTaskMode();
+        }}
         onNewTask={() => {
-          selectAndHydrateTask(null);
+          enterNewTaskMode();
           setTimeout(() => inputRef.current?.focus(), 50);
           // B2 — wake the per-user pool browser THEN navigate to
           // Google. Without the wake step, browserNav fails silently
@@ -695,7 +704,7 @@ function AppShell(): JSX.Element {
         open={searchOpen}
         tasks={tasks}
         onClose={() => setSearchOpen(false)}
-        onPick={(taskId) => selectAndHydrateTask(taskId)}
+        onPick={(taskId) => selectTask(taskId, 'ui')}
       />
 
       <FeedbackDialog

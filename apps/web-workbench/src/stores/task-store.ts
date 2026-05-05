@@ -102,7 +102,29 @@ export interface TaskStore {
   pinnedTaskIds: ReadonlySet<string>;
   togglePin(taskId: string): void;
 
+  /**
+   * Unified state-machine entry for task selection. Replaces the
+   * earlier mix of `selectAndHydrateTask`, an outbound URL-sync
+   * effect, an inbound URL effect, and refreshTasks's auto-select.
+   * Three actions only:
+   *
+   *   - `selectTask(id, source)` — pick an existing task. Idempotent.
+   *     Triggers detail hydrate. Writes the URL via replaceState
+   *     unless `source === 'url'` (in which case the URL already
+   *     reflects the choice). 'ui' is the default.
+   *   - `enterNewTaskMode()` — clear selection. Drops the follow-up
+   *     chip (which is derived from selectedTaskId). Writes `/`.
+   *   - `refreshTaskList()` — fetch the list. Never auto-selects
+   *     EXCEPT when there's no current selection AND no `?task=`
+   *     hint AND the list is non-empty — in that case auto-picks
+   *     the newest task as a UI default.
+   */
+  selectTask(taskId: string, source?: 'url' | 'ui'): void;
+  enterNewTaskMode(): void;
+  refreshTaskList(): Promise<void>;
+  /** Legacy alias — routes through selectTask / enterNewTaskMode. */
   selectAndHydrateTask(taskId: string | null): void;
+  /** Legacy alias — calls refreshTaskList. */
   refreshTasks(): Promise<void>;
   /**
    * Phase 24 RC follow-up — older tasks beyond the first page. Cursor
@@ -145,7 +167,188 @@ export interface TaskStore {
   reset(): void;
 }
 
-export const useTaskStore = create<TaskStore>((set, get) => ({
+export const useTaskStore = create<TaskStore>((set, get) => {
+  // Hydrate dedup token. Every selectTask bumps the token; the
+  // tail of an older detail-fetch checks its own token against
+  // the current one and bails if superseded. Cheaper + more
+  // portable than threading AbortControllers through tRPC.
+  let hydrateToken = 0;
+
+  function abortInFlightHydrate(): void {
+    hydrateToken += 1;
+  }
+
+  async function hydrateDetail(taskId: string): Promise<void> {
+    const myToken = ++hydrateToken;
+    try {
+      const detail = await trpc.tasks.detail.query({ taskId });
+      if (myToken !== hydrateToken) return;
+      const steps: UiStep[] = (detail.steps ?? []).map((s, idx) => {
+        const out = (s.output ?? {}) as {
+          message?: string;
+          mode?: string;
+          durationMs?: number;
+          antiBot?: UiStep['antiBot'];
+        };
+        const summary =
+          ((s.input ?? {}) as { summary?: string }).summary ?? s.kind;
+        const startedAt = s.startedAt
+          ? new Date(s.startedAt as unknown as string | number | Date).getTime()
+          : Date.now();
+        return {
+          tickIndex: typeof s.seq === 'number' ? s.seq : idx,
+          status: s.status === 'done' ? 'done' : 'failed',
+          actionKind: s.kind,
+          actionSummary: summary,
+          durationMs: out.durationMs ?? 0,
+          ...(out.message ? { message: out.message } : {}),
+          ...(out.antiBot ? { antiBot: out.antiBot } : {}),
+          startedAt,
+        };
+      });
+      set((prev) => {
+        const rawResultText = extractSummary(detail.result);
+        const isFailed =
+          detail.status === 'failed' || detail.status === 'cancelled';
+        const resultText = rawResultText
+          ? isFailed
+            ? humaniseTaskError(rawResultText)
+            : rawResultText
+          : undefined;
+        const detailWithPlan = detail as typeof detail & {
+          planText?: string | null;
+          planStatus?: UiTask['planStatus'] | null;
+        };
+        const planText = detailWithPlan.planText ?? undefined;
+        const planStatus =
+          (detailWithPlan.planStatus as UiTask['planStatus']) ?? undefined;
+        const resultObj = (detail.result ?? {}) as {
+          finalScreenshot?: string;
+          finalUrl?: string;
+        };
+        const finalScreenshot =
+          typeof resultObj.finalScreenshot === 'string' &&
+          resultObj.finalScreenshot.length > 0
+            ? resultObj.finalScreenshot
+            : undefined;
+        const finalUrl =
+          typeof resultObj.finalUrl === 'string' && resultObj.finalUrl.length > 0
+            ? resultObj.finalUrl
+            : undefined;
+        let hydratedWebSearch: UiWebSearchEvent | null = null;
+        for (const s of detail.steps ?? []) {
+          const out = (s.output ?? {}) as {
+            webSearches?: ReadonlyArray<{
+              query: string;
+              sources?: ReadonlyArray<{ title: string; url: string; snippet?: string }>;
+            }>;
+          };
+          const arr = out.webSearches;
+          if (!arr || arr.length === 0) continue;
+          const last = arr[arr.length - 1];
+          if (!last) continue;
+          hydratedWebSearch = {
+            iteration: typeof s.seq === 'number' ? s.seq : 0,
+            query: last.query,
+            at: Date.now(),
+            ...(last.sources && last.sources.length > 0
+              ? { sources: last.sources }
+              : {}),
+          };
+        }
+        const awaitingQuestion =
+          detail.status === 'awaiting_user' &&
+          typeof (detail as { awaitingQuestion?: string | null }).awaitingQuestion ===
+            'string'
+            ? (detail as { awaitingQuestion?: string | null }).awaitingQuestion ??
+              null
+            : null;
+        return {
+          stepsByTask: { ...prev.stepsByTask, [taskId]: steps },
+          ...(hydratedWebSearch
+            ? {
+                webSearchByTask: {
+                  ...prev.webSearchByTask,
+                  [taskId]: hydratedWebSearch,
+                },
+              }
+            : {}),
+          awaitingUserByTask: awaitingQuestion
+            ? {
+                ...prev.awaitingUserByTask,
+                [taskId]: { question: awaitingQuestion, at: Date.now() },
+              }
+            : (() => {
+                if (!prev.awaitingUserByTask[taskId])
+                  return prev.awaitingUserByTask;
+                const next = { ...prev.awaitingUserByTask };
+                delete next[taskId];
+                return next;
+              })(),
+          tasks: (() => {
+            const exists = prev.tasks.some((t) => t.taskId === taskId);
+            if (exists) {
+              return prev.tasks.map((t) =>
+                t.taskId === taskId
+                  ? {
+                      ...t,
+                      status: detail.status as UiTaskStatus,
+                      tickCount: Math.max(t.tickCount, steps.length),
+                      ...(resultText ? { resultText } : {}),
+                      ...(planText ? { planText } : {}),
+                      ...(planStatus ? { planStatus } : {}),
+                      ...(finalScreenshot ? { finalScreenshot } : {}),
+                      ...(finalUrl ? { finalUrl } : {}),
+                    }
+                  : t,
+              );
+            }
+            // P1-C — deep link to a task older than the first page.
+            // synthesise UiTask from detail, prepend.
+            const detailExtras = detail as typeof detail & {
+              opusUsed?: boolean;
+              starred?: boolean;
+              starredAt?: Date | string | null;
+              projectId?: string | null;
+            };
+            const synth: UiTask = {
+              taskId,
+              intent: detail.intent,
+              title:
+                typeof detail.title === 'string' ? detail.title : null,
+              status: detail.status as UiTaskStatus,
+              tickCount: steps.length,
+              ...(resultText ? { resultText } : {}),
+              createdAt: new Date(
+                detail.createdAt as unknown as string | number | Date,
+              ),
+              modelLabel: detailExtras.opusUsed === true ? 'opus' : 'sonnet',
+              starred: detailExtras.starred === true,
+              starredAt: detailExtras.starredAt
+                ? new Date(
+                    detailExtras.starredAt as unknown as string | number | Date,
+                  )
+                : null,
+              projectId:
+                typeof detailExtras.projectId === 'string'
+                  ? detailExtras.projectId
+                  : null,
+              ...(planText ? { planText } : {}),
+              ...(planStatus ? { planStatus } : {}),
+              ...(finalScreenshot ? { finalScreenshot } : {}),
+              ...(finalUrl ? { finalUrl } : {}),
+            };
+            return [synth, ...prev.tasks];
+          })(),
+        };
+      });
+    } catch (err) {
+      if (myToken !== hydrateToken) return;
+      set({ error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return {
   tasks: [],
   selectedTaskId: null,
   loading: false,
@@ -188,226 +391,70 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     });
   },
 
-  selectAndHydrateTask(taskId) {
+  selectTask(taskId, source = 'ui') {
+    if (!taskId) return;
+    if (get().selectedTaskId === taskId) {
+      // Idempotent: already selected. Still re-hydrate detail —
+      // a re-click on the same task is the user asking for fresh
+      // data (post-completion summary, refreshed plan status, etc).
+      // URL stays put; no replaceState needed.
+      void hydrateDetail(taskId);
+      return;
+    }
     set({ selectedTaskId: taskId });
-    // Bug 4 — hydrate persisted steps + result when the user picks a
-    // task from the side nav. Without this, a closed-and-reopened tab
-    // shows an empty task because all the WS-driven step-state was
-    // in-memory only.
-    if (taskId) {
-      void (async () => {
-        try {
-          const detail = await trpc.tasks.detail.query({ taskId });
-          const steps: UiStep[] = (detail.steps ?? []).map((s, idx) => {
-            const out = (s.output ?? {}) as {
-              message?: string;
-              mode?: string;
-              durationMs?: number;
-              antiBot?: UiStep['antiBot'];
-            };
-            const summary =
-              ((s.input ?? {}) as { summary?: string }).summary ?? s.kind;
-            const startedAt = s.startedAt
-              ? new Date(s.startedAt as unknown as string | number | Date).getTime()
-              : Date.now();
-            return {
-              tickIndex: typeof s.seq === 'number' ? s.seq : idx,
-              status: s.status === 'done' ? 'done' : 'failed',
-              actionKind: s.kind,
-              actionSummary: summary,
-              durationMs: out.durationMs ?? 0,
-              ...(out.message ? { message: out.message } : {}),
-              ...(out.antiBot ? { antiBot: out.antiBot } : {}),
-              startedAt,
-            };
-          });
-          set((prev) => {
-            const rawResultText = extractSummary(detail.result);
-            // Failed-task path stores the same technical English in
-            // `result.reason` as in `error_message`; humanise both so
-            // the SPA never renders raw "exhausted maxIterations" /
-            // "Anthropic API error 4xx" / etc. Only failed/cancelled
-            // tasks go through the transformer — completed tasks'
-            // summary is the agent's own reply text and shouldn't be
-            // touched.
-            const isFailed =
-              detail.status === 'failed' || detail.status === 'cancelled';
-            const resultText = rawResultText
-              ? isFailed
-                ? humaniseTaskError(rawResultText)
-                : rawResultText
-              : undefined;
-            // Phase 13 Dim 1 — hydrate plan body + status from the
-            // persisted columns (server.task.plan was a one-shot
-            // broadcast at task start; this picks up the plan when
-            // the user re-opens a tab later).
-            const detailWithPlan = detail as typeof detail & {
-              planText?: string | null;
-              planStatus?: UiTask['planStatus'] | null;
-            };
-            const planText = detailWithPlan.planText ?? undefined;
-            const planStatus = (detailWithPlan.planStatus as UiTask['planStatus']) ?? undefined;
-            // R7 — pull the final-state evidence out of result JSON.
-            // tasks.detail is the only path that ships finalScreenshot;
-            // tasks.list strips it. So this hydration is the SOLE way
-            // the SPA learns about the captured screenshot.
-            const resultObj = (detail.result ?? {}) as {
-              finalScreenshot?: string;
-              finalUrl?: string;
-            };
-            const finalScreenshot =
-              typeof resultObj.finalScreenshot === 'string' && resultObj.finalScreenshot.length > 0
-                ? resultObj.finalScreenshot
-                : undefined;
-            const finalUrl =
-              typeof resultObj.finalUrl === 'string' && resultObj.finalUrl.length > 0
-                ? resultObj.finalUrl
-                : undefined;
-            // R6 — rebuild webSearchByTask from persisted step.output.
-            // The WS-live state stores the LAST web_search per task
-            // (latest-wins). Hydration mirrors that: walk steps in
-            // ascending seq, take the last entry of the last step
-            // that carried `webSearches`. End state matches what a
-            // user-without-refresh would have seen.
-            let hydratedWebSearch: UiWebSearchEvent | null = null;
-            for (const s of detail.steps ?? []) {
-              const out = (s.output ?? {}) as {
-                webSearches?: ReadonlyArray<{
-                  query: string;
-                  sources?: ReadonlyArray<{ title: string; url: string; snippet?: string }>;
-                }>;
-              };
-              const arr = out.webSearches;
-              if (!arr || arr.length === 0) continue;
-              const last = arr[arr.length - 1];
-              if (!last) continue;
-              hydratedWebSearch = {
-                iteration: typeof s.seq === 'number' ? s.seq : 0,
-                query: last.query,
-                at: Date.now(),
-                ...(last.sources && last.sources.length > 0
-                  ? { sources: last.sources }
-                  : {}),
-              };
-            }
-            // F11 → P1.1 — rehydrate the awaiting_user prompt from
-            // the persisted column so a refresh during the pause
-            // re-renders the input box. Only meaningful while the
-            // task is actually awaiting; otherwise we drop the
-            // prompt to avoid stale render after resume.
-            const awaitingQuestion =
-              detail.status === 'awaiting_user' &&
-              typeof (detail as { awaitingQuestion?: string | null }).awaitingQuestion === 'string'
-                ? ((detail as { awaitingQuestion?: string | null }).awaitingQuestion ?? null)
-                : null;
-            return {
-              stepsByTask: { ...prev.stepsByTask, [taskId]: steps },
-              ...(hydratedWebSearch
-                ? {
-                    webSearchByTask: {
-                      ...prev.webSearchByTask,
-                      [taskId]: hydratedWebSearch,
-                    },
-                  }
-                : {}),
-              awaitingUserByTask: awaitingQuestion
-                ? {
-                    ...prev.awaitingUserByTask,
-                    [taskId]: { question: awaitingQuestion, at: Date.now() },
-                  }
-                : (() => {
-                    // Strip any stale entry — the live WS path also
-                    // clears once the task moves out of awaiting_user.
-                    if (!prev.awaitingUserByTask[taskId]) return prev.awaitingUserByTask;
-                    const next = { ...prev.awaitingUserByTask };
-                    delete next[taskId];
-                    return next;
-                  })(),
-              tasks: (() => {
-                const exists = prev.tasks.some((t) => t.taskId === taskId);
-                if (exists) {
-                  return prev.tasks.map((t) =>
-                    t.taskId === taskId
-                      ? {
-                          ...t,
-                          status: detail.status as UiTaskStatus,
-                          tickCount: Math.max(t.tickCount, steps.length),
-                          ...(resultText ? { resultText } : {}),
-                          ...(planText ? { planText } : {}),
-                          ...(planStatus ? { planStatus } : {}),
-                          ...(finalScreenshot ? { finalScreenshot } : {}),
-                          ...(finalUrl ? { finalUrl } : {}),
-                        }
-                      : t,
-                  );
-                }
-                // P1-C — deep link to a task older than the first
-                // page. List didn't ship this row, so synthesise a
-                // UiTask from the detail and prepend. Without this
-                // the panel renders blank because activeTask is
-                // null and finalScreenshot can't surface.
-                const detailExtras = detail as typeof detail & {
-                  opusUsed?: boolean;
-                  starred?: boolean;
-                  starredAt?: Date | string | null;
-                  projectId?: string | null;
-                };
-                const synth: UiTask = {
-                  taskId,
-                  intent: detail.intent,
-                  title:
-                    typeof detail.title === 'string' ? detail.title : null,
-                  status: detail.status as UiTaskStatus,
-                  tickCount: steps.length,
-                  ...(resultText ? { resultText } : {}),
-                  createdAt: new Date(
-                    detail.createdAt as unknown as string | number | Date,
-                  ),
-                  modelLabel: detailExtras.opusUsed === true ? 'opus' : 'sonnet',
-                  starred: detailExtras.starred === true,
-                  starredAt: detailExtras.starredAt
-                    ? new Date(
-                        detailExtras.starredAt as unknown as string | number | Date,
-                      )
-                    : null,
-                  projectId:
-                    typeof detailExtras.projectId === 'string'
-                      ? detailExtras.projectId
-                      : null,
-                  ...(planText ? { planText } : {}),
-                  ...(planStatus ? { planStatus } : {}),
-                  ...(finalScreenshot ? { finalScreenshot } : {}),
-                  ...(finalUrl ? { finalUrl } : {}),
-                };
-                return [synth, ...prev.tasks];
-              })(),
-            };
-          });
-        } catch (err) {
-          set({ error: err instanceof Error ? err.message : String(err) });
-        }
-      })();
+    void hydrateDetail(taskId);
+    if (source !== 'url' && typeof window !== 'undefined') {
+      // Preserve other params (?project=, etc.) when writing task.
+      const params = new URLSearchParams(window.location.search);
+      params.set('task', taskId);
+      const search = params.toString();
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${search ? `?${search}` : ''}`,
+      );
     }
   },
 
-  async refreshTasks() {
+  enterNewTaskMode() {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('task')) {
+        params.delete('task');
+        const search = params.toString();
+        window.history.replaceState(
+          null,
+          '',
+          `${window.location.pathname}${search ? `?${search}` : ''}`,
+        );
+      }
+    }
+    if (get().selectedTaskId !== null) {
+      set({ selectedTaskId: null });
+    }
+    // Cancel any in-flight hydrate so its post-set callback doesn't
+    // re-stamp the just-cleared selection's tasks[] entry.
+    abortInFlightHydrate();
+  },
+
+  // Legacy alias retained for code that hasn't migrated yet.
+  selectAndHydrateTask(taskId) {
+    if (taskId) {
+      get().selectTask(taskId, 'ui');
+    } else {
+      get().enterNewTaskMode();
+    }
+  },
+
+  async refreshTaskList() {
     set({ loading: true, error: null });
     try {
       const res = await trpc.tasks.list.query({ limit: 50 });
       const freshList: UiTask[] = res.tasks.map(toUiTask);
-      // P1-C race fix — preserve the active selection's UiTask even
-      // when it isn't on the loaded page. Deep-link flow goes:
-      //   1. URL effect → selectAndHydrateTask(deepLinkId) prepends
-      //      a synth UiTask for an old task not in the first 50.
-      //   2. Some later refreshTasks() (e.g. an in-flight one
-      //      finishing after the deep-link fired) used to wipe the
-      //      synth and fall to first-task because keepSelection
-      //      checked only the FRESH list.
-      // Now we look at the LIVE store: if the current selection has
-      // a UiTask there but isn't in the fresh list, prepend that
-      // UiTask onto the new list and treat the selection as kept.
-      // Genuinely deleted-by-the-user tasks fall off normally —
-      // the sidebar's deleteTask path clears selectedTaskId first.
+      // P1-C: preserve the active selection's UiTask object across
+      // a list refresh. Deep-linked oldies (not in the first 50) get
+      // upserted by the hydrate path, and that synth must survive a
+      // subsequent refreshTaskList() that overwrites tasks[].
       const prevSelected = get().selectedTaskId;
       const freshIds = new Set(freshList.map((t) => t.taskId));
       const preservedSelected: UiTask | null =
@@ -417,30 +464,43 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       const tasks: UiTask[] = preservedSelected
         ? [preservedSelected, ...freshList]
         : freshList;
-      const keepSelection = Boolean(
-        prevSelected && (freshIds.has(prevSelected) || preservedSelected),
-      );
-      const nextSelected = keepSelection ? prevSelected : (tasks[0]?.taskId ?? null);
+      // STATE-MACHINE rule: refreshTaskList does NOT decide
+      // selectedTaskId on its own. The auto-pick-newest only fires
+      // when there's no current selection AND the URL has no
+      // ?task= hint AND the list is non-empty. This breaks the old
+      // race where a deep-link selection was clobbered by a later-
+      // arriving refresh. URL handling stays inside selectTask;
+      // refreshTaskList just delivers fresh task data.
+      let urlTaskHint: string | null = null;
+      if (typeof window !== 'undefined') {
+        urlTaskHint = new URLSearchParams(window.location.search).get('task');
+      }
+      const shouldAutoPick =
+        !prevSelected && !urlTaskHint && tasks.length > 0;
       set({
         tasks,
         loading: false,
-        // Phase 24 RC follow-up — track cursor so 'load more' picks
-        // up from where the first page ended.
         tasksCursor: res.nextCursor ?? null,
         tasksHasMore: res.nextCursor != null,
-        selectedTaskId: nextSelected,
       });
-      // P1.1 — re-hydrate detail (finalScreenshot, webSearches,
-      // awaiting_question) for the active selection. tasks.list
-      // doesn't ship those, so without this a refresh after a task
-      // completed would render a sidebar entry but no evidence in
-      // the panel.
-      if (nextSelected) {
-        get().selectAndHydrateTask(nextSelected);
+      if (shouldAutoPick) {
+        get().selectTask(tasks[0]!.taskId, 'ui');
+      } else if (prevSelected) {
+        // Selection unchanged but the underlying detail might have
+        // moved on (task completed, awaiting_user prompt added,
+        // etc.). Re-hydrate so the panel reflects the fresh state.
+        // hydrateDetail's token guard collapses bursts so this is
+        // cheap when refreshTaskList fires alongside a deep-link.
+        void hydrateDetail(prevSelected);
       }
     } catch (err) {
       set({ loading: false, error: err instanceof Error ? err.message : String(err) });
     }
+  },
+
+  // Legacy alias retained for code paths that haven't migrated.
+  async refreshTasks() {
+    await get().refreshTaskList();
   },
 
   async loadMoreTasks() {
@@ -1019,7 +1079,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       terminalTaskIds: new Set<string>(),
     });
   },
-}));
+  };
+});
 
 // Pinned-task persistence. Trivial JSON array of taskIds in
 // localStorage — no sync across devices, no backend column. Good
