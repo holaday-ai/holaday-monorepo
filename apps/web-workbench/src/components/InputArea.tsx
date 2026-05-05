@@ -201,16 +201,20 @@ export function InputArea({
   // mutation is in flight so the spinner is tied specifically to
   // *this* submit.
   const [submitting, setSubmitting] = React.useState(false);
-  // O4 — Auto/Plan toggle. Default Auto. Persisted in localStorage so
-  // the user's last choice sticks across page reloads.
-  const [taskMode, setTaskMode] = React.useState<'auto' | 'plan'>(() => {
-    if (typeof window === 'undefined') return 'auto';
-    return window.localStorage.getItem('holaday.taskMode') === 'plan' ? 'plan' : 'auto';
-  });
-  const setTaskModePersist = React.useCallback((m: 'auto' | 'plan') => {
-    setTaskMode(m);
+  // Auto / Plan toggle. Default Auto. Resets to Auto after every
+  // submit (and on page load) — Plan mode is a per-task opt-in
+  // ("force a planning step for THIS message") rather than a sticky
+  // preference. The previous localStorage persistence let users
+  // unknowingly stay in Plan for days, paying the planning round-trip
+  // on every subsequent task.
+  const [taskMode, setTaskMode] = React.useState<'auto' | 'plan'>('auto');
+  // One-shot cleanup of the legacy persisted preference key. Older
+  // builds wrote 'plan' here and read it on every mount; users
+  // upgrading would otherwise stay stuck in Plan mode silently.
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
     try {
-      window.localStorage.setItem('holaday.taskMode', m);
+      window.localStorage.removeItem('holaday.taskMode');
     } catch {
       /* private mode / quota — ignore */
     }
@@ -320,6 +324,10 @@ export function InputArea({
     setSubmitting(true);
     try {
       await Promise.resolve(onSubmit(trimmed, fileIds, taskMode));
+      // Plan mode is per-message intent, not a sticky preference —
+      // flip back to Auto after a submit so the user explicitly
+      // re-opts in for any subsequent Plan-required task.
+      setTaskMode('auto');
     } finally {
       setSubmitting(false);
     }
@@ -508,7 +516,7 @@ export function InputArea({
       </div>
       <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[11px] text-muted-foreground">
         <div className="flex items-center gap-2">
-          <TaskModeSelector mode={taskMode} onChange={setTaskModePersist} />
+          <TaskModeSelector mode={taskMode} onChange={setTaskMode} />
           <span className="hidden md:inline">
             按 <Kbd>/</Kbd> 聚焦 · <Kbd>⌘K</Kbd> 搜索任务
           </span>

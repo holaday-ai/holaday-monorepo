@@ -87,12 +87,36 @@ export function TaskStream({ task, onPickSuggestion }: Props): JSX.Element {
   const setBrowserInteractive = useTaskStore((s) => s.setBrowserInteractive);
   const scrollAnchorRef = React.useRef<HTMLDivElement>(null);
 
+  // Auto-scroll only follows the live tail when:
+  //   - the task hasn't reached a terminal state (still streaming
+  //     deltas the user wants to see), AND
+  //   - the user is already pinned near the bottom (< 200 px from
+  //     scrollHeight). Switching to a historical task or scrolling
+  //     up to read past content shouldn't yank the view back down.
+  const isTerminal =
+    task.status === 'completed' ||
+    task.status === 'failed' ||
+    task.status === 'cancelled';
   React.useEffect(() => {
-    scrollAnchorRef.current?.scrollIntoView({ block: 'end' });
+    if (isTerminal) return;
+    const anchor = scrollAnchorRef.current;
+    if (!anchor) return;
+    let parent: HTMLElement | null = anchor.parentElement;
+    while (parent) {
+      const overflowY = window.getComputedStyle(parent).overflowY;
+      if (overflowY === 'auto' || overflowY === 'scroll') break;
+      parent = parent.parentElement;
+    }
+    if (!parent) return;
+    const distanceFromBottom =
+      parent.scrollHeight - parent.scrollTop - parent.clientHeight;
+    if (distanceFromBottom < 200) {
+      anchor.scrollIntoView({ block: 'end' });
+    }
   }, [
+    isTerminal,
     steps.length,
     userReplies.length,
-    task.status,
     captchaWait,
     executorFallback,
     degrade,
@@ -291,7 +315,12 @@ function AgentBlock({
             // a terminal state — at that point the result above and
             // the step ticker below already cover what happened, and
             // an expanded plan reads like a duplicate template log.
-            defaultExpanded={task.status !== 'completed' && task.status !== 'failed'}
+            // Cancelled is terminal too — fold same as completed/failed.
+            defaultExpanded={
+              task.status !== 'completed' &&
+              task.status !== 'failed' &&
+              task.status !== 'cancelled'
+            }
           />
         )}
 
@@ -863,21 +892,34 @@ function TerminalSummary({
     () => makeMarkdownComponents({ onExternalClick: (href) => setPendingLink(href) }),
     [],
   );
-  if (status === 'failed' || status === 'cancelled') {
-    return (
-      <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
-        <div className="mb-1 text-xs font-semibold uppercase tracking-wider">
-          {status === 'failed' ? '任务失败' : '已取消'}
-        </div>
-        <div className="whitespace-pre-wrap">{displayText}</div>
-        {modelLabel && (
-          <div className="mt-2 text-[11px] text-red-700/70 dark:text-red-300/70">
-            {modelLabel === 'opus' ? 'Claude Opus 4.7' : 'Claude Sonnet 4.6'}
-          </div>
-        )}
-      </div>
-    );
-  }
+  // Three terminal states share the same shell — markdown body,
+  // optional model line, inline copy/share footer, optional URL row.
+  // Only colors + the small status pill differ. Failed used to be a
+  // whitespace-pre block with no copy buttons; cancelled used the
+  // failed branch verbatim. Both now look like the success card so
+  // users can copy a failure summary into a bug report just as
+  // easily as a successful answer.
+  const isFailedLike = status === 'failed' || status === 'cancelled';
+  const tone = isFailedLike
+    ? status === 'failed'
+      ? {
+          wrap: 'rounded-xl border border-red-200 bg-red-50/70 px-5 py-4 text-foreground dark:border-red-500/30 dark:bg-red-500/10',
+          label: '任务失败',
+          labelClass: 'text-red-700 dark:text-red-300',
+          divider: 'border-red-200/70 dark:border-red-500/30',
+        }
+      : {
+          wrap: 'rounded-xl border border-border bg-card/60 px-5 py-4 text-foreground',
+          label: '已取消',
+          labelClass: 'text-muted-foreground',
+          divider: 'border-border/60',
+        }
+    : {
+        wrap: 'rounded-xl border border-blue-200 bg-blue-50/60 px-5 py-4 text-foreground dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-foreground',
+        label: null,
+        labelClass: '',
+        divider: 'border-blue-200/70 dark:border-blue-500/30',
+      };
   const hasRealUrl =
     !!currentUrl && currentUrl !== 'about:blank' && !currentUrl.startsWith('chrome://');
   // Strip markdown syntax for the plain-text Copy. Keeps `[label](url)` →
@@ -898,45 +940,12 @@ function TerminalSummary({
     [toast],
   );
   return (
-    <div className="group relative rounded-xl border border-blue-200 bg-blue-50/60 px-5 py-4 text-foreground dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-foreground">
-      {/* Action buttons. Hidden until hover so the result reads
-          cleanly; on touch devices `group-hover` falls through tap so
-          a tap anywhere on the card surfaces them. */}
-      <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-        <button
-          type="button"
-          onClick={() => void copyTo(plainText, '纯文本')}
-          aria-label="复制纯文本"
-          title="复制纯文本"
-          className="rounded-md border border-blue-200/70 bg-card/80 p-1.5 text-blue-700 shadow-sm transition hover:bg-blue-50 dark:border-blue-500/30 dark:bg-card/40 dark:text-blue-300 dark:hover:bg-blue-500/10"
-        >
-          <Copy className="h-3.5 w-3.5" />
-        </button>
-        <button
-          type="button"
-          onClick={() => void copyTo(displayText, 'Markdown')}
-          aria-label="复制 Markdown 原文"
-          title="复制 Markdown 原文"
-          className="rounded-md border border-blue-200/70 bg-card/80 p-1.5 text-blue-700 shadow-sm transition hover:bg-blue-50 dark:border-blue-500/30 dark:bg-card/40 dark:text-blue-300 dark:hover:bg-blue-500/10"
-        >
-          <FileText className="h-3.5 w-3.5" />
-        </button>
-        {taskId && (
-          <button
-            type="button"
-            onClick={() => {
-              const origin =
-                typeof window !== 'undefined' ? window.location.origin : '';
-              void copyTo(`${origin}/?task=${encodeURIComponent(taskId)}`, '任务链接');
-            }}
-            aria-label="复制任务链接"
-            title="复制任务链接"
-            className="rounded-md border border-blue-200/70 bg-card/80 p-1.5 text-blue-700 shadow-sm transition hover:bg-blue-50 dark:border-blue-500/30 dark:bg-card/40 dark:text-blue-300 dark:hover:bg-blue-500/10"
-          >
-            <Link2 className="h-3.5 w-3.5" />
-          </button>
-        )}
-      </div>
+    <div className={tone.wrap}>
+      {tone.label && (
+        <div className={cn('mb-2 text-xs font-semibold uppercase tracking-wider', tone.labelClass)}>
+          {tone.label}
+        </div>
+      )}
       <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>
           {revealed}
@@ -948,6 +957,46 @@ function TerminalSummary({
           {modelLabel === 'opus' ? 'Claude Opus 4.7 · 深度思考' : 'Claude Sonnet 4.6'}
         </div>
       )}
+      {/* Inline copy / share footer. Replaced the prior absolute-
+          positioned overlay (top-right, opacity-0 group-hover) which
+          obscured the first lines of the result on overflow and
+          never appeared on touch. Always visible, sits below the
+          body so it doesn't compete with the content. */}
+      <div className={cn('mt-3 flex flex-wrap items-center gap-3 border-t pt-3 text-xs text-muted-foreground', tone.divider)}>
+        <button
+          type="button"
+          onClick={() => void copyTo(plainText, '纯文本')}
+          aria-label="复制纯文本"
+          className="inline-flex items-center gap-1 transition-colors hover:text-foreground"
+        >
+          <Copy className="h-3 w-3" />
+          复制
+        </button>
+        <button
+          type="button"
+          onClick={() => void copyTo(displayText, 'Markdown')}
+          aria-label="复制 Markdown 原文"
+          className="inline-flex items-center gap-1 transition-colors hover:text-foreground"
+        >
+          <FileText className="h-3 w-3" />
+          复制 Markdown
+        </button>
+        {taskId && (
+          <button
+            type="button"
+            onClick={() => {
+              const origin =
+                typeof window !== 'undefined' ? window.location.origin : '';
+              void copyTo(`${origin}/?task=${encodeURIComponent(taskId)}`, '任务链接');
+            }}
+            aria-label="复制任务链接"
+            className="inline-flex items-center gap-1 transition-colors hover:text-foreground"
+          >
+            <Link2 className="h-3 w-3" />
+            分享任务
+          </button>
+        )}
+      </div>
       {/* Plain-text suggestion links. Cleaner than the prior blue
           card style — each row is just a borderless ghost button
           with a leading → arrow that translates on hover. Click
@@ -978,7 +1027,7 @@ function TerminalSummary({
         </div>
       )}
       {(hasRealUrl || onContinueInBrowser) && (
-        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-blue-200/70 pt-3 text-xs">
+        <div className={cn('mt-4 flex flex-wrap items-center gap-2 border-t pt-3 text-xs', tone.divider)}>
           {onContinueInBrowser && (
             <button
               type="button"

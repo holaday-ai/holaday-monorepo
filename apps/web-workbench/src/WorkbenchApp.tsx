@@ -558,28 +558,15 @@ function AppShell(): JSX.Element {
           else enterNewTaskMode();
         }}
         onNewTask={() => {
+          // 新任务 button is "clear the composer + focus" only — no
+          // background browser wake. Allocating a Brave on every new-
+          // task click was wasteful for non-browser tasks and gave a
+          // misleading "browser is loading" signal in the right rail
+          // when the user just wanted to start typing. Browser is
+          // allocated lazily by `createTask` for tasks that actually
+          // need it, or explicitly via the sidebar 浏览器 entry.
           enterNewTaskMode();
           setTimeout(() => inputRef.current?.focus(), 50);
-          // B2 — wake the per-user pool browser THEN navigate to
-          // Google. Without the wake step, browserNav fails silently
-          // ('no_executor') when the pool instance has been reaped,
-          // leaving the panel showing a stale frame or hibernation
-          // card. wakeBrowser is idempotent (returns 'ready' if
-          // already alive), so paying it on every new-task is cheap.
-          // Fire-and-forget — errors land in toast.
-          void (async () => {
-            try {
-              const w = await trpc.tasks.wakeBrowser.mutate();
-              if (w.status === 'ready') {
-                await trpc.tasks.browserNav.mutate({
-                  direction: 'goto',
-                  url: 'https://www.google.com',
-                });
-              }
-            } catch {
-              /* fire-and-forget */
-            }
-          })();
         }}
         onDeleteTask={(taskId) => {
           // Defer the actual delete until the user confirms in the

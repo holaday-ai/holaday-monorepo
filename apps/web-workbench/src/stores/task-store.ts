@@ -632,11 +632,21 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const userRepliesByTask = { ...prev.userRepliesByTask };
         delete userRepliesByTask[taskId];
         const nextTasks = prev.tasks.filter((t) => t.taskId !== taskId);
-        const nextSelected =
-          prev.selectedTaskId === taskId ? (nextTasks[0]?.taskId ?? null) : prev.selectedTaskId;
+        // If the user is deleting the currently selected task, drop
+        // them into new-task mode rather than auto-jumping to the
+        // next sibling. The previous "promote tasks[0]" behaviour
+        // pulled the user into a stale task they'd just chosen NOT
+        // to be looking at — surprising, especially for batch deletes
+        // that include the active selection. composerMode flips to
+        // 'new' so the inbound URL effect bails and outbound clears
+        // ?task=. Other selections are untouched.
+        const wasActive = prev.selectedTaskId === taskId;
+        const nextSelected = wasActive ? null : prev.selectedTaskId;
+        const nextComposerMode = wasActive ? ('new' as const) : prev.composerMode;
         return {
           tasks: nextTasks,
           selectedTaskId: nextSelected,
+          composerMode: nextComposerMode,
           stepsByTask,
           screencastByTask,
           captchaWaitByTask,
