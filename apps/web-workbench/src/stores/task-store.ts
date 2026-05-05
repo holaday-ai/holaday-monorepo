@@ -394,12 +394,32 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const res = await trpc.tasks.list.query({ limit: 50 });
-      const tasks: UiTask[] = res.tasks.map(toUiTask);
-      // Pre-compute the next selection so the rehydrate call below
-      // sees the right id even if the previous one fell off the page.
+      const freshList: UiTask[] = res.tasks.map(toUiTask);
+      // P1-C race fix — preserve the active selection's UiTask even
+      // when it isn't on the loaded page. Deep-link flow goes:
+      //   1. URL effect → selectAndHydrateTask(deepLinkId) prepends
+      //      a synth UiTask for an old task not in the first 50.
+      //   2. Some later refreshTasks() (e.g. an in-flight one
+      //      finishing after the deep-link fired) used to wipe the
+      //      synth and fall to first-task because keepSelection
+      //      checked only the FRESH list.
+      // Now we look at the LIVE store: if the current selection has
+      // a UiTask there but isn't in the fresh list, prepend that
+      // UiTask onto the new list and treat the selection as kept.
+      // Genuinely deleted-by-the-user tasks fall off normally —
+      // the sidebar's deleteTask path clears selectedTaskId first.
       const prevSelected = get().selectedTaskId;
-      const keepSelection =
-        prevSelected && tasks.some((t) => t.taskId === prevSelected);
+      const freshIds = new Set(freshList.map((t) => t.taskId));
+      const preservedSelected: UiTask | null =
+        prevSelected && !freshIds.has(prevSelected)
+          ? get().tasks.find((t) => t.taskId === prevSelected) ?? null
+          : null;
+      const tasks: UiTask[] = preservedSelected
+        ? [preservedSelected, ...freshList]
+        : freshList;
+      const keepSelection = Boolean(
+        prevSelected && (freshIds.has(prevSelected) || preservedSelected),
+      );
       const nextSelected = keepSelection ? prevSelected : (tasks[0]?.taskId ?? null);
       set({
         tasks,
