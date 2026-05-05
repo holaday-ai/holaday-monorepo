@@ -3,8 +3,11 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   ExternalLink,
+  FileText,
   Globe,
+  Link2,
   Loader2,
   MessageCircleQuestion,
   MousePointerClick,
@@ -15,6 +18,7 @@ import * as React from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { useToast } from '@/components/ui/toast';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
 import { PlanCard } from '@/components/PlanCard';
 import { SearchResultCard } from '@/components/SearchResultCard';
@@ -367,7 +371,13 @@ function AgentBlock({
           <TerminalSummary
             status={task.status}
             text={task.resultText}
-            currentUrl={screencastUrl}
+            // task.finalUrl is the persisted final-page URL (R7), so
+            // refreshes / history clicks still surface "打开最终页面"
+            // even after the live screencast has gone. Live tasks
+            // fall back to the screencast url so an in-flight URL
+            // chip still tracks navigation.
+            currentUrl={task.finalUrl ?? screencastUrl}
+            taskId={task.taskId}
             modelLabel={task.modelLabel}
             onContinueInBrowser={
               task.status === 'completed' ? undefined : onContinueInBrowser
@@ -777,6 +787,7 @@ function TerminalSummary({
   status,
   text,
   currentUrl,
+  taskId,
   onContinueInBrowser,
   modelLabel,
   onSuggestionPick,
@@ -786,6 +797,8 @@ function TerminalSummary({
   status: UiTask['status'];
   text: string;
   currentUrl?: string | null;
+  /** Task id — used by the share button to build a deep link. */
+  taskId?: string;
   onContinueInBrowser?: () => void;
   modelLabel?: 'sonnet' | 'opus';
   onSuggestionPick?: (intent: string) => void;
@@ -804,6 +817,7 @@ function TerminalSummary({
    */
   animateReveal?: boolean;
 }): JSX.Element {
+  const toast = useToast();
   // Legacy: pull a fenced ```suggestions JSON block out of the
   // model's text. Kept as a fallback for tasks that completed before
   // the backend generator landed (or when the generator failed).
@@ -866,8 +880,63 @@ function TerminalSummary({
   }
   const hasRealUrl =
     !!currentUrl && currentUrl !== 'about:blank' && !currentUrl.startsWith('chrome://');
+  // Strip markdown syntax for the plain-text Copy. Keeps `[label](url)` →
+  // `label`, drops `**bold**` markers, code fences, list bullets — the
+  // user gets what they'd visually read. The markdown copy keeps the raw
+  // source so paste into Notion / Slack / a doc editor preserves
+  // structure.
+  const plainText = React.useMemo(() => stripMarkdown(displayText), [displayText]);
+  const copyTo = React.useCallback(
+    async (value: string, label: string): Promise<void> => {
+      try {
+        await navigator.clipboard.writeText(value);
+        toast.show(`已复制${label}`);
+      } catch {
+        toast.show('复制失败', 'error');
+      }
+    },
+    [toast],
+  );
   return (
-    <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-5 py-4 text-foreground dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-foreground">
+    <div className="group relative rounded-xl border border-blue-200 bg-blue-50/60 px-5 py-4 text-foreground dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-foreground">
+      {/* Action buttons. Hidden until hover so the result reads
+          cleanly; on touch devices `group-hover` falls through tap so
+          a tap anywhere on the card surfaces them. */}
+      <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <button
+          type="button"
+          onClick={() => void copyTo(plainText, '纯文本')}
+          aria-label="复制纯文本"
+          title="复制纯文本"
+          className="rounded-md border border-blue-200/70 bg-card/80 p-1.5 text-blue-700 shadow-sm transition hover:bg-blue-50 dark:border-blue-500/30 dark:bg-card/40 dark:text-blue-300 dark:hover:bg-blue-500/10"
+        >
+          <Copy className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => void copyTo(displayText, 'Markdown')}
+          aria-label="复制 Markdown 原文"
+          title="复制 Markdown 原文"
+          className="rounded-md border border-blue-200/70 bg-card/80 p-1.5 text-blue-700 shadow-sm transition hover:bg-blue-50 dark:border-blue-500/30 dark:bg-card/40 dark:text-blue-300 dark:hover:bg-blue-500/10"
+        >
+          <FileText className="h-3.5 w-3.5" />
+        </button>
+        {taskId && (
+          <button
+            type="button"
+            onClick={() => {
+              const origin =
+                typeof window !== 'undefined' ? window.location.origin : '';
+              void copyTo(`${origin}/?task=${encodeURIComponent(taskId)}`, '任务链接');
+            }}
+            aria-label="复制任务链接"
+            title="复制任务链接"
+            className="rounded-md border border-blue-200/70 bg-card/80 p-1.5 text-blue-700 shadow-sm transition hover:bg-blue-50 dark:border-blue-500/30 dark:bg-card/40 dark:text-blue-300 dark:hover:bg-blue-500/10"
+          >
+            <Link2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
       <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>
           {revealed}
@@ -957,6 +1026,38 @@ function TerminalSummary({
  * value via the seenRef cache — no flicker on a re-mount of the
  * same content.
  */
+/**
+ * Lightweight markdown-to-plain-text reducer for the terminal card's
+ * Copy button. Not a full parser — just covers the patterns the
+ * agent's summaries actually emit (bold/italic markers, inline code,
+ * code fences, list bullets, headings, links rendered as label-only).
+ * Keeping it deliberately small so a stray edge case doesn't silently
+ * mangle copied output; users who want structure preserved can hit
+ * the second button to copy the raw markdown.
+ */
+function stripMarkdown(input: string): string {
+  let out = input;
+  // Strip code fences (keep inner text).
+  out = out.replace(/```[a-zA-Z0-9_-]*\n([\s\S]*?)\n```/g, '$1');
+  // Strip inline `code` markers.
+  out = out.replace(/`([^`]+)`/g, '$1');
+  // [label](url) → label.
+  out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1');
+  // Bold + italic markers (** *, __ _).
+  out = out.replace(/\*\*([^*]+)\*\*/g, '$1');
+  out = out.replace(/\*([^*]+)\*/g, '$1');
+  out = out.replace(/__([^_]+)__/g, '$1');
+  out = out.replace(/_([^_]+)_/g, '$1');
+  // Heading hashes.
+  out = out.replace(/^#{1,6}\s+/gm, '');
+  // List bullets.
+  out = out.replace(/^\s*[-*+]\s+/gm, '');
+  out = out.replace(/^\s*\d+\.\s+/gm, '');
+  // Blockquote markers.
+  out = out.replace(/^>\s?/gm, '');
+  return out.trim();
+}
+
 function useTypewriterReveal(
   full: string,
   speedCharsPerSec: number,

@@ -63,6 +63,19 @@ interface Props {
   attachmentsAllowed?: boolean;
   /** Plan-specific size cap for the inline hint and pre-flight check. */
   attachmentByteCap?: number;
+  /**
+   * Suggestion-chip prefill. When this string flips from null to a
+   * value, the composer's text is replaced with it and the textarea
+   * gains focus. The caller calls `onPrefillConsumed` so the next
+   * identical chip click can re-trigger the effect.
+   *
+   * The chip path deliberately does NOT submit — clicking a
+   * suggestion fills the composer so the user can edit it before
+   * sending. The previous behaviour fired onSubmit directly and
+   * burned quota on accidental taps, especially on mobile.
+   */
+  prefillIntent?: string | null;
+  onPrefillConsumed?: () => void;
 }
 
 const ACCEPT_FILES = '.csv,.xlsx,.xls,.pdf,.txt,.json,.md';
@@ -88,6 +101,8 @@ export function InputArea({
   quotaPlan,
   attachmentsAllowed,
   attachmentByteCap,
+  prefillIntent,
+  onPrefillConsumed,
 }: Props): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
@@ -95,6 +110,46 @@ export function InputArea({
   const [value, setValue] = React.useState('');
   const [attachments, setAttachments] = React.useState<DraftAttachment[]>([]);
   const [dragActive, setDragActive] = React.useState(false);
+  // Local ref for the textarea so we can focus it from inside on
+  // suggestion-chip prefill. The forwarded `inputRef` is also kept
+  // up-to-date via a callback ref so external callers (Cmd+N
+  // shortcut, FilesPage handoff) keep working.
+  const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const setTextareaRef = React.useCallback(
+    (node: HTMLTextAreaElement | null) => {
+      textareaRef.current = node;
+      if (typeof inputRef === 'function') inputRef(node);
+      else if (inputRef && typeof inputRef === 'object') {
+        (inputRef as React.MutableRefObject<HTMLTextAreaElement | null>).current =
+          node;
+      }
+    },
+    [inputRef],
+  );
+
+  // Suggestion chip → composer prefill. The chip click sets
+  // prefillIntent in MainPanel; this effect copies it into the local
+  // value, focuses the textarea, and signals back so the prop can
+  // reset (a second click on the same chip then re-pulses cleanly).
+  React.useEffect(() => {
+    if (prefillIntent == null) return;
+    setValue(prefillIntent);
+    // requestAnimationFrame ensures the value commit has flushed
+    // before we move the caret — focusing into a stale textarea
+    // sometimes drops the cursor at index 0 on mobile.
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      const len = el.value.length;
+      try {
+        el.setSelectionRange(len, len);
+      } catch {
+        /* setSelectionRange not supported on every input type */
+      }
+    });
+    onPrefillConsumed?.();
+  }, [prefillIntent, onPrefillConsumed]);
 
   // FilesPage → 用于新任务 hands off via location.state. WorkbenchApp's
   // bootstrap effect handles `newTask: true` (calls enterNewTaskMode);
@@ -242,28 +297,9 @@ export function InputArea({
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }
 
-  // O6 — 3-second undo countdown. The pending dispatch state holds the
-  // actual onSubmit invocation behind a 3 s timer; user clicking the
-  // undo button or pressing the input again cancels before any API
-  // call happens. After the timer fires, normal submission proceeds.
-  const [pendingSend, setPendingSend] = React.useState<{
-    intent: string;
-    fileIds: string[];
-    secondsLeft: number;
-  } | null>(null);
-  const pendingTimerRef = React.useRef<number | null>(null);
-  const cancelPendingSend = React.useCallback((): void => {
-    if (pendingTimerRef.current != null) {
-      window.clearInterval(pendingTimerRef.current);
-      pendingTimerRef.current = null;
-    }
-    setPendingSend(null);
-  }, []);
-  React.useEffect(() => () => cancelPendingSend(), [cancelPendingSend]);
-
   async function handleSubmit(): Promise<void> {
     const trimmed = value.trim();
-    if (!trimmed || submitting || busy || pendingSend) return;
+    if (!trimmed || submitting || busy) return;
     // Block submit while any attachment is still uploading; let
     // failed ones submit (they'll just be ignored server-side).
     if (attachments.some((a) => a.status === 'uploading')) {
@@ -273,34 +309,20 @@ export function InputArea({
     const fileIds = attachments
       .filter((a) => a.status === 'ready' && a.fileId)
       .map((a) => a.fileId);
-    // Stash the input + clear the composer immediately so the user
-    // sees their message land in the conversation while the 3 s
-    // countdown runs. Timer counts down in 1 s ticks; on hit 0 it
-    // dispatches the actual onSubmit. User cancel removes the
-    // pending state without ever calling onSubmit (no quota burn).
+    // Immediate dispatch — clear the composer optimistically and let
+    // the parent's onSubmit drive task creation. Earlier code stalled
+    // here for 3 s under a "撤回" banner, but the delay read as the
+    // app being stuck (vs Codex/Manus's instant feedback) and most
+    // users hit Enter with intent. Quota guard / role-overflow gate
+    // already prevent runaway submits server-side.
     setValue('');
     setAttachments([]);
-    setPendingSend({ intent: trimmed, fileIds, secondsLeft: 3 });
-    pendingTimerRef.current = window.setInterval(() => {
-      setPendingSend((cur) => {
-        if (!cur) return null;
-        if (cur.secondsLeft <= 1) {
-          if (pendingTimerRef.current != null) {
-            window.clearInterval(pendingTimerRef.current);
-            pendingTimerRef.current = null;
-          }
-          // Fire the actual submission. Fire-and-forget so React's
-          // setState batching doesn't deadlock — onSubmit's own
-          // error path surfaces toasts already.
-          setSubmitting(true);
-          void Promise.resolve(onSubmit(cur.intent, cur.fileIds, taskMode)).finally(() => {
-            setSubmitting(false);
-          });
-          return null;
-        }
-        return { ...cur, secondsLeft: cur.secondsLeft - 1 };
-      });
-    }, 1_000);
+    setSubmitting(true);
+    try {
+      await Promise.resolve(onSubmit(trimmed, fileIds, taskMode));
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
@@ -310,7 +332,7 @@ export function InputArea({
     }
   }
 
-  const disabled = submitting || Boolean(busy) || pendingSend != null;
+  const disabled = submitting || Boolean(busy);
 
   return (
     <div
@@ -347,26 +369,7 @@ export function InputArea({
             : 'border-input',
         )}
       >
-        {pendingSend && (
-          <div className="flex items-center gap-2 border-b-2 border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500 dark:bg-amber-500/15 dark:text-amber-100">
-            <span className="shrink-0 font-semibold">即将发送</span>
-            <span className="min-w-0 flex-1 truncate">"{pendingSend.intent}"</span>
-            <span className="shrink-0 tabular-nums">{pendingSend.secondsLeft}s</span>
-            <button
-              type="button"
-              onClick={() => {
-                // Restore the composer + drop the pending dispatch.
-                // No API call happened, no quota burned.
-                setValue(pendingSend.intent);
-                cancelPendingSend();
-              }}
-              className="shrink-0 rounded px-2 py-0.5 font-medium text-amber-900 hover:bg-amber-200 dark:text-amber-100 dark:hover:bg-amber-500/30"
-            >
-              撤回
-            </button>
-          </div>
-        )}
-        {followUpTarget && !replyMode && !pendingSend && (
+        {followUpTarget && !replyMode && (
           <div className="flex items-center gap-2 border-b-2 border-sky-300 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:border-sky-500 dark:bg-sky-500/15 dark:text-sky-100">
             <span className="shrink-0 font-semibold">追问</span>
             <span className="min-w-0 flex-1 truncate">"{followUpTarget.title}"</span>
@@ -394,7 +397,7 @@ export function InputArea({
           </div>
         )}
         <Textarea
-          ref={inputRef}
+          ref={setTextareaRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}

@@ -1,4 +1,5 @@
 import { Globe, Menu, Sparkles } from 'lucide-react';
+import * as React from 'react';
 import { InputArea } from '@/components/InputArea';
 import { RoleNudgeBanner } from '@/components/RoleNudgeBanner';
 import { TaskStream } from '@/components/TaskStream';
@@ -67,6 +68,14 @@ export function MainPanel({
   attachmentsAllowed,
   attachmentByteCap,
 }: Props): JSX.Element {
+  // Suggestion-chip clicks (empty-state EmptyState picks + the
+  // "继续探索" chips inside TaskStream) prefill the composer instead
+  // of firing onSubmit directly. The previous straight-to-submit
+  // behaviour read as a quota landmine on mobile where the chips sit
+  // close to the thumb. Pulse-style state — InputArea consumes once
+  // and signals back to clear so a second tap on the same chip
+  // re-fires the effect.
+  const [prefillIntent, setPrefillIntent] = React.useState<string | null>(null);
   return (
     <main className="flex h-full min-w-0 flex-[2] flex-col bg-background lg:min-w-[420px]">
       <div className="flex h-11 items-center border-b border-border px-3 lg:hidden">
@@ -100,13 +109,13 @@ export function MainPanel({
         {task ? (
           <TaskStream
             task={task}
-            onPickSuggestion={(text) => void onSubmit(text, [])}
+            onPickSuggestion={(text) => setPrefillIntent(text)}
           />
         ) : (
           <div className="mx-auto max-w-3xl px-6 pt-12">
             <EmptyState
               greetingName={greetingName}
-              onPick={(intent) => void onSubmit(intent, [])}
+              onPick={(intent) => setPrefillIntent(intent)}
             />
           </div>
         )}
@@ -125,6 +134,8 @@ export function MainPanel({
         quotaPlan={userPlan}
         attachmentsAllowed={attachmentsAllowed}
         attachmentByteCap={attachmentByteCap}
+        prefillIntent={prefillIntent}
+        onPrefillConsumed={() => setPrefillIntent(null)}
       />
     </main>
   );
