@@ -68,23 +68,37 @@ export const rolesRouter = router({
       user.roleChangesPeriodStart && user.roleChangesPeriodStart >= monthStart
         ? user.roleChangesThisMonth
         : 0;
-    const selected = (user.selectedRoles ?? []) as string[];
-    // P1-A — flag legacy over-limit state. The skill/role split
-    // migration left some Basic users with > 5 entries in
-    // selected_roles (everything that hit ROLE_CATALOGUE got kept).
-    // Saving anything new is already blocked by the zod max(5)
-    // input check; this flag lets the SPA render an explicit
-    // "你当前选择超出基础版上限" banner so the user knows they
-    // need to trim before they can save.
-    const overLimit = user.plan === 'basic' && selected.length > BASIC_ROLE_PICK_LIMIT;
+    const rawSelected = (user.selectedRoles ?? []) as string[];
+    // P1-final — sanitize for Basic plan. The skill/role split
+    // migration kept every ROLE_CATALOGUE id (including Pro-exclusive
+    // ones like contract-reviewer) in selected_roles. Pro-only cards
+    // render as locked on /settings/roles for Basic users — they
+    // can't be unchecked, so the user got locked: their draft list
+    // still contained the Pro-only id, which `roles.select` then
+    // rejected. Filter Pro-only ids out at read-time so the SPA
+    // never sees them in `selected`. `needsRoleRepair` tells the
+    // SPA to surface a "请保存以修复" hint; saving the sanitized
+    // list rewrites the DB row to a clean state.
+    const sanitizedSelected =
+      user.plan === 'basic'
+        ? rawSelected.filter((id) => OPEN_POOL_SET.has(id))
+        : rawSelected;
+    const needsRoleRepair = sanitizedSelected.length !== rawSelected.length;
+    // overLimit kept for the over-limit-but-all-open-pool case
+    // (e.g. a Basic user with 8 valid open-pool roles). The banner
+    // copy is different from needsRoleRepair (one says "auto-removed
+    // ineligible roles", the other says "trim manually").
+    const overLimit =
+      user.plan === 'basic' && sanitizedSelected.length > BASIC_ROLE_PICK_LIMIT;
     return {
       plan: user.plan,
-      selected,
+      selected: sanitizedSelected,
       catalogue: ROLE_CATALOGUE,
       pickLimit: BASIC_ROLE_PICK_LIMIT,
       changesThisMonth,
       changesLimit: ROLE_CHANGES_PER_MONTH,
       overLimit,
+      needsRoleRepair,
     };
   }),
 

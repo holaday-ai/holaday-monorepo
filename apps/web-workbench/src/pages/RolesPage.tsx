@@ -26,6 +26,16 @@ interface ListResponse {
    * tells them to trim before saving.
    */
   overLimit?: boolean;
+  /**
+   * P1-final — true when the server filtered Pro-only ids out of
+   * the Basic user's selected_roles before returning. The user
+   * was previously locked: Pro-only cards render as disabled on
+   * Basic, so they couldn't uncheck the Pro-only ids, so save
+   * always failed (`roles.select` rejects ids outside OPEN_POOL).
+   * Banner tells them to just hit Save — `selected` is already
+   * sanitized so the save will land a clean list.
+   */
+  needsRoleRepair?: boolean;
 }
 
 const CATEGORY_ORDER: Array<{ key: RoleDefinition['category']; nameZh: string }> = [
@@ -95,6 +105,13 @@ export function RolesPage(): JSX.Element {
 
   const dirty = React.useMemo(() => {
     if (!data) return false;
+    // P1-final — force-enable save when the server pre-sanitised
+    // the selection (Pro-only ids stripped out). draft and selected
+    // both reflect the post-sanitize list, so the structural diff
+    // would say "no change", but the DB row still has the Pro-only
+    // contamination — the user MUST hit Save to rewrite it. Dirty
+    // resets to natural-diff after the save call updates data.selected.
+    if (data.needsRoleRepair) return true;
     if (data.selected.length !== draft.length) return true;
     const a = new Set(data.selected);
     return draft.some((x) => !a.has(x));
@@ -111,6 +128,9 @@ export function RolesPage(): JSX.Element {
               ...prev,
               selected: res.selected,
               changesThisMonth: res.changesThisMonth,
+              // Save persisted the sanitized list — the DB row is
+              // now clean, so drop the repair banner immediately.
+              needsRoleRepair: false,
             }
           : prev,
       );
@@ -154,6 +174,14 @@ export function RolesPage(): JSX.Element {
             升级到基础版
           </button>
           解锁 5 个自选角色，专业版解锁全部 33 个。
+        </div>
+      )}
+
+      {isBasic && data.needsRoleRepair && (
+        <div className="mb-4 rounded-lg border border-sky-300/40 bg-sky-50/50 px-4 py-3 text-sm text-sky-900 dark:border-sky-700/40 dark:bg-sky-950/30 dark:text-sky-200">
+          检测到不适用于当前套餐的角色已被自动移除。请直接点
+          <span className="font-semibold">「保存」</span>
+          以修复你的角色设置；之后即可正常创建新任务。
         </div>
       )}
 

@@ -3,6 +3,7 @@ import {
   BASIC_ROLE_PICK_LIMIT,
   gateRoleForUser,
   newExternalId,
+  OPEN_POOL_ROLE_IDS,
   type PlanId,
 } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
@@ -332,7 +333,19 @@ export const tasksRouter = router({
     // task row at insert time (avoids a follow-up UPDATE).
     const planId: PlanId =
       userRow.plan === 'basic' || userRow.plan === 'pro' ? userRow.plan : 'free';
-    const selectedRoles = (userRow.selectedRoles ?? []) as string[];
+    const rawSelectedRoles = (userRow.selectedRoles ?? []) as string[];
+    // P1-final — sanitize for Basic. Mirror what roles.list does so
+    // a Basic user whose persisted selected_roles still contains
+    // legacy Pro-only ids (e.g. contract-reviewer left over from the
+    // skill/role split migration) doesn't get gated on a count that
+    // includes ids they can't actually benefit from. The gate runs
+    // against OPEN_POOL-only ids; gateRoleForUser also receives the
+    // sanitized list so the keyword-classifier path stays consistent.
+    const OPEN_POOL_SET = new Set<string>(OPEN_POOL_ROLE_IDS);
+    const selectedRoles =
+      planId === 'basic'
+        ? rawSelectedRoles.filter((id) => OPEN_POOL_SET.has(id))
+        : rawSelectedRoles;
 
     // P1-A — Basic-plan over-limit gate. The skill/role split
     // migration left some users with > 5 entries in selected_roles.
