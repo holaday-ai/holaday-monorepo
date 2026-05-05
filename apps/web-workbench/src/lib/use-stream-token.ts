@@ -25,7 +25,7 @@ interface StreamTokenState {
   refresh: () => Promise<void>;
 }
 
-export function useStreamToken(): StreamTokenState {
+export function useStreamToken(enabled = true): StreamTokenState {
   const [token, setToken] = React.useState<string | null>(null);
   const cancelledRef = React.useRef(false);
 
@@ -58,6 +58,14 @@ export function useStreamToken(): StreamTokenState {
   }, []);
 
   React.useEffect(() => {
+    if (!enabled) {
+      cancelledRef.current = true;
+      // Drop any token held while we were enabled — when the consumer
+      // disables this hook (no active task), keeping a stale token in
+      // state would feed URL builders that should now produce null.
+      setToken(null);
+      return;
+    }
     cancelledRef.current = false;
     void refresh();
     const timer = window.setInterval(() => {
@@ -67,7 +75,7 @@ export function useStreamToken(): StreamTokenState {
       cancelledRef.current = true;
       window.clearInterval(timer);
     };
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   return { token, refresh };
 }

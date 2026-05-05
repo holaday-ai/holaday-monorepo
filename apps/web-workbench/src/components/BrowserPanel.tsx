@@ -292,18 +292,28 @@ export function BrowserPanel({
     taskStatus === 'completed' ||
     taskStatus === 'failed' ||
     taskStatus === 'cancelled';
+  // No active task means the panel is in idle state — no screencast
+  // to subscribe to, no VNC slot to reach. Without this gate, both
+  // URL builders fall back to the per-user pool slot
+  // (`/vnc-ws/<poolUserId>`), and the cold-start `/` view (now
+  // composerMode='new', selectedTaskId=null by default) would open a
+  // browser session and burn /api/stream-token requests for users
+  // who haven't even submitted a task yet.
+  const hasActiveTask = Boolean(activeTaskId);
   // Item 6 — short-lived stream token for screencast / VNC WS auth.
   // Refreshes every 45s; the WS URL gets rebuilt when token rotates,
   // which forces a benign reconnect (the connection itself doesn't
   // need re-auth, but the URL needs the latest token for the next
-  // failed-connect retry).
-  const { token: streamToken } = useStreamToken();
+  // failed-connect retry). Skipped when there's no active task — the
+  // hook drops its token and stops fetching.
+  const { token: streamToken } = useStreamToken(hasActiveTask);
   // VNC live stream — memoised so prop identity is stable across
   // re-renders (the viewport's effect re-runs on any URL change).
-  const vncUrl = React.useMemo(
-    () => (usingCdp ? null : buildVncUrl(activeTaskId ?? null, poolUserId, streamToken)),
-    [activeTaskId, poolUserId, usingCdp, streamToken],
-  );
+  const vncUrl = React.useMemo(() => {
+    if (!hasActiveTask) return null;
+    if (usingCdp) return null;
+    return buildVncUrl(activeTaskId ?? null, poolUserId, streamToken);
+  }, [activeTaskId, hasActiveTask, poolUserId, usingCdp, streamToken]);
   // RC follow-up audit fix — generate / scrape tasks have NO pool
   // slot (no Brave allocated), so /screencast-ws/<taskId> 409s in a
   // loop and the user sees "画面已断开，重连中" cycling every ~5s
@@ -319,6 +329,7 @@ export function BrowserPanel({
   );
   const isNonPoolTask = Boolean(streamingForActive ?? progressForActive);
   const screencastUrlForCdp = React.useMemo(() => {
+    if (!hasActiveTask) return null;
     if (!usingCdp) return null;
     // Per-task pool: terminal tasks have no live Brave. Fall through
     // to the static frame fallback (last-frame JPEG) instead of
@@ -329,7 +340,7 @@ export function BrowserPanel({
     // disconnect banner doesn't flicker every 5 s.
     if (activeTaskId && isNonPoolTask) return null;
     return buildScreencastUrl(activeTaskId ?? null, poolUserId, streamToken);
-  }, [activeTaskId, poolUserId, usingCdp, taskTerminal, isNonPoolTask, streamToken]);
+  }, [activeTaskId, hasActiveTask, poolUserId, usingCdp, taskTerminal, isNonPoolTask, streamToken]);
   // [HD-DEBUG] log every URL change (or change to/from null). Token
   // redacted so console dumps stay safe to share.
   React.useEffect(() => {

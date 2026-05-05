@@ -3,7 +3,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Clipboard,
-  Clock,
   FolderOpen,
   FolderPlus,
   Globe,
@@ -1044,7 +1043,7 @@ function BrandMark(): JSX.Element {
 }
 
 interface FeatureItem {
-  icon: typeof Clock;
+  icon: typeof Sparkles;
   label: string;
   /** When set the row is clickable and routes here. */
   href?: string;
@@ -1058,8 +1057,11 @@ interface FeatureItem {
 }
 
 const FEATURES: readonly FeatureItem[] = [
-  { icon: Clock, label: '定时任务', href: '/scheduled' },
   { icon: Sparkles, label: '专家技能', href: '/skills' },
+  // 定时任务 demoted off the main nav until the orchestrator's
+  // dispatch path is wired (today the cron handler only logs).
+  // Page kept reachable via direct URL but rendered as a roadmap
+  // placeholder so users can't create tasks that won't fire.
   // P2.6 — MCP connectors demoted off the main nav. The roadmap
   // page lives at /connections but isn't worth a top-level slot
   // until OAuth actually lands. Reachable from /settings or via
