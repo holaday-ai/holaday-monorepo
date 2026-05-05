@@ -187,6 +187,7 @@ function AppShell(): JSX.Element {
 
   const tasks = useTaskStore((s) => s.tasks);
   const selectedTaskId = useTaskStore((s) => s.selectedTaskId);
+  const composerMode = useTaskStore((s) => s.composerMode);
   const loading = useTaskStore((s) => s.loading);
   const selectTask = useTaskStore((s) => s.selectTask);
   const enterNewTaskMode = useTaskStore((s) => s.enterNewTaskMode);
@@ -325,13 +326,23 @@ function AppShell(): JSX.Element {
   // earlier "!taskParam → enterNewTaskMode" branch raced the outbound
   // navigate() and oscillated infinitely (101× selectTask ↔ 101×
   // enterNewTaskMode in a single mount).
+  //
+  // composerMode='new' gate: when the user just entered new-task
+  // mode, this effect re-runs before outbound's navigate() has
+  // flushed React Router's location, so `taskParam` still reads
+  // the pre-click value (e.g. 'tsk_iJj8'). Without the gate, that
+  // stale read fires `selectTask('url')` and undoes the user's
+  // 发新任务 click. Skipping while composerMode==='new' lets
+  // outbound clear the URL first; on the next render this effect
+  // sees taskParam=null and is a no-op.
   const taskParam = searchParams.get('task');
   React.useEffect(() => {
     if (!bootstrapped) return;
+    if (composerMode === 'new') return;
     if (taskParam && taskParam !== selectedTaskId) {
       selectTask(taskParam, 'url');
     }
-  }, [bootstrapped, taskParam, selectedTaskId, selectTask]);
+  }, [bootstrapped, composerMode, taskParam, selectedTaskId, selectTask]);
 
   // D1 — store → URL outbound sync. Lives here (not in selectTask)
   // because React Router's `useSearchParams` ignores raw
@@ -340,9 +351,18 @@ function AppShell(): JSX.Element {
   // consistent so the inbound effect above sees the new taskParam
   // immediately and the round-trip closes cleanly. Other params
   // (?project=, _cb=, etc.) preserved.
+  //
+  // Also watches composerMode: a flip to 'new' must drop ?task=
+  // even if selectedTaskId was already null (entering new-task
+  // mode from a state where selection was previously cleared but
+  // URL hadn't been reconciled — happens when an earlier path
+  // wrote selectedTaskId=null without going through the canonical
+  // selectTask/enterNewTaskMode signals the outbound effect was
+  // watching). Without this branch, clicking 发新任务 in that
+  // state was a no-op for the URL.
   React.useEffect(() => {
     if (!bootstrapped) return;
-    const desired = selectedTaskId ?? null;
+    const desired = composerMode === 'new' ? null : (selectedTaskId ?? null);
     if ((taskParam ?? null) === desired) return;
     const next = new URLSearchParams(searchParams);
     if (desired) next.set('task', desired);
@@ -352,6 +372,7 @@ function AppShell(): JSX.Element {
   }, [
     bootstrapped,
     selectedTaskId,
+    composerMode,
     taskParam,
     searchParams,
     navigate,
