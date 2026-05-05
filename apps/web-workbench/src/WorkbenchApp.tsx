@@ -319,19 +319,19 @@ function AppShell(): JSX.Element {
     enterNewTaskMode,
   ]);
 
-  // URL → store: when URL `?task=` changes (history back/forward,
-  // /app alias redirect with search forwarded, deep link), pull
-  // store into sync. selectTask is idempotent.
+  // URL → store: deep-link only. A missing ?task= is NOT a signal
+  // to enter new-task mode — new-task is entered only by explicit
+  // user intent (button, /files 用于新任务, keyboard shortcut). An
+  // earlier "!taskParam → enterNewTaskMode" branch raced the outbound
+  // navigate() and oscillated infinitely (101× selectTask ↔ 101×
+  // enterNewTaskMode in a single mount).
   const taskParam = searchParams.get('task');
   React.useEffect(() => {
     if (!bootstrapped) return;
-    if (taskParam) {
-      if (taskParam !== selectedTaskId) selectTask(taskParam, 'url');
-    } else if (selectedTaskId) {
-      // URL dropped ?task= via back-button → reflect in store.
-      enterNewTaskMode();
+    if (taskParam && taskParam !== selectedTaskId) {
+      selectTask(taskParam, 'url');
     }
-  }, [bootstrapped, taskParam, selectedTaskId, selectTask, enterNewTaskMode]);
+  }, [bootstrapped, taskParam, selectedTaskId, selectTask]);
 
   // D1 — store → URL outbound sync. Lives here (not in selectTask)
   // because React Router's `useSearchParams` ignores raw
