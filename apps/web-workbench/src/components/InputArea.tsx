@@ -10,7 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { AttachmentChip, type DraftAttachment } from '@/components/AttachmentChip';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -90,10 +90,34 @@ export function InputArea({
   attachmentByteCap,
 }: Props): JSX.Element {
   const navigate = useNavigate();
+  const location = useLocation();
   const toast = useToast();
   const [value, setValue] = React.useState('');
   const [attachments, setAttachments] = React.useState<DraftAttachment[]>([]);
   const [dragActive, setDragActive] = React.useState(false);
+
+  // P2.8 — pre-stage a DraftAttachment when FilesPage hands one off
+  // via React Router state. Consumes the state once (replaceState
+  // clears it) so a refresh on `/` doesn't re-attach the same file.
+  React.useEffect(() => {
+    const handoff = (location.state as { attachFile?: { fileId: string; filename: string; mimetype: string; sizeBytes: number } } | null)?.attachFile;
+    if (!handoff) return;
+    setAttachments((prev) => {
+      if (prev.some((a) => a.fileId === handoff.fileId)) return prev;
+      return [
+        ...prev,
+        {
+          fileId: handoff.fileId,
+          filename: handoff.filename,
+          mimetype: handoff.mimetype,
+          size: handoff.sizeBytes,
+          status: 'ready' as const,
+        },
+      ];
+    });
+    // Clear the state so re-renders / back-nav don't re-trigger.
+    navigate(location.pathname + location.search, { replace: true, state: null });
+  }, [location, navigate]);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const imageInputRef = React.useRef<HTMLInputElement>(null);
   // O14 — + button menu state. Closes on outside click and after

@@ -1,12 +1,16 @@
 import {
+  Download,
+  Eye,
   File as FileIcon,
   FileSpreadsheet,
   FileText,
   Image as ImageIcon,
+  Plus,
   Search,
   Trash2,
 } from 'lucide-react';
 import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
@@ -23,13 +27,15 @@ interface UiFile {
 type Filter = 'all' | 'images' | 'documents';
 
 /**
- * Phase 16b — files library page. Read-only view over the user's
- * existing task_files (kind=input) entries. Uploads remain on the
- * task composer's + menu (no upload-from-library yet); this page is
- * the inventory + delete surface.
+ * P2.8 — files library polish. Inventory of every task_files row the
+ * user has accumulated. Each row exposes 预览 (open in new tab), 下载
+ * (direct download), 用于新任务 (jump to home with the file pre-
+ * staged), and 删除. Mobile shows size + time inline (was hidden
+ * behind sm:block).
  */
 export function FilesPage(): JSX.Element {
   const toast = useToast();
+  const navigate = useNavigate();
   const [filter, setFilter] = React.useState<Filter>('all');
   const [q, setQ] = React.useState('');
   const [files, setFiles] = React.useState<UiFile[]>([]);
@@ -54,6 +60,35 @@ export function FilesPage(): JSX.Element {
     void refresh();
   }, [refresh]);
 
+  function downloadUrl(fileId: string): string {
+    return `/api/files/${encodeURIComponent(fileId)}/download`;
+  }
+
+  function onPreview(f: UiFile): void {
+    // Open in a new tab — for images / PDFs the browser renders
+    // inline; for everything else this triggers a download. The
+    // download endpoint sets Content-Disposition: inline so
+    // browsers prefer preview when they know how to.
+    window.open(downloadUrl(f.fileId), '_blank', 'noopener');
+  }
+
+  function onUseInNewTask(f: UiFile): void {
+    // Hand off to the home composer via React Router location.state.
+    // Carrying the full UiFile means InputArea can pre-stage the
+    // DraftAttachment without a separate metadata round-trip — the
+    // chip renders immediately and submission already has the fileId.
+    navigate('/', {
+      state: {
+        attachFile: {
+          fileId: f.fileId,
+          filename: f.filename,
+          mimetype: f.mimetype,
+          sizeBytes: f.sizeBytes,
+        },
+      },
+    });
+  }
+
   async function onDelete(f: UiFile): Promise<void> {
     if (!window.confirm(`删除文件「${f.filename}」？`)) return;
     try {
@@ -71,7 +106,7 @@ export function FilesPage(): JSX.Element {
   return (
     <PageShell
       title="文件库"
-      subtitle="管理你上传的文件和资料（uploads from the task composer's + menu）"
+      subtitle="在这里管理任务中上传和生成的文件"
       width="5xl"
     >
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -113,15 +148,22 @@ export function FilesPage(): JSX.Element {
         </div>
       ) : (
         <div className="overflow-hidden rounded-xl border border-border bg-card">
-          <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 border-b border-border bg-muted/40 px-4 py-2 text-[11px] font-medium tracking-wider text-muted-foreground">
+          <div className="hidden grid-cols-[1fr_auto_auto_auto] items-center gap-3 border-b border-border bg-muted/40 px-4 py-2 text-[11px] font-medium tracking-wider text-muted-foreground sm:grid">
             <div>名称</div>
-            <div className="hidden sm:block">已修改</div>
-            <div className="hidden sm:block">大小</div>
+            <div>已修改</div>
+            <div>大小</div>
             <div />
           </div>
           <div className="divide-y divide-border">
             {files.map((f) => (
-              <FileRow key={f.fileId} file={f} onDelete={() => void onDelete(f)} />
+              <FileRow
+                key={f.fileId}
+                file={f}
+                downloadHref={downloadUrl(f.fileId)}
+                onPreview={() => onPreview(f)}
+                onUseInNewTask={() => onUseInNewTask(f)}
+                onDelete={() => void onDelete(f)}
+              />
             ))}
           </div>
         </div>
@@ -157,36 +199,96 @@ function FilterTab({
 
 function FileRow({
   file,
+  downloadHref,
+  onPreview,
+  onUseInNewTask,
   onDelete,
 }: {
   file: UiFile;
+  downloadHref: string;
+  onPreview: () => void;
+  onUseInNewTask: () => void;
   onDelete: () => void;
 }): JSX.Element {
   const Icon = iconForMime(file.mimetype);
   const date = new Date(file.createdAt as string | number | Date);
   return (
-    <div className="group grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 px-4 py-2.5 transition-colors hover:bg-foreground/[0.03]">
+    <div className="group flex flex-col gap-1.5 px-4 py-2.5 transition-colors hover:bg-foreground/[0.03] sm:grid sm:grid-cols-[1fr_auto_auto_auto] sm:items-center sm:gap-3">
       <div className="flex min-w-0 items-center gap-2.5">
         <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 truncate text-sm text-foreground" title={file.filename}>
           {file.filename}
         </span>
       </div>
-      <div className="hidden whitespace-nowrap text-xs text-muted-foreground sm:block">
-        {formatRelative(date)}
+      {/* P2.8 — size + time always rendered. Mobile shows them inline
+          beneath the filename; sm+ snaps them into the grid columns. */}
+      <div className="flex items-center gap-3 text-xs text-muted-foreground sm:contents">
+        <span className="whitespace-nowrap sm:text-xs">{formatRelative(date)}</span>
+        <span className="whitespace-nowrap sm:text-xs">{formatBytes(file.sizeBytes)}</span>
       </div>
-      <div className="hidden whitespace-nowrap text-xs text-muted-foreground sm:block">
-        {formatBytes(file.sizeBytes)}
+      <div className="flex shrink-0 items-center gap-1 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
+        <RowAction onClick={onPreview} label="预览" icon={<Eye className="h-3.5 w-3.5" />} />
+        <RowAction
+          asLink
+          href={downloadHref}
+          download={file.filename}
+          label="下载"
+          icon={<Download className="h-3.5 w-3.5" />}
+        />
+        <RowAction
+          onClick={onUseInNewTask}
+          label="用于新任务"
+          icon={<Plus className="h-3.5 w-3.5" />}
+        />
+        <RowAction
+          onClick={onDelete}
+          label={`删除 ${file.filename}`}
+          icon={<Trash2 className="h-3.5 w-3.5" />}
+          danger
+        />
       </div>
-      <button
-        type="button"
-        onClick={onDelete}
-        aria-label={`删除文件 ${file.filename}`}
-        className="rounded p-1 text-muted-foreground opacity-0 transition-all hover:bg-red-500/10 hover:text-red-600 group-hover:opacity-100 dark:hover:text-red-400"
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </button>
     </div>
+  );
+}
+
+function RowAction({
+  onClick,
+  label,
+  icon,
+  danger = false,
+  asLink = false,
+  href,
+  download,
+}: {
+  onClick?: () => void;
+  label: string;
+  icon: React.ReactNode;
+  danger?: boolean;
+  asLink?: boolean;
+  href?: string;
+  download?: string;
+}): JSX.Element {
+  const className = cn(
+    'rounded p-1 text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground',
+    danger && 'hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400',
+  );
+  if (asLink && href) {
+    return (
+      <a
+        href={href}
+        download={download}
+        aria-label={label}
+        title={label}
+        className={className}
+      >
+        {icon}
+      </a>
+    );
+  }
+  return (
+    <button type="button" onClick={onClick} aria-label={label} title={label} className={className}>
+      {icon}
+    </button>
   );
 }
 

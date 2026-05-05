@@ -12,7 +12,6 @@ import {
   Pencil,
   Pin,
   PinOff,
-  Plug,
   Plus,
   RotateCcw,
   Search,
@@ -1061,7 +1060,10 @@ interface FeatureItem {
 const FEATURES: readonly FeatureItem[] = [
   { icon: Clock, label: '定时任务', href: '/scheduled' },
   { icon: Sparkles, label: '专家技能', href: '/skills' },
-  { icon: Plug, label: 'MCP 连接', href: '/connections' },
+  // P2.6 — MCP connectors demoted off the main nav. The roadmap
+  // page lives at /connections but isn't worth a top-level slot
+  // until OAuth actually lands. Reachable from /settings or via
+  // direct URL.
   { icon: FolderOpen, label: '文件库', href: '/files' },
   { icon: Globe, label: '浏览器', action: 'openBrowser' },
   { icon: Layers, label: '项目', href: '/projects' },

@@ -1038,9 +1038,15 @@ function makeMarkdownComponents(opts: {
       </a>
     ),
     table: ({ children, ...rest }) => (
-      <div className="my-3 -mx-1 overflow-x-auto">
+      // P2.7 — mobile overflow. The `min-w-full` rule forced wide
+      // tables to render at the parent's full width, killing the
+      // x-scroll on screens narrower than the column count needed.
+      // Removing it lets tables sit at their natural width and the
+      // outer wrapper handles horizontal scroll. Right edge gets a
+      // soft fade so the user knows there's more off-screen.
+      <div className="relative my-3 -mx-1 overflow-x-auto rounded-md after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-6 after:rounded-r-md after:bg-gradient-to-l after:from-background after:to-transparent">
         <table
-          className="min-w-full border-collapse rounded-md border border-border text-left text-[13px]"
+          className="w-auto border-collapse rounded-md border border-border text-left text-[13px]"
           {...rest}
         >
           {children}
@@ -1091,7 +1097,10 @@ function makeMarkdownComponents(opts: {
       return (
         <code
           className={cn(
-            'rounded bg-muted/70 px-1 py-0.5 text-[12px] text-foreground',
+            // P2.7 — break-anywhere on inline code. Long unbroken
+            // strings (URLs, hashes, error tokens) used to push the
+            // parent prose wider than the screen on mobile.
+            'rounded bg-muted/70 px-1 py-0.5 text-[12px] text-foreground [overflow-wrap:anywhere]',
             className,
           )}
           {...rest}

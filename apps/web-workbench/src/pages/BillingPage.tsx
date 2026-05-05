@@ -3,12 +3,12 @@ import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { formatCny, getPlanPriceCents, type PaidPlanId } from '@holaday/shared-types';
 import { Button } from '@/components/ui/button';
-import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { PageShell, Row, Section } from '@/pages/PageShell';
 
+const SUPPORT_EMAIL = 'support@holaday.ai';
+
 export function BillingPage(): JSX.Element {
-  const toast = useToast();
   const [plan, setPlan] = React.useState<string>('free');
   const [planExpiresAt, setPlanExpiresAt] = React.useState<string | null>(null);
 
@@ -57,15 +57,31 @@ export function BillingPage(): JSX.Element {
             <span className="text-sm text-muted-foreground">{nextAmountText}</span>
           </Row>
           {plan !== 'free' && (
-            <div className="mt-4 flex justify-end">
+            <div className="mt-4 flex flex-col items-end gap-1.5">
+              {/*
+                P2.5 — disabled, no toast theatre. Cancellation goes
+                through support so refunds + plan-end logic land in
+                one place. The tooltip surfaces the email so the user
+                doesn't have to hunt.
+              */}
               <Button
                 variant="outline"
                 size="sm"
-                className="text-red-600 hover:text-red-700"
-                onClick={() => toast.show('取消订阅功能后端 API 接入中')}
+                disabled
+                title={`取消订阅请联系客服：${SUPPORT_EMAIL}`}
+                className="cursor-not-allowed text-red-600 opacity-50"
               >
                 取消订阅
               </Button>
+              <p className="text-[11px] text-muted-foreground">
+                取消订阅请联系客服：
+                <a
+                  href={`mailto:${SUPPORT_EMAIL}`}
+                  className="text-primary underline-offset-2 hover:underline"
+                >
+                  {SUPPORT_EMAIL}
+                </a>
+              </p>
             </div>
           )}
         </Section>
@@ -82,10 +98,16 @@ export function BillingPage(): JSX.Element {
                   <div className="text-[11px] text-muted-foreground">支持信用卡、支付宝、微信支付</div>
                 </div>
               </div>
+              {/*
+                P2.5 — disabled until the saved-card flow lands. The
+                old toast-only path implied the action did something.
+              */}
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => toast.show('支付集成开发中，敬请期待')}
+                disabled
+                title="即将支持"
+                className="cursor-not-allowed opacity-50"
               >
                 <Plus className="h-3.5 w-3.5" />
                 添加
