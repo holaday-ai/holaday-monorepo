@@ -13,129 +13,88 @@ interface DayBar {
 }
 
 /**
- * Usage dashboard. Pulls tasks.list (via tRPC) so the counters and
- * daily histogram are real, even before a dedicated usage API
- * exists. Quota is derived from the plan tier using the same caps
- * PlanPage advertises — so the two screens stay consistent.
+ * Usage dashboard. P1.3 — single data source: `usage.summary`. The
+ * old version stitched together quota.status (本月任务) with a
+ * tasks.list scan capped at 100 (成功/失败/进行中), and the two
+ * answers didn't match. The new endpoint runs both queries in one
+ * round-trip, server-side, scoped to the user's UTC current month,
+ * so every counter on the page can be reconciled.
  */
-// Mirrors the orchestrator's task status enum. Only `completed` and
-// `failed` are terminal-success/failure; everything else is a flavor
-// of "still in flight" and lands in the running counter.
-const SUCCESS_STATUS = 'completed';
-const FAILED_STATUS = 'failed';
-const RUNNING_STATUSES = new Set([
-  'pending',
-  'planning',
-  'queued',
-  'executing',
-  'awaiting_user',
-  'paused',
-]);
-
 export function UsagePage(): JSX.Element {
-  // Canonical "本月任务" count comes from quota.status — that's the
-  // counter the orchestrator's own gate consults, so it can't disagree
-  // with reality. tasks.list is still polled for the activity
-  // breakdown + 7-day histogram, but with limit:100 (was 200, the
-  // backend rejects anything above 100 and the page used to show 0
-  // for every counter).
-  const [succeeded, setSucceeded] = React.useState(0);
-  const [failed, setFailed] = React.useState(0);
-  const [running, setRunning] = React.useState(0);
-  const [bars, setBars] = React.useState<DayBar[]>([]);
-  const [tasksUsed, setTasksUsed] = React.useState<number | null>(null);
-  const [quota, setQuota] = React.useState<number | null>(null);
-  const [bonusTasks, setBonusTasks] = React.useState(0);
-  const [tasksRemaining, setTasksRemaining] = React.useState<number | null>(null);
+  const [snap, setSnap] = React.useState<UsageSnapshot | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let active = true;
-    void Promise.all([
-      trpc.tasks.list.query({ limit: 100 }).catch(() => null),
-      trpc.quota.status.query().catch(() => null),
-    ]).then(([tasks, quotaSnap]) => {
-      if (!active) return;
-      if (quotaSnap) {
-        setTasksUsed(quotaSnap.tasksUsed);
-        setQuota(quotaSnap.tasksLimit);
-        setBonusTasks(quotaSnap.bonusTasks);
-        setTasksRemaining(quotaSnap.tasksRemaining);
-      }
-      let sCount = 0;
-      let fCount = 0;
-      let rCount = 0;
-      const byDay = new Map<string, number>();
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        byDay.set(dateKey(d), 0);
-      }
-      const list = Array.isArray(tasks) ? tasks : tasks && 'tasks' in tasks ? tasks.tasks : [];
-      for (const t of (list as Array<{ createdAt: string | number; status: string }>) ?? []) {
-        const ts = typeof t.createdAt === 'string' ? Date.parse(t.createdAt) : t.createdAt;
-        if (!Number.isFinite(ts)) continue;
-        if (t.status === SUCCESS_STATUS) sCount += 1;
-        else if (t.status === FAILED_STATUS) fCount += 1;
-        else if (RUNNING_STATUSES.has(t.status)) rCount += 1;
-        const k = dateKey(new Date(ts));
-        if (byDay.has(k)) byDay.set(k, (byDay.get(k) ?? 0) + 1);
-      }
-      setSucceeded(sCount);
-      setFailed(fCount);
-      setRunning(rCount);
-      setBars(
-        Array.from(byDay.entries()).map(([date, count]) => ({
-          date,
-          label: formatDay(new Date(date)),
-          count,
-        })),
-      );
-      setLoading(false);
-    });
+    void trpc.usage.summary
+      .query()
+      .then((res) => {
+        if (!active) return;
+        setSnap(res as UsageSnapshot);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : String(err));
+        setLoading(false);
+      });
     return () => {
       active = false;
     };
   }, []);
 
-  // While the quota API is loading, show — instead of fabricating a
-  // cap. Once loaded, total = base limit + bonus (paid add-on packs
-  // or first-month grants).
-  const totalQuota = quota == null ? null : quota + bonusTasks;
-  const monthCount = tasksUsed ?? 0;
-  const remaining = tasksRemaining ?? (totalQuota == null ? 0 : Math.max(0, totalQuota - monthCount));
+  const totalQuota =
+    snap == null ? null : snap.quotaLimit + snap.quotaBonus;
   const pct =
     totalQuota == null || totalQuota === 0
       ? 0
-      : Math.min(100, Math.round(((totalQuota - remaining) / totalQuota) * 100));
+      : Math.min(100, Math.round((snap?.quotaUsed ? snap.quotaUsed : 0) / totalQuota * 100));
+  const bars: DayBar[] = React.useMemo(() => {
+    if (!snap) return [];
+    return snap.dailyCounts.map((d) => ({
+      date: d.date,
+      label: formatDay(new Date(`${d.date}T00:00:00Z`)),
+      count: d.count,
+    }));
+  }, [snap]);
   const maxBar = Math.max(1, ...bars.map((b) => b.count));
 
   return (
     <PageShell title="用量" subtitle="当月任务额度和执行统计" width="5xl">
       <div className="space-y-6">
+        {error && (
+          <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 text-xs text-red-700">
+            读取用量失败：{error}
+          </div>
+        )}
         <div className="grid gap-4 md:grid-cols-3">
           <StatCard
             icon={<Activity className="h-4 w-4" />}
             label="本月任务"
-            value={loading ? '—' : String(monthCount)}
+            value={loading ? '—' : String(snap?.monthTasksTotal ?? 0)}
             sub={
-              totalQuota == null
+              snap == null
                 ? '配额 — 个'
-                : bonusTasks > 0
-                ? `配额 ${quota} + 加量 ${bonusTasks}`
-                : `配额 ${totalQuota} 个`
+                : snap.quotaBonus > 0
+                ? `配额 ${snap.quotaLimit} + 加量 ${snap.quotaBonus}`
+                : `配额 ${snap.quotaLimit} 个`
             }
           />
           <StatCard
             icon={<CheckCircle2 className="h-4 w-4 text-emerald-500" />}
             label="成功"
-            value={loading ? '—' : String(succeeded)}
-            sub={`失败 ${failed} · 进行中 ${running}`}
+            value={loading ? '—' : String(snap?.monthCompleted ?? 0)}
+            sub={
+              snap == null
+                ? '失败 — · 进行中 —'
+                : `失败 ${snap.monthFailed} · 进行中 ${snap.monthExecuting}`
+            }
           />
           <StatCard
             icon={<Clock className="h-4 w-4 text-pink-500" />}
             label="剩余额度"
-            value={loading ? '—' : String(remaining)}
+            value={loading ? '—' : String(snap?.quotaRemaining ?? 0)}
             sub={totalQuota == null ? '加载中…' : `${pct}% 已使用`}
           />
         </div>
@@ -152,7 +111,7 @@ export function UsagePage(): JSX.Element {
               />
             </div>
             <span className="text-xs tabular-nums text-muted-foreground">
-              {monthCount} / {totalQuota ?? '—'}
+              {snap?.quotaUsed ?? 0} / {totalQuota ?? '—'}
             </span>
           </div>
           {pct >= 75 && (
@@ -199,6 +158,18 @@ export function UsagePage(): JSX.Element {
   );
 }
 
+interface UsageSnapshot {
+  monthTasksTotal: number;
+  monthCompleted: number;
+  monthFailed: number;
+  monthExecuting: number;
+  quotaLimit: number;
+  quotaUsed: number;
+  quotaRemaining: number;
+  quotaBonus: number;
+  dailyCounts: Array<{ date: string; count: number }>;
+}
+
 function StatCard({
   icon,
   label,
@@ -222,17 +193,13 @@ function StatCard({
   );
 }
 
-function dateKey(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
 function formatDay(d: Date): string {
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  today.setUTCHours(0, 0, 0, 0);
   const copy = new Date(d);
-  copy.setHours(0, 0, 0, 0);
+  copy.setUTCHours(0, 0, 0, 0);
   const diff = Math.round((today.getTime() - copy.getTime()) / 86400000);
   if (diff === 0) return '今天';
   if (diff === 1) return '昨天';
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
 }

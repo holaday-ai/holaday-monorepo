@@ -187,7 +187,7 @@ function AppShell(): JSX.Element {
   const tasks = useTaskStore((s) => s.tasks);
   const selectedTaskId = useTaskStore((s) => s.selectedTaskId);
   const loading = useTaskStore((s) => s.loading);
-  const setSelectedTask = useTaskStore((s) => s.setSelectedTask);
+  const selectAndHydrateTask = useTaskStore((s) => s.selectAndHydrateTask);
   const refreshTasks = useTaskStore((s) => s.refreshTasks);
   const createTask = useTaskStore((s) => s.createTask);
   const replyToTask = useTaskStore((s) => s.replyToTask);
@@ -297,6 +297,20 @@ function AppShell(): JSX.Element {
     };
   }, [authed, refreshTasks, applyServerMessage, refreshProjects]);
 
+  // P1.1 — deep link via `?task=tsk_xxx`. After bootstrap (so the
+  // tasks list is loaded), if the URL specifies a task, swap to it
+  // and hydrate the panel from tasks.detail. Re-runs whenever the
+  // query param changes so navigation history works too.
+  // Guards: only switch when the requested id differs from the
+  // current selection AND it exists in the loaded list (otherwise
+  // we'd flash an empty panel until the next refresh).
+  const taskParam = searchParams.get('task');
+  React.useEffect(() => {
+    if (!bootstrapped || !taskParam) return;
+    if (taskParam === selectedTaskId) return;
+    selectAndHydrateTask(taskParam);
+  }, [bootstrapped, taskParam, selectedTaskId, selectAndHydrateTask]);
+
   // Auth invalidated by server (bad / expired token).
   React.useEffect(() => {
     if (wsStatus === 'unauthorized' && authed) {
@@ -370,7 +384,7 @@ function AppShell(): JSX.Element {
       // Cmd/Ctrl + N: new task + focus composer.
       if (meta && e.key.toLowerCase() === 'n') {
         e.preventDefault();
-        setSelectedTask(null);
+        selectAndHydrateTask(null);
         setTimeout(() => inputRef.current?.focus(), 50);
         return;
       }
@@ -393,7 +407,7 @@ function AppShell(): JSX.Element {
           return;
         }
         if (selectedTaskId && !inField) {
-          setSelectedTask(null);
+          selectAndHydrateTask(null);
         }
         return;
       }
@@ -405,7 +419,7 @@ function AppShell(): JSX.Element {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [authed, searchOpen, feedbackOpen, browserSheetOpen, panelFullscreen, selectedTaskId, setSelectedTask]);
+  }, [authed, searchOpen, feedbackOpen, browserSheetOpen, panelFullscreen, selectedTaskId, selectAndHydrateTask]);
 
   const handleLogout = React.useCallback(() => {
     clearAccessToken();
@@ -460,9 +474,9 @@ function AppShell(): JSX.Element {
         onClearProjectFilter={() => navigate('/')}
         historyDays={historyDays}
         selectedTaskId={selectedTaskId}
-        onSelectTask={setSelectedTask}
+        onSelectTask={selectAndHydrateTask}
         onNewTask={() => {
-          setSelectedTask(null);
+          selectAndHydrateTask(null);
           setTimeout(() => inputRef.current?.focus(), 50);
           // B2 — wake the per-user pool browser THEN navigate to
           // Google. Without the wake step, browserNav fails silently
@@ -662,7 +676,7 @@ function AppShell(): JSX.Element {
         open={searchOpen}
         tasks={tasks}
         onClose={() => setSearchOpen(false)}
-        onPick={(taskId) => setSelectedTask(taskId)}
+        onPick={(taskId) => selectAndHydrateTask(taskId)}
       />
 
       <FeedbackDialog

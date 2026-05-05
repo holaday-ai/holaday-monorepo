@@ -14,7 +14,7 @@ import { PageShell } from '@/pages/PageShell';
 export function StarredPage(): JSX.Element {
   const navigate = useNavigate();
   const tasks = useTaskStore((s) => s.tasks);
-  const setSelectedTask = useTaskStore((s) => s.setSelectedTask);
+  const selectAndHydrateTask = useTaskStore((s) => s.selectAndHydrateTask);
   const toggleStarred = useTaskStore((s) => s.toggleStarred);
   const refreshTasks = useTaskStore((s) => s.refreshTasks);
 
@@ -35,7 +35,7 @@ export function StarredPage(): JSX.Element {
   }, [tasks]);
 
   function open(taskId: string): void {
-    setSelectedTask(taskId);
+    selectAndHydrateTask(taskId);
     navigate('/');
   }
 

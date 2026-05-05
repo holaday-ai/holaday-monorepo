@@ -11,6 +11,7 @@ import { rolesRouter } from './routers/roles.js';
 import { scheduledTasksRouter } from './routers/scheduled-tasks.js';
 import { skillsRouter } from './routers/skills.js';
 import { tasksRouter } from './routers/tasks.js';
+import { usageRouter } from './routers/usage.js';
 import { publicProcedure, router } from './trpc.js';
 
 export const appRouter = router({
@@ -31,6 +32,7 @@ export const appRouter = router({
   files: filesRouter,
   scheduledTasks: scheduledTasksRouter,
   connections: connectionsRouter,
+  usage: usageRouter,
 });
 
 export type AppRouter = typeof appRouter;

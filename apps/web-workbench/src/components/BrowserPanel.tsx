@@ -228,11 +228,25 @@ export function BrowserPanel({
       !best || cur.timestamp > best.timestamp ? cur : best,
     null as UiScreencast | null) ?? null;
   }, [screencastByTask]);
-  // For terminal tasks with captured evidence, the evidence frame
-  // is the canonical view (the agent's final state). Live `frame`
-  // would be stale-or-absent at terminal anyway. For active tasks,
-  // live frame still wins.
-  const displayFrame = frame ?? finalEvidenceFrame ?? latestFrame;
+  // P1.1 — terminal task fall-through policy:
+  //   1. If the task is terminal AND has captured evidence
+  //      (finalEvidenceFrame), use ONLY that. Don't bleed
+  //      another task's latestFrame into the panel.
+  //   2. If the task is terminal WITHOUT evidence (legacy task,
+  //      or capture failed), don't fall through to another task's
+  //      latestFrame either — render the empty terminal state.
+  //   3. For active tasks, prefer live `frame`, then any latest
+  //      frame as a hint, then evidence (rare; would mean a task
+  //      ended but isn't marked terminal here yet).
+  // The previous "frame ?? finalEvidenceFrame ?? latestFrame" mixed
+  // task A's frame into task B's panel after a task switch.
+  const taskIsTerminal =
+    taskStatus === 'completed' ||
+    taskStatus === 'failed' ||
+    taskStatus === 'cancelled';
+  const displayFrame = taskIsTerminal
+    ? finalEvidenceFrame
+    : (frame ?? latestFrame ?? finalEvidenceFrame);
   const displayUrl = displayFrame?.url ?? 'about:blank';
   const abortTask = useTaskStore((s) => s.abortTask);
   const [aborting, setAborting] = React.useState(false);

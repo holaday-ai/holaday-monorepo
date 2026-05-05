@@ -102,7 +102,7 @@ export interface TaskStore {
   pinnedTaskIds: ReadonlySet<string>;
   togglePin(taskId: string): void;
 
-  setSelectedTask(taskId: string | null): void;
+  selectAndHydrateTask(taskId: string | null): void;
   refreshTasks(): Promise<void>;
   /**
    * Phase 24 RC follow-up — older tasks beyond the first page. Cursor
@@ -188,7 +188,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     });
   },
 
-  setSelectedTask(taskId) {
+  selectAndHydrateTask(taskId) {
     set({ selectedTaskId: taskId });
     // Bug 4 — hydrate persisted steps + result when the user picks a
     // task from the side nav. Without this, a closed-and-reopened tab
@@ -290,6 +290,16 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
                   : {}),
               };
             }
+            // F11 → P1.1 — rehydrate the awaiting_user prompt from
+            // the persisted column so a refresh during the pause
+            // re-renders the input box. Only meaningful while the
+            // task is actually awaiting; otherwise we drop the
+            // prompt to avoid stale render after resume.
+            const awaitingQuestion =
+              detail.status === 'awaiting_user' &&
+              typeof (detail as { awaitingQuestion?: string | null }).awaitingQuestion === 'string'
+                ? ((detail as { awaitingQuestion?: string | null }).awaitingQuestion ?? null)
+                : null;
             return {
               stepsByTask: { ...prev.stepsByTask, [taskId]: steps },
               ...(hydratedWebSearch
@@ -300,6 +310,19 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
                     },
                   }
                 : {}),
+              awaitingUserByTask: awaitingQuestion
+                ? {
+                    ...prev.awaitingUserByTask,
+                    [taskId]: { question: awaitingQuestion, at: Date.now() },
+                  }
+                : (() => {
+                    // Strip any stale entry — the live WS path also
+                    // clears once the task moves out of awaiting_user.
+                    if (!prev.awaitingUserByTask[taskId]) return prev.awaitingUserByTask;
+                    const next = { ...prev.awaitingUserByTask };
+                    delete next[taskId];
+                    return next;
+                  })(),
               tasks: prev.tasks.map((t) =>
                 t.taskId === taskId
                   ? {
@@ -328,19 +351,29 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     try {
       const res = await trpc.tasks.list.query({ limit: 50 });
       const tasks: UiTask[] = res.tasks.map(toUiTask);
-      set((prev) => ({
+      // Pre-compute the next selection so the rehydrate call below
+      // sees the right id even if the previous one fell off the page.
+      const prevSelected = get().selectedTaskId;
+      const keepSelection =
+        prevSelected && tasks.some((t) => t.taskId === prevSelected);
+      const nextSelected = keepSelection ? prevSelected : (tasks[0]?.taskId ?? null);
+      set({
         tasks,
         loading: false,
         // Phase 24 RC follow-up — track cursor so 'load more' picks
         // up from where the first page ended.
         tasksCursor: res.nextCursor ?? null,
         tasksHasMore: res.nextCursor != null,
-        // keep the current selection if it still exists; otherwise pick the newest.
-        selectedTaskId:
-          prev.selectedTaskId && tasks.some((t) => t.taskId === prev.selectedTaskId)
-            ? prev.selectedTaskId
-            : (tasks[0]?.taskId ?? null),
-      }));
+        selectedTaskId: nextSelected,
+      });
+      // P1.1 — re-hydrate detail (finalScreenshot, webSearches,
+      // awaiting_question) for the active selection. tasks.list
+      // doesn't ship those, so without this a refresh after a task
+      // completed would render a sidebar entry but no evidence in
+      // the panel.
+      if (nextSelected) {
+        get().selectAndHydrateTask(nextSelected);
+      }
     } catch (err) {
       set({ loading: false, error: err instanceof Error ? err.message : String(err) });
     }

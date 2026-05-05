@@ -47,8 +47,21 @@ export const users = mysqlTable(
      * (max 5). Pro plan ignores this — they get all 33 by default.
      * Stored as JSON so future schemas can carry per-pick metadata
      * (last-used, popularity rank) without a migration.
+     *
+     * Phase 24 follow-up — strictly role ids now. Earlier the
+     * /skills page also wrote skill toggles into this column, which
+     * blew up the Basic 5-pick gate; skill toggles moved to
+     * `selected_skills` below.
      */
     selectedRoles: json('selected_roles').$type<string[] | null>(),
+    /**
+     * Skill ids the user has explicitly toggled on in /skills. No
+     * pick limit here — skills are a free-form preference layer
+     * (which playbooks / system-prompt addons to load), not a
+     * paywalled role slot. Migrated out of `selected_roles` in
+     * `0017_users_split_skills`.
+     */
+    selectedSkills: json('selected_skills').$type<string[] | null>(),
     /**
      * Number of role-set changes the user has made in the current
      * `roleChangesPeriodStart` month. Resets via app code when
