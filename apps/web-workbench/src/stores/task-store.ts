@@ -31,19 +31,13 @@ export interface TaskStore {
   tasks: UiTask[];
   selectedTaskId: string | null;
   /**
-   * Composer mode flag. `'new'` means the user has explicitly
-   * asked to start a fresh task (clicked "发新任务", clicked
-   * 用于新任务 in /files, hit Cmd+N). `'task'` is the default —
-   * a task is or will be selected.
-   *
-   * The flag exists to keep `refreshTaskList`'s "no selection +
-   * no URL hint → auto-pick newest" rule from racing with
-   * `enterNewTaskMode`. Without it: user enters new-task mode →
-   * selection cleared → a couple seconds later `refreshTaskList`
-   * fires (e.g. WS reconnect, list-refresh interval) → sees
-   * empty selection, no `?task=`, picks the newest task → user
-   * is suddenly looking at a stale task with their new-task
-   * draft attached as a follow-up.
+   * Composer mode flag. `'new'` is the default: cold start of `/`
+   * lands the user in an empty composer (no auto-selection of the
+   * newest task). `'task'` means a task is selected, either through
+   * a deep link, sidebar/search/history click, or a successful
+   * `createTask`. The two URL effects in WorkbenchApp also key off
+   * this flag — inbound bails while `'new'`, outbound forces the
+   * `?task=` param to drop while `'new'`.
    */
   composerMode: 'new' | 'task';
   loading: boolean;
@@ -367,7 +361,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   return {
   tasks: [],
   selectedTaskId: null,
-  composerMode: 'task',
+  composerMode: 'new',
   loading: false,
   error: null,
   // Phase 24 RC follow-up — pagination state.
@@ -465,35 +459,20 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       const tasks: UiTask[] = preservedSelected
         ? [preservedSelected, ...freshList]
         : freshList;
-      // STATE-MACHINE rule: refreshTaskList does NOT decide
-      // selectedTaskId on its own. The auto-pick-newest only fires
-      // when there's no current selection AND the URL has no
-      // ?task= hint AND the list is non-empty. This breaks the old
-      // race where a deep-link selection was clobbered by a later-
-      // arriving refresh. URL handling stays inside selectTask;
-      // refreshTaskList just delivers fresh task data.
-      let urlTaskHint: string | null = null;
-      if (typeof window !== 'undefined') {
-        urlTaskHint = new URLSearchParams(window.location.search).get('task');
-      }
-      // Auto-pick is gated on composerMode — when the user has
-      // explicitly entered new-task mode (Cmd+N, sidebar 发新任务,
-      // /files 用于新任务), a later refreshTaskList must NOT
-      // silently jump them back into a stale task.
-      const shouldAutoPick =
-        !prevSelected
-        && !urlTaskHint
-        && tasks.length > 0
-        && get().composerMode !== 'new';
+      // refreshTaskList NEVER decides selectedTaskId. Cold start of
+      // `/` lands in new-task mode (composerMode='new' default)
+      // with the sidebar populated but nothing selected. Selection
+      // happens only through explicit signals: URL deep link via
+      // bootstrap, a sidebar / search / history click, or a
+      // successful createTask. This call just delivers fresh task
+      // data and re-hydrates the active selection if there is one.
       set({
         tasks,
         loading: false,
         tasksCursor: res.nextCursor ?? null,
         tasksHasMore: res.nextCursor != null,
       });
-      if (shouldAutoPick) {
-        get().selectTask(tasks[0]!.taskId, 'ui');
-      } else if (prevSelected) {
+      if (prevSelected) {
         // Selection unchanged but the underlying detail might have
         // moved on (task completed, awaiting_user prompt added,
         // etc.). Re-hydrate so the panel reflects the fresh state.
