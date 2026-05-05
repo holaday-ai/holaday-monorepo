@@ -81,11 +81,21 @@ function AppShell(): JSX.Element {
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
+  const [confirmBulkDelete, setConfirmBulkDelete] = React.useState<
+    string[] | null
+  >(null);
   const [confirmClearFailed, setConfirmClearFailed] = React.useState(false);
   // Panel "full-screen": Sidebar + MainPanel hidden, BrowserPanel
   // takes the whole app shell. Toggled from the Panel header button
   // and from Escape (via the existing keyboard handler below).
   const [panelFullscreen, setPanelFullscreen] = React.useState(false);
+  // Lifted collapse state. The previous local state inside
+  // BrowserPanel only narrowed an inner div but the parent column
+  // (`flex: 3 1 0` / configured panelPx) kept its width — so the
+  // collapse button visibly did nothing on desktop. Owning the flag
+  // up here lets us also override the column flex and hide the
+  // resize handle when collapsed.
+  const [browserCollapsed, setBrowserCollapsed] = React.useState(false);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const location = useLocation();
@@ -191,6 +201,7 @@ function AppShell(): JSX.Element {
   const loading = useTaskStore((s) => s.loading);
   const selectTask = useTaskStore((s) => s.selectTask);
   const enterNewTaskMode = useTaskStore((s) => s.enterNewTaskMode);
+  const requestBrowserLive = useTaskStore((s) => s.requestBrowserLive);
   const refreshTaskList = useTaskStore((s) => s.refreshTaskList);
   const createTask = useTaskStore((s) => s.createTask);
   const replyToTask = useTaskStore((s) => s.replyToTask);
@@ -575,6 +586,10 @@ function AppShell(): JSX.Element {
           // modal below; onConfirm pulls the id back out of state.
           setConfirmDelete(taskId);
         }}
+        onDeleteTasks={(taskIds) => {
+          if (taskIds.length === 0) return;
+          setConfirmBulkDelete(taskIds);
+        }}
         onRetryTask={async (intent) => {
           const res = await createTask(intent);
           if ('error' in res) toast.show(`重试失败：${res.error}`, 'error');
@@ -600,6 +615,11 @@ function AppShell(): JSX.Element {
           // so the user's Brave is ready when they arrive at it.
           // Fire-and-forget — wake errors land in toast via the
           // existing onNewTask path's handling.
+          // requestBrowserLive opts the panel out of the no-active-
+          // task idle gate so the user-scoped pool stream connects
+          // immediately. Cleared automatically on next selectTask /
+          // enterNewTaskMode / createTask.
+          requestBrowserLive();
           setBrowserSheetOpen(true);
           void (async () => {
             try {
@@ -706,10 +726,15 @@ function AppShell(): JSX.Element {
           }
         }}
         onOpenSidebar={() => setSidebarOpen(true)}
-        onOpenBrowser={() => setBrowserSheetOpen(true)}
+        onOpenBrowser={() => {
+          requestBrowserLive();
+          setBrowserSheetOpen(true);
+        }}
       />
       )}
-      {!panelFullscreen && <ResizeHandle onDrag={onPanelResizeDrag} onDragEnd={onPanelResizeEnd} />}
+      {!panelFullscreen && !browserCollapsed && (
+        <ResizeHandle onDrag={onPanelResizeDrag} onDragEnd={onPanelResizeEnd} />
+      )}
       <div
         className={
           panelFullscreen
@@ -719,9 +744,11 @@ function AppShell(): JSX.Element {
         style={
           panelFullscreen
             ? undefined
-            : panelPx != null
-              ? { flex: `0 0 ${panelPx}px` }
-              : { flex: '3 1 0', minWidth: 560 }
+            : browserCollapsed
+              ? { flex: '0 0 40px', minWidth: 40, width: 40 }
+              : panelPx != null
+                ? { flex: `0 0 ${panelPx}px` }
+                : { flex: '3 1 0', minWidth: 560 }
         }
       >
         <BrowserPanel
@@ -734,6 +761,8 @@ function AppShell(): JSX.Element {
           poolUserId={me?.multiUser ? me.userId : null}
           fullscreen={panelFullscreen}
           onToggleFullscreen={() => setPanelFullscreen((v) => !v)}
+          collapsed={browserCollapsed}
+          onToggleCollapse={() => setBrowserCollapsed((v) => !v)}
         />
       </div>
       <div className={panelFullscreen ? 'hidden' : 'lg:hidden'}>
@@ -799,6 +828,42 @@ function AppShell(): JSX.Element {
           const res = await deleteTask(taskId);
           if ('error' in res) toast.show(`删除失败：${res.error}`, 'error');
           else toast.show('任务已删除');
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmBulkDelete !== null}
+        title={`删除选中的 ${confirmBulkDelete?.length ?? 0} 个任务？`}
+        description="任务记录和所有步骤都会清除，操作无法恢复。"
+        confirmLabel={`删除 ${confirmBulkDelete?.length ?? 0} 个`}
+        destructive
+        onClose={() => setConfirmBulkDelete(null)}
+        onConfirm={async () => {
+          const ids = confirmBulkDelete;
+          setConfirmBulkDelete(null);
+          if (!ids || ids.length === 0) return;
+          // Same allSettled tally pattern as 清除失败任务 above —
+          // each delete is a cheap DB write, partial failures are
+          // surfaced in the toast rather than aborting the rest.
+          const results = await Promise.all(
+            ids.map((id) =>
+              deleteTask(id).then(
+                (r) => r,
+                (err) => ({ error: err instanceof Error ? err.message : String(err) }),
+              ),
+            ),
+          );
+          const errs = results.filter(
+            (r): r is { error: string } => 'error' in r,
+          );
+          if (errs.length === 0) toast.show(`已删除 ${ids.length} 个任务`);
+          else if (errs.length === ids.length)
+            toast.show(`删除失败：${errs[0]?.error ?? 'unknown'}`, 'error');
+          else
+            toast.show(
+              `已删除 ${ids.length - errs.length} 个，${errs.length} 个失败`,
+              'error',
+            );
         }}
       />
 

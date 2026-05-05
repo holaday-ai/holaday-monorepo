@@ -227,6 +227,12 @@ function AgentBlock({
   // terminal so the canonical resultText takes over.
   const streamingText = useTaskStore((s) => s.streamingByTask[task.taskId]);
   const progressMessage = useTaskStore((s) => s.progressByTask[task.taskId]);
+  // Set populated when a `server.task.terminal` arrives live — used
+  // to gate the typewriter reveal so historical task clicks render
+  // the summary statically (no per-mount replay).
+  const animatedThisSession = useTaskStore((s) =>
+    s.animatedTaskIds.has(task.taskId),
+  );
   hdDebug('TaskStream render', {
     taskId: task.taskId,
     status: task.status,
@@ -277,6 +283,11 @@ function AgentBlock({
           <PlanCard
             planText={task.planText}
             {...(task.planStatus ? { planStatus: task.planStatus } : {})}
+            // Fold the plan card by default once the task has landed in
+            // a terminal state — at that point the result above and
+            // the step ticker below already cover what happened, and
+            // an expanded plan reads like a duplicate template log.
+            defaultExpanded={task.status !== 'completed' && task.status !== 'failed'}
           />
         )}
 
@@ -358,18 +369,16 @@ function AgentBlock({
             text={task.resultText}
             currentUrl={screencastUrl}
             modelLabel={task.modelLabel}
-            // QA #17 — hide "在内置浏览器中继续操作" on completed tasks.
-            // The button targets the BrowserPanel which only has a live
-            // CDP session while the agent is still running; after a
-            // successful completion the pool slot has been released
-            // and clicking does nothing. Failed / cancelled paths
-            // still get the button — they sometimes have a stuck
-            // page the user wants to inspect manually before retrying.
             onContinueInBrowser={
               task.status === 'completed' ? undefined : onContinueInBrowser
             }
             onSuggestionPick={onSuggestionPick}
             serverSuggestions={serverSuggestions}
+            // Typewriter reveal only fires for tasks that hit terminal
+            // during this session (set populated in applyServerMessage).
+            // History clicks render the summary in full immediately so
+            // the panel doesn't replay-and-jitter on every navigation.
+            animateReveal={animatedThisSession}
           />
         )}
         {/* Phase 11 QA #11 — terminal-but-empty fallback. Catches the
@@ -772,6 +781,7 @@ function TerminalSummary({
   modelLabel,
   onSuggestionPick,
   serverSuggestions,
+  animateReveal = true,
 }: {
   status: UiTask['status'];
   text: string;
@@ -787,6 +797,12 @@ function TerminalSummary({
    * to emit a JSON block in its summary).
    */
   serverSuggestions?: string[];
+  /**
+   * When false (e.g. user clicked into a historical task), skip the
+   * typewriter reveal — render the full summary immediately. Default
+   * `true` preserves the live-completion experience.
+   */
+  animateReveal?: boolean;
 }): JSX.Element {
   // Legacy: pull a fenced ```suggestions JSON block out of the
   // model's text. Kept as a fallback for tasks that completed before
@@ -822,7 +838,9 @@ function TerminalSummary({
   // O10 — typewriter reveal of the SUMMARY text only (failed cards
   // skip this so users see the failure reason immediately). Resets
   // when text changes (new task / re-render with fresh content).
-  const revealed = useTypewriterReveal(displayText, 80);
+  // History clicks pass animateReveal=false so the summary renders
+  // statically — no replay on every navigation.
+  const revealed = useTypewriterReveal(displayText, 80, animateReveal);
   // Round-3 #4: external-link confirm. Both markdown anchors and
   // the "在新标签页打开 [url]" button funnel through pendingLink —
   // users get a confirm modal before leaving the workbench.
@@ -939,12 +957,23 @@ function TerminalSummary({
  * value via the seenRef cache — no flicker on a re-mount of the
  * same content.
  */
-function useTypewriterReveal(full: string, speedCharsPerSec: number): string {
+function useTypewriterReveal(
+  full: string,
+  speedCharsPerSec: number,
+  animate = true,
+): string {
   const [revealed, setRevealed] = React.useState<string>(full);
   const seenRef = React.useRef<string>('');
   React.useEffect(() => {
     if (!full) {
       setRevealed('');
+      return;
+    }
+    if (!animate) {
+      // Caller asked to render in full (e.g. opening a historical
+      // task). Skip the per-frame interval — just commit immediately.
+      seenRef.current = full;
+      setRevealed(full);
       return;
     }
     if (seenRef.current === full) {
@@ -962,7 +991,7 @@ function useTypewriterReveal(full: string, speedCharsPerSec: number): string {
       if (i >= full.length) window.clearInterval(interval);
     }, 1000 / 30);
     return () => window.clearInterval(interval);
-  }, [full, speedCharsPerSec]);
+  }, [full, speedCharsPerSec, animate]);
   return revealed;
 }
 

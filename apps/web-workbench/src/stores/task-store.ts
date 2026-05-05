@@ -40,6 +40,20 @@ export interface TaskStore {
    * `?task=` param to drop while `'new'`.
    */
   composerMode: 'new' | 'task';
+  /**
+   * `true` when the user explicitly clicked the sidebar 浏览器 entry
+   * (or other "show me the browser" surfaces) while no task is
+   * active. The BrowserPanel idle gate (`hasActiveTask`) blocks the
+   * URL build / token fetch by default, but this flag opts the panel
+   * back into the user-scoped pool stream — `/vnc-ws/<userId>` /
+   * `/screencast-ws/<userId>` — so the requester sees their Brave.
+   *
+   * Cleared on any path that re-binds the browser context to a task
+   * (selectTask, enterNewTaskMode, createTask via the same set), so
+   * the next selection / new-task / submit cycles the stream cleanly
+   * back to task-scoped or off.
+   */
+  browserLiveRequested: boolean;
   loading: boolean;
   error: string | null;
   /** Per-task step streams, keyed by taskId. */
@@ -96,6 +110,18 @@ export interface TaskStore {
    */
   terminalTaskIds: ReadonlySet<string>;
   /**
+   * Tasks that hit a terminal state during the current session
+   * (i.e. a `server.task.terminal` arrived live, not loaded from
+   * history). TerminalSummary's typewriter reveal only fires for
+   * task ids in this set — switching to a historical task whose
+   * terminal frame arrived before mount renders the summary
+   * statically, no replay on every navigation.
+   *
+   * Set is in-memory only — page refresh resets it, so any task
+   * loaded fresh from `tasks.list` reads as historical.
+   */
+  animatedTaskIds: ReadonlySet<string>;
+  /**
    * O5 — backend-generated follow-up suggestions per task. Populated
    * when the orchestrator's `generateSuggestions` call resolves
    * after a task's terminal frame. TaskStream prefers this over the
@@ -131,6 +157,13 @@ export interface TaskStore {
    */
   selectTask(taskId: string, source?: 'url' | 'ui'): void;
   enterNewTaskMode(): void;
+  /**
+   * Opt the BrowserPanel out of its idle gate so the panel connects
+   * to the user-scoped pool stream even with no active task.
+   * Triggered from the sidebar 浏览器 entry. Cleared by selectTask /
+   * enterNewTaskMode below.
+   */
+  requestBrowserLive(): void;
   refreshTaskList(): Promise<void>;
   /** Legacy alias — routes through selectTask / enterNewTaskMode. */
   selectAndHydrateTask(taskId: string | null): void;
@@ -362,6 +395,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   tasks: [],
   selectedTaskId: null,
   composerMode: 'new',
+  browserLiveRequested: false,
   loading: false,
   error: null,
   // Phase 24 RC follow-up — pagination state.
@@ -381,6 +415,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   streamingByTask: {},
   progressByTask: {},
   terminalTaskIds: new Set<string>(),
+  animatedTaskIds: new Set<string>(),
   // Default OFF: the product story is "watch the agent" — the user
   // observes by default and only takes over when they explicitly
   // click the takeover button or the agent enters awaiting_user /
@@ -414,7 +449,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     // composerMode flips back to 'task' on any selection. URL
     // writing happens in WorkbenchApp's outbound effect (uses
     // React Router's navigate so useSearchParams stays in sync).
-    set({ selectedTaskId: taskId, composerMode: 'task' });
+    // Selecting a task re-binds the browser context to that task —
+    // browserLiveRequested clears so the panel switches off the
+    // user-scoped pool stream and onto the task-scoped path.
+    set({
+      selectedTaskId: taskId,
+      composerMode: 'task',
+      browserLiveRequested: false,
+    });
     void hydrateDetail(taskId);
     void source; // retained as diagnostic hint
   },
@@ -425,11 +467,19 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     // fires shortly after enterNewTaskMode would silently re-
     // select the newest task and pull the user back into a 追问
     // of a stale task.
-    set({ selectedTaskId: null, composerMode: 'new' });
+    set({
+      selectedTaskId: null,
+      composerMode: 'new',
+      browserLiveRequested: false,
+    });
     // Cancel any in-flight hydrate so its post-set callback doesn't
     // re-stamp the just-cleared selection's tasks[] entry. URL
     // ?task= cleanup handled by the outbound effect in WorkbenchApp.
     abortInFlightHydrate();
+  },
+
+  requestBrowserLive() {
+    set({ browserLiveRequested: true });
   },
 
   // Legacy alias retained for code that hasn't migrated yet.
@@ -715,10 +765,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       // up with selectedTaskId=res.taskId but composerMode still
       // pinned to 'new' — leaving the store in an inconsistent state
       // that any subsequent enterNewTaskMode() would clear.
+      // browserLiveRequested clears so the BrowserPanel switches from
+      // the user-scoped fallback (if it was on) onto the new task's
+      // CDP / VNC stream.
       set((prev) => ({
         tasks: [optimistic, ...prev.tasks.filter((t) => t.taskId !== res.taskId)],
         selectedTaskId: res.taskId,
         composerMode: 'task' as const,
+        browserLiveRequested: false,
       }));
       // Fire-and-forget refresh so the row's server-authored fields
       // (createdAt, status) replace the optimistic stub once available.
@@ -757,6 +811,13 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         });
         const nextTerminalIds = new Set(prev.terminalTaskIds);
         nextTerminalIds.add(msg.taskId);
+        // Mark this taskId as freshly-completed so TerminalSummary's
+        // typewriter reveal plays once. Tasks loaded from history
+        // (`tasks.list` / `tasks.detail`) never enter this set, so
+        // navigating to a historical task renders the summary in full
+        // immediately — no replay on every sidebar click.
+        const nextAnimatedIds = new Set(prev.animatedTaskIds);
+        nextAnimatedIds.add(msg.taskId);
         return {
           tasks: prev.tasks.map((t) =>
             t.taskId === msg.taskId
@@ -769,6 +830,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               : t,
           ),
           terminalTaskIds: nextTerminalIds,
+          animatedTaskIds: nextAnimatedIds,
           // streamingByTask + progressByTask unchanged; buffers
           // persist until resultText is rendered in their place.
         };
@@ -1052,6 +1114,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     set({
       tasks: [],
       selectedTaskId: null,
+      browserLiveRequested: false,
       loading: false,
       error: null,
       tasksCursor: null,
@@ -1070,6 +1133,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       streamingByTask: {},
       progressByTask: {},
       terminalTaskIds: new Set<string>(),
+      animatedTaskIds: new Set<string>(),
     });
   },
   };

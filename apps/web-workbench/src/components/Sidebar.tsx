@@ -38,6 +38,13 @@ interface Props {
   onSelectTask: (taskId: string) => void;
   onNewTask: () => void;
   onDeleteTask?(taskId: string): void | Promise<void>;
+  /**
+   * Batch delete entry — opens a single bulk-confirm modal upstream.
+   * Replaces the old loop over `onDeleteTask`, which only opened the
+   * single-task confirm modal repeatedly (last id wins, only one
+   * task ever got deleted).
+   */
+  onDeleteTasks?(taskIds: string[]): void;
   onRenameTask?(taskId: string, title: string): void | Promise<void>;
   onRetryTask?(intent: string): void | Promise<void>;
   /** Phase 16 — toggle a task's starred flag. Wires through to the store. */
@@ -123,6 +130,7 @@ export function Sidebar({
   onSelectTask,
   onNewTask,
   onDeleteTask,
+  onDeleteTasks,
   onRenameTask,
   onRetryTask,
   onToggleStarred,
@@ -172,40 +180,46 @@ export function Sidebar({
   const buckets = React.useMemo(() => bucketByTime(unpinnedTasks), [unpinnedTasks]);
 
   // O1 — batch select + bulk delete. Toggle entered via the
-  // "批量管理" footer button; while on, every task row swaps from
-  // "click to open" to "click to toggle checkbox", and a sticky
-  // bottom bar shows the count + 全选 / 删除选中 / 取消. Uses the
-  // existing onDeleteTask one-by-one (no new endpoint), confirmed
-  // through window.confirm to keep the surface area minimal.
+  // "批量管理" footer button; while on, every deletable task row
+  // swaps from "click to open" to "click to toggle checkbox", and a
+  // sticky bottom bar shows the count + 全选 / 删除选中 / 取消.
+  // Active / executing tasks are disabled (greyed checkbox, click
+  // swallowed) — backend rejects deletes on them anyway, so showing
+  // a user-actionable selection that always fails would be a lie.
+  // The actual delete fans out through the parent's onDeleteTasks
+  // entry which opens a single bulk-confirm modal and uses
+  // Promise.allSettled for the network calls.
   const [batchMode, setBatchMode] = React.useState(false);
   const [batchSelected, setBatchSelected] = React.useState<Set<string>>(new Set());
-  const toggleBatchSelect = React.useCallback((id: string) => {
-    setBatchSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const toggleBatchSelect = React.useCallback(
+    (id: string) => {
+      const status = tasks.find((t) => t.taskId === id)?.status;
+      if (status && !isTaskDeletable(status)) return;
+      setBatchSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+    },
+    [tasks],
+  );
   const exitBatchMode = React.useCallback(() => {
     setBatchMode(false);
     setBatchSelected(new Set());
   }, []);
   const selectAllVisible = React.useCallback(() => {
-    setBatchSelected(new Set(tasks.map((t) => t.taskId)));
+    setBatchSelected(
+      new Set(
+        tasks.filter((t) => isTaskDeletable(t.status)).map((t) => t.taskId),
+      ),
+    );
   }, [tasks]);
-  const deleteSelected = React.useCallback(async () => {
-    if (batchSelected.size === 0 || !onDeleteTask) return;
-    if (!window.confirm(`删除选中的 ${batchSelected.size} 个任务？此操作不可撤销。`)) return;
-    for (const id of batchSelected) {
-      try {
-        await onDeleteTask(id);
-      } catch {
-        /* swallow per-id; toast comes from caller */
-      }
-    }
+  const deleteSelected = React.useCallback(() => {
+    if (batchSelected.size === 0 || !onDeleteTasks) return;
+    onDeleteTasks(Array.from(batchSelected));
     exitBatchMode();
-  }, [batchSelected, onDeleteTask, exitBatchMode]);
+  }, [batchSelected, onDeleteTasks, exitBatchMode]);
 
   const [collapsed, setCollapsed] = React.useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
@@ -408,6 +422,7 @@ export function Sidebar({
                       onRenameCancel={() => setRenamingId(null)}
                       batchMode={batchMode}
                       batchChecked={batchSelected.has(t.taskId)}
+                      batchDisabled={!isTaskDeletable(t.status)}
                       onBatchToggle={toggleBatchSelect}
                       onToggleStarred={onToggleStarred}
                     />
@@ -447,6 +462,7 @@ export function Sidebar({
                       onRenameCancel={() => setRenamingId(null)}
                       batchMode={batchMode}
                       batchChecked={batchSelected.has(t.taskId)}
+                      batchDisabled={!isTaskDeletable(t.status)}
                       onBatchToggle={toggleBatchSelect}
                       onToggleStarred={onToggleStarred}
                     />
@@ -486,6 +502,7 @@ export function Sidebar({
                       onRenameCancel={() => setRenamingId(null)}
                       batchMode={batchMode}
                       batchChecked={batchSelected.has(t.taskId)}
+                      batchDisabled={!isTaskDeletable(t.status)}
                       onBatchToggle={toggleBatchSelect}
                       onToggleStarred={onToggleStarred}
                     />
@@ -529,7 +546,7 @@ export function Sidebar({
                     </button>
                     <button
                       type="button"
-                      onClick={() => void deleteSelected()}
+                      onClick={deleteSelected}
                       disabled={batchSelected.size === 0}
                       className={cn(
                         'rounded px-2 py-0.5 font-medium',
@@ -550,7 +567,7 @@ export function Sidebar({
                   </div>
                 </div>
               ) : (
-                onDeleteTask && (
+                onDeleteTasks && (
                   <div className="mb-1 flex items-center justify-end px-2">
                     <button
                       type="button"

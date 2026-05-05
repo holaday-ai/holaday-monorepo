@@ -163,6 +163,16 @@ interface Props {
    */
   fullscreen?: boolean;
   onToggleFullscreen?: () => void;
+  /**
+   * Lifted-collapse mode. When `collapsed` is provided, the panel
+   * runs as a controlled component — onToggleCollapse fires when the
+   * user hits the collapse button. Lets the parent (WorkbenchApp)
+   * also shrink the right column / hide the resize handle, since
+   * the previous local-state collapse only narrowed the inner div
+   * inside a column the parent had already sized.
+   */
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 /**
@@ -187,8 +197,12 @@ export function BrowserPanel({
   poolUserId = null,
   fullscreen = false,
   onToggleFullscreen,
+  collapsed: collapsedProp,
+  onToggleCollapse,
 }: Props): JSX.Element | null {
-  const [collapsed, setCollapsed] = React.useState(false);
+  const [collapsedLocal, setCollapsedLocal] = React.useState(false);
+  const collapsed = collapsedProp ?? collapsedLocal;
+  const toggleCollapsed = onToggleCollapse ?? (() => setCollapsedLocal((c) => !c));
   // Interactive mode is in the global store so the TaskStream's
   // "Continue in browser" button can flip it on from the left panel.
   const interactive = useTaskStore((s) => s.browserInteractive);
@@ -292,28 +306,32 @@ export function BrowserPanel({
     taskStatus === 'completed' ||
     taskStatus === 'failed' ||
     taskStatus === 'cancelled';
-  // No active task means the panel is in idle state — no screencast
-  // to subscribe to, no VNC slot to reach. Without this gate, both
-  // URL builders fall back to the per-user pool slot
-  // (`/vnc-ws/<poolUserId>`), and the cold-start `/` view (now
-  // composerMode='new', selectedTaskId=null by default) would open a
-  // browser session and burn /api/stream-token requests for users
-  // who haven't even submitted a task yet.
+  // Idle gate. Two paths can flip it on:
+  //   1. There's an active task — the panel shows that task's
+  //      screencast / VNC.
+  //   2. The user explicitly clicked the sidebar 浏览器 entry while
+  //      no task was active. `browserLiveRequested` opts the panel
+  //      into the per-user pool stream so the user sees their Brave.
+  // Selecting a task or starting a new one clears the request flag
+  // (handled in the store), so the stream binds back to task-scoped
+  // automatically once the user moves on.
+  const browserLiveRequested = useTaskStore((s) => s.browserLiveRequested);
   const hasActiveTask = Boolean(activeTaskId);
+  const shouldConnect = hasActiveTask || browserLiveRequested;
   // Item 6 — short-lived stream token for screencast / VNC WS auth.
   // Refreshes every 45s; the WS URL gets rebuilt when token rotates,
   // which forces a benign reconnect (the connection itself doesn't
   // need re-auth, but the URL needs the latest token for the next
-  // failed-connect retry). Skipped when there's no active task — the
-  // hook drops its token and stops fetching.
-  const { token: streamToken } = useStreamToken(hasActiveTask);
+  // failed-connect retry). Skipped when neither path enabled the
+  // panel — the hook drops its token and stops fetching.
+  const { token: streamToken } = useStreamToken(shouldConnect);
   // VNC live stream — memoised so prop identity is stable across
   // re-renders (the viewport's effect re-runs on any URL change).
   const vncUrl = React.useMemo(() => {
-    if (!hasActiveTask) return null;
+    if (!shouldConnect) return null;
     if (usingCdp) return null;
     return buildVncUrl(activeTaskId ?? null, poolUserId, streamToken);
-  }, [activeTaskId, hasActiveTask, poolUserId, usingCdp, streamToken]);
+  }, [activeTaskId, shouldConnect, poolUserId, usingCdp, streamToken]);
   // RC follow-up audit fix — generate / scrape tasks have NO pool
   // slot (no Brave allocated), so /screencast-ws/<taskId> 409s in a
   // loop and the user sees "画面已断开，重连中" cycling every ~5s
@@ -329,7 +347,7 @@ export function BrowserPanel({
   );
   const isNonPoolTask = Boolean(streamingForActive ?? progressForActive);
   const screencastUrlForCdp = React.useMemo(() => {
-    if (!hasActiveTask) return null;
+    if (!shouldConnect) return null;
     if (!usingCdp) return null;
     // Per-task pool: terminal tasks have no live Brave. Fall through
     // to the static frame fallback (last-frame JPEG) instead of
@@ -340,7 +358,7 @@ export function BrowserPanel({
     // disconnect banner doesn't flicker every 5 s.
     if (activeTaskId && isNonPoolTask) return null;
     return buildScreencastUrl(activeTaskId ?? null, poolUserId, streamToken);
-  }, [activeTaskId, hasActiveTask, poolUserId, usingCdp, taskTerminal, isNonPoolTask, streamToken]);
+  }, [activeTaskId, shouldConnect, poolUserId, usingCdp, taskTerminal, isNonPoolTask, streamToken]);
   // [HD-DEBUG] log every URL change (or change to/from null). Token
   // redacted so console dumps stay safe to share.
   React.useEffect(() => {
@@ -637,7 +655,7 @@ export function BrowserPanel({
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setCollapsed((c) => !c)}
+          onClick={toggleCollapsed}
           aria-label={collapsed ? '展开浏览器' : '收起浏览器'}
           className="absolute left-0 top-3 h-6 w-6 -translate-x-1/2 rounded-full border border-border bg-card shadow-sm"
         >

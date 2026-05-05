@@ -26,6 +26,13 @@ interface Props {
   batchChecked?: boolean;
   onBatchToggle?(taskId: string): void;
   /**
+   * Active / executing tasks can't be batch-deleted — backend will
+   * reject. With this flag set, the row dims its checkbox and
+   * swallows clicks so users can't accumulate undeletable rows in
+   * the selection set and then hit a wall on confirm.
+   */
+  batchDisabled?: boolean;
+  /**
    * Phase 16 — when present, the row renders a Star icon on the
    * trailing edge that toggles the task's starred flag. The icon is
    * filled when task.starred = true (visible always), or outline +
@@ -66,6 +73,7 @@ export function TaskListItem({
   batchMode,
   batchChecked,
   onBatchToggle,
+  batchDisabled,
   onToggleStarred,
 }: Props): JSX.Element {
   const active = isActive(task.status);
@@ -75,18 +83,26 @@ export function TaskListItem({
       onClick={() => {
         if (renaming) return;
         if (batchMode) {
+          if (batchDisabled) return;
           onBatchToggle?.(task.taskId);
           return;
         }
         onSelect(task.taskId);
       }}
       onContextMenu={onContextMenu ? (e) => onContextMenu(task.taskId, e) : undefined}
-      title={renaming ? undefined : `${task.intent}\n${subtitleFor(task)}`}
+      title={
+        renaming
+          ? undefined
+          : batchMode && batchDisabled
+            ? '进行中的任务无法批量删除'
+            : `${task.intent}\n${subtitleFor(task)}`
+      }
       className={cn(
         'group relative flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors',
         'hover:bg-foreground/5',
         selected && !batchMode && 'bg-foreground/[0.06]',
         batchMode && batchChecked && 'bg-blue-50/50 dark:bg-blue-500/10',
+        batchMode && batchDisabled && 'opacity-50',
       )}
     >
       {selected && !batchMode && (
@@ -103,6 +119,7 @@ export function TaskListItem({
             batchChecked
               ? 'border-foreground bg-foreground text-background'
               : 'border-muted-foreground/40',
+            batchDisabled && 'border-dashed',
           )}
         >
           {batchChecked && <span className="text-[10px] leading-none">✓</span>}
