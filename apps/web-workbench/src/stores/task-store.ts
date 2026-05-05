@@ -731,9 +731,15 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         tickCount: 0,
         createdAt: now,
       };
+      // composerMode flips back to 'task' here. Without this, a user
+      // who clicked 发新任务 (composerMode='new') and submitted ends
+      // up with selectedTaskId=res.taskId but composerMode still
+      // pinned to 'new' — leaving the store in an inconsistent state
+      // that any subsequent enterNewTaskMode() would clear.
       set((prev) => ({
         tasks: [optimistic, ...prev.tasks.filter((t) => t.taskId !== res.taskId)],
         selectedTaskId: res.taskId,
+        composerMode: 'task' as const,
       }));
       // Fire-and-forget refresh so the row's server-authored fields
       // (createdAt, status) replace the optimistic stub once available.
