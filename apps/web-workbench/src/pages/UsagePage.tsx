@@ -71,7 +71,7 @@ export function UsagePage(): JSX.Element {
         <div className="grid gap-4 md:grid-cols-3">
           <StatCard
             icon={<Activity className="h-4 w-4" />}
-            label="本月任务"
+            label="本月执行记录"
             value={loading ? '—' : String(snap?.monthTasksTotal ?? 0)}
             sub={
               snap == null
@@ -100,6 +100,9 @@ export function UsagePage(): JSX.Element {
         </div>
 
         <Section title="额度使用进度">
+          <p className="mb-3 text-[11px] text-muted-foreground">
+            额度仅计入成功消耗的任务，失败和系统任务不扣额度。
+          </p>
           <div className="flex items-center gap-3">
             <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
               <div

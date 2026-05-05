@@ -323,20 +323,64 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
                     delete next[taskId];
                     return next;
                   })(),
-              tasks: prev.tasks.map((t) =>
-                t.taskId === taskId
-                  ? {
-                      ...t,
-                      status: detail.status as UiTaskStatus,
-                      tickCount: Math.max(t.tickCount, steps.length),
-                      ...(resultText ? { resultText } : {}),
-                      ...(planText ? { planText } : {}),
-                      ...(planStatus ? { planStatus } : {}),
-                      ...(finalScreenshot ? { finalScreenshot } : {}),
-                      ...(finalUrl ? { finalUrl } : {}),
-                    }
-                  : t,
-              ),
+              tasks: (() => {
+                const exists = prev.tasks.some((t) => t.taskId === taskId);
+                if (exists) {
+                  return prev.tasks.map((t) =>
+                    t.taskId === taskId
+                      ? {
+                          ...t,
+                          status: detail.status as UiTaskStatus,
+                          tickCount: Math.max(t.tickCount, steps.length),
+                          ...(resultText ? { resultText } : {}),
+                          ...(planText ? { planText } : {}),
+                          ...(planStatus ? { planStatus } : {}),
+                          ...(finalScreenshot ? { finalScreenshot } : {}),
+                          ...(finalUrl ? { finalUrl } : {}),
+                        }
+                      : t,
+                  );
+                }
+                // P1-C — deep link to a task older than the first
+                // page. List didn't ship this row, so synthesise a
+                // UiTask from the detail and prepend. Without this
+                // the panel renders blank because activeTask is
+                // null and finalScreenshot can't surface.
+                const detailExtras = detail as typeof detail & {
+                  opusUsed?: boolean;
+                  starred?: boolean;
+                  starredAt?: Date | string | null;
+                  projectId?: string | null;
+                };
+                const synth: UiTask = {
+                  taskId,
+                  intent: detail.intent,
+                  title:
+                    typeof detail.title === 'string' ? detail.title : null,
+                  status: detail.status as UiTaskStatus,
+                  tickCount: steps.length,
+                  ...(resultText ? { resultText } : {}),
+                  createdAt: new Date(
+                    detail.createdAt as unknown as string | number | Date,
+                  ),
+                  modelLabel: detailExtras.opusUsed === true ? 'opus' : 'sonnet',
+                  starred: detailExtras.starred === true,
+                  starredAt: detailExtras.starredAt
+                    ? new Date(
+                        detailExtras.starredAt as unknown as string | number | Date,
+                      )
+                    : null,
+                  projectId:
+                    typeof detailExtras.projectId === 'string'
+                      ? detailExtras.projectId
+                      : null,
+                  ...(planText ? { planText } : {}),
+                  ...(planStatus ? { planStatus } : {}),
+                  ...(finalScreenshot ? { finalScreenshot } : {}),
+                  ...(finalUrl ? { finalUrl } : {}),
+                };
+                return [synth, ...prev.tasks];
+              })(),
             };
           });
         } catch (err) {

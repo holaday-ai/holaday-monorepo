@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { ToastProvider } from '@/components/ui/toast';
 import { BillingPage } from '@/pages/BillingPage';
 import { HistoryPage } from '@/pages/HistoryPage';
@@ -163,9 +163,26 @@ export function App(): JSX.Element {
           }
         />
 
-        <Route path="/app" element={<Navigate to="/" replace />} />
+        <Route path="/app" element={<AppAliasRedirect />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </ToastProvider>
+  );
+}
+
+/**
+ * P1-B — `/app` is the legacy alias the landing page lands on after
+ * auth handoff. The previous `<Navigate to="/" />` dropped query +
+ * hash, which killed any deep link routed through it (notably
+ * `/app/?task=tsk_xxx` from a shared link). Forward the full
+ * location so search + hash survive.
+ */
+function AppAliasRedirect(): JSX.Element {
+  const location = useLocation();
+  return (
+    <Navigate
+      to={{ pathname: '/', search: location.search, hash: location.hash }}
+      replace
+    />
   );
 }

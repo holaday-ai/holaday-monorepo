@@ -19,6 +19,13 @@ interface ListResponse {
   pickLimit: number;
   changesThisMonth: number;
   changesLimit: number;
+  /**
+   * P1-A — true when a Basic-plan user has more entries in
+   * selected_roles than the 5-pick limit (legacy state from the
+   * skill/role split migration). Drives the warning banner that
+   * tells them to trim before saving.
+   */
+  overLimit?: boolean;
 }
 
 const CATEGORY_ORDER: Array<{ key: RoleDefinition['category']; nameZh: string }> = [
@@ -150,10 +157,25 @@ export function RolesPage(): JSX.Element {
         </div>
       )}
 
+      {isBasic && data.overLimit && (
+        <div className="mb-4 rounded-lg border border-amber-300/40 bg-amber-50/50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-200">
+          你当前选择 <span className="font-semibold">{draft.length}</span> 个角色，
+          超出基础版 {BASIC_ROLE_PICK_LIMIT} 个上限。请取消勾选至 {BASIC_ROLE_PICK_LIMIT} 个以内
+          再保存，否则新任务将无法创建。
+        </div>
+      )}
+
       {isBasic && (
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
           <div className="flex flex-col text-xs text-muted-foreground">
-            <span className="text-sm font-medium text-foreground">
+            <span
+              className={cn(
+                'text-sm font-medium',
+                draft.length > BASIC_ROLE_PICK_LIMIT
+                  ? 'text-red-600 dark:text-red-400'
+                  : 'text-foreground',
+              )}
+            >
               已选 {draft.length} / {BASIC_ROLE_PICK_LIMIT}
             </span>
             <span>
@@ -173,7 +195,7 @@ export function RolesPage(): JSX.Element {
             <Button
               type="button"
               size="sm"
-              disabled={!dirty || saving}
+              disabled={!dirty || saving || draft.length > BASIC_ROLE_PICK_LIMIT}
               onClick={() => void save()}
             >
               {saving ? '保存中…' : dirty ? '保存' : '已保存'}

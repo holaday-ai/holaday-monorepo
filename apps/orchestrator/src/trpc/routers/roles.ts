@@ -33,7 +33,11 @@ const selectInput = z.object({
    * Empty list = "no roles" (a valid choice — user disables the
    * role layer entirely on Basic).
    */
-  roleIds: z.array(z.string()).max(BASIC_ROLE_PICK_LIMIT),
+  roleIds: z
+    .array(z.string())
+    .max(BASIC_ROLE_PICK_LIMIT, {
+      message: `基础版最多可选 ${BASIC_ROLE_PICK_LIMIT} 个角色，请先减少再保存`,
+    }),
 });
 
 /** Same UTC month boundary the QuotaService uses for paid plans. */
@@ -64,13 +68,23 @@ export const rolesRouter = router({
       user.roleChangesPeriodStart && user.roleChangesPeriodStart >= monthStart
         ? user.roleChangesThisMonth
         : 0;
+    const selected = (user.selectedRoles ?? []) as string[];
+    // P1-A — flag legacy over-limit state. The skill/role split
+    // migration left some Basic users with > 5 entries in
+    // selected_roles (everything that hit ROLE_CATALOGUE got kept).
+    // Saving anything new is already blocked by the zod max(5)
+    // input check; this flag lets the SPA render an explicit
+    // "你当前选择超出基础版上限" banner so the user knows they
+    // need to trim before they can save.
+    const overLimit = user.plan === 'basic' && selected.length > BASIC_ROLE_PICK_LIMIT;
     return {
       plan: user.plan,
-      selected: (user.selectedRoles ?? []) as string[],
+      selected,
       catalogue: ROLE_CATALOGUE,
       pickLimit: BASIC_ROLE_PICK_LIMIT,
       changesThisMonth,
       changesLimit: ROLE_CHANGES_PER_MONTH,
+      overLimit,
     };
   }),
 

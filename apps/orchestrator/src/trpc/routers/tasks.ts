@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import {
+  BASIC_ROLE_PICK_LIMIT,
   gateRoleForUser,
   newExternalId,
   type PlanId,
@@ -332,6 +333,20 @@ export const tasksRouter = router({
     const planId: PlanId =
       userRow.plan === 'basic' || userRow.plan === 'pro' ? userRow.plan : 'free';
     const selectedRoles = (userRow.selectedRoles ?? []) as string[];
+
+    // P1-A — Basic-plan over-limit gate. The skill/role split
+    // migration left some users with > 5 entries in selected_roles.
+    // gateRoleForUser would happily inject any of the 8 detected
+    // matches, effectively letting Basic users benefit from a 8-pick
+    // allowance they never paid for. Refuse the task until they
+    // trim back to ≤ 5 in /settings/roles. Auto-trim is intentionally
+    // avoided — the user should pick which 5 to keep.
+    if (planId === 'basic' && selectedRoles.length > BASIC_ROLE_PICK_LIMIT) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: `你当前选择 ${selectedRoles.length} 个角色，超出基础版 ${BASIC_ROLE_PICK_LIMIT} 个上限。请到 /settings/roles 调整，或升级到专业版解除限制。`,
+      });
+    }
 
     // Role gate. classifyRole runs the same keyword classifier the
     // agent-loop uses; gateRoleForUser then drops it back to 'none'
@@ -2495,6 +2510,20 @@ export const tasksRouter = router({
         .where(eq(taskSteps.taskId, taskRow.id))
         .orderBy(asc(taskSteps.seq));
 
+      // P1-C — translate internal projectId to the public prj_… id
+      // so the SPA gets the same shape `tasks.list` ships. Without
+      // this, an upsert from a deep link would land a UiTask whose
+      // projectId is the bigint primary key, which the sidebar
+      // can't match to a project route.
+      const projectExternalId = await (async (): Promise<string | null> => {
+        if (taskRow.projectId == null) return null;
+        const [proj] = await ctx.db
+          .select({ externalId: projects.externalId })
+          .from(projects)
+          .where(eq(projects.id, taskRow.projectId))
+          .limit(1);
+        return proj?.externalId ?? null;
+      })();
       return {
         taskId: taskRow.externalId,
         intent: taskRow.intent,
@@ -2508,6 +2537,13 @@ export const tasksRouter = router({
         awaitingQuestion: taskRow.awaitingQuestion ?? null,
         errorCode: taskRow.errorCode,
         errorMessage: taskRow.errorMessage,
+        // P1-C — extra fields the SPA's UiTask shape needs when this
+        // task isn't already in the loaded sidebar list (deep links
+        // beyond the first 50). tasks.list ships these too.
+        opusUsed: Boolean(taskRow.opusUsed),
+        starred: Boolean(taskRow.starred),
+        starredAt: taskRow.starredAt,
+        projectId: projectExternalId,
         result: normalizeOutput(taskRow.result),
         // Phase 13 Dim 1 — surface plan body so a re-opened tab
         // re-renders the PlanCard from persisted state instead of
