@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type PageLike, PlaywrightExecutor, annotateAriaSnapshot } from './playwright-executor.js';
 
 beforeAll(() => {
@@ -468,6 +468,20 @@ describe('PlaywrightExecutor.isPageResponsive', () => {
 });
 
 describe('PlaywrightExecutor.getPage — anti-bot auto-recovery', () => {
+  // Both tests stub `evaluate` to hang forever, so getPage waits out
+  // its responsive-probe deadline before falling back. Setting
+  // ACTION_TIMEOUT_MS=200 collapses the 3 s default to 200 ms so the
+  // suite doesn't trip vitest's per-test cap on slower CI machines.
+  let prevActionTimeout: string | undefined;
+  beforeEach(() => {
+    prevActionTimeout = process.env.ACTION_TIMEOUT_MS;
+    process.env.ACTION_TIMEOUT_MS = '200';
+  });
+  afterEach(() => {
+    if (prevActionTimeout === undefined) delete process.env.ACTION_TIMEOUT_MS;
+    else process.env.ACTION_TIMEOUT_MS = prevActionTimeout;
+  });
+
   it('soft-resets a stuck page by navigating to about:blank', async () => {
     const { page: stuckPage, calls } = makeFakePage({
       evaluate: () => new Promise(() => {}), // hangs → not responsive

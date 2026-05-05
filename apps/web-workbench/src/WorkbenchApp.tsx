@@ -714,8 +714,15 @@ function AppShell(): JSX.Element {
         }}
         onOpenSidebar={() => setSidebarOpen(true)}
         onOpenBrowser={() => {
+          // Mobile parity with the sidebar 浏览器 entry — wake the
+          // pool browser so the sheet shows a live frame instead of
+          // a dead about:blank when the user opens it from the
+          // mobile shell.
           requestBrowserLive();
           setBrowserSheetOpen(true);
+          void trpc.tasks.wakeBrowser.mutate().catch(() => {
+            /* fire-and-forget, surfaces in toast on real task drive */
+          });
         }}
       />
       )}

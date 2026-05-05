@@ -68,18 +68,20 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
   }
   if (!snap) return null;
 
-  // Total available (limit + bonus) drives the percentage. Bonus gets
-  // its own ghost segment on the bar so users can see why their
-  // remaining count exceeds the plan ceiling.
+  // Drive the bar straight off `remaining` so the percentage and the
+  // displayed "剩余 X / Y" number can never disagree. The previous
+  // formula divided `tasksUsed` by (limit + bonus), but `tasksUsed`
+  // only counts regular-slot consumption — bonus tasks decrement
+  // `bonusTasks` instead. With bonus-first consumption that meant
+  // a user could burn through their entire add-on pack and the bar
+  // still read 0%. Now the bar reflects whatever `tasksRemaining`
+  // says, which the quota service already computes correctly.
   const totalLimit = snap.tasksLimit + snap.bonusTasks;
-  const totalUsed = snap.tasksUsed; // bonus gets decremented on consume, not used here
-  // Display logic: remaining is what we surface to the user. Used /
-  // limit goes in the secondary line.
   const remaining = snap.tasksRemaining;
-  // Visualised as "used / total" with bonus folded into total. So a
-  // basic plan with 5 used + 10 bonus shows 5/110 in the secondary
-  // line — feels right because bonus is real headroom they can use.
-  const usedPct = totalLimit > 0 ? Math.min(100, Math.round((totalUsed / totalLimit) * 100)) : 0;
+  const usedPct =
+    totalLimit > 0
+      ? Math.min(100, Math.max(0, Math.round(((totalLimit - remaining) / totalLimit) * 100)))
+      : 0;
   const periodLabel = snap.period === 'day' ? '今日' : '本月';
   const lowOnTasks = remaining <= Math.max(1, Math.floor(totalLimit * 0.1));
   const outOfTasks = remaining === 0;

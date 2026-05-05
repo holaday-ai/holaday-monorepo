@@ -484,14 +484,19 @@ export class PlaywrightExecutor {
     // cheaply (evaluate('1') with a 3s race), try a soft reset
     // (goto about:blank, 5s), then hard-reset by opening a fresh
     // page and best-effort closing the old one.
-    const responsive = await this.isPageResponsive(page as unknown as PageLike);
+    const responsive = await this.isPageResponsive(
+      page as unknown as PageLike,
+      antiBotResponsiveTimeoutMs(),
+    );
     if (responsive) {
       this.activePage = page;
       await this.applyStealthToPageIfNeeded(page as unknown as PageLike);
       return page;
     }
     try {
-      await (page as unknown as PageLike).goto('about:blank', { timeout: 5_000 });
+      await (page as unknown as PageLike).goto('about:blank', {
+        timeout: antiBotSoftResetTimeoutMs(),
+      });
       this.activePage = page;
       await this.applyStealthToPageIfNeeded(page as unknown as PageLike);
       return page;
@@ -988,6 +993,18 @@ const SCROLL_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 5_000;
 const NAVIGATE_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 15_000;
 const SCREENSHOT_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 10_000;
 const CLICK_BY_ROLE_TIMEOUT_MS = ACTION_TIMEOUT_OVERRIDE ?? 10_000;
+
+// Anti-bot recovery uses two probes. Both honour `ACTION_TIMEOUT_MS`
+// so unit tests (which set it to e.g. 200 ms) don't sit on the
+// 3 s / 5 s production defaults — the auto-recovery suite was
+// occasionally tripping vitest's 5 s per-test cap when `evaluate`
+// was stubbed to hang forever.
+function antiBotResponsiveTimeoutMs(): number {
+  return readEnvTimeoutOrNull('ACTION_TIMEOUT_MS') ?? 3_000;
+}
+function antiBotSoftResetTimeoutMs(): number {
+  return readEnvTimeoutOrNull('ACTION_TIMEOUT_MS') ?? 5_000;
+}
 
 function readEnvTimeoutOrNull(name: string): number | null {
   const raw = process.env[name];

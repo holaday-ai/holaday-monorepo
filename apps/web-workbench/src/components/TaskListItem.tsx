@@ -61,6 +61,18 @@ export function taskDisplayTitle(task: UiTask, maxLen = 24): string {
  * One row in the sidebar task list, Claude-style. Single-line intent
  * with a colour-coded status dot to its left; no subtitle row. A 2px
  * blue left-bar marks the selected row. Hover tints the background.
+ *
+ * Root is a non-interactive `<div>` so the star + menu can be real
+ * `<button>` elements without a nested-button DOM warning. The label
+ * area is the click target — a transparent, full-width `<button>`
+ * sized over the row's content. Star + menu sit above it (z-10) and
+ * stop propagation, so clicking them never accidentally selects the
+ * task.
+ *
+ * Touch parity: star + menu render at full opacity on viewports
+ * narrower than `lg` (the breakpoint our sidebar collapses to a
+ * sheet at). On desktop they keep the existing hover-reveal
+ * behaviour so the row stays clean at rest.
  */
 export function TaskListItem({
   task,
@@ -77,26 +89,29 @@ export function TaskListItem({
   onToggleStarred,
 }: Props): JSX.Element {
   const active = isActive(task.status);
+  const handleRowClick = (
+    e: React.MouseEvent | React.KeyboardEvent,
+  ): void => {
+    if (renaming) return;
+    if (batchMode) {
+      if (batchDisabled) return;
+      onBatchToggle?.(task.taskId);
+      return;
+    }
+    void e;
+    onSelect(task.taskId);
+  };
+  const rowTitle = renaming
+    ? undefined
+    : batchMode && batchDisabled
+      ? '进行中的任务无法批量删除'
+      : `${task.intent}\n${subtitleFor(task)}`;
   return (
-    <button
-      type="button"
-      onClick={() => {
-        if (renaming) return;
-        if (batchMode) {
-          if (batchDisabled) return;
-          onBatchToggle?.(task.taskId);
-          return;
-        }
-        onSelect(task.taskId);
-      }}
-      onContextMenu={onContextMenu ? (e) => onContextMenu(task.taskId, e) : undefined}
-      title={
-        renaming
-          ? undefined
-          : batchMode && batchDisabled
-            ? '进行中的任务无法批量删除'
-            : `${task.intent}\n${subtitleFor(task)}`
+    <div
+      onContextMenu={
+        onContextMenu ? (e) => onContextMenu(task.taskId, e) : undefined
       }
+      title={rowTitle}
       className={cn(
         'group relative flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors',
         'hover:bg-foreground/5',
@@ -133,69 +148,62 @@ export function TaskListItem({
           onCancel={onRenameCancel ?? (() => {})}
         />
       ) : (
-        <span
+        <button
+          type="button"
+          onClick={handleRowClick}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              handleRowClick(e);
+            }
+          }}
+          aria-pressed={selected && !batchMode ? true : undefined}
           className={cn(
-            'min-w-0 flex-1 truncate text-[13px] leading-5',
+            'min-w-0 flex-1 truncate bg-transparent text-left text-[13px] leading-5 outline-none focus-visible:ring-1 focus-visible:ring-ring',
             task.status === 'failed' ? 'text-muted-foreground' : 'text-foreground',
             selected && 'font-medium',
           )}
         >
           {taskDisplayTitle(task)}
-        </span>
+        </button>
       )}
       {!renaming && onToggleStarred && (
-        <span
-          role="button"
+        <button
+          type="button"
           aria-label={task.starred ? '取消收藏' : '收藏'}
           aria-pressed={Boolean(task.starred)}
-          tabIndex={0}
           onClick={(e) => {
             e.stopPropagation();
             onToggleStarred(task.taskId);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              e.stopPropagation();
-              onToggleStarred(task.taskId);
-            }
           }}
           className={cn(
             'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded transition-opacity hover:bg-foreground/10 focus-visible:opacity-100',
             task.starred
               ? 'text-amber-500 opacity-100'
-              : 'text-muted-foreground opacity-0 group-hover:opacity-100',
+              : 'text-muted-foreground opacity-100 lg:opacity-0 lg:group-hover:opacity-100',
           )}
         >
           <Star
             className="h-3.5 w-3.5"
             fill={task.starred ? 'currentColor' : 'none'}
           />
-        </span>
+        </button>
       )}
       {!renaming && onContextMenu && (
-        <span
-          role="button"
+        <button
+          type="button"
           aria-label="任务菜单"
-          tabIndex={0}
           onClick={(e) => {
             e.stopPropagation();
             onContextMenu(task.taskId, e);
           }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              e.stopPropagation();
-              onContextMenu(task.taskId, e as unknown as React.MouseEvent);
-            }
-          }}
-          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-foreground/10 focus-visible:opacity-100 group-hover:opacity-100"
+          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-100 transition-opacity hover:bg-foreground/10 focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
         >
           <MoreHorizontal className="h-3.5 w-3.5" />
-        </span>
+        </button>
       )}
       {active && !renaming && <span className="sr-only">进行中 · {subtitleFor(task)}</span>}
-    </button>
+    </div>
   );
 }
 

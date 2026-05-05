@@ -783,34 +783,37 @@ function ExecutorFallbackBanner({
   );
 }
 
+// Map the recovery escalation level to natural-language copy. The
+// internal strategy name (`profile_rotation` / `proxy_swap` / etc.)
+// reads as engineering jargon to a user — they don't need to know
+// which lever the agent pulled, only that it's still trying. Pinned
+// to the level number so the message stays stable as new strategies
+// are added under each tier.
+const DEGRADE_LEVEL_COPY: Readonly<Record<number, string>> = {
+  1: '页面拦截了自动化访问，正在调整访问方式…',
+  2: '正在尝试更稳定的访问方式…',
+  3: '正在切换网络通道重试…',
+};
+
 function DegradeBanner({ event }: { event: UiDegradeEvent }): JSX.Element {
-  const label = STRATEGY_LABELS[event.strategy] ?? event.strategy;
+  const message =
+    DEGRADE_LEVEL_COPY[event.level] ?? '正在尝试替代方案…';
   return (
     <div className="flex animate-fade-in items-start gap-3 rounded-xl border border-pink-300 bg-pink-50/70 px-4 py-3 dark:border-pink-500/40 dark:bg-pink-500/10">
       <Puzzle className="mt-0.5 h-5 w-5 shrink-0 text-pink-600" />
       <div className="min-w-0 flex-1 text-sm">
-        <div className="font-semibold text-pink-900 dark:text-pink-100">
-          正在尝试替代方案（level {event.level}）
+        <div className="font-medium text-pink-900 dark:text-pink-100">
+          {message}
         </div>
-        <div className="mt-1 text-xs text-pink-900/80 dark:text-pink-100/80">
-          策略：<span className="font-medium">{label}</span>
-          {event.ok ? '' : '（未生效，继续升级）'}
-        </div>
-        {event.nextUrl ? (
-          <div className="mt-1 text-xs text-pink-900/80 dark:text-pink-100/80">下一步导航：{event.nextUrl}</div>
-        ) : null}
+        {!event.ok && (
+          <div className="mt-1 text-xs text-pink-900/80 dark:text-pink-100/80">
+            上一次尝试未生效，继续切换方式。
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
-const STRATEGY_LABELS: Readonly<Record<string, string>> = {
-  profile_rotation: '清 cookie + 换 UA',
-  proxy_swap: '切换代理（需配置）',
-  search_engine_swap: '换搜索引擎',
-  search_api_fallback: '走搜索 API',
-  extension_fallback: '切到浏览器扩展',
-};
 
 function TerminalSummary({
   status,
