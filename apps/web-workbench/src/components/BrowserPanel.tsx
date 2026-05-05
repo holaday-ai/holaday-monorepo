@@ -18,9 +18,9 @@ import {
   type CdpScreencastStatus,
 } from '@/components/CdpScreencastViewport';
 import { VncViewport, type VncStatus } from '@/components/VncViewport';
-import { getAccessToken } from '@/lib/auth';
 import { hdDebug } from '@/lib/hd-debug';
 import { trpc } from '@/lib/trpc';
+import { useStreamToken } from '@/lib/use-stream-token';
 import { send as wsSend } from '@/lib/ws';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
@@ -60,20 +60,22 @@ const VNC_PATH = (import.meta.env.VITE_VNC_PATH as string | undefined) ?? '/vnc/
 function buildVncUrl(
   activeTaskId: string | null,
   poolUserId: string | null,
+  streamToken: string | null,
 ): string | null {
   if (typeof window === 'undefined') return null;
   const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
   // Prefer the per-task route so concurrent tasks each get their
   // own VNC stream; fall back to the legacy userId path (caller's
   // most-recently-active task) when no task is selected. Mirrors
-  // buildScreencastUrl below.
+  // buildScreencastUrl below. Token is the 60s stream JWT, not the
+  // workbench access JWT — keeps the long-lived secret out of WS
+  // URLs that browsers print on connect failure.
   const arg = activeTaskId ?? poolUserId;
   if (arg) {
-    const token = getAccessToken();
-    if (!token) return null;
+    if (!streamToken) return null;
     return `${scheme}://${window.location.host}/vnc-ws/${encodeURIComponent(
       arg,
-    )}?token=${encodeURIComponent(token)}`;
+    )}?token=${encodeURIComponent(streamToken)}`;
   }
   if (!VNC_PATH) return null;
   return `${scheme}://${window.location.host}${VNC_PATH}`;
@@ -96,16 +98,16 @@ function buildVncUrl(
 function buildScreencastUrl(
   activeTaskId: string | null,
   poolUserId: string | null,
+  streamToken: string | null,
 ): string | null {
   if (typeof window === 'undefined') return null;
   const arg = activeTaskId ?? poolUserId;
   if (!arg) return null;
-  const token = getAccessToken();
-  if (!token) return null;
+  if (!streamToken) return null;
   const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
   return `${scheme}://${window.location.host}/screencast-ws/${encodeURIComponent(
     arg,
-  )}?token=${encodeURIComponent(token)}`;
+  )}?token=${encodeURIComponent(streamToken)}`;
 }
 
 /**
@@ -290,11 +292,17 @@ export function BrowserPanel({
     taskStatus === 'completed' ||
     taskStatus === 'failed' ||
     taskStatus === 'cancelled';
+  // Item 6 — short-lived stream token for screencast / VNC WS auth.
+  // Refreshes every 45s; the WS URL gets rebuilt when token rotates,
+  // which forces a benign reconnect (the connection itself doesn't
+  // need re-auth, but the URL needs the latest token for the next
+  // failed-connect retry).
+  const { token: streamToken } = useStreamToken();
   // VNC live stream — memoised so prop identity is stable across
   // re-renders (the viewport's effect re-runs on any URL change).
   const vncUrl = React.useMemo(
-    () => (usingCdp ? null : buildVncUrl(activeTaskId ?? null, poolUserId)),
-    [activeTaskId, poolUserId, usingCdp],
+    () => (usingCdp ? null : buildVncUrl(activeTaskId ?? null, poolUserId, streamToken)),
+    [activeTaskId, poolUserId, usingCdp, streamToken],
   );
   // RC follow-up audit fix — generate / scrape tasks have NO pool
   // slot (no Brave allocated), so /screencast-ws/<taskId> 409s in a
@@ -320,8 +328,8 @@ export function BrowserPanel({
     // a /screencast-ws/<taskId> backend; skip the WS so the
     // disconnect banner doesn't flicker every 5 s.
     if (activeTaskId && isNonPoolTask) return null;
-    return buildScreencastUrl(activeTaskId ?? null, poolUserId);
-  }, [activeTaskId, poolUserId, usingCdp, taskTerminal, isNonPoolTask]);
+    return buildScreencastUrl(activeTaskId ?? null, poolUserId, streamToken);
+  }, [activeTaskId, poolUserId, usingCdp, taskTerminal, isNonPoolTask, streamToken]);
   // [HD-DEBUG] log every URL change (or change to/from null). Token
   // redacted so console dumps stay safe to share.
   React.useEffect(() => {

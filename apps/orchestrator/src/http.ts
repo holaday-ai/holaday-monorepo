@@ -10,6 +10,7 @@ import type { VisionLoopCommander } from './agent/vision-loop/commander.js';
 import type { PlaywrightExecutor } from './agent/vision-loop/playwright-executor.js';
 import type { BrowserPool } from './browser-pool/index.js';
 import { bearerAuth } from './auth/middleware.js';
+import { signStreamToken } from './auth/jwt.js';
 import { AuthService } from './auth/service.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
@@ -384,6 +385,33 @@ export function createHttpApp(deps: HttpAppDeps) {
       fileSize: Math.max(...Object.values(UPLOAD_BYTE_LIMIT)),
       files: 1,
     },
+  });
+
+  // Item 6 — short-lived JWT for screencast / VNC WS connections.
+  // The SPA fetches one of these per connect, swaps it into the
+  // WS URL, and discards it. Keeps the long-lived workbench JWT
+  // out of WS error logs (browsers print failed-WS URLs verbatim
+  // including the query token), shrinking the leak surface from
+  // 7 days to 60 seconds. Auth is the regular bearer middleware
+  // — caller proves identity with the long-lived token; the
+  // returned stream token is scoped to the streaming audience
+  // and can't be replayed against tRPC.
+  app.post('/stream-token', async (req, res) => {
+    const userExternalId = (req as express.Request & { userId?: string }).userId;
+    if (!userExternalId) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    try {
+      const { token, expiresIn } = await signStreamToken(userExternalId);
+      res.json({ token, expiresIn });
+    } catch (err) {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        'stream-token: sign failed',
+      );
+      res.status(500).json({ error: 'sign_failed' });
+    }
   });
 
   app.post('/files/upload', upload.single('file'), async (req, res) => {

@@ -1038,20 +1038,14 @@ function makeMarkdownComponents(opts: {
       </a>
     ),
     table: ({ children, ...rest }) => (
-      // P2.7 — mobile overflow. The `min-w-full` rule forced wide
-      // tables to render at the parent's full width, killing the
-      // x-scroll on screens narrower than the column count needed.
-      // Removing it lets tables sit at their natural width and the
-      // outer wrapper handles horizontal scroll. Right edge gets a
-      // soft fade so the user knows there's more off-screen.
-      <div className="relative my-3 -mx-1 overflow-x-auto rounded-md after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-6 after:rounded-r-md after:bg-gradient-to-l after:from-background after:to-transparent">
-        <table
-          className="w-auto border-collapse rounded-md border border-border text-left text-[13px]"
-          {...rest}
-        >
-          {children}
-        </table>
-      </div>
+      // Item 5 — mobile <640px renders the table as one card per
+      // row with explicit "Header: value" lines. The desktop table
+      // is hidden via Tailwind responsive classes so the same
+      // children tree is traversed once for the cards but the table
+      // remains the source of truth. Cells get `overflow-wrap:
+      // anywhere` so long unbroken values (URLs, hashes) don't
+      // push card width past the viewport.
+      <ResponsiveMarkdownTable rest={rest}>{children}</ResponsiveMarkdownTable>
     ),
     thead: ({ children, ...rest }) => (
       <thead className="bg-muted/60 text-[12px] font-medium text-foreground" {...rest}>
@@ -1132,4 +1126,97 @@ function makeMarkdownComponents(opts: {
       );
     },
   };
+}
+
+/**
+ * Item 5 — markdown table that switches to per-row cards on screens
+ * narrower than 640px. The desktop table stays in DOM (hidden via
+ * `hidden sm:block`) so the children tree only renders once; the
+ * card view is built by traversing `<thead>` / `<tbody>` children
+ * to extract headers + rows.
+ *
+ * Long unbroken cell values get `overflow-wrap: anywhere` so URLs /
+ * hashes / token strings break instead of overflowing the card.
+ */
+function ResponsiveMarkdownTable({
+  children,
+  rest,
+}: {
+  children: React.ReactNode;
+  rest: Record<string, unknown>;
+}): JSX.Element {
+  const data = React.useMemo(() => extractTableData(children), [children]);
+  return (
+    <>
+      <div className="relative my-3 -mx-1 hidden overflow-x-auto rounded-md after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-6 after:rounded-r-md after:bg-gradient-to-l after:from-background after:to-transparent sm:block">
+        <table
+          className="w-auto border-collapse rounded-md border border-border text-left text-[13px]"
+          {...rest}
+        >
+          {children}
+        </table>
+      </div>
+      {data && data.rows.length > 0 && (
+        <div className="my-3 space-y-2 sm:hidden">
+          {data.rows.map((row, ri) => (
+            <div
+              key={ri}
+              className="space-y-1 rounded-md border border-border bg-muted/30 p-3 text-[13px]"
+            >
+              {row.map((cell, ci) => (
+                <div
+                  key={ci}
+                  className="flex flex-col gap-0.5 border-b border-border/50 pb-1 last:border-b-0 last:pb-0 [overflow-wrap:anywhere]"
+                >
+                  <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    {data.headers[ci] ?? ''}
+                  </span>
+                  <span className="text-foreground">{cell}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+interface TableData {
+  headers: React.ReactNode[];
+  rows: React.ReactNode[][];
+}
+
+function extractTableData(children: React.ReactNode): TableData | null {
+  const headers: React.ReactNode[] = [];
+  const rows: React.ReactNode[][] = [];
+  React.Children.forEach(children, (section) => {
+    if (!React.isValidElement(section)) return;
+    const sectionType = section.type;
+    if (sectionType === 'thead') {
+      const trProps = (section.props as { children?: React.ReactNode }).children;
+      React.Children.forEach(trProps, (tr) => {
+        if (!React.isValidElement(tr)) return;
+        const ths = (tr.props as { children?: React.ReactNode }).children;
+        React.Children.forEach(ths, (th) => {
+          if (!React.isValidElement(th)) return;
+          headers.push((th.props as { children?: React.ReactNode }).children);
+        });
+      });
+    } else if (sectionType === 'tbody') {
+      const trList = (section.props as { children?: React.ReactNode }).children;
+      React.Children.forEach(trList, (tr) => {
+        if (!React.isValidElement(tr)) return;
+        const tds = (tr.props as { children?: React.ReactNode }).children;
+        const row: React.ReactNode[] = [];
+        React.Children.forEach(tds, (td) => {
+          if (!React.isValidElement(td)) return;
+          row.push((td.props as { children?: React.ReactNode }).children);
+        });
+        rows.push(row);
+      });
+    }
+  });
+  if (headers.length === 0 && rows.length === 0) return null;
+  return { headers, rows };
 }

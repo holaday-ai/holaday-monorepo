@@ -17,6 +17,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { isUploadError, uploadFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
+import { useTaskStore } from '@/stores/task-store';
 
 interface Props {
   onSubmit: (
@@ -99,25 +100,42 @@ export function InputArea({
   // P2.8 — pre-stage a DraftAttachment when FilesPage hands one off
   // via React Router state. Consumes the state once (replaceState
   // clears it) so a refresh on `/` doesn't re-attach the same file.
+  // Item 3 follow-up: when state.newTask is also set, clear the
+  // current task selection first. Otherwise a user with a recently-
+  // completed task selected would land here, see the attachment
+  // pre-staged, and unknowingly submit as a 追问 of the old task
+  // (the orchestrator branches on `selectedTaskId` for follow-ups).
+  const selectAndHydrateTask = useTaskStore((s) => s.selectAndHydrateTask);
   React.useEffect(() => {
-    const handoff = (location.state as { attachFile?: { fileId: string; filename: string; mimetype: string; sizeBytes: number } } | null)?.attachFile;
-    if (!handoff) return;
-    setAttachments((prev) => {
-      if (prev.some((a) => a.fileId === handoff.fileId)) return prev;
-      return [
-        ...prev,
-        {
-          fileId: handoff.fileId,
-          filename: handoff.filename,
-          mimetype: handoff.mimetype,
-          size: handoff.sizeBytes,
-          status: 'ready' as const,
-        },
-      ];
-    });
+    const state = location.state as
+      | {
+          attachFile?: { fileId: string; filename: string; mimetype: string; sizeBytes: number };
+          newTask?: boolean;
+        }
+      | null;
+    const handoff = state?.attachFile;
+    if (!handoff && !state?.newTask) return;
+    if (state?.newTask) {
+      selectAndHydrateTask(null);
+    }
+    if (handoff) {
+      setAttachments((prev) => {
+        if (prev.some((a) => a.fileId === handoff.fileId)) return prev;
+        return [
+          ...prev,
+          {
+            fileId: handoff.fileId,
+            filename: handoff.filename,
+            mimetype: handoff.mimetype,
+            size: handoff.sizeBytes,
+            status: 'ready' as const,
+          },
+        ];
+      });
+    }
     // Clear the state so re-renders / back-nav don't re-trigger.
     navigate(location.pathname + location.search, { replace: true, state: null });
-  }, [location, navigate]);
+  }, [location, navigate, selectAndHydrateTask]);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const imageInputRef = React.useRef<HTMLInputElement>(null);
   // O14 — + button menu state. Closes on outside click and after

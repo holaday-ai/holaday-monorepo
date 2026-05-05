@@ -311,6 +311,25 @@ function AppShell(): JSX.Element {
     selectAndHydrateTask(taskParam);
   }, [bootstrapped, taskParam, selectedTaskId, selectAndHydrateTask]);
 
+  // Item 4 — outbound URL sync. The inbound direction (URL → store)
+  // already lives in the effect above; this one closes the loop by
+  // mirroring the store's `selectedTaskId` into `?task=`. Click in
+  // the sidebar / search overlay / starred / etc. now writes the
+  // URL automatically — no need to wrap every call site. Refresh
+  // preserves the active task. Both directions are guarded so they
+  // can't pingpong (each compares URL ↔ state before navigating /
+  // dispatching). Other params (e.g. `?project=`) preserved.
+  React.useEffect(() => {
+    if (!bootstrapped) return;
+    const desired = selectedTaskId ?? null;
+    if ((taskParam ?? null) === desired) return;
+    const next = new URLSearchParams(searchParams);
+    if (desired) next.set('task', desired);
+    else next.delete('task');
+    const search = next.toString() ? `?${next.toString()}` : '';
+    navigate({ pathname: '/', search }, { replace: true });
+  }, [bootstrapped, selectedTaskId, taskParam, searchParams, navigate]);
+
   // Auth invalidated by server (bad / expired token).
   React.useEffect(() => {
     if (wsStatus === 'unauthorized' && authed) {

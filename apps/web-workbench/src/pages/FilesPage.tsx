@@ -77,6 +77,12 @@ export function FilesPage(): JSX.Element {
     // Carrying the full UiFile means InputArea can pre-stage the
     // DraftAttachment without a separate metadata round-trip — the
     // chip renders immediately and submission already has the fileId.
+    //
+    // Item 3 — `newTask: true` tells the composer to drop any
+    // currently-selected terminal task and dismiss the follow-up
+    // chip. Otherwise a user with a recently-completed task selected
+    // would land on /, see the file pre-attached, and unknowingly
+    // submit a 追问 of the old task instead of a fresh task.
     navigate('/', {
       state: {
         attachFile: {
@@ -85,6 +91,7 @@ export function FilesPage(): JSX.Element {
           mimetype: f.mimetype,
           sizeBytes: f.sizeBytes,
         },
+        newTask: true,
       },
     });
   }

@@ -145,16 +145,28 @@ export const rolesRouter = router({
     // Anti-thrash: 3 changes per UTC calendar month. Counts only
     // when the new selection actually differs from the current one
     // — re-saving the same picks doesn't burn a change.
+    //
+    // P1-final-followup — repair flow doesn't burn a change either.
+    // Compare `dedup` against the SANITIZED current (Pro-only ids
+    // stripped). When equal, the user is just rewriting the row to
+    // its already-effective state — no functional change, so no
+    // counter consumption. Without this carve-out, a user whose 3
+    // monthly changes are spent can never repair their corrupted
+    // selected_roles row, and stays locked out of task creation.
     const monthStart = currentMonthStart();
     const periodInSync =
       user.roleChangesPeriodStart && user.roleChangesPeriodStart >= monthStart;
     const currentSelected = (user.selectedRoles ?? []) as string[];
-    const sameSelection =
-      currentSelected.length === dedup.length &&
-      currentSelected.every((id) => dedup.includes(id));
+    const sanitizedCurrent = currentSelected.filter((id) => OPEN_POOL_SET.has(id));
+    const sortedKey = (a: readonly string[]): string =>
+      [...a].sort().join('|');
+    const dedupKey = sortedKey(dedup);
+    const isRepair = sortedKey(sanitizedCurrent) === dedupKey;
+    const isExactNoOp = sortedKey(currentSelected) === dedupKey;
+    const isFunctionalChange = !isRepair && !isExactNoOp;
 
     let nextChangesThisMonth = periodInSync ? user.roleChangesThisMonth : 0;
-    if (!sameSelection) {
+    if (isFunctionalChange) {
       if (nextChangesThisMonth >= ROLE_CHANGES_PER_MONTH) {
         throw new TRPCError({
           code: 'TOO_MANY_REQUESTS',

@@ -24,7 +24,7 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Logger } from 'pino';
 import { WebSocket, WebSocketServer } from 'ws';
-import { verifyAccessToken } from '../auth/jwt.js';
+import { verifyStreamOrAccessToken } from '../auth/jwt.js';
 import type { BrowserPool } from './browser-pool.js';
 
 export interface VncProxyOptions {
@@ -81,10 +81,13 @@ export function createVncProxy(opts: VncProxyOptions): VncProxy {
       return reject(socket, 401, 'missing bearer token');
     }
 
-    // verifyAccessToken is async (jose jwtVerify). Kick it off and
-    // continue on the returned promise — if rejected or null we close
-    // the raw TCP socket, never calling wss.handleUpgrade.
-    verifyAccessToken(token).then((claims) => {
+    // verifyStreamOrAccessToken accepts either a short-lived stream
+    // token (preferred — fresh per connect, 60s TTL) or the legacy
+    // long-lived workbench JWT (kept for SPA versions that haven't
+    // shipped the stream-token swap yet). Kick off async; if
+    // rejected or null we close the raw TCP socket, never calling
+    // wss.handleUpgrade.
+    verifyStreamOrAccessToken(token).then((claims) => {
       if (!claims) {
         log.warn({}, 'jwt verify returned null — invalid token');
         return reject(socket, 401, 'invalid token');

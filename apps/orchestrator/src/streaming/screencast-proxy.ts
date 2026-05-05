@@ -27,7 +27,7 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Logger } from 'pino';
 import { WebSocket, WebSocketServer } from 'ws';
-import { verifyAccessToken } from '../auth/jwt.js';
+import { verifyStreamOrAccessToken } from '../auth/jwt.js';
 import type { BrowserPool } from '../browser-pool/index.js';
 import type { BrowserInstance } from '../browser-pool/types.js';
 import { CdpInputHandler, type InputMessage } from './cdp-input.js';
@@ -125,7 +125,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       return reject(socket, 401, 'missing bearer token');
     }
 
-    verifyAccessToken(token).then(
+    verifyStreamOrAccessToken(token).then(
       (claims) => {
         if (!claims) {
           log.warn({}, 'jwt verify returned null');

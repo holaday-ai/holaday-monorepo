@@ -177,15 +177,35 @@ export function RolesPage(): JSX.Element {
         </div>
       )}
 
+      {/*
+        Item 2 — banners react to draft, not the snapshot from the
+        initial roles.list call. Without this, unchecking 3 of 8 to
+        get back to 5/5 still rendered "超出上限" amber until next
+        page refresh. Two states only show one banner at a time:
+          - needsRoleRepair (server cleaned Pro-only ids; copy switches
+            with draft over/at-limit)
+          - draftOverLimit (no server-side issue, user just has too
+            many draft picks)
+      */}
       {isBasic && data.needsRoleRepair && (
         <div className="mb-4 rounded-lg border border-sky-300/40 bg-sky-50/50 px-4 py-3 text-sm text-sky-900 dark:border-sky-700/40 dark:bg-sky-950/30 dark:text-sky-200">
-          检测到不适用于当前套餐的角色已被自动移除。请直接点
-          <span className="font-semibold">「保存」</span>
-          以修复你的角色设置；之后即可正常创建新任务。
+          {draft.length > BASIC_ROLE_PICK_LIMIT ? (
+            <>
+              检测到不适用于当前套餐的角色已被自动移除。请先取消勾选至
+              <span className="font-semibold"> {BASIC_ROLE_PICK_LIMIT} 个以内 </span>
+              再保存。
+            </>
+          ) : (
+            <>
+              检测到不适用于当前套餐的角色已被自动移除。请直接点
+              <span className="font-semibold">「保存」</span>
+              以修复你的角色设置；之后即可正常创建新任务。
+            </>
+          )}
         </div>
       )}
 
-      {isBasic && data.overLimit && (
+      {isBasic && !data.needsRoleRepair && draft.length > BASIC_ROLE_PICK_LIMIT && (
         <div className="mb-4 rounded-lg border border-amber-300/40 bg-amber-50/50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-200">
           你当前选择 <span className="font-semibold">{draft.length}</span> 个角色，
           超出基础版 {BASIC_ROLE_PICK_LIMIT} 个上限。请取消勾选至 {BASIC_ROLE_PICK_LIMIT} 个以内
