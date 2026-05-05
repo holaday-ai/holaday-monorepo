@@ -319,12 +319,9 @@ function AppShell(): JSX.Element {
     enterNewTaskMode,
   ]);
 
-  // P1.1 → state-machine: when URL `?task=` changes mid-session
-  // (history back/forward), pull the store into sync. selectTask
-  // is idempotent — same id is a no-op aside from re-hydrating.
-  // No outbound URL effect: selectTask itself writes the URL when
-  // source !== 'url', so sidebar / search / starred clicks update
-  // the URL without a separate sync effect.
+  // URL → store: when URL `?task=` changes (history back/forward,
+  // /app alias redirect with search forwarded, deep link), pull
+  // store into sync. selectTask is idempotent.
   const taskParam = searchParams.get('task');
   React.useEffect(() => {
     if (!bootstrapped) return;
@@ -335,6 +332,31 @@ function AppShell(): JSX.Element {
       enterNewTaskMode();
     }
   }, [bootstrapped, taskParam, selectedTaskId, selectTask, enterNewTaskMode]);
+
+  // D1 — store → URL outbound sync. Lives here (not in selectTask)
+  // because React Router's `useSearchParams` ignores raw
+  // `window.history.replaceState` writes — RR-internal history is
+  // its own state. Going through `navigate` keeps RR's state
+  // consistent so the inbound effect above sees the new taskParam
+  // immediately and the round-trip closes cleanly. Other params
+  // (?project=, _cb=, etc.) preserved.
+  React.useEffect(() => {
+    if (!bootstrapped) return;
+    const desired = selectedTaskId ?? null;
+    if ((taskParam ?? null) === desired) return;
+    const next = new URLSearchParams(searchParams);
+    if (desired) next.set('task', desired);
+    else next.delete('task');
+    const search = next.toString() ? `?${next.toString()}` : '';
+    navigate({ pathname: location.pathname, search }, { replace: true });
+  }, [
+    bootstrapped,
+    selectedTaskId,
+    taskParam,
+    searchParams,
+    navigate,
+    location.pathname,
+  ]);
 
   // Auth invalidated by server (bad / expired token).
   React.useEffect(() => {

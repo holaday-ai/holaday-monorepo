@@ -2,6 +2,19 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      D3 — defensive cache headers for the SPA shell. The hash-named
+      JS/CSS bundles in /assets/ are content-addressed and safely
+      cacheable forever, but THIS index.html must always re-fetch so
+      a new bundle hash takes effect on next reload (otherwise users
+      stay on the previous SPA build until they hard-refresh).
+      `add_header` in nginx is the primary control — these meta tags
+      are belt-and-suspenders for any cached HTML still in browser
+      memory from before the nginx fix landed.
+    -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#6366f1" />

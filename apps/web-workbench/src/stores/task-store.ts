@@ -397,43 +397,28 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       // Idempotent: already selected. Still re-hydrate detail —
       // a re-click on the same task is the user asking for fresh
       // data (post-completion summary, refreshed plan status, etc).
-      // URL stays put; no replaceState needed.
       void hydrateDetail(taskId);
       return;
     }
     set({ selectedTaskId: taskId });
     void hydrateDetail(taskId);
-    if (source !== 'url' && typeof window !== 'undefined') {
-      // Preserve other params (?project=, etc.) when writing task.
-      const params = new URLSearchParams(window.location.search);
-      params.set('task', taskId);
-      const search = params.toString();
-      window.history.replaceState(
-        null,
-        '',
-        `${window.location.pathname}${search ? `?${search}` : ''}`,
-      );
-    }
+    // D1 — `source` is retained as a diagnostic hint but URL writing
+    // happens in an outbound effect inside WorkbenchApp that uses
+    // React Router's `navigate`. Calling `window.history.replaceState`
+    // here would bypass RR's internal history, leaving its
+    // `useSearchParams` hook stale and producing a one-frame race
+    // where the inbound URL→store effect would re-dispatch with the
+    // pre-click taskParam.
+    void source;
   },
 
   enterNewTaskMode() {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.has('task')) {
-        params.delete('task');
-        const search = params.toString();
-        window.history.replaceState(
-          null,
-          '',
-          `${window.location.pathname}${search ? `?${search}` : ''}`,
-        );
-      }
-    }
     if (get().selectedTaskId !== null) {
       set({ selectedTaskId: null });
     }
     // Cancel any in-flight hydrate so its post-set callback doesn't
-    // re-stamp the just-cleared selection's tasks[] entry.
+    // re-stamp the just-cleared selection's tasks[] entry. URL
+    // ?task= cleanup handled by the outbound effect in WorkbenchApp.
     abortInFlightHydrate();
   },
 
