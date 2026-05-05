@@ -611,7 +611,15 @@ function AppShell(): JSX.Element {
         replyMode={isReplyMode}
         followUpTarget={followUpTarget}
         onCancelFollowUp={() => {
+          // 发新任务 — drop the follow-up chip AND clear the
+          // selection / URL via the canonical state-machine entry.
+          // setFollowUpDismissedTaskId on its own only suppressed
+          // the chip locally; selectedTaskId stayed put, ?task= in
+          // URL stayed put, and refreshTaskList could later re-
+          // surface the same task as the panel default.
           if (selectedTaskId) setFollowUpDismissedTaskId(selectedTaskId);
+          enterNewTaskMode();
+          setTimeout(() => inputRef.current?.focus(), 50);
         }}
         userPlan={me?.plan}
         userSelectedRoles={me?.selectedRoles ?? null}

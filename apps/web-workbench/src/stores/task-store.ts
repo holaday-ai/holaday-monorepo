@@ -30,6 +30,22 @@ import type {
 export interface TaskStore {
   tasks: UiTask[];
   selectedTaskId: string | null;
+  /**
+   * Composer mode flag. `'new'` means the user has explicitly
+   * asked to start a fresh task (clicked "发新任务", clicked
+   * 用于新任务 in /files, hit Cmd+N). `'task'` is the default —
+   * a task is or will be selected.
+   *
+   * The flag exists to keep `refreshTaskList`'s "no selection +
+   * no URL hint → auto-pick newest" rule from racing with
+   * `enterNewTaskMode`. Without it: user enters new-task mode →
+   * selection cleared → a couple seconds later `refreshTaskList`
+   * fires (e.g. WS reconnect, list-refresh interval) → sees
+   * empty selection, no `?task=`, picks the newest task → user
+   * is suddenly looking at a stale task with their new-task
+   * draft attached as a follow-up.
+   */
+  composerMode: 'new' | 'task';
   loading: boolean;
   error: string | null;
   /** Per-task step streams, keyed by taskId. */
@@ -351,6 +367,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   return {
   tasks: [],
   selectedTaskId: null,
+  composerMode: 'task',
   loading: false,
   error: null,
   // Phase 24 RC follow-up — pagination state.
@@ -400,22 +417,21 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       void hydrateDetail(taskId);
       return;
     }
-    set({ selectedTaskId: taskId });
+    // composerMode flips back to 'task' on any selection. URL
+    // writing happens in WorkbenchApp's outbound effect (uses
+    // React Router's navigate so useSearchParams stays in sync).
+    set({ selectedTaskId: taskId, composerMode: 'task' });
     void hydrateDetail(taskId);
-    // D1 — `source` is retained as a diagnostic hint but URL writing
-    // happens in an outbound effect inside WorkbenchApp that uses
-    // React Router's `navigate`. Calling `window.history.replaceState`
-    // here would bypass RR's internal history, leaving its
-    // `useSearchParams` hook stale and producing a one-frame race
-    // where the inbound URL→store effect would re-dispatch with the
-    // pre-click taskParam.
-    void source;
+    void source; // retained as diagnostic hint
   },
 
   enterNewTaskMode() {
-    if (get().selectedTaskId !== null) {
-      set({ selectedTaskId: null });
-    }
+    // composerMode='new' is the lock. refreshTaskList's auto-pick
+    // checks it and bails — without that lock, a refresh that
+    // fires shortly after enterNewTaskMode would silently re-
+    // select the newest task and pull the user back into a 追问
+    // of a stale task.
+    set({ selectedTaskId: null, composerMode: 'new' });
     // Cancel any in-flight hydrate so its post-set callback doesn't
     // re-stamp the just-cleared selection's tasks[] entry. URL
     // ?task= cleanup handled by the outbound effect in WorkbenchApp.
@@ -460,8 +476,15 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       if (typeof window !== 'undefined') {
         urlTaskHint = new URLSearchParams(window.location.search).get('task');
       }
+      // Auto-pick is gated on composerMode — when the user has
+      // explicitly entered new-task mode (Cmd+N, sidebar 发新任务,
+      // /files 用于新任务), a later refreshTaskList must NOT
+      // silently jump them back into a stale task.
       const shouldAutoPick =
-        !prevSelected && !urlTaskHint && tasks.length > 0;
+        !prevSelected
+        && !urlTaskHint
+        && tasks.length > 0
+        && get().composerMode !== 'new';
       set({
         tasks,
         loading: false,
