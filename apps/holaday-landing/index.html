@@ -2,6 +2,16 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <!--
+    Logged-in handoff. If the user already has a token (auth flow
+    previously stored it), bounce them straight into the SPA instead
+    of rendering the marketing page. Critical: forward
+    location.search + location.hash so deep links like
+    `/?task=tsk_xxx` survive the hop. The earlier shorter form
+    (`location.replace("/app")`) silently dropped query/hash and
+    broke every shared task link.
+  -->
+  <script>try{if(localStorage.getItem("holaday.access_token"))location.replace("/app"+location.search+location.hash);}catch(e){}</script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HOLA DAY — AI 任务执行助手 | 把工作交给 AI</title>
   <meta name="description" content="HOLA DAY 是你的 AI 任务执行助手。说一句话，它帮你搜索、操作浏览器、分析数据、整理文档，直到完成。免费体验。">
