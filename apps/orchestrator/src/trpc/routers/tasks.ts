@@ -612,7 +612,15 @@ export const tasksRouter = router({
       // there's no per-user FIFO queue to enqueue into. Concurrent
       // generate tasks parallelize on the Anthropic API.
       const anthropicClient = anthropicForResolver;
+      const generateStartedAt = Date.now();
       void (async () => {
+        // A2 deferred — generate→browser fallback would re-enter the
+        // supercar branch which needs pool slots, queueing, and a
+        // distinct outcome shape. Tracked as fallbackChain=['generate']
+        // here for the eval pipeline; if generate fails today, we
+        // surface the failure as-is rather than risk the cross-runner
+        // re-dispatch.
+        const fallbackChain: string[] = ['generate'];
         let outcome;
         try {
           outcome = await runGenerateTask({
@@ -654,18 +662,44 @@ export const tasksRouter = router({
           };
         }
 
+        // B3 — structured task:completed log.
+        const elapsedMs = Date.now() - generateStartedAt;
+        const metadata = {
+          executionMode: 'generate' as const,
+          finalExecutionMode: 'generate' as const,
+          expertWorkflowId: expertWorkflow?.id ?? null,
+          selectedRole: gatedRole === 'none' ? null : gatedRole,
+          model: 'claude-sonnet-4-6',
+          fallbackChain,
+          elapsedMs,
+          modelFinalText:
+            outcome.status === 'completed' ? outcome.summary.slice(0, 200) : null,
+        };
+        ctx.logger.info(
+          {
+            taskId,
+            userId: ctx.userId,
+            finalStatus: outcome.status,
+            ...metadata,
+            failureReason: outcome.status === 'failed' ? outcome.reason : null,
+          },
+          'task:completed',
+        );
+
         try {
           if (outcome.status === 'completed') {
             await repo.persistVisionOutcome(taskId, {
               status: 'completed',
               summary: outcome.summary,
               tickCount: 1,
+              metadata,
             });
           } else {
             await repo.persistVisionOutcome(taskId, {
               status: 'failed',
               reason: outcome.reason ?? 'generate: api failed',
               tickCount: 1,
+              metadata,
             });
           }
         } catch (err) {
@@ -760,10 +794,17 @@ export const tasksRouter = router({
 
       const firecrawl = ctx.firecrawl;
       const anthropicClient = anthropicForResolver;
+      const scrapeStartedAt = Date.now();
       void (async () => {
-        let outcome;
+        // Fallback chain (A4) — every lane the dispatcher actually
+        // tried for this task. Logged + persisted under
+        // result.metadata.fallbackChain so the eval pipeline can see
+        // which path produced the final outcome.
+        const fallbackChain: string[] = ['scrape'];
+        let finalExecutionMode: 'scrape' | 'generate' = 'scrape';
+        let scrapeOutcome;
         try {
-          outcome = await runScrapeTask({
+          scrapeOutcome = await runScrapeTask({
             taskId,
             userId: ctx.userId,
             intent: expertWorkflow ? effectiveIntent : input.intent,
@@ -803,7 +844,7 @@ export const tasksRouter = router({
           });
         } catch (err) {
           ctx.logger.error({ err, taskId }, 'scrape: runner threw');
-          outcome = {
+          scrapeOutcome = {
             status: 'failed' as const,
             summary: '',
             reason: err instanceof Error ? err.message : 'scrape: unknown error',
@@ -815,18 +856,129 @@ export const tasksRouter = router({
           };
         }
 
+        // A1 — scrape failed → fall back to generate. Generate has
+        // zero infra dependencies (no Brave, no Firecrawl) so it's
+        // always reachable; if the model can't answer the intent
+        // directly, generate itself will return failed and we keep
+        // the chain visible in metadata for triage. The intent +
+        // skill + attachments are identical between the two runners,
+        // so the fallback produces the same surface for the user.
+        let outcome:
+          | {
+              status: 'completed';
+              summary: string;
+              reason?: string;
+            }
+          | {
+              status: 'failed';
+              summary?: string;
+              reason: string;
+            };
+        if (scrapeOutcome.status === 'completed') {
+          outcome = {
+            status: 'completed',
+            summary: scrapeOutcome.summary,
+          };
+        } else {
+          ctx.logger.warn(
+            {
+              taskId,
+              scrapeReason: scrapeOutcome.reason,
+              fallbackTo: 'generate',
+            },
+            'scrape failed, falling back to generate',
+          );
+          fallbackChain.push('generate');
+          finalExecutionMode = 'generate';
+          let generateOutcome;
+          try {
+            generateOutcome = await runGenerateTask({
+              taskId,
+              userId: ctx.userId,
+              intent: expertWorkflow ? effectiveIntent : input.intent,
+              skillId:
+                gatedRole !== 'none'
+                  ? gatedRole
+                  : input.skillId ?? undefined,
+              client: anthropicClient,
+              logger: ctx.logger,
+              ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
+              onStreamDelta: (delta) => {
+                try {
+                  broadcastToUser(ctx.userId, {
+                    type: 'server.task.stream',
+                    taskId,
+                    delta,
+                  });
+                } catch (err) {
+                  ctx.logger.warn({ err, taskId }, 'fallback-generate: broadcast stream delta failed');
+                }
+              },
+            });
+          } catch (err) {
+            ctx.logger.error({ err, taskId }, 'fallback-generate: runner threw');
+            generateOutcome = {
+              status: 'failed' as const,
+              summary: '',
+              reason: err instanceof Error ? err.message : 'fallback-generate: unknown error',
+              inputTokens: 0,
+              outputTokens: 0,
+              durationMs: 0,
+            };
+          }
+          if (generateOutcome.status === 'completed') {
+            outcome = {
+              status: 'completed',
+              summary: generateOutcome.summary,
+            };
+          } else {
+            outcome = {
+              status: 'failed',
+              reason: `scrape failed (${scrapeOutcome.reason}); generate fallback also failed (${generateOutcome.reason ?? 'unknown'})`,
+            };
+          }
+        }
+
+        // B3 — structured task:completed log. Single record per task
+        // termination with all fields the eval pipeline needs.
+        const elapsedMs = Date.now() - scrapeStartedAt;
+        const metadata = {
+          executionMode: 'scrape' as const,
+          finalExecutionMode,
+          expertWorkflowId: expertWorkflow?.id ?? null,
+          selectedRole: gatedRole === 'none' ? null : gatedRole,
+          model: 'claude-sonnet-4-6',
+          fallbackChain,
+          elapsedMs,
+          modelFinalText:
+            outcome.status === 'completed' ? outcome.summary.slice(0, 200) : null,
+        };
+        ctx.logger.info(
+          {
+            taskId,
+            userId: ctx.userId,
+            finalStatus: outcome.status,
+            ...metadata,
+            failureReason:
+              outcome.status === 'failed' ? outcome.reason : null,
+          },
+          'task:completed',
+        );
+
         try {
           if (outcome.status === 'completed') {
             await repo.persistVisionOutcome(taskId, {
               status: 'completed',
               summary: outcome.summary,
               tickCount: 1,
+              metadata,
             });
           } else {
             await repo.persistVisionOutcome(taskId, {
               status: 'failed',
-              reason: outcome.reason ?? 'scrape: api failed',
+              reason: outcome.reason,
               tickCount: 1,
+              metadata,
             });
           }
         } catch (err) {
@@ -1542,6 +1694,7 @@ export const tasksRouter = router({
             }
           },
         };
+      const browserStartedAt = Date.now();
       const runFn = () =>
         runSupercarWithRetry(supercarArgs, { userId, taskId, logger: ctx.logger })
           .then(async (outcome) => {
@@ -1559,7 +1712,47 @@ export const tasksRouter = router({
             const finalState = perUserExec
               ? await captureFinalState(perUserExec, ctx.logger, taskId)
               : {};
-            await persistSupercarOutcome(repo, taskId, outcome, finalState);
+            // B3 — structured eval log fields. Persisted under
+            // result.metadata so tasks.detail consumers (Codex eval
+            // pipeline) get them without a schema migration. Same
+            // shape as the scrape / generate fork logs above so
+            // downstream parsing is uniform.
+            const elapsedMs = Date.now() - browserStartedAt;
+            const metadata = {
+              executionMode: executionMode === 'browser' ? 'browser' : executionMode,
+              finalExecutionMode: executionMode === 'browser' ? 'browser' : executionMode,
+              expertWorkflowId: expertWorkflow?.id ?? null,
+              selectedRole: gatedRole === 'none' ? null : gatedRole,
+              model: opusActuallyConsumed ? 'claude-opus-4-7' : 'claude-sonnet-4-6',
+              fallbackChain: ['browser'],
+              elapsedMs,
+              iterations: outcome.iterations,
+              toolsUsed: outcome.toolsUsed,
+              // awaitingUserCount isn't exposed on SupercarOutcome
+              // today — Codex pipeline can derive it from
+              // task_events `vision.paused` rows for now. Stub at 0.
+              awaitingUserCount: 0,
+              modelFinalText:
+                outcome.status === 'completed'
+                  ? (outcome.summary ?? '').slice(0, 200)
+                  : null,
+              ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+              hasFinalScreenshot: Boolean(finalState.finalScreenshot),
+            };
+            ctx.logger.info(
+              {
+                taskId,
+                userId,
+                finalStatus: outcome.status,
+                ...metadata,
+                failureReason:
+                  outcome.status === 'failed' || outcome.status === 'timeout'
+                    ? outcome.reason
+                    : null,
+              },
+              'task:completed',
+            );
+            await persistSupercarOutcome(repo, taskId, outcome, finalState, metadata);
             try {
               broadcastToUser(userId, buildTaskTerminalMessage(taskId, outcome));
             } catch (err) {
@@ -3283,6 +3476,7 @@ async function persistSupercarOutcome(
   taskId: string,
   outcome: SupercarOutcome,
   finalState: { finalScreenshot?: string; finalUrl?: string } = {},
+  metadata?: Record<string, unknown>,
 ): Promise<void> {
   try {
     if (outcome.status === 'completed') {
@@ -3292,6 +3486,7 @@ async function persistSupercarOutcome(
         tickCount: outcome.iterations,
         ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
         ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+        ...(metadata ? { metadata } : {}),
       });
     } else if (outcome.status === 'awaiting_user') {
       // Shouldn't land here in the happy path — the loop returns a
@@ -3314,6 +3509,7 @@ async function persistSupercarOutcome(
         tickCount: outcome.iterations,
         ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
         ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+        ...(metadata ? { metadata } : {}),
       });
     } else {
       // 'failed'
@@ -3323,6 +3519,7 @@ async function persistSupercarOutcome(
         tickCount: outcome.iterations,
         ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
         ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+        ...(metadata ? { metadata } : {}),
       });
     }
   } catch (err) {

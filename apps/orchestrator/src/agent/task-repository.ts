@@ -251,6 +251,14 @@ export class TaskRepository {
           /** R7 — final-state evidence captured pre-pool-release. */
           finalScreenshot?: string;
           finalUrl?: string;
+          /**
+           * Spec B3 — structured execution metadata stamped into the
+           * `result` JSON under `metadata`. Carries fields the eval
+           * pipeline needs (executionMode, fallbackChain, model,
+           * expertWorkflowId, etc.) without a schema migration. Read
+           * by `tasks.detail` consumers via `result.metadata`.
+           */
+          metadata?: Record<string, unknown>;
         }
       | {
           status: 'failed';
@@ -259,6 +267,7 @@ export class TaskRepository {
           errorCode?: string;
           finalScreenshot?: string;
           finalUrl?: string;
+          metadata?: Record<string, unknown>;
         }
       | { status: 'paused'; reason: string; tickCount: number }
       | { status: 'cancelled'; tickCount: number },
@@ -280,6 +289,7 @@ export class TaskRepository {
       result.summary = outcome.summary;
       if (outcome.finalScreenshot) result.finalScreenshot = outcome.finalScreenshot;
       if (outcome.finalUrl) result.finalUrl = outcome.finalUrl;
+      if (outcome.metadata) result.metadata = outcome.metadata;
       eventPayload = { ...eventPayload, summary: outcome.summary };
     } else if (outcome.status === 'failed') {
       update.completedAt = new Date();
@@ -289,6 +299,7 @@ export class TaskRepository {
       result.reason = outcome.reason;
       if (outcome.finalScreenshot) result.finalScreenshot = outcome.finalScreenshot;
       if (outcome.finalUrl) result.finalUrl = outcome.finalUrl;
+      if (outcome.metadata) result.metadata = outcome.metadata;
       eventPayload = { ...eventPayload, reason: outcome.reason };
     } else if (outcome.status === 'paused') {
       update.pauseReason = 'max_steps_reached';

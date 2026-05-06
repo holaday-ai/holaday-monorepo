@@ -281,6 +281,10 @@ async function main() {
     firecrawlLane = createFirecrawlLane({
       apiKey: env.FIRECRAWL_API_KEY,
       baseUrl: env.FIRECRAWL_BASE_URL,
+      // A5 — surface HTTP status / body / abort details when Firecrawl
+      // fails so prod log triage doesn't have to reproduce the upstream
+      // request to know whether it was a 4xx, 5xx, or a timeout.
+      logger: logger.child({ component: 'firecrawl' }),
     });
     logger.info(
       { baseUrl: env.FIRECRAWL_BASE_URL, keyPrefix: env.FIRECRAWL_API_KEY.slice(0, 6) },

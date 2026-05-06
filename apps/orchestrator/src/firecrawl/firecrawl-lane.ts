@@ -63,6 +63,13 @@ export interface CreateFirecrawlLaneOpts {
   fetch?: typeof fetch;
   /** Per-call wall-clock cap. Default 30s. Aborts via AbortSignal. */
   timeoutMs?: number;
+  /**
+   * Optional pino-style logger so transport / 5xx / abort failures
+   * land in pm2 logs with HTTP status + first 500 chars of body. Without
+   * this, every Firecrawl failure is opaque "operation aborted (after
+   * 2 attempts)" — diagnosable only by reproducing the upstream request.
+   */
+  logger?: { warn(obj: object, msg: string): void };
 }
 
 const DEFAULT_BASE_URL = 'https://api.firecrawl.dev';
@@ -74,6 +81,7 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
   const baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const fetchFn = opts.fetch ?? fetch;
+  const logger = opts.logger;
 
   async function request(
     path: string,
@@ -85,6 +93,7 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
     let lastErr: string = 'unknown';
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const controller = new AbortController();
+      const startedAt = Date.now();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const res = await fetchFn(`${baseUrl}${path}`, {
@@ -98,19 +107,59 @@ export function createFirecrawlLane(opts: CreateFirecrawlLaneOpts): FirecrawlLan
         });
         clearTimeout(timer);
         if (!res.ok) {
+          // Read body once for diagnostic logging — capped at 500
+          // chars so an HTML error page from a misconfigured endpoint
+          // doesn't blow out pm2 logs. Body read errors are caught so
+          // the diagnostic path itself never throws.
+          let bodyPreview = '';
+          try {
+            const txt = await res.text();
+            bodyPreview = txt.slice(0, 500);
+          } catch {
+            /* body unreadable — ignore */
+          }
+          logger?.warn(
+            {
+              path,
+              status: res.status,
+              attempt,
+              elapsedMs: Date.now() - startedAt,
+              bodyPreview,
+            },
+            'firecrawl: non-2xx response',
+          );
           // 4xx / 5xx — no retry on 4xx (bad request stays bad);
           // retry once on 5xx by falling through.
           if (res.status >= 500 && attempt < MAX_ATTEMPTS) {
             lastErr = `firecrawl HTTP ${res.status}`;
             continue;
           }
-          return { ok: false, error: `firecrawl HTTP ${res.status}` };
+          return {
+            ok: false,
+            error: `firecrawl HTTP ${res.status}${bodyPreview ? `: ${bodyPreview.slice(0, 120)}` : ''}`,
+          };
         }
         const json = (await res.json()) as unknown;
         return { ok: true, json };
       } catch (err) {
         clearTimeout(timer);
         lastErr = err instanceof Error ? err.message : String(err);
+        const isAbort =
+          err instanceof Error &&
+          (err.name === 'AbortError' || /aborted|abort/i.test(err.message));
+        logger?.warn(
+          {
+            path,
+            attempt,
+            elapsedMs: Date.now() - startedAt,
+            timeoutMs,
+            isAbort,
+            err: lastErr,
+          },
+          isAbort
+            ? 'firecrawl: request aborted (timeout)'
+            : 'firecrawl: transport failure',
+        );
         // network/timeout — retry once
       }
     }
