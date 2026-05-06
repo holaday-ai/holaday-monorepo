@@ -580,6 +580,34 @@ function AppShell(): JSX.Element {
     setBootstrapped(false);
   }, [reset]);
 
+  // Hooks must run unconditionally — keep the awaiting_user effect
+  // ABOVE the early returns below. The previous patch placed the
+  // useEffect after `if (!authed) return` / `if (!bootstrapped) return`,
+  // so the hook count flipped between the pre-bootstrap render (3
+  // hooks short) and post-bootstrap render — React error #310
+  // "Rendered more hooks than during the previous render", whole app
+  // went white. selectedTask is derived inline here (post-early-return
+  // selectedTask hasn't run yet) — it's the same `tasks.find` call.
+  const selectedNeedsUser = Boolean(
+    selectedTaskId &&
+      (awaitingUserByTask[selectedTaskId] ||
+        captchaWaitByTask[selectedTaskId] ||
+        // UiTaskStatus is the SPA-side narrowed enum (no
+        // 'awaiting_user' member); the wire shape can carry it though,
+        // so the cast is the honest acknowledgement that the runtime
+        // value can fall outside the type.
+        (tasks.find((t) => t.taskId === selectedTaskId)?.status as
+          | string
+          | undefined) === 'awaiting_user'),
+  );
+  React.useEffect(() => {
+    if (!selectedNeedsUser) return;
+    setBrowserCollapsed(false);
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setBrowserSheetOpen(true);
+    }
+  }, [selectedNeedsUser]);
+
   if (!authed) {
     return <LoginGate onAuthenticated={() => setAuthed(true)} />;
   }
@@ -595,9 +623,7 @@ function AppShell(): JSX.Element {
   // over follow-up — that's a tasks.reply, not a new task) AND
   // the user hasn't explicitly dismissed it for this task.
   const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
-  const isReplyMode = Boolean(
-    selectedTaskId && awaitingUserByTask[selectedTaskId],
-  );
+  const isReplyMode = selectedNeedsUser;
   const followUpTarget =
     selectedTask &&
     selectedTaskId &&
@@ -834,7 +860,12 @@ function AppShell(): JSX.Element {
           frame={selectedTask ? (screencastByTask[selectedTask.taskId] ?? null) : null}
           taskStatus={selectedTask?.status ?? null}
           awaitingUser={
-            selectedTask ? Boolean(captchaWaitByTask[selectedTask.taskId]) : false
+            selectedTask
+              ? Boolean(
+                  captchaWaitByTask[selectedTask.taskId] ||
+                    awaitingUserByTask[selectedTask.taskId],
+                )
+              : false
           }
           activeTaskId={selectedTaskId}
           poolUserId={me?.multiUser ? me.userId : null}
@@ -852,7 +883,12 @@ function AppShell(): JSX.Element {
           frame={selectedTask ? (screencastByTask[selectedTask.taskId] ?? null) : null}
           taskStatus={selectedTask?.status ?? null}
           awaitingUser={
-            selectedTask ? Boolean(captchaWaitByTask[selectedTask.taskId]) : false
+            selectedTask
+              ? Boolean(
+                  captchaWaitByTask[selectedTask.taskId] ||
+                    awaitingUserByTask[selectedTask.taskId],
+                )
+              : false
           }
           activeTaskId={selectedTaskId}
           poolUserId={me?.multiUser ? me.userId : null}

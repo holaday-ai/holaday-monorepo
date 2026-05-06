@@ -55,6 +55,7 @@ interface Props {
 // and can loop infinitely under StrictMode.
 const EMPTY_STEPS: UiStep[] = [];
 const EMPTY_REPLIES: Array<{ at: number; text: string }> = [];
+const PLAYED_TERMINAL_REVEAL_TASK_IDS = new Set<string>();
 
 /**
  * Conversational stream for one task. Emulates Claude's chat layout:
@@ -261,6 +262,16 @@ function AgentBlock({
   const animatedThisSession = useTaskStore((s) =>
     s.animatedTaskIds.has(task.taskId),
   );
+  const animateTerminalReveal =
+    animatedThisSession && !PLAYED_TERMINAL_REVEAL_TASK_IDS.has(task.taskId);
+  React.useEffect(() => {
+    if (!animateTerminalReveal) return;
+    PLAYED_TERMINAL_REVEAL_TASK_IDS.add(task.taskId);
+    if (PLAYED_TERMINAL_REVEAL_TASK_IDS.size > 200) {
+      const oldest = PLAYED_TERMINAL_REVEAL_TASK_IDS.values().next().value;
+      if (oldest) PLAYED_TERMINAL_REVEAL_TASK_IDS.delete(oldest);
+    }
+  }, [animateTerminalReveal, task.taskId]);
   hdDebug('TaskStream render', {
     taskId: task.taskId,
     status: task.status,
@@ -417,7 +428,7 @@ function AgentBlock({
             // during this session (set populated in applyServerMessage).
             // History clicks render the summary in full immediately so
             // the panel doesn't replay-and-jitter on every navigation.
-            animateReveal={animatedThisSession}
+            animateReveal={animateTerminalReveal}
           />
         )}
         {/* Phase 11 QA #11 — terminal-but-empty fallback. Catches the
