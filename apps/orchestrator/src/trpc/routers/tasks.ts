@@ -48,6 +48,7 @@ import {
   formatForPrompt as formatPlaybooksForPrompt,
   matchPlaybooks,
 } from '../../agent/supercar/playbook-service.js';
+import { matchExpertWorkflow } from '../../agent/supercar/expert-workflows.js';
 import { FileService, taskInternalIdFor } from '../../files/file-service.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
 import {
@@ -323,8 +324,15 @@ export const tasksRouter = router({
             '',
           ].join('\n')
         : '';
+    const expertWorkflow = matchExpertWorkflow(input.intent, {
+      hasAttachments: Boolean(input.fileIds && input.fileIds.length > 0),
+    });
+    const expertWorkflowPreamble = expertWorkflow?.promptPreamble ?? '';
     const effectiveIntent =
-      planPreamble + (parentContextBlock ? parentContextBlock : '') + input.intent;
+      planPreamble +
+      (expertWorkflowPreamble ? `${expertWorkflowPreamble}\n` : '') +
+      (parentContextBlock ? parentContextBlock : '') +
+      input.intent;
 
     // Phase 10 Tier 2 — quota + concurrency gate. Both block task
     // creation BEFORE the row is inserted, so the user gets a clean
@@ -394,11 +402,23 @@ export const tasksRouter = router({
     // browser/generate budgets). Adds ~500ms latency on cache miss;
     // skill-hint + keyword fast paths inside the classifier short-
     // circuit most cases for free.
-    const executionMode = await classifyExecutionMode({
+    const classifiedExecutionMode = await classifyExecutionMode({
       intent: input.intent,
       skillId: input.skillId,
       logger: ctx.logger.child({ userId: ctx.userId, stage: 'router' }),
     });
+    const executionMode = expertWorkflow?.routeOverride ?? classifiedExecutionMode;
+    if (expertWorkflow?.routeOverride) {
+      ctx.logger.info(
+        {
+          workflowId: expertWorkflow.id,
+          routeOverride: expertWorkflow.routeOverride,
+          classifiedExecutionMode,
+          missingInputs: expertWorkflow.missingInputs,
+        },
+        'expert-workflow: route override applied',
+      );
+    }
 
     // Phase 21a P0 — global queue-depth guard. Applies to ALL users,
     // bypass or not, so a runaway client (or a bug elsewhere) can't
@@ -598,7 +618,7 @@ export const tasksRouter = router({
           outcome = await runGenerateTask({
             taskId,
             userId: ctx.userId,
-            intent: input.intent,
+            intent: expertWorkflow ? effectiveIntent : input.intent,
             skillId:
               gatedRole !== 'none'
                 ? gatedRole
@@ -746,7 +766,7 @@ export const tasksRouter = router({
           outcome = await runScrapeTask({
             taskId,
             userId: ctx.userId,
-            intent: input.intent,
+            intent: expertWorkflow ? effectiveIntent : input.intent,
             skillId:
               gatedRole !== 'none'
                 ? gatedRole

@@ -82,6 +82,33 @@ const ACCEPT_FILES = '.csv,.xlsx,.xls,.pdf,.txt,.json,.md';
 const ACCEPT_IMAGES = '.png,.jpg,.jpeg,.webp,.gif,image/*';
 const MAX_ATTACHMENTS = 5;
 
+type ComposerExpertWorkflow = {
+  id: 'douyin-livestream-review';
+  name: string;
+  missingInputs: Array<'liveSession' | 'dataSource'>;
+};
+
+const DOUYIN_TERMS = ['抖音', 'douyin', 'tiktok', '千川', '巨量百应', '电商罗盘'];
+const LIVE_TERMS = ['直播', '直播间', '带货', '主播', 'gmv', 'gpm', 'uv价值', '场次'];
+const REVIEW_TERMS = ['复盘', '分析', '总结', '优化', '诊断', '报告', '策略', '改进'];
+const SESSION_PATTERNS = [
+  /昨天|今日|今天|前天|本周|上周|本月|上月|今晚|上午|下午|晚上/u,
+  /近\s*\d+\s*[天日周月]/u,
+  /最近\s*\d+\s*[天日周月]?/u,
+  /上一场|最近一场|这场直播|该场直播/u,
+  /\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[日号]?/u,
+  /\d{1,2}\s*月\s*\d{1,2}\s*[日号]?/u,
+  /\d{1,2}:\d{2}/u,
+];
+const DATA_SOURCE_PATTERNS = [
+  /抖音电商罗盘|电商罗盘|罗盘/u,
+  /巨量百应|巨量千川|千川|巨量引擎/u,
+  /蝉妈妈|飞瓜|新抖|抖查查/u,
+  /商家后台|店铺后台|后台|创作者中心/u,
+  /上传|附件|表格|excel|xlsx|csv|截图|图片|数据文件|报表/u,
+  /https?:\/\/|www\./iu,
+];
+
 /**
  * Bottom-of-panel composer. Enter submits, Shift+Enter inserts a
  * newline. Textarea auto-grows to ~6 lines before scrolling. The
@@ -341,6 +368,20 @@ export function InputArea({
   }
 
   const disabled = submitting || Boolean(busy);
+  const expertWorkflow =
+    !replyMode && !followUpTarget
+      ? detectComposerExpertWorkflow(value, attachments.some((a) => a.status === 'ready'))
+      : null;
+
+  function appendGuidance(text: string): void {
+    setValue((prev) => {
+      const trimmed = prev.trimEnd();
+      if (!trimmed) return text;
+      if (trimmed.includes(text)) return trimmed;
+      return `${trimmed}，${text}`;
+    });
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }
 
   return (
     <div
@@ -404,6 +445,9 @@ export function InputArea({
             ))}
           </div>
         )}
+        {expertWorkflow && (
+          <ExpertWorkflowHint workflow={expertWorkflow} onPick={appendGuidance} />
+        )}
         <Textarea
           ref={setTextareaRef}
           value={value}
@@ -414,7 +458,9 @@ export function InputArea({
               ? '回复 HOLA DAY...'
               : followUpTarget
                 ? '追问这个任务...'
-                : '描述你想让 HOLA DAY 做什么...'
+                : expertWorkflow
+                  ? '补充直播场次、数据来源或你想要的报告形式...'
+                  : '描述你想让 HOLA DAY 做什么...'
           }
           rows={2}
           className="resize-none border-0 bg-transparent px-4 py-3 pr-14 text-sm shadow-none focus-visible:ring-0"
@@ -637,6 +683,101 @@ function ModeOption({
       </span>
     </button>
   );
+}
+
+function ExpertWorkflowHint({
+  workflow,
+  onPick,
+}: {
+  workflow: ComposerExpertWorkflow;
+  onPick(text: string): void;
+}): JSX.Element {
+  const missingLabels = workflow.missingInputs.map(labelForWorkflowInput);
+  const actions = guidanceActionsForWorkflow(workflow);
+
+  return (
+    <div className="border-b border-border bg-amber-50/70 px-3 py-2 text-xs text-amber-950 dark:bg-amber-500/10 dark:text-amber-100">
+      <div className="flex items-start gap-2">
+        <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="font-medium">已匹配：{workflow.name}</span>
+            {missingLabels.length > 0 ? (
+              <span className="text-amber-900/75 dark:text-amber-100/75">
+                还缺 {missingLabels.join('、')}
+              </span>
+            ) : (
+              <span className="text-amber-900/75 dark:text-amber-100/75">
+                信息已基本足够，发送后会按专家复盘结构执行
+              </span>
+            )}
+          </div>
+          {actions.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {actions.map((action) => (
+                <button
+                  key={action}
+                  type="button"
+                  onClick={() => onPick(action)}
+                  className="rounded-full border border-amber-300/80 bg-white/75 px-2 py-1 text-[11px] text-amber-950 transition hover:bg-amber-100 dark:border-amber-300/30 dark:bg-amber-300/10 dark:text-amber-50 dark:hover:bg-amber-300/20"
+                >
+                  {action}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function detectComposerExpertWorkflow(
+  value: string,
+  hasReadyAttachment: boolean,
+): ComposerExpertWorkflow | null {
+  const lower = value.toLowerCase();
+  const hasDouyin = DOUYIN_TERMS.some((term) => lower.includes(term.toLowerCase()));
+  const hasLive = LIVE_TERMS.some((term) => lower.includes(term.toLowerCase()));
+  const hasReview = REVIEW_TERMS.some((term) => lower.includes(term.toLowerCase()));
+  if (!hasDouyin || !hasLive || !hasReview) return null;
+
+  const missingInputs: ComposerExpertWorkflow['missingInputs'] = [];
+  if (!SESSION_PATTERNS.some((pattern) => pattern.test(value))) {
+    missingInputs.push('liveSession');
+  }
+  if (!hasReadyAttachment && !DATA_SOURCE_PATTERNS.some((pattern) => pattern.test(value))) {
+    missingInputs.push('dataSource');
+  }
+
+  return {
+    id: 'douyin-livestream-review',
+    name: '抖音直播复盘',
+    missingInputs,
+  };
+}
+
+function labelForWorkflowInput(input: ComposerExpertWorkflow['missingInputs'][number]): string {
+  switch (input) {
+    case 'liveSession':
+      return '直播场次';
+    case 'dataSource':
+      return '数据来源';
+  }
+}
+
+function guidanceActionsForWorkflow(workflow: ComposerExpertWorkflow): string[] {
+  const actions: string[] = [];
+  if (workflow.missingInputs.includes('liveSession')) {
+    actions.push('昨天整场直播', '近 7 天直播汇总');
+  }
+  if (workflow.missingInputs.includes('dataSource')) {
+    actions.push('数据在抖音电商罗盘', '我会上传表格或截图');
+  }
+  if (actions.length === 0) {
+    actions.push('输出老板汇报版', '输出详细运营复盘');
+  }
+  return actions;
 }
 
 function Kbd({ children }: { children: React.ReactNode }): JSX.Element {

@@ -48,8 +48,8 @@ interface Props {
  * Centre column — a scrollable TaskStream area on top, InputArea
  * pinned to the bottom, and a mobile-only top bar that hosts the
  * hamburger toggle. Empty state (no task selected) shows a welcome
- * line plus clickable suggestion chips; clicking a chip prefills the
- * input and submits it immediately.
+   * line plus clickable suggestion chips; clicking a chip prefills the
+   * input so the user can edit before sending.
  */
 export function MainPanel({
   task,
@@ -176,8 +176,8 @@ function EmptyState({
 }
 
 const SUGGESTIONS = [
+  '帮我复盘昨天的抖音直播数据，做总结和优化策略',
   '帮我查一下今天的科技新闻',
   '打开 GitHub 看看 trending 项目',
   '去东方财富查一下茅台最新股价',
-  '在百度搜索 claude opus 并把首条结果发给我',
 ];
