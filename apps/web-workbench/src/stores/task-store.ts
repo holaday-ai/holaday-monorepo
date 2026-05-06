@@ -1218,7 +1218,7 @@ function extractSummary(result: unknown): string | null {
   return null;
 }
 
-function toUiTask(row: ListRow): UiTask {
+export function toUiTask(row: ListRow): UiTask {
   const opusUsed = (row as { opusUsed?: unknown }).opusUsed === true;
   const r = row as { starred?: unknown; starredAt?: unknown; projectId?: unknown };
   // Root-cause fix for the "result text disappears on refresh" / brief

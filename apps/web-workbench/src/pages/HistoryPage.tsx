@@ -22,10 +22,35 @@ interface HistoryTask {
   completedAt: string | number | Date | null;
 }
 
+// "进行中" maps to all non-terminal DB statuses — the chip is a UX
+// shortcut, the server still receives the explicit list so the WHERE
+// clause is `status IN (…)` instead of five round-trips.
+const RUNNING_STATUSES = [
+  'pending',
+  'planning',
+  'queued',
+  'executing',
+  'awaiting_user',
+  'paused',
+] as const;
+
+type ServerTaskStatus =
+  | 'pending'
+  | 'planning'
+  | 'queued'
+  | 'executing'
+  | 'awaiting_user'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
 /**
- * Full historical task list. Pulls batches of 50 at a time from
- * tasks.list and paginates with a cursor; filters by status and
- * date range client-side. Clicking a row deep-links to the
+ * Full historical task list. Filters (status / date range / query)
+ * are sent to the server via `tasks.list` so the search reaches past
+ * the in-memory first-50 sidebar window. Cursor pagination is
+ * scoped per filter set — any filter change resets cursor + tasks
+ * and refetches from the top. Clicking a row deep-links to the
  * workbench with the task id so the main panel selects it.
  */
 export function HistoryPage(): JSX.Element {
@@ -38,63 +63,81 @@ export function HistoryPage(): JSX.Element {
   const [status, setStatus] = React.useState<StatusFilter>('all');
   const [range, setRange] = React.useState<RangeFilter>('30d');
   const [query, setQuery] = React.useState('');
+  const [debouncedQuery, setDebouncedQuery] = React.useState('');
 
-  const fetchPage = React.useCallback(async (): Promise<void> => {
-    setLoading(true);
-    try {
-      const input: { limit: number; cursor?: number } = { limit: 50 };
-      if (cursor) input.cursor = cursor;
-      const res = await trpc.tasks.list.query(input);
-      const list = (res?.tasks ?? []) as HistoryTask[];
-      setTasks((prev) => [...prev, ...list]);
-      setCursor(res?.nextCursor ?? null);
-      setHasMore(Boolean(res?.nextCursor));
-    } finally {
-      setLoading(false);
-      setInitialLoad(false);
-    }
-  }, [cursor]);
-
+  // Debounce the search input by 300 ms — keystrokes shouldn't each
+  // trigger a fresh paged query.
   React.useEffect(() => {
-    void fetchPage();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const handle = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
+    return () => window.clearTimeout(handle);
+  }, [query]);
 
-  const filtered = React.useMemo(() => {
-    const now = Date.now();
-    const cutoff =
-      range === '7d' ? now - 7 * 86400000 : range === '30d' ? now - 30 * 86400000 : 0;
-    const q = query.trim().toLowerCase();
-    return tasks.filter((t) => {
-      if (status !== 'all') {
-        if (status === 'running') {
-          // The orchestrator surfaces several non-terminal statuses;
-          // treat them all as "running" for the chip's purposes.
-          const RUNNING = new Set([
-            'executing',
-            'pending',
-            'planning',
-            'paused',
-            'awaiting_user',
-          ]);
-          if (!RUNNING.has(t.status)) return false;
-        } else if (t.status !== status) {
-          return false;
-        }
+  // Build the input shape from the active filters. Fed to fetchPage
+  // and used as the deps key to reset pagination when the filter set
+  // changes. `cursor` lives outside this memo so a "load more" can
+  // append to the existing tasks list.
+  const baseInput = React.useMemo(() => {
+    const out: {
+      limit: number;
+      query?: string;
+      status?: ServerTaskStatus | ServerTaskStatus[];
+      dateFrom?: Date;
+    } = { limit: 50 };
+    if (debouncedQuery.length > 0) out.query = debouncedQuery;
+    if (status === 'completed') out.status = 'completed';
+    else if (status === 'failed') out.status = 'failed';
+    else if (status === 'running') out.status = [...RUNNING_STATUSES];
+    if (range === '7d') out.dateFrom = new Date(Date.now() - 7 * 86400000);
+    else if (range === '30d') out.dateFrom = new Date(Date.now() - 30 * 86400000);
+    return out;
+  }, [debouncedQuery, status, range]);
+
+  const fetchPage = React.useCallback(
+    async (nextCursor: number | null, append: boolean): Promise<void> => {
+      setLoading(true);
+      try {
+        const input = {
+          ...baseInput,
+          ...(nextCursor ? { cursor: nextCursor } : {}),
+        };
+        const res = await trpc.tasks.list.query(input);
+        const list = (res?.tasks ?? []) as HistoryTask[];
+        setTasks((prev) => (append ? [...prev, ...list] : list));
+        setCursor(res?.nextCursor ?? null);
+        setHasMore(Boolean(res?.nextCursor));
+      } finally {
+        setLoading(false);
+        setInitialLoad(false);
       }
-      if (cutoff > 0) {
-        const ts =
-          typeof t.createdAt === 'string'
-            ? Date.parse(t.createdAt)
-            : typeof t.createdAt === 'number'
-              ? t.createdAt
-              : (t.createdAt as Date).getTime?.() ?? 0;
-        if (ts < cutoff) return false;
-      }
-      if (q && !t.intent.toLowerCase().includes(q)) return false;
-      return true;
-    });
-  }, [tasks, status, range, query]);
+    },
+    [baseInput],
+  );
+
+  // Filter set changed → drop the existing list + refetch from the
+  // top. Token guard so a stale response from the previous filter
+  // doesn't overwrite the new one.
+  const fetchToken = React.useRef(0);
+  React.useEffect(() => {
+    const myToken = ++fetchToken.current;
+    setTasks([]);
+    setCursor(null);
+    setHasMore(true);
+    setLoading(true);
+    void trpc.tasks.list
+      .query(baseInput)
+      .then((res) => {
+        if (myToken !== fetchToken.current) return;
+        const list = (res?.tasks ?? []) as HistoryTask[];
+        setTasks(list);
+        setCursor(res?.nextCursor ?? null);
+        setHasMore(Boolean(res?.nextCursor));
+      })
+      .finally(() => {
+        if (myToken !== fetchToken.current) return;
+        setLoading(false);
+        setInitialLoad(false);
+      });
+  }, [baseInput]);
 
   return (
     <PageShell title="任务历史" subtitle="全部历史记录" width="5xl">
@@ -140,14 +183,14 @@ export function HistoryPage(): JSX.Element {
             <div className="flex h-48 items-center justify-center">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
-          ) : filtered.length === 0 ? (
+          ) : tasks.length === 0 ? (
             <div className="flex h-48 flex-col items-center justify-center text-center">
               <div className="text-sm text-muted-foreground">没有符合条件的任务</div>
               <div className="mt-1 text-[11px] text-muted-foreground">换个筛选试试</div>
             </div>
           ) : (
             <ul className="divide-y divide-border">
-              {filtered.map((t) => (
+              {tasks.map((t) => (
                 <li key={t.taskId}>
                   <button
                     type="button"
@@ -174,7 +217,12 @@ export function HistoryPage(): JSX.Element {
 
           {hasMore && !initialLoad && (
             <div className="mt-4 flex justify-center">
-              <Button variant="outline" size="sm" onClick={() => void fetchPage()} disabled={loading}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void fetchPage(cursor, true)}
+                disabled={loading}
+              >
                 {loading ? '加载中…' : '加载更多'}
               </Button>
             </div>

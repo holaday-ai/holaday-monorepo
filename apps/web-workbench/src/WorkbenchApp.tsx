@@ -16,10 +16,10 @@ import { clearAccessToken, getAccessToken } from '@/lib/auth';
 import { hdDebug } from '@/lib/hd-debug';
 import { trpc } from '@/lib/trpc';
 import { type ConnStatus, connect, disconnect, onServerMessage, onStatus } from '@/lib/ws';
-import { useTaskStore } from '@/stores/task-store';
+import { toUiTask, useTaskStore } from '@/stores/task-store';
 import { isQuotaExhausted, useQuotaStatus } from '@/lib/use-quota-status';
 import { applyHistoryRetention } from '@/utils/time-buckets';
-import type { UiProject } from '@/types/task';
+import type { UiProject, UiTask } from '@/types/task';
 
 interface MeProfile {
   userId: string;
@@ -242,13 +242,40 @@ function AppShell(): JSX.Element {
       () => applyHistoryRetention(tasks, historyDays, retentionPinned),
       [tasks, historyDays, retentionPinned],
     );
-  // Phase 16b — apply project filter on top of retention. When
-  // projectFilter is set, only tasks linked to that project survive;
-  // the sidebar groups still render normally below the filter chip.
+  // Project-scoped task list. When `?project=prj_…` is present we
+  // fetch tasks.list with the projectId filter so older entries past
+  // the sidebar's first-50 slice still surface here. The fetch is
+  // independent from the store (which holds the all-tasks recent
+  // slice) — this local list is only consumed by the sidebar render
+  // path below. Reset + refetch whenever projectFilter changes.
+  const [projectTasks, setProjectTasks] = React.useState<UiTask[] | null>(null);
+  const projectFetchToken = React.useRef(0);
+  React.useEffect(() => {
+    if (!projectFilter) {
+      setProjectTasks(null);
+      return;
+    }
+    const myToken = ++projectFetchToken.current;
+    setProjectTasks(null);
+    void trpc.tasks.list
+      .query({ projectId: projectFilter, limit: 50 })
+      .then((res) => {
+        if (myToken !== projectFetchToken.current) return;
+        setProjectTasks(res.tasks.map((t) => toUiTask(t)));
+      })
+      .catch(() => {
+        if (myToken !== projectFetchToken.current) return;
+        setProjectTasks([]);
+      });
+  }, [projectFilter]);
+  // Sidebar list source: server-fetched project view when filter is
+  // active, otherwise the retention-clipped store list. Retention
+  // doesn't apply to the project-scoped fetch — the user explicitly
+  // navigated into the project, they want the full list.
   const filteredTasks = React.useMemo(() => {
-    if (!projectFilter) return visibleTasks;
-    return visibleTasks.filter((t) => t.projectId === projectFilter);
-  }, [visibleTasks, projectFilter]);
+    if (projectFilter) return projectTasks ?? [];
+    return visibleTasks;
+  }, [projectFilter, projectTasks, visibleTasks]);
   const activeProject = React.useMemo(
     () => projects.find((p) => p.projectId === projectFilter) ?? null,
     [projects, projectFilter],

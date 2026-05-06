@@ -7,7 +7,7 @@ import {
   type PlanId,
 } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
-import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, like, lt, lte, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { injectResolvedUrl, resolveIntentUrl } from '../../agent/url-resolver.js';
@@ -2381,6 +2381,60 @@ export const tasksRouter = router({
            * to the bigint id once before the WHERE clause.
            */
           projectId: z.string().min(1).optional(),
+          /**
+           * Spec A — server-side filters. SearchOverlay / HistoryPage /
+           * StarredPage / project filter all funnel through this list
+           * endpoint instead of filtering the in-memory first-50 slice
+           * client-side. Combined with AND; cursor pagination still
+           * uses `lt(id, cursor)` so existing infinite-scroll wiring
+           * keeps working.
+           *
+           * `query` matches `intent OR title` with LIKE — the columns
+           * use a `_ci` collation in MySQL so LIKE is case-insensitive.
+           * `status` is constrained to the canonical UI enum.
+           * `starred=true` switches ORDER BY to `starredAt DESC` so the
+           * Starred page reads in last-starred order.
+           */
+          query: z.string().min(1).max(200).optional(),
+          // Accepts either one status or a small set — `HistoryPage`'s
+          // "进行中" chip OR's together five non-terminal statuses, so
+          // a flat enum can't express that filter without round-tripping
+          // five separate calls. Single values stay terse on the wire
+          // (`status: 'failed'`); arrays encode the bundle.
+          status: z
+            .union([
+              z.enum([
+                'pending',
+                'planning',
+                'queued',
+                'executing',
+                'awaiting_user',
+                'paused',
+                'completed',
+                'failed',
+                'cancelled',
+              ]),
+              z
+                .array(
+                  z.enum([
+                    'pending',
+                    'planning',
+                    'queued',
+                    'executing',
+                    'awaiting_user',
+                    'paused',
+                    'completed',
+                    'failed',
+                    'cancelled',
+                  ]),
+                )
+                .min(1)
+                .max(9),
+            ])
+            .optional(),
+          starred: z.boolean().optional(),
+          dateFrom: z.coerce.date().optional(),
+          dateTo: z.coerce.date().optional(),
         })
         .default({ limit: 20 }),
     )
@@ -2394,7 +2448,19 @@ export const tasksRouter = router({
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
       }
       const conds = [eq(tasksTable.userId, userRow.id)];
-      if (input.cursor) conds.push(lt(tasksTable.id, input.cursor));
+      // Cursor is an opaque numeric token whose interpretation matches
+      // the active ORDER BY. In starred mode we order by `starredAt
+      // DESC` and treat the cursor as a unix-ms timestamp; otherwise
+      // we order by `id DESC` and the cursor is a row id. The frontend
+      // just hands `nextCursor` back unchanged, so the contract stays
+      // single-field.
+      if (input.cursor) {
+        conds.push(
+          input.starred
+            ? lt(tasksTable.starredAt, new Date(input.cursor))
+            : lt(tasksTable.id, input.cursor),
+        );
+      }
       if (input.projectId) {
         const [projRow] = await ctx.db
           .select({ id: projects.id })
@@ -2412,6 +2478,37 @@ export const tasksRouter = router({
           return { tasks: [], nextCursor: null };
         }
         conds.push(eq(tasksTable.projectId, projRow.id));
+      }
+      if (input.query) {
+        // Wrap in % — caller passes a bare substring. Drizzle's `like`
+        // doesn't auto-escape SQL `%` / `_` wildcards in user input,
+        // but the worst case is a slightly-broader match (a query of
+        // "5%" would also match "5y" / "5x"). Fine for a search box.
+        const needle = `%${input.query}%`;
+        const matchIntent = like(tasksTable.intent, needle);
+        const matchTitle = like(tasksTable.title, needle);
+        const queryCond = or(matchIntent, matchTitle);
+        if (queryCond) conds.push(queryCond);
+      }
+      if (input.status) {
+        if (Array.isArray(input.status)) {
+          conds.push(
+            input.status.length === 1
+              ? eq(tasksTable.status, input.status[0]!)
+              : inArray(tasksTable.status, input.status),
+          );
+        } else {
+          conds.push(eq(tasksTable.status, input.status));
+        }
+      }
+      if (input.starred) {
+        conds.push(sql`${tasksTable.starredAt} IS NOT NULL`);
+      }
+      if (input.dateFrom) {
+        conds.push(gte(tasksTable.createdAt, input.dateFrom));
+      }
+      if (input.dateTo) {
+        conds.push(lte(tasksTable.createdAt, input.dateTo));
       }
       const rows = await ctx.db
         .select({
@@ -2434,7 +2531,12 @@ export const tasksRouter = router({
         })
         .from(tasksTable)
         .where(and(...conds))
-        .orderBy(desc(tasksTable.id))
+        // Starred mode reads in last-starred order so the most-recent
+        // bookmark surfaces first; everything else stays newest-first
+        // by id (autoincrement so monotonic with insertion time).
+        .orderBy(
+          input.starred ? desc(tasksTable.starredAt) : desc(tasksTable.id),
+        )
         .limit(input.limit);
 
       // Resolve project external ids in one round-trip — mapping
@@ -2474,7 +2576,12 @@ export const tasksRouter = router({
           updatedAt: r.updatedAt,
           completedAt: r.completedAt,
         })),
-        nextCursor: rows.length === input.limit ? (rows[rows.length - 1]?.id ?? null) : null,
+        nextCursor:
+          rows.length === input.limit
+            ? input.starred
+              ? rows[rows.length - 1]?.starredAt?.getTime() ?? null
+              : rows[rows.length - 1]?.id ?? null
+            : null,
       };
     }),
 

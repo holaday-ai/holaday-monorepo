@@ -1,46 +1,105 @@
-import { Search, X } from 'lucide-react';
+import { Loader2, Search, X } from 'lucide-react';
 import * as React from 'react';
+import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
-import type { UiTask } from '@/types/task';
+import type { UiTask, UiTaskStatus } from '@/types/task';
 
 interface Props {
   open: boolean;
+  /**
+   * Recent task list from the store — used as the initial cold-state
+   * when the user opens the palette without typing. Once a query lands,
+   * the server-side search results take over.
+   */
   tasks: UiTask[];
   onClose(): void;
   onPick(taskId: string): void;
 }
 
+interface ServerTaskRow {
+  taskId: string;
+  intent: string;
+  title: string | null;
+  status: UiTaskStatus;
+}
+
 /**
- * Cmd/Ctrl+K palette — a modal list over the whole app. Searches the
- * current task list's intent text (plain substring, case-insensitive)
- * and lets the user jump to the first match with Enter or click a row.
- * Small on-purpose: we don't paginate or fetch server-side yet.
+ * Cmd/Ctrl+K palette — a modal list over the whole app. Empty input
+ * shows the recent task list from the store; typing kicks off a 300 ms
+ * debounced server-side search via `tasks.list({ query, limit: 20 })`
+ * so matches outside the sidebar's first-50 slice are still findable.
  */
 export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Element | null {
   const [query, setQuery] = React.useState('');
   const [active, setActive] = React.useState(0);
+  const [serverResults, setServerResults] = React.useState<ServerTaskRow[]>([]);
+  const [searching, setSearching] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     if (!open) return;
     setQuery('');
     setActive(0);
+    setServerResults([]);
+    setSearching(false);
     // Focus after mount so the browser accepts the focus call.
     const id = requestAnimationFrame(() => inputRef.current?.focus());
     return () => cancelAnimationFrame(id);
   }, [open]);
 
-  const filtered = React.useMemo(() => {
-    if (!query.trim()) return tasks.slice(0, 30);
-    const q = query.trim().toLowerCase();
-    return tasks
-      .filter(
-        (t) =>
-          t.intent.toLowerCase().includes(q) ||
-          (t.title ? t.title.toLowerCase().includes(q) : false),
-      )
-      .slice(0, 30);
-  }, [query, tasks]);
+  // Debounce server-side search by 300 ms so each keystroke isn't a
+  // network round-trip. Bumping the request token in the trailing
+  // closure lets a stale response silently lose to a newer one — tRPC
+  // doesn't ship cancellation through query() so we gate the setState
+  // on token equality instead.
+  const requestToken = React.useRef(0);
+  React.useEffect(() => {
+    if (!open) return;
+    const trimmed = query.trim();
+    if (trimmed.length === 0) {
+      setServerResults([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const myToken = ++requestToken.current;
+    const handle = window.setTimeout(() => {
+      void trpc.tasks.list
+        .query({ query: trimmed, limit: 20 })
+        .then((res) => {
+          if (myToken !== requestToken.current) return;
+          setServerResults(
+            res.tasks.map((t) => ({
+              taskId: t.taskId,
+              intent: t.intent,
+              title: t.title,
+              status: t.status as UiTaskStatus,
+            })),
+          );
+          setSearching(false);
+        })
+        .catch(() => {
+          if (myToken !== requestToken.current) return;
+          setServerResults([]);
+          setSearching(false);
+        });
+    }, 300);
+    return () => window.clearTimeout(handle);
+  }, [open, query]);
+
+  const filtered: ServerTaskRow[] = React.useMemo(() => {
+    if (!query.trim()) {
+      // Cold palette: show the most recent loaded tasks so the user
+      // has somewhere to land before typing.
+      return tasks.slice(0, 30).map((t) => ({
+        taskId: t.taskId,
+        intent: t.intent,
+        title: t.title,
+        status: t.status,
+      }));
+    }
+    return serverResults;
+  }, [query, tasks, serverResults]);
 
   React.useEffect(() => {
     if (active >= filtered.length) setActive(0);
@@ -95,6 +154,9 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
             placeholder="搜索任务…"
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
+          {searching && (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+          )}
           <button
             type="button"
             onClick={onClose}

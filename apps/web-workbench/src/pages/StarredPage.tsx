@@ -1,48 +1,99 @@
-import { Star, X } from 'lucide-react';
+import { Loader2, Star, X } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTaskStore } from '@/stores/task-store';
 import { taskDisplayTitle } from '@/components/TaskListItem';
+import { Button } from '@/components/ui/button';
+import { trpc } from '@/lib/trpc';
 import { PageShell } from '@/pages/PageShell';
+import type { UiTask } from '@/types/task';
+
+interface ServerStarredTask {
+  taskId: string;
+  intent: string;
+  title: string | null;
+  status: UiTask['status'];
+  starredAt: string | number | Date | null;
+}
 
 /**
- * Phase 16 — 收藏 list page. Reads the in-memory task list from
- * the store, filters to starred tasks, sorts by starredAt desc.
- * Click a row → open it in the workbench (router push to `/`
- * with the selectedTaskId set in the store).
+ * Phase 16 — 收藏 list page. Pulls the user's starred tasks via
+ * `tasks.list({ starred: true })` so older starred entries (past the
+ * sidebar's first-50 window) still surface here. Cursor pagination
+ * is independent from the store: the store keeps the live recent
+ * task slice, this page maintains its own list scoped to the
+ * starred-only view.
+ *
+ * Toggle off a star → optimistically drop the row + call the store's
+ * `toggleStarred` so the sidebar's `task.starred` flag stays in sync
+ * for any rows that overlap. The next page fetch picks up the
+ * canonical server state.
  */
 export function StarredPage(): JSX.Element {
   const navigate = useNavigate();
-  const tasks = useTaskStore((s) => s.tasks);
   const toggleStarred = useTaskStore((s) => s.toggleStarred);
-  const refreshTaskList = useTaskStore((s) => s.refreshTaskList);
 
-  // Refresh once on mount so a freshly-loaded /starred bookmark sees
-  // the latest server state even if the store was cold-empty.
+  const [items, setItems] = React.useState<ServerStarredTask[]>([]);
+  const [cursor, setCursor] = React.useState<number | null>(null);
+  const [hasMore, setHasMore] = React.useState(false);
+  const [loading, setLoading] = React.useState(true);
+  const [initialLoad, setInitialLoad] = React.useState(true);
+
+  const fetchToken = React.useRef(0);
+  const fetchPage = React.useCallback(
+    async (nextCursor: number | null, append: boolean): Promise<void> => {
+      const myToken = ++fetchToken.current;
+      setLoading(true);
+      try {
+        const res = await trpc.tasks.list.query({
+          starred: true,
+          limit: 50,
+          ...(nextCursor ? { cursor: nextCursor } : {}),
+        });
+        if (myToken !== fetchToken.current) return;
+        const list = (res?.tasks ?? []) as ServerStarredTask[];
+        setItems((prev) => (append ? [...prev, ...list] : list));
+        setCursor(res?.nextCursor ?? null);
+        setHasMore(Boolean(res?.nextCursor));
+      } finally {
+        if (myToken === fetchToken.current) {
+          setLoading(false);
+          setInitialLoad(false);
+        }
+      }
+    },
+    [],
+  );
+
   React.useEffect(() => {
-    if (tasks.length === 0) void refreshTaskList();
-  }, [tasks.length, refreshTaskList]);
-
-  const starred = React.useMemo(() => {
-    return tasks
-      .filter((t) => t.starred)
-      .sort((a, b) => {
-        const ta = a.starredAt ? new Date(a.starredAt).getTime() : 0;
-        const tb = b.starredAt ? new Date(b.starredAt).getTime() : 0;
-        return tb - ta;
-      });
-  }, [tasks]);
+    void fetchPage(null, false);
+  }, [fetchPage]);
 
   function open(taskId: string): void {
-    // navigate to /?task=… and let WorkbenchApp's URL→store effect
-    // pick it up. Avoids racing the store update against the route
-    // change.
     navigate(`/?task=${encodeURIComponent(taskId)}`);
+  }
+
+  async function handleUnstar(taskId: string): Promise<void> {
+    // Optimistic remove — the row vanishes immediately so the user
+    // doesn't see their tap reflect after a round-trip. Store
+    // toggle keeps the sidebar's task.starred flag in sync if the
+    // task is also in the recent slice.
+    setItems((prev) => prev.filter((t) => t.taskId !== taskId));
+    try {
+      await toggleStarred(taskId);
+    } catch {
+      // Revert: re-fetch from page top so any failure is visible.
+      void fetchPage(null, false);
+    }
   }
 
   return (
     <PageShell title="收藏" subtitle="星标的任务，按收藏时间倒序排列" width="3xl">
-      {starred.length === 0 ? (
+      {initialLoad ? (
+        <div className="flex h-48 items-center justify-center">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
+      ) : items.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
           <Star className="h-8 w-8 text-muted-foreground/40" />
           <div className="text-sm font-medium text-foreground/80">还没有收藏的任务</div>
@@ -51,31 +102,55 @@ export function StarredPage(): JSX.Element {
           </div>
         </div>
       ) : (
-        <div className="divide-y divide-border rounded-xl border border-border bg-card">
-          {starred.map((t) => (
-            <div
-              key={t.taskId}
-              className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-foreground/[0.03]"
-            >
-              <Star className="h-4 w-4 shrink-0 text-amber-500" fill="currentColor" />
-              <button
-                type="button"
-                onClick={() => open(t.taskId)}
-                className="min-w-0 flex-1 truncate text-left text-sm text-foreground hover:underline"
+        <>
+          <div className="divide-y divide-border rounded-xl border border-border bg-card">
+            {items.map((t) => (
+              <div
+                key={t.taskId}
+                className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-foreground/[0.03]"
               >
-                {taskDisplayTitle(t, 60)}
-              </button>
-              <button
-                type="button"
-                onClick={() => void toggleStarred(t.taskId)}
-                aria-label="取消收藏"
-                className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100"
+                <Star className="h-4 w-4 shrink-0 text-amber-500" fill="currentColor" />
+                <button
+                  type="button"
+                  onClick={() => open(t.taskId)}
+                  className="min-w-0 flex-1 truncate text-left text-sm text-foreground hover:underline"
+                >
+                  {taskDisplayTitle(
+                    {
+                      taskId: t.taskId,
+                      intent: t.intent,
+                      title: t.title,
+                      status: t.status,
+                      tickCount: 0,
+                      createdAt: new Date(0),
+                    },
+                    60,
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleUnstar(t.taskId)}
+                  aria-label="取消收藏"
+                  className="rounded p-1 text-muted-foreground opacity-100 transition-opacity hover:bg-foreground/10 hover:text-foreground lg:opacity-0 lg:group-hover:opacity-100"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+          {hasMore && (
+            <div className="mt-4 flex justify-center">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void fetchPage(cursor, true)}
+                disabled={loading}
               >
-                <X className="h-3.5 w-3.5" />
-              </button>
+                {loading ? '加载中…' : '加载更多'}
+              </Button>
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
     </PageShell>
   );
