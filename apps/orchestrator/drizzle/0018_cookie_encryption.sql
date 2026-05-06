@@ -18,8 +18,12 @@
 -- `cookies_json` itself is being relaxed to NULL so the new code can
 -- write rows without it once we're confident about rollback.
 
+-- Production DB has cookies_json as MEDIUMTEXT (16 MB cap) — drizzle's
+-- generated schema says TEXT but the actual column is wider, set by an
+-- earlier hand-edit. Preserve the wider type here so a power user with
+-- a >64 KB cookie payload doesn't get truncated mid-rollout.
 ALTER TABLE pending_cookies
-  MODIFY COLUMN cookies_json TEXT NULL,
+  MODIFY COLUMN cookies_json MEDIUMTEXT NULL,
   ADD COLUMN encrypted_blob MEDIUMBLOB NULL,
   ADD COLUMN encryption_iv VARBINARY(12) NULL,
   ADD COLUMN encryption_tag VARBINARY(16) NULL,
