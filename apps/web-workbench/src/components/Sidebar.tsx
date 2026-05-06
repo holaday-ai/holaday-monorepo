@@ -107,6 +107,17 @@ interface Props {
   hiddenTaskCount?: number;
   /** Plan retention window in days — used in the hint copy. */
   historyDays?: number;
+  /**
+   * Override the LoadMoreTasksButton's pagination source. When set
+   * (project-filter mode), the button uses these instead of the
+   * store's `tasksHasMore` / `loadingMore` / `loadMoreTasks`. When
+   * absent, the button reads straight from the store as before.
+   */
+  pagerOverride?: {
+    hasMore: boolean;
+    loadingMore: boolean;
+    onLoadMore: () => void;
+  };
 }
 
 const COLLAPSED_KEY = 'holaday.sidebar.collapsed';
@@ -153,6 +164,7 @@ export function Sidebar({
   onMobileClose,
   hiddenTaskCount = 0,
   historyDays,
+  pagerOverride,
 }: Props): JSX.Element {
   const pinnedIds = useTaskStore((s) => s.pinnedTaskIds);
   const togglePin = useTaskStore((s) => s.togglePin);
@@ -518,7 +530,7 @@ export function Sidebar({
                   page past the first 50 tasks. Hidden until the first
                   refresh sets tasksHasMore=true; once the cursor is
                   exhausted the button hides itself again. */}
-              <LoadMoreTasksButton />
+              <LoadMoreTasksButton override={pagerOverride} />
               {hiddenTaskCount > 0 && (
                 <RetentionHint
                   hiddenCount={hiddenTaskCount}
@@ -999,15 +1011,32 @@ function TaskGroup({ title, children }: GroupProps): JSX.Element {
  * visible while loading so users can see progress; the store throttles
  * concurrent calls via its `loadingMore` flag.
  */
-function LoadMoreTasksButton(): JSX.Element | null {
-  const hasMore = useTaskStore((s) => s.tasksHasMore);
-  const loadingMore = useTaskStore((s) => s.loadingMore);
-  const loadMore = useTaskStore((s) => s.loadMoreTasks);
+function LoadMoreTasksButton({
+  override,
+}: {
+  override?: {
+    hasMore: boolean;
+    loadingMore: boolean;
+    onLoadMore: () => void;
+  };
+}): JSX.Element | null {
+  // Hooks always run — even when an override is provided — so we
+  // don't violate the hooks rules. Cheap reads when unused.
+  const storeHasMore = useTaskStore((s) => s.tasksHasMore);
+  const storeLoadingMore = useTaskStore((s) => s.loadingMore);
+  const storeLoadMore = useTaskStore((s) => s.loadMoreTasks);
+  const hasMore = override ? override.hasMore : storeHasMore;
+  const loadingMore = override ? override.loadingMore : storeLoadingMore;
+  const onLoadMore = override
+    ? override.onLoadMore
+    : (): void => {
+        void storeLoadMore();
+      };
   if (!hasMore) return null;
   return (
     <button
       type="button"
-      onClick={() => void loadMore()}
+      onClick={onLoadMore}
       disabled={loadingMore}
       className="mx-3 my-2 block w-[calc(100%-1.5rem)] rounded-md border border-black/[0.06] px-2 py-1.5 text-center text-xs text-muted-foreground hover:bg-muted/40 disabled:opacity-60"
     >

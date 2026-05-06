@@ -244,30 +244,74 @@ function AppShell(): JSX.Element {
     );
   // Project-scoped task list. When `?project=prj_…` is present we
   // fetch tasks.list with the projectId filter so older entries past
-  // the sidebar's first-50 slice still surface here. The fetch is
-  // independent from the store (which holds the all-tasks recent
-  // slice) — this local list is only consumed by the sidebar render
-  // path below. Reset + refetch whenever projectFilter changes.
+  // the sidebar's first-50 slice still surface here. Independent
+  // pagination state — own cursor/hasMore/loading — so the "加载
+  // 更多" button paginates within the project instead of the
+  // store's global all-tasks list. Reset + refetch whenever
+  // projectFilter changes.
   const [projectTasks, setProjectTasks] = React.useState<UiTask[] | null>(null);
+  const [projectCursor, setProjectCursor] = React.useState<number | null>(null);
+  const [projectHasMore, setProjectHasMore] = React.useState(false);
+  const [projectLoadingMore, setProjectLoadingMore] = React.useState(false);
   const projectFetchToken = React.useRef(0);
+  const loadProjectTasksPage = React.useCallback(
+    async (
+      pid: string,
+      cursor: number | null,
+      append: boolean,
+    ): Promise<void> => {
+      const myToken = ++projectFetchToken.current;
+      setProjectLoadingMore(true);
+      try {
+        const res = await trpc.tasks.list.query({
+          projectId: pid,
+          limit: 50,
+          ...(cursor != null ? { cursor } : {}),
+        });
+        if (myToken !== projectFetchToken.current) return;
+        const fresh = res.tasks.map((t) => toUiTask(t));
+        setProjectTasks((prev) => (append && prev ? [...prev, ...fresh] : fresh));
+        setProjectCursor(res.nextCursor ?? null);
+        setProjectHasMore(res.nextCursor != null);
+      } catch {
+        if (myToken !== projectFetchToken.current) return;
+        if (!append) setProjectTasks([]);
+      } finally {
+        if (myToken === projectFetchToken.current) {
+          setProjectLoadingMore(false);
+        }
+      }
+    },
+    [],
+  );
   React.useEffect(() => {
     if (!projectFilter) {
+      // Drop project-scoped state when the filter goes away — the
+      // sidebar reverts to the store's tasks + the store-based
+      // LoadMoreTasksButton.
       setProjectTasks(null);
+      setProjectCursor(null);
+      setProjectHasMore(false);
+      setProjectLoadingMore(false);
+      projectFetchToken.current += 1;
       return;
     }
-    const myToken = ++projectFetchToken.current;
     setProjectTasks(null);
-    void trpc.tasks.list
-      .query({ projectId: projectFilter, limit: 50 })
-      .then((res) => {
-        if (myToken !== projectFetchToken.current) return;
-        setProjectTasks(res.tasks.map((t) => toUiTask(t)));
-      })
-      .catch(() => {
-        if (myToken !== projectFetchToken.current) return;
-        setProjectTasks([]);
-      });
-  }, [projectFilter]);
+    setProjectCursor(null);
+    setProjectHasMore(false);
+    void loadProjectTasksPage(projectFilter, null, false);
+  }, [projectFilter, loadProjectTasksPage]);
+  const onProjectLoadMore = React.useCallback(() => {
+    if (!projectFilter) return;
+    if (!projectHasMore || projectLoadingMore) return;
+    void loadProjectTasksPage(projectFilter, projectCursor, true);
+  }, [
+    projectFilter,
+    projectHasMore,
+    projectLoadingMore,
+    projectCursor,
+    loadProjectTasksPage,
+  ]);
   // Sidebar list source: server-fetched project view when filter is
   // active, otherwise the retention-clipped store list. Retention
   // doesn't apply to the project-scoped fetch — the user explicitly
@@ -579,6 +623,20 @@ function AppShell(): JSX.Element {
         }
         onClearProjectFilter={() => navigate('/')}
         historyDays={historyDays}
+        // In project-filter mode, paginate within the project's
+        // tasks via tasks.list({ projectId, cursor }). Without this
+        // override, the sidebar's "加载更多" button paged the
+        // store's global all-tasks list — which is the wrong axis
+        // when the user has scoped down to a single project.
+        pagerOverride={
+          projectFilter
+            ? {
+                hasMore: projectHasMore,
+                loadingMore: projectLoadingMore,
+                onLoadMore: onProjectLoadMore,
+              }
+            : undefined
+        }
         selectedTaskId={selectedTaskId}
         onSelectTask={(taskId) => {
           if (taskId) selectTask(taskId, 'ui');

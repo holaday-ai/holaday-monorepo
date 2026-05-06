@@ -54,9 +54,13 @@ describe('cookie-crypto', () => {
 
   it('rejects a tampered ciphertext (auth tag mismatch)', () => {
     const blob = encryptCookieJson('{"answer":42}');
-    // Flip one bit in the ciphertext.
+    // Flip one bit in the ciphertext. Buffer index access types as
+    // `number | undefined` under tsc strict, but we just encrypted
+    // a non-empty plaintext so byte 0 must exist — the `!` is the
+    // honest assertion of that invariant.
+    expect(blob.encryptedBlob.length).toBeGreaterThan(0);
     const tampered = Buffer.from(blob.encryptedBlob);
-    tampered[0] ^= 0x01;
+    tampered[0] = tampered[0]! ^ 0x01;
     expect(() =>
       decryptCookieJson({ ...blob, encryptedBlob: tampered }),
     ).toThrow();
@@ -65,7 +69,7 @@ describe('cookie-crypto', () => {
   it('rejects a tampered auth tag', () => {
     const blob = encryptCookieJson('{"answer":42}');
     const tag = Buffer.from(blob.encryptionTag);
-    tag[0] ^= 0x01;
+    tag[0] = tag[0]! ^ 0x01;
     expect(() => decryptCookieJson({ ...blob, encryptionTag: tag })).toThrow();
   });
 
