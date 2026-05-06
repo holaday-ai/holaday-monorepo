@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  customType,
   datetime,
   int,
   mysqlTable,
@@ -8,6 +9,25 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/mysql-core';
 import { users } from './users.js';
+
+/**
+ * Binary columns expressed as Buffer in/out. Drizzle 0.38's built-in
+ * `varbinary` helper types its driverData as string (cookie payloads
+ * are not text), so customType keeps the typing honest end-to-end —
+ * sync-service writes Buffers; reads return Buffers; the encryption
+ * helper never has to round-trip through hex/base64.
+ */
+const mediumblob = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return 'mediumblob';
+  },
+});
+const fixedVarbinary = (length: number) =>
+  customType<{ data: Buffer; driverData: Buffer }>({
+    dataType() {
+      return `varbinary(${length})`;
+    },
+  });
 
 /**
  * `pending_cookies` — extension-shipped cookies waiting for injection
@@ -29,10 +49,24 @@ export const pendingCookies = mysqlTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     /**
-     * JSON-encoded SyncableCookie[]. Stored as mediumtext (16 MB
-     * cap) but typical payloads are tens of KB.
+     * Legacy plaintext storage. Kept as nullable during the Spec B
+     * envelope-encryption rollout so a rollback of the new code can
+     * still read existing rows from this column. Will be dropped in
+     * a follow-up migration after the soak window closes.
      */
-    cookiesJson: text('cookies_json').notNull(),
+    cookiesJson: text('cookies_json'),
+    /**
+     * Spec B envelope encryption — AES-256-GCM ciphertext of the
+     * JSON payload, encrypted under a per-row data key that's itself
+     * wrapped by the master key from `COOKIE_MASTER_KEY`. See
+     * `cookies/cookie-crypto.ts` for the layout. Nullable until the
+     * 0019 migration drops `cookies_json` and flips these to NOT
+     * NULL.
+     */
+    encryptedBlob: mediumblob('encrypted_blob'),
+    encryptionIv: fixedVarbinary(12)('encryption_iv'),
+    encryptionTag: fixedVarbinary(16)('encryption_tag'),
+    encryptedKey: fixedVarbinary(256)('encrypted_key'),
     cookieCount: int('cookie_count', { unsigned: true }).notNull(),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
       .notNull()

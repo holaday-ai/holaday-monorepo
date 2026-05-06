@@ -24,6 +24,7 @@ import { logger } from '../config/logger.js';
 import type { db as DbHandle } from '../db/client.js';
 import { pendingCookies } from '../db/schema/pending-cookies.js';
 import { users } from '../db/schema/users.js';
+import { decryptCookieJson, encryptCookieJson } from './cookie-crypto.js';
 
 /**
  * Domains the extension is allowed to sync cookies for. Mirrors the
@@ -101,6 +102,13 @@ export const MAX_COOKIES_PER_SYNC = 5_000;
  * Replace the user's pending cookie payload with the new one. Idempotent
  * across retries — the unique index on user_id makes this a true
  * upsert via ON DUPLICATE KEY UPDATE.
+ *
+ * Spec B rollout — dual-write phase. We write the four envelope-
+ * encryption columns AND the legacy `cookies_json` column. The new
+ * read path prefers encrypted; the old read path (if rolled back to)
+ * still finds plaintext in cookies_json. Once the 30-day soak ends
+ * the next migration will drop cookies_json and the second branch
+ * here becomes a no-op to delete.
  */
 export async function upsertPendingCookies(
   db: typeof DbHandle,
@@ -108,16 +116,25 @@ export async function upsertPendingCookies(
   cookies: readonly SyncableCookie[],
 ): Promise<{ count: number }> {
   const json = JSON.stringify(cookies);
+  const enc = encryptCookieJson(json);
   await db
     .insert(pendingCookies)
     .values({
       userId: userInternalId,
       cookiesJson: json,
+      encryptedBlob: enc.encryptedBlob,
+      encryptionIv: enc.encryptionIv,
+      encryptionTag: enc.encryptionTag,
+      encryptedKey: enc.encryptedKey,
       cookieCount: cookies.length,
     })
     .onDuplicateKeyUpdate({
       set: {
         cookiesJson: json,
+        encryptedBlob: enc.encryptedBlob,
+        encryptionIv: enc.encryptionIv,
+        encryptionTag: enc.encryptionTag,
+        encryptedKey: enc.encryptedKey,
         cookieCount: cookies.length,
         updatedAt: sql`CURRENT_TIMESTAMP(3)`,
       },
@@ -145,15 +162,56 @@ export async function injectPendingCookies(opts: {
     .limit(1);
   if (!userRow) return 0;
   const [row] = await opts.db
-    .select({ id: pendingCookies.id, cookiesJson: pendingCookies.cookiesJson })
+    .select({
+      id: pendingCookies.id,
+      cookiesJson: pendingCookies.cookiesJson,
+      encryptedBlob: pendingCookies.encryptedBlob,
+      encryptionIv: pendingCookies.encryptionIv,
+      encryptionTag: pendingCookies.encryptionTag,
+      encryptedKey: pendingCookies.encryptedKey,
+    })
     .from(pendingCookies)
     .where(eq(pendingCookies.userId, userRow.id))
     .limit(1);
   if (!row) return 0;
 
+  // Spec B — prefer the encrypted columns when present, fall back to
+  // legacy plaintext. Decrypt failure (auth tag mismatch, wrong key,
+  // corrupted blob) drops the row + logs rather than returning stale
+  // data; the user's next sync repopulates.
+  let payloadJson: string | null = null;
+  if (
+    row.encryptedBlob &&
+    row.encryptionIv &&
+    row.encryptionTag &&
+    row.encryptedKey
+  ) {
+    try {
+      payloadJson = decryptCookieJson({
+        encryptedBlob: row.encryptedBlob,
+        encryptionIv: row.encryptionIv,
+        encryptionTag: row.encryptionTag,
+        encryptedKey: row.encryptedKey,
+      });
+    } catch (err) {
+      logger.warn(
+        { err: errMsg(err), userExternalId: opts.userExternalId },
+        'cookie-sync: encrypted payload failed to decrypt; dropping row',
+      );
+      await opts.db.delete(pendingCookies).where(eq(pendingCookies.id, row.id));
+      return 0;
+    }
+  } else if (row.cookiesJson) {
+    payloadJson = row.cookiesJson;
+  } else {
+    // Empty row (no plaintext, no ciphertext) — drop and skip.
+    await opts.db.delete(pendingCookies).where(eq(pendingCookies.id, row.id));
+    return 0;
+  }
+
   let parsed: unknown;
   try {
-    parsed = JSON.parse(row.cookiesJson);
+    parsed = JSON.parse(payloadJson);
   } catch (err) {
     logger.warn(
       { err: errMsg(err), userExternalId: opts.userExternalId },
