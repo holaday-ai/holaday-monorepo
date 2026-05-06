@@ -263,7 +263,22 @@ export function BrowserPanel({
   const displayFrame = taskIsTerminal
     ? finalEvidenceFrame
     : (frame ?? latestFrame ?? finalEvidenceFrame);
-  const displayUrl = displayFrame?.url ?? 'about:blank';
+  // P2 — URL fallback chain: task.finalUrl (persisted, survives
+  // refreshes / awaiting_user pauses / screencast disconnects)
+  // → displayFrame.url (live or evidence) → about:blank.
+  // Earlier the URL chip dropped to about:blank during an
+  // awaiting_user pause whenever the screencast WS dropped; finalUrl
+  // is written by the supercar on park / terminal so it pins the
+  // last real URL through any transient connection loss.
+  const persistedFinalUrl =
+    activeTask?.finalUrl && !isBlankUrl(activeTask.finalUrl)
+      ? activeTask.finalUrl
+      : null;
+  const frameUrl =
+    displayFrame?.url && !isBlankUrl(displayFrame.url)
+      ? displayFrame.url
+      : null;
+  const displayUrl = persistedFinalUrl ?? frameUrl ?? 'about:blank';
   const abortTask = useTaskStore((s) => s.abortTask);
   const [aborting, setAborting] = React.useState(false);
   const isExecuting = taskStatus === 'executing';

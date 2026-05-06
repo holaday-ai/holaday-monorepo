@@ -85,6 +85,16 @@ function AppShell(): JSX.Element {
     string[] | null
   >(null);
   const [confirmClearFailed, setConfirmClearFailed] = React.useState(false);
+  // P1-C — handle-loss confirm. Set when tasks.reply returns ok:false
+  // (the orchestrator's in-memory handle is gone — restart, GC, race
+  // with another reply). User confirms → we rebuild the task with the
+  // original intent + every prior reply + the message they just tried
+  // to send, so they don't have to retype context.
+  const [confirmRebuildTask, setConfirmRebuildTask] = React.useState<{
+    taskId: string;
+    intent: string;
+    pendingMessage: string;
+  } | null>(null);
   // Panel "full-screen": Sidebar + MainPanel hidden, BrowserPanel
   // takes the whole app shell. Toggled from the Panel header button
   // and from Escape (via the existing keyboard handler below).
@@ -210,6 +220,7 @@ function AppShell(): JSX.Element {
   const toggleStarred = useTaskStore((s) => s.toggleStarred);
   const moveTaskToProject = useTaskStore((s) => s.moveTaskToProject);
   const awaitingUserByTask = useTaskStore((s) => s.awaitingUserByTask);
+  const userRepliesByTask = useTaskStore((s) => s.userRepliesByTask);
   const applyServerMessage = useTaskStore((s) => s.applyServerMessage);
   const reset = useTaskStore((s) => s.reset);
   const screencastByTask = useTaskStore((s) => s.screencastByTask);
@@ -787,8 +798,20 @@ function AppShell(): JSX.Element {
           // 1) In-flight awaiting_user → tasks.reply, resumes the existing loop.
           if (isReplyMode && selectedTaskId) {
             const res = await replyToTask(selectedTaskId, intent);
-            if ('error' in res) toast.show(`回复失败：${res.error}`, 'error');
-            else if (!res.ok) toast.show('这个任务已经不在等待回复了', 'error');
+            if ('error' in res) {
+              toast.show(`回复失败：${res.error}`, 'error');
+            } else if (!res.ok) {
+              // P1-C — handle missing on the backend (orchestrator
+              // restart since the task parked, GC reaped the slot,
+              // race with another reply). Don't silently fallback to
+              // a fresh task that loses the user's typed message; ask
+              // first and offer to reconstruct with everything we know.
+              setConfirmRebuildTask({
+                taskId: selectedTaskId,
+                intent: selectedTask?.intent ?? '',
+                pendingMessage: intent,
+              });
+            }
             return;
           }
           // 2) Terminal task selected + chip not dismissed → 追问 (free,
@@ -979,6 +1002,29 @@ function AppShell(): JSX.Element {
               `已删除 ${ids.length - errs.length} 个，${errs.length} 个失败`,
               'error',
             );
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmRebuildTask !== null}
+        title="执行进程已中断"
+        description="该任务已不在等待回复（很可能是后端重启过）。是否基于当前上下文重新执行？将使用原任务描述、此前已收集的补充和你刚才输入的内容。"
+        confirmLabel="重新执行"
+        onClose={() => setConfirmRebuildTask(null)}
+        onConfirm={async () => {
+          const ctx = confirmRebuildTask;
+          setConfirmRebuildTask(null);
+          if (!ctx) return;
+          const replies = userRepliesByTask[ctx.taskId] ?? [];
+          const replyBlock = replies.map((r) => r.text).filter(Boolean).join('\n');
+          const combined = [
+            ctx.intent,
+            replyBlock.length > 0 ? `\n[此前补充]\n${replyBlock}` : '',
+            `\n[当前补充]\n${ctx.pendingMessage}`,
+          ].join('').trim();
+          const res = await createTask(combined);
+          if ('error' in res) toast.show(`重建任务失败：${res.error}`, 'error');
+          else toast.show('已基于当前上下文重新创建任务');
         }}
       />
 

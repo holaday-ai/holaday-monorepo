@@ -1641,17 +1641,52 @@ export const tasksRouter = router({
             } catch (err) {
               ctx.logger.warn({ err, taskId }, 'supercar: broadcast awaiting_user failed');
             }
-            // Persist the question so a refresh during the pause
-            // can rebuild the input box from tasks.detail. The
-            // status flip to 'awaiting_user' is owned by the
-            // supercar runner; we just stamp the question text.
+            // P1-A — also flip status to 'awaiting_user' so a
+            // refresh / reconnect surfaces the park state purely
+            // from tasks.detail without depending on the WS event
+            // having been received. Earlier code only stamped the
+            // question text; selectedNeedsUser on the SPA fell back
+            // to the in-memory WS-driven awaitingUserByTask flag,
+            // which is empty after a hard refresh — composer
+            // dispatched createTask instead of tasks.reply, the
+            // observed P1-B bug. Pairing this with the resume
+            // path in `reply` below closes the loop both ways.
+            //
+            // P2 — also stamp the current page URL into
+            // result.finalUrl when supercar provides it. The SPA's
+            // BrowserPanel reads this URL through any screencast
+            // disconnect during the pause, instead of dropping
+            // back to about:blank.
             ctx.db
               .update(tasksTable)
-              .set({ awaitingQuestion: ev.question })
+              .set({ status: 'awaiting_user', awaitingQuestion: ev.question })
               .where(eq(tasksTable.externalId, taskId))
               .catch((err) => {
-                ctx.logger.warn({ err, taskId }, 'supercar: persist awaiting_question failed');
+                ctx.logger.warn({ err, taskId }, 'supercar: persist awaiting_user state failed');
               });
+            if (ev.currentUrl) {
+              const parkUrl = ev.currentUrl;
+              void (async () => {
+                try {
+                  const [row] = await ctx.db
+                    .select({ result: tasksTable.result })
+                    .from(tasksTable)
+                    .where(eq(tasksTable.externalId, taskId))
+                    .limit(1);
+                  const prev = (row?.result ?? {}) as Record<string, unknown>;
+                  const next = { ...prev, finalUrl: parkUrl };
+                  await ctx.db
+                    .update(tasksTable)
+                    .set({ result: next })
+                    .where(eq(tasksTable.externalId, taskId));
+                } catch (err) {
+                  ctx.logger.warn(
+                    { err, taskId },
+                    'supercar: persist park finalUrl failed',
+                  );
+                }
+              })();
+            }
           },
           onThinking(summary) {
             try {
@@ -2932,6 +2967,21 @@ export const tasksRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
       }
       const delivered = supercarReply(input.taskId, input.message);
+      if (delivered) {
+        // P1-A — flip status back to 'executing' and clear the
+        // pending question so a refresh during the next iteration
+        // doesn't show the SPA in reply-mode anymore. Pairs with the
+        // onAwaitingUser callback's status='awaiting_user' write.
+        // Best-effort; a DB blip here is recoverable from the next
+        // park / terminal write that persistSupercarOutcome does.
+        ctx.db
+          .update(tasksTable)
+          .set({ status: 'executing', awaitingQuestion: null })
+          .where(eq(tasksTable.externalId, input.taskId))
+          .catch((err) => {
+            ctx.logger.warn({ err, taskId: input.taskId }, 'reply: status resume write failed');
+          });
+      }
       return { ok: delivered };
     }),
 

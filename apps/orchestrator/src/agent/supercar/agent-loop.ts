@@ -390,6 +390,15 @@ export interface SupercarAwaitingUserEvent {
   question: string;
   /** When this question was asked. */
   at: Date;
+  /**
+   * P2 — current page URL captured pre-park, when available.
+   * Lets the dispatcher persist tasks.finalUrl so the SPA's
+   * BrowserPanel keeps showing the real URL through the pause
+   * even when the screencast WS disconnects. Empty / null when
+   * the runner has no executor (generate / scrape modes) or
+   * the page isn't queryable at the moment.
+   */
+  currentUrl?: string | null;
 }
 
 export interface SupercarWebSearchEvent {
@@ -1463,7 +1472,32 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           // the task in 'executing' forever — it's the actual bug
           // observed on tsk_SFsgUXHMrxgQSpJ5SXTqb.
           const AWAITING_USER_TIMEOUT_MS = 5 * 60 * 1000;
-          await safeCall(opts.onAwaitingUser, { question: finalText, at: new Date() });
+          // P1-A — strip the machine marker before showing the
+          // question to the user. Detector consumed it; user
+          // shouldn't see "[AWAITING_USER_INPUT]" verbatim.
+          const visibleQuestion = stripAwaitingUserMarker(finalText);
+          // P2 — capture current page URL right before parking so
+          // the dispatcher can persist tasks.finalUrl. Survives any
+          // screencast disconnect that happens during the pause.
+          // Best-effort: a Playwright failure here shouldn't block
+          // the park; pass null and the dispatcher skips the write.
+          let currentParkUrl: string | null = null;
+          try {
+            const livePage = (await executor.getPage()) as unknown as {
+              url?: () => string;
+            };
+            const u = livePage?.url?.();
+            if (typeof u === 'string' && u && u !== 'about:blank') {
+              currentParkUrl = u;
+            }
+          } catch {
+            /* swallow — best-effort URL snapshot */
+          }
+          await safeCall(opts.onAwaitingUser, {
+            question: visibleQuestion,
+            at: new Date(),
+            currentUrl: currentParkUrl,
+          });
           let waitTimer: NodeJS.Timeout | null = null;
           const replyPromise = new Promise<string>((resolve) => {
             handle.resolveReply = resolve;
@@ -1500,7 +1534,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             );
             return {
               status: 'completed',
-              summary: finalText,
+              summary: stripAwaitingUserMarker(finalText),
               iterations: iteration,
               toolsUsed: Array.from(toolsUsed),
             };
@@ -1518,7 +1552,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         }
         return {
           status: 'completed',
-          summary: finalText,
+          summary: stripAwaitingUserMarker(finalText),
           iterations: iteration,
           toolsUsed: Array.from(toolsUsed),
         };
@@ -2604,17 +2638,60 @@ function normaliseModifier(raw: string): string {
 }
 
 /**
- * Very conservative heuristic: flag a response as "awaiting user" only
- * when the last non-empty line ends in a question mark (zh / en).
- * Short responses that merely contain a '?' somewhere don't count —
- * summaries with rhetorical questions were false-positives in dogfood.
+ * Decide whether the model's text-only turn is asking the user for
+ * more input (→ park to awaiting_user) or genuinely terminating
+ * (→ status=completed). Three signals, in priority order:
+ *
+ *   1. Explicit `[AWAITING_USER_INPUT]` marker — emitted by expert-
+ *      workflow preambles (see expert-workflows.ts) when the model
+ *      enters intake-guard mode. Strongest signal; overrides other
+ *      heuristics. Stripped from the user-visible text by the caller
+ *      before broadcast.
+ *   2. Trailing question mark (zh / en) on the last non-empty line —
+ *      original heuristic. Conservative: covers polite "需要其它部分
+ *      吗？" tails without false-firing on summaries that mention a
+ *      question internally.
+ *   3. Structured intake without a trailing '?' — model lists missing
+ *      fields as a numbered / bulleted block (matched by INTAKE_MARKERS
+ *      AND ≥2 list lines, capped at 1500 chars to avoid finished
+ *      reports that contain phrases like "请告诉我" inside prose).
+ *      This is the failure mode P1-A targets: the douyin intake-guard
+ *      output before the marker existed didn't end in '?', so the
+ *      task hit completed and the user's question never showed.
  */
 function looksLikePendingQuestion(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
+  if (/\[AWAITING[_ ]USER[_ ]INPUT\]/i.test(trimmed)) return true;
   const lines = trimmed.split('\n').map((l) => l.trim()).filter(Boolean);
   const last = lines[lines.length - 1] ?? '';
-  return last.endsWith('？') || last.endsWith('?');
+  if (last.endsWith('？') || last.endsWith('?')) return true;
+  if (trimmed.length >= 1500) return false;
+  const INTAKE_MARKERS: readonly RegExp[] = [
+    /请(?:先\s*)?(?:告诉|提供|补充|发我|给我|确认|说明)/u,
+    /需要(?:先|您|你|以下)(?:确认|提供|补充|说明|告知|信息|输入)/u,
+    /缺少(?:以下|这些|关键|必要)(?:信息|输入|字段|数据)/u,
+    /(?:才能|以便)(?:开始|执行|继续|分析|生成|出报告)/u,
+    /(?:please\s+)?(?:provide|tell\s+me|share|confirm|let\s+me\s+know)\b/i,
+    /\bbefore\s+(?:i\s+can|we\s+can|we\s+begin)\b/i,
+    /\bi\s+(?:need|require|'ll\s+need)\s+(?:the|some|more|additional)\b/i,
+  ];
+  if (!INTAKE_MARKERS.some((re) => re.test(trimmed))) return false;
+  const listLines = lines.filter(
+    (l) => /^[\-\*•·]\s/.test(l) || /^\d+[\.、)]/u.test(l),
+  ).length;
+  if (listLines >= 2) return true;
+  // Or: colon-then-list pattern ("请补充：\n1. ...\n2. ...")
+  return /[：:]\s*\n\s*(?:[\d\-\*•·]|[一二三四五六七八九十])/u.test(trimmed);
+}
+
+/**
+ * Strip the `[AWAITING_USER_INPUT]` machine marker from the user-
+ * visible text — operators / users should never see the raw marker,
+ * but the agent-loop has already consumed it as a park signal.
+ */
+function stripAwaitingUserMarker(text: string): string {
+  return text.replace(/\s*\[AWAITING[_ ]USER[_ ]INPUT\]\s*/gi, ' ').trim();
 }
 
 /**

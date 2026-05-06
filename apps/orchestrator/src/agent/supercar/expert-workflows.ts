@@ -109,7 +109,17 @@ function buildDouyinLivestreamPreamble(opts: {
           `当前缺少：${missingLabels.join('、')}。`,
           '在缺少上述关键信息时，先不要调用任何工具，不要 navigate，不要 web_search，也不要凭经验生成复盘。',
           '请先向用户提出 1-3 个最小必要问题，并给出快捷选项。问题应覆盖：复盘哪一场直播、数据在后台还是上传附件、希望产出简版结论还是详细运营报告。',
-          '用户回答后，将原始需求和补充信息合并成执行上下文，再继续执行。',
+          // P1-A — explicit park marker. The agent-loop's question
+          // detector previously only flagged outputs ending in '?' /
+          // '？', so a structured intake list (numbered, no trailing
+          // question mark) was treated as a completed turn and the
+          // task hit a terminal completed state with the user's
+          // intake question never reaching them. The marker below is
+          // detected upstream as a strong signal to park to
+          // awaiting_user; the trailing-? heuristic is kept as a
+          // belt-and-suspenders fallback.
+          '在你输出问题列表的同一回合末尾，必须独占一行写入 [AWAITING_USER_INPUT]。这是机器读取的暂停标记，对用户不可见，但会让本任务保持 awaiting_user 状态等待补充。',
+          '用户回答后，将原始需求和补充信息合并成执行上下文，再继续执行。这次不要再写 [AWAITING_USER_INPUT]。',
         ].join('\n')
       : [
           '最低启动信息已基本具备。可以开始执行，但所有经营结论必须来自用户提供的数据、后台读取结果或明确标注的公开来源。',
