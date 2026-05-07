@@ -322,6 +322,15 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             ? (detail as { awaitingQuestion?: string | null }).awaitingQuestion ??
               null
             : null;
+        const awaitingKindRaw = (detail as { awaitingKind?: string | null })
+          .awaitingKind;
+        const awaitingKind: UiAwaitingUser['awaitingKind'] =
+          awaitingKindRaw === 'login' ||
+          awaitingKindRaw === 'captcha' ||
+          awaitingKindRaw === 'browser_action' ||
+          awaitingKindRaw === 'clarification'
+            ? awaitingKindRaw
+            : undefined;
         return {
           stepsByTask: { ...prev.stepsByTask, [taskId]: steps },
           ...(hydratedWebSearch
@@ -335,7 +344,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           awaitingUserByTask: awaitingQuestion
             ? {
                 ...prev.awaitingUserByTask,
-                [taskId]: { question: awaitingQuestion, at: Date.now() },
+                [taskId]: {
+                  question: awaitingQuestion,
+                  at: Date.now(),
+                  ...(awaitingKind ? { awaitingKind } : {}),
+                },
               }
             : (() => {
                 if (!prev.awaitingUserByTask[taskId])
@@ -358,6 +371,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                       ...(planStatus ? { planStatus } : {}),
                       ...(finalScreenshot ? { finalScreenshot } : {}),
                       ...(finalUrl ? { finalUrl } : {}),
+                      ...(awaitingKind ? { awaitingKind } : {}),
                     }
                   : t,
               );
@@ -396,6 +410,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               ...(planStatus ? { planStatus } : {}),
               ...(finalScreenshot ? { finalScreenshot } : {}),
               ...(finalUrl ? { finalUrl } : {}),
+              ...(awaitingKind ? { awaitingKind } : {}),
             };
             return [synth, ...prev.tasks];
           })(),
@@ -1115,11 +1130,25 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       return;
     }
     if (msg.type === 'server.supercar.awaiting_user') {
+      const awaitingKind = msg.awaitingKind;
       set((prev) => ({
         awaitingUserByTask: {
           ...prev.awaitingUserByTask,
-          [msg.taskId]: { question: msg.question, at: Date.now() },
+          [msg.taskId]: {
+            question: msg.question,
+            at: Date.now(),
+            ...(awaitingKind ? { awaitingKind } : {}),
+          },
         },
+        // P2-A — also mirror onto the task row so a refresh that
+        // re-loads via tasks.detail still has the right kind even if
+        // the WS event arrived first and tasks.detail's hydrate has
+        // not yet fired.
+        tasks: prev.tasks.map((t) =>
+          t.taskId === msg.taskId && awaitingKind
+            ? { ...t, awaitingKind }
+            : t,
+        ),
       }));
       return;
     }

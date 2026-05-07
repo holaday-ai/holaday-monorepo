@@ -398,6 +398,12 @@ export interface SupercarTickEvent {
   apiLatencyMs: number;
 }
 
+export type SupercarAwaitingKind =
+  | 'clarification'
+  | 'login'
+  | 'captcha'
+  | 'browser_action';
+
 export interface SupercarAwaitingUserEvent {
   question: string;
   /** When this question was asked. */
@@ -411,6 +417,17 @@ export interface SupercarAwaitingUserEvent {
    * the page isn't queryable at the moment.
    */
   currentUrl?: string | null;
+  /**
+   * P2-A — what KIND of input we're waiting on. The default
+   * `clarification` means the agent asked an intake / follow-up
+   * question (the user replies in the chat composer). The other
+   * kinds need the user to do something IN the browser viewport,
+   * which is the only context where the BrowserPanel auto-expands
+   * and shows the "需要您手动完成验证" banner. Conflating the two
+   * was the BOSS-reported bug: every clarification flashed the
+   * verification banner and forced the panel open.
+   */
+  awaitingKind: SupercarAwaitingKind;
 }
 
 export interface SupercarWebSearchEvent {
@@ -800,6 +817,17 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       ];
       if (r.runId) lines.push(`- Run ID: \`${r.runId}\``);
       if (r.statusUrl) lines.push(`- 查看进度：${r.statusUrl}`);
+      // P1 — Zapier short-circuit completes the task without ever
+      // entering the loop, so the in-loop convergePlanOnSuccess
+      // never runs. Mirror it inline here.
+      if ((opts.planSteps?.length ?? 0) > 0) {
+        const converged = opts.planSteps!.map((s) =>
+          s.status === 'pending' || s.status === 'running'
+            ? { ...s, status: 'done' as const }
+            : { ...s },
+        );
+        void Promise.resolve(opts.onPlanStepUpdate?.(converged));
+      }
       return {
         status: 'completed',
         summary: lines.join('\n'),
@@ -1087,6 +1115,31 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   };
   const currentPlanSteps: PlanStepLocal[] = (opts.planSteps ?? []).map((s) => ({ ...s }));
   const planTrackerEnabled = currentPlanSteps.length > 0 && opts.planText != null;
+
+  // P1 — converge plan on terminal success. The model isn't
+  // disciplined about emitting a final `[STEP N done]` for every
+  // bullet, and the handoff_to_generate path skips the supercar
+  // marker scanner entirely. Without convergence, a successful run
+  // can leave the PlanCard reading "0/5 完成" forever — the worst
+  // possible signal to a user who just got a complete answer.
+  // Rule: any pending/running step rolls to done; existing done /
+  // failed are left alone (don't overwrite real signal). Only fired
+  // on completed / handoff_to_generate paths — failure leaves the
+  // plan as-is so the user can see how far the loop got.
+  const convergePlanOnSuccess = (): void => {
+    if (!planTrackerEnabled) return;
+    let mutated = false;
+    for (const step of currentPlanSteps) {
+      if (step.status === 'pending' || step.status === 'running') {
+        step.status = 'done';
+        mutated = true;
+      }
+    }
+    if (mutated) {
+      const snapshot = currentPlanSteps.map((s) => ({ ...s }));
+      void Promise.resolve(opts.onPlanStepUpdate?.(snapshot));
+    }
+  };
   // Captured from the first response that materialised a server-side
   // code_execution sandbox (Sonnet 4.6 + computer-use-2025-11-24 beta
   // auto-enables this). Re-passed on every subsequent messages.create
@@ -1552,6 +1605,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             question: visibleQuestion,
             at: new Date(),
             currentUrl: currentParkUrl,
+            awaitingKind: classifyAwaitingKind(visibleQuestion),
           });
           let waitTimer: NodeJS.Timeout | null = null;
           const replyPromise = new Promise<string>((resolve) => {
@@ -1577,6 +1631,12 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           if (handle.handoffMessage !== null) {
             const handoffMsg = handle.handoffMessage;
             handle.handoffMessage = null;
+            // P1 — handoff means the supercar gave up the browser
+            // and the dispatcher will run generate to finish. From
+            // the user's plan-card perspective every browser-tier
+            // step the supercar managed counts as done; the
+            // dispatcher converges again after generate completes.
+            convergePlanOnSuccess();
             return {
               status: 'handoff_to_generate',
               question: handoffMsg,
@@ -1605,6 +1665,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               },
               'supercar: awaiting-user timed out — completing with available text',
             );
+            convergePlanOnSuccess();
             return {
               status: 'completed',
               summary: stripAwaitingUserMarker(finalText),
@@ -1623,6 +1684,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           messages.push({ role: 'user', content: replyOrAbort });
           continue;
         }
+        convergePlanOnSuccess();
         return {
           status: 'completed',
           summary: stripAwaitingUserMarker(finalText),
@@ -2226,6 +2288,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               .slice(0, 10)
               .map((it, i) => `${i + 1}. \`\`\`json\n${JSON.stringify(it, null, 2).slice(0, 400)}\n\`\`\``)
               .join('\n\n');
+            convergePlanOnSuccess();
             return {
               status: 'completed',
               summary:
@@ -2765,6 +2828,42 @@ function looksLikePendingQuestion(text: string): boolean {
  */
 function stripAwaitingUserMarker(text: string): string {
   return text.replace(/\s*\[AWAITING[_ ]USER[_ ]INPUT\]\s*/gi, ' ').trim();
+}
+
+/**
+ * P2-A — classify what KIND of user input the supercar is waiting on.
+ * Drives the SPA's BrowserPanel: only the non-clarification kinds
+ * auto-expand the panel and show the "需要您手动完成验证" banner.
+ * Order matters — captcha/login wins over the looser browser_action
+ * heuristic because the same question can mention "登录" inside a
+ * generic prompt.
+ */
+export function classifyAwaitingKind(
+  question: string,
+): SupercarAwaitingKind {
+  const t = question.toLowerCase();
+  if (
+    /验证码|滑块|滑动验证|拼图|captcha|recaptcha|hcaptcha|cloudflare|cf[\-\s]?turnstile|人机验证/.test(
+      t,
+    )
+  ) {
+    return 'captcha';
+  }
+  if (
+    /扫码|二维码|扫一扫|scan\s*(?:the\s*)?(?:qr|code)|登录|登入|账号|密码|sign[\-\s]?in|log[\-\s]?in|登出后重新登录/.test(
+      t,
+    )
+  ) {
+    return 'login';
+  }
+  if (
+    /请在(?:浏览器|页面|网页|当前页|右(?:边|侧)).*(?:点击|确认|操作|选择|完成|继续)|帮我点(?:一下|击)|请点击(?:一下|页面|按钮)|请前往|请打开(?:页面|这个|该)|在浏览器中(?:点击|确认|完成)/.test(
+      t,
+    )
+  ) {
+    return 'browser_action';
+  }
+  return 'clarification';
 }
 
 /**

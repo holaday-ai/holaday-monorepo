@@ -589,6 +589,16 @@ export const serverSupercarAwaitingUserSchema = z.object({
   type: z.literal('server.supercar.awaiting_user'),
   taskId: z.string(),
   question: z.string(),
+  /**
+   * P2-A — what KIND of input the agent is waiting on. Drives the
+   * BrowserPanel's verify banner / auto-expand: only the
+   * non-`clarification` kinds need the panel to take over the screen.
+   * Older orchestrator builds omit the field; SPA defaults to
+   * 'clarification' so missing == safe (chat composer only).
+   */
+  awaitingKind: z
+    .enum(['clarification', 'login', 'captcha', 'browser_action'])
+    .optional(),
 });
 
 /**

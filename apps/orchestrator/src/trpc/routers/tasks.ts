@@ -1638,6 +1638,10 @@ export const tasksRouter = router({
                 type: 'server.supercar.awaiting_user',
                 taskId,
                 question: ev.question,
+                // P2-A — propagate kind to the SPA so the BrowserPanel
+                // doesn't have to guess. WS receivers older than this
+                // build will ignore the field (zod passthrough).
+                awaitingKind: ev.awaitingKind,
               });
             } catch (err) {
               ctx.logger.warn({ err, taskId }, 'supercar: broadcast awaiting_user failed');
@@ -1660,7 +1664,11 @@ export const tasksRouter = router({
             // back to about:blank.
             ctx.db
               .update(tasksTable)
-              .set({ status: 'awaiting_user', awaitingQuestion: ev.question })
+              .set({
+                status: 'awaiting_user',
+                awaitingQuestion: ev.question,
+                awaitingKind: ev.awaitingKind,
+              })
               .where(eq(tasksTable.externalId, taskId))
               .catch((err) => {
                 ctx.logger.warn({ err, taskId }, 'supercar: persist awaiting_user state failed');
@@ -1844,6 +1852,15 @@ export const tasksRouter = router({
                     tickCount: outcome.iterations,
                     metadata,
                   });
+                  // P1 — generate has no plan-step marker discipline
+                  // (no [STEP N done] emission), so any pending /
+                  // running steps left over from the supercar's
+                  // browser phase would freeze at "x/N 完成" forever
+                  // even though the user just got a complete answer.
+                  // Roll them all to done now and broadcast so the
+                  // PlanCard catches up. Best-effort: a DB blip
+                  // can't block terminal broadcast.
+                  void convergePlanStatusOnSuccess(ctx, taskId, userId);
                   broadcastToUser(userId, {
                     type: 'server.task.terminal',
                     taskId,
@@ -3043,6 +3060,10 @@ export const tasksRouter = router({
         // historical rows is harmless. Returned alongside status so
         // a refresh during a pause re-renders the input.
         awaitingQuestion: taskRow.awaitingQuestion ?? null,
+        // P2-A — kind classifier for the awaiting state. NULL on
+        // legacy rows or non-awaiting tasks; SPA defaults to
+        // 'clarification' when missing.
+        awaitingKind: taskRow.awaitingKind ?? null,
         errorCode: taskRow.errorCode,
         errorMessage: taskRow.errorMessage,
         // P1-C — extra fields the SPA's UiTask shape needs when this
@@ -3133,7 +3154,7 @@ export const tasksRouter = router({
         // park / terminal write that persistSupercarOutcome does.
         ctx.db
           .update(tasksTable)
-          .set({ status: 'executing', awaitingQuestion: null })
+          .set({ status: 'executing', awaitingQuestion: null, awaitingKind: null })
           .where(eq(tasksTable.externalId, input.taskId))
           .catch((err) => {
             ctx.logger.warn({ err, taskId: input.taskId }, 'reply: status resume write failed');
@@ -3802,6 +3823,69 @@ async function persistSupercarOutcome(
     // Best-effort — persistence failure is logged by the caller's .then().
     // Rethrow so the caller's logger catches it.
     throw err instanceof Error ? err : new Error(String(err));
+  }
+}
+
+/**
+ * P1 — converge `tasks.plan_status` after a successful terminal write
+ * for paths whose runner does not emit per-step `[STEP N done]`
+ * markers (today: the supercar→generate handoff). Reads the row's
+ * current `planStatus`, rolls every pending / running step to `done`
+ * (leaves done/failed alone), writes back, and broadcasts the new
+ * snapshot so the PlanCard catches up. Best-effort: a DB error is
+ * logged, never thrown — the user already saw the terminal frame.
+ */
+async function convergePlanStatusOnSuccess(
+  ctx: { db: import('../../db/client.js').DB; logger: import('pino').Logger },
+  taskExternalId: string,
+  userExternalId: string,
+): Promise<void> {
+  try {
+    const row = await ctx.db
+      .select({ planStatus: tasksTable.planStatus })
+      .from(tasksTable)
+      .where(eq(tasksTable.externalId, taskExternalId))
+      .limit(1)
+      .then((r) => r[0] ?? null);
+    if (!row) return;
+    const raw = row.planStatus;
+    if (!Array.isArray(raw) || raw.length === 0) return;
+    type PlanRow = {
+      idx: number;
+      status: 'pending' | 'running' | 'done' | 'failed';
+      note?: string;
+    };
+    const steps = raw as PlanRow[];
+    let mutated = false;
+    const converged: PlanRow[] = steps.map((s) => {
+      if (s.status === 'pending' || s.status === 'running') {
+        mutated = true;
+        return { ...s, status: 'done' };
+      }
+      return { ...s };
+    });
+    if (!mutated) return;
+    await ctx.db
+      .update(tasksTable)
+      .set({ planStatus: converged as unknown })
+      .where(eq(tasksTable.externalId, taskExternalId));
+    try {
+      broadcastToUser(userExternalId, {
+        type: 'server.task.plan_step',
+        taskId: taskExternalId,
+        planStatus: converged,
+      });
+    } catch (err) {
+      ctx.logger.warn(
+        { err, taskId: taskExternalId },
+        'plan-step convergence broadcast failed',
+      );
+    }
+  } catch (err) {
+    ctx.logger.warn(
+      { err, taskId: taskExternalId },
+      'plan-step convergence persist failed',
+    );
   }
 }
 

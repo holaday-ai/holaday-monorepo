@@ -134,6 +134,15 @@ interface Props {
   taskStatus?: UiTaskStatus | null;
   /** Non-null when the orchestrator paused on a captcha signal. */
   awaitingUser?: boolean;
+  /**
+   * P2-A — what KIND of input the agent is waiting on. Only the
+   * non-`clarification` kinds need the panel's verify banner / auto
+   * takeover. `clarification` (intake / follow-up question) leaves
+   * the panel idle so the user can keep typing in the chat composer
+   * without losing the page they were watching. Missing == treated
+   * as `clarification` for safety on legacy events.
+   */
+  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'browser_action';
   /** Active task id — forwarded on user_input events so backend can correlate. */
   activeTaskId?: string | null;
   /**
@@ -190,6 +199,7 @@ export function BrowserPanel({
   frame,
   taskStatus,
   awaitingUser,
+  awaitingKind,
   activeTaskId,
   layout = 'rail',
   open = true,
@@ -200,6 +210,16 @@ export function BrowserPanel({
   collapsed: collapsedProp,
   onToggleCollapse,
 }: Props): JSX.Element | null {
+  // P2-A — only the non-clarification kinds need browser takeover.
+  // Treat missing kind as `clarification` so older WS events / legacy
+  // DB rows (NULL awaiting_kind) don't accidentally flash the verify
+  // banner. The banner + auto-interactive used to fire for every
+  // awaiting_user, including expert-workflow intake — that was the
+  // BOSS-reported bug.
+  const browserAwaiting =
+    awaitingUser === true &&
+    awaitingKind != null &&
+    awaitingKind !== 'clarification';
   const [collapsedLocal, setCollapsedLocal] = React.useState(false);
   const collapsed = collapsedProp ?? collapsedLocal;
   const toggleCollapsed = onToggleCollapse ?? (() => setCollapsedLocal((c) => !c));
@@ -485,12 +505,12 @@ export function BrowserPanel({
   //   - VNC: live connection present.
   //   - JPEG fallback: a real frame (not about:blank).
   React.useEffect(() => {
-    if (!awaitingUser || interactive) return;
+    if (!browserAwaiting || interactive) return;
     const hasLiveViewport = useVnc
       ? vncStatus === 'connected' || vncStatus === 'connecting'
       : Boolean(frame) && !isBlankUrl(frame?.url);
     if (hasLiveViewport) setInteractive(true);
-  }, [awaitingUser, interactive, useVnc, vncStatus, frame, setInteractive]);
+  }, [browserAwaiting, interactive, useVnc, vncStatus, frame, setInteractive]);
   // Recent steps for the in-panel activity overlay. Select WITHOUT a
   // fresh-array fallback — zustand treats each new `[]` as a changed
   // snapshot and infinite-loops the component (getSnapshot cache warn,
@@ -515,7 +535,7 @@ export function BrowserPanel({
   const [ripple, setRipple] = React.useState<{ x: number; y: number; id: number } | null>(null);
   const rippleIdRef = React.useRef(0);
   const imgRef = React.useRef<HTMLImageElement | null>(null);
-  const status: DotStatus = awaitingUser
+  const status: DotStatus = browserAwaiting
     ? 'error'
     : deriveDotStatus(taskStatus, Boolean(frame));
 
@@ -788,7 +808,7 @@ export function BrowserPanel({
             )}
           </header>
           )}
-          {awaitingUser && (
+          {browserAwaiting && (
             <div
               role="alert"
               className="flex animate-pulse-dot items-center gap-3 border-b-2 border-amber-400 bg-amber-100 px-4 py-3 text-amber-900 shadow-inner dark:border-amber-500 dark:bg-amber-500/20 dark:text-amber-100"
@@ -798,10 +818,10 @@ export function BrowserPanel({
               </span>
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-semibold">
-                  需要您手动完成验证
+                  {awaitingKindBannerTitle(awaitingKind)}
                 </div>
                 <div className="mt-0.5 text-xs text-amber-900/80 dark:text-amber-100/80">
-                  交互模式已开启，直接在下方画面里点击验证码 / 滑动滑块即可。完成后 agent 会继续。
+                  {awaitingKindBannerBody(awaitingKind)}
                 </div>
               </div>
             </div>
@@ -1252,6 +1272,34 @@ const NAMED_KEYS: Readonly<Record<string, string>> = {
 };
 
 type DotStatus = 'idle' | 'live' | 'error';
+
+function awaitingKindBannerTitle(
+  kind: 'clarification' | 'login' | 'captcha' | 'browser_action' | undefined,
+): string {
+  switch (kind) {
+    case 'login':
+      return '需要您完成登录';
+    case 'browser_action':
+      return '需要您在浏览器中操作';
+    case 'captcha':
+    default:
+      return '需要您手动完成验证';
+  }
+}
+
+function awaitingKindBannerBody(
+  kind: 'clarification' | 'login' | 'captcha' | 'browser_action' | undefined,
+): string {
+  switch (kind) {
+    case 'login':
+      return '交互模式已开启，直接在下方画面里完成登录 / 扫码。完成后 agent 会继续。';
+    case 'browser_action':
+      return '交互模式已开启，按提示在下方画面里点击 / 选择即可。完成后 agent 会继续。';
+    case 'captcha':
+    default:
+      return '交互模式已开启，直接在下方画面里点击验证码 / 滑动滑块即可。完成后 agent 会继续。';
+  }
+}
 
 function deriveDotStatus(status: UiTaskStatus | null | undefined, hasFrame: boolean): DotStatus {
   if (status === 'failed') return 'error';

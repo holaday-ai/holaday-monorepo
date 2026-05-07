@@ -21,6 +21,8 @@ import { isQuotaExhausted, useQuotaStatus } from '@/lib/use-quota-status';
 import { applyHistoryRetention } from '@/utils/time-buckets';
 import type { UiProject, UiTask } from '@/types/task';
 
+type UiTaskAwaitingKind = NonNullable<UiTask['awaitingKind']> | undefined;
+
 interface MeProfile {
   userId: string;
   /** Nullable since Phase 12 — SMS-first users have no email yet. */
@@ -600,13 +602,36 @@ function AppShell(): JSX.Element {
           | string
           | undefined) === 'awaiting_user'),
   );
+  // P2-A — split panel auto-expand from replyMode. `selectedNeedsUser`
+  // still drives `isReplyMode` (so the composer routes through
+  // tasks.reply for any awaiting_user), but the BrowserPanel's
+  // takeover is reserved for kinds that genuinely need the user IN the
+  // viewport: login, captcha, browser_action, or any captchaWaitByTask
+  // (Layer-3 anti-bot signal — no kind classifier on that path, treat
+  // as needing browser). A plain text-clarification leaves the panel
+  // alone so the user keeps the page they were watching.
+  const selectedAwaitingKind: UiTaskAwaitingKind = (() => {
+    if (!selectedTaskId) return undefined;
+    const fromAwaiting = awaitingUserByTask[selectedTaskId]?.awaitingKind;
+    if (fromAwaiting) return fromAwaiting;
+    const fromTask = tasks.find((t) => t.taskId === selectedTaskId)
+      ?.awaitingKind;
+    return fromTask;
+  })();
+  const selectedNeedsBrowser = Boolean(
+    selectedTaskId &&
+      (captchaWaitByTask[selectedTaskId] ||
+        (selectedNeedsUser &&
+          selectedAwaitingKind != null &&
+          selectedAwaitingKind !== 'clarification')),
+  );
   React.useEffect(() => {
-    if (!selectedNeedsUser) return;
+    if (!selectedNeedsBrowser) return;
     setBrowserCollapsed(false);
     if (typeof window !== 'undefined' && window.innerWidth < 1024) {
       setBrowserSheetOpen(true);
     }
-  }, [selectedNeedsUser]);
+  }, [selectedNeedsBrowser]);
 
   if (!authed) {
     return <LoginGate onAuthenticated={() => setAuthed(true)} />;
@@ -879,6 +904,11 @@ function AppShell(): JSX.Element {
                 )
               : false
           }
+          awaitingKind={
+            selectedTask && captchaWaitByTask[selectedTask.taskId]
+              ? 'captcha'
+              : selectedAwaitingKind
+          }
           activeTaskId={selectedTaskId}
           poolUserId={me?.multiUser ? me.userId : null}
           fullscreen={panelFullscreen}
@@ -901,6 +931,11 @@ function AppShell(): JSX.Element {
                     awaitingUserByTask[selectedTask.taskId],
                 )
               : false
+          }
+          awaitingKind={
+            selectedTask && captchaWaitByTask[selectedTask.taskId]
+              ? 'captcha'
+              : selectedAwaitingKind
           }
           activeTaskId={selectedTaskId}
           poolUserId={me?.multiUser ? me.userId : null}

@@ -102,6 +102,13 @@ export const tasks = mysqlTable(
      * when the task next moves out of `awaiting_user`.
      */
     awaitingQuestion: text('awaiting_question'),
+    /**
+     * P2-A — what kind of input the supercar is waiting on. One of
+     * 'clarification' | 'login' | 'captcha' | 'browser_action'. NULL
+     * = legacy row, treated as the safe default ('clarification') by
+     * the SPA. Cleared when the task next moves out of awaiting_user.
+     */
+    awaitingKind: varchar('awaiting_kind', { length: 32 }),
     result: json('result'),
     errorCode: varchar('error_code', { length: 64 }),
     errorMessage: text('error_message'),

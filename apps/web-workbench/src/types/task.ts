@@ -70,6 +70,14 @@ export interface UiTask {
   finalScreenshot?: string;
   /** R7 — URL the per-task Brave was on at terminal. */
   finalUrl?: string;
+  /**
+   * P2-A — what kind of input the agent is waiting on while
+   * `status === 'awaiting_user'`. Drives the BrowserPanel's verify
+   * banner / auto-expand: only non-`clarification` kinds need the
+   * panel to take over the screen. Missing == 'clarification'
+   * (chat composer is enough).
+   */
+  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'browser_action';
 }
 
 /**
@@ -198,6 +206,12 @@ export interface UiExecutorFallback {
 export interface UiAwaitingUser {
   question: string;
   at: number;
+  /**
+   * P2-A — kind of input we're waiting on. The store mirrors this
+   * onto the task's awaitingKind so refreshing tasks.detail
+   * preserves the BrowserPanel's expand/banner decision.
+   */
+  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'browser_action';
 }
 
 /**
