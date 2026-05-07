@@ -828,6 +828,10 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         );
         void Promise.resolve(opts.onPlanStepUpdate?.(converged));
       }
+      logger.warn(
+        { taskId: opts.taskId, exitPath: 'zapier-shortcircuit', didCallParkCheck: false },
+        '[PARK-CHECK] exit',
+      );
       return {
         status: 'completed',
         summary: lines.join('\n'),
@@ -1560,6 +1564,27 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         apiLatencyMs,
       });
 
+      // PARK-CHECK instrumentation — diagnose why login takeover
+      // prompts ("需要你接管浏览器登录") sometimes leak through to
+      // status='completed' instead of parking. Every iteration logs
+      // whether THIS turn carried a takeover phrase in textPreamble
+      // and whether tool_use forced the loop to continue past it.
+      // Strip later once root cause is known.
+      const turnHasTakeover = looksLikeBrowserTakeoverPrompt(textPreamble);
+      logger.warn(
+        {
+          taskId: opts.taskId,
+          iteration,
+          textPreambleLen: textPreamble.length,
+          textPreambleHead: textPreamble.slice(0, 200),
+          toolUseCount: toolUseBlocks.length,
+          toolNames: toolUseBlocks.map((b) => b.name),
+          turnHasTakeover,
+          stopReason: response.stop_reason,
+        },
+        '[PARK-CHECK] iteration done',
+      );
+
       // If the model didn't invoke any client-side tool, the turn is
       // finished. Decide between completed / awaiting_user.
       if (toolUseBlocks.length === 0) {
@@ -1571,7 +1596,20 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         const finalText = textPreamble
           .replace(/\[STEP\s+\d+\s+(?:done|running|failed|pending)\]\s*\n*/gi, '')
           .trim();
-        if (looksLikePendingQuestion(finalText)) {
+        const parkCheckResult = looksLikePendingQuestion(finalText);
+        logger.warn(
+          {
+            taskId: opts.taskId,
+            iteration,
+            finalTextLen: finalText.length,
+            finalTextHead: finalText.slice(0, 300),
+            parkCheckResult,
+            takeoverDetected: looksLikeBrowserTakeoverPrompt(finalText),
+            stopReason: response.stop_reason,
+          },
+          '[PARK-CHECK] no-tool exit — calling looksLikePendingQuestion',
+        );
+        if (parkCheckResult) {
           // Park on a user reply. `supercarReply` resolves the promise;
           // `supercarAbort` rejects with a sentinel we swap to
           // cancelled. Capped at the kind-specific timeout below so a
@@ -1616,6 +1654,18 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           } catch {
             /* swallow — best-effort URL snapshot */
           }
+          logger.warn(
+            {
+              taskId: opts.taskId,
+              exitPath: 'park-awaiting_user',
+              didCallParkCheck: true,
+              parkCheckResult: true,
+              awaitingKind: parkAwaitingKind,
+              iteration,
+              timeoutMs: AWAITING_USER_TIMEOUT_MS,
+            },
+            '[PARK-CHECK] entering awaiting_user park',
+          );
           await safeCall(opts.onAwaitingUser, {
             question: visibleQuestion,
             at: new Date(),
@@ -1652,6 +1702,15 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             // step the supercar managed counts as done; the
             // dispatcher converges again after generate completes.
             convergePlanOnSuccess();
+            logger.warn(
+              {
+                taskId: opts.taskId,
+                exitPath: 'handoff_to_generate',
+                didCallParkCheck: true,
+                iteration,
+              },
+              '[PARK-CHECK] exit',
+            );
             return {
               status: 'handoff_to_generate',
               question: handoffMsg,
@@ -1660,6 +1719,10 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             };
           }
           if (replyOrAbort === '__SUPERCAR_ABORT__' || cancelled) {
+            logger.warn(
+              { taskId: opts.taskId, exitPath: 'park-then-abort', didCallParkCheck: true, iteration },
+              '[PARK-CHECK] exit',
+            );
             return {
               status: 'cancelled',
               iterations: iteration,
@@ -1686,6 +1749,16 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               executor,
               opts.taskId,
             );
+            logger.warn(
+              {
+                taskId: opts.taskId,
+                exitPath: 'awaiting-user-timeout-completed',
+                didCallParkCheck: true,
+                iteration,
+                finalTextHead: finalText.slice(0, 200),
+              },
+              '[PARK-CHECK] exit',
+            );
             return {
               status: 'completed',
               summary: reconciled.summary,
@@ -1694,6 +1767,10 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             };
           }
           if (Date.now() >= deadline) {
+            logger.warn(
+              { taskId: opts.taskId, exitPath: 'park-then-deadline-timeout', didCallParkCheck: true, iteration },
+              '[PARK-CHECK] exit',
+            );
             return {
               status: 'timeout',
               reason: 'task timeout elapsed while waiting for user reply',
@@ -1709,6 +1786,18 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           stripAwaitingUserMarker(finalText),
           executor,
           opts.taskId,
+        );
+        logger.warn(
+          {
+            taskId: opts.taskId,
+            exitPath: 'no-tool-end-of-turn-completed',
+            didCallParkCheck: true,
+            parkCheckResult,
+            iteration,
+            finalTextLen: finalText.length,
+            finalTextHead: finalText.slice(0, 300),
+          },
+          '[PARK-CHECK] exit',
         );
         return {
           status: 'completed',
@@ -2314,6 +2403,17 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               .map((it, i) => `${i + 1}. \`\`\`json\n${JSON.stringify(it, null, 2).slice(0, 400)}\n\`\`\``)
               .join('\n\n');
             convergePlanOnSuccess();
+            logger.warn(
+              {
+                taskId: opts.taskId,
+                exitPath: 'apify-fallback-completed',
+                didCallParkCheck: false,
+                iteration,
+                actorId: match.actorId,
+                itemCount: r.items.length,
+              },
+              '[PARK-CHECK] exit',
+            );
             return {
               status: 'completed',
               summary:
@@ -2517,6 +2617,10 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     }
 
     if (cancelled) {
+      logger.warn(
+        { taskId: opts.taskId, exitPath: 'loop-end-cancelled', didCallParkCheck: false, iteration },
+        '[PARK-CHECK] exit',
+      );
       return {
         status: 'cancelled',
         iterations: iteration,
@@ -2524,6 +2628,10 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       };
     }
     if (Date.now() >= deadline) {
+      logger.warn(
+        { taskId: opts.taskId, exitPath: 'loop-end-deadline-timeout', didCallParkCheck: false, iteration },
+        '[PARK-CHECK] exit',
+      );
       return {
         status: 'timeout',
         reason: `task timeout (${Math.round(timeoutMs / 1000)}s) elapsed`,
@@ -2531,6 +2639,10 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         toolsUsed: Array.from(toolsUsed),
       };
     }
+    logger.warn(
+      { taskId: opts.taskId, exitPath: 'loop-end-max-iterations-failed', didCallParkCheck: false, iteration, maxIterations },
+      '[PARK-CHECK] exit',
+    );
     return {
       status: 'failed',
       reason: `exhausted maxIterations=${maxIterations} without completion`,
