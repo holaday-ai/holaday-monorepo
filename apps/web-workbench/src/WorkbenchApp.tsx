@@ -16,7 +16,7 @@ import { clearAccessToken, getAccessToken } from '@/lib/auth';
 import { hdDebug } from '@/lib/hd-debug';
 import { trpc } from '@/lib/trpc';
 import { type ConnStatus, connect, disconnect, onServerMessage, onStatus } from '@/lib/ws';
-import { toUiTask, useTaskStore } from '@/stores/task-store';
+import { setStoreNavigate, toUiTask, useTaskStore } from '@/stores/task-store';
 import { isQuotaExhausted, useQuotaStatus } from '@/lib/use-quota-status';
 import { applyHistoryRetention } from '@/utils/time-buckets';
 import type { UiProject, UiTask } from '@/types/task';
@@ -413,64 +413,61 @@ function AppShell(): JSX.Element {
     enterNewTaskMode,
   ]);
 
-  // URL → store: deep-link only. A missing ?task= is NOT a signal
-  // to enter new-task mode — new-task is entered only by explicit
-  // user intent (button, /files 用于新任务, keyboard shortcut). An
-  // earlier "!taskParam → enterNewTaskMode" branch raced the outbound
-  // navigate() and oscillated infinitely (101× selectTask ↔ 101×
-  // enterNewTaskMode in a single mount).
+  // URL → store: deep-link / browser back-forward only. A missing
+  // ?task= is NOT a signal to enter new-task mode — new-task is
+  // entered only by explicit user intent (button, /files 用于新任务,
+  // keyboard shortcut). An earlier "!taskParam → enterNewTaskMode"
+  // branch raced an outbound navigate() and oscillated infinitely
+  // (101× selectTask ↔ 101× enterNewTaskMode in a single mount).
   //
-  // composerMode='new' gate: when the user just entered new-task
-  // mode, this effect re-runs before outbound's navigate() has
-  // flushed React Router's location, so `taskParam` still reads
-  // the pre-click value (e.g. 'tsk_iJj8'). Without the gate, that
-  // stale read fires `selectTask('url')` and undoes the user's
-  // 发新任务 click. Skipping while composerMode==='new' lets
-  // outbound clear the URL first; on the next render this effect
-  // sees taskParam=null and is a no-op.
+  // The OUTBOUND effect (store → URL) used to live here too. It
+  // got deleted in this round: every store action that changes
+  // selection (selectTask / enterNewTaskMode / createTask) now
+  // writes the URL directly via the injected `storeNavigate`
+  // callback below. The inbound effect's `taskParam !== selectedTaskId`
+  // guard short-circuits when the URL change came from the store
+  // itself (state already matches), and selectTask passes
+  // `source='url'` when called from this effect to skip its own
+  // re-navigate — closing the loop.
   const taskParam = searchParams.get('task');
   React.useEffect(() => {
     if (!bootstrapped) return;
     if (composerMode === 'new') return;
+    // Diagnostic — drop after BOSS confirms no loop. Counts every
+    // inbound-effect run with the trio of inputs that determine the
+    // selectTask call. A loop would show this >2x per click in
+    // rapid succession.
+    if (typeof window !== 'undefined') {
+      // eslint-disable-next-line no-console
+      console.warn('[NAV-INBOUND]', { taskParam, selectedTaskId, composerMode });
+    }
     if (taskParam && taskParam !== selectedTaskId) {
       selectTask(taskParam, 'url');
     }
   }, [bootstrapped, composerMode, taskParam, selectedTaskId, selectTask]);
 
-  // D1 — store → URL outbound sync. Lives here (not in selectTask)
-  // because React Router's `useSearchParams` ignores raw
-  // `window.history.replaceState` writes — RR-internal history is
-  // its own state. Going through `navigate` keeps RR's state
-  // consistent so the inbound effect above sees the new taskParam
-  // immediately and the round-trip closes cleanly. Other params
-  // (?project=, _cb=, etc.) preserved.
-  //
-  // Also watches composerMode: a flip to 'new' must drop ?task=
-  // even if selectedTaskId was already null (entering new-task
-  // mode from a state where selection was previously cleared but
-  // URL hadn't been reconciled — happens when an earlier path
-  // wrote selectedTaskId=null without going through the canonical
-  // selectTask/enterNewTaskMode signals the outbound effect was
-  // watching). Without this branch, clicking 发新任务 in that
-  // state was a no-op for the URL.
+  // Inject the URL-write callback into the store. selectTask /
+  // enterNewTaskMode / createTask call it after their `set()` so
+  // the URL stays pinned to the active selection without an effect
+  // chain (which is what loop-spammed before this round). The
+  // callback reads `searchParams` and `location.pathname` at the
+  // moment of the call, so other query params (?project=, _cb=, etc.)
+  // are preserved. Returns a cleanup that nulls the registration so
+  // a hot-reload / unmount doesn't keep a stale closure alive.
+  const navigateToTask = React.useCallback(
+    (taskId: string | null) => {
+      const next = new URLSearchParams(searchParams);
+      if (taskId) next.set('task', taskId);
+      else next.delete('task');
+      const search = next.toString() ? `?${next.toString()}` : '';
+      navigate({ pathname: location.pathname, search }, { replace: true });
+    },
+    [navigate, searchParams, location.pathname],
+  );
   React.useEffect(() => {
-    if (!bootstrapped) return;
-    const desired = composerMode === 'new' ? null : (selectedTaskId ?? null);
-    if ((taskParam ?? null) === desired) return;
-    const next = new URLSearchParams(searchParams);
-    if (desired) next.set('task', desired);
-    else next.delete('task');
-    const search = next.toString() ? `?${next.toString()}` : '';
-    navigate({ pathname: location.pathname, search }, { replace: true });
-  }, [
-    bootstrapped,
-    selectedTaskId,
-    composerMode,
-    taskParam,
-    searchParams,
-    navigate,
-    location.pathname,
-  ]);
+    setStoreNavigate(navigateToTask);
+    return () => setStoreNavigate(null);
+  }, [navigateToTask]);
 
   // Auth invalidated by server (bad / expired token).
   React.useEffect(() => {

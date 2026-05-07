@@ -210,6 +210,22 @@ export interface TaskStore {
   reset(): void;
 }
 
+// URL-write callback registered by WorkbenchApp at mount. Earlier the
+// store→URL sync lived in a useEffect that watched selectedTaskId and
+// called `navigate()`; that created an infinite loop on every sidebar
+// click (effect → navigate → URL change → inbound effect → selectTask
+// → set → effect …). Letting selectTask/enterNewTaskMode/createTask
+// write the URL directly closes the loop because the inbound effect
+// can short-circuit when `taskParam === selectedTaskId` (no work).
+// `source='url'` selectTask calls (originating from the inbound effect)
+// SKIP this writer to break the cycle even tighter.
+let storeNavigate: ((taskId: string | null) => void) | null = null;
+export function setStoreNavigate(
+  fn: ((taskId: string | null) => void) | null,
+): void {
+  storeNavigate = fn;
+}
+
 export const useTaskStore = create<TaskStore>((set, get) => {
   // Hydrate dedup token. Every selectTask bumps the token; the
   // tail of an older detail-fetch checks its own token against
@@ -453,9 +469,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     // prevents its tail (the post-fetch `set()` that stamps tasks[]
     // entries) from running against the now-different selectedTaskId
     // and re-pulling the previous task's payload into the new view.
-    // composerMode flips back to 'task' on any selection. URL
-    // writing happens in WorkbenchApp's outbound effect (uses
-    // React Router's navigate so useSearchParams stays in sync).
+    // composerMode flips back to 'task' on any selection.
     // Selecting a task re-binds the browser context to that task —
     // browserLiveRequested clears so the panel switches off the
     // user-scoped pool stream and onto the task-scoped path.
@@ -466,7 +480,17 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       browserLiveRequested: false,
     });
     void hydrateDetail(taskId);
-    void source; // retained as diagnostic hint
+    // URL write — only when the call ORIGINATES from a UI action
+    // (sidebar click, suggestion chip, etc.). When source==='url'
+    // the inbound effect already saw the URL change and called us —
+    // re-navigating would re-emit the same URL change and the
+    // inbound effect would re-fire selectTask(... 'url') in a loop.
+    // The asymmetry is what closes the loop: store→URL writes only
+    // happen when the store update originated outside RR, and
+    // URL→store reads never trigger a re-write.
+    if (source !== 'url') {
+      storeNavigate?.(taskId);
+    }
   },
 
   enterNewTaskMode() {
@@ -481,9 +505,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       browserLiveRequested: false,
     });
     // Cancel any in-flight hydrate so its post-set callback doesn't
-    // re-stamp the just-cleared selection's tasks[] entry. URL
-    // ?task= cleanup handled by the outbound effect in WorkbenchApp.
+    // re-stamp the just-cleared selection's tasks[] entry.
     abortInFlightHydrate();
+    // Drop ?task= via the same direct-navigate path as selectTask;
+    // the deleted outbound effect used to do this. Inbound effect
+    // bails on composerMode==='new' so no loop.
+    storeNavigate?.(null);
   },
 
   requestBrowserLive() {
@@ -792,6 +819,10 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         composerMode: 'task' as const,
         browserLiveRequested: false,
       }));
+      // Pin URL to the new task — same direct-navigate path as
+      // selectTask. The deleted outbound effect used to do this off
+      // the selectedTaskId dep change.
+      storeNavigate?.(res.taskId);
       // Fire-and-forget refresh so the row's server-authored fields
       // (createdAt, status) replace the optimistic stub once available.
       void get().refreshTasks();
