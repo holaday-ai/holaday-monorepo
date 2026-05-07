@@ -1574,16 +1574,31 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         if (looksLikePendingQuestion(finalText)) {
           // Park on a user reply. `supercarReply` resolves the promise;
           // `supercarAbort` rejects with a sentinel we swap to
-          // cancelled. Capped at AWAITING_USER_TIMEOUT_MS so a model
-          // response that ends with a polite question (e.g. "需要补
-          // 充哪部分？" after writing a complete PRD) doesn't park
-          // the task in 'executing' forever — it's the actual bug
-          // observed on tsk_SFsgUXHMrxgQSpJ5SXTqb.
-          const AWAITING_USER_TIMEOUT_MS = 5 * 60 * 1000;
+          // cancelled. Capped at the kind-specific timeout below so a
+          // polite-question end of turn (e.g. "需要补充哪部分？" after
+          // a complete PRD) doesn't park the task in 'executing'
+          // forever — the bug observed on tsk_SFsgUXHMrxgQSpJ5SXTqb.
+          //
+          // F1 — login / captcha / browser_action need a much longer
+          // window than chat clarification. The user is physically in
+          // the browser viewport doing 2FA / scanning a QR / filling a
+          // captcha, which routinely takes 3-10min. The old uniform
+          // 5min cap silently completed real takeover sessions and
+          // released the per-task Brave under the user's hands.
+          // clarification keeps 5min (and in practice doesn't even
+          // reach this path anymore — expert intake routes to generate
+          // upstream).
+          const AWAITING_USER_TIMEOUT_CLARIFICATION_MS = 5 * 60 * 1000;
+          const AWAITING_USER_TIMEOUT_TAKEOVER_MS = 30 * 60 * 1000;
           // P1-A — strip the machine marker before showing the
           // question to the user. Detector consumed it; user
           // shouldn't see "[AWAITING_USER_INPUT]" verbatim.
           const visibleQuestion = stripAwaitingUserMarker(finalText);
+          const parkAwaitingKind = classifyAwaitingKind(visibleQuestion);
+          const AWAITING_USER_TIMEOUT_MS =
+            parkAwaitingKind === 'clarification'
+              ? AWAITING_USER_TIMEOUT_CLARIFICATION_MS
+              : AWAITING_USER_TIMEOUT_TAKEOVER_MS;
           // P2 — capture current page URL right before parking so
           // the dispatcher can persist tasks.finalUrl. Survives any
           // screencast disconnect that happens during the pause.
@@ -1605,7 +1620,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             question: visibleQuestion,
             at: new Date(),
             currentUrl: currentParkUrl,
-            awaitingKind: classifyAwaitingKind(visibleQuestion),
+            awaitingKind: parkAwaitingKind,
           });
           let waitTimer: NodeJS.Timeout | null = null;
           const replyPromise = new Promise<string>((resolve) => {
@@ -1666,9 +1681,14 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               'supercar: awaiting-user timed out — completing with available text',
             );
             convergePlanOnSuccess();
+            const reconciled = await reconcileFinalAnswer(
+              stripAwaitingUserMarker(finalText),
+              executor,
+              opts.taskId,
+            );
             return {
               status: 'completed',
-              summary: stripAwaitingUserMarker(finalText),
+              summary: reconciled.summary,
               iterations: iteration,
               toolsUsed: Array.from(toolsUsed),
             };
@@ -1685,9 +1705,14 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           continue;
         }
         convergePlanOnSuccess();
+        const reconciled = await reconcileFinalAnswer(
+          stripAwaitingUserMarker(finalText),
+          executor,
+          opts.taskId,
+        );
         return {
           status: 'completed',
-          summary: stripAwaitingUserMarker(finalText),
+          summary: reconciled.summary,
           iterations: iteration,
           toolsUsed: Array.from(toolsUsed),
         };
@@ -2799,6 +2824,14 @@ function looksLikePendingQuestion(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
   if (/\[AWAITING[_ ]USER[_ ]INPUT\]/i.test(trimmed)) return true;
+  // F1 — login / browser takeover detection. The model often signs
+  // off a turn with "请接管浏览器完成登录" / "please log in" rather
+  // than a question; without this the loop saw it as end-of-turn,
+  // returned status='completed', dispatcher released the per-task
+  // Brave, and the user faced "请接管" with no live session left.
+  // Promoted ABOVE the trailing-? heuristic because takeover prompts
+  // rarely end in a question mark.
+  if (looksLikeBrowserTakeoverPrompt(trimmed)) return true;
   const lines = trimmed.split('\n').map((l) => l.trim()).filter(Boolean);
   const last = lines[lines.length - 1] ?? '';
   if (last.endsWith('？') || last.endsWith('?')) return true;
@@ -2822,12 +2855,117 @@ function looksLikePendingQuestion(text: string): boolean {
 }
 
 /**
+ * F1 — detect "model is asking the user to take over the browser to
+ * log in / scan / verify". These prompts park the loop with
+ * `awaitingKind='login'`; the per-task Brave stays allocated so the
+ * user can actually do what was asked. Conservative — must mention
+ * BOTH a takeover verb (接管/take over/please) AND a target action
+ * (登录/sign in/scan code/verify), so a passing mention of "登录"
+ * inside a completed report doesn't trip it.
+ */
+export function looksLikeBrowserTakeoverPrompt(text: string): boolean {
+  const t = text.toLowerCase();
+  const zhTakeover =
+    /请(?:您|你|帮)?(?:接管|手动|自己)?(?:浏览器|页面|登录|登入|扫码|扫一扫)|需要(?:您|你)(?:登录|登入|扫码|手动|接管)|帮我(?:登录|扫码)|请(?:扫|扫描|扫一下)(?:二维码|码)/u;
+  const enTakeover =
+    /\b(?:please\s+)?(?:take\s+over|log\s*in|sign\s*in|scan\s+(?:the\s+)?(?:qr|code))\b/i;
+  return zhTakeover.test(text) || enTakeover.test(t);
+}
+
+/**
  * Strip the `[AWAITING_USER_INPUT]` machine marker from the user-
  * visible text — operators / users should never see the raw marker,
  * but the agent-loop has already consumed it as a park signal.
  */
 function stripAwaitingUserMarker(text: string): string {
   return text.replace(/\s*\[AWAITING[_ ]USER[_ ]INPUT\]\s*/gi, ' ').trim();
+}
+
+/**
+ * F2 — reconcile the model's final answer against what the browser
+ * actually has on screen. The model occasionally invents a URL from
+ * memory that doesn't match the page it's currently looking at —
+ * the canonical case is "click 'More information…' on example.com",
+ * where the model says https://www.iana.org/domains/reserved while
+ * the page actually navigated to https://www.iana.org/help/example-domains.
+ * Without this reconcile, the user reads a wrong link in the answer
+ * and a different URL in the BrowserPanel evidence.
+ *
+ * Strategy: pull the live page URL + title via the executor, find
+ * any URLs in `finalText`. If the text mentions URLs but none of
+ * them match the observed page, append a "📍 实际浏览器页面" line
+ * with the truthful URL. Conservative — we never rewrite the
+ * model's text, only append. If `finalText` mentions no URLs at all
+ * (a pure prose answer), nothing is appended.
+ */
+async function reconcileFinalAnswer(
+  finalText: string,
+  executor: PlaywrightExecutor,
+  taskId: string,
+): Promise<{
+  summary: string;
+  observedUrl: string | null;
+  observedTitle: string | null;
+}> {
+  let observedUrl: string | null = null;
+  let observedTitle: string | null = null;
+  try {
+    const page = (await executor.getPage()) as unknown as {
+      url?: () => string;
+      title?: () => Promise<string>;
+    };
+    const u = page?.url?.();
+    if (typeof u === 'string' && u && u !== 'about:blank') {
+      observedUrl = u;
+    }
+    if (page?.title) {
+      // Bound the title call — a hung renderer shouldn't block the
+      // outcome path. 2s is generous for a property read.
+      observedTitle = await Promise.race<string | null>([
+        page.title().then((t) => t ?? null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_000)),
+      ]).catch(() => null);
+    }
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err), taskId },
+      'reconcile: failed to read observed page state (non-fatal)',
+    );
+  }
+
+  if (!observedUrl) {
+    return { summary: finalText, observedUrl, observedTitle };
+  }
+
+  // Find all URLs in finalText and compare modulo trailing punctuation
+  // / closing markdown brackets. If the model wrote `[label](url)` we
+  // still pick `url` cleanly via the regex below.
+  const urlsInText = finalText.match(/https?:\/\/[^\s)\]]+/g) ?? [];
+  if (urlsInText.length === 0) {
+    return { summary: finalText, observedUrl, observedTitle };
+  }
+  const normalize = (u: string): string =>
+    u.replace(/[.,;:!?)\]]+$/, '').replace(/\/$/, '').toLowerCase();
+  const observedNorm = normalize(observedUrl);
+  const matched = urlsInText.some((u) => normalize(u) === observedNorm);
+  if (matched) {
+    return { summary: finalText, observedUrl, observedTitle };
+  }
+
+  const titleLabel =
+    observedTitle && observedTitle.trim().length > 0
+      ? observedTitle.trim()
+      : observedUrl;
+  const correction = `\n\n> 📍 实际浏览器页面：[${titleLabel}](${observedUrl})`;
+  logger.info(
+    {
+      taskId,
+      observedUrl,
+      mentionedUrls: urlsInText.slice(0, 3),
+    },
+    'reconcile: appended observed-URL correction to final answer',
+  );
+  return { summary: finalText + correction, observedUrl, observedTitle };
 }
 
 /**

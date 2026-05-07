@@ -285,11 +285,21 @@ export function BrowserPanel({
     : (frame ?? latestFrame ?? finalEvidenceFrame);
   // P2 — URL fallback chain: task.finalUrl (persisted, survives
   // refreshes / awaiting_user pauses / screencast disconnects)
-  // → displayFrame.url (live or evidence) → about:blank.
+  // → displayFrame.url (live or evidence) → lastKnownUrl (in-memory
+  // grace) → about:blank.
   // Earlier the URL chip dropped to about:blank during an
   // awaiting_user pause whenever the screencast WS dropped; finalUrl
   // is written by the supercar on park / terminal so it pins the
   // last real URL through any transient connection loss.
+  //
+  // F3 — `lastKnownUrl` closes the brief flash window at the
+  // executing→terminal transition. The screencast WS shuts off the
+  // moment status flips; `frame` becomes stale and the next render
+  // saw `about:blank` until tasks.detail's `finalUrl` hydrate
+  // landed (~200-800 ms later, sometimes longer on slow connections).
+  // We mirror every non-blank screencast URL into a ref-backed state,
+  // and slot it in BETWEEN frameUrl and 'about:blank'. Reset on
+  // active-task switch so the prior task's URL doesn't bleed in.
   const persistedFinalUrl =
     activeTask?.finalUrl && !isBlankUrl(activeTask.finalUrl)
       ? activeTask.finalUrl
@@ -298,7 +308,15 @@ export function BrowserPanel({
     displayFrame?.url && !isBlankUrl(displayFrame.url)
       ? displayFrame.url
       : null;
-  const displayUrl = persistedFinalUrl ?? frameUrl ?? 'about:blank';
+  const [lastKnownUrl, setLastKnownUrl] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    setLastKnownUrl(null);
+  }, [activeTaskId]);
+  React.useEffect(() => {
+    if (frameUrl) setLastKnownUrl(frameUrl);
+  }, [frameUrl]);
+  const displayUrl =
+    persistedFinalUrl ?? frameUrl ?? lastKnownUrl ?? 'about:blank';
   const abortTask = useTaskStore((s) => s.abortTask);
   const [aborting, setAborting] = React.useState(false);
   const isExecuting = taskStatus === 'executing';
