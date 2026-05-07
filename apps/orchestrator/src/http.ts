@@ -232,9 +232,11 @@ export function createHttpApp(deps: HttpAppDeps) {
       // 4. Hand the token back via URL fragment — the SPA's lib/auth
       //    picks it out at load, persists to localStorage, then scrubs
       //    the hash via history.replaceState so it doesn't leak into
-      //    referrers.
+      //    referrers. Land on `/login` (not `/`) so the SPA's auth
+      //    bootstrap is the surface that consumes the hash, instead
+      //    of the landing page swallowing it before the SPA mounts.
       const fragment = `#token=${encodeURIComponent(result.accessToken)}`;
-      res.redirect(302, `/${fragment}`);
+      res.redirect(302, `/login${fragment}`);
     } catch (err) {
       logger.error(
         { err: err instanceof Error ? err.message : String(err) },
