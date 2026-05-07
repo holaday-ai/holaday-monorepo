@@ -2858,18 +2858,70 @@ function looksLikePendingQuestion(text: string): boolean {
  * F1 — detect "model is asking the user to take over the browser to
  * log in / scan / verify". These prompts park the loop with
  * `awaitingKind='login'`; the per-task Brave stays allocated so the
- * user can actually do what was asked. Conservative — must mention
- * BOTH a takeover verb (接管/take over/please) AND a target action
- * (登录/sign in/scan code/verify), so a passing mention of "登录"
- * inside a completed report doesn't trip it.
+ * user can actually do what was asked.
+ *
+ * Two-pass design:
+ *   1. STANDALONE phrases — single regex hits that are unambiguous
+ *      asks ("接管浏览器" / "完成登录" / "请登录" / "take over the
+ *      browser"). The earlier "请(?:您|你|帮)?接管…" form required a
+ *      leading 请 and missed real outputs like "直接接管浏览器自己
+ *      完成登录" / "或者直接接管浏览器".
+ *   2. Co-occurrence — if both a login keyword AND an ask-the-user
+ *      keyword appear in a short text, treat as a takeover prompt.
+ *      Catches patterns like "请告诉我你用哪个入口登录" where neither
+ *      half is takeover-shaped on its own. Length cap dodges long
+ *      completed reports that mention both incidentally; the past-
+ *      tense exclusion skips "我已成功登录" style report sentences.
+ *
+ * Bias: prefer false positives (parks an already-completed turn —
+ * user types "好的" or 30min timeout auto-completes) over false
+ * negatives (Brave is released under an unfinished login — the
+ * actual bug being fixed).
  */
 export function looksLikeBrowserTakeoverPrompt(text: string): boolean {
   const t = text.toLowerCase();
-  const zhTakeover =
-    /请(?:您|你|帮)?(?:接管|手动|自己)?(?:浏览器|页面|登录|登入|扫码|扫一扫)|需要(?:您|你)(?:登录|登入|扫码|手动|接管)|帮我(?:登录|扫码)|请(?:扫|扫描|扫一下)(?:二维码|码)/u;
-  const enTakeover =
-    /\b(?:please\s+)?(?:take\s+over|log\s*in|sign\s*in|scan\s+(?:the\s+)?(?:qr|code))\b/i;
-  return zhTakeover.test(text) || enTakeover.test(t);
+
+  // Pass 1 — strong standalone phrases.
+  const STANDALONE: readonly RegExp[] = [
+    /接管(?:浏览器|页面|一下|这个|这里)/u,
+    /(?:请|需要)(?:您|你)?(?:登录|登入)/u,
+    /完成(?:登录|登入|扫码|验证)/u,
+    /(?:扫码|手动|自己)\s*登[录入]/u,
+    /帮我(?:登录|登入|扫码)/u,
+    /请(?:扫|扫描|扫一下)(?:二维码|码)/u,
+    /\bplease\s+(?:log\s*in|sign\s*in|take\s+over|scan)\b/i,
+    /\btake\s+over\s+(?:the\s+)?(?:browser|page)\b/i,
+    /\bsign\s+in\s+manually\b/i,
+  ];
+  if (STANDALONE.some((re) => re.test(text))) {
+    return !looksLikePastTenseLoginReport(text);
+  }
+
+  // Pass 2 — co-occurrence (login keyword + ask-the-user keyword).
+  // Cap at 1500 chars so a long completed report that mentions both
+  // by accident isn't tripped.
+  if (text.length > 1500) return false;
+  const hasLogin =
+    /登录|登入|扫码|二维码|入口|sign\s*in|log\s*in/i.test(t);
+  const hasAsk =
+    /接管|告诉我|选择|哪个|哪一个|你用|麻烦你|麻烦您|choose|select|take\s+over|please\s+(?:tell|let|specify|provide|share|choose|pick)/i.test(
+      t,
+    );
+  if (!(hasLogin && hasAsk)) return false;
+  return !looksLikePastTenseLoginReport(text);
+}
+
+/**
+ * Past-tense completion context — model is REPORTING a successful
+ * login (e.g. "已成功登录抖店后台并选择了…"), not asking the user to
+ * do one. Skip the takeover heuristic when the only login mention
+ * is in a past-tense / success frame so a real summary isn't parked
+ * as awaiting_user.
+ */
+function looksLikePastTenseLoginReport(text: string): boolean {
+  return /已\s*(?:经)?\s*(?:成功)?\s*(?:完成)?\s*(?:登录|登入|扫码)|(?:登录|登入|扫码)\s*(?:成功|完成|了)|(?:登录|登入|扫码)\s*[了过完]|successfully\s+(?:logged|signed)\s*in/iu.test(
+    text,
+  );
 }
 
 /**
