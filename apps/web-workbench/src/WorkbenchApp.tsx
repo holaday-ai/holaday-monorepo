@@ -433,14 +433,6 @@ function AppShell(): JSX.Element {
   React.useEffect(() => {
     if (!bootstrapped) return;
     if (composerMode === 'new') return;
-    // Diagnostic — drop after BOSS confirms no loop. Counts every
-    // inbound-effect run with the trio of inputs that determine the
-    // selectTask call. A loop would show this >2x per click in
-    // rapid succession.
-    if (typeof window !== 'undefined') {
-      // eslint-disable-next-line no-console
-      console.warn('[NAV-INBOUND]', { taskParam, selectedTaskId, composerMode });
-    }
     if (taskParam && taskParam !== selectedTaskId) {
       selectTask(taskParam, 'url');
     }
