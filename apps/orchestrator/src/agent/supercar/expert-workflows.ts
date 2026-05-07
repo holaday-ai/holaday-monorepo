@@ -60,9 +60,19 @@ export function matchExpertWorkflow(
   if (!hasLiveSession) missingInputs.push('liveSession');
   if (!hasDataSource) missingInputs.push('dataSource');
 
+  // Route decision. Critical: when the workflow needs more info from
+  // the user (`missingInputs.length > 0`), DO NOT allocate a Brave —
+  // route to `generate` so the intake question round trips through
+  // the cheap one-shot runner. Earlier code routed to `browser` here,
+  // which spun up a per-task Brave just for the model to immediately
+  // park on `awaiting_user` asking the same question. The pool slot
+  // sat unused for the entire user-reply window.
+  // Once the user has supplied data, the reply path (tasks.reply)
+  // re-evaluates and either continues in generate (manual data /
+  // attachment) or hands off to browser (platform-source reply).
   const routeOverride: ExecutionMode | null =
     missingInputs.length > 0
-      ? 'browser'
+      ? 'generate'
       : hasPlatformDataSource && !hasUploadedDataSource
         ? 'browser'
         : hasUploadedDataSource

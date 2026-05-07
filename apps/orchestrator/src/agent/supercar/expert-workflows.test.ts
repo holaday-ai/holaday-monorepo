@@ -6,7 +6,11 @@ describe('expert workflow matching', () => {
     const match = matchExpertWorkflow('帮我复盘一场抖音直播数据，做总结和优化策略');
 
     expect(match?.id).toBe('douyin-livestream-review');
-    expect(match?.routeOverride).toBe('browser');
+    // Intake-only park: route to `generate` so the dispatcher does
+    // NOT allocate a Brave just to ask the user for the live session
+    // + data source. The reply path re-evaluates and either continues
+    // in generate (manual data) or hands off to browser (platform).
+    expect(match?.routeOverride).toBe('generate');
     expect(match?.missingInputs).toEqual(['liveSession', 'dataSource']);
     expect(match?.promptPreamble).toContain('专家技能工作流：抖音直播复盘');
     expect(match?.promptPreamble).toContain('先不要调用任何工具');

@@ -695,6 +695,25 @@ export const tasksRouter = router({
               tickCount: 1,
               metadata,
             });
+          } else if (outcome.status === 'awaiting_user') {
+            // Expert-workflow intake park out of the generate runner.
+            // Persist status='awaiting_user' + the visible question
+            // so a refresh during the pause re-renders correctly,
+            // and stamp `awaiting_kind='clarification'` so the SPA's
+            // BrowserPanel does NOT auto-expand / show the verify
+            // banner — this is a chat-only intake. We also stamp
+            // `result.executionMode='generate'` (rather than going
+            // through persistVisionOutcome) so the reply path can
+            // tell this task is parked from generate, not supercar.
+            await ctx.db
+              .update(tasksTable)
+              .set({
+                status: 'awaiting_user',
+                awaitingQuestion: outcome.summary,
+                awaitingKind: 'clarification',
+                result: { ...metadata, executionMode: 'generate' as const },
+              })
+              .where(eq(tasksTable.externalId, taskId));
           } else {
             await repo.persistVisionOutcome(taskId, {
               status: 'failed',
@@ -714,6 +733,13 @@ export const tasksRouter = router({
               taskId,
               status: 'completed',
               ...(outcome.summary ? { summary: outcome.summary } : {}),
+            });
+          } else if (outcome.status === 'awaiting_user') {
+            broadcastToUser(ctx.userId, {
+              type: 'server.supercar.awaiting_user',
+              taskId,
+              question: outcome.summary,
+              awaitingKind: 'clarification',
             });
           } else {
             broadcastToUser(ctx.userId, {
@@ -3159,8 +3185,235 @@ export const tasksRouter = router({
           .catch((err) => {
             ctx.logger.warn({ err, taskId: input.taskId }, 'reply: status resume write failed');
           });
+        return { ok: true };
       }
-      return { ok: delivered };
+
+      // No supercar handle — could be a generate-lane intake park
+      // (expert workflow with `missingInputs > 0` routes through
+      // `runGenerateTask`, parks on `[AWAITING_USER_INPUT]`, has no
+      // agent loop to register a handle). In that case we resume by
+      // re-running runGenerateTask under the same taskId with the
+      // combined original-intent + user-reply text.
+      const [parkRow] = await ctx.db
+        .select({
+          intent: tasksTable.intent,
+          status: tasksTable.status,
+          result: tasksTable.result,
+          opusUsed: tasksTable.opusUsed,
+          roleId: tasksTable.roleId,
+        })
+        .from(tasksTable)
+        .where(eq(tasksTable.externalId, input.taskId))
+        .limit(1);
+      const prevResult = (parkRow?.result ?? null) as
+        | Record<string, unknown>
+        | null;
+      const wasGenerateParked =
+        Boolean(parkRow) &&
+        parkRow!.status === 'awaiting_user' &&
+        prevResult?.executionMode === 'generate';
+      if (!wasGenerateParked) {
+        return { ok: false };
+      }
+
+      const combinedIntent = [
+        parkRow!.intent,
+        `\n\n[用户补充]\n${input.message}`,
+      ].join('').trim();
+
+      // Re-evaluate the workflow on the COMBINED intent. Two outcomes
+      // matter here:
+      //   1. missingInputs is now empty + user supplied platform-source
+      //      keywords (罗盘/抖店) → routeOverride='browser'. We can't
+      //      cleanly hand off to supercar from inside this handler
+      //      today (the supercar dispatch is 1500 lines of inline glue
+      //      in tasks.create, not a callable helper). So we surface a
+      //      structured response and let the SPA prompt the user to
+      //      open a new task with `intent=combinedIntent`. Tracked as
+      //      a follow-up to extract `dispatchSupercar` once we have a
+      //      dedicated reviewer for the refactor.
+      //   2. Otherwise (manual data / paste / "我自己给数据" / still
+      //      missing inputs) → re-run runGenerateTask one shot. The
+      //      runner will either complete (report) or park again with
+      //      a new intake question (the model decides).
+      const newWorkflow = matchExpertWorkflow(combinedIntent, {
+        hasAttachments: false,
+      });
+      const wantsBrowser = newWorkflow?.routeOverride === 'browser';
+
+      if (wantsBrowser) {
+        ctx.logger.info(
+          {
+            taskId: input.taskId,
+            workflowId: newWorkflow!.id,
+            missingInputs: newWorkflow!.missingInputs,
+          },
+          'reply: combined intent now wants browser lane — flagging for new-task handoff',
+        );
+        // Persist a hint into result so the SPA can show a "open in
+        // browser" affordance, and complete this task with a stub
+        // summary. The user keeps the chat history; no Brave wasted.
+        const handoffNotice =
+          '需要登录浏览器去后台读取数据。请点击下方"在浏览器中继续"按钮，或重新建任务并附上你刚刚补充的信息。';
+        try {
+          await ctx.db
+            .update(tasksTable)
+            .set({
+              status: 'completed',
+              awaitingQuestion: null,
+              awaitingKind: null,
+              result: {
+                ...(prevResult ?? {}),
+                executionMode: 'generate',
+                handoffSuggestion: 'browser',
+                combinedIntent,
+                summary: handoffNotice,
+              },
+              completedAt: new Date(),
+            })
+            .where(eq(tasksTable.externalId, input.taskId));
+          broadcastToUser(ctx.userId, {
+            type: 'server.task.terminal',
+            taskId: input.taskId,
+            status: 'completed',
+            summary: handoffNotice,
+          });
+        } catch (err) {
+          ctx.logger.error(
+            { err, taskId: input.taskId },
+            'reply: handoff persist failed',
+          );
+        }
+        return { ok: true, handoff: 'browser' as const };
+      }
+
+      // Generate-lane resume. Flip to executing, then dispatch the
+      // runner with the combined intent. The preamble carries the
+      // expert-workflow context (now with `missingInputs.length === 0`
+      // → no intake-guard, so the model will produce a real report).
+      const anthropicClient = anthropicForResolver;
+      if (!anthropicClient) {
+        ctx.logger.error(
+          { taskId: input.taskId },
+          'reply: anthropic client not configured — cannot resume',
+        );
+        return { ok: false };
+      }
+      const repo = new TaskRepository(ctx.db);
+      const newWorkflowPreamble = newWorkflow?.promptPreamble ?? '';
+      const effectiveCombined =
+        (newWorkflowPreamble ? `${newWorkflowPreamble}\n` : '') + combinedIntent;
+      await ctx.db
+        .update(tasksTable)
+        .set({
+          status: 'executing',
+          awaitingQuestion: null,
+          awaitingKind: null,
+        })
+        .where(eq(tasksTable.externalId, input.taskId));
+      const resumeStartedAt = Date.now();
+      void (async () => {
+        let outcome;
+        try {
+          outcome = await runGenerateTask({
+            taskId: input.taskId,
+            userId: ctx.userId,
+            intent: effectiveCombined,
+            ...(parkRow!.roleId ? { skillId: parkRow!.roleId } : {}),
+            client: anthropicClient,
+            logger: ctx.logger,
+            onStreamDelta: (delta) => {
+              try {
+                broadcastToUser(ctx.userId, {
+                  type: 'server.task.stream',
+                  taskId: input.taskId,
+                  delta,
+                });
+              } catch (err) {
+                ctx.logger.warn(
+                  { err, taskId: input.taskId },
+                  'reply: broadcast stream delta failed',
+                );
+              }
+            },
+          });
+        } catch (err) {
+          ctx.logger.error({ err, taskId: input.taskId }, 'reply: runner threw');
+          outcome = {
+            status: 'failed' as const,
+            summary: '',
+            reason:
+              err instanceof Error ? err.message : 'reply: unknown error',
+            inputTokens: 0,
+            outputTokens: 0,
+            durationMs: 0,
+          };
+        }
+        const elapsedMs = Date.now() - resumeStartedAt;
+        const metadata = {
+          executionMode: 'generate' as const,
+          finalExecutionMode: 'generate' as const,
+          expertWorkflowId: newWorkflow?.id ?? null,
+          selectedRole: parkRow!.roleId ?? null,
+          model: 'claude-sonnet-4-6',
+          fallbackChain: ['generate-resume'],
+          elapsedMs,
+          modelFinalText:
+            outcome.status === 'completed' ? outcome.summary.slice(0, 200) : null,
+        };
+        try {
+          if (outcome.status === 'completed') {
+            await repo.persistVisionOutcome(input.taskId, {
+              status: 'completed',
+              summary: outcome.summary,
+              tickCount: 1,
+              metadata,
+            });
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId: input.taskId,
+              status: 'completed',
+              ...(outcome.summary ? { summary: outcome.summary } : {}),
+            });
+          } else if (outcome.status === 'awaiting_user') {
+            // Park again — model still wants more info.
+            await ctx.db
+              .update(tasksTable)
+              .set({
+                status: 'awaiting_user',
+                awaitingQuestion: outcome.summary,
+                awaitingKind: 'clarification',
+                result: { ...metadata, executionMode: 'generate' as const },
+              })
+              .where(eq(tasksTable.externalId, input.taskId));
+            broadcastToUser(ctx.userId, {
+              type: 'server.supercar.awaiting_user',
+              taskId: input.taskId,
+              question: outcome.summary,
+              awaitingKind: 'clarification',
+            });
+          } else {
+            await repo.persistVisionOutcome(input.taskId, {
+              status: 'failed',
+              reason: outcome.reason ?? 'generate-resume: api failed',
+              tickCount: 1,
+              metadata,
+            });
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId: input.taskId,
+              status: 'failed',
+              ...(outcome.reason ? { reason: outcome.reason } : {}),
+            });
+          }
+        } catch (err) {
+          ctx.logger.error(
+            { err, taskId: input.taskId },
+            'reply: persist resume outcome failed',
+          );
+        }
+      })();
+      return { ok: true };
     }),
 
   /**

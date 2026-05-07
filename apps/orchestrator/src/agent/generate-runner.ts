@@ -33,8 +33,12 @@ import { buildLayeredSystemPrompt, classifyRole } from './supercar/prompt-layers
 type AttachmentBlock = { type: string };
 
 export interface GenerateOutcome {
-  status: 'completed' | 'failed';
-  /** Final assembled text. Empty string when status='failed'. */
+  status: 'completed' | 'failed' | 'awaiting_user';
+  /**
+   * Final assembled text. Empty string when status='failed'.
+   * For status='awaiting_user' this is the visible question text
+   * (with the `[AWAITING_USER_INPUT]` machine marker stripped).
+   */
   summary: string;
   /** Failure reason — only set when status='failed'. */
   reason?: string;
@@ -42,6 +46,18 @@ export interface GenerateOutcome {
   outputTokens: number;
   /** Wall-clock time including web_search round-trips. */
   durationMs: number;
+}
+
+/**
+ * Detection helper for the `[AWAITING_USER_INPUT]` machine marker
+ * the expert-workflow preamble injects. Mirrors the supercar agent
+ * loop's `looksLikePendingQuestion`/`stripAwaitingUserMarker` pair —
+ * generate has no agent loop so we check + strip here instead.
+ */
+const AWAITING_USER_MARKER_RE = /\[AWAITING[_ ]USER[_ ]INPUT\]/i;
+
+function stripAwaitingUserMarker(text: string): string {
+  return text.replace(/\s*\[AWAITING[_ ]USER[_ ]INPUT\]\s*/gi, ' ').trim();
 }
 
 export interface RunGenerateOpts {
@@ -221,6 +237,34 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
             { attempt, summaryLen: summary.length },
             'generate: empty-response retry succeeded',
           );
+        }
+        // Expert-workflow intake park: the preamble instructs the
+        // model to emit `[AWAITING_USER_INPUT]` on a dedicated line
+        // when it needs more info from the user before producing a
+        // real report. supercar's agent loop catches the marker as
+        // a park signal; generate has no loop, so we surface it as
+        // a distinct outcome status. The dispatcher persists status
+        // 'awaiting_user' instead of 'completed' so the SPA goes
+        // into reply mode.
+        if (AWAITING_USER_MARKER_RE.test(summary)) {
+          const visibleQuestion = stripAwaitingUserMarker(summary);
+          log.info(
+            {
+              questionLen: visibleQuestion.length,
+              durationMs,
+              inputTokens: lastInputTokens,
+              outputTokens: lastOutputTokens,
+              attempts: attempt,
+            },
+            'generate: parking on awaiting_user marker',
+          );
+          return {
+            status: 'awaiting_user',
+            summary: visibleQuestion,
+            inputTokens: lastInputTokens,
+            outputTokens: lastOutputTokens,
+            durationMs,
+          };
         }
         log.info(
           {
