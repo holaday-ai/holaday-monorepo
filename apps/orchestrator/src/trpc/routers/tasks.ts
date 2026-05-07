@@ -3236,10 +3236,21 @@ export const tasksRouter = router({
       //      missing inputs) → re-run runGenerateTask one shot. The
       //      runner will either complete (report) or park again with
       //      a new intake question (the model decides).
+      //
+      // Short-circuit: if the user clearly pasted metrics/data
+      // (`replyKind === 'manual_data'`) we skip the workflow re-run
+      // and go straight to generate. The classifier is conservative,
+      // so a `manual_data` verdict means there are unambiguous numeric
+      // figures or "数据如下" markers — no need to ask whether the
+      // user actually wants the browser path. Avoids edge cases where
+      // a paste happens to contain platform keywords ("罗盘 GMV 156k
+      // UV 28k") and would otherwise trip the browser-handoff branch.
       const newWorkflow = matchExpertWorkflow(combinedIntent, {
         hasAttachments: false,
       });
-      const wantsBrowser = newWorkflow?.routeOverride === 'browser';
+      const wantsBrowser =
+        replyKind !== 'manual_data' &&
+        newWorkflow?.routeOverride === 'browser';
 
       if (wantsBrowser) {
         ctx.logger.info(
