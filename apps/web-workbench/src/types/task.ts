@@ -78,6 +78,19 @@ export interface UiTask {
    * (chat composer is enough).
    */
   awaitingKind?: 'clarification' | 'login' | 'captcha' | 'browser_action';
+  /**
+   * Which dispatcher lane this task is running in. Source order:
+   *   - `result.executionMode` (set on awaiting_user park from generate)
+   *   - `result.metadata.executionMode` (set on terminal persist)
+   *   - inferred from streaming/progress events (any incoming delta
+   *     is a strong signal it's a non-browser runner)
+   * Drives the BrowserPanel's gate: only `browser` connects the
+   * screencast WS and renders the URL bar / stop / frame counter.
+   * Undefined for tasks that just started and haven't streamed
+   * yet — the panel falls through to the streamingByTask signal in
+   * that window.
+   */
+  executionMode?: 'browser' | 'generate' | 'scrape';
 }
 
 /**

@@ -331,6 +331,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           awaitingKindRaw === 'clarification'
             ? awaitingKindRaw
             : undefined;
+        const executionMode = extractExecutionMode(detail.result);
         return {
           stepsByTask: { ...prev.stepsByTask, [taskId]: steps },
           ...(hydratedWebSearch
@@ -372,6 +373,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                       ...(finalScreenshot ? { finalScreenshot } : {}),
                       ...(finalUrl ? { finalUrl } : {}),
                       ...(awaitingKind ? { awaitingKind } : {}),
+                      ...(executionMode ? { executionMode } : {}),
                     }
                   : t,
               );
@@ -411,6 +413,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               ...(finalScreenshot ? { finalScreenshot } : {}),
               ...(finalUrl ? { finalUrl } : {}),
               ...(awaitingKind ? { awaitingKind } : {}),
+              ...(executionMode ? { executionMode } : {}),
             };
             return [synth, ...prev.tasks];
           })(),
@@ -928,6 +931,18 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             ...prev.streamingByTask,
             [msg.taskId]: (prev.streamingByTask[msg.taskId] ?? '') + msg.delta,
           },
+          // Stream deltas only come from the generate / scrape runners
+          // (browser path uses screencast, not text streaming). Stamp
+          // executionMode='generate' on first delta so the BrowserPanel
+          // closes its chrome before tasks.detail's persisted result
+          // catches up. Idempotent: only writes when the field is
+          // currently undefined / 'browser', so a real browser→generate
+          // fallback that already persisted 'generate' isn't overridden.
+          tasks: prev.tasks.map((t) =>
+            t.taskId === msg.taskId && t.executionMode !== 'generate'
+              ? { ...t, executionMode: 'generate' as const }
+              : t,
+          ),
         };
       });
       return;
@@ -950,6 +965,13 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             ...prev.progressByTask,
             [msg.taskId]: msg.message,
           },
+          // Same rationale as the stream branch above — progress
+          // notes only come from generate / scrape, never browser.
+          tasks: prev.tasks.map((t) =>
+            t.taskId === msg.taskId && t.executionMode !== 'generate'
+              ? { ...t, executionMode: 'generate' as const }
+              : t,
+          ),
         };
       });
       return;
@@ -1286,6 +1308,31 @@ function extractSummary(result: unknown): string | null {
   return null;
 }
 
+/**
+ * Read `executionMode` out of the `result` JSON. Two locations:
+ *   - `result.executionMode` (parked-from-generate write path)
+ *   - `result.metadata.executionMode` (terminal persistVisionOutcome
+ *     stamps it under `metadata`)
+ * Returns undefined for executing tasks that haven't persisted yet —
+ * BrowserPanel falls back to streamingByTask presence in that window.
+ */
+function extractExecutionMode(
+  result: unknown,
+): UiTask['executionMode'] | undefined {
+  if (!result || typeof result !== 'object') return undefined;
+  const r = result as Record<string, unknown>;
+  const direct = r.executionMode;
+  if (direct === 'browser' || direct === 'generate' || direct === 'scrape') {
+    return direct;
+  }
+  const meta = r.metadata;
+  if (meta && typeof meta === 'object') {
+    const m = (meta as Record<string, unknown>).executionMode;
+    if (m === 'browser' || m === 'generate' || m === 'scrape') return m;
+  }
+  return undefined;
+}
+
 export function toUiTask(row: ListRow): UiTask {
   const opusUsed = (row as { opusUsed?: unknown }).opusUsed === true;
   const r = row as { starred?: unknown; starredAt?: unknown; projectId?: unknown };
@@ -1299,6 +1346,9 @@ export function toUiTask(row: ListRow): UiTask {
   // bridged the gap; mapping result.summary here removes the gap
   // entirely, so those guards mostly become belt-and-suspenders.
   const summaryFromResult = extractSummary((row as { result?: unknown }).result);
+  const executionMode = extractExecutionMode(
+    (row as { result?: unknown }).result,
+  );
   const errorText =
     typeof row.errorMessage === 'string'
       ? humaniseTaskError(row.errorMessage)
@@ -1313,6 +1363,7 @@ export function toUiTask(row: ListRow): UiTask {
     // for now and let G4's ws events fill it in as ticks stream.
     tickCount: 0,
     ...(resultText ? { resultText } : {}),
+    ...(executionMode ? { executionMode } : {}),
     // tRPC serializes Date to string over the wire; coerce back.
     createdAt: new Date(row.createdAt as unknown as string | number | Date),
     modelLabel: opusUsed ? 'opus' : 'sonnet',

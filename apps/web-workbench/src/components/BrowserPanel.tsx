@@ -352,21 +352,6 @@ export function BrowserPanel({
   // automatically once the user moves on.
   const browserLiveRequested = useTaskStore((s) => s.browserLiveRequested);
   const hasActiveTask = Boolean(activeTaskId);
-  const shouldConnect = hasActiveTask || browserLiveRequested;
-  // Item 6 — short-lived stream token for screencast / VNC WS auth.
-  // Refreshes every 45s; the WS URL gets rebuilt when token rotates,
-  // which forces a benign reconnect (the connection itself doesn't
-  // need re-auth, but the URL needs the latest token for the next
-  // failed-connect retry). Skipped when neither path enabled the
-  // panel — the hook drops its token and stops fetching.
-  const { token: streamToken } = useStreamToken(shouldConnect);
-  // VNC live stream — memoised so prop identity is stable across
-  // re-renders (the viewport's effect re-runs on any URL change).
-  const vncUrl = React.useMemo(() => {
-    if (!shouldConnect) return null;
-    if (usingCdp) return null;
-    return buildVncUrl(activeTaskId ?? null, poolUserId, streamToken);
-  }, [activeTaskId, shouldConnect, poolUserId, usingCdp, streamToken]);
   // RC follow-up audit fix — generate / scrape tasks have NO pool
   // slot (no Brave allocated), so /screencast-ws/<taskId> 409s in a
   // loop and the user sees "画面已断开，重连中" cycling every ~5s
@@ -381,6 +366,35 @@ export function BrowserPanel({
     activeTaskId ? s.progressByTask[activeTaskId] : undefined,
   );
   const isNonPoolTask = Boolean(streamingForActive ?? progressForActive);
+  // P3 — gate the panel on whether this task actually needs a browser.
+  // Earlier code connected screencast for ANY active task, so a fresh
+  // generate / intake task (no Brave allocated, never will be) showed
+  // about:blank + URL bar + "第 1 帧" + Stop button — confusing. Now
+  // we trust `activeTask.executionMode` first (set by the store from
+  // tasks.detail's `result.executionMode` / `result.metadata.executionMode`,
+  // or inferred from the first server.task.stream / progress event).
+  // For the brief window before that lands, fall back to `!isNonPoolTask`
+  // (i.e. no streaming buffer yet → could be browser, treat optimistic).
+  const knownExecutionMode = activeTask?.executionMode;
+  const isBrowserTask =
+    knownExecutionMode != null
+      ? knownExecutionMode === 'browser'
+      : hasActiveTask && !isNonPoolTask;
+  const shouldConnect = isBrowserTask || browserLiveRequested;
+  // Item 6 — short-lived stream token for screencast / VNC WS auth.
+  // Refreshes every 45s; the WS URL gets rebuilt when token rotates,
+  // which forces a benign reconnect (the connection itself doesn't
+  // need re-auth, but the URL needs the latest token for the next
+  // failed-connect retry). Skipped when neither path enabled the
+  // panel — the hook drops its token and stops fetching.
+  const { token: streamToken } = useStreamToken(shouldConnect);
+  // VNC live stream — memoised so prop identity is stable across
+  // re-renders (the viewport's effect re-runs on any URL change).
+  const vncUrl = React.useMemo(() => {
+    if (!shouldConnect) return null;
+    if (usingCdp) return null;
+    return buildVncUrl(activeTaskId ?? null, poolUserId, streamToken);
+  }, [activeTaskId, shouldConnect, poolUserId, usingCdp, streamToken]);
   const screencastUrlForCdp = React.useMemo(() => {
     if (!shouldConnect) return null;
     if (!usingCdp) return null;
@@ -736,7 +750,7 @@ export function BrowserPanel({
               <Minimize2 className="h-4 w-4" />
             </button>
           )}
-          {!fullscreen && (
+          {!fullscreen && shouldConnect && (
           <header className="flex h-11 items-center gap-2 border-b border-border px-3 pt-2">
             <StatusDot status={status} />
             <NavButton direction="back" title="后退" />
@@ -974,10 +988,13 @@ export function BrowserPanel({
                 </div>
               </div>
             ) : (
-              <EmptyBrowserState taskStatus={taskStatus} />
+              <EmptyBrowserState
+                taskStatus={taskStatus}
+                isBrowserTask={isBrowserTask}
+              />
             )}
           </div>
-          {!fullscreen && (
+          {!fullscreen && shouldConnect && (
             <footer className="flex h-7 items-center justify-between border-t border-border px-3 text-[11px] text-muted-foreground">
               <span>{frame ? `${frame.viewport.width}×${frame.viewport.height}` : '—'}</span>
               <span>{frame ? `第 ${frame.tickIndex + 1} 帧` : ''}</span>
@@ -1169,10 +1186,20 @@ function HibernationCard({
 
 function EmptyBrowserState({
   taskStatus,
+  isBrowserTask = true,
 }: {
   taskStatus: UiTaskStatus | null | undefined;
+  /**
+   * P3 — when the active task does NOT need a browser (generate /
+   * scrape / intake clarification), render the generic idle copy
+   * instead of "等待第一帧…". The latter implies a Brave is about
+   * to show a frame, but for a non-browser task no frame will ever
+   * arrive. Default true preserves prior behaviour for callers
+   * without active-task context (e.g. browserLiveRequested mode).
+   */
+  isBrowserTask?: boolean;
 }): JSX.Element {
-  if (taskStatus === 'executing') {
+  if (taskStatus === 'executing' && isBrowserTask) {
     return <div className="text-center text-xs text-muted-foreground">等待第一帧…</div>;
   }
   return (
