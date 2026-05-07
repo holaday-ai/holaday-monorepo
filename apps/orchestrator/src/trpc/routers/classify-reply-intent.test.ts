@@ -67,6 +67,62 @@ describe('classifyReplyIntent', () => {
     });
   });
 
+  describe('still_awaiting (Fix 2)', () => {
+    it('matches "还没登录"', () => {
+      expect(classifyReplyIntent('还没登录')).toBe('still_awaiting');
+    });
+
+    it('matches "等一下"', () => {
+      expect(classifyReplyIntent('等一下')).toBe('still_awaiting');
+    });
+
+    it('matches "稍等"', () => {
+      expect(classifyReplyIntent('稍等')).toBe('still_awaiting');
+    });
+
+    it('matches "稍等，我还在操作"', () => {
+      expect(classifyReplyIntent('稍等，我还在操作')).toBe('still_awaiting');
+    });
+
+    it('matches "还没登录，等一下"', () => {
+      expect(classifyReplyIntent('还没登录，等一下')).toBe('still_awaiting');
+    });
+
+    it('matches "马上好"', () => {
+      expect(classifyReplyIntent('马上好')).toBe('still_awaiting');
+    });
+
+    it('matches "我还在登录"', () => {
+      expect(classifyReplyIntent('我还在登录')).toBe('still_awaiting');
+    });
+
+    it('matches English "wait a sec"', () => {
+      expect(classifyReplyIntent('wait a sec')).toBe('still_awaiting');
+    });
+
+    it('matches English "hold on"', () => {
+      expect(classifyReplyIntent('hold on')).toBe('still_awaiting');
+    });
+
+    it('matches English "not yet"', () => {
+      expect(classifyReplyIntent('not yet')).toBe('still_awaiting');
+    });
+
+    it('does NOT match "登录好了" (login completed wins)', () => {
+      expect(classifyReplyIntent('登录好了')).toBe('login_completed');
+    });
+
+    it('does NOT match a long message that incidentally contains "稍等"', () => {
+      // Realistic paste: user types substantive content that happens to
+      // include "稍等" as a polite preamble. Length cap (50 chars) keeps
+      // still_awaiting bound to short acks; this 80+-char message
+      // classifies on the numeric structural signal instead.
+      const long =
+        '请稍等片刻，下面是昨晚直播的核心数据。GMV ¥156,832，UV 28,592，ROI 1:3.2，转化率 2.8%，主播话术节奏稳定。';
+      expect(classifyReplyIntent(long)).not.toBe('still_awaiting');
+    });
+  });
+
   describe('default', () => {
     it('treats casual short replies as default', () => {
       expect(classifyReplyIntent('好的')).toBe('default');

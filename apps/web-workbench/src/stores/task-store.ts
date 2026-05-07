@@ -754,7 +754,16 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }));
     try {
       const res = await trpc.tasks.reply.mutate({ taskId, message });
-      if (res.ok) {
+      // Fix 2 — backend tags reply outcome as `state: 'resumed' | 'stillAwaiting'`.
+      // Only `resumed` means the supercar accepted the message and
+      // started executing again; `stillAwaiting` is the user saying
+      // "等一下 / wait" and we should preserve the takeover UI so the
+      // BrowserPanel banner stays up. Older orchestrator builds omit
+      // `state` — treat that as the legacy "always clear" behaviour.
+      const state =
+        (res as { state?: 'resumed' | 'stillAwaiting' }).state ??
+        (res.ok ? 'resumed' : null);
+      if (state === 'resumed') {
         // Optimistically clear the awaiting-user state so the composer
         // flips back to the default mode. The agent's actual response
         // will flow in through subsequent tick frames.

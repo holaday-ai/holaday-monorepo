@@ -3153,11 +3153,13 @@ export const tasksRouter = router({
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
       }
-      // F1 — classify the user's reply intent. Three buckets:
+      // F1 — classify the user's reply intent. Four buckets:
       //   manual_data     — user pasted metrics / "数据如下" / numeric
       //                     blob; supercar should hand off to generate.
       //   login_completed — user finished a manual login or captcha
       //                     ("扫完了" / "登录好了"); continue browser.
+      //   still_awaiting  — user said "等一下 / 稍等 / wait"; keep
+      //                     supercar parked, don't resume the loop.
       //   default         — auto, anything else; continue browser.
       // The classifier is intentionally conservative (favors `default`)
       // — false-handoff aborts a working browser session, so we only
@@ -3167,6 +3169,47 @@ export const tasksRouter = router({
         { taskId: input.taskId, replyKind, msgLen: input.message.length },
         'reply: classified',
       );
+
+      // Fix 2 — still_awaiting short-circuit. Don't deliver to
+      // supercarReply, don't resume the loop, don't touch DB status.
+      // Task stays in awaiting_user; SPA's replyToTask gates on
+      // `state` and preserves the BrowserPanel takeover UI.
+      if (replyKind === 'still_awaiting') {
+        // Best-effort re-broadcast so any SPA tab that lost its
+        // awaitingUserByTask entry (e.g. after a long idle) gets it
+        // back without needing tasks.detail re-fetch.
+        try {
+          const [row] = await ctx.db
+            .select({
+              awaitingQuestion: tasksTable.awaitingQuestion,
+              awaitingKind: tasksTable.awaitingKind,
+            })
+            .from(tasksTable)
+            .where(eq(tasksTable.externalId, input.taskId))
+            .limit(1);
+          if (row?.awaitingQuestion) {
+            const k = row.awaitingKind;
+            const validKinds = ['clarification', 'login', 'captcha', 'browser_action'] as const;
+            const kind =
+              typeof k === 'string' && (validKinds as readonly string[]).includes(k)
+                ? (k as (typeof validKinds)[number])
+                : 'clarification';
+            broadcastToUser(ctx.userId, {
+              type: 'server.supercar.awaiting_user',
+              taskId: input.taskId,
+              question: row.awaitingQuestion,
+              awaitingKind: kind,
+            });
+          }
+        } catch (err) {
+          ctx.logger.warn(
+            { err, taskId: input.taskId },
+            'reply: still_awaiting rebroadcast failed (non-fatal)',
+          );
+        }
+        return { ok: true, state: 'stillAwaiting' as const };
+      }
+
       const delivered =
         replyKind === 'manual_data'
           ? supercarHandoffToGenerate(input.taskId, input.message)
@@ -3185,7 +3228,7 @@ export const tasksRouter = router({
           .catch((err) => {
             ctx.logger.warn({ err, taskId: input.taskId }, 'reply: status resume write failed');
           });
-        return { ok: true };
+        return { ok: true, state: 'resumed' as const };
       }
 
       // No supercar handle — could be a generate-lane intake park
@@ -3295,7 +3338,11 @@ export const tasksRouter = router({
             'reply: handoff persist failed',
           );
         }
-        return { ok: true, handoff: 'browser' as const };
+        return {
+          ok: true,
+          handoff: 'browser' as const,
+          state: 'resumed' as const,
+        };
       }
 
       // Generate-lane resume. Flip to executing, then dispatch the
@@ -3424,7 +3471,7 @@ export const tasksRouter = router({
           );
         }
       })();
-      return { ok: true };
+      return { ok: true, state: 'resumed' as const };
     }),
 
   /**
@@ -3980,10 +4027,32 @@ function shouldUseBrowserPool(_userId: string): boolean {
  */
 export function classifyReplyIntent(
   message: string,
-): 'manual_data' | 'login_completed' | 'default' {
+): 'manual_data' | 'login_completed' | 'still_awaiting' | 'default' {
   const trimmed = message.trim();
   if (!trimmed) return 'default';
   const lower = trimmed.toLowerCase();
+
+  // Fix 2 — still-awaiting tells. User is mid-login / mid-captcha and
+  // typing "等一下 / 稍等 / wait" to ask the system to keep waiting.
+  // Match BEFORE login_completed because "还没登录" has both signals
+  // and "still" should win (not "logged in"). Capped at 50 chars to
+  // dodge long substantive replies that happen to contain "稍等".
+  if (trimmed.length <= 50) {
+    const STILL_AWAITING_PHRASES: readonly RegExp[] = [
+      /还没(?:登录|登陆|好|完|完成|搞定|弄好|操作完|输入完)/u,
+      /还在(?:登录|登陆|操作|输入|扫码|忙)/u,
+      /我还在/u,
+      /等一?下|稍等|等等|再等(?:等|会儿|一下)?|马上(?:好|完成|就好)/u,
+      /没好|继续等(?:待|一下|等)?/u,
+      /(?:别|不要|先别)(?:动|继续|执行)/u,
+      /\bnot\s+yet\b|\bwait(?:ing)?\b|\bhold\s+on\b|\bone\s+sec(?:ond)?\b/i,
+      /\bgive\s+me\s+a\s+(?:sec|moment|minute)\b/i,
+      /\b(?:still|just)\s+(?:working|loading|signing|logging)\b/i,
+    ];
+    if (STILL_AWAITING_PHRASES.some((re) => re.test(trimmed))) {
+      return 'still_awaiting';
+    }
+  }
 
   // Strong manual-data tells. The phrase patterns are a high-precision
   // signal — users typing "数据如下" or "I'll give you the numbers"

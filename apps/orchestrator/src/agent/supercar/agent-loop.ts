@@ -3097,39 +3097,152 @@ async function reconcileFinalAnswer(
     );
   }
 
-  if (!observedUrl) {
-    return { summary: finalText, observedUrl, observedTitle };
+  const summary = reconcileFinalAnswerText(
+    finalText,
+    observedUrl,
+    observedTitle,
+    taskId,
+  );
+  return { summary, observedUrl, observedTitle };
+}
+
+/**
+ * Pure URL/title reconciliation — extracted so unit tests can exercise
+ * every branch without a Playwright mock. `reconcileFinalAnswer` is
+ * the I/O wrapper; this is the algorithm.
+ *
+ * Strategy:
+ *   - No observedUrl / no domain → return finalText unchanged.
+ *   - Already-correct URL in finalText → unchanged.
+ *   - Same-domain mismatch (path differs) → splice in observed URL
+ *     (and title, for `[label](url)` markdown links). Multiple edits
+ *     applied right-to-left so positions stay valid.
+ *   - Different-domain mismatch → fall back to appending a "📍 实际
+ *     浏览器页面" line. Replacing across domains would change the
+ *     answer's meaning silently.
+ */
+export function reconcileFinalAnswerText(
+  finalText: string,
+  observedUrl: string | null,
+  observedTitle: string | null,
+  taskId?: string,
+): string {
+  if (!observedUrl) return finalText;
+  const observedDomain = parseDomain(observedUrl);
+  if (!observedDomain) return finalText;
+
+  // Collect markdown links `[label](url)` first so we can swap label
+  // along with url for same-domain mismatches. Bare URLs are detected
+  // in a second pass and skipped if they fall inside an already-
+  // captured markdown range.
+  type MdLink = { start: number; end: number; label: string; url: string };
+  type BareUrl = { start: number; end: number; url: string };
+  const mdLinks: MdLink[] = [];
+  const MD_LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g;
+  for (let m = MD_LINK_RE.exec(finalText); m; m = MD_LINK_RE.exec(finalText)) {
+    mdLinks.push({
+      start: m.index,
+      end: m.index + m[0].length,
+      label: m[1] ?? '',
+      url: m[2] ?? '',
+    });
+  }
+  const bareUrls: BareUrl[] = [];
+  // Stop at whitespace, closing brackets, AND common Chinese
+  // punctuation — without that, "...example.com/foo，标题是..." swept
+  // the comma + following Chinese into the URL match and broke
+  // same-domain comparison downstream.
+  const BARE_URL_RE = /https?:\/\/[^\s)\]，。、！？；：、]+/g;
+  for (let m = BARE_URL_RE.exec(finalText); m; m = BARE_URL_RE.exec(finalText)) {
+    const start = m.index;
+    const end = start + m[0].length;
+    if (mdLinks.some((ml) => start >= ml.start && end <= ml.end)) continue;
+    bareUrls.push({ start, end, url: m[0] });
   }
 
-  // Find all URLs in finalText and compare modulo trailing punctuation
-  // / closing markdown brackets. If the model wrote `[label](url)` we
-  // still pick `url` cleanly via the regex below.
-  const urlsInText = finalText.match(/https?:\/\/[^\s)\]]+/g) ?? [];
-  if (urlsInText.length === 0) {
-    return { summary: finalText, observedUrl, observedTitle };
-  }
+  const allUrls = [...mdLinks.map((l) => l.url), ...bareUrls.map((b) => b.url)];
+  if (allUrls.length === 0) return finalText;
+
+  // Normalize: strip trailing punctuation (ASCII + Chinese) and a
+  // final slash. Lowercase for host-insensitive compare. Used for
+  // exact-match check vs observedUrl below.
   const normalize = (u: string): string =>
-    u.replace(/[.,;:!?)\]]+$/, '').replace(/\/$/, '').toLowerCase();
+    u
+      .replace(/[.,;:!?)\]、。，！？；：]+$/, '')
+      .replace(/\/$/, '')
+      .toLowerCase();
   const observedNorm = normalize(observedUrl);
-  const matched = urlsInText.some((u) => normalize(u) === observedNorm);
-  if (matched) {
-    return { summary: finalText, observedUrl, observedTitle };
+  if (allUrls.some((u) => normalize(u) === observedNorm)) {
+    // Already correct — nothing to fix.
+    return finalText;
   }
 
-  const titleLabel =
+  const safeTitle =
     observedTitle && observedTitle.trim().length > 0
       ? observedTitle.trim()
       : observedUrl;
-  const correction = `\n\n> 📍 实际浏览器页面：[${titleLabel}](${observedUrl})`;
+
+  // Same-domain mismatch path: replace inline. Apply edits in
+  // descending position order so earlier offsets stay valid as we
+  // splice. Markdown labels get replaced too — the model picks the
+  // label from memory just like the URL.
+  const edits: Array<{ start: number; end: number; replacement: string }> = [];
+  for (const ml of mdLinks) {
+    if (parseDomain(ml.url) === observedDomain) {
+      edits.push({
+        start: ml.start,
+        end: ml.end,
+        replacement: `[${safeTitle}](${observedUrl})`,
+      });
+    }
+  }
+  for (const bu of bareUrls) {
+    if (parseDomain(bu.url) === observedDomain) {
+      edits.push({ start: bu.start, end: bu.end, replacement: observedUrl });
+    }
+  }
+
+  if (edits.length > 0) {
+    edits.sort((a, b) => b.start - a.start);
+    let edited = finalText;
+    for (const e of edits) {
+      edited = edited.slice(0, e.start) + e.replacement + edited.slice(e.end);
+    }
+    logger.info(
+      {
+        taskId,
+        observedUrl,
+        observedTitle,
+        replacements: edits.length,
+      },
+      'reconcile: replaced same-domain URL/title mismatches inline',
+    );
+    return edited;
+  }
+
+  // Different-domain mismatch — extreme case. The model is talking
+  // about an entirely different host than the live page. Append
+  // rather than replace, since silently rewriting a foreign-domain
+  // mention would change the meaning of the answer.
+  const correction = `\n\n> 📍 实际浏览器页面：[${safeTitle}](${observedUrl})`;
   logger.info(
     {
       taskId,
       observedUrl,
-      mentionedUrls: urlsInText.slice(0, 3),
+      mentionedUrls: allUrls.slice(0, 3),
     },
-    'reconcile: appended observed-URL correction to final answer',
+    'reconcile: appended observed-URL correction (different-domain mismatch)',
   );
-  return { summary: finalText + correction, observedUrl, observedTitle };
+  return finalText + correction;
+}
+
+/** Parse a URL's hostname (lowercased) or null on malformed input. */
+function parseDomain(url: string): string | null {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
 }
 
 /**
