@@ -446,12 +446,20 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       void hydrateDetail(taskId);
       return;
     }
+    // F2 — switching tasks is UNCONDITIONAL. No guard on the previous
+    // task's status, no in-flight check. The user clicked a row —
+    // they want that view, the executing/awaiting_user task in the
+    // background keeps running on its own. Aborting the old hydrate
+    // prevents its tail (the post-fetch `set()` that stamps tasks[]
+    // entries) from running against the now-different selectedTaskId
+    // and re-pulling the previous task's payload into the new view.
     // composerMode flips back to 'task' on any selection. URL
     // writing happens in WorkbenchApp's outbound effect (uses
     // React Router's navigate so useSearchParams stays in sync).
     // Selecting a task re-binds the browser context to that task —
     // browserLiveRequested clears so the panel switches off the
     // user-scoped pool stream and onto the task-scoped path.
+    abortInFlightHydrate();
     set({
       selectedTaskId: taskId,
       composerMode: 'task',
@@ -1255,21 +1263,22 @@ export function toUiTask(row: ListRow): UiTask {
 }
 
 function normaliseStatus(raw: string): UiTaskStatus {
-  // The orchestrator has a richer status set (planning, pending,
-  // awaiting_user, ...). Map everything we don't display onto an
-  // active/paused bucket so the sidebar stays readable.
+  // The orchestrator has a richer status set (planning, pending, ...).
+  // Map everything we don't display onto an active/paused bucket so
+  // the sidebar stays readable. `awaiting_user` is now a first-class
+  // SPA status — composer flips to reply mode and the sidebar dot
+  // turns amber so the user sees "this task is waiting on me".
   switch (raw) {
     case 'completed':
     case 'failed':
     case 'cancelled':
     case 'paused':
     case 'executing':
+    case 'awaiting_user':
     // Phase 24 RC follow-up — `queued` is the new pre-executing state
     // emitted by tasks.create when the BrowserPool is at capacity.
     case 'queued':
       return raw;
-    case 'awaiting_user':
-      return 'paused';
     default:
       return 'executing';
   }

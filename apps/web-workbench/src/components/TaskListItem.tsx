@@ -261,6 +261,12 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
         // executing" (fast blue pulse).
         status === 'queued' && 'animate-pulse-dot bg-amber-400',
         status === 'executing' && 'animate-pulse-dot bg-blue-500',
+        // Awaiting-user gets a non-pulsing solid amber so the row
+        // reads as "stopped, waiting on you" — distinct from queued
+        // (pulsing amber: waiting on the system) and paused (also
+        // amber but no incoming question). The user can scan the
+        // sidebar and immediately spot which tasks need action.
+        status === 'awaiting_user' && 'bg-amber-500 ring-2 ring-amber-300/50',
         status === 'paused' && 'bg-amber-500',
         // Completed: hollow grey dot — done is neutral, not
         // celebrated. Matches Claude's sidebar where completed tasks
@@ -283,6 +289,12 @@ function subtitleFor(task: UiTask): string {
       return '排队中 · 等待空闲槽位';
     case 'executing':
       return task.tickCount === 0 ? '正在启动…' : `执行中 · 第 ${task.tickCount} 步`;
+    case 'awaiting_user':
+      // F3 — explicit awaiting-user copy. Previously this fell through
+      // to the default branch and rendered `undefined` in the row's
+      // tooltip / aria-label, both visually wrong and a screen-reader
+      // hole.
+      return '等待你回复';
     case 'paused':
       return task.tickCount === 0 ? '已暂停' : `已暂停 · ${task.tickCount} 步`;
     case 'completed':
@@ -291,5 +303,9 @@ function subtitleFor(task: UiTask): string {
       return task.tickCount === 0 ? '失败' : `失败 · ${task.tickCount} 步`;
     case 'cancelled':
       return task.tickCount === 0 ? '已取消' : `已取消 · ${task.tickCount} 步`;
+    default:
+      // Defence-in-depth: never let `undefined` reach the DOM if a
+      // future status sneaks past TS narrowing.
+      return '';
   }
 }

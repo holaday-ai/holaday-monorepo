@@ -12,6 +12,7 @@
 export type UiTaskStatus =
   | 'queued'
   | 'executing'
+  | 'awaiting_user'
   | 'paused'
   | 'completed'
   | 'failed'
@@ -229,5 +230,14 @@ export interface UiThinkingEvent {
 }
 
 export function isActive(status: UiTaskStatus): boolean {
-  return status === 'queued' || status === 'executing' || status === 'paused';
+  // 'awaiting_user' counts as active — task is paused on a user
+  // question, not finished. Sidebar's StatusDot uses this to render
+  // the row with a non-terminal style; the row's hover preview also
+  // uses it for live-task affordances.
+  return (
+    status === 'queued' ||
+    status === 'executing' ||
+    status === 'awaiting_user' ||
+    status === 'paused'
+  );
 }

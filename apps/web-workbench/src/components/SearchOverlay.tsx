@@ -212,6 +212,8 @@ function statusLabel(status: UiTask['status']): string {
       return '排队中';
     case 'executing':
       return '执行中';
+    case 'awaiting_user':
+      return '等待你回复';
     case 'paused':
       return '已暂停';
     case 'completed':
@@ -220,5 +222,7 @@ function statusLabel(status: UiTask['status']): string {
       return '失败';
     case 'cancelled':
       return '已取消';
+    default:
+      return '';
   }
 }

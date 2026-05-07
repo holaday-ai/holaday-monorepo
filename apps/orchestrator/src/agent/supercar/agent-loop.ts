@@ -351,7 +351,19 @@ export function patchOrphanServerToolUses(
   return { patched, orphansFixed };
 }
 
-export type SupercarStatus = 'completed' | 'failed' | 'awaiting_user' | 'timeout' | 'cancelled';
+export type SupercarStatus =
+  | 'completed'
+  | 'failed'
+  | 'awaiting_user'
+  | 'timeout'
+  | 'cancelled'
+  // F1 — user replied to the awaiting_user prompt with manual data
+  // (e.g. pasted GMV / ROI numbers). Loop exits without continuing
+  // to drive the browser; dispatcher catches this status and runs
+  // generate with the original intent + the user's data, producing
+  // a written report. Avoids the "task stuck thinking" mode where
+  // supercar resumed in browser-mode but the user never wanted that.
+  | 'handoff_to_generate';
 
 /**
  * Shape the loop hands back to `tasks.ts`. Compatible with the legacy
@@ -629,6 +641,15 @@ interface RunHandle {
   resolveReply: ((text: string) => void) | null;
   /** Flip to signal the loop that the client aborted the run. */
   abort: () => void;
+  /**
+   * F1 — when set, the next reply resolution exits the loop with
+   * status='handoff_to_generate' instead of continuing the browser
+   * loop. Carries the user's message so the dispatcher can build a
+   * generate prompt that combines original intent + manual data.
+   */
+  handoffMessage: string | null;
+  /** Stamp the original user intent so the handoff path can repackage it. */
+  originalIntent: string;
 }
 
 const handles = new Map<string, RunHandle>();
@@ -647,6 +668,38 @@ export function supercarReply(taskId: string, message: string): boolean {
   handle.resolveReply = null;
   resolve(message);
   return true;
+}
+
+/**
+ * F1 — variant of supercarReply that signals "user provided manual
+ * data, exit the browser loop and hand off to generate". The dispatcher
+ * checks the loop's outcome.status and, when it's
+ * 'handoff_to_generate', invokes runGenerateTask with the original
+ * intent + this manual data instead of marking the task failed /
+ * cancelled. Returns true if the handoff was accepted (handle exists +
+ * is parked); false if the task isn't currently parked.
+ */
+export function supercarHandoffToGenerate(
+  taskId: string,
+  message: string,
+): boolean {
+  const handle = handles.get(taskId);
+  if (!handle || !handle.resolveReply) return false;
+  handle.handoffMessage = message;
+  const resolve = handle.resolveReply;
+  handle.resolveReply = null;
+  resolve(message);
+  return true;
+}
+
+/**
+ * Read the original intent stamped into the handle when the loop
+ * started. Used by the dispatcher's handoff branch to rebuild the
+ * generate prompt without requiring the user to retype.
+ */
+export function supercarHandleOriginalIntent(taskId: string): string | null {
+  const handle = handles.get(taskId);
+  return handle ? handle.originalIntent : null;
 }
 
 /**
@@ -1045,6 +1098,8 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // can find us later.
   const handle: RunHandle = {
     resolveReply: null,
+    handoffMessage: null,
+    originalIntent: opts.intent,
     abort: () => {
       cancelled = true;
       if (handle.resolveReply) {
@@ -1511,6 +1566,24 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           const replyOrAbort = await Promise.race([replyPromise, timeoutPromise]);
           if (waitTimer) clearTimeout(waitTimer);
           handle.resolveReply = null;
+          // F1 — `supercarHandoffToGenerate` set handle.handoffMessage
+          // before resolving the promise. Exit the loop now so the
+          // dispatcher can run runGenerateTask with the user's data
+          // instead of the supercar continuing to drive the browser.
+          // The handoff is detected via the flag (not the message
+          // content) because the user's text is also pushed onto the
+          // messages array if we DID continue the loop — keeping the
+          // exit decision orthogonal to message inspection.
+          if (handle.handoffMessage !== null) {
+            const handoffMsg = handle.handoffMessage;
+            handle.handoffMessage = null;
+            return {
+              status: 'handoff_to_generate',
+              question: handoffMsg,
+              iterations: iteration,
+              toolsUsed: Array.from(toolsUsed),
+            };
+          }
           if (replyOrAbort === '__SUPERCAR_ABORT__' || cancelled) {
             return {
               status: 'cancelled',

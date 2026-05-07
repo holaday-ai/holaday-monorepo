@@ -2,6 +2,8 @@ export {
   runSupercarTask,
   supercarReply,
   supercarAbort,
+  supercarHandoffToGenerate,
+  supercarHandleOriginalIntent,
   type SupercarOutcome,
   type SupercarStatus,
   type SupercarTickEvent,

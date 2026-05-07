@@ -29,6 +29,7 @@ import {
   classifyAsSimpleSearch,
   runSupercarTask,
   supercarAbort,
+  supercarHandoffToGenerate,
   supercarReply,
   type SupercarOutcome,
 } from '../../agent/supercar/index.js';
@@ -1737,6 +1738,145 @@ export const tasksRouter = router({
               { taskId, status: outcome.status, iterations: outcome.iterations, toolsUsed: outcome.toolsUsed },
               'supercar: task terminated',
             );
+            // F1 — handoff to generate. User replied with manual data
+            // (numeric metrics, "数据如下:", etc.); supercar exited
+            // without continuing the browser loop. Run generate against
+            // the original intent + the user's data and persist THAT
+            // outcome under this task id. No new task row, no quota
+            // re-charge — same task, same id, just a different runner.
+            if (outcome.status === 'handoff_to_generate') {
+              const userManualData = outcome.question ?? '';
+              const combinedIntent = [
+                input.intent,
+                userManualData
+                  ? `\n\n[用户提供的数据]\n${userManualData}`
+                  : '',
+              ].join('').trim();
+              ctx.logger.info(
+                {
+                  taskId,
+                  userId,
+                  manualDataLen: userManualData.length,
+                  combinedIntentLen: combinedIntent.length,
+                },
+                'supercar: handoff to generate runner',
+              );
+              const handoffStartedAt = Date.now();
+              let generateOutcome;
+              try {
+                generateOutcome = await runGenerateTask({
+                  taskId,
+                  userId: ctx.userId,
+                  intent: combinedIntent,
+                  skillId:
+                    gatedRole !== 'none'
+                      ? gatedRole
+                      : input.skillId ?? undefined,
+                  client: anthropicForResolver!,
+                  logger: ctx.logger,
+                  ...(attachmentBlocks.length > 0
+                    ? { attachments: attachmentBlocks }
+                    : {}),
+                  onStreamDelta: (delta) => {
+                    try {
+                      broadcastToUser(userId, {
+                        type: 'server.task.stream',
+                        taskId,
+                        delta,
+                      });
+                    } catch (err) {
+                      ctx.logger.warn(
+                        { err, taskId },
+                        'handoff-generate: broadcast stream delta failed',
+                      );
+                    }
+                  },
+                });
+              } catch (err) {
+                ctx.logger.error(
+                  { err, taskId },
+                  'handoff-generate: runner threw',
+                );
+                generateOutcome = {
+                  status: 'failed' as const,
+                  summary: '',
+                  reason:
+                    err instanceof Error
+                      ? err.message
+                      : 'handoff-generate: unknown error',
+                  inputTokens: 0,
+                  outputTokens: 0,
+                  durationMs: 0,
+                };
+              }
+              const elapsedMs = Date.now() - handoffStartedAt;
+              const metadata = {
+                executionMode: 'browser' as const,
+                finalExecutionMode: 'generate' as const,
+                expertWorkflowId: expertWorkflow?.id ?? null,
+                selectedRole: gatedRole === 'none' ? null : gatedRole,
+                model: 'claude-sonnet-4-6',
+                fallbackChain: ['browser', 'generate'],
+                elapsedMs,
+                modelFinalText:
+                  generateOutcome.status === 'completed'
+                    ? (generateOutcome.summary ?? '').slice(0, 200)
+                    : null,
+              };
+              ctx.logger.info(
+                {
+                  taskId,
+                  userId,
+                  finalStatus: generateOutcome.status,
+                  ...metadata,
+                  failureReason:
+                    generateOutcome.status === 'failed'
+                      ? generateOutcome.reason
+                      : null,
+                },
+                'task:completed',
+              );
+              try {
+                if (generateOutcome.status === 'completed') {
+                  await repo.persistVisionOutcome(taskId, {
+                    status: 'completed',
+                    summary: generateOutcome.summary,
+                    tickCount: outcome.iterations,
+                    metadata,
+                  });
+                  broadcastToUser(userId, {
+                    type: 'server.task.terminal',
+                    taskId,
+                    status: 'completed',
+                    ...(generateOutcome.summary
+                      ? { summary: generateOutcome.summary }
+                      : {}),
+                  });
+                } else {
+                  await repo.persistVisionOutcome(taskId, {
+                    status: 'failed',
+                    reason:
+                      generateOutcome.reason ?? 'handoff-generate: api failed',
+                    tickCount: outcome.iterations,
+                    metadata,
+                  });
+                  broadcastToUser(userId, {
+                    type: 'server.task.terminal',
+                    taskId,
+                    status: 'failed',
+                    ...(generateOutcome.reason
+                      ? { reason: generateOutcome.reason }
+                      : {}),
+                  });
+                }
+              } catch (err) {
+                ctx.logger.error(
+                  { err, taskId },
+                  'handoff-generate: persist/broadcast failed',
+                );
+              }
+              return;
+            }
             // R7 — grab the final-state evidence BEFORE persistSupercar
             // and pool.release. The BrowserPanel renders the static
             // screenshot for terminal tasks instead of trying to
@@ -2966,7 +3106,24 @@ export const tasksRouter = router({
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
       }
-      const delivered = supercarReply(input.taskId, input.message);
+      // F1 — classify the user's reply intent. Three buckets:
+      //   manual_data     — user pasted metrics / "数据如下" / numeric
+      //                     blob; supercar should hand off to generate.
+      //   login_completed — user finished a manual login or captcha
+      //                     ("扫完了" / "登录好了"); continue browser.
+      //   default         — auto, anything else; continue browser.
+      // The classifier is intentionally conservative (favors `default`)
+      // — false-handoff aborts a working browser session, so we only
+      // hand off when the message is unambiguously self-sufficient.
+      const replyKind = classifyReplyIntent(input.message);
+      ctx.logger.info(
+        { taskId: input.taskId, replyKind, msgLen: input.message.length },
+        'reply: classified',
+      );
+      const delivered =
+        replyKind === 'manual_data'
+          ? supercarHandoffToGenerate(input.taskId, input.message)
+          : supercarReply(input.taskId, input.message);
       if (delivered) {
         // P1-A — flip status back to 'executing' and clear the
         // pending question so a refresh during the next iteration
@@ -3514,6 +3671,75 @@ function stripFinalScreenshot(result: unknown): unknown {
  */
 function shouldUseBrowserPool(_userId: string): boolean {
   return true;
+}
+
+/**
+ * F1 — classify a `tasks.reply` body so the handler picks the right
+ * resume path:
+ *   manual_data     — user pasted metrics, table-shaped data, or said
+ *                     "数据如下" / "我直接给你数据". Supercar should
+ *                     hand off to generate; trying to keep driving the
+ *                     browser is wasted work and often loops on a
+ *                     login page the user has explicitly opted out of.
+ *   login_completed — user finished a manual login / captcha so
+ *                     supercar should keep driving the browser. Today
+ *                     this returns the same code path as `default`,
+ *                     but the explicit bucket lets us tune the prompt
+ *                     or telemetry separately later.
+ *   default         — anything else; let supercar continue.
+ *
+ * Conservative: false-positives abort a working browser session, so
+ * we only flag manual_data when the message has structural signals
+ * (≥ 3 numerical figures, OR `key: value` lines, OR an explicit
+ * "数据如下" / "I'll provide data" phrase). Casual replies stay default.
+ */
+export function classifyReplyIntent(
+  message: string,
+): 'manual_data' | 'login_completed' | 'default' {
+  const trimmed = message.trim();
+  if (!trimmed) return 'default';
+  const lower = trimmed.toLowerCase();
+
+  // Strong manual-data tells. The phrase patterns are a high-precision
+  // signal — users typing "数据如下" or "I'll give you the numbers"
+  // almost never mean "keep driving the browser".
+  const MANUAL_DATA_PHRASES: readonly RegExp[] = [
+    /数据如下|以下是数据|这些(?:是|就是)数据|我(?:直接|手动)?(?:给|提供|发)(?:你)?数据/u,
+    /用我(?:上传|提供|发)的(?:数据|表格|文件|附件)/u,
+    /(?:不(?:用|要)|跳过|别)(?:登录|登陆)|(?:不要|别)(?:打开|访问)(?:网站|页面|后台)/u,
+    /\bhere(?:'s|\s+is)\s+the\s+(?:data|numbers|metrics)/i,
+    /\bi(?:'ll)?\s+(?:provide|give|paste)\s+(?:the\s+)?(?:data|numbers)/i,
+  ];
+  if (MANUAL_DATA_PHRASES.some((re) => re.test(trimmed))) return 'manual_data';
+
+  // Login-completed tells. Conservative — the message has to be short
+  // and unambiguously about login state, not a long answer that
+  // happens to mention "登录".
+  if (trimmed.length <= 30) {
+    const LOGIN_DONE_PHRASES: readonly RegExp[] = [
+      /(?:扫(?:码)?(?:好|完|完了|完成))|登(?:录|陆)(?:好|完|成功|完成|进去|进了)/u,
+      /(?:已|我已经?)(?:登录|登陆)/u,
+      /\b(?:logged\s+in|signed\s+in|login\s+(?:done|complete))\b/i,
+    ];
+    if (LOGIN_DONE_PHRASES.some((re) => re.test(lower))) {
+      return 'login_completed';
+    }
+  }
+
+  // Structural manual-data signal: ≥ 3 distinct numeric figures (with
+  // unit / separator hints to dodge the "1, 2, 3 step list" false-fire),
+  // OR multiple `key: value` lines.
+  const NUMERIC_WITH_HINT = /(?:¥|\$|€|£|RMB|usd)\s*[\d,]+(?:\.\d+)?|[\d,]+(?:\.\d+)?\s*(?:%|元|万|亿|人民币)|[\d,]+(?:\.\d+)?(?=\s*(?:GMV|UV|ROI|GPM|UV价值|订单|转化|消耗|分|%))/giu;
+  const numericHits = trimmed.match(NUMERIC_WITH_HINT);
+  if (numericHits && numericHits.length >= 3) return 'manual_data';
+
+  const KV_LINE = /^[一-龥A-Za-z0-9 \t（）()\-_/]+\s*[：:][^\n]+$/u;
+  const kvLines = trimmed
+    .split('\n')
+    .filter((l) => KV_LINE.test(l.trim())).length;
+  if (kvLines >= 2) return 'manual_data';
+
+  return 'default';
 }
 
 /**
