@@ -382,6 +382,18 @@ export interface SupercarOutcome {
   iterations: number;
   /** Which tools the model actually used over the run. Useful for audit + metrics. */
   toolsUsed: string[];
+  /**
+   * Populated on completed paths only when reconcileFinalAnswer
+   * actually changed the model's text (URL or title mismatched
+   * observed page). Carries the (truncated) corrected actionSummary
+   * for the LAST step (`tickIndex === iterations`) so the dispatcher
+   * can splice the new value into `task_steps` and rebroadcast
+   * `server.vision.tick.end` — without this, the BrowserPanel "最近
+   * 操作" overlay keeps showing the model's original (wrong) URL
+   * after the final summary has been corrected, which is the bug
+   * that made users distrust the answer.
+   */
+  reconciledStepUpdate?: { tickIndex: number; actionSummary: string };
 }
 
 export interface SupercarTickEvent {
@@ -828,10 +840,6 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         );
         void Promise.resolve(opts.onPlanStepUpdate?.(converged));
       }
-      logger.warn(
-        { taskId: opts.taskId, exitPath: 'zapier-shortcircuit', didCallParkCheck: false },
-        '[PARK-CHECK] exit',
-      );
       return {
         status: 'completed',
         summary: lines.join('\n'),
@@ -1564,27 +1572,6 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         apiLatencyMs,
       });
 
-      // PARK-CHECK instrumentation — diagnose why login takeover
-      // prompts ("需要你接管浏览器登录") sometimes leak through to
-      // status='completed' instead of parking. Every iteration logs
-      // whether THIS turn carried a takeover phrase in textPreamble
-      // and whether tool_use forced the loop to continue past it.
-      // Strip later once root cause is known.
-      const turnHasTakeover = looksLikeBrowserTakeoverPrompt(textPreamble);
-      logger.warn(
-        {
-          taskId: opts.taskId,
-          iteration,
-          textPreambleLen: textPreamble.length,
-          textPreambleHead: textPreamble.slice(0, 200),
-          toolUseCount: toolUseBlocks.length,
-          toolNames: toolUseBlocks.map((b) => b.name),
-          turnHasTakeover,
-          stopReason: response.stop_reason,
-        },
-        '[PARK-CHECK] iteration done',
-      );
-
       // If the model didn't invoke any client-side tool, the turn is
       // finished. Decide between completed / awaiting_user.
       if (toolUseBlocks.length === 0) {
@@ -1596,20 +1583,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         const finalText = textPreamble
           .replace(/\[STEP\s+\d+\s+(?:done|running|failed|pending)\]\s*\n*/gi, '')
           .trim();
-        const parkCheckResult = looksLikePendingQuestion(finalText);
-        logger.warn(
-          {
-            taskId: opts.taskId,
-            iteration,
-            finalTextLen: finalText.length,
-            finalTextHead: finalText.slice(0, 300),
-            parkCheckResult,
-            takeoverDetected: looksLikeBrowserTakeoverPrompt(finalText),
-            stopReason: response.stop_reason,
-          },
-          '[PARK-CHECK] no-tool exit — calling looksLikePendingQuestion',
-        );
-        if (parkCheckResult) {
+        if (looksLikePendingQuestion(finalText)) {
           // Park on a user reply. `supercarReply` resolves the promise;
           // `supercarAbort` rejects with a sentinel we swap to
           // cancelled. Capped at the kind-specific timeout below so a
@@ -1654,18 +1628,6 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           } catch {
             /* swallow — best-effort URL snapshot */
           }
-          logger.warn(
-            {
-              taskId: opts.taskId,
-              exitPath: 'park-awaiting_user',
-              didCallParkCheck: true,
-              parkCheckResult: true,
-              awaitingKind: parkAwaitingKind,
-              iteration,
-              timeoutMs: AWAITING_USER_TIMEOUT_MS,
-            },
-            '[PARK-CHECK] entering awaiting_user park',
-          );
           await safeCall(opts.onAwaitingUser, {
             question: visibleQuestion,
             at: new Date(),
@@ -1702,15 +1664,6 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             // step the supercar managed counts as done; the
             // dispatcher converges again after generate completes.
             convergePlanOnSuccess();
-            logger.warn(
-              {
-                taskId: opts.taskId,
-                exitPath: 'handoff_to_generate',
-                didCallParkCheck: true,
-                iteration,
-              },
-              '[PARK-CHECK] exit',
-            );
             return {
               status: 'handoff_to_generate',
               question: handoffMsg,
@@ -1719,10 +1672,6 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             };
           }
           if (replyOrAbort === '__SUPERCAR_ABORT__' || cancelled) {
-            logger.warn(
-              { taskId: opts.taskId, exitPath: 'park-then-abort', didCallParkCheck: true, iteration },
-              '[PARK-CHECK] exit',
-            );
             return {
               status: 'cancelled',
               iterations: iteration,
@@ -1744,33 +1693,26 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               'supercar: awaiting-user timed out — completing with available text',
             );
             convergePlanOnSuccess();
+            const preReconcile = stripAwaitingUserMarker(finalText);
             const reconciled = await reconcileFinalAnswer(
-              stripAwaitingUserMarker(finalText),
+              preReconcile,
               executor,
               opts.taskId,
             );
-            logger.warn(
-              {
-                taskId: opts.taskId,
-                exitPath: 'awaiting-user-timeout-completed',
-                didCallParkCheck: true,
-                iteration,
-                finalTextHead: finalText.slice(0, 200),
-              },
-              '[PARK-CHECK] exit',
+            const stepUpdate = buildReconciledStepUpdate(
+              preReconcile,
+              reconciled.summary,
+              iteration,
             );
             return {
               status: 'completed',
               summary: reconciled.summary,
               iterations: iteration,
               toolsUsed: Array.from(toolsUsed),
+              ...(stepUpdate ? { reconciledStepUpdate: stepUpdate } : {}),
             };
           }
           if (Date.now() >= deadline) {
-            logger.warn(
-              { taskId: opts.taskId, exitPath: 'park-then-deadline-timeout', didCallParkCheck: true, iteration },
-              '[PARK-CHECK] exit',
-            );
             return {
               status: 'timeout',
               reason: 'task timeout elapsed while waiting for user reply',
@@ -1782,28 +1724,23 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           continue;
         }
         convergePlanOnSuccess();
+        const preReconcile = stripAwaitingUserMarker(finalText);
         const reconciled = await reconcileFinalAnswer(
-          stripAwaitingUserMarker(finalText),
+          preReconcile,
           executor,
           opts.taskId,
         );
-        logger.warn(
-          {
-            taskId: opts.taskId,
-            exitPath: 'no-tool-end-of-turn-completed',
-            didCallParkCheck: true,
-            parkCheckResult,
-            iteration,
-            finalTextLen: finalText.length,
-            finalTextHead: finalText.slice(0, 300),
-          },
-          '[PARK-CHECK] exit',
+        const stepUpdate = buildReconciledStepUpdate(
+          preReconcile,
+          reconciled.summary,
+          iteration,
         );
         return {
           status: 'completed',
           summary: reconciled.summary,
           iterations: iteration,
           toolsUsed: Array.from(toolsUsed),
+          ...(stepUpdate ? { reconciledStepUpdate: stepUpdate } : {}),
         };
       }
 
@@ -2403,17 +2340,6 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               .map((it, i) => `${i + 1}. \`\`\`json\n${JSON.stringify(it, null, 2).slice(0, 400)}\n\`\`\``)
               .join('\n\n');
             convergePlanOnSuccess();
-            logger.warn(
-              {
-                taskId: opts.taskId,
-                exitPath: 'apify-fallback-completed',
-                didCallParkCheck: false,
-                iteration,
-                actorId: match.actorId,
-                itemCount: r.items.length,
-              },
-              '[PARK-CHECK] exit',
-            );
             return {
               status: 'completed',
               summary:
@@ -2617,10 +2543,6 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     }
 
     if (cancelled) {
-      logger.warn(
-        { taskId: opts.taskId, exitPath: 'loop-end-cancelled', didCallParkCheck: false, iteration },
-        '[PARK-CHECK] exit',
-      );
       return {
         status: 'cancelled',
         iterations: iteration,
@@ -2628,10 +2550,6 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       };
     }
     if (Date.now() >= deadline) {
-      logger.warn(
-        { taskId: opts.taskId, exitPath: 'loop-end-deadline-timeout', didCallParkCheck: false, iteration },
-        '[PARK-CHECK] exit',
-      );
       return {
         status: 'timeout',
         reason: `task timeout (${Math.round(timeoutMs / 1000)}s) elapsed`,
@@ -2639,10 +2557,6 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         toolsUsed: Array.from(toolsUsed),
       };
     }
-    logger.warn(
-      { taskId: opts.taskId, exitPath: 'loop-end-max-iterations-failed', didCallParkCheck: false, iteration, maxIterations },
-      '[PARK-CHECK] exit',
-    );
     return {
       status: 'failed',
       reason: `exhausted maxIterations=${maxIterations} without completion`,
@@ -3243,6 +3157,45 @@ function parseDomain(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Build the optional `reconciledStepUpdate` outcome field. The
+ * dispatcher's `onTick` truncated the model's per-iteration text to
+ * 80 chars and stamped it onto `task_steps.input.summary` (and broad-
+ * casted as the `actionSummary` for `server.vision.tick.end`). When
+ * reconcileFinalAnswer rewrites the LAST iteration's text, the step
+ * row stays stale, so the BrowserPanel "最近操作" overlay keeps
+ * showing the wrong URL after the final summary has been corrected.
+ *
+ * Returns an update payload only when reconcile actually changed
+ * something — otherwise the dispatcher skips the DB rewrite + WS
+ * rebroadcast entirely.
+ */
+function buildReconciledStepUpdate(
+  preReconcile: string,
+  postReconcile: string,
+  tickIndex: number,
+): { tickIndex: number; actionSummary: string } | undefined {
+  if (preReconcile === postReconcile) return undefined;
+  // Match dispatcher's truncation budget so the step row's summary
+  // field stays the same shape it had before reconcile (downstream
+  // consumers expect ≤ 80-char preview).
+  const STEP_SUMMARY_MAX = 80;
+  const actionSummary = stripPlanTrackerMarkers(postReconcile)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, STEP_SUMMARY_MAX);
+  return { tickIndex, actionSummary };
+}
+
+/**
+ * Strip the `[STEP N status]` markers the planner reminder asks the
+ * model to emit. Mirror of the dispatcher-side helper of the same
+ * name; duplicated here so reconcile output stays clean.
+ */
+function stripPlanTrackerMarkers(s: string): string {
+  return s.replace(/\[STEP\s+\d+\s+(?:done|running|failed|pending)\]\s*/gi, '');
 }
 
 /**

@@ -1971,6 +1971,51 @@ export const tasksRouter = router({
               'task:completed',
             );
             await persistSupercarOutcome(repo, taskId, outcome, finalState, metadata);
+            // Reconcile-driven step rewrite. When the agent loop's
+            // reconcileFinalAnswer rewrote the model's text (URL or
+            // title mismatched the live page), the LAST step row's
+            // `input.summary` and the matching `tick.end` actionSummary
+            // are now stale. The "最近操作" overlay reads from steps,
+            // not summary, so without this rewrite the user opens the
+            // overlay and still sees the wrong URL the model invented.
+            // Best-effort: a DB / broadcast blip leaves the row stale
+            // but doesn't impact terminal flow.
+            if (outcome.reconciledStepUpdate && taskDbId) {
+              const upd = outcome.reconciledStepUpdate;
+              try {
+                await ctx.db
+                  .update(taskSteps)
+                  .set({ input: { summary: upd.actionSummary } })
+                  .where(
+                    and(
+                      eq(taskSteps.taskId, taskDbId),
+                      eq(taskSteps.seq, upd.tickIndex),
+                    ),
+                  );
+              } catch (err) {
+                ctx.logger.warn(
+                  { err, taskId, tickIndex: upd.tickIndex },
+                  'supercar: persist reconciled step failed',
+                );
+              }
+              try {
+                broadcastToUser(userId, {
+                  type: 'server.vision.tick.end',
+                  taskId,
+                  tickIndex: upd.tickIndex,
+                  mode: 'screenshot',
+                  actionKind: 'text',
+                  actionSummary: upd.actionSummary,
+                  durationMs: 0,
+                  ok: true,
+                });
+              } catch (err) {
+                ctx.logger.warn(
+                  { err, taskId, tickIndex: upd.tickIndex },
+                  'supercar: broadcast reconciled step failed',
+                );
+              }
+            }
             try {
               broadcastToUser(userId, buildTaskTerminalMessage(taskId, outcome));
             } catch (err) {
