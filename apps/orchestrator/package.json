@@ -20,6 +20,8 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "sync-skills": "tsx scripts/sync-skills.ts",
     "smoke-anthropic": "tsx scripts/smoke-anthropic.ts",
+    "eval": "tsx src/eval/eval-runner.ts",
+    "eval:smoke": "tsx src/eval/eval-runner.ts p0-smoke",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",

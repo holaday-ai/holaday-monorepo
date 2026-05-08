@@ -1,0 +1,132 @@
+[
+  {
+    "id": "P0_001",
+    "tier": "P0",
+    "category": "basic",
+    "prompt": "把这句话翻译成英文：今天天气真好",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "generate",
+      "maxDurationMs": 60000
+    },
+    "notes": "Pure-text translation should classify as generate-mode and finish without touching a browser."
+  },
+  {
+    "id": "P0_002",
+    "tier": "P0",
+    "category": "douyin_intake",
+    "prompt": "帮我复盘抖音直播数据",
+    "expectations": {
+      "mustComplete": false,
+      "terminalStatus": "awaiting_user",
+      "awaitingKind": "clarification",
+      "maxDurationMs": 60000
+    },
+    "notes": "Expert workflow intake: missing data → park awaiting clarification, no browser allocated."
+  },
+  {
+    "id": "P0_003",
+    "tier": "P0",
+    "category": "douyin_data",
+    "prompt": "复盘抖音直播，GMV ¥100000 UV 20000 转化率 3% ROI 1:2.5 客单价 ¥80 千川消耗 ¥8000",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "generate",
+      "mustContainAny": ["数据校验", "校验", "数据一致"],
+      "maxDurationMs": 180000
+    },
+    "notes": "Data-complete intake: must run consistency check pass before producing the review."
+  },
+  {
+    "id": "P0_004",
+    "tier": "P0",
+    "category": "browser_nav",
+    "prompt": "打开 https://example.com 告诉我页面标题",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "browser",
+      "urlMustMatch": "example.com",
+      "maxDurationMs": 180000
+    },
+    "notes": "Smallest browser path. Fails if the agent can't reach example.com or extract title text."
+  },
+  {
+    "id": "P0_005",
+    "tier": "P0",
+    "category": "browser_click",
+    "prompt": "打开 https://example.com 点击 More information 链接，告诉我跳转后 URL",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "browser",
+      "urlMustMatch": "iana.org",
+      "maxDurationMs": 240000
+    },
+    "notes": "Click + navigate. example.com → iana.org confirms the click loop reaches the next page."
+  },
+  {
+    "id": "P0_006",
+    "tier": "P0",
+    "category": "login_park",
+    "prompt": "打开 https://compass.jinritemai.com 如果需要登录就停下来",
+    "expectations": {
+      "mustComplete": false,
+      "terminalStatus": "awaiting_user",
+      "awaitingKind": "login",
+      "maxDurationMs": 240000
+    },
+    "notes": "Login park gate. Requires Brave reachable to the target — local dev needs BrowserPool ready."
+  },
+  {
+    "id": "P0_007",
+    "tier": "P0",
+    "category": "generate_search",
+    "prompt": "2026年5月最新的AI行业新闻是什么",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "generate",
+      "maxDurationMs": 60000
+    },
+    "notes": "Generate-lane web_search path. The 60s cap is intentional — surfaces tool-loop / max_tokens regressions early."
+  },
+  {
+    "id": "P0_008",
+    "tier": "P0",
+    "category": "no_browser_for_analysis",
+    "prompt": "分析抖音直播下单率和购买转化率趋势",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "generate",
+      "maxDurationMs": 180000
+    },
+    "notes": "Pure-analysis intent must NOT allocate a browser. SPA-side BrowserPanel-idle is a manual eyeball check."
+  },
+  {
+    "id": "P0_009",
+    "tier": "P0",
+    "category": "data_contradiction",
+    "prompt": "复盘直播 GMV ¥200000 订单 500 客单价 ¥50",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "generate",
+      "mustContainAny": ["矛盾", "不一致", "对不上", "不匹配"],
+      "maxDurationMs": 180000
+    },
+    "notes": "200000 / 500 = ¥400 ≠ ¥50. Consistency-check prompt must surface the contradiction before producing the review."
+  },
+  {
+    "id": "P0_010",
+    "tier": "P0",
+    "category": "deep_link_refresh",
+    "prompt": "(no-op — runner uses customValidator)",
+    "expectations": {
+      "mustComplete": false,
+      "customValidator": "detailRehydrate"
+    },
+    "notes": "SPA white-screen guard: server must hand back enough rehydration data (result OR steps) for the most-recent completed task. Run AFTER P0_001 — the runner pulls the newest completed task from tasks.list."
+  }
+]
