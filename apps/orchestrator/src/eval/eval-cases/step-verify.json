@@ -1,0 +1,25 @@
+[
+  {
+    "id": "STEP_VERIFY_GEN",
+    "tier": "P0",
+    "category": "generate",
+    "prompt": "把这句话翻译成英文：今天天气真好",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "generate",
+      "maxDurationMs": 60000
+    },
+    "notes": "Generate-lane probe used after flag flips on Vultr. Verifies: tasks.create routes to generate, ledger picks up user_input + response_length, contract is checklist tier (when flag on)."
+  },
+  {
+    "id": "STEP_VERIFY_SCRAPE",
+    "tier": "P0",
+    "category": "scrape",
+    "prompt": "搜索小红书上露营装备热门笔记",
+    "expectations": {
+      "mustComplete": false,
+      "maxDurationMs": 90000
+    },
+    "notes": "Scrape-lane probe — '搜索 + 小红书' triggers the SEARCH_VERBS + site classifier route to scrape. Ledger should record scraped_url entries from Firecrawl results. Contract is checklist tier (per spec, scrape and generate share the checklist tier)."
+  }
+]
