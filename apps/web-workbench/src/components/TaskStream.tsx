@@ -399,7 +399,7 @@ function AgentBlock({
               {streamingText && (
                 <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {streamingText}
+                    {sanitizeMarkdownTrailingPunctuation(streamingText)}
                   </ReactMarkdown>
                   <span className="ml-0.5 inline-block h-3 w-1 animate-pulse bg-foreground/40 align-baseline" />
                 </div>
@@ -420,7 +420,15 @@ function AgentBlock({
             taskId={task.taskId}
             modelLabel={task.modelLabel}
             onContinueInBrowser={
-              task.status === 'completed' ? undefined : onContinueInBrowser
+              // F2 — only show "在内置浏览器中继续操作" for tasks
+              // that actually have a browser session: not completed
+              // (Brave already released) AND executionMode === 'browser'
+              // (generate / scrape never had a Brave to continue in).
+              // Older rows without executionMode set fall through to
+              // hidden — safer than offering a button that 404s.
+              task.status === 'completed' || task.executionMode !== 'browser'
+                ? undefined
+                : onContinueInBrowser
             }
             onSuggestionPick={onSuggestionPick}
             serverSuggestions={serverSuggestions}
@@ -826,6 +834,25 @@ function DegradeBanner({ event }: { event: UiDegradeEvent }): JSX.Element {
   );
 }
 
+/**
+ * F3 — markdown parser sanitizer for trailing Chinese punctuation.
+ * Bare URLs followed by ，。、！？；： get the punctuation eaten into
+ * the href by remark-gfm's autolink — the rendered link's URL then
+ * has a stray Chinese char appended, so clicking 404s. We pre-process
+ * the source text and insert a space between URL body and trailing
+ * Chinese punctuation. Markdown links `[label](url)` aren't affected
+ * because the URL inside `(...)` ends at the closing `)`.
+ *
+ * Also exported for unit testing.
+ */
+export function sanitizeMarkdownTrailingPunctuation(text: string): string {
+  if (!text) return text;
+  return text.replace(
+    /(https?:\/\/[^\s)\]\[　-〿＀-￯]+)([　-〿＀-￯])/g,
+    '$1 $2',
+  );
+}
+
 function TerminalSummary({
   status,
   text,
@@ -962,7 +989,7 @@ function TerminalSummary({
       )}
       <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>
-          {revealed}
+          {sanitizeMarkdownTrailingPunctuation(revealed)}
         </ReactMarkdown>
       </div>
       {/* O3 — model info line. Tiny, non-intrusive. */}
