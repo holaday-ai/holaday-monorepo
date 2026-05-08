@@ -3494,6 +3494,41 @@ export const tasksRouter = router({
           typeof prevResult?.handoffTaskId === 'string'
             ? prevResult.handoffTaskId
             : null;
+        // F4 ordering fix — createCaller's `tasks.create` follow-up
+        // gate (replyToTaskId path) rejects parents in awaiting_user
+        // ("只能追问已完成/失败/取消的任务"). We must flip the parent
+        // to `completed` BEFORE invoking createCaller, otherwise the
+        // call throws and handoffTaskId stays null. Persist the
+        // pre-handoff state first, then run createCaller, then patch
+        // the result row again to include handoffTaskId on success.
+        // If createCaller throws AFTER the status flip, the parent
+        // stays completed (with combinedIntent in result) — slightly
+        // worse UX than ideal but never blocks the user, and matches
+        // the prior behaviour for partial failure.
+        try {
+          await ctx.db
+            .update(tasksTable)
+            .set({
+              status: 'completed',
+              awaitingQuestion: null,
+              awaitingKind: null,
+              result: {
+                ...(prevResult ?? {}),
+                executionMode: 'generate',
+                handoffSuggestion: 'browser',
+                combinedIntent,
+                summary: handoffNotice,
+              },
+              completedAt: new Date(),
+            })
+            .where(eq(tasksTable.externalId, input.taskId));
+        } catch (err) {
+          ctx.logger.error(
+            { err, taskId: input.taskId },
+            'reply: handoff parent-flip persist failed',
+          );
+        }
+
         ctx.logger.warn(
           {
             parentTaskId: input.taskId,
@@ -3529,10 +3564,8 @@ export const tasksRouter = router({
               },
               '[HANDOFF] reply: createCaller threw',
             );
-            // Continue — we'll still mark parent completed but won't
-            // include handoffTaskId on the terminal frame. SPA falls
-            // through to showing the completion notice without
-            // auto-navigation.
+            // Continue — parent already marked completed above; SPA
+            // shows the completion notice without auto-navigation.
           }
         } else {
           ctx.logger.info(
@@ -3541,24 +3574,25 @@ export const tasksRouter = router({
           );
         }
 
+        // Patch result with handoffTaskId now that createCaller has
+        // returned (or failed). Best-effort — terminal broadcast
+        // below already carries the field for live SPA listeners.
         try {
-          await ctx.db
-            .update(tasksTable)
-            .set({
-              status: 'completed',
-              awaitingQuestion: null,
-              awaitingKind: null,
-              result: {
-                ...(prevResult ?? {}),
-                executionMode: 'generate',
-                handoffSuggestion: 'browser',
-                combinedIntent,
-                summary: handoffNotice,
-                ...(handoffTaskId ? { handoffTaskId } : {}),
-              },
-              completedAt: new Date(),
-            })
-            .where(eq(tasksTable.externalId, input.taskId));
+          if (handoffTaskId) {
+            await ctx.db
+              .update(tasksTable)
+              .set({
+                result: {
+                  ...(prevResult ?? {}),
+                  executionMode: 'generate',
+                  handoffSuggestion: 'browser',
+                  combinedIntent,
+                  summary: handoffNotice,
+                  handoffTaskId,
+                },
+              })
+              .where(eq(tasksTable.externalId, input.taskId));
+          }
           ctx.logger.warn(
             {
               parentTaskId: input.taskId,
