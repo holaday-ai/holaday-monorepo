@@ -824,17 +824,18 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       // Optimistic insert at the top so the UI feels instant; the next
       // refreshTasks() will pick up the canonical server row.
       //
-      // F2 — stamp `executionMode` with a coarse front-end inference so
-      // the BrowserPanel's `isBrowserTask` gate doesn't fall through
-      // to the "could be browser, treat optimistic" fallback for the
-      // initial render window. Generate is the safe default (no Brave
-      // = no chrome shown for non-browser tasks); the inference flips
-      // to 'browser' when the intent obviously needs the live browser
-      // (URL or 打开 / 访问 / 浏览器 / 登录 / 扫码 keywords). The
-      // server's authoritative executionMode arrives via
-      // tasks.detail's `result.executionMode` (parked-from-generate)
-      // or via `result.metadata.executionMode` (terminal persist),
-      // and overwrites this hint downstream.
+      // F3 — `executionMode` source-of-truth order:
+      //   1. `res.executionMode` (server-authoritative, available on
+      //      builds that include the F3 patch)
+      //   2. `inferExecutionModeFromIntent(intent)` — front-end coarse
+      //      inference, kept as a fallback for older orchestrator
+      //      builds that don't yet ship the field
+      // The server value is always correct because it was decided by
+      // `classifyExecutionMode` + `matchExpertWorkflow` BEFORE the
+      // task row was inserted. Falling back to inference covers the
+      // version-skew window after a deploy.
+      const serverExecutionMode = (res as { executionMode?: UiTask['executionMode'] })
+        .executionMode;
       const now = new Date();
       const optimistic: UiTask = {
         taskId: res.taskId,
@@ -843,7 +844,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         status: (res.status as UiTaskStatus) ?? 'executing',
         tickCount: 0,
         createdAt: now,
-        executionMode: inferExecutionModeFromIntent(intent),
+        executionMode: serverExecutionMode ?? inferExecutionModeFromIntent(intent),
       };
       // composerMode flips back to 'task' here. Without this, a user
       // who clicked 发新任务 (composerMode='new') and submitted ends

@@ -93,23 +93,27 @@ export function MainPanel({
     [enterNewTaskMode],
   );
   // F1 — when the user moves to a HISTORICAL task (selectedTaskId
-  // changes from null/A to B), clear any leftover suggestion draft.
-  // Without this, a chip click → enterNewTaskMode flow followed by
-  // a sidebar click on a different task carried the prefilled
-  // suggestion text into InputArea's value AND composerMode flipped
-  // back to 'task' → next submit became a follow-up reply on the
-  // wrong task. Empty-string prefill flows through InputArea's
-  // useEffect (`if (prefillIntent == null) return`), so it clears
-  // the controlled value cleanly. Skip on transitions INTO new-task
-  // mode (selectedTaskId becomes null) — that's exactly the chip
-  // click pathway we want to keep prefilled.
+  // changes from null/A to B), clear any leftover composer draft.
+  // The previous fix only set `prefillIntent=''` to push setValue('')
+  // through InputArea's effect — which works for chip-prefilled
+  // text BUT not for free-form drafts the user typed AFTER consume,
+  // because at that point InputArea's local `value` state is the
+  // sole source of truth and has no effect dep listening for outer
+  // resets. Bumping `composerKey` forces InputArea to remount with
+  // a fresh value=''. All composer-internal state (attachments,
+  // task-mode toggle, plus menu) gets reset too — heavy hammer but
+  // guarantees no cross-task pollution. Skip on transitions INTO
+  // new-task mode (selectedTaskId becomes null) — that's exactly
+  // the chip click pathway we want to keep prefilled.
   const selectedTaskId = useTaskStore((s) => s.selectedTaskId);
   const lastSelectedTaskIdRef = React.useRef<string | null>(selectedTaskId);
+  const [composerKey, setComposerKey] = React.useState(0);
   React.useEffect(() => {
     const prev = lastSelectedTaskIdRef.current;
     lastSelectedTaskIdRef.current = selectedTaskId;
     if (selectedTaskId && prev !== selectedTaskId) {
       setPrefillIntent('');
+      setComposerKey((k) => k + 1);
     }
   }, [selectedTaskId]);
   return (
@@ -160,6 +164,7 @@ export function MainPanel({
         <RoleNudgeBanner plan={userPlan} selectedRoles={userSelectedRoles ?? null} />
       ) : null}
       <InputArea
+        key={composerKey}
         onSubmit={onSubmit}
         busy={busy}
         inputRef={inputRef}

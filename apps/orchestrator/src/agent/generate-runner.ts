@@ -114,6 +114,15 @@ const DEFAULT_MAX_TOKENS = 8192;
 // progress. 300s is the supercar's per-call cap, matched here so a
 // single long generate never times out before its supercar cousin.
 const DEFAULT_TIMEOUT_MS = 300_000;
+// F2 — heartbeat cap. The 300s wall-clock above is a budget; if
+// streaming sits idle (no text deltas, no stop_reason) for HEARTBEAT
+// the call is presumed wedged — Anthropic occasionally ships an
+// open SSE that never produces tokens, and waiting the full 300s
+// just spins "正在启动…" with no progress. 45s is generous for the
+// slow first-token lane (cold cache, large web_search round-trips
+// take 15-30s) without leaving users staring at a dead screen.
+const HEARTBEAT_TIMEOUT_MS = 45_000;
+const HEARTBEAT_TICK_MS = 5_000;
 
 /**
  * Run the task. Resolves with the outcome regardless of success — the
@@ -225,65 +234,139 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
       // Empty-response retry inner loop. Anthropic occasionally
       // returns a server_tool_use without producing visible output
       // — one retry usually resolves it, two attempts is the cap.
+      // F2 — also covers heartbeat aborts: 45s without ANY stream
+      // event triggers a per-call abort that lands here as a normal
+      // retry. Two failed attempts → heartbeat error message instead
+      // of generic "empty response".
       let summary = '';
       let stopReason: string | null = null;
       let lastInputTokens = 0;
       let lastOutputTokens = 0;
+      let lastFailureWasHeartbeat = false;
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        // Phase 24 RC follow-up — switched messages.create →
-        // messages.stream so the SPA can render incrementally.
-        // Continuations stream into the same onStreamDelta callback,
-        // so the SPA's streamingByTask buffer naturally accumulates
-        // the full multi-call output.
-        const stream = opts.client.messages.stream(
-          { ...requestArgs, messages },
-          { signal: abortController.signal },
-        );
-        if (opts.onStreamDelta) {
-          const cb = opts.onStreamDelta;
-          stream.on('text', (delta: string): void => {
-            if (delta) {
-              try {
-                cb(delta);
-              } catch (err) {
-                log.warn(
-                  { err: err instanceof Error ? err.message : String(err) },
-                  'generate: onStreamDelta callback threw (swallowed)',
-                );
-              }
-            }
+        // Per-stream AbortController, chained to the outer wall-clock.
+        // Outer abort cascades down (kills this stream too); heartbeat
+        // aborts stay LOCAL — we want to retry the stream, not kill
+        // the whole runner.
+        const streamAbort = new AbortController();
+        const onParentAbort = (): void => streamAbort.abort();
+        if (abortController.signal.aborted) {
+          streamAbort.abort();
+        } else {
+          abortController.signal.addEventListener('abort', onParentAbort, {
+            once: true,
           });
         }
-        const finalMessage = await stream.finalMessage();
-        summary = finalMessage.content
-          .map((b) => (b.type === 'text' ? b.text : ''))
-          .join('')
-          .trim();
-        stopReason = finalMessage.stop_reason;
-        lastInputTokens = finalMessage.usage?.input_tokens ?? 0;
-        lastOutputTokens = finalMessage.usage?.output_tokens ?? 0;
-        if (summary) {
-          if (attempt > 1) {
-            log.info(
-              { attempt, continuation, summaryLen: summary.length },
-              'generate: empty-response retry succeeded',
+
+        let lastProgress = Date.now();
+        let heartbeatFired = false;
+        const heartbeatTimer = setInterval(() => {
+          if (Date.now() - lastProgress > HEARTBEAT_TIMEOUT_MS) {
+            heartbeatFired = true;
+            log.warn(
+              {
+                attempt,
+                continuation,
+                heartbeatMs: HEARTBEAT_TIMEOUT_MS,
+                idleMs: Date.now() - lastProgress,
+              },
+              'generate: heartbeat timeout — aborting stream for retry',
             );
+            streamAbort.abort();
           }
-          break;
+        }, HEARTBEAT_TICK_MS);
+
+        try {
+          // Phase 24 RC follow-up — switched messages.create →
+          // messages.stream so the SPA can render incrementally.
+          // Continuations stream into the same onStreamDelta callback,
+          // so the SPA's streamingByTask buffer naturally accumulates
+          // the full multi-call output.
+          const stream = opts.client.messages.stream(
+            { ...requestArgs, messages },
+            { signal: streamAbort.signal },
+          );
+          if (opts.onStreamDelta) {
+            const cb = opts.onStreamDelta;
+            stream.on('text', (delta: string): void => {
+              if (delta) {
+                lastProgress = Date.now();
+                try {
+                  cb(delta);
+                } catch (err) {
+                  log.warn(
+                    { err: err instanceof Error ? err.message : String(err) },
+                    'generate: onStreamDelta callback threw (swallowed)',
+                  );
+                }
+              }
+            });
+          } else {
+            // No delta callback wired but we still want progress
+            // tracking; observe the underlying SSE event stream.
+            stream.on('text', (delta: string): void => {
+              if (delta) lastProgress = Date.now();
+            });
+          }
+          // Any stream event counts as progress — covers tool_use /
+          // content_block_start ticks where text deltas pause.
+          stream.on('streamEvent', (): void => {
+            lastProgress = Date.now();
+          });
+
+          const finalMessage = await stream.finalMessage();
+          summary = finalMessage.content
+            .map((b) => (b.type === 'text' ? b.text : ''))
+            .join('')
+            .trim();
+          stopReason = finalMessage.stop_reason;
+          lastInputTokens = finalMessage.usage?.input_tokens ?? 0;
+          lastOutputTokens = finalMessage.usage?.output_tokens ?? 0;
+          lastFailureWasHeartbeat = false;
+          if (summary) {
+            if (attempt > 1) {
+              log.info(
+                { attempt, continuation, summaryLen: summary.length },
+                'generate: empty-response retry succeeded',
+              );
+            }
+            break;
+          }
+          log.warn(
+            {
+              attempt,
+              continuation,
+              maxAttempts: MAX_ATTEMPTS,
+              stopReason,
+              inputTokens: lastInputTokens,
+              outputTokens: lastOutputTokens,
+            },
+            attempt < MAX_ATTEMPTS
+              ? 'generate: empty response — retrying'
+              : 'generate: empty response (final attempt, giving up)',
+          );
+        } catch (err) {
+          if (heartbeatFired) {
+            // Local heartbeat abort — retry next attempt. NOT the
+            // outer wall-clock; outer is still running.
+            lastFailureWasHeartbeat = true;
+            if (attempt === MAX_ATTEMPTS) {
+              log.warn(
+                { attempt, continuation, heartbeatMs: HEARTBEAT_TIMEOUT_MS },
+                'generate: heartbeat timeout (final attempt, giving up)',
+              );
+            }
+            // Fall through to next iteration of attempt loop.
+          } else {
+            // Outer wall-clock abort or genuine API failure — bubble
+            // up to the outer try/catch which decides accumulated-
+            // partial-vs-failed.
+            throw err;
+          }
+        } finally {
+          clearInterval(heartbeatTimer);
+          abortController.signal.removeEventListener('abort', onParentAbort);
         }
-        log.warn(
-          {
-            attempt,
-            continuation,
-            maxAttempts: MAX_ATTEMPTS,
-            stopReason,
-            inputTokens: lastInputTokens,
-            outputTokens: lastOutputTokens,
-          },
-          attempt < MAX_ATTEMPTS
-            ? 'generate: empty response — retrying'
-            : 'generate: empty response (final attempt, giving up)',
-        );
       }
 
       totalInputTokens += lastInputTokens;
@@ -294,13 +377,26 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
         // for the WHOLE run — earlier accumulation is preserved if any
         // (rare: we already produced text and a follow-up returned
         // nothing). Surface that partial as the failure reason text.
+        // F2 — distinguish heartbeat-timeout failures from generic
+        // empty-response failures. Heartbeat means the API streamed
+        // nothing for 45s on both tries — usually a wedged session
+        // or upstream issue. Different reason text gives operators
+        // a clearer signal in error_message.
         const partial = accumulatedSummary;
+        let reason: string;
+        if (partial) {
+          reason = lastFailureWasHeartbeat
+            ? `AI 续写时长时间无响应，已生成 ${partial.length} 字。`
+            : `AI 在续写时返回空内容，已生成 ${partial.length} 字。`;
+        } else if (lastFailureWasHeartbeat) {
+          reason = 'AI 长时间没有响应，请简化任务后重试。';
+        } else {
+          reason = 'AI 连续两次返回空内容，请重试或简化任务。';
+        }
         return {
           status: 'failed',
           summary: '',
-          reason: partial
-            ? `AI 在续写时返回空内容，已生成 ${partial.length} 字。`
-            : 'AI 连续两次返回空内容，请重试或简化任务。',
+          reason,
           inputTokens: totalInputTokens,
           outputTokens: totalOutputTokens,
           durationMs: Date.now() - start,

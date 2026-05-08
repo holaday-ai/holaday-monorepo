@@ -754,7 +754,12 @@ export const tasksRouter = router({
         }
       })();
 
-      return { taskId, status: 'executing' as const, steps: [] };
+      return {
+        taskId,
+        status: 'executing' as const,
+        steps: [],
+        executionMode: 'generate' as const,
+      };
     }
     // ===== end generate-mode fork =====
 
@@ -816,7 +821,12 @@ export const tasksRouter = router({
         } catch {
           /* swallow — best-effort */
         }
-        return { taskId, status: 'executing' as const, steps: [] };
+        return {
+          taskId,
+          status: 'executing' as const,
+          steps: [],
+          executionMode: 'scrape' as const,
+        };
       }
 
       const firecrawl = ctx.firecrawl;
@@ -1033,7 +1043,12 @@ export const tasksRouter = router({
         }
       })();
 
-      return { taskId, status: 'executing' as const, steps: [] };
+      return {
+        taskId,
+        status: 'executing' as const,
+        steps: [],
+        executionMode: 'scrape' as const,
+      };
     }
     // ===== end scrape-mode fork =====
 
@@ -2232,13 +2247,23 @@ export const tasksRouter = router({
           'task-queue: task enqueued',
         );
         const statusOut = enqueueResult.kind === 'dispatched' ? 'executing' : 'queued';
-        return { taskId, status: statusOut as 'executing' | 'queued', steps: [] };
+        return {
+          taskId,
+          status: statusOut as 'executing' | 'queued',
+          steps: [],
+          executionMode: 'browser' as const,
+        };
       }
 
       // Legacy / non-pool path — fire directly without queue gating.
       void dispatchToBrave();
 
-      return { taskId, status: 'executing' as const, steps: [] };
+      return {
+        taskId,
+        status: 'executing' as const,
+        steps: [],
+        executionMode: 'browser' as const,
+      };
     }
 
     // Vision-loop path — the new control plane. Claude looks at each
