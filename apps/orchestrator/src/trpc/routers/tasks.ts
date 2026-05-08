@@ -1891,6 +1891,28 @@ export const tasksRouter = router({
             }
           },
         };
+      // Phase 1 Day 5 Round 2 — initialise execution pipeline for
+      // the supercar/browser lane. No-op when flags are off. Light
+      // tier per the original Phase 1 spec (browser → light): the
+      // verifier checks data_present + URL grounding + the optional
+      // url_match (only when the resolver supplied a target domain).
+      // Per-step navigation evidence isn't instrumented in agent-loop
+      // yet — the post-runner hook below seeds the ledger with the
+      // terminal browser state + response_length, which is enough
+      // for the light-tier criteria to evaluate meaningfully.
+      initExecution({
+        taskId,
+        intent: input.intent,
+        executionMode: 'browser',
+        expertWorkflowId: expertWorkflow?.id ?? null,
+        hasAttachments: attachmentBlocks.length > 0,
+      });
+      // Captures the verifier's verdict so the .finally() persist
+      // block can serialise it after the run terminates. Stays null
+      // for any path that doesn't reach the verify hook (failures,
+      // handoffs to generate, runner exceptions) — those rows just
+      // get contract + ledger persisted with verification=null.
+      let executionVerification: VerificationResult | null = null;
       const browserStartedAt = Date.now();
       const runFn = () =>
         runSupercarWithRetry(supercarArgs, { userId, taskId, logger: ctx.logger })
@@ -2097,6 +2119,40 @@ export const tasksRouter = router({
               },
               'task:completed',
             );
+            // Phase 1 Day 5 Round 2 — pipeline verification on the
+            // supercar/browser final answer. Mirrors the generate +
+            // scrape pattern: seed terminal-state evidence into the
+            // ledger, then run the verifier. autoFix can substitute
+            // a fabricated URL with a grounded one BEFORE
+            // persistSupercarOutcome writes the row, so the user
+            // sees the corrected text on first render.
+            if (outcome.status === 'completed' && outcome.summary) {
+              if (finalState.finalUrl) {
+                recordEvidence(taskId, {
+                  fact: `final_url=${finalState.finalUrl}`,
+                  sourceType: 'browser_state',
+                  sourceDetail: 'supercar terminal state',
+                  confidence: 'observed',
+                });
+              }
+              recordEvidence(taskId, {
+                fact: `response_length=${outcome.summary.length}`,
+                sourceType: 'tool_result',
+                sourceDetail: 'supercar agent response',
+                confidence: 'observed',
+              });
+              const verified: VerifyOutput = await verifyAndFinalize({
+                taskId,
+                answerText: outcome.summary,
+                ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+                client: anthropicForResolver,
+                logger: ctx.logger,
+              });
+              if (verified.finalText !== outcome.summary) {
+                outcome = { ...outcome, summary: verified.finalText };
+              }
+              executionVerification = verified.verification;
+            }
             await persistSupercarOutcome(repo, taskId, outcome, finalState, metadata);
             // Reconcile-driven step rewrite. When the agent loop's
             // reconcileFinalAnswer rewrote the model's text (URL or
@@ -2253,6 +2309,17 @@ export const tasksRouter = router({
             // waiting for the next 5s tick. Safe even when no queue
             // is wired (the optional-chain shorts).
             ctx.taskQueue?.signalSlotFreed();
+            // Phase 1 Day 5 Round 2 — fire-and-forget pipeline
+            // persist + cleanup. Same pattern as the generate +
+            // scrape lanes. Always runs (then OR catch path), so
+            // even a runner exception still serialises the contract
+            // + ledger that were inited at task start.
+            void persistExecution({
+              taskId,
+              verification: executionVerification,
+              db: ctx.db,
+              logger: ctx.logger,
+            }).finally(() => disposeExecution(taskId));
           });
 
       // Phase 24 — fire the runFn directly (pre-queue path). Per-task
