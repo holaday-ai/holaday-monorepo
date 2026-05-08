@@ -1,0 +1,239 @@
+import { describe, expect, it } from 'vitest';
+
+import { autoFix, pickSimilarUrl } from './auto-fix.js';
+import { verifyDeterministic } from './answer-verifier.js';
+import { buildContract } from './execution-contract.js';
+import { EvidenceLedger } from './evidence-ledger.js';
+
+describe('pickSimilarUrl', () => {
+  it('prefers exact-host match with path overlap', () => {
+    const grounded = [
+      'https://example.com/help/index',
+      'https://example.com/about',
+      'https://www.iana.org/help/example-domains',
+    ];
+    expect(pickSimilarUrl('https://example.com/help/missing', grounded)).toBe(
+      'https://example.com/help/index',
+    );
+  });
+
+  it('falls back to suffix-host match (subdomain) when no exact host', () => {
+    const grounded = ['https://docs.example.com/page'];
+    expect(pickSimilarUrl('https://example.com/page', grounded)).toBe(
+      'https://docs.example.com/page',
+    );
+  });
+
+  it('returns undefined when nothing is similar enough', () => {
+    const grounded = ['https://example.com/page'];
+    expect(
+      pickSimilarUrl('https://totally-different-site.example.org/x', grounded),
+    ).toBeUndefined();
+  });
+
+  it('returns undefined when grounded list is empty', () => {
+    expect(pickSimilarUrl('https://anywhere.example/a', [])).toBeUndefined();
+  });
+
+  it('strips www. for host comparison', () => {
+    const grounded = ['https://www.example.com/x'];
+    expect(pickSimilarUrl('https://example.com/x', grounded)).toBe(
+      'https://www.example.com/x',
+    );
+  });
+});
+
+describe('autoFix — URL fabrication', () => {
+  function setup(answer: string, groundedUrls: string[]) {
+    const taskId = 'tsk_af';
+    const contract = buildContract({
+      taskId,
+      intent: 'something',
+      executionMode: 'generate',
+    });
+    const ledger = new EvidenceLedger(taskId);
+    for (const u of groundedUrls) {
+      ledger.add({
+        fact: `visited ${u}`,
+        sourceType: 'browser_state',
+        sourceDetail: 'goto',
+        confidence: 'observed',
+      });
+    }
+    const verification = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: answer,
+    });
+    return { contract, ledger, verification };
+  }
+
+  it('substitutes a fabricated URL with a similar grounded one', () => {
+    const answer =
+      'Per https://example.com/help/wrong-page we should refresh. ' +
+      'x'.repeat(60);
+    const { contract, ledger, verification } = setup(answer, [
+      'https://example.com/help/index',
+    ]);
+    const out = autoFix({ contract, ledger, verification, answerText: answer });
+    expect(out.fixed).toContain('https://example.com/help/index');
+    expect(out.fixed).not.toContain('wrong-page');
+    expect(out.applied).toHaveLength(1);
+    expect(out.applied[0]!.kind).toBe('url_substitute');
+  });
+
+  it('drops a fabricated URL when no grounded candidate is similar', () => {
+    const answer =
+      'See https://made-up-citation.example/article for context. ' +
+      'x'.repeat(60);
+    const { contract, ledger, verification } = setup(answer, [
+      'https://example.com/help/index',
+    ]);
+    const out = autoFix({ contract, ledger, verification, answerText: answer });
+    expect(out.fixed).toContain('[未验证来源已移除]');
+    expect(out.fixed).not.toContain('made-up-citation');
+    expect(out.applied[0]!.kind).toBe('url_drop');
+  });
+
+  it('preserves trailing punctuation when substituting', () => {
+    const answer =
+      'See (https://example.com/help/wrong). It explains. ' + 'x'.repeat(60);
+    const { contract, ledger, verification } = setup(answer, [
+      'https://example.com/help/index',
+    ]);
+    const out = autoFix({ contract, ledger, verification, answerText: answer });
+    // Closing paren must still be there.
+    expect(out.fixed).toContain('https://example.com/help/index)');
+  });
+
+  it('leaves grounded URLs untouched even when other URLs are fabricated', () => {
+    const answer =
+      'Real: https://example.com/help/index. Fake: https://fake.example.org/x. ' +
+      'x'.repeat(60);
+    const { contract, ledger, verification } = setup(answer, [
+      'https://example.com/help/index',
+    ]);
+    const out = autoFix({ contract, ledger, verification, answerText: answer });
+    expect(out.fixed).toContain('https://example.com/help/index');
+    expect(out.fixed).not.toContain('fake.example.org');
+  });
+});
+
+describe('autoFix — passes verification through unchanged', () => {
+  it('returns original text when verification is passed', () => {
+    const contract = buildContract({
+      taskId: 'tsk_pass',
+      intent: 'simple',
+      executionMode: 'generate',
+    });
+    const ledger = new EvidenceLedger('tsk_pass');
+    const answer = 'Plain answer with no URLs at all but long enough.' + 'x'.repeat(60);
+    const verification = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: answer,
+    });
+    const out = autoFix({ contract, ledger, verification, answerText: answer });
+    expect(out.fixed).toBe(answer);
+    expect(out.applied).toEqual([]);
+  });
+
+  it('does nothing when failureLevel is hard_fail (caller escalates)', () => {
+    const contract = {
+      ...buildContract({
+        taskId: 'tsk_hard',
+        intent: 'x',
+        executionMode: 'browser',
+        targetDomain: 'example.com',
+      }),
+      constraints: ['no_form_submit'],
+    };
+    const ledger = new EvidenceLedger('tsk_hard');
+    ledger.add({
+      fact: 'visited https://example.com/',
+      sourceType: 'browser_state',
+      sourceDetail: 'goto',
+      confidence: 'observed',
+    });
+    ledger.add({
+      fact: 'submitted form on /search',
+      sourceType: 'browser_state',
+      sourceDetail: 'submit',
+      confidence: 'observed',
+    });
+    const answer = 'Did the search.' + 'x'.repeat(60);
+    const verification = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: answer,
+      finalUrl: 'https://example.com/',
+    });
+    expect(verification.failureLevel).toBe('hard_fail');
+    const out = autoFix({ contract, ledger, verification, answerText: answer });
+    expect(out.fixed).toBe(answer);
+    expect(out.applied).toEqual([]);
+  });
+});
+
+describe('autoFix — missing fields note', () => {
+  it('appends a 补充字段 line when provided inputs missing from answer', () => {
+    const contract = buildContract({
+      taskId: 'tsk_mf',
+      intent: '复盘',
+      executionMode: 'generate',
+      expertWorkflowId: 'douyin',
+      requiredInputs: [
+        { name: 'GMV', description: 't', provided: true },
+        { name: '客单价', description: 't', provided: true },
+      ],
+    });
+    const ledger = new EvidenceLedger('tsk_mf');
+    ledger.add({
+      fact: 'GMV=100000, 客单价=80',
+      sourceType: 'user_input',
+      sourceDetail: 'msg',
+      confidence: 'observed',
+    });
+    const answer = '本场 GMV ¥100000，分析下转化和复购。' + 'x'.repeat(220);
+    const verification = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: answer,
+    });
+    expect(verification.failureLevel).toBe('fixable');
+    const out = autoFix({ contract, ledger, verification, answerText: answer });
+    expect(out.fixed).toContain('补充字段');
+    expect(out.fixed).toContain('客单价');
+    const op = out.applied.find((o) => o.kind === 'missing_fields_note');
+    expect(op).toBeDefined();
+  });
+});
+
+describe('autoFix — re-verify after fix', () => {
+  it('a successful URL substitution makes the verifier pass on rerun', () => {
+    const contract = buildContract({
+      taskId: 'tsk_re',
+      intent: 'something',
+      executionMode: 'generate',
+    });
+    const ledger = new EvidenceLedger('tsk_re');
+    ledger.add({
+      fact: 'visited https://example.com/help/index',
+      sourceType: 'browser_state',
+      sourceDetail: 'goto',
+      confidence: 'observed',
+    });
+    const answer =
+      'Source: https://example.com/help/missing-page is the canonical doc. ' +
+      'x'.repeat(60);
+    const v1 = verifyDeterministic({ contract, ledger, answerText: answer });
+    expect(v1.passed).toBe(false);
+    const out = autoFix({ contract, ledger, verification: v1, answerText: answer });
+    const v2 = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: out.fixed,
+    });
+    expect(v2.passed).toBe(true);
+  });
+});
