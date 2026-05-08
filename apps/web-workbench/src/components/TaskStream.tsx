@@ -843,14 +843,29 @@ function DegradeBanner({ event }: { event: UiDegradeEvent }): JSX.Element {
  * Chinese punctuation. Markdown links `[label](url)` aren't affected
  * because the URL inside `(...)` ends at the closing `)`.
  *
+ * Earlier draft used the broad CJK Punctuation + Halfwidth/Fullwidth
+ * Forms ranges as the URL stop set. Although CJK ideographs aren't
+ * in those ranges, the broad pattern was confusing and missed curly
+ * quotes ("" '') which live in General Punctuation. Switched to an
+ * explicit char list so the behaviour is obvious and we can be sure
+ * Chinese path chars in URLs (e.g. /wiki/人工智能) survive untouched.
+ *
  * Also exported for unit testing.
  */
+// Unicode escapes for the curly quote pairs so the string literal
+// stays unambiguous regardless of editor / clipboard behaviour
+// (an ASCII ' inside this list would close the string and break
+// the regex). “ / ” = " " (curly double); ‘ /
+// ’ = ' ' (curly single).
+const CJK_TRAILING_PUNCT = '，。、！？；：“”‘’（）【】《》';
+const URL_STOP_CHARS = `\\s)\\]\\[${CJK_TRAILING_PUNCT}`;
+const URL_TRAILING_PUNCT_RE = new RegExp(
+  `(https?://[^${URL_STOP_CHARS}]+)([${CJK_TRAILING_PUNCT}])`,
+  'g',
+);
 export function sanitizeMarkdownTrailingPunctuation(text: string): string {
   if (!text) return text;
-  return text.replace(
-    /(https?:\/\/[^\s)\]\[　-〿＀-￯]+)([　-〿＀-￯])/g,
-    '$1 $2',
-  );
+  return text.replace(URL_TRAILING_PUNCT_RE, '$1 $2');
 }
 
 function TerminalSummary({

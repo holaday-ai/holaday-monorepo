@@ -4,6 +4,7 @@ import { InputArea } from '@/components/InputArea';
 import { RoleNudgeBanner } from '@/components/RoleNudgeBanner';
 import { TaskStream } from '@/components/TaskStream';
 import { Button } from '@/components/ui/button';
+import { useTaskStore } from '@/stores/task-store';
 import type { UiTask } from '@/types/task';
 
 interface Props {
@@ -76,6 +77,21 @@ export function MainPanel({
   // and signals back to clear so a second tap on the same chip
   // re-fires the effect.
   const [prefillIntent, setPrefillIntent] = React.useState<string | null>(null);
+  // F1 — chip clicks must enter new-task mode BEFORE prefilling, so
+  // the next submit creates a fresh task instead of getting interpreted
+  // as a follow-up reply on whichever historical task happens to be
+  // currently selected. enterNewTaskMode() also clears followUpTarget
+  // and any draft, then setPrefillIntent puts the suggestion text into
+  // the composer. Composer mode flips to 'new', InputArea routes
+  // onSubmit through createTask not tasks.reply.
+  const enterNewTaskMode = useTaskStore((s) => s.enterNewTaskMode);
+  const handlePickSuggestion = React.useCallback(
+    (text: string) => {
+      enterNewTaskMode();
+      setPrefillIntent(text);
+    },
+    [enterNewTaskMode],
+  );
   return (
     <main className="flex h-full min-w-0 flex-[2] flex-col bg-background lg:min-w-[420px]">
       <div className="flex h-11 items-center border-b border-border px-3 lg:hidden">
@@ -109,13 +125,13 @@ export function MainPanel({
         {task ? (
           <TaskStream
             task={task}
-            onPickSuggestion={(text) => setPrefillIntent(text)}
+            onPickSuggestion={handlePickSuggestion}
           />
         ) : (
           <div className="mx-auto max-w-3xl px-6 pt-12">
             <EmptyState
               greetingName={greetingName}
-              onPick={(intent) => setPrefillIntent(intent)}
+              onPick={handlePickSuggestion}
             />
           </div>
         )}

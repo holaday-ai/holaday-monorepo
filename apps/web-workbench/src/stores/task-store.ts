@@ -823,6 +823,18 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       });
       // Optimistic insert at the top so the UI feels instant; the next
       // refreshTasks() will pick up the canonical server row.
+      //
+      // F2 — stamp `executionMode` with a coarse front-end inference so
+      // the BrowserPanel's `isBrowserTask` gate doesn't fall through
+      // to the "could be browser, treat optimistic" fallback for the
+      // initial render window. Generate is the safe default (no Brave
+      // = no chrome shown for non-browser tasks); the inference flips
+      // to 'browser' when the intent obviously needs the live browser
+      // (URL or 打开 / 访问 / 浏览器 / 登录 / 扫码 keywords). The
+      // server's authoritative executionMode arrives via
+      // tasks.detail's `result.executionMode` (parked-from-generate)
+      // or via `result.metadata.executionMode` (terminal persist),
+      // and overwrites this hint downstream.
       const now = new Date();
       const optimistic: UiTask = {
         taskId: res.taskId,
@@ -831,6 +843,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         status: (res.status as UiTaskStatus) ?? 'executing',
         tickCount: 0,
         createdAt: now,
+        executionMode: inferExecutionModeFromIntent(intent),
       };
       // composerMode flips back to 'task' here. Without this, a user
       // who clicked 发新任务 (composerMode='new') and submitted ends
@@ -1325,6 +1338,46 @@ function extractSummary(result: unknown): string | null {
  * Returns undefined for executing tasks that haven't persisted yet —
  * BrowserPanel falls back to streamingByTask presence in that window.
  */
+/**
+ * F2 — coarse front-end inference for the optimistic task row created
+ * inside `createTask`. We don't have access to the orchestrator's
+ * `classifyExecutionMode` (Anthropic round-trip) on the SPA, so we
+ * apply a conservative keyword pass: anything that obviously implies
+ * driving the browser flips to 'browser'; everything else defaults
+ * to 'generate' (the safe default — BrowserPanel's `isBrowserTask`
+ * gate stays closed, no idle WS connect attempt). The server's
+ * authoritative classification overwrites this hint via
+ * `result.executionMode` / `result.metadata.executionMode` when
+ * tasks.detail / WS terminal lands.
+ */
+function inferExecutionModeFromIntent(
+  intent: string,
+): UiTask['executionMode'] {
+  const t = intent.toLowerCase();
+  // Bare URL → almost always a browse / scrape / interaction request.
+  if (/https?:\/\/\S+/i.test(t)) return 'browser';
+  // Common verbs that imply live browser interaction. Conservative —
+  // a false 'generate' here is harmless (BrowserPanel just stays
+  // closed until the server's real mode lands), while a false
+  // 'browser' would render the URL bar / Stop / frame counter on a
+  // task that never gets a Brave.
+  if (
+    /打开|访问|浏览器|登录|登陆|扫码|扫一扫|二维码|下单|购买|预订|抢票|查看(?:网站|页面|后台)|抖店|罗盘|公众号|小红书|淘宝|京东|拼多多|抖音/u.test(
+      t,
+    )
+  ) {
+    return 'browser';
+  }
+  if (
+    /\bopen\s+(?:the\s+)?(?:browser|page|site|url)|\b(?:log|sign)\s*in\b|\bnavigate\s+to\b|\bvisit\b/i.test(
+      t,
+    )
+  ) {
+    return 'browser';
+  }
+  return 'generate';
+}
+
 function extractExecutionMode(
   result: unknown,
 ): UiTask['executionMode'] | undefined {
