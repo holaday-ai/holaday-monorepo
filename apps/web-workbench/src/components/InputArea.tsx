@@ -348,23 +348,52 @@ export function InputArea({
     const fileIds = attachments
       .filter((a) => a.status === 'ready' && a.fileId)
       .map((a) => a.fileId);
-    // Immediate dispatch — clear the composer optimistically and let
-    // the parent's onSubmit drive task creation. Earlier code stalled
-    // here for 3 s under a "撤回" banner, but the delay read as the
-    // app being stuck (vs Codex/Manus's instant feedback) and most
-    // users hit Enter with intent. Quota guard / role-overflow gate
-    // already prevent runaway submits server-side.
-    setValue('');
-    setAttachments([]);
+    // F6 — clear the composer ONLY on success. Previous flow cleared
+    // immediately ("optimistic dispatch") which felt instant but lost
+    // user input on any submit failure (quota error, role-overflow,
+    // network blip) — they had to retype the prompt + re-attach files.
+    // Now: keep value + attachments visible until onSubmit returns;
+    // on failure, toast.show + leave them in place to retry. The
+    // textarea is `disabled` while `submitting=true`, so users see
+    // the in-flight state without further loss. Plan mode flip-back
+    // also gates on success.
     setSubmitting(true);
+    let submitOk = false;
     try {
-      await Promise.resolve(onSubmit(trimmed, fileIds, taskMode));
-      // Plan mode is per-message intent, not a sticky preference —
-      // flip back to Auto after a submit so the user explicitly
-      // re-opts in for any subsequent Plan-required task.
-      setTaskMode('auto');
+      const result = (await Promise.resolve(
+        onSubmit(trimmed, fileIds, taskMode),
+      )) as unknown;
+      // onSubmit may return void OR { ok: boolean } / { error: string }.
+      // Treat undefined as success (legacy callers never threw and didn't
+      // signal failure). If a structured `{ error }` came back, surface
+      // it and keep the input.
+      if (result == null) {
+        submitOk = true;
+      } else if (typeof result === 'object') {
+        const r = result as { ok?: boolean; error?: string };
+        if (r.error) {
+          toast.show(r.error, 'error');
+          submitOk = false;
+        } else {
+          submitOk = r.ok !== false;
+        }
+      } else {
+        submitOk = true;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.show(`提交失败：${msg}`, 'error');
+      submitOk = false;
     } finally {
       setSubmitting(false);
+    }
+    if (submitOk) {
+      setValue('');
+      setAttachments([]);
+      // Plan mode is per-message intent, not a sticky preference —
+      // flip back to Auto after a successful submit so the user
+      // explicitly re-opts in for any subsequent Plan-required task.
+      setTaskMode('auto');
     }
   }
 
@@ -454,7 +483,17 @@ export function InputArea({
           </div>
         )}
         {expertWorkflow && (
-          <ExpertWorkflowHint workflow={expertWorkflow} onPick={appendGuidance} />
+          <ExpertWorkflowHint
+            workflow={expertWorkflow}
+            onPickText={appendGuidance}
+            onPickUpload={() => {
+              if (!attachmentsAllowed) {
+                toast.show('免费版不支持附件，升级基础版可上传文件 / 图片');
+                return;
+              }
+              fileInputRef.current?.click();
+            }}
+          />
         )}
         <Textarea
           ref={setTextareaRef}
@@ -699,10 +738,19 @@ function ModeOption({
 
 function ExpertWorkflowHint({
   workflow,
-  onPick,
+  onPickText,
+  onPickUpload,
 }: {
   workflow: ComposerExpertWorkflow;
-  onPick(text: string): void;
+  onPickText(text: string): void;
+  /**
+   * F3 — fired when the user clicks the upload-shortcut chip
+   * ("我会上传表格或截图"). Caller opens the OS file picker; if the
+   * user cancels without selecting a file, no text is appended and
+   * no attachment exists — the data-source slot stays empty so the
+   * agent knows to keep asking.
+   */
+  onPickUpload(): void;
 }): JSX.Element {
   const missingLabels = workflow.missingInputs.map(labelForWorkflowInput);
   const actions = guidanceActionsForWorkflow(workflow);
@@ -728,12 +776,18 @@ function ExpertWorkflowHint({
             <div className="mt-2 flex flex-wrap gap-1.5">
               {actions.map((action) => (
                 <button
-                  key={action}
+                  key={action.label}
                   type="button"
-                  onClick={() => onPick(action)}
+                  onClick={() => {
+                    if (action.kind === 'upload') {
+                      onPickUpload();
+                    } else {
+                      onPickText(action.label);
+                    }
+                  }}
                   className="rounded-full border border-amber-300/80 bg-white/75 px-2 py-1 text-[11px] text-amber-950 transition hover:bg-amber-100 dark:border-amber-300/30 dark:bg-amber-300/10 dark:text-amber-50 dark:hover:bg-amber-300/20"
                 >
-                  {action}
+                  {action.label}
                 </button>
               ))}
             </div>
@@ -778,16 +832,39 @@ function labelForWorkflowInput(input: ComposerExpertWorkflow['missingInputs'][nu
   }
 }
 
-function guidanceActionsForWorkflow(workflow: ComposerExpertWorkflow): string[] {
-  const actions: string[] = [];
+/**
+ * F3 — guidance actions are no longer plain strings. Most chips just
+ * append their label to the composer (text-append), but the
+ * "我会上传表格或截图" chip opens the file picker instead — clicking
+ * it without actually attaching a file should NOT count as the data
+ * source being satisfied (the prior text-append flow misled the
+ * model into thinking data was already available).
+ */
+type GuidanceAction =
+  | { label: string; kind: 'text' }
+  | { label: string; kind: 'upload' };
+
+function guidanceActionsForWorkflow(
+  workflow: ComposerExpertWorkflow,
+): GuidanceAction[] {
+  const actions: GuidanceAction[] = [];
   if (workflow.missingInputs.includes('liveSession')) {
-    actions.push('昨天整场直播', '近 7 天直播汇总');
+    actions.push(
+      { label: '昨天整场直播', kind: 'text' },
+      { label: '近 7 天直播汇总', kind: 'text' },
+    );
   }
   if (workflow.missingInputs.includes('dataSource')) {
-    actions.push('数据在抖音电商罗盘', '我会上传表格或截图');
+    actions.push(
+      { label: '数据在抖音电商罗盘', kind: 'text' },
+      { label: '我会上传表格或截图', kind: 'upload' },
+    );
   }
   if (actions.length === 0) {
-    actions.push('输出老板汇报版', '输出详细运营复盘');
+    actions.push(
+      { label: '输出老板汇报版', kind: 'text' },
+      { label: '输出详细运营复盘', kind: 'text' },
+    );
   }
   return actions;
 }

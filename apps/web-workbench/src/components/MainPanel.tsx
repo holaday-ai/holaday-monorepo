@@ -85,13 +85,26 @@ export function MainPanel({
   // the composer. Composer mode flips to 'new', InputArea routes
   // onSubmit through createTask not tasks.reply.
   const enterNewTaskMode = useTaskStore((s) => s.enterNewTaskMode);
-  const handlePickSuggestion = React.useCallback(
+  // F4 — split suggestion entry points by surface:
+  //   - EmptyState (no task selected) → user has nothing to follow up
+  //     on, so enter new-task mode + prefill (the existing flow).
+  //   - TerminalSummary "继续探索" chips on a completed task → KEEP
+  //     the selected task + followUpTarget context, only prefill the
+  //     composer. User edits the suggestion and submits it as a
+  //     linked follow-up (replyToTaskId points back to the parent).
+  // The earlier unified behaviour (always enterNewTaskMode) lost the
+  // parent context, so post-completion suggestions read as random
+  // new tasks rather than continuations.
+  const handlePickFromEmptyState = React.useCallback(
     (text: string) => {
       enterNewTaskMode();
       setPrefillIntent(text);
     },
     [enterNewTaskMode],
   );
+  const handlePickFromTaskSummary = React.useCallback((text: string) => {
+    setPrefillIntent(text);
+  }, []);
   // F1 — when the user moves to a HISTORICAL task (selectedTaskId
   // changes from null/A to B), clear any leftover composer draft.
   // The previous fix only set `prefillIntent=''` to push setValue('')
@@ -149,13 +162,13 @@ export function MainPanel({
         {task ? (
           <TaskStream
             task={task}
-            onPickSuggestion={handlePickSuggestion}
+            onPickSuggestion={handlePickFromTaskSummary}
           />
         ) : (
           <div className="mx-auto max-w-3xl px-6 pt-12">
             <EmptyState
               greetingName={greetingName}
-              onPick={handlePickSuggestion}
+              onPick={handlePickFromEmptyState}
             />
           </div>
         )}

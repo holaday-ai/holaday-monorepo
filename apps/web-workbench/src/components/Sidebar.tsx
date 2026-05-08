@@ -326,6 +326,14 @@ export function Sidebar({
             {...(onClearFailedTasks ? { onClearFailedTasks } : {})}
             {...(onOpenSettings ? { onOpenSettings } : {})}
             {...(onOpenFeedback ? { onOpenFeedback } : {})}
+            {...(onOpenBrowser
+              ? {
+                  onOpenBrowser: () => {
+                    onOpenBrowser();
+                    onMobileClose?.();
+                  },
+                }
+              : {})}
           />
         ) : (
           <>
@@ -876,6 +884,13 @@ interface CollapsedRailProps {
   onNewTask: () => void;
   onExpand: () => void;
   onOpenSearch?: () => void;
+  /**
+   * F7 — opens the BrowserPanel directly without expanding the
+   * sidebar. Mirrors the expanded sidebar's 浏览器 entry. Optional
+   * because not every page wires it (e.g. onboarding flows that
+   * suppress the panel).
+   */
+  onOpenBrowser?: () => void;
   userDisplayName: string;
   userEmail: string | null;
   userPlan: string;
@@ -903,6 +918,7 @@ function CollapsedRail({
   onNewTask,
   onExpand,
   onOpenSearch,
+  onOpenBrowser,
   userDisplayName,
   userEmail,
   userPlan,
@@ -927,6 +943,16 @@ function CollapsedRail({
       <RailIconButton onClick={onNewTask} title="新任务 (/)" aria-label="新任务">
         <Plus className="h-4 w-4" />
       </RailIconButton>
+
+      {onOpenBrowser && (
+        <RailIconButton
+          onClick={onOpenBrowser}
+          title="打开浏览器面板"
+          aria-label="打开浏览器面板"
+        >
+          <Globe className="h-4 w-4" />
+        </RailIconButton>
+      )}
 
       <RailIconButton onClick={onExpand} title="任务列表" aria-label="任务列表">
         <ListTree className="h-4 w-4" />
