@@ -112,6 +112,25 @@ export const tasks = mysqlTable(
     result: json('result'),
     errorCode: varchar('error_code', { length: 64 }),
     errorMessage: text('error_message'),
+    /**
+     * Phase 1 Day 5 — execution-pipeline persistence.
+     *
+     * All NULL until the corresponding feature flag (in
+     * `apps/orchestrator/src/execution/feature-flags.ts`) is flipped on.
+     * Existing queries are unaffected — the columns are append-only
+     * and never required.
+     *
+     *   contractJson        — ExecutionContract.toJSON snapshot
+     *   evidenceJson        — EvidenceLedger.toJSON snapshot at terminal
+     *   verificationJson    — VerificationResult (deterministic ± LLM)
+     *   verificationPassed  — quick-filter boolean for analytics
+     *   failureLevel        — 'fixable' | 'needs_clarification' | 'hard_fail'
+     */
+    contractJson: json('contract_json'),
+    evidenceJson: json('evidence_json'),
+    verificationJson: json('verification_json'),
+    verificationPassed: boolean('verification_passed'),
+    failureLevel: varchar('failure_level', { length: 32 }),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
       .notNull()
       .default(sql`CURRENT_TIMESTAMP(3)`),

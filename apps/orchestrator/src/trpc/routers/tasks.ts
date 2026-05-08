@@ -76,6 +76,18 @@ import {
   updateTaskStateForUser,
 } from '../../ws/server.js';
 import { protectedProcedure, router } from '../trpc.js';
+// Phase 1 Day 5 — execution-pipeline glue. All four entry points are
+// no-ops when the corresponding feature flag is off (default), so
+// importing them adds no runtime cost on a baseline deploy.
+import {
+  disposeExecution,
+  initExecution,
+  persistExecution,
+  recordEvidence,
+  verifyAndFinalize,
+  type VerifyOutput,
+} from '../../execution/execution-pipeline.js';
+import type { VerificationResult } from '../../execution/answer-verifier.js';
 
 const taskController = new TaskController();
 
@@ -609,6 +621,17 @@ export const tasksRouter = router({
         'task: executor lane selected',
       );
 
+      // Phase 1 Day 5 — initialise execution pipeline. No-op when
+      // every feature flag is off (default). When flags are flipped
+      // on, this seeds the ledger with the user_input fact and
+      // generates the contract for later verification.
+      initExecution({
+        taskId,
+        intent: input.intent,
+        executionMode: 'generate',
+        expertWorkflowId: expertWorkflow?.id ?? null,
+      });
+
       // Fire-and-forget — generate doesn't share Brave instances so
       // there's no per-user FIFO queue to enqueue into. Concurrent
       // generate tasks parallelize on the Anthropic API.
@@ -661,6 +684,30 @@ export const tasksRouter = router({
             outputTokens: 0,
             durationMs: 0,
           };
+        }
+
+        // Phase 1 Day 5 — pipeline verification on the runner's
+        // final answer. No-op when EXECUTION_VERIFIER_ENABLED is
+        // off; in that case verifiedSummary === outcome.summary
+        // and executionVerification === null.
+        let executionVerification: VerificationResult | null = null;
+        if (outcome.status === 'completed') {
+          recordEvidence(taskId, {
+            fact: `response_length=${outcome.summary.length}`,
+            sourceType: 'tool_result',
+            sourceDetail: 'llm_generate_response',
+            confidence: 'observed',
+          });
+          const verified: VerifyOutput = await verifyAndFinalize({
+            taskId,
+            answerText: outcome.summary,
+            client: anthropicClient,
+            logger: ctx.logger,
+          });
+          if (verified.finalText !== outcome.summary) {
+            outcome = { ...outcome, summary: verified.finalText };
+          }
+          executionVerification = verified.verification;
         }
 
         // B3 — structured task:completed log.
@@ -752,6 +799,17 @@ export const tasksRouter = router({
         } catch (err) {
           ctx.logger.warn({ err, taskId }, 'generate: broadcast terminal failed');
         }
+
+        // Phase 1 Day 5 — fire-and-forget execution-pipeline persist
+        // + always cleanup the in-memory contract / ledger registries
+        // even when persist is a no-op (flags off) so the maps don't
+        // leak across long-running PM2 lifetimes.
+        void persistExecution({
+          taskId,
+          verification: executionVerification,
+          db: ctx.db,
+          logger: ctx.logger,
+        }).finally(() => disposeExecution(taskId));
       })();
 
       return {
@@ -828,6 +886,17 @@ export const tasksRouter = router({
           executionMode: 'scrape' as const,
         };
       }
+
+      // Phase 1 Day 5 — initialise execution pipeline. No-op when
+      // every feature flag is off (default). The firecrawl-null
+      // early return above bails BEFORE this init so the registries
+      // never see a task that won't terminate.
+      initExecution({
+        taskId,
+        intent: input.intent,
+        executionMode: 'scrape',
+        expertWorkflowId: expertWorkflow?.id ?? null,
+      });
 
       const firecrawl = ctx.firecrawl;
       const anthropicClient = anthropicForResolver;
@@ -976,6 +1045,38 @@ export const tasksRouter = router({
           }
         }
 
+        // Phase 1 Day 5 — pipeline verification on the runner's
+        // final answer. Same pattern as the generate fork: ledger
+        // gets a tool_result for each scraped source + a
+        // response_length entry, then the verifier runs.
+        let executionVerification: VerificationResult | null = null;
+        if (outcome.status === 'completed') {
+          for (const url of scrapeOutcome.sources.slice(0, 10)) {
+            recordEvidence(taskId, {
+              fact: `scraped_url=${url}`,
+              sourceType: 'tool_result',
+              sourceDetail: `firecrawl_${scrapeOutcome.source}`,
+              confidence: 'extracted',
+            });
+          }
+          recordEvidence(taskId, {
+            fact: `response_length=${outcome.summary.length}`,
+            sourceType: 'tool_result',
+            sourceDetail: 'llm_scrape_response',
+            confidence: 'observed',
+          });
+          const verified: VerifyOutput = await verifyAndFinalize({
+            taskId,
+            answerText: outcome.summary,
+            client: anthropicClient,
+            logger: ctx.logger,
+          });
+          if (verified.finalText !== outcome.summary) {
+            outcome = { ...outcome, summary: verified.finalText };
+          }
+          executionVerification = verified.verification;
+        }
+
         // B3 — structured task:completed log. Single record per task
         // termination with all fields the eval pipeline needs.
         const elapsedMs = Date.now() - scrapeStartedAt;
@@ -1041,6 +1142,15 @@ export const tasksRouter = router({
         } catch (err) {
           ctx.logger.warn({ err, taskId }, 'scrape: broadcast terminal failed');
         }
+
+        // Phase 1 Day 5 — fire-and-forget execution-pipeline persist
+        // + cleanup. Same pattern as the generate fork.
+        void persistExecution({
+          taskId,
+          verification: executionVerification,
+          db: ctx.db,
+          logger: ctx.logger,
+        }).finally(() => disposeExecution(taskId));
       })();
 
       return {
