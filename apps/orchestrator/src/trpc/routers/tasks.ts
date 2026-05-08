@@ -3342,6 +3342,19 @@ export const tasksRouter = router({
               input.message,
               replyAttachmentBlocks.length > 0 ? replyAttachmentBlocks : undefined,
             );
+      ctx.logger.warn(
+        {
+          taskId: input.taskId,
+          replyKind,
+          delivered,
+          path: delivered
+            ? replyKind === 'manual_data'
+              ? 'supercarHandoffToGenerate'
+              : 'supercarReply'
+            : 'no-handle (will check generate-park)',
+        },
+        '[HANDOFF] reply: supercar handle dispatch result',
+      );
       if (delivered) {
         // P1-A — flip status back to 'executing' and clear the
         // pending question so a refresh during the next iteration
@@ -3383,6 +3396,16 @@ export const tasksRouter = router({
         Boolean(parkRow) &&
         parkRow!.status === 'awaiting_user' &&
         prevResult?.executionMode === 'generate';
+      ctx.logger.warn(
+        {
+          taskId: input.taskId,
+          parkRowFound: Boolean(parkRow),
+          parkRowStatus: parkRow?.status ?? null,
+          prevResultExecutionMode: prevResult?.executionMode ?? null,
+          wasGenerateParked,
+        },
+        '[HANDOFF] reply: generate-park check',
+      );
       if (!wasGenerateParked) {
         return { ok: false };
       }
@@ -3423,6 +3446,25 @@ export const tasksRouter = router({
         replyKind !== 'manual_data' &&
         newWorkflow?.routeOverride === 'browser';
 
+      // [HANDOFF] diagnostic — pin down which branch fires for each
+      // reply when BOSS reports the user is stuck. Logs every decision
+      // point (workflow match, route override, replyKind) so we can
+      // tell whether the issue is condition-not-met or call-failed.
+      // Strip once the handoff path is confirmed working end-to-end.
+      ctx.logger.warn(
+        {
+          taskId: input.taskId,
+          replyKind,
+          combinedIntentHead: combinedIntent.slice(0, 200),
+          workflowMatched: Boolean(newWorkflow),
+          workflowId: newWorkflow?.id ?? null,
+          routeOverride: newWorkflow?.routeOverride ?? null,
+          missingInputs: newWorkflow?.missingInputs ?? null,
+          wantsBrowser,
+        },
+        '[HANDOFF] reply: route decision',
+      );
+
       if (wantsBrowser) {
         ctx.logger.info(
           {
@@ -3452,6 +3494,14 @@ export const tasksRouter = router({
           typeof prevResult?.handoffTaskId === 'string'
             ? prevResult.handoffTaskId
             : null;
+        ctx.logger.warn(
+          {
+            parentTaskId: input.taskId,
+            existingHandoffTaskId: handoffTaskId,
+            willCallCreate: !handoffTaskId,
+          },
+          '[HANDOFF] reply: about to call createCaller (or skip due to idempotency)',
+        );
         if (!handoffTaskId) {
           try {
             const handoff = await tasksRouter
@@ -3461,18 +3511,23 @@ export const tasksRouter = router({
                 replyToTaskId: input.taskId,
               });
             handoffTaskId = handoff.taskId;
-            ctx.logger.info(
+            ctx.logger.warn(
               {
                 parentTaskId: input.taskId,
                 handoffTaskId,
-                executionMode: handoff.executionMode,
+                handoffStatus: handoff.status,
+                handoffExecutionMode: handoff.executionMode,
               },
-              'reply: spawned handoff task via createCaller',
+              '[HANDOFF] reply: createCaller succeeded',
             );
           } catch (err) {
             ctx.logger.error(
-              { err, parentTaskId: input.taskId },
-              'reply: handoff createCaller failed',
+              {
+                err: err instanceof Error ? err.message : String(err),
+                stack: err instanceof Error ? err.stack?.split('\n').slice(0, 5) : null,
+                parentTaskId: input.taskId,
+              },
+              '[HANDOFF] reply: createCaller threw',
             );
             // Continue — we'll still mark parent completed but won't
             // include handoffTaskId on the terminal frame. SPA falls
@@ -3482,7 +3537,7 @@ export const tasksRouter = router({
         } else {
           ctx.logger.info(
             { parentTaskId: input.taskId, handoffTaskId },
-            'reply: handoff already exists for this parent — idempotent reuse',
+            '[HANDOFF] reply: handoff already exists — idempotent reuse',
           );
         }
 
@@ -3504,6 +3559,14 @@ export const tasksRouter = router({
               completedAt: new Date(),
             })
             .where(eq(tasksTable.externalId, input.taskId));
+          ctx.logger.warn(
+            {
+              parentTaskId: input.taskId,
+              handoffTaskId,
+              willBroadcastHandoff: Boolean(handoffTaskId),
+            },
+            '[HANDOFF] reply: broadcasting terminal frame',
+          );
           broadcastToUser(ctx.userId, {
             type: 'server.task.terminal',
             taskId: input.taskId,
