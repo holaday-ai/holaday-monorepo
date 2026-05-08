@@ -98,9 +98,15 @@ describe('buildContract — common header', () => {
 
 describe('buildContract — checklist tier (generate/scrape)', () => {
   it('emits word_count + URL grounding criteria, no constraints', () => {
+    // 100+ char prompt → "long" generate bucket → min=50.
+    // The shape (criteria count + types + constraints) is what
+    // matters here; the threshold-by-prompt-length tests live below.
+    const longIntent =
+      '请帮我写一份非常完整的 PRD 文档，覆盖目标用户的画像分析、核心功能模块、非功能性需求、上线时间计划、运营推广策略、关键指标 KPI 设定与各种边缘场景的风险评估方案，并给出明确的迭代节奏与版本里程碑。';
+    expect(longIntent.length).toBeGreaterThanOrEqual(100);
     const c = buildContract({
       taskId: 'tsk_g',
-      intent: '翻译',
+      intent: longIntent,
       executionMode: 'generate',
     });
     expect(c.successCriteria).toHaveLength(2);
@@ -118,6 +124,98 @@ describe('buildContract — checklist tier (generate/scrape)', () => {
       constraints: ['不引用未公开数据'],
     });
     expect(c.constraints).toEqual(['不引用未公开数据']);
+  });
+});
+
+describe('buildContract — dynamic word_count threshold (Phase 1 follow-up)', () => {
+  function wordCountMin(c: ReturnType<typeof buildContract>): number {
+    const wc = c.successCriteria.find((s) => s.type === 'word_count');
+    if (!wc) throw new Error('no word_count criterion');
+    return (wc.data as { min: number }).min;
+  }
+
+  it('short generate prompt (< 100 chars) without attachments → min=10', () => {
+    const c = buildContract({
+      taskId: 'tsk_short',
+      intent: '把这句话翻译成英文：今天天气真好',
+      executionMode: 'generate',
+    });
+    expect(wordCountMin(c)).toBe(10);
+    // Description should reflect the chosen min.
+    expect(c.successCriteria[0]!.description).toContain('10 字符');
+  });
+
+  it('short generate prompt WITH attachments → min=50 (analysis case)', () => {
+    const c = buildContract({
+      taskId: 'tsk_short_attach',
+      intent: '帮我看看',
+      executionMode: 'generate',
+      hasAttachments: true,
+    });
+    // "帮我看看" is < 100 chars but the user uploaded data — the
+    // expected answer is a real analysis, not a one-liner.
+    expect(wordCountMin(c)).toBe(50);
+  });
+
+  it('long generate prompt (>= 100 chars) → min=50', () => {
+    const c = buildContract({
+      taskId: 'tsk_long',
+      intent: '请帮我写一份详细的产品经理岗位的 OKR 周报，包括本周进展、下周计划、风险与依赖、需要协调的事项与资源。'.repeat(2),
+      executionMode: 'generate',
+    });
+    expect(wordCountMin(c)).toBe(50);
+  });
+
+  it('scrape mode → min=100 regardless of prompt length', () => {
+    const c = buildContract({
+      taskId: 'tsk_scrape_short',
+      intent: '搜小红书',
+      executionMode: 'scrape',
+    });
+    expect(wordCountMin(c)).toBe(100);
+    expect(c.successCriteria[0]!.description).toContain('100 字符');
+  });
+
+  it('boundary: exactly 100 chars in generate → still long bucket (min=50)', () => {
+    // 100 chars exactly — the "< 100" rule excludes this from short.
+    const intent = 'A'.repeat(100);
+    const c = buildContract({
+      taskId: 'tsk_boundary',
+      intent,
+      executionMode: 'generate',
+    });
+    expect(wordCountMin(c)).toBe(50);
+  });
+
+  it('boundary: exactly 99 chars in generate → short bucket (min=10)', () => {
+    const intent = 'A'.repeat(99);
+    const c = buildContract({
+      taskId: 'tsk_boundary99',
+      intent,
+      executionMode: 'generate',
+    });
+    expect(wordCountMin(c)).toBe(10);
+  });
+
+  it('hasAttachments=false explicit → same as omitted', () => {
+    const c = buildContract({
+      taskId: 'tsk_no_attach',
+      intent: '翻译',
+      executionMode: 'generate',
+      hasAttachments: false,
+    });
+    expect(wordCountMin(c)).toBe(10);
+  });
+
+  it('full tier (expert workflow) is unaffected by the threshold helper', () => {
+    // Full tier still uses its own 200-char threshold.
+    const c = buildContract({
+      taskId: 'tsk_full_unaffected',
+      intent: '复盘',
+      executionMode: 'generate',
+      expertWorkflowId: 'douyin',
+    });
+    expect(wordCountMin(c)).toBe(200);
   });
 });
 

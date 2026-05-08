@@ -102,6 +102,13 @@ export interface ContractInputs {
    * patterns recur.
    */
   constraints?: string[];
+  /**
+   * Phase 1 follow-up — whether the user's request came with file
+   * attachments. Used to differentiate "short translation / Q&A"
+   * (low word_count threshold) from "short prompt + attachments
+   * = analyze the data you uploaded" (regular threshold).
+   */
+  hasAttachments?: boolean;
 }
 
 const DEFAULT_TIMEOUTS = {
@@ -169,17 +176,44 @@ function summariseIntent(intent: string): string {
   return oneLine.length <= 120 ? oneLine : `${oneLine.slice(0, 117)}...`;
 }
 
+/**
+ * Phase 1 follow-up — differentiated word_count threshold per task
+ * shape. The single 50-char threshold over-rejected legitimate
+ * short translation answers (e.g. "Today's weather is really nice."
+ * is 31 chars, well below 50). Three buckets:
+ *
+ *   - scrape          → 100. The runner has bytes from Firecrawl;
+ *                       answers should weave them into a real summary.
+ *   - generate, short → 10.  Translation / Q&A; answers can be one
+ *                       sentence. "short" = prompt < 100 chars AND
+ *                       no attachments (attachments imply analysis).
+ *   - generate, long  → 50.  PRD / report / analysis; the prompt
+ *                       itself signals expectation of a meaty answer.
+ *
+ * Rule logic is keyword-free — pure length checks plus the
+ * attachment flag — so it never invents an LLM call. Threshold
+ * tuning lives ONLY here; verifier is unchanged.
+ */
+function pickChecklistMinWordCount(inputs: ContractInputs): number {
+  if (inputs.executionMode === 'scrape') return 100;
+  const isShortPrompt = inputs.intent.length < 100;
+  const hasAttachments = inputs.hasAttachments === true;
+  if (isShortPrompt && !hasAttachments) return 10;
+  return 50;
+}
+
 function buildChecklistTier(inputs: ContractInputs): ExecutionContract {
   // Pure-text generate / scrape lanes. Cheapest tier — no domain,
   // no step budget. Catch the obvious failure modes only.
+  const wordCountMin = pickChecklistMinWordCount(inputs);
   return {
     ...commonHeader(inputs, 'checklist', 'text'),
     successCriteria: [
       {
         id: newCriterionId(),
         type: 'word_count',
-        description: '回复非空且至少 50 字符（避免空响应 / 错误回退到默认文案）',
-        data: { min: 50 },
+        description: `回复非空且至少 ${wordCountMin} 字符（避免空响应 / 错误回退到默认文案）`,
+        data: { min: wordCountMin },
       },
       {
         id: newCriterionId(),

@@ -630,6 +630,7 @@ export const tasksRouter = router({
         intent: input.intent,
         executionMode: 'generate',
         expertWorkflowId: expertWorkflow?.id ?? null,
+        hasAttachments: attachmentBlocks.length > 0,
       });
 
       // Fire-and-forget — generate doesn't share Brave instances so
@@ -896,6 +897,7 @@ export const tasksRouter = router({
         intent: input.intent,
         executionMode: 'scrape',
         expertWorkflowId: expertWorkflow?.id ?? null,
+        hasAttachments: attachmentBlocks.length > 0,
       });
 
       const firecrawl = ctx.firecrawl;
