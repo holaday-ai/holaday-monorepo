@@ -170,7 +170,11 @@ function readResultField<T = unknown>(result: unknown, key: string): T | null {
 function buildHaystack(detail: TaskDetail): string {
   const summary = readResultField<string>(detail.result, 'summary');
   const reason = readResultField<string>(detail.result, 'reason');
-  return [summary, reason, detail.intent, detail.errorMessage]
+  // For awaiting_user states the relevant text lives in
+  // awaitingQuestion (the agent's clarification prompt) — result
+  // is empty until the task actually terminates. Including it lets
+  // mustContain / mustContainAny validate parked tasks too.
+  return [summary, reason, detail.awaitingQuestion, detail.intent, detail.errorMessage]
     .filter((v): v is string => typeof v === 'string' && v.length > 0)
     .join('\n');
 }

@@ -35,19 +35,10 @@
       "terminalStatus": "awaiting_user",
       "awaitingKind": "clarification",
       "executionMode": "generate",
+      "mustContainAny": ["校验", "矛盾", "不一致"],
       "maxDurationMs": 60000
     },
-    "replySequence": [
-      {
-        "message": "按 GMV 为准，直接出报告",
-        "expectations": {
-          "mustComplete": true,
-          "mustContainAny": ["校验", "矛盾", "不一致"],
-          "maxDurationMs": 180000
-        }
-      }
-    ],
-    "notes": "Two-stage: agent parks for clarification on first turn (data has internal contradiction), then resumes after the user picks GMV as authoritative. Final review must surface the consistency-check signal."
+    "notes": "The 6 metrics in this prompt have 3 distinct internal contradictions (UV×conv ≠ GMV/客单价; ROI ≠ GMV/千川; orders triangle 1250 vs 600). Validates: agent detects + surfaces the conflict in awaitingQuestion before producing any analysis. Multi-turn resume validation belongs in P1 with a self-consistent input set."
   },
   {
     "id": "P0_004",
