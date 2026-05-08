@@ -92,6 +92,26 @@ export function MainPanel({
     },
     [enterNewTaskMode],
   );
+  // F1 — when the user moves to a HISTORICAL task (selectedTaskId
+  // changes from null/A to B), clear any leftover suggestion draft.
+  // Without this, a chip click → enterNewTaskMode flow followed by
+  // a sidebar click on a different task carried the prefilled
+  // suggestion text into InputArea's value AND composerMode flipped
+  // back to 'task' → next submit became a follow-up reply on the
+  // wrong task. Empty-string prefill flows through InputArea's
+  // useEffect (`if (prefillIntent == null) return`), so it clears
+  // the controlled value cleanly. Skip on transitions INTO new-task
+  // mode (selectedTaskId becomes null) — that's exactly the chip
+  // click pathway we want to keep prefilled.
+  const selectedTaskId = useTaskStore((s) => s.selectedTaskId);
+  const lastSelectedTaskIdRef = React.useRef<string | null>(selectedTaskId);
+  React.useEffect(() => {
+    const prev = lastSelectedTaskIdRef.current;
+    lastSelectedTaskIdRef.current = selectedTaskId;
+    if (selectedTaskId && prev !== selectedTaskId) {
+      setPrefillIntent('');
+    }
+  }, [selectedTaskId]);
   return (
     <main className="flex h-full min-w-0 flex-[2] flex-col bg-background lg:min-w-[420px]">
       <div className="flex h-11 items-center border-b border-border px-3 lg:hidden">

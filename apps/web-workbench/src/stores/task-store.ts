@@ -1349,32 +1349,33 @@ function extractSummary(result: unknown): string | null {
  * authoritative classification overwrites this hint via
  * `result.executionMode` / `result.metadata.executionMode` when
  * tasks.detail / WS terminal lands.
+ *
+ * Rule order:
+ *   1. Bare URL → 'browser' (almost always navigation).
+ *   2. Action verb (打开 / 登录 / 访问 / open / sign in …) — required
+ *      for `browser` regardless of site mention. Earlier draft fired
+ *      `browser` on any site keyword (抖音/淘宝/...), which mis-flagged
+ *      "复盘抖音直播数据" because pure analysis tasks aren't browser
+ *      sessions. The action+site combo dodges that: "复盘抖音" only
+ *      matches the site half → falls through to 'generate'; "打开抖音
+ *      罗盘" matches both halves → 'browser'.
+ *   3. Pure action verb without a site (e.g. "打开浏览器") → 'browser'.
+ *      The verb itself is a strong tell.
+ *   4. Otherwise → 'generate' (safe default).
  */
+const BROWSER_ACTION_RE =
+  /打开|访问|登录|登陆|扫码|扫一扫|进入(?:后台|页面|网站)|读取(?:页面|后台)|下单|购买|预订|抢票|提交(?:表单|申请)|帮我点|帮我操作|\bopen\s+(?:the\s+)?(?:browser|page|site|url|tab)|\b(?:log|sign)\s*in\b|\bnavigate\s+to\b|\bvisit\b|\bgo\s+to\b/iu;
+const BROWSER_SITE_RE =
+  /抖店|罗盘|公众号|小红书|淘宝|京东|拼多多|抖音|微信|支付宝|美团|大众点评|jinritemai|taobao|jd\.com|tmall|pinduoduo|xiaohongshu|douyin|weixin|alipay|meituan/iu;
 function inferExecutionModeFromIntent(
   intent: string,
 ): UiTask['executionMode'] {
   const t = intent.toLowerCase();
-  // Bare URL → almost always a browse / scrape / interaction request.
   if (/https?:\/\/\S+/i.test(t)) return 'browser';
-  // Common verbs that imply live browser interaction. Conservative —
-  // a false 'generate' here is harmless (BrowserPanel just stays
-  // closed until the server's real mode lands), while a false
-  // 'browser' would render the URL bar / Stop / frame counter on a
-  // task that never gets a Brave.
-  if (
-    /打开|访问|浏览器|登录|登陆|扫码|扫一扫|二维码|下单|购买|预订|抢票|查看(?:网站|页面|后台)|抖店|罗盘|公众号|小红书|淘宝|京东|拼多多|抖音/u.test(
-      t,
-    )
-  ) {
-    return 'browser';
-  }
-  if (
-    /\bopen\s+(?:the\s+)?(?:browser|page|site|url)|\b(?:log|sign)\s*in\b|\bnavigate\s+to\b|\bvisit\b/i.test(
-      t,
-    )
-  ) {
-    return 'browser';
-  }
+  const hasAction = BROWSER_ACTION_RE.test(intent);
+  const hasSite = BROWSER_SITE_RE.test(intent);
+  if (hasAction && hasSite) return 'browser';
+  if (hasAction) return 'browser';
   return 'generate';
 }
 
