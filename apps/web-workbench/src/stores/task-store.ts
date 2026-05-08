@@ -1363,8 +1363,15 @@ function extractSummary(result: unknown): string | null {
  *      The verb itself is a strong tell.
  *   4. Otherwise → 'generate' (safe default).
  */
+// Naked weak verbs (访问 / 下单 / 购买 / 抢票 / visit) bled into metric
+// phrases — "下单率"、"购买转化"、"访问量"、"visit count" — and pushed
+// pure-analysis intents into the browser lane. Real browser sessions
+// always carry stronger phrasing (打开 / 登录 / 扫码 / 进入后台 / open
+// browser / log in). Keep `提交(?:表单|申请)` and `进入(?:后台|页面|网站)`
+// because they're already qualified — only fire when followed by a
+// matching object word.
 const BROWSER_ACTION_RE =
-  /打开|访问|登录|登陆|扫码|扫一扫|进入(?:后台|页面|网站)|读取(?:页面|后台)|下单|购买|预订|抢票|提交(?:表单|申请)|帮我点|帮我操作|\bopen\s+(?:the\s+)?(?:browser|page|site|url|tab)|\b(?:log|sign)\s*in\b|\bnavigate\s+to\b|\bvisit\b|\bgo\s+to\b/iu;
+  /打开|登录|登陆|扫码|扫一扫|进入(?:后台|页面|网站)|读取(?:页面|后台)|提交(?:表单|申请)|帮我点|帮我操作|\bopen\s+(?:the\s+)?(?:browser|page|site|url|tab)|\b(?:log|sign)\s*in\b|\bnavigate\s+to\b|\bgo\s+to\s+https?:/iu;
 const BROWSER_SITE_RE =
   /抖店|罗盘|公众号|小红书|淘宝|京东|拼多多|抖音|微信|支付宝|美团|大众点评|jinritemai|taobao|jd\.com|tmall|pinduoduo|xiaohongshu|douyin|weixin|alipay|meituan/iu;
 function inferExecutionModeFromIntent(
