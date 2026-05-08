@@ -3347,13 +3347,22 @@ export const tasksRouter = router({
             workflowId: newWorkflow!.id,
             missingInputs: newWorkflow!.missingInputs,
           },
-          'reply: combined intent now wants browser lane — flagging for new-task handoff',
+          'reply: combined intent now wants browser lane — auto-handoff to new browser task',
         );
-        // Persist a hint into result so the SPA can show a "open in
-        // browser" affordance, and complete this task with a stub
-        // summary. The user keeps the chat history; no Brave wasted.
+        // F1 — auto-handoff to a new browser task. Earlier flow marked
+        // this task `completed` with a `handoffSuggestion` and a "click
+        // the button" notice in the summary; the SPA's executionMode-
+        // aware CTA gate then HID the button (executionMode='generate'),
+        // leaving the user with no way forward — a dead-end. Now we
+        // mark this task completed with a brief explanatory note AND
+        // include `autoHandoff` on the terminal frame so the SPA fires
+        // a new createTask({ intent: combinedIntent }) the moment it
+        // receives the broadcast. Original task carries `linkedTaskId`
+        // in result once the SPA's createTask returns — but the SPA
+        // is the source of truth for that linkage; backend-side we
+        // just publish enough for the SPA to act.
         const handoffNotice =
-          '需要登录浏览器去后台读取数据。请点击下方"在浏览器中继续"按钮，或重新建任务并附上你刚刚补充的信息。';
+          '需要登录浏览器去后台读取数据，已为你新建一个浏览器任务接续执行。';
         try {
           await ctx.db
             .update(tasksTable)
@@ -3376,6 +3385,10 @@ export const tasksRouter = router({
             taskId: input.taskId,
             status: 'completed',
             summary: handoffNotice,
+            autoHandoff: {
+              intent: combinedIntent,
+              mode: 'browser',
+            },
           });
         } catch (err) {
           ctx.logger.error(

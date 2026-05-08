@@ -335,6 +335,22 @@ export const serverTaskTerminalSchema = z.object({
   status: z.enum(['completed', 'failed', 'paused', 'cancelled']),
   summary: z.string().optional(),
   reason: z.string().optional(),
+  /**
+   * F1 — automatic handoff hint. When set, the SPA should immediately
+   * dispatch a new task with `intent` running in the suggested `mode`.
+   * Today only emitted by the reply handler when the user's clarification
+   * answer reveals the workflow needs a different lane (intake parked
+   * in generate, user reply now wants browser). Without this, marking
+   * the original task `completed` with a "click the button" message
+   * was a dead-end — the UI no longer renders that button after the
+   * executionMode-aware CTA gate landed.
+   */
+  autoHandoff: z
+    .object({
+      intent: z.string(),
+      mode: z.enum(['browser', 'generate']),
+    })
+    .optional(),
 });
 
 /**

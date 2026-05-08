@@ -39,9 +39,12 @@ const PLATFORM_SOURCE_PATTERNS = [
   /https?:\/\/|www\./iu,
 ];
 
-const UPLOAD_SOURCE_PATTERNS = [
-  /上传|附件|表格|excel|xlsx|csv|截图|图片|数据文件|报表/u,
-];
+// F3 — UPLOAD_SOURCE_PATTERNS was previously used to infer
+// `hasUploadedDataSource` from intent text alone. That treated "我会
+// 上传表格" / "稍后发截图" as already-satisfied data sources, sending
+// the task straight to generate with nothing to analyse. The data-
+// source check now requires `hasAttachments === true`; the text
+// pattern was redundant and was removed.
 
 export function matchExpertWorkflow(
   intent: string,
@@ -52,8 +55,17 @@ export function matchExpertWorkflow(
   const hasAttachments = Boolean(opts.hasAttachments);
   const hasLiveSession = SESSION_PATTERNS.some((pattern) => pattern.test(intent));
   const hasPlatformDataSource = PLATFORM_SOURCE_PATTERNS.some((pattern) => pattern.test(intent));
-  const hasUploadedDataSource =
-    hasAttachments || UPLOAD_SOURCE_PATTERNS.some((pattern) => pattern.test(intent));
+  // F3 — `hasUploadedDataSource` only counts when an attachment is
+  // ACTUALLY present. Earlier text-pattern path ("上传/附件/表格/截图")
+  // matched on intent text alone, which mistakenly treated "我会上传
+  // 表格" / "稍后发截图" (intent-to-upload) as a satisfied data
+  // source — task then went straight to generate and the model had
+  // no data to analyse. Now those phrases fall through to
+  // missingInputs=[dataSource], parking the task on awaiting_user
+  // until the user actually attaches a file or pastes data.
+  // UPLOAD_SOURCE_PATTERNS retained as documentation; not load-
+  // bearing for routing.
+  const hasUploadedDataSource = hasAttachments;
   const hasDataSource = hasPlatformDataSource || hasUploadedDataSource;
 
   const missingInputs: MissingInput[] = [];

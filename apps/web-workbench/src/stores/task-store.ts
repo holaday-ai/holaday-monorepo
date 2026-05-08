@@ -924,6 +924,33 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           // persist until resultText is rendered in their place.
         };
       });
+      // F1 — auto-handoff. The reply browser-handoff branch on the
+      // backend marks this task `completed` AND attaches `autoHandoff
+      // = { intent, mode }` so the SPA fires a fresh createTask with
+      // the combined intent. Without this the user saw a "click the
+      // button" message but no button (the executionMode-aware CTA
+      // gate hides the button on the now-completed parent task).
+      // setTimeout(0) defers the dispatch until after the current
+      // set() commit so any state listeners on terminal complete
+      // first; createTask updates selectedTaskId to the new row and
+      // navigates the URL via storeNavigate.
+      const ah = (msg as { autoHandoff?: { intent: string; mode: 'browser' | 'generate' } })
+        .autoHandoff;
+      if (ah && typeof ah.intent === 'string' && ah.intent.trim().length > 0) {
+        const intent = ah.intent;
+        setTimeout(() => {
+          void get()
+            .createTask(intent, undefined, undefined, undefined)
+            .catch((err) => {
+              // Best-effort. If quota / network blips, the user can
+              // retry manually — they have the full intent in the
+              // completed task's chat history.
+              hdDebug('autoHandoff createTask failed', {
+                err: err instanceof Error ? err.message : String(err),
+              });
+            });
+        }, 0);
+      }
       return;
     }
     if (msg.type === 'server.task.stream') {
