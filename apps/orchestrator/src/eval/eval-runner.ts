@@ -36,6 +36,7 @@ import { users } from '../db/schema/users.js';
 import type {
   EvalCase,
   EvalCaseResult,
+  EvalExpectations,
   EvalReport,
 } from './eval-suite.js';
 
@@ -234,6 +235,73 @@ async function runDetailRehydrate(
   };
 }
 
+function validateExpectations(
+  detail: TaskDetail | undefined,
+  exp: EvalExpectations,
+  prefix: string,
+  capturedExecutionMode: string | null,
+): string[] {
+  const failures: string[] = [];
+  if (!detail) {
+    failures.push(`${prefix}no detail captured`);
+    return failures;
+  }
+  if (exp.terminalStatus && detail.status !== exp.terminalStatus) {
+    failures.push(
+      `${prefix}terminalStatus: expected ${exp.terminalStatus}, got ${detail.status}`,
+    );
+  }
+  if (
+    exp.mustComplete &&
+    !exp.terminalStatus &&
+    detail.status !== 'completed'
+  ) {
+    failures.push(
+      `${prefix}mustComplete: status=${detail.status}${
+        detail.errorMessage ? ` (errorMessage="${detail.errorMessage}")` : ''
+      }`,
+    );
+  }
+  if (exp.executionMode && capturedExecutionMode !== exp.executionMode) {
+    failures.push(
+      `${prefix}executionMode: expected ${exp.executionMode}, got ${capturedExecutionMode ?? 'null'}`,
+    );
+  }
+  if (exp.awaitingKind && detail.awaitingKind !== exp.awaitingKind) {
+    failures.push(
+      `${prefix}awaitingKind: expected ${exp.awaitingKind}, got ${detail.awaitingKind ?? 'null'}`,
+    );
+  }
+  const haystack = buildHaystack(detail);
+  for (const needle of exp.mustContain ?? []) {
+    if (!haystack.includes(needle)) {
+      failures.push(`${prefix}mustContain: missing "${needle}"`);
+    }
+  }
+  if (exp.mustContainAny && exp.mustContainAny.length > 0) {
+    const hit = exp.mustContainAny.some((n) => haystack.includes(n));
+    if (!hit) {
+      failures.push(
+        `${prefix}mustContainAny: none of [${exp.mustContainAny.join(', ')}] appeared`,
+      );
+    }
+  }
+  for (const needle of exp.mustNotContain ?? []) {
+    if (haystack.includes(needle)) {
+      failures.push(`${prefix}mustNotContain: contains "${needle}"`);
+    }
+  }
+  if (exp.urlMustMatch) {
+    const finalUrl = readResultField<string>(detail.result, 'finalUrl');
+    if (!finalUrl || !finalUrl.includes(exp.urlMustMatch)) {
+      failures.push(
+        `${prefix}urlMustMatch: finalUrl=${finalUrl ?? 'null'} doesn't include "${exp.urlMustMatch}"`,
+      );
+    }
+  }
+  return failures;
+}
+
 async function runStandardCase(
   caseDef: EvalCase,
   token: string,
@@ -268,30 +336,6 @@ async function runStandardCase(
         })`,
       );
     }
-
-    // Run replySequence (if any) AFTER the parent reaches terminal /
-    // awaiting_user. P0 doesn't use this; it's here so P1 multi-turn
-    // cases drop in without runner changes.
-    if (caseDef.replySequence && taskId && detail) {
-      for (const turn of caseDef.replySequence) {
-        await callMutation('tasks.reply', {
-          taskId,
-          message: turn.message,
-          ...(turn.fileIds ? { fileIds: turn.fileIds } : {}),
-        }, token);
-        if (turn.pollAfter) {
-          const maxMs = exp.maxDurationMs ?? DEFAULT_MAX_DURATION_MS;
-          try {
-            detail = await pollUntilTerminal(taskId, token, maxMs);
-          } catch (err) {
-            detail = (err as Error & { detail?: TaskDetail }).detail;
-            failures.push(
-              `replySequence: timed out after reply "${turn.message.slice(0, 40)}"`,
-            );
-          }
-        }
-      }
-    }
   } catch (err) {
     failures.push(
       `exception during create/poll: ${
@@ -300,72 +344,81 @@ async function runStandardCase(
     );
   }
 
-  // ---- Validation ----
-  const finalUrl = readResultField<string>(detail?.result, 'finalUrl');
-  const summary = readResultField<string>(detail?.result, 'summary');
-  const resultExecMode = readResultField<string>(detail?.result, 'executionMode');
-  if (resultExecMode) executionMode = resultExecMode;
-
+  // ---- Initial-state validation ----
+  const initialResultMode = readResultField<string>(detail?.result, 'executionMode');
+  if (initialResultMode) executionMode = initialResultMode;
   if (detail) {
-    if (exp.terminalStatus && detail.status !== exp.terminalStatus) {
-      failures.push(
-        `terminalStatus: expected ${exp.terminalStatus}, got ${detail.status}`,
-      );
-    }
-    if (
-      exp.mustComplete &&
-      !exp.terminalStatus &&
-      detail.status !== 'completed'
-    ) {
-      failures.push(
-        `mustComplete: status=${detail.status}${
-          detail.errorMessage ? ` (errorMessage="${detail.errorMessage}")` : ''
-        }`,
-      );
-    }
-    if (exp.executionMode && executionMode !== exp.executionMode) {
-      failures.push(
-        `executionMode: expected ${exp.executionMode}, got ${executionMode ?? 'null'}`,
-      );
-    }
-    if (exp.awaitingKind && detail.awaitingKind !== exp.awaitingKind) {
-      failures.push(
-        `awaitingKind: expected ${exp.awaitingKind}, got ${detail.awaitingKind ?? 'null'}`,
-      );
-    }
-    const haystack = buildHaystack(detail);
-    for (const needle of exp.mustContain ?? []) {
-      if (!haystack.includes(needle)) {
-        failures.push(`mustContain: missing "${needle}"`);
-      }
-    }
-    if (exp.mustContainAny && exp.mustContainAny.length > 0) {
-      const hit = exp.mustContainAny.some((n) => haystack.includes(n));
-      if (!hit) {
-        failures.push(
-          `mustContainAny: none of [${exp.mustContainAny.join(', ')}] appeared`,
-        );
-      }
-    }
-    for (const needle of exp.mustNotContain ?? []) {
-      if (haystack.includes(needle)) {
-        failures.push(`mustNotContain: contains "${needle}"`);
-      }
-    }
-    if (exp.urlMustMatch) {
-      if (!finalUrl || !finalUrl.includes(exp.urlMustMatch)) {
-        failures.push(
-          `urlMustMatch: finalUrl=${finalUrl ?? 'null'} doesn't include "${exp.urlMustMatch}"`,
-        );
-      }
-    }
+    failures.push(...validateExpectations(detail, exp, '', executionMode));
   } else if (!timedOut) {
     failures.push('runner: no detail captured — task never created');
   }
-
   if (exp.customValidator && exp.customValidator !== 'detailRehydrate') {
     failures.push(`unknown customValidator "${exp.customValidator}"`);
   }
+
+  // ---- Reply turns (each with optional post-reply expectations) ----
+  if (caseDef.replySequence && taskId && detail) {
+    for (let i = 0; i < caseDef.replySequence.length; i++) {
+      const turn = caseDef.replySequence[i];
+      if (!turn) continue;
+      const turnLabel = `replySequence[${i}] `;
+      try {
+        await callMutation(
+          'tasks.reply',
+          {
+            taskId,
+            message: turn.message,
+            ...(turn.fileIds ? { fileIds: turn.fileIds } : {}),
+          },
+          token,
+        );
+      } catch (err) {
+        failures.push(
+          `${turnLabel}tasks.reply threw: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        break;
+      }
+      // Default: poll until terminal again. Set pollAfter:false to
+      // probe immediate-return paths (e.g. still_awaiting).
+      const shouldPoll = turn.pollAfter !== false;
+      if (shouldPoll) {
+        const turnMaxMs =
+          turn.expectations?.maxDurationMs ??
+          exp.maxDurationMs ??
+          DEFAULT_MAX_DURATION_MS;
+        try {
+          detail = await pollUntilTerminal(taskId, token, turnMaxMs);
+        } catch (err) {
+          detail = (err as Error & { detail?: TaskDetail }).detail;
+          failures.push(
+            `${turnLabel}timeout: did not reach terminal in ${turnMaxMs}ms after reply "${turn.message.slice(0, 40)}"`,
+          );
+        }
+      } else {
+        try {
+          detail = await callQuery<TaskDetail>('tasks.detail', { taskId }, token);
+        } catch (err) {
+          failures.push(
+            `${turnLabel}refetch failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+      const turnResultMode = readResultField<string>(detail?.result, 'executionMode');
+      if (turnResultMode) executionMode = turnResultMode;
+      if (turn.expectations) {
+        failures.push(
+          ...validateExpectations(detail, turn.expectations, turnLabel, executionMode),
+        );
+      }
+    }
+  }
+
+  const finalUrl = readResultField<string>(detail?.result, 'finalUrl');
+  const summary = readResultField<string>(detail?.result, 'summary');
 
   return {
     id: caseDef.id,

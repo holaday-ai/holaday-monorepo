@@ -102,18 +102,28 @@ export interface EvalExpectations {
 }
 
 /**
- * Optional follow-up turn. The runner waits for the parent to reach
- * a non-executing status (awaiting_user / completed / failed), then
- * issues `tasks.reply` with the message. If `pollAfter=true`, it
- * polls until the task is terminal again before returning.
+ * Optional follow-up turn. The runner first validates the initial
+ * post-create state against `case.expectations`, then for each
+ * reply turn:
+ *   1. issues `tasks.reply` with the message,
+ *   2. polls until terminal again (unless `pollAfter:false`),
+ *   3. validates the post-reply detail against `turn.expectations`.
  *
- * P0 doesn't use these; the field is here so P1/P2 multi-turn cases
- * can be added without runner changes.
+ * `pollAfter` defaults to `true` — the natural use case is "user
+ * sends data, agent resumes and finishes; assert the resumed task
+ * eventually completes". Set `pollAfter:false` only when probing
+ * an immediate-return reply path (e.g. still_awaiting short-circuit).
  */
 export interface EvalReplyTurn {
   message: string;
   fileIds?: string[];
   pollAfter?: boolean;
+  /**
+   * Optional validation against the post-reply state. Same shape
+   * as `case.expectations`. When omitted the turn just advances
+   * the conversation without asserting on the outcome.
+   */
+  expectations?: EvalExpectations;
 }
 
 export interface EvalCase {

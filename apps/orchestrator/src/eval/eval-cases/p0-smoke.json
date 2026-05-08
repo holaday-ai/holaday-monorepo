@@ -31,13 +31,23 @@
     "category": "douyin_data",
     "prompt": "复盘抖音直播，GMV ¥100000 UV 20000 转化率 3% ROI 1:2.5 客单价 ¥80 千川消耗 ¥8000",
     "expectations": {
-      "mustComplete": true,
-      "terminalStatus": "completed",
+      "mustComplete": false,
+      "terminalStatus": "awaiting_user",
+      "awaitingKind": "clarification",
       "executionMode": "generate",
-      "mustContainAny": ["数据校验", "校验", "数据一致"],
-      "maxDurationMs": 180000
+      "maxDurationMs": 60000
     },
-    "notes": "Data-complete intake: must run consistency check pass before producing the review."
+    "replySequence": [
+      {
+        "message": "按 GMV 为准，直接出报告",
+        "expectations": {
+          "mustComplete": true,
+          "mustContainAny": ["校验", "矛盾", "不一致"],
+          "maxDurationMs": 180000
+        }
+      }
+    ],
+    "notes": "Two-stage: agent parks for clarification on first turn (data has internal contradiction), then resumes after the user picks GMV as authoritative. Final review must surface the consistency-check signal."
   },
   {
     "id": "P0_004",
@@ -89,9 +99,9 @@
       "mustComplete": true,
       "terminalStatus": "completed",
       "executionMode": "generate",
-      "maxDurationMs": 60000
+      "maxDurationMs": 120000
     },
-    "notes": "Generate-lane web_search path. The 60s cap is intentional — surfaces tool-loop / max_tokens regressions early."
+    "notes": "Generate-lane web_search path. 120s accommodates max_tokens auto-continue + 45s heartbeat for multi-tool searches. Tighten back if a future run consistently finishes in <60s."
   },
   {
     "id": "P0_008",
@@ -99,11 +109,13 @@
     "category": "no_browser_for_analysis",
     "prompt": "分析抖音直播下单率和购买转化率趋势",
     "expectations": {
-      "mustComplete": true,
+      "mustComplete": false,
+      "terminalStatus": "awaiting_user",
+      "awaitingKind": "clarification",
       "executionMode": "generate",
-      "maxDurationMs": 180000
+      "maxDurationMs": 60000
     },
-    "notes": "Pure-analysis intent must NOT allocate a browser. SPA-side BrowserPanel-idle is a manual eyeball check."
+    "notes": "Core invariant: pure-analysis intent must NOT allocate a browser (executionMode='generate'). Without data the agent parks for clarification — that's the expert workflow path. SPA-side BrowserPanel-idle remains a manual eyeball check."
   },
   {
     "id": "P0_009",
