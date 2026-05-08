@@ -3205,8 +3205,32 @@ export const tasksRouter = router({
    * the running loop, so we bail fast when it's missing.
    */
   reply: protectedProcedure
-    .input(z.object({ taskId: z.string().min(1), message: z.string().min(1).max(4_000) }))
-    .mutation(async ({ ctx, input }) => {
+    .input(
+      z.object({
+        taskId: z.string().min(1),
+        message: z.string().min(1).max(4_000),
+        // F2 — attachments uploaded with the reply. Same shape as
+        // `tasks.create.fileIds`. Resolved + parsed below into
+        // content blocks, then plumbed through `supercarReply`'s
+        // attachmentBlocks param. Cap mirrors create.
+        fileIds: z.array(z.string()).max(5).optional(),
+      }),
+    )
+    // Explicit return-type annotation breaks the circular type
+    // inference: this handler calls `tasksRouter.createCaller` (F4
+    // backend handoff), which references the very router this
+    // handler is inside. Without the annotation tsc gives up and
+    // resolves the whole router as `any`, breaking SPA type-safety.
+    .mutation(
+      async ({
+        ctx,
+        input,
+      }): Promise<{
+        ok: boolean;
+        state?: 'resumed' | 'stillAwaiting';
+        handoff?: 'browser';
+        handoffTaskId?: string;
+      }> => {
       const [userRow] = await ctx.db
         .select({ id: users.id })
         .from(users)
@@ -3222,6 +3246,36 @@ export const tasksRouter = router({
         .limit(1);
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
+      }
+      // F2 — resolve + parse attachments before classification so the
+      // resulting blocks are ready for whichever delivery path fires.
+      // Same pattern as tasks.create: any individual file that fails
+      // to load / parse is skipped with a warn; the reply still
+      // delivers with whatever did parse.
+      const replyAttachmentBlocks: Awaited<
+        ReturnType<typeof parseFileForPrompt>
+      >['blocks'] = [];
+      if (input.fileIds && input.fileIds.length > 0) {
+        const fileService = new FileService(ctx.db, ctx.logger);
+        const loaded = await fileService.loadMany(input.fileIds, userRow.id);
+        for (const f of loaded) {
+          try {
+            const parsed = await parseFileForPrompt(
+              f.buffer,
+              f.row.filename,
+              f.row.mimetype,
+            );
+            replyAttachmentBlocks.push(...parsed.blocks);
+          } catch (err) {
+            ctx.logger.warn(
+              {
+                err: err instanceof Error ? err.message : String(err),
+                fileId: f.row.externalId,
+              },
+              'tasks.reply: file parse failed — skipping',
+            );
+          }
+        }
       }
       // F1 — classify the user's reply intent. Four buckets:
       //   manual_data     — user pasted metrics / "数据如下" / numeric
@@ -3283,7 +3337,11 @@ export const tasksRouter = router({
       const delivered =
         replyKind === 'manual_data'
           ? supercarHandoffToGenerate(input.taskId, input.message)
-          : supercarReply(input.taskId, input.message);
+          : supercarReply(
+              input.taskId,
+              input.message,
+              replyAttachmentBlocks.length > 0 ? replyAttachmentBlocks : undefined,
+            );
       if (delivered) {
         // P1-A — flip status back to 'executing' and clear the
         // pending question so a refresh during the next iteration
@@ -3372,22 +3430,62 @@ export const tasksRouter = router({
             workflowId: newWorkflow!.id,
             missingInputs: newWorkflow!.missingInputs,
           },
-          'reply: combined intent now wants browser lane — auto-handoff to new browser task',
+          'reply: combined intent now wants browser lane — backend auto-handoff',
         );
-        // F1 — auto-handoff to a new browser task. Earlier flow marked
-        // this task `completed` with a `handoffSuggestion` and a "click
-        // the button" notice in the summary; the SPA's executionMode-
-        // aware CTA gate then HID the button (executionMode='generate'),
-        // leaving the user with no way forward — a dead-end. Now we
-        // mark this task completed with a brief explanatory note AND
-        // include `autoHandoff` on the terminal frame so the SPA fires
-        // a new createTask({ intent: combinedIntent }) the moment it
-        // receives the broadcast. Original task carries `linkedTaskId`
-        // in result once the SPA's createTask returns — but the SPA
-        // is the source of truth for that linkage; backend-side we
-        // just publish enough for the SPA to act.
+        // F4 — backend-orchestrated auto-handoff. The earlier round
+        // broadcast `autoHandoff: { intent }` and let the SPA fire
+        // createTask, which had two problems:
+        //   1. SPA reconnect could replay the terminal frame and
+        //      double-create the handoff task.
+        //   2. The SPA's createTask charged user quota — even though
+        //      the handoff is logically a continuation of the parent.
+        // Now the backend invokes `tasksRouter.create` itself via
+        // createCaller with `replyToTaskId` set to the parent. That
+        // path skips the quota gate (existing follow-up semantics),
+        // injects the parent context, and returns the new taskId.
+        // Idempotency guard: if `result.handoffTaskId` is already
+        // populated for this parent, reuse it instead of creating a
+        // duplicate (handles WS replay / double-click).
         const handoffNotice =
           '需要登录浏览器去后台读取数据，已为你新建一个浏览器任务接续执行。';
+        let handoffTaskId: string | null =
+          typeof prevResult?.handoffTaskId === 'string'
+            ? prevResult.handoffTaskId
+            : null;
+        if (!handoffTaskId) {
+          try {
+            const handoff = await tasksRouter
+              .createCaller(ctx)
+              .create({
+                intent: combinedIntent,
+                replyToTaskId: input.taskId,
+              });
+            handoffTaskId = handoff.taskId;
+            ctx.logger.info(
+              {
+                parentTaskId: input.taskId,
+                handoffTaskId,
+                executionMode: handoff.executionMode,
+              },
+              'reply: spawned handoff task via createCaller',
+            );
+          } catch (err) {
+            ctx.logger.error(
+              { err, parentTaskId: input.taskId },
+              'reply: handoff createCaller failed',
+            );
+            // Continue — we'll still mark parent completed but won't
+            // include handoffTaskId on the terminal frame. SPA falls
+            // through to showing the completion notice without
+            // auto-navigation.
+          }
+        } else {
+          ctx.logger.info(
+            { parentTaskId: input.taskId, handoffTaskId },
+            'reply: handoff already exists for this parent — idempotent reuse',
+          );
+        }
+
         try {
           await ctx.db
             .update(tasksTable)
@@ -3401,6 +3499,7 @@ export const tasksRouter = router({
                 handoffSuggestion: 'browser',
                 combinedIntent,
                 summary: handoffNotice,
+                ...(handoffTaskId ? { handoffTaskId } : {}),
               },
               completedAt: new Date(),
             })
@@ -3410,10 +3509,7 @@ export const tasksRouter = router({
             taskId: input.taskId,
             status: 'completed',
             summary: handoffNotice,
-            autoHandoff: {
-              intent: combinedIntent,
-              mode: 'browser',
-            },
+            ...(handoffTaskId ? { handoffTaskId } : {}),
           });
         } catch (err) {
           ctx.logger.error(
@@ -3425,6 +3521,7 @@ export const tasksRouter = router({
           ok: true,
           handoff: 'browser' as const,
           state: 'resumed' as const,
+          ...(handoffTaskId ? { handoffTaskId } : {}),
         };
       }
 
@@ -3463,6 +3560,13 @@ export const tasksRouter = router({
             ...(parkRow!.roleId ? { skillId: parkRow!.roleId } : {}),
             client: anthropicClient,
             logger: ctx.logger,
+            // F2 — pass user-uploaded attachments through to the
+            // generate runner so a parked-from-generate task that
+            // resumes with a file (e.g. Excel of metrics) sees the
+            // attachment alongside the original intent.
+            ...(replyAttachmentBlocks.length > 0
+              ? { attachments: replyAttachmentBlocks }
+              : {}),
             onStreamDelta: (delta) => {
               try {
                 broadcastToUser(ctx.userId, {
@@ -3555,7 +3659,8 @@ export const tasksRouter = router({
         }
       })();
       return { ok: true, state: 'resumed' as const };
-    }),
+    },
+  ),
 
   /**
    * Supercar-only: abort a running task. Sets the in-memory abort flag;
@@ -3687,16 +3792,41 @@ export const tasksRouter = router({
         // body bounded; longer URLs are almost certainly someone
         // shoving form data into the address bar.
         url: z.string().max(2048).optional(),
+        // F3 — when the SPA's BrowserPanel is showing a SPECIFIC
+        // task's screencast, it passes that task's id so the nav
+        // routes to the right Brave. Without this, peekActiveForUser
+        // picked the most-recently-active instance, which races when
+        // the user has multiple concurrent tasks. Optional so the
+        // explicit "browser live" entrypoint (sidebar globe, no
+        // task selected) still falls through to the userId pick.
+        taskId: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // Phase 24 — peekActiveForUser routes the panel's address-bar
-      // navigation to whichever task's Brave the user is currently
-      // viewing (most-recently-active).
-      const poolInstance =
-        ctx.browserPool && shouldUseBrowserPool(ctx.userId)
-          ? ctx.browserPool.peekActiveForUser(ctx.userId)
-          : null;
+      // Resolve the executor in two layers: prefer the per-task pool
+      // instance when the SPA passed a taskId — that uniquely binds
+      // the nav to whichever Brave the panel is actually streaming.
+      // Owner check is non-negotiable: pool.peek returns by taskId
+      // alone, so without verifying `inst.userId === ctx.userId` a
+      // user could navigate someone ELSE's browser by guessing a
+      // task id. Fall through to peekActiveForUser only when no
+      // taskId is supplied (sidebar globe entry / legacy path).
+      let poolInstance = null;
+      if (ctx.browserPool && shouldUseBrowserPool(ctx.userId)) {
+        if (input.taskId) {
+          const inst = ctx.browserPool.peek(input.taskId);
+          if (inst && inst.userId === ctx.userId) {
+            poolInstance = inst;
+          } else if (inst) {
+            ctx.logger.warn(
+              { taskId: input.taskId, ownerMismatch: true },
+              'tasks.browserNav: peek returned non-owner instance — ignoring',
+            );
+          }
+        } else {
+          poolInstance = ctx.browserPool.peekActiveForUser(ctx.userId);
+        }
+      }
       const exec =
         poolInstance?.executor ??
         ctx.executionRouter?.getExecutor('headed') ??

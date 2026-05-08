@@ -247,7 +247,15 @@ export function InputArea({
     }
   }, []);
 
-  if (quotaExhausted) {
+  // F1 — quota gate exception for reply / follow-up paths. Replying
+  // to a parked supercar task or following up on a recently-completed
+  // task is NOT a "create new task" action; it does not consume quota.
+  // Earlier the quota card replaced the composer the moment the user
+  // hit zero, even when they were mid-reply on a paused task — a
+  // clear UX dead-end (the agent stays parked, user can't unblock it).
+  // tasks.reply has its own server-side gating, so showing the card
+  // here is duplicate work that breaks the user.
+  if (quotaExhausted && !replyMode && !followUpTarget) {
     return (
       <QuotaExhaustedCard plan={quotaPlan ?? 'free'} navigate={navigate} />
     );
@@ -467,9 +475,14 @@ export function InputArea({
           style={{ maxHeight: '10rem' }}
           disabled={disabled}
         />
-        {!replyMode && (
-          <div ref={plusMenuRef} className="absolute bottom-2.5 left-2.5">
-            <button
+        {/* F2 — attachment + plus menu now available in replyMode too.
+            Backend `tasks.reply` accepts `fileIds` and parses them
+            into the supercar handle's pendingAttachmentBlocks (or the
+            generate-resume runner's `attachments`), so users can
+            paste a screenshot / drop an Excel as part of an "I gave
+            you the data" reply on a parked task. */}
+        <div ref={plusMenuRef} className="absolute bottom-2.5 left-2.5">
+          <button
               type="button"
               onClick={() => {
                 if (!attachmentsAllowed) {
@@ -523,7 +536,6 @@ export function InputArea({
               </div>
             )}
           </div>
-        )}
         <input
           ref={fileInputRef}
           type="file"

@@ -811,7 +811,10 @@ function AppShell(): JSX.Element {
           });
           // 1) In-flight awaiting_user → tasks.reply, resumes the existing loop.
           if (isReplyMode && selectedTaskId) {
-            const res = await replyToTask(selectedTaskId, intent);
+            // F2 — pass fileIds through so the backend's tasks.reply
+            // can parse + plumb attachments into supercarReply's
+            // attachmentBlocks (or generate-resume's attachments).
+            const res = await replyToTask(selectedTaskId, intent, fileIds);
             if ('error' in res) {
               toast.show(`回复失败：${res.error}`, 'error');
             } else if (!res.ok) {

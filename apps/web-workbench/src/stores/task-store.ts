@@ -204,7 +204,17 @@ export interface TaskStore {
   ): Promise<{ taskId: string } | { error: string }>;
   deleteTask(taskId: string): Promise<{ ok: true } | { error: string }>;
   renameTask(taskId: string, title: string): Promise<{ ok: true } | { error: string }>;
-  replyToTask(taskId: string, message: string): Promise<{ ok: boolean } | { error: string }>;
+  replyToTask(
+    taskId: string,
+    message: string,
+    /**
+     * F2 — file attachments uploaded with the reply, in the same
+     * fileId shape `createTask` accepts. Backend `tasks.reply` parses
+     * + plumbs them through `supercarReply`'s attachmentBlocks (or
+     * the generate-resume path's `attachments`).
+     */
+    fileIds?: string[],
+  ): Promise<{ ok: boolean } | { error: string }>;
   abortTask(taskId: string): Promise<{ ok: boolean } | { error: string }>;
   applyServerMessage(msg: ServerMessage): void;
   reset(): void;
@@ -738,7 +748,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
   },
 
-  async replyToTask(taskId, message) {
+  async replyToTask(taskId, message, fileIds) {
     // Pin the user's text into the conversation stream before the
     // round-trip returns — the old behaviour wiped the composer and
     // left no trace of what the user said, which read like the reply
@@ -753,7 +763,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       },
     }));
     try {
-      const res = await trpc.tasks.reply.mutate({ taskId, message });
+      const res = await trpc.tasks.reply.mutate({
+        taskId,
+        message,
+        ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
+      });
       // Fix 2 — backend tags reply outcome as `state: 'resumed' | 'stillAwaiting'`.
       // Only `resumed` means the supercar accepted the message and
       // started executing again; `stillAwaiting` is the user saying
@@ -925,31 +939,25 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           // persist until resultText is rendered in their place.
         };
       });
-      // F1 — auto-handoff. The reply browser-handoff branch on the
-      // backend marks this task `completed` AND attaches `autoHandoff
-      // = { intent, mode }` so the SPA fires a fresh createTask with
-      // the combined intent. Without this the user saw a "click the
-      // button" message but no button (the executionMode-aware CTA
-      // gate hides the button on the now-completed parent task).
-      // setTimeout(0) defers the dispatch until after the current
-      // set() commit so any state listeners on terminal complete
-      // first; createTask updates selectedTaskId to the new row and
-      // navigates the URL via storeNavigate.
-      const ah = (msg as { autoHandoff?: { intent: string; mode: 'browser' | 'generate' } })
-        .autoHandoff;
-      if (ah && typeof ah.intent === 'string' && ah.intent.trim().length > 0) {
-        const intent = ah.intent;
+      // F4 — backend-orchestrated handoff. When the reply handler on
+      // the orchestrator spawns a follow-up task (intake clarification
+      // revealed a need for the browser lane), it ships the new task's
+      // id on the terminal frame. The SPA's only job: navigate the
+      // selection to that task — the new row + its supercar dispatch
+      // are already running server-side. Earlier flow had the SPA
+      // fire createTask off the terminal which double-created on WS
+      // replay; this version is idempotent because the backend uses
+      // `result.handoffTaskId` as its dedup key.
+      const handoffTaskId = (msg as { handoffTaskId?: string }).handoffTaskId;
+      if (typeof handoffTaskId === 'string' && handoffTaskId.length > 0) {
         setTimeout(() => {
-          void get()
-            .createTask(intent, undefined, undefined, undefined)
-            .catch((err) => {
-              // Best-effort. If quota / network blips, the user can
-              // retry manually — they have the full intent in the
-              // completed task's chat history.
-              hdDebug('autoHandoff createTask failed', {
-                err: err instanceof Error ? err.message : String(err),
-              });
+          try {
+            get().selectTask(handoffTaskId, 'ui');
+          } catch (err) {
+            hdDebug('handoff selectTask failed', {
+              err: err instanceof Error ? err.message : String(err),
             });
+          }
         }, 0);
       }
       return;

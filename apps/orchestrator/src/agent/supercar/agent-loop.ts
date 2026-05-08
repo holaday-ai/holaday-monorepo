@@ -679,6 +679,15 @@ interface RunHandle {
   handoffMessage: string | null;
   /** Stamp the original user intent so the handoff path can repackage it. */
   originalIntent: string;
+  /**
+   * F2 — attachment content blocks the user uploaded with their reply.
+   * Set by `supercarReply(taskId, message, attachmentBlocks)`; the
+   * loop reads + clears this on reply resume to build a multi-block
+   * `{ role: 'user', content: [...blocks, { type: 'text', text }] }`
+   * message instead of the bare-text path. Empty / missing means the
+   * reply was text-only (the original behaviour).
+   */
+  pendingAttachmentBlocks: ReadonlyArray<{ type: string }> | null;
 }
 
 const handles = new Map<string, RunHandle>();
@@ -688,11 +697,21 @@ const handles = new Map<string, RunHandle>();
  * true if the task accepted the reply, false if the task isn't
  * currently waiting for one (unknown taskId, already moved on, etc.).
  *
- * Called from the `tasks.reply` tRPC mutation.
+ * Called from the `tasks.reply` tRPC mutation. F2 — optional
+ * `attachmentBlocks` plumb file uploads through the reply path; when
+ * present, the loop pushes a multi-block user message instead of
+ * bare text so the model sees the attachments alongside the reply.
  */
-export function supercarReply(taskId: string, message: string): boolean {
+export function supercarReply(
+  taskId: string,
+  message: string,
+  attachmentBlocks?: ReadonlyArray<{ type: string }>,
+): boolean {
   const handle = handles.get(taskId);
   if (!handle || !handle.resolveReply) return false;
+  if (attachmentBlocks && attachmentBlocks.length > 0) {
+    handle.pendingAttachmentBlocks = attachmentBlocks;
+  }
   const resolve = handle.resolveReply;
   handle.resolveReply = null;
   resolve(message);
@@ -1165,6 +1184,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     resolveReply: null,
     handoffMessage: null,
     originalIntent: opts.intent,
+    pendingAttachmentBlocks: null,
     abort: () => {
       cancelled = true;
       if (handle.resolveReply) {
@@ -1720,7 +1740,27 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               toolsUsed: Array.from(toolsUsed),
             };
           }
-          messages.push({ role: 'user', content: replyOrAbort });
+          // F2 — when supercarReply was called with attachmentBlocks,
+          // emit a multi-block user message so the model sees the
+          // uploads inline with the reply text. Clear pending state
+          // after consuming so a subsequent text-only reply doesn't
+          // accidentally inherit the prior attachments.
+          if (
+            handle.pendingAttachmentBlocks &&
+            handle.pendingAttachmentBlocks.length > 0
+          ) {
+            const blocks = handle.pendingAttachmentBlocks;
+            handle.pendingAttachmentBlocks = null;
+            messages.push({
+              role: 'user',
+              content: [
+                ...(blocks as unknown as ContentBlockParam[]),
+                { type: 'text', text: replyOrAbort },
+              ],
+            });
+          } else {
+            messages.push({ role: 'user', content: replyOrAbort });
+          }
           continue;
         }
         convergePlanOnSuccess();

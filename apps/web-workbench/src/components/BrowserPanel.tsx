@@ -771,12 +771,13 @@ export function BrowserPanel({
           {!fullscreen && shouldConnect && (
           <header className="flex h-11 items-center gap-2 border-b border-border px-3 pt-2">
             <StatusDot status={status} />
-            <NavButton direction="back" title="后退" />
-            <NavButton direction="forward" title="前进" />
-            <NavButton direction="reload" title="刷新" />
+            <NavButton direction="back" title="后退" navTaskId={activeTaskId ?? null} />
+            <NavButton direction="forward" title="前进" navTaskId={activeTaskId ?? null} />
+            <NavButton direction="reload" title="刷新" navTaskId={activeTaskId ?? null} />
             <UrlBar
               displayUrl={displayUrl}
               interactiveActive={interactiveActive}
+              navTaskId={activeTaskId ?? null}
             />
             {isExecuting && activeTaskId && (
               <button
@@ -1383,9 +1384,18 @@ function StatusDot({ status }: { status: DotStatus }): JSX.Element {
 function UrlBar({
   displayUrl,
   interactiveActive,
+  navTaskId,
 }: {
   displayUrl: string;
   interactiveActive: boolean;
+  /**
+   * F3 — when the panel is showing a specific task's screencast,
+   * its taskId is passed here so the goto navigation routes to
+   * that exact pool instance (not just the user's most-recent
+   * Brave). Null = explicit "browser live" mode (no task picked);
+   * backend falls through to peekActiveForUser.
+   */
+  navTaskId: string | null;
 }): JSX.Element {
   // Local editing state. Resync to the prop whenever the agent
   // navigates (or the user clicks back/forward) so the bar always
@@ -1408,6 +1418,7 @@ function UrlBar({
       const res = await trpc.tasks.browserNav.mutate({
         direction: 'goto',
         url: target,
+        ...(navTaskId ? { taskId: navTaskId } : {}),
       });
       if (!res.ok) {
         // Soft failure: snap back. The most likely reason is
@@ -1467,9 +1478,12 @@ function UrlBar({
 function NavButton({
   direction,
   title,
+  navTaskId,
 }: {
   direction: 'back' | 'forward' | 'reload';
   title: string;
+  /** F3 — same as UrlBar's navTaskId. Null falls through to user-pick. */
+  navTaskId: string | null;
 }): JSX.Element {
   const [pending, setPending] = React.useState(false);
   const Icon = direction === 'back' ? ArrowLeft : direction === 'forward' ? ArrowRight : RotateCw;
@@ -1482,7 +1496,10 @@ function NavButton({
       onClick={async () => {
         setPending(true);
         try {
-          await trpc.tasks.browserNav.mutate({ direction });
+          await trpc.tasks.browserNav.mutate({
+            direction,
+            ...(navTaskId ? { taskId: navTaskId } : {}),
+          });
         } catch {
           /* silent — see docstring */
         } finally {

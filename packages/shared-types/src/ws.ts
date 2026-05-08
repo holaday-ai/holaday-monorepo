@@ -336,21 +336,20 @@ export const serverTaskTerminalSchema = z.object({
   summary: z.string().optional(),
   reason: z.string().optional(),
   /**
-   * F1 — automatic handoff hint. When set, the SPA should immediately
-   * dispatch a new task with `intent` running in the suggested `mode`.
-   * Today only emitted by the reply handler when the user's clarification
-   * answer reveals the workflow needs a different lane (intake parked
-   * in generate, user reply now wants browser). Without this, marking
-   * the original task `completed` with a "click the button" message
-   * was a dead-end — the UI no longer renders that button after the
-   * executionMode-aware CTA gate landed.
+   * F4 — backend-orchestrated handoff. When the reply handler spawns
+   * a follow-up task (e.g. user's clarification revealed the workflow
+   * needs a browser lane), it includes the new task's id here. The
+   * SPA's only job: navigate to `?task=handoffTaskId`. The new task
+   * row + its supercar dispatch are already kicked off server-side
+   * via tRPC's createCaller, so the SPA does NOT call createTask
+   * (would otherwise double-create + double-charge quota).
+   *
+   * Earlier draft of this field carried `autoHandoff: { intent }` and
+   * relied on the SPA to fire createTask — that was racy on WS
+   * replay and lost atomicity. Schema retired in favour of the id-
+   * only handoffTaskId.
    */
-  autoHandoff: z
-    .object({
-      intent: z.string(),
-      mode: z.enum(['browser', 'generate']),
-    })
-    .optional(),
+  handoffTaskId: z.string().optional(),
 });
 
 /**
