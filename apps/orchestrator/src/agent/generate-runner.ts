@@ -188,127 +188,209 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
     ],
   };
 
-  let lastInputTokens = 0;
-  let lastOutputTokens = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  // F4 — auto-continue on max_tokens. Initial call + up to 2 follow-up
+  // calls (so a long PRD / detailed report has up to 3 × maxTokens of
+  // budget). Each continuation feeds the prior accumulation back as
+  // assistant content + a "请继续上文，不要重复已有内容" user nudge.
+  // After exhausting continuations, append a visible truncation
+  // notice so the user knows to ask for the rest.
+  const MAX_CONTINUATIONS = 2;
+  const CONTINUE_PROMPT = '请继续上文，不要重复已有内容。';
+  const TRUNCATION_NOTICE =
+    '\n\n---\n⚠️ 内容因长度限制被截断，如需完整版请追问。';
+  const baseMessages = requestArgs.messages;
+  let accumulatedSummary = '';
+  let truncatedAtCap = false;
 
   try {
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      // Phase 24 RC follow-up — switched messages.create →
-      // messages.stream so the SPA can render the model's output
-      // incrementally instead of waiting for the full response.
-      // The runner subscribes to 'text' events for the WS broadcast,
-      // then awaits finalMessage() to get the canonical content +
-      // usage numbers (same shape as the create() response).
-      const stream = opts.client.messages.stream(requestArgs, {
-        signal: abortController.signal,
-      });
-      if (opts.onStreamDelta) {
-        const cb = opts.onStreamDelta;
-        stream.on('text', (delta: string): void => {
-          if (delta) {
-            try {
-              cb(delta);
-            } catch (err) {
-              log.warn(
-                { err: err instanceof Error ? err.message : String(err) },
-                'generate: onStreamDelta callback threw (swallowed)',
-              );
+    continuationLoop: for (
+      let continuation = 0;
+      continuation <= MAX_CONTINUATIONS;
+      continuation++
+    ) {
+      // First call uses the original user message; continuations
+      // append the prior assistant text + a continuation nudge so
+      // the model picks up where it left off.
+      const messages =
+        continuation === 0
+          ? baseMessages
+          : ([
+              ...baseMessages,
+              { role: 'assistant' as const, content: accumulatedSummary },
+              { role: 'user' as const, content: CONTINUE_PROMPT },
+            ] as unknown as typeof baseMessages);
+
+      // Empty-response retry inner loop. Anthropic occasionally
+      // returns a server_tool_use without producing visible output
+      // — one retry usually resolves it, two attempts is the cap.
+      let summary = '';
+      let stopReason: string | null = null;
+      let lastInputTokens = 0;
+      let lastOutputTokens = 0;
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        // Phase 24 RC follow-up — switched messages.create →
+        // messages.stream so the SPA can render incrementally.
+        // Continuations stream into the same onStreamDelta callback,
+        // so the SPA's streamingByTask buffer naturally accumulates
+        // the full multi-call output.
+        const stream = opts.client.messages.stream(
+          { ...requestArgs, messages },
+          { signal: abortController.signal },
+        );
+        if (opts.onStreamDelta) {
+          const cb = opts.onStreamDelta;
+          stream.on('text', (delta: string): void => {
+            if (delta) {
+              try {
+                cb(delta);
+              } catch (err) {
+                log.warn(
+                  { err: err instanceof Error ? err.message : String(err) },
+                  'generate: onStreamDelta callback threw (swallowed)',
+                );
+              }
             }
-          }
-        });
-      }
-      const finalMessage = await stream.finalMessage();
-
-      // Concatenate text blocks — anything that isn't text (server-tool-use
-      // results, etc.) gets dropped silently. Most generate tasks will
-      // just be one or two text blocks.
-      const summary = finalMessage.content
-        .map((b) => (b.type === 'text' ? b.text : ''))
-        .join('')
-        .trim();
-
-      lastInputTokens = finalMessage.usage?.input_tokens ?? 0;
-      lastOutputTokens = finalMessage.usage?.output_tokens ?? 0;
-      const durationMs = Date.now() - start;
-
-      if (summary) {
-        if (attempt > 1) {
-          log.info(
-            { attempt, summaryLen: summary.length },
-            'generate: empty-response retry succeeded',
-          );
+          });
         }
-        // Expert-workflow intake park: the preamble instructs the
-        // model to emit `[AWAITING_USER_INPUT]` on a dedicated line
-        // when it needs more info from the user before producing a
-        // real report. supercar's agent loop catches the marker as
-        // a park signal; generate has no loop, so we surface it as
-        // a distinct outcome status. The dispatcher persists status
-        // 'awaiting_user' instead of 'completed' so the SPA goes
-        // into reply mode.
-        if (AWAITING_USER_MARKER_RE.test(summary)) {
-          const visibleQuestion = stripAwaitingUserMarker(summary);
-          log.info(
-            {
-              questionLen: visibleQuestion.length,
-              durationMs,
-              inputTokens: lastInputTokens,
-              outputTokens: lastOutputTokens,
-              attempts: attempt,
-            },
-            'generate: parking on awaiting_user marker',
-          );
-          return {
-            status: 'awaiting_user',
-            summary: visibleQuestion,
+        const finalMessage = await stream.finalMessage();
+        summary = finalMessage.content
+          .map((b) => (b.type === 'text' ? b.text : ''))
+          .join('')
+          .trim();
+        stopReason = finalMessage.stop_reason;
+        lastInputTokens = finalMessage.usage?.input_tokens ?? 0;
+        lastOutputTokens = finalMessage.usage?.output_tokens ?? 0;
+        if (summary) {
+          if (attempt > 1) {
+            log.info(
+              { attempt, continuation, summaryLen: summary.length },
+              'generate: empty-response retry succeeded',
+            );
+          }
+          break;
+        }
+        log.warn(
+          {
+            attempt,
+            continuation,
+            maxAttempts: MAX_ATTEMPTS,
+            stopReason,
             inputTokens: lastInputTokens,
             outputTokens: lastOutputTokens,
-            durationMs,
-          };
-        }
+          },
+          attempt < MAX_ATTEMPTS
+            ? 'generate: empty response — retrying'
+            : 'generate: empty response (final attempt, giving up)',
+        );
+      }
+
+      totalInputTokens += lastInputTokens;
+      totalOutputTokens += lastOutputTokens;
+
+      if (!summary) {
+        // Both attempts of this stream returned empty. Treat as fatal
+        // for the WHOLE run — earlier accumulation is preserved if any
+        // (rare: we already produced text and a follow-up returned
+        // nothing). Surface that partial as the failure reason text.
+        const partial = accumulatedSummary;
+        return {
+          status: 'failed',
+          summary: '',
+          reason: partial
+            ? `AI 在续写时返回空内容，已生成 ${partial.length} 字。`
+            : 'AI 连续两次返回空内容，请重试或简化任务。',
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          durationMs: Date.now() - start,
+        };
+      }
+
+      // Expert-workflow intake park: the preamble instructs the
+      // model to emit `[AWAITING_USER_INPUT]` on a dedicated line
+      // when it needs more info before producing a real report.
+      // supercar's agent loop catches the marker as a park signal;
+      // generate has no loop, so we surface it as a distinct
+      // outcome status. The marker can in theory appear during a
+      // continuation; combine accumulation + this turn first.
+      const combined = accumulatedSummary + summary;
+      if (AWAITING_USER_MARKER_RE.test(combined)) {
+        const visibleQuestion = stripAwaitingUserMarker(combined);
         log.info(
           {
-            stopReason: finalMessage.stop_reason,
-            inputTokens: lastInputTokens,
-            outputTokens: lastOutputTokens,
-            durationMs,
-            summaryLen: summary.length,
-            attempts: attempt,
+            questionLen: visibleQuestion.length,
+            continuation,
+            durationMs: Date.now() - start,
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens,
+          },
+          'generate: parking on awaiting_user marker',
+        );
+        return {
+          status: 'awaiting_user',
+          summary: visibleQuestion,
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          durationMs: Date.now() - start,
+        };
+      }
+
+      accumulatedSummary = combined;
+
+      if (stopReason !== 'max_tokens') {
+        // Model finished naturally — stop continuing.
+        log.info(
+          {
+            stopReason,
+            continuation,
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens,
+            summaryLen: accumulatedSummary.length,
             streaming: true,
           },
           'generate: completed',
         );
-        return {
-          status: 'completed',
-          summary,
-          inputTokens: lastInputTokens,
-          outputTokens: lastOutputTokens,
-          durationMs,
-        };
+        break continuationLoop;
       }
 
-      // Empty — log + retry (or fall through to failure below).
-      log.warn(
+      // stopReason === 'max_tokens'.
+      if (continuation === MAX_CONTINUATIONS) {
+        // Last call also hit the cap — surface the truncation
+        // notice and stop. Avoids unbounded continuation cost.
+        truncatedAtCap = true;
+        log.warn(
+          {
+            continuations: continuation + 1,
+            totalLen: accumulatedSummary.length,
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens,
+          },
+          'generate: still max_tokens after continuations — appending truncation notice',
+        );
+        break continuationLoop;
+      }
+
+      log.info(
         {
-          attempt,
-          maxAttempts: MAX_ATTEMPTS,
-          stopReason: finalMessage.stop_reason,
-          inputTokens: lastInputTokens,
-          outputTokens: lastOutputTokens,
-          durationMs,
+          continuation: continuation + 1,
+          soFarLen: accumulatedSummary.length,
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
         },
-        attempt < MAX_ATTEMPTS
-          ? 'generate: empty response — retrying'
-          : 'generate: empty response (final attempt, giving up)',
+        'generate: max_tokens — continuing',
       );
     }
 
+    const finalSummary = truncatedAtCap
+      ? accumulatedSummary + TRUNCATION_NOTICE
+      : accumulatedSummary;
+
     return {
-      status: 'failed',
-      summary: '',
-      reason: 'AI 连续两次返回空内容，请重试或简化任务。',
-      inputTokens: lastInputTokens,
-      outputTokens: lastOutputTokens,
+      status: 'completed',
+      summary: finalSummary,
+      inputTokens: totalInputTokens,
+      outputTokens: totalOutputTokens,
       durationMs: Date.now() - start,
     };
   } catch (err) {
@@ -323,15 +405,36 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
         : String(err);
     const durationMs = Date.now() - start;
     log.warn(
-      { err: reason, durationMs, isAbort, timeoutMs },
+      {
+        err: reason,
+        durationMs,
+        isAbort,
+        timeoutMs,
+        accumulatedLen: accumulatedSummary.length,
+      },
       isAbort ? 'generate: timeout' : 'generate: api call failed',
     );
+    // F4 — preserve accumulated text when a continuation throws.
+    // Better to deliver a truncated answer with a clear notice than
+    // discard a 4000-char draft because the second stream call hit a
+    // network blip.
+    if (accumulatedSummary.length > 0) {
+      return {
+        status: 'completed',
+        summary:
+          accumulatedSummary +
+          '\n\n---\n⚠️ 内容因网络/超时被截断，如需完整版请追问。',
+        inputTokens: totalInputTokens,
+        outputTokens: totalOutputTokens,
+        durationMs,
+      };
+    }
     return {
       status: 'failed',
       summary: '',
       reason,
-      inputTokens: 0,
-      outputTokens: 0,
+      inputTokens: totalInputTokens,
+      outputTokens: totalOutputTokens,
       durationMs,
     };
   } finally {
