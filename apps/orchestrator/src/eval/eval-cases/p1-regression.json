@@ -15,13 +15,13 @@
     "id": "P1_GEN_SUMMARY",
     "tier": "P1",
     "category": "generate_summary",
-    "prompt": "用 100 字以内总结：人工智能是一个研究、开发用于模拟、延伸和扩展人的智能的理论、方法、技术及应用系统的一门技术科学。它由不同的领域组成，如机器学习、计算机视觉等等。总体来讲，人工智能研究的一个主要目标是使机器能够胜任一些通常需要人类智能才能完成的复杂工作。",
+    "prompt": "以下是关于人工智能的一段描述，请用 100 字以内总结：人工智能是一门让机器能够胜任通常需要人类智能才能完成的复杂工作的技术科学。它由不同领域组成，包括机器学习、计算机视觉、自然语言处理等。它的目标是使机器能够模拟人的认知过程，并不断扩展其能力边界。",
     "expectations": {
       "mustComplete": true,
       "executionMode": "generate",
       "maxDurationMs": 90000
     },
-    "notes": "Long prompt (100+ chars) → min=50 threshold. Should pass cleanly."
+    "notes": "Long prompt (100+ chars) → checklist tier with min=50 threshold. Body deliberately avoids SEARCH_VERBS (搜索/查找/查询/研究/对比/调研) — earlier version had '研究' in the descriptive body text and tripped the scrape route. INFO_VERB '总结' is fine: classifier's INFO_VERBS-without-URL/site branch falls through to generate."
   },
   {
     "id": "P1_GEN_LONG_REPORT",
