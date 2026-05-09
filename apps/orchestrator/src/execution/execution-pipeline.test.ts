@@ -248,9 +248,11 @@ describe('all flags on — URL fabrication autoFix loop', () => {
       answerText:
         'Citation: https://totally-unrelated.example.org/x. ' + 'x'.repeat(60),
     });
-    // url_drop is still applied (op recorded), the recheck against the
-    // "[未验证来源已移除]" placeholder passes the URL-grounding rule.
-    expect(out.finalText).toContain('[未验证来源已移除]');
+    // Phase 1 follow-up: url_drop now removes the fabricated URL
+    // entirely (no placeholder text). The recheck passes because
+    // no URLs remain in the answer for the grounding rule to flag.
+    expect(out.finalText).not.toContain('totally-unrelated.example.org');
+    expect(out.finalText).not.toContain('[未验证');
     expect(out.verification!.passed).toBe(true);
   });
 });

@@ -269,8 +269,24 @@ export class TaskRepository {
           finalUrl?: string;
           metadata?: Record<string, unknown>;
         }
-      | { status: 'paused'; reason: string; tickCount: number }
-      | { status: 'cancelled'; tickCount: number },
+      | {
+          status: 'paused';
+          reason: string;
+          tickCount: number;
+          // Phase 1 follow-up — paused / cancelled rows now also
+          // accept terminal-state evidence so the SPA's BrowserPanel
+          // has a frame to render after a refresh / disconnect.
+          finalScreenshot?: string;
+          finalUrl?: string;
+          metadata?: Record<string, unknown>;
+        }
+      | {
+          status: 'cancelled';
+          tickCount: number;
+          finalScreenshot?: string;
+          finalUrl?: string;
+          metadata?: Record<string, unknown>;
+        },
   ): Promise<void> {
     const [taskRow] = await this.db
       .select({ id: tasks.id })
@@ -304,10 +320,18 @@ export class TaskRepository {
     } else if (outcome.status === 'paused') {
       update.pauseReason = 'max_steps_reached';
       result.reason = outcome.reason;
+      // Phase 1 follow-up — accept finalScreenshot/finalUrl/metadata.
+      if (outcome.finalScreenshot) result.finalScreenshot = outcome.finalScreenshot;
+      if (outcome.finalUrl) result.finalUrl = outcome.finalUrl;
+      if (outcome.metadata) result.metadata = outcome.metadata;
       eventPayload = { ...eventPayload, reason: outcome.reason };
     } else {
       update.completedAt = new Date();
       update.pauseReason = null;
+      // Phase 1 follow-up — capture terminal frame on cancellation.
+      if (outcome.finalScreenshot) result.finalScreenshot = outcome.finalScreenshot;
+      if (outcome.finalUrl) result.finalUrl = outcome.finalUrl;
+      if (outcome.metadata) result.metadata = outcome.metadata;
     }
     update.result = result;
 

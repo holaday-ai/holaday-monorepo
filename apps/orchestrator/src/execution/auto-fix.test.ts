@@ -82,7 +82,7 @@ describe('autoFix — URL fabrication', () => {
     expect(out.applied[0]!.kind).toBe('url_substitute');
   });
 
-  it('drops a fabricated URL when no grounded candidate is similar', () => {
+  it('drops a fabricated URL when no grounded candidate is similar (no placeholder)', () => {
     const answer =
       'See https://made-up-citation.example/article for context. ' +
       'x'.repeat(60);
@@ -90,9 +90,15 @@ describe('autoFix — URL fabrication', () => {
       'https://example.com/help/index',
     ]);
     const out = autoFix({ contract, ledger, verification, answerText: answer });
-    expect(out.fixed).toContain('[未验证来源已移除]');
+    // Phase 1 follow-up: the URL is removed without leaving a
+    // placeholder. The surrounding sentence still reads cleanly
+    // because the fabricated URL was the only structure
+    // disappearing — punctuation around it stays.
     expect(out.fixed).not.toContain('made-up-citation');
+    expect(out.fixed).not.toContain('[未验证');
     expect(out.applied[0]!.kind).toBe('url_drop');
+    // The leading "See " text is preserved.
+    expect(out.fixed).toContain('See  for context.');
   });
 
   it('preserves trailing punctuation when substituting', () => {

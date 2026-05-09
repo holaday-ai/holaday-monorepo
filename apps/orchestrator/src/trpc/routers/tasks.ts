@@ -88,6 +88,13 @@ import {
   type VerifyOutput,
 } from '../../execution/execution-pipeline.js';
 import type { VerificationResult } from '../../execution/answer-verifier.js';
+// Phase 1 follow-up — final-text sanitiser + scrape-failure
+// humaniser. Strips tool-XML / base64 / stop-reason markers from
+// outcome.summary BEFORE it goes through verify + persist.
+import {
+  humaniseScrapeFailure,
+  sanitizeFinalText,
+} from '../../agent/text-sanitizer.js';
 
 const taskController = new TaskController();
 
@@ -722,6 +729,19 @@ export const tasksRouter = router({
           };
         }
 
+        // Phase 1 follow-up — sanitise outcome.summary BEFORE the
+        // verifier sees it. Tool-XML / base64 / stop-reason fragments
+        // that occasionally leak into the model's visible output
+        // would otherwise pollute persisted result.summary and the
+        // verifier's grounding check (the URL regex inside a
+        // base64 blob is not a real URL the user can click).
+        if (outcome.status === 'completed' && outcome.summary) {
+          const cleaned = sanitizeFinalText(outcome.summary);
+          if (cleaned !== outcome.summary) {
+            outcome = { ...outcome, summary: cleaned };
+          }
+        }
+
         // Phase 1 Day 5 — pipeline verification on the runner's
         // final answer. No-op when EXECUTION_VERIFIER_ENABLED is
         // off; in that case verifiedSummary === outcome.summary
@@ -1075,10 +1095,24 @@ export const tasksRouter = router({
               summary: generateOutcome.summary,
             };
           } else {
+            // Phase 1 follow-up — humanise the failure reason so the
+            // user sees actionable Chinese guidance instead of a raw
+            // stack trace / English error code.
             outcome = {
               status: 'failed',
-              reason: `scrape failed (${scrapeOutcome.reason}); generate fallback also failed (${generateOutcome.reason ?? 'unknown'})`,
+              reason: humaniseScrapeFailure(
+                `scrape failed (${scrapeOutcome.reason}); generate fallback also failed (${generateOutcome.reason ?? 'unknown'})`,
+              ),
             };
+          }
+        }
+
+        // Phase 1 follow-up — sanitise the completed-path summary
+        // before verification. Same rationale as the generate lane.
+        if (outcome.status === 'completed' && outcome.summary) {
+          const cleaned = sanitizeFinalText(outcome.summary);
+          if (cleaned !== outcome.summary) {
+            outcome = { ...outcome, summary: cleaned };
           }
         }
 
@@ -1861,19 +1895,30 @@ export const tasksRouter = router({
               .catch((err) => {
                 ctx.logger.warn({ err, taskId }, 'supercar: persist awaiting_user state failed');
               });
-            // Phase 1 follow-up — also stamp `executionMode='browser'`
-            // into result on park, so analytics / eval pipeline lane
-            // classification (which reads result.metadata.executionMode
-            // OR result.executionMode) doesn't fall through to
-            // 'unknown' for login parks. Was previously only written
-            // by persistSupercarOutcome on terminal status; the park
-            // path skipped it entirely, leaving the result blob with
-            // only finalUrl (and only conditionally that). Lifted out
-            // of the `if (ev.currentUrl)` guard so the executionMode
-            // tag lands even on parks without a current URL.
+            // Phase 1 follow-up — stamp `executionMode='browser'`,
+            // `finalUrl`, AND `finalScreenshot` into result on park.
+            //
+            // Why screenshot on park (not just on terminal):
+            // when the user refreshes the page during a login park,
+            // the WS screencast disconnects and the BrowserPanel
+            // would otherwise show a blank `about:blank`. With a
+            // persisted `finalScreenshot` the SPA renders the last
+            // visible frame instead of empty space.
+            //
+            // Why executionMode here: analytics / eval pipeline lane
+            // classification reads result.metadata.executionMode OR
+            // result.executionMode; without this, login parks fall
+            // through to lane='unknown'.
             const parkUrl = ev.currentUrl;
             void (async () => {
               try {
+                // Capture a screenshot off the per-task Brave. This
+                // shares the captureFinalState helper used at terminal
+                // — best-effort, returns {} on any failure (no
+                // executor / page closed / capture timeout).
+                const captured = perUserExec
+                  ? await captureFinalState(perUserExec, ctx.logger, taskId)
+                  : ({} as { finalScreenshot?: string; finalUrl?: string });
                 const [row] = await ctx.db
                   .select({ result: tasksTable.result })
                   .from(tasksTable)
@@ -1884,7 +1929,14 @@ export const tasksRouter = router({
                   ...prev,
                   executionMode: 'browser',
                 };
-                if (parkUrl) next.finalUrl = parkUrl;
+                // Prefer the URL the agent gave us via the event;
+                // fall back to whatever captureFinalState read off
+                // the page if `ev.currentUrl` was undefined.
+                const finalUrl = parkUrl ?? captured.finalUrl;
+                if (finalUrl) next.finalUrl = finalUrl;
+                if (captured.finalScreenshot) {
+                  next.finalScreenshot = captured.finalScreenshot;
+                }
                 await ctx.db
                   .update(tasksTable)
                   .set({ result: next })
@@ -2166,6 +2218,17 @@ export const tasksRouter = router({
               },
               'task:completed',
             );
+            // Phase 1 follow-up — sanitise the supercar's final
+            // answer before any downstream step (verification,
+            // persistence, broadcast). Tool-XML scaffolding from
+            // computer_20251124 traces leaks here more often than
+            // in the generate / scrape lanes.
+            if (outcome.status === 'completed' && outcome.summary) {
+              const cleaned = sanitizeFinalText(outcome.summary);
+              if (cleaned !== outcome.summary) {
+                outcome = { ...outcome, summary: cleaned };
+              }
+            }
             // Phase 1 Day 5 Round 2 — pipeline verification on the
             // supercar/browser final answer. Mirrors the generate +
             // scrape pattern: seed terminal-state evidence into the
@@ -4597,17 +4660,28 @@ async function persistSupercarOutcome(
       });
     } else if (outcome.status === 'awaiting_user') {
       // Shouldn't land here in the happy path — the loop returns a
-      // terminal status after the reply, not awaiting_user. Persist as
-      // paused so the UI still renders sensibly if it did.
+      // terminal status after the reply, not awaiting_user. Persist
+      // as paused so the UI still renders sensibly if it did.
+      // Phase 1 follow-up — include finalUrl + finalScreenshot so
+      // the BrowserPanel has a frame to render instead of blank.
       await repo.persistVisionOutcome(taskId, {
         status: 'paused',
         reason: outcome.question ?? 'awaiting user reply',
         tickCount: outcome.iterations,
+        ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
+        ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+        ...(metadata ? { metadata } : {}),
       });
     } else if (outcome.status === 'cancelled') {
+      // Phase 1 follow-up — capture terminal frame on cancel too.
+      // Users sometimes cancel mid-task and want to see the last
+      // visible state.
       await repo.persistVisionOutcome(taskId, {
         status: 'cancelled',
         tickCount: outcome.iterations,
+        ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
+        ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+        ...(metadata ? { metadata } : {}),
       });
     } else if (outcome.status === 'timeout') {
       await repo.persistVisionOutcome(taskId, {

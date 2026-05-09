@@ -103,13 +103,19 @@ function fixFabricatedUrls(
         const tail = raw.slice(url.length);
         return `${replacement}${tail}`;
       }
-      // No similar grounded URL. Drop the fabricated one and leave a
-      // marker so the human reviewer notices a citation went missing.
+      // Phase 1 follow-up — no similar grounded URL → DROP the
+      // fabricated URL entirely (no placeholder text). The earlier
+      // "[未验证来源已移除]" placeholder leaked into the rendered
+      // SPA as user-visible noise; with the placeholder removed,
+      // the answer reads as if the model never had the URL,
+      // which matches what we want to communicate.
       ops.push({
         kind: 'url_drop',
         detail: `${url} (no grounded match)`,
       });
-      return '[未验证来源已移除]';
+      // Preserve trailing punctuation that was on `raw` so the
+      // surrounding sentence still reads cleanly.
+      return raw.slice(url.length);
     }),
     ops,
   };

@@ -140,9 +140,9 @@
     "expectations": {
       "mustComplete": true,
       "executionMode": "generate",
-      "mustContain": ["[未验证来源已移除]"],
+      "mustNotContain": ["http://", "https://"],
       "maxDurationMs": 60000
     },
-    "notes": "Fabrication probe — generate-mode lane has no browser/tool sources, so every URL the model emits is ungrounded. Prompt deliberately avoids: SEARCH_VERBS (搜索/查找/查询...), INFO_VERBS (分析/总结...), SITE_NAMES, and any literal URL example (which would self-match URL_REGEX and route to scrape). Verifier's no_ungrounded_urls criterion flags as fixable; autoFix.url_drop replaces each fabricated URL with the [未验证来源已移除] placeholder; recheck passes."
+    "notes": "Fabrication probe — generate-mode lane has no browser/tool sources, so every URL the model emits is ungrounded. Verifier's no_ungrounded_urls criterion flags as fixable; autoFix.url_drop now REMOVES the URL entirely (no placeholder); recheck passes because no URLs remain. Test asserts the final answer has no http(s) URL — proving autoFix swept them away."
   }
 ]

@@ -43,10 +43,10 @@
     "expectations": {
       "mustComplete": true,
       "executionMode": "generate",
-      "mustContain": ["[未验证来源已移除]"],
+      "mustNotContain": ["http://", "https://"],
       "maxDurationMs": 60000
     },
-    "notes": "Different prompt from P0_011 — same fabrication-detection path. Both deliberately avoid SEARCH/INFO verbs and literal URLs (which would self-match URL_REGEX and route to scrape)."
+    "notes": "Different prompt from P0_011 — same fabrication-detection path. After Phase 1 follow-up, autoFix.url_drop removes URLs entirely (no placeholder); the assertion is 'no http(s) URL remains in the answer' which proves autoFix did its job."
   },
   {
     "id": "P1_GEN_REJECT_CODE",
