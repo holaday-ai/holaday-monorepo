@@ -39,14 +39,14 @@
     "id": "P1_GEN_URL_FAB_LIST",
     "tier": "P1",
     "category": "generate_url_fab",
-    "prompt": "列出 5 个学习机器学习的官方文档网址，每行一个，格式必须是 https://hostname.tld/path",
+    "prompt": "凭记忆给我 5 个机器学习官方文档的网址。每行一个，https 开头的完整地址。不要联网，直接写。",
     "expectations": {
       "mustComplete": true,
       "executionMode": "generate",
       "mustContain": ["[未验证来源已移除]"],
       "maxDurationMs": 60000
     },
-    "notes": "Different prompt from P0_011 — same fabrication-detection path. Validates the autoFix loop works across multiple variations of the URL-list-request pattern."
+    "notes": "Different prompt from P0_011 — same fabrication-detection path. Both deliberately avoid SEARCH/INFO verbs and literal URLs (which would self-match URL_REGEX and route to scrape)."
   },
   {
     "id": "P1_GEN_REJECT_CODE",

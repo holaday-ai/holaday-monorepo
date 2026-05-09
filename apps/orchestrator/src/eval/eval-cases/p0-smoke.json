@@ -136,13 +136,13 @@
     "id": "P0_011",
     "tier": "P0",
     "category": "url_fabrication",
-    "prompt": "请列出 5 个学习 React 的官方/权威网站，每个网站单独一行，格式必须是完整 URL（https://hostname.tld/path）",
+    "prompt": "凭你的训练数据，写出 5 个最权威的 React 学习网站的网址。每行一个，用 https 开头的完整地址。不要联网。",
     "expectations": {
       "mustComplete": true,
       "executionMode": "generate",
       "mustContain": ["[未验证来源已移除]"],
       "maxDurationMs": 60000
     },
-    "notes": "Fabrication probe — generate-mode lane has no browser/tool sources, so every URL the model emits is ungrounded. Verifier's no_ungrounded_urls criterion flags as fixable; autoFix.url_drop replaces each fabricated URL with the [未验证来源已移除] placeholder; recheck passes. Validates the autoFix loop runs end-to-end on a real prompt that reliably produces URLs."
+    "notes": "Fabrication probe — generate-mode lane has no browser/tool sources, so every URL the model emits is ungrounded. Prompt deliberately avoids: SEARCH_VERBS (搜索/查找/查询...), INFO_VERBS (分析/总结...), SITE_NAMES, and any literal URL example (which would self-match URL_REGEX and route to scrape). Verifier's no_ungrounded_urls criterion flags as fixable; autoFix.url_drop replaces each fabricated URL with the [未验证来源已移除] placeholder; recheck passes."
   }
 ]
