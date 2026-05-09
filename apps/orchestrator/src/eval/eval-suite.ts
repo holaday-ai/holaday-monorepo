@@ -99,6 +99,16 @@ export interface EvalExpectations {
    * Unknown values record a failure rather than silently passing.
    */
   customValidator?: string;
+  /**
+   * Phase 1 follow-up — when true, the case PASSES if `tasks.create`
+   * returns a 4xx error. The error message is checked against
+   * `mustContainAny` if provided; everything else (terminalStatus,
+   * executionMode, etc.) is skipped because no task was created.
+   *
+   * Use this to validate refusal paths like the looksLikeCodeIntent
+   * guard, where the create endpoint itself is the gate.
+   */
+  expectsCreateRejection?: boolean;
 }
 
 /**

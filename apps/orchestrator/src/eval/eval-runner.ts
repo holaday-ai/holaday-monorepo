@@ -342,11 +342,34 @@ async function runStandardCase(
       );
     }
   } catch (err) {
-    failures.push(
-      `exception during create/poll: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
+    const errMsg = err instanceof Error ? err.message : String(err);
+    // Phase 1 follow-up — expectsCreateRejection short-circuit.
+    // tasks.create returning a 4xx is the success signal for this
+    // mode (e.g. looksLikeCodeIntent guard). Validate the error
+    // message against mustContainAny and return early — no task
+    // exists to poll.
+    if (exp.expectsCreateRejection) {
+      const checkFailures: string[] = [];
+      if (exp.mustContainAny && exp.mustContainAny.length > 0) {
+        const hit = exp.mustContainAny.some((n) => errMsg.includes(n));
+        if (!hit) {
+          checkFailures.push(
+            `expectsCreateRejection: error message "${errMsg.slice(0, 100)}" doesn't include any of [${exp.mustContainAny.join(', ')}]`,
+          );
+        }
+      }
+      return {
+        id: caseDef.id,
+        tier: caseDef.tier,
+        category: caseDef.category,
+        ok: checkFailures.length === 0,
+        failures: checkFailures,
+        durationMs: Date.now() - startedAt,
+        terminalStatus: 'create_rejected',
+        errorMessage: errMsg.slice(0, 500),
+      };
+    }
+    failures.push(`exception during create/poll: ${errMsg}`);
   }
 
   // ---- Initial-state validation ----

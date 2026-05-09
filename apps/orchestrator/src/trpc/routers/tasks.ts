@@ -212,12 +212,47 @@ const CODE_PHRASES = [
   '帮我开发', '帮我编程', '帮我写代码',
   'build me a website', 'build a website', 'make me an app', 'build a webapp',
 ];
+/**
+ * Phase 1 follow-up — analysis-intent whitelist. The verb+subject
+ * heuristic was too aggressive: prompts like "总结人工智能应用系统的
+ * 发展趋势" matched `开发` (verb) + `应用系统` (subject) and triggered
+ * the rejection. Real users asking for analysis got told to use
+ * Cursor.
+ *
+ * The whitelist applies ONLY to the verb+subject pair; CODE_PHRASES
+ * (full unambiguous phrases like "做个网站") still always trigger.
+ * The user's analytical framing is the signal — if any of these
+ * words is present, the intent is "explain / analyze / report ON
+ * the technology" rather than "build the technology for me".
+ */
+const ANALYSIS_INTENT_WORDS = [
+  '分析', '总结', '复盘', '报告',
+  '研究', '调研', '调查',
+  '说明', '解释', '介绍', '描述', '阐述', '讲讲', '讲一下',
+  '方法', '方法论', '方案', '策略', '思路',
+  '趋势', '现状', '特点', '特征', '原理', '架构思路', '本质',
+  '是什么', '什么是', '如何理解', '怎么看',
+  // English
+  'analyze ', 'analyse ', 'summarize ', 'summarise ',
+  'explain ', 'describe ', 'compare ', 'overview',
+  'introduction', 'what is', 'how does',
+];
+function hasAnalysisIntent(lower: string): boolean {
+  return ANALYSIS_INTENT_WORDS.some((w) => lower.includes(w));
+}
 function looksLikeCodeIntent(intent: string): boolean {
   const lower = intent.toLowerCase();
+  // Unambiguous full phrases always trigger — the user explicitly
+  // said "build me a website" / "做个网站". No whitelist for these.
   if (CODE_PHRASES.some((p) => lower.includes(p))) return true;
   const hasVerb = CODE_VERBS.some((v) => lower.includes(v));
   if (!hasVerb) return false;
-  return CODE_SUBJECTS.some((s) => lower.includes(s));
+  if (!CODE_SUBJECTS.some((s) => lower.includes(s))) return false;
+  // Verb + subject pair matched — but if the prompt also has an
+  // analysis-intent word, the user is asking ABOUT the tech, not
+  // asking us to build it. Skip the rejection.
+  if (hasAnalysisIntent(lower)) return false;
+  return true;
 }
 
 export const tasksRouter = router({
