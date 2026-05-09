@@ -1826,29 +1826,41 @@ export const tasksRouter = router({
               .catch((err) => {
                 ctx.logger.warn({ err, taskId }, 'supercar: persist awaiting_user state failed');
               });
-            if (ev.currentUrl) {
-              const parkUrl = ev.currentUrl;
-              void (async () => {
-                try {
-                  const [row] = await ctx.db
-                    .select({ result: tasksTable.result })
-                    .from(tasksTable)
-                    .where(eq(tasksTable.externalId, taskId))
-                    .limit(1);
-                  const prev = (row?.result ?? {}) as Record<string, unknown>;
-                  const next = { ...prev, finalUrl: parkUrl };
-                  await ctx.db
-                    .update(tasksTable)
-                    .set({ result: next })
-                    .where(eq(tasksTable.externalId, taskId));
-                } catch (err) {
-                  ctx.logger.warn(
-                    { err, taskId },
-                    'supercar: persist park finalUrl failed',
-                  );
-                }
-              })();
-            }
+            // Phase 1 follow-up — also stamp `executionMode='browser'`
+            // into result on park, so analytics / eval pipeline lane
+            // classification (which reads result.metadata.executionMode
+            // OR result.executionMode) doesn't fall through to
+            // 'unknown' for login parks. Was previously only written
+            // by persistSupercarOutcome on terminal status; the park
+            // path skipped it entirely, leaving the result blob with
+            // only finalUrl (and only conditionally that). Lifted out
+            // of the `if (ev.currentUrl)` guard so the executionMode
+            // tag lands even on parks without a current URL.
+            const parkUrl = ev.currentUrl;
+            void (async () => {
+              try {
+                const [row] = await ctx.db
+                  .select({ result: tasksTable.result })
+                  .from(tasksTable)
+                  .where(eq(tasksTable.externalId, taskId))
+                  .limit(1);
+                const prev = (row?.result ?? {}) as Record<string, unknown>;
+                const next: Record<string, unknown> = {
+                  ...prev,
+                  executionMode: 'browser',
+                };
+                if (parkUrl) next.finalUrl = parkUrl;
+                await ctx.db
+                  .update(tasksTable)
+                  .set({ result: next })
+                  .where(eq(tasksTable.externalId, taskId));
+              } catch (err) {
+                ctx.logger.warn(
+                  { err, taskId },
+                  'supercar: persist park metadata failed',
+                );
+              }
+            })();
           },
           onThinking(summary) {
             try {

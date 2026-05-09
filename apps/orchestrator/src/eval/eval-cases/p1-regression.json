@@ -1,1 +1,191 @@
-[]
+[
+  {
+    "id": "P1_GEN_TRANSLATE",
+    "tier": "P1",
+    "category": "generate_translate",
+    "prompt": "翻译这段话到日语：今天天气不错，适合出去走走",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "generate",
+      "maxDurationMs": 60000
+    },
+    "notes": "Short prompt → checklist tier with min=10. Verifier should pass without autoFix."
+  },
+  {
+    "id": "P1_GEN_SUMMARY",
+    "tier": "P1",
+    "category": "generate_summary",
+    "prompt": "用 100 字以内总结：人工智能是一个研究、开发用于模拟、延伸和扩展人的智能的理论、方法、技术及应用系统的一门技术科学。它由不同的领域组成，如机器学习、计算机视觉等等。总体来讲，人工智能研究的一个主要目标是使机器能够胜任一些通常需要人类智能才能完成的复杂工作。",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "generate",
+      "maxDurationMs": 90000
+    },
+    "notes": "Long prompt (100+ chars) → min=50 threshold. Should pass cleanly."
+  },
+  {
+    "id": "P1_GEN_LONG_REPORT",
+    "tier": "P1",
+    "category": "generate_long_report",
+    "prompt": "请帮我写一份关于 2026 年中国 AI 行业现状与展望的详细分析报告，覆盖政策、市场、技术、应用四个维度，每个维度至少 200 字，总字数不少于 1000 字。",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "generate",
+      "maxDurationMs": 240000
+    },
+    "notes": "Long-form generation. Tests max_tokens auto-continue path. Verifier word_count min=50 trivially passes."
+  },
+  {
+    "id": "P1_GEN_URL_FAB_LIST",
+    "tier": "P1",
+    "category": "generate_url_fab",
+    "prompt": "列出 5 个学习机器学习的官方文档网址，每行一个，格式必须是 https://hostname.tld/path",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "generate",
+      "mustContain": ["[未验证来源已移除]"],
+      "maxDurationMs": 60000
+    },
+    "notes": "Different prompt from P0_011 — same fabrication-detection path. Validates the autoFix loop works across multiple variations of the URL-list-request pattern."
+  },
+  {
+    "id": "P1_GEN_REJECT_CODE",
+    "tier": "P1",
+    "category": "generate_reject",
+    "prompt": "帮我写一个完整的 React + TypeScript 网站项目代码",
+    "expectations": {
+      "mustComplete": false,
+      "terminalStatus": "failed",
+      "mustContainAny": ["Cursor", "Claude Code", "代码开发", "浏览器"],
+      "maxDurationMs": 30000
+    },
+    "notes": "Hits looksLikeCodeIntent guard in tasks.create — should fail BEFORE any runner is dispatched, with a friendly Chinese refusal. errorMessage carries the redirect-to-Cursor message."
+  },
+  {
+    "id": "P1_SCRAPE_NEWS",
+    "tier": "P1",
+    "category": "scrape_news",
+    "prompt": "搜索 2026 年 5 月最新的人工智能行业动态新闻",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "scrape",
+      "maxDurationMs": 90000
+    },
+    "notes": "Search-verb + 'news' triggers scrape lane (Firecrawl /search). Verifier checklist tier min=100 — scrape responses are typically 800+ chars."
+  },
+  {
+    "id": "P1_SCRAPE_PRODUCT",
+    "tier": "P1",
+    "category": "scrape_product",
+    "prompt": "查询 iPhone 16 Pro 官方介绍和价格",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "scrape",
+      "maxDurationMs": 90000
+    },
+    "notes": "Product info — '查询' search verb keeps it in scrape lane (no live interaction needed)."
+  },
+  {
+    "id": "P1_SCRAPE_XHS",
+    "tier": "P1",
+    "category": "scrape_xhs",
+    "prompt": "搜索小红书上关于护肤的热门笔记总结",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "scrape",
+      "maxDurationMs": 120000
+    },
+    "notes": "搜索 + 小红书 (site name) → scrape. Stress-tests Firecrawl's social-platform coverage."
+  },
+  {
+    "id": "P1_SCRAPE_OFFICIAL",
+    "tier": "P1",
+    "category": "scrape_official",
+    "prompt": "查询苹果公司最新一季度财报的关键数据",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "scrape",
+      "maxDurationMs": 120000
+    },
+    "notes": "Official IR data — scrape's bread and butter. Verifier should report multiple grounded URLs from Firecrawl."
+  },
+  {
+    "id": "P1_SCRAPE_NONEXISTENT",
+    "tier": "P1",
+    "category": "scrape_404",
+    "prompt": "总结 https://this-is-definitely-not-a-real-domain-12345.example/article 这篇文章",
+    "expectations": {
+      "mustComplete": false,
+      "terminalStatus": "failed",
+      "executionMode": "scrape",
+      "maxDurationMs": 60000
+    },
+    "notes": "Bogus URL → Firecrawl returns scrape error → runner persists status=failed. Pipeline should still write contract+ledger (with just user_input), verification stays NULL."
+  },
+  {
+    "id": "P1_BROWSER_NAV",
+    "tier": "P1",
+    "category": "browser_nav",
+    "prompt": "打开 https://www.baidu.com 告诉我搜索框的占位提示文字",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "browser",
+      "urlMustMatch": "baidu.com",
+      "maxDurationMs": 180000
+    },
+    "notes": "Real Chinese site nav + element extraction. Light-tier contract should validate finalUrl + grounded URL list."
+  },
+  {
+    "id": "P1_BROWSER_CLICK",
+    "tier": "P1",
+    "category": "browser_click",
+    "prompt": "打开 https://example.com 点击 More information 链接，告诉我跳转后的页面标题",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "browser",
+      "urlMustMatch": "iana.org",
+      "maxDurationMs": 240000
+    },
+    "notes": "Two-step click + read. final_url ledger entry should reflect iana.org, not example.com."
+  },
+  {
+    "id": "P1_BROWSER_FORM_NO_SUBMIT",
+    "tier": "P1",
+    "category": "browser_form_no_submit",
+    "prompt": "打开 https://www.bing.com，把 'AI' 这两个字符输入到搜索框，但不要点击搜索按钮，把输入完成后的状态告诉我",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "browser",
+      "urlMustMatch": "bing.com",
+      "maxDurationMs": 180000
+    },
+    "notes": "Tests the agent obeys the explicit no-submit constraint. Contract.constraints (light tier) auto-includes no_form_submit so verifier would flag if a form_submit ledger entry shows up."
+  },
+  {
+    "id": "P1_BROWSER_LOGIN_PARK",
+    "tier": "P1",
+    "category": "browser_login_park",
+    "prompt": "打开 https://passport.zhihu.com/login 如果需要登录就停下来等用户操作",
+    "expectations": {
+      "mustComplete": false,
+      "terminalStatus": "awaiting_user",
+      "awaitingKind": "login",
+      "executionMode": "browser",
+      "maxDurationMs": 180000
+    },
+    "notes": "Login park gate. After the Phase 1 follow-up fix, supercar park writes executionMode='browser' to result so lane attribution is correct."
+  },
+  {
+    "id": "P1_BROWSER_URL_CHECK",
+    "tier": "P1",
+    "category": "browser_url_check",
+    "prompt": "打开 https://example.com 然后告诉我当前页面的完整 URL 是什么",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "browser",
+      "urlMustMatch": "example.com",
+      "maxDurationMs": 120000
+    },
+    "notes": "Direct URL self-report. The agent's final answer should literally cite the URL it visited; URL grounding should pass cleanly."
+  }
+]

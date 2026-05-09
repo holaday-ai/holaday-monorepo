@@ -61,3 +61,32 @@ fi
 RESTART=$("${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
   "pm2 list | grep holaday-orchestrator | awk '{print \$10}'" | head -1)
 echo "✅ Orchestrator deployed — restart count: $RESTART"
+
+# Phase 1 follow-up — auto-run P0 smoke after every deploy. Failure
+# does NOT block the deploy (smoke runs against a live orchestrator
+# and depends on Anthropic API health which fluctuates). The result
+# is logged + the JSON / markdown report is left on disk for
+# follow-up triage. Skip with SKIP_AUTO_SMOKE=1 (e.g. urgent hotfix
+# where you don't want to wait the ~3min for a full P0 cycle).
+if [[ "${SKIP_AUTO_SMOKE:-0}" == "1" ]]; then
+  echo "→ Auto-smoke skipped (SKIP_AUTO_SMOKE=1)"
+else
+  echo "→ Running P0 smoke (informational; failure does NOT block deploy)"
+  SMOKE_OUT=$("${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+    "cd /opt/holaday-monorepo && \
+     set -a && . apps/orchestrator/.env && set +a && \
+     EVAL_BASE_URL=http://127.0.0.1:4001 \
+     pnpm --filter @holaday/orchestrator eval:smoke 2>&1 | tail -25" \
+    || true)
+  echo "$SMOKE_OUT"
+  if echo "$SMOKE_OUT" | grep -qE '\[eval\] [0-9]+/[0-9]+ passed'; then
+    if echo "$SMOKE_OUT" | grep -qE '\[eval\] 10/10 passed'; then
+      echo "✅ Auto-smoke 10/10 — pipeline healthy"
+    else
+      echo "⚠️  Auto-smoke had failures (see output above) — deploy NOT rolled back"
+      echo "   Likely flaky LLM (Anthropic overloaded) or a real regression — investigate."
+    fi
+  else
+    echo "⚠️  Auto-smoke did not produce a parseable summary line — eval runner may have errored"
+  fi
+fi

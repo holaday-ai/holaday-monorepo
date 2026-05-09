@@ -39,6 +39,7 @@ import type {
   EvalExpectations,
   EvalReport,
 } from './eval-suite.js';
+import { writeEvalSummary } from './eval-summary.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -527,9 +528,29 @@ async function main(): Promise<void> {
   const outPath = resolve(outDir, `${suiteName}-${stamp}.json`);
   await fs.writeFile(outPath, JSON.stringify(report, null, 2));
 
+  // Phase 1 follow-up — EvalOps v1: also produce a markdown
+  // summary alongside the JSON report. DB-driven; best-effort.
+  // Failures here log a warning but don't change the runner's
+  // exit code (the JSON report is the durable artifact).
+  let summaryPath: string | undefined;
+  try {
+    summaryPath = await writeEvalSummary({
+      report,
+      reportPath: outPath,
+      evalUserExternalId: EVAL_USER_EXTERNAL_ID,
+    });
+  } catch (err) {
+    console.warn(
+      `[eval] summary writer crashed (non-blocking): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
   console.log('');
   console.log(`[eval] ${passed}/${results.length} passed (${(totalMs / 1000).toFixed(1)}s)`);
   console.log(`[eval] report: ${outPath}`);
+  if (summaryPath) {
+    console.log(`[eval] summary: ${summaryPath}`);
+  }
 
   process.exit(failed > 0 ? 1 : 0);
 }
