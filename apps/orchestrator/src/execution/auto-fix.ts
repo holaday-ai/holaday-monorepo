@@ -23,6 +23,17 @@ import type { VerificationResult } from './answer-verifier.js';
 
 const URL_RE = /https?:\/\/[^\s,;'")\]>]+/g;
 
+/**
+ * Markdown link `[text](https://...)`. Captured separately from the
+ * bare URL pattern because dropping just the URL leaves
+ * `[text]()` — and the SPA's markdown renderer turns an empty
+ * `href=""` into a self-link to the current page (one of the
+ * Phase-1 user-facing UX bugs). So when autoFix decides to drop
+ * an ungrounded URL inside a markdown link, drop the whole link
+ * shape and keep just the bare text.
+ */
+const MARKDOWN_LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
+
 export type AutoFixKind = 'url_substitute' | 'url_drop' | 'missing_fields_note';
 
 export interface AutoFixOp {
@@ -89,36 +100,61 @@ function fixFabricatedUrls(
   const grounded = ledger.getGroundedUrls();
   const groundedSet = new Set(grounded.map(stripTrailingPunct));
 
-  return {
-    text: text.replace(URL_RE, (raw) => {
-      const url = stripTrailingPunct(raw);
-      if (groundedSet.has(url)) return raw; // already grounded
-      const replacement = pickSimilarUrl(url, grounded);
-      if (replacement) {
-        ops.push({
-          kind: 'url_substitute',
-          detail: `${url} → ${replacement}`,
-        });
-        // Preserve the trailing punctuation that was on `raw`.
-        const tail = raw.slice(url.length);
-        return `${replacement}${tail}`;
-      }
-      // Phase 1 follow-up — no similar grounded URL → DROP the
-      // fabricated URL entirely (no placeholder text). The earlier
-      // "[未验证来源已移除]" placeholder leaked into the rendered
-      // SPA as user-visible noise; with the placeholder removed,
-      // the answer reads as if the model never had the URL,
-      // which matches what we want to communicate.
+  // Pass 1 — markdown links `[text](url)`. Process FIRST so the
+  // bare-URL pass below doesn't see the `(url)` half on its own
+  // and create an empty `[text]()` artifact.
+  let working = text.replace(MARKDOWN_LINK_RE, (_raw, label: string, url: string) => {
+    const cleanUrl = stripTrailingPunct(url);
+    if (groundedSet.has(cleanUrl)) {
+      // URL is grounded — keep the link intact.
+      return `[${label}](${cleanUrl})`;
+    }
+    const replacement = pickSimilarUrl(cleanUrl, grounded);
+    if (replacement) {
       ops.push({
-        kind: 'url_drop',
-        detail: `${url} (no grounded match)`,
+        kind: 'url_substitute',
+        detail: `${cleanUrl} → ${replacement} (in markdown link)`,
       });
-      // Preserve trailing punctuation that was on `raw` so the
-      // surrounding sentence still reads cleanly.
-      return raw.slice(url.length);
-    }),
-    ops,
-  };
+      return `[${label}](${replacement})`;
+    }
+    // No grounded match — collapse the markdown link to bare label
+    // text. Avoids the SPA-renderer "empty href = self-link" bug.
+    ops.push({
+      kind: 'url_drop',
+      detail: `${cleanUrl} (markdown link → plain text "${label}")`,
+    });
+    return label;
+  });
+
+  // Pass 2 — bare URLs left after markdown handling.
+  working = working.replace(URL_RE, (raw) => {
+    const url = stripTrailingPunct(raw);
+    if (groundedSet.has(url)) return raw; // already grounded
+    const replacement = pickSimilarUrl(url, grounded);
+    if (replacement) {
+      ops.push({
+        kind: 'url_substitute',
+        detail: `${url} → ${replacement}`,
+      });
+      // Preserve the trailing punctuation that was on `raw`.
+      const tail = raw.slice(url.length);
+      return `${replacement}${tail}`;
+    }
+    // Phase 1 follow-up — no similar grounded URL → DROP the
+    // fabricated URL entirely (no placeholder text). The earlier
+    // "[未验证来源已移除]" placeholder leaked into the rendered
+    // SPA as user-visible noise; with the placeholder removed,
+    // the answer reads as if the model never had the URL.
+    ops.push({
+      kind: 'url_drop',
+      detail: `${url} (no grounded match)`,
+    });
+    // Preserve trailing punctuation that was on `raw` so the
+    // surrounding sentence still reads cleanly.
+    return raw.slice(url.length);
+  });
+
+  return { text: working, ops };
 }
 
 /**

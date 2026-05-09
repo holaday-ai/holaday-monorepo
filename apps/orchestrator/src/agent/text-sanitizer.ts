@@ -61,11 +61,92 @@ const ORPHAN_TAG_RE = new RegExp(
  * legitimate short hash-like strings.
  */
 const BASE64_DATA_URL_RE = /data:image\/[a-zA-Z]+;base64,[A-Za-z0-9+/=]+/g;
-// Standalone bare base64 — surrounded by whitespace (or string ends).
-// Capture the boundary whitespace so the replacement preserves the
-// paragraph break the blob sat between, instead of welding the
-// surrounding text together.
-const STANDALONE_BASE64_RE = /(^|\s)([A-Za-z0-9+/=]{200,})(\s|$)/g;
+
+/**
+ * Image-format magic-byte base64 prefixes. When the agent's tool
+ * response leaks into the visible answer, the JPEG `/9j/` (or PNG
+ * `iVBORw0KGgo`, GIF `R0lGOD`, WEBP `UklGR`) prefix is the only
+ * portable way to recognise embedded screenshots regardless of
+ * quoting context. Catches both bare runs and quoted runs inside
+ * a JSON `"data":"..."` field.
+ */
+const IMAGE_MARKER_BASE64_RE =
+  /(?:\/9j\/|iVBORw0KGgo|R0lGOD[a-zA-Z0-9]+|UklGR)[A-Za-z0-9+/=]{20,}/g;
+
+/**
+ * JSON-quoted screenshot payload — the wrapping `"data":"..."` plus
+ * the base64 string. Stripped wholesale so the surrounding JSON
+ * doesn't end up with a half-removed string literal.
+ */
+const QUOTED_IMAGE_DATA_RE =
+  /"data"\s*:\s*"(?:\/9j\/|iVBORw0KGgo|R0lGOD|UklGR)[A-Za-z0-9+/=]*"/g;
+
+/**
+ * Standalone bare base64 — surrounded by whitespace (or string
+ * ends). Threshold lowered from 200 to 50 chars to catch the
+ * smaller payloads observed in production. Capture the boundary
+ * whitespace so the replacement preserves paragraph breaks.
+ */
+const STANDALONE_BASE64_RE = /(^|\s)([A-Za-z0-9+/=]{50,})(\s|$)/g;
+
+/**
+ * Tool-response JSON markers — substrings whose presence inside
+ * a `{...}` block strongly signals "this is a tool response, not
+ * narrative". Used by `stripToolJsonBlocks()` to decide whether
+ * to drop a JSON block.
+ */
+const TOOL_RESPONSE_MARKERS_RE =
+  /"(?:status|content|screenshot|base64)"|"type"\s*:\s*"image"|"data"\s*:\s*"(?:\/9j\/|iVBORw0KGgo|R0lGOD|UklGR)/i;
+
+/**
+ * Brace-counted tool-response JSON stripper. Walks the input,
+ * finds every `{...}` (handles arbitrary nesting), and drops the
+ * block when it contains a tool-response marker. Native string
+ * scan — no regex backtracking, O(n) in input. Bounded at 50_000
+ * chars per block to defend against pathological input.
+ *
+ * Why brace-counted instead of regex: the JSON BOSS observed has
+ * 2+ levels of nesting (`{"content":{"data":"..."}}`); JS regex
+ * doesn't recurse, so a flat `\{[^{}]*\}` only catches the
+ * innermost block and a marker-bearing outer block survives the
+ * pass.
+ */
+function stripToolJsonBlocks(text: string): string {
+  const MAX_BLOCK = 50_000;
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '{') {
+      const start = i;
+      let depth = 1;
+      let j = i + 1;
+      while (j < text.length && depth > 0 && j - start < MAX_BLOCK) {
+        const c = text[j];
+        if (c === '{') depth++;
+        else if (c === '}') depth--;
+        j++;
+      }
+      if (depth !== 0) {
+        // Unbalanced / truncated — bail conservatively and keep the
+        // tail untouched so a syntax glitch doesn't eat real text.
+        out += text.slice(start);
+        return out;
+      }
+      const block = text.slice(start, j);
+      if (TOOL_RESPONSE_MARKERS_RE.test(block)) {
+        // Drop the block entirely; iterator continues at j.
+      } else {
+        out += block;
+      }
+      i = j;
+    } else {
+      out += ch;
+      i++;
+    }
+  }
+  return out;
+}
 
 /**
  * Stop-reason / model-internal markers that occasionally surface in
@@ -98,11 +179,29 @@ const TRIPLE_BLANK_RE = /\n{3,}/g;
 export function sanitizeFinalText(input: string | null | undefined): string {
   if (!input) return '';
   let text = input;
+  // 1. XML tool envelopes (paired + orphan).
   text = text.replace(PAIRED_TAG_RE, '');
   text = text.replace(ORPHAN_TAG_RE, '');
+  // 2. Tool-response JSON blocks — handled BEFORE the bare-base64
+  //    pass because the JSON wrapping (`"data": "..."`) has no
+  //    whitespace boundary, so STANDALONE_BASE64_RE wouldn't catch
+  //    the embedded payload.
+  text = stripToolJsonBlocks(text);
+  // 3. Quoted JSON image-data field — survives if the surrounding
+  //    JSON didn't have a marker that triggered stripToolJsonBlocks
+  //    (rare, but cheap to belt-and-braces).
+  text = text.replace(QUOTED_IMAGE_DATA_RE, '');
+  // 4. Inline image-magic-byte base64 — anywhere, regardless of
+  //    quoting context. Catches the payload on its own line, in
+  //    a sentence, mid-paragraph.
+  text = text.replace(IMAGE_MARKER_BASE64_RE, '');
+  // 5. data: URLs (image/* with base64).
   text = text.replace(BASE64_DATA_URL_RE, '');
+  // 6. Standalone 50+ char base64 runs (whitespace-bounded).
   text = text.replace(STANDALONE_BASE64_RE, '$1$3');
+  // 7. Stop-reason / model-internal markers.
   for (const re of STOP_REASON_MARKERS) text = text.replace(re, '');
+  // 8. Collapse whitespace gaps left by the strips.
   text = text.replace(TRIPLE_BLANK_RE, '\n\n');
   return text.trim();
 }

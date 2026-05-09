@@ -47,8 +47,8 @@ describe('sanitizeFinalText — base64 / data URLs', () => {
     expect(sanitizeFinalText(input)).toBe('截图： 后续内容');
   });
 
-  it('strips a bare 200+ char base64 run on its own line, keeps paragraph break', () => {
-    const blob = 'A'.repeat(250);
+  it('strips a bare 50+ char base64 run on its own line, keeps paragraph break', () => {
+    const blob = 'A'.repeat(80);
     const input = `text before\n${blob}\ntext after`;
     expect(sanitizeFinalText(input)).toBe('text before\n\ntext after');
   });
@@ -56,6 +56,61 @@ describe('sanitizeFinalText — base64 / data URLs', () => {
   it('keeps short alphanumeric-looking strings (not real base64)', () => {
     const input = '调用 ID: abc123def456 完成';
     expect(sanitizeFinalText(input)).toBe('调用 ID: abc123def456 完成');
+  });
+
+  it('strips bare JPEG magic-byte base64 anywhere (no whitespace boundary needed)', () => {
+    const blob = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQE';
+    expect(sanitizeFinalText(`截图payload${blob}内容`)).toBe('截图payload内容');
+  });
+
+  it('strips bare PNG magic-byte base64', () => {
+    const blob = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA';
+    // Non-base64 chars on each side ('!' / '!') so the regex
+    // doesn't greedily eat them.
+    expect(sanitizeFinalText(`prefix!${blob}!suffix`)).toBe('prefix!!suffix');
+  });
+});
+
+describe('sanitizeFinalText — tool-response JSON blocks (BOSS fixture)', () => {
+  it('strips the BOSS-observed nested JSON pattern', () => {
+    // Verbatim shape from tsk_937Rm6oH7dsSB4SXmLw5L (truncated base64
+    // for test brevity; the real one was ~10 KB).
+    const dirty =
+      '抓取到的内容是2022-2024年的行业分析文章，不是小红书平台上的实时笔记数据。我来直接去小红书搜索，给你看真实的热门内容。\n\n让我打开小红书搜索露营装备。\n\n{"status": "success", "content": {"type": "image", "data": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgMDA"}}';
+    const out = sanitizeFinalText(dirty);
+    expect(out).not.toContain('"status"');
+    expect(out).not.toContain('"data"');
+    expect(out).not.toContain('/9j/');
+    expect(out).not.toContain('AAQSkZJRg');
+    expect(out).toContain('抓取到的内容是2022-2024年的行业分析文章');
+    expect(out).toContain('让我打开小红书搜索露营装备');
+  });
+
+  it('strips JSON with "status":"success" + "content" markers', () => {
+    const input = 'before {"status":"success","content":"some short text"} after';
+    expect(sanitizeFinalText(input)).toBe('before  after');
+  });
+
+  it('strips JSON with "type":"image" marker (deeply nested)', () => {
+    const input = 'narrative {"a":{"b":{"type":"image","data":"x"}}} more narrative';
+    expect(sanitizeFinalText(input)).toBe('narrative  more narrative');
+  });
+
+  it('keeps a JSON block that has no tool-response markers', () => {
+    const input = '配置示例：{"theme":"dark","fontSize":14}';
+    expect(sanitizeFinalText(input)).toBe('配置示例：{"theme":"dark","fontSize":14}');
+  });
+
+  it('handles unbalanced braces conservatively (keeps tail intact)', () => {
+    const input = 'good text {"status":"success"';
+    // Unbalanced — bail out, keep tail. Avoids silently chewing
+    // the remainder of the input on a syntax glitch.
+    expect(sanitizeFinalText(input)).toBe('good text {"status":"success"');
+  });
+
+  it('strips quoted "data":"..." even outside a marker-recognised wrapper', () => {
+    const input = 'narrative "data":"/9j/4AAQSkZJRgABAQA" more';
+    expect(sanitizeFinalText(input)).toBe('narrative  more');
   });
 });
 

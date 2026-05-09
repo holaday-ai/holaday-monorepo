@@ -101,6 +101,51 @@ describe('autoFix — URL fabrication', () => {
     expect(out.fixed).toContain('See  for context.');
   });
 
+  it('markdown link with ungrounded URL collapses to plain text (no empty href)', () => {
+    // BOSS Phase 1 follow-up — the SPA's markdown renderer turns
+    // an empty `href=""` into a self-link. autoFix must drop the
+    // whole `[text](url)` pair instead of leaving `[text]()`.
+    const answer =
+      '推荐资源：[LearnPython.org](https://learnpython.org) 是一个不错的入门站点。' +
+      ' '.repeat(40) + 'x'.repeat(40);
+    const { contract, ledger, verification } = setup(answer, [
+      'https://example.com/help/index',
+    ]);
+    const out = autoFix({ contract, ledger, verification, answerText: answer });
+    expect(out.fixed).toContain('LearnPython.org');
+    expect(out.fixed).not.toContain('[LearnPython.org]');
+    expect(out.fixed).not.toContain('learnpython.org');
+    expect(out.fixed).not.toContain('](https://');
+    expect(out.fixed).not.toContain('[未验证');
+    expect(out.applied[0]!.kind).toBe('url_drop');
+    expect(out.applied[0]!.detail).toContain('markdown link');
+  });
+
+  it('markdown link with grounded URL stays intact', () => {
+    const answer =
+      '查阅 [help index](https://example.com/help/index) 了解详情。' +
+      'x'.repeat(60);
+    const { contract, ledger, verification } = setup(answer, [
+      'https://example.com/help/index',
+    ]);
+    const out = autoFix({ contract, ledger, verification, answerText: answer });
+    expect(out.fixed).toContain('[help index](https://example.com/help/index)');
+    expect(out.applied).toHaveLength(0);
+  });
+
+  it('markdown link with similar grounded URL gets substituted', () => {
+    const answer =
+      '查阅 [help](https://example.com/help/wrong) 了解详情。' +
+      'x'.repeat(60);
+    const { contract, ledger, verification } = setup(answer, [
+      'https://example.com/help/index',
+    ]);
+    const out = autoFix({ contract, ledger, verification, answerText: answer });
+    expect(out.fixed).toContain('[help](https://example.com/help/index)');
+    expect(out.fixed).not.toContain('wrong');
+    expect(out.applied[0]!.kind).toBe('url_substitute');
+  });
+
   it('preserves trailing punctuation when substituting', () => {
     const answer =
       'See (https://example.com/help/wrong). It explains. ' + 'x'.repeat(60);
