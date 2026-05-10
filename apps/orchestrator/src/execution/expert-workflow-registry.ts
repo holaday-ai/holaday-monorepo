@@ -91,6 +91,23 @@ export function matchExpertWorkflow(
 }
 
 /**
+ * Lookup by stable workflow id. Used by the verifier to resolve
+ * the typed workflow from a persisted `ExecutionContract.
+ * expertWorkflowId` without re-running the matcher (the matcher
+ * needs the original intent text, which is awkward to reconstruct
+ * mid-pipeline). Returns null when the id isn't registered —
+ * caller falls back to non-workflow verification.
+ */
+export function getExpertWorkflowById(
+  workflowId: string,
+): ExpertWorkflowContract | null {
+  for (const w of WORKFLOWS) {
+    if (w.workflowId === workflowId) return w;
+  }
+  return null;
+}
+
+/**
  * Test-only — get all registered workflows for shape introspection.
  */
 export function _getRegisteredWorkflowsForTest(): readonly ExpertWorkflowContract[] {

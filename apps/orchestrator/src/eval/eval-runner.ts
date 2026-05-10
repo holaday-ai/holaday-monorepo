@@ -390,19 +390,38 @@ async function runStandardCase(
       const turn = caseDef.replySequence[i];
       if (!turn) continue;
       const turnLabel = `replySequence[${i}] `;
+      const turnKind = turn.kind ?? 'reply';
       try {
-        await callMutation(
-          'tasks.reply',
-          {
-            taskId,
-            message: turn.message,
-            ...(turn.fileIds ? { fileIds: turn.fileIds } : {}),
-          },
-          token,
-        );
+        if (turnKind === 'follow-up') {
+          // tasks.create with replyToTaskId — mirrors the SPA's
+          // followup-action chip click. Spawns a NEW task that
+          // inherits the parent's context. Subsequent polls /
+          // validation target the new taskId.
+          const followUp: CreateTaskOut = await callMutation<CreateTaskOut>(
+            'tasks.create',
+            {
+              intent: turn.message,
+              replyToTaskId: taskId,
+              ...(turn.fileIds ? { fileIds: turn.fileIds } : {}),
+            },
+            token,
+          );
+          taskId = followUp.taskId;
+          executionMode = followUp.executionMode ?? executionMode;
+        } else {
+          await callMutation(
+            'tasks.reply',
+            {
+              taskId,
+              message: turn.message,
+              ...(turn.fileIds ? { fileIds: turn.fileIds } : {}),
+            },
+            token,
+          );
+        }
       } catch (err) {
         failures.push(
-          `${turnLabel}tasks.reply threw: ${
+          `${turnLabel}${turnKind === 'follow-up' ? 'tasks.create (follow-up)' : 'tasks.reply'} threw: ${
             err instanceof Error ? err.message : String(err)
           }`,
         );

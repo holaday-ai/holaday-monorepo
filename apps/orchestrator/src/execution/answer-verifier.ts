@@ -29,6 +29,7 @@ import type {
   SuccessCriterion,
 } from './execution-contract.js';
 import type { EvidenceLedger } from './evidence-ledger.js';
+import type { ExpertWorkflowContract } from './expert-workflow-contract.js';
 
 export type FailureLevel = 'fixable' | 'needs_clarification' | 'hard_fail';
 
@@ -57,6 +58,15 @@ export interface VerifyInputs {
   answerText: string;
   /** When the task is browser-mode, the last URL the agent reached. */
   finalUrl?: string;
+  /**
+   * Phase 2 Day 4 — when the contract was built from an expert
+   * workflow, the pipeline resolves the typed contract from the
+   * registry and passes it through. The verifier then runs the
+   * workflow-specific section_presence + source_annotation checks.
+   * Absent for non-workflow tasks → those checks are skipped
+   * entirely (no false positives on translation / browser tasks).
+   */
+  workflowContract?: ExpertWorkflowContract;
 }
 
 const URL_RE = /https?:\/\/[^\s,;'")\]>]+/g;
@@ -117,7 +127,7 @@ const CHINESE_CONSTRAINT_ALIASES: Record<string, string> = {
  * into a Haiku prompt when `contract.tier === 'full'`.
  */
 export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
-  const { contract, ledger, answerText, finalUrl } = inputs;
+  const { contract, ledger, answerText, finalUrl, workflowContract } = inputs;
   const checks: CheckResult[] = [];
 
   // 1. Per-criterion checks.
@@ -134,6 +144,17 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
 
   const numberCheck = checkNumberCrossValidation(ledger);
   if (numberCheck) checks.push(numberCheck);
+
+  // 3. Workflow-specific checks (only when an expert workflow drove
+  //    this task). Section presence + source annotation. No-op for
+  //    every non-workflow task — translation / browser / scrape
+  //    tiers never see the workflow contract.
+  if (workflowContract) {
+    const sectionCheck = checkWorkflowSectionPresence(workflowContract, answerText);
+    if (sectionCheck) checks.push(sectionCheck);
+    const annotationCheck = checkWorkflowSourceAnnotation(workflowContract, answerText);
+    if (annotationCheck) checks.push(annotationCheck);
+  }
 
   const passed = checks.every((c) => c.passed);
   const result: VerificationResult = {
@@ -546,6 +567,185 @@ function withinTolerance(a: number, b: number): boolean {
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// ---------------------------------------------------------------------------
+// Workflow-specific checks (Phase 2 Day 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Source-annotation glyphs the workflow report prompt pins. The
+ * verifier only requires that AT LEAST ONE of these markers
+ * appears inside a section that demanded annotation. Stricter
+ * counting (e.g. every numeric line must have one) belongs in the
+ * LLM tier — too noisy for deterministic.
+ */
+const SOURCE_ANNOTATION_GLYPHS = ['🟢', '🔵', '🟡', '🔴'] as const;
+
+/**
+ * Strip emoji + leading/trailing whitespace so 抖音's "📊 核心数据"
+ * still matches a model that wrote "核心数据" or "核心数据 📊". The
+ * goal is forgiving title comparison — the model will sometimes
+ * drop the leading icon, sometimes restate it differently. The
+ * core noun phrase is the load-bearing identifier.
+ *
+ * Range covered: BMP emoji block + the supplementary ranges that
+ * cover ✅ ⚠️ 📊 🔍 💡 📈 🟢 etc. Done with codepoint-aware regex
+ * (Unicode property escapes) so we don't list every glyph.
+ */
+function normaliseSectionTitle(s: string): string {
+  return (
+    s
+      .replace(/\p{Extended_Pictographic}/gu, '')
+      // Variation selector (U+FE0F) often follows ✅ etc.
+      .replace(/️/g, '')
+      .replace(/\s+/g, '')
+      .trim()
+  );
+}
+
+/**
+ * Locate the slice of `text` that belongs to a section identified
+ * by `title`. Two-pass approach:
+ *   1. find the title using normalised comparison (forgiving — ignores
+ *      emoji + whitespace differences in the model's heading style)
+ *   2. return the body from the ORIGINAL text so source-annotation
+ *      glyphs (🟢🔵🟡🔴) survive for the annotation check
+ *
+ * Returns null when the title isn't found at all.
+ */
+function extractSectionBody(
+  text: string,
+  title: string,
+  allTitles: readonly string[],
+): string | null {
+  const titleCore = normaliseSectionTitle(title);
+  if (titleCore.length === 0) return null;
+
+  const startIdx = findNormalisedIndex(text, titleCore, 0);
+  if (startIdx === -1) return null;
+
+  // Skip past the original characters that contributed to the
+  // matched title. Original text may have extra emoji or spaces
+  // between the core characters, so probe forward until we've
+  // consumed enough normalised chars.
+  let bodyStart = startIdx;
+  let collected = 0;
+  while (bodyStart < text.length && collected < titleCore.length) {
+    if (normaliseSectionTitle(text[bodyStart]!).length > 0) collected++;
+    bodyStart++;
+  }
+
+  let endIdx = text.length;
+  for (const other of allTitles) {
+    if (other === title) continue;
+    const otherCore = normaliseSectionTitle(other);
+    if (otherCore.length === 0) continue;
+    const idx = findNormalisedIndex(text, otherCore, bodyStart);
+    if (idx !== -1 && idx < endIdx) endIdx = idx;
+  }
+  return text.slice(bodyStart, endIdx);
+}
+
+/**
+ * Find the first index in `text` (original — emoji + whitespace
+ * intact) where the normalised suffix starts with `needleCore`
+ * (already normalised). Returns -1 if no match. Quadratic worst
+ * case but inputs are short.
+ */
+function findNormalisedIndex(
+  text: string,
+  needleCore: string,
+  fromIdx: number,
+): number {
+  if (needleCore.length === 0) return -1;
+  for (let i = fromIdx; i < text.length; i++) {
+    let collected = '';
+    let j = i;
+    while (j < text.length && collected.length < needleCore.length) {
+      collected += normaliseSectionTitle(text[j]!);
+      j++;
+    }
+    if (collected.startsWith(needleCore)) return i;
+  }
+  return -1;
+}
+
+/**
+ * Section-presence check. For every required `ReportSection`,
+ * confirm its title (or the title minus emoji/whitespace) appears
+ * in the answer text. Missing required sections → fixable failure
+ * so autoFix can re-prompt the model to fill the gap. Optional
+ * sections being absent never fails.
+ *
+ * Returns null when the workflow defines zero required sections —
+ * defensive, can't reach with the current douyin-review contract
+ * but keeps the function pure.
+ */
+function checkWorkflowSectionPresence(
+  workflow: ExpertWorkflowContract,
+  answerText: string,
+): CheckResult | null {
+  const required = workflow.reportSections.filter((s) => s.required);
+  if (required.length === 0) return null;
+  const normalisedAnswer = normaliseSectionTitle(answerText);
+  const missing = required.filter(
+    (s) => !normalisedAnswer.includes(normaliseSectionTitle(s.title)),
+  );
+  const passed = missing.length === 0;
+  return {
+    criterionId: 'workflow.section_presence',
+    passed,
+    checker: 'deterministic',
+    detail: passed
+      ? `all ${required.length} required sections present`
+      : `missing required sections: ${missing.map((s) => s.title).join('、')}`,
+    severity: passed ? undefined : 'fixable',
+  };
+}
+
+/**
+ * Source-annotation check. For every section flagged
+ * `sourceAnnotation: true`, confirm at least one annotation glyph
+ * (🟢🔵🟡🔴) appears inside that section's body. A required
+ * section that's missing entirely is already caught by
+ * section_presence — here we vacuous-pass so we don't double-fail.
+ * An optional section that's missing is also vacuous-pass.
+ *
+ * Failure → fixable: autoFix can prompt the model to add source
+ * markers without regenerating the whole report. Returns null
+ * when no section requires annotation (some workflows might not).
+ */
+function checkWorkflowSourceAnnotation(
+  workflow: ExpertWorkflowContract,
+  answerText: string,
+): CheckResult | null {
+  const annotated = workflow.reportSections.filter((s) => s.sourceAnnotation);
+  if (annotated.length === 0) return null;
+  const allTitles = workflow.reportSections.map((s) => s.title);
+  const unannotated: string[] = [];
+  for (const section of annotated) {
+    const body = extractSectionBody(answerText, section.title, allTitles);
+    if (body == null) {
+      // Section absent. If it was required, section_presence will
+      // already have flagged it; here we skip silently so we don't
+      // double-count. If optional, also skip — annotation only
+      // matters when the section exists.
+      continue;
+    }
+    const hasAny = SOURCE_ANNOTATION_GLYPHS.some((g) => body.includes(g));
+    if (!hasAny) unannotated.push(section.title);
+  }
+  const passed = unannotated.length === 0;
+  return {
+    criterionId: 'workflow.source_annotation',
+    passed,
+    checker: 'deterministic',
+    detail: passed
+      ? 'all annotated sections include 🟢/🔵/🟡/🔴 markers'
+      : `sections missing source markers: ${unannotated.join('、')}`,
+    severity: passed ? undefined : 'fixable',
+  };
 }
 
 // ---------------------------------------------------------------------------

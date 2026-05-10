@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { verifyDeterministic } from './answer-verifier.js';
+import { DOUYIN_REVIEW_WORKFLOW } from './expert-workflow-douyin.js';
 import type { ExecutionContract } from './execution-contract.js';
 import { buildContract } from './execution-contract.js';
 import { EvidenceLedger } from './evidence-ledger.js';
@@ -565,5 +566,173 @@ describe('verifyDeterministic — suggestion building', () => {
     expect(result.suggestedFix).toBeDefined();
     expect(result.suggestedFix).toContain('grounded URLs');
     expect(result.suggestedFix).toContain('https://real.example.com/page');
+  });
+});
+
+const fullTierContract = (taskId: string): ExecutionContract =>
+  buildContract({
+    taskId,
+    intent: '复盘抖音直播',
+    executionMode: 'generate',
+    expertWorkflowId: 'douyin-review',
+    requiredInputs: [
+      { name: 'gmv', description: 'GMV', provided: true },
+    ],
+  });
+
+// Compact but realistic — every required section title and at
+// least one annotation glyph per annotated section. Long enough
+// to clear the full-tier word_count threshold (200 chars).
+const COMPLETE_REPORT = [
+  '# 直播复盘报告',
+  '',
+  '## ⚠️ 数据校验',
+  '所有数据已通过交叉校验。',
+  '',
+  '## 📊 核心数据',
+  '- GMV: ¥100000 🟢',
+  '- 订单数: 1250 🟢',
+  '- 客单价: ¥80 🟢',
+  '- UV: 20000 🟢',
+  '- 转化率: 6.25% 🔵 (订单数÷UV)',
+  '',
+  '## 🔍 问题诊断',
+  '主要问题：UV 分布不均 🟢；客单价偏低 🟢；ROI 处于行业平均线 🟡。',
+  '',
+  '## 💡 优化动作',
+  '1. 把主推品 X 从第 3 位上架位调整到第 1 位。',
+  '2. 调整千川投放定向到「下单意向」人群。',
+  '3. 增加直播话术节奏点位，每 15 分钟提及一次促销节点。',
+  '',
+  '## ✅ 下场直播 Checklist',
+  '- [ ] 开播前 30 分钟完成商品上架顺序调整',
+  '- [ ] 主推品话术彩排 3 遍',
+  '- [ ] 千川投放计划开播前 2 小时启动',
+  '- [ ] 下播后 30 分钟内完成数据填报',
+].join('\n');
+
+describe('verifyDeterministic — workflow section_presence + source_annotation (Phase 2 Day 4)', () => {
+  it('non-workflow contract: new checks do not trigger', () => {
+    // Plain checklist contract (no workflow). Even with a totally
+    // unstructured answer, the new checks should not appear in
+    // the result.
+    const contract = buildContract({
+      taskId: 'tsk_no_wf',
+      intent: 'translate to english',
+      executionMode: 'generate',
+    });
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_no_wf'),
+      answerText: 'Hello world. ' + 'x'.repeat(60),
+      // workflowContract intentionally omitted
+    });
+    const sectionCheck = result.checks.find(
+      (c) => c.criterionId === 'workflow.section_presence',
+    );
+    const annotationCheck = result.checks.find(
+      (c) => c.criterionId === 'workflow.source_annotation',
+    );
+    expect(sectionCheck).toBeUndefined();
+    expect(annotationCheck).toBeUndefined();
+    expect(result.passed).toBe(true);
+  });
+
+  it('complete report: section_presence + source_annotation both pass', () => {
+    const contract = fullTierContract('tsk_wf_ok');
+    const ledger = new EvidenceLedger('tsk_wf_ok');
+    ledger.add({
+      fact: 'GMV=100000, 订单数=1250, 客单价=80',
+      sourceType: 'user_input',
+      sourceDetail: 'msg',
+      confidence: 'observed',
+    });
+    const result = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: COMPLETE_REPORT,
+      workflowContract: DOUYIN_REVIEW_WORKFLOW,
+    });
+    const sectionCheck = result.checks.find(
+      (c) => c.criterionId === 'workflow.section_presence',
+    );
+    const annotationCheck = result.checks.find(
+      (c) => c.criterionId === 'workflow.source_annotation',
+    );
+    expect(sectionCheck).toBeDefined();
+    expect(sectionCheck!.passed).toBe(true);
+    expect(annotationCheck).toBeDefined();
+    expect(annotationCheck!.passed).toBe(true);
+  });
+
+  it('missing required section: section_presence fails as fixable', () => {
+    // Drop the "💡 优化动作" section entirely.
+    const truncated = COMPLETE_REPORT.replace(
+      /## 💡 优化动作[\s\S]*?(?=## ✅)/,
+      '',
+    );
+    const contract = fullTierContract('tsk_wf_missing');
+    const ledger = new EvidenceLedger('tsk_wf_missing');
+    ledger.add({
+      fact: 'GMV=100000, 订单数=1250, 客单价=80',
+      sourceType: 'user_input',
+      sourceDetail: 'msg',
+      confidence: 'observed',
+    });
+    const result = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: truncated,
+      workflowContract: DOUYIN_REVIEW_WORKFLOW,
+    });
+    const sectionCheck = result.checks.find(
+      (c) => c.criterionId === 'workflow.section_presence',
+    );
+    expect(sectionCheck).toBeDefined();
+    expect(sectionCheck!.passed).toBe(false);
+    expect(sectionCheck!.detail).toContain('优化动作');
+    expect(sectionCheck!.severity).toBe('fixable');
+    expect(result.passed).toBe(false);
+    expect(result.failureLevel).toBe('fixable');
+  });
+
+  it('annotated section without 🟢🔵🟡🔴: source_annotation fails as fixable', () => {
+    // Strip all glyphs out of the 核心数据 section while keeping
+    // its title intact.
+    const stripped = COMPLETE_REPORT.replace(
+      /## 📊 核心数据[\s\S]*?(?=## 🔍)/,
+      [
+        '## 📊 核心数据',
+        '- GMV: ¥100000',
+        '- 订单数: 1250',
+        '- 客单价: ¥80',
+        '- UV: 20000',
+        '- 转化率: 6.25%',
+        '',
+        '',
+      ].join('\n'),
+    );
+    const contract = fullTierContract('tsk_wf_unannotated');
+    const ledger = new EvidenceLedger('tsk_wf_unannotated');
+    ledger.add({
+      fact: 'GMV=100000, 订单数=1250, 客单价=80',
+      sourceType: 'user_input',
+      sourceDetail: 'msg',
+      confidence: 'observed',
+    });
+    const result = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: stripped,
+      workflowContract: DOUYIN_REVIEW_WORKFLOW,
+    });
+    const annotationCheck = result.checks.find(
+      (c) => c.criterionId === 'workflow.source_annotation',
+    );
+    expect(annotationCheck).toBeDefined();
+    expect(annotationCheck!.passed).toBe(false);
+    expect(annotationCheck!.detail).toContain('核心数据');
+    expect(annotationCheck!.severity).toBe('fixable');
+    expect(result.failureLevel).toBe('fixable');
   });
 });

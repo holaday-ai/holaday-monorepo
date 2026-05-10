@@ -72,6 +72,14 @@ export interface ExecutionContract {
   timeout: number; // seconds
   maxSteps: number;
   createdAt: string; // ISO
+  /**
+   * Phase 2 Day 4 — pass-through of the matched expert workflow id
+   * (`douyin-review` etc.). Set only on full-tier contracts. The
+   * verifier reads this to look up the typed workflow from the
+   * registry and run section-presence / source-annotation checks
+   * against the model's report. Null on non-workflow tiers.
+   */
+  expertWorkflowId?: string | null;
 }
 
 export interface ContractInputs {
@@ -271,6 +279,7 @@ function buildFullTier(inputs: ContractInputs): ExecutionContract {
   // The richer LLM-driven criteria land in the integration step.
   return {
     ...commonHeader(inputs, 'full', 'text'),
+    expertWorkflowId: inputs.expertWorkflowId ?? null,
     successCriteria: [
       {
         id: newCriterionId(),

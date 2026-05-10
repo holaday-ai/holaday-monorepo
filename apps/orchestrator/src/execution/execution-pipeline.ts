@@ -61,6 +61,7 @@ import {
   verifyWithLlm,
   type AnthropicLikeClient,
 } from './llm-verifier.js';
+import { getExpertWorkflowById } from './expert-workflow-registry.js';
 
 // ---------------------------------------------------------------------------
 // Contract registry (module-scope)
@@ -187,16 +188,25 @@ export async function verifyAndFinalize(
   const ledger = getLedger(inputs.taskId);
   if (!contract || !ledger) return NULL_OUTPUT(inputs.answerText);
 
+  // Phase 2 Day 4 — resolve typed expert workflow contract for the
+  // verifier's section_presence + source_annotation checks. Only
+  // hits the registry when the contract was built from a workflow;
+  // null on every other tier so the new checks no-op for them.
+  const workflowContract = contract.expertWorkflowId
+    ? getExpertWorkflowById(contract.expertWorkflowId)
+    : null;
+
   // Layer 1 — deterministic.
   const det = verifyDeterministic({
     contract,
     ledger,
     answerText: inputs.answerText,
     ...(inputs.finalUrl ? { finalUrl: inputs.finalUrl } : {}),
+    ...(workflowContract ? { workflowContract } : {}),
   });
 
   if (!det.passed) {
-    return runFixLoop(contract, ledger, det, inputs);
+    return runFixLoop(contract, ledger, det, inputs, workflowContract);
   }
 
   // Layer 2 — LLM (only when tier=full and deterministic passed).
@@ -213,7 +223,7 @@ export async function verifyAndFinalize(
         client: inputs.client as AnthropicLikeClient,
       });
       if (!llm.passed) {
-        return runFixLoop(contract, ledger, llm, inputs);
+        return runFixLoop(contract, ledger, llm, inputs, workflowContract);
       }
       return { verification: llm, finalText: inputs.answerText };
     } catch (err) {
@@ -241,6 +251,7 @@ function runFixLoop(
   ledger: EvidenceLedger,
   initialVerification: VerificationResult,
   inputs: VerifyInputs,
+  workflowContract: import('./expert-workflow-contract.js').ExpertWorkflowContract | null,
 ): VerifyOutput {
   if (initialVerification.failureLevel !== 'fixable') {
     return { verification: initialVerification, finalText: inputs.answerText };
@@ -269,6 +280,7 @@ function runFixLoop(
     ledger,
     answerText: fix.fixed,
     ...(inputs.finalUrl ? { finalUrl: inputs.finalUrl } : {}),
+    ...(workflowContract ? { workflowContract } : {}),
   });
   if (recheck.passed) {
     return {

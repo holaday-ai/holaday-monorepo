@@ -129,6 +129,17 @@ export interface EvalReplyTurn {
   fileIds?: string[];
   pollAfter?: boolean;
   /**
+   * How to deliver the message:
+   *   - 'reply' (default) — `tasks.reply` against the SAME taskId.
+   *     Used to resume an awaiting_user task with the missing data.
+   *   - 'follow-up' — `tasks.create` with `replyToTaskId` pointing
+   *     at the parent. Used for the SPA's followup-action chips
+   *     (parent already completed; user clicks "生成 SOP" → new
+   *     task with parent context inherited). The runner switches
+   *     subsequent polls to the NEW taskId.
+   */
+  kind?: 'reply' | 'follow-up';
+  /**
    * Optional validation against the post-reply state. Same shape
    * as `case.expectations`. When omitted the turn just advances
    * the conversation without asserting on the outcome.

@@ -1,0 +1,130 @@
+[
+  {
+    "id": "P2_DR_001",
+    "tier": "P2",
+    "category": "douyin_review_complete",
+    "prompt": "复盘抖音直播 GMV ¥100000 UV 20000 订单 1250 客单价 ¥80 转化率 6.25%",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "generate",
+      "mustContainAny": ["核心数据", "问题诊断", "优化动作", "Checklist"],
+      "maxDurationMs": 240000
+    },
+    "notes": "Self-consistent 5-field input: 1250×80=100000 (GMV/客单价 OK), 1250/20000=6.25% (转化率 OK). Workflow runs full pipeline: intake passes → report prompt fires → all 5 required sections (数据校验/核心数据/问题诊断/优化动作/Checklist) emitted. mustContainAny scans summary for the section titles."
+  },
+  {
+    "id": "P2_DR_002",
+    "tier": "P2",
+    "category": "douyin_review_no_data",
+    "prompt": "帮我复盘抖音直播",
+    "expectations": {
+      "mustComplete": false,
+      "terminalStatus": "awaiting_user",
+      "awaitingKind": "clarification",
+      "executionMode": "generate",
+      "mustContainAny": ["GMV", "UV", "订单数", "客单价", "转化率"],
+      "maxDurationMs": 60000
+    },
+    "notes": "Bare intake — every required field missing. Intake gate parks with structured clarification listing all 5 fields. Question text contains the field names so mustContainAny on any one of them will hit. No LLM call → fast (< 60s)."
+  },
+  {
+    "id": "P2_DR_003",
+    "tier": "P2",
+    "category": "douyin_review_partial_data",
+    "prompt": "复盘抖音直播 GMV ¥100000 UV 20000",
+    "expectations": {
+      "mustComplete": false,
+      "terminalStatus": "awaiting_user",
+      "awaitingKind": "clarification",
+      "executionMode": "generate",
+      "mustContainAny": ["订单数", "客单价", "转化率"],
+      "maxDurationMs": 60000
+    },
+    "notes": "Partial intake — 2 of 5 fields supplied, 3 missing. Clarification surfaces the 3 missing field names. Validates that the parser doesn't false-positive when only some fields land."
+  },
+  {
+    "id": "P2_DR_004",
+    "tier": "P2",
+    "category": "douyin_review_arithmetic_conflict",
+    "prompt": "复盘抖音直播 GMV ¥200000 订单 500 客单价 ¥50 UV 10000 转化率 5%",
+    "expectations": {
+      "mustComplete": false,
+      "terminalStatus": "awaiting_user",
+      "awaitingKind": "clarification",
+      "executionMode": "generate",
+      "mustContainAny": ["400", "偏差", "矛盾", "不一致"],
+      "maxDurationMs": 60000
+    },
+    "notes": "Arithmetic conflict — GMV/订单 = 400, but declared 客单价 = 50 (drift 700% over the 20% tolerance). Intake gate's gmv_order_price validator catches it; surfaces ¥400 vs ¥50 in the clarification message. UV/转化率 added to keep 5/5 fields present so we test the validator path, not the missing-fields path."
+  },
+  {
+    "id": "P2_DR_005",
+    "tier": "P2",
+    "category": "douyin_review_natural_language",
+    "prompt": "复盘抖音直播：昨天播了4小时 卖了15万 来了2万人 下了800单 客单价188 转化率4%",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "generate",
+      "mustContainAny": ["核心数据", "问题诊断"],
+      "maxDurationMs": 240000
+    },
+    "notes": "Natural-language hand-pasted form. Parser must extract: GMV=15万 (150000), UV=2万 (20000), 订单=800, 客单价=188, 转化率=4%. Cross-checks: 800×188=150400 ≈ 150000 ✓; 800/20000=4% ✓. Validates regex patterns handle 万 suffix + free-form word order."
+  },
+  {
+    "id": "P2_DR_006",
+    "tier": "P2",
+    "category": "douyin_review_with_ad_spend",
+    "prompt": "复盘抖音直播 GMV ¥150000 UV 15000 订单 1500 客单价 ¥100 转化率 10% 千川消耗 ¥30000 ROI 1:5",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "generate",
+      "mustContainAny": ["千川", "ROI", "投放"],
+      "maxDurationMs": 240000
+    },
+    "notes": "Full 5 required + 2 optional (千川消耗 + ROI). Self-consistent: 1500×100=150000, 1500/15000=10%, 150000/30000=5 (ROI 1:5 ✓). Report should reference 千川/ROI/投放 in the optimization or 核心数据 section since both are now in extracted data."
+  },
+  {
+    "id": "P2_DR_007",
+    "tier": "P2",
+    "category": "douyin_review_invalid_conversion",
+    "prompt": "复盘抖音直播 GMV ¥100000 UV 20000 订单 1250 客单价 ¥80 转化率 150%",
+    "expectations": {
+      "mustComplete": false,
+      "terminalStatus": "awaiting_user",
+      "awaitingKind": "clarification",
+      "executionMode": "generate",
+      "mustContainAny": ["100%", "核实", "转化率"],
+      "maxDurationMs": 60000
+    },
+    "notes": "conversion_sanity validator catches 转化率=150% > 100%. Other 4 fields all match (1250×80=100000), so the sole failure is the conversion sanity check. The clarification must explain that 转化率 should be 0-100% and prompt for口径clarification."
+  },
+  {
+    "id": "P2_DR_008",
+    "tier": "P2",
+    "category": "douyin_review_followup_sop",
+    "prompt": "复盘抖音直播 GMV ¥100000 UV 20000 订单 1250 客单价 ¥80 转化率 6.25%",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "generate",
+      "maxDurationMs": 240000
+    },
+    "replySequence": [
+      {
+        "kind": "follow-up",
+        "message": "基于这次抖音直播复盘的诊断和优化建议，帮我生成一份详细的下场直播 SOP，包含开播前准备、节奏节点、话术框架。",
+        "expectations": {
+          "mustComplete": true,
+          "terminalStatus": "completed",
+          "executionMode": "generate",
+          "mustContainAny": ["开播前", "话术", "节奏", "checklist"],
+          "maxDurationMs": 240000
+        }
+      }
+    ],
+    "notes": "Two-task flow mirroring SPA chip click: parent completes the douyin review, follow-up uses tasks.create with replyToTaskId (kind='follow-up'). The legacy expertWorkflow matcher requires 抖音+直播+复盘 buckets; including 抖音直播复盘 in the message ensures parent context (with extracted data) is prepended to runGenerateTask. The new typed matcher then re-fires, re-parses parent data, regenerates the report — the next_stream_checklist section serves as the SOP. Validates that followUpAction chips can produce SOP-style output via the existing workflow."
+  }
+]
