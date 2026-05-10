@@ -43,6 +43,15 @@ export interface SiteDismissPatterns {
    *   - cookie banner: "同意" / "全部接受" / "Accept all"
    *   - 建议下载 App overlay: "稍后再说" / "暂不下载"
    *   - age gate: "已满18岁" / "I am over 18"
+   *
+   * **Caution for `requiresAuth: true` sites:** do NOT include
+   * "继续访问" / "继续浏览" / "continue as guest" / similar bypass-
+   * the-login-wall buttons. xiaohongshu's login overlay has a
+   * "继续浏览" button that drops the user into a content-free guest
+   * shell — clicking it bypasses the auth detector and lets the
+   * model write a summary as if the page rendered fine
+   * (P3_AUTH_006 regression). Stick to unambiguous "close app-
+   * download prompt" / "close cookie banner" texts.
    */
   cookieBannerTexts?: readonly string[];
   ageGateTexts?: readonly string[];

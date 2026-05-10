@@ -25,12 +25,13 @@ export const XIAOHONGSHU_SITE_CONFIG: SiteConfig = {
   },
   dismiss: {
     cookieBannerTexts: ['同意', '全部接受', 'Accept all'],
-    popupDismissTexts: [
-      '关闭',
-      '稍后再说',
-      '暂不下载',
-      '继续访问',
-      '继续浏览',
-    ],
+    // Phase 3 R2 follow-up — DO NOT include "继续访问" / "继续浏览"
+    // here. xiaohongshu's login overlay has a "继续浏览" button that
+    // dismisses the login wall and serves a guest-mode shell with no
+    // real content. Clicking it (P3_AUTH_006 regression) lets the
+    // model write a summary as if the page rendered fine, defeating
+    // the auth detector. Only keep buttons that are unambiguously
+    // about download-app prompts or cookie banners.
+    popupDismissTexts: ['关闭', '稍后再说', '暂不下载'],
   },
 };
