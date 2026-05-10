@@ -1,3 +1,9 @@
+# Claude Code per-session artifacts (locks / log buffers / settings.local).
+# Skill / agent / command definitions stay tracked elsewhere; only ephemeral
+# files in the worktree's `.claude/` show up here.
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+
 # Dependencies
 node_modules/
 .pnpm-store/
