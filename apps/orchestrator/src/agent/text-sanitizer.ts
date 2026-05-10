@@ -169,6 +169,35 @@ const STOP_REASON_MARKERS = [
 const TRIPLE_BLANK_RE = /\n{3,}/g;
 
 /**
+ * Orphan JSON fragment line. After `stripToolJsonBlocks` bails out
+ * on unbalanced braces (conservative: keeps the tail intact), a
+ * line like `{"image": "` (no closing `}`) survives. This regex
+ * line-strips any line that:
+ *   - starts with `{"<marker_key>"` (after optional whitespace)
+ *   - has no `}` until end of line (so it's an orphan opener,
+ *     not a fully-closed JSON object the user might have written
+ *     intentionally)
+ *
+ * Marker keys are the same set TOOL_RESPONSE_MARKERS_RE uses.
+ * Multiline + case-insensitive flags so it sweeps every line in
+ * one pass.
+ */
+const ORPHAN_JSON_FRAGMENT_LINE_RE =
+  /^[ \t]*\{"(?:status|content|type|data|image|screenshot|base64)"[^}\n]*$/gim;
+
+/**
+ * Stray closing brace on its own line — common leftover after the
+ * inner block of nested JSON gets stripped. e.g. input
+ * `{"outer":{"image":"x"}}` → stripToolJsonBlocks removes the
+ * outer too (markers present); but for `{"outer":{"image":"x"}}`
+ * where the OUTER doesn't have markers the scanner kept the
+ * outer block. With the inner stripped post-hoc, the user might
+ * see `}\n}` orphans. This kills purely brace/bracket lines that
+ * are clearly cleanup leftovers (≤6 chars, only braces/brackets).
+ */
+const STRAY_CLOSER_LINE_RE = /^[ \t]*[\}\]]{1,3}[\s,]*$/gm;
+
+/**
  * Strip every known scaffold pattern, then collapse whitespace
  * gaps. Returns the cleaned text. Idempotent: sanitising an
  * already-sanitised string returns the same string.
@@ -201,7 +230,15 @@ export function sanitizeFinalText(input: string | null | undefined): string {
   text = text.replace(STANDALONE_BASE64_RE, '$1$3');
   // 7. Stop-reason / model-internal markers.
   for (const re of STOP_REASON_MARKERS) text = text.replace(re, '');
-  // 8. Collapse whitespace gaps left by the strips.
+  // 8. Orphan JSON fragments — lines like `{"image": "` that the
+  //    brace-counted scanner conservatively preserved when the
+  //    closing brace was missing. Phase 1 follow-up: BOSS observed
+  //    these surviving in production output.
+  text = text.replace(ORPHAN_JSON_FRAGMENT_LINE_RE, '');
+  // 9. Stray brace/bracket-only lines left over from a stripped
+  //    inner block whose outer wrapper was kept.
+  text = text.replace(STRAY_CLOSER_LINE_RE, '');
+  // 10. Collapse whitespace gaps left by the strips.
   text = text.replace(TRIPLE_BLANK_RE, '\n\n');
   return text.trim();
 }

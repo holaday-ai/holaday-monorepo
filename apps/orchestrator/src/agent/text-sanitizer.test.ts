@@ -114,6 +114,61 @@ describe('sanitizeFinalText — tool-response JSON blocks (BOSS fixture)', () =>
   });
 });
 
+describe('sanitizeFinalText — orphan JSON fragment lines (BOSS sweep)', () => {
+  // BOSS Phase 1 follow-up: after the brace-counted scanner bails
+  // out on unbalanced braces (conservative), a line like
+  // `{"image": "` survives unchanged. The post-pass line-strip
+  // handles it.
+
+  it('BOSS exact pattern: 人话\\n{"image": "\\n更多人话 → cleaned', () => {
+    const input = '人话\n{"image": "\n更多人话';
+    expect(sanitizeFinalText(input)).toBe('人话\n\n更多人话');
+  });
+
+  it('orphan {"status": " line (no closing brace) → dropped', () => {
+    const input = 'A\n{"status": "still typing\nB';
+    expect(sanitizeFinalText(input)).toBe('A\n\nB');
+  });
+
+  it('orphan {"data": " line gets removed', () => {
+    const input = 'before\n  {"data": "/9j/abcdef\nafter';
+    expect(sanitizeFinalText(input)).toBe('before\n\nafter');
+  });
+
+  it('balanced inline JSON with strong marker on the same line → swept by stripToolJsonBlocks', () => {
+    // The marker set is keyed on tool-response signatures
+    // ("status"/"content"/"screenshot"/"base64", or "type":"image",
+    // or "data":"/9j/..."). A balanced block carrying any of those
+    // gets dropped by step 2.
+    const input = 'before {"status":"success","x":1} after';
+    expect(sanitizeFinalText(input)).toBe('before  after');
+  });
+
+  it('balanced inline JSON whose marker is "image" key alone → KEPT (could be legit)', () => {
+    // {"image":"logo.png"} could be a valid config snippet — the
+    // `"image"` key alone isn't a strong tool-response signal. The
+    // pollution pattern is `"type":"image"` (with that exact value)
+    // or `"data":"/9j/..."` which is unambiguous.
+    const input = 'before {"image":"logo.png"} after';
+    expect(sanitizeFinalText(input)).toBe('before {"image":"logo.png"} after');
+  });
+
+  it('balanced JSON without markers (e.g. config example) is NOT touched', () => {
+    const input = '配置示例：\n{"theme":"dark"}\n说明完毕';
+    expect(sanitizeFinalText(input)).toBe('配置示例：\n{"theme":"dark"}\n说明完毕');
+  });
+
+  it('stray brace-only lines get cleaned up', () => {
+    const input = 'header\n}\nbody';
+    expect(sanitizeFinalText(input)).toBe('header\n\nbody');
+  });
+
+  it('ordinary text containing a curly brace token (no key pattern) → kept', () => {
+    const input = '在公式中 f(x) = {x : x ∈ N} 的写法';
+    expect(sanitizeFinalText(input)).toBe('在公式中 f(x) = {x : x ∈ N} 的写法');
+  });
+});
+
 describe('sanitizeFinalText — stop-reason markers', () => {
   it('strips [STOP_REASON: ...]', () => {
     const input = 'final answer [STOP_REASON: end_turn] done';

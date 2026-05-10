@@ -136,6 +136,73 @@ describe('classifyExecutionMode — explicit skill hint short-circuit', () => {
   });
 });
 
+describe('classifyExecutionMode — strong keyword overrides skill hint (Phase 1 follow-up)', () => {
+  // Phase 1 follow-up — search verbs / URLs / interaction verbs are
+  // STRONG signals that override an installed skill hint. Without
+  // this swap, a user with xiaohongshu skill enabled who typed
+  // "搜索小红书上露营笔记" routed to browser (skill won) and hit a
+  // login wall instead of routing to scrape (Firecrawl /search).
+  // These tests pin the precedence so a future "skill always wins"
+  // regression is caught at unit time. Each test uses a UNIQUE
+  // intent (the prior tests share a module-scope cache keyed only
+  // on intent text).
+
+  it('search-verb signal beats xiaohongshu skill hint → scrape', async () => {
+    const out = await classifyExecutionMode({
+      intent: '搜索小红书上 P1F-A 露营装备笔记',
+      skillId: 'xiaohongshu',
+      logger: fakeLogger(),
+    });
+    expect(out).toBe('scrape');
+  });
+
+  it('search-verb signal beats douyin skill hint → scrape', async () => {
+    const out = await classifyExecutionMode({
+      intent: '查找 P1F-B 抖音热门商品趋势',
+      skillId: 'douyin',
+      logger: fakeLogger(),
+    });
+    expect(out).toBe('scrape');
+  });
+
+  it('URL signal beats douyin skill hint → scrape', async () => {
+    const out = await classifyExecutionMode({
+      intent: '看一下 https://example.com/p1f-c-page',
+      skillId: 'douyin',
+      logger: fakeLogger(),
+    });
+    expect(out).toBe('scrape');
+  });
+
+  it('interaction verb still routes to browser even without skill hint', async () => {
+    const out = await classifyExecutionMode({
+      intent: '在小红书上点赞 P1F-D 这篇笔记',
+      skillId: 'xiaohongshu',
+      logger: fakeLogger(),
+    });
+    expect(out).toBe('browser');
+  });
+
+  it('site name alone (kw:site, NOT strong) → skill hint still wins', async () => {
+    // "小红书 P1F-E" is just a site mention — kw:site is a weaker
+    // signal that defers to the user's explicit skill choice.
+    const out = await classifyExecutionMode({
+      intent: '看看小红书 P1F-E 的产品页',
+      skillId: 'xiaohongshu',
+      logger: fakeLogger(),
+    });
+    expect(out).toBe('browser');
+  });
+
+  it('search-verb without skill hint → still scrape (no behaviour change)', async () => {
+    const out = await classifyExecutionMode({
+      intent: '搜索小红书 P1F-F 露营装备',
+      logger: fakeLogger(),
+    });
+    expect(out).toBe('scrape');
+  });
+});
+
 describe('classifyExecutionMode — scrape route (Firecrawl path)', () => {
   it('search verb + site name → scrape', async () => {
     const out = await classifyExecutionMode({

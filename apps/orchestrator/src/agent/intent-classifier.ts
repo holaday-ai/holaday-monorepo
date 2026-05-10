@@ -222,6 +222,43 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
     return cached.mode;
   }
 
+  // Phase 1 follow-up — strong keyword signals override skill-hint
+  // defaults. Without this swap, a user with the xiaohongshu skill
+  // enabled who typed "搜索小红书上露营笔记" routed to browser (skill
+  // hint won) instead of scrape (search-verb keyword), hit a login
+  // wall, and burned a Brave slot. Three signals are STRONG enough
+  // to override an installed skill hint:
+  //
+  //   kw:interaction — verb explicitly says "drive a live page"
+  //                    (login / click / fill / 登录 / 点击 / ...)
+  //   kw:url         — user pasted a specific URL → scrape that URL
+  //   kw:search-verb — verb explicitly says "search the web"
+  //                    (搜索 / 查找 / 查询 / search / find / ...)
+  //
+  // Weaker signals (kw:site alone, or no decide() match → default
+  // generate) still defer to the skill hint when one is installed.
+  // This preserves the user's explicit "use this skill" intent for
+  // ambiguous prompts while preventing the search-verb foot-gun.
+  const d = decide(intent);
+  const STRONG_SIGNAL_SOURCES = new Set([
+    'kw:interaction',
+    'kw:url',
+    'kw:search-verb',
+  ]);
+  if (STRONG_SIGNAL_SOURCES.has(d.source)) {
+    cacheSet(key, d.mode, d.source);
+    opts.logger.info(
+      {
+        mode: d.mode,
+        source: d.source,
+        ...(d.match ? { match: d.match } : {}),
+        ...(opts.skillId ? { skillIdIgnored: opts.skillId } : {}),
+      },
+      'intent-classifier: decided',
+    );
+    return d.mode;
+  }
+
   if (opts.skillId) {
     const hinted = SKILL_HINTS.get(opts.skillId);
     if (hinted) {
@@ -234,7 +271,6 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
     }
   }
 
-  const d = decide(intent);
   cacheSet(key, d.mode, d.source);
   opts.logger.info(
     {
