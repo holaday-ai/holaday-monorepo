@@ -726,7 +726,13 @@ export const tasksRouter = router({
           outcome = await runGenerateTask({
             taskId,
             userId: ctx.userId,
-            intent: expertWorkflow ? effectiveIntent : input.intent,
+            // Use effectiveIntent (with parent context block when in
+            // a follow-up + workflow preambles) whenever EITHER the
+            // legacy or typed matcher fires. Earlier this only checked
+            // legacy; P2_CT_008 surfaced the gap — typed-only matches
+            // (content-topic / ecom-daily) lost their parent context
+            // on follow-up tasks.create with replyToTaskId.
+            intent: expertWorkflow || typedWorkflow ? effectiveIntent : input.intent,
             skillId:
               gatedRole !== 'none'
                 ? gatedRole
@@ -1003,7 +1009,13 @@ export const tasksRouter = router({
           scrapeOutcome = await runScrapeTask({
             taskId,
             userId: ctx.userId,
-            intent: expertWorkflow ? effectiveIntent : input.intent,
+            // Use effectiveIntent (with parent context block when in
+            // a follow-up + workflow preambles) whenever EITHER the
+            // legacy or typed matcher fires. Earlier this only checked
+            // legacy; P2_CT_008 surfaced the gap — typed-only matches
+            // (content-topic / ecom-daily) lost their parent context
+            // on follow-up tasks.create with replyToTaskId.
+            intent: expertWorkflow || typedWorkflow ? effectiveIntent : input.intent,
             skillId:
               gatedRole !== 'none'
                 ? gatedRole
@@ -1091,7 +1103,13 @@ export const tasksRouter = router({
             generateOutcome = await runGenerateTask({
               taskId,
               userId: ctx.userId,
-              intent: expertWorkflow ? effectiveIntent : input.intent,
+              // Use effectiveIntent (with parent context block when in
+            // a follow-up + workflow preambles) whenever EITHER the
+            // legacy or typed matcher fires. Earlier this only checked
+            // legacy; P2_CT_008 surfaced the gap — typed-only matches
+            // (content-topic / ecom-daily) lost their parent context
+            // on follow-up tasks.create with replyToTaskId.
+            intent: expertWorkflow || typedWorkflow ? effectiveIntent : input.intent,
               skillId:
                 gatedRole !== 'none'
                   ? gatedRole
