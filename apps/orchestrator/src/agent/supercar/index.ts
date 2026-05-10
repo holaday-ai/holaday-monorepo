@@ -4,6 +4,7 @@ export {
   supercarAbort,
   supercarHandoffToGenerate,
   supercarHandleOriginalIntent,
+  hasParkedSupercarHandle,
   type SupercarOutcome,
   type SupercarStatus,
   type SupercarTickEvent,

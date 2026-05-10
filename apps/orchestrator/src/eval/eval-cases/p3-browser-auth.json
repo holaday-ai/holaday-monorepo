@@ -1,0 +1,76 @@
+[
+  {
+    "id": "P3_AUTH_001",
+    "tier": "P2",
+    "category": "auth_login_park_jinritemai",
+    "prompt": "打开 https://compass.jinritemai.com 如果需要登录就停下来",
+    "expectations": {
+      "mustComplete": false,
+      "terminalStatus": "awaiting_user",
+      "awaitingKind": "login",
+      "executionMode": "browser",
+      "mustContainAny": ["登录", "完成登录"],
+      "maxDurationMs": 240000
+    },
+    "notes": "Phase 3 R1 — duplicates P0_006 to validate the state-machine guard fix on a domain we already know triggers a login URL. mustContainAny is more permissive than P0_006 to make the test stable across model phrasings of the synthesised park question."
+  },
+  {
+    "id": "P3_AUTH_002",
+    "tier": "P2",
+    "category": "auth_login_park_zhihu",
+    "prompt": "打开 https://www.zhihu.com/signin 如果需要登录就停下来",
+    "expectations": {
+      "mustComplete": false,
+      "terminalStatus": "awaiting_user",
+      "awaitingKind": "login",
+      "executionMode": "browser",
+      "mustContainAny": ["登录"],
+      "maxDurationMs": 240000
+    },
+    "notes": "Direct nav to zhihu's login page. URL path /signin matches LOGIN_URL_PATH_NEEDLES; the deterministic detector fires regardless of LLM phrasing. Validates the detector is robust across hosts (jinritemai is /login, zhihu is /signin)."
+  },
+  {
+    "id": "P3_AUTH_003",
+    "tier": "P2",
+    "category": "auth_captcha_park",
+    "prompt": "打开 https://httpbin.org/anything/captcha 看看上面写了什么",
+    "expectations": {
+      "mustComplete": false,
+      "terminalStatus": "awaiting_user",
+      "awaitingKind": "captcha",
+      "executionMode": "browser",
+      "mustContainAny": ["验证", "已验证"],
+      "maxDurationMs": 180000
+    },
+    "notes": "URL path /captcha matches CAPTCHA_URL_PATH_NEEDLES. httpbin.org/anything echoes back arbitrary URLs as JSON, so the actual response isn't a real captcha page — but the detector fires on URL alone before content is interpreted. Validates the path-based detector + the captcha-specific park question (mentions '已验证' rather than '已登录')."
+  },
+  {
+    "id": "P3_AUTH_004",
+    "tier": "P2",
+    "category": "auth_permission_park",
+    "prompt": "打开 https://httpbin.org/status/403 看看返回了什么",
+    "expectations": {
+      "mustComplete": false,
+      "terminalStatus": "awaiting_user",
+      "awaitingKind": "permission",
+      "executionMode": "browser",
+      "mustContainAny": ["权限", "继续"],
+      "maxDurationMs": 180000
+    },
+    "notes": "httpbin.org/status/403 returns HTTP 403 explicitly. URL path /403 matches PERMISSION_URL_PATH_NEEDLES (handles the path-only signal); the kind-specific park message says '需要账号权限或会员权限' / '继续' (distinct from login's '已登录'). Validates the permission-wall detection + distinct kind copy."
+  },
+  {
+    "id": "P3_AUTH_005",
+    "tier": "P2",
+    "category": "auth_pool_release_followup",
+    "prompt": "打开 https://example.com 告诉我页面标题",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "browser",
+      "urlMustMatch": "example.com",
+      "maxDurationMs": 240000
+    },
+    "notes": "Sanity check that the per-user Brave pool isn't wedged after the four prior parking cases (P3_AUTH_001..004). If the watchdog + state-guard work, the parked tasks released their per-task Brave on terminal/timeout and this case starts cleanly. Same shape as P0_004 but runs AFTER the parking suite — implicit pool-recovery test. If this case fails with PoolCapacityError or similar, the watchdog isn't releasing properly."
+  }
+]

@@ -104,9 +104,12 @@ export const tasks = mysqlTable(
     awaitingQuestion: text('awaiting_question'),
     /**
      * P2-A — what kind of input the supercar is waiting on. One of
-     * 'clarification' | 'login' | 'captcha' | 'browser_action'. NULL
-     * = legacy row, treated as the safe default ('clarification') by
-     * the SPA. Cleared when the task next moves out of awaiting_user.
+     * 'clarification' | 'login' | 'captcha' | 'permission' |
+     * 'browser_action'. NULL = legacy row, treated as the safe
+     * default ('clarification') by the SPA. Cleared when the task
+     * next moves out of awaiting_user. `permission` (Phase 3 R1)
+     * means a 403 / paywall / VIP gate — login alone won't unstick
+     * it; the user needs an authorised account.
      */
     awaitingKind: varchar('awaiting_kind', { length: 32 }),
     result: json('result'),

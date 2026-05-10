@@ -612,7 +612,7 @@ export const serverSupercarAwaitingUserSchema = z.object({
    * 'clarification' so missing == safe (chat composer only).
    */
   awaitingKind: z
-    .enum(['clarification', 'login', 'captcha', 'browser_action'])
+    .enum(['clarification', 'login', 'captcha', 'permission', 'browser_action'])
     .optional(),
 });
 

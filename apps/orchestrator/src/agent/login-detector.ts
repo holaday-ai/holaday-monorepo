@@ -197,3 +197,232 @@ export function buildLoginParkQuestion(url: string | null | undefined): string {
   }
   return '当前页面需要登录才能继续。完成登录后回复「已登录」我接着干。';
 }
+
+// ---------------------------------------------------------------------------
+// Phase 3 R1 — captcha + permission detection
+// ---------------------------------------------------------------------------
+
+/**
+ * URL substrings that strongly signal a captcha / verification
+ * challenge page. Distinct from login: the user is already
+ * authenticated (or doesn't need to be), but the site is asking
+ * them to prove they're human.
+ */
+const CAPTCHA_URL_PATH_NEEDLES = [
+  '/captcha',
+  '/verify',
+  '/verification',
+  '/challenge',
+  '/recaptcha',
+  '/hcaptcha',
+  '/cf-challenge', // Cloudflare
+  '/_validate',
+  '/anti-bot',
+];
+
+const CAPTCHA_TITLE_NEEDLES = [
+  '验证码',
+  '滑动验证',
+  '滑块',
+  '拼图',
+  '人机验证',
+  'CAPTCHA',
+  'captcha',
+  "i'm not a robot",
+  "i am not a robot",
+  'verify you are human',
+  'cloudflare',
+  'security check',
+  '安全检查',
+  '安全验证',
+];
+
+const CAPTCHA_BODY_NEEDLES = CAPTCHA_TITLE_NEEDLES;
+
+/**
+ * URL / page signals for "you don't have permission" walls — distinct
+ * from a login wall (login-only) and a captcha (prove-you're-human).
+ * Permission walls fire on:
+ *   - HTTP 403 status (caller passes it in via `httpStatus`).
+ *   - URL paths like /403, /forbidden, /access-denied.
+ *   - Page text mentioning "需要授权 / access denied / 付费会员 / VIP".
+ */
+const PERMISSION_URL_PATH_NEEDLES = [
+  '/403',
+  '/forbidden',
+  '/access-denied',
+  '/access_denied',
+  '/permission-denied',
+  '/no-access',
+  '/restricted',
+  '/paywall',
+  '/membership',
+  '/subscribe',
+];
+
+const PERMISSION_TITLE_NEEDLES = [
+  // Chinese
+  '需要授权',
+  '没有权限',
+  '没有访问权限',
+  '权限不足',
+  '付费会员',
+  '会员专享',
+  'VIP',
+  '订阅会员',
+  '需要订阅',
+  '请先订阅',
+  // English
+  'access denied',
+  'permission denied',
+  'forbidden',
+  '403',
+  'subscription required',
+  'subscribe to read',
+  'paywall',
+  'members only',
+  'premium content',
+];
+
+const PERMISSION_BODY_NEEDLES = PERMISSION_TITLE_NEEDLES;
+
+/**
+ * Captcha detector. Same shape as the login detector — URL probe is
+ * cheapest, title next, body last.
+ */
+export function detectCaptchaPage(inputs: LoginCheckInputs): LoginSignal {
+  if (inputs.url) {
+    let path: string | null = null;
+    try {
+      path = new URL(inputs.url).pathname.toLowerCase();
+    } catch {
+      /* swallow */
+    }
+    if (path) {
+      for (const needle of CAPTCHA_URL_PATH_NEEDLES) {
+        if (path.includes(needle)) {
+          return { matched: true, source: 'url-path', match: needle };
+        }
+      }
+    }
+  }
+  if (inputs.title) {
+    const lower = inputs.title.toLowerCase();
+    for (const needle of CAPTCHA_TITLE_NEEDLES) {
+      if (lower.includes(needle.toLowerCase())) {
+        return { matched: true, source: 'title', match: needle };
+      }
+    }
+  }
+  if (inputs.prominentText && inputs.prominentText.length >= 2) {
+    const lower = inputs.prominentText.toLowerCase();
+    for (const needle of CAPTCHA_BODY_NEEDLES) {
+      if (lower.includes(needle.toLowerCase())) {
+        return { matched: true, source: 'body', match: needle };
+      }
+    }
+  }
+  return { matched: false, source: 'none' };
+}
+
+export interface PermissionCheckInputs extends LoginCheckInputs {
+  /**
+   * HTTP status from the most recent navigation. 403 is the
+   * authoritative signal for a permission wall; pass it in when
+   * available so we don't have to read it off page text.
+   */
+  httpStatus?: number | null;
+}
+
+/**
+ * Permission-wall detector. 403 status is the strongest signal
+ * (always fires); URL / title / body match for sites that return
+ * 200 with a "subscribe to read" page.
+ */
+export function detectPermissionWall(
+  inputs: PermissionCheckInputs,
+): LoginSignal {
+  if (inputs.httpStatus === 403) {
+    return { matched: true, source: 'url-host', match: 'http-403' };
+  }
+  if (inputs.url) {
+    let path: string | null = null;
+    try {
+      path = new URL(inputs.url).pathname.toLowerCase();
+    } catch {
+      /* swallow */
+    }
+    if (path) {
+      for (const needle of PERMISSION_URL_PATH_NEEDLES) {
+        if (path.includes(needle)) {
+          return { matched: true, source: 'url-path', match: needle };
+        }
+      }
+    }
+  }
+  if (inputs.title) {
+    const lower = inputs.title.toLowerCase();
+    for (const needle of PERMISSION_TITLE_NEEDLES) {
+      if (lower.includes(needle.toLowerCase())) {
+        return { matched: true, source: 'title', match: needle };
+      }
+    }
+  }
+  if (inputs.prominentText && inputs.prominentText.length >= 2) {
+    const lower = inputs.prominentText.toLowerCase();
+    for (const needle of PERMISSION_BODY_NEEDLES) {
+      if (lower.includes(needle.toLowerCase())) {
+        return { matched: true, source: 'body', match: needle };
+      }
+    }
+  }
+  return { matched: false, source: 'none' };
+}
+
+/**
+ * Build the synthetic park question for a captcha page. Different
+ * copy from login because the action the user takes is different —
+ * they need to solve the puzzle, not enter credentials.
+ */
+export function buildCaptchaParkQuestion(url: string | null | undefined): string {
+  const host = friendlyHost(url);
+  if (host) {
+    return `当前页面（${host}）出现了人机验证（验证码 / 滑块 / 拼图）。请在浏览器中完成验证，回复「已验证」我接着干。`;
+  }
+  return '当前页面出现了人机验证（验证码 / 滑块 / 拼图）。请在浏览器中完成验证，回复「已验证」我接着干。';
+}
+
+/**
+ * Build the synthetic park question for a permission wall. Login
+ * alone won't help — the user needs an authorised account / VIP /
+ * paid subscription. Different action: they need to switch context
+ * or upgrade, not "log in".
+ */
+export function buildPermissionParkQuestion(
+  url: string | null | undefined,
+): string {
+  const host = friendlyHost(url);
+  if (host) {
+    return `当前页面（${host}）需要账号权限或会员权限才能访问。请用有权限的账号在浏览器中打开后，回复「继续」我接着干。`;
+  }
+  return '当前页面需要账号权限或会员权限才能访问。请用有权限的账号在浏览器中打开后，回复「继续」我接着干。';
+}
+
+/**
+ * Pick the appropriate park-question for a given awaitingKind.
+ * Centralised so the agent-loop can call ONE function regardless of
+ * whether the URL probe matched login / captcha / permission.
+ */
+export function buildAuthParkQuestion(
+  kind: 'login' | 'captcha' | 'permission',
+  url: string | null | undefined,
+): string {
+  switch (kind) {
+    case 'login':
+      return buildLoginParkQuestion(url);
+    case 'captcha':
+      return buildCaptchaParkQuestion(url);
+    case 'permission':
+      return buildPermissionParkQuestion(url);
+  }
+}

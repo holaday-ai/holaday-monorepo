@@ -44,8 +44,10 @@ import type { ApifyAdapter } from './adapters/apify.js';
 import type { ZapierAdapter } from './adapters/zapier.js';
 import { translateError } from '../error-translator.js';
 import {
-  buildLoginParkQuestion,
+  buildAuthParkQuestion,
+  detectCaptchaPage,
   detectLoginUrl,
+  detectPermissionWall,
 } from '../login-detector.js';
 import { classifyTaskType, filterTools } from '../tool-registry.js';
 import {
@@ -418,6 +420,7 @@ export type SupercarAwaitingKind =
   | 'clarification'
   | 'login'
   | 'captcha'
+  | 'permission'
   | 'browser_action';
 
 export interface SupercarAwaitingUserEvent {
@@ -720,6 +723,20 @@ export function supercarReply(
   handle.resolveReply = null;
   resolve(message);
   return true;
+}
+
+/**
+ * Phase 3 R1 — pre-check whether a supercar handle exists AND is
+ * currently parked on a user reply. Used by the reply path in
+ * tasks.ts: it needs to know whether the user's reply will be
+ * delivered to a parked supercar (so it can flip the DB row from
+ * `awaiting_user` back to `executing` BEFORE supercarReply wakes the
+ * agent), or whether it should fall through to the generate-resume
+ * path. Pure observer — no side effects.
+ */
+export function hasParkedSupercarHandle(taskId: string): boolean {
+  const handle = handles.get(taskId);
+  return Boolean(handle && handle.resolveReply);
 }
 
 /**
@@ -1626,9 +1643,44 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         } catch {
           /* swallow — best-effort URL snapshot */
         }
+        // Phase 3 R1 — extend the deterministic auth probe from
+        // login-only to login | captcha | permission. Probe in
+        // priority order: permission first (a 403/paywall is the
+        // strongest signal — cleanly distinguishable), then captcha
+        // (page hasn't returned content yet, user must solve a
+        // puzzle), then login (default takeover). Page title is
+        // pulled cheaply if available so captcha / permission text
+        // detection works on pages whose URL doesn't say /captcha.
+        let preParkTitle: string | null = null;
+        try {
+          const livePage = (await executor.getPage()) as unknown as {
+            title?: () => Promise<string> | string;
+          };
+          const t = livePage?.title?.();
+          if (t) preParkTitle = (typeof t === 'string' ? t : await t) ?? null;
+        } catch {
+          /* swallow — best-effort title snapshot */
+        }
+        const permissionSignal = detectPermissionWall({
+          url: preParkUrl,
+          title: preParkTitle,
+        });
+        const captchaSignal = detectCaptchaPage({
+          url: preParkUrl,
+          title: preParkTitle,
+        });
         const loginSignal = detectLoginUrl(preParkUrl);
-        const forcedLoginPark = loginSignal.matched;
-        if (forcedLoginPark || looksLikePendingQuestion(finalText)) {
+        // Pick the FIRST hit from {permission, captcha, login}.
+        // Order matters: a captcha page might also have /login in the
+        // path (post-login captcha verification); we want captcha
+        // copy in that case. Permission walls trump everything (you
+        // can't unlock by retrying or solving a captcha).
+        let forcedAuthKind: 'login' | 'captcha' | 'permission' | null = null;
+        if (permissionSignal.matched) forcedAuthKind = 'permission';
+        else if (captchaSignal.matched) forcedAuthKind = 'captcha';
+        else if (loginSignal.matched) forcedAuthKind = 'login';
+        const forcedAuthPark = forcedAuthKind !== null;
+        if (forcedAuthPark || looksLikePendingQuestion(finalText)) {
           // Park on a user reply. `supercarReply` resolves the promise;
           // `supercarAbort` rejects with a sentinel we swap to
           // cancelled. Capped at the kind-specific timeout below so a
@@ -1657,11 +1709,13 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           // instead of feeding the model's "completed-y" text into
           // classifyAwaitingKind (which would land on 'clarification'
           // → 5min timeout → silently complete under the user's hands).
-          const visibleQuestion = forcedLoginPark
-            ? buildLoginParkQuestion(preParkUrl)
+          const visibleQuestion = forcedAuthPark
+            ? buildAuthParkQuestion(forcedAuthKind!, preParkUrl)
             : stripAwaitingUserMarker(finalText);
           const parkAwaitingKind: ReturnType<typeof classifyAwaitingKind> =
-            forcedLoginPark ? 'login' : classifyAwaitingKind(visibleQuestion);
+            forcedAuthPark
+              ? (forcedAuthKind as ReturnType<typeof classifyAwaitingKind>)
+              : classifyAwaitingKind(visibleQuestion);
           const AWAITING_USER_TIMEOUT_MS =
             parkAwaitingKind === 'clarification'
               ? AWAITING_USER_TIMEOUT_CLARIFICATION_MS

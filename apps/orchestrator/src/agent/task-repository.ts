@@ -289,12 +289,44 @@ export class TaskRepository {
         },
   ): Promise<void> {
     const [taskRow] = await this.db
-      .select({ id: tasks.id })
+      .select({ id: tasks.id, status: tasks.status })
       .from(tasks)
       .where(eq(tasks.externalId, taskExternalId))
       .limit(1);
     if (!taskRow) throw new Error(`task ${taskExternalId} not found in DB`);
     const taskRowId = taskRow.id;
+
+    // Phase 3 R1 — state-machine invariant: once the row is in
+    // `awaiting_user`, ONLY `tasks.reply` can transition it back to
+    // `executing`. Any persist call attempting to overwrite
+    // awaiting_user with completed / failed / paused / cancelled is a
+    // late write from the agent loop after a takeover-window timeout
+    // or from a duplicate persist call. Reject it — the user is still
+    // owed the chance to reply, and the row should reflect the real
+    // user-facing state (parked, awaiting input).
+    //
+    // The legitimate completed→awaiting_user transition isn't allowed
+    // here either; that's for tasks.reply to manage explicitly.
+    // Cross-status writes that ARE allowed:
+    //   - executing → any terminal (the normal happy path)
+    //   - paused → any terminal (cleanup writes)
+    //   - completed/failed/cancelled → same status (idempotent retry,
+    //     drops through to the regular write — DB sees no change)
+    if (taskRow.status === 'awaiting_user') {
+      // persistVisionOutcome's outcome union doesn't include
+      // awaiting_user (that state is written directly via the
+      // onAwaitingUser callback in tasks.ts), so any call landing here
+      // while the row is awaiting_user is by definition trying to
+      // overwrite it with a terminal status. Skip + log.
+      // Caller's `.finally()` still runs (Brave release, pipeline
+      // persist, etc.); the row stays awaiting_user so the user can
+      // still reply or cancel.
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[task-repository] refusing to overwrite awaiting_user → ${outcome.status} for ${taskExternalId} (Phase 3 R1 state guard)`,
+      );
+      return;
+    }
 
     const update: Partial<typeof tasks.$inferInsert> = { status: outcome.status };
     const result: Record<string, unknown> = { tickCount: outcome.tickCount };

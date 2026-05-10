@@ -27,6 +27,7 @@ import type { PlaywrightExecutor } from '../../agent/vision-loop/playwright-exec
 import {
   classifyAsCrossPlatformAutomation,
   classifyAsSimpleSearch,
+  hasParkedSupercarHandle,
   runSupercarTask,
   supercarAbort,
   supercarHandoffToGenerate,
@@ -2066,6 +2067,54 @@ export const tasksRouter = router({
       // get contract + ledger persisted with verification=null.
       let executionVerification: VerificationResult | null = null;
       const browserStartedAt = Date.now();
+      // Phase 3 R1 — outer watchdog. The agent-loop has its OWN
+      // deadline (SUPERCAR_TIMEOUT_MS, default 10 min) but if the
+      // loop wedges (an Anthropic fetch never resolves, a Playwright
+      // command hangs, etc.) the .finally() below never fires and
+      // Brave + the per-task pool slot stay allocated until the
+      // process restarts. The watchdog fires `internalDeadline +
+      // 30s` and force-releases Brave + clears the pool slot. Idempotent
+      // with the .finally release (browser-pool.release on a
+      // non-allocated slot no-ops).
+      const SUPERCAR_TIMEOUT_MS = Number.parseInt(
+        process.env.SUPERCAR_TIMEOUT_MS ?? '600000',
+        10,
+      );
+      const WATCHDOG_GRACE_MS = 30_000;
+      const watchdogTimer = setTimeout(() => {
+        ctx.logger.warn(
+          {
+            taskId,
+            userId: ctx.userId,
+            watchdogMs: SUPERCAR_TIMEOUT_MS + WATCHDOG_GRACE_MS,
+          },
+          'supercar: watchdog fired — forcing brave release (agent-loop may be wedged)',
+        );
+        // Step 1: tell agent-loop to abort. If it's in a non-blocking
+        // state (between API calls / tool steps) it'll exit cleanly
+        // and the .finally below still fires the regular release.
+        try {
+          supercarAbort(taskId);
+        } catch {
+          /* swallow — abort is best-effort */
+        }
+        // Step 2: force-release the per-task Brave even if abort
+        // didn't take. The pool's release method is idempotent: a
+        // second call when the slot is already torn down no-ops.
+        if (didAllocatePool && ctx.browserPool) {
+          void ctx.browserPool
+            .release(taskId, 'watchdog-force-release')
+            .catch((relErr) => {
+              ctx.logger.warn(
+                { err: relErr, taskId, userId: ctx.userId },
+                'pool: watchdog force-release failed',
+              );
+            });
+        }
+      }, SUPERCAR_TIMEOUT_MS + WATCHDOG_GRACE_MS);
+      // Mark the timer as unref'd so it doesn't keep the Node process
+      // alive on shutdown — the pool's own draining handles cleanup.
+      watchdogTimer.unref?.();
       const runFn = () =>
         runSupercarWithRetry(supercarArgs, { userId, taskId, logger: ctx.logger })
           .then(async (outcome) => {
@@ -2454,6 +2503,11 @@ export const tasksRouter = router({
             }
           })
           .finally(() => {
+            // Phase 3 R1 — clear the watchdog now that the runner
+            // settled normally. If it already fired, clearTimeout is
+            // a no-op and the watchdog's release call has already
+            // happened (idempotent with the regular release below).
+            clearTimeout(watchdogTimer);
             // Phase 24 — release the per-task Brave immediately on
             // completion. One task = one Brave; no shared instance,
             // no refcount. The per-user concurrency limit is enforced
@@ -3570,7 +3624,7 @@ export const tasksRouter = router({
         input,
       }): Promise<{
         ok: boolean;
-        state?: 'resumed' | 'stillAwaiting';
+        state?: 'resumed' | 'stillAwaiting' | 'persistFailed';
         handoff?: 'browser';
         handoffTaskId?: string;
       }> => {
@@ -3656,7 +3710,7 @@ export const tasksRouter = router({
             .limit(1);
           if (row?.awaitingQuestion) {
             const k = row.awaitingKind;
-            const validKinds = ['clarification', 'login', 'captcha', 'browser_action'] as const;
+            const validKinds = ['clarification', 'login', 'captcha', 'permission', 'browser_action'] as const;
             const kind =
               typeof k === 'string' && (validKinds as readonly string[]).includes(k)
                 ? (k as (typeof validKinds)[number])
@@ -3677,6 +3731,43 @@ export const tasksRouter = router({
         return { ok: true, state: 'stillAwaiting' as const };
       }
 
+      // Phase 3 R1 — state-machine invariant requires the row to be
+      // in `executing` BEFORE the agent-loop is woken from its
+      // awaiting_user park. Otherwise the agent's next iteration
+      // could complete + call persistVisionOutcome while the row
+      // still says `awaiting_user`, and the new state guard in
+      // task-repository would refuse the completed write.
+      //
+      // Sequence:
+      //   1. AWAIT the DB transition awaiting_user → executing.
+      //   2. Then call supercarReply / supercarHandoffToGenerate to
+      //      wake the agent.
+      //   3. Agent's next persistVisionOutcome sees status=executing,
+      //      writes complete normally.
+      // If the DB write fails we DON'T deliver the reply — the row
+      // would be inconsistent and the agent could complete into a
+      // refused write, leaving the user with a parked task that
+      // never moves.
+      const supercarHasHandle = hasParkedSupercarHandle(input.taskId);
+      if (supercarHasHandle) {
+        try {
+          await ctx.db
+            .update(tasksTable)
+            .set({
+              status: 'executing',
+              awaitingQuestion: null,
+              awaitingKind: null,
+            })
+            .where(eq(tasksTable.externalId, input.taskId));
+        } catch (err) {
+          ctx.logger.error(
+            { err, taskId: input.taskId },
+            'reply: failed to flip awaiting_user → executing; refusing to deliver reply',
+          );
+          return { ok: false, state: 'persistFailed' as const };
+        }
+      }
+
       const delivered =
         replyKind === 'manual_data'
           ? supercarHandoffToGenerate(input.taskId, input.message)
@@ -3686,19 +3777,6 @@ export const tasksRouter = router({
               replyAttachmentBlocks.length > 0 ? replyAttachmentBlocks : undefined,
             );
       if (delivered) {
-        // P1-A — flip status back to 'executing' and clear the
-        // pending question so a refresh during the next iteration
-        // doesn't show the SPA in reply-mode anymore. Pairs with the
-        // onAwaitingUser callback's status='awaiting_user' write.
-        // Best-effort; a DB blip here is recoverable from the next
-        // park / terminal write that persistSupercarOutcome does.
-        ctx.db
-          .update(tasksTable)
-          .set({ status: 'executing', awaitingQuestion: null, awaitingKind: null })
-          .where(eq(tasksTable.externalId, input.taskId))
-          .catch((err) => {
-            ctx.logger.warn({ err, taskId: input.taskId }, 'reply: status resume write failed');
-          });
         return { ok: true, state: 'resumed' as const };
       }
 

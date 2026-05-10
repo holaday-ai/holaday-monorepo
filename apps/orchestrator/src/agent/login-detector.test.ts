@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildAuthParkQuestion,
+  buildCaptchaParkQuestion,
   buildLoginParkQuestion,
+  buildPermissionParkQuestion,
+  detectCaptchaPage,
   detectLoginBody,
   detectLoginPage,
   detectLoginTitle,
   detectLoginUrl,
+  detectPermissionWall,
   friendlyHost,
 } from './login-detector.js';
 
@@ -207,5 +212,89 @@ describe('buildLoginParkQuestion', () => {
   it('falls back to generic phrasing when URL missing', () => {
     expect(buildLoginParkQuestion(null)).toContain('当前页面');
     expect(buildLoginParkQuestion(null)).toContain('登录');
+  });
+});
+
+describe('detectCaptchaPage — Phase 3 R1', () => {
+  it('matches /captcha / /verify / /challenge URL paths', () => {
+    expect(detectCaptchaPage({ url: 'https://example.com/captcha' }).matched).toBe(true);
+    expect(detectCaptchaPage({ url: 'https://example.com/verify?id=1' }).matched).toBe(true);
+    expect(detectCaptchaPage({ url: 'https://example.com/challenge' }).matched).toBe(true);
+    expect(detectCaptchaPage({ url: 'https://example.com/cf-challenge' }).matched).toBe(true);
+  });
+
+  it('matches Chinese title needles (验证码 / 滑动验证 / 拼图)', () => {
+    expect(detectCaptchaPage({ url: 'https://x.com/', title: '请完成验证码' }).matched).toBe(true);
+    expect(detectCaptchaPage({ url: 'https://x.com/', title: '滑动验证' }).matched).toBe(true);
+    expect(detectCaptchaPage({ url: 'https://x.com/', title: '拼图验证' }).matched).toBe(true);
+  });
+
+  it("matches English needles (CAPTCHA / I'm not a robot / Cloudflare)", () => {
+    expect(detectCaptchaPage({ url: 'https://x.com/', title: 'CAPTCHA' }).matched).toBe(true);
+    expect(detectCaptchaPage({ url: 'https://x.com/', title: "I'm not a robot" }).matched).toBe(true);
+    expect(detectCaptchaPage({ url: 'https://x.com/', title: 'Cloudflare security check' }).matched).toBe(true);
+  });
+
+  it('does not match a non-captcha page', () => {
+    expect(detectCaptchaPage({ url: 'https://example.com/articles/42' }).matched).toBe(false);
+    expect(detectCaptchaPage({ url: 'https://example.com/', title: 'Welcome' }).matched).toBe(false);
+  });
+});
+
+describe('detectPermissionWall — Phase 3 R1', () => {
+  it('HTTP 403 status fires regardless of URL', () => {
+    expect(detectPermissionWall({ url: 'https://example.com/articles', httpStatus: 403 }).matched).toBe(true);
+  });
+
+  it('matches /forbidden / /access-denied / /paywall URL paths', () => {
+    expect(detectPermissionWall({ url: 'https://example.com/forbidden' }).matched).toBe(true);
+    expect(detectPermissionWall({ url: 'https://example.com/access-denied' }).matched).toBe(true);
+    expect(detectPermissionWall({ url: 'https://example.com/paywall/article' }).matched).toBe(true);
+  });
+
+  it('matches Chinese permission text (需要授权 / 付费会员 / VIP)', () => {
+    expect(detectPermissionWall({ url: 'https://x.com/', title: '需要授权' }).matched).toBe(true);
+    expect(detectPermissionWall({ url: 'https://x.com/', title: '付费会员专享' }).matched).toBe(true);
+    expect(detectPermissionWall({ url: 'https://x.com/', title: 'VIP 内容' }).matched).toBe(true);
+  });
+
+  it('matches English paywall (subscription required / members only)', () => {
+    expect(detectPermissionWall({ url: 'https://x.com/', title: 'Subscription required' }).matched).toBe(true);
+    expect(detectPermissionWall({ url: 'https://x.com/', title: 'Members only' }).matched).toBe(true);
+  });
+
+  it('does not fire on plain login pages or normal articles', () => {
+    expect(detectPermissionWall({ url: 'https://x.com/login' }).matched).toBe(false);
+    expect(detectPermissionWall({ url: 'https://x.com/articles/42', title: 'Article title' }).matched).toBe(false);
+  });
+});
+
+describe('buildAuthParkQuestion — kind-specific copy', () => {
+  it('login → mentions 登录 + 已登录', () => {
+    const q = buildAuthParkQuestion('login', 'https://compass.jinritemai.com/');
+    expect(q).toContain('登录');
+    expect(q).toContain('已登录');
+    expect(q).toContain('compass.jinritemai.com');
+  });
+
+  it('captcha → mentions 验证 + 已验证', () => {
+    const q = buildAuthParkQuestion('captcha', 'https://example.com/captcha');
+    expect(q).toContain('验证');
+    expect(q).toContain('已验证');
+    expect(q).not.toContain('登录后回复'); // distinct from login copy
+  });
+
+  it('permission → mentions 权限 / 会员 + 继续', () => {
+    const q = buildAuthParkQuestion('permission', 'https://nytimes.com/article');
+    expect(q).toContain('权限');
+    expect(q).toContain('继续');
+  });
+
+  it('all three return distinct messages', () => {
+    const url = 'https://x.com/';
+    const login = buildAuthParkQuestion('login', url);
+    const captcha = buildAuthParkQuestion('captcha', url);
+    const permission = buildAuthParkQuestion('permission', url);
+    expect(new Set([login, captcha, permission]).size).toBe(3);
   });
 });
