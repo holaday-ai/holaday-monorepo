@@ -1,0 +1,129 @@
+[
+  {
+    "id": "P2_ED_001",
+    "tier": "P2",
+    "category": "ecom_daily_complete",
+    "prompt": "电商日报 日期 2026-05-09 营收 30万 订单 1500 客单价 200 UV 15000 转化率 10% 投放消耗 6万 ROI 1:5 退款率 3% 新客数 200",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "generate",
+      "mustContainAny": ["核心数据", "异动诊断", "明日重点", "执行 Checklist"],
+      "maxDurationMs": 240000
+    },
+    "notes": "Full required + 8 optionals, all self-consistent: 1500×200=300000 (revenue/aov ✓), 1500/15000=10% (conv ✓), 300000/60000=5 (ROI ✓), 3% refund sane. Workflow → ready, report covers 4 of 6 required sections."
+  },
+  {
+    "id": "P2_ED_002",
+    "tier": "P2",
+    "category": "ecom_daily_no_data",
+    "prompt": "帮我做电商日报",
+    "expectations": {
+      "mustComplete": false,
+      "terminalStatus": "awaiting_user",
+      "awaitingKind": "clarification",
+      "executionMode": "generate",
+      "mustContainAny": ["日期", "营收"],
+      "maxDurationMs": 60000
+    },
+    "notes": "Bare intent — both required missing. Intake parks listing report_date + revenue. Fast (<60s, no LLM)."
+  },
+  {
+    "id": "P2_ED_003",
+    "tier": "P2",
+    "category": "ecom_daily_partial_data",
+    "prompt": "昨日营收 50万 怎么样",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "generate",
+      "mustContainAny": ["核心数据", "明日重点"],
+      "maxDurationMs": 240000
+    },
+    "notes": "Both required filled (report_date=昨日, revenue=500000) with no optionals. Workflow → ready. Report should still produce all required sections — mostly with '缺少数据' annotations, validating that the prompt handles sparse input gracefully."
+  },
+  {
+    "id": "P2_ED_004",
+    "tier": "P2",
+    "category": "ecom_daily_arithmetic_conflict",
+    "prompt": "日报 2026-05-09 营收 30万 订单 1500 客单价 50 UV 10000 转化率 15%",
+    "expectations": {
+      "mustComplete": false,
+      "terminalStatus": "awaiting_user",
+      "awaitingKind": "clarification",
+      "executionMode": "generate",
+      "mustContainAny": ["数据不一致", "200", "客单价"],
+      "maxDurationMs": 60000
+    },
+    "notes": "revenue/orders = ¥200 ≠ declared aov ¥50 (drift 300%, way over 20% tolerance). revenue_orders_aov validator catches it. Surface message contains '数据不一致：营收 ÷ 订单数 = ¥200，但客单价填的是 ¥50'."
+  },
+  {
+    "id": "P2_ED_005",
+    "tier": "P2",
+    "category": "ecom_daily_invalid_refund",
+    "prompt": "昨日 营收 30万 订单 1500 客单价 200 退款率 150%",
+    "expectations": {
+      "mustComplete": false,
+      "terminalStatus": "awaiting_user",
+      "awaitingKind": "clarification",
+      "executionMode": "generate",
+      "mustContainAny": ["退款率", "100%", "核实"],
+      "maxDurationMs": 60000
+    },
+    "notes": "refund_rate_sanity validator catches 退款率 150% > 100%. Other fields self-consistent (1500×200=300000)."
+  },
+  {
+    "id": "P2_ED_006",
+    "tier": "P2",
+    "category": "ecom_daily_natural_language",
+    "prompt": "帮我做昨日的电商日报，营收 50万 订单 2500 客单价 200 投放 10万 ROI 1:5",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "generate",
+      "mustContainAny": ["核心数据", "投放", "渠道"],
+      "maxDurationMs": 240000
+    },
+    "notes": "Natural-ish phrasing with 万 suffixes. 2500×200=500000 ✓; 500000/100000=5 ROI ✓. Has ad_spend → channel_analysis section should fire (optional)."
+  },
+  {
+    "id": "P2_ED_007",
+    "tier": "P2",
+    "category": "ecom_daily_with_top_skus",
+    "prompt": "日报 2026-05-09 营收 80万 订单 4000 客单价 200 转化率 8% UV 50000 TOP SKU: 商品A 占比40% / 商品B 占比25% / 商品C 占比15%",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "generate",
+      "mustContainAny": ["商品A", "TOP", "SKU"],
+      "maxDurationMs": 240000
+    },
+    "notes": "Has top_skus → channel_analysis section fires referencing actual SKU names. 4000×200=800000 ✓; 4000/50000=8% ✓ — all consistent."
+  },
+  {
+    "id": "P2_ED_008",
+    "tier": "P2",
+    "category": "ecom_daily_followup_sop",
+    "prompt": "电商日报 日期 2026-05-09 营收 30万 订单 1500 客单价 200 UV 15000 转化率 10%",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "generate",
+      "maxDurationMs": 240000
+    },
+    "replySequence": [
+      {
+        "kind": "follow-up",
+        "message": "基于这次电商日报的诊断和明日重点，帮我生成一份完整的明日运营 SOP：开店前准备、上架顺序、活动页改动、投放配置、客服话术。",
+        "expectations": {
+          "mustComplete": true,
+          "terminalStatus": "completed",
+          "executionMode": "generate",
+          "mustContainAny": ["开店前", "SOP", "活动页", "投放"],
+          "maxDurationMs": 240000
+        }
+      }
+    ],
+    "notes": "Two-task flow mirroring the SPA chip click. Parent runs ecom-daily + completes; follow-up uses tasks.create with replyToTaskId. Follow-up message has 电商日报 + 明日 keywords ensuring matcher fires on combined parent context."
+  }
+]

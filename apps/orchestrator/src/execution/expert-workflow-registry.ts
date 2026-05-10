@@ -6,17 +6,25 @@
  * applies, or null. Used by `runGenerateTask` to decide whether to
  * route through the workflow intake gate.
  *
- * Today: only `douyin-review`. The shape supports adding more
- * workflows by registering them in WORKFLOWS — content-topic and
- * ecom-daily land in Phase 2b.
+ * Phase 2b — three workflows registered:
+ *   - douyin-review   (事后复盘 — 抖音直播复盘)
+ *   - content-topic   (事前生成 — 内容选题策划)
+ *   - ecom-daily      (日度复盘 — 电商日报)
  *
  * Distinct from the legacy `agent/supercar/expert-workflows.ts`
  * matcher: that one returns abstract `missingInputs:
  * ['liveSession'|'dataSource']` for routing decisions (browser vs
  * generate). This one returns the concrete typed contract for
  * deterministic input parsing + arithmetic validation.
+ *
+ * Matcher precedence: workflows shouldn't overlap by design (different
+ * keyword buckets), but if two ever match the same intent, FIRST one
+ * in the WORKFLOWS array wins. Order is: douyin-review → content-topic
+ * → ecom-daily. Adjust the array if a future workflow needs priority.
  */
 import { DOUYIN_REVIEW_WORKFLOW } from './expert-workflow-douyin.js';
+import { CONTENT_TOPIC_WORKFLOW } from './expert-workflow-content-topic.js';
+import { ECOM_DAILY_WORKFLOW } from './expert-workflow-ecom-daily.js';
 import type { ExpertWorkflowContract } from './expert-workflow-contract.js';
 
 interface MatchOpts {
@@ -31,6 +39,8 @@ interface MatchOpts {
  */
 const WORKFLOWS: readonly ExpertWorkflowContract[] = [
   DOUYIN_REVIEW_WORKFLOW,
+  CONTENT_TOPIC_WORKFLOW,
+  ECOM_DAILY_WORKFLOW,
 ];
 
 /**
@@ -45,6 +55,10 @@ function matchOne(
   switch (workflow.workflowId) {
     case 'douyin-review':
       return matchesDouyinReview(opts);
+    case 'content-topic':
+      return matchesContentTopic(opts);
+    case 'ecom-daily':
+      return matchesEcomDaily(opts);
     default:
       // Unknown workflow id (defensive — can't reach today). Fall
       // through to keyword check based on the workflow's name.
@@ -55,6 +69,98 @@ function matchOne(
 const DOUYIN_TERMS = ['抖音', 'douyin', 'tiktok'];
 const LIVE_TERMS = ['直播', '直播间', '带货', '主播'];
 const REVIEW_TERMS = ['复盘', '诊断', '分析直播', '直播分析', '直播报告'];
+
+// Buckets for content-topic. Two-of-two required:
+//   TASK   — 选题/内容策划/爆款/标题
+//   PLATFORM — any of the supported platform names
+// "标题" alone (e.g. "帮我起个标题") doesn't fire because no platform.
+// "做小红书" alone doesn't fire because no task term. The conjunction
+// pattern is what makes content-topic distinct from douyin-review.
+const CONTENT_TASK_TERMS = [
+  '选题',
+  '内容策划',
+  '爆款',
+  '标题',
+  '内容方向',
+  '种草',
+];
+const CONTENT_PLATFORM_TERMS = [
+  '小红书',
+  '抖音',
+  'douyin',
+  'tiktok',
+  '视频号',
+  'b站',
+  'bilibili',
+  '公众号',
+  '知乎',
+  '微博',
+  'xiaohongshu',
+];
+
+// Buckets for ecom-daily. Two-of-two required:
+//   TIME — 日报/昨日/今日/每日/当日/yesterday/today
+//   ECOM — 电商/营收/销售/店铺/营业额/GMV
+// "GMV 100万" alone (without time term) doesn't fire — could be a
+// douyin-review or content-topic. "昨日 销售" without 营收 keyword does
+// fire because both 销售 and 昨日 are present. The ECOM bucket is
+// generous on purpose: ecom-daily reports are about店铺业绩拆解, and
+// we want to match the user's natural phrasing without making them
+// say "电商" explicitly.
+const TIME_TERMS = [
+  '日报',
+  '昨日',
+  '昨天',
+  '今日',
+  '今天',
+  '前日',
+  '前天',
+  '每日',
+  '当日',
+  'yesterday',
+  'today',
+];
+const ECOM_TERMS = [
+  '电商',
+  '营收',
+  '营业额',
+  '销售额',
+  '店铺',
+  'GMV',
+  '日销售',
+  '日gmv',
+];
+
+function matchesEcomDaily(opts: MatchOpts): boolean {
+  // Precedence: registry order means douyin-review and content-topic
+  // are checked first. ecom-daily intent like "昨日营收 30万" should
+  // not collide with douyin-review (no 直播/复盘 keyword) or
+  // content-topic (no 选题/标题 keyword), so the conjunction is
+  // sufficient.
+  const lower = opts.intent.toLowerCase();
+  const hasTime = TIME_TERMS.some((t) => lower.includes(t.toLowerCase()));
+  const hasEcom = ECOM_TERMS.some((t) => lower.includes(t.toLowerCase()));
+  return hasTime && hasEcom;
+}
+
+function matchesContentTopic(opts: MatchOpts): boolean {
+  // Crucial overlap guard: douyin-review fires on 抖音 + 直播 + 复盘.
+  // content-topic also accepts 抖音 in its PLATFORM bucket. If a user
+  // asks "复盘抖音直播", that's douyin-review; if they ask "抖音爆款选题"
+  // without 直播 + 复盘, that's content-topic. Because douyin-review
+  // is checked FIRST in WORKFLOWS, intent that fits both lands in
+  // douyin-review (correct precedence — review trumps planning when
+  // BOTH are explicitly asked). This function therefore doesn't need
+  // an exclusion clause — the order in WORKFLOWS handles it.
+  const lower = opts.intent.toLowerCase();
+  const hasTask = CONTENT_TASK_TERMS.some((t) =>
+    lower.includes(t.toLowerCase()),
+  );
+  const hasPlatform = CONTENT_PLATFORM_TERMS.some((t) =>
+    lower.includes(t.toLowerCase()),
+  );
+  return hasTask && hasPlatform;
+}
 
 function matchesDouyinReview(opts: MatchOpts): boolean {
   // Keyword match on intent — three buckets, all required:

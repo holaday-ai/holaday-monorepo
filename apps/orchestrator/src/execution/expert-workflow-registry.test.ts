@@ -77,3 +77,113 @@ describe('matchExpertWorkflow — douyin-review', () => {
     expect(matchExpertWorkflow({ intent: '' })).toBeNull();
   });
 });
+
+describe('matchExpertWorkflow — content-topic', () => {
+  it('matches 选题 + 平台名', () => {
+    expect(
+      matchExpertWorkflow({ intent: '小红书 美妆选题' })?.workflowId,
+    ).toBe('content-topic');
+    expect(
+      matchExpertWorkflow({ intent: '抖音爆款选题怎么做' })?.workflowId,
+    ).toBe('content-topic');
+    expect(
+      matchExpertWorkflow({ intent: '帮我做 B站 内容策划' })?.workflowId,
+    ).toBe('content-topic');
+  });
+
+  it('matches 标题 / 内容方向 / 种草 task variants', () => {
+    expect(
+      matchExpertWorkflow({ intent: '小红书 标题策划' })?.workflowId,
+    ).toBe('content-topic');
+    expect(
+      matchExpertWorkflow({ intent: '抖音 内容方向规划' })?.workflowId,
+    ).toBe('content-topic');
+    expect(
+      matchExpertWorkflow({ intent: '小红书种草笔记选题' })?.workflowId,
+    ).toBe('content-topic');
+  });
+
+  it('does NOT match without a platform term', () => {
+    expect(matchExpertWorkflow({ intent: '帮我想几个爆款选题' })).toBeNull();
+    expect(matchExpertWorkflow({ intent: '起标题' })).toBeNull();
+  });
+
+  it('does NOT match without a task term', () => {
+    expect(matchExpertWorkflow({ intent: '小红书账号涨粉' })).toBeNull();
+    expect(matchExpertWorkflow({ intent: '抖音 GMV 做不动' })).toBeNull();
+  });
+
+  it('precedence: 抖音 + 直播 + 复盘 → douyin-review wins (not content-topic)', () => {
+    // Intent that would trigger BOTH if precedence were wrong.
+    // douyin-review is first in WORKFLOWS so it wins. content-topic
+    // is for pre-creation; douyin-review is for post-stream review.
+    const w = matchExpertWorkflow({
+      intent: '复盘抖音直播：选题方向是不是有问题',
+    });
+    expect(w?.workflowId).toBe('douyin-review');
+  });
+
+  it('English platform aliases (xiaohongshu / bilibili) match', () => {
+    expect(
+      matchExpertWorkflow({ intent: 'xiaohongshu 选题策划' })?.workflowId,
+    ).toBe('content-topic');
+    expect(
+      matchExpertWorkflow({ intent: 'bilibili 爆款标题' })?.workflowId,
+    ).toBe('content-topic');
+  });
+});
+
+describe('matchExpertWorkflow — ecom-daily', () => {
+  it('matches 日报 + ECOM term', () => {
+    expect(
+      matchExpertWorkflow({ intent: '电商日报' })?.workflowId,
+    ).toBe('ecom-daily');
+    expect(
+      matchExpertWorkflow({ intent: '帮我做日报，营收 30万' })?.workflowId,
+    ).toBe('ecom-daily');
+    expect(
+      matchExpertWorkflow({ intent: '昨日营收 50万 订单 1500' })?.workflowId,
+    ).toBe('ecom-daily');
+  });
+
+  it('matches relative time + 销售/店铺', () => {
+    expect(
+      matchExpertWorkflow({ intent: '昨日 销售额 100万' })?.workflowId,
+    ).toBe('ecom-daily');
+    expect(
+      matchExpertWorkflow({ intent: '今天店铺数据复盘' })?.workflowId,
+    ).toBe('ecom-daily');
+  });
+
+  it('does NOT match without time term', () => {
+    expect(matchExpertWorkflow({ intent: '电商营收要怎么提升' })).toBeNull();
+    expect(matchExpertWorkflow({ intent: 'GMV 100万 怎么样' })).toBeNull();
+  });
+
+  it('does NOT match without ECOM term', () => {
+    expect(matchExpertWorkflow({ intent: '昨天天气好' })).toBeNull();
+    expect(matchExpertWorkflow({ intent: '今日要做的事' })).toBeNull();
+  });
+
+  it('precedence: 抖音直播 + 复盘 → douyin-review wins, not ecom-daily', () => {
+    // "昨日 抖音直播复盘" — has TIME (昨日) + ECOM-adjacent term but
+    // also 抖音/直播/复盘 → douyin-review wins (first in WORKFLOWS).
+    const w = matchExpertWorkflow({
+      intent: '复盘抖音直播 昨日营收 100万',
+    });
+    expect(w?.workflowId).toBe('douyin-review');
+  });
+
+  it('precedence: content-topic-shaped intent → content-topic wins, not ecom-daily', () => {
+    // "昨日小红书选题" — TIME (昨日) + content-topic terms (小红书 + 选题).
+    // No ECOM term so ecom-daily doesn't fire anyway, content-topic does.
+    const w = matchExpertWorkflow({ intent: '昨日 小红书 选题策划' });
+    expect(w?.workflowId).toBe('content-topic');
+  });
+
+  it('English aliases (yesterday / today) work', () => {
+    expect(
+      matchExpertWorkflow({ intent: 'yesterday 销售额 100万' })?.workflowId,
+    ).toBe('ecom-daily');
+  });
+});
