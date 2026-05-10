@@ -1652,22 +1652,47 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         // pulled cheaply if available so captcha / permission text
         // detection works on pages whose URL doesn't say /captcha.
         let preParkTitle: string | null = null;
+        let preParkBodyText: string | null = null;
         try {
           const livePage = (await executor.getPage()) as unknown as {
             title?: () => Promise<string> | string;
+            evaluate?: (
+              fn: () => string,
+            ) => Promise<string> | string;
           };
           const t = livePage?.title?.();
           if (t) preParkTitle = (typeof t === 'string' ? t : await t) ?? null;
+          // Phase 3 R1 fix — pull a body text sample so the detector
+          // can see Chromium's 403 / paywall / captcha pages even when
+          // the URL is `chrome-error://chromewebdata/` (Chromium swaps
+          // to its internal error page on HTTP 403, hiding the original
+          // URL). Cap at 1KB to keep the keyword scan cheap; that's
+          // enough for "Access denied" / "HTTP ERROR 403" / "Forbidden"
+          // / "需要登录" headers without dragging in article body.
+          if (typeof livePage?.evaluate === 'function') {
+            // Function runs in the browser context (Node TypeScript
+            // doesn't see `document` here). Cast through unknown to
+            // express that the lambda is opaque to the orchestrator.
+            const evalFn = (() => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const doc: any = (globalThis as any).document;
+              return (doc?.body?.innerText ?? '').slice(0, 1024);
+            }) as unknown as () => string;
+            const raw = await livePage.evaluate(evalFn);
+            preParkBodyText = typeof raw === 'string' ? raw : null;
+          }
         } catch {
-          /* swallow — best-effort title snapshot */
+          /* swallow — best-effort title + body snapshot */
         }
         const permissionSignal = detectPermissionWall({
           url: preParkUrl,
           title: preParkTitle,
+          prominentText: preParkBodyText,
         });
         const captchaSignal = detectCaptchaPage({
           url: preParkUrl,
           title: preParkTitle,
+          prominentText: preParkBodyText,
         });
         const loginSignal = detectLoginUrl(preParkUrl);
         // Pick the FIRST hit from {permission, captcha, login}.
