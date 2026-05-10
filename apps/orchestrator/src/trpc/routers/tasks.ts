@@ -50,6 +50,8 @@ import {
   matchPlaybooks,
 } from '../../agent/supercar/playbook-service.js';
 import { matchExpertWorkflow } from '../../agent/supercar/expert-workflows.js';
+import { matchExpertWorkflow as matchTypedExpertWorkflow } from '../../execution/expert-workflow-registry.js';
+import { getFeatureFlags as getExecutionFeatureFlags } from '../../execution/feature-flags.js';
 import { FileService, taskInternalIdFor } from '../../files/file-service.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
 import {
@@ -462,7 +464,38 @@ export const tasksRouter = router({
       skillId: input.skillId,
       logger: ctx.logger.child({ userId: ctx.userId, stage: 'router' }),
     });
-    const executionMode = expertWorkflow?.routeOverride ?? classifiedExecutionMode;
+    // Phase 2b — typed expert workflow lane override. When the new
+    // typed matcher (content-topic / ecom-daily / douyin-review)
+    // fires AND the EXPERT_WORKFLOW flag is on, force generate-mode
+    // — these workflows never want a browser. This sits after the
+    // legacy matcher so routeOverride='browser' from the legacy
+    // douyin-livestream-review (when user has platform-source
+    // keywords) still wins; in practice the two matchers don't
+    // overlap on browser-needing intents.
+    const typedWorkflow = getExecutionFeatureFlags().EXPERT_WORKFLOW
+      ? matchTypedExpertWorkflow({
+          intent: input.intent,
+          roleId: input.skillId ?? null,
+        })
+      : null;
+    const typedWorkflowOverride =
+      typedWorkflow != null && expertWorkflow?.routeOverride !== 'browser'
+        ? ('generate' as const)
+        : null;
+    const executionMode =
+      typedWorkflowOverride ??
+      expertWorkflow?.routeOverride ??
+      classifiedExecutionMode;
+    if (typedWorkflow != null && executionMode === 'generate') {
+      ctx.logger.info(
+        {
+          typedWorkflowId: typedWorkflow.workflowId,
+          classifiedExecutionMode,
+          legacyRouteOverride: expertWorkflow?.routeOverride ?? null,
+        },
+        'typed-workflow: forced generate lane',
+      );
+    }
     if (expertWorkflow?.routeOverride) {
       ctx.logger.info(
         {
