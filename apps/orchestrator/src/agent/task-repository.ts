@@ -1,6 +1,21 @@
 import { newExternalId } from '@holaday/shared-types';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
+
+/**
+ * mysql2 returns `[ResultSetHeader, ...]` from drizzle's `update().set()`
+ * call; ResultSetHeader has `affectedRows`. Some drizzle versions /
+ * adapters surface it on the top-level object instead. Probe both —
+ * mirrors the helper in src/index.ts for the boot sweep.
+ */
+function extractMysqlAffectedRows(result: unknown): number {
+  if (Array.isArray(result)) {
+    const head = result[0] as { affectedRows?: number } | undefined;
+    if (typeof head?.affectedRows === 'number') return head.affectedRows;
+  }
+  const direct = (result as { affectedRows?: number } | null)?.affectedRows;
+  return typeof direct === 'number' ? direct : 0;
+}
 import { taskEvents } from '../db/schema/task-events.js';
 import { taskSteps } from '../db/schema/task-steps.js';
 import { tasks } from '../db/schema/tasks.js';
@@ -289,44 +304,12 @@ export class TaskRepository {
         },
   ): Promise<void> {
     const [taskRow] = await this.db
-      .select({ id: tasks.id, status: tasks.status })
+      .select({ id: tasks.id })
       .from(tasks)
       .where(eq(tasks.externalId, taskExternalId))
       .limit(1);
     if (!taskRow) throw new Error(`task ${taskExternalId} not found in DB`);
     const taskRowId = taskRow.id;
-
-    // Phase 3 R1 — state-machine invariant: once the row is in
-    // `awaiting_user`, ONLY `tasks.reply` can transition it back to
-    // `executing`. Any persist call attempting to overwrite
-    // awaiting_user with completed / failed / paused / cancelled is a
-    // late write from the agent loop after a takeover-window timeout
-    // or from a duplicate persist call. Reject it — the user is still
-    // owed the chance to reply, and the row should reflect the real
-    // user-facing state (parked, awaiting input).
-    //
-    // The legitimate completed→awaiting_user transition isn't allowed
-    // here either; that's for tasks.reply to manage explicitly.
-    // Cross-status writes that ARE allowed:
-    //   - executing → any terminal (the normal happy path)
-    //   - paused → any terminal (cleanup writes)
-    //   - completed/failed/cancelled → same status (idempotent retry,
-    //     drops through to the regular write — DB sees no change)
-    if (taskRow.status === 'awaiting_user') {
-      // persistVisionOutcome's outcome union doesn't include
-      // awaiting_user (that state is written directly via the
-      // onAwaitingUser callback in tasks.ts), so any call landing here
-      // while the row is awaiting_user is by definition trying to
-      // overwrite it with a terminal status. Skip + log.
-      // Caller's `.finally()` still runs (Brave release, pipeline
-      // persist, etc.); the row stays awaiting_user so the user can
-      // still reply or cancel.
-      // eslint-disable-next-line no-console
-      console.warn(
-        `[task-repository] refusing to overwrite awaiting_user → ${outcome.status} for ${taskExternalId} (Phase 3 R1 state guard)`,
-      );
-      return;
-    }
 
     const update: Partial<typeof tasks.$inferInsert> = { status: outcome.status };
     const result: Record<string, unknown> = { tickCount: outcome.tickCount };
@@ -367,8 +350,35 @@ export class TaskRepository {
     }
     update.result = result;
 
+    // Phase 3 R1 (Codex follow-up) — atomic state-machine guard.
+    // Earlier the guard was SELECT-status THEN UPDATE — a race window
+    // existed where another writer could flip status to
+    // 'awaiting_user' between the read and the write. Now the UPDATE
+    // itself includes `WHERE status != 'awaiting_user'`, so the row
+    // is either updated atomically (when not parked) or no-op (when
+    // parked); inspecting affectedRows tells us which happened.
+    //
+    // The legitimate state-machine invariant is unchanged: once a row
+    // is in awaiting_user, ONLY tasks.reply can transition it back to
+    // executing. Persist writes from a late agent-loop completion or
+    // takeover-timeout get refused here so the row keeps reflecting
+    // the real user-facing state (parked, awaiting input).
     await this.db.transaction(async (tx) => {
-      await tx.update(tasks).set(update).where(eq(tasks.id, taskRowId));
+      const updateResult = await tx
+        .update(tasks)
+        .set(update)
+        .where(and(eq(tasks.id, taskRowId), ne(tasks.status, 'awaiting_user')));
+      const affected = extractMysqlAffectedRows(updateResult);
+      if (affected === 0) {
+        // Row is in awaiting_user; UPDATE was a no-op. Skip the event
+        // insert too — recording a `vision.completed` event when the
+        // row is still parked would be wrong / misleading.
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[task-repository] refusing to overwrite awaiting_user → ${outcome.status} for ${taskExternalId} (Phase 3 R1 atomic state guard)`,
+        );
+        return;
+      }
       await tx.insert(taskEvents).values({
         externalId: newExternalId('taskEvent'),
         taskId: taskRowId,

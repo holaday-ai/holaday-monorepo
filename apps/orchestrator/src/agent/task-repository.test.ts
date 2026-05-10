@@ -3,50 +3,58 @@
  * in `TaskRepository.persistVisionOutcome`. Heavyweight DB tests live
  * in `task-repository.integration.test.ts`; this file uses a minimal
  * fake `DB` that records writes so we can assert the guard skipped
- * the transaction.
+ * the event insert when the row was already parked.
+ *
+ * Phase 3 R1 (Codex follow-up) — guard is now atomic. The UPDATE
+ * itself filters out awaiting_user rows; we mock affectedRows on
+ * the fake to drive both branches.
  */
 import { describe, expect, it, vi } from 'vitest';
 
 import type { DB } from '../db/client.js';
 import { TaskRepository } from './task-repository.js';
 
-interface CapturedUpdate {
-  setArgs: unknown;
+interface Captured {
+  /** count of insert(taskEvents) calls — proxies "did the event log fire". */
+  eventInserts: number;
+  /** count of update calls inside a transaction */
+  txUpdates: number;
+  transactionRan: boolean;
 }
 
 /**
- * Build a fake `DB` that returns a fixed `tasks.status` from the
- * initial SELECT and records any subsequent .update().set() calls.
- * Returning the same `chain` from every method lets a single fake
- * cover both `select` and `update` chains.
+ * Build a fake `DB` whose `update().set().where()` returns a result
+ * with the given `affectedRows`. 0 → guard refused; 1 → guard passed.
  */
-function fakeDbWithStatus(currentStatus: string) {
-  const captured: { updates: CapturedUpdate[]; transactionRan: boolean } = {
-    updates: [],
+function fakeDbWithAffectedRows(affectedRows: number) {
+  const captured: Captured = {
+    eventInserts: 0,
+    txUpdates: 0,
     transactionRan: false,
   };
-
-  const tasksRow = { id: 1, status: currentStatus };
 
   const select = () => ({
     from: () => ({
       where: () => ({
-        limit: async () => [tasksRow],
+        limit: async () => [{ id: 1 }],
       }),
     }),
   });
 
   const update = () => ({
-    set: (setArgs: unknown) => {
-      captured.updates.push({ setArgs });
-      return {
-        where: async () => undefined,
-      };
-    },
+    set: () => ({
+      where: async () => {
+        captured.txUpdates += 1;
+        return [{ affectedRows }];
+      },
+    }),
   });
 
   const insert = () => ({
-    values: async () => undefined,
+    values: async () => {
+      captured.eventInserts += 1;
+      return undefined;
+    },
   });
 
   const transaction = async (cb: (tx: unknown) => Promise<void>) => {
@@ -58,10 +66,10 @@ function fakeDbWithStatus(currentStatus: string) {
   return { db, captured };
 }
 
-describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Phase 3 R1)', () => {
-  it('refuses to overwrite awaiting_user with completed', async () => {
+describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Phase 3 R1, atomic)', () => {
+  it('UPDATE no-op (affectedRows=0) → row was awaiting_user → no event log, console.warn fires', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const { db, captured } = fakeDbWithStatus('awaiting_user');
+    const { db, captured } = fakeDbWithAffectedRows(0);
     const repo = new TaskRepository(db);
 
     await repo.persistVisionOutcome('tsk_aw_completed', {
@@ -70,17 +78,20 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
       tickCount: 12,
     });
 
-    expect(captured.transactionRan).toBe(false);
-    expect(captured.updates).toHaveLength(0);
+    expect(captured.transactionRan).toBe(true);
+    expect(captured.txUpdates).toBe(1);
+    // Crucially: the event row was NOT inserted because the guard
+    // tripped on affectedRows=0.
+    expect(captured.eventInserts).toBe(0);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('refusing to overwrite awaiting_user'),
     );
     warnSpy.mockRestore();
   });
 
-  it('refuses to overwrite awaiting_user with failed', async () => {
+  it('UPDATE no-op for failed write attempt → no event row', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const { db, captured } = fakeDbWithStatus('awaiting_user');
+    const { db, captured } = fakeDbWithAffectedRows(0);
     const repo = new TaskRepository(db);
 
     await repo.persistVisionOutcome('tsk_aw_failed', {
@@ -89,14 +100,13 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
       tickCount: 8,
     });
 
-    expect(captured.transactionRan).toBe(false);
-    expect(captured.updates).toHaveLength(0);
+    expect(captured.eventInserts).toBe(0);
     warnSpy.mockRestore();
   });
 
-  it('refuses to overwrite awaiting_user with cancelled', async () => {
+  it('UPDATE no-op for cancelled write attempt → no event row', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const { db, captured } = fakeDbWithStatus('awaiting_user');
+    const { db, captured } = fakeDbWithAffectedRows(0);
     const repo = new TaskRepository(db);
 
     await repo.persistVisionOutcome('tsk_aw_cancelled', {
@@ -104,12 +114,12 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
       tickCount: 5,
     });
 
-    expect(captured.transactionRan).toBe(false);
+    expect(captured.eventInserts).toBe(0);
     warnSpy.mockRestore();
   });
 
-  it('allows executing → completed (the normal happy path)', async () => {
-    const { db, captured } = fakeDbWithStatus('executing');
+  it('UPDATE applied (affectedRows=1) → event row written (executing → completed happy path)', async () => {
+    const { db, captured } = fakeDbWithAffectedRows(1);
     const repo = new TaskRepository(db);
 
     await repo.persistVisionOutcome('tsk_exec_done', {
@@ -119,10 +129,11 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
     });
 
     expect(captured.transactionRan).toBe(true);
+    expect(captured.eventInserts).toBe(1);
   });
 
-  it('allows executing → failed (the normal failure path)', async () => {
-    const { db, captured } = fakeDbWithStatus('executing');
+  it('UPDATE applied → event row written (executing → failed)', async () => {
+    const { db, captured } = fakeDbWithAffectedRows(1);
     const repo = new TaskRepository(db);
 
     await repo.persistVisionOutcome('tsk_exec_failed', {
@@ -131,11 +142,11 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
       tickCount: 2,
     });
 
-    expect(captured.transactionRan).toBe(true);
+    expect(captured.eventInserts).toBe(1);
   });
 
-  it('allows paused → cancelled (cleanup path)', async () => {
-    const { db, captured } = fakeDbWithStatus('paused');
+  it('UPDATE applied → event row written (paused → cancelled)', async () => {
+    const { db, captured } = fakeDbWithAffectedRows(1);
     const repo = new TaskRepository(db);
 
     await repo.persistVisionOutcome('tsk_paused_cancel', {
@@ -143,6 +154,6 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
       tickCount: 1,
     });
 
-    expect(captured.transactionRan).toBe(true);
+    expect(captured.eventInserts).toBe(1);
   });
 });

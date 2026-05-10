@@ -51,7 +51,10 @@ import {
   matchPlaybooks,
 } from '../../agent/supercar/playbook-service.js';
 import { matchExpertWorkflow } from '../../agent/supercar/expert-workflows.js';
-import { matchExpertWorkflow as matchTypedExpertWorkflow } from '../../execution/expert-workflow-registry.js';
+import {
+  getExpertWorkflowById,
+  matchExpertWorkflow as matchTypedExpertWorkflow,
+} from '../../execution/expert-workflow-registry.js';
 import { getFeatureFlags as getExecutionFeatureFlags } from '../../execution/feature-flags.js';
 import { FileService, taskInternalIdFor } from '../../files/file-service.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
@@ -307,6 +310,16 @@ export const tasksRouter = router({
     // "再试一次" style follow-ups.
     let parentContextBlock = '';
     let isFollowUp = false;
+    /**
+     * Phase 3 R1 (Codex follow-up #2) — recovered parent workflow id.
+     * When this is a follow-up tasks.create (replyToTaskId set), we
+     * read the parent's `result.metadata.expertWorkflowId` so the
+     * follow-up inherits the parent's workflow even if the chip's
+     * prompt doesn't trip the typed matcher (e.g. "生成发布日历"
+     * has no platform keyword). Null if no parent or parent wasn't
+     * a workflow task.
+     */
+    let parentWorkflowId: string | null = null;
     if (input.replyToTaskId) {
       const [parent] = await ctx.db
         .select({
@@ -337,8 +350,23 @@ export const tasksRouter = router({
         });
       }
       const parentResult = (parent.result ?? null) as
-        | { summary?: string; reason?: string }
+        | {
+            summary?: string;
+            reason?: string;
+            metadata?: { expertWorkflowId?: string | null };
+            expertWorkflowId?: string | null;
+          }
         | null;
+      // Workflow id can be either nested under metadata (newer tasks)
+      // or top-level on result (older / generate-resume rows). Probe
+      // both so old tasks don't lose context on follow-up.
+      const candidateWfId =
+        parentResult?.metadata?.expertWorkflowId ??
+        parentResult?.expertWorkflowId ??
+        null;
+      if (typeof candidateWfId === 'string' && candidateWfId.length > 0) {
+        parentWorkflowId = candidateWfId;
+      }
       const summary = parentResult?.summary?.trim() ?? '';
       const reason =
         parentResult?.reason?.trim() ?? (parent.errorMessage ?? '').trim();
@@ -473,12 +501,23 @@ export const tasksRouter = router({
     // douyin-livestream-review (when user has platform-source
     // keywords) still wins; in practice the two matchers don't
     // overlap on browser-needing intents.
-    const typedWorkflow = getExecutionFeatureFlags().EXPERT_WORKFLOW
+    const typedWorkflowFromMatcher = getExecutionFeatureFlags().EXPERT_WORKFLOW
       ? matchTypedExpertWorkflow({
           intent: input.intent,
           roleId: input.skillId ?? null,
         })
       : null;
+    // Phase 3 R1 (Codex follow-up #2) — on follow-up tasks the chip
+    // prompt usually doesn't carry workflow keywords ("生成发布日历"
+    // / "深挖 ROI 不达预期" / "生成下场直播 SOP"). Fall back to the
+    // parent task's workflow id so the contract stays full-tier and
+    // the verifier's section_presence + source_annotation checks
+    // continue to fire on the follow-up's report.
+    const typedWorkflowFromParent =
+      isFollowUp && parentWorkflowId
+        ? getExpertWorkflowById(parentWorkflowId)
+        : null;
+    const typedWorkflow = typedWorkflowFromMatcher ?? typedWorkflowFromParent;
     const typedWorkflowOverride =
       typedWorkflow != null && expertWorkflow?.routeOverride !== 'browser'
         ? ('generate' as const)
@@ -705,7 +744,7 @@ export const tasksRouter = router({
         taskId,
         intent: input.intent,
         executionMode: 'generate',
-        expertWorkflowId: expertWorkflow?.id ?? null,
+        expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
         hasAttachments: attachmentBlocks.length > 0,
       });
 
@@ -733,7 +772,19 @@ export const tasksRouter = router({
             // legacy; P2_CT_008 surfaced the gap — typed-only matches
             // (content-topic / ecom-daily) lost their parent context
             // on follow-up tasks.create with replyToTaskId.
-            intent: expertWorkflow || typedWorkflow ? effectiveIntent : input.intent,
+            // Phase 3 R1 (Codex #2): use effectiveIntent (parent
+            // context block + workflow preamble prepended) whenever
+            // any of:
+            //   - legacy matcher fires
+            //   - typed matcher fires (or recovered from parent)
+            //   - this is a follow-up (replyToTaskId set) — the
+            //     parent's outcome is load-bearing context for the
+            //     model regardless of whether a workflow matched
+            // Otherwise pass the bare user input.
+            intent:
+              expertWorkflow || typedWorkflow || isFollowUp
+                ? effectiveIntent
+                : input.intent,
             // Phase 2b — pass the resolved typed workflow so the
             // runner skips its inline matcher (which would re-match
             // against the parent-context-prefixed intent and could
@@ -818,7 +869,7 @@ export const tasksRouter = router({
         const metadata = {
           executionMode: 'generate' as const,
           finalExecutionMode: 'generate' as const,
-          expertWorkflowId: expertWorkflow?.id ?? null,
+          expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
           selectedRole: gatedRole === 'none' ? null : gatedRole,
           model: 'claude-sonnet-4-6',
           fallbackChain,
@@ -998,7 +1049,7 @@ export const tasksRouter = router({
         taskId,
         intent: input.intent,
         executionMode: 'scrape',
-        expertWorkflowId: expertWorkflow?.id ?? null,
+        expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
         hasAttachments: attachmentBlocks.length > 0,
       });
 
@@ -1023,7 +1074,19 @@ export const tasksRouter = router({
             // legacy; P2_CT_008 surfaced the gap — typed-only matches
             // (content-topic / ecom-daily) lost their parent context
             // on follow-up tasks.create with replyToTaskId.
-            intent: expertWorkflow || typedWorkflow ? effectiveIntent : input.intent,
+            // Phase 3 R1 (Codex #2): use effectiveIntent (parent
+            // context block + workflow preamble prepended) whenever
+            // any of:
+            //   - legacy matcher fires
+            //   - typed matcher fires (or recovered from parent)
+            //   - this is a follow-up (replyToTaskId set) — the
+            //     parent's outcome is load-bearing context for the
+            //     model regardless of whether a workflow matched
+            // Otherwise pass the bare user input.
+            intent:
+              expertWorkflow || typedWorkflow || isFollowUp
+                ? effectiveIntent
+                : input.intent,
             skillId:
               gatedRole !== 'none'
                 ? gatedRole
@@ -1111,7 +1174,19 @@ export const tasksRouter = router({
             generateOutcome = await runGenerateTask({
               taskId,
               userId: ctx.userId,
-              intent: expertWorkflow || typedWorkflow ? effectiveIntent : input.intent,
+              // Phase 3 R1 (Codex #2): use effectiveIntent (parent
+            // context block + workflow preamble prepended) whenever
+            // any of:
+            //   - legacy matcher fires
+            //   - typed matcher fires (or recovered from parent)
+            //   - this is a follow-up (replyToTaskId set) — the
+            //     parent's outcome is load-bearing context for the
+            //     model regardless of whether a workflow matched
+            // Otherwise pass the bare user input.
+            intent:
+              expertWorkflow || typedWorkflow || isFollowUp
+                ? effectiveIntent
+                : input.intent,
               workflowOverride: typedWorkflow,
               skillId:
                 gatedRole !== 'none'
@@ -1208,7 +1283,7 @@ export const tasksRouter = router({
         const metadata = {
           executionMode: 'scrape' as const,
           finalExecutionMode,
-          expertWorkflowId: expertWorkflow?.id ?? null,
+          expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
           selectedRole: gatedRole === 'none' ? null : gatedRole,
           model: 'claude-sonnet-4-6',
           fallbackChain,
@@ -2057,7 +2132,7 @@ export const tasksRouter = router({
         taskId,
         intent: input.intent,
         executionMode: 'browser',
-        expertWorkflowId: expertWorkflow?.id ?? null,
+        expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
         hasAttachments: attachmentBlocks.length > 0,
       });
       // Captures the verifier's verdict so the .finally() persist
@@ -2198,7 +2273,7 @@ export const tasksRouter = router({
               const metadata = {
                 executionMode: 'browser' as const,
                 finalExecutionMode: 'generate' as const,
-                expertWorkflowId: expertWorkflow?.id ?? null,
+                expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
                 selectedRole: gatedRole === 'none' ? null : gatedRole,
                 model: 'claude-sonnet-4-6',
                 fallbackChain: ['browser', 'generate'],
@@ -2290,7 +2365,7 @@ export const tasksRouter = router({
             const metadata = {
               executionMode: executionMode === 'browser' ? 'browser' : executionMode,
               finalExecutionMode: executionMode === 'browser' ? 'browser' : executionMode,
-              expertWorkflowId: expertWorkflow?.id ?? null,
+              expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
               selectedRole: gatedRole === 'none' ? null : gatedRole,
               model: opusActuallyConsumed ? 'claude-opus-4-7' : 'claude-sonnet-4-6',
               fallbackChain: ['browser'],
