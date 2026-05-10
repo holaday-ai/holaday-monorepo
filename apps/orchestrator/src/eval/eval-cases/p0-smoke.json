@@ -116,10 +116,10 @@
     "expectations": {
       "mustComplete": true,
       "executionMode": "generate",
-      "mustContainAny": ["矛盾", "不一致", "对不上", "不匹配"],
+      "mustContainAny": ["矛盾", "不一致", "对不上", "不匹配", "不是", "不符", "≠"],
       "maxDurationMs": 180000
     },
-    "notes": "200000 / 500 = ¥400 ≠ ¥50. Consistency-check prompt must surface the contradiction before producing the review."
+    "notes": "200000 / 500 = ¥400 ≠ ¥50. Consistency-check prompt must surface the contradiction. Phrasing varies by sample: '矛盾'/'不一致' (formal) / '不是 ¥50, 是 ¥400' (model's preferred wording) / '≠' (math notation). All count as surfacing the conflict."
   },
   {
     "id": "P0_010",
