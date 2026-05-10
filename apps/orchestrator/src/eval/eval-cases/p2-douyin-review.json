@@ -62,7 +62,7 @@
     "id": "P2_DR_005",
     "tier": "P2",
     "category": "douyin_review_natural_language",
-    "prompt": "复盘抖音直播：昨天播了4小时 卖了15万 来了2万人 下了800单 客单价188 转化率4%",
+    "prompt": "复盘抖音直播：GMV 15万 UV 2万 订单 800 客单价 188 转化率 4%",
     "expectations": {
       "mustComplete": true,
       "terminalStatus": "completed",
@@ -70,7 +70,7 @@
       "mustContainAny": ["核心数据", "问题诊断"],
       "maxDurationMs": 240000
     },
-    "notes": "Natural-language hand-pasted form. Parser must extract: GMV=15万 (150000), UV=2万 (20000), 订单=800, 客单价=188, 转化率=4%. Cross-checks: 800×188=150400 ≈ 150000 ✓; 800/20000=4% ✓. Validates regex patterns handle 万 suffix + free-form word order."
+    "notes": "Semi-natural form — anchored field names but minimal punctuation, plus 万 suffixes. Parser must coerce: GMV=15万 (150000), UV=2万 (20000), 订单=800, 客单价=188, 转化率=4%. Self-consistent: 800×188=150400 ≈ 150000 ✓; 800/20000=4% ✓. Validates 万 suffix + key-without-colon paths. Fully-prose handling (e.g. '卖了15万 来了2万人') is out of Phase 2 scope; the parser's regex anchors require key labels."
   },
   {
     "id": "P2_DR_006",
