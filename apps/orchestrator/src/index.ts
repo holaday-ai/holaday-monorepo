@@ -391,17 +391,28 @@ async function main() {
     // agent-loop's takeover window (30 min) + buffer; rows older than
     // that are definitely abandoned. Bypass user accumulates these
     // fastest because eval suites kick off many parking cases.
+    // The boot-sweep threshold also defaults to 35 minutes, but
+    // can be tightened via env var for one-off cleanup. After the
+    // Phase 3 R1 state-machine guard landed, the bypass eval user
+    // accumulated 100 awaiting_user tasks (the guard now prevents
+    // takeover-timeout from auto-completing them, but the runtime
+    // reaper hadn't existed yet). Set BOOT_SWEEP_AWAITING_USER_MIN=5
+    // for one deploy to flush, then restore.
+    const bootAwaitingMin = Number.parseInt(
+      process.env.BOOT_SWEEP_AWAITING_USER_MIN ?? '35',
+      10,
+    );
     const parkRows = await db.execute(sql`
       UPDATE tasks
          SET status = 'failed',
              error_code = 'AWAITING_USER_TIMEOUT',
-             error_message = '等待用户响应超时（>35分钟），任务已自动释放。',
+             error_message = ${`等待用户响应超时（>${bootAwaitingMin}分钟），任务已自动释放。`},
              awaiting_question = NULL,
              awaiting_kind = NULL,
              updated_at = NOW(3),
              completed_at = NOW(3)
        WHERE status = 'awaiting_user'
-         AND updated_at < NOW() - INTERVAL 35 MINUTE
+         AND updated_at < NOW() - INTERVAL ${sql.raw(String(bootAwaitingMin))} MINUTE
     `);
     // Phase 22a (#25 audit fix) — `db.execute(UPDATE)` returns
     // `[ResultSetHeader, ...]` under mysql2 (the driver drizzle uses
@@ -415,6 +426,15 @@ async function main() {
       logger.warn({ count: changed }, 'boot sweep: marked stale in-flight tasks as failed');
     } else {
       logger.info('boot sweep: no stale in-flight tasks to mark');
+    }
+    const parkChanged = extractAffectedRows(parkRows);
+    if (parkChanged > 0) {
+      logger.warn(
+        { count: parkChanged, thresholdMin: bootAwaitingMin },
+        'boot sweep: marked stale awaiting_user parks as failed',
+      );
+    } else {
+      logger.info({ thresholdMin: bootAwaitingMin }, 'boot sweep: no stale awaiting_user parks to mark');
     }
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'boot sweep failed (non-fatal)');
