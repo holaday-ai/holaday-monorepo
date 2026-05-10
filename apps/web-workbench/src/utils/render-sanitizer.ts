@@ -51,37 +51,92 @@ const BARE_SCREENSHOT_FILENAME_RE =
  * narrates its own retry / reroute / error-recovery thinking in
  * the visible answer. These lines aren't useful to the end user.
  *
+ * Filtering principle (BOSS Phase 1 follow-up):
+ *
+ *   KEEP — explanations. The user needs to know WHY the result is
+ *          what it is.
+ *     - "我遇到登录限制，只能给你搜索结果整理"
+ *     - "小红书需要登录才能查看完整内容" (note: the substring
+ *       '需要登录才能' is no longer in the filter list — was a
+ *       false-positive removal of legitimate explanatory text)
+ *     - "基于搜索结果已经抓到了足够多的笔记信息"
+ *
+ *   FILTER — process narration. The user does NOT need to know
+ *            WHAT the agent is currently doing.
+ *     - "我来直接去小红书搜索给你看..."
+ *     - "让我截图" / "正在调用工具" / "等一下再截图"
+ *     - "搜到了，直接进几个..." / "直接整理给你"
+ *     - "页面是空白，等一下重试" / "页面还在加载"
+ *
  * Pattern: a LINE that STARTS WITH (after optional bullet markers
  * "- ", "* ", "> ", or whitespace) one of the narrative phrases.
- * Whole-line strip — the rest of the line goes too. This is a
- * judgement call: occasionally a legitimate user reply might
- * begin with one of these phrases ("需要登录才能查看，所以我..."
- * is something the agent might write to acknowledge a constraint),
- * but in practice the lines that start with these phrases are
- * almost always junk.
+ * Whole-line strip — the rest of the line goes too.
  */
 const NARRATIVE_LINE_STARTERS = [
+  // --- Process announce (agent narrating its next action) ---
+  '我来直接',
+  '我来打开',
+  '我来搜索',
+  '我来截图',
+  '我来去',
+  '我来抓',
+  '让我直接',
+  '让我打开',
+  '让我搜索',
+  '让我截图',
+  '让我截个图',
+  '让我去',
+  '让我看看',
+  '让我看一下',
+  '让我换',
+  '让我换一下',
+  '让我换个',
+  '让我重新',
+  '让我再',
+
+  // --- Tool-invocation narration ---
+  '正在调用',
+  '正在使用',
+  '正在尝试',
+
+  // --- Page state / loading observations ---
   '页面是空白',
   '页面空白',
   '页面加载失败',
+  '页面还在加载',
+  '页面加载中',
+
+  // --- Wait + retry process ---
   '等一下重试',
+  '等一下再',
   '稍等，重试',
   '稍等，再试',
+
+  // --- Lane / source switch announcements ---
   '我换',
   '换用 Google 搜索',
   '换用Google搜索',
   '换 Google',
   '改用搜索',
-  '让我换一下',
-  '让我换个',
-  '让我重新',
-  '让我再试',
-  '需要登录才能',
+  '换用其他',
+
+  // --- Recovery announcements (process flavour) ---
   '抓取失败，让我',
   '抓取超时，让我',
-  '让我打开',
-  '让我去',
-  '让我直接',
+
+  // --- Completion + next-action announce (agent celebrates
+  //     a partial result while still doing more work; user
+  //     just wants the final synthesis) ---
+  '搜到了，直接',
+  '搜到了，进',
+  '抓到了，直接',
+  '直接整理给你',
+  '直接给你看',
+
+  // NOTE: '需要登录才能' was removed from this list. Phrases like
+  // "小红书需要登录才能查看完整内容" are EXPLANATORY (they tell the
+  // user why the result is incomplete), not process narration. The
+  // earlier sweep filter false-positived these; users now see them.
 ];
 
 /**

@@ -43,6 +43,10 @@ import type { DomainName } from '../vision-loop/domain/classifier.js';
 import type { ApifyAdapter } from './adapters/apify.js';
 import type { ZapierAdapter } from './adapters/zapier.js';
 import { translateError } from '../error-translator.js';
+import {
+  buildLoginParkQuestion,
+  detectLoginUrl,
+} from '../login-detector.js';
 import { classifyTaskType, filterTools } from '../tool-registry.js';
 import {
   classifyRole,
@@ -1603,7 +1607,28 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         const finalText = textPreamble
           .replace(/\[STEP\s+\d+\s+(?:done|running|failed|pending)\]\s*\n*/gi, '')
           .trim();
-        if (looksLikePendingQuestion(finalText)) {
+        // Phase 1 follow-up — deterministic login-page detection.
+        // The model is right ~80-90% on login walls; the remaining
+        // cases either silently treat the login page as the answer
+        // ("here's the URL I reached") or burn iterations trying to
+        // bypass. Probe the live page URL up front and short-circuit
+        // to a forced park when a login pattern matches, regardless
+        // of whether the LLM emitted [AWAITING_USER_INPUT].
+        let preParkUrl: string | null = null;
+        try {
+          const livePage = (await executor.getPage()) as unknown as {
+            url?: () => string;
+          };
+          const u = livePage?.url?.();
+          if (typeof u === 'string' && u && u !== 'about:blank') {
+            preParkUrl = u;
+          }
+        } catch {
+          /* swallow — best-effort URL snapshot */
+        }
+        const loginSignal = detectLoginUrl(preParkUrl);
+        const forcedLoginPark = loginSignal.matched;
+        if (forcedLoginPark || looksLikePendingQuestion(finalText)) {
           // Park on a user reply. `supercarReply` resolves the promise;
           // `supercarAbort` rejects with a sentinel we swap to
           // cancelled. Capped at the kind-specific timeout below so a
@@ -1625,8 +1650,18 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           // P1-A — strip the machine marker before showing the
           // question to the user. Detector consumed it; user
           // shouldn't see "[AWAITING_USER_INPUT]" verbatim.
-          const visibleQuestion = stripAwaitingUserMarker(finalText);
-          const parkAwaitingKind = classifyAwaitingKind(visibleQuestion);
+          //
+          // Phase 1 follow-up — when the deterministic login probe
+          // forced this park (LLM didn't emit a marker), synthesise
+          // a clear Chinese question with the friendly host name
+          // instead of feeding the model's "completed-y" text into
+          // classifyAwaitingKind (which would land on 'clarification'
+          // → 5min timeout → silently complete under the user's hands).
+          const visibleQuestion = forcedLoginPark
+            ? buildLoginParkQuestion(preParkUrl)
+            : stripAwaitingUserMarker(finalText);
+          const parkAwaitingKind: ReturnType<typeof classifyAwaitingKind> =
+            forcedLoginPark ? 'login' : classifyAwaitingKind(visibleQuestion);
           const AWAITING_USER_TIMEOUT_MS =
             parkAwaitingKind === 'clarification'
               ? AWAITING_USER_TIMEOUT_CLARIFICATION_MS
@@ -1634,20 +1669,11 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           // P2 — capture current page URL right before parking so
           // the dispatcher can persist tasks.finalUrl. Survives any
           // screencast disconnect that happens during the pause.
-          // Best-effort: a Playwright failure here shouldn't block
-          // the park; pass null and the dispatcher skips the write.
-          let currentParkUrl: string | null = null;
-          try {
-            const livePage = (await executor.getPage()) as unknown as {
-              url?: () => string;
-            };
-            const u = livePage?.url?.();
-            if (typeof u === 'string' && u && u !== 'about:blank') {
-              currentParkUrl = u;
-            }
-          } catch {
-            /* swallow — best-effort URL snapshot */
-          }
+          // Phase 1 follow-up — reuse the URL snapshot taken above
+          // for the deterministic login probe. Probing twice in
+          // <1ms costs nothing but the value can't have changed in
+          // between (no I/O between the two checks).
+          const currentParkUrl: string | null = preParkUrl;
           await safeCall(opts.onAwaitingUser, {
             question: visibleQuestion,
             at: new Date(),
