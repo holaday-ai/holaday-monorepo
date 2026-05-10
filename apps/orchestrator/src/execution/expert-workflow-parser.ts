@@ -22,28 +22,49 @@ import type {
 } from './expert-workflow-contract.js';
 
 /**
- * Strip thousand-separators and currency markers, then parse as
- * JS Number. Returns NaN for unparseable input — caller handles.
+ * Strip thousand-separators and currency markers, translate Chinese
+ * unit suffixes (万/亿/千/百), then parse as JS Number. Returns NaN
+ * for unparseable input — caller handles.
  *
  *   "100,000"      → 100000
  *   "¥100,000.50"  → 100000.5
- *   "1.5万"        → NaN  (we don't translate Chinese unit suffixes
- *                          here; workflow authors should specify the
- *                          unit in the field label and ask the user
- *                          to provide the canonical form)
- *   "3%"           → 3    (% suffix stripped — caller decides whether
- *                          the field IS a percentage; the workflow's
- *                          field label and unit should clarify)
+ *   "15万"         → 150000     (Chinese unit suffix, common in
+ *                                user-pasted GMV / UV figures)
+ *   "1.5万"        → 15000
+ *   "2亿"          → 200000000
+ *   "3%"           → 3          (% suffix stripped — caller decides
+ *                                whether the field IS a percentage)
+ *
+ * Phase 2 Day 6 follow-up — earlier this rejected 万 / 亿 etc.,
+ * forcing users to write canonical forms. Real users routinely
+ * paste "GMV 15万" (the Compass UI shows it that way), so the
+ * intake gate was rejecting valid input. Suffix translation lives
+ * here so every workflow gets it for free.
  */
 function coerceNumber(raw: string): number {
-  const cleaned = raw
+  let cleaned = raw
     .trim()
-    // Drop currency markers + thousand-separator commas + percentage
-    // suffix. Keep digits, decimal point, leading sign.
     .replace(/[¥￥$,，％%]/g, '')
     .replace(/\s+/g, '');
   if (!cleaned) return NaN;
-  return Number(cleaned);
+  let multiplier = 1;
+  // Order matters: check 亿 before 万 (亿 isn't a suffix of 万).
+  if (cleaned.endsWith('亿')) {
+    multiplier = 100_000_000;
+    cleaned = cleaned.slice(0, -1);
+  } else if (cleaned.endsWith('万')) {
+    multiplier = 10_000;
+    cleaned = cleaned.slice(0, -1);
+  } else if (cleaned.endsWith('千')) {
+    multiplier = 1_000;
+    cleaned = cleaned.slice(0, -1);
+  } else if (cleaned.endsWith('百')) {
+    multiplier = 100;
+    cleaned = cleaned.slice(0, -1);
+  }
+  if (!cleaned) return NaN;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n * multiplier : NaN;
 }
 
 /**

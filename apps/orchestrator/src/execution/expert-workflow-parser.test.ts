@@ -32,6 +32,16 @@ describe('coerceNumber', () => {
   it('non-numeric → NaN', () => {
     expect(Number.isNaN(c('abc'))).toBe(true);
   });
+  it('Chinese unit suffix 万 / 亿 / 千 / 百 translated', () => {
+    expect(c('15万')).toBe(150_000);
+    expect(c('1.5万')).toBe(15_000);
+    expect(c('2亿')).toBe(200_000_000);
+    expect(c('5千')).toBe(5_000);
+    expect(c('3百')).toBe(300);
+  });
+  it('suffix-only input → NaN (no number to multiply)', () => {
+    expect(Number.isNaN(c('万'))).toBe(true);
+  });
 });
 
 describe('parseInputs — douyin required fields', () => {
