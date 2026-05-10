@@ -120,12 +120,28 @@ describe('detectLoginBody', () => {
     expect(detectLoginBody('Continue with Google').matched).toBe(false);
   });
 
-  it('long article body that mentions "login" once → matched (intentional liberal match)', () => {
-    // Body matching is opt-in via prominentText. The caller is
-    // expected to pass H1+button text only, NOT full body. This
-    // test pins the behaviour so callers know what to expect.
+  it('long article body that mentions "login" once → does NOT match (Phase 3 R1 stricter needles)', () => {
+    // Body needles are now phrase-level only ("please log in",
+    // "请先登录", "扫码登录", etc.) — single tokens like "login" /
+    // "登录" appear in every site's nav, false-positive on baidu /
+    // bing / google homepages. Phase 3 R1 tightened the needle list
+    // to phrases that ONLY appear on login walls.
     const long = 'A '.repeat(200) + 'login best practices include MFA';
-    expect(detectLoginBody(long).matched).toBe(true);
+    expect(detectLoginBody(long).matched).toBe(false);
+  });
+
+  it('login wall phrase → matched', () => {
+    expect(detectLoginBody('请先登录后查看完整内容').matched).toBe(true);
+    expect(detectLoginBody('please sign in to continue').matched).toBe(true);
+    expect(detectLoginBody('扫码登录抖音电商罗盘').matched).toBe(true);
+  });
+
+  it('search engine homepage with "登录" link → does NOT match', () => {
+    // Bing.com / baidu.com homepages have a "登录" link in the nav
+    // bar but no login wall. Body text says things like
+    // "百度一下，你就知道", search box placeholder, etc.
+    const baiduLike = '百度一下 你就知道 关于百度 登录 设置 hao123 视频';
+    expect(detectLoginBody(baiduLike).matched).toBe(false);
   });
 });
 

@@ -78,13 +78,55 @@ const LOGIN_TITLE_NEEDLES = [
 ];
 
 /**
- * Body / button keywords. Stronger evidence: the page CORE has
- * login affordances. Used when caller provides DOM-extracted
- * prominent text. Same list as title keywords by design — if
- * the title says nothing useful but the page body has these,
- * it's still a login wall.
+ * Body needles — STRICTER than the title list. Single words like
+ * "登录" or "sign in" appear in the navigation of EVERY major site
+ * (search engines, news, e-commerce homepages all have a "登录"
+ * link top-right). If we matched on those alone we'd false-positive
+ * on baidu.com / bing.com / google.com landing pages — observed in
+ * P1_BROWSER_NAV regression.
+ *
+ * Phrase-level needles only: "please sign in", "请先登录", "扫码登录"
+ * etc. — the kind of copy that ONLY appears on a login wall, not
+ * on a navigation link.
  */
-const LOGIN_BODY_NEEDLES = LOGIN_TITLE_NEEDLES;
+const LOGIN_BODY_NEEDLES = [
+  // Chinese — login-wall specific phrases
+  '请先登录',
+  '请登录',
+  '需要登录',
+  '登录以查看',
+  '登录以继续',
+  '登录后查看',
+  '登录后继续',
+  '未登录',
+  '尚未登录',
+  '账号登录',
+  '手机登录',
+  '手机号登录',
+  '邮箱登录',
+  '密码登录',
+  '扫码登录',
+  '微信登录',
+  '验证码登录',
+  '账号或密码',
+  '请输入密码',
+  '请输入账号',
+  '请输入手机号',
+  '请输入验证码',
+  // English — login-wall specific phrases
+  'please sign in',
+  'please log in',
+  'sign in to continue',
+  'log in to continue',
+  'sign in to view',
+  'log in to view',
+  'login required',
+  'must be logged in',
+  'please log on',
+  'enter your password',
+  'enter your username',
+  'enter your email',
+];
 
 export interface LoginSignal {
   matched: boolean;
