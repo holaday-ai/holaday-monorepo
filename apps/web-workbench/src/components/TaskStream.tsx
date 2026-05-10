@@ -36,6 +36,13 @@ import type {
   UiWebSearchEvent,
 } from '@/types/task';
 import { friendlyHost, humanizeStep, humanizedGlyph, liveStatusLabel } from '@/utils/step-humanize';
+// Phase 1 follow-up — render-time defence-in-depth sanitiser. Strips
+// markdown image references that point at agent screenshots, agent
+// retry / reroute / login-wall narrative lines, lingering tool XML
+// envelopes, and image-magic-byte base64. Runs on EVERY summary
+// before ReactMarkdown — protects history rows that pre-date the
+// orchestrator-side sanitiser too.
+import { sanitizeForRender } from '@/utils/render-sanitizer';
 
 interface Props {
   task: UiTask;
@@ -399,7 +406,9 @@ function AgentBlock({
               {streamingText && (
                 <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {sanitizeMarkdownTrailingPunctuation(streamingText)}
+                    {sanitizeMarkdownTrailingPunctuation(
+                      sanitizeForRender(streamingText),
+                    )}
                   </ReactMarkdown>
                   <span className="ml-0.5 inline-block h-3 w-1 animate-pulse bg-foreground/40 align-baseline" />
                 </div>
@@ -1004,7 +1013,7 @@ function TerminalSummary({
       )}
       <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>
-          {sanitizeMarkdownTrailingPunctuation(revealed)}
+          {sanitizeMarkdownTrailingPunctuation(sanitizeForRender(revealed))}
         </ReactMarkdown>
       </div>
       {/* O3 — model info line. Tiny, non-intrusive. */}

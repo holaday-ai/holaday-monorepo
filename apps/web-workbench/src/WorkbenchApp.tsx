@@ -633,6 +633,32 @@ function AppShell(): JSX.Element {
     }
   }, [selectedNeedsBrowser]);
 
+  // Phase 1 follow-up — auto-collapse BrowserPanel for non-browser
+  // tasks. When the user picks a generate / scrape task (or the
+  // executor lane is otherwise non-browser), the panel content is
+  // either empty or shows a stale frame from a prior browser task.
+  // Default-collapsing gives the TaskStream the full content width.
+  // The user can still manually expand via the panel toggle —
+  // that toggle writes to the same `browserCollapsed` state, so
+  // their override stands until the next task change. The
+  // `selectedNeedsBrowser` effect above wins for live-browser tasks
+  // (it'll re-open the panel when a captcha / login / browser_action
+  // park fires).
+  React.useEffect(() => {
+    const selectedTaskNow = selectedTaskId
+      ? tasks.find((t) => t.taskId === selectedTaskId)
+      : null;
+    if (!selectedTaskNow) return;
+    if (selectedNeedsBrowser) return; // already handled by the effect above
+    const lane = selectedTaskNow.executionMode;
+    // Only auto-collapse when we know the lane is non-browser. A
+    // missing executionMode (legacy row) leaves the panel alone —
+    // safer to show empty than to hide a real browser task.
+    if (lane && lane !== 'browser') {
+      setBrowserCollapsed(true);
+    }
+  }, [selectedTaskId, selectedNeedsBrowser, tasks]);
+
   if (!authed) {
     return <LoginGate onAuthenticated={() => setAuthed(true)} />;
   }

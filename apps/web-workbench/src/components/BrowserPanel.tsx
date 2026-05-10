@@ -3,6 +3,7 @@ import {
   ArrowRight,
   ChevronLeft,
   ChevronRight,
+  ExternalLink,
   Globe,
   Maximize2,
   Minimize2,
@@ -856,6 +857,35 @@ export function BrowserPanel({
                 <div className="mt-0.5 text-xs text-amber-900/80 dark:text-amber-100/80">
                   {awaitingKindBannerBody(awaitingKind)}
                 </div>
+                {/* Phase 1 follow-up — login park resume affordance.
+                    Surfaces ONLY when:
+                    - kind is 'login' (the case where users actually
+                      need to act outside our panel)
+                    - we have a real URL to point at (the persisted
+                      finalUrl, not a stale `about:blank`)
+                    - and the live screencast is NOT current
+                      (frame === null means WS dropped on refresh OR
+                      Brave was released; the static evidence frame
+                      is what the user is seeing). When the live
+                      screencast is up, the inline interactive
+                      takeover already handles the login flow inside
+                      the panel.
+                    The button opens the login URL in a new tab so
+                    the user can complete the login flow on the live
+                    site, then come back and reply to the task. */}
+                {awaitingKind === 'login' &&
+                  !frame &&
+                  persistedFinalUrl && (
+                    <a
+                      href={persistedFinalUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-amber-500/60 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-900 hover:bg-amber-100 hover:text-amber-950 dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/20"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      在新标签打开登录页
+                    </a>
+                  )}
               </div>
             </div>
           )}
