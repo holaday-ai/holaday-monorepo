@@ -25,6 +25,20 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from 'pino';
 import { buildLayeredSystemPrompt, classifyRole } from './supercar/prompt-layers.js';
+// Phase 2 — typed expert workflow framework. When the
+// EXPERT_WORKFLOW flag is on AND the intent matches a registered
+// workflow, the runner runs deterministic intake (parse →
+// validators) before invoking the model. Missing fields or
+// arithmetic contradictions short-circuit to an awaiting_user
+// park BEFORE any token cost.
+import { getFeatureFlags } from '../execution/feature-flags.js';
+import type { ExpertWorkflowContract } from '../execution/expert-workflow-contract.js';
+import { runIntake } from '../execution/expert-workflow-intake.js';
+import {
+  buildFollowUpFooter,
+  buildReportSystemPrompt,
+} from '../execution/expert-workflow-prompt.js';
+import { matchExpertWorkflow } from '../execution/expert-workflow-registry.js';
 
 /** Content blocks for the user message — text/image/document blocks from
  *  parsed file attachments. Loose typing (just `{ type: string }`) so
@@ -138,7 +152,75 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
   // the safe baseline — buildLayeredSystemPrompt handles it cleanly.
   const explicitRole = opts.skillId && opts.skillId !== 'none' ? opts.skillId : null;
   const roleId = explicitRole ?? classifyRole(opts.intent);
-  const system = buildLayeredSystemPrompt(roleId);
+
+  // Phase 2 — expert-workflow intake gate. When the flag is on AND
+  // the intent maps to a registered workflow (today: douyin-review),
+  // run deterministic parse + validators BEFORE any model call.
+  //
+  // Three outcomes:
+  //   missing       — required inputs absent → return awaiting_user
+  //                   with the structured clarification question
+  //   contradiction — arithmetic check failed (e.g. GMV ÷ orders ≠
+  //                   declared 客单价 by > 20%) → return awaiting_user
+  //                   asking the user to confirm which value is right
+  //   ready         — all data + arithmetic clean → swap the role's
+  //                   default system prompt for the workflow's
+  //                   structured report prompt and let the rest of
+  //                   the runner proceed
+  //
+  // Reply path is automatically covered: tasks.reply re-invokes
+  // runGenerateTask with the original-intent + reply-message
+  // combined, the matcher fires on the combined text, and the
+  // intake re-runs against the merged data.
+  let workflow: ExpertWorkflowContract | null = null;
+  let workflowReportSystem: string | null = null;
+  if (getFeatureFlags().EXPERT_WORKFLOW) {
+    workflow = matchExpertWorkflow({ intent: opts.intent, roleId: opts.skillId ?? null });
+    if (workflow) {
+      const intake = runIntake(workflow, opts.intent);
+      log.info(
+        {
+          workflowId: workflow.workflowId,
+          intakeKind: intake.kind,
+          missingRequired: intake.parseResult.missingRequired.map((i) => i.name),
+          extracted: Object.keys(intake.parseResult.extracted),
+        },
+        'expert-workflow: intake decided',
+      );
+      if (intake.kind === 'missing') {
+        // Park with the clarification question. tasks.ts persists
+        // status=awaiting_user, awaitingQuestion=summary,
+        // awaitingKind='clarification'.
+        return {
+          status: 'awaiting_user',
+          summary: intake.question,
+          inputTokens: 0,
+          outputTokens: 0,
+          durationMs: Date.now() - start,
+        };
+      }
+      if (intake.kind === 'contradiction') {
+        // Same persistence shape as missing — caller surfaces the
+        // arithmetic-conflict question to the user.
+        return {
+          status: 'awaiting_user',
+          summary: intake.question,
+          inputTokens: 0,
+          outputTokens: 0,
+          durationMs: Date.now() - start,
+        };
+      }
+      // intake.kind === 'ready' — build the structured report
+      // prompt and use it INSTEAD OF the default role-layered prompt.
+      workflowReportSystem = buildReportSystemPrompt({
+        workflow,
+        extracted: intake.parseResult.extracted,
+        validatorResults: intake.validatorResults,
+      });
+    }
+  }
+
+  const system = workflowReportSystem ?? buildLayeredSystemPrompt(roleId);
 
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
@@ -478,9 +560,17 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
       );
     }
 
-    const finalSummary = truncatedAtCap
+    const baseSummary = truncatedAtCap
       ? accumulatedSummary + TRUNCATION_NOTICE
       : accumulatedSummary;
+    // Phase 2 — append the workflow's follow-up actions footer.
+    // Empty string when no workflow matched (legacy generate path)
+    // or when the workflow has no follow-ups configured. SPA renders
+    // the marker block as a chip rail; default markdown renderers
+    // fall through to a plain link list.
+    const finalSummary = workflow
+      ? baseSummary + buildFollowUpFooter(workflow)
+      : baseSummary;
 
     return {
       status: 'completed',
@@ -515,11 +605,14 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
     // discard a 4000-char draft because the second stream call hit a
     // network blip.
     if (accumulatedSummary.length > 0) {
+      // Phase 2 — same footer-append discipline as the happy path
+      // so a partially-streamed report still ships with chips.
+      const partialSummary =
+        accumulatedSummary +
+        '\n\n---\n⚠️ 内容因网络/超时被截断，如需完整版请追问。';
       return {
         status: 'completed',
-        summary:
-          accumulatedSummary +
-          '\n\n---\n⚠️ 内容因网络/超时被截断，如需完整版请追问。',
+        summary: workflow ? partialSummary + buildFollowUpFooter(workflow) : partialSummary,
         inputTokens: totalInputTokens,
         outputTokens: totalOutputTokens,
         durationMs,

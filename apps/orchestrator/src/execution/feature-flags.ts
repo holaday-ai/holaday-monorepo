@@ -26,6 +26,14 @@ interface FeatureFlags {
   EXECUTION_CONTRACT: boolean;
   EXECUTION_VERIFIER: boolean;
   EVIDENCE_LEDGER: boolean;
+  /**
+   * Phase 2 — expert workflow framework. When true, generate-runner
+   * intercepts douyin-review (and other registered workflows) for
+   * deterministic intake gating + structured report generation. When
+   * false (default), generate path runs the legacy text-prompt
+   * supercar/expert-workflows.ts flow unchanged.
+   */
+  EXPERT_WORKFLOW: boolean;
 }
 
 function readFlagsFromEnv(): FeatureFlags {
@@ -33,6 +41,7 @@ function readFlagsFromEnv(): FeatureFlags {
     EXECUTION_CONTRACT: process.env.EXECUTION_CONTRACT_ENABLED === 'true',
     EXECUTION_VERIFIER: process.env.EXECUTION_VERIFIER_ENABLED === 'true',
     EVIDENCE_LEDGER: process.env.EVIDENCE_LEDGER_ENABLED === 'true',
+    EXPERT_WORKFLOW: process.env.EXPERT_WORKFLOW_ENABLED === 'true',
   };
 }
 

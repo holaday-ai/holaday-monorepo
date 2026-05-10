@@ -210,4 +210,159 @@ describe('runGenerateTask (phase 22a)', () => {
       expect(outcome.summary).toBe('OK');
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Phase 2 — expert-workflow intake gate. The runner intercepts before
+  // any model call when EXPERT_WORKFLOW=true AND the intent matches a
+  // registered workflow (today: douyin-review). Three outcomes:
+  //   missing       → awaiting_user with the clarification question
+  //   contradiction → awaiting_user with the arithmetic-conflict question
+  //   ready         → swap the system prompt, model call proceeds with
+  //                   structured report directives + follow-up footer
+  //                   appended to the final summary.
+  // -------------------------------------------------------------------------
+  describe('Phase 2 expert-workflow intake gate', () => {
+    // Defer-load to avoid a circular dep at file parse time.
+    async function withFlag<T>(value: boolean, fn: () => Promise<T>): Promise<T> {
+      const { setFeatureFlagsForTest, reloadFeatureFlagsForTest } = await import(
+        '../execution/feature-flags.js'
+      );
+      setFeatureFlagsForTest({ EXPERT_WORKFLOW: value });
+      try {
+        return await fn();
+      } finally {
+        reloadFeatureFlagsForTest();
+      }
+    }
+
+    it('flag OFF → workflow skipped, default flow even with matching intent', async () => {
+      const client = makeClient({ textOut: '生成的复盘报告...' });
+      const outcome = await withFlag(false, () =>
+        runGenerateTask({
+          taskId: 'tsk_w_off',
+          userId: 'usr_test',
+          intent: '复盘抖音直播 GMV 100000 UV 20000 订单 1250 客单价 80 转化率 6.25%',
+          client,
+          logger: makeLogger(),
+        }),
+      );
+      expect(outcome.status).toBe('completed');
+      // No follow-up footer when workflow is bypassed.
+      expect(outcome.summary).not.toContain('HOLA_FOLLOW_UP_ACTIONS');
+      expect(outcome.summary).toBe('生成的复盘报告...');
+    });
+
+    it('flag ON + missing inputs → awaiting_user with clarification question, NO model call', async () => {
+      const client = makeClient({ textOut: 'should not be reached' });
+      const outcome = await withFlag(true, () =>
+        runGenerateTask({
+          taskId: 'tsk_w_missing',
+          userId: 'usr_test',
+          intent: '帮我复盘下抖音直播',
+          client,
+          logger: makeLogger(),
+        }),
+      );
+      expect(outcome.status).toBe('awaiting_user');
+      expect(outcome.summary).toContain('直播 GMV');
+      expect(outcome.summary).toContain('客单价');
+      expect(outcome.inputTokens).toBe(0);
+      expect(outcome.outputTokens).toBe(0);
+    });
+
+    it('flag ON + contradiction → awaiting_user with arithmetic-conflict question', async () => {
+      const client = makeClient({ textOut: 'should not be reached' });
+      const outcome = await withFlag(true, () =>
+        runGenerateTask({
+          taskId: 'tsk_w_contradict',
+          userId: 'usr_test',
+          intent:
+            '复盘抖音直播 GMV 200000 UV 5000 订单 500 客单价 50 转化率 10%',
+          client,
+          logger: makeLogger(),
+        }),
+      );
+      expect(outcome.status).toBe('awaiting_user');
+      expect(outcome.summary).toContain('校验未通过');
+      expect(outcome.summary).toContain('400'); // calculated avg price
+      expect(outcome.summary).toContain('50'); // declared
+      expect(outcome.inputTokens).toBe(0);
+    });
+
+    it('flag ON + ready → model call uses workflow system prompt + footer appended', async () => {
+      // The mock client captures the system prompt the runner sends so
+      // we can assert it carries the workflow's directive markers
+      // (source-annotation glyphs, section list).
+      let systemPromptSeen = '';
+      const stream = vi.fn(
+        (params: { system: { text: string }[] }, _reqOpts?: unknown): unknown => {
+          systemPromptSeen = params.system[0]?.text ?? '';
+          const listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
+          const emit = (event: string, ...args: unknown[]) => {
+            for (const fn of listeners[event] ?? []) fn(...args);
+          };
+          const finalMessagePromise = new Promise<unknown>((resolve) => {
+            queueMicrotask(() => {
+              const text = '## 📊 核心数据\n本场 GMV ¥100000 (🟢 用户提供) ...';
+              emit('text', text, text);
+              resolve({
+                id: 'msg_test',
+                model: 'claude-sonnet-4-6',
+                stop_reason: 'end_turn',
+                content: [{ type: 'text', text, citations: null }],
+                usage: { input_tokens: 100, output_tokens: 50 },
+              });
+            });
+          });
+          return {
+            on(event: string, fn: (...a: unknown[]) => void) {
+              (listeners[event] ??= []).push(fn);
+              return this;
+            },
+            finalMessage() {
+              return finalMessagePromise;
+            },
+          };
+        },
+      );
+      const client = { messages: { stream } } as unknown as Anthropic;
+
+      const outcome = await withFlag(true, () =>
+        runGenerateTask({
+          taskId: 'tsk_w_ready',
+          userId: 'usr_test',
+          intent:
+            '复盘抖音直播 GMV 100000 UV 20000 订单 1250 客单价 80 转化率 6.25%',
+          client,
+          logger: makeLogger(),
+        }),
+      );
+      expect(outcome.status).toBe('completed');
+      // System prompt swapped to workflow report directives:
+      expect(systemPromptSeen).toContain('抖音直播复盘');
+      expect(systemPromptSeen).toContain('🟢');
+      expect(systemPromptSeen).toContain('核心数据');
+      expect(systemPromptSeen).toContain('"gmv": 100000');
+      // Follow-up footer appended:
+      expect(outcome.summary).toContain('HOLA_FOLLOW_UP_ACTIONS_START');
+      expect(outcome.summary).toContain('生成下场直播 SOP');
+    });
+
+    it('flag ON + non-matching intent → workflow skipped, default flow', async () => {
+      const client = makeClient({ textOut: 'translation result' });
+      const outcome = await withFlag(true, () =>
+        runGenerateTask({
+          taskId: 'tsk_w_no_match',
+          userId: 'usr_test',
+          intent: '把这句话翻译成英文：今天天气真好',
+          client,
+          logger: makeLogger(),
+        }),
+      );
+      expect(outcome.status).toBe('completed');
+      expect(outcome.summary).toBe('translation result');
+      // No workflow → no footer.
+      expect(outcome.summary).not.toContain('HOLA_FOLLOW_UP_ACTIONS');
+    });
+  });
 });
