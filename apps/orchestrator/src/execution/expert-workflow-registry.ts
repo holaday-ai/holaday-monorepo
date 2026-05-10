@@ -57,17 +57,22 @@ const LIVE_TERMS = ['直播', '直播间', '带货', '主播'];
 const REVIEW_TERMS = ['复盘', '诊断', '分析直播', '直播分析', '直播报告'];
 
 function matchesDouyinReview(opts: MatchOpts): boolean {
-  // 1. Explicit role hit — any of the douyin-review roleIds, or a
-  //    pattern starting with `douyin` (covers `douyin-strategist`,
-  //    `douyin-operator`, etc. that the existing UI uses).
-  if (opts.roleId) {
-    const role = opts.roleId.toLowerCase();
-    if (role.startsWith('douyin')) return true;
-    if (DOUYIN_REVIEW_WORKFLOW.roleIds.includes(opts.roleId)) return true;
-  }
-  // 2. Keyword match on intent. Need ALL THREE buckets:
-  //    site (抖音), surface (直播), task (复盘). Two out of three
-  //    isn't enough — "分析抖音的内容生态" shouldn't trigger this.
+  // Keyword match on intent — three buckets, all required:
+  //   site (抖音), surface (直播), task (复盘). Two-of-three isn't
+  //   enough; "分析抖音的内容生态" shouldn't trigger this.
+  //
+  // Earlier this had a `roleId.startsWith('douyin')` fast-path that
+  // fired the workflow whenever the user had a douyin role selected,
+  // even on intents like "复盘直播 GMV..." that omit the 抖音 site
+  // keyword. The eval bypass user has `douyin-strategist` configured
+  // by default, so that fast-path was grabbing P0_009 (an
+  // intentionally non-douyin contradiction case meant to exercise
+  // the LLM-driven contradiction surfacing path) and forcing it
+  // through the workflow gate. Dropping the role fast-path makes
+  // the routing decision driven by intent content alone — saner
+  // default, since the role is a persona not a routing key. Users
+  // who select douyin-strategist + paste data still fire the
+  // workflow as long as they mention 抖音 in the intent.
   const lower = opts.intent.toLowerCase();
   const hasSite = DOUYIN_TERMS.some((t) => lower.includes(t.toLowerCase()));
   const hasSurface = LIVE_TERMS.some((t) => lower.includes(t.toLowerCase()));

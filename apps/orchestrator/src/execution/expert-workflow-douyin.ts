@@ -177,7 +177,7 @@ const DATA_VALIDATORS: readonly DataValidator[] = [
       if (drift > GMV_PRICE_TOLERANCE) {
         return {
           passed: false,
-          message: `GMV ÷ 订单数 = ¥${calculated.toFixed(0)}，与填报的客单价 ¥${price} 偏差 ${(drift * 100).toFixed(0)}%。`,
+          message: `数据不一致：GMV ÷ 订单数 = ¥${calculated.toFixed(0)}，但客单价填的是 ¥${price}（偏差 ${(drift * 100).toFixed(0)}%）。`,
           suggestedFix: `请确认：实际客单价是 ¥${calculated.toFixed(0)} 还是 ¥${price}？（GMV、订单数、客单价 三者只需修正一个就能对齐）`,
         };
       }

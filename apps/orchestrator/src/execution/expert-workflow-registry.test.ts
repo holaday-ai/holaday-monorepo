@@ -15,23 +15,33 @@ describe('matchExpertWorkflow — douyin-review', () => {
     expect(w?.workflowId).toBe('douyin-review');
   });
 
-  it('matches on role_id starting with douyin', () => {
+  it('role_id alone is NOT enough — intent keywords still required', () => {
+    // Earlier the matcher fired on `douyin-strategist` even with a
+    // terse intent like "帮我看看数据". Eval bypass user has that
+    // role configured by default, so the fast-path was forcing
+    // every contradiction-style P0 case through the workflow gate.
+    // Now the intent must mention 抖音 + 直播 + 复盘 buckets even
+    // when an explicit douyin role is selected.
+    expect(
+      matchExpertWorkflow({ intent: '帮我看看数据', roleId: 'douyin-strategist' }),
+    ).toBeNull();
+    expect(
+      matchExpertWorkflow({ intent: '随便', roleId: 'douyin-operator' }),
+    ).toBeNull();
+  });
+
+  it('explicit douyin role + workflow-shaped intent → still matches', () => {
+    // The role doesn't fire the matcher itself, but intent keywords
+    // do — and a douyin-strategist who actually types a review
+    // intent still gets the workflow.
     const w = matchExpertWorkflow({
-      intent: '帮我看看数据',
+      intent: '复盘抖音直播 GMV 100000',
       roleId: 'douyin-strategist',
     });
     expect(w?.workflowId).toBe('douyin-review');
   });
 
-  it('matches role_id with -operator suffix (existing UI pattern)', () => {
-    const w = matchExpertWorkflow({
-      intent: '随便',
-      roleId: 'douyin-operator',
-    });
-    expect(w?.workflowId).toBe('douyin-review');
-  });
-
-  it('does NOT match if role_id is unrelated', () => {
+  it('does NOT match if role_id is unrelated AND keywords incomplete', () => {
     const w = matchExpertWorkflow({
       intent: '复盘一下',
       roleId: 'content-creator',
