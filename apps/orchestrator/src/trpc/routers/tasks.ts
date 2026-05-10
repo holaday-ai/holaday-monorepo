@@ -733,6 +733,13 @@ export const tasksRouter = router({
             // (content-topic / ecom-daily) lost their parent context
             // on follow-up tasks.create with replyToTaskId.
             intent: expertWorkflow || typedWorkflow ? effectiveIntent : input.intent,
+            // Phase 2b — pass the resolved typed workflow so the
+            // runner skips its inline matcher (which would re-match
+            // against the parent-context-prefixed intent and could
+            // pick a different workflow — P2_ED_008 surfaced this
+            // when the parent ecom-daily report's summary text
+            // happened to contain douyin-review keywords like 诊断).
+            workflowOverride: typedWorkflow,
             skillId:
               gatedRole !== 'none'
                 ? gatedRole
@@ -1103,13 +1110,8 @@ export const tasksRouter = router({
             generateOutcome = await runGenerateTask({
               taskId,
               userId: ctx.userId,
-              // Use effectiveIntent (with parent context block when in
-            // a follow-up + workflow preambles) whenever EITHER the
-            // legacy or typed matcher fires. Earlier this only checked
-            // legacy; P2_CT_008 surfaced the gap — typed-only matches
-            // (content-topic / ecom-daily) lost their parent context
-            // on follow-up tasks.create with replyToTaskId.
-            intent: expertWorkflow || typedWorkflow ? effectiveIntent : input.intent,
+              intent: expertWorkflow || typedWorkflow ? effectiveIntent : input.intent,
+              workflowOverride: typedWorkflow,
               skillId:
                 gatedRole !== 'none'
                   ? gatedRole
@@ -2101,6 +2103,7 @@ export const tasksRouter = router({
                   taskId,
                   userId: ctx.userId,
                   intent: combinedIntent,
+                  workflowOverride: typedWorkflow,
                   skillId:
                     gatedRole !== 'none'
                       ? gatedRole

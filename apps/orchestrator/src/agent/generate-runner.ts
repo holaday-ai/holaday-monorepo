@@ -117,6 +117,26 @@ export interface RunGenerateOpts {
    * incremental output.
    */
   onStreamDelta?: (delta: string) => void;
+  /**
+   * Phase 2b — when tasks.ts has already resolved the typed expert
+   * workflow (via the registry's matchExpertWorkflow on the user's
+   * raw input.intent), pass it through here so the runner doesn't
+   * re-match against the combined parent-context-prefixed intent.
+   *
+   * Why: on a follow-up tasks.create, `opts.intent` is the
+   * effectiveIntent string with parent context block prepended.
+   * That parent context is the prior task's full report summary,
+   * which incidentally contains tokens (诊断 / 直播 / 抖音 in some
+   * cases) that can flip the matcher to a DIFFERENT workflow than
+   * the one tasks.ts already locked in based on the user's actual
+   * reply. Passing the resolved workflow keeps the decisions
+   * consistent across the two layers.
+   *
+   * `null` / undefined = re-run the matcher inside (legacy / forward-
+   * path behaviour, also fine for non-follow-up calls because
+   * input.intent and effectiveIntent agree there).
+   */
+  workflowOverride?: ExpertWorkflowContract | null;
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
@@ -175,7 +195,14 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
   let workflow: ExpertWorkflowContract | null = null;
   let workflowReportSystem: string | null = null;
   if (getFeatureFlags().EXPERT_WORKFLOW) {
-    workflow = matchExpertWorkflow({ intent: opts.intent, roleId: opts.skillId ?? null });
+    // If tasks.ts already locked in the workflow on the raw user
+    // input, respect that. Otherwise (forward-path call where
+    // tasks.ts didn't pre-resolve, or pre-Phase-2b callsites) run
+    // the matcher inline.
+    workflow =
+      opts.workflowOverride !== undefined
+        ? opts.workflowOverride
+        : matchExpertWorkflow({ intent: opts.intent, roleId: opts.skillId ?? null });
     if (workflow) {
       const intake = runIntake(workflow, opts.intent);
       log.info(
