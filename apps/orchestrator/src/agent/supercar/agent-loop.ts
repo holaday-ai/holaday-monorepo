@@ -1684,26 +1684,46 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         } catch {
           /* swallow — best-effort title + body snapshot */
         }
-        const permissionSignal = detectPermissionWall({
+        // Priority: URL is the strongest signal. Sites pin their auth
+        // endpoints to canonical paths (/login, /signin, /captcha,
+        // /403). Body text is incidental — a login page commonly has
+        // the word "验证码" because it shows a captcha widget INSIDE
+        // the login form, but the page is still primarily a login
+        // wall. Probe URL first across all three kinds; fall back to
+        // title + body only when URL gives no signal.
+        const permissionUrlSignal = detectPermissionWall({
           url: preParkUrl,
-          title: preParkTitle,
-          prominentText: preParkBodyText,
+          title: null,
+          prominentText: null,
         });
-        const captchaSignal = detectCaptchaPage({
+        const captchaUrlSignal = detectCaptchaPage({
           url: preParkUrl,
-          title: preParkTitle,
-          prominentText: preParkBodyText,
+          title: null,
+          prominentText: null,
         });
-        const loginSignal = detectLoginUrl(preParkUrl);
-        // Pick the FIRST hit from {permission, captcha, login}.
-        // Order matters: a captcha page might also have /login in the
-        // path (post-login captcha verification); we want captcha
-        // copy in that case. Permission walls trump everything (you
-        // can't unlock by retrying or solving a captcha).
+        const loginUrlSignal = detectLoginUrl(preParkUrl);
         let forcedAuthKind: 'login' | 'captcha' | 'permission' | null = null;
-        if (permissionSignal.matched) forcedAuthKind = 'permission';
-        else if (captchaSignal.matched) forcedAuthKind = 'captcha';
-        else if (loginSignal.matched) forcedAuthKind = 'login';
+        if (permissionUrlSignal.matched) forcedAuthKind = 'permission';
+        else if (captchaUrlSignal.matched) forcedAuthKind = 'captcha';
+        else if (loginUrlSignal.matched) forcedAuthKind = 'login';
+        if (forcedAuthKind === null) {
+          // No URL hit → check title + body. Permission > captcha
+          // here because a 403 / paywall is a stronger product
+          // signal than a captcha widget (captchas can sometimes be
+          // solved; paywalls need a different account).
+          const permissionTextSignal = detectPermissionWall({
+            url: null,
+            title: preParkTitle,
+            prominentText: preParkBodyText,
+          });
+          const captchaTextSignal = detectCaptchaPage({
+            url: null,
+            title: preParkTitle,
+            prominentText: preParkBodyText,
+          });
+          if (permissionTextSignal.matched) forcedAuthKind = 'permission';
+          else if (captchaTextSignal.matched) forcedAuthKind = 'captcha';
+        }
         const forcedAuthPark = forcedAuthKind !== null;
         if (forcedAuthPark || looksLikePendingQuestion(finalText)) {
           // Park on a user reply. `supercarReply` resolves the promise;
