@@ -383,6 +383,26 @@ async function main() {
        WHERE status IN ('pending','executing','planning')
          AND created_at < NOW() - INTERVAL 2 MINUTE
     `);
+    // Phase 3 R1 — also reap stale awaiting_user tasks. With the new
+    // state-machine guard, agent-loop's takeover-timeout no longer
+    // overwrites awaiting_user with completed, so parked tasks that
+    // the user never came back to now persist indefinitely (and count
+    // against the per-user concurrency limit). 35 min is the
+    // agent-loop's takeover window (30 min) + buffer; rows older than
+    // that are definitely abandoned. Bypass user accumulates these
+    // fastest because eval suites kick off many parking cases.
+    const parkRows = await db.execute(sql`
+      UPDATE tasks
+         SET status = 'failed',
+             error_code = 'AWAITING_USER_TIMEOUT',
+             error_message = '等待用户响应超时（>35分钟），任务已自动释放。',
+             awaiting_question = NULL,
+             awaiting_kind = NULL,
+             updated_at = NOW(3),
+             completed_at = NOW(3)
+       WHERE status = 'awaiting_user'
+         AND updated_at < NOW() - INTERVAL 35 MINUTE
+    `);
     // Phase 22a (#25 audit fix) — `db.execute(UPDATE)` returns
     // `[ResultSetHeader, ...]` under mysql2 (the driver drizzle uses
     // for MySQL); affectedRows is on `[0]`, not on `rows.affectedRows`.
@@ -415,6 +435,13 @@ async function main() {
   const ZOMBIE_REAP_INTERVAL_MS = 60_000;
   const ZOMBIE_REAP_THRESHOLD_MIN = 20;
   const { sql: sqlForReaper } = await import('drizzle-orm');
+  // Phase 3 R1 — runtime sweep also covers stale awaiting_user. Same
+  // 35-min threshold as the boot-sweep counterpart; marks parked tasks
+  // the user never came back to as failed so they stop counting against
+  // per-user concurrency. Without this, a Vultr session that runs for
+  // weeks (no restart triggering boot sweep) accumulates abandoned
+  // parks and eventually wedges the bypass user / heavy users.
+  const AWAITING_USER_REAP_THRESHOLD_MIN = 35;
   const zombieReaperTimer = setInterval(() => {
     void (async () => {
       try {
@@ -433,6 +460,25 @@ async function main() {
           logger.warn(
             { count: changed, thresholdMin: ZOMBIE_REAP_THRESHOLD_MIN },
             'zombie reaper: marked stale executing tasks as failed',
+          );
+        }
+        const parkResult = await db.execute(sqlForReaper`
+          UPDATE tasks
+             SET status = 'failed',
+                 error_code = 'AWAITING_USER_TIMEOUT',
+                 error_message = ${`等待用户响应超时（>${AWAITING_USER_REAP_THRESHOLD_MIN}分钟），任务已自动释放。`},
+                 awaiting_question = NULL,
+                 awaiting_kind = NULL,
+                 updated_at = NOW(3),
+                 completed_at = NOW(3)
+           WHERE status = 'awaiting_user'
+             AND updated_at < NOW() - INTERVAL ${AWAITING_USER_REAP_THRESHOLD_MIN} MINUTE
+        `);
+        const parkChanged = extractAffectedRows(parkResult);
+        if (parkChanged > 0) {
+          logger.warn(
+            { count: parkChanged, thresholdMin: AWAITING_USER_REAP_THRESHOLD_MIN },
+            'zombie reaper: marked stale awaiting_user parks as failed',
           );
         }
       } catch (err) {
