@@ -50,6 +50,10 @@ import {
   detectLoginUrl,
   detectPermissionWall,
 } from '../login-detector.js';
+import {
+  applySiteConfigPostNavigation,
+  matchSiteConfig,
+} from '../site-configs/index.js';
 import { classifyTaskType, filterTools } from '../tool-registry.js';
 import {
   classifyRole,
@@ -1707,6 +1711,25 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         if (permissionUrlSignal.matched) forcedAuthKind = 'permission';
         else if (captchaUrlSignal.matched) forcedAuthKind = 'captcha';
         else if (loginUrlSignal.matched) forcedAuthKind = 'login';
+        // Phase 3 R2 — site-specific URL path augmentation. If the
+        // landed URL matches a registered site config, extend the
+        // login URL probe with that site's loginUrlPaths (e.g.
+        // douyin-compass adds /passport, /account/login). Cheap to
+        // do here even when the global URL probe already hit.
+        const siteConfig = matchSiteConfig(preParkUrl);
+        if (forcedAuthKind === null && siteConfig?.auth?.loginUrlPaths && preParkUrl) {
+          try {
+            const path = new URL(preParkUrl).pathname.toLowerCase();
+            for (const needle of siteConfig.auth.loginUrlPaths) {
+              if (path.includes(needle.toLowerCase())) {
+                forcedAuthKind = 'login';
+                break;
+              }
+            }
+          } catch {
+            /* swallow — bad URL shape */
+          }
+        }
         if (forcedAuthKind === null) {
           // No URL hit → check title + body across all 3 kinds.
           // Order: permission > captcha > login.
@@ -1732,14 +1755,33 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           // detectLoginPage helper combines URL+title+body in priority
           // order; here we feed only title+body since URL was already
           // tried above and didn't hit.
-          const loginTextSignal = detectLoginPage({
+          let loginTextHit = detectLoginPage({
             url: null,
             title: preParkTitle,
             prominentText: preParkBodyText,
-          });
+          }).matched;
+          // Phase 3 R2 — site-specific body phrase augmentation.
+          // Each site can add a few high-precision phrases the global
+          // strict needles wouldn't catch (e.g. xiaohongshu's
+          // "登录解锁更多内容", taobao's "亲，请登录"). Only checked when
+          // the global login body probe missed AND the site config
+          // matched — keeps the false-positive risk low.
+          if (
+            !loginTextHit &&
+            siteConfig?.auth?.loginBodyPhrases &&
+            preParkBodyText
+          ) {
+            const lower = preParkBodyText.toLowerCase();
+            for (const phrase of siteConfig.auth.loginBodyPhrases) {
+              if (lower.includes(phrase.toLowerCase())) {
+                loginTextHit = true;
+                break;
+              }
+            }
+          }
           if (permissionTextSignal.matched) forcedAuthKind = 'permission';
           else if (captchaTextSignal.matched) forcedAuthKind = 'captcha';
-          else if (loginTextSignal.matched) forcedAuthKind = 'login';
+          else if (loginTextHit) forcedAuthKind = 'login';
         }
         const forcedAuthPark = forcedAuthKind !== null;
         if (forcedAuthPark || looksLikePendingQuestion(finalText)) {
@@ -1984,6 +2026,43 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                 err: err instanceof Error ? err.message : String(err),
               },
               'supercar: navigate goto errored (continuing to screenshot)',
+            );
+          }
+          // Phase 3 R2 — site-config post-nav hook. Match the URL
+          // landed on (NOT the requested URL — they can differ on
+          // redirect to login wall) and run any registered dismiss
+          // patterns. Best-effort; on failure we just continue to
+          // the screenshot. Single dismiss pass — most overlays
+          // disappear in one click.
+          try {
+            const landedUrl = navPage.url();
+            const cfg = matchSiteConfig(landedUrl);
+            if (cfg) {
+              const r = await applySiteConfigPostNavigation(
+                cfg,
+                navPage as unknown as Parameters<typeof applySiteConfigPostNavigation>[1],
+              );
+              if (r.dismissed.length > 0) {
+                logger.info(
+                  {
+                    taskId: opts.taskId,
+                    iteration,
+                    siteId: cfg.siteId,
+                    dismissed: r.dismissed,
+                    url: landedUrl,
+                  },
+                  'supercar: site-config dismissed popup overlays',
+                );
+              }
+            }
+          } catch (err) {
+            logger.warn(
+              {
+                taskId: opts.taskId,
+                iteration,
+                err: err instanceof Error ? err.message : String(err),
+              },
+              'supercar: site-config post-nav hook threw (non-fatal)',
             );
           }
           const navShot = await executor.screenshot(navPage);
