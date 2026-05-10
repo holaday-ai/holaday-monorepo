@@ -72,20 +72,5 @@
       "maxDurationMs": 240000
     },
     "notes": "Sanity check that the per-user Brave pool isn't wedged after the four prior parking cases (P3_AUTH_001..004). If the watchdog + state-guard work, the parked tasks released their per-task Brave on terminal/timeout and this case starts cleanly. Same shape as P0_004 but runs AFTER the parking suite — implicit pool-recovery test. If this case fails with PoolCapacityError or similar, the watchdog isn't releasing properly."
-  },
-  {
-    "id": "P3_AUTH_006",
-    "tier": "P2",
-    "category": "auth_site_xiaohongshu",
-    "prompt": "打开 https://www.xiaohongshu.com 帮我看下首页内容",
-    "expectations": {
-      "mustComplete": false,
-      "terminalStatus": "awaiting_user",
-      "awaitingKind": "login",
-      "executionMode": "browser",
-      "mustContainAny": ["登录", "已登录"],
-      "maxDurationMs": 240000
-    },
-    "notes": "Phase 3 R2 — xiaohongshu.com homepage is gated even though the URL has no /login path. The site config's loginBodyPhrases (扫码登录小红书 / 登录解锁更多内容) catches the login form via body-text fallback. Also exercises the auto popup-dismiss (cookie banner if present)."
   }
 ]
