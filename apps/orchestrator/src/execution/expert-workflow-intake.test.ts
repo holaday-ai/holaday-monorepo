@@ -107,3 +107,33 @@ describe('runIntake — ready', () => {
     expect(r.kind).toBe('ready');
   });
 });
+
+describe('runIntake — combined missing + validator failures (Phase 2 Day 4 fix)', () => {
+  it('orders missing AND ROI conflict → missing question surfaces both', () => {
+    // P0_003 scenario: gmv + uv + 转化率 + 客单价 + ROI + 千川消耗
+    // present, but orders missing AND ROI doesn't match GMV/ad_spend.
+    // Pre-fix the missing branch returned only the field-list; the
+    // ROI conflict was lost. Now the message includes both.
+    const r = runIntake(
+      W,
+      '复盘抖音直播 GMV 100000 UV 20000 转化率 3% ROI 1:2.5 客单价 80 千川消耗 8000',
+    );
+    expect(r.kind).toBe('missing');
+    if (r.kind !== 'missing') return;
+    expect(r.parseResult.missingRequired.map((i) => i.name)).toContain('orders');
+    // Validator must still have run and surfaced the ROI conflict.
+    expect(r.question).toContain('校验');
+    expect(r.question).toMatch(/ROI/);
+    // Field list still appended below the validator section.
+    expect(r.question).toContain('订单数');
+  });
+
+  it('all required missing + no validator data → only field-list surfaces', () => {
+    // No fields at all → validators all vacuous-pass → no校验 prefix.
+    const r = runIntake(W, '帮我复盘抖音直播');
+    expect(r.kind).toBe('missing');
+    if (r.kind !== 'missing') return;
+    expect(r.question).not.toContain('校验');
+    expect(r.question).toContain('为了完成');
+  });
+});
