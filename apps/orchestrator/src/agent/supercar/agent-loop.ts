@@ -46,6 +46,7 @@ import { translateError } from '../error-translator.js';
 import {
   buildAuthParkQuestion,
   detectCaptchaPage,
+  detectLoginPage,
   detectLoginUrl,
   detectPermissionWall,
 } from '../login-detector.js';
@@ -1707,10 +1708,14 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         else if (captchaUrlSignal.matched) forcedAuthKind = 'captcha';
         else if (loginUrlSignal.matched) forcedAuthKind = 'login';
         if (forcedAuthKind === null) {
-          // No URL hit → check title + body. Permission > captcha
-          // here because a 403 / paywall is a stronger product
-          // signal than a captcha widget (captchas can sometimes be
-          // solved; paywalls need a different account).
+          // No URL hit → check title + body across all 3 kinds.
+          // Order: permission > captcha > login.
+          // Permission > captcha because a 403 / paywall is a stronger
+          // product signal than a captcha widget. Login last because
+          // the LOGIN_BODY_NEEDLES list includes generic words like
+          // "登录" / "sign in" that articles or doc pages incidentally
+          // mention; we only fall back to login-body when neither URL
+          // nor permission/captcha body fired.
           const permissionTextSignal = detectPermissionWall({
             url: null,
             title: preParkTitle,
@@ -1721,8 +1726,20 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             title: preParkTitle,
             prominentText: preParkBodyText,
           });
+          // Login body/title detection — covers the
+          // compass.jinritemai.com case where the homepage has a "登录"
+          // button + login form widgets but the URL is /. The
+          // detectLoginPage helper combines URL+title+body in priority
+          // order; here we feed only title+body since URL was already
+          // tried above and didn't hit.
+          const loginTextSignal = detectLoginPage({
+            url: null,
+            title: preParkTitle,
+            prominentText: preParkBodyText,
+          });
           if (permissionTextSignal.matched) forcedAuthKind = 'permission';
           else if (captchaTextSignal.matched) forcedAuthKind = 'captcha';
+          else if (loginTextSignal.matched) forcedAuthKind = 'login';
         }
         const forcedAuthPark = forcedAuthKind !== null;
         if (forcedAuthPark || looksLikePendingQuestion(finalText)) {
