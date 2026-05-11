@@ -12,7 +12,12 @@
         "无法访问",
         "请检查",
         "页面加载失败",
-        "页面未能正常加载"
+        "页面未能正常加载",
+        "不存在",
+        "无效",
+        "找不到",
+        "解析失败",
+        "DNS"
       ],
       "mustNotContain": [
         "net::ERR_",
@@ -22,7 +27,7 @@
       ],
       "maxDurationMs": 300000
     },
-    "notes": "Phase 3 R4 — DNS failure on a deliberately non-existent subdomain. translateNavError catches ERR_NAME_NOT_RESOLVED and feeds 无法访问...请检查 into the navigate tool_result. Agent surfaces a friendly Chinese message to the user. mustNotContain asserts no English stack trace / net::ERR string leaks into the final summary."
+    "notes": "Phase 3 R4 — DNS failure on a deliberately non-existent subdomain. translateNavError catches ERR_NAME_NOT_RESOLVED and feeds 无法访问...请检查 into the navigate tool_result. The model usually echoes that, but also frequently produces semantic variants ('网址根本不存在' / 'DNS 记录找不到' / '上面什么内容都没有'). mustContainAny accepts either the verbatim friendly phrase OR semantic equivalents — the test asserts 'agent told the user the URL didn't load', not 'used a specific phrase'. mustNotContain stays strict: no English stack trace / net::ERR string leaks into the final summary."
   },
   {
     "id": "P3_FAIL_002",

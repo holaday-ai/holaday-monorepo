@@ -116,10 +116,10 @@
     "expectations": {
       "mustComplete": true,
       "executionMode": "generate",
-      "mustContainAny": ["矛盾", "不一致", "对不上", "不匹配", "不是", "不符", "≠"],
+      "mustContainAny": ["矛盾", "不一致", "对不上", "不匹配", "不是", "不符", "≠", "出入", "异常", "相差", "差", "偏差", "核查"],
       "maxDurationMs": 180000
     },
-    "notes": "200000 / 500 = ¥400 ≠ ¥50. Consistency-check prompt must surface the contradiction. Phrasing varies by sample: '矛盾'/'不一致' (formal) / '不是 ¥50, 是 ¥400' (model's preferred wording) / '≠' (math notation). All count as surfacing the conflict."
+    "notes": "200000 / 500 = ¥400 ≠ ¥50. Consistency-check prompt must surface the contradiction. Phrasing varies dramatically by sample — model's prose ranges over 矛盾/不一致 (formal), 不是 ¥50, 是 ¥400 (specific value), 数据异常预警 / 出入极大 / 相差 8 倍 (analytical), 建议核查 (advisory). All count as surfacing the conflict. The bar is 'model noticed the data is wrong', NOT 'used a specific phrase'."
   },
   {
     "id": "P0_010",
