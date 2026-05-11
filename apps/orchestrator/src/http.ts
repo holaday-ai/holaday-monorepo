@@ -40,8 +40,10 @@ import {
   type AddonPackId,
   type BillingCycle,
 } from '@holaday/shared-types';
+import { createWebhookTasksHandler } from './api-keys/webhook-handler.js';
 import { makeCreateContext } from './trpc/context.js';
 import { appRouter } from './trpc/router.js';
+import { tasksRouter } from './trpc/routers/tasks.js';
 
 export interface HttpAppDeps {
   planner: Planner;
@@ -918,6 +920,45 @@ export function createHttpApp(deps: HttpAppDeps) {
       );
       res.status(500).json({ error: 'internal_error' });
     }
+  });
+
+  // Phase 5d — webhook route. Nginx strips `/api/` so we mount at
+  // `/webhooks/tasks`. The handler does its own bearer auth (API
+  // key, not JWT) — the upstream bearerAuth silently no-ops on
+  // `hd_live_…` tokens because they don't verify as JWTs.
+  const buildContextForUser = (
+    userExternalId: string,
+  ): import('./trpc/context.js').Context => ({
+    db,
+    logger,
+    // Express req/res stubs — tasks.create doesn't read them; the
+    // protected-procedure middleware only gates on ctx.userId.
+    req: {} as import('express').Request,
+    res: {} as import('express').Response,
+    planner: deps.planner,
+    visionCommander: deps.visionCommander,
+    playwrightExecutor: deps.playwrightExecutor ?? null,
+    executionRouter: deps.executionRouter ?? null,
+    browserPool: deps.browserPool ?? null,
+    taskQueue: deps.taskQueue ?? null,
+    firecrawl: deps.firecrawl ?? null,
+    paypalAdapter: deps.paypalAdapter ?? null,
+    downloadManager: deps.downloadManager ?? null,
+    userId: userExternalId,
+  });
+  const webhookHandler = createWebhookTasksHandler({
+    db,
+    logger,
+    buildContextForUser,
+    dispatch: async (ctx, input) => {
+      const result = await tasksRouter
+        .createCaller(ctx)
+        .create({ intent: input.intent });
+      return { taskId: result.taskId, status: result.status };
+    },
+  });
+  app.post('/webhooks/tasks', (req, res) => {
+    void webhookHandler(req, res);
   });
 
   app.use(

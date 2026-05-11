@@ -1,3 +1,4 @@
+import { apiKeysRouter } from './routers/api-keys.js';
 import { authRouter } from './routers/auth.js';
 import { batchTasksRouter } from './routers/batch-tasks.js';
 import { connectionsRouter } from './routers/connections.js';
@@ -33,6 +34,7 @@ export const appRouter = router({
   files: filesRouter,
   scheduledTasks: scheduledTasksRouter,
   batchTasks: batchTasksRouter,
+  apiKeys: apiKeysRouter,
   connections: connectionsRouter,
   usage: usageRouter,
 });
