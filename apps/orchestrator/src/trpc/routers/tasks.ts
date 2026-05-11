@@ -42,6 +42,10 @@ import { generatePlan, shouldSkipPlan } from '../../agent/supercar/plan-service.
 import { MemoryService } from '../../agent/supercar/memory-service.js';
 import { generateSuggestions } from '../../agent/suggestions-generator.js';
 import {
+  runResponseLayerForLane,
+  stampResponseLayerColumns,
+} from '../../response-layer/lane-integration.js';
+import {
   StatsService,
   classifyTaskType,
   extractDomain,
@@ -888,6 +892,28 @@ export const tasksRouter = router({
           'task:completed',
         );
 
+        // Optimization #2 (Codex follow-up) — response-layer formatter
+        // runs AFTER the verifier (already done above) + BEFORE
+        // persist so the row's `result.summary` carries the polished
+        // text. `runResponseLayerForLane` is a no-op when the flag
+        // is off; on flag-on it dynamic-imports the formatter +
+        // OpenAI SDK. We stamp the metadata columns AFTER persist
+        // (see `stampResponseLayerColumns` call below) so we don't
+        // UPDATE a row that doesn't exist yet on failure path.
+        const generateRl = await runResponseLayerForLane({
+          taskId,
+          status: outcome.status,
+          summary: outcome.status === 'completed' ? outcome.summary : '',
+          expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+          logger: ctx.logger,
+        });
+        if (
+          outcome.status === 'completed' &&
+          generateRl.summary !== outcome.summary
+        ) {
+          outcome = { ...outcome, summary: generateRl.summary };
+        }
+
         try {
           if (outcome.status === 'completed') {
             await repo.persistVisionOutcome(taskId, {
@@ -926,6 +952,21 @@ export const tasksRouter = router({
         } catch (err) {
           ctx.logger.error({ err, taskId }, 'generate: persist failed');
         }
+
+        // Stamp the response-layer metadata columns now that persist
+        // has landed. Best-effort: a stamp failure logs but doesn't
+        // tear down terminal broadcast. Only fires when the formatter
+        // actually ran (flag on); the awaiting_user branch never
+        // produces a formatter run (non-terminal status filter
+        // inside `runResponseLayerForLane`).
+        await stampResponseLayerColumns(
+          ctx.db,
+          taskId,
+          generateRl.responseLayerOriginal,
+          outcome.status === 'completed' ? outcome.summary : '',
+          generateRl.responseLayerMetadata,
+          ctx.logger,
+        );
 
         try {
           if (outcome.status === 'completed') {
@@ -1303,6 +1344,23 @@ export const tasksRouter = router({
           'task:completed',
         );
 
+        // Optimization #2 (Codex follow-up) — same wire-up pattern
+        // as the generate lane: format after verifier, before
+        // persist; stamp metadata columns after persist.
+        const scrapeRl = await runResponseLayerForLane({
+          taskId,
+          status: outcome.status,
+          summary: outcome.status === 'completed' ? outcome.summary : '',
+          expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+          logger: ctx.logger,
+        });
+        if (
+          outcome.status === 'completed' &&
+          scrapeRl.summary !== outcome.summary
+        ) {
+          outcome = { ...outcome, summary: scrapeRl.summary };
+        }
+
         try {
           if (outcome.status === 'completed') {
             await repo.persistVisionOutcome(taskId, {
@@ -1322,6 +1380,15 @@ export const tasksRouter = router({
         } catch (err) {
           ctx.logger.error({ err, taskId }, 'scrape: persist failed');
         }
+
+        await stampResponseLayerColumns(
+          ctx.db,
+          taskId,
+          scrapeRl.responseLayerOriginal,
+          outcome.status === 'completed' ? outcome.summary : '',
+          scrapeRl.responseLayerMetadata,
+          ctx.logger,
+        );
 
         try {
           if (outcome.status === 'completed') {
@@ -2363,6 +2430,32 @@ export const tasksRouter = router({
                 },
                 'task:completed',
               );
+              // Optimization #2 (Codex follow-up) — format the
+              // handoff-generate output. Unlike the standalone
+              // generate/scrape lanes this path has no upstream
+              // verifier, but the formatter's deterministic
+              // post-check (no new URLs / numbers, no marker drops)
+              // still applies. Flag-off → no-op.
+              const handoffRl = await runResponseLayerForLane({
+                taskId,
+                status: generateOutcome.status,
+                summary:
+                  generateOutcome.status === 'completed'
+                    ? generateOutcome.summary
+                    : '',
+                expertWorkflowId:
+                  typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+                logger: ctx.logger,
+              });
+              if (
+                generateOutcome.status === 'completed' &&
+                handoffRl.summary !== generateOutcome.summary
+              ) {
+                generateOutcome = {
+                  ...generateOutcome,
+                  summary: handoffRl.summary,
+                };
+              }
               try {
                 if (generateOutcome.status === 'completed') {
                   await repo.persistVisionOutcome(taskId, {
@@ -2411,6 +2504,21 @@ export const tasksRouter = router({
                   'handoff-generate: persist/broadcast failed',
                 );
               }
+              // Stamp metadata columns after persist. Safe to call
+              // even on the failed branch (the helper no-ops when
+              // metadata is undefined; metadata is only defined
+              // when format() actually ran, which requires
+              // status='completed' + summary).
+              await stampResponseLayerColumns(
+                ctx.db,
+                taskId,
+                handoffRl.responseLayerOriginal,
+                generateOutcome.status === 'completed'
+                  ? generateOutcome.summary
+                  : '',
+                handoffRl.responseLayerMetadata,
+                ctx.logger,
+              );
               return;
             }
             // R7 — grab the final-state evidence BEFORE persistSupercar
