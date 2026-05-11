@@ -45,6 +45,20 @@ interface PageLike {
  * site presumably auto-shows it, and clicking off-screen is a sign
  * of a wrong selector match anyway.
  */
+/**
+ * Codex P3 follow-up — `page.evaluate` hangs occasionally on
+ * heavy-JS sites (taobao's main runtime can pin the renderer for
+ * seconds during sliding-captcha bootstrap). Without a ceiling the
+ * site-config hook could add a multi-second tail latency to every
+ * navigation. 800 ms is generous for a `querySelectorAll('button')`
+ * walk over the visible DOM but tight enough that an unhealthy page
+ * just skips the dismiss pass and the agent moves on. On timeout
+ * we return null (same as a no-match), which means the post-nav
+ * hook reports `dismissed: []` and the screenshot still goes to
+ * the model — degraded behaviour, not failure.
+ */
+const EVALUATE_TIMEOUT_MS = 800;
+
 async function clickFirstByText(
   page: PageLike,
   texts: readonly string[],
@@ -82,11 +96,26 @@ async function clickFirstByText(
       return null;
     };
     /* eslint-enable @typescript-eslint/no-explicit-any */
-    const result = (await page.evaluate(
+    const evaluatePromise = page.evaluate(
       evalFn as unknown as (arg: string[]) => unknown,
       texts as unknown as string[],
-    )) as string | null;
-    return result ?? null;
+    );
+    // Race against an 800 ms timeout — see EVALUATE_TIMEOUT_MS rationale.
+    // clearTimeout in the .finally so a fast evaluate doesn't leave a
+    // dangling Node handle keeping the event loop alive (vitest flags
+    // those as unhandled in CI).
+    const timeoutSentinel = Symbol('site-config:evaluate-timeout');
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<typeof timeoutSentinel>((resolve) => {
+      timeoutHandle = setTimeout(() => resolve(timeoutSentinel), EVALUATE_TIMEOUT_MS);
+    });
+    try {
+      const raceResult = await Promise.race([evaluatePromise, timeoutPromise]);
+      if (raceResult === timeoutSentinel) return null;
+      return (raceResult as string | null) ?? null;
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+    }
   } catch {
     return null;
   }

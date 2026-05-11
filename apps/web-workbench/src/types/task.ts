@@ -77,7 +77,7 @@ export interface UiTask {
    * panel to take over the screen. Missing == 'clarification'
    * (chat composer is enough).
    */
-  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'browser_action';
+  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'permission' | 'browser_action';
   /**
    * Which dispatcher lane this task is running in. Source order:
    *   - `result.executionMode` (set on awaiting_user park from generate)
@@ -91,6 +91,48 @@ export interface UiTask {
    * that window.
    */
   executionMode?: 'browser' | 'generate' | 'scrape';
+  /**
+   * Phase 4 R1 — terminal metadata.attachments[] hydrated from
+   * `tasks.detail.result.metadata.attachments` (L1 auto-screenshot
+   * + L2 save_page_as_pdf outputs). Empty / undefined means no
+   * downloadable artifacts; the AttachmentBar in TerminalSummary
+   * hides itself in that case.
+   *
+   * NOT populated by the live `server.task.terminal` WS frame —
+   * the SPA waits for the lazy tasks.detail hydration that already
+   * brings finalScreenshot / finalUrl in.
+   */
+  attachments?: ReadonlyArray<UiTerminalAttachment>;
+  /**
+   * Phase 4 R1 — expert workflow id stamped under metadata when the
+   * supercar ran a typed workflow (douyin-review / content-topic /
+   * ecom-daily). Drives the expert-report header above the markdown
+   * body so users see "📈 电商日报" / "📝 选题分析" rather than a
+   * raw block of prose. Undefined for normal browser / generate tasks.
+   */
+  expertWorkflowId?: string;
+}
+
+/**
+ * Phase 4 R1 — one downloadable artifact attached to a terminal
+ * task. Shape mirrors the orchestrator-side write in tasks.ts
+ * (search for `metadata.attachments = [...]`). `expiresAt` is a
+ * pre-serialised ISO string; the SPA never parses it but renders
+ * it for the user in the AttachmentBar.
+ */
+export interface UiTerminalAttachment {
+  fileId: string;
+  downloadUrl: string;
+  filename: string;
+  mimetype: string;
+  sizeBytes: number;
+  expiresAt: string;
+  /**
+   * 'screenshot' (L1 auto-save) or 'pdf' (L2 save_page_as_pdf).
+   * Other strings tolerated — the renderer falls through to a
+   * generic file icon.
+   */
+  kind: string;
 }
 
 /**
@@ -224,7 +266,7 @@ export interface UiAwaitingUser {
    * onto the task's awaitingKind so refreshing tasks.detail
    * preserves the BrowserPanel's expand/banner decision.
    */
-  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'browser_action';
+  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'permission' | 'browser_action';
 }
 
 /**

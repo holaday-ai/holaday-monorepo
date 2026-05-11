@@ -26,13 +26,10 @@ export const WEIBO_SITE_CONFIG: SiteConfig = {
   },
   dismiss: {
     cookieBannerTexts: ['同意', '接受所有', 'Accept'],
-    popupDismissTexts: [
-      '关闭',
-      '稍后再说',
-      '取消',
-      '暂不下载',
-      '继续访问',
-      '继续浏览',
-    ],
+    // Codex P3 follow-up — drop generic '关闭' / '取消' and the
+    // '继续访问' / '继续浏览' login-wall bypasses (same rationale as
+    // xiaohongshu in f75a659 / taobao above: these match buttons the
+    // model needs to SEE, not click past).
+    popupDismissTexts: ['稍后再说', '不再提示', '暂不下载'],
   },
 };

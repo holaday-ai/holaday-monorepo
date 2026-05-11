@@ -28,14 +28,18 @@ export const TAOBAO_SITE_CONFIG: SiteConfig = {
     ],
   },
   dismiss: {
-    cookieBannerTexts: ['同意', '我同意', '接受', 'Accept', '继续'],
-    popupDismissTexts: [
-      '关闭',
-      '取消',
-      '稍后再说',
-      '不再提示',
-      '暂不下载',
-      '继续访问',
-    ],
+    // Codex P3 follow-up — drop generic '继续' from cookie banners.
+    // Phishing warnings + auth gates share that label and clicking it
+    // walks the user past the very wall we want them to see.
+    cookieBannerTexts: ['我同意', '同意并继续', '接受', 'Accept'],
+    // Codex P3 follow-up — drop generic '关闭' / '取消' / '继续访问'.
+    // '关闭' matches every close-X in the modal forest including the
+    // taobao app-download banner Chrome flashes briefly during nav,
+    // which clicked away the captcha modal in P3_AUTH_003 reruns.
+    // '取消' is a no-op on most modals but matches the "cancel order"
+    // button on a checkout page if the model lands there. '继续访问'
+    // is the chrome interstitial bypass for unsafe-site warnings — we
+    // explicitly want those to surface, not auto-dismiss.
+    popupDismissTexts: ['稍后再说', '不再提示', '暂不下载'],
   },
 };

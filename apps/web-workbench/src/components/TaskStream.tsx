@@ -33,6 +33,7 @@ import type {
   UiExecutorFallback,
   UiStep,
   UiTask,
+  UiTerminalAttachment,
   UiWebSearchEvent,
 } from '@/types/task';
 import { friendlyHost, humanizeStep, humanizedGlyph, liveStatusLabel } from '@/utils/step-humanize';
@@ -441,6 +442,11 @@ function AgentBlock({
             }
             onSuggestionPick={onSuggestionPick}
             serverSuggestions={serverSuggestions}
+            // Phase 4 R1 — pass through metadata.attachments +
+            // expertWorkflowId hydrated by tasks.detail so the
+            // AttachmentBar + expert report header can render.
+            attachments={task.attachments}
+            expertWorkflowId={task.expertWorkflowId}
             // Typewriter reveal only fires for tasks that hit terminal
             // during this session (set populated in applyServerMessage).
             // History clicks render the summary in full immediately so
@@ -877,6 +883,160 @@ export function sanitizeMarkdownTrailingPunctuation(text: string): string {
   return text.replace(URL_TRAILING_PUNCT_RE, '$1 $2');
 }
 
+/**
+ * Phase 4 R1 — expert-workflow header. When the supercar runs a
+ * typed workflow (content-topic / ecom-daily / douyin-review), the
+ * terminal-state metadata stamps `expertWorkflowId` so the SPA can
+ * surface a header that names what the user is looking at instead
+ * of just a wall of prose. Unknown ids → null (no header).
+ *
+ * The icon + label list lives here rather than in a registry file
+ * because there are only three workflows; adding a fourth is a
+ * one-line edit. If the count grows the right move is to derive
+ * this from packages/shared-types.
+ */
+const EXPERT_HEADER_META: Record<string, { icon: string; label: string }> = {
+  'content-topic': { icon: '📝', label: '选题分析' },
+  'ecom-daily': { icon: '📈', label: '电商日报' },
+  'douyin-review': { icon: '🎬', label: '抖音稿件复盘' },
+};
+function ExpertReportHeader({ workflowId }: { workflowId: string }): JSX.Element | null {
+  const meta = EXPERT_HEADER_META[workflowId];
+  if (!meta) return null;
+  return (
+    <div className="mb-3 flex items-center gap-2 border-b border-blue-200/70 pb-2 text-sm font-semibold text-blue-900 dark:border-blue-500/30 dark:text-blue-200">
+      <span aria-hidden className="text-base">
+        {meta.icon}
+      </span>
+      <span>{meta.label}</span>
+    </div>
+  );
+}
+
+/**
+ * Phase 4 R1 — HOLA_FOLLOW_UP_ACTIONS extractor. The orchestrator
+ * inserts an HTML-comment-delimited marker around a JSON array of
+ * follow-up chip suggestions. This helper splits the body into:
+ *   - cleanBody: the markdown body with the marker block removed
+ *   - actions: the parsed string[] (empty on missing / malformed)
+ *
+ * The marker is invisible to ReactMarkdown anyway (HTML comments
+ * are dropped during render); we strip the LITERAL marker so a
+ * future Copy-as-Markdown doesn't surface "<!-- HOLA_FOLLOW_UP...".
+ */
+const FOLLOW_UP_ACTIONS_RE =
+  /<!--\s*HOLA_FOLLOW_UP_ACTIONS_START\s*-->([\s\S]*?)<!--\s*HOLA_FOLLOW_UP_ACTIONS_END\s*-->/i;
+function extractFollowUpActions(text: string): {
+  cleanBody: string;
+  actions: string[];
+} {
+  const m = FOLLOW_UP_ACTIONS_RE.exec(text);
+  if (!m || !m[1]) return { cleanBody: text, actions: [] };
+  const rawBlock = m[1].trim();
+  let actions: string[] = [];
+  try {
+    const parsed = JSON.parse(rawBlock);
+    if (Array.isArray(parsed)) {
+      actions = parsed
+        .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+        .map((v) => v.trim())
+        .slice(0, 4);
+    }
+  } catch {
+    actions = [];
+  }
+  return { cleanBody: text.replace(FOLLOW_UP_ACTIONS_RE, '').trim(), actions };
+}
+
+function FollowUpChips({
+  actions,
+  onPick,
+}: {
+  actions: string[];
+  onPick(intent: string): void;
+}): JSX.Element {
+  return (
+    <div className="mt-4 flex flex-wrap gap-2 border-t border-border/40 pt-3">
+      <div className="basis-full text-[11px] font-medium tracking-wider text-muted-foreground">
+        后续操作
+      </div>
+      {actions.map((a, i) => (
+        <button
+          key={`${i}-${a.slice(0, 12)}`}
+          type="button"
+          onClick={() => onPick(a)}
+          className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800 transition hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/20"
+        >
+          <span aria-hidden>→</span>
+          <span className="max-w-[220px] truncate">{a}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Phase 4 R1 — SourceBadge classifier. The model labels grounded
+ * facts with a leading colored circle:
+ *   🟢 = 用户提供 (user-provided)
+ *   🔵 = 系统计算 (system-derived)
+ *   🟡 = 模型假设 (model assumption)
+ *   🔴 = 外部基准 (external benchmark)
+ *
+ * Each gets a colored pill + tooltip so the user can scan at a
+ * glance which numbers are observed vs. assumed. We only transform
+ * the LEADING emoji on a paragraph — the same emoji further down in
+ * a sentence stays as plain text.
+ */
+const SOURCE_BADGES: Record<
+  string,
+  { label: string; tone: string }
+> = {
+  '🟢': {
+    label: '用户提供',
+    tone: 'border-green-300 bg-green-50 text-green-800 dark:border-green-500/40 dark:bg-green-500/10 dark:text-green-200',
+  },
+  '🔵': {
+    label: '系统计算',
+    tone: 'border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-200',
+  },
+  '🟡': {
+    label: '模型假设',
+    tone: 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200',
+  },
+  '🔴': {
+    label: '外部基准',
+    tone: 'border-red-300 bg-red-50 text-red-800 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200',
+  },
+};
+function matchSourceBadgePrefix(text: string): { emoji: string; rest: string } | null {
+  for (const key of Object.keys(SOURCE_BADGES)) {
+    if (text.startsWith(key)) {
+      return { emoji: key, rest: text.slice(key.length).replace(/^\s+/, '') };
+    }
+  }
+  return null;
+}
+
+function SourceBadge({ emoji }: { emoji: string }): JSX.Element {
+  const meta = SOURCE_BADGES[emoji] ?? null;
+  if (!meta) {
+    return <span aria-hidden>{emoji}</span>;
+  }
+  return (
+    <span
+      title={meta.label}
+      className={cn(
+        'mr-1.5 inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium align-middle',
+        meta.tone,
+      )}
+    >
+      <span aria-hidden>{emoji}</span>
+      {meta.label}
+    </span>
+  );
+}
+
 function TerminalSummary({
   status,
   text,
@@ -886,6 +1046,8 @@ function TerminalSummary({
   modelLabel,
   onSuggestionPick,
   serverSuggestions,
+  attachments,
+  expertWorkflowId,
   animateReveal = true,
 }: {
   status: UiTask['status'];
@@ -905,6 +1067,20 @@ function TerminalSummary({
    */
   serverSuggestions?: string[];
   /**
+   * Phase 4 R1 — downloadable artifacts from
+   * `result.metadata.attachments[]`. Rendered as a row of
+   * FileDownloadCards below the markdown body, above the
+   * copy/share footer. Empty / undefined → no bar.
+   */
+  attachments?: ReadonlyArray<UiTerminalAttachment>;
+  /**
+   * Phase 4 R1 — expert workflow id from
+   * `result.metadata.expertWorkflowId`. When present, renders a
+   * "📈 电商日报" / "📝 选题分析" / "🎬 抖音稿件复盘" header above
+   * the markdown body. Unknown ids fall through to no header.
+   */
+  expertWorkflowId?: string;
+  /**
    * When false (e.g. user clicked into a historical task), skip the
    * typewriter reveal — render the full summary immediately. Default
    * `true` preserves the live-completion experience.
@@ -912,6 +1088,13 @@ function TerminalSummary({
   animateReveal?: boolean;
 }): JSX.Element {
   const toast = useToast();
+  // Phase 4 R1 — extract HOLA_FOLLOW_UP_ACTIONS BEFORE the legacy
+  // suggestions block scan so the marker doesn't survive into the
+  // typewriter / markdown render.
+  const { textWithoutFollowUps, followUpActions } = React.useMemo(() => {
+    const { cleanBody, actions } = extractFollowUpActions(text);
+    return { textWithoutFollowUps: cleanBody, followUpActions: actions };
+  }, [text]);
   // Legacy: pull a fenced ```suggestions JSON block out of the
   // model's text. Kept as a fallback for tasks that completed before
   // the backend generator landed (or when the generator failed).
@@ -919,13 +1102,16 @@ function TerminalSummary({
   // see raw JSON regardless of which suggestion source wins.
   const { displayText, suggestions: parsedSuggestions } = React.useMemo(() => {
     const re = /```suggestions\s*\n([\s\S]*?)\n```/i;
-    const m = re.exec(text);
-    if (!m || !m[1]) return { displayText: text, suggestions: [] as string[] };
+    const m = re.exec(textWithoutFollowUps);
+    if (!m || !m[1]) return { displayText: textWithoutFollowUps, suggestions: [] as string[] };
     let parsed: unknown;
     try {
       parsed = JSON.parse(m[1]);
     } catch {
-      return { displayText: text.replace(re, '').trim(), suggestions: [] as string[] };
+      return {
+        displayText: textWithoutFollowUps.replace(re, '').trim(),
+        suggestions: [] as string[],
+      };
     }
     const list =
       parsed && typeof parsed === 'object' && Array.isArray((parsed as { suggestions?: unknown }).suggestions)
@@ -934,8 +1120,11 @@ function TerminalSummary({
             .map((s) => s.trim())
             .slice(0, 3))
         : [];
-    return { displayText: text.replace(re, '').trim(), suggestions: list };
-  }, [text]);
+    return {
+      displayText: textWithoutFollowUps.replace(re, '').trim(),
+      suggestions: list,
+    };
+  }, [textWithoutFollowUps]);
   // Backend suggestions take precedence; fall back to whatever the
   // model embedded in its text. Either way, the chip render path
   // below sees a single canonical `suggestions` array.
@@ -1011,11 +1200,38 @@ function TerminalSummary({
           {tone.label}
         </div>
       )}
+      {/* Phase 4 R1 B.6 — expert-report header (only on success
+          panels; failed/cancelled never carry a workflow id). */}
+      {!isFailedLike && expertWorkflowId && (
+        <ExpertReportHeader workflowId={expertWorkflowId} />
+      )}
       <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>
           {sanitizeMarkdownTrailingPunctuation(sanitizeForRender(revealed))}
         </ReactMarkdown>
       </div>
+      {/* Phase 4 R1 B.5 — AttachmentBar. Hidden when attachments is
+          empty/undefined; only on success panels. Renders each
+          attachment as the existing FileDownloadCard so the auth +
+          blob-download plumbing is reused. */}
+      {!isFailedLike && attachments && attachments.length > 0 && (
+        <div className="mt-3 flex flex-col gap-2 border-t border-blue-200/70 pt-3 dark:border-blue-500/30">
+          <div className="text-[11px] font-medium tracking-wider text-muted-foreground">
+            产出文件
+          </div>
+          {attachments.map((a) => (
+            <FileDownloadCard
+              key={a.fileId}
+              payload={{
+                fileId: a.fileId,
+                filename: a.filename,
+                size: a.sizeBytes,
+                downloadUrl: a.downloadUrl,
+              }}
+            />
+          ))}
+        </div>
+      )}
       {/* O3 — model info line. Tiny, non-intrusive. */}
       {modelLabel && (
         <div className="mt-3 text-[11px] text-muted-foreground dark:text-foreground/60">
@@ -1062,6 +1278,15 @@ function TerminalSummary({
           </button>
         )}
       </div>
+      {/* Phase 4 R1 B.2 — FollowUpChips. The orchestrator inserts a
+          structured marker around explicit next-action suggestions
+          ("查看竞品" / "排查异常品"). Rendered as a chip rail above
+          the legacy "继续探索" block. Reuses onSuggestionPick which
+          inherits replyToTaskId via MainPanel's follow-up auto-
+          detect, so chip clicks land as proper follow-up turns. */}
+      {followUpActions.length > 0 && onSuggestionPick && revealed === displayText && (
+        <FollowUpChips actions={followUpActions} onPick={onSuggestionPick} />
+      )}
       {/* Plain-text suggestion links. Cleaner than the prior blue
           card style — each row is just a borderless ghost button
           with a leading → arrow that translates on hover. Click
@@ -1368,6 +1593,52 @@ function makeMarkdownComponents(opts: {
           {children}
         </pre>
       );
+    },
+    // Phase 4 R1 — paragraph override. Two transforms based on the
+    // FIRST text node:
+    //   1. Leading ⚠️ → wrap the entire paragraph in a yellow warning
+    //      callout. The emoji is consumed (no longer shown inline)
+    //      since the box itself is the visual signal.
+    //   2. Leading 🟢/🔵/🟡/🔴 → emit a SourceBadge pill before the
+    //      remaining text. The emoji is consumed; the badge carries
+    //      the same color cue plus a hover tooltip.
+    //
+    // Everything else falls through to the default ReactMarkdown
+    // paragraph render.
+    p: ({ children, ...rest }) => {
+      const arr = Array.isArray(children) ? children : [children];
+      const first = arr[0];
+      if (typeof first !== 'string') {
+        return <p {...rest}>{children}</p>;
+      }
+      // ⚠️ warning block. Match the emoji with or without the
+      // text-style variation selector (U+FE0F) and any trailing
+      // whitespace.
+      const warningPrefixRe = /^[ \t]*⚠(?:️)?[ \t]*/u;
+      if (warningPrefixRe.test(first)) {
+        const trimmed = first.replace(warningPrefixRe, '');
+        return (
+          <div className="my-2 flex gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+            <span aria-hidden className="text-base leading-tight">
+              ⚠️
+            </span>
+            <p className="my-0 flex-1 text-[13px] leading-relaxed" {...rest}>
+              {[trimmed, ...arr.slice(1)]}
+            </p>
+          </div>
+        );
+      }
+      // 🟢🔵🟡🔴 SourceBadge prefix on the first text node.
+      const badge = matchSourceBadgePrefix(first);
+      if (badge) {
+        return (
+          <p {...rest}>
+            <SourceBadge emoji={badge.emoji} />
+            {[badge.rest, ...arr.slice(1)]}
+          </p>
+        );
+      }
+      return <p {...rest}>{children}</p>;
     },
   };
 }

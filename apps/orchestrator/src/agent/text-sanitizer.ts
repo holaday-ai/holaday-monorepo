@@ -162,6 +162,68 @@ const STOP_REASON_MARKERS = [
 ];
 
 /**
+ * Phase 4 R1 — Claude self-signature patterns. The product is
+ * branded HOLA DAY (橙子智能), not Claude; when the agent emits
+ * "I'm Claude Sonnet 4.6" or "由 Claude Opus 生成" the user trusts
+ * the answer less ("am I talking to OpenAI's competitor?") and the
+ * brand surface is wrong.
+ *
+ * Each pattern is anchored so it only strips the self-ID phrase,
+ * NOT every occurrence of the word "Claude" — a user can still ask
+ * about "Claude Shannon" or "Claude Monet" without losing the word.
+ * The strict matcher is "Claude" + Sonnet/Opus/Haiku (the model
+ * family), Anthropic-attribution, or known self-intro openers.
+ *
+ * Order matters: the leading-dash model-ID pattern is FIRST so it
+ * eats both the dash and the model ID together. Without that,
+ * stripping the model ID in isolation would leave an orphan "— "
+ * sign-off that the footer pass then has to clean up separately.
+ */
+const CLAUDE_SIGNATURE_PATTERNS: ReadonlyArray<RegExp> = [
+  // Model identifier WITH a leading em-dash / dash sign-off marker.
+  // Sweeps the entire sign-off footer in one pass.
+  /[ \t]*[—\-–][ \t]*Claude[\s-](?:Sonnet|Opus|Haiku)(?:[\s-]?\d+(?:\.\d+)?)?(?:\s*\([^)]{0,60}\))?/gi,
+  // Model identifier (no leading dash). Anchored with a required
+  // family word (Sonnet/Opus/Haiku) so "Claude Shannon" / "Apple
+  // and Claude" stay intact. Optional version + parenthetical
+  // release tag follow if present.
+  /\bClaude[\s-](?:Sonnet|Opus|Haiku)(?:[\s-]?\d+(?:\.\d+)?)?(?:\s*\([^)]{0,60}\))?/gi,
+  // English inline self-introduction. Lookahead asserts a clause
+  // boundary (punctuation / whitespace / end-of-string) so this
+  // does NOT match "I'm Claudette" or similar.
+  /\b(?:I['’]m|I am|This is)\s+Claude(?=[,.\s]|$)/gi,
+  // Anthropic-branded self-ID — strip the whole envelope. Two
+  // shapes: Anthropic-prefix and Claude-then-Anthropic-attribution.
+  /\bAnthropic['’]s?\s+(?:AI|assistant|model)\s+(?:named\s+|called\s+)?Claude\b/gi,
+  /\bClaude,?\s+Anthropic['’]s?\s+(?:AI|assistant|model)[^.\n]{0,60}/gi,
+  // English provenance attributions.
+  /\b(?:Generated|Created|Made|Powered|Built|Written|Drafted|Authored)\s+by\s+Claude\b/gi,
+  // Chinese inline self-introduction + provenance.
+  /我(?:是|叫|为)\s*Claude[^。\n]{0,40}/gi,
+  /(?:由|来自)\s*Claude(?:\s*(?:Sonnet|Opus|Haiku))?(?:\s*生成|\s*提供|\s*回答|\s*撰写|\s*作答|\s*出品)?/gi,
+  /作为\s*Claude[^，。\n]{0,40}/gi,
+];
+
+/**
+ * Trailing-signature line cleanup — catches sign-offs left over by
+ * the substring strips. Three shapes:
+ *   1. Bare-dash + Claude-family token line (uncommon now that the
+ *      first inline pattern eats the dash too, but a belt-and-braces
+ *      catch for unusual whitespace).
+ *   2. Bare-dash + Anthropic-attribution suffix line ("— Anthropic
+ *      AI assistant" remains after stripping "Claude, ").
+ *   3. Pure-dash / whitespace orphan line.
+ *
+ * All bounded to one line + ≤60 trailing chars so a real bulleted
+ * paragraph can't accidentally match.
+ */
+const CLAUDE_FOOTER_LINE_RE: ReadonlyArray<RegExp> = [
+  /^[ \t]*[—\-–][ \t]*(?:Claude|Sonnet|Opus|Haiku)[^\n]{0,60}$/gim,
+  /^[ \t]*[—\-–][ \t]*,?[ \t]*Anthropic[^\n]{0,60}$/gim,
+  /^[ \t]*[—\-–]+[ \t]*$/gim,
+];
+
+/**
  * Collapse 3+ consecutive blank lines down to 2. After stripping
  * tool envelopes the answer often has gaps; this keeps paragraphs
  * separated without a giant gulf between them.
@@ -238,7 +300,14 @@ export function sanitizeFinalText(input: string | null | undefined): string {
   // 9. Stray brace/bracket-only lines left over from a stripped
   //    inner block whose outer wrapper was kept.
   text = text.replace(STRAY_CLOSER_LINE_RE, '');
-  // 10. Collapse whitespace gaps left by the strips.
+  // 10. Phase 4 R1 — Claude self-signatures. Strip every leak shape
+  //     (model ID, English self-intro, Chinese self-intro,
+  //     provenance attribution). Then run the footer-line pass to
+  //     mop up orphan dashes / Anthropic-only sign-off lines that
+  //     the inline substring strips can leave behind.
+  for (const re of CLAUDE_SIGNATURE_PATTERNS) text = text.replace(re, '');
+  for (const re of CLAUDE_FOOTER_LINE_RE) text = text.replace(re, '');
+  // 11. Collapse whitespace gaps left by the strips.
   text = text.replace(TRIPLE_BLANK_RE, '\n\n');
   return text.trim();
 }

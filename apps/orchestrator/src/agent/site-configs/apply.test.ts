@@ -97,4 +97,26 @@ describe('applySiteConfigPostNavigation', () => {
     // Second (popup) succeeded.
     expect(r.dismissed).toEqual(['关闭']);
   });
+
+  it('evaluate hangs > 800ms → race timeout returns null (no click)', async () => {
+    // Codex P3 — guard against renderer pin (taobao's sliding-captcha
+    // bootstrap occasionally pegs the main thread for seconds). The
+    // post-nav hook MUST not block the agent loop.
+    const slowEval = (): Promise<string | null> =>
+      new Promise((resolve) => setTimeout(() => resolve('同意'), 1_200));
+    const page: FakePage = {
+      url: () => 'https://x.com/',
+      evaluate: vi.fn(slowEval),
+    };
+    const started = Date.now();
+    const r = await applySiteConfigPostNavigation(
+      { ...baseConfig, dismiss: { cookieBannerTexts: ['同意'] } },
+      page,
+    );
+    const elapsed = Date.now() - started;
+    expect(r.dismissed).toEqual([]);
+    // The race should bail well before 1.2 s. Allow generous slack for
+    // CI clock jitter — anything under 1100 ms proves the race worked.
+    expect(elapsed).toBeLessThan(1_100);
+  });
 });

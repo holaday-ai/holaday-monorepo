@@ -143,7 +143,7 @@ interface Props {
    * without losing the page they were watching. Missing == treated
    * as `clarification` for safety on legacy events.
    */
-  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'browser_action';
+  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'permission' | 'browser_action';
   /** Active task id — forwarded on user_input events so backend can correlate. */
   activeTaskId?: string | null;
   /**
@@ -1350,13 +1350,24 @@ const NAMED_KEYS: Readonly<Record<string, string>> = {
 type DotStatus = 'idle' | 'live' | 'error';
 
 function awaitingKindBannerTitle(
-  kind: 'clarification' | 'login' | 'captcha' | 'browser_action' | undefined,
+  kind:
+    | 'clarification'
+    | 'login'
+    | 'captcha'
+    | 'permission'
+    | 'browser_action'
+    | undefined,
 ): string {
   switch (kind) {
     case 'login':
       return '需要您完成登录';
     case 'browser_action':
       return '需要您在浏览器中操作';
+    case 'permission':
+      // Phase 3 R1 — permission walls (HTTP 403, geo-restricted pages,
+      // chrome-error pages). Different from a login: there's nothing
+      // to log into, the page is just refusing access.
+      return '页面拒绝了访问';
     case 'captcha':
     default:
       return '需要您手动完成验证';
@@ -1364,13 +1375,21 @@ function awaitingKindBannerTitle(
 }
 
 function awaitingKindBannerBody(
-  kind: 'clarification' | 'login' | 'captcha' | 'browser_action' | undefined,
+  kind:
+    | 'clarification'
+    | 'login'
+    | 'captcha'
+    | 'permission'
+    | 'browser_action'
+    | undefined,
 ): string {
   switch (kind) {
     case 'login':
       return '交互模式已开启，直接在下方画面里完成登录 / 扫码。完成后 agent 会继续。';
     case 'browser_action':
       return '交互模式已开启，按提示在下方画面里点击 / 选择即可。完成后 agent 会继续。';
+    case 'permission':
+      return '当前页面对未授权访问返回 403 / 拒绝。请确认你有权限，或换一个公开来源后回复继续。';
     case 'captcha':
     default:
       return '交互模式已开启，直接在下方画面里点击验证码 / 滑动滑块即可。完成后 agent 会继续。';

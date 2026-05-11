@@ -302,7 +302,7 @@ export class TaskRepository {
           finalUrl?: string;
           metadata?: Record<string, unknown>;
         },
-  ): Promise<void> {
+  ): Promise<{ persisted: boolean }> {
     const [taskRow] = await this.db
       .select({ id: tasks.id })
       .from(tasks)
@@ -363,6 +363,15 @@ export class TaskRepository {
     // executing. Persist writes from a late agent-loop completion or
     // takeover-timeout get refused here so the row keeps reflecting
     // the real user-facing state (parked, awaiting input).
+    //
+    // Codex P3 follow-up — return `{persisted}` so callers can skip
+    // terminal-only side effects (server.task.terminal broadcast,
+    // memory.extractAndStore, suggestion generation) when this UPDATE
+    // was refused. Without the flag, a takeover-timeout that loses
+    // the race against a real reply still fires the terminal frame on
+    // the WS, which clobbers the in-progress awaiting_user state in
+    // the SPA's task store.
+    let persisted = true;
     await this.db.transaction(async (tx) => {
       const updateResult = await tx
         .update(tasks)
@@ -377,6 +386,7 @@ export class TaskRepository {
         console.warn(
           `[task-repository] refusing to overwrite awaiting_user → ${outcome.status} for ${taskExternalId} (Phase 3 R1 atomic state guard)`,
         );
+        persisted = false;
         return;
       }
       await tx.insert(taskEvents).values({
@@ -387,6 +397,7 @@ export class TaskRepository {
         payload: eventPayload,
       });
     });
+    return { persisted };
   }
 
   /**

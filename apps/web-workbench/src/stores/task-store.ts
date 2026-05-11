@@ -294,6 +294,10 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const resultObj = (detail.result ?? {}) as {
           finalScreenshot?: string;
           finalUrl?: string;
+          metadata?: {
+            attachments?: unknown;
+            expertWorkflowId?: unknown;
+          };
         };
         const finalScreenshot =
           typeof resultObj.finalScreenshot === 'string' &&
@@ -303,6 +307,47 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const finalUrl =
           typeof resultObj.finalUrl === 'string' && resultObj.finalUrl.length > 0
             ? resultObj.finalUrl
+            : undefined;
+        // Phase 4 R1 — hydrate metadata.attachments[] +
+        // metadata.expertWorkflowId from the terminal-state JSON.
+        // Both fields are nullable; we only pass them through when
+        // the shape validates so a malformed metadata block can't
+        // crash the renderer.
+        const attachments: UiTask['attachments'] | undefined = (() => {
+          const arr = resultObj.metadata?.attachments;
+          if (!Array.isArray(arr) || arr.length === 0) return undefined;
+          const cleaned = arr
+            .map((entry) => {
+              if (!entry || typeof entry !== 'object') return null;
+              const e = entry as Record<string, unknown>;
+              if (
+                typeof e.fileId !== 'string' ||
+                typeof e.downloadUrl !== 'string' ||
+                typeof e.filename !== 'string' ||
+                typeof e.mimetype !== 'string' ||
+                typeof e.sizeBytes !== 'number' ||
+                typeof e.expiresAt !== 'string' ||
+                typeof e.kind !== 'string'
+              ) {
+                return null;
+              }
+              return {
+                fileId: e.fileId,
+                downloadUrl: e.downloadUrl,
+                filename: e.filename,
+                mimetype: e.mimetype,
+                sizeBytes: e.sizeBytes,
+                expiresAt: e.expiresAt,
+                kind: e.kind,
+              };
+            })
+            .filter((v): v is NonNullable<typeof v> => v !== null);
+          return cleaned.length > 0 ? cleaned : undefined;
+        })();
+        const expertWorkflowId =
+          typeof resultObj.metadata?.expertWorkflowId === 'string' &&
+          resultObj.metadata.expertWorkflowId.length > 0
+            ? (resultObj.metadata.expertWorkflowId as string)
             : undefined;
         let hydratedWebSearch: UiWebSearchEvent | null = null;
         for (const s of detail.steps ?? []) {
@@ -337,6 +382,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const awaitingKind: UiAwaitingUser['awaitingKind'] =
           awaitingKindRaw === 'login' ||
           awaitingKindRaw === 'captcha' ||
+          awaitingKindRaw === 'permission' ||
           awaitingKindRaw === 'browser_action' ||
           awaitingKindRaw === 'clarification'
             ? awaitingKindRaw
@@ -384,6 +430,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                       ...(finalUrl ? { finalUrl } : {}),
                       ...(awaitingKind ? { awaitingKind } : {}),
                       ...(executionMode ? { executionMode } : {}),
+                      ...(attachments ? { attachments } : {}),
+                      ...(expertWorkflowId ? { expertWorkflowId } : {}),
                     }
                   : t,
               );
@@ -424,6 +472,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               ...(finalUrl ? { finalUrl } : {}),
               ...(awaitingKind ? { awaitingKind } : {}),
               ...(executionMode ? { executionMode } : {}),
+              ...(attachments ? { attachments } : {}),
+              ...(expertWorkflowId ? { expertWorkflowId } : {}),
             };
             return [synth, ...prev.tasks];
           })(),

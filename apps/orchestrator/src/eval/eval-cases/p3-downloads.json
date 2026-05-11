@@ -11,12 +11,12 @@
       "urlMustMatch": "example.com",
       "mustContainAny": [
         "screenshot-tsk_",
-        "image/png",
+        "image/jpeg",
         "/files/file_"
       ],
       "maxDurationMs": 180000
     },
-    "notes": "L1 — every browser task auto-saves the final screenshot as a downloadable file. mustContainAny scans the haystack (now includes metadata.attachments JSON) for the auto-generated filename pattern (screenshot-tsk_X.png) OR the MIME OR the download URL fragment. The model's summary still includes 'Example Domain' (P0_004 baseline), this case just adds the attachment assertion."
+    "notes": "L1 — every browser task auto-saves the final screenshot as a downloadable file. mustContainAny scans the haystack (now includes metadata.attachments JSON) for the auto-generated filename pattern (screenshot-tsk_X.jpg) OR the MIME (image/jpeg — captureFinalState produces JPEG q80) OR the download URL fragment. The model's summary still includes 'Example Domain' (P0_004 baseline), this case just adds the attachment assertion."
   },
   {
     "id": "P3_DL_002",

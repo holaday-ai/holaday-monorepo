@@ -1753,6 +1753,23 @@ export const tasksRouter = router({
         readonly query: string;
         readonly sources: ReadonlyArray<{ title: string; url: string; snippet?: string }>;
       }> = [];
+      // Codex P3 follow-up — per-task buffer of save_page_as_pdf
+      // results. Each successful call appends one entry here; the
+      // terminal-state merge below folds the list into
+      // `metadata.attachments` so the eval haystack + SPA AttachmentBar
+      // see every PDF the agent saved during the run (not just the
+      // last one). Local to the .create closure so concurrent tasks
+      // don't share state. Each entry mirrors the L1 screenshot
+      // attachment shape (`kind: 'pdf'`).
+      const pdfAttachments: Array<{
+        fileId: string;
+        downloadUrl: string;
+        filename: string;
+        mimetype: string;
+        sizeBytes: number;
+        expiresAt: string;
+        kind: 'pdf';
+      }> = [];
       const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
           taskId,
           // Phase 14 audit follow-up — feed the agent the parent-task
@@ -1865,6 +1882,21 @@ export const tasksRouter = router({
                       content: pdfBuffer,
                       filename,
                       mimetype: 'application/pdf',
+                    });
+                    // Codex P3 follow-up — accumulate per-task so the
+                    // terminal-state merge folds every saved PDF into
+                    // metadata.attachments. Previously the model's tool
+                    // result text was the only record of the PDF, which
+                    // meant the SPA's AttachmentBar + eval haystack saw
+                    // none of the saved PDFs.
+                    pdfAttachments.push({
+                      fileId: saved.fileId,
+                      downloadUrl: saved.downloadUrl,
+                      filename: saved.filename,
+                      mimetype: saved.mimetype,
+                      sizeBytes: saved.sizeBytes,
+                      expiresAt: saved.expiresAt.toISOString(),
+                      kind: 'pdf',
                     });
                     return {
                       fileId: saved.fileId,
@@ -2025,7 +2057,7 @@ export const tasksRouter = router({
               ctx.logger.warn({ err, taskId }, 'supercar: broadcast web_search failed');
             }
           },
-          onAwaitingUser(ev) {
+          async onAwaitingUser(ev) {
             try {
               broadcastToUser(userId, {
                 type: 'server.supercar.awaiting_user',
@@ -2039,33 +2071,26 @@ export const tasksRouter = router({
             } catch (err) {
               ctx.logger.warn({ err, taskId }, 'supercar: broadcast awaiting_user failed');
             }
-            // P1-A — also flip status to 'awaiting_user' so a
-            // refresh / reconnect surfaces the park state purely
-            // from tasks.detail without depending on the WS event
-            // having been received. Earlier code only stamped the
-            // question text; selectedNeedsUser on the SPA fell back
-            // to the in-memory WS-driven awaitingUserByTask flag,
-            // which is empty after a hard refresh — composer
-            // dispatched createTask instead of tasks.reply, the
-            // observed P1-B bug. Pairing this with the resume
-            // path in `reply` below closes the loop both ways.
-            //
-            // P2 — also stamp the current page URL into
-            // result.finalUrl when supercar provides it. The SPA's
-            // BrowserPanel reads this URL through any screencast
-            // disconnect during the pause, instead of dropping
-            // back to about:blank.
-            ctx.db
-              .update(tasksTable)
-              .set({
-                status: 'awaiting_user',
-                awaitingQuestion: ev.question,
-                awaitingKind: ev.awaitingKind,
-              })
-              .where(eq(tasksTable.externalId, taskId))
-              .catch((err) => {
-                ctx.logger.warn({ err, taskId }, 'supercar: persist awaiting_user state failed');
-              });
+            // Codex P3 follow-up — AWAIT the status flip before the
+            // agent loop suspends. Previously this was fire-and-forget
+            // (`.catch()` only), so a fast tasks.reply landing within
+            // the same event-loop tick could read the row before the
+            // status / awaitingQuestion / awaitingKind columns were
+            // committed, and fall through the "no parked supercar"
+            // branch. Awaiting here closes that race; safeCall on the
+            // agent side already awaits this callback's promise.
+            try {
+              await ctx.db
+                .update(tasksTable)
+                .set({
+                  status: 'awaiting_user',
+                  awaitingQuestion: ev.question,
+                  awaitingKind: ev.awaitingKind,
+                })
+                .where(eq(tasksTable.externalId, taskId));
+            } catch (err) {
+              ctx.logger.warn({ err, taskId }, 'supercar: persist awaiting_user state failed');
+            }
             // Phase 1 follow-up — stamp `executionMode='browser'`,
             // `finalUrl`, AND `finalScreenshot` into result on park.
             //
@@ -2448,13 +2473,20 @@ export const tasksRouter = router({
               ctx.downloadManager
             ) {
               try {
+                // captureFinalState pulls a JPEG (quality 80) off the
+                // PlaywrightExecutor (vision-loop/playwright-executor.ts
+                // L610: `page.screenshot({ type: 'jpeg', quality: 80 })`).
+                // Earlier this code labeled it as PNG, so downloads ended
+                // up as foo.png containing JPEG bytes — most viewers fall
+                // back on sniffing, but eval pipelines + strict viewers
+                // (Slack preview, some PDF embedders) refuse to render.
                 screenshotAttachment = await ctx.downloadManager.save({
                   userIdInternal: userRow.id,
                   userExternalId: ctx.userId,
                   taskIdInternal: taskDbId,
                   content: finalState.finalScreenshot,
-                  filename: `screenshot-${taskId}.png`,
-                  mimetype: 'image/png',
+                  filename: `screenshot-${taskId}.jpg`,
+                  mimetype: 'image/jpeg',
                 });
                 ctx.logger.info(
                   {
@@ -2486,6 +2518,23 @@ export const tasksRouter = router({
                   'L1: final screenshot save failed (non-fatal)',
                 );
               }
+            }
+            // Codex P3 follow-up — fold any save_page_as_pdf outputs the
+            // agent accumulated during the run into metadata.attachments
+            // alongside the L1 screenshot. The accumulator is appended
+            // (not replaced) so the screenshot block above (which
+            // already wrote to metadata.attachments) stays intact.
+            if (pdfAttachments.length > 0) {
+              const existing = (metadata.attachments as unknown[]) ?? [];
+              metadata.attachments = [...existing, ...pdfAttachments];
+              ctx.logger.info(
+                {
+                  taskId,
+                  pdfCount: pdfAttachments.length,
+                  fileIds: pdfAttachments.map((a) => a.fileId),
+                },
+                'L2: folded save_page_as_pdf outputs into metadata.attachments',
+              );
             }
             ctx.logger.info(
               {
@@ -2545,7 +2594,13 @@ export const tasksRouter = router({
               }
               executionVerification = verified.verification;
             }
-            await persistSupercarOutcome(repo, taskId, outcome, finalState, metadata);
+            const { persisted: terminalPersisted } = await persistSupercarOutcome(
+              repo,
+              taskId,
+              outcome,
+              finalState,
+              metadata,
+            );
             // Reconcile-driven step rewrite. When the agent loop's
             // reconcileFinalAnswer rewrote the model's text (URL or
             // title mismatched the live page), the LAST step row's
@@ -2591,17 +2646,34 @@ export const tasksRouter = router({
                 );
               }
             }
-            try {
-              broadcastToUser(userId, buildTaskTerminalMessage(taskId, outcome));
-            } catch (err) {
-              ctx.logger.warn({ err, taskId }, 'supercar: broadcast terminal failed');
+            // Codex P3 follow-up — gate terminal-only side effects on
+            // `terminalPersisted`. When the atomic state-machine guard
+            // refused the UPDATE (row still in awaiting_user — happens
+            // when a takeover-timeout fires AFTER the user already
+            // came back and replied), the WS terminal frame would
+            // clobber the in-progress state in the SPA store, memory
+            // extraction would store a half-finished summary, and a
+            // stale suggestion bubble would surface alongside the
+            // running task. Skip all three when the row didn't move.
+            if (!terminalPersisted) {
+              ctx.logger.info(
+                { taskId },
+                'supercar: terminal persist refused by state guard — skipping broadcast / memory / suggestions',
+              );
+            }
+            if (terminalPersisted) {
+              try {
+                broadcastToUser(userId, buildTaskTerminalMessage(taskId, outcome));
+              } catch (err) {
+                ctx.logger.warn({ err, taskId }, 'supercar: broadcast terminal failed');
+              }
             }
             // Phase 13 Dim 5 — memory extraction. Run only on
             // completed tasks to avoid storing tips from the
             // partial / failed state of the agent. Best-effort:
             // rejections log + continue (the user's task is done
             // regardless of memory outcome).
-            if (outcome.status === 'completed' && outcome.summary && appEnv.ANTHROPIC_API_KEY) {
+            if (terminalPersisted && outcome.status === 'completed' && outcome.summary && appEnv.ANTHROPIC_API_KEY) {
               void memoryService
                 .extractAndStore({
                   apiKey: appEnv.ANTHROPIC_API_KEY,
@@ -2658,27 +2730,36 @@ export const tasksRouter = router({
               { err, taskId },
               'supercar: loop threw — persisting failed',
             );
+            // Codex P3 follow-up — same `persisted` gate as the happy
+            // path. If the runner threw AFTER the row landed in
+            // awaiting_user (rare but possible: runtime stack unwind
+            // after the agent fired onAwaitingUser), don't broadcast
+            // terminal-failed and clobber the park state.
+            let catchPersisted = false;
             try {
-              await repo.persistVisionOutcome(taskId, {
+              const out = await repo.persistVisionOutcome(taskId, {
                 status: 'failed',
                 reason: `runner threw: ${reason}`.slice(0, 500),
                 tickCount: 0,
               });
+              catchPersisted = out.persisted;
             } catch (persistErr) {
               ctx.logger.error(
                 { err: persistErr, taskId },
                 'supercar: catch-block persist also failed',
               );
             }
-            try {
-              broadcastToUser(userId, {
-                type: 'server.task.terminal',
-                taskId,
-                status: 'failed',
-                reason: `runner threw: ${reason}`.slice(0, 200),
-              });
-            } catch {
-              /* swallow — broadcast is best-effort */
+            if (catchPersisted) {
+              try {
+                broadcastToUser(userId, {
+                  type: 'server.task.terminal',
+                  taskId,
+                  status: 'failed',
+                  reason: `runner threw: ${reason}`.slice(0, 200),
+                });
+              } catch {
+                /* swallow — broadcast is best-effort */
+              }
             }
           })
           .finally(() => {
@@ -4958,10 +5039,15 @@ async function persistSupercarOutcome(
   outcome: SupercarOutcome,
   finalState: { finalScreenshot?: string; finalUrl?: string } = {},
   metadata?: Record<string, unknown>,
-): Promise<void> {
+): Promise<{ persisted: boolean }> {
+  // Codex P3 follow-up — forward persistVisionOutcome's `{persisted}`
+  // so the caller can short-circuit terminal broadcasts / memory /
+  // suggestions when the state-machine guard refused the write (row
+  // still in awaiting_user). See task-repository.ts atomic guard for
+  // the rationale.
   try {
     if (outcome.status === 'completed') {
-      await repo.persistVisionOutcome(taskId, {
+      return await repo.persistVisionOutcome(taskId, {
         status: 'completed',
         summary: outcome.summary ?? '',
         tickCount: outcome.iterations,
@@ -4975,7 +5061,7 @@ async function persistSupercarOutcome(
       // as paused so the UI still renders sensibly if it did.
       // Phase 1 follow-up — include finalUrl + finalScreenshot so
       // the BrowserPanel has a frame to render instead of blank.
-      await repo.persistVisionOutcome(taskId, {
+      return await repo.persistVisionOutcome(taskId, {
         status: 'paused',
         reason: outcome.question ?? 'awaiting user reply',
         tickCount: outcome.iterations,
@@ -4987,7 +5073,7 @@ async function persistSupercarOutcome(
       // Phase 1 follow-up — capture terminal frame on cancel too.
       // Users sometimes cancel mid-task and want to see the last
       // visible state.
-      await repo.persistVisionOutcome(taskId, {
+      return await repo.persistVisionOutcome(taskId, {
         status: 'cancelled',
         tickCount: outcome.iterations,
         ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
@@ -4995,7 +5081,7 @@ async function persistSupercarOutcome(
         ...(metadata ? { metadata } : {}),
       });
     } else if (outcome.status === 'timeout') {
-      await repo.persistVisionOutcome(taskId, {
+      return await repo.persistVisionOutcome(taskId, {
         status: 'failed',
         reason: outcome.reason ?? 'supercar: task timeout',
         tickCount: outcome.iterations,
@@ -5005,7 +5091,7 @@ async function persistSupercarOutcome(
       });
     } else {
       // 'failed'
-      await repo.persistVisionOutcome(taskId, {
+      return await repo.persistVisionOutcome(taskId, {
         status: 'failed',
         reason: outcome.reason ?? 'supercar: task failed',
         tickCount: outcome.iterations,

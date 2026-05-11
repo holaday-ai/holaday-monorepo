@@ -67,12 +67,12 @@ function fakeDbWithAffectedRows(affectedRows: number) {
 }
 
 describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Phase 3 R1, atomic)', () => {
-  it('UPDATE no-op (affectedRows=0) → row was awaiting_user → no event log, console.warn fires', async () => {
+  it('UPDATE no-op (affectedRows=0) → row was awaiting_user → no event log, console.warn fires, persisted=false', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { db, captured } = fakeDbWithAffectedRows(0);
     const repo = new TaskRepository(db);
 
-    await repo.persistVisionOutcome('tsk_aw_completed', {
+    const result = await repo.persistVisionOutcome('tsk_aw_completed', {
       status: 'completed',
       summary: 'late finish text',
       tickCount: 12,
@@ -83,6 +83,8 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
     // Crucially: the event row was NOT inserted because the guard
     // tripped on affectedRows=0.
     expect(captured.eventInserts).toBe(0);
+    // Codex P3 follow-up — surfaces refusal to callers via persisted flag.
+    expect(result.persisted).toBe(false);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('refusing to overwrite awaiting_user'),
     );
@@ -118,11 +120,11 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
     warnSpy.mockRestore();
   });
 
-  it('UPDATE applied (affectedRows=1) → event row written (executing → completed happy path)', async () => {
+  it('UPDATE applied (affectedRows=1) → event row written (executing → completed happy path), persisted=true', async () => {
     const { db, captured } = fakeDbWithAffectedRows(1);
     const repo = new TaskRepository(db);
 
-    await repo.persistVisionOutcome('tsk_exec_done', {
+    const result = await repo.persistVisionOutcome('tsk_exec_done', {
       status: 'completed',
       summary: 'final answer',
       tickCount: 3,
@@ -130,6 +132,7 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
 
     expect(captured.transactionRan).toBe(true);
     expect(captured.eventInserts).toBe(1);
+    expect(result.persisted).toBe(true);
   });
 
   it('UPDATE applied → event row written (executing → failed)', async () => {
