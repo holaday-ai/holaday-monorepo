@@ -254,16 +254,98 @@ export function ApiKeysSection(): JSX.Element {
         )}
       </div>
 
-      <div className="mt-4 rounded-md border border-dashed border-border bg-card/40 p-3 text-[11px] text-muted-foreground">
-        <div className="font-medium text-foreground/80">如何调用 webhook</div>
+      <WebhookDocs />
+    </Section>
+  );
+}
+
+/**
+ * Phase 5d follow-up — webhook docs panel.
+ *
+ * Two changes vs. the original:
+ *   1. URL is dynamic: `${window.location.origin}/api/webhooks/tasks`
+ *      so a user on hd-app.orangebench.tech sees that exact host
+ *      instead of a hardcoded holaday.ai. The original "holaday.ai"
+ *      placeholder was wrong for every non-production environment.
+ *   2. Includes Zapier configuration steps + a curl example with
+ *      Idempotency-Key so users see the retry-safe shape immediately.
+ */
+function WebhookDocs(): JSX.Element {
+  const toast = useToast();
+  // Origin is captured once on mount — SSR-safe via the typeof check;
+  // window is always present in the SPA bundle but the type guard
+  // keeps strict-mode bundlers happy.
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const webhookUrl = `${origin}/api/webhooks/tasks`;
+  const copyUrl = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(webhookUrl);
+      toast.show('已复制 Webhook URL');
+    } catch {
+      toast.show('复制失败', 'error');
+    }
+  };
+  return (
+    <div className="mt-4 space-y-3">
+      {/* URL row with one-click copy. */}
+      <div className="rounded-md border border-dashed border-border bg-card/40 p-3">
+        <div className="text-xs font-medium text-foreground/80">Webhook URL</div>
+        <div className="mt-1.5 flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 font-mono text-[11px]">
+          <span className="min-w-0 flex-1 break-all">{webhookUrl}</span>
+          <button
+            type="button"
+            onClick={() => void copyUrl()}
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            aria-label="复制 URL"
+            title="复制"
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Zapier steps. */}
+      <details className="rounded-md border border-dashed border-border bg-card/40 p-3 text-[11px] text-muted-foreground">
+        <summary className="cursor-pointer text-xs font-medium text-foreground/80">
+          在 Zapier 里配置（5 步）
+        </summary>
+        <ol className="mt-2 list-decimal space-y-1 pl-4">
+          <li>新建 Zap，选触发器（Email / Slack / RSS / 任意）</li>
+          <li>添加 Action：搜 <span className="font-mono">Webhooks by Zapier</span> → POST</li>
+          <li>URL 填上方 Webhook URL；Method = POST；Data Pass-Through = No</li>
+          <li>
+            Headers 加两条：
+            <div className="mt-1 rounded bg-background p-2 font-mono">
+              Authorization: Bearer hd_live_xxxxxxxxxxxxxxxxxxxxxxxx<br />
+              Idempotency-Key: &#123;&#123;zap_meta_human_now&#125;&#125;
+            </div>
+            （Idempotency-Key 用 Zap 自带变量保证重试安全）
+          </li>
+          <li>
+            Body 选 JSON，填：
+            <div className="mt-1 rounded bg-background p-2 font-mono">
+              &#123;"prompt": "&#123;&#123;trigger_field&#125;&#125;"&#125;
+            </div>
+          </li>
+        </ol>
+      </details>
+
+      {/* curl example with Idempotency-Key. */}
+      <div className="rounded-md border border-dashed border-border bg-card/40 p-3 text-[11px] text-muted-foreground">
+        <div className="text-xs font-medium text-foreground/80">curl 示例</div>
         <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all rounded bg-background p-2 font-mono text-[10px]">
-{`curl -X POST https://holaday.ai/api/webhooks/tasks \\
+{`curl -X POST ${webhookUrl} \\
   -H "Authorization: Bearer hd_live_xxxxxxxxxxxxxxxxxxxxxxxx" \\
+  -H "Idempotency-Key: my-unique-key-001" \\
   -H "Content-Type: application/json" \\
   -d '{"prompt":"帮我查一下今天的科技新闻"}'`}
         </pre>
+        <p className="mt-2">
+          带 <span className="font-mono">Idempotency-Key</span> 的重复请求 24h 内会返回相同
+          taskId；同 key 但不同 body 会返回 <span className="font-mono">409</span>。
+        </p>
       </div>
-    </Section>
+    </div>
   );
 }
 

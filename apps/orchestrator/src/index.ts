@@ -338,6 +338,17 @@ async function main() {
     logger.info({ port: env.HTTP_PORT }, 'HTTP server listening');
   });
 
+  // Phase 5d follow-up — periodic cleanup of expired webhook
+  // idempotency rows (24h TTL). Fires once on boot + then every
+  // 60min. Lookup-time guard already treats expired rows as missing
+  // so this is purely about table bloat.
+  {
+    const { startIdempotencyCleanup } = await import(
+      './api-keys/webhook-idempotency-service.js'
+    );
+    startIdempotencyCleanup({ db, logger });
+  }
+
   // Codex P5 follow-up — boot sweep for scheduled_tasks rows stuck in
   // 'running'. A pm2 restart that landed mid-dispatch left the row
   // wedged in 'running'; the runner's tick only matches 'active',

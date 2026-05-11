@@ -116,6 +116,23 @@ export const tasks = mysqlTable(
     errorCode: varchar('error_code', { length: 64 }),
     errorMessage: text('error_message'),
     /**
+     * Optimization #2 — OpenAI response formatter / style layer.
+     *
+     * `original_summary` is the agent's raw output BEFORE the formatter
+     * runs; `formatted_summary` is the polished version (or `=
+     * original` when the formatter falls back). `response_layer_metadata`
+     * stores `{model, latency_ms, changes[], fallbackReason}` so we
+     * can audit fallback rates + post-check trips per prompt class.
+     *
+     * All three are NULL until the formatter runs at least once on the
+     * row; rows pre-dating the feature stay NULL forever. Off by
+     * default (OPENAI_RESPONSE_LAYER_ENABLED=false) so existing
+     * traffic is unaffected.
+     */
+    originalSummary: text('original_summary'),
+    formattedSummary: text('formatted_summary'),
+    responseLayerMetadata: json('response_layer_metadata'),
+    /**
      * Phase 1 Day 5 — execution-pipeline persistence.
      *
      * All NULL until the corresponding feature flag (in

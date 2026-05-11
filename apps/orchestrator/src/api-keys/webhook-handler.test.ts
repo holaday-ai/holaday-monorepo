@@ -145,11 +145,21 @@ function makeRes() {
   return { res: res as Response, captured };
 }
 
-function makeReq(opts: { auth?: string; body?: unknown; path?: string } = {}): Request {
+function makeReq(opts: {
+  auth?: string;
+  body?: unknown;
+  path?: string;
+  headers?: Record<string, string>;
+} = {}): Request {
+  const lowerHeaders: Record<string, string> = {};
+  for (const [k, v] of Object.entries(opts.headers ?? {})) {
+    lowerHeaders[k.toLowerCase()] = v;
+  }
   return {
     header(name: string) {
-      if (name.toLowerCase() === 'authorization') return opts.auth;
-      return undefined;
+      const lower = name.toLowerCase();
+      if (lower === 'authorization') return opts.auth;
+      return lowerHeaders[lower];
     },
     body: opts.body,
     path: opts.path ?? '/webhooks/tasks',
@@ -381,5 +391,297 @@ describe('createWebhookTasksHandler', () => {
       res,
     );
     expect(captured.status).toBe(500);
+  });
+});
+
+describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () => {
+  /**
+   * Extended fake DB that supports select + insert + delete on
+   * webhook_idempotency (the existing makeFakeDb above only handles
+   * api_keys + users for the auth-only tests).
+   *
+   * State:
+   *   - keys: api key rows (drives auth resolution)
+   *   - users: user rows (drives owner resolution)
+   *   - idempotency: webhook_idempotency rows
+   * Mutations:
+   *   - INSERT INTO webhook_idempotency appends to state.idempotency
+   *   - UPDATE api_keys last_used_at is silently accepted
+   */
+  function setup() {
+    const { plaintext, hash } = generateApiKey();
+    interface IdemRow {
+      userId: number;
+      idempotencyKey: string;
+      requestHash: string;
+      taskId: string;
+      responseJson: unknown;
+      expiresAt: Date;
+    }
+    const state = {
+      keys: [
+        {
+          id: 1,
+          userId: 42,
+          keyHash: hash,
+          revokedAt: null as Date | null,
+          expiresAt: null as Date | null,
+        },
+      ],
+      users: [{ id: 42, externalId: 'usr_test' }],
+      idempotency: [] as IdemRow[],
+      // Track inserts so tests can assert on persistence.
+      lastInsert: null as Record<string, unknown> | null,
+    };
+    function inspect(p: unknown): string {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require('node:util').inspect(p, { depth: 6, getters: true });
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    function tableName(table: any): string {
+      return (
+        table[Symbol.for('drizzle:Name')] ??
+        table?._?.name ??
+        String(table?.name ?? '')
+      );
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db: any = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      select(_fields?: any) {
+        return {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          from(table: any) {
+            const name = tableName(table);
+            return {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              where(predicate: any) {
+                const s = inspect(predicate);
+                return {
+                  async limit(_n: number): Promise<unknown[]> {
+                    if (name === 'api_keys') {
+                      return state.keys
+                        .filter((k) => s.includes(`value: '${k.keyHash}'`))
+                        .map((k) => ({
+                          id: k.id,
+                          userId: k.userId,
+                          revokedAt: k.revokedAt,
+                          expiresAt: k.expiresAt,
+                        }));
+                    }
+                    if (name === 'users') {
+                      return state.users
+                        .filter((u) => s.includes(`value: ${u.id}`))
+                        .map((u) => ({ id: u.id, externalId: u.externalId }));
+                    }
+                    if (name === 'webhook_idempotency') {
+                      return state.idempotency
+                        .filter(
+                          (i) =>
+                            s.includes(`value: ${i.userId}`) &&
+                            s.includes(`value: '${i.idempotencyKey}'`),
+                        )
+                        .map(
+                          ({ requestHash, taskId, responseJson, expiresAt }) => ({
+                            requestHash,
+                            taskId,
+                            responseJson,
+                            expiresAt,
+                          }),
+                        );
+                    }
+                    return [];
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      update(_table: any) {
+        return {
+          set(_values: Record<string, unknown>) {
+            return {
+              async where(_predicate: unknown) {
+                return {};
+              },
+              then(onfulfilled?: (v: void) => unknown, onrejected?: (e: unknown) => unknown) {
+                return Promise.resolve().then(onfulfilled, onrejected);
+              },
+            };
+          },
+        };
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      insert(table: any) {
+        const name = tableName(table);
+        return {
+          async values(values: Record<string, unknown>) {
+            if (name === 'webhook_idempotency') {
+              state.lastInsert = values;
+              state.idempotency.push({
+                userId: values.userId as number,
+                idempotencyKey: values.idempotencyKey as string,
+                requestHash: values.requestHash as string,
+                taskId: values.taskId as string,
+                responseJson: values.responseJson,
+                expiresAt: values.expiresAt as Date,
+              });
+            }
+          },
+        };
+      },
+    };
+    const dispatch = vi.fn(async () => ({
+      taskId: 'tsk_fresh',
+      status: 'pending',
+    }));
+    const handler = createWebhookTasksHandler({
+      db,
+      logger: fakeLogger,
+      buildContextForUser: (userExternalId) =>
+        ({ userId: userExternalId }) as unknown as import('../trpc/context.js').Context,
+      dispatch,
+    });
+    return { handler, plaintext, dispatch, state };
+  }
+
+  it('no Idempotency-Key header → bypasses cache (back-compat)', async () => {
+    const { handler, plaintext, dispatch, state } = setup();
+    const { res, captured } = makeRes();
+    await handler(
+      makeReq({
+        auth: `Bearer ${plaintext}`,
+        body: { prompt: 'no key' },
+      }),
+      res,
+    );
+    expect(captured.status).toBe(200);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    // No idempotency row should be inserted.
+    expect(state.idempotency).toHaveLength(0);
+  });
+
+  it('first call with Idempotency-Key → dispatch + record row', async () => {
+    const { handler, plaintext, dispatch, state } = setup();
+    const { res, captured } = makeRes();
+    await handler(
+      makeReq({
+        auth: `Bearer ${plaintext}`,
+        body: { prompt: 'first call' },
+        headers: { 'Idempotency-Key': 'zap-abc-123' },
+      }),
+      res,
+    );
+    expect(captured.status).toBe(200);
+    expect(captured.json).toEqual({ taskId: 'tsk_fresh', status: 'pending' });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    // Row inserted with hash + taskId.
+    expect(state.idempotency).toHaveLength(1);
+    expect(state.idempotency[0]?.taskId).toBe('tsk_fresh');
+    expect(state.idempotency[0]?.idempotencyKey).toBe('zap-abc-123');
+  });
+
+  it('replay: second call with same key + same body → cached response, no second dispatch', async () => {
+    const { handler, plaintext, dispatch, state } = setup();
+    // Seed the cache by running the first call.
+    const r1 = makeRes();
+    await handler(
+      makeReq({
+        auth: `Bearer ${plaintext}`,
+        body: { prompt: 'replay me' },
+        headers: { 'Idempotency-Key': 'zap-456' },
+      }),
+      r1.res,
+    );
+    expect(r1.captured.status).toBe(200);
+    // Reset dispatch count to assert the second call doesn't fire it.
+    dispatch.mockClear();
+    const r2 = makeRes();
+    await handler(
+      makeReq({
+        auth: `Bearer ${plaintext}`,
+        body: { prompt: 'replay me' },
+        headers: { 'Idempotency-Key': 'zap-456' },
+      }),
+      r2.res,
+    );
+    expect(r2.captured.status).toBe(200);
+    expect(r2.captured.json).toEqual({ taskId: 'tsk_fresh', status: 'pending' });
+    expect(dispatch).not.toHaveBeenCalled();
+    // Cache size stays 1.
+    expect(state.idempotency).toHaveLength(1);
+  });
+
+  it('conflict: same key + different body → 409 with originalTaskId', async () => {
+    const { handler, plaintext, dispatch } = setup();
+    await handler(
+      makeReq({
+        auth: `Bearer ${plaintext}`,
+        body: { prompt: 'first version' },
+        headers: { 'Idempotency-Key': 'zap-999' },
+      }),
+      makeRes().res,
+    );
+    dispatch.mockClear();
+    const r2 = makeRes();
+    await handler(
+      makeReq({
+        auth: `Bearer ${plaintext}`,
+        body: { prompt: 'DIFFERENT version' },
+        headers: { 'Idempotency-Key': 'zap-999' },
+      }),
+      r2.res,
+    );
+    expect(r2.captured.status).toBe(409);
+    expect((r2.captured.json as { error: string }).error).toBe(
+      'idempotency_conflict',
+    );
+    expect((r2.captured.json as { originalTaskId: string }).originalTaskId).toBe(
+      'tsk_fresh',
+    );
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('400 invalid_idempotency_key for malformed key (whitespace / control chars)', async () => {
+    const { handler, plaintext } = setup();
+    const { res, captured } = makeRes();
+    await handler(
+      makeReq({
+        auth: `Bearer ${plaintext}`,
+        body: { prompt: 'x' },
+        headers: { 'Idempotency-Key': 'has spaces!' },
+      }),
+      res,
+    );
+    expect(captured.status).toBe(400);
+    expect((captured.json as { error: string }).error).toBe('invalid_idempotency_key');
+  });
+
+  it('body-key order insensitive — different JSON serialization order → same hash → replay', async () => {
+    const { handler, plaintext, dispatch } = setup();
+    await handler(
+      makeReq({
+        auth: `Bearer ${plaintext}`,
+        body: { prompt: 'shared', roleId: 'r1' },
+        headers: { 'Idempotency-Key': 'zap-order' },
+      }),
+      makeRes().res,
+    );
+    dispatch.mockClear();
+    const r2 = makeRes();
+    await handler(
+      makeReq({
+        auth: `Bearer ${plaintext}`,
+        // Same fields, different key order → canonicalize produces
+        // identical hash → replay.
+        body: { roleId: 'r1', prompt: 'shared' },
+        headers: { 'Idempotency-Key': 'zap-order' },
+      }),
+      r2.res,
+    );
+    expect(r2.captured.status).toBe(200);
+    expect(dispatch).not.toHaveBeenCalled();
   });
 });

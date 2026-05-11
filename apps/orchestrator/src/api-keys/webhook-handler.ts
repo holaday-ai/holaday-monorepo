@@ -40,10 +40,15 @@ import {
   hashApiKey,
   isValidApiKeyShape,
 } from './api-key-service.js';
+import { lookup as idempotencyLookup, record as idempotencyRecord } from './webhook-idempotency-service.js';
 import { apiKeys } from '../db/schema/api-keys.js';
 import { users } from '../db/schema/users.js';
 import type { DB } from '../db/client.js';
 import type { Context } from '../trpc/context.js';
+
+const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
+const MAX_IDEMPOTENCY_KEY_LENGTH = 128;
+const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9._\-:/]{1,128}$/;
 
 export interface WebhookDeps {
   db: DB;
@@ -75,7 +80,12 @@ export async function resolveApiKey(
   bearer: string | null,
   db: DB,
 ): Promise<
-  | { ok: true; userExternalId: string; apiKeyInternalId: number }
+  | {
+      ok: true;
+      userExternalId: string;
+      userInternalId: number;
+      apiKeyInternalId: number;
+    }
   | { ok: false; code: 'missing' | 'malformed' | 'unknown' | 'revoked' | 'expired' }
 > {
   if (!bearer) return { ok: false, code: 'missing' };
@@ -98,7 +108,7 @@ export async function resolveApiKey(
   }
   // Resolve owner's external id for the tRPC context.
   const [user] = await db
-    .select({ externalId: users.externalId })
+    .select({ id: users.id, externalId: users.externalId })
     .from(users)
     .where(eq(users.id, row.userId))
     .limit(1);
@@ -106,6 +116,7 @@ export async function resolveApiKey(
   return {
     ok: true,
     userExternalId: user.externalId,
+    userInternalId: user.id,
     apiKeyInternalId: row.id,
   };
 }
@@ -148,6 +159,72 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
     // version of the webhook that routes to a specific workflow.
     void body.roleId;
 
+    // Phase 5d follow-up — idempotency. Zapier (and any retry-prone
+    // caller) sets `Idempotency-Key`; we hash the body, look up
+    // (user, key) in webhook_idempotency, and:
+    //   - hit + hash matches → return original taskId/response (200)
+    //   - hit + hash differs → 409 idempotency_conflict (the user
+    //     reused a key for a different payload — almost always a
+    //     client bug)
+    //   - miss / missing header → normal flow; record on success
+    const rawKey = req.header(IDEMPOTENCY_KEY_HEADER);
+    const idempotencyKey =
+      typeof rawKey === 'string' ? rawKey.trim() : '';
+    if (idempotencyKey && !IDEMPOTENCY_KEY_RE.test(idempotencyKey)) {
+      res.status(400).json({ error: 'invalid_idempotency_key' });
+      return;
+    }
+    if (idempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+      res.status(400).json({ error: 'idempotency_key_too_long' });
+      return;
+    }
+    if (idempotencyKey) {
+      try {
+        const cached = await idempotencyLookup(
+          { db: deps.db, logger: deps.logger },
+          resolution.userInternalId,
+          idempotencyKey,
+          body,
+        );
+        if (cached.kind === 'replay') {
+          if (cached.conflictsWith) {
+            deps.logger.info(
+              {
+                userInternalId: resolution.userInternalId,
+                idempotencyKey,
+              },
+              'webhook: idempotency conflict — same key, different body',
+            );
+            res.status(409).json({
+              error: 'idempotency_conflict',
+              message:
+                'Idempotency-Key was reused with a different request body',
+              originalTaskId: cached.taskId,
+            });
+            return;
+          }
+          // Replay — return the original response byte-for-byte.
+          deps.logger.info(
+            {
+              userInternalId: resolution.userInternalId,
+              idempotencyKey,
+              taskId: cached.taskId,
+            },
+            'webhook: idempotency replay — returning cached response',
+          );
+          res.status(200).json(cached.response);
+          return;
+        }
+      } catch (err) {
+        // A failure in the idempotency lookup shouldn't block the
+        // caller — log + proceed without caching.
+        deps.logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          'webhook: idempotency lookup failed (non-fatal — proceeding without cache)',
+        );
+      }
+    }
+
     // Stamp last_used_at BEFORE dispatching the task so a long-running
     // task doesn't make the timestamp look stale to the SPA. Best-
     // effort: a failed update doesn't block the task creation.
@@ -176,7 +253,33 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
 
     try {
       const result = await deps.dispatch(ctx, { intent: prompt });
-      res.status(200).json({ taskId: result.taskId, status: result.status });
+      const response = { taskId: result.taskId, status: result.status };
+      // Persist the idempotency row BEFORE responding so a retry that
+      // lands before we flush the cache still gets the recorded
+      // response. Failure here is non-fatal: we still 200 the caller
+      // (their task was dispatched OK), they just lose replay
+      // guarantee for the duration the cache row would have lived.
+      if (idempotencyKey) {
+        try {
+          await idempotencyRecord(
+            { db: deps.db, logger: deps.logger },
+            resolution.userInternalId,
+            idempotencyKey,
+            body,
+            result.taskId,
+            response,
+          );
+        } catch (err) {
+          deps.logger.warn(
+            {
+              err: err instanceof Error ? err.message : String(err),
+              idempotencyKey,
+            },
+            'webhook: idempotency record failed (non-fatal — caller still got 200)',
+          );
+        }
+      }
+      res.status(200).json(response);
     } catch (err) {
       // TRPCError carries a code we can map. Quota / rate-limit shape
       // varies across the tasks router — TOO_MANY_REQUESTS is the

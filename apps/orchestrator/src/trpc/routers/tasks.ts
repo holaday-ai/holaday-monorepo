@@ -2594,6 +2594,54 @@ export const tasksRouter = router({
               }
               executionVerification = verified.verification;
             }
+            // Optimization #2 — OpenAI response formatter / style
+            // layer. Runs AFTER the verifier (so we polish facts that
+            // have already been grounded) and BEFORE persistence. The
+            // shouldFormat guard short-circuits on flag-off / short
+            // response (unless expert workflow); the deterministic
+            // post-check refuses any rewrite that introduces new
+            // URLs / numbers or drops a marker. On fallback the
+            // formatted text equals the original — caller sees no
+            // visible change, the metadata records the reason.
+            let responseLayerOriginal: string | undefined;
+            let responseLayerMetadata: unknown = undefined;
+            const isTerminal =
+              outcome.status === 'completed' ||
+              outcome.status === 'failed' ||
+              outcome.status === 'cancelled';
+            if (isTerminal && outcome.summary) {
+              try {
+                const { format: formatResponse } = await import(
+                  '../../response-layer/openai-response-layer.js'
+                );
+                const fmt = await formatResponse(
+                  {
+                    original: outcome.summary,
+                    terminalStatus: outcome.status as
+                      | 'completed'
+                      | 'failed'
+                      | 'cancelled',
+                    expertWorkflowId:
+                      typeof metadata?.expertWorkflowId === 'string'
+                        ? metadata.expertWorkflowId
+                        : undefined,
+                  },
+                  { logger: ctx.logger },
+                );
+                if (fmt.formatted !== outcome.summary) {
+                  responseLayerOriginal = outcome.summary;
+                  outcome = { ...outcome, summary: fmt.formatted };
+                }
+                responseLayerMetadata = fmt.metadata;
+              } catch (err) {
+                // Belt-and-braces — format() already catches its own
+                // errors; a throw here would be a programming bug.
+                ctx.logger.warn(
+                  { err: err instanceof Error ? err.message : String(err), taskId },
+                  'openai-response-layer: unexpected throw — keeping original',
+                );
+              }
+            }
             const { persisted: terminalPersisted } = await persistSupercarOutcome(
               repo,
               taskId,
@@ -2601,6 +2649,32 @@ export const tasksRouter = router({
               finalState,
               metadata,
             );
+            // Optimization #2 — stamp the formatter columns. Best-
+            // effort UPDATE after the row landed; failure here logs
+            // but doesn't tear down the terminal flow. Only writes
+            // when we actually have something to record (formatter
+            // ran, even if it fell back).
+            if (terminalPersisted && responseLayerMetadata) {
+              try {
+                await ctx.db
+                  .update(tasksTable)
+                  .set({
+                    originalSummary:
+                      responseLayerOriginal ?? outcome.summary ?? null,
+                    formattedSummary: outcome.summary ?? null,
+                    responseLayerMetadata: responseLayerMetadata as Record<
+                      string,
+                      unknown
+                    >,
+                  })
+                  .where(eq(tasksTable.externalId, taskId));
+              } catch (err) {
+                ctx.logger.warn(
+                  { err: err instanceof Error ? err.message : String(err), taskId },
+                  'openai-response-layer: persist metadata failed (non-fatal)',
+                );
+              }
+            }
             // Reconcile-driven step rewrite. When the agent loop's
             // reconcileFinalAnswer rewrote the model's text (URL or
             // title mismatched the live page), the LAST step row's
