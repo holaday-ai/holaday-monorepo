@@ -1,0 +1,41 @@
+[
+  {
+    "id": "P3_DL_001",
+    "tier": "P2",
+    "category": "download_screenshot_auto",
+    "prompt": "打开 https://example.com 告诉我页面标题",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "browser",
+      "urlMustMatch": "example.com",
+      "mustContainAny": [
+        "screenshot-tsk_",
+        "image/png",
+        "/files/file_"
+      ],
+      "maxDurationMs": 180000
+    },
+    "notes": "L1 — every browser task auto-saves the final screenshot as a downloadable file. mustContainAny scans the haystack (now includes metadata.attachments JSON) for the auto-generated filename pattern (screenshot-tsk_X.png) OR the MIME OR the download URL fragment. The model's summary still includes 'Example Domain' (P0_004 baseline), this case just adds the attachment assertion."
+  },
+  {
+    "id": "P3_DL_002",
+    "tier": "P2",
+    "category": "download_pdf_on_request",
+    "prompt": "打开 https://example.com，然后用 save_page_as_pdf 工具把这个页面保存为 PDF，告诉我下载链接。",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "browser",
+      "urlMustMatch": "example.com",
+      "mustContainAny": [
+        "save_page_as_pdf",
+        "application/pdf",
+        ".pdf",
+        "/files/file_"
+      ],
+      "maxDurationMs": 300000
+    },
+    "notes": "L2 — explicit prompt tells the agent to invoke save_page_as_pdf. The tool result text includes '下载链接：...' which the agent echoes in its summary. mustContainAny also accepts the attachment JSON (application/pdf MIME / .pdf filename / /files/file_ URL prefix) so the test passes regardless of how the model phrases the final answer."
+  }
+]

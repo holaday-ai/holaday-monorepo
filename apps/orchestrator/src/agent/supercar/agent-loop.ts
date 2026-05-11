@@ -616,6 +616,21 @@ export interface RunSupercarOptions {
     content: string;
   }) => Promise<{ fileId: string; filename: string; size: number; downloadUrl: string } | { error: string }>;
 
+  /**
+   * Phase 3 R3 — `save_page_as_pdf` tool callback. Storage-only:
+   * the loop renders the current page to PDF via Playwright's
+   * `page.pdf()` (CDP `Page.printToPDF`) and hands the Buffer to
+   * this callback; the callback persists it through DownloadManager
+   * and returns the download URL. Splitting it this way keeps
+   * page-rendering in the loop (where the executor handle lives)
+   * and storage in the dispatcher (where DownloadManager lives).
+   * Absent → tool is suppressed.
+   */
+  onSavePageAsPdf?: (input: {
+    filename: string;
+    pdfBuffer: Buffer;
+  }) => Promise<{ fileId: string; filename: string; sizeBytes: number; downloadUrl: string } | { error: string }>;
+
   // --- Phase 13 Dim 5/6: cross-task memory + execution stats ---
   /**
    * Pre-rendered memory preamble (output of MemoryService.formatForPrompt).
@@ -1338,6 +1353,32 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             // Pro gets all). Server-side check below also re-validates,
             // so a model that hallucinates 'xlsx' on Basic still fails
             // safely instead of producing a paid-tier file.
+            // Phase 3 R3 — save_page_as_pdf. Renders the CURRENT
+            // browser page to PDF via CDP Page.printToPDF (Playwright
+            // exposes this as page.pdf()). 24h downloadable link.
+            // Different from create_file which generates from text;
+            // this captures whatever the user is looking at right
+            // now (post-navigation, post-render).
+            ...(opts.onSavePageAsPdf
+              ? [
+                  {
+                    type: 'custom' as const,
+                    name: 'save_page_as_pdf',
+                    description:
+                      '把当前浏览器页面（你现在看到的这一页）保存为 PDF，返回 24 小时有效的下载链接。**适用场景**：用户明确要求保存当前页为 PDF / 导出报告 / 存档。这工具捕获的是当前 DOM 渲染后的页面，跟 create_file 不一样（那个是从纯文本生成新文档）。',
+                    input_schema: {
+                      type: 'object',
+                      properties: {
+                        filename: {
+                          type: 'string',
+                          description: '可选：自定义文件名（不含路径）。默认 page-<taskId>.pdf。',
+                        },
+                      },
+                      required: [],
+                    },
+                  },
+                ]
+              : []),
             ...(opts.createFileFormats && opts.createFileFormats.length > 0
               ? [
                   {
@@ -2109,6 +2150,86 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               },
             ],
           });
+          continue;
+        }
+
+        // -------- Custom `save_page_as_pdf` tool (Phase 3 R3 L2) --------
+        if (toolUse.name === 'save_page_as_pdf') {
+          if (!opts.onSavePageAsPdf) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [{ type: 'text', text: 'save_page_as_pdf: 当前会话未启用 PDF 保存' }],
+              is_error: true,
+            });
+            continue;
+          }
+          const inp = (toolUse.input as { filename?: string } | null) ?? {};
+          const filenameOpt = typeof inp.filename === 'string' ? inp.filename.trim() : '';
+          const filename = filenameOpt || `page-${opts.taskId}.pdf`;
+          try {
+            // Render current page → PDF via Playwright's page.pdf().
+            // Chromium-only; Brave shares Chromium under the hood so
+            // this works. Default page.pdf() options give A4
+            // portrait; sufficient for the L2 use case.
+            const pdfPage = (await executor.getPage()) as unknown as {
+              pdf?: (opts?: Record<string, unknown>) => Promise<Buffer>;
+            };
+            if (typeof pdfPage.pdf !== 'function') {
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolUse.id,
+                content: [
+                  {
+                    type: 'text',
+                    text: 'save_page_as_pdf: 当前浏览器执行器不支持 PDF 渲染（需要 Playwright/Chromium）',
+                  },
+                ],
+                is_error: true,
+              });
+              continue;
+            }
+            const pdfBuffer = await pdfPage.pdf({
+              printBackground: true,
+              format: 'A4',
+            });
+            const result = await opts.onSavePageAsPdf({ filename, pdfBuffer });
+            if ('error' in result) {
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolUse.id,
+                content: [{ type: 'text', text: `save_page_as_pdf: ${result.error}` }],
+                is_error: true,
+              });
+            } else {
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolUse.id,
+                content: [
+                  {
+                    type: 'text',
+                    text:
+                      `已把当前页面保存为 PDF。文件名：${result.filename}。` +
+                      `大小：${(result.sizeBytes / 1024).toFixed(1)} KB。` +
+                      `下载链接：${result.downloadUrl}（24 小时有效）。`,
+                  },
+                ],
+              });
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.warn(
+              { taskId: opts.taskId, err: msg },
+              'supercar: save_page_as_pdf threw',
+            );
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: [{ type: 'text', text: `save_page_as_pdf: ${msg}` }],
+              is_error: true,
+            });
+          }
+          toolsUsed.add('save_page_as_pdf');
           continue;
         }
 

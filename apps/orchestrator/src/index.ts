@@ -294,9 +294,21 @@ async function main() {
     logger.info('Firecrawl adapter disabled — FIRECRAWL_API_KEY not set');
   }
 
+  // Phase 3 R3 — DownloadManager. Wraps the existing FileService with
+  // a 50MB cap + URL construction. FileService is constructed inside
+  // createHttpApp today, so we stand up a parallel instance here for
+  // the manager (FileService is stateless — the DB pool is shared
+  // through the singleton `db` import).
+  const downloadFileService = new (await import('./files/file-service.js')).FileService(db, logger);
+  const downloadManager = new (await import('./files/download-manager.js')).DownloadManager(
+    downloadFileService,
+    env.HOLADAY_PUBLIC_BASE_URL,
+  );
+
   const app = createHttpApp({
     planner,
     executionRouter,
+    downloadManager,
     ...(visionCommander ? { visionCommander } : {}),
     ...(playwrightExecutor ? { playwrightExecutor } : {}),
     ...(browserPool ? { browserPool } : {}),

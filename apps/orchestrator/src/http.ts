@@ -52,6 +52,12 @@ export interface HttpAppDeps {
   taskQueue?: import('./queue/task-queue.js').TaskQueue | null;
   firecrawl?: import('./firecrawl/firecrawl-lane.js').FirecrawlLane | null;
   paypalAdapter?: PayPalAdapter | null;
+  /**
+   * Phase 3 R3 — DownloadManager. Optional so integration tests that
+   * stand up a partial deps shape don't need to construct the manager;
+   * tasks.ts checks for null at the L1 screenshot save site.
+   */
+  downloadManager?: import('./files/download-manager.js').DownloadManager | null;
 }
 
 export function createHttpApp(deps: HttpAppDeps) {
@@ -927,6 +933,7 @@ export function createHttpApp(deps: HttpAppDeps) {
         ...(deps.taskQueue ? { taskQueue: deps.taskQueue } : {}),
         ...(deps.firecrawl ? { firecrawl: deps.firecrawl } : {}),
         ...(deps.paypalAdapter ? { paypalAdapter: deps.paypalAdapter } : {}),
+        ...(deps.downloadManager ? { downloadManager: deps.downloadManager } : {}),
       }),
     }),
   );

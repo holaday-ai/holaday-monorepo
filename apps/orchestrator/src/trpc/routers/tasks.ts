@@ -1838,6 +1838,48 @@ export const tasksRouter = router({
           // queue runs async; the row exists by the time the model
           // calls a tool). Stores the buffer + index row, then returns
           // a download URL the model embeds in the final summary.
+          // Phase 3 R3 L2 — save_page_as_pdf storage callback. The
+          // supercar loop renders the page to a PDF Buffer; we just
+          // persist it via DownloadManager (which enforces the 50MB
+          // cap + builds the URL). Only wired when downloadManager
+          // exists on ctx (always true in prod boot path; nullable
+          // in test deps).
+          ...(ctx.downloadManager
+            ? {
+                async onSavePageAsPdf({
+                  filename,
+                  pdfBuffer,
+                }: {
+                  filename: string;
+                  pdfBuffer: Buffer;
+                }) {
+                  try {
+                    const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+                    if (taskInternalId == null) {
+                      return { error: 'task row not found' };
+                    }
+                    const saved = await ctx.downloadManager!.save({
+                      userIdInternal: userRow.id,
+                      userExternalId: ctx.userId,
+                      taskIdInternal: taskInternalId,
+                      content: pdfBuffer,
+                      filename,
+                      mimetype: 'application/pdf',
+                    });
+                    return {
+                      fileId: saved.fileId,
+                      filename: saved.filename,
+                      sizeBytes: saved.sizeBytes,
+                      downloadUrl: saved.downloadUrl,
+                    };
+                  } catch (err) {
+                    return {
+                      error: err instanceof Error ? err.message : String(err),
+                    };
+                  }
+                },
+              }
+            : {}),
           async onCreateFile({ filename, format, content }) {
             if (!isCreateFileFormat(format)) {
               return { error: `unsupported format: ${format}` };
@@ -2362,7 +2404,7 @@ export const tasksRouter = router({
             // shape as the scrape / generate fork logs above so
             // downstream parsing is uniform.
             const elapsedMs = Date.now() - browserStartedAt;
-            const metadata = {
+            const metadata: Record<string, unknown> = {
               executionMode: executionMode === 'browser' ? 'browser' : executionMode,
               finalExecutionMode: executionMode === 'browser' ? 'browser' : executionMode,
               expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
@@ -2383,6 +2425,68 @@ export const tasksRouter = router({
               ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
               hasFinalScreenshot: Boolean(finalState.finalScreenshot),
             };
+            // Phase 3 R3 — L1 auto-save final screenshot as a
+            // downloadable file. Only fires when:
+            //   1. The task is in browser-mode (finalState came from
+            //      captureFinalState which is null for generate/scrape)
+            //   2. We actually captured a screenshot (lone "browser
+            //      crashed before goto" failures leave finalScreenshot
+            //      empty)
+            //   3. There's a task DB id to attach to (taskDbId is set
+            //      after the initial insert; falsy only on a code-path
+            //      bug we'd want to log anyway)
+            // Failures here log + continue — the user's task still
+            // completes; they just lose the downloadable artifact.
+            // The screenshot's base64 form is already inside
+            // metadata.result via persistVisionOutcome, so the SPA's
+            // BrowserPanel still has a frame to render.
+            let screenshotAttachment: import('../../files/download-manager.js').DownloadResult | null = null;
+            if (
+              finalState.finalScreenshot &&
+              taskDbId &&
+              outcome.status !== 'cancelled' &&
+              ctx.downloadManager
+            ) {
+              try {
+                screenshotAttachment = await ctx.downloadManager.save({
+                  userIdInternal: userRow.id,
+                  userExternalId: ctx.userId,
+                  taskIdInternal: taskDbId,
+                  content: finalState.finalScreenshot,
+                  filename: `screenshot-${taskId}.png`,
+                  mimetype: 'image/png',
+                });
+                ctx.logger.info(
+                  {
+                    taskId,
+                    fileId: screenshotAttachment.fileId,
+                    sizeBytes: screenshotAttachment.sizeBytes,
+                  },
+                  'L1: final screenshot saved as downloadable file',
+                );
+                // Surface to SPA + eval-runner via result.metadata.
+                // The shape mirrors what the L2 save_pdf tool will
+                // produce, so consumers iterate one homogeneous list.
+                const attachments = (metadata.attachments as unknown[]) ?? [];
+                metadata.attachments = [
+                  ...attachments,
+                  {
+                    fileId: screenshotAttachment.fileId,
+                    downloadUrl: screenshotAttachment.downloadUrl,
+                    filename: screenshotAttachment.filename,
+                    mimetype: screenshotAttachment.mimetype,
+                    sizeBytes: screenshotAttachment.sizeBytes,
+                    expiresAt: screenshotAttachment.expiresAt.toISOString(),
+                    kind: 'screenshot',
+                  },
+                ];
+              } catch (err) {
+                ctx.logger.warn(
+                  { err: err instanceof Error ? err.message : String(err), taskId },
+                  'L1: final screenshot save failed (non-fatal)',
+                );
+              }
+            }
             ctx.logger.info(
               {
                 taskId,

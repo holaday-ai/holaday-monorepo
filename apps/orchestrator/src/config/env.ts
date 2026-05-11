@@ -118,6 +118,17 @@ const schema = z.object({
    */
   SUPERCAR_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
 
+  /**
+   * Phase 3 R3 — public origin for download URLs. Returned to the
+   * agent / SPA as part of DownloadManager.save's result so emitted
+   * links are clickable outside the SPA (e.g. when the user shares
+   * the link in chat). Empty default → DownloadManager emits root-
+   * relative paths (`/files/<id>/download`); the SPA already
+   * resolves those against its API base. Set to the customer-facing
+   * https origin on prod (e.g. https://holaday.ai).
+   */
+  HOLADAY_PUBLIC_BASE_URL: z.string().default(''),
+
   S3_ENDPOINT: z.string().url().optional(),
   S3_ACCESS_KEY: z.string().optional(),
   S3_SECRET_KEY: z.string().optional(),

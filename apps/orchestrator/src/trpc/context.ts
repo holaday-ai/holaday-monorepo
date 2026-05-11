@@ -6,6 +6,7 @@ import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executo
 import type { BrowserPool } from '../browser-pool/index.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
+import type { DownloadManager } from '../files/download-manager.js';
 import type { PayPalAdapter } from '../payment/index.js';
 import type { TaskQueue } from '../queue/task-queue.js';
 import type { FirecrawlLane } from '../firecrawl/firecrawl-lane.js';
@@ -62,6 +63,13 @@ export interface AppContextDeps {
    * null so the SPA can show a "PayPal not configured" message.
    */
   paypalAdapter?: PayPalAdapter | null;
+  /**
+   * Phase 3 R3 — DownloadManager. Wraps FileService.storeOutput with
+   * the 50MB cap + URL construction. Optional so integration tests
+   * that build a partial deps shape compile; tasks.ts checks for
+   * null at the L1 screenshot save site.
+   */
+  downloadManager?: DownloadManager | null;
 }
 
 export function makeCreateContext(deps: AppContextDeps) {
@@ -79,6 +87,7 @@ export function makeCreateContext(deps: AppContextDeps) {
       taskQueue: deps.taskQueue ?? null,
       firecrawl: deps.firecrawl ?? null,
       paypalAdapter: deps.paypalAdapter ?? null,
+      downloadManager: deps.downloadManager ?? null,
       userId: (req as Request & { userId?: string }).userId,
     };
   };
