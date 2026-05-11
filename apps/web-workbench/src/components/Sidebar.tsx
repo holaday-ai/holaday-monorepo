@@ -8,6 +8,7 @@ import {
   FolderPlus,
   Globe,
   Layers,
+  ListPlus,
   ListTree,
   Pencil,
   Pin,
@@ -1137,6 +1138,8 @@ const FEATURES: readonly FeatureItem[] = [
   // P2.6 — MCP connectors stay demoted; the /connections page is
   // still a roadmap surface until OAuth lands.
   { icon: Clock, label: '定时任务', href: '/scheduled' },
+  // Phase 5b — batch tasks (submit a list, run with concurrency cap).
+  { icon: ListPlus, label: '批量任务', href: '/batch' },
   { icon: FolderOpen, label: '文件库', href: '/files' },
   { icon: Globe, label: '浏览器', action: 'openBrowser' },
   { icon: Layers, label: '项目', href: '/projects' },

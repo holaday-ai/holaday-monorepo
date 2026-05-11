@@ -1,3 +1,4 @@
+export * from './batch-tasks.js';
 export * from './users.js';
 export * from './user-profiles.js';
 export * from './skills.js';

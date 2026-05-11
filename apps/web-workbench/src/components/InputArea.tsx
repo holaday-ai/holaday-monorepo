@@ -654,6 +654,29 @@ export function InputArea({
         </div>
         <span>Enter 发送 · Shift+Enter 换行</span>
       </div>
+      {/* Phase 5b — multi-line detect. When the composer holds 2+
+          non-empty lines AND we're not in a reply / follow-up flow,
+          surface a one-click "make this a batch" hint. Routes to
+          /batch with the lines pre-filled into the BatchTaskDialog
+          (the dialog reads `initialPrompts` from history state). */}
+      {!replyMode &&
+        !followUpTarget &&
+        (() => {
+          const lines = value.split('\n').map((l) => l.trim()).filter(Boolean);
+          if (lines.length < 2) return null;
+          return (
+            <button
+              type="button"
+              onClick={() => {
+                navigate('/batch', { state: { initialPrompts: lines } });
+              }}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-[11px] font-medium text-primary transition hover:bg-primary/20"
+            >
+              <span aria-hidden>≣</span>
+              提交为批量任务（{lines.length} 项）
+            </button>
+          );
+        })()}
     </div>
   );
 }

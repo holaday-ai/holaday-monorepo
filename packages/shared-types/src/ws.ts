@@ -665,6 +665,34 @@ export const serverTaskProgressSchema = z.object({
   message: z.string(),
 });
 
+/**
+ * Phase 5b — batch task progress. Fires whenever a batch's parent
+ * counters change (item dispatched / completed / failed) OR the
+ * batch's status flips (pending → running → completed / partial /
+ * cancelled). The SPA's batch list/detail view updates its progress
+ * bar + item rows from these events without re-fetching.
+ *
+ * `item` is included on every event for the row that triggered the
+ * fire (or null for a status-only change with no item delta).
+ */
+export const serverBatchProgressSchema = z.object({
+  type: z.literal('server.batch.progress'),
+  batchId: z.string(),
+  status: z.enum(['pending', 'running', 'completed', 'partial', 'cancelled']),
+  itemsTotal: z.number().int().nonnegative(),
+  itemsDone: z.number().int().nonnegative(),
+  itemsFailed: z.number().int().nonnegative(),
+  item: z
+    .object({
+      batchItemId: z.string(),
+      seq: z.number().int().nonnegative(),
+      status: z.enum(['pending', 'running', 'completed', 'failed', 'cancelled']),
+      taskId: z.string().optional(),
+      errorMessage: z.string().optional(),
+    })
+    .optional(),
+});
+
 export const serverMessageSchema = z.discriminatedUnion('type', [
   serverWelcomeSchema,
   serverErrorSchema,
@@ -692,6 +720,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverSupercarThinkingSchema,
   serverTaskStreamSchema,
   serverTaskProgressSchema,
+  serverBatchProgressSchema,
 ]);
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;

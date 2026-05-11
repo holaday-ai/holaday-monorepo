@@ -21,6 +21,9 @@ export const ID_PREFIXES = {
   project: 'prj',
   // Phase 16b — scheduled task triggers (cron-style).
   scheduledTask: 'sch',
+  // Phase 5b — batch tasks (a list of prompts run together) + per-item rows.
+  batch: 'btc',
+  batchItem: 'bti',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

@@ -1,4 +1,5 @@
 import { authRouter } from './routers/auth.js';
+import { batchTasksRouter } from './routers/batch-tasks.js';
 import { connectionsRouter } from './routers/connections.js';
 import { feedbackRouter } from './routers/feedback.js';
 import { filesRouter } from './routers/files.js';
@@ -31,6 +32,7 @@ export const appRouter = router({
   skills: skillsRouter,
   files: filesRouter,
   scheduledTasks: scheduledTasksRouter,
+  batchTasks: batchTasksRouter,
   connections: connectionsRouter,
   usage: usageRouter,
 });

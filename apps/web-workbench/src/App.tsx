@@ -14,6 +14,7 @@ import { RedirectIfAuthed } from '@/pages/RedirectIfAuthed';
 import { RegisterPage } from '@/pages/RegisterPage';
 import { RequireAuth } from '@/pages/RequireAuth';
 import { RolesPage } from '@/pages/RolesPage';
+import { BatchPage } from '@/pages/BatchPage';
 import { ScheduledPage } from '@/pages/ScheduledPage';
 import { ServerErrorPage } from '@/pages/ServerErrorPage';
 import { SettingsPage } from '@/pages/SettingsPage';
@@ -151,6 +152,22 @@ export function App(): JSX.Element {
           element={
             <RequireAuth>
               <ScheduledPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/batch"
+          element={
+            <RequireAuth>
+              <BatchPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/batch/:batchId"
+          element={
+            <RequireAuth>
+              <BatchPage />
             </RequireAuth>
           }
         />

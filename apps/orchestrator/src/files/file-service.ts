@@ -18,8 +18,6 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import {
   newExternalId,
   type PlanId,
@@ -29,6 +27,8 @@ import { eq } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { taskFiles, type TaskFile } from '../db/schema/task-files.js';
 import { tasks } from '../db/schema/tasks.js';
+import type { StorageProvider } from './storage-provider.js';
+import { LocalStorageProvider } from './storage-provider.js';
 
 export type FileKind = 'input' | 'output';
 
@@ -71,10 +71,22 @@ export const ACCEPTED_EXTENSIONS = new Set<string>([
 ]);
 
 export class FileService {
+  /**
+   * Phase 5c — disk I/O routed through a StorageProvider. Default
+   * (LocalStorageProvider rooted at FILES_ROOT) preserves the
+   * pre-5c behaviour exactly, so all existing callers + tests are
+   * unaffected. Production swaps to R2 by setting STORAGE_PROVIDER=r2
+   * (factory in storage-provider.ts) and passing the returned
+   * provider into this constructor at boot.
+   */
+  private readonly storage: StorageProvider;
   constructor(
     private readonly db: DB,
     private readonly logger: Logger,
-  ) {}
+    storage?: StorageProvider,
+  ) {
+    this.storage = storage ?? new LocalStorageProvider(FILES_ROOT, logger);
+  }
 
   /**
    * Persist a freshly-uploaded buffer to disk and write the index
@@ -94,10 +106,17 @@ export class FileService {
   }): Promise<TaskFile> {
     const externalId = newExternalId('file');
     const safeFilename = sanitiseFilename(opts.filename);
-    const dir = path.join(FILES_ROOT, opts.userExternalId, 'input', externalId);
-    await fs.mkdir(dir, { recursive: true });
-    const storagePath = path.join(dir, safeFilename);
-    await fs.writeFile(storagePath, opts.buffer);
+    // Phase 5c — route through StorageProvider. LocalProvider writes
+    // under FILES_ROOT preserving the pre-5c path layout exactly so
+    // existing rows stay readable.
+    const { storagePath } = await this.storage.put({
+      userExternalId: opts.userExternalId,
+      kind: 'input',
+      fileExternalId: externalId,
+      filename: safeFilename,
+      buffer: opts.buffer,
+      mimetype: opts.mimetype,
+    });
     await this.db.insert(taskFiles).values({
       externalId,
       userId: opts.userIdInternal,
@@ -142,10 +161,14 @@ export class FileService {
   }): Promise<TaskFile> {
     const externalId = newExternalId('file');
     const safeFilename = sanitiseFilename(opts.filename);
-    const dir = path.join(FILES_ROOT, opts.userExternalId, 'output', externalId);
-    await fs.mkdir(dir, { recursive: true });
-    const storagePath = path.join(dir, safeFilename);
-    await fs.writeFile(storagePath, opts.buffer);
+    const { storagePath } = await this.storage.put({
+      userExternalId: opts.userExternalId,
+      kind: 'output',
+      fileExternalId: externalId,
+      filename: safeFilename,
+      buffer: opts.buffer,
+      mimetype: opts.mimetype,
+    });
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
     await this.db.insert(taskFiles).values({
       externalId,
@@ -190,16 +213,9 @@ export class FileService {
     // the ownership has been pre-checked.
     void userExternalId;
     if (row.expiresAt && row.expiresAt < new Date()) return null;
-    try {
-      const buffer = await fs.readFile(row.storagePath);
-      return { row, buffer };
-    } catch (err) {
-      this.logger.warn(
-        { err, fileId: fileExternalId, path: row.storagePath },
-        'file: read from disk failed (file deleted out-of-band?)',
-      );
-      return null;
-    }
+    const buffer = await this.storage.get(row.storagePath);
+    if (!buffer) return null;
+    return { row, buffer };
   }
 
   /**
@@ -222,11 +238,11 @@ export class FileService {
         .limit(1);
       if (!row) continue;
       if (row.userId !== userIdInternal) continue;
-      try {
-        const buffer = await fs.readFile(row.storagePath);
+      const buffer = await this.storage.get(row.storagePath);
+      if (buffer) {
         out.push({ row, buffer });
-      } catch (err) {
-        this.logger.warn({ err, fileId: id }, 'file: load skipped (disk read failed)');
+      } else {
+        this.logger.warn({ fileId: id }, 'file: load skipped (storage read returned null)');
       }
     }
     return out;
