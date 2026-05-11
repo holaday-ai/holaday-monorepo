@@ -3407,11 +3407,39 @@ export function looksLikeBrowserTakeoverPrompt(text: string): boolean {
  * do one. Skip the takeover heuristic when the only login mention
  * is in a past-tense / success frame so a real summary isn't parked
  * as awaiting_user.
+ *
+ * Phase 4 R1 follow-up — added negative lookaheads on the
+ * "登录完成 / 登录了" branches so they DON'T fire on future-tense
+ * "登录完成后告诉我" / "登录后再回来" patterns. Observed regression
+ * on P0_006: model emitted "...请手动登录...登录完成后告诉我",
+ * past-tense regex hit "登录完成", takeover heuristic was suppressed,
+ * task terminated as completed instead of parking on the login wall.
  */
 function looksLikePastTenseLoginReport(text: string): boolean {
-  return /已\s*(?:经)?\s*(?:成功)?\s*(?:完成)?\s*(?:登录|登入|扫码)|(?:登录|登入|扫码)\s*(?:成功|完成|了)|(?:登录|登入|扫码)\s*[了过完]|successfully\s+(?:logged|signed)\s*in/iu.test(
-    text,
-  );
+  // `已 ... 登录` form — established success ("已成功登录", "已完成扫码").
+  if (/已\s*(?:经)?\s*(?:成功)?\s*(?:完成)?\s*(?:登录|登入|扫码)/u.test(text)) {
+    return true;
+  }
+  // "登录完成" / "登录成功" / "登录了" — but NOT when followed by
+  // "后" / "再" / "之后" / "以后" (future-tense subordinate clause).
+  // The lookahead allows incidental whitespace so "登录完成 后告诉我"
+  // also gets excluded (defensive against a stray newline).
+  if (
+    /(?:登录|登入|扫码)\s*(?:成功|完成|了)(?!\s*(?:后|再|之后|以后))/u.test(text)
+  ) {
+    return true;
+  }
+  // "登录过" — past-tense aspectual marker. NOTE: 完 alone is
+  // ambiguous: "登录完毕" is past but "登录完成后" is future and
+  // shares the prefix "登录完". Branch 2 (above) already catches the
+  // unambiguous 完成 form with the future-tense guard; dropping 完
+  // from this branch avoids the false-positive on
+  // "请...登录...登录完成后告诉我" that suppressed P0_006 takeover.
+  if (/(?:登录|登入|扫码)\s*过/u.test(text)) {
+    return true;
+  }
+  if (/successfully\s+(?:logged|signed)\s*in/i.test(text)) return true;
+  return false;
 }
 
 /**

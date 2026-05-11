@@ -97,6 +97,26 @@ describe('looksLikeBrowserTakeoverPrompt', () => {
       ).toBe(false);
     });
 
+    it('Phase 4 R1 regression — future-tense "登录完成后告诉我" does NOT suppress takeover', () => {
+      // P0_006 regression caught the past-tense detector greedily
+      // matching "登录完成" inside the future-tense clause
+      // "登录完成后告诉我" (when login completes, tell me) and
+      // suppressing the takeover heuristic. The "登录" before this
+      // (in "需要你手动登录...") IS a takeover prompt — the model is
+      // asking the user to log in, then come back. Expect TRUE.
+      expect(
+        looksLikeBrowserTakeoverPrompt(
+          '页面已打开，右上角显示「登录」按钮，处于未登录状态。需要你手动登录才能继续——请在右侧浏览器面板点击「登录」完成身份验证（支持商家 / 达人 / 品牌 / 机构身份），登录完成后告诉我。',
+        ),
+      ).toBe(true);
+    });
+
+    it('future-tense "登录成功后再回来" does NOT suppress takeover either', () => {
+      expect(
+        looksLikeBrowserTakeoverPrompt('请手动登录，登录成功后再回来通知我'),
+      ).toBe(true);
+    });
+
     it('long completed report that mentions both login and select incidentally', () => {
       // Length cap dodges the co-occurrence guard for genuine reports.
       const longReport =
