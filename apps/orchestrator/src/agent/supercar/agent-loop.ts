@@ -2202,10 +2202,18 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           // Phase 3 R4 — when goto errored or the page is blank,
           // lead with the friendly Chinese message instead of the
           // happy "已导航到 X" line. The screenshot still goes
-          // through so the model sees what (if anything) rendered;
-          // is_error=true on the tool_result tells the model the
-          // navigation didn't succeed, so it doesn't proceed as if
-          // it did.
+          // through so the model sees what (if anything) rendered.
+          //
+          // DELIBERATELY no is_error=true: setting that on the
+          // tool_result was causing the Anthropic API to return
+          // invalid_request_error (translated as "服务暂时繁忙") and
+          // the supercar's give-up path firing. Without is_error,
+          // the model reads the friendly text + screenshot, decides
+          // whether to retry or report the failure to the user, and
+          // produces a sensible final summary on its own. P3_AUTH_004
+          // (httpbin.org/status/403) also stays awaiting_user
+          // because the auth detector runs on the model's no-tool
+          // turn, not the navigate tool turn.
           toolResults.push({
             type: 'tool_result',
             tool_use_id: toolUse.id,
@@ -2223,7 +2231,6 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                 },
               },
             ],
-            ...(extraStatusText ? { is_error: true } : {}),
           });
           continue;
         }
