@@ -7,7 +7,10 @@ import Anthropic from '@anthropic-ai/sdk';
 import { DrizzleLlmCallRecorder } from './agent/llm-call-recorder.js';
 import { AnthropicPlanner } from './agent/planners/anthropic.js';
 import { StubPlanner } from './agent/planners/stub.js';
-import { startScheduledRunner } from './agent/scheduled-runner.js';
+import {
+  recoverStuckRunningScheduledTasks,
+  startScheduledRunner,
+} from './agent/scheduled-runner.js';
 import { injectPendingCookies } from './cookies/sync-service.js';
 import { createScreencastProxy } from './streaming/screencast-proxy.js';
 import {
@@ -294,11 +297,25 @@ async function main() {
     logger.info('Firecrawl adapter disabled — FIRECRAWL_API_KEY not set');
   }
 
+  // Phase 5c+P5-fix — eagerly construct the shared StorageProvider
+  // at boot. The factory throws on misconfigured R2 (STORAGE_PROVIDER=
+  // r2 with missing R2_* creds), so we want that failure visible at
+  // pm2 start rather than deferred to the first file upload. The
+  // singleton is then memoized in storage-provider.ts and consumed by
+  // every FileService default constructor + the http.ts upload route.
+  const { getSharedStorageProvider } = await import('./files/storage-provider.js');
+  const sharedStorage = getSharedStorageProvider({ logger });
+  logger.info(
+    { providerKind: sharedStorage.constructor.name },
+    'storage: shared provider initialized',
+  );
+
   // Phase 3 R3 — DownloadManager. Wraps the existing FileService with
   // a 50MB cap + URL construction. FileService is constructed inside
   // createHttpApp today, so we stand up a parallel instance here for
   // the manager (FileService is stateless — the DB pool is shared
-  // through the singleton `db` import).
+  // through the singleton `db` import). FileService picks up the
+  // shared storage singleton via its default constructor branch.
   const downloadFileService = new (await import('./files/file-service.js')).FileService(db, logger);
   const downloadManager = new (await import('./files/download-manager.js')).DownloadManager(
     downloadFileService,
@@ -320,6 +337,14 @@ async function main() {
   const httpServer = app.listen(env.HTTP_PORT, () => {
     logger.info({ port: env.HTTP_PORT }, 'HTTP server listening');
   });
+
+  // Codex P5 follow-up — boot sweep for scheduled_tasks rows stuck in
+  // 'running'. A pm2 restart that landed mid-dispatch left the row
+  // wedged in 'running'; the runner's tick only matches 'active',
+  // so the row would never fire again. Restore them to 'active' so
+  // the next tick re-claims atomically + dispatches. Worst case: one
+  // extra fire (acceptable vs. silent stop).
+  await recoverStuckRunningScheduledTasks(db);
 
   // Phase 5a — scheduled-tasks polling loop, NOW with real dispatch.
   // The Phase 16b version was a logger stub; this version wires

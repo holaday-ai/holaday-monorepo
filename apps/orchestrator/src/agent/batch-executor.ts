@@ -111,13 +111,17 @@ export async function executeBatch(
     return;
   }
 
-  // Flip pending → running on first dispatch attempt.
-  if (batch.status === 'pending') {
-    await db
-      .update(batchTasks)
-      .set({ status: 'running' })
-      .where(eq(batchTasks.id, batch.id));
-  }
+  // Codex P5 follow-up — atomic flip pending → running. The earlier
+  // read-then-write (`if (batch.status === 'pending')`) had a race
+  // with a parallel executeBatch invocation OR with a user-cancel
+  // that lands between our SELECT and UPDATE. Now the WHERE clause
+  // includes `status='pending'` so the UPDATE is a no-op if anyone
+  // else moved the row first; we don't care about the affectedRows
+  // result here (idempotent — already-running is fine).
+  await db
+    .update(batchTasks)
+    .set({ status: 'running' })
+    .where(and(eq(batchTasks.id, batch.id), eq(batchTasks.status, 'pending')));
 
   // Concurrency-bounded fanout. We re-read item rows on each pass so
   // a user-cancel between iterations is observed.
@@ -194,12 +198,37 @@ async function runItem(
   deps: BatchExecutorDeps,
 ): Promise<void> {
   const { db, logger } = deps;
-  // Mark running BEFORE we call dispatch so a slow create can't
-  // confuse a poll that sees status='pending' as "not yet started".
-  await db
-    .update(batchTaskItems)
-    .set({ status: 'running' })
-    .where(eq(batchTaskItems.id, item.id));
+  // Codex P5 follow-up — atomic claim on the item row. The earlier
+  // unconditional `UPDATE ... SET status='running' WHERE id=?` would
+  // double-dispatch if two executeBatch invocations both grabbed the
+  // same item (e.g. an HMR reload that didn't fully tear down the
+  // first run, or a hypothetical multi-instance scale-out). Now the
+  // WHERE includes `status='pending'` so only one writer wins; the
+  // loser sees affectedRows=0 and bails BEFORE calling dispatch.
+  let claimAffected = 0;
+  try {
+    const claim = await db
+      .update(batchTaskItems)
+      .set({ status: 'running' })
+      .where(
+        and(
+          eq(batchTaskItems.id, item.id),
+          eq(batchTaskItems.status, 'pending'),
+        ),
+      );
+    claimAffected = extractMysqlAffectedRows(claim);
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err), batchItemId: item.externalId },
+      'batch-executor: item claim UPDATE threw',
+    );
+    return;
+  }
+  if (claimAffected === 0) {
+    // Already running or terminal — another writer owns it. Don't
+    // dispatch, don't broadcast — let the other owner finish.
+    return;
+  }
   await broadcastItemUpdate(batch, item.id, 'running', deps, owner.externalId);
 
   let taskInternalId: number | null = null;
@@ -397,6 +426,21 @@ async function broadcastItemUpdate(
       ...(extras?.errorMessage ? { errorMessage: extras.errorMessage } : {}),
     },
   });
+}
+
+/**
+ * Codex P5 follow-up — extract MySQL affectedRows from a drizzle
+ * update result. Mirrors the helper in scheduled-runner.ts +
+ * task-repository.ts; lifted here so the executor can run the same
+ * atomic-claim pattern.
+ */
+function extractMysqlAffectedRows(result: unknown): number {
+  if (Array.isArray(result)) {
+    const head = result[0] as { affectedRows?: number } | undefined;
+    if (typeof head?.affectedRows === 'number') return head.affectedRows;
+  }
+  const direct = (result as { affectedRows?: number } | null)?.affectedRows;
+  return typeof direct === 'number' ? direct : 0;
 }
 
 function isTerminal(status: string | null | undefined): boolean {

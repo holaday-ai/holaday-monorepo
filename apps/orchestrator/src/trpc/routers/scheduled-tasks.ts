@@ -184,16 +184,39 @@ export const scheduledTasksRouter = router({
           message: '一次性任务已完成，无法重新启用。请新建一个定时任务。',
         });
       }
+      // Codex P5 follow-up — `running` is the transient claim state
+      // owned by the runner. Toggling while a dispatch is in flight
+      // would race with the runner's restore-to-active write. Reject
+      // and ask the user to retry shortly.
+      if (row.status === 'running') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '该定时任务正在执行中，请稍后再试',
+        });
+      }
+      // Atomic flip via WHERE status=? so a parallel runner claim
+      // can't sneak between our read and our write. If the conditional
+      // update finds nothing (status moved to running mid-call), we
+      // fall through to the same "执行中" error so the SPA shows a
+      // consistent message instead of "succeeded but nothing changed".
       const nextStatus = row.status === 'active' ? 'paused' : 'active';
-      await ctx.db
+      const result = await ctx.db
         .update(scheduledTasks)
         .set({ status: nextStatus })
         .where(
           and(
             eq(scheduledTasks.externalId, input.scheduledTaskId),
             eq(scheduledTasks.userId, userId),
+            eq(scheduledTasks.status, row.status),
           ),
         );
+      const affected = (result as unknown as { affectedRows?: number }).affectedRows ?? 0;
+      if (affected === 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '该定时任务状态已变化，请刷新后重试',
+        });
+      }
       return { ok: true as const, status: nextStatus };
     }),
 });

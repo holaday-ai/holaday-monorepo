@@ -104,16 +104,85 @@ export function stopScheduledRunner(): void {
   }
 }
 
+/**
+ * Codex P5 follow-up — extract MySQL affectedRows from a drizzle
+ * `db.update(...).set(...).where(...)` result. mysql2 returns
+ * `[ResultSetHeader, ...]`; some shape variants surface the count
+ * directly on the top-level object. Probe both.
+ */
+function extractMysqlAffectedRows(result: unknown): number {
+  if (Array.isArray(result)) {
+    const head = result[0] as { affectedRows?: number } | undefined;
+    if (typeof head?.affectedRows === 'number') return head.affectedRows;
+  }
+  const direct = (result as { affectedRows?: number } | null)?.affectedRows;
+  return typeof direct === 'number' ? direct : 0;
+}
+
+/**
+ * Codex P5 follow-up — boot-time recovery sweep. A pm2 restart that
+ * lands BETWEEN claim ('running') and restore ('active' / 'completed')
+ * would leave a row stuck in 'running' forever; the runner's
+ * next-tick scan only matches `status='active'`, so the row never
+ * fires again.
+ *
+ * Restore every row in `running` back to `active` on boot. Worst
+ * case we fire one extra time (next tick re-claims atomically and
+ * dispatches), which is the lesser of two evils vs. silent stop.
+ */
+export async function recoverStuckRunningScheduledTasks(
+  db: ScheduledRunnerDeps['db'],
+): Promise<number> {
+  try {
+    const result = await db
+      .update(scheduledTasks)
+      .set({ status: 'active' })
+      .where(eq(scheduledTasks.status, 'running'));
+    const affected = extractMysqlAffectedRows(result);
+    if (affected > 0) {
+      logger.info(
+        { recovered: affected },
+        'scheduled-runner: boot sweep restored stuck-running rows to active',
+      );
+    }
+    return affected;
+  } catch (err) {
+    logger.warn(
+      { err: errMsg(err) },
+      'scheduled-runner: boot sweep failed (non-fatal)',
+    );
+    return 0;
+  }
+}
+
 async function tick(deps: ScheduledRunnerDeps): Promise<void> {
   const now = new Date();
-  let due: Array<{
+  // Codex P5 follow-up — TWO-PHASE atomic claim. The old single-phase
+  // pattern (SELECT due → for each row: dispatch → UPDATE advance)
+  // had a race: two ticks (e.g. boot-tick + first interval-tick
+  // within 60s) could both see the same `due` row and double-
+  // dispatch. Even single-instance the immediate boot-tick races
+  // with the next interval-tick if dispatch takes >60s.
+  //
+  // Phase 1: scan candidates (cheap).
+  // Phase 2: per row, atomic UPDATE WHERE status='active' AND
+  //          next_run_at<=NOW → set status='running'. Inspecting
+  //          affectedRows tells us if WE got the claim; if not,
+  //          someone else has it (or it's no longer due), skip.
+  //
+  // After dispatch (success OR failure), restore to 'active' (with
+  // advanced next_run_at) for recurring, or to 'completed' for
+  // one-shot. We always restore — a permanently-failing dispatch
+  // gets advanced to the next interval and the user can pause from
+  // the UI. Boot sweep recovers any row that crashed mid-dispatch.
+  let candidates: Array<{
     id: number;
     userId: number;
     intent: string;
     repeatType: string;
   }>;
   try {
-    due = await deps.db
+    candidates = await deps.db
       .select({
         id: scheduledTasks.id,
         userId: scheduledTasks.userId,
@@ -128,9 +197,38 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
     logger.warn({ err: errMsg(err) }, 'scheduled-runner: scan failed');
     return;
   }
-  if (due.length === 0) return;
-  logger.info({ count: due.length }, 'scheduled-runner: firing due triggers');
-  for (const row of due) {
+  if (candidates.length === 0) return;
+  logger.info({ count: candidates.length }, 'scheduled-runner: candidates found');
+  for (const row of candidates) {
+    // Phase 2 atomic claim.
+    let claimAffected = 0;
+    try {
+      const claim = await deps.db
+        .update(scheduledTasks)
+        .set({ status: 'running' })
+        .where(
+          and(
+            eq(scheduledTasks.id, row.id),
+            eq(scheduledTasks.status, 'active'),
+            lte(scheduledTasks.nextRunAt, now),
+          ),
+        );
+      claimAffected = extractMysqlAffectedRows(claim);
+    } catch (err) {
+      logger.warn(
+        { err: errMsg(err), scheduledTaskId: row.id },
+        'scheduled-runner: claim UPDATE threw',
+      );
+      continue;
+    }
+    if (claimAffected === 0) {
+      // Lost the race — another tick / instance grabbed this row,
+      // OR a user paused/deleted it between the scan and the claim.
+      continue;
+    }
+
+    // We own this row now (status='running'). Dispatch, then advance
+    // + restore — both branches MUST run so the row doesn't wedge.
     let dispatchedTaskId: number | null = null;
     try {
       dispatchedTaskId = await deps.dispatch({
@@ -144,16 +242,13 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
         'scheduled-runner: dispatch threw',
       );
     }
-    // Advance regardless of dispatch success: a permanently-failing
-    // dispatch shouldn't lock the row in a tight retry loop. The
-    // user can pause from the UI to stop the bleeding.
     const nextRun = computeNextRun(
       now,
       row.repeatType as 'once' | 'daily' | 'weekly' | 'monthly' | 'custom',
     );
     try {
       if (nextRun === null) {
-        // Once: mark completed.
+        // One-shot — terminal.
         await deps.db
           .update(scheduledTasks)
           .set({
@@ -163,9 +258,11 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
           })
           .where(eq(scheduledTasks.id, row.id));
       } else {
+        // Recurring — restore to 'active' for the next tick.
         await deps.db
           .update(scheduledTasks)
           .set({
+            status: 'active',
             nextRunAt: nextRun,
             lastRunAt: now,
             ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
@@ -173,9 +270,11 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
           .where(eq(scheduledTasks.id, row.id));
       }
     } catch (err) {
+      // Worst-case path — the row stays in 'running' until the boot
+      // sweep recovers it. Log so we know it happened.
       logger.warn(
         { err: errMsg(err), scheduledTaskId: row.id },
-        'scheduled-runner: advance failed',
+        'scheduled-runner: advance failed — row may be stuck in running until next restart',
       );
     }
   }

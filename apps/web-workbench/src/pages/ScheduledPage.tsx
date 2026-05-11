@@ -137,14 +137,22 @@ export function ScheduledPage(): JSX.Element {
                     </span>
                     <span
                       className={
-                        r.status === 'active'
-                          ? 'text-foreground/80'
-                          : r.status === 'paused'
-                            ? 'text-amber-700 dark:text-amber-300'
-                            : 'text-muted-foreground'
+                        r.status === 'running'
+                          ? 'text-primary'
+                          : r.status === 'active'
+                            ? 'text-foreground/80'
+                            : r.status === 'paused'
+                              ? 'text-amber-700 dark:text-amber-300'
+                              : 'text-muted-foreground'
                       }
                     >
-                      {r.status === 'active' ? '运行中' : r.status === 'paused' ? '已暂停' : '已完成'}
+                      {r.status === 'running'
+                        ? '执行中'
+                        : r.status === 'active'
+                          ? '已启用'
+                          : r.status === 'paused'
+                            ? '已暂停'
+                            : '已完成'}
                     </span>
                     <span>下次：{fmtDate(r.nextRunAt)}</span>
                     {r.lastRunAt && <span>上次：{fmtDate(r.lastRunAt)}</span>}

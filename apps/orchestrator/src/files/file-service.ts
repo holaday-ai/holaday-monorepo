@@ -28,7 +28,7 @@ import type { DB } from '../db/client.js';
 import { taskFiles, type TaskFile } from '../db/schema/task-files.js';
 import { tasks } from '../db/schema/tasks.js';
 import type { StorageProvider } from './storage-provider.js';
-import { LocalStorageProvider } from './storage-provider.js';
+import { getSharedStorageProvider } from './storage-provider.js';
 
 export type FileKind = 'input' | 'output';
 
@@ -72,12 +72,14 @@ export const ACCEPTED_EXTENSIONS = new Set<string>([
 
 export class FileService {
   /**
-   * Phase 5c — disk I/O routed through a StorageProvider. Default
-   * (LocalStorageProvider rooted at FILES_ROOT) preserves the
-   * pre-5c behaviour exactly, so all existing callers + tests are
-   * unaffected. Production swaps to R2 by setting STORAGE_PROVIDER=r2
-   * (factory in storage-provider.ts) and passing the returned
-   * provider into this constructor at boot.
+   * Phase 5c — disk I/O routed through a StorageProvider. When the
+   * caller doesn't pass an explicit provider, we resolve the shared
+   * process-wide singleton (`getSharedStorageProvider`), which
+   * honours `STORAGE_PROVIDER=local|r2` env. This means a flip to
+   * R2 actually plumbs through every FileService construction site
+   * (Codex P5 follow-up — the previous default-LocalStorageProvider
+   * branch silently overrode the env flag for every FileService
+   * built outside the boot path).
    */
   private readonly storage: StorageProvider;
   constructor(
@@ -85,7 +87,7 @@ export class FileService {
     private readonly logger: Logger,
     storage?: StorageProvider,
   ) {
-    this.storage = storage ?? new LocalStorageProvider(FILES_ROOT, logger);
+    this.storage = storage ?? getSharedStorageProvider({ logger });
   }
 
   /**

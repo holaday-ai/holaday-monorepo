@@ -310,6 +310,41 @@ export interface CreateStorageProviderOpts {
 }
 
 /**
+ * Process-wide singleton populated lazily on first
+ * `getSharedStorageProvider()` call. Holds whichever provider the
+ * factory returned (Local OR R2) so every FileService / migration
+ * script picks up the SAME instance. Tests reset it via the exported
+ * `_resetSharedStorageProviderForTesting` helper.
+ *
+ * Why a singleton: R2's S3Client is heavyweight (keeps an HTTP/2
+ * connection pool); spinning up a fresh one per FileService — which
+ * is constructed dozens of times per task lifecycle — would be
+ * wasteful, even though correctness wouldn't suffer.
+ */
+let sharedStorageProvider: StorageProvider | null = null;
+
+/**
+ * Return (and lazily initialize) the process-wide storage provider.
+ * First call reads env via createStorageProvider; subsequent calls
+ * return the cached instance. Caller should pass the application
+ * logger so the lazy-init path can warn / throw with context.
+ */
+export function getSharedStorageProvider(opts: CreateStorageProviderOpts): StorageProvider {
+  if (sharedStorageProvider === null) {
+    sharedStorageProvider = createStorageProvider(opts);
+  }
+  return sharedStorageProvider;
+}
+
+/**
+ * Test-only reset. Production code never calls this — the singleton
+ * is meant to live for the entire process lifetime.
+ */
+export function _resetSharedStorageProviderForTesting(): void {
+  sharedStorageProvider = null;
+}
+
+/**
  * Read env + return the right provider. Default is LOCAL — flipping
  * to R2 requires STORAGE_PROVIDER=r2 plus the four R2_* creds. A
  * missing cred while flag=r2 throws here at boot so misconfiguration

@@ -20,7 +20,7 @@
 
 import { newExternalId, type PlanId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { executeBatch, insertBatch } from '../../agent/batch-executor.js';
 import { batchTaskItems, batchTasks } from '../../db/schema/batch-tasks.js';
@@ -121,33 +121,19 @@ export const batchTasksRouter = router({
         .map((i) => i.taskInternalId)
         .filter((v): v is number => v !== null);
       const tasksById = new Map<number, string>();
+      // Codex P5 follow-up — use inArray for the multi-id case
+      // instead of the per-id fallback loop. The earlier code's
+      // `where(undefined)` branch on the N>1 path was a full-table
+      // scan via the empty predicate; even though we filtered the
+      // results client-side, MySQL returned the entire tasks table
+      // first. inArray emits `WHERE id IN (?, ?, ...)` which uses
+      // the PRIMARY index. One query, indexed read.
       if (taskInternalIds.length > 0) {
         const taskRows = await ctx.db
           .select({ id: tasks.id, externalId: tasks.externalId })
           .from(tasks)
-          .where(
-            taskInternalIds.length === 1
-              ? eq(tasks.id, taskInternalIds[0]!)
-              : // drizzle's `inArray` would be cleaner but importing
-                // it here for one branch isn't worth it; fall through
-                // to a manual loop for the small N (≤50).
-                undefined,
-          );
+          .where(inArray(tasks.id, taskInternalIds));
         for (const r of taskRows) tasksById.set(r.id, r.externalId);
-        if (taskInternalIds.length > 1) {
-          // Fallback per-id lookup for the multi-item path. Hit on a
-          // ≤50 batch is fine; if this becomes hot we'd batch via
-          // inArray.
-          for (const tid of taskInternalIds) {
-            if (tasksById.has(tid)) continue;
-            const [tRow] = await ctx.db
-              .select({ id: tasks.id, externalId: tasks.externalId })
-              .from(tasks)
-              .where(eq(tasks.id, tid))
-              .limit(1);
-            if (tRow) tasksById.set(tRow.id, tRow.externalId);
-          }
-        }
       }
       return {
         batchId: batch.externalId,
@@ -262,8 +248,15 @@ export const batchTasksRouter = router({
     .input(z.object({ batchId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const user = await requireUser(ctx);
-      // Only running / pending batches are cancellable. Completed /
-      // partial / cancelled stay terminal.
+      // Codex P5 follow-up — status guard. Earlier the UPDATE
+      // unconditionally wrote `status='cancelled'` on whatever row
+      // matched, which would silently demote an already-completed
+      // batch back to cancelled (losing the completedAt timestamp
+      // semantic + confusing the SPA's terminal-status guard). Now
+      // we only flip when status IN ('pending', 'running'); on
+      // affectedRows=0 we re-read the row to distinguish "not found"
+      // (404) from "already terminal" (200 ok / 400 depending on
+      // which terminal).
       const result = await ctx.db
         .update(batchTasks)
         .set({ status: 'cancelled', completedAt: new Date() })
@@ -271,13 +264,36 @@ export const batchTasksRouter = router({
           and(
             eq(batchTasks.externalId, input.batchId),
             eq(batchTasks.userId, user.id),
+            inArray(batchTasks.status, ['pending', 'running']),
           ),
         );
       const affected = (result as unknown as { affectedRows?: number }).affectedRows;
-      if (!affected) {
+      if (affected) {
+        // Happy path — executor sees status='cancelled' on its next
+        // iteration and drains.
+        return { ok: true as const, alreadyTerminal: false as const };
+      }
+      // Zero affected → either the row doesn't exist or it's already
+      // in a terminal state. Read once to differentiate.
+      const [row] = await ctx.db
+        .select({ status: batchTasks.status })
+        .from(batchTasks)
+        .where(
+          and(eq(batchTasks.externalId, input.batchId), eq(batchTasks.userId, user.id)),
+        )
+        .limit(1);
+      if (!row) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'batch not found' });
       }
-      // Executor picks up the cancellation on its next iteration.
-      return { ok: true as const };
+      if (row.status === 'cancelled') {
+        // Already cancelled — idempotent. SPA gets a clean ok.
+        return { ok: true as const, alreadyTerminal: true as const };
+      }
+      // Terminal but not cancelled (completed / partial). Refuse
+      // with a clear reason so the SPA can show "已结束 (xxx)".
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `批量任务已结束（${row.status}），无法取消`,
+      });
     }),
 });

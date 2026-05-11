@@ -18,7 +18,12 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { computeNextRun, startScheduledRunner, stopScheduledRunner } from './scheduled-runner.js';
+import {
+  computeNextRun,
+  recoverStuckRunningScheduledTasks,
+  startScheduledRunner,
+  stopScheduledRunner,
+} from './scheduled-runner.js';
 
 describe('computeNextRun', () => {
   it('once → null (one-shot trigger marks row completed instead)', () => {
@@ -56,8 +61,22 @@ describe('startScheduledRunner — tick integration', () => {
    *   db.select(...).from(...).where(...) — returns an array
    *   db.update(...).set(...).where(...) — returns OK
    */
-  function makeFakeDb(rows: Array<Record<string, unknown>>) {
+  /**
+   * Codex P5 follow-up — the runner now does TWO updates per
+   * dispatch: (1) atomic claim `status='running'`, (2) advance +
+   * restore. The fake DB captures BOTH so tests can verify the
+   * sequencing.
+   *
+   * `claimSucceeds` controls whether the claim UPDATE reports
+   * affectedRows=1 (we own this row) or 0 (lost the race).
+   */
+  function makeFakeDb(
+    rows: Array<Record<string, unknown>>,
+    opts?: { claimSucceeds?: boolean },
+  ) {
     const updates: Array<Record<string, unknown>> = [];
+    const claimSucceeds = opts?.claimSucceeds ?? true;
+    let updateCallNum = 0;
     const select = vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(async () => rows),
@@ -67,11 +86,20 @@ describe('startScheduledRunner — tick integration', () => {
       set: vi.fn((values: Record<string, unknown>) => ({
         where: vi.fn(async () => {
           updates.push(values);
-          return undefined;
+          updateCallNum += 1;
+          // First update per row is the claim (status='running').
+          // Subsequent updates (advance) always succeed.
+          const isClaim = (values as { status?: string }).status === 'running';
+          const affectedRows = isClaim && !claimSucceeds ? 0 : 1;
+          return { affectedRows };
         }),
       })),
     }));
-    return { db: { select, update } as unknown as Parameters<typeof startScheduledRunner>[0]['db'], updates };
+    return {
+      db: { select, update } as unknown as Parameters<typeof startScheduledRunner>[0]['db'],
+      updates,
+      getUpdateCount: () => updateCallNum,
+    };
   }
 
   it('fires dispatch and advances next_run_at for a due daily row', async () => {
@@ -88,15 +116,17 @@ describe('startScheduledRunner — tick integration', () => {
       userInternalId: 42,
       intent: 'run my report',
     });
-    expect(updates.length).toBe(1);
-    const u = updates[0]!;
-    expect(u).toMatchObject({
+    // Two updates per dispatch: (1) claim status='running',
+    // (2) advance + restore status='active'.
+    expect(updates.length).toBe(2);
+    expect(updates[0]).toMatchObject({ status: 'running' });
+    const advance = updates[1]!;
+    expect(advance).toMatchObject({
+      status: 'active',
       lastTaskId: 999,
     });
-    // For recurring schedules nextRunAt MUST be set; for once it's
-    // absent (we go to completed instead). Validate it's there.
-    expect('nextRunAt' in u).toBe(true);
-    expect((u as { nextRunAt: Date }).nextRunAt).toBeInstanceOf(Date);
+    expect('nextRunAt' in advance).toBe(true);
+    expect((advance as { nextRunAt: Date }).nextRunAt).toBeInstanceOf(Date);
     stopScheduledRunner();
   });
 
@@ -107,13 +137,14 @@ describe('startScheduledRunner — tick integration', () => {
     const dispatch = vi.fn(async () => 1000);
     startScheduledRunner({ db, dispatch, pollIntervalMs: 60_000 });
     await new Promise((r) => setTimeout(r, 50));
-    expect(updates.length).toBe(1);
-    const u = updates[0]!;
-    expect(u).toMatchObject({
+    expect(updates.length).toBe(2);
+    expect(updates[0]).toMatchObject({ status: 'running' });
+    const advance = updates[1]!;
+    expect(advance).toMatchObject({
       status: 'completed',
       lastTaskId: 1000,
     });
-    expect('nextRunAt' in u).toBe(false);
+    expect('nextRunAt' in advance).toBe(false);
     stopScheduledRunner();
   });
 
@@ -125,13 +156,67 @@ describe('startScheduledRunner — tick integration', () => {
     startScheduledRunner({ db, dispatch, pollIntervalMs: 60_000 });
     await new Promise((r) => setTimeout(r, 50));
     expect(dispatch).toHaveBeenCalledTimes(1);
-    expect(updates.length).toBe(1);
-    const u = updates[0]!;
+    expect(updates.length).toBe(2);
+    const advance = updates[1]!;
     // lastTaskId NOT set when dispatch returned null (the conditional
     // spread in the runner skips the column).
-    expect('lastTaskId' in u).toBe(false);
-    // But the row still advanced.
-    expect('nextRunAt' in u).toBe(true);
+    expect('lastTaskId' in advance).toBe(false);
+    // Status restored to 'active' so the row doesn't wedge in
+    // 'running' for a permanently-failing dispatch. Next interval
+    // will re-try (subject to the advanced next_run_at).
+    expect(advance).toMatchObject({ status: 'active' });
+    expect('nextRunAt' in advance).toBe(true);
     stopScheduledRunner();
+  });
+
+  it('Codex P5 — claim fails (affectedRows=0) → skip dispatch entirely', async () => {
+    const { db, updates } = makeFakeDb(
+      [{ id: 10, userId: 42, intent: 'racy', repeatType: 'daily' }],
+      { claimSucceeds: false },
+    );
+    const dispatch = vi.fn(async () => 1234);
+    startScheduledRunner({ db, dispatch, pollIntervalMs: 60_000 });
+    await new Promise((r) => setTimeout(r, 50));
+    // Lost the claim race → no dispatch, no advance UPDATE.
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(updates.length).toBe(1); // only the failed claim attempt
+    expect(updates[0]).toMatchObject({ status: 'running' });
+    stopScheduledRunner();
+  });
+});
+
+describe('recoverStuckRunningScheduledTasks (boot sweep)', () => {
+  it('flips status="running" rows back to "active" + returns affected count', async () => {
+    const captured: Array<{ values: Record<string, unknown> }> = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db: any = {
+      update: vi.fn(() => ({
+        set: vi.fn((values: Record<string, unknown>) => ({
+          where: vi.fn(async () => {
+            captured.push({ values });
+            return { affectedRows: 3 };
+          }),
+        })),
+      })),
+    };
+    const recovered = await recoverStuckRunningScheduledTasks(db);
+    expect(recovered).toBe(3);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.values).toEqual({ status: 'active' });
+  });
+
+  it('returns 0 + does not throw on DB error', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db: any = {
+      update: vi.fn(() => ({
+        set: vi.fn(() => ({
+          where: vi.fn(async () => {
+            throw new Error('connection refused');
+          }),
+        })),
+      })),
+    };
+    const recovered = await recoverStuckRunningScheduledTasks(db);
+    expect(recovered).toBe(0);
   });
 });
