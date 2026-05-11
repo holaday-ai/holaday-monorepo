@@ -28,10 +28,43 @@
  */
 
 import OpenAI from 'openai';
+import { Agent as UndiciAgent, fetch as undiciFetch } from 'undici';
 import type { Logger } from 'pino';
 
 export const DEFAULT_RESPONSE_MODEL = 'gpt-4o-mini';
-export const DEFAULT_TIMEOUT_MS = 10_000;
+export const DEFAULT_TIMEOUT_MS = 25_000;
+
+/**
+ * Dedicated undici dispatcher for OpenAI calls. The orchestrator
+ * shares a process-wide undici state with the Anthropic SDK + many
+ * long-running browser-tool fetches; we hit a reproducible issue
+ * where standalone Node calls to api.openai.com complete in ~1s
+ * but in-process calls from the long-running orchestrator time out
+ * at 30s (= SDK's 10s timeout × 3 retries). A fresh per-module
+ * dispatcher bypasses any pool corruption / connection-keepalive
+ * staleness inherited from neighbouring SDKs.
+ *
+ * `connect.timeout` fails fast on TCP-level hangs so the visible
+ * latency on a network blip is bounded. `pipelining: 0` keeps
+ * request boundaries clean (HTTP/1.1 default pool would otherwise
+ * pipeline, which historically tickles surprising bugs).
+ *
+ * Lazy module-scope singleton — first format() call materialises
+ * it; subsequent calls reuse the pool. We don't instantiate at
+ * import time so the flag-off path stays zero-cost.
+ */
+let openaiDispatcher: UndiciAgent | null = null;
+function getOpenAiDispatcher(): UndiciAgent {
+  if (!openaiDispatcher) {
+    openaiDispatcher = new UndiciAgent({
+      connect: { timeout: 5_000 },
+      keepAliveTimeout: 30_000,
+      keepAliveMaxTimeout: 60_000,
+      pipelining: 0,
+    });
+  }
+  return openaiDispatcher;
+}
 /** Trigger threshold — only format replies above this length. */
 export const TRIGGER_MIN_LENGTH = 200;
 
@@ -147,6 +180,14 @@ export async function format(
     };
   }
   const model = env.OPENAI_RESPONSE_MODEL ?? DEFAULT_RESPONSE_MODEL;
+  // Custom fetch that pins each request to our dedicated undici
+  // dispatcher. OpenAI SDK 4.104 accepts a `fetch?: (url, init)`
+  // override; we route through `undiciFetch` with `dispatcher`
+  // injected into `init` so the request bypasses any
+  // process-shared pool state.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dispatcherFetch: any = (url: string | URL, init?: any) =>
+    undiciFetch(url as never, { ...(init ?? {}), dispatcher: getOpenAiDispatcher() });
   const client =
     deps.openaiClient ??
     new OpenAI({
@@ -155,6 +196,13 @@ export async function format(
       // call; we set the client default to the same value so future
       // call sites inherit. The per-call override below overrides this.
       timeout: DEFAULT_TIMEOUT_MS,
+      // No SDK-level retries — a single 25s window is plenty for
+      // a small gpt-4o-mini polish call. Default `maxRetries: 2`
+      // turns a 10s timeout into a 30s pile-up that's user-visible
+      // when the call eventually falls back; we'd rather surface
+      // the error fast.
+      maxRetries: 0,
+      fetch: dispatcherFetch,
     });
 
   let raw: string;
