@@ -1,0 +1,46 @@
+[
+  {
+    "id": "P3_FAIL_001",
+    "tier": "P2",
+    "category": "fail_dns_friendly_error",
+    "prompt": "打开 https://does-not-exist-orange-zebra-9b2k3v.example 看看上面写了什么",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "browser",
+      "mustContainAny": [
+        "无法访问",
+        "请检查",
+        "页面加载失败",
+        "页面未能正常加载"
+      ],
+      "mustNotContain": [
+        "net::ERR_",
+        "ERR_NAME_NOT_RESOLVED",
+        "TimeoutError",
+        "page.goto:"
+      ],
+      "maxDurationMs": 300000
+    },
+    "notes": "Phase 3 R4 — DNS failure on a deliberately non-existent subdomain. translateNavError catches ERR_NAME_NOT_RESOLVED and feeds 无法访问...请检查 into the navigate tool_result. Agent surfaces a friendly Chinese message to the user. mustNotContain asserts no English stack trace / net::ERR string leaks into the final summary."
+  },
+  {
+    "id": "P3_FAIL_002",
+    "tier": "P2",
+    "category": "fail_no_false_positive_blank",
+    "prompt": "打开 https://example.com 告诉我页面标题",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "browser",
+      "urlMustMatch": "example.com",
+      "mustContainAny": ["Example Domain"],
+      "mustNotContain": [
+        "未能正常加载",
+        "DOM 内容为空"
+      ],
+      "maxDurationMs": 180000
+    },
+    "notes": "Phase 3 R4 — false-positive guard. example.com is a real page with 'Example Domain' h1 + 2 paragraphs (~200 chars body text, no images/iframes/inputs). The conservative blank-page detector (textLength >= 10 OR images>0 OR inputs>0 OR iframes>0 OR buttons>0) should NOT trip on it. Assertion: model returns the title verbatim AND no '未能正常加载' boilerplate."
+  }
+]

@@ -54,6 +54,8 @@ import {
   applySiteConfigPostNavigation,
   matchSiteConfig,
 } from '../site-configs/index.js';
+import { detectBlankPage } from '../blank-page-detector.js';
+import { translateNavError } from '../nav-error-translator.js';
 import { classifyTaskType, filterTools } from '../tool-registry.js';
 import {
   classifyRole,
@@ -2053,18 +2055,26 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               opts?: { waitUntil?: string; timeout?: number },
             ) => Promise<unknown>;
           };
+          // Phase 3 R4 — capture friendly error message for the
+          // failure paths. We still continue to screenshot in case
+          // the page has partial content (e.g. SSL warning page,
+          // chrome-error page with translated copy), but the
+          // friendly message is appended to the tool_result so the
+          // model + user see what went wrong in plain language.
+          let navErrorFriendly: string | null = null;
           try {
             await navPage.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
           } catch (err) {
-            // goto can fail on net::ERR_* but the page might still
-            // have partial content — take a screenshot anyway so
-            // Claude sees what's there.
+            const translated = translateNavError(err);
+            navErrorFriendly = translated.friendly;
             logger.info(
               {
                 taskId: opts.taskId,
                 iteration,
                 url: targetUrl,
-                err: err instanceof Error ? err.message : String(err),
+                kind: translated.kind,
+                friendly: translated.friendly,
+                rawErr: translated.rawMessage,
               },
               'supercar: navigate goto errored (continuing to screenshot)',
             );
@@ -2106,17 +2116,71 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               'supercar: site-config post-nav hook threw (non-fatal)',
             );
           }
+          // Phase 3 R4 — blank-page detection + one retry.
+          // Conservative (DOM-based; only fires when page has
+          // essentially no content / images / inputs / buttons).
+          // If blank AND we haven't already noticed a goto error,
+          // wait 3s and probe again — sometimes domcontentloaded
+          // fires before the SPA bundle mounts. After retry, if
+          // still blank: surface the friendly message via the tool
+          // result so the agent can tell the user instead of
+          // pretending the navigation succeeded.
+          let blankCheck = await detectBlankPage(
+            navPage as unknown as Parameters<typeof detectBlankPage>[0],
+          );
+          if (blankCheck.blank && !navErrorFriendly) {
+            logger.info(
+              {
+                taskId: opts.taskId,
+                iteration,
+                url: targetUrl,
+                ...blankCheck.diagnostics,
+              },
+              'supercar: blank page detected after navigate, retrying in 3s',
+            );
+            await new Promise((resolve) => setTimeout(resolve, 3_000));
+            blankCheck = await detectBlankPage(
+              navPage as unknown as Parameters<typeof detectBlankPage>[0],
+            );
+          }
           const navShot = await executor.screenshot(navPage);
           if (navShot.error || !navShot.base64) {
+            const failureMsg = navErrorFriendly
+              ? `${navErrorFriendly}（截图也失败：${navShot.error ?? '?'}）`
+              : `导航失败：截图无法生成（${navShot.error ?? '?'}）`;
             toolResults.push({
               type: 'tool_result',
               tool_use_id: toolUse.id,
-              content: [
-                { type: 'text', text: `navigate to ${targetUrl}: screenshot failed: ${navShot.error ?? '?'}` },
-              ],
+              content: [{ type: 'text', text: failureMsg }],
               is_error: true,
             });
             continue;
+          }
+          // If goto errored OR the page is blank after retry, the
+          // model needs to know — surface friendly text alongside
+          // the (possibly empty) screenshot. The blank-page message
+          // wins over a generic "could not connect" because blank
+          // is the more actionable signal for the user.
+          let extraStatusText: string | null = null;
+          if (blankCheck.blank) {
+            extraStatusText = navErrorFriendly
+              ? `${navErrorFriendly}（页面也未能正常加载）`
+              : '页面未能正常加载（DOM 内容为空）。请稍后重试或检查网址。';
+            logger.info(
+              {
+                taskId: opts.taskId,
+                iteration,
+                url: targetUrl,
+                ...blankCheck.diagnostics,
+              },
+              'supercar: blank page after retry, returning friendly error to agent',
+            );
+          } else if (navErrorFriendly) {
+            // Page rendered SOMETHING but goto threw — usually
+            // chrome-error page with content, or an SSL warning. The
+            // agent should know goto errored so it doesn't pretend
+            // the URL loaded normally.
+            extraStatusText = navErrorFriendly;
           }
           const navHash = createHash('md5').update(navShot.base64).digest('hex');
           if (lastScreenshotHash !== navHash) {
@@ -2135,11 +2199,21 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             { taskId: opts.taskId, iteration, requested: targetUrl, landed: navUrl },
             'supercar: navigate completed',
           );
+          // Phase 3 R4 — when goto errored or the page is blank,
+          // lead with the friendly Chinese message instead of the
+          // happy "已导航到 X" line. The screenshot still goes
+          // through so the model sees what (if anything) rendered;
+          // is_error=true on the tool_result tells the model the
+          // navigation didn't succeed, so it doesn't proceed as if
+          // it did.
           toolResults.push({
             type: 'tool_result',
             tool_use_id: toolUse.id,
             content: [
-              { type: 'text', text: `已导航到 ${navUrl}` },
+              {
+                type: 'text',
+                text: extraStatusText ?? `已导航到 ${navUrl}`,
+              },
               {
                 type: 'image',
                 source: {
@@ -2149,6 +2223,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                 },
               },
             ],
+            ...(extraStatusText ? { is_error: true } : {}),
           });
           continue;
         }
