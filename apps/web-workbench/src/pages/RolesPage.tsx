@@ -188,7 +188,7 @@ export function RolesPage(): JSX.Element {
             many draft picks)
       */}
       {isBasic && data.needsRoleRepair && (
-        <div className="mb-4 rounded-lg border border-sky-300/40 bg-sky-50/50 px-4 py-3 text-sm text-sky-900 dark:border-sky-700/40 dark:bg-sky-950/30 dark:text-sky-200">
+        <div className="mb-4 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-foreground dark:border-primary/40 dark:bg-primary/15">
           {draft.length > BASIC_ROLE_PICK_LIMIT ? (
             <>
               检测到不适用于当前套餐的角色已被自动移除。请先取消勾选至

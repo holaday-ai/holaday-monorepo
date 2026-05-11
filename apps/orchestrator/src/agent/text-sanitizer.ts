@@ -198,10 +198,24 @@ const CLAUDE_SIGNATURE_PATTERNS: ReadonlyArray<RegExp> = [
   /\bClaude,?\s+Anthropic['’]s?\s+(?:AI|assistant|model)[^.\n]{0,60}/gi,
   // English provenance attributions.
   /\b(?:Generated|Created|Made|Powered|Built|Written|Drafted|Authored)\s+by\s+Claude\b/gi,
-  // Chinese inline self-introduction + provenance.
-  /我(?:是|叫|为)\s*Claude[^。\n]{0,40}/gi,
-  /(?:由|来自)\s*Claude(?:\s*(?:Sonnet|Opus|Haiku))?(?:\s*生成|\s*提供|\s*回答|\s*撰写|\s*作答|\s*出品)?/gi,
-  /作为\s*Claude[^，。\n]{0,40}/gi,
+  // Chinese inline self-introduction. Phase 4 Codex follow-up: the
+  // earlier `我(?:是|叫|为)\s*Claude[^。\n]{0,40}` was too permissive —
+  // "我读了 Claude Shannon 的论文" / "我为 Claude Shannon 的工作贡献"
+  // would all match. Distinguisher: in a real self-intro, "Claude" is
+  // immediately followed by CJK punctuation (我是 Claude，可以…) or
+  // by a Claude-self anchor (Sonnet/Opus/Haiku/Anthropic/AI/助手/
+  // 大模型/模型). In a legitimate reference, Claude is followed by
+  // another English name (Shannon, Monet) — no anchor → no match.
+  /我(?:是|叫|为)\s*Claude(?:\s*[，,。:;：；]|\s+(?:Sonnet|Opus|Haiku|Anthropic)\b|\s*(?:AI|助手|大模型|模型))[^。\n]{0,40}/gi,
+  // Provenance attribution — "由 Claude 生成 / 由 Claude Sonnet 提供".
+  // Earlier the pattern had BOTH the family-word group AND the verb
+  // group as optional, which collapsed to a bare `由 Claude` match
+  // and false-tripped "由 Claude Shannon 提出". Now at least one of
+  // the two downstream anchors is REQUIRED.
+  /(?:由|来自)\s*Claude\s*(?:(?:Sonnet|Opus|Haiku)\b|(?:生成|提供|回答|撰写|作答|出品))/gi,
+  // "作为 Claude X" — same tightening. Require Sonnet/Opus/Haiku OR
+  // an AI/助手/模型 anchor so "作为 Claude Shannon 的同事" stays.
+  /作为\s*Claude\s*(?:(?:Sonnet|Opus|Haiku)\b|(?:AI|助手|大模型|模型))[^，。\n]{0,40}/gi,
 ];
 
 /**

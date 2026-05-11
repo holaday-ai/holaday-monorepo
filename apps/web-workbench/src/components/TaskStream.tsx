@@ -3,6 +3,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Clock,
   Copy,
   Download,
   ExternalLink,
@@ -21,6 +22,7 @@ import remarkGfm from 'remark-gfm';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
+import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 import { getAccessToken } from '@/lib/auth';
 import { PlanCard } from '@/components/PlanCard';
 import { SearchResultCard } from '@/components/SearchResultCard';
@@ -430,6 +432,9 @@ function AgentBlock({
             // chip still tracks navigation.
             currentUrl={task.finalUrl ?? screencastUrl}
             taskId={task.taskId}
+            // Phase 5a — pass the original intent so the 设为定时
+            // button can pre-fill the ScheduledTaskDialog.
+            intent={task.intent}
             modelLabel={task.modelLabel}
             onContinueInBrowser={
               // F2 — only show "在内置浏览器中继续操作" for tasks
@@ -808,11 +813,11 @@ function ExecutorFallbackBanner({
     );
   }
   return (
-    <div className="flex animate-fade-in items-start gap-3 rounded-xl border border-sky-200 bg-sky-50/70 px-4 py-3 dark:border-sky-500/40 dark:bg-sky-500/10">
-      <Puzzle className="mt-0.5 h-5 w-5 shrink-0 text-sky-600" />
+    <div className="flex animate-fade-in items-start gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 dark:border-primary/40 dark:bg-primary/15">
+      <Puzzle className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
       <div className="min-w-0 flex-1 text-sm">
-        <div className="font-semibold text-sky-900">已切换到浏览器扩展模式执行</div>
-        <div className="mt-1 text-xs text-sky-900/80">
+        <div className="font-semibold text-primary">已切换到浏览器扩展模式执行</div>
+        <div className="mt-1 text-xs text-primary/80">
           连续检测到反爬拦截，HOLA DAY 切到 Chrome 扩展继续任务，后续步骤通过扩展内的 CDP 驱动
           执行。
         </div>
@@ -1046,6 +1051,7 @@ function ScreenshotThumbnailCard({
 }: {
   payload: import('./FileDownloadCard').FileDownloadPayload;
 }): JSX.Element {
+  const toast = useToast();
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
   const [failed, setFailed] = React.useState(false);
   React.useEffect(() => {
@@ -1078,10 +1084,16 @@ function ScreenshotThumbnailCard({
   if (failed) {
     return <FileDownloadCard payload={payload} />;
   }
+  const handleClick = async (): Promise<void> => {
+    const ok = await downloadAttachmentAuthed(payload);
+    if (!ok) {
+      toast.show('下载失败或链接已过期（产出文件保留 24 小时）', 'error');
+    }
+  };
   return (
     <button
       type="button"
-      onClick={() => void downloadAttachmentAuthed(payload)}
+      onClick={() => void handleClick()}
       className={cn(
         'group my-2 flex w-full max-w-md flex-col gap-2 overflow-hidden rounded-xl border border-border bg-card p-2 text-left shadow-sm transition-colors',
         'hover:border-foreground/30 hover:bg-foreground/[0.03]',
@@ -1124,7 +1136,7 @@ function ScreenshotThumbnailCard({
  */
 async function downloadAttachmentAuthed(
   payload: import('./FileDownloadCard').FileDownloadPayload,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const token = getAccessToken();
     const res = await fetch(payload.downloadUrl, {
@@ -1140,9 +1152,11 @@ async function downloadAttachmentAuthed(
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5_000);
+    return true;
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('[ScreenshotThumbnailCard] download failed', err);
+    return false;
   }
 }
 
@@ -1176,6 +1190,7 @@ function TerminalSummary({
   text,
   currentUrl,
   taskId,
+  intent,
   onContinueInBrowser,
   modelLabel,
   onSuggestionPick,
@@ -1189,6 +1204,12 @@ function TerminalSummary({
   currentUrl?: string | null;
   /** Task id — used by the share button to build a deep link. */
   taskId?: string;
+  /**
+   * Phase 5a — the underlying task's intent. Pre-fills the
+   * ScheduledTaskDialog so "设为定时" is a one-click setup for the
+   * exact thing the user just ran.
+   */
+  intent?: string;
   onContinueInBrowser?: () => void;
   modelLabel?: 'sonnet' | 'opus';
   onSuggestionPick?: (intent: string) => void;
@@ -1276,6 +1297,8 @@ function TerminalSummary({
   // the "在新标签页打开 [url]" button funnel through pendingLink —
   // users get a confirm modal before leaving the workbench.
   const [pendingLink, setPendingLink] = React.useState<string | null>(null);
+  // Phase 5a — ScheduledTaskDialog visibility (set by 设为定时 button).
+  const [scheduleDialogOpen, setScheduleDialogOpen] = React.useState(false);
   const md = React.useMemo(
     () => makeMarkdownComponents({ onExternalClick: (href) => setPendingLink(href) }),
     [],
@@ -1374,10 +1397,16 @@ function TerminalSummary({
           })}
         </div>
       )}
-      {/* O3 — model info line. Tiny, non-intrusive. */}
+      {/* Phase 4 Codex follow-up — model-tier label, brand-neutral.
+          The previous text leaked the underlying model ID ("Claude
+          Sonnet 4.6") into the user-facing surface, which contradicts
+          B.1's whole-product-side sanitizer. Now we surface the tier
+          intent (deep vs. standard) without naming the upstream model;
+          the actual claude-* ID still lives in result.metadata for
+          analytics / debugging consumers. */}
       {modelLabel && (
         <div className="mt-3 text-[11px] text-muted-foreground dark:text-foreground/60">
-          {modelLabel === 'opus' ? 'Claude Opus 4.7 · 深度思考' : 'Claude Sonnet 4.6'}
+          {modelLabel === 'opus' ? '深度思考模式' : '标准执行模式'}
         </div>
       )}
       {/* Inline copy / share footer. Replaced the prior absolute-
@@ -1418,6 +1447,21 @@ function TerminalSummary({
           <Download className="h-3 w-3" />
           下载 .md
         </button>
+        {/* Phase 5a — turn a finished task into a recurring schedule.
+            Only on success / cancellation panels (failed tasks rarely
+            warrant a daily re-run; user can still trigger from the
+            scheduled-tasks page directly). */}
+        {!isFailedLike && intent && (
+          <button
+            type="button"
+            onClick={() => setScheduleDialogOpen(true)}
+            aria-label="设为定时任务"
+            className="inline-flex items-center gap-1 transition-colors hover:text-foreground"
+          >
+            <Clock className="h-3 w-3" />
+            设为定时
+          </button>
+        )}
         {taskId && (
           <button
             type="button"
@@ -1504,6 +1548,15 @@ function TerminalSummary({
           setPendingLink(null);
           window.open(href, '_blank', 'noopener,noreferrer');
         }}
+      />
+      {/* Phase 5a — schedule-this-task dialog. `initialIntent` pre-
+          fills with the just-finished task's intent. Toast/refresh
+          handled inside the dialog; on success we just close it. */}
+      <ScheduledTaskDialog
+        open={scheduleDialogOpen}
+        onClose={() => setScheduleDialogOpen(false)}
+        onCreated={() => setScheduleDialogOpen(false)}
+        initialIntent={intent}
       />
     </div>
   );

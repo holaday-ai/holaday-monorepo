@@ -1,38 +1,216 @@
-import { Clock } from 'lucide-react';
-import { PageShell } from '@/pages/PageShell';
+import { Clock, Pause, Play, Plus, Trash2 } from 'lucide-react';
+import * as React from 'react';
+import { useToast } from '@/components/ui/toast';
+import { trpc } from '@/lib/trpc';
+import { PageShell, Section } from '@/pages/PageShell';
+import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 
 /**
- * Scheduled tasks demoted to a roadmap placeholder. The orchestrator's
- * cron-dispatch path is still a stub (logs but doesn't actually run the
- * task), so allowing users to create / pause / delete triggers misled
- * them into thinking work would happen at the scheduled time when
- * nothing fires. Page kept reachable by direct URL so the in-flight
- * /scheduled link surface (sidebar removed, but route preserved)
- * doesn't 404 mid-rollout. Becomes interactive again once dispatch
- * lands.
+ * Phase 5a — scheduled tasks list page. Replaces the Phase 16b
+ * roadmap placeholder. Wires through to scheduledTasksRouter:
+ *   list      → render rows
+ *   toggle    → pause ↔ active flip on the row
+ *   delete    → remove
+ *   create    → modal popup (see ScheduledTaskDialog)
+ *
+ * Row shape: name (intent slice) · 频率 · 上次/下次执行 · 状态. One-shot
+ * schedules that already fired show as 'completed' and are read-only
+ * (toggle is rejected by the router with a BAD_REQUEST).
  */
+
+interface UiScheduled {
+  scheduledTaskId: string;
+  intent: string;
+  repeatType: string;
+  status: string;
+  nextRunAt: string | Date;
+  lastRunAt: string | Date | null;
+  createdAt: string | Date;
+}
+
+const REPEAT_LABEL: Record<string, string> = {
+  once: '一次性',
+  daily: '每天',
+  weekly: '每周',
+  monthly: '每月',
+};
+
 export function ScheduledPage(): JSX.Element {
+  const toast = useToast();
+  const [rows, setRows] = React.useState<UiScheduled[] | null>(null);
+  const [dialogOpen, setDialogOpen] = React.useState(false);
+
+  const reload = React.useCallback(async (): Promise<void> => {
+    try {
+      const list = await trpc.scheduledTasks.list.query();
+      setRows(list as UiScheduled[]);
+    } catch (err) {
+      toast.show(
+        err instanceof Error ? `加载失败：${err.message}` : '加载失败',
+        'error',
+      );
+      setRows([]);
+    }
+  }, [toast]);
+
+  React.useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const handleToggle = async (id: string): Promise<void> => {
+    try {
+      const result = await trpc.scheduledTasks.toggle.mutate({ scheduledTaskId: id });
+      toast.show(result.status === 'active' ? '已恢复' : '已暂停');
+      await reload();
+    } catch (err) {
+      toast.show(
+        err instanceof Error ? err.message : '操作失败',
+        'error',
+      );
+    }
+  };
+
+  const handleDelete = async (id: string): Promise<void> => {
+    if (!window.confirm('确认删除这个定时任务？')) return;
+    try {
+      await trpc.scheduledTasks.delete.mutate({ scheduledTaskId: id });
+      toast.show('已删除');
+      await reload();
+    } catch (err) {
+      toast.show(
+        err instanceof Error ? err.message : '删除失败',
+        'error',
+      );
+    }
+  };
+
   return (
     <PageShell
       title="定时任务"
-      subtitle="按计划自动执行任务的能力正在开发中"
-      width="2xl"
+      subtitle="按计划自动执行任务 — 每天 / 每周 / 每月，或一次性"
+      width="4xl"
     >
-      <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
-          <Clock className="h-5 w-5" />
-        </div>
-        <div className="space-y-1">
-          <div className="text-base font-medium text-foreground/85">即将推出</div>
-          <div className="max-w-md text-sm text-muted-foreground">
-            把每天的早报、每周的周报、每月的对账这种重复任务交给定时器。
-            后端调度路径仍在打磨中，开放后会第一时间放回侧边栏。
+      <Section>
+        <div className="mb-4 flex items-center justify-between">
+          <div className="text-xs text-muted-foreground">
+            {rows == null
+              ? '加载中…'
+              : rows.length === 0
+                ? '还没有定时任务，点右侧按钮新建一个。'
+                : `共 ${rows.length} 个定时任务`}
           </div>
+          <button
+            type="button"
+            onClick={() => setDialogOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90"
+          >
+            <Plus className="h-4 w-4" />
+            新建定时任务
+          </button>
         </div>
-        <span className="rounded-md border border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-          Beta · 功能开发中
-        </span>
-      </div>
+        {rows && rows.length === 0 && (
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <Clock className="h-5 w-5" />
+            </div>
+            <div className="space-y-1">
+              <div className="text-sm font-medium text-foreground/85">
+                把重复的工作交给定时器
+              </div>
+              <div className="max-w-md text-xs text-muted-foreground">
+                例如「每天早上 9 点跑昨天的电商日报」「每周一发送项目周报」。
+              </div>
+            </div>
+          </div>
+        )}
+        {rows && rows.length > 0 && (
+          <ul className="divide-y divide-border">
+            {rows.map((r) => (
+              <li key={r.scheduledTaskId} className="flex items-start gap-3 py-3">
+                <div className="min-w-0 flex-1">
+                  <div className="line-clamp-2 text-sm font-medium text-foreground" title={r.intent}>
+                    {r.intent}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                    <span className="rounded border border-border bg-card px-1.5 py-0.5">
+                      {REPEAT_LABEL[r.repeatType] ?? r.repeatType}
+                    </span>
+                    <span
+                      className={
+                        r.status === 'active'
+                          ? 'text-foreground/80'
+                          : r.status === 'paused'
+                            ? 'text-amber-700 dark:text-amber-300'
+                            : 'text-muted-foreground'
+                      }
+                    >
+                      {r.status === 'active' ? '运行中' : r.status === 'paused' ? '已暂停' : '已完成'}
+                    </span>
+                    <span>下次：{fmtDate(r.nextRunAt)}</span>
+                    {r.lastRunAt && <span>上次：{fmtDate(r.lastRunAt)}</span>}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  {r.status !== 'completed' && (
+                    <button
+                      type="button"
+                      onClick={() => void handleToggle(r.scheduledTaskId)}
+                      aria-label={r.status === 'active' ? '暂停' : '恢复'}
+                      title={r.status === 'active' ? '暂停' : '恢复'}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+                    >
+                      {r.status === 'active' ? (
+                        <Pause className="h-4 w-4" />
+                      ) : (
+                        <Play className="h-4 w-4" />
+                      )}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete(r.scheduledTaskId)}
+                    aria-label="删除"
+                    title="删除"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+      <ScheduledTaskDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        onCreated={() => {
+          setDialogOpen(false);
+          void reload();
+        }}
+      />
     </PageShell>
   );
+}
+
+/**
+ * Local date formatter — keep the rendered string in the user's
+ * tz. Falls back to the raw value if the input isn't parseable.
+ */
+function fmtDate(input: string | Date | null | undefined): string {
+  if (!input) return '—';
+  try {
+    const d = typeof input === 'string' ? new Date(input) : input;
+    if (Number.isNaN(d.getTime())) return String(input);
+    return d.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+  } catch {
+    return String(input);
+  }
 }

@@ -922,7 +922,7 @@ export function BrowserPanel({
                     className={cn(
                       'rounded-md border shadow-sm',
                       interactiveActive
-                        ? 'border-sky-400 ring-2 ring-sky-300'
+                        ? 'border-primary ring-2 ring-primary/40'
                         : 'border-black/[0.06]',
                     )}
                   />
@@ -934,7 +934,7 @@ export function BrowserPanel({
                     className={cn(
                       'rounded-md border shadow-sm',
                       interactiveActive
-                        ? 'border-sky-400 ring-2 ring-sky-300'
+                        ? 'border-primary ring-2 ring-primary/40'
                         : 'border-black/[0.06]',
                     )}
                   />
@@ -986,7 +986,7 @@ export function BrowserPanel({
                     className={cn(
                       'max-h-full max-w-full rounded-md border object-contain shadow-sm',
                       interactiveActive
-                        ? 'cursor-pointer border-sky-400 ring-2 ring-sky-300'
+                        ? 'cursor-pointer border-primary ring-2 ring-primary/40'
                         : 'border-black/[0.06]',
                     )}
                   />
@@ -1515,7 +1515,7 @@ function UrlBar({
         'min-w-0 flex-1 truncate rounded-md border bg-transparent px-2 py-1 font-mono text-[11px] outline-none transition-colors',
         'border-transparent text-muted-foreground hover:border-border hover:bg-muted/40',
         'focus:border-foreground/20 focus:bg-background focus:text-foreground focus:ring-0',
-        interactiveActive && 'border-sky-300/40',
+        interactiveActive && 'border-primary/40',
         pending && 'cursor-wait opacity-60',
       )}
     />

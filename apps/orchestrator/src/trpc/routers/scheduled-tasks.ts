@@ -154,4 +154,46 @@ export const scheduledTasksRouter = router({
       }
       return { ok: true as const };
     }),
+
+  // Phase 5a — single-call toggle for the SPA list view. Reads the
+  // current status and flips active ↔ paused atomically. Completed
+  // schedules (repeat='once' that already fired) can't be toggled
+  // back on — that would re-fire a one-shot job; surface an error
+  // so the SPA can show "已完成，无法切换" instead of silently
+  // re-activating a stale schedule.
+  toggle: protectedProcedure
+    .input(z.object({ scheduledTaskId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const userId = await requireUserId(ctx);
+      const [row] = await ctx.db
+        .select({ status: scheduledTasks.status })
+        .from(scheduledTasks)
+        .where(
+          and(
+            eq(scheduledTasks.externalId, input.scheduledTaskId),
+            eq(scheduledTasks.userId, userId),
+          ),
+        )
+        .limit(1);
+      if (!row) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'scheduled task not found' });
+      }
+      if (row.status === 'completed') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '一次性任务已完成，无法重新启用。请新建一个定时任务。',
+        });
+      }
+      const nextStatus = row.status === 'active' ? 'paused' : 'active';
+      await ctx.db
+        .update(scheduledTasks)
+        .set({ status: nextStatus })
+        .where(
+          and(
+            eq(scheduledTasks.externalId, input.scheduledTaskId),
+            eq(scheduledTasks.userId, userId),
+          ),
+        );
+      return { ok: true as const, status: nextStatus };
+    }),
 });

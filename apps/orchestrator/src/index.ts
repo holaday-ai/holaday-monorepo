@@ -321,24 +321,97 @@ async function main() {
     logger.info({ port: env.HTTP_PORT }, 'HTTP server listening');
   });
 
-  // Phase 16b — start the scheduled-tasks polling loop. Pure
-  // in-process setInterval (no BullMQ); single-instance safe. The
-  // dispatch callback is a stub for v1 — it just logs the fire.
-  // Wiring through to real task creation needs the supercar entry
-  // point exposed as a service rather than a tRPC mutation; that's
-  // a follow-up. The schedule infrastructure is ready in advance so
-  // users can create / list / pause schedules end-to-end and watch
-  // the next_run_at advance correctly.
-  startScheduledRunner({
-    db,
-    dispatch: async ({ scheduledTaskId, intent }) => {
-      logger.info(
-        { scheduledTaskId, intentPreview: intent.slice(0, 80) },
-        'scheduled-runner: would dispatch (full wiring pending)',
-      );
-      return null;
-    },
-  });
+  // Phase 5a — scheduled-tasks polling loop, NOW with real dispatch.
+  // The Phase 16b version was a logger stub; this version wires
+  // tasksRouter.createCaller so a fired schedule actually creates +
+  // dispatches a task as the owning user.
+  //
+  // Context construction: we synthesize the ctx the protectedProcedure
+  // middleware expects — userId (resolved from user_internal_id),
+  // db, logger, plus every adapter handle in scope. req / res are
+  // stubbed because tasks.create doesn't read either; the protected
+  // procedure middleware only gates on ctx.userId.
+  //
+  // Single-instance assumption stays: only one orchestrator pm2
+  // process polls, so two runs of the same schedule can't race.
+  // Quota / concurrency limits inside tasks.create still apply, so a
+  // schedule firing on a user who's at their concurrent task limit
+  // throws — runner advances next_run_at anyway (the dispatch result
+  // is null but the row moves forward so it doesn't tight-retry).
+  {
+    const { tasksRouter } = await import('./trpc/routers/tasks.js');
+    const { users: usersTable } = await import('./db/schema/users.js');
+    const { tasks: tasksTable } = await import('./db/schema/tasks.js');
+    const { eq } = await import('drizzle-orm');
+    startScheduledRunner({
+      db,
+      dispatch: async ({ scheduledTaskId, userInternalId, intent }) => {
+        try {
+          const [user] = await db
+            .select({ externalId: usersTable.externalId })
+            .from(usersTable)
+            .where(eq(usersTable.id, userInternalId))
+            .limit(1);
+          if (!user) {
+            logger.warn(
+              { scheduledTaskId, userInternalId },
+              'scheduled-runner: owning user not found — skipping',
+            );
+            return null;
+          }
+          // Minimal Context for createCaller. Cast the req/res to
+          // unknown because tasks.create never reads them — making
+          // them undefined would compile-fail Context, so we stub
+          // with an empty object. If a future handler starts reading
+          // ctx.req.headers (etc.) it'd surface here.
+          const ctx = {
+            db,
+            logger,
+            req: {} as unknown as import('express').Request,
+            res: {} as unknown as import('express').Response,
+            planner,
+            visionCommander: visionCommander ?? undefined,
+            playwrightExecutor: playwrightExecutor ?? null,
+            executionRouter,
+            browserPool: browserPool ?? null,
+            taskQueue: taskQueue ?? null,
+            firecrawl: firecrawlLane ?? null,
+            paypalAdapter: paypalAdapter ?? null,
+            downloadManager,
+            userId: user.externalId,
+          };
+          const result = await tasksRouter.createCaller(ctx).create({ intent });
+          // Resolve the new external taskId back to the internal
+          // bigint id so the runner can stamp last_task_id (used by
+          // the SPA list view's "上次运行 → tsk_…" link).
+          const [taskRow] = await db
+            .select({ id: tasksTable.id })
+            .from(tasksTable)
+            .where(eq(tasksTable.externalId, result.taskId))
+            .limit(1);
+          logger.info(
+            {
+              scheduledTaskId,
+              ownerExternalId: user.externalId,
+              dispatchedTaskId: result.taskId,
+              executionMode: result.executionMode,
+            },
+            'scheduled-runner: dispatched',
+          );
+          return taskRow?.id ?? null;
+        } catch (err) {
+          logger.warn(
+            {
+              err: err instanceof Error ? err.message : String(err),
+              scheduledTaskId,
+            },
+            'scheduled-runner: dispatch failed',
+          );
+          return null;
+        }
+      },
+    });
+  }
 
   // Per-user VNC WebSocket proxy — only live when the pool is active.
   // Nginx (Vultr or Aliyun edge) rewrites /vnc-ws/* → 127.0.0.1:4001/vnc-ws/*

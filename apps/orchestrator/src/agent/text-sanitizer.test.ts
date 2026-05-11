@@ -298,6 +298,44 @@ describe('sanitizeFinalText — Phase 4 R1 Claude self-signatures', () => {
     expect(sanitizeFinalText(text)).toBe(text);
   });
 
+  it('Phase 4 Codex follow-up — preserves Chinese mentions of Claude Shannon / Monet', () => {
+    // Original Chinese patterns over-matched: "我为 Claude Shannon",
+    // "由 Claude Shannon 提出", "作为 Claude Monet 的同事" all hit
+    // the `Claude` token without a Claude-self anchor. After the
+    // tightening (require Sonnet/Opus/Haiku/Anthropic/AI/助手/模型
+    // OR provenance verb), these stay intact.
+    const cases = [
+      '我读了 Claude Shannon 1948 年的论文，关于信息熵的理论。',
+      '由 Claude Shannon 提出的香农熵公式至今仍在使用。',
+      '作为 Claude Monet 的同事，他亲眼见证了印象派的兴起。',
+      'Claude Monet 是法国印象派画家，代表作有《睡莲》。',
+    ];
+    for (const text of cases) {
+      expect(sanitizeFinalText(text)).toBe(text);
+    }
+  });
+
+  it('Phase 4 Codex follow-up — still strips real Chinese self-intro with model-family anchor', () => {
+    expect(sanitizeFinalText('我是 Claude Sonnet 4.6，可以帮你分析。继续。')).not.toContain(
+      '我是 Claude',
+    );
+    expect(sanitizeFinalText('我是 Claude，Anthropic 的 AI 助手。开始任务。')).not.toContain(
+      '我是 Claude',
+    );
+    expect(sanitizeFinalText('作为 Claude AI 助手，我可以帮你处理这件事。')).not.toContain(
+      '作为 Claude',
+    );
+  });
+
+  it('Phase 4 Codex follow-up — still strips Chinese provenance with verb anchor', () => {
+    expect(sanitizeFinalText('结论：销售下降 12%。由 Claude 生成。')).not.toMatch(
+      /由\s*Claude\s*生成/,
+    );
+    expect(sanitizeFinalText('报告来自 Claude Opus 提供。')).not.toMatch(
+      /来自\s*Claude\s*Opus/,
+    );
+  });
+
   it('idempotent — Claude pattern sweep is stable on second pass', () => {
     const dirty = '结论：12%。我是 Claude Sonnet 4.6，由 Claude Opus 提供。';
     const once = sanitizeFinalText(dirty);
