@@ -40,7 +40,11 @@ import {
   hashApiKey,
   isValidApiKeyShape,
 } from './api-key-service.js';
-import { lookup as idempotencyLookup, record as idempotencyRecord } from './webhook-idempotency-service.js';
+import {
+  finalizeClaim as idempotencyFinalize,
+  recordClaim as idempotencyClaim,
+  releaseClaim as idempotencyRelease,
+} from './webhook-idempotency-service.js';
 import { apiKeys } from '../db/schema/api-keys.js';
 import { users } from '../db/schema/users.js';
 import type { DB } from '../db/client.js';
@@ -159,14 +163,18 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
     // version of the webhook that routes to a specific workflow.
     void body.roleId;
 
-    // Phase 5d follow-up — idempotency. Zapier (and any retry-prone
-    // caller) sets `Idempotency-Key`; we hash the body, look up
-    // (user, key) in webhook_idempotency, and:
-    //   - hit + hash matches → return original taskId/response (200)
-    //   - hit + hash differs → 409 idempotency_conflict (the user
-    //     reused a key for a different payload — almost always a
-    //     client bug)
-    //   - miss / missing header → normal flow; record on success
+    // Phase 5d follow-up + Codex P1 — idempotency via atomic claim.
+    // Zapier (and any retry-prone caller) sets `Idempotency-Key`;
+    // we INSERT a claim row (sentinel taskId='') BEFORE dispatch so
+    // two parallel calls with the same key can't both create tasks.
+    // Outcomes:
+    //   - claimed     → caller owns; dispatch + finalize
+    //   - replay      → another request already finalized
+    //                   (same hash → 200 cached, diff hash → 409)
+    //   - in_flight   → another claim is mid-dispatch; surface 425
+    //                   "Too Early" so Zapier retries shortly (it
+    //                   will see replay on the second try)
+    //   - missing key → no idempotency guarantee; normal flow
     const rawKey = req.header(IDEMPOTENCY_KEY_HEADER);
     const idempotencyKey =
       typeof rawKey === 'string' ? rawKey.trim() : '';
@@ -178,16 +186,17 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
       res.status(400).json({ error: 'idempotency_key_too_long' });
       return;
     }
+    let claimedKey = false;
     if (idempotencyKey) {
       try {
-        const cached = await idempotencyLookup(
+        const claim = await idempotencyClaim(
           { db: deps.db, logger: deps.logger },
           resolution.userInternalId,
           idempotencyKey,
           body,
         );
-        if (cached.kind === 'replay') {
-          if (cached.conflictsWith) {
+        if (claim.kind === 'replay') {
+          if (claim.conflictsWith) {
             deps.logger.info(
               {
                 userInternalId: resolution.userInternalId,
@@ -199,7 +208,7 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
               error: 'idempotency_conflict',
               message:
                 'Idempotency-Key was reused with a different request body',
-              originalTaskId: cached.taskId,
+              originalTaskId: claim.taskId,
             });
             return;
           }
@@ -208,19 +217,48 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
             {
               userInternalId: resolution.userInternalId,
               idempotencyKey,
-              taskId: cached.taskId,
+              taskId: claim.taskId,
             },
             'webhook: idempotency replay — returning cached response',
           );
-          res.status(200).json(cached.response);
+          res.status(200).json(claim.response);
           return;
         }
+        if (claim.kind === 'in_flight') {
+          // Another caller is dispatching right now. Returning 425
+          // (HTTP "Too Early") signals "try again shortly"; Zapier's
+          // retry logic + the unique index together mean the next
+          // attempt will see the finalized replay row.
+          deps.logger.info(
+            {
+              userInternalId: resolution.userInternalId,
+              idempotencyKey,
+              claimedAt: claim.claimedAt.toISOString(),
+            },
+            'webhook: idempotency in_flight — another claim is dispatching',
+          );
+          res
+            .status(425)
+            .setHeader('Retry-After', '2')
+            .json({
+              error: 'idempotency_in_flight',
+              message:
+                'Another request with this Idempotency-Key is being processed. Retry in a moment.',
+            });
+          return;
+        }
+        // claim.kind === 'claimed' → we own the slot; must dispatch
+        // and either finalize (success) or release (failure) so
+        // retries aren't blocked by our placeholder row.
+        claimedKey = true;
       } catch (err) {
-        // A failure in the idempotency lookup shouldn't block the
-        // caller — log + proceed without caching.
+        // A failure in the claim flow shouldn't block the caller —
+        // log + proceed without caching. The caller misses the
+        // dedupe guarantee for this attempt, but their task still
+        // dispatches.
         deps.logger.warn(
           { err: err instanceof Error ? err.message : String(err) },
-          'webhook: idempotency lookup failed (non-fatal — proceeding without cache)',
+          'webhook: idempotency claim failed (non-fatal — proceeding without cache)',
         );
       }
     }
@@ -254,18 +292,17 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
     try {
       const result = await deps.dispatch(ctx, { intent: prompt });
       const response = { taskId: result.taskId, status: result.status };
-      // Persist the idempotency row BEFORE responding so a retry that
-      // lands before we flush the cache still gets the recorded
+      // Finalize the idempotency claim BEFORE responding so a retry
+      // that lands before we flush the cache still gets the recorded
       // response. Failure here is non-fatal: we still 200 the caller
       // (their task was dispatched OK), they just lose replay
       // guarantee for the duration the cache row would have lived.
-      if (idempotencyKey) {
+      if (claimedKey) {
         try {
-          await idempotencyRecord(
+          await idempotencyFinalize(
             { db: deps.db, logger: deps.logger },
             resolution.userInternalId,
             idempotencyKey,
-            body,
             result.taskId,
             response,
           );
@@ -275,12 +312,26 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
               err: err instanceof Error ? err.message : String(err),
               idempotencyKey,
             },
-            'webhook: idempotency record failed (non-fatal — caller still got 200)',
+            'webhook: idempotency finalize failed (non-fatal — caller still got 200)',
           );
         }
       }
       res.status(200).json(response);
     } catch (err) {
+      // Codex P1 — release the claim so retries aren't blocked by
+      // the placeholder row. Without this, a quota-failure retry
+      // would 425 in-flight for 60s (until orphan-takeover) then
+      // hit the same quota error — surfacing as a confusing latency
+      // for the user. releaseClaim is a no-op on already-finalized
+      // rows so it's safe to fire unconditionally before the
+      // error-shaping block.
+      if (claimedKey) {
+        await idempotencyRelease(
+          { db: deps.db, logger: deps.logger },
+          resolution.userInternalId,
+          idempotencyKey,
+        );
+      }
       // TRPCError carries a code we can map. Quota / rate-limit shape
       // varies across the tasks router — TOO_MANY_REQUESTS is the
       // standard tRPC code, but the existing quota gate throws

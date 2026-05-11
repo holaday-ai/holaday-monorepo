@@ -206,7 +206,18 @@ export async function verifyAndFinalize(
   });
 
   if (!det.passed) {
-    return runFixLoop(contract, ledger, det, inputs, workflowContract);
+    // Optimization #2b (Codex P2) — VerifierFallback second-opinion
+    // BEFORE we commit to runFixLoop. OpenAI may upgrade the
+    // severity from 'fixable' to 'needs_clarification' if it sees
+    // a concrete fabrication risk the autoFix path can't handle.
+    // shouldTrigger gates internally; if no trigger / flag off /
+    // OpenAI unreachable, the original det verdict is preserved.
+    const augmented = await maybeApplyVerifierFallback(
+      det,
+      inputs,
+      contract.goal,
+    );
+    return runFixLoop(contract, ledger, augmented, inputs, workflowContract);
   }
 
   // Layer 2 — LLM (only when tier=full and deterministic passed).
@@ -225,7 +236,20 @@ export async function verifyAndFinalize(
       if (!llm.passed) {
         return runFixLoop(contract, ledger, llm, inputs, workflowContract);
       }
-      return { verification: llm, finalText: inputs.answerText };
+      // Optimization #2b (Codex P2) — VerifierFallback second-opinion
+      // on Haiku's "passed but with reservations" verdict. If
+      // OpenAI disagrees, it downgrades to passed=false +
+      // needs_clarification → runFixLoop. Otherwise the LLM verdict
+      // ships unchanged.
+      const augmented = await maybeApplyVerifierFallback(
+        llm,
+        inputs,
+        contract.goal,
+      );
+      if (!augmented.passed) {
+        return runFixLoop(contract, ledger, augmented, inputs, workflowContract);
+      }
+      return { verification: augmented, finalText: inputs.answerText };
     } catch (err) {
       // Belt-and-suspenders — verifyWithLlm is supposed to never
       // throw, but if it does we still don't block the user.
@@ -238,6 +262,67 @@ export async function verifyAndFinalize(
   }
 
   return { verification: det, finalText: inputs.answerText };
+}
+
+/**
+ * Optimization #2b — second-opinion via VerifierFallback. Inline
+ * flag gate avoids loading the module + its `openai` dep on every
+ * verification when the feature is off (production default).
+ * Never throws: any infra failure returns the original verdict.
+ */
+async function maybeApplyVerifierFallback(
+  verification: VerificationResult,
+  inputs: VerifyInputs,
+  contractGoal: string,
+): Promise<VerificationResult> {
+  const flag = (process.env.OPENAI_VERIFIER_FALLBACK_ENABLED ?? 'false').toLowerCase();
+  if (flag !== 'true' && flag !== '1') return verification;
+  if (!process.env.OPENAI_API_KEY) return verification;
+  try {
+    const { verifyFallback } = await import(
+      '../response-layer/openai-verifier-fallback.js'
+    );
+    const fb = await verifyFallback(
+      {
+        original: verification,
+        answerText: inputs.answerText,
+        contractGoal,
+        ...(inputs.finalUrl ? { finalUrl: inputs.finalUrl } : {}),
+      },
+      { logger: inputs.logger ?? makeNoopLogger() },
+    );
+    return fb.verification;
+  } catch (err) {
+    inputs.logger?.warn(
+      {
+        err: err instanceof Error ? err.message : String(err),
+        taskId: inputs.taskId,
+      },
+      'execution-pipeline: verifier-fallback threw — keeping original verdict',
+    );
+    return verification;
+  }
+}
+
+/**
+ * Cheap stub for callers that didn't pass a logger. Keeps the
+ * fallback module's `deps.logger.warn(...)` happy without forcing
+ * every verify caller to thread pino through.
+ */
+function makeNoopLogger(): Logger {
+  const noop = () => undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return {
+    info: noop,
+    warn: noop,
+    error: noop,
+    debug: noop,
+    trace: noop,
+    fatal: noop,
+    level: 'silent',
+    silent: noop,
+    child: () => makeNoopLogger(),
+  } as any;
 }
 
 /**

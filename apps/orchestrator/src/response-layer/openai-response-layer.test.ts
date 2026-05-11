@@ -15,6 +15,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   format,
+  isResponseLayerEnabled,
   postCheck,
   shouldFormat,
   TRIGGER_MIN_LENGTH,
@@ -273,10 +274,62 @@ describe('postCheck — deterministic guards', () => {
     const formatted = '⚠️ 异常综述：异常一 + 异常二';
     expect(postCheck(original, formatted)).toEqual({ ok: true });
   });
+
+  it('markdown ordered-list ordinals at line start are NOT treated as new numbers', () => {
+    // Codex P2 follow-up — the formatter is allowed to re-number an
+    // ordered list. "1." / "2." at line start are list markers, not
+    // facts. Without this exclusion, the formatter adding an
+    // ordered list (or renumbering one) silently fell back.
+    const original = '主要发现：\n- GMV 50000 元\n- 转化率 4.1%';
+    const formatted =
+      '## 主要发现\n\n1. GMV 50000 元\n2. 转化率 4.1%';
+    expect(postCheck(original, formatted)).toEqual({ ok: true });
+  });
+
+  it('markdown ordinals with leading indent (nested lists) are also stripped', () => {
+    const original = 'GMV 50000';
+    const formatted = '- 类别 A\n   1. 子项目\n   2. 另一项\nGMV 50000';
+    expect(postCheck(original, formatted)).toEqual({ ok: true });
+  });
+
+  it('sentence-internal "1." (no surrounding ordinal pattern) still counts as a real number', () => {
+    // "排名第 1. 抖音" has "1." mid-sentence — should still register
+    // as the number 1; if the formatter adds a different number, fail.
+    const original = '排名第 1 的是抖音';
+    const formatted = '排名第 7 的是抖音'; // formatter "fixed" 1 → 7 (fabrication)
+    const r = postCheck(original, formatted);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('new_number_introduced');
+  });
 });
 
 describe('TRIGGER_MIN_LENGTH constant', () => {
   it('is 200 chars (matches spec)', () => {
     expect(TRIGGER_MIN_LENGTH).toBe(200);
+  });
+});
+
+describe('isResponseLayerEnabled — caller-side flag gate (Codex P2)', () => {
+  // Hoisted out of shouldFormat so the tasks.ts integration block
+  // can short-circuit BEFORE touching the response layer (zero DB
+  // writes for users who haven't opted into the feature).
+  it('flag off → false (canonical reason for skipping the entire block)', () => {
+    expect(isResponseLayerEnabled({ OPENAI_RESPONSE_LAYER_ENABLED: 'false', OPENAI_API_KEY: 'sk-x' })).toBe(false);
+  });
+  it('flag missing entirely → false', () => {
+    expect(isResponseLayerEnabled({ OPENAI_API_KEY: 'sk-x' })).toBe(false);
+  });
+  it('flag on but missing API key → false (caller skips, no fallback metadata leaks)', () => {
+    expect(isResponseLayerEnabled({ OPENAI_RESPONSE_LAYER_ENABLED: 'true' })).toBe(false);
+  });
+  it('flag on + key set → true (caller proceeds)', () => {
+    expect(isResponseLayerEnabled({ OPENAI_RESPONSE_LAYER_ENABLED: 'true', OPENAI_API_KEY: 'sk-x' })).toBe(true);
+  });
+  it('accepts "1" as truthy (matches shouldFormat\'s flag parsing)', () => {
+    expect(isResponseLayerEnabled({ OPENAI_RESPONSE_LAYER_ENABLED: '1', OPENAI_API_KEY: 'sk-x' })).toBe(true);
+  });
+  it('case-insensitive on flag value ("TRUE" / "True")', () => {
+    expect(isResponseLayerEnabled({ OPENAI_RESPONSE_LAYER_ENABLED: 'TRUE', OPENAI_API_KEY: 'sk-x' })).toBe(true);
+    expect(isResponseLayerEnabled({ OPENAI_RESPONSE_LAYER_ENABLED: 'True', OPENAI_API_KEY: 'sk-x' })).toBe(true);
   });
 });

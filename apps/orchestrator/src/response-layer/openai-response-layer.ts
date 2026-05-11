@@ -81,15 +81,29 @@ export interface ResponseLayerDeps {
 }
 
 /**
+ * Standalone flag check — callers gate the entire integration block
+ * (including the post-persist UPDATE) on this. Codex P2 follow-up:
+ * when the flag is off we must do ZERO DB writes for original_summary
+ * / formatted_summary / response_layer_metadata; the previous
+ * always-call-format-and-write-metadata flow left audit-only rows on
+ * every terminal task and bloated the columns for users who never
+ * opted into the feature.
+ */
+export function isResponseLayerEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const flag = (env.OPENAI_RESPONSE_LAYER_ENABLED ?? 'false').toLowerCase();
+  if (flag !== 'true' && flag !== '1') return false;
+  if (!env.OPENAI_API_KEY) return false;
+  return true;
+}
+
+/**
  * Should we even attempt to format this response? Returns false when:
  *   - flag is off
  *   - status is something other than the three terminal kinds
  *   - response is short AND not an expert workflow report
  */
 export function shouldFormat(req: FormatRequest, env: NodeJS.ProcessEnv = process.env): boolean {
-  const flag = (env.OPENAI_RESPONSE_LAYER_ENABLED ?? 'false').toLowerCase();
-  if (flag !== 'true' && flag !== '1') return false;
-  if (!env.OPENAI_API_KEY) return false;
+  if (!isResponseLayerEnabled(env)) return false;
   if (req.terminalStatus !== 'completed' && req.terminalStatus !== 'failed' && req.terminalStatus !== 'cancelled') {
     return false;
   }
@@ -351,8 +365,16 @@ function extractUrls(text: string): Set<string> {
 // version preferred the comma-grouped branch which split bare
 // "100000" into "100" + "000" (regex alternation is left-first).
 const NUMBER_RE = /(?:[¥$€])?\d+(?:,\d{3})*(?:\.\d+)?%?/g;
+// Markdown ordered-list ordinal at line start: "1. ", "2. ", optionally
+// preceded by whitespace (nested indentation). Strip these BEFORE
+// number extraction so the formatter re-numbering a list (or adding
+// a new ordered list while preserving facts) doesn't trip the "new
+// number introduced" guard. Sentence-internal "1." (no space-after
+// or no line-start) still counts as a real number.
+const MARKDOWN_ORDINAL_RE = /^[ \t]*\d+\.[ \t]+/gm;
 function extractNumbers(text: string): string[] {
-  const matches = text.match(NUMBER_RE);
+  const stripped = text.replace(MARKDOWN_ORDINAL_RE, '');
+  const matches = stripped.match(NUMBER_RE);
   return matches ?? [];
 }
 function normaliseNumber(raw: string): string {

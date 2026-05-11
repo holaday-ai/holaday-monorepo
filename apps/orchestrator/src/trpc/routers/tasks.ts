@@ -2597,19 +2597,36 @@ export const tasksRouter = router({
             // Optimization #2 — OpenAI response formatter / style
             // layer. Runs AFTER the verifier (so we polish facts that
             // have already been grounded) and BEFORE persistence. The
-            // shouldFormat guard short-circuits on flag-off / short
-            // response (unless expert workflow); the deterministic
-            // post-check refuses any rewrite that introduces new
-            // URLs / numbers or drops a marker. On fallback the
-            // formatted text equals the original — caller sees no
-            // visible change, the metadata records the reason.
+            // shouldFormat guard short-circuits on short response
+            // (unless expert workflow); the deterministic post-check
+            // refuses any rewrite that introduces new URLs / numbers
+            // or drops a marker. On fallback the formatted text equals
+            // the original — caller sees no visible change, the
+            // metadata records the reason.
+            //
+            // Codex P2 follow-up — the flag check is hoisted to the
+            // CALLER so flag-off → zero DB writes (original_summary /
+            // formatted_summary / response_layer_metadata stay NULL).
+            // Without this gate, the always-flow wrote an audit row
+            // for every terminal task even when no user had opted in.
             let responseLayerOriginal: string | undefined;
             let responseLayerMetadata: unknown = undefined;
             const isTerminal =
               outcome.status === 'completed' ||
               outcome.status === 'failed' ||
               outcome.status === 'cancelled';
-            if (isTerminal && outcome.summary) {
+            // Inline flag gate — kept in sync with
+            // openai-response-layer.ts `isResponseLayerEnabled`. Inline
+            // (vs. import + call) so the common flag-off path avoids
+            // loading the response-layer module + its `openai` dep at
+            // every terminal.
+            const responseLayerFlag = (
+              process.env.OPENAI_RESPONSE_LAYER_ENABLED ?? 'false'
+            ).toLowerCase();
+            const responseLayerActive =
+              (responseLayerFlag === 'true' || responseLayerFlag === '1') &&
+              !!process.env.OPENAI_API_KEY;
+            if (isTerminal && outcome.summary && responseLayerActive) {
               try {
                 const { format: formatResponse } = await import(
                   '../../response-layer/openai-response-layer.js'

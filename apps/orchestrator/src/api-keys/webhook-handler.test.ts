@@ -130,7 +130,11 @@ function makeFakeDb(state: { keys: FakeApiKeyRow[]; users: FakeUserRow[] }) {
 }
 
 function makeRes() {
-  const captured: { status?: number; json?: unknown } = {};
+  const captured: {
+    status?: number;
+    json?: unknown;
+    headers?: Record<string, string>;
+  } = { headers: {} };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const res: any = {
     status(code: number) {
@@ -139,6 +143,15 @@ function makeRes() {
     },
     json(payload: unknown) {
       captured.json = payload;
+      return res;
+    },
+    setHeader(name: string, value: string) {
+      captured.headers![name] = value;
+      return res;
+    },
+    header(name: string, value: string) {
+      // Express's alias for setHeader.
+      captured.headers![name] = value;
       return res;
     },
   };
@@ -417,6 +430,7 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
       taskId: string;
       responseJson: unknown;
       expiresAt: Date;
+      createdAt: Date;
     }
     const state = {
       keys: [
@@ -482,11 +496,12 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
                             s.includes(`value: '${i.idempotencyKey}'`),
                         )
                         .map(
-                          ({ requestHash, taskId, responseJson, expiresAt }) => ({
+                          ({ requestHash, taskId, responseJson, expiresAt, createdAt }) => ({
                             requestHash,
                             taskId,
                             responseJson,
                             expiresAt,
+                            createdAt,
                           }),
                         );
                     }
@@ -499,11 +514,34 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
         };
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      update(_table: any) {
+      update(table: any) {
+        const name = tableName(table);
         return {
-          set(_values: Record<string, unknown>) {
+          set(setValues: Record<string, unknown>) {
             return {
-              async where(_predicate: unknown) {
+              async where(predicate: unknown) {
+                const s = inspect(predicate);
+                if (name === 'webhook_idempotency') {
+                  // Codex P1 — finalizeClaim writes taskId +
+                  // responseJson onto the placeholder row. Match by
+                  // (userId, idempotencyKey) + the placeholder
+                  // task_id guard so concurrent finalizes don't
+                  // overwrite each other.
+                  let affected = 0;
+                  for (const row of state.idempotency) {
+                    if (!s.includes(`value: ${row.userId}`)) continue;
+                    if (!s.includes(`value: '${row.idempotencyKey}'`)) continue;
+                    // Empty-string guard appears as `value: ''` in the
+                    // inspected predicate; if present, only update
+                    // rows still in placeholder state.
+                    if (s.includes("value: ''") && row.taskId !== '') continue;
+                    if ('taskId' in setValues) row.taskId = setValues.taskId as string;
+                    if ('responseJson' in setValues) row.responseJson = setValues.responseJson;
+                    affected++;
+                  }
+                  return { affectedRows: affected };
+                }
+                // api_keys.last_used_at update is silently accepted.
                 return {};
               },
               then(onfulfilled?: (v: void) => unknown, onrejected?: (e: unknown) => unknown) {
@@ -514,11 +552,48 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
         };
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete(table: any) {
+        const name = tableName(table);
+        return {
+          async where(predicate: unknown): Promise<{ affectedRows: number }> {
+            const s = inspect(predicate);
+            if (name === 'webhook_idempotency') {
+              let affected = 0;
+              for (let i = state.idempotency.length - 1; i >= 0; i--) {
+                const row = state.idempotency[i];
+                if (!row) continue;
+                if (!s.includes(`value: ${row.userId}`)) continue;
+                if (!s.includes(`value: '${row.idempotencyKey}'`)) continue;
+                if (s.includes("value: ''") && row.taskId !== '') continue;
+                state.idempotency.splice(i, 1);
+                affected++;
+              }
+              return { affectedRows: affected };
+            }
+            return { affectedRows: 0 };
+          },
+        };
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       insert(table: any) {
         const name = tableName(table);
         return {
           async values(values: Record<string, unknown>) {
             if (name === 'webhook_idempotency') {
+              // Codex P1 — simulate the unique index on
+              // (user_id, idempotency_key) so atomic-claim INSERT
+              // collisions surface as ER_DUP_ENTRY (the real driver
+              // throws this; our service catches + recovers).
+              const dup = state.idempotency.find(
+                (r) =>
+                  r.userId === (values.userId as number) &&
+                  r.idempotencyKey === (values.idempotencyKey as string),
+              );
+              if (dup) {
+                const err = new Error('duplicate') as Error & { code: string };
+                err.code = 'ER_DUP_ENTRY';
+                throw err;
+              }
               state.lastInsert = values;
               state.idempotency.push({
                 userId: values.userId as number,
@@ -527,6 +602,7 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
                 taskId: values.taskId as string,
                 responseJson: values.responseJson,
                 expiresAt: values.expiresAt as Date,
+                createdAt: new Date(),
               });
             }
           },
@@ -657,6 +733,75 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
     );
     expect(captured.status).toBe(400);
     expect((captured.json as { error: string }).error).toBe('invalid_idempotency_key');
+  });
+
+  it('in_flight: claim placeholder exists → 425 Too Early with Retry-After (NEW Codex P1)', async () => {
+    const { handler, plaintext, dispatch, state } = setup();
+    // Seed a placeholder claim (taskId='') as if another caller is
+    // mid-dispatch. The recent createdAt keeps it inside the
+    // stale-claim window.
+    state.idempotency.push({
+      userId: 42,
+      idempotencyKey: 'zap-inflight',
+      requestHash: 'doesnt_matter',
+      taskId: '', // CLAIM_PLACEHOLDER_TASK_ID
+      responseJson: {},
+      expiresAt: new Date(Date.now() + 60_000),
+      createdAt: new Date(),
+    });
+    dispatch.mockClear();
+    const r = makeRes();
+    await handler(
+      makeReq({
+        auth: `Bearer ${plaintext}`,
+        body: { prompt: 'parallel attempt' },
+        headers: { 'Idempotency-Key': 'zap-inflight' },
+      }),
+      r.res,
+    );
+    expect(r.captured.status).toBe(425);
+    expect((r.captured.json as { error: string }).error).toBe(
+      'idempotency_in_flight',
+    );
+    // Critical: dispatch MUST NOT fire (atomic-claim P1 guarantee).
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('dispatch failure releases the claim so retries aren\'t blocked (NEW Codex P1)', async () => {
+    // First call: dispatch throws → handler returns 5xx + must
+    // release the claim row so the next retry sees a fresh slot.
+    // Second call (same key) should then succeed cleanly.
+    const { handler, plaintext, dispatch, state } = setup();
+    dispatch.mockImplementationOnce(async () => {
+      throw new Error('transient backend blip');
+    });
+    const r1 = makeRes();
+    await handler(
+      makeReq({
+        auth: `Bearer ${plaintext}`,
+        body: { prompt: 'fail then retry' },
+        headers: { 'Idempotency-Key': 'zap-fail-release' },
+      }),
+      r1.res,
+    );
+    expect(r1.captured.status).toBe(500);
+    // The claim row should be GONE — release deleted the placeholder.
+    expect(state.idempotency).toHaveLength(0);
+    // Second attempt with the same key now goes through cleanly
+    // (dispatch was only mocked-once to throw; second call returns
+    // the default 'tsk_fresh' response).
+    const r2 = makeRes();
+    await handler(
+      makeReq({
+        auth: `Bearer ${plaintext}`,
+        body: { prompt: 'fail then retry' },
+        headers: { 'Idempotency-Key': 'zap-fail-release' },
+      }),
+      r2.res,
+    );
+    expect(r2.captured.status).toBe(200);
+    expect(state.idempotency).toHaveLength(1);
+    expect(state.idempotency[0]?.taskId).toBe('tsk_fresh');
   });
 
   it('body-key order insensitive — different JSON serialization order → same hash → replay', async () => {

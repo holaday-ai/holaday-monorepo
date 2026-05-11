@@ -5,6 +5,7 @@ import {
   datetime,
   index,
   json,
+  mediumtext,
   mysqlTable,
   text,
   uniqueIndex,
@@ -129,8 +130,8 @@ export const tasks = mysqlTable(
      * default (OPENAI_RESPONSE_LAYER_ENABLED=false) so existing
      * traffic is unaffected.
      */
-    originalSummary: text('original_summary'),
-    formattedSummary: text('formatted_summary'),
+    originalSummary: mediumtext('original_summary'),
+    formattedSummary: mediumtext('formatted_summary'),
     responseLayerMetadata: json('response_layer_metadata'),
     /**
      * Phase 1 Day 5 — execution-pipeline persistence.
