@@ -247,6 +247,40 @@ export function InputArea({
     }
   }, []);
 
+  /**
+   * Phase 4 R2 4c — mobile keyboard scroll. When the soft keyboard
+   * pops up, the textarea ends up hidden behind it on iOS Safari
+   * and Android Chrome. visualViewport.height shrinks after keyboard
+   * animation finishes; we listen for that and scroll the focused
+   * textarea back into view. `block: 'end'` keeps the caret line
+   * visible at the bottom of the available area (above the keyboard).
+   *
+   * Placed here (above any early returns) so the hook order stays
+   * stable — react-hooks/rules-of-hooks would error otherwise.
+   */
+  React.useEffect(() => {
+    const vv = (window as Window & {
+      visualViewport?: {
+        addEventListener: typeof window.addEventListener;
+        removeEventListener: typeof window.removeEventListener;
+        height: number;
+      };
+    }).visualViewport;
+    if (!vv) return;
+    const onResize = (): void => {
+      const el = textareaRef.current;
+      if (!el) return;
+      if (document.activeElement !== el) return;
+      if (vv.height < window.innerHeight * 0.75) {
+        setTimeout(() => {
+          el.scrollIntoView({ block: 'end', behavior: 'smooth' });
+        }, 60);
+      }
+    };
+    vv.addEventListener('resize', onResize);
+    return () => vv.removeEventListener('resize', onResize);
+  }, []);
+
   // F1 — quota gate exception for reply / follow-up paths. Replying
   // to a parked supercar task or following up on a recently-completed
   // task is NOT a "create new task" action; it does not consume quota.
@@ -456,7 +490,7 @@ export function InputArea({
         )}
       >
         {followUpTarget && !replyMode && (
-          <div className="flex items-center gap-2 border-b-2 border-sky-300 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:border-sky-500 dark:bg-sky-500/15 dark:text-sky-100">
+          <div className="flex items-center gap-2 border-b-2 border-primary/40 bg-primary/10 px-3 py-2 text-xs text-primary dark:border-primary/50 dark:bg-primary/15">
             <span className="shrink-0 font-semibold">追问</span>
             <span className="min-w-0 flex-1 truncate">"{followUpTarget.title}"</span>
             <button
@@ -464,7 +498,7 @@ export function InputArea({
               onClick={onCancelFollowUp}
               aria-label="取消追问，发新任务"
               title="取消追问，发新任务"
-              className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-sky-900/70 hover:bg-sky-200 hover:text-sky-900 dark:text-sky-100/70 dark:hover:bg-sky-500/30 dark:hover:text-sky-100"
+              className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-primary/70 hover:bg-primary/20 hover:text-primary"
             >
               <X className="h-3 w-3" aria-hidden />
               发新任务

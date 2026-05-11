@@ -105,7 +105,7 @@ export function PlanCard({
                   href={href ?? '#'}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-800 dark:text-blue-400"
+                  className="text-primary underline decoration-primary/40 underline-offset-2 hover:text-primary/80 dark:text-primary"
                   {...rest}
                 >
                   {children}
@@ -160,7 +160,7 @@ function StatusPill({
     'mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px]';
   if (state === 'done') {
     return (
-      <span className={cn(cls, 'bg-blue-500 text-white')} aria-label="done">
+      <span className={cn(cls, 'bg-primary text-white')} aria-label="done">
         <Check className="h-2.5 w-2.5" strokeWidth={3} />
       </span>
     );
@@ -174,7 +174,7 @@ function StatusPill({
   }
   if (state === 'running') {
     return (
-      <span className={cn(cls, 'bg-blue-500 text-white animate-pulse-dot')} aria-label="running">
+      <span className={cn(cls, 'bg-primary text-white animate-pulse-dot')} aria-label="running">
         <Loader2 className="h-2.5 w-2.5 animate-spin" />
       </span>
     );

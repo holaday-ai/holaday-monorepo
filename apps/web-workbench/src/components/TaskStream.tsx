@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  Download,
   ExternalLink,
   FileText,
   Globe,
@@ -20,6 +21,7 @@ import remarkGfm from 'remark-gfm';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
+import { getAccessToken } from '@/lib/auth';
 import { PlanCard } from '@/components/PlanCard';
 import { SearchResultCard } from '@/components/SearchResultCard';
 import { StepCard } from '@/components/StepCard';
@@ -397,7 +399,7 @@ function AgentBlock({
          *  no-op — only the supplementary controls (copy button,
          *  suggestion chips) light up when resultText lands. */}
         {!task.resultText && (progressMessage || streamingText) && (
-            <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-5 py-4 text-foreground dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-foreground">
+            <div className="rounded-xl border border-primary/20 bg-primary/5 px-5 py-4 text-foreground dark:border-primary/30 dark:bg-primary/15 dark:text-foreground">
               {progressMessage && !streamingText && (
                 <div className="text-xs text-muted-foreground">
                   <span className="inline-block animate-pulse">●</span>{' '}
@@ -604,10 +606,9 @@ function LiveStatus({
   taskStatus: UiTask['status'];
   lastStepStatus: UiStep['status'];
 }): JSX.Element {
-  // Color policy (Round-2b fix):
-  //   - Task still running (not terminal) → always blue spinner,
-  //     even if the most recent tick has status='failed'. The agent
-  //     retries opaquely; the user shouldn't see red mid-flight.
+  // Color policy:
+  //   - Task running (not terminal) → muted text + magenta spinner
+  //     (brand color signals "actively working"). Phase 4 R2 4d.
   //   - Task terminal + failed → red + AlertCircle
   //   - Otherwise → neutral
   const red = taskTerminal && taskStatus === 'failed';
@@ -626,7 +627,10 @@ function LiveStatus({
       {red ? (
         <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
       ) : (
-        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+        <Loader2
+          className="h-3.5 w-3.5 shrink-0 animate-spin text-primary"
+          aria-hidden
+        />
       )}
       <span>{label}</span>
     </div>
@@ -904,7 +908,7 @@ function ExpertReportHeader({ workflowId }: { workflowId: string }): JSX.Element
   const meta = EXPERT_HEADER_META[workflowId];
   if (!meta) return null;
   return (
-    <div className="mb-3 flex items-center gap-2 border-b border-blue-200/70 pb-2 text-sm font-semibold text-blue-900 dark:border-blue-500/30 dark:text-blue-200">
+    <div className="mb-3 flex items-center gap-2 border-b border-primary/30 pb-2 text-sm font-semibold text-primary dark:border-primary/40">
       <span aria-hidden className="text-base">
         {meta.icon}
       </span>
@@ -965,7 +969,7 @@ function FollowUpChips({
           key={`${i}-${a.slice(0, 12)}`}
           type="button"
           onClick={() => onPick(a)}
-          className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800 transition hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/20"
+          className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary transition hover:bg-primary/20 dark:border-primary/40 dark:bg-primary/15 dark:text-primary-foreground dark:hover:bg-primary/25"
         >
           <span aria-hidden>→</span>
           <span className="max-w-[220px] truncate">{a}</span>
@@ -1016,6 +1020,136 @@ function matchSourceBadgePrefix(text: string): { emoji: string; rest: string } |
     }
   }
   return null;
+}
+
+/**
+ * Phase 4 R2 — screenshot thumbnail card. Replaces the generic
+ * FileDownloadCard (icon + filename) for `kind === 'screenshot'`
+ * attachments so the user sees the actual image they're about to
+ * download instead of a placeholder paperclip.
+ *
+ * Auth: same Bearer-token fetch FileDownloadCard already uses. We
+ * pull the blob ONCE, build a same-origin object URL, and feed it
+ * into `<img src>`. Object URL is revoked on unmount so a long task
+ * list with many screenshots doesn't leak blobs.
+ *
+ * Failure paths:
+ *   - fetch / 401 / blob read errors → fall through to the icon-only
+ *     FileDownloadCard so the user still has SOMETHING clickable
+ *   - while loading → small skeleton box at the same aspect ratio
+ *
+ * Click on the thumbnail OR the download icon → reuses the same
+ * downloadAuthed flow as FileDownloadCard (fresh fetch + blob hop).
+ */
+function ScreenshotThumbnailCard({
+  payload,
+}: {
+  payload: import('./FileDownloadCard').FileDownloadPayload;
+}): JSX.Element {
+  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
+  const [failed, setFailed] = React.useState(false);
+  React.useEffect(() => {
+    let cancelled = false;
+    let createdUrl: string | null = null;
+    const load = async (): Promise<void> => {
+      try {
+        const token = getAccessToken();
+        const res = await fetch(payload.downloadUrl, {
+          headers: token ? { authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        if (cancelled) return;
+        createdUrl = URL.createObjectURL(blob);
+        setPreviewUrl(createdUrl);
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [payload.downloadUrl]);
+
+  // Auth fetch failed — fall back to the original card so the user
+  // can still try a manual click (which retries the fetch).
+  if (failed) {
+    return <FileDownloadCard payload={payload} />;
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => void downloadAttachmentAuthed(payload)}
+      className={cn(
+        'group my-2 flex w-full max-w-md flex-col gap-2 overflow-hidden rounded-xl border border-border bg-card p-2 text-left shadow-sm transition-colors',
+        'hover:border-foreground/30 hover:bg-foreground/[0.03]',
+      )}
+      aria-label={`下载截图 ${payload.filename}`}
+    >
+      <div className="relative w-full overflow-hidden rounded-md bg-muted/40">
+        {previewUrl ? (
+          <img
+            src={previewUrl}
+            alt="截图预览"
+            className="block max-h-72 w-full object-contain transition-transform group-hover:scale-[1.01]"
+            loading="lazy"
+          />
+        ) : (
+          <div
+            aria-hidden
+            className="hola-skel block h-48 w-full bg-muted/50"
+          />
+        )}
+      </div>
+      <div className="flex items-center gap-2 px-1 pb-0.5 text-xs">
+        <div className="min-w-0 flex-1 truncate font-medium" title={payload.filename}>
+          {payload.filename}
+        </div>
+        <div className="text-[11px] text-muted-foreground">
+          {formatBytesShort(payload.size)} · 24h
+        </div>
+        <Download className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
+      </div>
+    </button>
+  );
+}
+
+/**
+ * Internal helper that mirrors FileDownloadCard's `downloadAuthed`
+ * (fetch + blob + anchor click). Re-implemented here rather than
+ * exported from FileDownloadCard so the latter stays a leaf
+ * component; the duplication is one short function.
+ */
+async function downloadAttachmentAuthed(
+  payload: import('./FileDownloadCard').FileDownloadPayload,
+): Promise<void> {
+  try {
+    const token = getAccessToken();
+    const res = await fetch(payload.downloadUrl, {
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = payload.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5_000);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[ScreenshotThumbnailCard] download failed', err);
+  }
+}
+
+function formatBytesShort(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function SourceBadge({ emoji }: { emoji: string }): JSX.Element {
@@ -1169,10 +1303,15 @@ function TerminalSummary({
           divider: 'border-border/60',
         }
     : {
-        wrap: 'rounded-xl border border-blue-200 bg-blue-50/60 px-5 py-4 text-foreground dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-foreground',
+        // Phase 4 R2 4d — brand-unified success panel. Light-mode
+        // blue-50 swap to primary/5 (1.25% opacity magenta) keeps the
+        // panel readable while replacing the "info blue" cue with
+        // brand magenta. Dark mode opacity bumped to /15 since /10
+        // didn't pick up enough against the dark card background.
+        wrap: 'rounded-xl border border-primary/20 bg-primary/5 px-5 py-4 text-foreground dark:border-primary/30 dark:bg-primary/15 dark:text-foreground',
         label: null,
         labelClass: '',
-        divider: 'border-blue-200/70 dark:border-blue-500/30',
+        divider: 'border-primary/20 dark:border-primary/30',
       };
   const hasRealUrl =
     !!currentUrl && currentUrl !== 'about:blank' && !currentUrl.startsWith('chrome://');
@@ -1215,21 +1354,24 @@ function TerminalSummary({
           attachment as the existing FileDownloadCard so the auth +
           blob-download plumbing is reused. */}
       {!isFailedLike && attachments && attachments.length > 0 && (
-        <div className="mt-3 flex flex-col gap-2 border-t border-blue-200/70 pt-3 dark:border-blue-500/30">
+        <div className="mt-3 flex flex-col gap-2 border-t border-primary/20 pt-3 dark:border-primary/30">
           <div className="text-[11px] font-medium tracking-wider text-muted-foreground">
             产出文件
           </div>
-          {attachments.map((a) => (
-            <FileDownloadCard
-              key={a.fileId}
-              payload={{
-                fileId: a.fileId,
-                filename: a.filename,
-                size: a.sizeBytes,
-                downloadUrl: a.downloadUrl,
-              }}
-            />
-          ))}
+          {attachments.map((a) => {
+            const payload = {
+              fileId: a.fileId,
+              filename: a.filename,
+              size: a.sizeBytes,
+              downloadUrl: a.downloadUrl,
+            };
+            // Phase 4 R2 — screenshots get a thumbnail preview; other
+            // kinds (PDF, generic file) keep the icon-only card.
+            if (a.kind === 'screenshot' || a.mimetype.startsWith('image/')) {
+              return <ScreenshotThumbnailCard key={a.fileId} payload={payload} />;
+            }
+            return <FileDownloadCard key={a.fileId} payload={payload} />;
+          })}
         </div>
       )}
       {/* O3 — model info line. Tiny, non-intrusive. */}
@@ -1261,6 +1403,20 @@ function TerminalSummary({
         >
           <FileText className="h-3 w-3" />
           复制 Markdown
+        </button>
+        {/* Phase 4 R2 4e — markdown export. Client-side download of
+            the displayText as a .md file. PDF export needs server-side
+            rendering (L2 save_page_as_pdf is agent-runtime only, not
+            available post-completion), so we ship the markdown variant
+            now and leave PDF for a later phase. */}
+        <button
+          type="button"
+          onClick={() => downloadMarkdown(displayText, taskId)}
+          aria-label="下载 Markdown 文件"
+          className="inline-flex items-center gap-1 transition-colors hover:text-foreground"
+        >
+          <Download className="h-3 w-3" />
+          下载 .md
         </button>
         {taskId && (
           <button
@@ -1322,7 +1478,7 @@ function TerminalSummary({
             <button
               type="button"
               onClick={onContinueInBrowser}
-              className="inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-card px-3 py-1.5 font-medium text-blue-800 shadow-sm transition hover:bg-blue-50 dark:border-blue-500/40 dark:text-blue-300 dark:hover:bg-blue-500/10"
+              className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-card px-3 py-1.5 font-medium text-primary shadow-sm transition hover:bg-primary/10 dark:border-primary/50 dark:hover:bg-primary/15"
             >
               <MousePointerClick className="h-3.5 w-3.5" />
               在内置浏览器中继续操作
@@ -1332,11 +1488,11 @@ function TerminalSummary({
             <button
               type="button"
               onClick={() => setPendingLink(currentUrl ?? null)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-card px-3 py-1.5 font-medium text-blue-800 shadow-sm transition hover:bg-blue-50 dark:border-blue-500/40 dark:text-blue-300 dark:hover:bg-blue-500/10"
+              className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-card px-3 py-1.5 font-medium text-primary shadow-sm transition hover:bg-primary/10 dark:border-primary/50 dark:hover:bg-primary/15"
             >
               <ExternalLink className="h-3.5 w-3.5" />
               在新标签页打开
-              <span className="max-w-[180px] truncate text-blue-700/70">{currentUrl}</span>
+              <span className="max-w-[180px] truncate text-primary/70">{currentUrl}</span>
             </button>
           )}
         </div>
@@ -1374,6 +1530,30 @@ function TerminalSummary({
  * mangle copied output; users who want structure preserved can hit
  * the second button to copy the raw markdown.
  */
+/**
+ * Phase 4 R2 4e — client-side markdown export. Wraps displayText
+ * in a Blob and triggers a download named after the task id (so a
+ * later session can find the file again from the local filesystem).
+ * No auth needed — the content is whatever's on screen.
+ */
+function downloadMarkdown(text: string, taskId?: string): void {
+  try {
+    const filename = `${taskId ?? 'holaday-task'}.md`;
+    const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5_000);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[TaskStream] markdown export failed', err);
+  }
+}
+
 function stripMarkdown(input: string): string {
   let out = input;
   // Strip code fences (keep inner text).
@@ -1499,7 +1679,7 @@ function makeMarkdownComponents(opts: {
               }
             : undefined
         }
-        className="inline-flex items-center gap-1 text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+        className="inline-flex items-center gap-1 text-primary underline decoration-primary/40 underline-offset-2 hover:text-primary/80 dark:text-primary dark:hover:text-primary/80"
         {...rest}
       >
         {children}

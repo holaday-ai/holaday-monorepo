@@ -43,7 +43,7 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
           aria-hidden
           className={cn(
             'absolute left-3 top-6 bottom-0 w-px -translate-x-1/2',
-            step.status === 'running' ? 'bg-blue-300 animate-pulse-dot' : 'bg-border',
+            step.status === 'running' ? 'bg-primary/70 animate-pulse-dot' : 'bg-border',
           )}
         />
       )}
@@ -54,13 +54,13 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
           antiBotHigh
             ? 'border-amber-300 bg-amber-50/70 dark:border-amber-500/40 dark:bg-amber-500/10'
             : 'border-border bg-card/80',
-          step.status === 'running' && 'ring-1 ring-blue-300/60',
+          step.status === 'running' && 'ring-1 ring-primary/40',
         )}
       >
         <div className="flex items-baseline justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             {step.status === 'running' && (
-              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-blue-500" />
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
             )}
             <div className="truncate text-sm font-medium text-foreground">{title}</div>
           </div>
@@ -123,8 +123,8 @@ function StatusBadge({ step }: { step: UiStep }): JSX.Element {
     <div
       className={cn(
         'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white',
-        step.status === 'running' && 'animate-pulse-dot bg-blue-500',
-        step.status === 'done' && 'bg-blue-500',
+        step.status === 'running' && 'animate-pulse-dot bg-primary',
+        step.status === 'done' && 'bg-primary',
         step.status === 'failed' && 'bg-red-500',
       )}
       aria-label={`步骤 ${step.tickIndex + 1} · ${step.status}`}

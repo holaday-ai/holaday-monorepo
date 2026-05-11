@@ -124,6 +124,10 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
       return;
     }
     if (e.key === 'Enter') {
+      // Phase 4 R2 4c — composing-Enter guard. Without it, a Chinese
+      // search like "复盘" would fire the picker as soon as the IME
+      // commits the first 复, losing 盘.
+      if (e.nativeEvent.isComposing) return;
       e.preventDefault();
       const pick = filtered[active];
       if (pick) {

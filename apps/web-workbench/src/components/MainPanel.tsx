@@ -1,4 +1,4 @@
-import { Globe, Menu, Sparkles } from 'lucide-react';
+import { BarChart3, Globe, Menu, Newspaper, Search, Sparkles, TrendingUp } from 'lucide-react';
 import * as React from 'react';
 import { InputArea } from '@/components/InputArea';
 import { RoleNudgeBanner } from '@/components/RoleNudgeBanner';
@@ -205,33 +205,72 @@ function EmptyState({
   const who = greetingName ? `，${greetingName}` : '';
   return (
     <div className="flex flex-col items-center justify-center pb-8 pt-16 text-center">
-      <div className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-pink-500 to-pink-700 text-white shadow-sm">
-        <Sparkles className="h-5 w-5" />
+      <div className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-primary to-[hsl(var(--accent))] text-white shadow-lg shadow-primary/20">
+        <Sparkles className="h-6 w-6" />
       </div>
-      <h2 className="mt-4 text-2xl font-semibold tracking-tight">你好{who}</h2>
-      <p className="mt-2 text-sm text-muted-foreground">
+      <h2 className="mt-5 text-2xl font-semibold tracking-tight">你好{who}</h2>
+      <p className="mt-2 max-w-md text-sm text-muted-foreground">
         告诉 HOLA DAY 你想做什么，它会替你操作浏览器，把事情一步步做完。
       </p>
-      <ul className="mt-6 grid w-full gap-2 text-left text-sm sm:grid-cols-2">
-        {SUGGESTIONS.map((s) => (
-          <li key={s}>
-            <button
-              type="button"
-              onClick={() => onPick(s)}
-              className="w-full rounded-lg border border-border bg-card px-3 py-2.5 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition hover:border-foreground/20 hover:bg-accent"
-            >
-              {s}
-            </button>
-          </li>
-        ))}
+      <ul className="mt-7 grid w-full gap-3 text-left sm:grid-cols-2">
+        {SUGGESTIONS.map((s) => {
+          const Icon = s.icon;
+          return (
+            <li key={s.intent}>
+              <button
+                type="button"
+                onClick={() => onPick(s.intent)}
+                className="group flex h-full w-full gap-3 rounded-xl border border-border bg-card px-4 py-3.5 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition hover:-translate-y-px hover:border-primary/40 hover:shadow-md hover:shadow-primary/10"
+              >
+                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-foreground">{s.title}</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">{s.intent}</span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
 }
 
-const SUGGESTIONS = [
-  '帮我复盘昨天的抖音直播数据，做总结和优化策略',
-  '帮我查一下今天的科技新闻',
-  '打开 GitHub 看看 trending 项目',
-  '去东方财富查一下茅台最新股价',
+/**
+ * Phase 4 R2 4d — redesigned shortcut cards. Each one carries an
+ * icon + short title + the actual intent so the user can see
+ * BOTH what category the task is and what it does verbatim. Hover
+ * lifts the card and shows brand-tinted glow.
+ *
+ * Categories cover the four most-used workflows on the workbench:
+ * 直播复盘 (expert workflow), 资讯检索 (search), 浏览发现 (browse),
+ * 行情查询 (data lookup).
+ */
+const SUGGESTIONS: ReadonlyArray<{
+  title: string;
+  intent: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
+  {
+    title: '抖音直播复盘',
+    intent: '帮我复盘昨天的抖音直播数据，做总结和优化策略',
+    icon: BarChart3,
+  },
+  {
+    title: '今日科技资讯',
+    intent: '帮我查一下今天的科技新闻',
+    icon: Newspaper,
+  },
+  {
+    title: '浏览 GitHub Trending',
+    intent: '打开 GitHub 看看 trending 项目',
+    icon: Search,
+  },
+  {
+    title: '查询股价行情',
+    intent: '去东方财富查一下茅台最新股价',
+    icon: TrendingUp,
+  },
 ];

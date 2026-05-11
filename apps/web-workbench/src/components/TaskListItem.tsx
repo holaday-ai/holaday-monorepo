@@ -116,14 +116,14 @@ export function TaskListItem({
         'group relative flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors',
         'hover:bg-foreground/5',
         selected && !batchMode && 'bg-foreground/[0.06]',
-        batchMode && batchChecked && 'bg-blue-50/50 dark:bg-blue-500/10',
+        batchMode && batchChecked && 'bg-primary/10 dark:bg-primary/15',
         batchMode && batchDisabled && 'opacity-50',
       )}
     >
       {selected && !batchMode && (
         <span
           aria-hidden
-          className="absolute inset-y-1 left-0 w-[2px] rounded-r bg-blue-500"
+          className="absolute inset-y-1 left-0 w-[2px] rounded-r bg-primary"
         />
       )}
       {batchMode && (
@@ -237,7 +237,10 @@ function RenameInput({
       onChange={(e) => setValue(e.target.value)}
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') {
+        // Phase 4 R2 4c — composing-Enter guard. Without it the IME
+        // commit on Enter would also commit the rename, truncating
+        // multi-char Chinese / Japanese input mid-stream.
+        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
           e.preventDefault();
           onCommit(value);
         } else if (e.key === 'Escape') {
@@ -246,7 +249,7 @@ function RenameInput({
         }
       }}
       onBlur={() => onCommit(value)}
-      className="min-w-0 flex-1 rounded border border-blue-500/40 bg-background px-1.5 py-0 text-[13px] leading-5 shadow-sm focus-visible:outline-none"
+      className="min-w-0 flex-1 rounded border border-primary/40 bg-background px-1.5 py-0 text-[13px] leading-5 shadow-sm focus-visible:outline-none"
     />
   );
 }
@@ -260,7 +263,7 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
         // user can distinguish "waiting for a slot" from "actively
         // executing" (fast blue pulse).
         status === 'queued' && 'animate-pulse-dot bg-amber-400',
-        status === 'executing' && 'animate-pulse-dot bg-blue-500',
+        status === 'executing' && 'animate-pulse-dot bg-primary',
         // Awaiting-user gets a non-pulsing solid amber so the row
         // reads as "stopped, waiting on you" — distinct from queued
         // (pulsing amber: waiting on the system) and paused (also

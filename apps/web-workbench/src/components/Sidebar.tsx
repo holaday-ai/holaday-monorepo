@@ -554,13 +554,13 @@ export function Sidebar({
                   controls; otherwise show a small "批量管理" entry
                   button alongside the quota indicator. */}
               {batchMode ? (
-                <div className="mx-2 mb-2 flex items-center justify-between gap-2 rounded-md border border-blue-200 bg-blue-50/60 px-2 py-1.5 text-[11px] text-blue-900 dark:border-blue-500/30 dark:bg-blue-500/15 dark:text-blue-100">
+                <div className="mx-2 mb-2 flex items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary dark:border-primary/40 dark:bg-primary/15">
                   <span className="font-medium">已选 {batchSelected.size}</span>
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
                       onClick={selectAllVisible}
-                      className="rounded px-2 py-0.5 hover:bg-blue-200/50 dark:hover:bg-blue-500/25"
+                      className="rounded px-2 py-0.5 hover:bg-primary/20"
                     >
                       全选
                     </button>
@@ -580,7 +580,7 @@ export function Sidebar({
                     <button
                       type="button"
                       onClick={exitBatchMode}
-                      className="rounded px-2 py-0.5 hover:bg-blue-200/50 dark:hover:bg-blue-500/25"
+                      className="rounded px-2 py-0.5 hover:bg-primary/20"
                     >
                       取消
                     </button>

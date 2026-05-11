@@ -73,7 +73,7 @@ export function ResizeHandle({ onDrag, onDragEnd, className }: Props): JSX.Eleme
       // area invisible at rest, only the inner bar shows.
       className={cn(
         'group relative z-20 hidden h-full w-3 shrink-0 cursor-col-resize touch-none select-none lg:block',
-        dragging && 'bg-blue-500/10',
+        dragging && 'bg-primary/10',
         className,
       )}
     >
@@ -83,8 +83,8 @@ export function ResizeHandle({ onDrag, onDragEnd, className }: Props): JSX.Eleme
         className={cn(
           'absolute inset-y-0 left-1/2 -translate-x-1/2 transition-all',
           dragging
-            ? 'w-1 bg-blue-500'
-            : 'w-0.5 bg-border group-hover:w-1 group-hover:bg-blue-500/80',
+            ? 'w-1 bg-primary'
+            : 'w-0.5 bg-border group-hover:w-1 group-hover:bg-primary/80',
         )}
       />
       {/* Grip dots in the middle — ALWAYS visible so the handle
@@ -99,8 +99,8 @@ export function ResizeHandle({ onDrag, onDragEnd, className }: Props): JSX.Eleme
             className={cn(
               'h-1 w-1 rounded-full transition-colors',
               dragging
-                ? 'bg-blue-500'
-                : 'bg-muted-foreground/60 group-hover:bg-blue-500/80',
+                ? 'bg-primary'
+                : 'bg-muted-foreground/60 group-hover:bg-primary/80',
             )}
           />
         ))}

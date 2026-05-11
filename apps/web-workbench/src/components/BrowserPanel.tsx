@@ -811,7 +811,7 @@ export function BrowserPanel({
               className={cn(
                 'inline-flex h-6 w-6 items-center justify-center rounded-md border transition-colors',
                 interactive
-                  ? 'border-sky-300 bg-sky-100 text-sky-700'
+                  ? 'border-primary/40 bg-primary/10 text-primary'
                   : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5',
               )}
             >
@@ -890,7 +890,7 @@ export function BrowserPanel({
             </div>
           )}
           {interactiveActive && !fullscreen && (
-            <div className="border-b border-sky-300/60 bg-sky-50 px-3 py-1.5 text-center text-[11px] font-medium text-sky-800 dark:border-sky-500/60 dark:bg-sky-500/15 dark:text-sky-100">
+            <div className="border-b border-primary/40 bg-primary/10 px-3 py-1.5 text-center text-[11px] font-medium text-primary dark:border-primary/50 dark:bg-primary/20">
               你正在直接操作浏览器 · 点工具栏的接管按钮可让 AI 继续
             </div>
           )}
@@ -898,7 +898,7 @@ export function BrowserPanel({
             className={cn(
               'flex flex-1 items-center justify-center overflow-hidden',
               fullscreen ? 'p-0' : 'p-3',
-              interactiveActive ? 'bg-sky-50/40' : 'bg-muted/40',
+              interactiveActive ? 'bg-primary/5' : 'bg-muted/40',
             )}
           >
             {hibernated ? (
@@ -1151,7 +1151,9 @@ function CjkInputBar({
           // Enter sends; Shift+Enter is reserved (no multi-line in this bar).
           // Also: stop propagation so the window-level keydown listener
           // (interactive ASCII forwarder) doesn't double-fire each keystroke.
-          if (e.key === 'Enter' && !e.shiftKey) {
+          // Phase 4 R2 4c — composing-Enter guard so an IME commit
+          // doesn't fire send mid-input.
+          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
             handleSend();
           }
@@ -1408,7 +1410,7 @@ function StatusDot({ status }: { status: DotStatus }): JSX.Element {
       className={cn(
         'inline-block h-2 w-2 rounded-full',
         status === 'idle' && 'bg-muted-foreground/40',
-        status === 'live' && 'animate-pulse-dot bg-blue-500',
+        status === 'live' && 'animate-pulse-dot bg-primary',
         status === 'error' && 'bg-red-500',
       )}
     />
@@ -1496,7 +1498,10 @@ function UrlBar({
       onChange={(e) => setDraft(e.target.value)}
       onKeyDown={(e) => {
         e.stopPropagation();
-        if (e.key === 'Enter') {
+        // Phase 4 R2 4c — composing-Enter guard. URL bar with a
+        // Chinese-domain IME commit (e.g. typing 中文.com) used to
+        // submit the partial composition.
+        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
           e.preventDefault();
           void submit();
         } else if (e.key === 'Escape') {
