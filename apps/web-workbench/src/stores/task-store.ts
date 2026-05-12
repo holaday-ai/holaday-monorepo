@@ -1,4 +1,4 @@
-import type { ServerMessage } from '@holaday/shared-types';
+import type { BrowserViewportProfile, ServerMessage } from '@holaday/shared-types';
 import { create } from 'zustand';
 import { humaniseTaskError } from '@/lib/error-copy';
 import { hdDebug } from '@/lib/hd-debug';
@@ -201,6 +201,14 @@ export interface TaskStore {
     replyToTaskId?: string,
     /** O4 — 'plan' makes agent emit + wait-for-approval before executing. */
     mode?: 'auto' | 'plan',
+    /**
+     * Optimization #3 R1 — picked from the SPA's current panel
+     * layout (sidepanel / fullscreen / mobile sheet). Plumbed to
+     * the pool so Brave + Xvfb + CDP frame caps match the user's
+     * surface. Optional; the server defaults to 'desktop' when
+     * absent.
+     */
+    viewportProfile?: BrowserViewportProfile,
   ): Promise<{ taskId: string } | { error: string }>;
   deleteTask(taskId: string): Promise<{ ok: true } | { error: string }>;
   renameTask(taskId: string, title: string): Promise<{ ok: true } | { error: string }>;
@@ -867,7 +875,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
   },
 
-  async createTask(intent, fileIds, replyToTaskId, mode) {
+  async createTask(intent, fileIds, replyToTaskId, mode, viewportProfile) {
     // Reject intents that are obviously control commands typed into
     // the wrong box (e.g. user typing "停止" into the composer
     // because they didn't see the Stop button). Fails client-side
@@ -884,6 +892,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
         ...(replyToTaskId ? { replyToTaskId } : {}),
         ...(mode === 'plan' ? { mode } : {}),
+        ...(viewportProfile ? { viewportProfile } : {}),
       });
       // Optimistic insert at the top so the UI feels instant; the next
       // refreshTasks() will pick up the canonical server row.

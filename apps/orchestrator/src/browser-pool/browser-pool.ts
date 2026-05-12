@@ -47,6 +47,11 @@
 import { mkdirSync, rmSync } from 'node:fs';
 import { join as pathJoin } from 'node:path';
 import type { Logger } from 'pino';
+import {
+  type BrowserViewportProfile,
+  braveWindowSizeForProfile,
+  xvfbScreenForProfile,
+} from '@holaday/shared-types';
 import { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
 import { SlotAllocator } from './port-allocator.js';
 import {
@@ -98,7 +103,18 @@ export class BrowserPool {
    * (taskIds are unique by construction in tasks.ts). userId is
    * retained as the owner reference for cookie-sync + peekActiveForUser.
    */
-  async allocate(taskId: string, userId: string): Promise<BrowserInstance> {
+  /**
+   * Optimization #3 R1 — `viewportProfile` (sidepanel / desktop /
+   * fullscreen / mobile) picks the Brave window-size + Xvfb screen
+   * geometry + CDP streamer cap. Optional; falls back to the
+   * legacy 'desktop' default when omitted so existing callers see
+   * no behaviour change.
+   */
+  async allocate(
+    taskId: string,
+    userId: string,
+    viewportProfile?: BrowserViewportProfile,
+  ): Promise<BrowserInstance> {
     if (this.shuttingDown) {
       throw new Error('BrowserPool: shutting down, cannot allocate');
     }
@@ -112,7 +128,7 @@ export class BrowserPool {
         return inst;
       }
     }
-    return this.spawnInstance(taskId, userId);
+    return this.spawnInstance(taskId, userId, viewportProfile);
   }
 
   /**
@@ -277,15 +293,32 @@ export class BrowserPool {
   private async spawnInstance(
     taskId: string,
     userId: string,
+    viewportProfile?: BrowserViewportProfile,
   ): Promise<BrowserInstance> {
     if (this.allocator.isFull()) {
       throw new PoolCapacityError(this.config.maxInstances);
     }
     const slot: BrowserSlot = this.allocator.claim();
     const userDataDir = pathJoin(this.config.baseDir, taskIdToDirName(taskId));
+    // Optimization #3 R1 — resolve per-task viewport geometry from
+    // the profile. Falls back to the legacy config.screenSize +
+    // Brave default when no profile is set (back-compat).
+    const xvfbScreen = viewportProfile
+      ? xvfbScreenForProfile(viewportProfile)
+      : this.config.screenSize;
+    const braveWindowSize = viewportProfile
+      ? braveWindowSizeForProfile(viewportProfile)
+      : undefined;
 
     this.logger.info(
-      { taskId, userId, ...slot, userDataDir },
+      {
+        taskId,
+        userId,
+        ...slot,
+        userDataDir,
+        viewportProfile: viewportProfile ?? null,
+        xvfbScreen,
+      },
       'pool: spawning quartet',
     );
 
@@ -312,7 +345,7 @@ export class BrowserPool {
     };
 
     try {
-      const xvfb = spawnXvfb(slot.display, this.config.screenSize, this.logger);
+      const xvfb = spawnXvfb(slot.display, xvfbScreen, this.logger);
       processes.push(xvfb);
       // Give Xvfb ~250ms to bind its Unix socket before Brave connects.
       await new Promise((r) => setTimeout(r, 250));
@@ -322,6 +355,7 @@ export class BrowserPool {
           display: slot.display,
           cdpPort: slot.cdpPort,
           userDataDir,
+          ...(braveWindowSize ? { windowSize: braveWindowSize } : {}),
         },
         this.logger,
       );
@@ -370,6 +404,7 @@ export class BrowserPool {
         createdAt: now,
         lastActiveAt: now,
         status: 'ready',
+        ...(viewportProfile ? { viewportProfile } : {}),
       };
       this.instances.set(taskId, instance);
 

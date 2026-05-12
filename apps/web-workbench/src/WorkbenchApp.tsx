@@ -1,6 +1,10 @@
 import * as React from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { PLAN_CATALOGUE, type PlanId } from '@holaday/shared-types';
+import {
+  PLAN_CATALOGUE,
+  type BrowserViewportProfile,
+  type PlanId,
+} from '@holaday/shared-types';
 import { BrowserPanel } from '@/components/BrowserPanel';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { FeedbackDialog } from '@/components/FeedbackDialog';
@@ -36,6 +40,39 @@ interface MeProfile {
   multiUser: boolean;
   /** Phase 10 Tier 2 — open-pool role ids picked by this user. */
   selectedRoles?: string[];
+}
+
+/**
+ * Optimization #3 R1 — picks the viewport profile for tasks.create
+ * from the SPA's current layout. The decision tree:
+ *   1. Mobile viewport (< 1024) → 'mobile' (390×844)
+ *   2. Fullscreen panel toggled → 'fullscreen' (1440×960)
+ *   3. Sidepanel (panel width < 1100px effective content) → 'sidepanel' (900×900)
+ *   4. Default → 'desktop' (1280×800)
+ *
+ * Inputs:
+ *   panelFullscreen - the takeover toggle from the panel header
+ *   panelPx         - explicit width when the user has dragged (else
+ *                     null = 60%-of-row default)
+ *   isMobile        - viewport-width gate (matches the lg breakpoint)
+ *
+ * Picked ONCE at task-create time — switching the panel layout
+ * mid-task wouldn't re-spawn Brave, so the Brave that's already
+ * running keeps its original geometry.
+ */
+function pickViewportProfile(inputs: {
+  panelFullscreen: boolean;
+  panelPx: number | null;
+  isMobile: boolean;
+}): BrowserViewportProfile {
+  if (inputs.isMobile) return 'mobile';
+  if (inputs.panelFullscreen) return 'fullscreen';
+  // Sidepanel when the user has explicitly narrowed the panel below
+  // the "comfortable two-pane" threshold. 1100px is where Chinese
+  // sites start to feel cramped at desktop geometry; below this the
+  // 900×900 sidepanel profile gives better text density.
+  if (inputs.panelPx != null && inputs.panelPx < 1100) return 'sidepanel';
+  return 'desktop';
 }
 
 /**
@@ -244,7 +281,24 @@ function AppShell(): JSX.Element {
   // (still consumed by browser-mode task starts internally); we just
   // don't need a SPA-side handle anymore.
   const refreshTaskList = useTaskStore((s) => s.refreshTaskList);
-  const createTask = useTaskStore((s) => s.createTask);
+  const createTaskRaw = useTaskStore((s) => s.createTask);
+  // Optimization #3 R1 — every createTask call site is wrapped so
+  // the picked `viewportProfile` is automatic; callers that don't
+  // care still get the right profile for the current layout.
+  const createTask: typeof createTaskRaw = React.useCallback(
+    (intent, fileIds, replyToTaskId, mode, viewportProfile) => {
+      const picked =
+        viewportProfile ??
+        pickViewportProfile({
+          panelFullscreen,
+          panelPx,
+          isMobile:
+            typeof window !== 'undefined' && window.innerWidth < 1024,
+        });
+      return createTaskRaw(intent, fileIds, replyToTaskId, mode, picked);
+    },
+    [createTaskRaw, panelFullscreen, panelPx],
+  );
   const replyToTask = useTaskStore((s) => s.replyToTask);
   const deleteTask = useTaskStore((s) => s.deleteTask);
   const renameTask = useTaskStore((s) => s.renameTask);
@@ -549,6 +603,11 @@ function AppShell(): JSX.Element {
     if (!storeError) lastErrorRef.current = null;
   }, [storeError, toast]);
 
+  // Optimization #3 R2 — Esc routing needs to know whether the user
+  // is currently in interactive mode inside the BrowserPanel. When
+  // they are, Esc belongs to the REMOTE page (close a modal, exit
+  // a menu), not to "close fullscreen / deselect task" on the SPA.
+  const browserInteractive = useTaskStore((s) => s.browserInteractive);
   // Keyboard shortcuts.
   React.useEffect(() => {
     if (!authed) return;
@@ -570,7 +629,27 @@ function AppShell(): JSX.Element {
         return;
       }
       // Escape: close any modal; if nothing is open, deselect the task.
+      //
+      // Optimization #3 R2 — when the user is INTERACTIVE inside the
+      // BrowserPanel (fullscreen takeover OR sidepanel takeover with
+      // `interactive=true`), Esc should be ROUTED TO THE REMOTE page
+      // (close a modal on the page, exit a menu, blur a focused
+      // input). BrowserPanel's own window keydown listener handles
+      // the forward — we just skip our own consumption here. The
+      // explicit exit path is the toolbar X button or Cmd/Shift+Esc.
       if (e.key === 'Escape') {
+        const remoteOwnsEsc =
+          browserInteractive &&
+          (panelFullscreen || browserSheetOpen) &&
+          !inField &&
+          !searchOpen &&
+          !feedbackOpen &&
+          !e.metaKey &&
+          !e.shiftKey;
+        if (remoteOwnsEsc) {
+          // Let BrowserPanel's interactive keydown listener pick it up.
+          return;
+        }
         if (searchOpen) {
           setSearchOpen(false);
           return;
@@ -600,7 +679,7 @@ function AppShell(): JSX.Element {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [authed, searchOpen, feedbackOpen, browserSheetOpen, panelFullscreen, selectedTaskId, enterNewTaskMode]);
+  }, [authed, searchOpen, feedbackOpen, browserSheetOpen, panelFullscreen, selectedTaskId, enterNewTaskMode, browserInteractive]);
 
   const handleLogout = React.useCallback(() => {
     clearAccessToken();

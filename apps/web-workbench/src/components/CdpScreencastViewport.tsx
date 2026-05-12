@@ -38,6 +38,15 @@ interface Props {
   /** Block input forwarding when true (mirror VncViewport semantics). */
   viewOnly?: boolean;
   onStatusChange?: (status: CdpScreencastStatus) => void;
+  /**
+   * Optimization #3 R2 — fired on every top-level
+   * `Page.frameNavigated` (the CDP streamer already publishes
+   * `type: 'url-changed'`; we just consume it now). Parent uses
+   * this to keep the BrowserPanel's address bar in sync with what
+   * the user can see on the remote page. Optional — older parents
+   * that ignore navigation events still work fine.
+   */
+  onUrlChange?: (url: string) => void;
   className?: string;
 }
 
@@ -70,8 +79,15 @@ export function CdpScreencastViewport({
   wsUrl,
   viewOnly = true,
   onStatusChange,
+  onUrlChange,
   className,
 }: Props): JSX.Element {
+  // Latest onUrlChange ref so the WS onmessage closure stays stable
+  // even when the parent passes a fresh handler on every render.
+  const onUrlChangeRef = React.useRef(onUrlChange);
+  React.useEffect(() => {
+    onUrlChangeRef.current = onUrlChange;
+  }, [onUrlChange]);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const hiddenInputRef = React.useRef<HTMLInputElement>(null);
   const wsRef = React.useRef<WebSocket | null>(null);
@@ -148,13 +164,23 @@ export function CdpScreencastViewport({
       };
       ws.onmessage = (event) => {
         if (disposed) return;
-        let msg: { type?: string; data?: string } | null = null;
+        let msg: { type?: string; data?: string; url?: string } | null = null;
         try {
           msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
         } catch {
           return; // swallow malformed
         }
-        if (!msg || msg.type !== 'frame' || typeof msg.data !== 'string') return;
+        if (!msg) return;
+        // Optimization #3 R2 — `Page.frameNavigated` events from
+        // the CDP streamer arrive as `{type: 'url-changed', url}`.
+        // Forward them to the parent so the address bar tracks
+        // remote navigation (user clicked a link, JS pushState,
+        // page reloaded, etc.).
+        if (msg.type === 'url-changed' && typeof msg.url === 'string') {
+          onUrlChangeRef.current?.(msg.url);
+          return;
+        }
+        if (msg.type !== 'frame' || typeof msg.data !== 'string') return;
         drawFrame(msg.data);
       };
       ws.onerror = () => {

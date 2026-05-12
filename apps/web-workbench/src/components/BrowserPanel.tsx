@@ -5,6 +5,7 @@ import {
   ChevronRight,
   ExternalLink,
   Globe,
+  Hand,
   Maximize2,
   Minimize2,
   MousePointerClick,
@@ -316,8 +317,30 @@ export function BrowserPanel({
   React.useEffect(() => {
     if (frameUrl) setLastKnownUrl(frameUrl);
   }, [frameUrl]);
-  const displayUrl =
-    persistedFinalUrl ?? frameUrl ?? lastKnownUrl ?? 'about:blank';
+  // Optimization #3 R2 — live CDP URL from the streamer's
+  // `Page.frameNavigated` event. Tracks user / agent navigation on
+  // the remote browser in real time (clicking a link, JS pushState,
+  // page reload). When set, takes priority over `persistedFinalUrl`
+  // during EXECUTING — the live URL is fresher than `result.finalUrl`
+  // (which only updates on terminal / park). On terminal status we
+  // fall back to the persisted final URL so the address bar matches
+  // the captured evidence frame.
+  const [cdpLiveUrl, setCdpLiveUrl] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    setCdpLiveUrl(null);
+  }, [activeTaskId]);
+  const onCdpUrlChange = React.useCallback((url: string) => {
+    if (!url || isBlankUrl(url)) return;
+    setCdpLiveUrl(url);
+    setLastKnownUrl(url); // also feed the grace cache
+  }, []);
+  const isTerminalStatus =
+    taskStatus === 'completed' ||
+    taskStatus === 'failed' ||
+    taskStatus === 'cancelled';
+  const displayUrl = isTerminalStatus
+    ? (persistedFinalUrl ?? cdpLiveUrl ?? frameUrl ?? lastKnownUrl ?? 'about:blank')
+    : (cdpLiveUrl ?? frameUrl ?? persistedFinalUrl ?? lastKnownUrl ?? 'about:blank');
   const abortTask = useTaskStore((s) => s.abortTask);
   const [aborting, setAborting] = React.useState(false);
   const isExecuting = taskStatus === 'executing';
@@ -780,15 +803,29 @@ export function BrowserPanel({
            * to the usual stacked layout.
            */}
           {fullscreen && onToggleFullscreen && (
-            <button
-              type="button"
-              onClick={onToggleFullscreen}
-              title="退出全屏 (Esc)"
-              aria-label="exit fullscreen"
-              className="absolute right-3 top-3 z-50 inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/20 bg-black/50 text-white shadow-lg backdrop-blur-md transition-colors hover:bg-black/70"
-            >
-              <Minimize2 className="h-4 w-4" />
-            </button>
+            // Optimization #3 R2 — floating toolbar. Replaces the
+            // lonely exit button with a peek-on-hover bar that
+            // mirrors the non-fullscreen header essentials: status
+            // dot, back / forward / reload, URL bar, takeover
+            // toggle, exit. Auto-hides 2.5s after the cursor leaves
+            // so the canvas stays unobstructed while the user
+            // watches the agent work; reappears on hover or focus.
+            //
+            // The bar sits at the TOP — covering the page title is
+            // a smaller hit than covering action buttons at the
+            // bottom of most sites.
+            <FullscreenFloatingToolbar
+              displayUrl={displayUrl}
+              status={status}
+              interactiveActive={interactiveActive}
+              interactive={interactive}
+              onToggleInteractive={() => setInteractive(!interactive)}
+              navTaskId={activeTaskId ?? null}
+              isExecuting={isExecuting}
+              aborting={aborting}
+              onStop={onStopClick}
+              onExitFullscreen={onToggleFullscreen}
+            />
           )}
           {!fullscreen && shouldConnect && (
           <header className="flex h-11 items-center gap-2 border-b border-border px-3 pt-2">
@@ -940,6 +977,7 @@ export function BrowserPanel({
                       // "connecting…" / hibernation banners just work.
                       handleVncStatus(s as VncStatus)
                     }
+                    onUrlChange={onCdpUrlChange}
                     className={cn(
                       'rounded-md border shadow-sm',
                       interactiveActive
@@ -1734,5 +1772,146 @@ function NavButton({
     >
       <Icon className="h-3.5 w-3.5" />
     </button>
+  );
+}
+
+/**
+ * Optimization #3 R2 — fullscreen floating toolbar.
+ *
+ * In fullscreen takeover, BOSS reported the bare exit-button left
+ * users stranded: they couldn't see the URL, couldn't go back, and
+ * had to exit fullscreen to take over the page. The new toolbar
+ * is a single horizontal bar floating at the TOP of the canvas
+ * that mirrors the non-fullscreen header essentials.
+ *
+ * Auto-hide:
+ *   - Visible by default (cold mount + cursor in-bar)
+ *   - Hides 2.5s after pointer leaves so the canvas stays clean
+ *     while watching the agent work
+ *   - Cursor near top edge (< 56px) re-summons it
+ *
+ * Visible elements (left → right):
+ *   - status dot
+ *   - back / forward / reload
+ *   - URL bar (read-only display; the same UrlBar component the
+ *     header uses, so clipboard + edit-to-navigate behave
+ *     identically)
+ *   - takeover toggle (Hand icon, mirrors the header button)
+ *   - stop button (when executing)
+ *   - exit fullscreen
+ */
+function FullscreenFloatingToolbar({
+  displayUrl,
+  status,
+  interactiveActive,
+  interactive,
+  onToggleInteractive,
+  navTaskId,
+  isExecuting,
+  aborting,
+  onStop,
+  onExitFullscreen,
+}: {
+  displayUrl: string;
+  status: DotStatus;
+  interactiveActive: boolean;
+  interactive: boolean;
+  onToggleInteractive: () => void;
+  navTaskId: string | null;
+  isExecuting: boolean;
+  aborting: boolean;
+  onStop: () => Promise<void> | void;
+  onExitFullscreen: () => void;
+}): JSX.Element {
+  const [visible, setVisible] = React.useState(true);
+  const hideTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleHide = React.useCallback(() => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => setVisible(false), 2_500);
+  }, []);
+  const cancelHide = React.useCallback(() => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = null;
+  }, []);
+  // Re-summon on cursor near top edge.
+  React.useEffect(() => {
+    const onMove = (e: MouseEvent): void => {
+      if (e.clientY < 56) setVisible(true);
+    };
+    window.addEventListener('mousemove', onMove);
+    return () => window.removeEventListener('mousemove', onMove);
+  }, []);
+  React.useEffect(() => {
+    if (!visible) return;
+    scheduleHide();
+    return () => cancelHide();
+  }, [visible, scheduleHide, cancelHide]);
+  React.useEffect(() => () => cancelHide(), [cancelHide]);
+  return (
+    <div
+      onMouseEnter={() => {
+        cancelHide();
+        setVisible(true);
+      }}
+      onMouseLeave={scheduleHide}
+      onFocus={() => {
+        cancelHide();
+        setVisible(true);
+      }}
+      className={cn(
+        'pointer-events-auto absolute left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-1.5 rounded-lg border border-white/15 bg-black/55 px-2.5 py-1.5 shadow-2xl backdrop-blur-md transition-opacity duration-200',
+        visible ? 'opacity-100' : 'opacity-0 hover:opacity-100',
+      )}
+      style={{ minWidth: 'min(640px, 90%)', maxWidth: '90%' }}
+    >
+      <StatusDot status={status} />
+      <NavButton direction="back" title="后退" navTaskId={navTaskId} />
+      <NavButton direction="forward" title="前进" navTaskId={navTaskId} />
+      <NavButton direction="reload" title="刷新" navTaskId={navTaskId} />
+      <UrlBar
+        displayUrl={displayUrl}
+        interactiveActive={interactiveActive}
+        navTaskId={navTaskId}
+      />
+      {isExecuting && navTaskId && (
+        <button
+          type="button"
+          onClick={() => void onStop()}
+          disabled={aborting}
+          title="停止当前任务"
+          aria-label="停止当前任务"
+          className={cn(
+            'inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[11px] font-medium transition-colors',
+            aborting
+              ? 'cursor-wait border-white/20 bg-white/10 text-white/60'
+              : 'border-red-300/40 bg-red-500/15 text-red-200 hover:bg-red-500/25',
+          )}
+        >
+          <Square className="h-3 w-3" strokeWidth={2.5} />
+          停止
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={onToggleInteractive}
+        title={interactive ? '退出接管 — 让 AI 继续操作' : '接管 — 你自己操作浏览器'}
+        aria-label={interactive ? '退出接管' : '接管'}
+        className={cn(
+          'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-white/85 transition-colors hover:bg-white/10',
+          interactive && 'bg-primary/35 text-white',
+        )}
+      >
+        <Hand className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={onExitFullscreen}
+        title="退出全屏 (Cmd/Ctrl+Esc)"
+        aria-label="exit fullscreen"
+        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-white/85 transition-colors hover:bg-white/10"
+      >
+        <Minimize2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
   );
 }

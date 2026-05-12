@@ -10,6 +10,7 @@
  * per-profile lock happy).
  */
 
+import type { BrowserViewportProfile } from '@holaday/shared-types';
 import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
 
 /**
@@ -50,6 +51,15 @@ export interface BrowserInstance extends BrowserSlot {
   lastActiveAt: number;
   createdAt: number;
   status: InstanceStatus;
+  /**
+   * Optimization #3 R1 — viewport profile this instance was spawned
+   * with. Used by the CDP streamer to cap frame dimensions to the
+   * Brave's logical viewport, and by /screencast-ws/ handlers to
+   * surface the profile to the SPA viewport for display-time math.
+   * Undefined on legacy / back-compat allocations (treated as
+   * 'desktop' by downstream consumers).
+   */
+  viewportProfile?: BrowserViewportProfile;
 }
 
 export interface PoolConfig {

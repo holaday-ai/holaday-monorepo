@@ -5,3 +5,4 @@ export * from './ids.js';
 export * from './plans.js';
 export * from './roles.js';
 export * from './addon-packs.js';
+export * from './browser-viewport-profile.js';

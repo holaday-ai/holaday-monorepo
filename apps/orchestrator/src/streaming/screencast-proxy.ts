@@ -27,6 +27,7 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Logger } from 'pino';
 import { WebSocket, WebSocketServer } from 'ws';
+import { dimensionsForProfile } from '@holaday/shared-types';
 import { verifyStreamOrAccessToken } from '../auth/jwt.js';
 import type { BrowserPool } from '../browser-pool/index.js';
 import type { BrowserInstance } from '../browser-pool/types.js';
@@ -212,10 +213,21 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       // every task start, so a fixed reference would die after the
       // first task — see cdp-streamer.ts CdpStreamerOptions.getPage.
       const executor = args.instance!.executor;
+      // Optimization #3 R1 — pin the streamer's frame caps to the
+      // viewport profile the pool spawned this Brave with. The CDP
+      // contract caps frames at maxWidth × maxHeight; passing
+      // sidepanel (900×900) keeps a narrow panel from receiving
+      // 1280-px-wide frames that the SPA then downscales (wasted
+      // bandwidth + slightly fuzzier text). When the instance has
+      // no profile attached (back-compat), the streamer falls
+      // back to its built-in 1280×800 default.
+      const profile = args.instance!.viewportProfile;
+      const profileDims = profile ? dimensionsForProfile(profile) : null;
       streamer = new CdpStreamer({
         getPage: () => executor.getPage(),
         ws: args.ws,
         logger: userLog,
+        ...(profileDims ? { maxWidth: profileDims.width, maxHeight: profileDims.height } : {}),
       });
       await streamer.start();
       if (!streamer.getSession()) {

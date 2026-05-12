@@ -186,6 +186,19 @@ const createInput = z.object({
    * the wire lets us short-circuit the guard cleanly.
    */
   skillId: z.string().min(1).max(64).optional(),
+  /**
+   * Optimization #3 R1 — viewport profile the SPA wants for this
+   * task's per-Brave geometry. Picked from the user's current
+   * panel layout: sidepanel / desktop / fullscreen / mobile. The
+   * pool reads this at allocate time to size Xvfb + Brave's
+   * `--window-size` + the CDP streamer's frame cap. Validated as
+   * a literal union so unknown values land as a tRPC BAD_REQUEST
+   * rather than silently falling through to the default geometry.
+   * Optional — omitted requests get the legacy 'desktop' default.
+   */
+  viewportProfile: z
+    .enum(['sidepanel', 'desktop', 'fullscreen', 'mobile'])
+    .optional(),
 });
 
 /**
@@ -1634,7 +1647,11 @@ export const tasksRouter = router({
           // .finally below calls release(taskId) to tear down
           // immediately on completion. Per-user concurrency is gated
           // upstream via getActiveTaskCount + plan limits.
-          const instance = await ctx.browserPool.allocate(taskId, ctx.userId);
+          const instance = await ctx.browserPool.allocate(
+            taskId,
+            ctx.userId,
+            input.viewportProfile,
+          );
           // P0 SAFETY GUARD — Phase 24 RC follow-up. The per-task pool
           // allocates CDP ports in the inclusive range
           // [cdpPortStart, cdpPortStart + maxInstances - 1] = [9300,
