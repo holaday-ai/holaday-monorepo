@@ -20,13 +20,19 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
 import { QuotaIndicator } from '@/components/QuotaIndicator';
 import {
   Sidebar as SidebarShell,
   SidebarContent,
   SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
   useSidebar,
 } from '@/components/ui/sidebar';
 import { TaskListItem } from '@/components/TaskListItem';
@@ -290,33 +296,43 @@ export function Sidebar({
 
   return (
     <>
-      <SidebarShell collapsible="offcanvas">
-        <SidebarHeader className="border-b border-sidebar-border">
-          <div className="flex items-center gap-2 px-1 py-2">
-            <h1 className="flex flex-1 items-center gap-2 text-base font-semibold tracking-tight text-sidebar-foreground">
-              <BrandMark />
-              <span>HOLA DAY</span>
-            </h1>
+      <SidebarShell collapsible="icon">
+        <SidebarHeader className="border-b border-sidebar-border gap-2">
+          {/* Brand row — text hides in icon mode via shadcn's
+              `group-data-[collapsible=icon]` selector chain so only
+              the mark remains visible at 48px width. */}
+          <div className="flex items-center gap-2 px-1 py-1">
+            <BrandMark />
+            <span className="text-base font-semibold tracking-tight text-sidebar-foreground group-data-[collapsible=icon]:hidden">
+              HOLA DAY
+            </span>
           </div>
-          <Button
-            variant="default"
-            size="sm"
-            onClick={() => {
-              onNewTask();
-              onMobileClose?.();
-            }}
-            className="w-full justify-start"
-          >
-            <Plus className="h-4 w-4" />
-            新任务
-          </Button>
+          {/* New-task — `SidebarMenuButton` so it collapses to a
+              `Plus` icon when the sidebar is in icon mode. The
+              `tooltip` prop wires the hover label. Brand magenta
+              filled. */}
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                tooltip="新任务 (/)"
+                onClick={() => {
+                  onNewTask();
+                  onMobileClose?.();
+                }}
+                className="bg-primary text-primary-foreground font-medium hover:bg-primary/90 hover:text-primary-foreground data-[active=true]:bg-primary data-[active=true]:text-primary-foreground"
+              >
+                <Plus />
+                <span>新任务</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
         </SidebarHeader>
 
         <SidebarContent className="px-0">
           <FeatureNav />
 
             {projectFilter && (
-              <div className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-pink-300/40 bg-pink-50/40 px-2.5 py-1.5 text-[12px] dark:border-pink-500/30 dark:bg-pink-500/10">
+              <div className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-pink-300/40 bg-pink-50/40 px-2.5 py-1.5 text-[12px] dark:border-pink-500/30 dark:bg-pink-500/10 group-data-[collapsible=icon]:hidden">
                 <FolderOpen className="h-3.5 w-3.5 shrink-0 text-pink-600 dark:text-pink-300" />
                 <span className="min-w-0 flex-1 truncate text-foreground">
                   项目：{projectFilter.name}
@@ -332,7 +348,7 @@ export function Sidebar({
               </div>
             )}
 
-            <div className="px-2 pb-4">
+            <div className="px-2 pb-4 group-data-[collapsible=icon]:hidden">
               {pinnedTasks.length > 0 && (
                 <TaskGroup title="置顶">
                   {pinnedTasks.map((t) => (
@@ -474,7 +490,7 @@ export function Sidebar({
 
             </SidebarContent>
 
-            <SidebarFooter className="border-t border-sidebar-border px-0 py-2">
+            <SidebarFooter className="border-t border-sidebar-border px-0 py-2 group-data-[collapsible=icon]:hidden">
               {/* O1 — batch action bar / batch entry. When batchMode
                   is on, render the count + 全选 / 删除选中 / 取消
                   controls; otherwise show a small "批量管理" entry
@@ -547,6 +563,11 @@ export function Sidebar({
                 />
               </div>
             </SidebarFooter>
+        {/* SidebarRail — invisible hairline on the right edge that
+            users can click to toggle expand/collapse. Lets the icon
+            mode feel composable instead of "stuck" without users
+            having to discover Cmd+B. */}
+        <SidebarRail />
       </SidebarShell>
 
       {menu && (onDeleteTask || onRetryTask || onRenameTask) && (
@@ -816,14 +837,26 @@ interface GroupProps {
   children: React.ReactNode;
 }
 
+/**
+ * Optimization #4 follow-up — task-history group uses the shadcn
+ * `<SidebarGroup>` shell + `<SidebarGroupLabel>` so the section
+ * heading picks up the canonical 11px uppercase grey label style.
+ * In icon-mode the group hides via the standard
+ * `group-data-[collapsible=icon]:hidden` selector inherited by the
+ * shadcn `SidebarMenuSub` family — we apply it directly here so
+ * the whole pinned / starred / time-bucket section disappears
+ * when the rail collapses to icons.
+ */
 function TaskGroup({ title, children }: GroupProps): JSX.Element {
   return (
-    <section className="mt-3 first:mt-1">
-      <div className="px-3 py-0.5 text-[10px] font-medium tracking-wide text-muted-foreground/60">
+    <SidebarGroup className="py-0 group-data-[collapsible=icon]:hidden">
+      <SidebarGroupLabel className="px-3 text-[11px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
         {title}
-      </div>
-      <div className="mt-0.5 space-y-px">{children}</div>
-    </section>
+      </SidebarGroupLabel>
+      <SidebarGroupContent>
+        <div className="space-y-px">{children}</div>
+      </SidebarGroupContent>
+    </SidebarGroup>
   );
 }
 
@@ -950,40 +983,59 @@ const FEATURES: readonly FeatureItem[] = [
  */
 function FeatureNav(): JSX.Element {
   const navigate = useNavigate();
+  // Optimization #4 follow-up — feature nav is now a proper
+  // shadcn `<SidebarMenu>` so:
+  //   - hover gets the rounded `bg-sidebar-accent` highlight
+  //   - active route gets `data-[active=true]` filled background
+  //   - icon-mode shows ONLY the icon with a hover tooltip via
+  //     `SidebarMenuButton tooltip="…"`
+  // We read pathname directly so the active state updates without
+  // a router subscription in the parent.
+  const pathname =
+    typeof window !== 'undefined' ? window.location.pathname : '';
   return (
-    <nav className="px-2 pb-2">
-      {FEATURES.map(({ icon: Icon, label, href }) => {
-        if (href) {
-          return (
-            <button
-              key={label}
-              type="button"
-              onClick={() => {
-                navigate(href);
-              }}
-              className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
-            >
-              <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              <span className="truncate">{label}</span>
-            </button>
-          );
-        }
-        return (
-          <button
-            key={label}
-            type="button"
-            disabled
-            aria-disabled
-            title={`${label} · 即将推出`}
-            className="flex w-full cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground/70 opacity-60 transition-colors"
-          >
-            <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            <span className="truncate">{label}</span>
-            <span className="ml-auto text-[10px] text-muted-foreground/50">即将推出</span>
-          </button>
-        );
-      })}
-    </nav>
+    <SidebarGroup>
+      <SidebarGroupLabel className="px-3 text-[11px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
+        快捷入口
+      </SidebarGroupLabel>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {FEATURES.map(({ icon: Icon, label, href }) => {
+            if (href) {
+              const isActive = pathname === href;
+              return (
+                <SidebarMenuItem key={label}>
+                  <SidebarMenuButton
+                    tooltip={label}
+                    isActive={isActive}
+                    onClick={() => navigate(href)}
+                  >
+                    <Icon aria-hidden />
+                    <span>{label}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              );
+            }
+            return (
+              <SidebarMenuItem key={label}>
+                <SidebarMenuButton
+                  tooltip={`${label} · 即将推出`}
+                  disabled
+                  aria-disabled
+                  className="cursor-not-allowed opacity-60"
+                >
+                  <Icon aria-hidden />
+                  <span>{label}</span>
+                  <span className="ml-auto text-[10px] text-sidebar-foreground/50 group-data-[collapsible=icon]:hidden">
+                    即将推出
+                  </span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            );
+          })}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
   );
 }
 

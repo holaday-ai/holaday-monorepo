@@ -299,7 +299,7 @@ function AppShell(): JSX.Element {
         });
       return createTaskRaw(intent, fileIds, replyToTaskId, mode, picked);
     },
-    [createTaskRaw, panelFullscreen, panelPx],
+    [createTaskRaw, panelPx],
   );
   const replyToTask = useTaskStore((s) => s.replyToTask);
   const deleteTask = useTaskStore((s) => s.deleteTask);
