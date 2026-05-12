@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
-import { PageShell, Section } from '@/pages/PageShell';
+import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 
 // Filter values use the same vocabulary as the orchestrator's
 // `tasks.status` column ('completed' / 'failed' / 'executing' / …)
@@ -140,7 +140,8 @@ export function HistoryPage(): JSX.Element {
   }, [baseInput]);
 
   return (
-    <PageShell title="任务历史" subtitle="全部历史记录" width="5xl">
+    <PageContainer width="wide">
+      <PageHeader title="任务历史" description="全部历史记录" />
       <div className="space-y-4">
         <Section>
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -229,7 +230,7 @@ export function HistoryPage(): JSX.Element {
           )}
         </Section>
       </div>
-    </PageShell>
+    </PageContainer>
   );
 }
 

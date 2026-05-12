@@ -1,6 +1,6 @@
 import { Loader2 } from 'lucide-react';
 import * as React from 'react';
-import { PageShell, Row, Section } from '@/pages/PageShell';
+import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
 import { Button } from '@/components/ui/button';
 import { trpc } from '@/lib/trpc';
 
@@ -41,16 +41,18 @@ export function ProfilePage(): JSX.Element {
 
   if (loading) {
     return (
-      <PageShell title="个人资料">
+      <PageContainer width="form">
+        <PageHeader title="个人资料" />
         <div className="flex h-64 items-center justify-center">
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         </div>
-      </PageShell>
+      </PageContainer>
     );
   }
 
   return (
-    <PageShell title="个人资料" subtitle="管理你的基本信息" width="3xl">
+    <PageContainer width="form">
+      <PageHeader title="个人资料" description="管理你的基本信息" />
       <div className="space-y-6">
         <Section>
           <div className="flex flex-col items-start gap-6 md:flex-row md:items-center">
@@ -108,6 +110,6 @@ export function ProfilePage(): JSX.Element {
           </Row>
         </Section>
       </div>
-    </PageShell>
+    </PageContainer>
   );
 }

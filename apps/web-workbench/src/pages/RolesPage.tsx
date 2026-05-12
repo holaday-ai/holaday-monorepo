@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
-import { PageShell, Section } from '@/pages/PageShell';
+import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 
 interface ListResponse {
   plan: string;
@@ -145,9 +145,10 @@ export function RolesPage(): JSX.Element {
 
   if (!data) {
     return (
-      <PageShell title="专业角色" subtitle="挑选 AI 在工作时使用的视角" backTo="/settings">
+      <PageContainer width="wide">
+        <PageHeader title="专业角色" description="挑选 AI 在工作时使用的视角" />
         <div className="text-sm text-muted-foreground">读取中…</div>
-      </PageShell>
+      </PageContainer>
     );
   }
 
@@ -157,12 +158,8 @@ export function RolesPage(): JSX.Element {
   }));
 
   return (
-    <PageShell
-      title="专业角色"
-      subtitle="挑选 AI 在工作时使用的视角"
-      backTo="/settings"
-      width="6xl"
-    >
+    <PageContainer width="wide">
+      <PageHeader title="专业角色" description="挑选 AI 在工作时使用的视角" />
       {isFree && (
         <div className="mb-6 rounded-lg border border-amber-300/40 bg-amber-50/50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-200">
           免费版没有角色权限。
@@ -282,7 +279,7 @@ export function RolesPage(): JSX.Element {
           </Section>
         ))}
       </div>
-    </PageShell>
+    </PageContainer>
   );
 }
 

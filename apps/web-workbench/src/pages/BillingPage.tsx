@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { formatCny, getPlanPriceCents, type PaidPlanId } from '@holaday/shared-types';
 import { Button } from '@/components/ui/button';
 import { trpc } from '@/lib/trpc';
-import { PageShell, Row, Section } from '@/pages/PageShell';
+import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
 
 const SUPPORT_EMAIL = 'support@holaday.ai';
 
@@ -37,7 +37,8 @@ export function BillingPage(): JSX.Element {
     : '—';
 
   return (
-    <PageShell title="账单与订阅" subtitle="支付方式和历史发票" width="4xl">
+    <PageContainer width="list">
+      <PageHeader title="账单与订阅" description="支付方式和历史发票" />
       <div className="space-y-6">
         <Section title="当前订阅">
           <Row label="套餐" description="查看完整对比">
@@ -125,6 +126,6 @@ export function BillingPage(): JSX.Element {
           </div>
         </Section>
       </div>
-    </PageShell>
+    </PageContainer>
   );
 }

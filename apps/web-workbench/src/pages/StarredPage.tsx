@@ -5,7 +5,7 @@ import { useTaskStore } from '@/stores/task-store';
 import { taskDisplayTitle } from '@/components/TaskListItem';
 import { Button } from '@/components/ui/button';
 import { trpc } from '@/lib/trpc';
-import { PageShell } from '@/pages/PageShell';
+import { PageContainer, PageHeader } from '@/pages/PageShell';
 import type { UiTask } from '@/types/task';
 
 interface ServerStarredTask {
@@ -88,7 +88,8 @@ export function StarredPage(): JSX.Element {
   }
 
   return (
-    <PageShell title="收藏" subtitle="星标的任务，按收藏时间倒序排列" width="3xl">
+    <PageContainer width="form">
+      <PageHeader title="收藏" description="星标的任务，按收藏时间倒序排列" />
       {initialLoad ? (
         <div className="flex h-48 items-center justify-center">
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -152,6 +153,6 @@ export function StarredPage(): JSX.Element {
           )}
         </>
       )}
-    </PageShell>
+    </PageContainer>
   );
 }

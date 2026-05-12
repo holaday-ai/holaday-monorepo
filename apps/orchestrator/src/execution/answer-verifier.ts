@@ -440,15 +440,17 @@ function checkEmptyResult(answerText: string): CheckResult | null {
     .replace(/[|`*_>]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  // Two-part guard: at least 10 chars AND at least one
-  // alphanumeric / CJK content character. Short browser-task
-  // confirmations like "Page reached." (13 chars + 2 words) pass.
-  // Pure-ordinal markdown like "## 报告\n1. \n2. " sanitizes to
-  // empty + fails. Empty tables like "| a | b |\n|---|---|\n" also
-  // sanitize to empty.
+  // Two-part guard: at least 20 chars AND at least one
+  // alphanumeric / CJK content character. Pure-ordinal markdown like
+  // "## 报告\n1. \n2. " sanitizes to empty + fails. Empty tables like
+  // "| a | b |\n|---|---|\n" also sanitize to empty. The 20-char
+  // floor matches the SPA-side fallback in TaskStream so the user
+  // never sees a near-empty result card; a one-line "搜索完成" stub
+  // also flags now so 自动 retry / 追问 can intervene before we
+  // call the task completed.
   const hasContentChars =
     /[A-Za-z0-9一-鿿぀-ゟ゠-ヿ]/.test(meaningful);
-  if (meaningful.length >= 10 && hasContentChars) return null;
+  if (meaningful.length >= 20 && hasContentChars) return null;
   return {
     criterionId: 'generic.empty_result',
     passed: false,

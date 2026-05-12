@@ -1,6 +1,5 @@
 import {
   ArrowUp,
-  Check,
   ChevronDown,
   FileText,
   Image as ImageIcon,
@@ -17,6 +16,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Textarea } from '@/components/ui/textarea';
@@ -454,7 +455,7 @@ export function InputArea({
 
   return (
     <div
-      className="mx-auto w-full max-w-3xl px-3 pb-4 sm:px-6 sm:pb-6"
+      className="mx-auto w-full max-w-[760px] px-3 pb-4 sm:px-6 sm:pb-6"
       onDragEnter={(e) => {
         if (!attachmentsAllowed) return;
         if (e.dataTransfer.types.includes('Files')) {
@@ -685,13 +686,11 @@ export function InputArea({
 }
 
 /**
- * Single ghost-button + popover dropdown for picking the task mode.
- * Replaces the prior pair of emoji pill buttons. Click the button →
- * popover with two options, each a row carrying title + small
- * sub-label and a leading check mark on the active choice.
- *
- * Closes on outside click, Escape, or option pick. Persists mode
- * via the parent's onChange (already writes localStorage).
+ * Task-mode picker. Radix DropdownMenuRadioGroup so the selection is
+ * keyboard-navigable, escape/outside-click handled by Radix, and the
+ * portal layering plays nicely with the composer's z-index stack.
+ * The hand-rolled mousedown / keydown listeners (and the stale-closure
+ * bugs they bred) are gone.
  */
 function TaskModeSelector({
   mode,
@@ -701,98 +700,47 @@ function TaskModeSelector({
   onChange: (m: 'auto' | 'plan') => void;
 }): JSX.Element {
   const [open, setOpen] = React.useState(false);
-  const wrapRef = React.useRef<HTMLDivElement>(null);
-  React.useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e: MouseEvent): void => {
-      if (wrapRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    window.addEventListener('mousedown', onDocClick);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onDocClick);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
   const label = mode === 'auto' ? '自动执行' : '先出方案';
   return (
-    <div ref={wrapRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className={cn(
-          'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground',
-          open && 'bg-foreground/[0.05] text-foreground',
-        )}
-      >
-        <span>{label}</span>
-        <ChevronDown className="h-3 w-3 opacity-70" />
-      </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute bottom-7 left-0 z-30 w-56 overflow-hidden rounded-md border border-border bg-popover py-1 shadow-lg"
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground',
+            open && 'bg-foreground/[0.05] text-foreground',
+          )}
         >
-          <ModeOption
-            active={mode === 'auto'}
-            onPick={() => {
-              onChange('auto');
-              setOpen(false);
-            }}
-            title="自动执行"
-            sub="AI 直接执行任务"
-          />
-          <ModeOption
-            active={mode === 'plan'}
-            onPick={() => {
-              onChange('plan');
-              setOpen(false);
-            }}
-            title="先出方案"
-            sub="AI 先列计划，你确认后再执行"
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ModeOption({
-  active,
-  onPick,
-  title,
-  sub,
-}: {
-  active: boolean;
-  onPick: () => void;
-  title: string;
-  sub: string;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onPick}
-      className="flex w-full items-start gap-2 px-3 py-2 text-left text-[12px] hover:bg-foreground/[0.05]"
-    >
-      <Check
-        className={cn(
-          'mt-0.5 h-3.5 w-3.5 shrink-0',
-          active ? 'text-foreground' : 'opacity-0',
-        )}
-        aria-hidden
-      />
-      <span className="min-w-0 flex-1">
-        <span className="block font-medium text-foreground">{title}</span>
-        <span className="block text-[11px] text-muted-foreground">{sub}</span>
-      </span>
-    </button>
+          <span>{label}</span>
+          <ChevronDown className="h-3 w-3 opacity-70" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="start" sideOffset={6} className="w-60">
+        <DropdownMenuRadioGroup
+          value={mode}
+          onValueChange={(v) => {
+            if (v === 'auto' || v === 'plan') onChange(v);
+          }}
+        >
+          <DropdownMenuRadioItem value="auto" className="items-start py-2">
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="text-[12px] font-medium text-foreground">自动执行</span>
+              <span className="text-[11px] text-muted-foreground">
+                AI 直接执行任务
+              </span>
+            </span>
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="plan" className="items-start py-2">
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="text-[12px] font-medium text-foreground">先出方案</span>
+              <span className="text-[11px] text-muted-foreground">
+                AI 先列计划，你确认后再执行
+              </span>
+            </span>
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

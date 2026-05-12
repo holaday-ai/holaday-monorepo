@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { PageShell } from '@/pages/PageShell';
+import { PageContainer, PageHeader } from '@/pages/PageShell';
 
 /**
  * Privacy policy. Template text covering GDPR + PIPL basics. Must be
@@ -9,7 +9,8 @@ import { PageShell } from '@/pages/PageShell';
  */
 export function PrivacyPage(): JSX.Element {
   return (
-    <PageShell title="隐私政策" subtitle="最后更新：2026-04-24" width="3xl">
+    <PageContainer width="prose">
+      <PageHeader title="隐私政策" description="最后更新：2026-04-24" />
       <article className="prose prose-sm max-w-none dark:prose-invert prose-headings:tracking-tight">
         <p>
           HOLA DAY（下称"我们"）非常重视您的隐私。本隐私政策说明我们如何收集、使用、
@@ -103,6 +104,6 @@ export function PrivacyPage(): JSX.Element {
           <Link to="/terms">服务条款</Link>。
         </p>
       </article>
-    </PageShell>
+    </PageContainer>
   );
 }

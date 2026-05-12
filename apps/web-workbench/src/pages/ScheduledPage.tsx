@@ -2,7 +2,7 @@ import { Clock, Pause, Play, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
-import { PageShell, Section } from '@/pages/PageShell';
+import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 
 /**
@@ -92,28 +92,28 @@ export function ScheduledPage(): JSX.Element {
   };
 
   return (
-    <PageShell
-      title="定时任务"
-      subtitle="按计划自动执行任务 — 每天 / 每周 / 每月，或一次性"
-      width="4xl"
-    >
-      <Section>
-        <div className="mb-4 flex items-center justify-between">
-          <div className="text-xs text-muted-foreground">
-            {rows == null
-              ? '加载中…'
-              : rows.length === 0
-                ? '还没有定时任务，点右侧按钮新建一个。'
-                : `共 ${rows.length} 个定时任务`}
-          </div>
+    <PageContainer width="list">
+      <PageHeader
+        title="定时任务"
+        description="按计划自动执行任务 — 每天 / 每周 / 每月，或一次性"
+        action={
           <button
             type="button"
             onClick={() => setDialogOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90"
           >
             <Plus className="h-4 w-4" />
             新建定时任务
           </button>
+        }
+      />
+      <Section>
+        <div className="mb-3 text-xs text-muted-foreground">
+          {rows == null
+            ? '加载中…'
+            : rows.length === 0
+              ? '还没有定时任务，点右上角按钮新建一个。'
+              : `共 ${rows.length} 个定时任务`}
         </div>
         {rows && rows.length === 0 && (
           <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
@@ -232,7 +232,7 @@ export function ScheduledPage(): JSX.Element {
           void reload();
         }}
       />
-    </PageShell>
+    </PageContainer>
   );
 }
 

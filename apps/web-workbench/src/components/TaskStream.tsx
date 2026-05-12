@@ -1370,13 +1370,15 @@ function TerminalSummary({
         <ExpertReportHeader workflowId={expertWorkflowId} />
       )}
       {(() => {
-        // Product polish #2 — empty-result fallback. When the
-        // sanitized text is suspiciously short (< 20 chars after
-        // stripping markdown structure / ordinals / whitespace),
-        // surface a hint card instead of rendering a near-empty
-        // prose block. Common causes: model hit max_tokens before
-        // producing real content, post-check ate everything, tool
-        // output was structurally invalid.
+        // Empty-result fallback. When the sanitized text is
+        // suspiciously short (< 20 chars after stripping markdown
+        // structure / ordinals / whitespace), surface a hint card
+        // instead of rendering a near-empty prose block. Common
+        // causes: model hit max_tokens before producing real content,
+        // post-check ate everything, tool output was structurally
+        // invalid. Threshold matches the orchestrator's answer-verifier
+        // checkEmptyResult so the SPA never displays a near-empty
+        // success card the backend would have flagged fixable.
         const sanitized = sanitizeMarkdownTrailingPunctuation(
           sanitizeForRender(revealed),
         );
@@ -1394,7 +1396,7 @@ function TerminalSummary({
         if (
           !isFailedLike &&
           !attachments?.length &&
-          (meaningful.length < 10 || !hasContentChars)
+          (meaningful.length < 20 || !hasContentChars)
         ) {
           return (
             <div className="rounded-md border border-amber-300/50 bg-amber-50/70 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">

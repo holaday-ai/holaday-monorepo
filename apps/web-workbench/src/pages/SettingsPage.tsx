@@ -6,7 +6,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
-import { PageShell, Row, Section } from '@/pages/PageShell';
+import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
 
 /**
  * Settings page — only the rows that actually persist server-side
@@ -35,7 +35,8 @@ export function SettingsPage(): JSX.Element {
   }
 
   return (
-    <PageShell title="设置" subtitle="角色、记忆与账号" width="3xl">
+    <PageContainer width="form">
+      <PageHeader title="设置" description="角色、记忆与账号" />
       <div className="space-y-6">
         <Section title="AI 视角">
           <Link
@@ -67,7 +68,7 @@ export function SettingsPage(): JSX.Element {
           </Row>
         </Section>
       </div>
-    </PageShell>
+    </PageContainer>
   );
 }
 

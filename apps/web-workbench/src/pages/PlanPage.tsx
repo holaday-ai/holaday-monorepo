@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
-import { PageShell } from '@/pages/PageShell';
+import { PageContainer, PageHeader } from '@/pages/PageShell';
 
 interface PaymentOptions {
   paypal: boolean;
@@ -132,11 +132,11 @@ export function PlanPage(): JSX.Element {
   );
 
   return (
-    <PageShell
-      title={zh ? '套餐与定价' : 'Plans & Pricing'}
-      subtitle={zh ? '选择适合你的版本' : 'Pick the version that fits you'}
-      width="6xl"
-    >
+    <PageContainer width="wide">
+      <PageHeader
+        title={zh ? '套餐与定价' : 'Plans & Pricing'}
+        description={zh ? '选择适合你的版本' : 'Pick the version that fits you'}
+      />
       <div className="mx-auto mb-8 max-w-2xl text-center">
         <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">
           {zh ? '让 AI 替你搞定浏览器里的一切' : 'Let AI handle everything in your browser'}
@@ -530,6 +530,6 @@ export function PlanPage(): JSX.Element {
           onError={(msg) => handlePaymentError(msg)}
         />
       )}
-    </PageShell>
+    </PageContainer>
   );
 }

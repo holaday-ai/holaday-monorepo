@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
-import { PageShell } from '@/pages/PageShell';
+import { PageContainer, PageHeader } from '@/pages/PageShell';
 import type { UiProject } from '@/types/task';
 
 /**
@@ -82,21 +82,25 @@ export function ProjectsPage(): JSX.Element {
   }
 
   return (
-    <PageShell title="项目" subtitle="按项目分组管理你的任务" width="5xl">
-      <div className="mb-4 flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">
-          共 {projects.length} 个项目
-        </span>
-        {!creating && (
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-colors hover:bg-foreground/85"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            新建项目
-          </button>
-        )}
+    <PageContainer width="wide">
+      <PageHeader
+        title="项目"
+        description="按项目分组管理你的任务"
+        action={
+          !creating ? (
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90"
+            >
+              <Plus className="h-4 w-4" />
+              新建项目
+            </button>
+          ) : null
+        }
+      />
+      <div className="mb-3 text-xs text-muted-foreground">
+        共 {projects.length} 个项目
       </div>
 
       {creating && (
@@ -199,6 +203,6 @@ export function ProjectsPage(): JSX.Element {
           ))}
         </div>
       )}
-    </PageShell>
+    </PageContainer>
   );
 }

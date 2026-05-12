@@ -14,7 +14,7 @@ import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
-import { PageShell } from '@/pages/PageShell';
+import { PageContainer, PageHeader } from '@/pages/PageShell';
 
 interface UiFile {
   fileId: string;
@@ -111,11 +111,8 @@ export function FilesPage(): JSX.Element {
   }
 
   return (
-    <PageShell
-      title="文件库"
-      subtitle="在这里管理任务中上传和生成的文件"
-      width="5xl"
-    >
+    <PageContainer width="wide">
+      <PageHeader title="文件库" description="在这里管理任务中上传和生成的文件" />
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-1">
           <FilterTab label="全部" active={filter === 'all'} onClick={() => setFilter('all')} />
@@ -175,7 +172,7 @@ export function FilesPage(): JSX.Element {
           </div>
         </div>
       )}
-    </PageShell>
+    </PageContainer>
   );
 }
 

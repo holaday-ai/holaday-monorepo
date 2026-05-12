@@ -3,7 +3,7 @@ import * as React from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
-import { PageShell, Section } from '@/pages/PageShell';
+import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import { BatchTaskDialog } from '@/components/BatchTaskDialog';
 
 /**
@@ -105,24 +105,28 @@ function BatchList(): JSX.Element {
   }, [reload]);
 
   return (
-    <PageShell title="批量任务" subtitle="一次提交多个任务，按套餐并发执行" width="4xl">
-      <Section>
-        <div className="mb-4 flex items-center justify-between">
-          <div className="text-xs text-muted-foreground">
-            {rows == null
-              ? '加载中…'
-              : rows.length === 0
-                ? '还没有批量任务。'
-                : `共 ${rows.length} 个批量任务`}
-          </div>
+    <PageContainer width="list">
+      <PageHeader
+        title="批量任务"
+        description="一次提交多个任务，按套餐并发执行"
+        action={
           <button
             type="button"
             onClick={() => setDialogOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90"
           >
             <Plus className="h-4 w-4" />
             新建批量任务
           </button>
+        }
+      />
+      <Section>
+        <div className="mb-3 text-xs text-muted-foreground">
+          {rows == null
+            ? '加载中…'
+            : rows.length === 0
+              ? '还没有批量任务。'
+              : `共 ${rows.length} 个批量任务`}
         </div>
         {rows && rows.length === 0 && (
           <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
@@ -192,7 +196,7 @@ function BatchList(): JSX.Element {
         }}
         initialPrompts={initialPrompts}
       />
-    </PageShell>
+    </PageContainer>
   );
 }
 
@@ -234,13 +238,14 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
 
   if (!detail) {
     return (
-      <PageShell title="批量任务详情" backTo="/batch" width="4xl">
+      <PageContainer width="list">
+        <PageHeader title="批量任务详情" />
         <Section>
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
             加载中…
           </div>
         </Section>
-      </PageShell>
+      </PageContainer>
     );
   }
 
@@ -252,27 +257,26 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
   const canCancel = detail.status === 'pending' || detail.status === 'running';
 
   return (
-    <PageShell
-      title={detail.name ?? `批量任务 · ${detail.itemsTotal} 项`}
-      subtitle={`并发 ${detail.concurrency} · ${STATUS_LABEL[detail.status] ?? detail.status}`}
-      backTo="/batch"
-      width="4xl"
-    >
-      <Section>
-        <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
-          <span>
-            {detail.itemsDone} / {detail.itemsTotal} 完成
-            {detail.itemsFailed > 0 && ` · ${detail.itemsFailed} 失败`}
-          </span>
-          {canCancel && (
+    <PageContainer width="list">
+      <PageHeader
+        title={detail.name ?? `批量任务 · ${detail.itemsTotal} 项`}
+        description={`并发 ${detail.concurrency} · ${STATUS_LABEL[detail.status] ?? detail.status}`}
+        action={
+          canCancel ? (
             <button
               type="button"
               onClick={() => void handleCancel()}
-              className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-destructive/60 hover:text-destructive"
+              className="inline-flex h-9 items-center rounded-md border border-border px-3 text-sm text-muted-foreground transition-colors hover:border-destructive/60 hover:text-destructive"
             >
               取消批量
             </button>
-          )}
+          ) : null
+        }
+      />
+      <Section>
+        <div className="mb-2 text-xs text-muted-foreground">
+          {detail.itemsDone} / {detail.itemsTotal} 完成
+          {detail.itemsFailed > 0 && ` · ${detail.itemsFailed} 失败`}
         </div>
         <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
           <div
@@ -317,7 +321,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
           ))}
         </ul>
       </Section>
-    </PageShell>
+    </PageContainer>
   );
 }
 

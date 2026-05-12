@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { PageShell } from '@/pages/PageShell';
+import { PageContainer, PageHeader } from '@/pages/PageShell';
 
 /**
  * Terms of service. Template text; must be reviewed by counsel before
@@ -8,7 +8,8 @@ import { PageShell } from '@/pages/PageShell';
  */
 export function TermsPage(): JSX.Element {
   return (
-    <PageShell title="服务条款" subtitle="最后更新：2026-04-24" width="3xl">
+    <PageContainer width="prose">
+      <PageHeader title="服务条款" description="最后更新：2026-04-24" />
       <article className="prose prose-sm max-w-none dark:prose-invert prose-headings:tracking-tight">
         <p>
           欢迎使用 HOLA DAY（下称"我们"、"本服务"）。本服务条款（下称"本条款"）构成您
@@ -92,6 +93,6 @@ export function TermsPage(): JSX.Element {
           如有疑问，请联系 <a href="mailto:support@holaday.ai">support@holaday.ai</a>。
         </p>
       </article>
-    </PageShell>
+    </PageContainer>
   );
 }

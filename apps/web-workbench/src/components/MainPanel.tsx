@@ -155,7 +155,7 @@ export function MainPanel({
             onPickSuggestion={handlePickFromTaskSummary}
           />
         ) : (
-          <div className="mx-auto max-w-3xl px-6 pt-12">
+          <div className="mx-auto w-full max-w-[760px] px-4 pt-12 sm:px-6 md:pt-24">
             <EmptyState
               greetingName={greetingName}
               onPick={handlePickFromEmptyState}
@@ -194,12 +194,14 @@ function EmptyState({
 }): JSX.Element {
   const who = greetingName ? `，${greetingName}` : '';
   return (
-    <div className="flex flex-col items-center justify-center pb-8 pt-16 text-center">
+    <div className="flex flex-col items-center justify-center pb-8 text-center">
       <div className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-primary to-[hsl(var(--accent))] text-white shadow-lg shadow-primary/20">
         <Sparkles className="h-6 w-6" />
       </div>
-      <h2 className="mt-5 text-2xl font-semibold tracking-tight">你好{who}</h2>
-      <p className="mt-2 max-w-md text-sm text-muted-foreground">
+      <h2 className="mt-5 text-[28px] font-semibold leading-tight tracking-tight">
+        你好{who}
+      </h2>
+      <p className="mt-2 max-w-[520px] text-sm leading-relaxed text-muted-foreground">
         告诉 HOLA DAY 你想做什么，它会替你操作浏览器，把事情一步步做完。
       </p>
       <ul className="mt-7 grid w-full gap-3 text-left sm:grid-cols-2">
@@ -210,14 +212,18 @@ function EmptyState({
               <button
                 type="button"
                 onClick={() => onPick(s.intent)}
-                className="group flex h-full w-full gap-3 rounded-xl border border-border bg-card px-4 py-3.5 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition hover:-translate-y-px hover:border-primary/40 hover:shadow-md hover:shadow-primary/10"
+                className="group flex h-[72px] w-full items-center gap-3 rounded-[10px] border border-border bg-card px-4 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition hover:-translate-y-px hover:border-primary/40 hover:shadow-md hover:shadow-primary/10"
               >
                 <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
                   <Icon className="h-4 w-4" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-foreground">{s.title}</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">{s.intent}</span>
+                  <span className="block text-sm font-medium text-foreground">
+                    {s.title}
+                  </span>
+                  <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                    {s.intent}
+                  </span>
                 </span>
               </button>
             </li>

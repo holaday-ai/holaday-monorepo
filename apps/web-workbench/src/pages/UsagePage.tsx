@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
-import { PageShell, Section } from '@/pages/PageShell';
+import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 
 interface DayBar {
   date: string;
@@ -61,7 +61,8 @@ export function UsagePage(): JSX.Element {
   const maxBar = Math.max(1, ...bars.map((b) => b.count));
 
   return (
-    <PageShell title="用量" subtitle="当月任务额度和执行统计" width="5xl">
+    <PageContainer width="wide">
+      <PageHeader title="用量" description="当月任务额度和执行统计" />
       <div className="space-y-6">
         {error && (
           <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 text-xs text-red-700">
@@ -157,7 +158,7 @@ export function UsagePage(): JSX.Element {
           </div>
         </Section>
       </div>
-    </PageShell>
+    </PageContainer>
   );
 }
 

@@ -1,70 +1,103 @@
-import { ArrowLeft } from 'lucide-react';
 import * as React from 'react';
-import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 
-interface Props {
-  title: string;
-  subtitle?: string;
+/**
+ * Page-level building blocks for secondary product pages. Sub-pages
+ * compose these inside the unified AppShell's main slot:
+ *
+ *   <PageContainer width="list">
+ *     <PageHeader title="..." description="..." action={...} />
+ *     <Section>...</Section>
+ *   </PageContainer>
+ *
+ * No more sticky sub-shell, no more "← 返回" — the AppShell sidebar
+ * stays mounted across every authed route, so a "back" link inside
+ * each page just duplicates the navigation surface the user already
+ * has on the left.
+ */
+
+const WIDTH_CLASS = {
+  /** Forms / settings — narrow column so labels and inputs read cleanly. */
+  form: 'max-w-[880px]',
+  /** Tables / lists — wider so rows breathe + columns line up. */
+  list: 'max-w-[960px]',
+  /** Wide content (billing, plan comparison). */
+  wide: 'max-w-5xl',
+  /** Reading column for legal text. */
+  prose: 'max-w-3xl',
+} as const;
+
+export type PageContainerWidth = keyof typeof WIDTH_CLASS;
+
+interface PageContainerProps {
   children: React.ReactNode;
-  /** Override the back-link target. Default: `/` (workbench). */
-  backTo?: string;
-  backLabel?: string;
-  /** Tighten max-w for text-heavy pages (legal). Default: `5xl`. */
-  width?: '2xl' | '3xl' | '4xl' | '5xl' | '6xl';
+  width?: PageContainerWidth;
+  className?: string;
 }
 
 /**
- * Common shell for secondary product pages. Centers a max-width
- * container on the page background, shows a sticky header with a
- * back-arrow link, and renders children below.
- *
- * Uses the shadcn token palette so it tracks light/dark theme with
- * the rest of the app — no bespoke colors.
+ * Centered max-width wrapper for a secondary page's main content.
+ * Provides the horizontal padding (16/24/32 px responsive) + vertical
+ * rhythm. Lives inside the AppShell's `<main>` slot, which itself
+ * supplies the scrolling container + background.
  */
-export function PageShell({
-  title,
-  subtitle,
+export function PageContainer({
   children,
-  backTo = '/',
-  backLabel = '返回',
-  width = '5xl',
-}: Props): JSX.Element {
-  const widthClass = {
-    '2xl': 'max-w-2xl',
-    '3xl': 'max-w-3xl',
-    '4xl': 'max-w-4xl',
-    '5xl': 'max-w-5xl',
-    '6xl': 'max-w-6xl',
-  }[width];
-
+  width = 'list',
+  className,
+}: PageContainerProps): JSX.Element {
   return (
-    <div className="min-h-full w-full overflow-y-auto bg-background text-foreground">
-      <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur-xl">
-        <div className={cn('mx-auto flex items-center gap-3 px-4 py-3 md:px-6', widthClass)}>
-          <Link
-            to={backTo}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            <span>{backLabel}</span>
-          </Link>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-sm font-semibold tracking-tight">{title}</h1>
-            {subtitle && (
-              <p className="truncate text-[11px] text-muted-foreground">{subtitle}</p>
-            )}
-          </div>
-        </div>
-      </header>
-      <main className={cn('mx-auto px-4 py-8 md:px-6 md:py-10', widthClass)}>{children}</main>
+    <div
+      className={cn(
+        'mx-auto w-full px-4 py-8 sm:px-6 md:px-8 md:py-10',
+        WIDTH_CLASS[width],
+        className,
+      )}
+    >
+      {children}
     </div>
   );
 }
 
+interface PageHeaderProps {
+  title: string;
+  description?: string;
+  /** Right-side action button(s). Renders inline with the title row. */
+  action?: React.ReactNode;
+}
+
 /**
- * Card-style section used on most secondary pages. Consistent rounded
- * border + card bg so pages feel like part of one system.
+ * Page header row. Two-column layout: title + description on the
+ * left, action button(s) on the right. Tokenised type sizes match
+ * the design spec (20/600 title, 13 muted description). Below it,
+ * the page's body sections render with their own card / list
+ * affordances.
+ */
+export function PageHeader({
+  title,
+  description,
+  action,
+}: PageHeaderProps): JSX.Element {
+  return (
+    <header className="mb-6 flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <h1 className="text-xl font-semibold leading-tight tracking-tight text-foreground">
+          {title}
+        </h1>
+        {description && (
+          <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+            {description}
+          </p>
+        )}
+      </div>
+      {action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
+    </header>
+  );
+}
+
+/**
+ * Card-style section used on most secondary pages. Consistent
+ * rounded border + card bg so pages feel like part of one system.
  */
 export function Section({
   title,
@@ -86,7 +119,9 @@ export function Section({
     >
       {(title || description) && (
         <header className="mb-4">
-          {title && <h2 className="text-base font-semibold tracking-tight">{title}</h2>}
+          {title && (
+            <h2 className="text-base font-semibold tracking-tight">{title}</h2>
+          )}
           {description && (
             <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
           )}

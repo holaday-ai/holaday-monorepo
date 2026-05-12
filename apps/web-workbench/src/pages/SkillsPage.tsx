@@ -38,7 +38,7 @@ import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
-import { PageShell } from '@/pages/PageShell';
+import { PageContainer, PageHeader } from '@/pages/PageShell';
 import type { UiSkill } from '@/types/task';
 
 type Category = UiSkill['category'];
@@ -178,11 +178,11 @@ export function SkillsPage(): JSX.Element {
   }
 
   return (
-    <PageShell
-      title="专家技能"
-      subtitle="选择你常用的技能，HOLA DAY 会自动识别并调用专业工作流"
-      width="5xl"
-    >
+    <PageContainer width="wide">
+      <PageHeader
+        title="专家技能"
+        description="选择你常用的技能，HOLA DAY 会自动识别并调用专业工作流"
+      />
       {loading ? (
         <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
           加载中…
@@ -212,7 +212,7 @@ export function SkillsPage(): JSX.Element {
           ))}
         </div>
       )}
-    </PageShell>
+    </PageContainer>
   );
 }
 

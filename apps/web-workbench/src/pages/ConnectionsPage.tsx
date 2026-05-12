@@ -15,7 +15,7 @@ import {
 import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
-import { PageShell } from '@/pages/PageShell';
+import { PageContainer, PageHeader } from '@/pages/PageShell';
 
 type Category = 'productivity' | 'communication' | 'storage' | 'development' | 'social';
 
@@ -81,11 +81,11 @@ export function ConnectionsPage(): JSX.Element {
   }, [toast]);
 
   return (
-    <PageShell
-      title="即将支持的连接器"
-      subtitle="OAuth 与 MCP 集成正在路上 — 这里展示了规划中的服务"
-      width="5xl"
-    >
+    <PageContainer width="wide">
+      <PageHeader
+        title="即将支持的连接器"
+        description="OAuth 与 MCP 集成正在路上 — 这里展示了规划中的服务"
+      />
       {loading ? (
         <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
           加载中…
@@ -120,6 +120,6 @@ export function ConnectionsPage(): JSX.Element {
           })}
         </div>
       )}
-    </PageShell>
+    </PageContainer>
   );
 }

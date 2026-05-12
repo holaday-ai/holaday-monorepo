@@ -137,7 +137,7 @@ describe('shouldRunLlmVerifier', () => {
     const detResult = verifyDeterministic({
       contract,
       ledger,
-      answerText: 'Page reached.',
+      answerText: 'Page reached example.com home content successfully.',
       finalUrl: 'https://example.com/',
     });
     expect(detResult.passed).toBe(true);

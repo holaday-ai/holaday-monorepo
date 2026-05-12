@@ -1,6 +1,5 @@
 import {
   Check,
-  ChevronRight,
   Clipboard,
   Clock,
   FolderOpen,
@@ -21,6 +20,16 @@ import {
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { QuotaIndicator } from '@/components/QuotaIndicator';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Sidebar as SidebarShell,
   SidebarContent,
@@ -269,23 +278,10 @@ export function Sidebar({
     | null
   >(null);
   const [renamingId, setRenamingId] = React.useState<string | null>(null);
-  // Phase 16b — when set, the right-click menu's "移到项目" item has
-  // been hovered and the submenu is showing the project list. Resets
-  // when the user clicks an option or the outer menu closes.
-  const [moveOpen, setMoveOpen] = React.useState(false);
-
-  React.useEffect(() => {
-    if (!menu) return;
-    const close = (): void => setMenu(null);
-    window.addEventListener('click', close);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
-    return () => {
-      window.removeEventListener('click', close);
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
-    };
-  }, [menu]);
+  // Radix DropdownMenu owns the outside-click / Escape / focus loop —
+  // the previous hand-rolled mousedown + scroll + resize listeners are
+  // gone. We just toggle `menu` state when the user right-clicks a row
+  // and Radix anchors to an invisible 0×0 trigger at the cursor.
 
   // Optimization #4 — outer shell is now `<SidebarShell>` from
   // shadcn. The provider above us handles open/collapse state +
@@ -363,7 +359,6 @@ export function Sidebar({
                       }}
                       onContextMenu={(id, e) => {
                         e.preventDefault();
-                        setMoveOpen(false);
                         setMenu({
                           taskId: id,
                           intent: t.intent,
@@ -403,7 +398,6 @@ export function Sidebar({
                       }}
                       onContextMenu={(id, e) => {
                         e.preventDefault();
-                        setMoveOpen(false);
                         setMenu({
                           taskId: id,
                           intent: t.intent,
@@ -443,7 +437,6 @@ export function Sidebar({
                       }}
                       onContextMenu={(id, e) => {
                         e.preventDefault();
-                        setMoveOpen(false);
                         setMenu({
                           taskId: id,
                           intent: t.intent,
@@ -570,258 +563,218 @@ export function Sidebar({
         <SidebarRail />
       </SidebarShell>
 
-      {menu && (onDeleteTask || onRetryTask || onRenameTask) && (
-        <ContextMenuShell anchorX={menu.x} anchorY={menu.y}><div
-          role="menu"
-          onClick={(e) => e.stopPropagation()}
-          className="min-w-[160px] rounded-md border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg animate-fade-in"
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              const { taskId } = menu;
-              setMenu(null);
-              togglePin(taskId);
-            }}
-            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-foreground/5"
-          >
-            {pinnedIds.has(menu.taskId) ? (
-              <>
-                <PinOff className="h-3.5 w-3.5" />
-                取消置顶
-              </>
-            ) : (
-              <>
-                <Pin className="h-3.5 w-3.5" />
-                置顶
-              </>
-            )}
-          </button>
-          {onRenameTask && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                const { taskId } = menu;
-                setMenu(null);
-                setRenamingId(taskId);
-              }}
-              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-foreground/5"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-              重命名
-            </button>
-          )}
-          {onRetryTask && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={async () => {
-                const { intent } = menu;
-                setMenu(null);
-                await onRetryTask(intent);
-              }}
-              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-foreground/5"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              用相同意图重试
-            </button>
-          )}
-          {onMoveTaskToProject && (
-            <div className="relative">
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => setMoveOpen((v) => !v)}
-                aria-expanded={moveOpen}
-                className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-foreground/5"
-              >
-                <FolderOpen className="h-3.5 w-3.5" />
-                <span className="flex-1">移到项目</span>
-                <ChevronRight className="h-3 w-3 opacity-60" />
-              </button>
-              {moveOpen && (
-                <div
-                  role="menu"
-                  // Phase 18b — submenu positioning: mobile (<sm) stacks
-                  // below the parent menu item (full width of the
-                  // outer context menu) so it can't overflow off the
-                  // right edge on a 390px viewport. Desktop (≥sm)
-                  // keeps the original adjacent-right placement.
-                  className="absolute z-[61] inset-x-0 top-full mt-1 max-h-72 overflow-y-auto rounded-md border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg animate-fade-in sm:inset-x-auto sm:left-full sm:top-0 sm:ml-1 sm:mt-0 sm:min-w-[180px]"
-                >
-                  {/* "无项目" — clear assignment */}
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={async () => {
-                      const { taskId } = menu;
-                      setMenu(null);
-                      setMoveOpen(false);
-                      await onMoveTaskToProject(taskId, null);
-                    }}
-                    className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left transition-colors hover:bg-foreground/5"
-                  >
-                    <Check
-                      className={cn(
-                        'h-3.5 w-3.5 shrink-0',
-                        menu.projectId == null ? 'opacity-100' : 'opacity-0',
-                      )}
-                    />
-                    <span className="text-muted-foreground">无项目</span>
-                  </button>
-                  {(projectsProp ?? []).length > 0 && (
-                    <div className="my-1 border-t border-border" />
-                  )}
-                  {(projectsProp ?? []).map((p) => {
-                    const active = menu.projectId === p.projectId;
-                    return (
-                      <button
-                        key={p.projectId}
-                        type="button"
-                        role="menuitem"
-                        onClick={async () => {
-                          const { taskId } = menu;
-                          setMenu(null);
-                          setMoveOpen(false);
-                          await onMoveTaskToProject(taskId, p.projectId);
-                        }}
-                        className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left transition-colors hover:bg-foreground/5"
-                      >
-                        <Check
-                          className={cn(
-                            'h-3.5 w-3.5 shrink-0',
-                            active ? 'opacity-100' : 'opacity-0',
-                          )}
-                        />
-                        <span className="min-w-0 flex-1 truncate text-foreground">
-                          {p.name}
-                        </span>
-                      </button>
-                    );
-                  })}
-                  {onCreateProject && (
-                    <>
-                      <div className="my-1 border-t border-border" />
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setMenu(null);
-                          setMoveOpen(false);
-                          onCreateProject();
-                        }}
-                        className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-foreground/5"
-                      >
-                        <FolderPlus className="h-3.5 w-3.5" />
-                        新建项目
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          <button
-            type="button"
-            role="menuitem"
-            onClick={async () => {
-              const { intent } = menu;
-              setMenu(null);
-              try {
-                // navigator.clipboard is async and gated on secure
-                // context — wrap so a rejected promise doesn't
-                // crash the component. Users on http:// dev get a
-                // console warning but nothing user-visible.
-                await navigator.clipboard?.writeText(intent);
-              } catch (err) {
-                console.warn('[TaskMenu] clipboard copy failed', err);
+      <TaskContextMenu
+        menu={menu}
+        onClose={() => setMenu(null)}
+        pinned={menu ? pinnedIds.has(menu.taskId) : false}
+        onTogglePin={() => {
+          if (!menu) return;
+          togglePin(menu.taskId);
+        }}
+        onRename={
+          onRenameTask
+            ? () => {
+                if (!menu) return;
+                setRenamingId(menu.taskId);
               }
-            }}
-            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-foreground/5"
-          >
-            <Clipboard className="h-3.5 w-3.5" />
-            复制任务文本
-          </button>
-          {onDeleteTask && (
-            <button
-              type="button"
-              role="menuitem"
-              disabled={!menu.deletable}
-              onClick={async () => {
-                const { taskId } = menu;
-                setMenu(null);
-                if (!menu.deletable) return;
-                await onDeleteTask(taskId);
-              }}
-              className={cn(
-                'flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left transition-colors',
-                menu.deletable
-                  ? 'text-red-600 hover:bg-red-500/10 dark:text-red-400'
-                  : 'cursor-not-allowed text-muted-foreground',
-              )}
-              title={menu.deletable ? '' : '任务进行中，不能删除'}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              删除任务
-            </button>
-          )}
-        </div></ContextMenuShell>
-      )}
+            : undefined
+        }
+        onRetry={
+          onRetryTask
+            ? () => {
+                if (!menu) return;
+                void onRetryTask(menu.intent);
+              }
+            : undefined
+        }
+        onMoveToProject={
+          onMoveTaskToProject
+            ? (projectId) => {
+                if (!menu) return;
+                void onMoveTaskToProject(menu.taskId, projectId);
+              }
+            : undefined
+        }
+        projects={projectsProp}
+        onCreateProject={onCreateProject}
+        onCopyIntent={() => {
+          if (!menu) return;
+          try {
+            void navigator.clipboard?.writeText(menu.intent);
+          } catch (err) {
+            console.warn('[TaskMenu] clipboard copy failed', err);
+          }
+        }}
+        onDelete={
+          onDeleteTask
+            ? () => {
+                if (!menu || !menu.deletable) return;
+                void onDeleteTask(menu.taskId);
+              }
+            : undefined
+        }
+      />
     </>
   );
 }
 
+interface TaskContextMenuProps {
+  menu:
+    | {
+        taskId: string;
+        intent: string;
+        projectId: string | null;
+        x: number;
+        y: number;
+        deletable: boolean;
+      }
+    | null;
+  onClose(): void;
+  pinned: boolean;
+  onTogglePin(): void;
+  onRename?(): void;
+  onRetry?(): void;
+  onMoveToProject?(projectId: string | null): void;
+  projects?: readonly UiProject[];
+  onCreateProject?(): void;
+  onCopyIntent(): void;
+  onDelete?(): void;
+}
+
 /**
- * Context-menu positioner that flips direction when the anchor is
- * close to the viewport's bottom / right edge. Measures its own
- * size via ref in a layout effect, then re-anchors via `bottom` /
- * `right` so the menu always lands on-screen. Keeps the anchor
- * pixel (the raw click point) in the same place — only the menu's
- * extent direction changes.
+ * Right-click task menu, anchored to an invisible 0×0 trigger at the
+ * cursor coords. Radix DropdownMenu owns outside-click, Escape,
+ * keyboard navigation, focus management, and portal layering — the
+ * earlier hand-rolled ContextMenuShell + setMoveOpen / mousedown /
+ * scroll / resize listeners are all gone. Submenu uses Radix
+ * DropdownMenuSub so arrow keys + Esc work the same as in every other
+ * shadcn menu in the app.
  */
-function ContextMenuShell({
-  anchorX,
-  anchorY,
-  children,
-}: {
-  anchorX: number;
-  anchorY: number;
-  children: React.ReactNode;
-}): JSX.Element {
-  const ref = React.useRef<HTMLDivElement>(null);
-  const [pos, setPos] = React.useState<React.CSSProperties>({
-    top: anchorY,
-    left: anchorX,
-    visibility: 'hidden',
-  });
-  React.useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const { offsetWidth: w, offsetHeight: h } = el;
-    const margin = 8;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const style: React.CSSProperties = { position: 'fixed', visibility: 'visible' };
-    if (anchorY + h + margin > vh) {
-      // Too close to the bottom — anchor by `bottom` so the menu
-      // grows upward from the cursor.
-      style.bottom = Math.max(margin, vh - anchorY);
-    } else {
-      style.top = anchorY;
-    }
-    if (anchorX + w + margin > vw) {
-      style.right = Math.max(margin, vw - anchorX);
-    } else {
-      style.left = anchorX;
-    }
-    setPos(style);
-  }, [anchorX, anchorY]);
+function TaskContextMenu({
+  menu,
+  onClose,
+  pinned,
+  onTogglePin,
+  onRename,
+  onRetry,
+  onMoveToProject,
+  projects,
+  onCreateProject,
+  onCopyIntent,
+  onDelete,
+}: TaskContextMenuProps): JSX.Element | null {
+  if (!menu) return null;
+  const anchorStyle: React.CSSProperties = {
+    position: 'fixed',
+    left: menu.x,
+    top: menu.y,
+    width: 0,
+    height: 0,
+    pointerEvents: 'none',
+  };
   return (
-    <div ref={ref} className="z-[60]" style={pos}>
-      {children}
-    </div>
+    <DropdownMenu
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DropdownMenuTrigger asChild>
+        <span style={anchorStyle} aria-hidden />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        side="bottom"
+        className="min-w-[180px]"
+        onCloseAutoFocus={(e) => e.preventDefault()}
+      >
+        <DropdownMenuItem onSelect={onTogglePin}>
+          {pinned ? (
+            <>
+              <PinOff className="text-muted-foreground" />
+              <span>取消置顶</span>
+            </>
+          ) : (
+            <>
+              <Pin className="text-muted-foreground" />
+              <span>置顶</span>
+            </>
+          )}
+        </DropdownMenuItem>
+        {onRename && (
+          <DropdownMenuItem onSelect={onRename}>
+            <Pencil className="text-muted-foreground" />
+            <span>重命名</span>
+          </DropdownMenuItem>
+        )}
+        {onRetry && (
+          <DropdownMenuItem onSelect={onRetry}>
+            <RotateCcw className="text-muted-foreground" />
+            <span>用相同意图重试</span>
+          </DropdownMenuItem>
+        )}
+        {onMoveToProject && (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <FolderOpen className="text-muted-foreground" />
+              <span>移到项目</span>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="max-h-72 overflow-y-auto">
+              <DropdownMenuItem onSelect={() => onMoveToProject(null)}>
+                <Check
+                  className={cn(
+                    'opacity-0',
+                    menu.projectId == null && 'opacity-100',
+                  )}
+                />
+                <span className="text-muted-foreground">无项目</span>
+              </DropdownMenuItem>
+              {(projects ?? []).length > 0 && <DropdownMenuSeparator />}
+              {(projects ?? []).map((p) => {
+                const active = menu.projectId === p.projectId;
+                return (
+                  <DropdownMenuItem
+                    key={p.projectId}
+                    onSelect={() => onMoveToProject(p.projectId)}
+                  >
+                    <Check
+                      className={cn('opacity-0', active && 'opacity-100')}
+                    />
+                    <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                  </DropdownMenuItem>
+                );
+              })}
+              {onCreateProject && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={onCreateProject}>
+                    <FolderPlus className="text-muted-foreground" />
+                    <span>新建项目</span>
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        )}
+        <DropdownMenuItem onSelect={onCopyIntent}>
+          <Clipboard className="text-muted-foreground" />
+          <span>复制任务文本</span>
+        </DropdownMenuItem>
+        {onDelete && (
+          <DropdownMenuItem
+            disabled={!menu.deletable}
+            onSelect={onDelete}
+            className={cn(
+              menu.deletable &&
+                'text-red-600 focus:bg-red-500/10 focus:text-red-600 dark:text-red-400 dark:focus:text-red-300',
+            )}
+          >
+            <Trash2 className={menu.deletable ? '' : 'text-muted-foreground'} />
+            <span>删除任务</span>
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
