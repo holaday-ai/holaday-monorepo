@@ -48,6 +48,7 @@
  */
 
 import OpenAI from 'openai';
+import { Agent as UndiciAgent, fetch as undiciFetch } from 'undici';
 import type { Logger } from 'pino';
 import type {
   CheckResult,
@@ -56,6 +57,32 @@ import type {
 
 export const DEFAULT_VERIFIER_FALLBACK_MODEL = 'gpt-4o-mini';
 export const DEFAULT_VERIFIER_FALLBACK_TIMEOUT_MS = 8_000;
+
+/**
+ * Dedicated undici dispatcher — see `openai-response-layer.ts` for
+ * the rationale. The orchestrator's long-running process shares
+ * undici state with the Anthropic SDK + long-lived browser fetches;
+ * we hit a reproducible "in-process OpenAI call times out at 30s
+ * while a standalone Node + same env succeeds in ~1s" symptom that
+ * goes away when each OpenAI client gets its own dispatcher.
+ *
+ * Codex P2 follow-up — this also pairs with `maxRetries: 0` on the
+ * client so the 8s timeout in the spec actually bounds the
+ * verifier-fallback's user-visible latency. Default `maxRetries: 2`
+ * turned 8s into 24s = directly contradicts the "non-blocking" spec.
+ */
+let verifierDispatcher: UndiciAgent | null = null;
+function getVerifierDispatcher(): UndiciAgent {
+  if (!verifierDispatcher) {
+    verifierDispatcher = new UndiciAgent({
+      connect: { timeout: 5_000 },
+      keepAliveTimeout: 30_000,
+      keepAliveMaxTimeout: 60_000,
+      pipelining: 0,
+    });
+  }
+  return verifierDispatcher;
+}
 /** Cap on the answer text we send to OpenAI; longer drafts are
  *  truncated with a marker line. The verifier-fallback prompt is
  *  intentionally compact — Haiku already handled the deep judgement,
@@ -183,11 +210,21 @@ export async function verifyFallback(
       metadata: { model, latencyMs: 0, triggered: false, fallbackReason: 'no_trigger' },
     };
   }
+  // Codex P2 — same pattern as `openai-response-layer.ts`:
+  // dedicated dispatcher + maxRetries=0 so the 8s timeout from the
+  // spec actually bounds latency. Without these, the SDK's default
+  // maxRetries=2 turned every fallback failure into a 24s wait,
+  // contradicting the "non-blocking second opinion" design.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dispatcherFetch: any = (url: string | URL, init?: any) =>
+    undiciFetch(url as never, { ...(init ?? {}), dispatcher: getVerifierDispatcher() });
   const client =
     deps.openaiClient ??
     new OpenAI({
       apiKey: env.OPENAI_API_KEY,
       timeout: DEFAULT_VERIFIER_FALLBACK_TIMEOUT_MS,
+      maxRetries: 0,
+      fetch: dispatcherFetch,
     });
   let raw: string;
   try {

@@ -25,6 +25,13 @@ interface UiScheduled {
   status: string;
   nextRunAt: string | Date;
   lastRunAt: string | Date | null;
+  /** Codex P1 — 'success' | 'failed' | null. Differentiates the
+   *  status='active' recurring row that just-failed vs the
+   *  status='active' row that just-succeeded. */
+  lastRunStatus?: 'success' | 'failed' | string | null;
+  /** Error message captured when last_run_status='failed'. Shown
+   *  as a tooltip on the failure badge. */
+  lastError?: string | null;
   createdAt: string | Date;
 }
 
@@ -143,7 +150,9 @@ export function ScheduledPage(): JSX.Element {
                             ? 'text-foreground/80'
                             : r.status === 'paused'
                               ? 'text-amber-700 dark:text-amber-300'
-                              : 'text-muted-foreground'
+                              : r.status === 'failed'
+                                ? 'text-rose-700 dark:text-rose-300'
+                                : 'text-muted-foreground'
                       }
                     >
                       {r.status === 'running'
@@ -152,10 +161,36 @@ export function ScheduledPage(): JSX.Element {
                           ? '已启用'
                           : r.status === 'paused'
                             ? '已暂停'
-                            : '已完成'}
+                            : r.status === 'failed'
+                              ? '已失败'
+                              : '已完成'}
                     </span>
+                    {/* Codex P1 — for recurring rows that just had a
+                        failed fire (status='active', last_run_status='failed'),
+                        surface a small red chip with the error message.
+                        For one-shot rows that failed the status badge
+                        already says 已失败 so this chip is redundant. */}
+                    {r.status === 'active' && r.lastRunStatus === 'failed' && (
+                      <span
+                        className="rounded border border-rose-300 bg-rose-50 px-1.5 py-0.5 text-rose-700 dark:border-rose-700 dark:bg-rose-900/30 dark:text-rose-300"
+                        title={r.lastError ?? '上次执行失败'}
+                      >
+                        上次失败
+                      </span>
+                    )}
                     <span>下次：{fmtDate(r.nextRunAt)}</span>
                     {r.lastRunAt && <span>上次：{fmtDate(r.lastRunAt)}</span>}
+                    {/* One-shot failed: the status badge already says
+                        已失败; offer the error detail on hover when
+                        present. */}
+                    {r.status === 'failed' && r.lastError && (
+                      <span
+                        className="cursor-help text-rose-700 dark:text-rose-300"
+                        title={r.lastError}
+                      >
+                        ⓘ 错误详情
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">

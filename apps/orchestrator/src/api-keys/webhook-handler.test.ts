@@ -620,7 +620,9 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
         ({ userId: userExternalId }) as unknown as import('../trpc/context.js').Context,
       dispatch,
     });
-    return { handler, plaintext, dispatch, state };
+    // Codex P2 — expose the db handle so tests can mutate
+    // db.insert mid-flight (e.g. to engineer a non-DUP throw).
+    return { handler, plaintext, dispatch, state, db };
   }
 
   it('no Idempotency-Key header → bypasses cache (back-compat)', async () => {
@@ -765,6 +767,69 @@ describe('createWebhookTasksHandler — idempotency (Phase 5d follow-up)', () =>
     );
     // Critical: dispatch MUST NOT fire (atomic-claim P1 guarantee).
     expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('Codex P2 — claim flow throws WITH Idempotency-Key → 503 fail-closed (no dispatch)', async () => {
+    // Engineer a non-DUP DB throw on the claim INSERT. The handler
+    // MUST return 503 (not 200) so the external caller's retry
+    // logic keeps the idempotency-key contract intact. Without
+    // this fail-closed: a transient DB blip on the claim path
+    // silently degrades to "dispatch + skip cache", letting two
+    // retries spawn duplicate tasks.
+    const { handler, plaintext, dispatch, db } = setup();
+    // Patch db.insert ONCE — first call throws a non-DUP error.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const originalInsert = (db as any).insert;
+    let insertCalls = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any).insert = (table: unknown) => {
+      insertCalls++;
+      if (insertCalls === 1) {
+        return {
+          async values() {
+            throw new Error('connection refused');
+          },
+        };
+      }
+      return originalInsert(table);
+    };
+    dispatch.mockClear();
+    const r = makeRes();
+    await handler(
+      makeReq({
+        auth: `Bearer ${plaintext}`,
+        body: { prompt: 'safe-retry path' },
+        headers: { 'Idempotency-Key': 'zap-fail-closed' },
+      }),
+      r.res,
+    );
+    expect(r.captured.status).toBe(503);
+    expect((r.captured.json as { error: string }).error).toBe(
+      'idempotency_unavailable',
+    );
+    // Critical: dispatch MUST NOT fire — that's the whole point of
+    // fail-closed. Letting it through would create the task without
+    // the idempotency row, defeating retry safety.
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('Codex P2 — webhook WITHOUT Idempotency-Key is unaffected by fail-closed change', async () => {
+    // The fail-closed change is gated on the presence of the
+    // Idempotency-Key header. Bareword webhooks still dispatch
+    // normally even if some other infra error happens.
+    const { handler, plaintext, dispatch, state } = setup();
+    const r = makeRes();
+    await handler(
+      makeReq({
+        auth: `Bearer ${plaintext}`,
+        body: { prompt: 'no idempotency key path' },
+        // No Idempotency-Key header.
+      }),
+      r.res,
+    );
+    expect(r.captured.status).toBe(200);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(state.idempotency).toHaveLength(0);
   });
 
   it('dispatch failure releases the claim so retries aren\'t blocked (NEW Codex P1)', async () => {

@@ -41,6 +41,11 @@ export const scheduledTasksRouter = router({
         nextRunAt: scheduledTasks.nextRunAt,
         lastRunAt: scheduledTasks.lastRunAt,
         status: scheduledTasks.status,
+        // Codex P1 — last_run_status + last_error so the SPA can
+        // distinguish "fired successfully" vs "fired but dispatch
+        // threw" and show the error in a tooltip.
+        lastRunStatus: scheduledTasks.lastRunStatus,
+        lastError: scheduledTasks.lastError,
         createdAt: scheduledTasks.createdAt,
       })
       .from(scheduledTasks)
@@ -53,6 +58,8 @@ export const scheduledTasksRouter = router({
       nextRunAt: r.nextRunAt,
       lastRunAt: r.lastRunAt,
       status: r.status,
+      lastRunStatus: r.lastRunStatus,
+      lastError: r.lastError,
       createdAt: r.createdAt,
     }));
   }),

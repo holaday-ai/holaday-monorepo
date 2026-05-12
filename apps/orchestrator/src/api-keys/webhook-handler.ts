@@ -252,14 +252,35 @@ export function createWebhookTasksHandler(deps: WebhookDeps) {
         // retries aren't blocked by our placeholder row.
         claimedKey = true;
       } catch (err) {
-        // A failure in the claim flow shouldn't block the caller —
-        // log + proceed without caching. The caller misses the
-        // dedupe guarantee for this attempt, but their task still
-        // dispatches.
+        // Codex P2 — fail CLOSED when the caller supplied an
+        // `Idempotency-Key`. The previous "log + proceed" path
+        // silently degraded retry safety: a transient DB blip on
+        // the claim INSERT would let two retries each dispatch
+        // (no atomic claim row written) and produce duplicate
+        // tasks — exactly the failure mode the Idempotency-Key
+        // contract is supposed to prevent.
+        //
+        // Returning 503 lets the external caller (Zapier, etc.)
+        // retry the request on its standard backoff schedule;
+        // the second attempt either succeeds the claim or hits
+        // a replay row + returns 200 cached.
         deps.logger.warn(
-          { err: err instanceof Error ? err.message : String(err) },
-          'webhook: idempotency claim failed (non-fatal — proceeding without cache)',
+          {
+            err: err instanceof Error ? err.message : String(err),
+            userInternalId: resolution.userInternalId,
+            idempotencyKey,
+          },
+          'webhook: idempotency claim failed → 503 fail-closed (Codex P2)',
         );
+        res
+          .status(503)
+          .setHeader('Retry-After', '2')
+          .json({
+            error: 'idempotency_unavailable',
+            message:
+              'Idempotency cache unavailable; retry shortly with the same Idempotency-Key.',
+          });
+        return;
       }
     }
 

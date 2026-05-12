@@ -229,7 +229,15 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
 
     // We own this row now (status='running'). Dispatch, then advance
     // + restore — both branches MUST run so the row doesn't wedge.
+    //
+    // Codex P1 follow-up — capture the dispatch error so we can
+    // record `last_run_status='failed'` + `last_error` and (for
+    // one-shot) flip the terminal status to 'failed' instead of
+    // mis-labelling it 'completed'. Recurring schedules still
+    // advance their nextRunAt (so the next interval gets another
+    // shot) but the failure is visible in /scheduled.
     let dispatchedTaskId: number | null = null;
+    let dispatchError: string | null = null;
     try {
       dispatchedTaskId = await deps.dispatch({
         scheduledTaskId: row.id,
@@ -237,34 +245,50 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
         intent: row.intent,
       });
     } catch (err) {
+      dispatchError = errMsg(err);
       logger.warn(
-        { err: errMsg(err), scheduledTaskId: row.id },
+        { err: dispatchError, scheduledTaskId: row.id },
         'scheduled-runner: dispatch threw',
       );
     }
+    const dispatchOk = dispatchedTaskId !== null && dispatchError === null;
     const nextRun = computeNextRun(
       now,
       row.repeatType as 'once' | 'daily' | 'weekly' | 'monthly' | 'custom',
     );
+    // Truncate the error so it fits a TEXT column without an extra
+    // type. 2KB is plenty for a TRPCError / stack-trace-first-line;
+    // longer payloads usually mean a system error worth shortening
+    // before persisting.
+    const truncatedError =
+      dispatchError !== null ? dispatchError.slice(0, 2000) : null;
     try {
       if (nextRun === null) {
-        // One-shot — terminal.
+        // One-shot — terminal. 'completed' on success; 'failed' when
+        // dispatch threw so the user can see the difference.
         await deps.db
           .update(scheduledTasks)
           .set({
-            status: 'completed',
+            status: dispatchOk ? 'completed' : 'failed',
             lastRunAt: now,
+            lastRunStatus: dispatchOk ? 'success' : 'failed',
+            lastError: truncatedError,
             ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
           })
           .where(eq(scheduledTasks.id, row.id));
       } else {
-        // Recurring — restore to 'active' for the next tick.
+        // Recurring — restore to 'active' for the next tick. Failure
+        // is recorded but doesn't block the next interval; the
+        // common transient cause (quota, network blip) typically
+        // resolves before the next fire.
         await deps.db
           .update(scheduledTasks)
           .set({
             status: 'active',
             nextRunAt: nextRun,
             lastRunAt: now,
+            lastRunStatus: dispatchOk ? 'success' : 'failed',
+            lastError: truncatedError,
             ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
           })
           .where(eq(scheduledTasks.id, row.id));

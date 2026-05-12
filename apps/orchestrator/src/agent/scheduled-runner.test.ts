@@ -124,6 +124,8 @@ describe('startScheduledRunner — tick integration', () => {
     expect(advance).toMatchObject({
       status: 'active',
       lastTaskId: 999,
+      lastRunStatus: 'success',
+      lastError: null,
     });
     expect('nextRunAt' in advance).toBe(true);
     expect((advance as { nextRunAt: Date }).nextRunAt).toBeInstanceOf(Date);
@@ -143,12 +145,14 @@ describe('startScheduledRunner — tick integration', () => {
     expect(advance).toMatchObject({
       status: 'completed',
       lastTaskId: 1000,
+      lastRunStatus: 'success',
+      lastError: null,
     });
     expect('nextRunAt' in advance).toBe(false);
     stopScheduledRunner();
   });
 
-  it('dispatch failure still advances the row (no tight-retry lock)', async () => {
+  it('dispatch returns null (legacy fail signal) → recurring advances + lastRunStatus="failed", no error msg', async () => {
     const { db, updates } = makeFakeDb([
       { id: 9, userId: 42, intent: 'flaky job', repeatType: 'daily' },
     ]);
@@ -164,8 +168,79 @@ describe('startScheduledRunner — tick integration', () => {
     // Status restored to 'active' so the row doesn't wedge in
     // 'running' for a permanently-failing dispatch. Next interval
     // will re-try (subject to the advanced next_run_at).
-    expect(advance).toMatchObject({ status: 'active' });
+    expect(advance).toMatchObject({
+      status: 'active',
+      lastRunStatus: 'failed',
+      lastError: null, // no thrown error → just a "returned null" signal
+    });
     expect('nextRunAt' in advance).toBe(true);
+    stopScheduledRunner();
+  });
+
+  // Codex P1 — dispatch-throw branch tests.
+  it('Codex P1 — dispatch throws on RECURRING → status=active + advance + last_run_status=failed + last_error captured', async () => {
+    const { db, updates } = makeFakeDb([
+      { id: 11, userId: 42, intent: 'thrown daily', repeatType: 'daily' },
+    ]);
+    const dispatch = vi.fn(async () => {
+      throw new Error('OpenAI quota exceeded (test)');
+    });
+    startScheduledRunner({ db, dispatch, pollIntervalMs: 60_000 });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(updates.length).toBe(2);
+    const advance = updates[1]!;
+    // Recurring row still advances + restores to active so the next
+    // interval gets another shot.
+    expect(advance).toMatchObject({
+      status: 'active',
+      lastRunStatus: 'failed',
+      lastError: 'OpenAI quota exceeded (test)',
+    });
+    expect('nextRunAt' in advance).toBe(true);
+    expect('lastTaskId' in advance).toBe(false);
+    stopScheduledRunner();
+  });
+
+  it('Codex P1 — dispatch throws on ONE-SHOT → status=failed (NOT completed) + last_error captured', async () => {
+    // The bug Codex flagged: a one-shot scheduled task whose dispatch
+    // failed used to land at status='completed' — indistinguishable
+    // from a successful run. The new behaviour marks it 'failed' so
+    // the SPA renders a red "已失败" badge with the error tooltip.
+    const { db, updates } = makeFakeDb([
+      { id: 12, userId: 42, intent: 'thrown once', repeatType: 'once' },
+    ]);
+    const dispatch = vi.fn(async () => {
+      throw new Error('quota gate rejected the dispatch');
+    });
+    startScheduledRunner({ db, dispatch, pollIntervalMs: 60_000 });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(updates.length).toBe(2);
+    const advance = updates[1]!;
+    expect(advance).toMatchObject({
+      status: 'failed',
+      lastRunStatus: 'failed',
+      lastError: 'quota gate rejected the dispatch',
+    });
+    expect('nextRunAt' in advance).toBe(false);
+    expect('lastTaskId' in advance).toBe(false);
+    stopScheduledRunner();
+  });
+
+  it('Codex P1 — dispatch error message > 2KB is truncated to fit the TEXT column', async () => {
+    const huge = 'x'.repeat(3_500);
+    const { db, updates } = makeFakeDb([
+      { id: 13, userId: 42, intent: 'huge error', repeatType: 'daily' },
+    ]);
+    const dispatch = vi.fn(async () => {
+      throw new Error(huge);
+    });
+    startScheduledRunner({ db, dispatch, pollIntervalMs: 60_000 });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(updates.length).toBe(2);
+    const advance = updates[1]!;
+    expect((advance as { lastError: string }).lastError).toHaveLength(2_000);
     stopScheduledRunner();
   });
 
