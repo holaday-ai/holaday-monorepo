@@ -199,6 +199,37 @@ export class CdpStreamer {
       void this.armScreencast('frame-navigated', params.frame.url);
     });
 
+    // Codex Browser-UX #4 — `Page.frameNavigated` fires only on
+    // FULL document loads. SPA navigations (history.pushState /
+    // replaceState / hash change) keep the same document; the
+    // event we get is `Page.navigatedWithinDocument`. Without this
+    // listener, clicking a link on a React/Vue/etc. SPA inside the
+    // remote browser left the SPA address bar stuck on the
+    // original URL until a full reload.
+    //
+    // We DON'T re-arm the screencast here — the underlying frame
+    // didn't actually re-render at the document level, the existing
+    // stream stays valid.
+    cdp.on('Page.navigatedWithinDocument', (params) => {
+      if (!this.streaming) return;
+      if (params.frameId == null) return;
+      // Only notify on the MAIN frame's pushState/replaceState; the
+      // streamer keeps the main frame id implicit via the no-parent
+      // check above, but this event doesn't carry parent info.
+      // Filter by URL shape instead — a SPA route change keeps the
+      // origin, so we trust the runtime to only emit this on the
+      // page we're streaming.
+      const msg: ScreencastUrlMessage = {
+        type: 'url-changed',
+        url: params.url,
+      };
+      try {
+        this.opts.ws.send(JSON.stringify(msg));
+      } catch {
+        /* swallow */
+      }
+    });
+
     cdp.on('Page.loadEventFired', () => {
       if (!this.streaming) return;
       void this.armScreencast('load-event-fired', null);

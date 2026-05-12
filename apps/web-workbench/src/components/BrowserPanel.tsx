@@ -1858,9 +1858,16 @@ function FullscreenFloatingToolbar({
         cancelHide();
         setVisible(true);
       }}
+      // Codex Browser-UX #5 — when hidden, the toolbar still
+      // intercepted clicks on the canvas because opacity:0 leaves
+      // hit-testing intact. `pointer-events-none` while hidden
+      // restores click-through to the page; visible state restores
+      // pointer-events-auto via the conditional class below.
       className={cn(
-        'pointer-events-auto absolute left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-1.5 rounded-lg border border-white/15 bg-black/55 px-2.5 py-1.5 shadow-2xl backdrop-blur-md transition-opacity duration-200',
-        visible ? 'opacity-100' : 'opacity-0 hover:opacity-100',
+        'absolute left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-1.5 rounded-lg border border-white/15 bg-black/55 px-2.5 py-1.5 shadow-2xl backdrop-blur-md transition-opacity duration-200',
+        visible
+          ? 'pointer-events-auto opacity-100'
+          : 'pointer-events-none opacity-0 hover:opacity-100',
       )}
       style={{ minWidth: 'min(640px, 90%)', maxWidth: '90%' }}
     >

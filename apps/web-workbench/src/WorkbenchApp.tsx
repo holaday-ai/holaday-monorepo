@@ -44,36 +44,38 @@ interface MeProfile {
 }
 
 /**
- * Optimization #3 R1 — picks the viewport profile for tasks.create
- * from the SPA's current layout. The decision tree:
+ * Optimization #3 R1 + Codex #2/#3 follow-up — picks the viewport
+ * profile for tasks.create from the SPA's current layout.
+ *
+ * Codex #3: the `'fullscreen'` profile is gone from this picker.
+ * Brave is spawned ONCE at task creation; the user toggling the
+ * SPA into fullscreen later can't resize the live Brave (would
+ * shift the agent's click coordinates relative to its plan). The
+ * "fullscreen" surface is now a DISPLAY-side zoom only — the
+ * profile stays whatever it was when the task started, the SPA
+ * just renders the frames larger.
+ *
+ * Codex #2: when `panelPx` is null the panel is in its DEFAULT
+ * two-pane layout (60% of contentRow / clamp 720). In any real
+ * window that lands the panel below the "comfortable desktop"
+ * threshold, so the default is now 'sidepanel' (900×900) instead
+ * of 'desktop' (1280×800). Only an EXPLICITLY-dragged panelPx ≥
+ * 1100 promotes back to 'desktop'.
+ *
+ * Decision tree:
  *   1. Mobile viewport (< 1024) → 'mobile' (390×844)
- *   2. Fullscreen panel toggled → 'fullscreen' (1440×960)
- *   3. Sidepanel (panel width < 1100px effective content) → 'sidepanel' (900×900)
- *   4. Default → 'desktop' (1280×800)
+ *   2. panelPx explicit and ≥ 1100 → 'desktop' (1280×800)
+ *   3. Otherwise → 'sidepanel' (900×900)
  *
- * Inputs:
- *   panelFullscreen - the takeover toggle from the panel header
- *   panelPx         - explicit width when the user has dragged (else
- *                     null = 60%-of-row default)
- *   isMobile        - viewport-width gate (matches the lg breakpoint)
- *
- * Picked ONCE at task-create time — switching the panel layout
- * mid-task wouldn't re-spawn Brave, so the Brave that's already
- * running keeps its original geometry.
+ * Picked ONCE at task-create time.
  */
 function pickViewportProfile(inputs: {
-  panelFullscreen: boolean;
   panelPx: number | null;
   isMobile: boolean;
 }): BrowserViewportProfile {
   if (inputs.isMobile) return 'mobile';
-  if (inputs.panelFullscreen) return 'fullscreen';
-  // Sidepanel when the user has explicitly narrowed the panel below
-  // the "comfortable two-pane" threshold. 1100px is where Chinese
-  // sites start to feel cramped at desktop geometry; below this the
-  // 900×900 sidepanel profile gives better text density.
-  if (inputs.panelPx != null && inputs.panelPx < 1100) return 'sidepanel';
-  return 'desktop';
+  if (inputs.panelPx != null && inputs.panelPx >= 1100) return 'desktop';
+  return 'sidepanel';
 }
 
 /**
@@ -291,7 +293,6 @@ function AppShell(): JSX.Element {
       const picked =
         viewportProfile ??
         pickViewportProfile({
-          panelFullscreen,
           panelPx,
           isMobile:
             typeof window !== 'undefined' && window.innerWidth < 1024,
@@ -631,17 +632,20 @@ function AppShell(): JSX.Element {
       }
       // Escape: close any modal; if nothing is open, deselect the task.
       //
-      // Optimization #3 R2 — when the user is INTERACTIVE inside the
-      // BrowserPanel (fullscreen takeover OR sidepanel takeover with
-      // `interactive=true`), Esc should be ROUTED TO THE REMOTE page
-      // (close a modal on the page, exit a menu, blur a focused
-      // input). BrowserPanel's own window keydown listener handles
-      // the forward — we just skip our own consumption here. The
-      // explicit exit path is the toolbar X button or Cmd/Shift+Esc.
+      // Optimization #3 R2 + Codex #1 follow-up — Esc belongs to the
+      // REMOTE page whenever the user has interactive takeover on a
+      // selected task. The earlier guard only allowed remote-Esc in
+      // fullscreen or the mobile sheet; the most common case is
+      // INTERACTIVE inside the desktop sidepanel, where users hit
+      // Esc to close a remote modal and got bounced out of the task
+      // instead. We now route Esc to the remote any time the panel
+      // is in interactive mode + a task is selected (and no SPA
+      // modal is owning the keystroke). Explicit exit-fullscreen
+      // path still works via the toolbar X button or Cmd / Shift+Esc.
       if (e.key === 'Escape') {
         const remoteOwnsEsc =
           browserInteractive &&
-          (panelFullscreen || browserSheetOpen) &&
+          !!selectedTaskId &&
           !inField &&
           !searchOpen &&
           !feedbackOpen &&
