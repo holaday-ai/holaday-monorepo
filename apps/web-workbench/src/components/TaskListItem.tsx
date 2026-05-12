@@ -258,25 +258,18 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
   return (
     <span
       className={cn(
-        'inline-block h-2 w-2 shrink-0 rounded-full',
-        // Phase 24 RC follow-up — queued is a slow-pulse amber so the
-        // user can distinguish "waiting for a slot" from "actively
-        // executing" (fast blue pulse).
+        'inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/35',
         status === 'queued' && 'animate-pulse-dot bg-amber-400',
         status === 'executing' && 'animate-pulse-dot bg-primary',
-        // Awaiting-user gets a non-pulsing solid amber so the row
-        // reads as "stopped, waiting on you" — distinct from queued
-        // (pulsing amber: waiting on the system) and paused (also
-        // amber but no incoming question). The user can scan the
-        // sidebar and immediately spot which tasks need action.
-        status === 'awaiting_user' && 'bg-amber-500 ring-2 ring-amber-300/50',
-        status === 'paused' && 'bg-amber-500',
-        // Completed: hollow grey dot — done is neutral, not
-        // celebrated. Matches Claude's sidebar where completed tasks
-        // fade into the background.
-        status === 'completed' && 'border border-muted-foreground/40 bg-transparent',
-        status === 'failed' && 'bg-red-500',
-        status === 'cancelled' && 'bg-muted-foreground/30',
+        // Awaiting-user + failed stand out — these are the rows the
+        // user has to come back to. Everything else stays a muted 6px
+        // grey dot so the sidebar reads as the workspace nav, not a
+        // status board.
+        status === 'awaiting_user' && 'h-2 w-2 bg-amber-500 ring-2 ring-amber-300/40',
+        status === 'paused' && 'bg-amber-500/80',
+        status === 'completed' && 'bg-muted-foreground/35',
+        status === 'failed' && 'h-2 w-2 bg-red-500',
+        status === 'cancelled' && 'bg-muted-foreground/25',
       )}
       aria-hidden
     />

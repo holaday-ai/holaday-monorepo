@@ -83,6 +83,13 @@ interface Props {
    */
   prefillIntent?: string | null;
   onPrefillConsumed?: () => void;
+  /**
+   * When true the composer drops its outer max-width + page padding
+   * and renders flush with the parent. Used on the empty home where
+   * MainPanel already centers the 720px column — the composer's
+   * own padding would double-shrink it.
+   */
+  fullBleed?: boolean;
 }
 
 const ACCEPT_FILES = '.csv,.xlsx,.xls,.pdf,.txt,.json,.md';
@@ -137,6 +144,7 @@ export function InputArea({
   attachmentByteCap,
   prefillIntent,
   onPrefillConsumed,
+  fullBleed,
 }: Props): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
@@ -455,7 +463,12 @@ export function InputArea({
 
   return (
     <div
-      className="mx-auto w-full max-w-[760px] px-3 pb-4 sm:px-6 sm:pb-6"
+      className={cn(
+        'w-full',
+        fullBleed
+          ? ''
+          : 'mx-auto max-w-[760px] px-3 pb-4 sm:px-6 sm:pb-6',
+      )}
       onDragEnter={(e) => {
         if (!attachmentsAllowed) return;
         if (e.dataTransfer.types.includes('Files')) {
@@ -482,7 +495,7 @@ export function InputArea({
     >
       <div
         className={cn(
-          'relative rounded-2xl border bg-background shadow-[0_2px_12px_rgba(0,0,0,0.04)] focus-within:border-foreground/20 focus-within:shadow-[0_4px_24px_rgba(0,0,0,0.08)]',
+          'relative rounded-[20px] border bg-background shadow-[0_8px_24px_rgba(0,0,0,0.06)] focus-within:border-foreground/20 focus-within:shadow-[0_10px_28px_rgba(0,0,0,0.08)]',
           dragActive
             ? 'border-foreground/30 ring-2 ring-foreground/10'
             : 'border-input',
@@ -543,7 +556,7 @@ export function InputArea({
                   : '描述你想让 HOLA DAY 做什么...'
           }
           rows={2}
-          className="resize-none border-0 bg-transparent px-4 py-3 pr-14 text-sm shadow-none focus-visible:ring-0"
+          className="min-h-[88px] resize-none border-0 bg-transparent px-4 pb-12 pt-4 pr-14 text-[15px] leading-relaxed shadow-none focus-visible:ring-0"
           style={{ maxHeight: '10rem' }}
           disabled={disabled}
         />
@@ -649,14 +662,9 @@ export function InputArea({
           )}
         </Button>
       </div>
-      <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[11px] text-muted-foreground">
-        <div className="flex items-center gap-2">
-          <TaskModeSelector mode={taskMode} onChange={setTaskMode} />
-          <span className="hidden md:inline">
-            按 <Kbd>/</Kbd> 聚焦 · <Kbd>⌘K</Kbd> 搜索任务
-          </span>
-        </div>
-        <span>Enter 发送 · Shift+Enter 换行</span>
+      <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[11px] text-muted-foreground/70">
+        <TaskModeSelector mode={taskMode} onChange={setTaskMode} />
+        <span className="hidden sm:inline">Enter 发送</span>
       </div>
       {/* Phase 5b — multi-line detect. When the composer holds 2+
           non-empty lines AND we're not in a reply / follow-up flow,
@@ -875,14 +883,6 @@ function guidanceActionsForWorkflow(
     );
   }
   return actions;
-}
-
-function Kbd({ children }: { children: React.ReactNode }): JSX.Element {
-  return (
-    <kbd className="rounded border border-border bg-muted/40 px-1 py-0.5 font-sans text-[10px] text-foreground/80">
-      {children}
-    </kbd>
-  );
 }
 
 /**

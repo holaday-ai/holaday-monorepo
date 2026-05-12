@@ -1,22 +1,25 @@
 /**
- * First-paint loading placeholder. Rendered while we wait for the
- * initial auth.me + tasks.list round-trip. Mirrors the three-column
- * shell so there's no layout flash when the real content lands.
+ * First-paint loading placeholder. Rendered by AppShell while we wait
+ * for the initial auth.me + tasks.list round-trip. Matches the
+ * composer-first empty home: sidebar + centered composer column —
+ * no right-side BrowserPanel skeleton, since that pane only mounts
+ * for an in-flight browser task and starting state never has one.
  */
 export function AppSkeleton(): JSX.Element {
   return (
     <div className="relative flex h-full min-h-0 w-full overflow-hidden">
       <aside
-        className="flex h-full w-60 shrink-0 flex-col border-r border-border px-3 py-5"
+        className="flex h-full w-[260px] shrink-0 flex-col border-r border-border px-3 py-5"
         style={{ backgroundColor: 'rgba(255,255,255,0.5)' }}
       >
         <div className="hola-skel h-5 w-32" />
-        <div className="hola-skel mt-4 h-8 w-full" />
+        <div className="hola-skel mt-4 h-9 w-full" />
         <div className="mt-6 space-y-3">
           <div className="hola-skel h-3 w-16" />
-          <div className="hola-skel h-8 w-full" />
-          <div className="hola-skel h-8 w-full" />
-          <div className="hola-skel h-8 w-4/5" />
+          <div className="hola-skel h-6 w-full" />
+          <div className="hola-skel h-6 w-full" />
+          <div className="hola-skel h-6 w-4/5" />
+          <div className="hola-skel h-6 w-3/4" />
         </div>
         <div className="flex-1" />
         <div className="flex items-center gap-2">
@@ -27,31 +30,20 @@ export function AppSkeleton(): JSX.Element {
           </div>
         </div>
       </aside>
-      <main className="flex h-full flex-1 flex-col bg-background px-6 pt-16">
-        <div className="mx-auto w-full max-w-3xl space-y-3">
-          <div className="hola-skel mx-auto h-10 w-10 rounded-full" />
-          <div className="hola-skel mx-auto h-6 w-40" />
-          <div className="hola-skel mx-auto h-3 w-64" />
-          <div className="mt-6 grid grid-cols-2 gap-2">
-            <div className="hola-skel h-12" />
-            <div className="hola-skel h-12" />
-            <div className="hola-skel h-12" />
-            <div className="hola-skel h-12" />
+      <main className="flex h-full flex-1 flex-col bg-background">
+        <div className="mx-auto w-full max-w-[720px] px-4 pt-[18vh] sm:px-6">
+          <div className="hola-skel mx-auto mb-6 h-7 w-56" />
+          <div className="hola-skel h-[120px] w-full rounded-[20px]" />
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-1.5">
+            <div className="hola-skel h-7 w-16 rounded-full" />
+            <div className="hola-skel h-7 w-14 rounded-full" />
+            <div className="hola-skel h-7 w-18 rounded-full" />
+            <div className="hola-skel h-7 w-16 rounded-full" />
+            <div className="hola-skel h-7 w-14 rounded-full" />
+            <div className="hola-skel h-7 w-20 rounded-full" />
           </div>
         </div>
-        <div className="flex-1" />
-        <div className="mx-auto mb-6 w-full max-w-3xl">
-          <div className="hola-skel h-16 w-full" />
-        </div>
       </main>
-      <aside
-        className="hidden h-full w-[400px] shrink-0 flex-col border-l border-border px-3 py-3 lg:flex"
-        style={{ backgroundColor: 'rgba(255,255,255,0.5)' }}
-      >
-        <div className="hola-skel h-6 w-full" />
-        <div className="hola-skel mt-3 flex-1" />
-        <div className="hola-skel mt-3 h-3 w-1/3" />
-      </aside>
     </div>
   );
 }

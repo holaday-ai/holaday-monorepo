@@ -1,4 +1,4 @@
-import { BarChart3, Menu, Newspaper, Search, Sparkles, TrendingUp } from 'lucide-react';
+import { Menu } from 'lucide-react';
 import * as React from 'react';
 import { InputArea } from '@/components/InputArea';
 import { RoleNudgeBanner } from '@/components/RoleNudgeBanner';
@@ -128,6 +128,11 @@ export function MainPanel({
       setComposerKey((k) => k + 1);
     }
   }, [selectedTaskId]);
+  // Empty home is composer-first: the H1 + composer + chips are
+  // the visual centre. We fold the composer into the EmptyState
+  // column on `/` (no selected task) so the user sees a single
+  // workspace surface, not "header + scroll area + footer composer."
+  const showEmptyHome = !task;
   return (
     <main className="flex h-full min-w-0 flex-[2] flex-col bg-background lg:min-w-[420px]">
       <div className="flex h-11 items-center border-b border-border px-3 lg:hidden">
@@ -143,130 +148,113 @@ export function MainPanel({
         <div className="ml-2 min-w-0 flex-1 truncate text-sm font-medium">
           {task ? task.intent : 'HOLA DAY'}
         </div>
-        {/* Codex follow-up — the mobile 浏览器 entry button is gone.
-            The BrowserPanel sheet now opens automatically for
-            browser-mode tasks and login / captcha park, matching
-            the desktop behaviour. */}
       </div>
-      <div className="flex-1 overflow-y-auto">
-        {task ? (
-          <TaskStream
-            task={task}
-            onPickSuggestion={handlePickFromTaskSummary}
-          />
-        ) : (
-          <div className="mx-auto w-full max-w-[760px] px-4 pt-12 sm:px-6 md:pt-24">
-            <EmptyState
-              greetingName={greetingName}
-              onPick={handlePickFromEmptyState}
+      {showEmptyHome ? (
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-[720px] px-4 pb-12 pt-[18vh] sm:px-6">
+            <h1 className="mb-6 text-center text-[28px] font-semibold leading-tight tracking-tight text-foreground">
+              你好，{greetingName || '今天想做点什么？'}
+            </h1>
+            <InputArea
+              key={composerKey}
+              onSubmit={onSubmit}
+              busy={busy}
+              inputRef={inputRef}
+              replyMode={replyMode}
+              followUpTarget={followUpTarget}
+              onCancelFollowUp={onCancelFollowUp}
+              quotaExhausted={quotaExhausted}
+              quotaPlan={userPlan}
+              attachmentsAllowed={attachmentsAllowed}
+              attachmentByteCap={attachmentByteCap}
+              prefillIntent={prefillIntent}
+              onPrefillConsumed={() => setPrefillIntent(null)}
+              fullBleed
+            />
+            <SuggestionChips onPick={handlePickFromEmptyState} />
+            {userPlan ? (
+              <div className="mt-10">
+                <RoleNudgeBanner
+                  plan={userPlan}
+                  selectedRoles={userSelectedRoles ?? null}
+                />
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="flex-1 overflow-y-auto">
+            <TaskStream
+              task={task}
+              onPickSuggestion={handlePickFromTaskSummary}
             />
           </div>
-        )}
-      </div>
-      {userPlan ? (
-        <RoleNudgeBanner plan={userPlan} selectedRoles={userSelectedRoles ?? null} />
-      ) : null}
-      <InputArea
-        key={composerKey}
-        onSubmit={onSubmit}
-        busy={busy}
-        inputRef={inputRef}
-        replyMode={replyMode}
-        followUpTarget={followUpTarget}
-        onCancelFollowUp={onCancelFollowUp}
-        quotaExhausted={quotaExhausted}
-        quotaPlan={userPlan}
-        attachmentsAllowed={attachmentsAllowed}
-        attachmentByteCap={attachmentByteCap}
-        prefillIntent={prefillIntent}
-        onPrefillConsumed={() => setPrefillIntent(null)}
-      />
+          {userPlan ? (
+            <RoleNudgeBanner
+              plan={userPlan}
+              selectedRoles={userSelectedRoles ?? null}
+            />
+          ) : null}
+          <InputArea
+            key={composerKey}
+            onSubmit={onSubmit}
+            busy={busy}
+            inputRef={inputRef}
+            replyMode={replyMode}
+            followUpTarget={followUpTarget}
+            onCancelFollowUp={onCancelFollowUp}
+            quotaExhausted={quotaExhausted}
+            quotaPlan={userPlan}
+            attachmentsAllowed={attachmentsAllowed}
+            attachmentByteCap={attachmentByteCap}
+            prefillIntent={prefillIntent}
+            onPrefillConsumed={() => setPrefillIntent(null)}
+          />
+        </>
+      )}
     </main>
   );
 }
 
-function EmptyState({
-  greetingName,
+/**
+ * Suggestion chips below the composer. Small, single-line, click
+ * fills the composer (does NOT submit). Eight chips covering the
+ * common entry points; tap a chip to seed an intent then edit.
+ */
+function SuggestionChips({
   onPick,
 }: {
-  greetingName?: string;
   onPick(intent: string): void;
 }): JSX.Element {
-  const who = greetingName ? `，${greetingName}` : '';
   return (
-    <div className="flex flex-col items-center justify-center pb-8 text-center">
-      <div className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-primary to-[hsl(var(--accent))] text-white shadow-lg shadow-primary/20">
-        <Sparkles className="h-6 w-6" />
-      </div>
-      <h2 className="mt-5 text-[28px] font-semibold leading-tight tracking-tight">
-        你好{who}
-      </h2>
-      <p className="mt-2 max-w-[520px] text-sm leading-relaxed text-muted-foreground">
-        告诉 HOLA DAY 你想做什么，它会替你操作浏览器，把事情一步步做完。
-      </p>
-      <ul className="mt-7 grid w-full gap-3 text-left sm:grid-cols-2">
-        {SUGGESTIONS.map((s) => {
-          const Icon = s.icon;
-          return (
-            <li key={s.intent}>
-              <button
-                type="button"
-                onClick={() => onPick(s.intent)}
-                className="group flex h-[72px] w-full items-center gap-3 rounded-[10px] border border-border bg-card px-4 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition hover:-translate-y-px hover:border-primary/40 hover:shadow-md hover:shadow-primary/10"
-              >
-                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-                  <Icon className="h-4 w-4" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-foreground">
-                    {s.title}
-                  </span>
-                  <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                    {s.intent}
-                  </span>
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+    <div className="mt-5 flex flex-wrap items-center justify-center gap-1.5">
+      {SUGGESTIONS.map((s) => (
+        <button
+          key={s.label}
+          type="button"
+          onClick={() => onPick(s.intent)}
+          className="inline-flex h-7 items-center rounded-full border border-border bg-card px-3 text-[12px] text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-foreground/[0.04] hover:text-foreground"
+        >
+          {s.label}
+        </button>
+      ))}
     </div>
   );
 }
 
 /**
- * Phase 4 R2 4d — redesigned shortcut cards. Each one carries an
- * icon + short title + the actual intent so the user can see
- * BOTH what category the task is and what it does verbatim. Hover
- * lifts the card and shows brand-tinted glow.
- *
- * Categories cover the four most-used workflows on the workbench:
- * 直播复盘 (expert workflow), 资讯检索 (search), 浏览发现 (browse),
- * 行情查询 (data lookup).
+ * Eight chip seeds covering the common entry points. Label is the
+ * short tap target; intent is the prefill text that lands in the
+ * composer (user can edit before submitting).
  */
-const SUGGESTIONS: ReadonlyArray<{
-  title: string;
-  intent: string;
-  icon: React.ComponentType<{ className?: string }>;
-}> = [
-  {
-    title: '抖音直播复盘',
-    intent: '帮我复盘昨天的抖音直播数据，做总结和优化策略',
-    icon: BarChart3,
-  },
-  {
-    title: '今日科技资讯',
-    intent: '帮我查一下今天的科技新闻',
-    icon: Newspaper,
-  },
-  {
-    title: '浏览 GitHub Trending',
-    intent: '打开 GitHub 看看 trending 项目',
-    icon: Search,
-  },
-  {
-    title: '查询股价行情',
-    intent: '去东方财富查一下茅台最新股价',
-    icon: TrendingUp,
-  },
+const SUGGESTIONS: ReadonlyArray<{ label: string; intent: string }> = [
+  { label: '直播复盘', intent: '帮我复盘昨天的抖音直播数据，做总结和优化策略' },
+  { label: '查资料', intent: '帮我查一下今天的科技新闻' },
+  { label: '打开网页', intent: '打开 GitHub 看看 trending 项目' },
+  { label: '行情查询', intent: '去东方财富查一下茅台最新股价' },
+  { label: '下载文件', intent: '把这页内容保存成 PDF：' },
+  { label: '定时任务', intent: '每天早上 9 点跑一次昨天的电商日报' },
+  { label: '批量执行', intent: '帮我对这些链接逐个执行抓取：\n' },
+  { label: '翻译内容', intent: '帮我翻译这段内容：' },
 ];

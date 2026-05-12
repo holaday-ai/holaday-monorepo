@@ -1,217 +1,61 @@
 import * as React from 'react';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  PLAN_CATALOGUE,
   type BrowserViewportProfile,
   type PlanId,
 } from '@holaday/shared-types';
-import { SidebarProvider } from '@/components/ui/sidebar';
+import { useAppShellContext } from '@/components/AppShell';
 import { BrowserPanel } from '@/components/BrowserPanel';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { FeedbackDialog } from '@/components/FeedbackDialog';
-import { LoginGate } from '@/components/LoginGate';
 import { MainPanel } from '@/components/MainPanel';
 import { ResizeHandle } from '@/components/ResizeHandle';
-import { SearchOverlay } from '@/components/SearchOverlay';
-import { SettingsModal } from '@/components/SettingsModal';
-import { Sidebar } from '@/components/Sidebar';
-import { AppSkeleton } from '@/components/Skeleton';
 import { useToast } from '@/components/ui/toast';
-import { clearAccessToken, getAccessToken } from '@/lib/auth';
+import { useSidebar } from '@/components/ui/sidebar';
 import { hdDebug } from '@/lib/hd-debug';
-import { trpc } from '@/lib/trpc';
-import { type ConnStatus, connect, disconnect, onServerMessage, onStatus } from '@/lib/ws';
-import { setStoreNavigate, toUiTask, useTaskStore } from '@/stores/task-store';
+import { useTaskStore } from '@/stores/task-store';
 import { isQuotaExhausted, useQuotaStatus } from '@/lib/use-quota-status';
-import { applyHistoryRetention } from '@/utils/time-buckets';
-import type { UiProject, UiTask } from '@/types/task';
+import type { UiTask } from '@/types/task';
 
 type UiTaskAwaitingKind = NonNullable<UiTask['awaitingKind']> | undefined;
 
-interface MeProfile {
-  userId: string;
-  /** Nullable since Phase 12 — SMS-first users have no email yet. */
-  email: string | null;
-  /** Phase 12 SMS users — 11-digit mainland mobile. */
-  phone?: string | null;
-  displayName: string | null;
-  plan: string;
-  /** Phase 8.2 canary flag — when true, the VNC panel connects to
-   *  this user's dedicated Brave via /vnc-ws/:userId. */
-  multiUser: boolean;
-  /** Phase 10 Tier 2 — open-pool role ids picked by this user. */
-  selectedRoles?: string[];
-}
-
 /**
- * Optimization #3 R1 + Codex #2/#3 follow-up — picks the viewport
- * profile for tasks.create from the SPA's current layout.
+ * Inner workbench content. Mounted as the `/` outlet of AppShell so
+ * it inherits the unified Sidebar + shared modals + bootstrap +
+ * keyboard shortcuts from the shell. WorkbenchApp itself only owns:
  *
- * Codex #3: the `'fullscreen'` profile is gone from this picker.
- * Brave is spawned ONCE at task creation; the user toggling the
- * SPA into fullscreen later can't resize the live Brave (would
- * shift the agent's click coordinates relative to its plan). The
- * "fullscreen" surface is now a DISPLAY-side zoom only — the
- * profile stays whatever it was when the task started, the SPA
- * just renders the frames larger.
+ *   - the BrowserPanel layout state (px width, fullscreen, collapse,
+ *     manual-override)
+ *   - the reply-flow rebuild-task confirm (specific to tasks.reply)
+ *   - the follow-up-dismissed flag for the chip suppression on the
+ *     selected terminal task
+ *   - the onSubmit routing that splits between tasks.reply / follow-up
+ *     create / fresh create
  *
- * Codex #2: when `panelPx` is null the panel is in its DEFAULT
- * two-pane layout (60% of contentRow / clamp 720). In any real
- * window that lands the panel below the "comfortable desktop"
- * threshold, so the default is now 'sidepanel' (900×900) instead
- * of 'desktop' (1280×800). Only an EXPLICITLY-dragged panelPx ≥
- * 1100 promotes back to 'desktop'.
- *
- * Decision tree:
- *   1. Mobile viewport (< 1024) → 'mobile' (390×844)
- *   2. panelPx explicit and ≥ 1100 → 'desktop' (1280×800)
- *   3. Otherwise → 'sidepanel' (900×900)
- *
- * Picked ONCE at task-create time.
- */
-function pickViewportProfile(inputs: {
-  panelPx: number | null;
-  isMobile: boolean;
-}): BrowserViewportProfile {
-  if (inputs.isMobile) return 'mobile';
-  if (inputs.panelPx != null && inputs.panelPx >= 1100) return 'desktop';
-  return 'sidepanel';
-}
-
-/**
- * Codex P3 follow-up — single source of truth for "how narrow can
- * the BrowserPanel get on desktop". Used by:
- *   - the localStorage clamp on seed (a stored value below this is
- *     treated as junk + ignored)
- *   - the drag-handle floor
- *   - the collapsed-flex fallback when no explicit panelPx is set
- *
- * Bumped from 420 → 560: anything narrower truncates the panel
- * header chips + screenshot controls so badly it stops being a
- * useful "second-pane" surface. If you want it smaller, collapse
- * the whole panel instead.
- */
-const PANEL_MIN_PX = 560;
-
-/**
- * B5 — humanise the displayName so legacy SMS-registered users (whose
- * displayName is the masked "138****1234") see "用户_<last4>" in the
- * UI instead of leaking their phone number into the avatar / greeting.
- * The new-registration path already stores 用户_XXXX (auth/service.ts);
- * this is the read-side fallback for rows that were inserted before
- * that fix landed.
- */
-function preferredDisplayName(me: MeProfile | null): string {
-  if (!me) return '';
-  const raw = me.displayName?.trim();
-  // Heuristic: any string that contains a phone-mask sequence
-  // (3 digits + asterisks + 4 digits) we treat as the legacy
-  // masked phone and replace with the prettier 用户_XXXX form.
-  // Falls back to email prefix or the literal phone last4.
-  const looksMasked = raw ? /\d{3}\**\d{4}/.test(raw) : false;
-  if (raw && !looksMasked) return raw;
-  if (me.phone) return `用户_${me.phone.slice(-4)}`;
-  if (me.email) return firstSegment(me.email);
-  return '用户';
-}
-
-/**
- * App shell. Gates on the access token: missing → LoginGate, present
- * → the three-column workbench wired to the live task store.
- *
- * On authenticate we kick off tRPC + WS in parallel, show a skeleton
- * until either the task list + user profile both resolve or 1.5 s
- * elapse (whichever first — avoids a perpetual skeleton if one call
- * is slow). A 4401 close from the WS means the stored token is bad;
- * we clear it and bounce back to the login gate.
+ * Auth, bootstrap, Sidebar, search overlay, settings modal, feedback
+ * modal, single+bulk task delete confirms, online/offline toasts and
+ * the shell keyboard shortcuts all live in AppShell.
  */
 export function WorkbenchApp(): JSX.Element {
-  return <AppShell />;
-}
+  const toast = useToast();
+  const { me } = useAppShellContext();
+  const { setOpenMobile } = useSidebar();
 
-function AppShell(): JSX.Element {
-  const [authed, setAuthed] = React.useState<boolean>(() => Boolean(getAccessToken()));
-  const [wsStatus, setWsStatus] = React.useState<ConnStatus>('idle');
-  const [sidebarOpen, setSidebarOpen] = React.useState(false);
+  // Inner-workbench state.
+  const [panelFullscreen, setPanelFullscreen] = React.useState(false);
+  const [browserCollapsed, setBrowserCollapsed] = React.useState(false);
   const [browserSheetOpen, setBrowserSheetOpen] = React.useState(false);
-  const [feedbackOpen, setFeedbackOpen] = React.useState(false);
-  const [settingsOpen, setSettingsOpen] = React.useState(false);
-  const [searchOpen, setSearchOpen] = React.useState(false);
-  const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
-  const [confirmBulkDelete, setConfirmBulkDelete] = React.useState<
-    string[] | null
-  >(null);
-  const [confirmClearFailed, setConfirmClearFailed] = React.useState(false);
-  // P1-C — handle-loss confirm. Set when tasks.reply returns ok:false
-  // (the orchestrator's in-memory handle is gone — restart, GC, race
-  // with another reply). User confirms → we rebuild the task with the
-  // original intent + every prior reply + the message they just tried
-  // to send, so they don't have to retype context.
+  const [manualPanelOverride, setManualPanelOverride] = React.useState(false);
+  const [followUpDismissedTaskId, setFollowUpDismissedTaskId] =
+    React.useState<string | null>(null);
   const [confirmRebuildTask, setConfirmRebuildTask] = React.useState<{
     taskId: string;
     intent: string;
     pendingMessage: string;
   } | null>(null);
-  // Panel "full-screen": Sidebar + MainPanel hidden, BrowserPanel
-  // takes the whole app shell. Toggled from the Panel header button
-  // and from Escape (via the existing keyboard handler below).
-  const [panelFullscreen, setPanelFullscreen] = React.useState(false);
-  // Lifted collapse state. The previous local state inside
-  // BrowserPanel only narrowed an inner div but the parent column
-  // (`flex: 3 1 0` / configured panelPx) kept its width — so the
-  // collapse button visibly did nothing on desktop. Owning the flag
-  // up here lets us also override the column flex and hide the
-  // resize handle when collapsed.
-  const [browserCollapsed, setBrowserCollapsed] = React.useState(false);
-  // Codex P2 follow-up — once the user manually expands the panel
-  // for a non-browser task, lock the auto-collapse effect so a
-  // background tasks-array refresh (poll / WS event) doesn't yank
-  // the panel shut underneath them. Reset on selectedTaskId change
-  // so the auto-collapse default applies again on the next task.
-  const [manualPanelOverride, setManualPanelOverride] = React.useState(false);
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const location = useLocation();
-  // Phase 16b — when ?project=prj_… is present in the URL the
-  // sidebar filters down to that project's tasks (the route stays /
-  // — workbench just shows a filter chip + the filtered list).
-  const projectFilter = searchParams.get('project');
-  const [me, setMe] = React.useState<MeProfile | null>(null);
-  const [bootstrapped, setBootstrapped] = React.useState(false);
-  // Phase 16b — projects list, loaded once on mount + refreshed
-  // after a move-to-project (so the right-click submenu and the
-  // /projects page see new task counts). Empty until first fetch
-  // resolves; the right-click submenu hides "无项目" + the list
-  // when projects is undefined, so an empty state renders cleanly.
-  const [projects, setProjects] = React.useState<UiProject[]>([]);
-  const refreshProjects = React.useCallback(async () => {
-    try {
-      const list = await trpc.projects.list.query();
-      setProjects(list as UiProject[]);
-    } catch {
-      // Silent — the right-click menu just won't show options.
-    }
-  }, []);
-  /**
-   * Phase 14 audit follow-up — when user is viewing a terminal
-   * task, the next message defaults to a 追问. They can dismiss
-   * the chip via ✕ to send a new task instead. Dismissal is
-   * scoped to one task id; switching tasks resets it.
-   */
-  const [followUpDismissedTaskId, setFollowUpDismissedTaskId] = React.useState<string | null>(null);
-  const [online, setOnline] = React.useState<boolean>(() =>
-    typeof navigator !== 'undefined' ? navigator.onLine : true,
-  );
-  const toast = useToast();
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
 
-  // Explicit px width for the BrowserPanel on desktop. The
-  // `PANEL_MIN_PX` constant is the single source of truth for "how
-  // narrow can this panel get" — used by the localStorage clamp on
-  // seed, the resize-drag floor, AND the collapsed-flex fallback.
-  // Previously these diverged: stored values were clamped at 560 but
-  // the drag floor was 420, so a user who dragged to 421 hit the
-  // discontinuity on next reload. Codex P3 follow-up unified it.
+  // BrowserPanel width — explicit px from drag, persisted in
+  // localStorage, clamped to PANEL_MIN_PX on read so a saved value
+  // below that floor doesn't render a sliver.
   const contentRowRef = React.useRef<HTMLDivElement | null>(null);
   const [panelPx, setPanelPx] = React.useState<number | null>(() => {
     if (typeof window === 'undefined') return null;
@@ -219,15 +63,9 @@ function AppShell(): JSX.Element {
     const n = raw ? Number.parseInt(raw, 10) : NaN;
     if (!Number.isFinite(n) || n <= 0) return null;
     const maxSensible = window.innerWidth * 0.85;
-    if (n < PANEL_MIN_PX || n > maxSensible) {
-      // Stored value doesn't make sense for this viewport → ignore.
-      // Don't delete it — user's other viewport might want it back.
-      return null;
-    }
+    if (n < PANEL_MIN_PX || n > maxSensible) return null;
     return n;
   });
-  // Snapshot of panelPx at drag start. Ref avoids stale-closure bugs
-  // when the drag callback re-identities between frames.
   const dragStartPxRef = React.useRef<number | null>(null);
   const panelPxRef = React.useRef(panelPx);
   React.useEffect(() => {
@@ -237,10 +75,6 @@ function AppShell(): JSX.Element {
   const computeInitialPanelPx = React.useCallback((): number => {
     const row = contentRowRef.current;
     if (!row) return Math.max(720, Math.round(window.innerWidth * 0.55));
-    // Default split: panel is 60% of the (content minus sidebar)
-    // horizontal budget. Min 560, floor of 720 so "just opened on a
-    // 1500px laptop" lands at a readable ~800px panel rather than
-    // the 560 min.
     const rect = row.getBoundingClientRect();
     return Math.max(720, Math.min(rect.width - 420, Math.round(rect.width * 0.6)));
   }, []);
@@ -252,16 +86,10 @@ function AppShell(): JSX.Element {
         dragStartPxRef.current = panelPxRef.current ?? computeInitialPanelPx();
       }
       const rowWidth = row.getBoundingClientRect().width;
-      // Dragging the handle right SHRINKS the panel (panel is on the
-      // right of the handle), so subtract dx.
       const raw = dragStartPxRef.current - dx;
-      // Codex P3 — same min as the localStorage clamp + the
-      // collapsed-flex fallback. PANEL_MIN_PX is the single
-      // source of truth.
       const min = PANEL_MIN_PX;
       const max = Math.max(min, rowWidth - 360);
-      const next = Math.min(max, Math.max(min, raw));
-      setPanelPx(next);
+      setPanelPx(Math.min(max, Math.max(min, raw)));
     },
     [computeInitialPanelPx],
   );
@@ -273,21 +101,13 @@ function AppShell(): JSX.Element {
     }
   }, []);
 
+  // Task store selectors.
   const tasks = useTaskStore((s) => s.tasks);
   const selectedTaskId = useTaskStore((s) => s.selectedTaskId);
   const composerMode = useTaskStore((s) => s.composerMode);
   const loading = useTaskStore((s) => s.loading);
-  const selectTask = useTaskStore((s) => s.selectTask);
   const enterNewTaskMode = useTaskStore((s) => s.enterNewTaskMode);
-  // Codex follow-up — `requestBrowserLive` was used by the now-removed
-  // sidebar 浏览器 entry handler. The hook is preserved in the store
-  // (still consumed by browser-mode task starts internally); we just
-  // don't need a SPA-side handle anymore.
-  const refreshTaskList = useTaskStore((s) => s.refreshTaskList);
   const createTaskRaw = useTaskStore((s) => s.createTask);
-  // Optimization #3 R1 — every createTask call site is wrapped so
-  // the picked `viewportProfile` is automatic; callers that don't
-  // care still get the right profile for the current layout.
   const createTask: typeof createTaskRaw = React.useCallback(
     (intent, fileIds, replyToTaskId, mode, viewportProfile) => {
       const picked =
@@ -302,433 +122,32 @@ function AppShell(): JSX.Element {
     [createTaskRaw, panelPx],
   );
   const replyToTask = useTaskStore((s) => s.replyToTask);
-  const deleteTask = useTaskStore((s) => s.deleteTask);
-  const renameTask = useTaskStore((s) => s.renameTask);
-  const toggleStarred = useTaskStore((s) => s.toggleStarred);
-  const moveTaskToProject = useTaskStore((s) => s.moveTaskToProject);
   const awaitingUserByTask = useTaskStore((s) => s.awaitingUserByTask);
   const userRepliesByTask = useTaskStore((s) => s.userRepliesByTask);
-  const applyServerMessage = useTaskStore((s) => s.applyServerMessage);
-  const reset = useTaskStore((s) => s.reset);
   const screencastByTask = useTaskStore((s) => s.screencastByTask);
   const captchaWaitByTask = useTaskStore((s) => s.captchaWaitByTask);
-  const storeError = useTaskStore((s) => s.error);
-  // Phase 10 polish — sidebar history retention + input quota gate.
-  // The hooks below MUST live above the `if (!authed)` early return
-  // farther down; otherwise hook count differs between the logged-out
-  // render and the authenticated one, and React surfaces it as #310
-  // when zustand's useSyncExternalStore detects a snapshot mismatch
-  // on the transition. Existing useTaskStore selectors (above) are
-  // co-located here for the same reason — keep all hooks in one
-  // unconditional block at the top of the component.
-  const pinnedIds = useTaskStore((s) => s.pinnedTaskIds);
+  const browserInteractive = useTaskStore((s) => s.browserInteractive);
+
+  // Quota gate.
   const planForRetention: PlanId =
     me?.plan === 'basic' || me?.plan === 'pro' ? me.plan : 'free';
-  const historyDays = PLAN_CATALOGUE[planForRetention].historyDays;
-  // selectedTaskId from above is captured by closure — no need to
-  // wait for the useTaskStore selector that reads it (already at
-  // line 131). retentionPinned is rebuilt only when pinnedIds or
-  // selectedTaskId changes; the new Set() is intentional, since
-  // applyHistoryRetention treats the set as opaque ReadonlySet.
-  const retentionPinned = React.useMemo(() => {
-    const set = new Set(pinnedIds);
-    if (selectedTaskId) set.add(selectedTaskId);
-    return set;
-  }, [pinnedIds, selectedTaskId]);
-  const { visible: visibleTasks, hiddenCount: hiddenByRetentionCount } =
-    React.useMemo(
-      () => applyHistoryRetention(tasks, historyDays, retentionPinned),
-      [tasks, historyDays, retentionPinned],
-    );
-  // Project-scoped task list. When `?project=prj_…` is present we
-  // fetch tasks.list with the projectId filter so older entries past
-  // the sidebar's first-50 slice still surface here. Independent
-  // pagination state — own cursor/hasMore/loading — so the "加载
-  // 更多" button paginates within the project instead of the
-  // store's global all-tasks list. Reset + refetch whenever
-  // projectFilter changes.
-  const [projectTasks, setProjectTasks] = React.useState<UiTask[] | null>(null);
-  const [projectCursor, setProjectCursor] = React.useState<number | null>(null);
-  const [projectHasMore, setProjectHasMore] = React.useState(false);
-  const [projectLoadingMore, setProjectLoadingMore] = React.useState(false);
-  const projectFetchToken = React.useRef(0);
-  const loadProjectTasksPage = React.useCallback(
-    async (
-      pid: string,
-      cursor: number | null,
-      append: boolean,
-    ): Promise<void> => {
-      const myToken = ++projectFetchToken.current;
-      setProjectLoadingMore(true);
-      try {
-        const res = await trpc.tasks.list.query({
-          projectId: pid,
-          limit: 50,
-          ...(cursor != null ? { cursor } : {}),
-        });
-        if (myToken !== projectFetchToken.current) return;
-        const fresh = res.tasks.map((t) => toUiTask(t));
-        setProjectTasks((prev) => (append && prev ? [...prev, ...fresh] : fresh));
-        setProjectCursor(res.nextCursor ?? null);
-        setProjectHasMore(res.nextCursor != null);
-      } catch {
-        if (myToken !== projectFetchToken.current) return;
-        if (!append) setProjectTasks([]);
-      } finally {
-        if (myToken === projectFetchToken.current) {
-          setProjectLoadingMore(false);
-        }
-      }
-    },
-    [],
-  );
-  React.useEffect(() => {
-    if (!projectFilter) {
-      // Drop project-scoped state when the filter goes away — the
-      // sidebar reverts to the store's tasks + the store-based
-      // LoadMoreTasksButton.
-      setProjectTasks(null);
-      setProjectCursor(null);
-      setProjectHasMore(false);
-      setProjectLoadingMore(false);
-      projectFetchToken.current += 1;
-      return;
-    }
-    setProjectTasks(null);
-    setProjectCursor(null);
-    setProjectHasMore(false);
-    void loadProjectTasksPage(projectFilter, null, false);
-  }, [projectFilter, loadProjectTasksPage]);
-  const onProjectLoadMore = React.useCallback(() => {
-    if (!projectFilter) return;
-    if (!projectHasMore || projectLoadingMore) return;
-    void loadProjectTasksPage(projectFilter, projectCursor, true);
-  }, [
-    projectFilter,
-    projectHasMore,
-    projectLoadingMore,
-    projectCursor,
-    loadProjectTasksPage,
-  ]);
-  // Sidebar list source: server-fetched project view when filter is
-  // active, otherwise the retention-clipped store list. Retention
-  // doesn't apply to the project-scoped fetch — the user explicitly
-  // navigated into the project, they want the full list.
-  const filteredTasks = React.useMemo(() => {
-    if (projectFilter) return projectTasks ?? [];
-    return visibleTasks;
-  }, [projectFilter, projectTasks, visibleTasks]);
-  const activeProject = React.useMemo(
-    () => projects.find((p) => p.projectId === projectFilter) ?? null,
-    [projects, projectFilter],
-  );
-  // Quota gate for the composer. Refresh keyed off the task list
-  // length so terminal events update both the sidebar's QuotaIndicator
-  // and the input gate in the same round-trip via tRPC batching.
   const { snap: quotaSnap } = useQuotaStatus(tasks.length);
   const quotaExhausted = isQuotaExhausted(quotaSnap);
 
-  // Bootstrap: single-shot state-machine entry. Reads the URL +
-  // location.state ONCE on mount, dispatches the right initial
-  // selection, then refreshes the list (which won't override the
-  // selection — the store's refreshTaskList only auto-picks when
-  // there's nothing selected and no `?task=` hint). Replaces the
-  // earlier mix of an inbound URL effect, an outbound URL-sync
-  // effect, and refreshTasks's auto-select — all of which used to
-  // fight each other for selectedTaskId in the same render cycle.
-  React.useEffect(() => {
-    if (!authed) return;
-    let done = false;
-    const finish = (): void => {
-      if (!done) {
-        done = true;
-        setBootstrapped(true);
-      }
-    };
-
-    // Read URL + state once. location is authoritative for the
-    // initial selection decision (the navigation that brought the
-    // user here already updated it before this effect ran).
-    const urlTaskParam = new URLSearchParams(location.search).get('task');
-    const stateNewTask =
-      (location.state as { newTask?: boolean } | null)?.newTask === true;
-
-    if (stateNewTask) {
-      // Files page → 用于新任务. Drop any current selection / URL
-      // ?task= regardless of what was there.
-      enterNewTaskMode();
-    } else if (urlTaskParam) {
-      // Deep link / refresh-with-task. URL is the source of truth.
-      // source='url' so selectTask doesn't replaceState (URL already
-      // matches).
-      selectTask(urlTaskParam, 'url');
-    }
-
-    const listFuture = refreshTaskList();
-    const meFuture = trpc.auth.me.query().then(
-      (res) =>
-        setMe({
-          userId: res.userId,
-          email: res.email,
-          displayName: res.displayName,
-          plan: res.plan,
-          multiUser: Boolean((res as { multiUser?: boolean }).multiUser),
-          selectedRoles:
-            (res as { selectedRoles?: string[] }).selectedRoles ?? [],
-        }),
-      () => {
-        /* swallow — auth.me failure isn't fatal. */
-      },
-    );
-    Promise.allSettled([listFuture, meFuture]).then(finish);
-    const timer = setTimeout(finish, 1500);
-    void refreshProjects();
-    connect();
-    const offMsg = onServerMessage(applyServerMessage);
-    const offStatus = onStatus(setWsStatus);
-    return () => {
-      clearTimeout(timer);
-      offMsg();
-      offStatus();
-    };
-  }, [
-    authed,
-    refreshTaskList,
-    applyServerMessage,
-    refreshProjects,
-    selectTask,
-    enterNewTaskMode,
-  ]);
-
-  // URL → store: deep-link / browser back-forward only. A missing
-  // ?task= is NOT a signal to enter new-task mode — new-task is
-  // entered only by explicit user intent (button, /files 用于新任务,
-  // keyboard shortcut). An earlier "!taskParam → enterNewTaskMode"
-  // branch raced an outbound navigate() and oscillated infinitely
-  // (101× selectTask ↔ 101× enterNewTaskMode in a single mount).
-  //
-  // The OUTBOUND effect (store → URL) used to live here too. It
-  // got deleted in this round: every store action that changes
-  // selection (selectTask / enterNewTaskMode / createTask) now
-  // writes the URL directly via the injected `storeNavigate`
-  // callback below. The inbound effect's `taskParam !== selectedTaskId`
-  // guard short-circuits when the URL change came from the store
-  // itself (state already matches), and selectTask passes
-  // `source='url'` when called from this effect to skip its own
-  // re-navigate — closing the loop.
-  const taskParam = searchParams.get('task');
-  React.useEffect(() => {
-    if (!bootstrapped) return;
-    if (composerMode === 'new') return;
-    if (taskParam && taskParam !== selectedTaskId) {
-      selectTask(taskParam, 'url');
-    }
-  }, [bootstrapped, composerMode, taskParam, selectedTaskId, selectTask]);
-
-  // Inject the URL-write callback into the store. selectTask /
-  // enterNewTaskMode / createTask call it after their `set()` so
-  // the URL stays pinned to the active selection without an effect
-  // chain (which is what loop-spammed before this round). The
-  // callback reads `searchParams` and `location.pathname` at the
-  // moment of the call, so other query params (?project=, _cb=, etc.)
-  // are preserved. Returns a cleanup that nulls the registration so
-  // a hot-reload / unmount doesn't keep a stale closure alive.
-  const navigateToTask = React.useCallback(
-    (taskId: string | null) => {
-      const next = new URLSearchParams(searchParams);
-      if (taskId) next.set('task', taskId);
-      else next.delete('task');
-      const search = next.toString() ? `?${next.toString()}` : '';
-      navigate({ pathname: location.pathname, search }, { replace: true });
-    },
-    [navigate, searchParams, location.pathname],
-  );
-  React.useEffect(() => {
-    setStoreNavigate(navigateToTask);
-    return () => setStoreNavigate(null);
-  }, [navigateToTask]);
-
-  // Auth invalidated by server (bad / expired token).
-  React.useEffect(() => {
-    if (wsStatus === 'unauthorized' && authed) {
-      clearAccessToken();
-      reset();
-      disconnect();
-      setMe(null);
-      setAuthed(false);
-      setBootstrapped(false);
-    }
-  }, [wsStatus, authed, reset]);
-
-  // Surface WS reconnection / disconnect as a toast so the user knows
-  // real-time is degraded. Only flag a transition away from 'open'.
-  const prevWsRef = React.useRef<ConnStatus>('idle');
-  React.useEffect(() => {
-    const prev = prevWsRef.current;
-    prevWsRef.current = wsStatus;
-    if (!authed) return;
-    if (prev === 'open' && (wsStatus === 'closed' || wsStatus === 'connecting')) {
-      toast.show('实时连接已断开，正在重连…', 'error');
-    }
-    if (prev !== 'open' && wsStatus === 'open' && prev !== 'idle') {
-      toast.show('实时连接已恢复');
-    }
-  }, [wsStatus, authed, toast]);
-
-  // Online / offline toasts (browser event). We only fire after the
-  // initial mount so a cold-start offline doesn't double-notify with
-  // the WS one.
-  React.useEffect(() => {
-    const onOffline = (): void => {
-      setOnline(false);
-      toast.show('网络连接已断开', 'error');
-    };
-    const onOnline = (): void => {
-      setOnline(true);
-      toast.show('网络已恢复');
-    };
-    window.addEventListener('offline', onOffline);
-    window.addEventListener('online', onOnline);
-    return () => {
-      window.removeEventListener('offline', onOffline);
-      window.removeEventListener('online', onOnline);
-    };
-  }, [toast]);
-
-  // Surface store-level errors (failed list/create/delete) as toasts.
-  const lastErrorRef = React.useRef<string | null>(null);
-  React.useEffect(() => {
-    if (storeError && storeError !== lastErrorRef.current) {
-      lastErrorRef.current = storeError;
-      toast.show(storeError, 'error');
-    }
-    if (!storeError) lastErrorRef.current = null;
-  }, [storeError, toast]);
-
-  // Optimization #3 R2 — Esc routing needs to know whether the user
-  // is currently in interactive mode inside the BrowserPanel. When
-  // they are, Esc belongs to the REMOTE page (close a modal, exit
-  // a menu), not to "close fullscreen / deselect task" on the SPA.
-  const browserInteractive = useTaskStore((s) => s.browserInteractive);
-  // Keyboard shortcuts.
-  React.useEffect(() => {
-    if (!authed) return;
-    const onKey = (e: KeyboardEvent): void => {
-      const meta = e.metaKey || e.ctrlKey;
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      const inField = tag === 'INPUT' || tag === 'TEXTAREA';
-      // Cmd/Ctrl + K: search.
-      if (meta && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setSearchOpen(true);
-        return;
-      }
-      // Cmd/Ctrl + N: new task + focus composer.
-      if (meta && e.key.toLowerCase() === 'n') {
-        e.preventDefault();
-        enterNewTaskMode();
-        setTimeout(() => inputRef.current?.focus(), 50);
-        return;
-      }
-      // Escape: close any modal; if nothing is open, deselect the task.
-      //
-      // Optimization #3 R2 + Codex #1 follow-up — Esc belongs to the
-      // REMOTE page whenever the user has interactive takeover on a
-      // selected task. The earlier guard only allowed remote-Esc in
-      // fullscreen or the mobile sheet; the most common case is
-      // INTERACTIVE inside the desktop sidepanel, where users hit
-      // Esc to close a remote modal and got bounced out of the task
-      // instead. We now route Esc to the remote any time the panel
-      // is in interactive mode + a task is selected (and no SPA
-      // modal is owning the keystroke). Explicit exit-fullscreen
-      // path still works via the toolbar X button or Cmd / Shift+Esc.
-      if (e.key === 'Escape') {
-        const remoteOwnsEsc =
-          browserInteractive &&
-          !!selectedTaskId &&
-          !inField &&
-          !searchOpen &&
-          !feedbackOpen &&
-          !e.metaKey &&
-          !e.shiftKey;
-        if (remoteOwnsEsc) {
-          // Let BrowserPanel's interactive keydown listener pick it up.
-          return;
-        }
-        if (searchOpen) {
-          setSearchOpen(false);
-          return;
-        }
-        if (feedbackOpen) {
-          setFeedbackOpen(false);
-          return;
-        }
-        if (browserSheetOpen) {
-          setBrowserSheetOpen(false);
-          return;
-        }
-        if (panelFullscreen) {
-          setPanelFullscreen(false);
-          return;
-        }
-        if (selectedTaskId && !inField) {
-          enterNewTaskMode();
-        }
-        return;
-      }
-      // '/' to focus the composer (not in a field).
-      if (e.key === '/' && !inField && !meta && !e.altKey) {
-        e.preventDefault();
-        inputRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [authed, searchOpen, feedbackOpen, browserSheetOpen, panelFullscreen, selectedTaskId, enterNewTaskMode, browserInteractive]);
-
-  const handleLogout = React.useCallback(() => {
-    clearAccessToken();
-    disconnect();
-    reset();
-    setMe(null);
-    setAuthed(false);
-    setBootstrapped(false);
-  }, [reset]);
-
-  // Hooks must run unconditionally — keep the awaiting_user effect
-  // ABOVE the early returns below. The previous patch placed the
-  // useEffect after `if (!authed) return` / `if (!bootstrapped) return`,
-  // so the hook count flipped between the pre-bootstrap render (3
-  // hooks short) and post-bootstrap render — React error #310
-  // "Rendered more hooks than during the previous render", whole app
-  // went white. selectedTask is derived inline here (post-early-return
-  // selectedTask hasn't run yet) — it's the same `tasks.find` call.
+  // Awaiting / browser derivations.
   const selectedNeedsUser = Boolean(
     selectedTaskId &&
       (awaitingUserByTask[selectedTaskId] ||
         captchaWaitByTask[selectedTaskId] ||
-        // UiTaskStatus is the SPA-side narrowed enum (no
-        // 'awaiting_user' member); the wire shape can carry it though,
-        // so the cast is the honest acknowledgement that the runtime
-        // value can fall outside the type.
         (tasks.find((t) => t.taskId === selectedTaskId)?.status as
           | string
           | undefined) === 'awaiting_user'),
   );
-  // P2-A — split panel auto-expand from replyMode. `selectedNeedsUser`
-  // still drives `isReplyMode` (so the composer routes through
-  // tasks.reply for any awaiting_user), but the BrowserPanel's
-  // takeover is reserved for kinds that genuinely need the user IN the
-  // viewport: login, captcha, browser_action, or any captchaWaitByTask
-  // (Layer-3 anti-bot signal — no kind classifier on that path, treat
-  // as needing browser). A plain text-clarification leaves the panel
-  // alone so the user keeps the page they were watching.
   const selectedAwaitingKind: UiTaskAwaitingKind = (() => {
     if (!selectedTaskId) return undefined;
     const fromAwaiting = awaitingUserByTask[selectedTaskId]?.awaitingKind;
     if (fromAwaiting) return fromAwaiting;
-    const fromTask = tasks.find((t) => t.taskId === selectedTaskId)
-      ?.awaitingKind;
+    const fromTask = tasks.find((t) => t.taskId === selectedTaskId)?.awaitingKind;
     return fromTask;
   })();
   const selectedNeedsBrowser = Boolean(
@@ -738,6 +157,9 @@ function AppShell(): JSX.Element {
           selectedAwaitingKind != null &&
           selectedAwaitingKind !== 'clarification')),
   );
+
+  // Auto-expand BrowserPanel for tasks that need it; mobile gets the
+  // bottom sheet pop.
   React.useEffect(() => {
     if (!selectedNeedsBrowser) return;
     setBrowserCollapsed(false);
@@ -746,58 +168,74 @@ function AppShell(): JSX.Element {
     }
   }, [selectedNeedsBrowser]);
 
-  // Phase 1 follow-up — auto-collapse BrowserPanel for non-browser
-  // tasks. When the user picks a generate / scrape task (or the
-  // executor lane is otherwise non-browser), the panel content is
-  // either empty or shows a stale frame from a prior browser task.
-  // Default-collapsing gives the TaskStream the full content width.
-  //
-  // Codex P2 follow-up — the effect deps used to include `tasks`,
-  // which meant every WS-driven task-list refresh re-fired the
-  // collapse logic and yanked the panel shut on the user underneath
-  // a manual expand. We now (1) reset `manualPanelOverride` only
-  // when `selectedTaskId` changes (NOT on tasks-array refresh) and
-  // (2) skip the auto-collapse when the override is set. The
-  // `selectedNeedsBrowser` effect above still wins for live-browser
-  // tasks (captcha / login / browser_action park).
+  // Reset manualPanelOverride on task switch.
   React.useEffect(() => {
     setManualPanelOverride(false);
   }, [selectedTaskId]);
+
+  // Auto-collapse BrowserPanel for non-browser tasks.
   React.useEffect(() => {
     if (manualPanelOverride) return;
     const selectedTaskNow = selectedTaskId
       ? tasks.find((t) => t.taskId === selectedTaskId)
       : null;
     if (!selectedTaskNow) return;
-    if (selectedNeedsBrowser) return; // already handled by the effect above
+    if (selectedNeedsBrowser) return;
     const lane = selectedTaskNow.executionMode;
-    // Only auto-collapse when we know the lane is non-browser. A
-    // missing executionMode (legacy row) leaves the panel alone —
-    // safer to show empty than to hide a real browser task.
     if (lane && lane !== 'browser') {
       setBrowserCollapsed(true);
     }
-    // Codex P2 — drop `tasks` from deps. `selectedTaskId` triggers
-    // re-evaluation on user task-switch; `selectedNeedsBrowser`
-    // covers the awaiting-user park path. A tasks-array refresh
-    // shouldn't reset the user's panel state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTaskId, selectedNeedsBrowser, manualPanelOverride]);
 
-  if (!authed) {
-    return <LoginGate onAuthenticated={() => setAuthed(true)} />;
-  }
+  // Workbench-specific Esc routing. Closes panelFullscreen +
+  // browserSheet, and steps out of the way when the BrowserPanel is in
+  // interactive takeover (the remote page should own Esc then). Shell
+  // modals (search / feedback / settings) are handled by AppShell's
+  // own Esc handler, so this one ignores them.
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      const inField = tag === 'INPUT' || tag === 'TEXTAREA';
+      const remoteOwnsEsc =
+        browserInteractive &&
+        !!selectedTaskId &&
+        !inField &&
+        !e.metaKey &&
+        !e.shiftKey;
+      if (remoteOwnsEsc) return;
+      if (browserSheetOpen) {
+        setBrowserSheetOpen(false);
+        return;
+      }
+      if (panelFullscreen) {
+        setPanelFullscreen(false);
+        return;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [browserSheetOpen, panelFullscreen, browserInteractive, selectedTaskId]);
 
-  if (!bootstrapped) return <AppSkeleton />;
+  // '/' to focus the composer.
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      const inField = tag === 'INPUT' || tag === 'TEXTAREA';
+      if (e.key === '/' && !inField && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const selectedTask = tasks.find((t) => t.taskId === selectedTaskId) ?? null;
-  const greetingName = preferredDisplayName(me);
 
-  // Phase 14 audit follow-up — chip + replyToTaskId wiring.
-  // Active when the selected task is in a terminal state AND not
-  // currently parked on an awaiting_user question (replyMode wins
-  // over follow-up — that's a tasks.reply, not a new task) AND
-  // the user hasn't explicitly dismissed it for this task.
+  // Follow-up chip — active on a terminal task that the user hasn't
+  // dismissed and isn't currently in awaiting-user reply mode.
   const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
   const isReplyMode = selectedNeedsUser;
   const followUpTarget =
@@ -812,272 +250,152 @@ function AppShell(): JSX.Element {
         }
       : null;
 
+  const showBrowserPanel =
+    (selectedTask?.executionMode === 'browser' || selectedNeedsBrowser) &&
+    !!selectedTaskId &&
+    composerMode !== 'new';
+
   return (
-    <SidebarProvider defaultOpen={true}>
-    <div className="relative flex h-full min-h-0 w-full overflow-hidden" ref={contentRowRef}>
+    <div
+      className="relative flex h-full min-h-0 w-full overflow-hidden"
+      ref={contentRowRef}
+    >
       {!panelFullscreen && (
-      <Sidebar
-        tasks={filteredTasks}
-        hiddenTaskCount={projectFilter ? 0 : hiddenByRetentionCount}
-        projectFilter={
-          activeProject
-            ? { projectId: activeProject.projectId, name: activeProject.name }
-            : null
-        }
-        onClearProjectFilter={() => navigate('/')}
-        historyDays={historyDays}
-        // In project-filter mode, paginate within the project's
-        // tasks via tasks.list({ projectId, cursor }). Without this
-        // override, the sidebar's "加载更多" button paged the
-        // store's global all-tasks list — which is the wrong axis
-        // when the user has scoped down to a single project.
-        pagerOverride={
-          projectFilter
-            ? {
-                hasMore: projectHasMore,
-                loadingMore: projectLoadingMore,
-                onLoadMore: onProjectLoadMore,
-              }
-            : undefined
-        }
-        selectedTaskId={selectedTaskId}
-        onSelectTask={(taskId) => {
-          if (taskId) selectTask(taskId, 'ui');
-          else enterNewTaskMode();
-        }}
-        onNewTask={() => {
-          // 新任务 button is "clear the composer + focus" only — no
-          // background browser wake. Allocating a Brave on every new-
-          // task click was wasteful for non-browser tasks and gave a
-          // misleading "browser is loading" signal in the right rail
-          // when the user just wanted to start typing. Browser is
-          // allocated lazily by `createTask` for tasks that actually
-          // need it, or explicitly via the sidebar 浏览器 entry.
-          enterNewTaskMode();
-          setTimeout(() => inputRef.current?.focus(), 50);
-        }}
-        onDeleteTask={(taskId) => {
-          // Defer the actual delete until the user confirms in the
-          // modal below; onConfirm pulls the id back out of state.
-          setConfirmDelete(taskId);
-        }}
-        onDeleteTasks={(taskIds) => {
-          if (taskIds.length === 0) return;
-          setConfirmBulkDelete(taskIds);
-        }}
-        onRetryTask={async (intent) => {
-          const res = await createTask(intent);
-          if ('error' in res) toast.show(`重试失败：${res.error}`, 'error');
-        }}
-        onRenameTask={async (taskId, title) => {
-          const res = await renameTask(taskId, title);
-          if ('error' in res) toast.show(`重命名失败：${res.error}`, 'error');
-        }}
-        onToggleStarred={(taskId) => void toggleStarred(taskId)}
-        projects={projects}
-        onMoveTaskToProject={async (taskId, projectId) => {
-          await moveTaskToProject(taskId, projectId);
-          // Refresh project task counts in the background so the
-          // sidebar's submenu and the /projects page see the latest
-          // numbers on next open.
-          void refreshProjects();
-        }}
-        onCreateProject={() => navigate('/projects?create=1')}
-        // Codex follow-up — the sidebar 浏览器 entry was removed; the
-        // BrowserPanel now reveals itself only for browser-mode
-        // tasks or login / captcha / permission park.
-        userEmail={me?.email ?? null}
-        userDisplayName={preferredDisplayName(me)}
-        userPlan={me?.plan ?? 'free'}
-        onLogout={handleLogout}
-        onOpenFeedback={() => setFeedbackOpen(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onOpenSearch={() => setSearchOpen(true)}
-        failedTaskCount={tasks.filter((t) => t.status === 'failed').length}
-        onClearFailedTasks={() => setConfirmClearFailed(true)}
-        mobileOpen={sidebarOpen}
-        onMobileClose={() => setSidebarOpen(false)}
-      />
-      )}
-      {!panelFullscreen && (
-      <MainPanel
-        task={selectedTask}
-        busy={loading}
-        greetingName={greetingName || undefined}
-        inputRef={inputRef}
-        replyMode={isReplyMode}
-        followUpTarget={followUpTarget}
-        onCancelFollowUp={() => {
-          // 发新任务 — drop the follow-up chip AND clear the
-          // selection / URL via the canonical state-machine entry.
-          // setFollowUpDismissedTaskId on its own only suppressed
-          // the chip locally; selectedTaskId stayed put, ?task= in
-          // URL stayed put, and refreshTaskList could later re-
-          // surface the same task as the panel default.
-          if (selectedTaskId) setFollowUpDismissedTaskId(selectedTaskId);
-          enterNewTaskMode();
-          setTimeout(() => inputRef.current?.focus(), 50);
-        }}
-        userPlan={me?.plan}
-        userSelectedRoles={me?.selectedRoles ?? null}
-        quotaExhausted={quotaExhausted}
-        attachmentsAllowed={planForRetention !== 'free'}
-        attachmentByteCap={
-          planForRetention === 'pro'
-            ? 10 * 1024 * 1024
-            : planForRetention === 'basic'
-              ? 5 * 1024 * 1024
-              : 0
-        }
-        onSubmit={async (intent, fileIds, mode) => {
-          // B6 diagnostic — surfaces in browser console which branch
-          // fires for each submit. BOSS reported "follow-up still
-          // creates a new task"; the routing is technically correct
-          // (server creates a new task row + injects parent context)
-          // but the visual outcome looks the same as fresh-task. Log
-          // helps verify the FE actually sent replyToTaskId.
-          hdDebug('onSubmit', {
-            isReplyMode,
-            followUpTaskId: followUpTarget?.taskId ?? null,
-            selectedTaskId,
-            mode,
-          });
-          // 1) In-flight awaiting_user → tasks.reply, resumes the existing loop.
-          if (isReplyMode && selectedTaskId) {
-            // F2 — pass fileIds through so the backend's tasks.reply
-            // can parse + plumb attachments into supercarReply's
-            // attachmentBlocks (or generate-resume's attachments).
-            const res = await replyToTask(selectedTaskId, intent, fileIds);
-            if ('error' in res) {
-              toast.show(`回复失败：${res.error}`, 'error');
-            } else if (!res.ok) {
-              // P1-C — handle missing on the backend (orchestrator
-              // restart since the task parked, GC reaped the slot,
-              // race with another reply). Don't silently fallback to
-              // a fresh task that loses the user's typed message; ask
-              // first and offer to reconstruct with everything we know.
-              setConfirmRebuildTask({
-                taskId: selectedTaskId,
-                intent: selectedTask?.intent ?? '',
-                pendingMessage: intent,
-              });
-            }
-            return;
-          }
-          // 2) Terminal task selected + chip not dismissed → 追问 (free,
-          //    parent context auto-injected server-side). Plan mode is
-          //    skipped on follow-ups — the parent already established
-          //    intent context, no value in pausing again.
-          if (followUpTarget) {
-            const res = await createTask(intent, fileIds, followUpTarget.taskId);
-            if ('error' in res) toast.show(`追问失败：${res.error}`, 'error');
-            else toast.show('已基于上一个任务追问');
-            return;
-          }
-          // 3) Default — fresh task. Pass mode through so Plan flips
-          //    the agent into "list plan first, wait for approval".
-          const res = await createTask(intent, fileIds, undefined, mode);
-          if ('error' in res) {
-            // O15 — server returns BAD_REQUEST with this exact prefix
-            // when the intent looks like a code task. Surface as an
-            // informational toast (no "发送失败：" prefix, no error
-            // styling) so the user understands the rejection isn't a
-            // failure of HOLA DAY but a positioning choice.
-            const codeRejected =
-              res.error.includes('HOLA DAY 专注浏览器任务') ||
-              res.error.includes('代码开发请用') ||
-              res.error.includes('Claude Code 或 Cursor');
-            if (codeRejected) {
-              toast.show(
-                'HOLA DAY 专注浏览器任务执行（搜索、填表、数据采集等）。代码开发建议使用 Claude Code 或 Cursor。',
-              );
-            } else {
-              toast.show(`发送失败：${res.error}`, 'error');
-            }
-          }
-        }}
-        onOpenSidebar={() => setSidebarOpen(true)}
-        // Codex follow-up — onOpenBrowser removed; the BrowserPanel
-        // sheet now opens automatically when a browser-mode task is
-        // selected, not on a button press.
-      />
-      )}
-      {/* Product polish #1 — empty homepage hides the right pane
-          entirely. The composer + MainPanel take the full width
-          when there's no task selected OR the user is composing
-          a new task. The pane only re-appears for browser-mode
-          tasks, captcha/login parks, or fullscreen takeover (the
-          fullscreen toggle owns the whole shell). Generate /
-          scrape tasks never need the pane and previously left a
-          560-pixel-wide empty slab on the right. */}
-      {!panelFullscreen &&
-        !browserCollapsed &&
-        (selectedTask?.executionMode === 'browser' || selectedNeedsBrowser) &&
-        !!selectedTaskId &&
-        composerMode !== 'new' && (
-          <ResizeHandle onDrag={onPanelResizeDrag} onDragEnd={onPanelResizeEnd} />
-        )}
-      {(panelFullscreen ||
-        ((selectedTask?.executionMode === 'browser' || selectedNeedsBrowser) &&
-          !!selectedTaskId &&
-          composerMode !== 'new')) && (
-      <div
-        className={
-          panelFullscreen
-            ? 'flex h-full w-full flex-col'
-            : 'hidden h-full lg:flex lg:flex-col lg:shrink-0'
-        }
-        style={
-          panelFullscreen
-            ? undefined
-            : browserCollapsed
-              ? { flex: '0 0 40px', minWidth: 40, width: 40 }
-              : panelPx != null
-                ? { flex: `0 0 ${panelPx}px` }
-                : { flex: '3 1 0', minWidth: PANEL_MIN_PX }
-        }
-      >
-        <BrowserPanel
-          frame={selectedTask ? (screencastByTask[selectedTask.taskId] ?? null) : null}
-          taskStatus={selectedTask?.status ?? null}
-          awaitingUser={
-            selectedTask
-              ? Boolean(
-                  captchaWaitByTask[selectedTask.taskId] ||
-                    awaitingUserByTask[selectedTask.taskId],
-                )
-              : false
-          }
-          awaitingKind={
-            selectedTask && captchaWaitByTask[selectedTask.taskId]
-              ? 'captcha'
-              : selectedAwaitingKind
-          }
-          activeTaskId={selectedTaskId}
-          poolUserId={me?.multiUser ? me.userId : null}
-          fullscreen={panelFullscreen}
-          onToggleFullscreen={() => setPanelFullscreen((v) => !v)}
-          collapsed={browserCollapsed}
-          onToggleCollapse={() => {
-            setBrowserCollapsed((v) => {
-              // Codex P2 — when the user MANUALLY un-collapses
-              // (expanding the panel from a collapsed state), lock
-              // the auto-collapse effect for the current task so a
-              // tasks-array refresh can't yank it shut.
-              const nextCollapsed = !v;
-              if (!nextCollapsed) setManualPanelOverride(true);
-              return nextCollapsed;
-            });
+        <MainPanel
+          task={selectedTask}
+          busy={loading}
+          greetingName={preferredDisplayName(me) || undefined}
+          inputRef={inputRef}
+          replyMode={isReplyMode}
+          followUpTarget={followUpTarget}
+          onCancelFollowUp={() => {
+            if (selectedTaskId) setFollowUpDismissedTaskId(selectedTaskId);
+            enterNewTaskMode();
+            setTimeout(() => inputRef.current?.focus(), 50);
           }}
+          userPlan={me?.plan}
+          userSelectedRoles={me?.selectedRoles ?? null}
+          quotaExhausted={quotaExhausted}
+          attachmentsAllowed={planForRetention !== 'free'}
+          attachmentByteCap={
+            planForRetention === 'pro'
+              ? 10 * 1024 * 1024
+              : planForRetention === 'basic'
+                ? 5 * 1024 * 1024
+                : 0
+          }
+          onSubmit={async (intent, fileIds, mode) => {
+            hdDebug('onSubmit', {
+              isReplyMode,
+              followUpTaskId: followUpTarget?.taskId ?? null,
+              selectedTaskId,
+              mode,
+            });
+            if (isReplyMode && selectedTaskId) {
+              const res = await replyToTask(selectedTaskId, intent, fileIds);
+              if ('error' in res) {
+                toast.show(`回复失败：${res.error}`, 'error');
+              } else if (!res.ok) {
+                setConfirmRebuildTask({
+                  taskId: selectedTaskId,
+                  intent: selectedTask?.intent ?? '',
+                  pendingMessage: intent,
+                });
+              }
+              return;
+            }
+            if (followUpTarget) {
+              const res = await createTask(intent, fileIds, followUpTarget.taskId);
+              if ('error' in res) toast.show(`追问失败：${res.error}`, 'error');
+              else toast.show('已基于上一个任务追问');
+              return;
+            }
+            const res = await createTask(intent, fileIds, undefined, mode);
+            if ('error' in res) {
+              const codeRejected =
+                res.error.includes('HOLA DAY 专注浏览器任务') ||
+                res.error.includes('代码开发请用') ||
+                res.error.includes('Claude Code 或 Cursor');
+              if (codeRejected) {
+                toast.show(
+                  'HOLA DAY 专注浏览器任务执行（搜索、填表、数据采集等）。代码开发建议使用 Claude Code 或 Cursor。',
+                );
+              } else {
+                toast.show(`发送失败：${res.error}`, 'error');
+              }
+            }
+          }}
+          onOpenSidebar={() => setOpenMobile(true)}
         />
-      </div>
       )}
+
+      {!panelFullscreen && !browserCollapsed && showBrowserPanel && (
+        <ResizeHandle onDrag={onPanelResizeDrag} onDragEnd={onPanelResizeEnd} />
+      )}
+
+      {(panelFullscreen || showBrowserPanel) && (
+        <div
+          className={
+            panelFullscreen
+              ? 'flex h-full w-full flex-col'
+              : 'hidden h-full lg:flex lg:flex-col lg:shrink-0'
+          }
+          style={
+            panelFullscreen
+              ? undefined
+              : browserCollapsed
+                ? { flex: '0 0 40px', minWidth: 40, width: 40 }
+                : panelPx != null
+                  ? { flex: `0 0 ${panelPx}px` }
+                  : { flex: '3 1 0', minWidth: PANEL_MIN_PX }
+          }
+        >
+          <BrowserPanel
+            frame={
+              selectedTask
+                ? (screencastByTask[selectedTask.taskId] ?? null)
+                : null
+            }
+            taskStatus={selectedTask?.status ?? null}
+            awaitingUser={
+              selectedTask
+                ? Boolean(
+                    captchaWaitByTask[selectedTask.taskId] ||
+                      awaitingUserByTask[selectedTask.taskId],
+                  )
+                : false
+            }
+            awaitingKind={
+              selectedTask && captchaWaitByTask[selectedTask.taskId]
+                ? 'captcha'
+                : selectedAwaitingKind
+            }
+            activeTaskId={selectedTaskId}
+            poolUserId={me?.multiUser ? me.userId : null}
+            fullscreen={panelFullscreen}
+            onToggleFullscreen={() => setPanelFullscreen((v) => !v)}
+            collapsed={browserCollapsed}
+            onToggleCollapse={() => {
+              setBrowserCollapsed((v) => {
+                const nextCollapsed = !v;
+                if (!nextCollapsed) setManualPanelOverride(true);
+                return nextCollapsed;
+              });
+            }}
+          />
+        </div>
+      )}
+
       <div className={panelFullscreen ? 'hidden' : 'lg:hidden'}>
         <BrowserPanel
           layout="sheet"
           open={browserSheetOpen}
           onClose={() => setBrowserSheetOpen(false)}
-          frame={selectedTask ? (screencastByTask[selectedTask.taskId] ?? null) : null}
+          frame={
+            selectedTask
+              ? (screencastByTask[selectedTask.taskId] ?? null)
+              : null
+          }
           taskStatus={selectedTask?.status ?? null}
           awaitingUser={
             selectedTask
@@ -1096,93 +414,6 @@ function AppShell(): JSX.Element {
           poolUserId={me?.multiUser ? me.userId : null}
         />
       </div>
-
-      <SearchOverlay
-        open={searchOpen}
-        tasks={tasks}
-        onClose={() => setSearchOpen(false)}
-        onPick={(taskId) => selectTask(taskId, 'ui')}
-      />
-
-      <FeedbackDialog
-        open={feedbackOpen}
-        onClose={() => setFeedbackOpen(false)}
-        onSubmit={async (message) => {
-          try {
-            const ctx = selectedTaskId ? `task_id=${selectedTaskId}` : undefined;
-            await trpc.feedback.submit.mutate(
-              ctx ? { message, context: ctx } : { message },
-            );
-            return { ok: true as const };
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            toast.show(`反馈发送失败：${msg}`, 'error');
-            return { error: msg };
-          }
-        }}
-      />
-
-      <SettingsModal
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        displayName={preferredDisplayName(me)}
-        email={me?.email ?? null}
-        phone={me?.phone ?? null}
-        plan={me?.plan ?? 'free'}
-      />
-
-      <ConfirmDialog
-        open={confirmDelete !== null}
-        title="确认删除此任务？"
-        description="任务记录和所有步骤都会清除，操作无法恢复。"
-        confirmLabel="删除"
-        destructive
-        onClose={() => setConfirmDelete(null)}
-        onConfirm={async () => {
-          const taskId = confirmDelete;
-          setConfirmDelete(null);
-          if (!taskId) return;
-          const res = await deleteTask(taskId);
-          if ('error' in res) toast.show(`删除失败：${res.error}`, 'error');
-          else toast.show('任务已删除');
-        }}
-      />
-
-      <ConfirmDialog
-        open={confirmBulkDelete !== null}
-        title={`删除选中的 ${confirmBulkDelete?.length ?? 0} 个任务？`}
-        description="任务记录和所有步骤都会清除，操作无法恢复。"
-        confirmLabel={`删除 ${confirmBulkDelete?.length ?? 0} 个`}
-        destructive
-        onClose={() => setConfirmBulkDelete(null)}
-        onConfirm={async () => {
-          const ids = confirmBulkDelete;
-          setConfirmBulkDelete(null);
-          if (!ids || ids.length === 0) return;
-          // Same allSettled tally pattern as 清除失败任务 above —
-          // each delete is a cheap DB write, partial failures are
-          // surfaced in the toast rather than aborting the rest.
-          const results = await Promise.all(
-            ids.map((id) =>
-              deleteTask(id).then(
-                (r) => r,
-                (err) => ({ error: err instanceof Error ? err.message : String(err) }),
-              ),
-            ),
-          );
-          const errs = results.filter(
-            (r): r is { error: string } => 'error' in r,
-          );
-          if (errs.length === 0) toast.show(`已删除 ${ids.length} 个任务`);
-          else if (errs.length === ids.length)
-            toast.show(`删除失败：${errs[0]?.error ?? 'unknown'}`, 'error');
-          else
-            toast.show(
-              `已删除 ${ids.length - errs.length} 个，${errs.length} 个失败`,
-              'error',
-            );
-        }}
-      />
 
       <ConfirmDialog
         open={confirmRebuildTask !== null}
@@ -1195,68 +426,63 @@ function AppShell(): JSX.Element {
           setConfirmRebuildTask(null);
           if (!ctx) return;
           const replies = userRepliesByTask[ctx.taskId] ?? [];
-          const replyBlock = replies.map((r) => r.text).filter(Boolean).join('\n');
+          const replyBlock = replies
+            .map((r) => r.text)
+            .filter(Boolean)
+            .join('\n');
           const combined = [
             ctx.intent,
             replyBlock.length > 0 ? `\n[此前补充]\n${replyBlock}` : '',
             `\n[当前补充]\n${ctx.pendingMessage}`,
-          ].join('').trim();
+          ]
+            .join('')
+            .trim();
           const res = await createTask(combined);
           if ('error' in res) toast.show(`重建任务失败：${res.error}`, 'error');
           else toast.show('已基于当前上下文重新创建任务');
         }}
       />
-
-      <ConfirmDialog
-        open={confirmClearFailed}
-        title="清除所有失败任务？"
-        description="这些任务的记录和步骤都会被删除，操作无法恢复。进行中的任务不受影响。"
-        confirmLabel={`清除 ${tasks.filter((t) => t.status === 'failed').length} 个`}
-        destructive
-        onClose={() => setConfirmClearFailed(false)}
-        onConfirm={async () => {
-          setConfirmClearFailed(false);
-          const failed = tasks.filter((t) => t.status === 'failed');
-          if (failed.length === 0) return;
-          // Issue deletes in parallel — each one is a cheap DB write.
-          // Errors toast individually; a partial failure doesn't block
-          // the rest. We swallow individual rejects so Promise.all
-          // fulfils even if one fails.
-          const results = await Promise.all(
-            failed.map((t) =>
-              deleteTask(t.taskId).then(
-                (r) => r,
-                (err) => ({ error: err instanceof Error ? err.message : String(err) }),
-              ),
-            ),
-          );
-          const errs = results.filter((r): r is { error: string } => 'error' in r);
-          if (errs.length === 0) toast.show(`已清除 ${failed.length} 个失败任务`);
-          else if (errs.length === failed.length)
-            toast.show(`清除失败：${errs[0]?.error ?? 'unknown'}`, 'error');
-          else
-            toast.show(
-              `清除了 ${failed.length - errs.length} 个，${errs.length} 个失败`,
-              'error',
-            );
-        }}
-      />
-
-      {!online && (
-        <div
-          aria-live="polite"
-          className="pointer-events-none fixed inset-x-0 bottom-0 z-[90] bg-red-600/95 px-3 py-1.5 text-center text-[11px] font-medium text-white"
-        >
-          当前离线 — 暂时无法创建新任务
-        </div>
-      )}
     </div>
-    </SidebarProvider>
   );
 }
 
-function firstSegment(email: string): string {
-  if (!email) return '';
-  const at = email.indexOf('@');
-  return at > 0 ? email.slice(0, at) : email;
+/**
+ * Single source of truth for the BrowserPanel's narrowest sane width.
+ * Used by the localStorage clamp on seed, the drag handle floor, AND
+ * the collapsed-flex fallback when no explicit panelPx is set.
+ */
+const PANEL_MIN_PX = 560;
+
+/**
+ * Picks the viewport profile baked into the task at create time.
+ * Browser sessions are spawned once at task start; the SPA's
+ * fullscreen toggle is a display-side zoom only — it can't shift the
+ * agent's click coordinates relative to its plan.
+ *
+ *   Mobile viewport (< 1024) → 'mobile' (390×844)
+ *   panelPx explicit and ≥ 1100 → 'desktop' (1280×800)
+ *   Otherwise → 'sidepanel' (900×900)
+ */
+function pickViewportProfile(inputs: {
+  panelPx: number | null;
+  isMobile: boolean;
+}): BrowserViewportProfile {
+  if (inputs.isMobile) return 'mobile';
+  if (inputs.panelPx != null && inputs.panelPx >= 1100) return 'desktop';
+  return 'sidepanel';
+}
+
+function preferredDisplayName(
+  me: { displayName: string | null; email: string | null; phone?: string | null } | null,
+): string {
+  if (!me) return '';
+  const raw = me.displayName?.trim();
+  const looksMasked = raw ? /\d{3}\**\d{4}/.test(raw) : false;
+  if (raw && !looksMasked) return raw;
+  if (me.phone) return `用户_${me.phone.slice(-4)}`;
+  if (me.email) {
+    const at = me.email.indexOf('@');
+    return at > 0 ? me.email.slice(0, at) : me.email;
+  }
+  return '用户';
 }
