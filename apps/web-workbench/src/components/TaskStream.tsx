@@ -320,11 +320,13 @@ function AgentBlock({
 
   const showInlineProgress = !terminal;
 
+  // Product polish #5 — drop the "H" avatar circle. Assistant
+  // output reads as a result card directly on the page (Codex /
+  // ChatGPT workspace style), not as a chat-IM message. The
+  // content space (max-w-3xl) and prose styling carry enough
+  // structure that an avatar adds noise without information.
   return (
     <div className="flex items-start gap-3">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-pink-500 to-pink-700 text-[11px] font-semibold text-white">
-        H
-      </div>
       <div className="min-w-0 flex-1 space-y-3">
         {/* Phase 13 Dim 1 — plan card lands above thinking + steps so
          *  the user sees the upcoming-step list as soon as the
@@ -751,13 +753,13 @@ function ThinkingBlock({ text }: { text: string }): JSX.Element {
 }
 
 function UserBubble({ intent }: { intent: string }): JSX.Element {
+  // Product polish #5 — drop the "Y" pink avatar. User input now
+  // renders as a light right-aligned text block without an avatar
+  // circle, matching Codex / ChatGPT workspace conventions.
   return (
-    <div className="flex items-start justify-end gap-3">
+    <div className="flex justify-end">
       <div className="max-w-[80%] rounded-2xl bg-muted px-4 py-2.5 text-sm leading-relaxed text-foreground">
         {intent}
-      </div>
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-pink-400 to-pink-600 text-xs font-semibold text-white">
-        Y
       </div>
     </div>
   );
@@ -1367,11 +1369,51 @@ function TerminalSummary({
       {!isFailedLike && expertWorkflowId && (
         <ExpertReportHeader workflowId={expertWorkflowId} />
       )}
-      <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>
-          {sanitizeMarkdownTrailingPunctuation(sanitizeForRender(revealed))}
-        </ReactMarkdown>
-      </div>
+      {(() => {
+        // Product polish #2 — empty-result fallback. When the
+        // sanitized text is suspiciously short (< 20 chars after
+        // stripping markdown structure / ordinals / whitespace),
+        // surface a hint card instead of rendering a near-empty
+        // prose block. Common causes: model hit max_tokens before
+        // producing real content, post-check ate everything, tool
+        // output was structurally invalid.
+        const sanitized = sanitizeMarkdownTrailingPunctuation(
+          sanitizeForRender(revealed),
+        );
+        // Strip markdown headers / list ordinals / table pipes /
+        // collapsed whitespace before measuring — "## 报告\n1. \n"
+        // is structurally non-empty but carries zero content.
+        const meaningful = sanitized
+          .replace(/^#{1,6}\s+.*$/gm, '')
+          .replace(/^[-*]\s+/gm, '')
+          .replace(/^\d+\.\s+/gm, '')
+          .replace(/[|`*_>]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        const hasContentChars = /[A-Za-z0-9一-鿿぀-ゟ゠-ヿ]/.test(meaningful);
+        if (
+          !isFailedLike &&
+          !attachments?.length &&
+          (meaningful.length < 10 || !hasContentChars)
+        ) {
+          return (
+            <div className="rounded-md border border-amber-300/50 bg-amber-50/70 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+              <div className="font-medium">结果内容不足</div>
+              <div className="mt-1 text-xs text-amber-900/80 dark:text-amber-200/80">
+                这次输出几乎没有有效内容。建议重新执行或换一种描述
+                方式（更具体的指令、提供示例数据、缩小范围）。
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>
+              {sanitized}
+            </ReactMarkdown>
+          </div>
+        );
+      })()}
       {/* Phase 4 R1 B.5 — AttachmentBar. Hidden when attachments is
           empty/undefined; only on success panels. Renders each
           attachment as the existing FileDownloadCard so the auth +

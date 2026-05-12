@@ -1002,9 +1002,25 @@ function AppShell(): JSX.Element {
         // selected, not on a button press.
       />
       )}
-      {!panelFullscreen && !browserCollapsed && (
-        <ResizeHandle onDrag={onPanelResizeDrag} onDragEnd={onPanelResizeEnd} />
-      )}
+      {/* Product polish #1 — empty homepage hides the right pane
+          entirely. The composer + MainPanel take the full width
+          when there's no task selected OR the user is composing
+          a new task. The pane only re-appears for browser-mode
+          tasks, captcha/login parks, or fullscreen takeover (the
+          fullscreen toggle owns the whole shell). Generate /
+          scrape tasks never need the pane and previously left a
+          560-pixel-wide empty slab on the right. */}
+      {!panelFullscreen &&
+        !browserCollapsed &&
+        (selectedTask?.executionMode === 'browser' || selectedNeedsBrowser) &&
+        !!selectedTaskId &&
+        composerMode !== 'new' && (
+          <ResizeHandle onDrag={onPanelResizeDrag} onDragEnd={onPanelResizeEnd} />
+        )}
+      {(panelFullscreen ||
+        ((selectedTask?.executionMode === 'browser' || selectedNeedsBrowser) &&
+          !!selectedTaskId &&
+          composerMode !== 'new')) && (
       <div
         className={
           panelFullscreen
@@ -1055,6 +1071,7 @@ function AppShell(): JSX.Element {
           }}
         />
       </div>
+      )}
       <div className={panelFullscreen ? 'hidden' : 'lg:hidden'}>
         <BrowserPanel
           layout="sheet"

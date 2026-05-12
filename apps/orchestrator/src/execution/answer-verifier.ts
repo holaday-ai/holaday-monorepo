@@ -156,6 +156,20 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
     if (annotationCheck) checks.push(annotationCheck);
   }
 
+  // 4. Product-polish #2 — empty-result guard. After stripping
+  //    markdown structure (headings, list ordinals, table pipes,
+  //    code/format markers, collapsed whitespace), the meaningful
+  //    text must be at least 20 chars. Common failure shape: the
+  //    model hits max_tokens during a tool loop and the visible
+  //    output ends up like "## 报告\n\n1. \n2. \n3.". SPA-side
+  //    sanitizer already hints this is empty to the user; the
+  //    verifier failure here flags the task as `fixable` so an
+  //    eventual autoFix step (or the user retrying via 重试) gets
+  //    surfaced cleanly instead of presenting a near-blank card
+  //    as a "success".
+  const emptyCheck = checkEmptyResult(answerText);
+  if (emptyCheck) checks.push(emptyCheck);
+
   const passed = checks.every((c) => c.passed);
   const result: VerificationResult = {
     taskId: contract.taskId,
@@ -402,6 +416,48 @@ function checkCustom(
  * sources). Returns null when the answer has no URLs at all
  * (vacuously fine — nothing to fabricate).
  */
+/**
+ * Product-polish #2 — empty-result check.
+ *
+ * Strips markdown structure (headings, list ordinals, table pipes,
+ * code/format markers, whitespace) and counts the remaining
+ * characters. Anything below 20 = the visible card is effectively
+ * empty (model hit max_tokens, post-check ate everything, tool
+ * loop never produced a final synthesis). Returns a `'fixable'`
+ * failure so the integration step + future autoFix can re-attempt;
+ * also lets `failureLevel` classification flip the task off the
+ * "completed" path so the user doesn't see a near-blank result
+ * card as "success".
+ *
+ * Returns null when the answer is long enough — the check is a
+ * floor, not a ceiling.
+ */
+function checkEmptyResult(answerText: string): CheckResult | null {
+  const meaningful = answerText
+    .replace(/^#{1,6}\s+.*$/gm, '')
+    .replace(/^[-*]\s+/gm, '')
+    .replace(/^\d+\.\s+/gm, '')
+    .replace(/[|`*_>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // Two-part guard: at least 10 chars AND at least one
+  // alphanumeric / CJK content character. Short browser-task
+  // confirmations like "Page reached." (13 chars + 2 words) pass.
+  // Pure-ordinal markdown like "## 报告\n1. \n2. " sanitizes to
+  // empty + fails. Empty tables like "| a | b |\n|---|---|\n" also
+  // sanitize to empty.
+  const hasContentChars =
+    /[A-Za-z0-9一-鿿぀-ゟ゠-ヿ]/.test(meaningful);
+  if (meaningful.length >= 10 && hasContentChars) return null;
+  return {
+    criterionId: 'generic.empty_result',
+    passed: false,
+    checker: 'deterministic',
+    detail: `meaningful answer length ${meaningful.length}, hasContentChars=${hasContentChars} — output looks empty after sanitization`,
+    severity: 'fixable',
+  };
+}
+
 function checkUrlGrounding(
   answerText: string,
   ledger: EvidenceLedger,

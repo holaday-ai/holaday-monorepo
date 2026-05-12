@@ -13,6 +13,12 @@ import * as React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AttachmentChip, type DraftAttachment } from '@/components/AttachmentChip';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { isUploadError, uploadFile } from '@/lib/upload-file';
@@ -208,20 +214,12 @@ export function InputArea({
   }, [location, navigate]);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const imageInputRef = React.useRef<HTMLInputElement>(null);
-  // O14 — + button menu state. Closes on outside click and after
-  // an option fires. Only relevant when attachmentsAllowed; the
-  // free-plan path returns the same upgrade toast on either option.
+  // Product polish #6 — + button menu state. Radix DropdownMenu
+  // owns the outside-click / escape close, focus management, and
+  // keyboard navigation. We only keep `open` state for the
+  // controlled `open` / `onOpenChange` API + to highlight the
+  // trigger when the menu is open.
   const [plusMenuOpen, setPlusMenuOpen] = React.useState(false);
-  const plusMenuRef = React.useRef<HTMLDivElement>(null);
-  React.useEffect(() => {
-    if (!plusMenuOpen) return;
-    const onDocClick = (e: MouseEvent): void => {
-      if (plusMenuRef.current?.contains(e.target as Node)) return;
-      setPlusMenuOpen(false);
-    };
-    window.addEventListener('mousedown', onDocClick);
-    return () => window.removeEventListener('mousedown', onDocClick);
-  }, [plusMenuOpen]);
   // Local submitting flag — decouples the button spinner from the
   // global `busy` prop (which is driven by the store-level `loading`
   // flag that covers list refresh too). We flip this while the
@@ -554,61 +552,66 @@ export function InputArea({
             generate-resume runner's `attachments`), so users can
             paste a screenshot / drop an Excel as part of an "I gave
             you the data" reply on a parked task. */}
-        <div ref={plusMenuRef} className="absolute bottom-2.5 left-2.5">
-          <button
-              type="button"
-              onClick={() => {
-                if (!attachmentsAllowed) {
-                  toast.show('免费版不支持附件，升级基础版可上传文件 / 图片');
-                  return;
-                }
-                setPlusMenuOpen((v) => !v);
-              }}
-              aria-label={attachmentsAllowed ? '添加附件' : '升级基础版可添加附件'}
-              aria-expanded={plusMenuOpen}
-              title={attachmentsAllowed ? '添加附件' : '升级基础版可添加附件'}
-              className={cn(
-                'inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors',
-                attachmentsAllowed
-                  ? 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground'
-                  : 'cursor-not-allowed text-muted-foreground/40',
-                plusMenuOpen && 'bg-foreground/[0.05] text-foreground',
-              )}
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-            {plusMenuOpen && attachmentsAllowed && (
-              <div
-                role="menu"
-                className="absolute bottom-10 left-0 z-30 w-40 overflow-hidden rounded-md border border-border bg-popover py-1 shadow-lg"
-              >
+        {/* Product polish #6 — Radix DropdownMenu replaces the
+            hand-rolled outside-click popover. Picks up focus
+            management, escape-to-close, arrow-key navigation,
+            and proper portal layering for free. */}
+        <div className="absolute bottom-2.5 left-2.5">
+          {attachmentsAllowed ? (
+            <DropdownMenu open={plusMenuOpen} onOpenChange={setPlusMenuOpen}>
+              <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  role="menuitem"
-                  onClick={() => {
+                  aria-label="添加附件"
+                  title="添加附件"
+                  className={cn(
+                    'inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground',
+                    plusMenuOpen && 'bg-foreground/[0.05] text-foreground',
+                  )}
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                side="top"
+                align="start"
+                sideOffset={6}
+                className="w-40"
+              >
+                <DropdownMenuItem
+                  onSelect={() => {
                     setPlusMenuOpen(false);
                     fileInputRef.current?.click();
                   }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-foreground/[0.05]"
                 >
-                  <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                  <FileText className="text-muted-foreground" />
                   <span>上传文件</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => {
                     setPlusMenuOpen(false);
                     imageInputRef.current?.click();
                   }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-foreground/[0.05]"
                 >
-                  <ImageIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                  <ImageIcon className="text-muted-foreground" />
                   <span>上传图片</span>
-                </button>
-              </div>
-            )}
-          </div>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                toast.show('免费版不支持附件，升级基础版可上传文件 / 图片');
+              }}
+              aria-label="升级基础版可添加附件"
+              title="升级基础版可添加附件"
+              className="inline-flex h-8 w-8 cursor-not-allowed items-center justify-center rounded-md text-muted-foreground/40"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          )}
+        </div>
         <input
           ref={fileInputRef}
           type="file"

@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { AuthedAppLayout } from '@/components/AuthedAppLayout';
 import { ToastProvider } from '@/components/ui/toast';
 import { BillingPage } from '@/pages/BillingPage';
 import { HistoryPage } from '@/pages/HistoryPage';
@@ -62,7 +63,9 @@ export function App(): JSX.Element {
           path="/profile"
           element={
             <RequireAuth>
-              <ProfilePage />
+              <AuthedAppLayout>
+                <ProfilePage />
+              </AuthedAppLayout>
             </RequireAuth>
           }
         />
@@ -70,7 +73,9 @@ export function App(): JSX.Element {
           path="/settings"
           element={
             <RequireAuth>
-              <SettingsPage />
+              <AuthedAppLayout>
+                <SettingsPage />
+              </AuthedAppLayout>
             </RequireAuth>
           }
         />
@@ -78,7 +83,9 @@ export function App(): JSX.Element {
           path="/settings/roles"
           element={
             <RequireAuth>
-              <RolesPage />
+              <AuthedAppLayout>
+                <RolesPage />
+              </AuthedAppLayout>
             </RequireAuth>
           }
         />
@@ -86,7 +93,9 @@ export function App(): JSX.Element {
           path="/plan"
           element={
             <RequireAuth>
-              <PlanPage />
+              <AuthedAppLayout>
+                <PlanPage />
+              </AuthedAppLayout>
             </RequireAuth>
           }
         />
@@ -94,7 +103,9 @@ export function App(): JSX.Element {
           path="/billing"
           element={
             <RequireAuth>
-              <BillingPage />
+              <AuthedAppLayout>
+                <BillingPage />
+              </AuthedAppLayout>
             </RequireAuth>
           }
         />
@@ -102,7 +113,9 @@ export function App(): JSX.Element {
           path="/usage"
           element={
             <RequireAuth>
-              <UsagePage />
+              <AuthedAppLayout>
+                <UsagePage />
+              </AuthedAppLayout>
             </RequireAuth>
           }
         />
@@ -110,7 +123,9 @@ export function App(): JSX.Element {
           path="/history"
           element={
             <RequireAuth>
-              <HistoryPage />
+              <AuthedAppLayout>
+                <HistoryPage />
+              </AuthedAppLayout>
             </RequireAuth>
           }
         />
@@ -119,7 +134,9 @@ export function App(): JSX.Element {
           path="/skills"
           element={
             <RequireAuth>
-              <SkillsPage />
+              <AuthedAppLayout>
+                <SkillsPage />
+              </AuthedAppLayout>
             </RequireAuth>
           }
         />
@@ -127,7 +144,9 @@ export function App(): JSX.Element {
           path="/projects"
           element={
             <RequireAuth>
-              <ProjectsPage />
+              <AuthedAppLayout>
+                <ProjectsPage />
+              </AuthedAppLayout>
             </RequireAuth>
           }
         />
@@ -135,7 +154,9 @@ export function App(): JSX.Element {
           path="/starred"
           element={
             <RequireAuth>
-              <StarredPage />
+              <AuthedAppLayout>
+                <StarredPage />
+              </AuthedAppLayout>
             </RequireAuth>
           }
         />
@@ -143,7 +164,9 @@ export function App(): JSX.Element {
           path="/files"
           element={
             <RequireAuth>
-              <FilesPage />
+              <AuthedAppLayout>
+                <FilesPage />
+              </AuthedAppLayout>
             </RequireAuth>
           }
         />
@@ -151,7 +174,9 @@ export function App(): JSX.Element {
           path="/scheduled"
           element={
             <RequireAuth>
-              <ScheduledPage />
+              <AuthedAppLayout>
+                <ScheduledPage />
+              </AuthedAppLayout>
             </RequireAuth>
           }
         />
@@ -159,7 +184,9 @@ export function App(): JSX.Element {
           path="/batch"
           element={
             <RequireAuth>
-              <BatchPage />
+              <AuthedAppLayout>
+                <BatchPage />
+              </AuthedAppLayout>
             </RequireAuth>
           }
         />
@@ -167,7 +194,9 @@ export function App(): JSX.Element {
           path="/batch/:batchId"
           element={
             <RequireAuth>
-              <BatchPage />
+              <AuthedAppLayout>
+                <BatchPage />
+              </AuthedAppLayout>
             </RequireAuth>
           }
         />
@@ -175,7 +204,9 @@ export function App(): JSX.Element {
           path="/connections"
           element={
             <RequireAuth>
-              <ConnectionsPage />
+              <AuthedAppLayout>
+                <ConnectionsPage />
+              </AuthedAppLayout>
             </RequireAuth>
           }
         />

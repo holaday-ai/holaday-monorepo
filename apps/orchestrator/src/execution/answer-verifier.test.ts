@@ -70,6 +70,62 @@ describe('verifyDeterministic — happy paths', () => {
   });
 });
 
+describe('verifyDeterministic — empty-result guard (product polish #2)', () => {
+  it('flags near-empty markdown (headers + ordinals only, no meaningful content)', () => {
+    const contract = happyChecklistContract('tsk_empty');
+    const ledger = new EvidenceLedger('tsk_empty');
+    // Model hit max_tokens or post-check stripped the body — what
+    // lands is structurally markdown but content-empty.
+    const result = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: '## 报告\n\n1. \n2. \n3. ',
+    });
+    expect(result.passed).toBe(false);
+    expect(result.failureLevel).toBe('fixable');
+    const emptyCheck = result.checks.find(
+      (c) => c.criterionId === 'generic.empty_result',
+    );
+    expect(emptyCheck).toBeDefined();
+    expect(emptyCheck?.passed).toBe(false);
+    expect(emptyCheck?.severity).toBe('fixable');
+  });
+
+  it('passes when meaningful content >= 20 chars after sanitization', () => {
+    const contract = happyChecklistContract('tsk_ok');
+    const ledger = new EvidenceLedger('tsk_ok');
+    const result = verifyDeterministic({
+      contract,
+      ledger,
+      answerText:
+        '## 报告\n\n1. 网站访问量增长了 30%\n2. 用户留存稳定在 80%',
+    });
+    expect(result.passed).toBe(true);
+    const emptyCheck = result.checks.find(
+      (c) => c.criterionId === 'generic.empty_result',
+    );
+    // No check appended when meaningful >= 20 (the guard returns null).
+    expect(emptyCheck).toBeUndefined();
+  });
+
+  it('strips table pipes + code markers before measuring (truly empty table)', () => {
+    // A pipe-table with NO content cells — just structure + dashes.
+    // After sanitization meaningful body collapses below the floor.
+    const contract = happyChecklistContract('tsk_pipes');
+    const ledger = new EvidenceLedger('tsk_pipes');
+    const result = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: '|   |   |\n|---|---|\n|   |   |\n',
+    });
+    expect(result.passed).toBe(false);
+    const emptyCheck = result.checks.find(
+      (c) => c.criterionId === 'generic.empty_result',
+    );
+    expect(emptyCheck?.passed).toBe(false);
+  });
+});
+
 describe('verifyDeterministic — URL fabrication (acceptance #3)', () => {
   it('flags URLs in answer that have no grounded source', () => {
     const contract = happyChecklistContract('tsk_fab');
