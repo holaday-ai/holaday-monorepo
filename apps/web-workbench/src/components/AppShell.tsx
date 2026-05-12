@@ -179,15 +179,46 @@ export function AppShell(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authed]);
 
-  // URL → store: deep-link / browser back-forward.
+  // URL → store: deep-link / browser back-forward. The URL is the
+  // source of truth — if `?task=xxx` is present, sync it. Only the
+  // bare `/` (no taskParam) in new-task mode is skipped, so visiting
+  // a deep link while composer is in new-task mode doesn't get
+  // silently dropped.
   const taskParam = searchParams.get('task');
   React.useEffect(() => {
     if (!bootstrapped) return;
-    if (composerMode === 'new') return;
+    if (!taskParam && composerMode === 'new') return;
     if (taskParam && taskParam !== selectedTaskId) {
       selectTask(taskParam, 'url');
     }
   }, [bootstrapped, composerMode, taskParam, selectedTaskId, selectTask]);
+
+  // New-task handoff. When a sub-page (e.g. Sidebar "新任务" from
+  // /scheduled) navigates back with `state.newTask`, the bootstrap
+  // effect doesn't re-run — so the old selectedTask would linger.
+  // Catch it here on every location change, drop the selection, and
+  // clear the state so a refresh doesn't re-fire. Preserve attachFile
+  // since FilesPage uses the same state.location pathway to hand off
+  // a file into the composer.
+  React.useEffect(() => {
+    if (!bootstrapped) return;
+    const state = location.state as
+      | { newTask?: boolean; attachFile?: unknown }
+      | null;
+    if (!state?.newTask) return;
+    enterNewTaskMode();
+    navigate(location.pathname + location.search, {
+      replace: true,
+      state: state.attachFile ? { attachFile: state.attachFile } : null,
+    });
+  }, [
+    bootstrapped,
+    location.pathname,
+    location.search,
+    location.state,
+    enterNewTaskMode,
+    navigate,
+  ]);
 
   // Store → URL injection. Lets the store actions write the URL
   // directly after a select / new / create, instead of relying on a
