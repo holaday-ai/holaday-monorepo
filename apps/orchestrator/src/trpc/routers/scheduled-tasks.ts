@@ -3,7 +3,15 @@
  *
  * CRUD for cron-style triggers. The runner (agent/scheduled-runner.ts)
  * scans the table on a 60s interval and fires due triggers; this
- * router just lets users create/list/pause/resume/delete entries.
+ * router just lets users create / list / toggle / delete entries.
+ *
+ * Codex follow-up — `pause` and `resume` are gone. The SPA always
+ * used `toggle` (a single atomic flip) so the separate verbs were
+ * dead code; the new sticking points around the 'failed' / 'running'
+ * states meant they'd need status guards anyway. `toggle` handles
+ * all of it: rejects 'completed' / 'running', flips
+ * active ↔ paused, and lets 'failed' one-shot rows retry by going
+ * back to 'active'.
  */
 
 import { newExternalId } from '@holaday/shared-types';
@@ -104,44 +112,6 @@ export const scheduledTasksRouter = router({
         status: 'active',
       });
       return { scheduledTaskId: externalId };
-    }),
-
-  pause: protectedProcedure
-    .input(z.object({ scheduledTaskId: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      const userId = await requireUserId(ctx);
-      const result = await ctx.db
-        .update(scheduledTasks)
-        .set({ status: 'paused' })
-        .where(
-          and(
-            eq(scheduledTasks.externalId, input.scheduledTaskId),
-            eq(scheduledTasks.userId, userId),
-          ),
-        );
-      if ((result as unknown as { affectedRows?: number }).affectedRows === 0) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'scheduled task not found' });
-      }
-      return { ok: true as const };
-    }),
-
-  resume: protectedProcedure
-    .input(z.object({ scheduledTaskId: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      const userId = await requireUserId(ctx);
-      const result = await ctx.db
-        .update(scheduledTasks)
-        .set({ status: 'active' })
-        .where(
-          and(
-            eq(scheduledTasks.externalId, input.scheduledTaskId),
-            eq(scheduledTasks.userId, userId),
-          ),
-        );
-      if ((result as unknown as { affectedRows?: number }).affectedRows === 0) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'scheduled task not found' });
-      }
-      return { ok: true as const };
     }),
 
   delete: protectedProcedure
