@@ -1,6 +1,5 @@
 import {
   Check,
-  ChevronLeft,
   ChevronRight,
   Clipboard,
   Clock,
@@ -8,13 +7,11 @@ import {
   FolderPlus,
   Layers,
   ListPlus,
-  ListTree,
   Pencil,
   Pin,
   PinOff,
   Plus,
   RotateCcw,
-  Search,
   Share2,
   Sparkles,
   Star,
@@ -25,6 +22,13 @@ import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { QuotaIndicator } from '@/components/QuotaIndicator';
+import {
+  Sidebar as SidebarShell,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  useSidebar,
+} from '@/components/ui/sidebar';
 import { TaskListItem } from '@/components/TaskListItem';
 import { useToast } from '@/components/ui/toast';
 import { UserMenu } from '@/components/UserMenu';
@@ -117,7 +121,10 @@ interface Props {
   };
 }
 
-const COLLAPSED_KEY = 'holaday.sidebar.collapsed';
+// Optimization #4 — sidebar collapse state moved to shadcn's
+// SidebarProvider (cookie-persisted under `sidebar:state`). The
+// legacy `holaday.sidebar.collapsed` localStorage key is retired
+// (shadcn writes to a cookie so HMR + new tab share the state).
 
 /**
  * Left rail. Two desktop modes:
@@ -147,7 +154,12 @@ export function Sidebar({
   onCreateProject,
   projectFilter,
   onClearProjectFilter,
-  onOpenSearch,
+  // Codex follow-up — onOpenSearch was previously used by the now-
+  // deleted CollapsedRail's Search icon. The Cmd+K shortcut still
+  // works via WorkbenchApp's keyboard handler, so we keep the prop
+  // on the interface (back-compat with WorkbenchApp wiring) but
+  // intentionally don't consume it in the new shadcn shell.
+  onOpenSearch: _unusedOnOpenSearch,
   userEmail,
   userDisplayName,
   userPlan,
@@ -229,20 +241,15 @@ export function Sidebar({
     exitBatchMode();
   }, [batchSelected, onDeleteTasks, exitBatchMode]);
 
-  const [collapsed, setCollapsed] = React.useState<boolean>(() => {
-    if (typeof window === 'undefined') return true;
-    const stored = window.localStorage.getItem(COLLAPSED_KEY);
-    return stored === null ? true : stored === '1';
-  });
-  const toggleCollapsed = React.useCallback(() => {
-    setCollapsed((prev) => {
-      const next = !prev;
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(COLLAPSED_KEY, next ? '1' : '0');
-      }
-      return next;
-    });
-  }, []);
+  // Optimization #4 — shadcn SidebarProvider owns the open/collapse
+  // state (cookie-persisted + Cmd+B shortcut + smooth transitions).
+  // We just bind mobile open via setOpenMobile so the legacy
+  // `mobileOpen` prop continues to drive the Sheet from
+  // WorkbenchApp's hamburger button.
+  const { setOpenMobile } = useSidebar();
+  React.useEffect(() => {
+    setOpenMobile(!!mobileOpen);
+  }, [mobileOpen, setOpenMobile]);
 
   const [menu, setMenu] = React.useState<
     | {
@@ -274,101 +281,39 @@ export function Sidebar({
     };
   }, [menu]);
 
-  // Mobile drawer always renders full width regardless of the desktop
-  // collapsed state — a touch viewport with a 64px icon strip is
-  // useless. `desktopCollapsed` is the only thing that changes layout
-  // on md+.
-  const desktopCollapsed = collapsed;
+  // Optimization #4 — outer shell is now `<SidebarShell>` from
+  // shadcn. The provider above us handles open/collapse state +
+  // smooth slide animations + automatic Sheet swap on mobile +
+  // Cmd/Ctrl+B shortcut. We just render Header / Content / Footer
+  // and keep all the inner business logic (task list, context
+  // menu, batch mode, project filter) untouched.
 
   return (
     <>
-      {mobileOpen && (
-        <button
-          type="button"
-          aria-label="关闭侧边栏"
-          onClick={onMobileClose}
-          className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm md:hidden"
-        />
-      )}
-      <aside
-        className={cn(
-          'flex h-full max-w-[90vw] shrink-0 flex-col border-r border-border backdrop-blur-xl transition-[width] duration-200',
-          // Mobile: always full-width drawer when open.
-          'w-72',
-          // Desktop: icon rail (collapsed) or task list (expanded).
-          // Expanded width bumped 64 → 72 (256px → 288px) so longer
-          // Chinese task titles stop truncating at the 8-char mark;
-          // still comfortably narrower than Codex's 320px.
-          desktopCollapsed ? 'md:w-16' : 'md:w-72',
-          'md:static md:translate-x-0',
-          'fixed inset-y-0 left-0 z-50',
-          mobileOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full md:shadow-none',
-        )}
-        style={{ backgroundColor: 'hsl(var(--card) / 0.85)' }}
-      >
-        {desktopCollapsed ? (
-          <CollapsedRail
-            onNewTask={() => {
+      <SidebarShell collapsible="offcanvas">
+        <SidebarHeader className="border-b border-sidebar-border">
+          <div className="flex items-center gap-2 px-1 py-2">
+            <h1 className="flex flex-1 items-center gap-2 text-base font-semibold tracking-tight text-sidebar-foreground">
+              <BrandMark />
+              <span>HOLA DAY</span>
+            </h1>
+          </div>
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => {
               onNewTask();
               onMobileClose?.();
             }}
-            onExpand={toggleCollapsed}
-            onOpenSearch={onOpenSearch}
-            userDisplayName={userDisplayName}
-            userEmail={userEmail}
-            userPlan={userPlan}
-            onLogout={onLogout}
-            failedTaskCount={failedTaskCount}
-            {...(onClearFailedTasks ? { onClearFailedTasks } : {})}
-            {...(onOpenSettings ? { onOpenSettings } : {})}
-            {...(onOpenFeedback ? { onOpenFeedback } : {})}
-          />
-        ) : (
-          <>
-            <header className="flex items-start justify-between px-4 pb-3 pt-5">
-              <div className="flex-1">
-                <h1 className="flex items-center gap-2 text-base font-semibold tracking-tight text-foreground">
-                  <BrandMark />
-                  <span>HOLA DAY</span>
-                </h1>
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={() => {
-                    onNewTask();
-                    onMobileClose?.();
-                  }}
-                  className="mt-3 w-full justify-start"
-                >
-                  <Plus className="h-4 w-4" />
-                  新任务
-                </Button>
-              </div>
-              {mobileOpen ? (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={onMobileClose}
-                  aria-label="关闭"
-                  className="md:hidden"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={toggleCollapsed}
-                  aria-label="收起侧边栏"
-                  title="收起侧边栏 (节省空间)"
-                  className="hidden md:inline-flex"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-              )}
-            </header>
+            className="w-full justify-start"
+          >
+            <Plus className="h-4 w-4" />
+            新任务
+          </Button>
+        </SidebarHeader>
 
-            <FeatureNav />
+        <SidebarContent className="px-0">
+          <FeatureNav />
 
             {projectFilter && (
               <div className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-pink-300/40 bg-pink-50/40 px-2.5 py-1.5 text-[12px] dark:border-pink-500/30 dark:bg-pink-500/10">
@@ -387,7 +332,7 @@ export function Sidebar({
               </div>
             )}
 
-            <div className="flex-1 overflow-y-auto px-2 pb-4">
+            <div className="px-2 pb-4">
               {pinnedTasks.length > 0 && (
                 <TaskGroup title="置顶">
                   {pinnedTasks.map((t) => (
@@ -527,7 +472,9 @@ export function Sidebar({
               )}
             </div>
 
-            <footer className="border-t border-black/[0.06] px-0 py-2">
+            </SidebarContent>
+
+            <SidebarFooter className="border-t border-sidebar-border px-0 py-2">
               {/* O1 — batch action bar / batch entry. When batchMode
                   is on, render the count + 全选 / 删除选中 / 取消
                   controls; otherwise show a small "批量管理" entry
@@ -599,10 +546,8 @@ export function Sidebar({
                   {...(onOpenSettings ? { onOpenSettings } : {})}
                 />
               </div>
-            </footer>
-          </>
-        )}
-      </aside>
+            </SidebarFooter>
+      </SidebarShell>
 
       {menu && (onDeleteTask || onRetryTask || onRenameTask) && (
         <ContextMenuShell anchorX={menu.x} anchorY={menu.y}><div
@@ -859,123 +804,12 @@ function ContextMenuShell({
   );
 }
 
-interface CollapsedRailProps {
-  onNewTask: () => void;
-  onExpand: () => void;
-  onOpenSearch?: () => void;
-  /**
-   * F7 — opens the BrowserPanel directly without expanding the
-   * sidebar. Mirrors the expanded sidebar's 浏览器 entry. Optional
-   * because not every page wires it (e.g. onboarding flows that
-   * suppress the panel).
-   */
-  // Codex follow-up — onOpenBrowser removed (no sidebar entry).
-  userDisplayName: string;
-  userEmail: string | null;
-  userPlan: string;
-  onLogout: () => void;
-  onOpenFeedback?: () => void;
-  onOpenSettings?: () => void;
-  failedTaskCount?: number;
-  onClearFailedTasks?: () => void;
-}
-
-/**
- * Codex-style icon rail. Five slots top-to-bottom:
- *
- *   - Brand (doubles as "expand sidebar")
- *   - New task (+)
- *   - Task list toggle (ListTree icon → expand sidebar)
- *   - Search (Search icon → Cmd+K overlay)
- *   - Spacer
- *   - User (UserMenu anchored at bottom)
- *
- * Each icon has a tooltip via the native title attr so the UI is
- * explorable without copy.
- */
-function CollapsedRail({
-  onNewTask,
-  onExpand,
-  onOpenSearch,
-  userDisplayName,
-  userEmail,
-  userPlan,
-  onLogout,
-  onOpenFeedback,
-  onOpenSettings,
-  failedTaskCount = 0,
-  onClearFailedTasks,
-}: CollapsedRailProps): JSX.Element {
-  return (
-    <div className="hidden h-full flex-col items-center gap-1 py-3 md:flex">
-      <button
-        type="button"
-        onClick={onExpand}
-        title="展开侧边栏"
-        aria-label="展开侧边栏"
-        className="mb-1 inline-flex h-10 w-10 items-center justify-center rounded-md transition-colors hover:bg-foreground/5"
-      >
-        <BrandMark />
-      </button>
-
-      <RailIconButton onClick={onNewTask} title="新任务 (/)" aria-label="新任务">
-        <Plus className="h-4 w-4" />
-      </RailIconButton>
-
-      <RailIconButton onClick={onExpand} title="任务列表" aria-label="任务列表">
-        <ListTree className="h-4 w-4" />
-      </RailIconButton>
-
-      {onOpenSearch && (
-        <RailIconButton onClick={onOpenSearch} title="搜索任务 (⌘K)" aria-label="搜索任务">
-          <Search className="h-4 w-4" />
-        </RailIconButton>
-      )}
-
-      <RailIconButton
-        onClick={onExpand}
-        title="展开"
-        aria-label="展开"
-        className="mt-auto"
-      >
-        <ChevronRight className="h-4 w-4" />
-      </RailIconButton>
-
-      <div className="border-t border-black/[0.06] pt-2">
-        <UserMenu
-          displayName={userDisplayName}
-          email={userEmail}
-          plan={userPlan}
-          onLogout={onLogout}
-          compact
-          failedTaskCount={failedTaskCount}
-          {...(onClearFailedTasks ? { onClearFailedTasks } : {})}
-          {...(onOpenFeedback ? { onOpenFeedback } : {})}
-          {...(onOpenSettings ? { onOpenSettings } : {})}
-        />
-      </div>
-    </div>
-  );
-}
-
-function RailIconButton({
-  children,
-  className,
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement>): JSX.Element {
-  return (
-    <button
-      type="button"
-      className={cn(
-        'inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground',
-        className,
-      )}
-      {...props}
-    >
-      {children}
-    </button>
-  );
-}
+// Optimization #4 — CollapsedRail + RailIconButton retired. shadcn's
+// `<Sidebar collapsible="offcanvas">` handles the collapse-to-hidden
+// state with smooth slide animations + Cmd/Ctrl+B keyboard shortcut.
+// A follow-up round will add `collapsible="icon"` mode and rewrap
+// the FeatureNav items as `SidebarMenuButton` with hover tooltips so
+// the icon rail returns as a proper composable surface.
 
 interface GroupProps {
   title: string;

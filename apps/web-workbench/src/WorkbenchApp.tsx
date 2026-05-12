@@ -5,6 +5,7 @@ import {
   type BrowserViewportProfile,
   type PlanId,
 } from '@holaday/shared-types';
+import { SidebarProvider } from '@/components/ui/sidebar';
 import { BrowserPanel } from '@/components/BrowserPanel';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { FeedbackDialog } from '@/components/FeedbackDialog';
@@ -808,6 +809,7 @@ function AppShell(): JSX.Element {
       : null;
 
   return (
+    <SidebarProvider defaultOpen={true}>
     <div className="relative flex h-full min-h-0 w-full overflow-hidden" ref={contentRowRef}>
       {!panelFullscreen && (
       <Sidebar
@@ -1228,6 +1230,7 @@ function AppShell(): JSX.Element {
         </div>
       )}
     </div>
+    </SidebarProvider>
   );
 }
 
