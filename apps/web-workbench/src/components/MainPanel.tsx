@@ -1,4 +1,4 @@
-import { BarChart3, Globe, Menu, Newspaper, Search, Sparkles, TrendingUp } from 'lucide-react';
+import { BarChart3, Menu, Newspaper, Search, Sparkles, TrendingUp } from 'lucide-react';
 import * as React from 'react';
 import { InputArea } from '@/components/InputArea';
 import { RoleNudgeBanner } from '@/components/RoleNudgeBanner';
@@ -16,7 +16,7 @@ interface Props {
   ) => Promise<void> | void;
   busy?: boolean;
   onOpenSidebar?: () => void;
-  onOpenBrowser?: () => void;
+  // Codex follow-up — onOpenBrowser removed (panel now auto-opens).
   greetingName?: string;
   /** Ref to focus the composer textarea via keyboard shortcut. */
   inputRef?: React.Ref<HTMLTextAreaElement>;
@@ -57,7 +57,6 @@ export function MainPanel({
   onSubmit,
   busy,
   onOpenSidebar,
-  onOpenBrowser,
   greetingName,
   inputRef,
   replyMode,
@@ -144,19 +143,10 @@ export function MainPanel({
         <div className="ml-2 min-w-0 flex-1 truncate text-sm font-medium">
           {task ? task.intent : 'HOLA DAY'}
         </div>
-        {/* Phase 18 — globe always available on mobile so the empty
-            state can also open the BrowserPanel (was previously gated
-            on `task` so first-time users had no way in). */}
-        {onOpenBrowser && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onOpenBrowser}
-            aria-label="打开浏览器面板"
-          >
-            <Globe className="h-4 w-4" />
-          </Button>
-        )}
+        {/* Codex follow-up — the mobile 浏览器 entry button is gone.
+            The BrowserPanel sheet now opens automatically for
+            browser-mode tasks and login / captcha park, matching
+            the desktop behaviour. */}
       </div>
       <div className="flex-1 overflow-y-auto">
         {task ? (

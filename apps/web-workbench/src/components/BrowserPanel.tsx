@@ -568,6 +568,19 @@ export function BrowserPanel({
   const [ripple, setRipple] = React.useState<{ x: number; y: number; id: number } | null>(null);
   const rippleIdRef = React.useRef(0);
   const imgRef = React.useRef<HTMLImageElement | null>(null);
+  // Codex P2 follow-up — hidden input for direct CJK typing on the
+  // JPEG screencast path (CDP mode). Browser-native IME composition
+  // events fire on this focused-but-invisible element; on
+  // `compositionend` we forward the finalised text via `insert_text`
+  // so Chinese / Japanese / Korean characters land on the remote
+  // page intact. Without it, each pinyin keystroke went through
+  // sendInput's `type` branch as a single ASCII letter, producing
+  // garbage when the user typed Chinese directly. The visible
+  // CjkInputBar is now an opt-in fallback for users whose IME path
+  // doesn't cooperate.
+  const hiddenCjkInputRef = React.useRef<HTMLInputElement | null>(null);
+  const cjkComposingRef = React.useRef(false);
+  const [cjkFallbackOpen, setCjkFallbackOpen] = React.useState(false);
   const status: DotStatus = browserAwaiting
     ? 'error'
     : deriveDotStatus(taskStatus, Boolean(frame));
@@ -629,6 +642,14 @@ export function BrowserPanel({
       e.preventDefault();
       flashRipple(e.clientX, e.clientY);
       sendInput({ kind: 'click', x: pt.x, y: pt.y, button: 'left' });
+      // Codex P2 — pull focus onto the hidden CJK input so the
+      // user's next keystroke (ASCII or IME-composed CJK) goes
+      // through our composition handlers instead of the page's
+      // default focus owner (which can't reach the remote Brave).
+      // We use the next tick so the click's default-prevention
+      // doesn't conflict with the focus call in some browsers.
+      const el = hiddenCjkInputRef.current;
+      if (el) requestAnimationFrame(() => el.focus());
     },
     [interactiveActive, mapToViewport, sendInput, flashRipple],
   );
@@ -1012,8 +1033,47 @@ export function BrowserPanel({
                       显示操作日志
                     </button>
                   )}
+                  {/* Codex P2 — hidden CJK input is always-mounted in
+                      interactive mode. It captures composition events
+                      so typing 中文 via the user's local IME goes via
+                      `compositionend → insert_text` instead of being
+                      shredded into pinyin letters by the window
+                      keydown listener. Visible CjkInputBar is now a
+                      fallback the user can opt into via the small
+                      toggle button when the hidden path doesn't
+                      cooperate with their IME / browser. */}
                   {interactiveActive && (
-                    <CjkInputBar onSend={sendInsertText} fullscreen={fullscreen} />
+                    <HiddenCjkInput
+                      ref={hiddenCjkInputRef}
+                      composingRef={cjkComposingRef}
+                      sendInsertText={sendInsertText}
+                      sendInput={sendInput}
+                    />
+                  )}
+                  {interactiveActive && !cjkFallbackOpen && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCjkFallbackOpen(true);
+                        // Drop focus from the hidden input so the
+                        // visible bar can take over.
+                        hiddenCjkInputRef.current?.blur();
+                      }}
+                      className={cn(
+                        'absolute left-2 z-30 rounded bg-black/40 px-2 py-1 text-[10px] text-white backdrop-blur hover:bg-black/60',
+                        fullscreen ? 'bottom-4' : 'bottom-2',
+                      )}
+                      title="切换输入方式（当 IME 直打不工作时使用浮动输入框）"
+                    >
+                      ✏️ 输入框
+                    </button>
+                  )}
+                  {interactiveActive && cjkFallbackOpen && (
+                    <CjkInputBar
+                      onSend={sendInsertText}
+                      fullscreen={fullscreen}
+                      onClose={() => setCjkFallbackOpen(false)}
+                    />
                   )}
                 </div>
               )
@@ -1120,12 +1180,107 @@ function ActivityOverlay({
  * deliberately doesn't try to manage focus: the user already
  * clicked through VNC to focus, this is just the typing channel.
  */
+/**
+ * Codex P2 follow-up — invisible-but-focusable input that hosts the
+ * browser-native IME composition. Auto-focused on canvas click (see
+ * `onClick` handler in the BrowserPanel body). When the user types
+ * via their local IME:
+ *   - compositionstart → flip the composing flag so the window
+ *     keydown listener doesn't double-dispatch
+ *   - compositionend   → fire `sendInsertText` with the finalised text
+ *
+ * For non-composing keystrokes we still replicate the window
+ * keydown listener's named-key + printable-char dispatch so a
+ * canvas-focused user can type ASCII without needing window-level
+ * focus. The window listener already skips when target is an INPUT,
+ * so there is no double-dispatch.
+ */
+const HiddenCjkInput = React.forwardRef<
+  HTMLInputElement,
+  {
+    composingRef: React.MutableRefObject<boolean>;
+    sendInsertText: (text: string) => void;
+    sendInput: (payload: Omit<UserInputEvent, 'type' | 'taskId'>) => void;
+  }
+>(function HiddenCjkInput({ composingRef, sendInsertText, sendInput }, ref): JSX.Element {
+  // Empty controlled input that we wipe after every compositionend.
+  // Keeping it controlled makes React happy about the change events
+  // without affecting visible state.
+  const [, setValue] = React.useState('');
+  return (
+    <input
+      ref={ref}
+      type="text"
+      tabIndex={-1}
+      aria-hidden
+      autoComplete="off"
+      autoCorrect="off"
+      spellCheck={false}
+      // Invisible to the user but focusable + receives IME events.
+      // Positioned in the canvas wrapper so it stays inside the
+      // panel viewport (some browsers refuse focus on display:none
+      // elements). `width: 1px` keeps the cursor caret invisible.
+      style={{
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        width: 1,
+        height: 1,
+        opacity: 0,
+        pointerEvents: 'none',
+      }}
+      onCompositionStart={() => {
+        composingRef.current = true;
+      }}
+      onCompositionEnd={(e) => {
+        composingRef.current = false;
+        const text =
+          e.data ?? (e.target as HTMLInputElement).value ?? '';
+        if (text) sendInsertText(text);
+        // Wipe local + DOM value so the next composition starts fresh.
+        setValue('');
+        const el = e.target as HTMLInputElement;
+        el.value = '';
+      }}
+      onKeyDown={(e) => {
+        // While composing, the IME owns the keystroke. Don't dispatch.
+        if (composingRef.current || e.nativeEvent.isComposing) return;
+        const named = NAMED_KEYS[e.key];
+        if (named) {
+          e.preventDefault();
+          const chord = [
+            e.ctrlKey && 'ctrl',
+            e.metaKey && 'meta',
+            e.altKey && 'alt',
+            e.shiftKey && 'shift',
+            named,
+          ]
+            .filter(Boolean)
+            .join('+');
+          sendInput({ kind: 'key', key: chord });
+          return;
+        }
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          sendInput({ kind: 'type', text: e.key });
+        }
+      }}
+      onChange={(e) => setValue(e.target.value)}
+    />
+  );
+});
+
 function CjkInputBar({
   onSend,
   fullscreen,
+  onClose,
 }: {
   onSend: (text: string) => void;
   fullscreen: boolean;
+  /** Codex P2 — when set, the bar is in "opt-in fallback" mode and
+   *  shows a close button so users who toggled it on can dismiss it
+   *  back to the default hidden-input flow. */
+  onClose?: () => void;
 }): JSX.Element {
   const [value, setValue] = React.useState('');
   const handleSend = (): void => {
@@ -1174,6 +1329,17 @@ function CjkInputBar({
       >
         发送
       </button>
+      {onClose && (
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="关闭浮动输入框"
+          title="关闭浮动输入框（恢复直接输入）"
+          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+        >
+          ×
+        </button>
+      )}
     </div>
   );
 }

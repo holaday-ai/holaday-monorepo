@@ -39,6 +39,21 @@ interface MeProfile {
 }
 
 /**
+ * Codex P3 follow-up — single source of truth for "how narrow can
+ * the BrowserPanel get on desktop". Used by:
+ *   - the localStorage clamp on seed (a stored value below this is
+ *     treated as junk + ignored)
+ *   - the drag-handle floor
+ *   - the collapsed-flex fallback when no explicit panelPx is set
+ *
+ * Bumped from 420 → 560: anything narrower truncates the panel
+ * header chips + screenshot controls so badly it stops being a
+ * useful "second-pane" surface. If you want it smaller, collapse
+ * the whole panel instead.
+ */
+const PANEL_MIN_PX = 560;
+
+/**
  * B5 — humanise the displayName so legacy SMS-registered users (whose
  * displayName is the masked "138****1234") see "用户_<last4>" in the
  * UI instead of leaking their phone number into the avatar / greeting.
@@ -108,6 +123,12 @@ function AppShell(): JSX.Element {
   // up here lets us also override the column flex and hide the
   // resize handle when collapsed.
   const [browserCollapsed, setBrowserCollapsed] = React.useState(false);
+  // Codex P2 follow-up — once the user manually expands the panel
+  // for a non-browser task, lock the auto-collapse effect so a
+  // background tasks-array refresh (poll / WS event) doesn't yank
+  // the panel shut underneath them. Reset on selectedTaskId change
+  // so the auto-collapse default applies again on the next task.
+  const [manualPanelOverride, setManualPanelOverride] = React.useState(false);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const location = useLocation();
@@ -144,11 +165,13 @@ function AppShell(): JSX.Element {
   const toast = useToast();
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
 
-  // Explicit px width for the BrowserPanel on desktop.
-  // Seed from localStorage, but clamp to sanity: a 420px stored value
-  // (the old min clamp) on a 1500px viewport is useless. If the
-  // stored value is outside [560, viewport*0.85], ignore and fall
-  // back to the 60%-of-content default.
+  // Explicit px width for the BrowserPanel on desktop. The
+  // `PANEL_MIN_PX` constant is the single source of truth for "how
+  // narrow can this panel get" — used by the localStorage clamp on
+  // seed, the resize-drag floor, AND the collapsed-flex fallback.
+  // Previously these diverged: stored values were clamped at 560 but
+  // the drag floor was 420, so a user who dragged to 421 hit the
+  // discontinuity on next reload. Codex P3 follow-up unified it.
   const contentRowRef = React.useRef<HTMLDivElement | null>(null);
   const [panelPx, setPanelPx] = React.useState<number | null>(() => {
     if (typeof window === 'undefined') return null;
@@ -156,7 +179,7 @@ function AppShell(): JSX.Element {
     const n = raw ? Number.parseInt(raw, 10) : NaN;
     if (!Number.isFinite(n) || n <= 0) return null;
     const maxSensible = window.innerWidth * 0.85;
-    if (n < 560 || n > maxSensible) {
+    if (n < PANEL_MIN_PX || n > maxSensible) {
       // Stored value doesn't make sense for this viewport → ignore.
       // Don't delete it — user's other viewport might want it back.
       return null;
@@ -192,7 +215,10 @@ function AppShell(): JSX.Element {
       // Dragging the handle right SHRINKS the panel (panel is on the
       // right of the handle), so subtract dx.
       const raw = dragStartPxRef.current - dx;
-      const min = 420;
+      // Codex P3 — same min as the localStorage clamp + the
+      // collapsed-flex fallback. PANEL_MIN_PX is the single
+      // source of truth.
+      const min = PANEL_MIN_PX;
       const max = Math.max(min, rowWidth - 360);
       const next = Math.min(max, Math.max(min, raw));
       setPanelPx(next);
@@ -213,7 +239,10 @@ function AppShell(): JSX.Element {
   const loading = useTaskStore((s) => s.loading);
   const selectTask = useTaskStore((s) => s.selectTask);
   const enterNewTaskMode = useTaskStore((s) => s.enterNewTaskMode);
-  const requestBrowserLive = useTaskStore((s) => s.requestBrowserLive);
+  // Codex follow-up — `requestBrowserLive` was used by the now-removed
+  // sidebar 浏览器 entry handler. The hook is preserved in the store
+  // (still consumed by browser-mode task starts internally); we just
+  // don't need a SPA-side handle anymore.
   const refreshTaskList = useTaskStore((s) => s.refreshTaskList);
   const createTask = useTaskStore((s) => s.createTask);
   const replyToTask = useTaskStore((s) => s.replyToTask);
@@ -638,13 +667,20 @@ function AppShell(): JSX.Element {
   // executor lane is otherwise non-browser), the panel content is
   // either empty or shows a stale frame from a prior browser task.
   // Default-collapsing gives the TaskStream the full content width.
-  // The user can still manually expand via the panel toggle —
-  // that toggle writes to the same `browserCollapsed` state, so
-  // their override stands until the next task change. The
-  // `selectedNeedsBrowser` effect above wins for live-browser tasks
-  // (it'll re-open the panel when a captcha / login / browser_action
-  // park fires).
+  //
+  // Codex P2 follow-up — the effect deps used to include `tasks`,
+  // which meant every WS-driven task-list refresh re-fired the
+  // collapse logic and yanked the panel shut on the user underneath
+  // a manual expand. We now (1) reset `manualPanelOverride` only
+  // when `selectedTaskId` changes (NOT on tasks-array refresh) and
+  // (2) skip the auto-collapse when the override is set. The
+  // `selectedNeedsBrowser` effect above still wins for live-browser
+  // tasks (captcha / login / browser_action park).
   React.useEffect(() => {
+    setManualPanelOverride(false);
+  }, [selectedTaskId]);
+  React.useEffect(() => {
+    if (manualPanelOverride) return;
     const selectedTaskNow = selectedTaskId
       ? tasks.find((t) => t.taskId === selectedTaskId)
       : null;
@@ -657,7 +693,12 @@ function AppShell(): JSX.Element {
     if (lane && lane !== 'browser') {
       setBrowserCollapsed(true);
     }
-  }, [selectedTaskId, selectedNeedsBrowser, tasks]);
+    // Codex P2 — drop `tasks` from deps. `selectedTaskId` triggers
+    // re-evaluation on user task-switch; `selectedNeedsBrowser`
+    // covers the awaiting-user park path. A tasks-array refresh
+    // shouldn't reset the user's panel state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTaskId, selectedNeedsBrowser, manualPanelOverride]);
 
   if (!authed) {
     return <LoginGate onAuthenticated={() => setAuthed(true)} />;
@@ -757,28 +798,9 @@ function AppShell(): JSX.Element {
           void refreshProjects();
         }}
         onCreateProject={() => navigate('/projects?create=1')}
-        onOpenBrowser={() => {
-          // Phase 18 — sidebar 浏览器 entry. Mobile (< lg) opens
-          // the BrowserPanel sheet; desktop the panel is already
-          // visible in the right rail, so we just kick wakeBrowser
-          // so the user's Brave is ready when they arrive at it.
-          // Fire-and-forget — wake errors land in toast via the
-          // existing onNewTask path's handling.
-          // requestBrowserLive opts the panel out of the no-active-
-          // task idle gate so the user-scoped pool stream connects
-          // immediately. Cleared automatically on next selectTask /
-          // enterNewTaskMode / createTask.
-          requestBrowserLive();
-          setBrowserSheetOpen(true);
-          void (async () => {
-            try {
-              await trpc.tasks.wakeBrowser.mutate();
-            } catch {
-              /* swallow — wakeBrowser errors are surfaced when the
-                 first task tries to drive the browser */
-            }
-          })();
-        }}
+        // Codex follow-up — the sidebar 浏览器 entry was removed; the
+        // BrowserPanel now reveals itself only for browser-mode
+        // tasks or login / captcha / permission park.
         userEmail={me?.email ?? null}
         userDisplayName={preferredDisplayName(me)}
         userPlan={me?.plan ?? 'free'}
@@ -890,17 +912,9 @@ function AppShell(): JSX.Element {
           }
         }}
         onOpenSidebar={() => setSidebarOpen(true)}
-        onOpenBrowser={() => {
-          // Mobile parity with the sidebar 浏览器 entry — wake the
-          // pool browser so the sheet shows a live frame instead of
-          // a dead about:blank when the user opens it from the
-          // mobile shell.
-          requestBrowserLive();
-          setBrowserSheetOpen(true);
-          void trpc.tasks.wakeBrowser.mutate().catch(() => {
-            /* fire-and-forget, surfaces in toast on real task drive */
-          });
-        }}
+        // Codex follow-up — onOpenBrowser removed; the BrowserPanel
+        // sheet now opens automatically when a browser-mode task is
+        // selected, not on a button press.
       />
       )}
       {!panelFullscreen && !browserCollapsed && (
@@ -919,7 +933,7 @@ function AppShell(): JSX.Element {
               ? { flex: '0 0 40px', minWidth: 40, width: 40 }
               : panelPx != null
                 ? { flex: `0 0 ${panelPx}px` }
-                : { flex: '3 1 0', minWidth: 560 }
+                : { flex: '3 1 0', minWidth: PANEL_MIN_PX }
         }
       >
         <BrowserPanel
@@ -943,7 +957,17 @@ function AppShell(): JSX.Element {
           fullscreen={panelFullscreen}
           onToggleFullscreen={() => setPanelFullscreen((v) => !v)}
           collapsed={browserCollapsed}
-          onToggleCollapse={() => setBrowserCollapsed((v) => !v)}
+          onToggleCollapse={() => {
+            setBrowserCollapsed((v) => {
+              // Codex P2 — when the user MANUALLY un-collapses
+              // (expanding the panel from a collapsed state), lock
+              // the auto-collapse effect for the current task so a
+              // tasks-array refresh can't yank it shut.
+              const nextCollapsed = !v;
+              if (!nextCollapsed) setManualPanelOverride(true);
+              return nextCollapsed;
+            });
+          }}
         />
       </div>
       <div className={panelFullscreen ? 'hidden' : 'lg:hidden'}>

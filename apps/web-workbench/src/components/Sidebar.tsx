@@ -6,7 +6,6 @@ import {
   Clock,
   FolderOpen,
   FolderPlus,
-  Globe,
   Layers,
   ListPlus,
   ListTree,
@@ -78,13 +77,9 @@ interface Props {
    */
   projectFilter?: { projectId: string; name: string } | null;
   onClearProjectFilter?(): void;
-  /**
-   * Phase 18 — invoked when the 浏览器 feature entry is clicked.
-   * Caller (WorkbenchApp) wakes the user's Brave instance and
-   * surfaces the BrowserPanel (slide-in sheet on mobile, focuses
-   * the existing right-rail on desktop).
-   */
-  onOpenBrowser?(): void;
+  // Codex follow-up — onOpenBrowser entry removed; the BrowserPanel
+  // now reveals itself only when a browser-mode task is selected
+  // or a login / captcha park fires. No explicit user-driven entry.
   onOpenSearch?(): void;
   userEmail: string | null;
   userDisplayName: string;
@@ -152,7 +147,6 @@ export function Sidebar({
   onCreateProject,
   projectFilter,
   onClearProjectFilter,
-  onOpenBrowser,
   onOpenSearch,
   userEmail,
   userDisplayName,
@@ -328,14 +322,6 @@ export function Sidebar({
             {...(onClearFailedTasks ? { onClearFailedTasks } : {})}
             {...(onOpenSettings ? { onOpenSettings } : {})}
             {...(onOpenFeedback ? { onOpenFeedback } : {})}
-            {...(onOpenBrowser
-              ? {
-                  onOpenBrowser: () => {
-                    onOpenBrowser();
-                    onMobileClose?.();
-                  },
-                }
-              : {})}
           />
         ) : (
           <>
@@ -382,16 +368,7 @@ export function Sidebar({
               )}
             </header>
 
-            <FeatureNav
-              onOpenBrowser={
-                onOpenBrowser
-                  ? () => {
-                      onMobileClose?.();
-                      onOpenBrowser();
-                    }
-                  : undefined
-              }
-            />
+            <FeatureNav />
 
             {projectFilter && (
               <div className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-pink-300/40 bg-pink-50/40 px-2.5 py-1.5 text-[12px] dark:border-pink-500/30 dark:bg-pink-500/10">
@@ -892,7 +869,7 @@ interface CollapsedRailProps {
    * because not every page wires it (e.g. onboarding flows that
    * suppress the panel).
    */
-  onOpenBrowser?: () => void;
+  // Codex follow-up — onOpenBrowser removed (no sidebar entry).
   userDisplayName: string;
   userEmail: string | null;
   userPlan: string;
@@ -920,7 +897,6 @@ function CollapsedRail({
   onNewTask,
   onExpand,
   onOpenSearch,
-  onOpenBrowser,
   userDisplayName,
   userEmail,
   userPlan,
@@ -945,16 +921,6 @@ function CollapsedRail({
       <RailIconButton onClick={onNewTask} title="新任务 (/)" aria-label="新任务">
         <Plus className="h-4 w-4" />
       </RailIconButton>
-
-      {onOpenBrowser && (
-        <RailIconButton
-          onClick={onOpenBrowser}
-          title="打开浏览器面板"
-          aria-label="打开浏览器面板"
-        >
-          <Globe className="h-4 w-4" />
-        </RailIconButton>
-      )}
 
       <RailIconButton onClick={onExpand} title="任务列表" aria-label="任务列表">
         <ListTree className="h-4 w-4" />
@@ -1121,13 +1087,6 @@ interface FeatureItem {
   label: string;
   /** When set the row is clickable and routes here. */
   href?: string;
-  /**
-   * Phase 18 — when set, click invokes the parent-supplied
-   * `onOpenBrowser` instead of navigating. Used by 浏览器 entry to
-   * open the live BrowserPanel (wakeBrowser + slide in the sheet
-   * on mobile / expand panel on desktop) rather than a route.
-   */
-  action?: 'openBrowser';
 }
 
 const FEATURES: readonly FeatureItem[] = [
@@ -1141,7 +1100,10 @@ const FEATURES: readonly FeatureItem[] = [
   // Phase 5b — batch tasks (submit a list, run with concurrency cap).
   { icon: ListPlus, label: '批量任务', href: '/batch' },
   { icon: FolderOpen, label: '文件库', href: '/files' },
-  { icon: Globe, label: '浏览器', action: 'openBrowser' },
+  // Codex follow-up — the '浏览器' entry is gone. The BrowserPanel
+  // now auto-opens for browser-mode tasks AND auto-expands on
+  // login / captcha / permission park; explicit entry was creating
+  // empty-frame UX for users who clicked it without a task in flight.
   { icon: Layers, label: '项目', href: '/projects' },
   { icon: Star, label: '收藏', href: '/starred' },
 ];
@@ -1152,27 +1114,18 @@ const FEATURES: readonly FeatureItem[] = [
  * those rows render as clickable nav links; the rest stay disabled
  * with the tooltip. Compact density (32px row).
  */
-function FeatureNav({
-  onOpenBrowser,
-}: {
-  /** Phase 18 — invoked when the 浏览器 entry is clicked. */
-  onOpenBrowser?: () => void;
-}): JSX.Element {
+function FeatureNav(): JSX.Element {
   const navigate = useNavigate();
   return (
     <nav className="px-2 pb-2">
-      {FEATURES.map(({ icon: Icon, label, href, action }) => {
-        if (href || action) {
+      {FEATURES.map(({ icon: Icon, label, href }) => {
+        if (href) {
           return (
             <button
               key={label}
               type="button"
               onClick={() => {
-                if (action === 'openBrowser') {
-                  onOpenBrowser?.();
-                } else if (href) {
-                  navigate(href);
-                }
+                navigate(href);
               }}
               className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
             >
