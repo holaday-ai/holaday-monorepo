@@ -163,7 +163,11 @@ export function Sidebar({
   onDeleteTasks,
   onRenameTask,
   onRetryTask,
-  onToggleStarred,
+  // Codex IA pass — pin replaces star as the sole "save" mental
+  // model in the Sidebar. The prop stays on the interface so the
+  // call sites in AppShell don't break, but it's unused here; the
+  // /starred page reaches the store action directly.
+  onToggleStarred: _unusedOnToggleStarred,
   projects: projectsProp,
   onMoveTaskToProject,
   onCreateProject,
@@ -190,27 +194,35 @@ export function Sidebar({
 }: Props): JSX.Element {
   const pinnedIds = useTaskStore((s) => s.pinnedTaskIds);
   const togglePin = useTaskStore((s) => s.togglePin);
-  // Partition: pinned tasks show as their own top group; unpinned
-  // tasks get the normal time-bucketed grouping. Pinned group keeps
-  // pin order (most-recently-pinned first by tasks array position).
-  const { pinnedTasks, starredTasks, unpinnedTasks } = React.useMemo(() => {
-    const pinned: UiTask[] = [];
-    const starred: UiTask[] = [];
-    const rest: UiTask[] = [];
+  // Belt-and-braces: collapse any duplicate taskId rows the store may
+  // hand us before partitioning. A single row can otherwise appear in
+  // 置顶 AND a time bucket if a refresh / load-more merge let two
+  // copies through (we treat the first occurrence as canonical).
+  const uniqueTasks = React.useMemo(() => {
+    const seen = new Set<string>();
+    const out: UiTask[] = [];
     for (const t of tasks) {
+      if (seen.has(t.taskId)) continue;
+      seen.add(t.taskId);
+      out.push(t);
+    }
+    return out;
+  }, [tasks]);
+  // Partition: pinned tasks show as their own top group; everything
+  // else falls through to the time-bucketed list. Codex IA pass —
+  // 收藏 was a duplicate save-state mental model, so this round drops
+  // the starred bucket entirely; the row-level star toggle is also
+  // hidden. Users have ONE save action: pin. /starred deep links
+  // still resolve.
+  const { pinnedTasks, unpinnedTasks } = React.useMemo(() => {
+    const pinned: UiTask[] = [];
+    const rest: UiTask[] = [];
+    for (const t of uniqueTasks) {
       if (pinnedIds.has(t.taskId)) pinned.push(t);
-      else if (t.starred) starred.push(t);
       else rest.push(t);
     }
-    // Sort starred by starredAt desc (most-recently-starred first).
-    // null starredAt sinks to the bottom.
-    starred.sort((a, b) => {
-      const ta = a.starredAt ? new Date(a.starredAt).getTime() : 0;
-      const tb = b.starredAt ? new Date(b.starredAt).getTime() : 0;
-      return tb - ta;
-    });
-    return { pinnedTasks: pinned, starredTasks: starred, unpinnedTasks: rest };
-  }, [tasks, pinnedIds]);
+    return { pinnedTasks: pinned, unpinnedTasks: rest };
+  }, [uniqueTasks, pinnedIds]);
   const buckets = React.useMemo(() => bucketByTime(unpinnedTasks), [unpinnedTasks]);
 
   // O1 — batch select + bulk delete. Toggle entered via the
@@ -397,46 +409,6 @@ export function Sidebar({
                       batchChecked={batchSelected.has(t.taskId)}
                       batchDisabled={!isTaskDeletable(t.status)}
                       onBatchToggle={toggleBatchSelect}
-                      onToggleStarred={onToggleStarred}
-                    />
-                  ))}
-                </TaskGroup>
-              )}
-              {starredTasks.length > 0 && (
-                <TaskGroup title={`收藏 (${starredTasks.length})`}>
-                  {starredTasks.map((t) => (
-                    <TaskListItem
-                      key={t.taskId}
-                      task={t}
-                      selected={t.taskId === selectedTaskId}
-                      renaming={renamingId === t.taskId}
-                      onSelect={(id) => {
-                        onSelectTask(id);
-                        onMobileClose?.();
-                      }}
-                      onContextMenu={(id, e) => {
-                        e.preventDefault();
-                        setMenu({
-                          taskId: id,
-                          intent: t.intent,
-                          projectId: t.projectId ?? null,
-                          x: e.clientX,
-                          y: e.clientY,
-                          deletable: isTaskDeletable(t.status),
-                        });
-                      }}
-                      onRenameCommit={(id, title) => {
-                        setRenamingId(null);
-                        if (onRenameTask && (title.trim() !== (t.title ?? '').trim())) {
-                          void onRenameTask(id, title);
-                        }
-                      }}
-                      onRenameCancel={() => setRenamingId(null)}
-                      batchMode={batchMode}
-                      batchChecked={batchSelected.has(t.taskId)}
-                      batchDisabled={!isTaskDeletable(t.status)}
-                      onBatchToggle={toggleBatchSelect}
-                      onToggleStarred={onToggleStarred}
                     />
                   ))}
                 </TaskGroup>
@@ -475,7 +447,6 @@ export function Sidebar({
                       batchChecked={batchSelected.has(t.taskId)}
                       batchDisabled={!isTaskDeletable(t.status)}
                       onBatchToggle={toggleBatchSelect}
-                      onToggleStarred={onToggleStarred}
                     />
                   ))}
                 </TaskGroup>

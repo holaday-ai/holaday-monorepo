@@ -627,9 +627,20 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         prevSelected && !freshIds.has(prevSelected)
           ? get().tasks.find((t) => t.taskId === prevSelected) ?? null
           : null;
-      const tasks: UiTask[] = preservedSelected
+      const merged: UiTask[] = preservedSelected
         ? [preservedSelected, ...freshList]
         : freshList;
+      // Belt-and-braces dedupe. preservedSelected is already gated on
+      // !freshIds.has(prevSelected) so a duplicate is unlikely, but
+      // any future merge path adding to the head shouldn't trip the
+      // Sidebar into rendering the same row in 置顶 and a time bucket.
+      const seen = new Set<string>();
+      const tasks: UiTask[] = [];
+      for (const t of merged) {
+        if (seen.has(t.taskId)) continue;
+        seen.add(t.taskId);
+        tasks.push(t);
+      }
       // refreshTaskList NEVER decides selectedTaskId. Cold start of
       // `/` lands in new-task mode (composerMode='new' default)
       // with the sidebar populated but nothing selected. Selection

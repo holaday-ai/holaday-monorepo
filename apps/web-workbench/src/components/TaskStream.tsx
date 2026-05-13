@@ -12,10 +12,17 @@ import {
   Link2,
   Loader2,
   MessageCircleQuestion,
+  MoreHorizontal,
   MousePointerClick,
   Puzzle,
   Search,
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import * as React from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -1346,31 +1353,14 @@ function TerminalSummary({
   // users can copy a failure summary into a bug report just as
   // easily as a successful answer.
   const isFailedLike = status === 'failed' || status === 'cancelled';
-  const tone = isFailedLike
-    ? status === 'failed'
-      ? {
-          wrap: 'rounded-xl border border-red-200 bg-red-50/70 px-5 py-4 text-foreground dark:border-red-500/30 dark:bg-red-500/10',
-          label: '任务失败',
-          labelClass: 'text-red-700 dark:text-red-300',
-          divider: 'border-red-200/70 dark:border-red-500/30',
-        }
-      : {
-          wrap: 'rounded-xl border border-border bg-card/60 px-5 py-4 text-foreground',
-          label: '已取消',
-          labelClass: 'text-muted-foreground',
-          divider: 'border-border/60',
-        }
-    : {
-        // Neutral success card (Codex info-architecture pass). Primary
-        // magenta is reserved for links / buttons / actionable chips;
-        // the surface of a successful result reads as a regular card
-        // so the eye lands on the content + the action buttons, not
-        // a wash of brand colour.
-        wrap: 'rounded-xl border border-border bg-card px-5 py-4 text-foreground shadow-sm dark:bg-card/80',
-        label: null,
-        labelClass: '',
-        divider: 'border-border',
-      };
+  // Codex IA pass — every terminal state shares the same neutral
+  // surface so the result reads as a work product, not a colored
+  // alert dialog. Failure / cancellation get a small inline alert
+  // block at the top of the card; the wrap itself stays calm.
+  const tone = {
+    wrap: 'rounded-xl border border-border bg-card px-5 py-4 text-foreground shadow-sm dark:bg-card/80',
+    divider: 'border-border',
+  };
   const hasRealUrl =
     !!currentUrl && currentUrl !== 'about:blank' && !currentUrl.startsWith('chrome://');
   // Strip markdown syntax for the plain-text Copy. Keeps `[label](url)` →
@@ -1403,17 +1393,32 @@ function TerminalSummary({
         <button
           type="button"
           onClick={onOpenBrowserPanel}
-          aria-label="查看任务浏览器画面"
-          title="查看浏览器"
+          aria-label="查看本次任务的浏览器证据"
+          title="查看本次任务的浏览器证据"
           className="absolute right-3 top-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-[11px] text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
         >
           <Globe className="h-3.5 w-3.5" />
-          <span>查看浏览器</span>
+          <span>查看证据</span>
         </button>
       )}
-      {tone.label && (
-        <div className={cn('mb-2 text-xs font-semibold uppercase tracking-wider', tone.labelClass)}>
-          {tone.label}
+      {isFailedLike && (
+        <div
+          className={cn(
+            'mb-3 rounded-md border px-3 py-2 text-sm',
+            status === 'failed'
+              ? 'border-red-200 bg-red-50/80 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200'
+              : 'border-border bg-muted/40 text-muted-foreground',
+          )}
+          role="alert"
+        >
+          <div className="font-medium">
+            {status === 'failed' ? '任务失败' : '已取消'}
+          </div>
+          <div className="mt-0.5 text-xs opacity-80">
+            {status === 'failed'
+              ? '下方是失败原因，可复制后用于反馈或重新执行。'
+              : '任务已取消。下方保留了已生成的部分内容。'}
+          </div>
         </div>
       )}
       {/* Phase 4 R1 B.6 — expert-report header (only on success
@@ -1510,69 +1515,70 @@ function TerminalSummary({
           obscured the first lines of the result on overflow and
           never appeared on touch. Always visible, sits below the
           body so it doesn't compete with the content. */}
-      <div className={cn('mt-3 flex flex-wrap items-center gap-3 border-t pt-3 text-xs text-muted-foreground', tone.divider)}>
+      {/* Footer (Codex IA pass). The primary action stays inline —
+          复制 — because it's the action 90% of users take first.
+          复制 Markdown / 下载 .md / 分享任务 / 设为定时 fold into a
+          单一 Radix More menu so the row isn't a wall of text
+          buttons. 查看证据 lives in the top-right of the card;
+          打开最终页面 keeps its own URL row below. */}
+      <div className={cn('mt-3 flex items-center justify-between gap-3 border-t pt-3 text-xs text-muted-foreground', tone.divider)}>
         <button
           type="button"
           onClick={() => void copyTo(plainText, '纯文本')}
           aria-label="复制纯文本"
-          className="inline-flex items-center gap-1 transition-colors hover:text-foreground"
+          className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground"
         >
-          <Copy className="h-3 w-3" />
+          <Copy className="h-3.5 w-3.5" />
           复制
         </button>
-        <button
-          type="button"
-          onClick={() => void copyTo(displayText, 'Markdown')}
-          aria-label="复制 Markdown 原文"
-          className="inline-flex items-center gap-1 transition-colors hover:text-foreground"
-        >
-          <FileText className="h-3 w-3" />
-          复制 Markdown
-        </button>
-        {/* Phase 4 R2 4e — markdown export. Client-side download of
-            the displayText as a .md file. PDF export needs server-side
-            rendering (L2 save_page_as_pdf is agent-runtime only, not
-            available post-completion), so we ship the markdown variant
-            now and leave PDF for a later phase. */}
-        <button
-          type="button"
-          onClick={() => downloadMarkdown(displayText, taskId)}
-          aria-label="下载 Markdown 文件"
-          className="inline-flex items-center gap-1 transition-colors hover:text-foreground"
-        >
-          <Download className="h-3 w-3" />
-          下载 .md
-        </button>
-        {/* Phase 5a — turn a finished task into a recurring schedule.
-            Only on success / cancellation panels (failed tasks rarely
-            warrant a daily re-run; user can still trigger from the
-            scheduled-tasks page directly). */}
-        {!isFailedLike && intent && (
-          <button
-            type="button"
-            onClick={() => setScheduleDialogOpen(true)}
-            aria-label="设为定时任务"
-            className="inline-flex items-center gap-1 transition-colors hover:text-foreground"
-          >
-            <Clock className="h-3 w-3" />
-            设为定时
-          </button>
-        )}
-        {taskId && (
-          <button
-            type="button"
-            onClick={() => {
-              const origin =
-                typeof window !== 'undefined' ? window.location.origin : '';
-              void copyTo(`${origin}/?task=${encodeURIComponent(taskId)}`, '任务链接');
-            }}
-            aria-label="复制任务链接"
-            className="inline-flex items-center gap-1 transition-colors hover:text-foreground"
-          >
-            <Link2 className="h-3 w-3" />
-            分享任务
-          </button>
-        )}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label="更多操作"
+              title="更多"
+              className="inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+              更多
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuItem
+              onSelect={() => void copyTo(displayText, 'Markdown')}
+            >
+              <FileText className="text-muted-foreground" />
+              <span>复制 Markdown</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => downloadMarkdown(displayText, taskId)}
+            >
+              <Download className="text-muted-foreground" />
+              <span>下载 .md</span>
+            </DropdownMenuItem>
+            {taskId && (
+              <DropdownMenuItem
+                onSelect={() => {
+                  const origin =
+                    typeof window !== 'undefined' ? window.location.origin : '';
+                  void copyTo(
+                    `${origin}/?task=${encodeURIComponent(taskId)}`,
+                    '任务链接',
+                  );
+                }}
+              >
+                <Link2 className="text-muted-foreground" />
+                <span>分享任务</span>
+              </DropdownMenuItem>
+            )}
+            {!isFailedLike && intent && (
+              <DropdownMenuItem onSelect={() => setScheduleDialogOpen(true)}>
+                <Clock className="text-muted-foreground" />
+                <span>设为定时</span>
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       {/* Phase 4 R1 B.2 — FollowUpChips. The orchestrator inserts a
           structured marker around explicit next-action suggestions
@@ -1621,18 +1627,18 @@ function TerminalSummary({
               className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-card px-3 py-1.5 font-medium text-primary shadow-sm transition hover:bg-primary/10 dark:border-primary/50 dark:hover:bg-primary/15"
             >
               <MousePointerClick className="h-3.5 w-3.5" />
-              在内置浏览器中继续操作
+              继续接管
             </button>
           )}
           {hasRealUrl && (
             <button
               type="button"
               onClick={() => setPendingLink(currentUrl ?? null)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-card px-3 py-1.5 font-medium text-primary shadow-sm transition hover:bg-primary/10 dark:border-primary/50 dark:hover:bg-primary/15"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 font-medium text-foreground/85 shadow-sm transition hover:border-foreground/30 hover:bg-foreground/[0.04]"
             >
               <ExternalLink className="h-3.5 w-3.5" />
-              在新标签页打开
-              <span className="max-w-[180px] truncate text-primary/70">{currentUrl}</span>
+              打开最终页面
+              <span className="max-w-[180px] truncate text-muted-foreground">{currentUrl}</span>
             </button>
           )}
         </div>

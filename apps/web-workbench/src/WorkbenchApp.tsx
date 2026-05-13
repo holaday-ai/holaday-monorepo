@@ -393,7 +393,22 @@ export function WorkbenchApp(): JSX.Element {
             fullscreen={panelFullscreen}
             onToggleFullscreen={() => setPanelFullscreen((v) => !v)}
             collapsed={browserCollapsed}
-            onToggleCollapse={() => setBrowserCollapsed((v) => !v)}
+            onToggleCollapse={() => {
+              // Terminal task: close button fully unmounts the panel
+              // (no leftover 40px rail). Live task keeps the rail so
+              // the user can re-expand without losing the session.
+              const taskNow = selectedTaskId
+                ? tasks.find((t) => t.taskId === selectedTaskId)
+                : null;
+              const isTerminal =
+                taskNow != null && TERMINAL_STATUSES.has(taskNow.status);
+              if (isTerminal) {
+                setUserOpenedBrowserPanel(false);
+                setBrowserCollapsed(false);
+                return;
+              }
+              setBrowserCollapsed((v) => !v);
+            }}
           />
         </div>
       )}
