@@ -59,6 +59,14 @@ interface Props {
    * follow-up auto-detection inherits parent context.
    */
   onPickSuggestion?: (intent: string) => void;
+  /**
+   * Codex P1 — fired when the user clicks the 查看浏览器 icon on a
+   * terminal browser task's result card. Asks WorkbenchApp to open
+   * the BrowserPanel (which would otherwise stay hidden for a
+   * completed browser task). No-op for non-browser tasks; the icon
+   * isn't rendered there.
+   */
+  onOpenBrowserPanel?: () => void;
 }
 
 // Stable empty-array reference so the zustand selector below returns
@@ -85,7 +93,11 @@ const PLAYED_TERMINAL_REVEAL_TASK_IDS = new Set<string>();
  * 百度…" or "点击了'搜索'"), with a spinner-adorned status row for the
  * still-running tick.
  */
-export function TaskStream({ task, onPickSuggestion }: Props): JSX.Element {
+export function TaskStream({
+  task,
+  onPickSuggestion,
+  onOpenBrowserPanel,
+}: Props): JSX.Element {
   const steps = useTaskStore((s) => s.stepsByTask[task.taskId]) ?? EMPTY_STEPS;
   const userReplies =
     useTaskStore((s) => s.userRepliesByTask[task.taskId]) ?? EMPTY_REPLIES;
@@ -191,6 +203,7 @@ export function TaskStream({ task, onPickSuggestion }: Props): JSX.Element {
         awaitingUser={awaitingUser}
         webSearch={webSearch}
         serverSuggestions={serverSuggestions}
+        onOpenBrowserPanel={onOpenBrowserPanel}
       />
 
       <div ref={scrollAnchorRef} />
@@ -243,6 +256,7 @@ function AgentBlock({
   executorFallback,
   awaitingUser,
   webSearch,
+  onOpenBrowserPanel,
   serverSuggestions,
 }: {
   task: UiTask;
@@ -259,6 +273,7 @@ function AgentBlock({
   awaitingUser: UiAwaitingUser | undefined;
   webSearch: UiWebSearchEvent | undefined;
   serverSuggestions?: string[];
+  onOpenBrowserPanel?: () => void;
 }): JSX.Element {
   const [detailOpen, setDetailOpen] = React.useState(false);
   // Phase 24 RC follow-up — generate / scrape streaming output. The
@@ -403,7 +418,7 @@ function AgentBlock({
          *  no-op — only the supplementary controls (copy button,
          *  suggestion chips) light up when resultText lands. */}
         {!task.resultText && (progressMessage || streamingText) && (
-            <div className="rounded-xl border border-primary/20 bg-primary/5 px-5 py-4 text-foreground dark:border-primary/30 dark:bg-primary/15 dark:text-foreground">
+            <div className="rounded-xl border border-border bg-card px-5 py-4 text-foreground shadow-sm dark:bg-card/80">
               {progressMessage && !streamingText && (
                 <div className="text-xs text-muted-foreground">
                   <span className="inline-block animate-pulse">●</span>{' '}
@@ -461,6 +476,8 @@ function AgentBlock({
             // History clicks render the summary in full immediately so
             // the panel doesn't replay-and-jitter on every navigation.
             animateReveal={animateTerminalReveal}
+            executionMode={task.executionMode}
+            onOpenBrowserPanel={onOpenBrowserPanel}
           />
         )}
         {/* Phase 11 QA #11 — terminal-but-empty fallback. Catches the
@@ -1200,10 +1217,26 @@ function TerminalSummary({
   attachments,
   expertWorkflowId,
   animateReveal = true,
+  executionMode,
+  onOpenBrowserPanel,
 }: {
   status: UiTask['status'];
   text: string;
   currentUrl?: string | null;
+  /**
+   * The task's executionMode. Drives whether the 查看浏览器 icon
+   * is rendered — non-browser lanes (generate / scrape / handoff)
+   * never had a Brave session, so the icon would 404 the user.
+   */
+  executionMode?: UiTask['executionMode'];
+  /**
+   * Codex P1 — click handler for the result-card 查看浏览器 icon.
+   * Tells WorkbenchApp to open the BrowserPanel (which otherwise
+   * stays hidden for completed browser tasks). The panel will show
+   * the finalScreenshot or — when missing — a fallback message with
+   * the finalUrl.
+   */
+  onOpenBrowserPanel?: () => void;
   /** Task id — used by the share button to build a deep link. */
   taskId?: string;
   /**
@@ -1328,15 +1361,15 @@ function TerminalSummary({
           divider: 'border-border/60',
         }
     : {
-        // Phase 4 R2 4d — brand-unified success panel. Light-mode
-        // blue-50 swap to primary/5 (1.25% opacity magenta) keeps the
-        // panel readable while replacing the "info blue" cue with
-        // brand magenta. Dark mode opacity bumped to /15 since /10
-        // didn't pick up enough against the dark card background.
-        wrap: 'rounded-xl border border-primary/20 bg-primary/5 px-5 py-4 text-foreground dark:border-primary/30 dark:bg-primary/15 dark:text-foreground',
+        // Neutral success card (Codex info-architecture pass). Primary
+        // magenta is reserved for links / buttons / actionable chips;
+        // the surface of a successful result reads as a regular card
+        // so the eye lands on the content + the action buttons, not
+        // a wash of brand colour.
+        wrap: 'rounded-xl border border-border bg-card px-5 py-4 text-foreground shadow-sm dark:bg-card/80',
         label: null,
         labelClass: '',
-        divider: 'border-primary/20 dark:border-primary/30',
+        divider: 'border-border',
       };
   const hasRealUrl =
     !!currentUrl && currentUrl !== 'about:blank' && !currentUrl.startsWith('chrome://');
@@ -1357,8 +1390,27 @@ function TerminalSummary({
     },
     [toast],
   );
+  // Show 查看浏览器 icon only when the task was a browser lane —
+  // generate / scrape / handoff never opened a Brave session, so the
+  // panel would render only the "no evidence" placeholder.
+  const showBrowserOpener =
+    !isFailedLike &&
+    executionMode === 'browser' &&
+    Boolean(onOpenBrowserPanel);
   return (
-    <div className={tone.wrap}>
+    <div className={cn('relative', tone.wrap)}>
+      {showBrowserOpener && (
+        <button
+          type="button"
+          onClick={onOpenBrowserPanel}
+          aria-label="查看任务浏览器画面"
+          title="查看浏览器"
+          className="absolute right-3 top-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-[11px] text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+        >
+          <Globe className="h-3.5 w-3.5" />
+          <span>查看浏览器</span>
+        </button>
+      )}
       {tone.label && (
         <div className={cn('mb-2 text-xs font-semibold uppercase tracking-wider', tone.labelClass)}>
           {tone.label}
@@ -1421,7 +1473,7 @@ function TerminalSummary({
           attachment as the existing FileDownloadCard so the auth +
           blob-download plumbing is reused. */}
       {!isFailedLike && attachments && attachments.length > 0 && (
-        <div className="mt-3 flex flex-col gap-2 border-t border-primary/20 pt-3 dark:border-primary/30">
+        <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
           <div className="text-[11px] font-medium tracking-wider text-muted-foreground">
             产出文件
           </div>

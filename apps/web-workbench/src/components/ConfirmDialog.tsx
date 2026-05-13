@@ -81,7 +81,7 @@ export function ConfirmDialog({
           {title}
         </h2>
         {description && (
-          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
             {description}
           </p>
         )}

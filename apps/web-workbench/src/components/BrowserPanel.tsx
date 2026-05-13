@@ -1138,6 +1138,7 @@ export function BrowserPanel({
               <EmptyBrowserState
                 taskStatus={taskStatus}
                 isBrowserTask={isBrowserTask}
+                finalUrl={persistedFinalUrl}
               />
             )}
           </div>
@@ -1442,6 +1443,7 @@ function HibernationCard({
 function EmptyBrowserState({
   taskStatus,
   isBrowserTask = true,
+  finalUrl,
 }: {
   taskStatus: UiTaskStatus | null | undefined;
   /**
@@ -1453,9 +1455,46 @@ function EmptyBrowserState({
    * without active-task context (e.g. browserLiveRequested mode).
    */
   isBrowserTask?: boolean;
+  /**
+   * When a terminal browser task has NO finalScreenshot we still
+   * usually have a persisted finalUrl. Surface it so the user can
+   * verify the agent's claim on the live page instead of staring at
+   * about:blank.
+   */
+  finalUrl?: string | null;
 }): JSX.Element {
   if (taskStatus === 'executing' && isBrowserTask) {
     return <div className="text-center text-xs text-muted-foreground">等待第一帧…</div>;
+  }
+  const terminal =
+    taskStatus === 'completed' ||
+    taskStatus === 'failed' ||
+    taskStatus === 'cancelled';
+  if (terminal && isBrowserTask) {
+    return (
+      <div className="flex flex-col items-center px-6 text-center text-muted-foreground">
+        <Globe className="h-10 w-10 text-muted-foreground/40" aria-hidden />
+        <div className="mt-3 text-sm font-medium text-foreground/80">
+          没有浏览器截图
+        </div>
+        <div className="mt-1 text-xs leading-relaxed">
+          这次任务结束时没有捕获到最终截图。
+        </div>
+        {finalUrl && (
+          <a
+            href={finalUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[12px] text-foreground transition-colors hover:border-foreground/30 hover:bg-foreground/[0.04]"
+          >
+            <ExternalLink className="h-3 w-3" />
+            <span className="max-w-[260px] truncate font-mono text-[11px]">
+              {finalUrl}
+            </span>
+          </a>
+        )}
+      </div>
+    );
   }
   return (
     <div className="flex flex-col items-center px-6 text-center text-muted-foreground">

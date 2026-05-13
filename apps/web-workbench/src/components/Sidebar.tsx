@@ -11,9 +11,9 @@ import {
   PinOff,
   Plus,
   RotateCcw,
+  Search,
   Share2,
   Sparkles,
-  Star,
   Trash2,
   X,
 } from 'lucide-react';
@@ -169,12 +169,11 @@ export function Sidebar({
   onCreateProject,
   projectFilter,
   onClearProjectFilter,
-  // Codex follow-up — onOpenSearch was previously used by the now-
-  // deleted CollapsedRail's Search icon. The Cmd+K shortcut still
-  // works via WorkbenchApp's keyboard handler, so we keep the prop
-  // on the interface (back-compat with WorkbenchApp wiring) but
-  // intentionally don't consume it in the new shadcn shell.
-  onOpenSearch: _unusedOnOpenSearch,
+  // Search button lives in SidebarHeader now. When this callback is
+  // provided we render a 搜索任务 / ⌘K row under "新任务"; when
+  // omitted we just don't render it (Cmd+K shortcut still works via
+  // AppShell's keyboard handler regardless).
+  onOpenSearch,
   userEmail,
   userDisplayName,
   userPlan,
@@ -293,20 +292,19 @@ export function Sidebar({
   return (
     <>
       <SidebarShell collapsible="icon">
+        {/* Codex info-architecture rework: the Sidebar reads as four
+            stable segments. Header / SidebarNav / SidebarFooter are
+            pinned; only the task list scrolls. The visual centre of
+            gravity sits on "新任务" + the feature shortcuts; task
+            history is a scroll surface, not a status board. */}
         <SidebarHeader className="border-b border-sidebar-border gap-2">
-          {/* Brand row — text hides in icon mode via shadcn's
-              `group-data-[collapsible=icon]` selector chain so only
-              the mark remains visible at 48px width. */}
           <div className="flex items-center gap-2 px-1 py-1">
             <BrandMark />
             <span className="text-base font-semibold tracking-tight text-sidebar-foreground group-data-[collapsible=icon]:hidden">
               HOLA DAY
             </span>
           </div>
-          {/* New-task — `SidebarMenuButton` so it collapses to a
-              `Plus` icon when the sidebar is in icon mode. The
-              `tooltip` prop wires the hover label. Brand magenta
-              filled. */}
+          {/* Brand magenta only on the primary action. */}
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
@@ -321,12 +319,32 @@ export function Sidebar({
                 <span>新任务</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
+            {onOpenSearch && (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  tooltip="搜索任务 (⌘K)"
+                  onClick={() => onOpenSearch()}
+                  className="text-sidebar-foreground/80"
+                >
+                  <Search />
+                  <span className="flex flex-1 items-center justify-between">
+                    搜索任务
+                    <kbd className="rounded border border-sidebar-border/50 bg-sidebar-accent/40 px-1 py-0.5 text-[10px] font-sans text-sidebar-foreground/60">
+                      ⌘K
+                    </kbd>
+                  </span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
           </SidebarMenu>
         </SidebarHeader>
 
-        <SidebarContent className="px-0">
-          <FeatureNav />
+        {/* SidebarNav — fixed feature shortcuts. Lives between
+            SidebarHeader and SidebarContent so it stays put while
+            the task list below scrolls. */}
+        <FeatureNav />
 
+        <SidebarContent className="px-0">
             {projectFilter && (
               <div className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-pink-300/40 bg-pink-50/40 px-2.5 py-1.5 text-[12px] dark:border-pink-500/30 dark:bg-pink-500/10 group-data-[collapsible=icon]:hidden">
                 <FolderOpen className="h-3.5 w-3.5 shrink-0 text-pink-600 dark:text-pink-300" />
@@ -911,21 +929,14 @@ interface FeatureItem {
 
 const FEATURES: readonly FeatureItem[] = [
   { icon: Sparkles, label: '专家技能', href: '/skills' },
-  // Phase 5a — 定时任务 promoted back to main nav now that the
-  // scheduled-runner's dispatch is wired (was a logger stub in
-  // Phase 16b). Cron triggers actually create + run tasks now.
-  // P2.6 — MCP connectors stay demoted; the /connections page is
-  // still a roadmap surface until OAuth lands.
   { icon: Clock, label: '定时任务', href: '/scheduled' },
-  // Phase 5b — batch tasks (submit a list, run with concurrency cap).
   { icon: ListPlus, label: '批量任务', href: '/batch' },
   { icon: FolderOpen, label: '文件库', href: '/files' },
-  // Codex follow-up — the '浏览器' entry is gone. The BrowserPanel
-  // now auto-opens for browser-mode tasks AND auto-expands on
-  // login / captcha / permission park; explicit entry was creating
-  // empty-frame UX for users who clicked it without a task in flight.
   { icon: Layers, label: '项目', href: '/projects' },
-  { icon: Star, label: '收藏', href: '/starred' },
+  // 收藏 was a top-level nav row but it duplicated what the sidebar
+  // already shows: starred tasks bubble to the top of SidebarTasks
+  // as the "收藏" group. The /starred route still exists for direct
+  // links; it's just not a primary entry point anymore.
 ];
 
 /**
@@ -936,18 +947,14 @@ const FEATURES: readonly FeatureItem[] = [
  */
 function FeatureNav(): JSX.Element {
   const navigate = useNavigate();
-  // Optimization #4 follow-up — feature nav is now a proper
-  // shadcn `<SidebarMenu>` so:
-  //   - hover gets the rounded `bg-sidebar-accent` highlight
-  //   - active route gets `data-[active=true]` filled background
-  //   - icon-mode shows ONLY the icon with a hover tooltip via
-  //     `SidebarMenuButton tooltip="…"`
-  // We read pathname directly so the active state updates without
-  // a router subscription in the parent.
+  // Read pathname directly so the active highlight updates on route
+  // switch without forcing a re-render through props. The shrink-0
+  // wrapper keeps this segment pinned below SidebarHeader while
+  // SidebarContent (the task list) takes the remaining height.
   const pathname =
     typeof window !== 'undefined' ? window.location.pathname : '';
   return (
-    <SidebarGroup>
+    <SidebarGroup className="shrink-0 border-b border-sidebar-border/60">
       <SidebarGroupLabel className="px-3 text-[11px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
         快捷入口
       </SidebarGroupLabel>

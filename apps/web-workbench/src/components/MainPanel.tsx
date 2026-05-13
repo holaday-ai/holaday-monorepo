@@ -43,6 +43,12 @@ interface Props {
   attachmentsAllowed?: boolean;
   /** Plan-specific attachment byte cap (5MB basic / 10MB pro). */
   attachmentByteCap?: number;
+  /**
+   * Codex P1 — passed through to TaskStream so the result card's
+   * 查看浏览器 icon can ask WorkbenchApp to open the BrowserPanel.
+   * Terminal browser tasks no longer auto-render the panel.
+   */
+  onOpenBrowserPanel?: () => void;
 }
 
 /**
@@ -67,6 +73,7 @@ export function MainPanel({
   quotaExhausted,
   attachmentsAllowed,
   attachmentByteCap,
+  onOpenBrowserPanel,
 }: Props): JSX.Element {
   // Suggestion-chip clicks (empty-state EmptyState picks + the
   // "继续探索" chips inside TaskStream) prefill the composer instead
@@ -188,6 +195,7 @@ export function MainPanel({
             <TaskStream
               task={task}
               onPickSuggestion={handlePickFromTaskSummary}
+              onOpenBrowserPanel={onOpenBrowserPanel}
             />
           </div>
           {userPlan ? (

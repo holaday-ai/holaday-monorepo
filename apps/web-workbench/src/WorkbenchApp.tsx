@@ -43,7 +43,12 @@ export function WorkbenchApp(): JSX.Element {
   const [panelFullscreen, setPanelFullscreen] = React.useState(false);
   const [browserCollapsed, setBrowserCollapsed] = React.useState(false);
   const [browserSheetOpen, setBrowserSheetOpen] = React.useState(false);
-  const [manualPanelOverride, setManualPanelOverride] = React.useState(false);
+  // True when the user explicitly opened the BrowserPanel via the
+  // result-card icon on a terminal task that wouldn't otherwise
+  // auto-render the panel. Reset on every task switch so a stale
+  // open from task A doesn't follow into task B.
+  const [userOpenedBrowserPanel, setUserOpenedBrowserPanel] =
+    React.useState(false);
   const [followUpDismissedTaskId, setFollowUpDismissedTaskId] =
     React.useState<string | null>(null);
   const [confirmRebuildTask, setConfirmRebuildTask] = React.useState<{
@@ -158,8 +163,9 @@ export function WorkbenchApp(): JSX.Element {
           selectedAwaitingKind !== 'clarification')),
   );
 
-  // Auto-expand BrowserPanel for tasks that need it; mobile gets the
-  // bottom sheet pop.
+  // Auto-expand BrowserPanel when the agent needs the user IN the
+  // viewport (login / captcha / browser_action). Mobile pops the
+  // bottom sheet so the takeover is reachable.
   React.useEffect(() => {
     if (!selectedNeedsBrowser) return;
     setBrowserCollapsed(false);
@@ -168,25 +174,13 @@ export function WorkbenchApp(): JSX.Element {
     }
   }, [selectedNeedsBrowser]);
 
-  // Reset manualPanelOverride on task switch.
+  // Reset per-task panel state on task switch: drop the "user opened
+  // it" flag and the manual-collapse choice so each task starts from
+  // its default (live tasks auto-show; terminal tasks stay hidden).
   React.useEffect(() => {
-    setManualPanelOverride(false);
+    setUserOpenedBrowserPanel(false);
+    setBrowserCollapsed(false);
   }, [selectedTaskId]);
-
-  // Auto-collapse BrowserPanel for non-browser tasks.
-  React.useEffect(() => {
-    if (manualPanelOverride) return;
-    const selectedTaskNow = selectedTaskId
-      ? tasks.find((t) => t.taskId === selectedTaskId)
-      : null;
-    if (!selectedTaskNow) return;
-    if (selectedNeedsBrowser) return;
-    const lane = selectedTaskNow.executionMode;
-    if (lane && lane !== 'browser') {
-      setBrowserCollapsed(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTaskId, selectedNeedsBrowser, manualPanelOverride]);
 
   // Workbench-specific Esc routing. Closes panelFullscreen +
   // browserSheet, and steps out of the way when the BrowserPanel is in
@@ -250,10 +244,25 @@ export function WorkbenchApp(): JSX.Element {
         }
       : null;
 
+  // BrowserPanel auto-render rules (Codex P1 fix — was always shown
+  // for any browser task, including completed ones with no live frame
+  // and no captured evidence, which displayed about:blank). New
+  // policy: render only when there's actually something to look at —
+  //   * live browser task (executing / queued / planning)
+  //   * agent parked awaiting user input (login / captcha / etc.)
+  //   * user explicitly clicked the 查看浏览器 icon on a terminal
+  //     task's result card
+  // Terminal browser tasks with neither a live frame nor an evidence
+  // screenshot no longer slap a blank rail onto the layout.
+  const isLiveBrowserTask = Boolean(
+    selectedTask &&
+      selectedTask.executionMode === 'browser' &&
+      !TERMINAL_STATUSES.has(selectedTask.status),
+  );
   const showBrowserPanel =
-    (selectedTask?.executionMode === 'browser' || selectedNeedsBrowser) &&
     !!selectedTaskId &&
-    composerMode !== 'new';
+    composerMode !== 'new' &&
+    (selectedNeedsBrowser || isLiveBrowserTask || userOpenedBrowserPanel);
 
   return (
     <div
@@ -326,6 +335,15 @@ export function WorkbenchApp(): JSX.Element {
             }
           }}
           onOpenSidebar={() => setOpenMobile(true)}
+          onOpenBrowserPanel={() => {
+            setUserOpenedBrowserPanel(true);
+            if (
+              typeof window !== 'undefined' &&
+              window.innerWidth < 1024
+            ) {
+              setBrowserSheetOpen(true);
+            }
+          }}
         />
       )}
 
@@ -375,13 +393,7 @@ export function WorkbenchApp(): JSX.Element {
             fullscreen={panelFullscreen}
             onToggleFullscreen={() => setPanelFullscreen((v) => !v)}
             collapsed={browserCollapsed}
-            onToggleCollapse={() => {
-              setBrowserCollapsed((v) => {
-                const nextCollapsed = !v;
-                if (!nextCollapsed) setManualPanelOverride(true);
-                return nextCollapsed;
-              });
-            }}
+            onToggleCollapse={() => setBrowserCollapsed((v) => !v)}
           />
         </div>
       )}

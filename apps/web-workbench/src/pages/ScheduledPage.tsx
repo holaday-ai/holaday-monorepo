@@ -1,5 +1,6 @@
 import { Clock, Pause, Play, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
@@ -46,6 +47,13 @@ export function ScheduledPage(): JSX.Element {
   const toast = useToast();
   const [rows, setRows] = React.useState<UiScheduled[] | null>(null);
   const [dialogOpen, setDialogOpen] = React.useState(false);
+  // Native window.confirm leaves the page chrome and gives a generic
+  // platform prompt. The product-internal Radix-backed ConfirmDialog
+  // keeps users inside HOLA DAY's UI and lets us name the task being
+  // deleted + show its next run time so the action is unambiguous.
+  const [confirmDelete, setConfirmDelete] = React.useState<UiScheduled | null>(
+    null,
+  );
 
   const reload = React.useCallback(async (): Promise<void> => {
     try {
@@ -77,17 +85,13 @@ export function ScheduledPage(): JSX.Element {
     }
   };
 
-  const handleDelete = async (id: string): Promise<void> => {
-    if (!window.confirm('确认删除这个定时任务？')) return;
+  const performDelete = async (id: string): Promise<void> => {
     try {
       await trpc.scheduledTasks.delete.mutate({ scheduledTaskId: id });
       toast.show('已删除');
       await reload();
     } catch (err) {
-      toast.show(
-        err instanceof Error ? err.message : '删除失败',
-        'error',
-      );
+      toast.show(err instanceof Error ? err.message : '删除失败', 'error');
     }
   };
 
@@ -211,7 +215,7 @@ export function ScheduledPage(): JSX.Element {
                   )}
                   <button
                     type="button"
-                    onClick={() => void handleDelete(r.scheduledTaskId)}
+                    onClick={() => setConfirmDelete(r)}
                     aria-label="删除"
                     title="删除"
                     className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
@@ -232,8 +236,31 @@ export function ScheduledPage(): JSX.Element {
           void reload();
         }}
       />
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="删除这个定时任务？"
+        description={
+          confirmDelete
+            ? `「${truncate(confirmDelete.intent, 60)}」\n下次执行：${fmtDate(confirmDelete.nextRunAt)}\n删除后无法恢复。`
+            : ''
+        }
+        confirmLabel="确认删除"
+        destructive
+        onClose={() => setConfirmDelete(null)}
+        onConfirm={async () => {
+          const row = confirmDelete;
+          setConfirmDelete(null);
+          if (!row) return;
+          await performDelete(row.scheduledTaskId);
+        }}
+      />
     </PageContainer>
   );
+}
+
+function truncate(s: string, n: number): string {
+  if (s.length <= n) return s;
+  return `${s.slice(0, n)}…`;
 }
 
 /**
