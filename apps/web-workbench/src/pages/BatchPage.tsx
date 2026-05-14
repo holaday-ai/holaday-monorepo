@@ -1,6 +1,7 @@
 import { CheckCircle2, Layers, Loader2, Plus, XCircle } from 'lucide-react';
 import * as React from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
@@ -204,6 +205,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
   const toast = useToast();
   const navigate = useNavigate();
   const [detail, setDetail] = React.useState<UiBatchDetail | null>(null);
+  const [confirmCancel, setConfirmCancel] = React.useState(false);
 
   const reload = React.useCallback(async () => {
     try {
@@ -225,8 +227,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
     return () => clearInterval(handle);
   }, [reload]);
 
-  const handleCancel = async (): Promise<void> => {
-    if (!window.confirm('确定取消这个批量任务？已经在跑的项目会继续完成。')) return;
+  const performCancel = async (): Promise<void> => {
     try {
       await trpc.batchTasks.cancel.mutate({ batchId });
       toast.show('已取消');
@@ -265,7 +266,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
           canCancel ? (
             <button
               type="button"
-              onClick={() => void handleCancel()}
+              onClick={() => setConfirmCancel(true)}
               className="inline-flex h-9 items-center rounded-md border border-border px-3 text-sm text-muted-foreground transition-colors hover:border-destructive/60 hover:text-destructive"
             >
               取消批量
@@ -321,6 +322,18 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
           ))}
         </ul>
       </Section>
+      <ConfirmDialog
+        open={confirmCancel}
+        title="取消这个批量任务？"
+        description={`未开始的项目会被取消。已在执行中的项目会继续完成，不会被中断。`}
+        confirmLabel="取消批量"
+        destructive
+        onClose={() => setConfirmCancel(false)}
+        onConfirm={async () => {
+          setConfirmCancel(false);
+          await performCancel();
+        }}
+      />
     </PageContainer>
   );
 }

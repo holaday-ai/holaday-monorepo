@@ -1,16 +1,25 @@
 import {
+  Copy,
   Download,
   Eye,
   File as FileIcon,
   FileSpreadsheet,
   FileText,
   Image as ImageIcon,
+  MoreHorizontal,
   Plus,
   Search,
   Trash2,
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
@@ -27,11 +36,15 @@ interface UiFile {
 type Filter = 'all' | 'images' | 'documents';
 
 /**
- * P2.8 — files library polish. Inventory of every task_files row the
- * user has accumulated. Each row exposes 预览 (open in new tab), 下载
- * (direct download), 用于新任务 (jump to home with the file pre-
- * staged), and 删除. Mobile shows size + time inline (was hidden
- * behind sm:block).
+ * P2.8 — files library. Each row shows two always-visible primary
+ * actions (filename = 预览, plus 用于新任务) and folds 下载 / 复制链接
+ * / 删除 into a Radix More dropdown. The earlier hover-to-reveal row
+ * action strip was unreachable on touch and easy to miss on desktop,
+ * which made delete in particular feel like a hidden hazard.
+ *
+ * Delete uses the product ConfirmDialog (no window.confirm) so users
+ * see the filename + size and a clear "the link will stop working"
+ * notice before the destructive call lands.
  */
 export function FilesPage(): JSX.Element {
   const toast = useToast();
@@ -40,6 +53,7 @@ export function FilesPage(): JSX.Element {
   const [q, setQ] = React.useState('');
   const [files, setFiles] = React.useState<UiFile[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [pendingDelete, setPendingDelete] = React.useState<UiFile | null>(null);
 
   const refresh = React.useCallback(async () => {
     setLoading(true);
@@ -65,24 +79,10 @@ export function FilesPage(): JSX.Element {
   }
 
   function onPreview(f: UiFile): void {
-    // Open in a new tab — for images / PDFs the browser renders
-    // inline; for everything else this triggers a download. The
-    // download endpoint sets Content-Disposition: inline so
-    // browsers prefer preview when they know how to.
     window.open(downloadUrl(f.fileId), '_blank', 'noopener');
   }
 
   function onUseInNewTask(f: UiFile): void {
-    // Hand off to the home composer via React Router location.state.
-    // Carrying the full UiFile means InputArea can pre-stage the
-    // DraftAttachment without a separate metadata round-trip — the
-    // chip renders immediately and submission already has the fileId.
-    //
-    // Item 3 — `newTask: true` tells the composer to drop any
-    // currently-selected terminal task and dismiss the follow-up
-    // chip. Otherwise a user with a recently-completed task selected
-    // would land on /, see the file pre-attached, and unknowingly
-    // submit a 追问 of the old task instead of a fresh task.
     navigate('/', {
       state: {
         attachFile: {
@@ -96,8 +96,20 @@ export function FilesPage(): JSX.Element {
     });
   }
 
-  async function onDelete(f: UiFile): Promise<void> {
-    if (!window.confirm(`删除文件「${f.filename}」？`)) return;
+  async function onCopyLink(f: UiFile): Promise<void> {
+    const url =
+      typeof window !== 'undefined'
+        ? `${window.location.origin}${downloadUrl(f.fileId)}`
+        : downloadUrl(f.fileId);
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.show('已复制下载链接');
+    } catch {
+      toast.show('复制失败', 'error');
+    }
+  }
+
+  async function performDelete(f: UiFile): Promise<void> {
     try {
       await trpc.files.delete.mutate({ fileId: f.fileId });
       toast.show('文件已删除');
@@ -166,12 +178,31 @@ export function FilesPage(): JSX.Element {
                 downloadHref={downloadUrl(f.fileId)}
                 onPreview={() => onPreview(f)}
                 onUseInNewTask={() => onUseInNewTask(f)}
-                onDelete={() => void onDelete(f)}
+                onCopyLink={() => void onCopyLink(f)}
+                onDelete={() => setPendingDelete(f)}
               />
             ))}
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="删除这个文件？"
+        description={
+          pendingDelete
+            ? `${pendingDelete.filename} · ${formatBytes(pendingDelete.sizeBytes)}\n已完成任务的结果文本不会受影响，但文件的下载链接会失效。`
+            : ''
+        }
+        confirmLabel="删除"
+        destructive
+        onClose={() => setPendingDelete(null)}
+        onConfirm={async () => {
+          const f = pendingDelete;
+          setPendingDelete(null);
+          if (!f) return;
+          await performDelete(f);
+        }}
+      />
     </PageContainer>
   );
 }
@@ -206,93 +237,86 @@ function FileRow({
   downloadHref,
   onPreview,
   onUseInNewTask,
+  onCopyLink,
   onDelete,
 }: {
   file: UiFile;
   downloadHref: string;
   onPreview: () => void;
   onUseInNewTask: () => void;
+  onCopyLink: () => void;
   onDelete: () => void;
 }): JSX.Element {
   const Icon = iconForMime(file.mimetype);
   const date = new Date(file.createdAt as string | number | Date);
   return (
-    <div className="group flex flex-col gap-1.5 px-4 py-2.5 transition-colors hover:bg-foreground/[0.03] sm:grid sm:grid-cols-[1fr_auto_auto_auto] sm:items-center sm:gap-3">
-      <div className="flex min-w-0 items-center gap-2.5">
+    <div className="flex flex-col gap-1.5 px-4 py-2.5 transition-colors hover:bg-foreground/[0.03] sm:grid sm:grid-cols-[1fr_auto_auto_auto] sm:items-center sm:gap-3">
+      {/* Filename = preview. Always reachable, no hover required. */}
+      <button
+        type="button"
+        onClick={onPreview}
+        title={`预览 ${file.filename}`}
+        className="flex min-w-0 items-center gap-2.5 text-left"
+      >
         <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 truncate text-sm text-foreground" title={file.filename}>
+        <span className="min-w-0 truncate text-sm text-foreground hover:underline">
           {file.filename}
         </span>
-      </div>
-      {/* P2.8 — size + time always rendered. Mobile shows them inline
-          beneath the filename; sm+ snaps them into the grid columns. */}
+      </button>
+      {/* Size + time always rendered. Mobile shows them inline beneath
+          the filename; sm+ snaps them into the grid columns. */}
       <div className="flex items-center gap-3 text-xs text-muted-foreground sm:contents">
         <span className="whitespace-nowrap sm:text-xs">{formatRelative(date)}</span>
         <span className="whitespace-nowrap sm:text-xs">{formatBytes(file.sizeBytes)}</span>
       </div>
-      <div className="flex shrink-0 items-center gap-1 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
-        <RowAction onClick={onPreview} label="预览" icon={<Eye className="h-3.5 w-3.5" />} />
-        <RowAction
-          asLink
-          href={downloadHref}
-          download={file.filename}
-          label="下载"
-          icon={<Download className="h-3.5 w-3.5" />}
-        />
-        <RowAction
+      {/* Always-visible primary action + More menu. No hover-only
+          opacity tricks — every action is reachable on touch. */}
+      <div className="flex shrink-0 items-center gap-1">
+        <button
+          type="button"
           onClick={onUseInNewTask}
-          label="用于新任务"
-          icon={<Plus className="h-3.5 w-3.5" />}
-        />
-        <RowAction
-          onClick={onDelete}
-          label={`删除 ${file.filename}`}
-          icon={<Trash2 className="h-3.5 w-3.5" />}
-          danger
-        />
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium text-foreground/85 transition-colors hover:border-foreground/30 hover:bg-foreground/[0.04]"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          用于新任务
+        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label="更多操作"
+              title="更多"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuItem onSelect={onPreview}>
+              <Eye className="text-muted-foreground" />
+              <span>预览</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <a href={downloadHref} download={file.filename}>
+                <Download className="text-muted-foreground" />
+                <span>下载</span>
+              </a>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onCopyLink}>
+              <Copy className="text-muted-foreground" />
+              <span>复制下载链接</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={onDelete}
+              className="text-red-600 focus:bg-red-500/10 focus:text-red-600 dark:text-red-400 dark:focus:text-red-300"
+            >
+              <Trash2 />
+              <span>删除</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
-  );
-}
-
-function RowAction({
-  onClick,
-  label,
-  icon,
-  danger = false,
-  asLink = false,
-  href,
-  download,
-}: {
-  onClick?: () => void;
-  label: string;
-  icon: React.ReactNode;
-  danger?: boolean;
-  asLink?: boolean;
-  href?: string;
-  download?: string;
-}): JSX.Element {
-  const className = cn(
-    'rounded p-1 text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground',
-    danger && 'hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400',
-  );
-  if (asLink && href) {
-    return (
-      <a
-        href={href}
-        download={download}
-        aria-label={label}
-        title={label}
-        className={className}
-      >
-        {icon}
-      </a>
-    );
-  }
-  return (
-    <button type="button" onClick={onClick} aria-label={label} title={label} className={className}>
-      {icon}
-    </button>
   );
 }
 

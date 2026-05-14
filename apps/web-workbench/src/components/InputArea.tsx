@@ -502,15 +502,27 @@ export function InputArea({
         )}
       >
         {followUpTarget && !replyMode && (
-          <div className="flex items-center gap-2 border-b-2 border-primary/40 bg-primary/10 px-3 py-2 text-xs text-primary dark:border-primary/50 dark:bg-primary/15">
-            <span className="shrink-0 font-semibold">追问</span>
-            <span className="min-w-0 flex-1 truncate">"{followUpTarget.title}"</span>
+          // Neutral context chip — primary magenta was reading as a
+          // warning banner. The chip just states the context; the
+          // ghost button on the right lets the user opt out into a
+          // fresh task. Brand magenta stays scoped to the send
+          // button + actionable chips elsewhere.
+          <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <span className="shrink-0 font-medium text-foreground/80">
+              继续这个任务
+            </span>
+            <span
+              className="min-w-0 flex-1 truncate"
+              title={followUpTarget.title}
+            >
+              {followUpTarget.title}
+            </span>
             <button
               type="button"
               onClick={onCancelFollowUp}
               aria-label="取消追问，发新任务"
               title="取消追问，发新任务"
-              className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-primary/70 hover:bg-primary/20 hover:text-primary"
+              className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
             >
               <X className="h-3 w-3" aria-hidden />
               发新任务

@@ -1,5 +1,6 @@
 import { Copy, Eye, EyeOff, Key, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
@@ -45,6 +46,11 @@ export function ApiKeysSection(): JSX.Element {
   const [fresh, setFresh] = React.useState<FreshKeyState | null>(null);
   const [reveal, setReveal] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
+  // Revocation is high-risk on a settings page — every deployed
+  // webhook starts 401-ing the moment we hit the endpoint. Surface
+  // the key's name + prefix + last-used time in a product-internal
+  // ConfirmDialog so the user can verify what they're killing.
+  const [pendingRevoke, setPendingRevoke] = React.useState<UiApiKey | null>(null);
 
   const reload = React.useCallback(async (): Promise<void> => {
     try {
@@ -85,10 +91,7 @@ export function ApiKeysSection(): JSX.Element {
     }
   };
 
-  const handleRevoke = async (key: UiApiKey): Promise<void> => {
-    if (!window.confirm(`确认撤销 "${key.name}"？已部署的 webhook 调用会立即开始 401。`)) {
-      return;
-    }
+  const performRevoke = async (key: UiApiKey): Promise<void> => {
     try {
       await trpc.apiKeys.revoke.mutate({ apiKeyId: key.apiKeyId });
       toast.show('已撤销');
@@ -240,7 +243,7 @@ export function ApiKeysSection(): JSX.Element {
         ) : (
           <ul className="divide-y divide-border">
             {activeRows.map((k) => (
-              <ApiKeyRow key={k.apiKeyId} row={k} onRevoke={() => void handleRevoke(k)} />
+              <ApiKeyRow key={k.apiKeyId} row={k} onRevoke={() => setPendingRevoke(k)} />
             ))}
             {revokedRows.length > 0 && (
               <li className="bg-muted/30 px-4 py-2 text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -255,6 +258,25 @@ export function ApiKeysSection(): JSX.Element {
       </div>
 
       <WebhookDocs />
+
+      <ConfirmDialog
+        open={pendingRevoke !== null}
+        title="撤销这个 API Key？"
+        description={
+          pendingRevoke
+            ? `${pendingRevoke.name} · ${pendingRevoke.keyPrefix}…\n上次使用：${pendingRevoke.lastUsedAt ? fmtDate(pendingRevoke.lastUsedAt) : '从未'}\n撤销后，已部署的 Zapier / webhook 调用会立即开始返回 401。`
+            : ''
+        }
+        confirmLabel="撤销 API Key"
+        destructive
+        onClose={() => setPendingRevoke(null)}
+        onConfirm={async () => {
+          const k = pendingRevoke;
+          setPendingRevoke(null);
+          if (!k) return;
+          await performRevoke(k);
+        }}
+      />
     </Section>
   );
 }

@@ -1,6 +1,13 @@
-import { FolderOpen, Plus, Trash2 } from 'lucide-react';
+import { FolderOpen, MoreHorizontal, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
@@ -8,11 +15,12 @@ import { PageContainer, PageHeader } from '@/pages/PageShell';
 import type { UiProject } from '@/types/task';
 
 /**
- * Phase 16 — 项目 list page. Shows the user's projects with task
- * counts and a name-only inline create input. Click a card → details
- * not yet implemented (Phase 16.1); for now a click toasts the
- * project id. Delete is gated behind a window.confirm to keep the
- * action surface minimal.
+ * Phase 16 — 项目 list page. Each card carries an always-visible
+ * More menu (打开项目 / 删除) on the right; delete routes through
+ * the product ConfirmDialog so users see what happens to the
+ * project's tasks before they confirm. The old "hover to reveal
+ * a trash icon + window.confirm" pattern made delete read as a
+ * hidden hazard on touch + cheap on desktop.
  */
 export function ProjectsPage(): JSX.Element {
   const toast = useToast();
@@ -25,6 +33,7 @@ export function ProjectsPage(): JSX.Element {
   const [creating, setCreating] = React.useState(searchParams.get('create') === '1');
   const [newName, setNewName] = React.useState('');
   const [creatingNow, setCreatingNow] = React.useState(false);
+  const [pendingDelete, setPendingDelete] = React.useState<UiProject | null>(null);
 
   const refresh = React.useCallback(async () => {
     setLoading(true);
@@ -65,10 +74,7 @@ export function ProjectsPage(): JSX.Element {
     }
   }
 
-  async function onDelete(p: UiProject): Promise<void> {
-    if (!window.confirm(`删除项目「${p.name}」？项目下的任务会被移到默认列表。`)) {
-      return;
-    }
+  async function performDelete(p: UiProject): Promise<void> {
     try {
       await trpc.projects.delete.mutate({ projectId: p.projectId });
       toast.show('项目已删除');
@@ -167,42 +173,79 @@ export function ProjectsPage(): JSX.Element {
           {projects.map((p) => (
             <div
               key={p.projectId}
-              className="group flex flex-col gap-2 rounded-xl border border-border bg-card p-4 transition-colors hover:border-foreground/20 hover:bg-foreground/[0.02]"
+              className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 transition-colors hover:border-foreground/20 hover:bg-foreground/[0.02]"
             >
-              <button
-                type="button"
-                onClick={() => navigate(`/?project=${p.projectId}`)}
-                className="flex items-start gap-2 text-left"
-              >
-                <FolderOpen className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-foreground hover:underline">
-                    {p.name}
-                  </div>
-                  {p.description && (
-                    <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                      {p.description}
-                    </div>
-                  )}
-                </div>
-              </button>
-              <div className="flex items-center justify-between">
-                <div className="text-[11px] text-muted-foreground">
-                  {p.taskCount} 个任务
-                </div>
+              <div className="flex items-start gap-2">
                 <button
                   type="button"
-                  onClick={() => void onDelete(p)}
-                  aria-label={`删除项目 ${p.name}`}
-                  className="rounded p-1 text-muted-foreground opacity-0 transition-all hover:bg-red-500/10 hover:text-red-600 group-hover:opacity-100 dark:hover:text-red-400"
+                  onClick={() => navigate(`/?project=${p.projectId}`)}
+                  className="flex min-w-0 flex-1 items-start gap-2 text-left"
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
+                  <FolderOpen className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-foreground hover:underline">
+                      {p.name}
+                    </div>
+                    {p.description && (
+                      <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                        {p.description}
+                      </div>
+                    )}
+                  </div>
                 </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label={`项目 ${p.name} 操作`}
+                      title="更多"
+                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-40">
+                    <DropdownMenuItem
+                      onSelect={() => navigate(`/?project=${p.projectId}`)}
+                    >
+                      <FolderOpen className="text-muted-foreground" />
+                      <span>打开项目</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => setPendingDelete(p)}
+                      className="text-red-600 focus:bg-red-500/10 focus:text-red-600 dark:text-red-400 dark:focus:text-red-300"
+                    >
+                      <Trash2 />
+                      <span>删除项目</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                {p.taskCount} 个任务
               </div>
             </div>
           ))}
         </div>
       )}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="删除这个项目？"
+        description={
+          pendingDelete
+            ? `项目「${pendingDelete.name}」共 ${pendingDelete.taskCount} 个任务。\n项目下的任务会移回默认列表，任务本身不会被删除。`
+            : ''
+        }
+        confirmLabel="删除项目"
+        destructive
+        onClose={() => setPendingDelete(null)}
+        onConfirm={async () => {
+          const p = pendingDelete;
+          setPendingDelete(null);
+          if (!p) return;
+          await performDelete(p);
+        }}
+      />
     </PageContainer>
   );
 }
