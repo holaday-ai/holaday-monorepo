@@ -1,4 +1,4 @@
-import { Clock, Pause, Play, Plus, Trash2 } from 'lucide-react';
+import { Clock, Pause, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import * as React from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
@@ -52,6 +52,11 @@ export function ScheduledPage(): JSX.Element {
   // keeps users inside HOLA DAY's UI and lets us name the task being
   // deleted + show its next run time so the action is unambiguous.
   const [confirmDelete, setConfirmDelete] = React.useState<UiScheduled | null>(
+    null,
+  );
+  // 重新创建 on a failed row pre-fills the dialog with the original
+  // intent so the user can edit then save without retyping it.
+  const [recreateIntent, setRecreateIntent] = React.useState<string | null>(
     null,
   );
 
@@ -198,7 +203,12 @@ export function ScheduledPage(): JSX.Element {
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  {r.status !== 'completed' && (
+                  {/* Pause/resume only for the two states it actually
+                      means something. running can't be toggled (mid-
+                      execution), completed one-shots can't be re-armed
+                      from a button (use 重新创建), failed surfaces a
+                      reopen-with-intent affordance instead. */}
+                  {(r.status === 'active' || r.status === 'paused') && (
                     <button
                       type="button"
                       onClick={() => void handleToggle(r.scheduledTaskId)}
@@ -211,6 +221,21 @@ export function ScheduledPage(): JSX.Element {
                       ) : (
                         <Play className="h-4 w-4" />
                       )}
+                    </button>
+                  )}
+                  {r.status === 'failed' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRecreateIntent(r.intent);
+                        setDialogOpen(true);
+                      }}
+                      aria-label="基于此任务重新创建定时"
+                      title="基于此任务重新创建定时"
+                      className="inline-flex h-8 items-center gap-1 rounded-md border border-border px-2 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      重新创建
                     </button>
                   )}
                   <button
@@ -230,11 +255,16 @@ export function ScheduledPage(): JSX.Element {
       </Section>
       <ScheduledTaskDialog
         open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
+        onClose={() => {
+          setDialogOpen(false);
+          setRecreateIntent(null);
+        }}
         onCreated={() => {
           setDialogOpen(false);
+          setRecreateIntent(null);
           void reload();
         }}
+        {...(recreateIntent ? { initialIntent: recreateIntent } : {})}
       />
       <ConfirmDialog
         open={confirmDelete !== null}

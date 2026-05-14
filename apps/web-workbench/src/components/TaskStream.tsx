@@ -15,6 +15,7 @@ import {
   MoreHorizontal,
   MousePointerClick,
   Puzzle,
+  RotateCcw,
   Search,
 } from 'lucide-react';
 import {
@@ -1487,6 +1488,29 @@ function TerminalSummary({
               <div className="mt-1 text-xs text-amber-900/80 dark:text-amber-200/80">
                 这次输出几乎没有有效内容。建议重新执行或换一种描述
                 方式（更具体的指令、提供示例数据、缩小范围）。
+              </div>
+              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                {intent && onSuggestionPick && (
+                  <button
+                    type="button"
+                    onClick={() => onSuggestionPick(intent)}
+                    className="inline-flex h-7 items-center gap-1.5 rounded-md border border-amber-400/60 bg-amber-100/60 px-2.5 text-[11px] font-medium text-amber-900 transition-colors hover:bg-amber-200/60 dark:border-amber-400/40 dark:bg-amber-400/10 dark:text-amber-100 dark:hover:bg-amber-400/15"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    重新执行
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const feedback = displayText.trim() || '(空结果)';
+                    void copyTo(feedback, '反馈内容');
+                  }}
+                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-amber-400/60 bg-white/40 px-2.5 text-[11px] font-medium text-amber-900 transition-colors hover:bg-white/70 dark:border-amber-400/40 dark:bg-transparent dark:text-amber-100 dark:hover:bg-amber-400/10"
+                >
+                  <Copy className="h-3 w-3" />
+                  复制反馈
+                </button>
               </div>
             </div>
           );
