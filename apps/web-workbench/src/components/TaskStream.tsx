@@ -461,15 +461,20 @@ function AgentBlock({
             intent={task.intent}
             modelLabel={task.modelLabel}
             onContinueInBrowser={
-              // F2 — only show "在内置浏览器中继续操作" for tasks
-              // that actually have a browser session: not completed
-              // (Brave already released) AND executionMode === 'browser'
-              // (generate / scrape never had a Brave to continue in).
-              // Older rows without executionMode set fall through to
-              // hidden — safer than offering a button that 404s.
-              task.status === 'completed' || task.executionMode !== 'browser'
-                ? undefined
-                : onContinueInBrowser
+              // 继续接管 only for live browser tasks. ANY terminal
+              // status (completed / failed / cancelled) means the
+              // Brave session is gone — the button would 404 the
+              // user. Non-browser lanes never had a Brave to begin
+              // with.
+              (() => {
+                const isTerminal =
+                  task.status === 'completed' ||
+                  task.status === 'failed' ||
+                  task.status === 'cancelled';
+                if (isTerminal) return undefined;
+                if (task.executionMode !== 'browser') return undefined;
+                return onContinueInBrowser;
+              })()
             }
             onSuggestionPick={onSuggestionPick}
             serverSuggestions={serverSuggestions}
@@ -484,6 +489,14 @@ function AgentBlock({
             // the panel doesn't replay-and-jitter on every navigation.
             animateReveal={animateTerminalReveal}
             executionMode={task.executionMode}
+            // Gate 查看证据 on real evidence existing — either a
+            // captured finalScreenshot or at least a persisted
+            // finalUrl. Without one, clicking the icon just opens
+            // the "没有浏览器截图" placeholder, which reads as a
+            // broken affordance.
+            hasBrowserEvidence={Boolean(
+              task.finalScreenshot || task.finalUrl,
+            )}
             onOpenBrowserPanel={onOpenBrowserPanel}
           />
         )}
@@ -1226,24 +1239,32 @@ function TerminalSummary({
   animateReveal = true,
   executionMode,
   onOpenBrowserPanel,
+  hasBrowserEvidence,
 }: {
   status: UiTask['status'];
   text: string;
   currentUrl?: string | null;
   /**
-   * The task's executionMode. Drives whether the 查看浏览器 icon
-   * is rendered — non-browser lanes (generate / scrape / handoff)
+   * The task's executionMode. Drives whether the 查看证据 icon is
+   * rendered — non-browser lanes (generate / scrape / handoff)
    * never had a Brave session, so the icon would 404 the user.
    */
   executionMode?: UiTask['executionMode'];
   /**
-   * Codex P1 — click handler for the result-card 查看浏览器 icon.
+   * Codex P1 — click handler for the result-card 查看证据 icon.
    * Tells WorkbenchApp to open the BrowserPanel (which otherwise
    * stays hidden for completed browser tasks). The panel will show
    * the finalScreenshot or — when missing — a fallback message with
    * the finalUrl.
    */
   onOpenBrowserPanel?: () => void;
+  /**
+   * True when the task has actual browser evidence to show — either
+   * a captured `finalScreenshot` or at least a `finalUrl`. When
+   * false, the icon is suppressed so users don't click into the
+   * "没有浏览器截图" placeholder.
+   */
+  hasBrowserEvidence?: boolean;
   /** Task id — used by the share button to build a deep link. */
   taskId?: string;
   /**
@@ -1380,12 +1401,17 @@ function TerminalSummary({
     },
     [toast],
   );
-  // Show 查看浏览器 icon only when the task was a browser lane —
-  // generate / scrape / handoff never opened a Brave session, so the
-  // panel would render only the "no evidence" placeholder.
+  // Show 查看证据 icon only when there's real evidence to show:
+  //   - browser lane (generate / scrape never opened a Brave)
+  //   - non-failed (failed cards already explain themselves in the
+  //     alert block)
+  //   - hasBrowserEvidence: finalScreenshot or finalUrl exists.
+  //     Without one the panel just shows the "没有浏览器截图"
+  //     placeholder — clicking the icon would feel broken.
   const showBrowserOpener =
     !isFailedLike &&
     executionMode === 'browser' &&
+    Boolean(hasBrowserEvidence) &&
     Boolean(onOpenBrowserPanel);
   return (
     <div className={cn('relative', tone.wrap)}>
