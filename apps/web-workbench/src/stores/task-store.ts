@@ -136,12 +136,18 @@ export interface TaskStore {
   /**
    * Toggle the pin state on a task. Pin is now server-persisted —
    * the legacy localStorage `pinnedTaskIds` Set is gone and the
-   * Sidebar reads `t.starred` directly off each row. The function
-   * still hits `tasks.star/unstar` over the wire; "pin" is the
-   * single product-side name (no more "收藏 / 星标"), but the RPC
-   * surface stays as-is so the backend doesn't need to be touched.
+   * Sidebar reads `t.starred` directly off each row. Hits
+   * `tasks.star/unstar` over the wire; "pin" is the single product-
+   * side name (no more "收藏 / 星标"), but the RPC surface stays
+   * unchanged so the backend doesn't need to be touched.
+   *
+   * `desiredPinned` lets callers force the target state when the
+   * row isn't in the local `tasks` slice — used by the /starred page
+   * to unpin a pre-paginated task that the recent-50 store never saw.
+   * When omitted, falls back to flipping the local row's `starred`
+   * (or pinning a missing row by default).
    */
-  togglePin(taskId: string): Promise<void>;
+  togglePin(taskId: string, desiredPinned?: boolean): Promise<void>;
 
   /**
    * Unified state-machine entry for task selection. Replaces the
@@ -696,30 +702,46 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
   },
 
-  async togglePin(taskId) {
-    // Pin is server-persisted. Optimistic flip on the local row first
-    // so the Sidebar 置顶 group updates immediately; revert on RPC
-    // failure. The wire name stays `tasks.star` (the existing
-    // backend route); UI never calls this anything but 置顶.
+  async togglePin(taskId, desiredPinned) {
+    // Pin is server-persisted. The optimistic local flip only applies
+    // when the task is in the store's `tasks` array — /starred can
+    // call this for older pins that aren't in the recent-50 slice, in
+    // which case there's no local row to flip but the RPC must still
+    // fire. Caller can pass `desiredPinned` to force the target state
+    // (the toggle-off path on /starred can't infer it from a local
+    // row that doesn't exist).
     const before = get().tasks.find((t) => t.taskId === taskId);
-    if (!before) return;
-    const next = !before.starred;
-    set((prev) => ({
-      tasks: prev.tasks.map((t) =>
-        t.taskId === taskId ? { ...t, starred: next, starredAt: next ? new Date() : null } : t,
-      ),
-    }));
-    try {
-      await trpc.tasks.star.mutate({ taskId, starred: next });
-    } catch {
-      // revert
+    const next = desiredPinned ?? !(before?.starred ?? false);
+    if (before) {
       set((prev) => ({
         tasks: prev.tasks.map((t) =>
           t.taskId === taskId
-            ? { ...t, starred: before.starred ?? false, starredAt: before.starredAt ?? null }
+            ? { ...t, starred: next, starredAt: next ? new Date() : null }
             : t,
         ),
       }));
+    }
+    try {
+      await trpc.tasks.star.mutate({ taskId, starred: next });
+    } catch {
+      if (before) {
+        // Local row existed and the RPC failed — revert the optimistic
+        // flip so the UI matches the server.
+        set((prev) => ({
+          tasks: prev.tasks.map((t) =>
+            t.taskId === taskId
+              ? {
+                  ...t,
+                  starred: before.starred ?? false,
+                  starredAt: before.starredAt ?? null,
+                }
+              : t,
+          ),
+        }));
+      }
+      // Nothing to revert when the task wasn't in the local slice;
+      // the caller (StarredPage) handles its own optimistic remove
+      // and re-fetches on failure.
     }
   },
 

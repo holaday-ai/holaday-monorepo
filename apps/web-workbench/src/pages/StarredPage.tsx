@@ -73,11 +73,14 @@ export function StarredPage(): JSX.Element {
   }
 
   async function handleUnpin(taskId: string): Promise<void> {
-    // Optimistic remove from this page's list; togglePin keeps the
-    // store row in sync so the Sidebar 置顶 group updates too.
+    // Optimistic remove from this page's list. Pass desiredPinned=false
+    // explicitly — older pinned tasks aren't in the store's recent-50
+    // slice, so togglePin can't infer the target state from a missing
+    // local row. Without this the unpin RPC would never fire and the
+    // pin would re-appear after a refresh.
     setItems((prev) => prev.filter((t) => t.taskId !== taskId));
     try {
-      await togglePin(taskId);
+      await togglePin(taskId, false);
     } catch {
       // Re-fetch from the top so a server failure is visible.
       void fetchPage(null, false);
