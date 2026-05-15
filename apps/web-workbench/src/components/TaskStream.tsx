@@ -85,6 +85,19 @@ const EMPTY_STEPS: UiStep[] = [];
 const EMPTY_REPLIES: Array<{ at: number; text: string }> = [];
 const PLAYED_TERMINAL_REVEAL_TASK_IDS = new Set<string>();
 
+// Browser-likely intent detector. Used to decide whether to render
+// the 查看浏览器 icon on legacy rows whose executionMode column was
+// never populated. Conservative: matches URL anchors + an explicit
+// list of browser verbs in Chinese. Generate / scrape intents
+// ("写一首诗 …", "整理 …") fall through and keep the result card
+// icon-free.
+const BROWSER_INTENT_VERBS = ['打开', '登录', '访问', '点击', '下载', '搜索'];
+function isBrowserLikelyIntent(intent: string | null | undefined): boolean {
+  if (!intent) return false;
+  if (/https?:\/\//i.test(intent)) return true;
+  return BROWSER_INTENT_VERBS.some((v) => intent.includes(v));
+}
+
 /**
  * Conversational stream for one task. Emulates Claude's chat layout:
  *
@@ -490,14 +503,6 @@ function AgentBlock({
             // the panel doesn't replay-and-jitter on every navigation.
             animateReveal={animateTerminalReveal}
             executionMode={task.executionMode}
-            // Gate 查看证据 on real evidence existing — either a
-            // captured finalScreenshot or at least a persisted
-            // finalUrl. Without one, clicking the icon just opens
-            // the "没有浏览器截图" placeholder, which reads as a
-            // broken affordance.
-            hasBrowserEvidence={Boolean(
-              task.finalScreenshot || task.finalUrl,
-            )}
             onOpenBrowserPanel={onOpenBrowserPanel}
           />
         )}
@@ -1240,32 +1245,24 @@ function TerminalSummary({
   animateReveal = true,
   executionMode,
   onOpenBrowserPanel,
-  hasBrowserEvidence,
 }: {
   status: UiTask['status'];
   text: string;
   currentUrl?: string | null;
   /**
-   * The task's executionMode. Drives whether the 查看证据 icon is
-   * rendered — non-browser lanes (generate / scrape / handoff)
-   * never had a Brave session, so the icon would 404 the user.
+   * The task's executionMode. Used together with the intent to
+   * decide whether the 查看浏览器 icon shows up. Legacy rows from
+   * before the executionMode column existed are detected from the
+   * intent (URL / "打开" / "登录" / "访问" / "点击" / "下载").
    */
   executionMode?: UiTask['executionMode'];
   /**
-   * Codex P1 — click handler for the result-card 查看证据 icon.
-   * Tells WorkbenchApp to open the BrowserPanel (which otherwise
-   * stays hidden for completed browser tasks). The panel will show
-   * the finalScreenshot or — when missing — a fallback message with
-   * the finalUrl.
+   * Click handler for the result-card 查看浏览器 icon. Tells
+   * WorkbenchApp to open the BrowserPanel (which otherwise stays
+   * hidden for terminal tasks). The panel itself handles the three
+   * empty-state branches (screenshot / final URL only / nothing).
    */
   onOpenBrowserPanel?: () => void;
-  /**
-   * True when the task has actual browser evidence to show — either
-   * a captured `finalScreenshot` or at least a `finalUrl`. When
-   * false, the icon is suppressed so users don't click into the
-   * "没有浏览器截图" placeholder.
-   */
-  hasBrowserEvidence?: boolean;
   /** Task id — used by the share button to build a deep link. */
   taskId?: string;
   /**
@@ -1402,30 +1399,28 @@ function TerminalSummary({
     },
     [toast],
   );
-  // Show 查看证据 icon only when there's real evidence to show:
-  //   - browser lane (generate / scrape never opened a Brave)
-  //   - non-failed (failed cards already explain themselves in the
-  //     alert block)
-  //   - hasBrowserEvidence: finalScreenshot or finalUrl exists.
-  //     Without one the panel just shows the "没有浏览器截图"
-  //     placeholder — clicking the icon would feel broken.
+  // 查看浏览器 icon — always available for browser tasks (or any
+  // intent that looks browser-likely on legacy rows without an
+  // executionMode). The panel itself is responsible for explaining
+  // what's there: screenshot, final URL only, or nothing saved.
+  // Tying the icon to "evidence exists" hid the entry for users who
+  // legitimately wanted to verify what the agent did.
+  const browserLikely =
+    executionMode === 'browser' || isBrowserLikelyIntent(intent);
   const showBrowserOpener =
-    !isFailedLike &&
-    executionMode === 'browser' &&
-    Boolean(hasBrowserEvidence) &&
-    Boolean(onOpenBrowserPanel);
+    !isFailedLike && browserLikely && Boolean(onOpenBrowserPanel);
   return (
     <div className={cn('relative', tone.wrap)}>
       {showBrowserOpener && (
         <button
           type="button"
           onClick={onOpenBrowserPanel}
-          aria-label="查看本次任务的浏览器证据"
-          title="查看本次任务的浏览器证据"
+          aria-label="查看本次任务的浏览器"
+          title="查看本次任务的浏览器"
           className="absolute right-3 top-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-[11px] text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
         >
           <Globe className="h-3.5 w-3.5" />
-          <span>查看证据</span>
+          <span>查看浏览器</span>
         </button>
       )}
       {isFailedLike && (

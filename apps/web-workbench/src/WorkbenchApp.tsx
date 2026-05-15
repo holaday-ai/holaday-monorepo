@@ -409,6 +409,25 @@ export function WorkbenchApp(): JSX.Element {
               }
               setBrowserCollapsed((v) => !v);
             }}
+            onReExecute={
+              // Empty-state fallback action: re-run the same intent
+              // as a fresh task. Drops the panel + the current
+              // selection so the user lands on the new task as it
+              // streams.
+              selectedTask
+                ? () => {
+                    const intent = selectedTask.intent;
+                    setUserOpenedBrowserPanel(false);
+                    setBrowserCollapsed(false);
+                    enterNewTaskMode();
+                    void createTask(intent).then((res) => {
+                      if ('error' in res) {
+                        toast.show(`重试失败：${res.error}`, 'error');
+                      }
+                    });
+                  }
+                : undefined
+            }
           />
         </div>
       )}

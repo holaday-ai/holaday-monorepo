@@ -184,6 +184,12 @@ interface Props {
    */
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  /**
+   * Fires when the user clicks "重新执行" on a terminal task that
+   * has neither a saved finalScreenshot nor a finalUrl. Provided
+   * by WorkbenchApp; the panel only knows the click happened.
+   */
+  onReExecute?: () => void;
 }
 
 /**
@@ -211,6 +217,7 @@ export function BrowserPanel({
   onToggleFullscreen,
   collapsed: collapsedProp,
   onToggleCollapse,
+  onReExecute,
 }: Props): JSX.Element | null {
   // P2-A — only the non-clarification kinds need browser takeover.
   // Treat missing kind as `clarification` so older WS events / legacy
@@ -1139,6 +1146,7 @@ export function BrowserPanel({
                 taskStatus={taskStatus}
                 isBrowserTask={isBrowserTask}
                 finalUrl={persistedFinalUrl}
+                onReExecute={onReExecute}
               />
             )}
           </div>
@@ -1444,6 +1452,7 @@ function EmptyBrowserState({
   taskStatus,
   isBrowserTask = true,
   finalUrl,
+  onReExecute,
 }: {
   taskStatus: UiTaskStatus | null | undefined;
   /**
@@ -1462,6 +1471,13 @@ function EmptyBrowserState({
    * about:blank.
    */
   finalUrl?: string | null;
+  /**
+   * Click handler for the "重新执行" button shown on terminal
+   * browser tasks with neither a screenshot nor a finalUrl saved.
+   * The legacy task has no recoverable evidence — best we can do
+   * is offer to re-run the same intent.
+   */
+  onReExecute?: () => void;
 }): JSX.Element {
   if (taskStatus === 'executing' && isBrowserTask) {
     return <div className="text-center text-xs text-muted-foreground">等待第一帧…</div>;
@@ -1471,16 +1487,21 @@ function EmptyBrowserState({
     taskStatus === 'failed' ||
     taskStatus === 'cancelled';
   if (terminal && isBrowserTask) {
-    return (
-      <div className="flex flex-col items-center px-6 text-center text-muted-foreground">
-        <Globe className="h-10 w-10 text-muted-foreground/40" aria-hidden />
-        <div className="mt-3 text-sm font-medium text-foreground/80">
-          没有浏览器截图
-        </div>
-        <div className="mt-1 text-xs leading-relaxed">
-          这次任务结束时没有捕获到最终截图。
-        </div>
-        {finalUrl && (
+    // Three branches: finalScreenshot is handled before reaching us
+    // (the parent renders `finalEvidenceFrame` directly). Here we
+    // only see "no screenshot" cases — either finalUrl exists (give
+    // the user a link to verify) or nothing was saved at all (offer
+    // to re-execute the intent).
+    if (finalUrl) {
+      return (
+        <div className="flex flex-col items-center px-6 text-center text-muted-foreground">
+          <Globe className="h-10 w-10 text-muted-foreground/40" aria-hidden />
+          <div className="mt-3 text-sm font-medium text-foreground/80">
+            没有截图
+          </div>
+          <div className="mt-1 text-xs leading-relaxed">
+            这次任务结束时没有捕获截图，可打开最终页面复核。
+          </div>
           <a
             href={finalUrl}
             target="_blank"
@@ -1492,6 +1513,26 @@ function EmptyBrowserState({
               {finalUrl}
             </span>
           </a>
+        </div>
+      );
+    }
+    return (
+      <div className="flex flex-col items-center px-6 text-center text-muted-foreground">
+        <Globe className="h-10 w-10 text-muted-foreground/40" aria-hidden />
+        <div className="mt-3 text-sm font-medium text-foreground/80">
+          这条历史任务没有保存浏览器证据
+        </div>
+        <div className="mt-1 text-xs leading-relaxed">
+          可能是上线前的旧任务。可以重新执行同样的意图来生成截图。
+        </div>
+        {onReExecute && (
+          <button
+            type="button"
+            onClick={onReExecute}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1 text-[12px] text-foreground transition-colors hover:border-foreground/30 hover:bg-foreground/[0.04]"
+          >
+            重新执行
+          </button>
         )}
       </div>
     );
