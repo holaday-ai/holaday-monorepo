@@ -585,7 +585,7 @@ export function AppShell(): JSX.Element {
       <ConfirmDialog
         open={confirmClearFailed}
         title="清除所有失败任务？"
-        description="这些任务的记录和步骤都会被删除，操作无法恢复。进行中的任务不受影响。"
+        description={`将清除 ${tasks.filter((t) => t.status === 'failed').length} 个失败任务，此操作不可恢复。\n进行中的任务不受影响。`}
         confirmLabel={`清除 ${tasks.filter((t) => t.status === 'failed').length} 个`}
         destructive
         onClose={() => setConfirmClearFailed(false)}

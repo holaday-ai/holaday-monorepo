@@ -187,6 +187,17 @@ export function WorkbenchApp(): JSX.Element {
     setSidePanelOverride(null);
   }, [selectedTaskId]);
 
+  // P1.2 — every newTask entry point lands here when selectedTaskId
+  // flips to null. Kill any layout state that would otherwise survive
+  // the transition and leave the user staring at a fullscreen
+  // BrowserPanel of nothing (or an empty mobile sheet). The composer
+  // mode + URL strip is already handled inside the store action.
+  React.useEffect(() => {
+    if (selectedTaskId) return;
+    setPanelFullscreen(false);
+    setBrowserSheetOpen(false);
+  }, [selectedTaskId]);
+
   // Workbench-specific Esc routing. Closes panelFullscreen +
   // browserSheet, and steps out of the way when the BrowserPanel is in
   // interactive takeover (the remote page should own Esc then). Shell

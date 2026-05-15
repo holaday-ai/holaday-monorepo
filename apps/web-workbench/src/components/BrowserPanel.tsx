@@ -623,6 +623,23 @@ export function BrowserPanel({
     ? interactive && (vncStatus === 'connected' || vncStatus === 'connecting')
     : interactive && Boolean(frame) && !isBlankUrl(frame?.url);
 
+  // Codex P2 — hide the address bar / nav / takeover chrome when
+  // the panel is open on a terminal task with no viewable evidence
+  // (no live frame, no captured screenshot, no recent frame). The
+  // toolbar's buttons can't do anything in that state; the panel
+  // becomes a "no evidence saved" placeholder + re-execute prompt.
+  // interactiveActive flips it back on if the user is mid-takeover
+  // for some reason (shouldn't happen on terminal but defensive).
+  const taskIsTerminalForHeader =
+    taskStatus === 'completed' ||
+    taskStatus === 'failed' ||
+    taskStatus === 'cancelled';
+  const hasViewableEvidence = Boolean(
+    frame || finalEvidenceFrame || latestFrame,
+  );
+  const showHeader =
+    !taskIsTerminalForHeader || hasViewableEvidence || interactiveActive;
+
   const sendInput = React.useCallback(
     (payload: Omit<UserInputEvent, 'type' | 'taskId'>) => {
       wsSend({
@@ -834,7 +851,7 @@ export function BrowserPanel({
               onExitFullscreen={onToggleFullscreen}
             />
           )}
-          {!fullscreen && shouldConnect && (
+          {!fullscreen && shouldConnect && showHeader && (
           <header className="flex h-11 items-center gap-2 border-b border-border px-3 pt-2">
             <StatusDot status={status} />
             <NavButton direction="back" title="后退" navTaskId={activeTaskId ?? null} />
@@ -1150,7 +1167,7 @@ export function BrowserPanel({
               />
             )}
           </div>
-          {!fullscreen && shouldConnect && (
+          {!fullscreen && shouldConnect && showHeader && (
             <footer className="flex h-7 items-center justify-between border-t border-border px-3 text-[11px] text-muted-foreground">
               <span>{frame ? `${frame.viewport.width}×${frame.viewport.height}` : '—'}</span>
               <span>{frame ? `第 ${frame.tickIndex + 1} 帧` : ''}</span>

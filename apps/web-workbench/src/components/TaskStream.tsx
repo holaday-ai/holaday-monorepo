@@ -30,8 +30,12 @@ import remarkGfm from 'remark-gfm';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
+import {
+  downloadFailureMessage,
+  downloadFileAuthed,
+  fetchFileBlobAuthed,
+} from '@/lib/download-file';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
-import { getAccessToken } from '@/lib/auth';
 import { PlanCard } from '@/components/PlanCard';
 import { SearchResultCard } from '@/components/SearchResultCard';
 import { StepCard } from '@/components/StepCard';
@@ -1076,22 +1080,15 @@ function ScreenshotThumbnailCard({
   React.useEffect(() => {
     let cancelled = false;
     let createdUrl: string | null = null;
-    const load = async (): Promise<void> => {
-      try {
-        const token = getAccessToken();
-        const res = await fetch(payload.downloadUrl, {
-          headers: token ? { authorization: `Bearer ${token}` } : {},
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const blob = await res.blob();
-        if (cancelled) return;
-        createdUrl = URL.createObjectURL(blob);
-        setPreviewUrl(createdUrl);
-      } catch {
-        if (!cancelled) setFailed(true);
+    void fetchFileBlobAuthed({ url: payload.downloadUrl }).then((res) => {
+      if (cancelled) return;
+      if (!res.ok || !res.blob) {
+        setFailed(true);
+        return;
       }
-    };
-    void load();
+      createdUrl = URL.createObjectURL(res.blob);
+      setPreviewUrl(createdUrl);
+    });
     return () => {
       cancelled = true;
       if (createdUrl) URL.revokeObjectURL(createdUrl);
@@ -1104,9 +1101,12 @@ function ScreenshotThumbnailCard({
     return <FileDownloadCard payload={payload} />;
   }
   const handleClick = async (): Promise<void> => {
-    const ok = await downloadAttachmentAuthed(payload);
-    if (!ok) {
-      toast.show('下载失败或链接已过期（产出文件保留 24 小时）', 'error');
+    const result = await downloadFileAuthed({
+      url: payload.downloadUrl,
+      filename: payload.filename,
+    });
+    if (!result.ok) {
+      toast.show(downloadFailureMessage(result.status), 'error');
     }
   };
   return (
@@ -1145,38 +1145,6 @@ function ScreenshotThumbnailCard({
       </div>
     </button>
   );
-}
-
-/**
- * Internal helper that mirrors FileDownloadCard's `downloadAuthed`
- * (fetch + blob + anchor click). Re-implemented here rather than
- * exported from FileDownloadCard so the latter stays a leaf
- * component; the duplication is one short function.
- */
-async function downloadAttachmentAuthed(
-  payload: import('./FileDownloadCard').FileDownloadPayload,
-): Promise<boolean> {
-  try {
-    const token = getAccessToken();
-    const res = await fetch(payload.downloadUrl, {
-      headers: token ? { authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = payload.filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5_000);
-    return true;
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[ScreenshotThumbnailCard] download failed', err);
-    return false;
-  }
 }
 
 function formatBytesShort(bytes: number): string {

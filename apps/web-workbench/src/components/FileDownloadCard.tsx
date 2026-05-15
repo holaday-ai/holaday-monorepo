@@ -1,7 +1,10 @@
 import { Download, File, FileSpreadsheet, FileText, Image as ImageIcon, Loader2, Presentation } from 'lucide-react';
 import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
-import { getAccessToken } from '@/lib/auth';
+import {
+  downloadFailureMessage,
+  downloadFileAuthed,
+} from '@/lib/download-file';
 import { cn } from '@/lib/utils';
 
 export interface FileDownloadPayload {
@@ -44,19 +47,15 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
   const handleClick = async (): Promise<void> => {
     if (state === 'loading') return;
     setState('loading');
-    const result = await downloadAuthed(payload);
+    const result = await downloadFileAuthed({
+      url: payload.downloadUrl,
+      filename: payload.filename,
+    });
     if (result.ok) {
       setState('idle');
     } else {
       setState('failed');
-      toast.show(
-        result.status === 401 || result.status === 403
-          ? '下载失败：未授权（请刷新页面后重试）'
-          : result.status === 404 || result.status === 410
-            ? '下载失败：链接已过期（产出文件保留 24 小时）'
-            : '下载失败或链接已过期',
-        'error',
-      );
+      toast.show(downloadFailureMessage(result.status), 'error');
     }
   };
 
@@ -114,49 +113,6 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
       )}
     </button>
   );
-}
-
-/**
- * Authed-fetch a file via Bearer token, blob it, trigger an anchor
- * click. Returns a result tuple so the caller can surface UI state
- * without coupling to the toast.
- *
- * Phase 4 Codex follow-up: was previously fire-and-forget with a
- * console.error on failure; the user got NO signal that 24h-expired
- * links were dead. The result.status carries the HTTP code so the
- * caller can craft a more specific message (401 vs 404 vs network).
- */
-async function downloadAuthed(
-  p: FileDownloadPayload,
-): Promise<{ ok: true } | { ok: false; status: number | null; message: string }> {
-  const token = getAccessToken();
-  try {
-    const res = await fetch(p.downloadUrl, {
-      headers: token ? { authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok) {
-      return { ok: false, status: res.status, message: `HTTP ${res.status}` };
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = p.filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    // Revoke after a tick so the browser can complete the download.
-    setTimeout(() => URL.revokeObjectURL(url), 5_000);
-    return { ok: true };
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[FileDownloadCard] download failed', err);
-    return {
-      ok: false,
-      status: null,
-      message: err instanceof Error ? err.message : String(err),
-    };
-  }
 }
 
 function FileTypeIcon({ filename }: { filename: string }): JSX.Element {

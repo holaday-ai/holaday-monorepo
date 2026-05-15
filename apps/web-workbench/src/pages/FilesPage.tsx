@@ -1,5 +1,4 @@
 import {
-  Copy,
   Download,
   Eye,
   File as FileIcon,
@@ -15,12 +14,20 @@ import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import {
+  FilePreviewModal,
+  type FilePreviewPayload,
+} from '@/components/FilePreviewModal';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/components/ui/toast';
+import {
+  downloadFailureMessage,
+  downloadFileAuthed,
+} from '@/lib/download-file';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
@@ -54,6 +61,9 @@ export function FilesPage(): JSX.Element {
   const [files, setFiles] = React.useState<UiFile[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [pendingDelete, setPendingDelete] = React.useState<UiFile | null>(null);
+  const [previewing, setPreviewing] = React.useState<FilePreviewPayload | null>(
+    null,
+  );
 
   const refresh = React.useCallback(async () => {
     setLoading(true);
@@ -79,7 +89,29 @@ export function FilesPage(): JSX.Element {
   }
 
   function onPreview(f: UiFile): void {
-    window.open(downloadUrl(f.fileId), '_blank', 'noopener');
+    // In-product authed preview. The previous `window.open` path
+    // opened a top-level GET that browsers refuse to send the Bearer
+    // header on — users on hd-app would land on a 401 page from the
+    // orchestrator. The modal fetches the blob with auth and renders
+    // inline (image / pdf / text), with a 下载到本地 fallback for
+    // formats it can't show.
+    setPreviewing({
+      fileId: f.fileId,
+      filename: f.filename,
+      mimetype: f.mimetype,
+      sizeBytes: f.sizeBytes,
+      url: downloadUrl(f.fileId),
+    });
+  }
+
+  async function onDownload(f: UiFile): Promise<void> {
+    const res = await downloadFileAuthed({
+      url: downloadUrl(f.fileId),
+      filename: f.filename,
+    });
+    if (!res.ok) {
+      toast.show(downloadFailureMessage(res.status), 'error');
+    }
   }
 
   function onUseInNewTask(f: UiFile): void {
@@ -96,18 +128,11 @@ export function FilesPage(): JSX.Element {
     });
   }
 
-  async function onCopyLink(f: UiFile): Promise<void> {
-    const url =
-      typeof window !== 'undefined'
-        ? `${window.location.origin}${downloadUrl(f.fileId)}`
-        : downloadUrl(f.fileId);
-    try {
-      await navigator.clipboard.writeText(url);
-      toast.show('已复制下载链接');
-    } catch {
-      toast.show('复制失败', 'error');
-    }
-  }
+  // 复制下载链接 is intentionally gone: the orchestrator's
+  // /api/files/:id/download endpoint requires an Authorization
+  // header, so a raw link copied to clipboard 401s the moment the
+  // user (or a tool they paste it into) navigates to it. Use 用于
+  // 新任务 or 下载 instead.
 
   async function performDelete(f: UiFile): Promise<void> {
     try {
@@ -175,16 +200,16 @@ export function FilesPage(): JSX.Element {
               <FileRow
                 key={f.fileId}
                 file={f}
-                downloadHref={downloadUrl(f.fileId)}
                 onPreview={() => onPreview(f)}
                 onUseInNewTask={() => onUseInNewTask(f)}
-                onCopyLink={() => void onCopyLink(f)}
+                onDownload={() => void onDownload(f)}
                 onDelete={() => setPendingDelete(f)}
               />
             ))}
           </div>
         </div>
       )}
+      <FilePreviewModal payload={previewing} onClose={() => setPreviewing(null)} />
       <ConfirmDialog
         open={pendingDelete !== null}
         title="删除这个文件？"
@@ -234,17 +259,15 @@ function FilterTab({
 
 function FileRow({
   file,
-  downloadHref,
   onPreview,
   onUseInNewTask,
-  onCopyLink,
+  onDownload,
   onDelete,
 }: {
   file: UiFile;
-  downloadHref: string;
   onPreview: () => void;
   onUseInNewTask: () => void;
-  onCopyLink: () => void;
+  onDownload: () => void;
   onDelete: () => void;
 }): JSX.Element {
   const Icon = iconForMime(file.mimetype);
@@ -296,15 +319,9 @@ function FileRow({
               <Eye className="text-muted-foreground" />
               <span>预览</span>
             </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <a href={downloadHref} download={file.filename}>
-                <Download className="text-muted-foreground" />
-                <span>下载</span>
-              </a>
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onCopyLink}>
-              <Copy className="text-muted-foreground" />
-              <span>复制下载链接</span>
+            <DropdownMenuItem onSelect={onDownload}>
+              <Download className="text-muted-foreground" />
+              <span>下载</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={onDelete}
