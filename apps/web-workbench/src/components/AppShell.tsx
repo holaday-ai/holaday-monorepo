@@ -182,14 +182,33 @@ export function AppShell(): JSX.Element {
   // bare `/` (no taskParam) in new-task mode is skipped, so visiting
   // a deep link while composer is in new-task mode doesn't get
   // silently dropped.
+  //
+  // Race guard (Sweep P1 fix): `lastSelectedRef` tracks the
+  // most-recently-cleared task id. If composerMode='new' AND taskParam
+  // still equals what we just cleared, that's the React commit
+  // window between zustand.set and storeNavigate(null) — re-selecting
+  // would undo enterNewTaskMode. Bail in that window. A genuine deep
+  // link click on a DIFFERENT task id still wins (taskParam !== last
+  // cleared).
   const taskParam = searchParams.get('task');
+  const lastSelectedRef = React.useRef<string | null>(null);
   React.useEffect(() => {
     if (!bootstrapped) return;
     if (!taskParam && composerMode === 'new') return;
+    if (
+      taskParam &&
+      composerMode === 'new' &&
+      taskParam === lastSelectedRef.current
+    ) {
+      return;
+    }
     if (taskParam && taskParam !== selectedTaskId) {
       selectTask(taskParam, 'url');
     }
   }, [bootstrapped, composerMode, taskParam, selectedTaskId, selectTask]);
+  React.useEffect(() => {
+    if (selectedTaskId) lastSelectedRef.current = selectedTaskId;
+  }, [selectedTaskId]);
 
   // New-task handoff. When a sub-page (e.g. Sidebar "新任务" from
   // /scheduled) navigates back with `state.newTask`, the bootstrap
@@ -444,11 +463,22 @@ export function AppShell(): JSX.Element {
           else enterNewTaskMode();
         }}
         onNewTask={() => {
+          // Sub-page: route to / + state.newTask=true so the handoff
+          // effect catches it after the location change.
           if (location.pathname !== '/') {
             navigate('/', { state: { newTask: true } });
-          } else {
-            enterNewTaskMode();
+            return;
           }
+          // Already on /. Strip any ?task= / ?project= synchronously
+          // BEFORE flipping store state. Otherwise the URL inbound
+          // effect races: it can fire with taskParam still set and
+          // composerMode='new' + selectedTaskId=null, hitting the
+          // second branch ("taskParam !== selectedTaskId → select")
+          // and re-selecting the task we just cleared.
+          if (location.search) {
+            navigate('/', { replace: true });
+          }
+          enterNewTaskMode();
         }}
         onDeleteTask={(taskId) => setConfirmDelete(taskId)}
         onDeleteTasks={(taskIds) => {

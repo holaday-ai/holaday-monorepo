@@ -59,6 +59,7 @@ import {
   getExpertWorkflowById,
   matchExpertWorkflow as matchTypedExpertWorkflow,
 } from '../../execution/expert-workflow-registry.js';
+import { parseInputs } from '../../execution/expert-workflow-parser.js';
 import { getFeatureFlags as getExecutionFeatureFlags } from '../../execution/feature-flags.js';
 import { FileService, taskInternalIdFor } from '../../files/file-service.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
@@ -4284,9 +4285,42 @@ export const tasksRouter = router({
         return { ok: false };
       }
 
+      // Sweep P2 fix: user replies the bare VALUE (e.g. "美妆护肤")
+      // for an intake question, but the typed workflow's
+      // extractPattern requires an anchor like "品类:" before the
+      // value. The re-parse on the unmodified combined intent
+      // re-misses the field and we park with the SAME question
+      // forever.
+      //
+      // Mitigation: peek at the typed workflow that was driving the
+      // original park and, for each required field whose
+      // extractPattern doesn't match the bare reply text, prepend
+      // the field's label as an anchor so the regex can pick it up
+      // on the next parse round. Uses the EXECUTION registry match
+      // (the typed-workflow lane), not the supercar matcher.
+      const parkingTypedWorkflow = matchTypedExpertWorkflow({
+        intent: parkRow!.intent,
+        roleId: parkRow!.roleId ?? null,
+      });
+      const userReply = input.message.trim();
+      let anchoredReply = userReply;
+      if (parkingTypedWorkflow && userReply.length > 0) {
+        const priorParse = parseInputs(parkRow!.intent, parkingTypedWorkflow);
+        const additions: string[] = [];
+        for (const field of priorParse.missingRequired) {
+          if (!field.extractPattern) continue;
+          if (field.extractPattern.test(userReply)) continue;
+          const anchor = (field.label ?? field.name).split(/[\s/]/)[0];
+          additions.push(`${anchor}: ${userReply}`);
+        }
+        if (additions.length > 0) {
+          anchoredReply = [...additions, userReply].join('\n');
+        }
+      }
+
       const combinedIntent = [
         parkRow!.intent,
-        `\n\n[用户补充]\n${input.message}`,
+        `\n\n[用户补充]\n${anchoredReply}`,
       ].join('').trim();
 
       // Re-evaluate the workflow on the COMBINED intent. Two outcomes

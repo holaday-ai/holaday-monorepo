@@ -219,6 +219,21 @@ export function Sidebar({
     return { pinnedTasks: pinned, unpinnedTasks: rest };
   }, [uniqueTasks]);
   const buckets = React.useMemo(() => bucketByTime(unpinnedTasks), [unpinnedTasks]);
+  // Number of tasks in any terminal state — feeds the QuotaIndicator
+  // refresh key so the bar re-fetches the moment any in-flight task
+  // hits completed / failed / cancelled, not just when a new task
+  // gets created. Without this the displayed used count stayed at
+  // task.length while server-side actual usage was incrementing.
+  const quotaTerminalCount = React.useMemo(
+    () =>
+      tasks.filter(
+        (t) =>
+          t.status === 'completed' ||
+          t.status === 'failed' ||
+          t.status === 'cancelled',
+      ).length,
+    [tasks],
+  );
 
   // O1 — batch select + bulk delete. Toggle entered via the
   // "批量管理" footer button; while on, every deletable task row
@@ -518,12 +533,18 @@ export function Sidebar({
                   </div>
                 )
               )}
-              {/* Quota strip first — the user's daily/monthly headroom */}
-              {/* is the primary "what can I still do" signal. Refetches  */}
-              {/* keyed off the task list length: every create/terminal  */}
-              {/* event changes the array, which is good enough to keep  */}
-              {/* the bar live without subscribing to WS task events.    */}
-              <QuotaIndicator refreshKey={tasks.length} />
+              {/* Quota strip first — the user's daily/monthly headroom
+                  is the primary "what can I still do" signal. Refetch
+                  key combines tasks.length (bumps on create/delete)
+                  with the count of terminal tasks (bumps when any
+                  in-flight task transitions to completed/failed —
+                  that's when server-side quota actually changes).
+                  Sweep P2 fix: length alone missed live updates;
+                  the bar would stay stale at 57/100 until the next
+                  create. */}
+              <QuotaIndicator
+                refreshKey={`${tasks.length}|${quotaTerminalCount}`}
+              />
               <div className="px-2 pb-1 pt-1">
                 <ShareInviteRow />
               </div>

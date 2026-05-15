@@ -34,9 +34,15 @@ export function SettingsPage(): JSX.Element {
     }
   }
 
+  // Section order (Sweep P2 fix): API Key region was buried below
+  // MemorySection which can hold dozens of rows on power-user
+  // accounts. Codex pass moved Developer ABOVE Memory so a 3-second
+  // scan from the top of /settings reaches the API key controls.
+  // Memory drops to the bottom (above 账号) since it's read-only
+  // curation; users don't need it on every visit.
   return (
     <PageContainer width="form">
-      <PageHeader title="设置" description="角色、记忆与账号" />
+      <PageHeader title="设置" description="角色、开发者、记忆与账号" />
       <div className="space-y-6">
         <Section title="AI 视角">
           <Link
@@ -53,9 +59,9 @@ export function SettingsPage(): JSX.Element {
           </Link>
         </Section>
 
-        <MemorySection />
-
         <ApiKeysSection />
+
+        <MemorySection />
 
         <Section title="账号">
           <Row
