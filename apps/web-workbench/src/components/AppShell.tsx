@@ -108,10 +108,8 @@ export function AppShell(): JSX.Element {
   const createTask = useTaskStore((s) => s.createTask);
   const deleteTask = useTaskStore((s) => s.deleteTask);
   const renameTask = useTaskStore((s) => s.renameTask);
-  const toggleStarred = useTaskStore((s) => s.toggleStarred);
   const moveTaskToProject = useTaskStore((s) => s.moveTaskToProject);
   const applyServerMessage = useTaskStore((s) => s.applyServerMessage);
-  const pinnedIds = useTaskStore((s) => s.pinnedTaskIds);
   const storeError = useTaskStore((s) => s.error);
   const reset = useTaskStore((s) => s.reset);
 
@@ -361,11 +359,18 @@ export function AppShell(): JSX.Element {
   const planForRetention: PlanId =
     me?.plan === 'basic' || me?.plan === 'pro' ? me.plan : 'free';
   const historyDays = PLAN_CATALOGUE[planForRetention].historyDays;
+  // Pinned + currently-selected tasks bypass retention. Pin state
+  // now lives in the server-backed `starred` flag on each row, so we
+  // derive the set straight from `tasks` instead of a separate
+  // localStorage cache.
   const retentionPinned = React.useMemo(() => {
-    const set = new Set(pinnedIds);
+    const set = new Set<string>();
+    for (const t of tasks) {
+      if (t.starred) set.add(t.taskId);
+    }
     if (selectedTaskId) set.add(selectedTaskId);
     return set;
-  }, [pinnedIds, selectedTaskId]);
+  }, [tasks, selectedTaskId]);
   const { visible: visibleTasks, hiddenCount: hiddenByRetentionCount } =
     React.useMemo(
       () => applyHistoryRetention(tasks, historyDays, retentionPinned),
@@ -462,7 +467,6 @@ export function AppShell(): JSX.Element {
           const res = await renameTask(taskId, title);
           if ('error' in res) toast.show(`重命名失败：${res.error}`, 'error');
         }}
-        onToggleStarred={(taskId) => void toggleStarred(taskId)}
         projects={projects}
         onMoveTaskToProject={async (taskId, projectId) => {
           await moveTaskToProject(taskId, projectId);

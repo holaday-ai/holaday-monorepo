@@ -54,9 +54,15 @@ export interface UiTask {
    * can see what their task ran on.
    */
   modelLabel?: 'sonnet' | 'opus';
-  /** Phase 16 — favourite ("收藏") flag. Drives the sidebar 收藏 group. */
+  /**
+   * Server-persisted pin flag. UI calls this "置顶" everywhere
+   * (the legacy 收藏 / 星标 surface was retired in the IA pass);
+   * the wire / column name stays `starred` so the existing
+   * tasks.star/unstar RPC can keep driving it without a backend
+   * rename.
+   */
   starred?: boolean;
-  /** When the task was last starred. Cleared on unstar. */
+  /** When the task was last pinned. Cleared on unpin. */
   starredAt?: Date | null;
   /** Phase 16 — external project id (prj_…), or null if unfiled. */
   projectId?: string | null;

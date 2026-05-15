@@ -67,8 +67,6 @@ interface Props {
   onDeleteTasks?(taskIds: string[]): void;
   onRenameTask?(taskId: string, title: string): void | Promise<void>;
   onRetryTask?(intent: string): void | Promise<void>;
-  /** Phase 16 — toggle a task's starred flag. Wires through to the store. */
-  onToggleStarred?(taskId: string): void | Promise<void>;
   /**
    * Phase 16b — projects available for the right-click "移到项目"
    * submenu. Empty array hides the menu item; absent prop also hides
@@ -163,11 +161,6 @@ export function Sidebar({
   onDeleteTasks,
   onRenameTask,
   onRetryTask,
-  // Codex IA pass — pin replaces star as the sole "save" mental
-  // model in the Sidebar. The prop stays on the interface so the
-  // call sites in AppShell don't break, but it's unused here; the
-  // /starred page reaches the store action directly.
-  onToggleStarred: _unusedOnToggleStarred,
   projects: projectsProp,
   onMoveTaskToProject,
   onCreateProject,
@@ -192,7 +185,6 @@ export function Sidebar({
   historyDays,
   pagerOverride,
 }: Props): JSX.Element {
-  const pinnedIds = useTaskStore((s) => s.pinnedTaskIds);
   const togglePin = useTaskStore((s) => s.togglePin);
   // Belt-and-braces: collapse any duplicate taskId rows the store may
   // hand us before partitioning. A single row can otherwise appear in
@@ -217,12 +209,15 @@ export function Sidebar({
   const { pinnedTasks, unpinnedTasks } = React.useMemo(() => {
     const pinned: UiTask[] = [];
     const rest: UiTask[] = [];
+    // Pin state now comes from the server-backed `starred` flag on
+    // each row (toggled via `togglePin` → tasks.star). Persists
+    // across refresh / device / logout-relogin.
     for (const t of uniqueTasks) {
-      if (pinnedIds.has(t.taskId)) pinned.push(t);
+      if (t.starred) pinned.push(t);
       else rest.push(t);
     }
     return { pinnedTasks: pinned, unpinnedTasks: rest };
-  }, [uniqueTasks, pinnedIds]);
+  }, [uniqueTasks]);
   const buckets = React.useMemo(() => bucketByTime(unpinnedTasks), [unpinnedTasks]);
 
   // O1 — batch select + bulk delete. Toggle entered via the
@@ -555,10 +550,14 @@ export function Sidebar({
       <TaskContextMenu
         menu={menu}
         onClose={() => setMenu(null)}
-        pinned={menu ? pinnedIds.has(menu.taskId) : false}
+        pinned={
+          menu
+            ? Boolean(uniqueTasks.find((t) => t.taskId === menu.taskId)?.starred)
+            : false
+        }
         onTogglePin={() => {
           if (!menu) return;
-          togglePin(menu.taskId);
+          void togglePin(menu.taskId);
         }}
         onRename={
           onRenameTask

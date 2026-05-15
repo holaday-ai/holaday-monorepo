@@ -133,10 +133,15 @@ export interface TaskStore {
   browserInteractive: boolean;
   setBrowserInteractive(v: boolean): void;
 
-  /** Task ids the user has pinned to the top of the sidebar.
-   *  Persisted in localStorage — no backend column yet. */
-  pinnedTaskIds: ReadonlySet<string>;
-  togglePin(taskId: string): void;
+  /**
+   * Toggle the pin state on a task. Pin is now server-persisted —
+   * the legacy localStorage `pinnedTaskIds` Set is gone and the
+   * Sidebar reads `t.starred` directly off each row. The function
+   * still hits `tasks.star/unstar` over the wire; "pin" is the
+   * single product-side name (no more "收藏 / 星标"), but the RPC
+   * surface stays as-is so the backend doesn't need to be touched.
+   */
+  togglePin(taskId: string): Promise<void>;
 
   /**
    * Unified state-machine entry for task selection. Replaces the
@@ -182,8 +187,6 @@ export interface TaskStore {
   tasksHasMore: boolean;
   /** Loading flag specific to the load-more action (so the button can spin without re-blanking the list). */
   loadingMore: boolean;
-  /** Phase 16 — toggle the starred flag on a task. Optimistic. */
-  toggleStarred(taskId: string): Promise<void>;
   /**
    * Phase 16b — move a task into a project (or out of one when
    * projectId === null). Optimistic; reverts the row on server error.
@@ -528,16 +531,6 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     set({ browserInteractive: v });
   },
 
-  pinnedTaskIds: readPinnedFromStorage(),
-  togglePin(taskId) {
-    set((prev) => {
-      const next = new Set(prev.pinnedTaskIds);
-      if (next.has(taskId)) next.delete(taskId);
-      else next.add(taskId);
-      writePinnedToStorage(next);
-      return { pinnedTaskIds: next };
-    });
-  },
 
   selectTask(taskId, source = 'ui') {
     if (!taskId) return;
@@ -703,11 +696,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
   },
 
-  async toggleStarred(taskId) {
-    // Optimistic local flip first so the star icon swaps instantly.
-    // On server failure we re-flip and surface the error via toast
-    // (caller usually doesn't show one — the row reverting is the
-    // visible signal that something went wrong).
+  async togglePin(taskId) {
+    // Pin is server-persisted. Optimistic flip on the local row first
+    // so the Sidebar 置顶 group updates immediately; revert on RPC
+    // failure. The wire name stays `tasks.star` (the existing
+    // backend route); UI never calls this anything but 置顶.
     const before = get().tasks.find((t) => t.taskId === taskId);
     if (!before) return;
     const next = !before.starred;
@@ -1366,33 +1359,6 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   },
   };
 });
-
-// Pinned-task persistence. Trivial JSON array of taskIds in
-// localStorage — no sync across devices, no backend column. Good
-// enough until we have user preferences as a first-class backend
-// feature.
-const PINNED_KEY = 'holaday.pinnedTasks';
-function readPinnedFromStorage(): ReadonlySet<string> {
-  if (typeof window === 'undefined') return new Set();
-  try {
-    const raw = window.localStorage.getItem(PINNED_KEY);
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set();
-    return new Set(parsed.filter((x) => typeof x === 'string'));
-  } catch {
-    return new Set();
-  }
-}
-function writePinnedToStorage(ids: ReadonlySet<string>): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(PINNED_KEY, JSON.stringify([...ids]));
-  } catch {
-    // Quota / private-mode failure — losing the pin list is
-    // acceptable vs crashing the set-state call.
-  }
-}
 
 // Short-list of control-shaped strings that should NEVER become a new
 // task intent. Matched case-insensitive + whole-string; a task legitimately
