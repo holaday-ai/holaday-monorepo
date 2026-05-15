@@ -67,14 +67,6 @@ interface Props {
    * follow-up auto-detection inherits parent context.
    */
   onPickSuggestion?: (intent: string) => void;
-  /**
-   * Codex P1 — fired when the user clicks the 查看浏览器 icon on a
-   * terminal browser task's result card. Asks WorkbenchApp to open
-   * the BrowserPanel (which would otherwise stay hidden for a
-   * completed browser task). No-op for non-browser tasks; the icon
-   * isn't rendered there.
-   */
-  onOpenBrowserPanel?: () => void;
 }
 
 // Stable empty-array reference so the zustand selector below returns
@@ -85,18 +77,6 @@ const EMPTY_STEPS: UiStep[] = [];
 const EMPTY_REPLIES: Array<{ at: number; text: string }> = [];
 const PLAYED_TERMINAL_REVEAL_TASK_IDS = new Set<string>();
 
-// Browser-likely intent detector. Used to decide whether to render
-// the 查看浏览器 icon on legacy rows whose executionMode column was
-// never populated. Conservative: matches URL anchors + an explicit
-// list of browser verbs in Chinese. Generate / scrape intents
-// ("写一首诗 …", "整理 …") fall through and keep the result card
-// icon-free.
-const BROWSER_INTENT_VERBS = ['打开', '登录', '访问', '点击', '下载', '搜索'];
-function isBrowserLikelyIntent(intent: string | null | undefined): boolean {
-  if (!intent) return false;
-  if (/https?:\/\//i.test(intent)) return true;
-  return BROWSER_INTENT_VERBS.some((v) => intent.includes(v));
-}
 
 /**
  * Conversational stream for one task. Emulates Claude's chat layout:
@@ -117,7 +97,6 @@ function isBrowserLikelyIntent(intent: string | null | undefined): boolean {
 export function TaskStream({
   task,
   onPickSuggestion,
-  onOpenBrowserPanel,
 }: Props): JSX.Element {
   const steps = useTaskStore((s) => s.stepsByTask[task.taskId]) ?? EMPTY_STEPS;
   const userReplies =
@@ -224,7 +203,6 @@ export function TaskStream({
         awaitingUser={awaitingUser}
         webSearch={webSearch}
         serverSuggestions={serverSuggestions}
-        onOpenBrowserPanel={onOpenBrowserPanel}
       />
 
       <div ref={scrollAnchorRef} />
@@ -277,7 +255,6 @@ function AgentBlock({
   executorFallback,
   awaitingUser,
   webSearch,
-  onOpenBrowserPanel,
   serverSuggestions,
 }: {
   task: UiTask;
@@ -294,7 +271,6 @@ function AgentBlock({
   awaitingUser: UiAwaitingUser | undefined;
   webSearch: UiWebSearchEvent | undefined;
   serverSuggestions?: string[];
-  onOpenBrowserPanel?: () => void;
 }): JSX.Element {
   const [detailOpen, setDetailOpen] = React.useState(false);
   // Phase 24 RC follow-up — generate / scrape streaming output. The
@@ -502,8 +478,6 @@ function AgentBlock({
             // History clicks render the summary in full immediately so
             // the panel doesn't replay-and-jitter on every navigation.
             animateReveal={animateTerminalReveal}
-            executionMode={task.executionMode}
-            onOpenBrowserPanel={onOpenBrowserPanel}
           />
         )}
         {/* Phase 11 QA #11 — terminal-but-empty fallback. Catches the
@@ -1243,26 +1217,10 @@ function TerminalSummary({
   attachments,
   expertWorkflowId,
   animateReveal = true,
-  executionMode,
-  onOpenBrowserPanel,
 }: {
   status: UiTask['status'];
   text: string;
   currentUrl?: string | null;
-  /**
-   * The task's executionMode. Used together with the intent to
-   * decide whether the 查看浏览器 icon shows up. Legacy rows from
-   * before the executionMode column existed are detected from the
-   * intent (URL / "打开" / "登录" / "访问" / "点击" / "下载").
-   */
-  executionMode?: UiTask['executionMode'];
-  /**
-   * Click handler for the result-card 查看浏览器 icon. Tells
-   * WorkbenchApp to open the BrowserPanel (which otherwise stays
-   * hidden for terminal tasks). The panel itself handles the three
-   * empty-state branches (screenshot / final URL only / nothing).
-   */
-  onOpenBrowserPanel?: () => void;
   /** Task id — used by the share button to build a deep link. */
   taskId?: string;
   /**
@@ -1399,30 +1357,11 @@ function TerminalSummary({
     },
     [toast],
   );
-  // 查看浏览器 icon — always available for browser tasks (or any
-  // intent that looks browser-likely on legacy rows without an
-  // executionMode). The panel itself is responsible for explaining
-  // what's there: screenshot, final URL only, or nothing saved.
-  // Tying the icon to "evidence exists" hid the entry for users who
-  // legitimately wanted to verify what the agent did.
-  const browserLikely =
-    executionMode === 'browser' || isBrowserLikelyIntent(intent);
-  const showBrowserOpener =
-    !isFailedLike && browserLikely && Boolean(onOpenBrowserPanel);
+  // Codex IA close-out — the result card no longer hosts the
+  // browser-panel entry. That moved to TaskToolbar at the top of the
+  // Main column so the result stays focused on the work product.
   return (
     <div className={cn('relative', tone.wrap)}>
-      {showBrowserOpener && (
-        <button
-          type="button"
-          onClick={onOpenBrowserPanel}
-          aria-label="查看本次任务的浏览器"
-          title="查看本次任务的浏览器"
-          className="absolute right-3 top-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-[11px] text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
-        >
-          <Globe className="h-3.5 w-3.5" />
-          <span>查看浏览器</span>
-        </button>
-      )}
       {isFailedLike && (
         <div
           className={cn(

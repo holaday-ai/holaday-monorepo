@@ -13,6 +13,11 @@ import { useSidebar } from '@/components/ui/sidebar';
 import { hdDebug } from '@/lib/hd-debug';
 import { useTaskStore } from '@/stores/task-store';
 import { isQuotaExhausted, useQuotaStatus } from '@/lib/use-quota-status';
+import {
+  computeSidePanelMode,
+  type SidePanelMode,
+  type SidePanelOverride,
+} from '@/types/side-panel';
 import type { UiTask } from '@/types/task';
 
 type UiTaskAwaitingKind = NonNullable<UiTask['awaitingKind']> | undefined;
@@ -41,14 +46,16 @@ export function WorkbenchApp(): JSX.Element {
 
   // Inner-workbench state.
   const [panelFullscreen, setPanelFullscreen] = React.useState(false);
-  const [browserCollapsed, setBrowserCollapsed] = React.useState(false);
   const [browserSheetOpen, setBrowserSheetOpen] = React.useState(false);
-  // True when the user explicitly opened the BrowserPanel via the
-  // result-card icon on a terminal task that wouldn't otherwise
-  // auto-render the panel. Reset on every task switch so a stale
-  // open from task A doesn't follow into task B.
-  const [userOpenedBrowserPanel, setUserOpenedBrowserPanel] =
-    React.useState(false);
+  // Single side-panel intent flag. `null` = use the default (live
+  // tasks auto-open, terminal tasks stay hidden); `'open'` /
+  // `'close'` forces the panel one way regardless of the default.
+  // Resets on every task switch so a stale intent from task A
+  // doesn't follow into task B. This single flag replaces the
+  // previous three (browserCollapsed / userOpenedBrowserPanel /
+  // showBrowserPanel) that were fighting each other.
+  const [sidePanelOverride, setSidePanelOverride] =
+    React.useState<SidePanelOverride>(null);
   const [followUpDismissedTaskId, setFollowUpDismissedTaskId] =
     React.useState<string | null>(null);
   const [confirmRebuildTask, setConfirmRebuildTask] = React.useState<{
@@ -163,23 +170,21 @@ export function WorkbenchApp(): JSX.Element {
           selectedAwaitingKind !== 'clarification')),
   );
 
-  // Auto-expand BrowserPanel when the agent needs the user IN the
-  // viewport (login / captcha / browser_action). Mobile pops the
-  // bottom sheet so the takeover is reachable.
+  // Mobile sheet auto-pop when the agent needs the user in the
+  // viewport. The sidePanelMode state machine already handles the
+  // desktop open/close; this effect is sheet-only.
   React.useEffect(() => {
     if (!selectedNeedsBrowser) return;
-    setBrowserCollapsed(false);
     if (typeof window !== 'undefined' && window.innerWidth < 1024) {
       setBrowserSheetOpen(true);
     }
   }, [selectedNeedsBrowser]);
 
-  // Reset per-task panel state on task switch: drop the "user opened
-  // it" flag and the manual-collapse choice so each task starts from
-  // its default (live tasks auto-show; terminal tasks stay hidden).
+  // Reset the side-panel intent on task switch so a manual open/close
+  // from task A doesn't follow into task B — each task starts from
+  // its default (live → open, terminal → closed).
   React.useEffect(() => {
-    setUserOpenedBrowserPanel(false);
-    setBrowserCollapsed(false);
+    setSidePanelOverride(null);
   }, [selectedTaskId]);
 
   // Workbench-specific Esc routing. Closes panelFullscreen +
@@ -244,25 +249,26 @@ export function WorkbenchApp(): JSX.Element {
         }
       : null;
 
-  // BrowserPanel auto-render rules (Codex P1 fix — was always shown
-  // for any browser task, including completed ones with no live frame
-  // and no captured evidence, which displayed about:blank). New
-  // policy: render only when there's actually something to look at —
-  //   * live browser task (executing / queued / planning)
-  //   * agent parked awaiting user input (login / captcha / etc.)
-  //   * user explicitly clicked the 查看浏览器 icon on a terminal
-  //     task's result card
-  // Terminal browser tasks with neither a live frame nor an evidence
-  // screenshot no longer slap a blank rail onto the layout.
+  // Side-panel state machine. Derives a single `sidePanelMode` from
+  // the task + the user's intent override. The renderer below maps
+  // mode → "should the panel mount?".
   const isLiveBrowserTask = Boolean(
     selectedTask &&
       selectedTask.executionMode === 'browser' &&
       !TERMINAL_STATUSES.has(selectedTask.status),
   );
-  const showBrowserPanel =
-    !!selectedTaskId &&
-    composerMode !== 'new' &&
-    (selectedNeedsBrowser || isLiveBrowserTask || userOpenedBrowserPanel);
+  const sidePanelMode: SidePanelMode = computeSidePanelMode({
+    hasSelectedTask: !!selectedTaskId,
+    isComposerNew: composerMode === 'new',
+    selectedNeedsBrowser,
+    isLiveBrowserTask,
+    override: sidePanelOverride,
+  });
+  const showBrowserPanel = sidePanelMode !== 'closed';
+  // Toolbar click flips the panel: closed → open, anything-else → close.
+  const onToggleSidePanel = React.useCallback(() => {
+    setSidePanelOverride(sidePanelMode === 'closed' ? 'open' : 'close');
+  }, [sidePanelMode]);
 
   return (
     <div
@@ -335,9 +341,14 @@ export function WorkbenchApp(): JSX.Element {
             }
           }}
           onOpenSidebar={() => setOpenMobile(true)}
-          onOpenBrowserPanel={() => {
-            setUserOpenedBrowserPanel(true);
+          sidePanelMode={sidePanelMode}
+          onToggleSidePanel={() => {
+            // Toolbar click flips the panel. Mobile also pops the
+            // bottom sheet when opening so the takeover surface is
+            // reachable on small viewports.
+            onToggleSidePanel();
             if (
+              sidePanelMode === 'closed' &&
               typeof window !== 'undefined' &&
               window.innerWidth < 1024
             ) {
@@ -347,7 +358,7 @@ export function WorkbenchApp(): JSX.Element {
         />
       )}
 
-      {!panelFullscreen && !browserCollapsed && showBrowserPanel && (
+      {!panelFullscreen && showBrowserPanel && (
         <ResizeHandle onDrag={onPanelResizeDrag} onDragEnd={onPanelResizeEnd} />
       )}
 
@@ -361,11 +372,9 @@ export function WorkbenchApp(): JSX.Element {
           style={
             panelFullscreen
               ? undefined
-              : browserCollapsed
-                ? { flex: '0 0 40px', minWidth: 40, width: 40 }
-                : panelPx != null
-                  ? { flex: `0 0 ${panelPx}px` }
-                  : { flex: '3 1 0', minWidth: PANEL_MIN_PX }
+              : panelPx != null
+                ? { flex: `0 0 ${panelPx}px` }
+                : { flex: '3 1 0', minWidth: PANEL_MIN_PX }
           }
         >
           <BrowserPanel
@@ -392,33 +401,22 @@ export function WorkbenchApp(): JSX.Element {
             poolUserId={me?.multiUser ? me.userId : null}
             fullscreen={panelFullscreen}
             onToggleFullscreen={() => setPanelFullscreen((v) => !v)}
-            collapsed={browserCollapsed}
-            onToggleCollapse={() => {
-              // Terminal task: close button fully unmounts the panel
-              // (no leftover 40px rail). Live task keeps the rail so
-              // the user can re-expand without losing the session.
-              const taskNow = selectedTaskId
-                ? tasks.find((t) => t.taskId === selectedTaskId)
-                : null;
-              const isTerminal =
-                taskNow != null && TERMINAL_STATUSES.has(taskNow.status);
-              if (isTerminal) {
-                setUserOpenedBrowserPanel(false);
-                setBrowserCollapsed(false);
-                return;
-              }
-              setBrowserCollapsed((v) => !v);
-            }}
+            // Close button on the panel header. Sets the override to
+            // 'close' so the panel unmounts regardless of whether
+            // the task is live or terminal — toolbar icon stays so
+            // the user can re-open if they want to peek again.
+            // Both `onToggleCollapse` (legacy desktop chevron) and
+            // `onClose` (sheet header) fire the same intent now.
+            onToggleCollapse={() => setSidePanelOverride('close')}
+            onClose={() => setSidePanelOverride('close')}
             onReExecute={
               // Empty-state fallback action: re-run the same intent
-              // as a fresh task. Drops the panel + the current
-              // selection so the user lands on the new task as it
-              // streams.
+              // as a fresh task. Drops the panel + selection so the
+              // user lands on the new task as it streams.
               selectedTask
                 ? () => {
                     const intent = selectedTask.intent;
-                    setUserOpenedBrowserPanel(false);
-                    setBrowserCollapsed(false);
+                    setSidePanelOverride('close');
                     enterNewTaskMode();
                     void createTask(intent).then((res) => {
                       if ('error' in res) {

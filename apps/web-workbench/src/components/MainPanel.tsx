@@ -3,8 +3,10 @@ import * as React from 'react';
 import { InputArea } from '@/components/InputArea';
 import { RoleNudgeBanner } from '@/components/RoleNudgeBanner';
 import { TaskStream } from '@/components/TaskStream';
+import { TaskToolbar, isBrowserLikely } from '@/components/TaskToolbar';
 import { Button } from '@/components/ui/button';
 import { useTaskStore } from '@/stores/task-store';
+import type { SidePanelMode } from '@/types/side-panel';
 import type { UiTask } from '@/types/task';
 
 interface Props {
@@ -44,11 +46,14 @@ interface Props {
   /** Plan-specific attachment byte cap (5MB basic / 10MB pro). */
   attachmentByteCap?: number;
   /**
-   * Codex P1 — passed through to TaskStream so the result card's
-   * 查看浏览器 icon can ask WorkbenchApp to open the BrowserPanel.
-   * Terminal browser tasks no longer auto-render the panel.
+   * Codex IA close-out — current side-panel mode + toggle callback.
+   * Drives the TaskToolbar in this column's top-right. The result
+   * card no longer hosts a 查看浏览器 entry; the toolbar is the
+   * single canonical surface for opening / closing the panel on the
+   * currently-selected task.
    */
-  onOpenBrowserPanel?: () => void;
+  sidePanelMode?: SidePanelMode;
+  onToggleSidePanel?: () => void;
 }
 
 /**
@@ -73,7 +78,8 @@ export function MainPanel({
   quotaExhausted,
   attachmentsAllowed,
   attachmentByteCap,
-  onOpenBrowserPanel,
+  sidePanelMode = 'closed',
+  onToggleSidePanel,
 }: Props): JSX.Element {
   // Suggestion-chip clicks (empty-state EmptyState picks + the
   // "继续探索" chips inside TaskStream) prefill the composer instead
@@ -191,11 +197,24 @@ export function MainPanel({
         </div>
       ) : (
         <>
+          {/* Per-task toolbar lives at the top of the column. Hosts
+              the browser-panel entry (Codex IA close-out moved it
+              off the result card so the result stays focused on the
+              work product). Only rendered for browser-shaped tasks
+              so generate / scrape don't pay a header height. */}
+          {isBrowserLikely(task) && (
+            <div className="flex h-10 items-center justify-end gap-2 border-b border-border/40 px-4">
+              <TaskToolbar
+                task={task}
+                sidePanelMode={sidePanelMode}
+                onToggleSidePanel={onToggleSidePanel ?? (() => {})}
+              />
+            </div>
+          )}
           <div className="flex-1 overflow-y-auto">
             <TaskStream
               task={task}
               onPickSuggestion={handlePickFromTaskSummary}
-              onOpenBrowserPanel={onOpenBrowserPanel}
             />
           </div>
           {userPlan ? (
