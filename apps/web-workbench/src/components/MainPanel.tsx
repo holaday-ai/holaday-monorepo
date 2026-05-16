@@ -5,6 +5,7 @@ import { RoleNudgeBanner } from '@/components/RoleNudgeBanner';
 import { TaskStream } from '@/components/TaskStream';
 import { TaskToolbar, isBrowserLikely } from '@/components/TaskToolbar';
 import { Button } from '@/components/ui/button';
+import { shouldResetComposerOnSelectionChange } from '@/components/composer-reset';
 import { useTaskStore } from '@/stores/task-store';
 import type { SidePanelMode } from '@/types/side-panel';
 import type { UiTask } from '@/types/task';
@@ -117,26 +118,28 @@ export function MainPanel({
   const handlePickFromTaskSummary = React.useCallback((text: string) => {
     setPrefillIntent(text);
   }, []);
-  // F1 — when the user moves to a HISTORICAL task (selectedTaskId
-  // changes from null/A to B), clear any leftover composer draft.
-  // The previous fix only set `prefillIntent=''` to push setValue('')
-  // through InputArea's effect — which works for chip-prefilled
-  // text BUT not for free-form drafts the user typed AFTER consume,
-  // because at that point InputArea's local `value` state is the
-  // sole source of truth and has no effect dep listening for outer
-  // resets. Bumping `composerKey` forces InputArea to remount with
-  // a fresh value=''. All composer-internal state (attachments,
-  // task-mode toggle, plus menu) gets reset too — heavy hammer but
-  // guarantees no cross-task pollution. Skip on transitions INTO
-  // new-task mode (selectedTaskId becomes null) — that's exactly
-  // the chip click pathway we want to keep prefilled.
+  // Composer-reset effect. Bumping `composerKey` forces InputArea to
+  // remount with a fresh local `value=''`, which is the ONLY way to
+  // wipe free-form text the user typed (InputArea's value lives in
+  // useState — no outer reset path otherwise). prefillIntent='' is
+  // belt-and-suspenders for chip-prefilled text that hadn't yet been
+  // edited.
+  //
+  // Triggers on transitions where the InputArea JSX position stays
+  // the same — i.e. task → task (both render in the task-detail
+  // branch) AND task → null (the "新任务" click). The previous guard
+  // skipped task → null on the assumption that the empty-home JSX
+  // swap would unmount the InputArea naturally, but reports of
+  // "occasionally doesn't clear old content" pointed at the typed-
+  // reply scenario where reliance on the structural reset was
+  // brittle. See `composer-reset.ts` for the full truth table.
   const selectedTaskId = useTaskStore((s) => s.selectedTaskId);
   const lastSelectedTaskIdRef = React.useRef<string | null>(selectedTaskId);
   const [composerKey, setComposerKey] = React.useState(0);
   React.useEffect(() => {
     const prev = lastSelectedTaskIdRef.current;
     lastSelectedTaskIdRef.current = selectedTaskId;
-    if (selectedTaskId && prev !== selectedTaskId) {
+    if (shouldResetComposerOnSelectionChange(prev, selectedTaskId)) {
       setPrefillIntent('');
       setComposerKey((k) => k + 1);
     }
