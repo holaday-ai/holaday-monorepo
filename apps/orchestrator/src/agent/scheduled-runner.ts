@@ -21,7 +21,14 @@
  */
 
 import { and, eq, lte } from 'drizzle-orm';
-import { rrulestr } from 'rrule';
+// rrule ships CJS-first (package.json main: dist/es5/rrule.js). Node 22's
+// ESM interop doesn't expose `rrulestr` as a named import on CJS modules
+// reliably — `import { rrulestr } from 'rrule'` crashes with
+// "does not provide an export named 'rrulestr'" at module load. Default
+// import + destructure works because the default IS the CJS module
+// object, and the property lookup happens at call time (not import time).
+import rrule from 'rrule';
+const { rrulestr } = rrule as { rrulestr: (s: string) => { after: (d: Date, inc?: boolean) => Date | null } };
 import { logger } from '../config/logger.js';
 import { scheduledTasks } from '../db/schema/scheduled-tasks.js';
 

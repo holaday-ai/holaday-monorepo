@@ -17,9 +17,13 @@
 import { newExternalId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { and, between, desc, eq, gte, lte, or } from 'drizzle-orm';
-import { rrulestr } from 'rrule';
+// See scheduled-runner.ts for why we default-import rrule + destructure.
+// Same CJS-vs-ESM interop story.
+import rrule from 'rrule';
 import { z } from 'zod';
 import { scheduledTasks } from '../../db/schema/scheduled-tasks.js';
+
+const { rrulestr } = rrule as { rrulestr: (s: string) => unknown };
 import { users } from '../../db/schema/users.js';
 import { protectedProcedure, router } from '../trpc.js';
 
