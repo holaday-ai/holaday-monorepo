@@ -12,7 +12,12 @@ import { LoginGate } from '@/components/LoginGate';
 import { SearchOverlay } from '@/components/SearchOverlay';
 import { Sidebar } from '@/components/Sidebar';
 import { AppSkeleton } from '@/components/Skeleton';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
+// Phase 26B — hd-popover-enter keyframe is defined in the calendar's
+// CSS but used by NotificationBell too. Import here so it's available
+// globally even before the user opens /scheduled.
+import '@/pages/scheduled-calendar/calendar-styles.css';
 import { useToast } from '@/components/ui/toast';
 import { clearAccessToken, getAccessToken } from '@/lib/auth';
 import { trpc } from '@/lib/trpc';
@@ -513,6 +518,11 @@ export function AppShell(): JSX.Element {
         onMobileClose={() => setSidebarOpen(false)}
       />
       <SidebarInset className="overflow-hidden bg-background">
+        {/* Phase 26B — global notification bell. Fixed top-right
+            inside SidebarInset so it stays put across every route,
+            sits above the route's content (z-40), and doesn't shift
+            page layout. Polls unreadCount every 30s. */}
+        <NotificationBell />
         <Outlet context={ctx} />
       </SidebarInset>
 

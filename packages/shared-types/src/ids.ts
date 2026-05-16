@@ -26,6 +26,9 @@ export const ID_PREFIXES = {
   batchItem: 'bti',
   // Phase 5d — user-scoped API keys (webhook / external-trigger bearer).
   apiKey: 'ak',
+  // Phase 26B — per-user inbox row + external webhook channel.
+  notification: 'nfn',
+  notificationChannel: 'nch',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

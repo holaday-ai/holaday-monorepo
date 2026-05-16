@@ -1,0 +1,201 @@
+import { describe, expect, it, vi } from 'vitest';
+import { notify } from './notification-service.js';
+import type { SendResult } from './webhook-sender.js';
+
+/**
+ * Minimal drizzle-shaped stub that captures inserts + returns canned
+ * channel rows. Mirrors the chain shapes notify() actually calls.
+ */
+function makeDbStub(opts: {
+  channels?: Array<{
+    externalId: string;
+    platform: string;
+    webhookUrl: string;
+    customTemplate: unknown;
+  }>;
+  insertThrows?: Error;
+  selectThrows?: Error;
+}) {
+  const inserted: Array<{ externalId: string; userId: number; type: string }> = [];
+  const db = {
+    insert: () => ({
+      values: (row: { externalId: string; userId: number; type: string }) => {
+        if (opts.insertThrows) return Promise.reject(opts.insertThrows);
+        inserted.push(row);
+        return Promise.resolve();
+      },
+    }),
+    select: () => ({
+      from: () => ({
+        where: () => {
+          if (opts.selectThrows) return Promise.reject(opts.selectThrows);
+          return Promise.resolve(opts.channels ?? []);
+        },
+      }),
+    }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+  return { db, inserted };
+}
+
+const NOOP_LOGGER = {
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+};
+
+describe('notify', () => {
+  it('writes inbox row + skips webhooks when user has no channels', async () => {
+    const { db, inserted } = makeDbStub({ channels: [] });
+    const sendMock = vi.fn();
+    const res = await notify(
+      { db, logger: NOOP_LOGGER, send: sendMock },
+      {
+        userInternalId: 42,
+        type: 'task_complete',
+        title: '完成',
+        message: '任务成功执行',
+      },
+    );
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]?.userId).toBe(42);
+    expect(inserted[0]?.type).toBe('task_complete');
+    expect(res.channelResults).toEqual([]);
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('writes inbox row + fires every enabled channel in parallel', async () => {
+    const { db } = makeDbStub({
+      channels: [
+        { externalId: 'nch_1', platform: 'wecom', webhookUrl: 'u1', customTemplate: null },
+        { externalId: 'nch_2', platform: 'feishu', webhookUrl: 'u2', customTemplate: null },
+      ],
+    });
+    const sendMock = vi
+      .fn<[unknown, unknown, unknown], Promise<SendResult>>()
+      .mockResolvedValue({ ok: true, status: 200, attempt: 1 });
+    const res = await notify(
+      { db, logger: NOOP_LOGGER, send: sendMock },
+      {
+        userInternalId: 42,
+        type: 'task_complete',
+        title: '完成',
+        message: 'ok',
+      },
+    );
+    expect(sendMock).toHaveBeenCalledTimes(2);
+    expect(res.channelResults).toHaveLength(2);
+    expect(res.channelResults.every((c) => c.result.ok)).toBe(true);
+  });
+
+  it('captures structured failure when one channel fails', async () => {
+    const { db } = makeDbStub({
+      channels: [
+        { externalId: 'nch_1', platform: 'wecom', webhookUrl: 'u1', customTemplate: null },
+        { externalId: 'nch_2', platform: 'feishu', webhookUrl: 'u2', customTemplate: null },
+      ],
+    });
+    const sendMock = vi
+      .fn<[unknown, unknown, unknown], Promise<SendResult>>()
+      .mockResolvedValueOnce({ ok: true, status: 200, attempt: 1 })
+      .mockResolvedValueOnce({ ok: false, status: 500, attempt: 2, error: 'boom' });
+    const res = await notify(
+      { db, logger: NOOP_LOGGER, send: sendMock },
+      {
+        userInternalId: 42,
+        type: 'task_failed',
+        title: '失败',
+        message: 'err',
+      },
+    );
+    expect(res.channelResults.map((c) => c.result.ok)).toEqual([true, false]);
+    expect(res.channelResults[1]?.result.error).toBe('boom');
+  });
+
+  it('survives a send() that rejects (allSettled wrap)', async () => {
+    const { db } = makeDbStub({
+      channels: [
+        { externalId: 'nch_1', platform: 'wecom', webhookUrl: 'u1', customTemplate: null },
+      ],
+    });
+    const sendMock = vi
+      .fn<[unknown, unknown, unknown], Promise<SendResult>>()
+      .mockRejectedValueOnce(new Error('unexpected throw'));
+    const res = await notify(
+      { db, logger: NOOP_LOGGER, send: sendMock },
+      {
+        userInternalId: 42,
+        type: 'task_complete',
+        title: 't',
+        message: 'm',
+      },
+    );
+    expect(res.channelResults).toHaveLength(1);
+    expect(res.channelResults[0]?.result.ok).toBe(false);
+    expect(res.channelResults[0]?.result.error).toBe('unexpected throw');
+  });
+
+  it('inbox insert failure returns gracefully (no throw)', async () => {
+    const { db } = makeDbStub({
+      insertThrows: new Error('ER_DUP_ENTRY'),
+      channels: [],
+    });
+    const sendMock = vi.fn();
+    const res = await notify(
+      { db, logger: NOOP_LOGGER, send: sendMock },
+      {
+        userInternalId: 42,
+        type: 'task_complete',
+        title: 't',
+        message: 'm',
+      },
+    );
+    expect(res.channelResults).toEqual([]);
+    expect(NOOP_LOGGER.error).toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('channel select failure leaves the inbox row intact', async () => {
+    const { db, inserted } = makeDbStub({
+      selectThrows: new Error('ER_NO_SUCH_TABLE'),
+    });
+    const sendMock = vi.fn();
+    const res = await notify(
+      { db, logger: NOOP_LOGGER, send: sendMock },
+      {
+        userInternalId: 42,
+        type: 'task_complete',
+        title: 't',
+        message: 'm',
+      },
+    );
+    expect(inserted).toHaveLength(1);
+    expect(res.channelResults).toEqual([]);
+    expect(NOOP_LOGGER.warn).toHaveBeenCalled();
+  });
+
+  it('passes taskName + status into webhook context', async () => {
+    const { db } = makeDbStub({
+      channels: [
+        { externalId: 'nch_1', platform: 'wecom', webhookUrl: 'u1', customTemplate: null },
+      ],
+    });
+    const sendMock = vi.fn<
+      [unknown, { title: string; status: string; taskName: string }, unknown],
+      Promise<SendResult>
+    >().mockResolvedValue({ ok: true, status: 200, attempt: 1 });
+    await notify(
+      { db, logger: NOOP_LOGGER, send: sendMock },
+      {
+        userInternalId: 42,
+        type: 'task_failed',
+        title: '失败',
+        message: 'm',
+        taskName: '每日新闻',
+      },
+    );
+    const ctxArg = sendMock.mock.calls[0]![1];
+    expect(ctxArg.taskName).toBe('每日新闻');
+    expect(ctxArg.status).toBe('failed');
+  });
+});

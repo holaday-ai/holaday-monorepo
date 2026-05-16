@@ -3,6 +3,7 @@ import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { ApiKeysSection } from '@/components/ApiKeysSection';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { NotificationsSection } from '@/components/notifications/NotificationsSection';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
@@ -74,6 +75,8 @@ export function SettingsPage(): JSX.Element {
         <ApiKeysSection />
 
         <MemorySection />
+
+        <NotificationsSection />
 
         <Section title="账号">
           <Row

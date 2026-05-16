@@ -6,6 +6,10 @@ import { feedbackRouter } from './routers/feedback.js';
 import { filesRouter } from './routers/files.js';
 import { llmCallsRouter } from './routers/llm-calls.js';
 import { memoryRouter } from './routers/memory.js';
+import {
+  notificationChannelsRouter,
+  notificationsRouter,
+} from './routers/notifications.js';
 import { paymentRouter } from './routers/payment.js';
 import { projectsRouter } from './routers/projects.js';
 import { quotaRouter } from './routers/quota.js';
@@ -37,6 +41,8 @@ export const appRouter = router({
   apiKeys: apiKeysRouter,
   connections: connectionsRouter,
   usage: usageRouter,
+  notifications: notificationsRouter,
+  notificationChannels: notificationChannelsRouter,
 });
 
 export type AppRouter = typeof appRouter;

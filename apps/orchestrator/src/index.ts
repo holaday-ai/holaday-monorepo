@@ -446,6 +446,29 @@ async function main() {
           return null;
         }
       },
+      // Phase 26B — wire the notification service so terminal
+      // dispatches land in the user's inbox + fire any configured
+      // webhooks. The notify hook is best-effort; the runner ignores
+      // its return value and never blocks on it.
+      notify: async ({ userInternalId, scheduledTaskInternalId, intent, ok, error }) => {
+        const { notify } = await import('./notifications/notification-service.js');
+        const truncatedIntent = intent.length > 60 ? `${intent.slice(0, 60)}…` : intent;
+        const title = ok ? '定时任务完成' : '定时任务失败';
+        const message = ok
+          ? `「${truncatedIntent}」已执行完成。`
+          : `「${truncatedIntent}」执行失败：${error ?? '未知错误'}`;
+        await notify(
+          { db, logger },
+          {
+            userInternalId,
+            scheduledTaskInternalId,
+            type: ok ? 'task_complete' : 'task_failed',
+            title,
+            message,
+            taskName: truncatedIntent,
+          },
+        );
+      },
     });
   }
 

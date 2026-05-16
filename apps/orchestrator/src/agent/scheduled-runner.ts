@@ -49,6 +49,21 @@ export interface ScheduledRunnerDeps {
     userInternalId: number;
     intent: string;
   }) => Promise<number | null>;
+  /**
+   * Phase 26B — optional notification hook. Called after every
+   * terminal dispatch (success OR failure) so the user's inbox +
+   * configured webhooks fire. Injected (not imported directly) so
+   * tests can stub without standing up the notification service.
+   * When omitted, the runner skips notifications entirely (back-
+   * compat with existing tests that don't care).
+   */
+  notify?: (input: {
+    userInternalId: number;
+    scheduledTaskInternalId: number;
+    intent: string;
+    ok: boolean;
+    error: string | null;
+  }) => Promise<void>;
   /** Override poll interval (ms). Default 60_000. Tests pass smaller. */
   pollIntervalMs?: number;
 }
@@ -358,6 +373,28 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
         { err: errMsg(err), scheduledTaskId: row.id },
         'scheduled-runner: advance failed — row may be stuck in running until next restart',
       );
+    }
+
+    // Phase 26B — fire the user's inbox + webhook notifications.
+    // Wrapped in its own try/catch so a notification path failure
+    // never wedges the runner's tick. The notify implementation
+    // itself never throws (allSettled fan-out), this is defence-
+    // in-depth in case a future stub does.
+    if (deps.notify) {
+      try {
+        await deps.notify({
+          userInternalId: row.userId,
+          scheduledTaskInternalId: row.id,
+          intent: row.intent,
+          ok: dispatchOk,
+          error: truncatedError,
+        });
+      } catch (err) {
+        logger.warn(
+          { err: errMsg(err), scheduledTaskId: row.id },
+          'scheduled-runner: notify hook threw — ignoring',
+        );
+      }
     }
   }
 }
