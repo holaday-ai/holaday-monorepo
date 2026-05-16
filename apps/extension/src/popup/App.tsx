@@ -34,6 +34,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { ORCHESTRATOR_HTTP, WORKBENCH_URL } from '../shared/config.js';
+import { openOrFocusWorkbench } from '../shared/open-workbench.js';
 import {
   type StoredUser,
   clearAccessToken,
@@ -263,9 +264,18 @@ export function App() {
     }
   }
 
+  /**
+   * Phase 25c — open OR focus the workbench tab. Previously this
+   * called chrome.tabs.create unconditionally so every CTA click
+   * spawned a duplicate. openOrFocusWorkbench searches existing tabs
+   * for hd-app.orangebench.tech / holaday.ai and activates the
+   * matching tab (and its window) when found; only creates fresh
+   * when nothing matches. window.close() runs AFTER the focus call
+   * resolves so Chrome doesn't race the popup-close with the tab-
+   * switch animation.
+   */
   function openWebLogin(): void {
-    void chrome.tabs.create({ url: WORKBENCH_URL });
-    window.close();
+    void openOrFocusWorkbench(WORKBENCH_URL).then(() => window.close());
   }
 
   if (!user) {
