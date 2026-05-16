@@ -57,6 +57,7 @@ import { runCookieSync } from './cookie-sync.js';
 import { runHistorySync } from './history-sync.js';
 import { handleExtensionToolCall } from './extension-tools.js';
 import { isTrustedAuthBridgeSender } from './auth-bridge-trust.js';
+import { decideAuthTokenAction } from './auth-token-handler.js';
 import {
   connect,
   disconnect,
@@ -1171,14 +1172,28 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     void (async () => {
       const incoming = typeof msg.token === 'string' ? msg.token : null;
       const stored = await getAccessToken();
-      if (incoming === stored) {
-        // No-op; content script's dedupe is best-effort and the SW
-        // is the authoritative gate.
+      const knownBad = await getKnownBadToken();
+      const action = decideAuthTokenAction(incoming, stored, knownBad);
+
+      if (action.kind === 'unchanged') {
         sendResponse({ ok: true, action: 'unchanged' });
         return;
       }
-      if (incoming === null) {
-        // SPA logged out → mirror it. clearStoredUser + clearAccessToken
+      if (action.kind === 'refuse') {
+        // Phase 25b fix — auth-bridge tried to revive the same token
+        // the orchestrator rejected via 4401. Refusing here prevents
+        // the cycle where every 3 s poll undoes onUnauthorized's
+        // cleanup; the user has to log in fresh on the SPA before
+        // this gate releases. See auth-token-handler.ts for the full
+        // rationale + regression tests.
+        console.warn(
+          '[holaday] auth-bridge: refusing to revive knownBad token (orchestrator already rejected it)',
+        );
+        sendResponse({ ok: false, reason: action.reason });
+        return;
+      }
+      if (action.kind === 'clear') {
+        // SPA logged out → mirror. clearStoredUser + clearAccessToken
         // wipe both the token and the cached user shape; disconnect
         // tears down the WS so the next ensureConnected starts fresh
         // (and returns null because no token is stored).
@@ -1186,18 +1201,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         await clearStoredUser();
         disconnect();
         state.tasks.clear();
-        // Phase 25b — popup mirror state may be cached; nudge any open
-        // popup to re-render via the tasks snapshot channel.
         pushTasksSnapshot();
         sendResponse({ ok: true, action: 'cleared' });
         return;
       }
-      // Fresh token (login OR account swap). Write to chrome.storage;
-      // ws-client's storage.onChanged listener will see the change and
-      // call reconnect(newToken). Also clear the auth-failure freeze
-      // since a fresh token from the SPA means the user just authed
-      // successfully on the web side — old failures aren't relevant.
-      await setAccessToken(incoming);
+      // action.kind === 'set' — fresh token (login OR account swap).
+      // Write to chrome.storage; ws-client's storage.onChanged listener
+      // sees the change and calls reconnect(newToken). Reset the
+      // auth-failure freeze too: the SPA just produced a NEW token
+      // (the cycle-breaker above already filtered the case where
+      // it's actually the same dead one).
+      await setAccessToken(action.token);
       await resetAuthFailureState();
       await resetWsReconnectAttempts();
       sendResponse({ ok: true, action: 'set' });

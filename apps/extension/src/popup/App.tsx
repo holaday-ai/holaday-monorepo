@@ -205,18 +205,30 @@ export function App() {
         // Phase 25b — token arrived via auth-bridge but the cached
         // user record isn't there yet (fresh install / cleared
         // storage). Fetch + persist so the next popup open is instant.
-        const fetched = await fetchMe(tok);
-        if (fetched) {
-          await setStoredUser(fetched);
-          setUser(fetched);
+        //
+        // Phase 25b fix: only clear the token when the server
+        // EXPLICITLY says 401. Network failures (orchestrator
+        // unreachable, CORS, DNS) leave the token intact so the
+        // SW's WS path can keep retrying. Otherwise we'd create a
+        // popup-driven clear/set cycle every time the user opens
+        // the popup against a temporarily-unreachable backend.
+        const result = await fetchMe(tok);
+        if (result.kind === 'ok') {
+          await setStoredUser(result.user);
+          setUser(result.user);
           setToken(tok);
           setStatus('connected');
           chrome.runtime.sendMessage({ type: 'holaday.connect', token: tok });
-        } else {
-          // Token in storage but /auth.me rejects it — likely
-          // expired. Clear so the popup falls to the logged-out
-          // view + invites a re-login on the web.
+        } else if (result.kind === 'unauthorized') {
+          // Server definitively rejected the token — clear it so the
+          // popup invites a re-login on the web. The SW's onUnauthorized
+          // path may have already done this; clear here is idempotent.
           await clearAccessToken();
+        } else {
+          // Network failure. Render the logged-out view but DON'T
+          // touch storage — the SW (which has the WS retry loop) is
+          // the authority on token validity, not the popup.
+          setStatus('idle');
         }
       }
       chrome.runtime.sendMessage({ type: 'holaday.tasks' }, (resp) => {
@@ -298,16 +310,16 @@ export function App() {
       void (async () => {
         const newToken = (tokenChange.newValue as string | undefined) ?? null;
         if (newToken) {
-          const fetched = await fetchMe(newToken);
-          if (fetched) {
-            await setStoredUser(fetched);
-            setUser(fetched);
+          const result = await fetchMe(newToken);
+          if (result.kind === 'ok') {
+            await setStoredUser(result.user);
+            setUser(result.user);
             setToken(newToken);
             setStatus('connected');
           } else {
-            // Token was rejected by /auth.me — leave the popup in the
-            // logged-out view; the SW would still try to connect, but
-            // we don't fake a session here.
+            // 401 or network — leave popup in the logged-out view.
+            // We DON'T clearAccessToken on network failure (see the
+            // mount-path comment); the SW path is the authority.
             setUser(null);
             setToken(null);
             setStatus('idle');
@@ -351,27 +363,52 @@ export function App() {
   }, []);
 
   /**
-   * Phase 25b — /trpc/auth.me lookup. Given a token from the
-   * auth-bridge (or from storage), pull the canonical user record so
-   * the header shows real name + plan instead of just an opaque token.
+   * Phase 25b — /trpc/auth.me lookup. Returns a structured result so
+   * the caller can distinguish:
+   *   - `ok`: valid user payload, use it
+   *   - `unauthorized`: server returned 401 — token is genuinely
+   *     rejected, caller can clear it
+   *   - `network`: fetch threw or returned non-401 non-2xx — keep
+   *     the token, retry later. Network errors must NOT trigger a
+   *     clearAccessToken because that creates a feedback loop:
+   *       fetchMe fails (orchestrator unreachable) →
+   *       clearAccessToken →
+   *       SW storage.onChanged → disconnect →
+   *       content script next poll re-syncs the same token from
+   *       SPA localStorage →
+   *       SW setAccessToken →
+   *       repeat each time the popup mounts.
+   *     The orchestrator's WS path is the SINGLE owner of "this
+   *     token is bad" (via 4401 → onUnauthorized). The popup is
+   *     read-only on auth state outside of the storage.onChanged
+   *     reactive path.
    */
-  async function fetchMe(authToken: string): Promise<StoredUser | null> {
+  type FetchMeResult =
+    | { kind: 'ok'; user: StoredUser }
+    | { kind: 'unauthorized' }
+    | { kind: 'network' };
+
+  async function fetchMe(authToken: string): Promise<FetchMeResult> {
     try {
       const res = await fetch(`${ORCHESTRATOR_HTTP}/trpc/auth.me`, {
         method: 'GET',
         headers: { authorization: `Bearer ${authToken}` },
       });
-      if (!res.ok) return null;
+      if (res.status === 401) return { kind: 'unauthorized' };
+      if (!res.ok) return { kind: 'network' };
       const body = (await res.json()) as MeResponse;
       const u = body.result.data;
       return {
-        externalId: u.userId,
-        email: u.email,
-        plan: u.plan,
-        displayName: u.displayName,
+        kind: 'ok',
+        user: {
+          externalId: u.userId,
+          email: u.email,
+          plan: u.plan,
+          displayName: u.displayName,
+        },
       };
     } catch {
-      return null;
+      return { kind: 'network' };
     }
   }
 
