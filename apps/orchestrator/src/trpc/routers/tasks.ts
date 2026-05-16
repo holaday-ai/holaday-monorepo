@@ -106,6 +106,12 @@ import {
   humaniseScrapeFailure,
   sanitizeFinalText,
 } from '../../agent/text-sanitizer.js';
+// Phase 24 RC follow-up — nav-failure safety net. Catches the
+// "false success" case where the agent calls task_done with a body
+// that is just a DNS/SSL/timeout/refused error message; the sidebar
+// would otherwise label it "已完成" because the runner respected the
+// agent's terminal decision.
+import { detectNavFailure } from '../../agent/nav-failure-detector.js';
 
 const taskController = new TaskController();
 
@@ -2684,6 +2690,37 @@ export const tasksRouter = router({
               const cleaned = sanitizeFinalText(outcome.summary);
               if (cleaned !== outcome.summary) {
                 outcome = { ...outcome, summary: cleaned };
+              }
+            }
+            // Phase 24 RC follow-up — nav-failure safety net.
+            // Codex caught the "false success" case: bare-URL tasks
+            // like `打开 https://thisdomaindoesnotexist12345.com`
+            // would land with status=completed and a summary that's
+            // just the friendly DNS error message. The agent thinks
+            // it completed (it accurately reported the failure), but
+            // the user's goal (open the page) was never reached, so
+            // labelling the row "已完成" is misleading. detectNavFailure
+            // pattern-matches a short summary against DNS / SSL /
+            // timeout / refused signals; on a hit we flip the row
+            // to failed BEFORE the verifier + persist run. Long
+            // legitimate reports that happen to mention a nav error
+            // as one bullet are not flipped (≤400 char gate).
+            if (outcome.status === 'completed' && outcome.summary) {
+              const navSignal = detectNavFailure(outcome.summary);
+              if (navSignal.detected) {
+                ctx.logger.info(
+                  {
+                    taskId,
+                    matchedPattern: navSignal.matchedPattern,
+                    kind: navSignal.kind,
+                  },
+                  'supercar: nav-failure detector tripped — downgrading completed → failed',
+                );
+                outcome = {
+                  ...outcome,
+                  status: 'failed',
+                  reason: navSignal.reason ?? '导航失败，未完成任务',
+                };
               }
             }
             // Phase 1 Day 5 Round 2 — pipeline verification on the

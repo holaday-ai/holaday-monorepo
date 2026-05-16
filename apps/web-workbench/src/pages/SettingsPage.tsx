@@ -1,12 +1,14 @@
-import { ChevronRight, X } from 'lucide-react';
+import { ChevronRight, Monitor, Moon, Sun, X } from 'lucide-react';
 import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { ApiKeysSection } from '@/components/ApiKeysSection';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
+import { type ThemeMode, useTheme } from '@/stores/theme-store';
 
 /**
  * Settings page — only the rows that actually persist server-side
@@ -24,6 +26,7 @@ import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
  */
 export function SettingsPage(): JSX.Element {
   const toast = useToast();
+  const { mode, setMode } = useTheme();
 
   function confirmDelete(): void {
     const answer = window.prompt(
@@ -42,8 +45,17 @@ export function SettingsPage(): JSX.Element {
   // curation; users don't need it on every visit.
   return (
     <PageContainer width="form">
-      <PageHeader title="设置" description="角色、开发者、记忆与账号" />
+      <PageHeader title="设置" description="外观、角色、开发者、记忆与账号" />
       <div className="space-y-6">
+        <Section title="外观">
+          <Row
+            label="主题"
+            description="跟随系统、浅色或深色。立即生效，记到本地。"
+          >
+            <ThemeSwitcher mode={mode} onChange={setMode} />
+          </Row>
+        </Section>
+
         <Section title="AI 视角">
           <Link
             to="/settings/roles"
@@ -75,6 +87,70 @@ export function SettingsPage(): JSX.Element {
         </Section>
       </div>
     </PageContainer>
+  );
+}
+
+function ThemeSwitcher({
+  mode,
+  onChange,
+}: {
+  mode: ThemeMode;
+  onChange(m: ThemeMode): void;
+}): JSX.Element {
+  return (
+    <div className="inline-grid grid-cols-3 gap-1 rounded-md bg-muted p-0.5">
+      <ThemeOption
+        active={mode === 'light'}
+        onClick={() => onChange('light')}
+        label="浅色"
+      >
+        <Sun className="h-3.5 w-3.5" />
+      </ThemeOption>
+      <ThemeOption
+        active={mode === 'dark'}
+        onClick={() => onChange('dark')}
+        label="深色"
+      >
+        <Moon className="h-3.5 w-3.5" />
+      </ThemeOption>
+      <ThemeOption
+        active={mode === 'system'}
+        onClick={() => onChange('system')}
+        label="跟随系统"
+      >
+        <Monitor className="h-3.5 w-3.5" />
+      </ThemeOption>
+    </div>
+  );
+}
+
+function ThemeOption({
+  active,
+  onClick,
+  label,
+  children,
+}: {
+  active: boolean;
+  onClick(): void;
+  label: string;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      title={label}
+      className={cn(
+        'flex items-center justify-center gap-1 rounded px-3 py-1 text-xs transition-colors',
+        active
+          ? 'bg-background text-foreground shadow-sm'
+          : 'text-muted-foreground hover:text-foreground',
+      )}
+    >
+      {children}
+      <span>{label}</span>
+    </button>
   );
 }
 

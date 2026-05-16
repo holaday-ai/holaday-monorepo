@@ -104,7 +104,6 @@ interface Props {
   onLogout(): void;
   onOpenFeedback?(): void;
   /** O12 — open the in-app settings modal instead of navigating. */
-  onOpenSettings?(): void;
   /** Count of tasks in status='failed' — feeds UserMenu badge. */
   failedTaskCount?: number;
   /** "清除所有失败任务" handler; hidden when count=0 or handler absent. */
@@ -176,7 +175,6 @@ export function Sidebar({
   userPlan,
   onLogout,
   onOpenFeedback,
-  onOpenSettings,
   failedTaskCount = 0,
   onClearFailedTasks,
   mobileOpen,
@@ -557,7 +555,6 @@ export function Sidebar({
                   failedTaskCount={failedTaskCount}
                   {...(onClearFailedTasks ? { onClearFailedTasks } : {})}
                   {...(onOpenFeedback ? { onOpenFeedback } : {})}
-                  {...(onOpenSettings ? { onOpenSettings } : {})}
                 />
               </div>
             </SidebarFooter>

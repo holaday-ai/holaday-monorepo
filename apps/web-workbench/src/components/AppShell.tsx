@@ -10,7 +10,6 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { FeedbackDialog } from '@/components/FeedbackDialog';
 import { LoginGate } from '@/components/LoginGate';
 import { SearchOverlay } from '@/components/SearchOverlay';
-import { SettingsModal } from '@/components/SettingsModal';
 import { Sidebar } from '@/components/Sidebar';
 import { AppSkeleton } from '@/components/Skeleton';
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
@@ -55,7 +54,7 @@ interface OutletContext {
  *     list + URL ⇄ task store sync via setStoreNavigate)
  *   - the Sidebar mount (so /, /scheduled, /batch, /files all share
  *     the same Sidebar instance — no re-mount on route switch)
- *   - shared modals: SearchOverlay, FeedbackDialog, SettingsModal,
+ *   - shared modals: SearchOverlay, FeedbackDialog,
  *     single-delete + bulk-delete + clear-failed confirms
  *   - keyboard shortcuts that span every route: Cmd/Ctrl+K (search),
  *     Cmd/Ctrl+N (new task), Esc (close topmost modal)
@@ -90,7 +89,6 @@ export function AppShell(): JSX.Element {
   // Shared modal state.
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const [feedbackOpen, setFeedbackOpen] = React.useState(false);
-  const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
   const [confirmBulkDelete, setConfirmBulkDelete] = React.useState<
@@ -508,7 +506,6 @@ export function AppShell(): JSX.Element {
         userPlan={me?.plan ?? 'free'}
         onLogout={handleLogout}
         onOpenFeedback={() => setFeedbackOpen(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
         onOpenSearch={() => setSearchOpen(true)}
         failedTaskCount={tasks.filter((t) => t.status === 'failed').length}
         onClearFailedTasks={() => setConfirmClearFailed(true)}
@@ -549,15 +546,6 @@ export function AppShell(): JSX.Element {
             return { error: msg };
           }
         }}
-      />
-
-      <SettingsModal
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        displayName={displayName}
-        email={me?.email ?? null}
-        phone={me?.phone ?? null}
-        plan={me?.plan ?? 'free'}
       />
 
       <ConfirmDialog
