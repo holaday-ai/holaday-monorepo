@@ -65,5 +65,25 @@ export default defineManifest({
       run_at: 'document_idle',
       all_frames: false,
     },
+    // Phase 25b — auth-bridge content script. Runs ONLY on workbench
+    // origins, watches localStorage['holaday.access_token'] for
+    // changes, and pushes them to the SW via chrome.runtime.sendMessage.
+    // Replaces the popup's email/password form: the source of truth for
+    // login now lives on the web side, the extension just mirrors it.
+    //
+    // Wildcards include subdomain forms so dev / staging / prod all
+    // hit the same content script without per-environment patches.
+    {
+      matches: [
+        'https://holaday.ai/*',
+        'https://*.holaday.ai/*',
+        'https://hd-app.orangebench.tech/*',
+        'http://localhost/*',
+        'http://localhost:*/*',
+      ],
+      js: ['src/content/auth-bridge.ts'],
+      run_at: 'document_start',
+      all_frames: false,
+    },
   ],
 });

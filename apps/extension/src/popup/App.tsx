@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
-import { ORCHESTRATOR_HTTP } from '../shared/config.js';
+import { ORCHESTRATOR_HTTP, WORKBENCH_URL } from '../shared/config.js';
 import {
   type StoredUser,
   clearAccessToken,
   getAccessToken,
   getStoredUser,
-  setAccessToken,
   setStoredUser,
 } from '../shared/storage.js';
 
@@ -123,12 +122,24 @@ interface TaskView {
   visionProgress?: VisionProgressView;
 }
 
-interface LoginResponse {
-  result: { data: { user: StoredUser; accessToken: string } };
-}
-
 interface CreateTaskResponse {
   result: { data: { taskId: string; status: TaskStatus; steps: StepView[] } };
+}
+
+/**
+ * Phase 25b — /trpc/auth.me response shape. Lifted from sidepanel/App.tsx;
+ * keeping the cast inline-typed so the popup doesn't import internals
+ * just for this one fetch.
+ */
+interface MeResponse {
+  result: {
+    data: {
+      userId: string;
+      email: string;
+      plan: string;
+      displayName: string;
+    };
+  };
 }
 
 export function App() {
@@ -136,8 +147,6 @@ export function App() {
   const [token, setToken] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [tasks, setTasks] = useState<TaskView[]>([]);
   const [intent, setIntent] = useState('帮我整理今天半导体板块的要闻');
   const [submitting, setSubmitting] = useState(false);
@@ -192,6 +201,23 @@ export function App() {
         setToken(tok);
         setStatus('connected');
         chrome.runtime.sendMessage({ type: 'holaday.connect', token: tok });
+      } else if (tok && !stored) {
+        // Phase 25b — token arrived via auth-bridge but the cached
+        // user record isn't there yet (fresh install / cleared
+        // storage). Fetch + persist so the next popup open is instant.
+        const fetched = await fetchMe(tok);
+        if (fetched) {
+          await setStoredUser(fetched);
+          setUser(fetched);
+          setToken(tok);
+          setStatus('connected');
+          chrome.runtime.sendMessage({ type: 'holaday.connect', token: tok });
+        } else {
+          // Token in storage but /auth.me rejects it — likely
+          // expired. Clear so the popup falls to the logged-out
+          // view + invites a re-login on the web.
+          await clearAccessToken();
+        }
       }
       chrome.runtime.sendMessage({ type: 'holaday.tasks' }, (resp) => {
         if (resp?.tasks) setTasks(resp.tasks as TaskView[]);
@@ -255,6 +281,54 @@ export function App() {
     })();
   }, []);
 
+  // Phase 25b — cross-context auth sync. The auth-bridge content
+  // script on any workbench tab pushes token changes to the SW, which
+  // writes them to chrome.storage.local. This listener picks up
+  // those changes and keeps the popup's user/token state coherent
+  // without requiring the user to re-open the popup. Same pattern as
+  // the sidepanel's listener (see apps/extension/src/sidepanel/App.tsx).
+  useEffect(() => {
+    const listener = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: chrome.storage.AreaName,
+    ) => {
+      if (area !== 'local') return;
+      const tokenChange = changes['holaday.access_token'];
+      if (!tokenChange) return;
+      void (async () => {
+        const newToken = (tokenChange.newValue as string | undefined) ?? null;
+        if (newToken) {
+          const fetched = await fetchMe(newToken);
+          if (fetched) {
+            await setStoredUser(fetched);
+            setUser(fetched);
+            setToken(newToken);
+            setStatus('connected');
+          } else {
+            // Token was rejected by /auth.me — leave the popup in the
+            // logged-out view; the SW would still try to connect, but
+            // we don't fake a session here.
+            setUser(null);
+            setToken(null);
+            setStatus('idle');
+          }
+        } else {
+          // SPA logged out → mirror immediately. Tasks list clears
+          // because they're per-user.
+          setUser(null);
+          setToken(null);
+          setTasks([]);
+          setStatus('idle');
+        }
+      })();
+    };
+    chrome.storage.onChanged.addListener(listener);
+    return () => chrome.storage.onChanged.removeListener(listener);
+    // fetchMe is stable (closure over WORKBENCH_URL / ORCHESTRATOR_HTTP);
+    // pinning it in deps would only re-register on render churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Subscribe to SW task snapshots + vision-loop progress events
   // while the popup is open. `holaday.tasks.update` is the full task
   // list (classic + vision); `holaday.vision.progress` fires on each
@@ -276,42 +350,42 @@ export function App() {
     return () => chrome.runtime.onMessage.removeListener(listener);
   }, []);
 
-  async function login() {
-    setStatus('loading');
-    setError(null);
+  /**
+   * Phase 25b — /trpc/auth.me lookup. Given a token from the
+   * auth-bridge (or from storage), pull the canonical user record so
+   * the header shows real name + plan instead of just an opaque token.
+   */
+  async function fetchMe(authToken: string): Promise<StoredUser | null> {
     try {
-      const res = await fetch(`${ORCHESTRATOR_HTTP}/trpc/auth.login`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+      const res = await fetch(`${ORCHESTRATOR_HTTP}/trpc/auth.me`, {
+        method: 'GET',
+        headers: { authorization: `Bearer ${authToken}` },
       });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as {
-          error?: { message?: string };
-        } | null;
-        throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
-      }
-      const body = (await res.json()) as LoginResponse;
-      const data = body.result.data;
-      await setAccessToken(data.accessToken);
-      await setStoredUser(data.user);
-      setUser(data.user);
-      setToken(data.accessToken);
-      setStatus('connected');
-      chrome.runtime.sendMessage({ type: 'holaday.connect', token: data.accessToken });
-    } catch (err) {
-      setStatus('error');
-      setError(err instanceof Error ? err.message : String(err));
+      if (!res.ok) return null;
+      const body = (await res.json()) as MeResponse;
+      const u = body.result.data;
+      return {
+        externalId: u.userId,
+        email: u.email,
+        plan: u.plan,
+        displayName: u.displayName,
+      };
+    } catch {
+      return null;
     }
   }
 
-  async function logout() {
-    await clearAccessToken();
-    chrome.runtime.sendMessage({ type: 'holaday.disconnect' });
-    setUser(null);
-    setToken(null);
-    setTasks([]);
-    setStatus('idle');
+  /**
+   * Phase 25b — open the workbench in a new tab so the user can sign
+   * in. The auth-bridge content script there will pick up the freshly-
+   * stored localStorage token within ~3 s and push it back to the SW;
+   * the popup's storage.onChanged listener then hydrates the UI.
+   * Closing the popup right after focuses the new tab (a popup eating
+   * the click is jarring).
+   */
+  function openWebLogin(): void {
+    void chrome.tabs.create({ url: WORKBENCH_URL });
+    window.close();
   }
 
   /**
@@ -511,36 +585,34 @@ export function App() {
   }
 
   if (!user) {
+    // Phase 25b — logged-out view. The extension no longer hosts a
+    // credentials form; the source of truth for login is the web
+    // workbench. Tapping "前往 HOLA DAY 登录" opens the SPA in a new
+    // tab; once the user signs in there, the auth-bridge content
+    // script pushes the token back to the SW within ~3 s and the
+    // storage.onChanged listener above flips this popup to the
+    // logged-in view.
     return (
       <div style={rootStyle}>
         <h3 style={h3}>HOLA DAY</h3>
-        <div style={column(6)}>
-          <input
-            type="email"
-            placeholder="email"
-            value={email}
-            onChange={(e) => setEmail(e.currentTarget.value)}
-          />
-          <input
-            type="password"
-            placeholder="password"
-            value={password}
-            onChange={(e) => setPassword(e.currentTarget.value)}
-          />
-          <button type="button" disabled={status === 'loading'} onClick={() => void login()}>
-            {status === 'loading' ? 'Signing in...' : 'Sign in'}
+        <div style={column(8)}>
+          <div style={loggedOutHint}>
+            请先在 HOLA DAY 网页登录。登录后扩展会自动同步登录态，无需在这里输入账号密码。
+          </div>
+          <button type="button" onClick={() => openWebLogin()} style={primaryBtn}>
+            前往 HOLA DAY 登录
           </button>
           {error ? <div style={errStyle}>{error}</div> : null}
           {/* Phase 18b — escape hatch for users stuck in the
-              auth-failure freeze. Most users will never see this
-              button (the SW only freezes after 3 consecutive
-              4401s), but when they do, the existing flow has no
-              way out without reinstalling. */}
+              auth-failure freeze. Phase 25b kept this button — even
+              when there's no login form, a stale token in extension
+              storage could prevent the auth-bridge sync from taking
+              hold. */}
           <button
             type="button"
             onClick={() => void resetConnection()}
             style={resetBtnStyle}
-            title="清除扩展存储的登录态 + 失败计数，重新尝试连接"
+            title="清除扩展存储的登录态 + 失败计数，重新尝试同步网页 token"
           >
             重置连接
           </button>
@@ -576,8 +648,19 @@ export function App() {
           >
             ⚙
           </button>
-          <button type="button" onClick={() => void logout()} style={miniBtn}>
-            Sign out
+          {/* Phase 25b — "Sign out" removed. Login state mirrors the
+              web (auth-bridge content script syncs both ways). If the
+              user wants to sign out, they do it on HOLA DAY 网页;
+              this popup will auto-clear within ~3 s.
+              The "前往网页" button opens the workbench so account
+              management is one click away. */}
+          <button
+            type="button"
+            onClick={() => void chrome.tabs.create({ url: WORKBENCH_URL })}
+            style={miniBtn}
+            title="打开 HOLA DAY 网页（账号管理 / 登出在那里）"
+          >
+            前往网页
           </button>
         </div>
       </div>
@@ -1537,6 +1620,37 @@ const resetBtnStyle: React.CSSProperties = {
   background: 'transparent',
   color: '#6b7280',
   border: '1px solid #d1d5db',
+  borderRadius: 4,
+  cursor: 'pointer',
+};
+/**
+ * Phase 25b — logged-out hint above the "前往登录" button. Tinted
+ * card so the message stands out a bit but not aggressive — this is
+ * the very first surface a sideloaded extension shows, so it sets
+ * the tone (the extension is a passive sync companion, not a login
+ * gateway of its own).
+ */
+const loggedOutHint: React.CSSProperties = {
+  padding: '10px 12px',
+  background: '#f0f9ff',
+  border: '1px solid #bae6fd',
+  borderRadius: 4,
+  fontSize: 12,
+  lineHeight: 1.5,
+  color: '#0c4a6e',
+};
+/**
+ * Phase 25b — primary "前往登录" button. Brand magenta (#E50B6B per
+ * the project handoff) so the action is unmistakable inside the
+ * narrow popup. Mirrors the SPA's primary button styling.
+ */
+const primaryBtn: React.CSSProperties = {
+  padding: '8px 12px',
+  fontSize: 13,
+  fontWeight: 600,
+  background: '#E50B6B',
+  color: '#ffffff',
+  border: 'none',
   borderRadius: 4,
   cursor: 'pointer',
 };

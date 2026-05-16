@@ -1,0 +1,61 @@
+import { describe, expect, it } from 'vitest';
+import { decideAction, looksLikeToken } from './auth-bridge-core.js';
+
+describe('decideAction', () => {
+  it('null → null is unchanged', () => {
+    expect(decideAction(null, null)).toEqual({ kind: 'unchanged' });
+  });
+
+  it('null → token is set', () => {
+    expect(decideAction(null, 'eyJabc.def.ghi-jwt-long-enough')).toEqual({
+      kind: 'set',
+      token: 'eyJabc.def.ghi-jwt-long-enough',
+    });
+  });
+
+  it('token → null is clear', () => {
+    expect(decideAction('eyJfoo', null)).toEqual({ kind: 'clear' });
+  });
+
+  it('same token is unchanged', () => {
+    expect(decideAction('eyJfoo', 'eyJfoo')).toEqual({ kind: 'unchanged' });
+  });
+
+  it('different token is set (account swap / refresh)', () => {
+    expect(decideAction('eyJold', 'eyJnew')).toEqual({ kind: 'set', token: 'eyJnew' });
+  });
+
+  it('empty string is treated as null', () => {
+    expect(decideAction('eyJfoo', '')).toEqual({ kind: 'clear' });
+    expect(decideAction(null, '')).toEqual({ kind: 'unchanged' });
+  });
+
+  it('whitespace-only is treated as null', () => {
+    expect(decideAction(null, '   ')).toEqual({ kind: 'unchanged' });
+    expect(decideAction('eyJfoo', '   ')).toEqual({ kind: 'clear' });
+  });
+});
+
+describe('looksLikeToken', () => {
+  it('accepts long JWT-like strings', () => {
+    expect(looksLikeToken('eyJabc.def.ghi-jwt-long-enough')).toBe(true);
+  });
+
+  it('rejects too-short values', () => {
+    expect(looksLikeToken('abc')).toBe(false);
+  });
+
+  it('rejects the literal strings "undefined" / "null"', () => {
+    expect(looksLikeToken('undefined')).toBe(false);
+    expect(looksLikeToken('null')).toBe(false);
+  });
+
+  it('rejects values with whitespace', () => {
+    expect(looksLikeToken('eyJ abc def ghi long enough')).toBe(false);
+    expect(looksLikeToken('eyJtab\there.is.tab')).toBe(false);
+  });
+
+  it('accepts long opaque token (not strictly JWT format)', () => {
+    expect(looksLikeToken('hd_live_' + 'a'.repeat(24))).toBe(true);
+  });
+});

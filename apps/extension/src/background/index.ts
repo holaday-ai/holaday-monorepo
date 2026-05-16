@@ -56,6 +56,7 @@ import { buildLoginStatesMessage, readLoginStates } from './cookie-bridge.js';
 import { runCookieSync } from './cookie-sync.js';
 import { runHistorySync } from './history-sync.js';
 import { handleExtensionToolCall } from './extension-tools.js';
+import { isTrustedAuthBridgeSender } from './auth-bridge-trust.js';
 import {
   connect,
   disconnect,
@@ -1154,6 +1155,56 @@ chrome.runtime.onStartup.addListener(() => {
 // ---------- Popup ⇄ SW messaging ----------
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg?.type === 'holaday.auth.token' && (msg.token === null || typeof msg.token === 'string')) {
+    // Phase 25b — push from the auth-bridge content script on a
+    // workbench page. Treats `null` as logout and a fresh string as
+    // login / account swap. Idempotent: identical-to-stored values
+    // are short-circuited so we don't churn the WS on poll ticks.
+    if (!isTrustedAuthBridgeSender(_sender.url)) {
+      console.warn(
+        '[holaday] auth-bridge: ignoring message from untrusted sender',
+        _sender.url,
+      );
+      sendResponse({ ok: false, reason: 'untrusted_sender' });
+      return true;
+    }
+    void (async () => {
+      const incoming = typeof msg.token === 'string' ? msg.token : null;
+      const stored = await getAccessToken();
+      if (incoming === stored) {
+        // No-op; content script's dedupe is best-effort and the SW
+        // is the authoritative gate.
+        sendResponse({ ok: true, action: 'unchanged' });
+        return;
+      }
+      if (incoming === null) {
+        // SPA logged out → mirror it. clearStoredUser + clearAccessToken
+        // wipe both the token and the cached user shape; disconnect
+        // tears down the WS so the next ensureConnected starts fresh
+        // (and returns null because no token is stored).
+        await clearAccessToken();
+        await clearStoredUser();
+        disconnect();
+        state.tasks.clear();
+        // Phase 25b — popup mirror state may be cached; nudge any open
+        // popup to re-render via the tasks snapshot channel.
+        pushTasksSnapshot();
+        sendResponse({ ok: true, action: 'cleared' });
+        return;
+      }
+      // Fresh token (login OR account swap). Write to chrome.storage;
+      // ws-client's storage.onChanged listener will see the change and
+      // call reconnect(newToken). Also clear the auth-failure freeze
+      // since a fresh token from the SPA means the user just authed
+      // successfully on the web side — old failures aren't relevant.
+      await setAccessToken(incoming);
+      await resetAuthFailureState();
+      await resetWsReconnectAttempts();
+      sendResponse({ ok: true, action: 'set' });
+    })();
+    return true; // keep response channel open
+  }
+
   if (msg?.type === 'holaday.connect' && typeof msg.token === 'string') {
     connect(msg.token);
     sendResponse({ ok: true });
