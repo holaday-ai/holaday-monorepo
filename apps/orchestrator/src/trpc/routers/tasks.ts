@@ -83,7 +83,9 @@ import { users } from '../../db/schema/users.js';
 import {
   broadcastToUser,
   getExtensionLoginState,
+  hasConnectedExtension,
   hasConnectedSwClient,
+  sendExtensionToolCall,
   updateTaskStateForUser,
 } from '../../ws/server.js';
 import { protectedProcedure, router } from '../trpc.js';
@@ -5150,6 +5152,74 @@ export const tasksRouter = router({
         ok: true as const,
         taskId: input.taskId,
         projectId: input.projectId,
+      };
+    }),
+
+  /**
+   * Phase 25 Mode B v0.1 — smoke endpoint for the extension execution
+   * path. Bypasses the agent loop entirely: just sends one
+   * `server.extension.tool_call` (kind='navigate') to the user's
+   * connected extension, awaits the result, and returns it.
+   *
+   * Purpose: prove the protocol roundtrip end-to-end (orchestrator →
+   * extension → user's Chrome → page load with their cookies → result
+   * back to orchestrator). Full agent-loop integration (where every
+   * navigate/click/type call in the vision-loop is routed through this
+   * path) is v0.2.
+   *
+   * Returns:
+   *   { ok: true, finalUrl, title, bodyText }                   // success
+   *   { ok: false, error: { message, code } }                   // any failure
+   *
+   * Failure codes (carried verbatim from sendExtensionToolCall):
+   *   no_extension    — user has no extension WS connection
+   *   timeout         — extension didn't reply within timeoutMs
+   *   socket_closed   — extension disconnected mid-flight
+   *   bad_args        — extension rejected the args (e.g. missing url)
+   *   exec_error      — chrome.tabs / scripting error inside the SW
+   */
+  modeBPing: protectedProcedure
+    .input(
+      z.object({
+        url: z.string().url(),
+        waitMs: z.number().int().nonnegative().max(10_000).optional(),
+        timeoutMs: z.number().int().positive().max(60_000).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.userId;
+      if (!hasConnectedExtension(userId)) {
+        return {
+          ok: false as const,
+          error: { message: '扩展未连接，请确认 HOLA DAY 扩展已安装并登录', code: 'no_extension' },
+        };
+      }
+      const outcome = await sendExtensionToolCall(userId, {
+        // taskId reused as a logical correlation id — we don't actually
+        // persist a tasks row for this smoke endpoint. The extension
+        // doesn't care about the value, only that requestId is unique.
+        taskId: `mode-b-ping-${Date.now().toString(36)}`,
+        kind: 'navigate',
+        args: {
+          url: input.url,
+          ...(input.waitMs !== undefined ? { waitMs: input.waitMs } : {}),
+        },
+        ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+      });
+      if (!outcome.ok) {
+        return {
+          ok: false as const,
+          error: outcome.error ?? { message: '未知错误', code: 'unknown' },
+        };
+      }
+      const result = outcome.result as
+        | { finalUrl?: unknown; title?: unknown; bodyText?: unknown }
+        | undefined;
+      return {
+        ok: true as const,
+        finalUrl: typeof result?.finalUrl === 'string' ? result.finalUrl : '',
+        title: typeof result?.title === 'string' ? result.title : '',
+        bodyText: typeof result?.bodyText === 'string' ? result.bodyText : '',
       };
     }),
 });

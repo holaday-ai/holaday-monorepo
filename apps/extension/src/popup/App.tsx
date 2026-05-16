@@ -9,6 +9,21 @@ import {
   setStoredUser,
 } from '../shared/storage.js';
 
+/**
+ * Phase 25 — chrome.storage keys mirrored from background/history-sync.ts
+ * + background/index.ts. Kept in sync by convention; the popup reads
+ * these directly (rather than going through a SW message) so the
+ * "已同步 N 个常用网站" / settings toggle render without a round-trip.
+ */
+const HISTORY_SYNC_ENABLED_KEY = 'holaday.history.enabled';
+const HISTORY_SYNC_SUMMARY_KEY = 'holaday.history.lastSyncSummary';
+
+interface HistorySyncSummary {
+  ingested: number;
+  topDomains: string[];
+  at: number;
+}
+
 type Status = 'idle' | 'loading' | 'connected' | 'error';
 
 /**
@@ -567,6 +582,8 @@ export function App() {
         </div>
       </div>
 
+      <BrowsingStatusBlock />
+
       <div style={{ ...column(6), marginTop: 8 }}>
         <textarea
           rows={2}
@@ -873,6 +890,115 @@ function ResultsSection({ task }: { task: ResultsSectionTask }) {
     </div>
   );
 }
+
+/**
+ * Phase 25 — browsing-history sync status block.
+ *
+ * Reads two chrome.storage keys:
+ *   - HISTORY_SYNC_SUMMARY_KEY: latest server response { ingested,
+ *     topDomains, at } — used to render "已同步 N 个常用网站".
+ *   - HISTORY_SYNC_ENABLED_KEY: user toggle (default ON when absent).
+ *
+ * The toggle write goes to the same storage key the SW reads inside
+ * `isHistorySyncEnabled` — no SW message needed, the next alarm tick
+ * (≤30 s away) picks up the change. The popup keeps a local copy of
+ * the toggle state so the checkbox is responsive without waiting on
+ * the SW.
+ */
+function BrowsingStatusBlock() {
+  const [summary, setSummary] = useState<HistorySyncSummary | null>(null);
+  const [enabled, setEnabled] = useState<boolean>(true);
+
+  useEffect(() => {
+    chrome.storage.local.get([HISTORY_SYNC_SUMMARY_KEY, HISTORY_SYNC_ENABLED_KEY], (r) => {
+      const s = r[HISTORY_SYNC_SUMMARY_KEY];
+      if (s && typeof s === 'object' && typeof (s as { ingested?: unknown }).ingested === 'number') {
+        setSummary(s as HistorySyncSummary);
+      }
+      setEnabled(r[HISTORY_SYNC_ENABLED_KEY] !== false);
+    });
+    // Re-render when the SW writes a fresh summary (post-sync).
+    const listener = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: chrome.storage.AreaName,
+    ): void => {
+      if (area !== 'local') return;
+      if (HISTORY_SYNC_SUMMARY_KEY in changes) {
+        const next = changes[HISTORY_SYNC_SUMMARY_KEY]?.newValue;
+        if (next && typeof next === 'object') {
+          setSummary(next as HistorySyncSummary);
+        }
+      }
+      if (HISTORY_SYNC_ENABLED_KEY in changes) {
+        setEnabled(changes[HISTORY_SYNC_ENABLED_KEY]?.newValue !== false);
+      }
+    };
+    chrome.storage.onChanged.addListener(listener);
+    return () => chrome.storage.onChanged.removeListener(listener);
+  }, []);
+
+  async function toggleEnabled(): Promise<void> {
+    const next = !enabled;
+    setEnabled(next);
+    try {
+      await chrome.storage.local.set({ [HISTORY_SYNC_ENABLED_KEY]: next });
+    } catch {
+      // Revert UI if storage write failed (shouldn't happen but defensive).
+      setEnabled(enabled);
+    }
+  }
+
+  return (
+    <div style={browsingBlock}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ fontSize: 12, fontWeight: 600 }}>
+          {summary && summary.ingested > 0
+            ? `已同步 ${summary.ingested} 个常用网站`
+            : enabled
+              ? '正在学习你的浏览习惯…'
+              : '浏览记录同步已关闭'}
+        </div>
+        <label style={{ fontSize: 11, display: 'inline-flex', gap: 4, alignItems: 'center', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={() => void toggleEnabled()}
+            style={{ margin: 0 }}
+          />
+          同步浏览记录
+        </label>
+      </div>
+      {summary && summary.topDomains.length > 0 ? (
+        <div style={browsingTop}>常去：{summary.topDomains.slice(0, 5).join('、')}</div>
+      ) : (
+        <div style={browsingHint}>
+          HOLA DAY 会用域名 + 访问次数学习你的偏好（不会上传完整 URL 或页面内容）。
+        </div>
+      )}
+    </div>
+  );
+}
+
+const browsingBlock: React.CSSProperties = {
+  marginTop: 8,
+  padding: '8px 10px',
+  background: '#f0f9ff',
+  border: '1px solid #bae6fd',
+  borderRadius: 4,
+};
+const browsingTop: React.CSSProperties = {
+  marginTop: 4,
+  fontSize: 11,
+  color: '#075985',
+  lineHeight: 1.4,
+};
+const browsingHint: React.CSSProperties = {
+  marginTop: 4,
+  fontSize: 11,
+  color: '#0c4a6e',
+  opacity: 0.85,
+  lineHeight: 1.4,
+};
 
 // ---------- History ----------
 

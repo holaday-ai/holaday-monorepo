@@ -54,13 +54,17 @@ import {
 import { captureVisionObservation, executeCdpAction, getActiveTabId } from './cdp-actions.js';
 import { buildLoginStatesMessage, readLoginStates } from './cookie-bridge.js';
 import { runCookieSync } from './cookie-sync.js';
+import { runHistorySync } from './history-sync.js';
+import { handleExtensionToolCall } from './extension-tools.js';
 import {
   connect,
   disconnect,
   isConnected,
+  isReconnectCapped,
   onServerMessage,
   onUnauthorized,
   reconnect,
+  resetWsReconnectAttempts,
   send,
 } from './ws-client.js';
 
@@ -239,6 +243,11 @@ onServerMessage((msg) => {
     // throttled at most once per WELCOME_COOKIE_SYNC_DEBOUNCE_MS.
     // Best-effort: errors logged + swallowed.
     void maybeRunCookieSync('welcome');
+    // Phase 25 — and a browsing-history sync. 24h gate inside the
+    // helper means the welcome path is also rate-limited; first
+    // post-install welcome fires it, subsequent same-day welcomes
+    // skip.
+    void maybeRunHistorySync('welcome');
     // Successful auth → reset the failure counter + known-bad
     // tracking so a future genuine failure starts fresh. Also
     // cancels any pending backoff retry that's no longer needed.
@@ -279,6 +288,14 @@ onServerMessage((msg) => {
   }
   if (msg.type === 'server.task.terminal') {
     onTaskTerminal(msg);
+    return;
+  }
+  if (msg.type === 'server.extension.tool_call') {
+    // Phase 25 Mode B v0.1 — orchestrator wants us to drive the
+    // user's local Chrome (login state inherited). Fire-and-forget;
+    // handleExtensionToolCall owns the result-send path on every
+    // success/failure branch.
+    void handleExtensionToolCall(msg);
     return;
   }
   console.debug('[holaday] msg', msg);
@@ -896,6 +913,72 @@ async function maybeRunCookieSync(reason: 'welcome' | 'alarm' | 'manual'): Promi
   }
 }
 
+/**
+ * Phase 25 — browsing-history sync throttle. Cadence is much slower
+ * than cookies (cookies move per-session, browsing patterns change
+ * per-week). 24 hours matches the spec target. Initial sync runs at
+ * the first WS welcome after install; subsequent runs are alarm-
+ * gated. Throttle state lives in chrome.storage.local so SW restarts
+ * don't double-up.
+ *
+ * Settings toggle (HISTORY_SYNC_ENABLED_KEY) is a user opt-out for
+ * the privacy-conscious — default ON because the value depends on
+ * the orchestrator having the data.
+ */
+const HISTORY_SYNC_PERIOD_MS = 24 * 60 * 60 * 1000;
+const HISTORY_SYNC_LAST_AT_KEY = 'holaday.history.lastSyncAt';
+const HISTORY_SYNC_ENABLED_KEY = 'holaday.history.enabled';
+
+async function isHistorySyncEnabled(): Promise<boolean> {
+  try {
+    const v = (await chrome.storage.local.get(HISTORY_SYNC_ENABLED_KEY))[HISTORY_SYNC_ENABLED_KEY];
+    // Default ON when key missing — explicit `false` disables.
+    return v !== false;
+  } catch {
+    return true;
+  }
+}
+
+async function getLastHistorySyncAt(): Promise<number> {
+  try {
+    const v = (await chrome.storage.local.get(HISTORY_SYNC_LAST_AT_KEY))[HISTORY_SYNC_LAST_AT_KEY];
+    return typeof v === 'number' ? v : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function setLastHistorySyncAt(t: number): Promise<void> {
+  try {
+    await chrome.storage.local.set({ [HISTORY_SYNC_LAST_AT_KEY]: t });
+  } catch {
+    /* non-fatal */
+  }
+}
+
+async function maybeRunHistorySync(reason: 'welcome' | 'alarm' | 'manual'): Promise<void> {
+  if (!(await isHistorySyncEnabled())) return;
+  const now = Date.now();
+  if (reason === 'alarm') {
+    const last = await getLastHistorySyncAt();
+    if (now - last < HISTORY_SYNC_PERIOD_MS) return;
+  }
+  try {
+    const res = await runHistorySync();
+    if (res === null) {
+      // No token OR empty history — silent skip, will retry next cadence.
+      return;
+    }
+    await setLastHistorySyncAt(now);
+    console.info(
+      `[holaday] history-sync (${reason}): ingested ${res.ingested} domains, rejected ${res.rejected}`,
+    );
+  } catch (err) {
+    console.warn('[holaday] history-sync failed', err);
+    // Do NOT advance the timestamp on failure — next cadence retries.
+  }
+}
+
 async function maybeReportLoginStates(): Promise<void> {
   if (!isConnected()) return;
   const now = Date.now();
@@ -1013,15 +1096,31 @@ onUnauthorized(() => {
 // the next alarm tick respawns it and we re-establish the WS. The
 // 30-second cadence is Chrome's stable minimum and matches our
 // HEARTBEAT_INTERVAL_MS — see shared-types/ws.ts.
+//
+// Phase 25 — the alarm path now consults `isReconnectCapped()` before
+// driving ensureConnected. Without this guard, the 30 s alarm would
+// kick off a fresh reconnect cycle EVERY tick after the in-memory
+// cap fired — defeating the persistent-cap fix in ws-client. With
+// it, three failed attempts → silence until the user explicitly
+// re-engages via the popup or chrome.runtime.onStartup.
 chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: KEEPALIVE_PERIOD_MIN });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === KEEPALIVE_ALARM) {
-    void ensureConnected().then(() => {
+    void (async () => {
+      if (await isReconnectCapped()) {
+        // Persistent cap is hit — don't burn another connect cycle on
+        // a known-unreachable orchestrator. The popup's manual retry
+        // path will clear the cap when the user is ready.
+        return;
+      }
+      await ensureConnected();
       void maybeReportLoginStates();
       // Phase 17 — internally throttled to once per 30 min, so safe
       // to fire from the keepalive cadence (30 s).
       void maybeRunCookieSync('alarm');
-    });
+      // Phase 25 — 24h gate inside the helper.
+      void maybeRunHistorySync('alarm');
+    })();
   }
 });
 
@@ -1029,7 +1128,28 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // on install, on browser start, on alarm wakeup, on event-driven respawn.
 // Pairs with the alarm above to make "always be trying to be connected"
 // the default state whenever a token exists.
-void ensureConnected();
+//
+// Phase 25 — same cap-aware gate as the alarm. If the persistent
+// counter says 3 attempts already failed in earlier SW lives, this
+// boot stays silent too. chrome.runtime.onStartup clears the cap on
+// a fresh browser launch (handler below), and the popup's "重置连接"
+// nudge clears it for an already-running browser.
+void (async () => {
+  if (await isReconnectCapped()) return;
+  await ensureConnected();
+})();
+
+// Fresh browser session → forget any cap from a previous Chrome
+// instance. Without this, a user who hit the cap, quit Chrome, and
+// restarted would silently stay disconnected until they noticed and
+// opened the popup. onStartup only fires on actual browser launch
+// (not on SW respawn), so the persistent cap inside one session is
+// untouched.
+chrome.runtime.onStartup.addListener(() => {
+  void resetWsReconnectAttempts().then(() => {
+    void ensureConnected();
+  });
+});
 
 // ---------- Popup ⇄ SW messaging ----------
 
@@ -1059,8 +1179,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     // tries auto-login from the current holaday.ai tab. Unlike
     // tryAutoLogin (which is the soft thaw — keep the token,
     // just clear the failure counter), this nukes the lot.
+    // Phase 25 — also clears the persistent ws-reconnect cap so
+    // a 3-attempt freeze unfreezes immediately.
     void (async () => {
       await resetAllAuthState();
+      await resetWsReconnectAttempts();
       const { token, frozen } = await ensureConnected();
       sendResponse({
         ok: Boolean(token),
@@ -1077,12 +1200,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     // user-initiated retry also counts as ground for un-freezing
     // the auth circuit breaker — clear the failure counter +
     // known-bad token so the next ensureConnected runs fresh.
+    // Phase 25 — same treatment for the ws-network cap.
     void (async () => {
       if (pendingAuthRetry) {
         clearTimeout(pendingAuthRetry);
         pendingAuthRetry = null;
       }
       await resetAuthFailureState();
+      await resetWsReconnectAttempts();
       const { token, frozen } = await ensureConnected();
       sendResponse({
         ok: Boolean(token),

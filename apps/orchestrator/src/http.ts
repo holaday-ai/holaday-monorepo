@@ -26,6 +26,10 @@ import {
   upsertPendingCookies,
 } from './cookies/sync-service.js';
 import {
+  browsingHistorySchema,
+  replaceUserSiteStats,
+} from './browsing-history/service.js';
+import {
   ACCEPTED_EXTENSIONS,
   ACCEPTED_MIMES,
   FileService,
@@ -656,6 +660,81 @@ export function createHttpApp(deps: HttpAppDeps) {
         domains,
         deferred,
       });
+    },
+  );
+
+  // ---------------------------------------------------------------------
+  // Phase 25 — extension browsing-history sync.
+  //
+  //   POST /extension/browsing-history
+  //   Headers: Authorization: Bearer <jwt>
+  //   Body: { domains: [{ domain, visitCount, lastVisitAt? }, ...] }
+  //
+  // The Chrome extension reads `chrome.history.search` for the last
+  // 30 days, groups by host client-side, and POSTs the resulting
+  // tuples here. The orchestrator does an atomic replace on
+  // `user_site_stats` for this user — the extension always sends a
+  // full snapshot so per-row upsert + conflict resolution isn't
+  // needed.
+  //
+  // Privacy contract: ONLY host + visit count + last visit timestamp
+  // are accepted. Full URLs, query strings, and page titles never
+  // touch our backend. The service-side filter additionally drops
+  // chrome:// / about: / IP literals (see browsing-history/service.ts).
+  //
+  // Per-route json parser bumps to 1mb — payloads are typically tens
+  // of KB but we let the headroom accommodate users with very wide
+  // browsing footprints.
+  // ---------------------------------------------------------------------
+  app.post(
+    '/extension/browsing-history',
+    express.json({ limit: '1mb' }),
+    async (req, res) => {
+      const userExternalId = (req as express.Request & { userId?: string }).userId;
+      if (!userExternalId) {
+        res.status(401).json({ error: 'unauthorized' });
+        return;
+      }
+      const parsed = browsingHistorySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({
+          error: 'invalid_payload',
+          // Zod's flatten() is plenty informative for an internal
+          // client we control; no need to ship its full issue tree.
+          message: parsed.error.issues[0]?.message ?? 'invalid body',
+        });
+        return;
+      }
+      const [user] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.externalId, userExternalId))
+        .limit(1);
+      if (!user) {
+        res.status(401).json({ error: 'unknown_user' });
+        return;
+      }
+      try {
+        const result = await replaceUserSiteStats(db, user.id, parsed.data);
+        logger.info(
+          {
+            userExternalId,
+            ingested: result.ingested,
+            rejected: result.rejected,
+          },
+          'extension: browsing-history sync',
+        );
+        res.json(result);
+      } catch (err) {
+        logger.error(
+          {
+            err: err instanceof Error ? err.message : String(err),
+            userExternalId,
+          },
+          'extension: browsing-history sync failed',
+        );
+        res.status(500).json({ error: 'sync_failed' });
+      }
     },
   );
 

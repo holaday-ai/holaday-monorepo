@@ -36,6 +36,14 @@ interface ClientState {
    * signal is plumbing, not state-machine state.
    */
   healedStepIds: Set<string>;
+  /**
+   * Phase 25 — true when this client is the Chrome extension (set
+   * from `client.hello.extensionVersion`). SPA / sidepanel clients
+   * leave it false. Read by `hasConnectedExtension(userId)` so the
+   * ExecutionRouter can decide whether Mode B (extension-driven) is
+   * available without sending discovery probes.
+   */
+  isExtension: boolean;
 }
 
 const taskController = new TaskController();
@@ -286,6 +294,116 @@ function removeClientForUser(userId: string, client: ClientState): void {
 }
 
 /**
+ * Phase 25 — does this user have a live Chrome-extension WS client
+ * connected RIGHT NOW (i.e. a socket that sent `client.hello` with
+ * `extensionVersion`, and is still in OPEN state)?
+ *
+ * The ExecutionRouter calls this at tasks.create to decide whether
+ * to route through Mode B (extension-driven, login-state inheriting)
+ * or fall through to Mode A (cloud Brave). When this returns false
+ * we go Mode A even if the user "has" an extension installed —
+ * physical-presence-of-connection is the only signal that matters
+ * for actually being able to drive the user's Chrome.
+ */
+export function hasConnectedExtension(userId: string): boolean {
+  const set = clientsByUser.get(userId);
+  if (!set) return false;
+  for (const client of set) {
+    if (client.isExtension && client.socket.readyState === WebSocket.OPEN) return true;
+  }
+  return false;
+}
+
+/**
+ * Phase 25 — pending extension tool-call requests, keyed by requestId.
+ * The orchestrator sends `server.extension.tool_call` to the extension
+ * and stashes a resolver here; when the matching
+ * `client.extension.tool_result` arrives we resolve the promise.
+ * Timeouts clean the entry; the deadline lives on the request payload.
+ */
+interface PendingExtensionToolCall {
+  resolve: (msg: ExtensionToolResultMsg) => void;
+  timer: NodeJS.Timeout;
+}
+type ExtensionToolResultMsg = Extract<ClientMessage, { type: 'client.extension.tool_result' }>;
+
+const pendingExtensionCalls = new Map<string, PendingExtensionToolCall>();
+
+export interface ExtensionToolCallOptions {
+  taskId: string;
+  kind: 'navigate' | 'screenshot';
+  args?: { url?: string; waitMs?: number };
+  /** Per-call deadline; clamped to [1s, 60s]. Default 30s. */
+  timeoutMs?: number;
+}
+
+export interface ExtensionToolCallOutcome {
+  ok: boolean;
+  result?: unknown;
+  error?: { message: string; code?: string };
+}
+
+/**
+ * Send a tool call to ONE of the user's connected extension sockets
+ * (the first OPEN one we find) and await the matching tool_result.
+ *
+ * Returns `{ ok: false, error }` rather than throwing on:
+ *   - No extension connected            (code: 'no_extension')
+ *   - Timeout                            (code: 'timeout')
+ *   - Socket closed mid-flight           (code: 'socket_closed')
+ * so callers don't need a try/catch — the result already carries the
+ * failure path. Programmer errors (invalid args, etc.) DO throw via
+ * the schema check downstream.
+ */
+export async function sendExtensionToolCall(
+  userId: string,
+  opts: ExtensionToolCallOptions,
+): Promise<ExtensionToolCallOutcome> {
+  const requestId = randomUUID();
+  const timeoutMs = Math.max(1000, Math.min(60_000, opts.timeoutMs ?? 30_000));
+
+  const set = clientsByUser.get(userId);
+  let target: ClientState | null = null;
+  if (set) {
+    for (const client of set) {
+      if (client.isExtension && client.socket.readyState === WebSocket.OPEN) {
+        target = client;
+        break;
+      }
+    }
+  }
+  if (!target) {
+    return { ok: false, error: { message: '扩展未连接，无法走 Mode B', code: 'no_extension' } };
+  }
+
+  return new Promise<ExtensionToolCallOutcome>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingExtensionCalls.delete(requestId);
+      resolve({ ok: false, error: { message: '扩展工具调用超时', code: 'timeout' } });
+    }, timeoutMs);
+    timer.unref();
+    pendingExtensionCalls.set(requestId, {
+      resolve: (msg) => {
+        resolve({
+          ok: msg.ok,
+          ...(msg.result !== undefined ? { result: msg.result } : {}),
+          ...(msg.error ? { error: msg.error } : {}),
+        });
+      },
+      timer,
+    });
+    send(target.socket, {
+      type: 'server.extension.tool_call',
+      taskId: opts.taskId,
+      requestId,
+      kind: opts.kind,
+      ...(opts.args ? { args: opts.args } : {}),
+      timeoutMs,
+    });
+  });
+}
+
+/**
  * Message types that, if sent to a Chrome extension WS client, would
  * drive the user's LOCAL Chrome via chrome.debugger. P0 guard
  * (Phase 24 RC follow-up): drop them at the broadcast boundary so a
@@ -359,6 +477,7 @@ async function handleConnection(socket: WebSocket, req: IncomingMessage) {
     authed: false,
     tasks: new Map(),
     healedStepIds: new Set(),
+    isExtension: false,
   };
 
   const requestedProtos = (req.headers['sec-websocket-protocol'] ?? '')
@@ -435,6 +554,13 @@ async function handleClientMessage(
     }
     state.userId = userId;
     state.authed = true;
+    // Phase 25 — flag this socket as an extension client when the
+    // hello frame carries `extensionVersion`. SPA / sidepanel clients
+    // omit the field. Read by `hasConnectedExtension(userId)` for the
+    // Mode B routing check in tasks.create.
+    if (typeof msg.extensionVersion === 'string' && msg.extensionVersion.length > 0) {
+      state.isExtension = true;
+    }
     addClientForUser(userId, state);
     clearTimeout(authTimer);
     send(state.socket, {
@@ -548,6 +674,24 @@ async function handleClientMessage(
         'extension: login states updated',
       );
     }
+    return;
+  }
+
+  if (msg.type === 'client.extension.tool_result') {
+    // Phase 25 — match the result to a pending tool call. If no
+    // pending entry exists, the timer already fired (or a different
+    // socket sent a stale result); ignore.
+    const pending = pendingExtensionCalls.get(msg.requestId);
+    if (!pending) {
+      logger.warn(
+        { requestId: msg.requestId, taskId: msg.taskId, clientId: state.id },
+        'extension: tool_result arrived without pending request (late / duplicate?)',
+      );
+      return;
+    }
+    clearTimeout(pending.timer);
+    pendingExtensionCalls.delete(msg.requestId);
+    pending.resolve(msg);
     return;
   }
 }

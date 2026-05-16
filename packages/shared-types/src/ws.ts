@@ -182,6 +182,50 @@ export const clientExtensionLoginStatesSchema = z.object({
     }),
 });
 
+/**
+ * Phase 25 — extension-driven tool execution (Mode B v0.1).
+ *
+ * When the user has the Chrome extension connected and Mode B is
+ * enabled, the orchestrator routes browser tool calls through the
+ * extension instead of a cloud Brave instance. The extension drives
+ * the user's own Chrome (which inherits all their cookies / sessions)
+ * via chrome.tabs / chrome.scripting APIs.
+ *
+ * Tool result reports back via this frame. `requestId` matches the
+ * `requestId` field on the corresponding `server.extension.tool_call`.
+ *
+ * Shape:
+ *   - `ok=true`:  call succeeded — `result` carries kind-specific
+ *                 payload (url + title + text for navigate, base64
+ *                 PNG for screenshot, etc.)
+ *   - `ok=false`: call failed — `error` carries a short Chinese
+ *                 message + optional Chromium error code
+ *
+ * Cap the payload at ~200KB per frame: that's enough for a full
+ * page-text extract (~10 pages of dense text) without blowing past
+ * typical WS frame limits. Larger payloads chunk into multiple frames
+ * (future work; v0.1 single-frame only).
+ */
+export const clientExtensionToolResultSchema = z.object({
+  type: z.literal('client.extension.tool_result'),
+  taskId: z.string().min(1).max(64),
+  requestId: z.string().min(1).max(64),
+  ok: z.boolean(),
+  // result is an arbitrary kind-specific object; the orchestrator
+  // narrows it at the consumer site based on the original tool kind.
+  // Stringified payloads (e.g. base64 screenshots) keep the wire size
+  // tractable.
+  result: z.unknown().optional(),
+  error: z
+    .object({
+      message: z.string().max(2000),
+      code: z.string().max(64).optional(),
+    })
+    .optional(),
+  /** ms since unix epoch — used for latency telemetry. */
+  at: z.number().int().nonnegative(),
+});
+
 export const clientMessageSchema = z.discriminatedUnion('type', [
   clientHelloSchema,
   clientPongSchema,
@@ -192,6 +236,7 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
   clientVisionActedSchema,
   clientVisionUserInputSchema,
   clientExtensionLoginStatesSchema,
+  clientExtensionToolResultSchema,
 ]);
 
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
@@ -693,6 +738,46 @@ export const serverBatchProgressSchema = z.object({
     .optional(),
 });
 
+/**
+ * Phase 25 — extension tool call (Mode B v0.1).
+ *
+ * Sent from orchestrator to a connected extension WS client when the
+ * agent's tool dispatcher decides this user's task should run in the
+ * user's local Chrome (login state inherited). Extension SW handles
+ * the call via chrome.tabs / chrome.scripting / chrome.tabs.captureVisibleTab
+ * and posts a `client.extension.tool_result` back with the matching
+ * requestId.
+ *
+ * Kinds supported in v0.1:
+ *   - 'navigate'    → navigate the active tab to `url`, return final url + title + body text
+ *   - 'screenshot'  → capture visible viewport, return base64 PNG (capped)
+ *
+ * Future kinds (v0.2+): click, type, scroll. For v0.1 the orchestrator
+ * only emits navigate (single-shot URL fetch) — proves the auth
+ * inheritance + protocol roundtrip without committing to the full
+ * vision-loop integration.
+ */
+export const serverExtensionToolCallSchema = z.object({
+  type: z.literal('server.extension.tool_call'),
+  taskId: z.string().min(1).max(64),
+  requestId: z.string().min(1).max(64),
+  kind: z.enum(['navigate', 'screenshot']),
+  /** Per-kind args. `url` populated for navigate; ignored for screenshot. */
+  args: z
+    .object({
+      url: z.string().url().optional(),
+      /**
+       * Optional ms to wait after navigation before reading body text.
+       * Default 1500 in the extension if omitted. Range guarded
+       * client-side to [0, 10000].
+       */
+      waitMs: z.number().int().nonnegative().max(10_000).optional(),
+    })
+    .optional(),
+  /** Orchestrator-side deadline; if no result arrives by then we time out. */
+  timeoutMs: z.number().int().positive().max(60_000).default(30_000),
+});
+
 export const serverMessageSchema = z.discriminatedUnion('type', [
   serverWelcomeSchema,
   serverErrorSchema,
@@ -721,6 +806,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   serverTaskStreamSchema,
   serverTaskProgressSchema,
   serverBatchProgressSchema,
+  serverExtensionToolCallSchema,
 ]);
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;

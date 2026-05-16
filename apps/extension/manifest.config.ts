@@ -43,6 +43,13 @@ export default defineManifest({
     // "HOLA DAY is debugging this browser" banner while attached — that's
     // the visible footprint of the control plane.
     'debugger',
+    // Phase 25 — read the user's 30-day browsing history at install
+    // and incrementally once a day after that. The extension groups
+    // visits by host client-side (we never upload the full URL list)
+    // and POSTs the per-domain aggregate to
+    // /extension/browsing-history. Lets the orchestrator's site-config
+    // router prefer configs for domains the user actually visits.
+    'history',
   ],
 
   host_permissions: ['<all_urls>'],
