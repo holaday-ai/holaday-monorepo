@@ -79,10 +79,15 @@ export function EventDetailPopover({
     <div
       ref={rootRef}
       className={cn(
-        'hd-popover-enter fixed z-50 rounded-lg border border-border bg-popover p-4 shadow-2xl',
+        'hd-popover-enter fixed z-50 bg-popover',
         mobile && 'left-2 right-2 bottom-2 mx-auto',
       )}
-      style={mobile ? undefined : position}
+      style={{
+        ...(mobile ? {} : position),
+        borderRadius: 12,
+        boxShadow: '0 4px 24px rgba(0,0,0,0.12)',
+        padding: 20,
+      }}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
@@ -100,6 +105,20 @@ export function EventDetailPopover({
           </p>
         </div>
       </div>
+
+      {row.description && row.description.trim().length > 0 && (
+        <div
+          className="mt-3 whitespace-pre-wrap text-xs text-muted-foreground"
+          style={{
+            padding: '8px 10px',
+            background: 'rgba(0,0,0,0.03)',
+            borderRadius: 8,
+            lineHeight: 1.5,
+          }}
+        >
+          {row.description}
+        </div>
+      )}
 
       <div className="mt-3 grid grid-cols-[auto,1fr] gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
         <span className="flex items-center gap-1"><Clock className="h-3 w-3" />下次</span>

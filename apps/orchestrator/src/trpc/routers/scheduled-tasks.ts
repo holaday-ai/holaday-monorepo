@@ -112,6 +112,7 @@ export const scheduledTasksRouter = router({
         .select({
           externalId: scheduledTasks.externalId,
           intent: scheduledTasks.intent,
+          description: scheduledTasks.description,
           repeatType: scheduledTasks.repeatType,
           rrule: scheduledTasks.rrule,
           durationMinutes: scheduledTasks.durationMinutes,
@@ -133,6 +134,7 @@ export const scheduledTasksRouter = router({
       return rows.map((r) => ({
         scheduledTaskId: r.externalId,
         intent: r.intent,
+        description: r.description,
         repeatType: r.repeatType,
         rrule: r.rrule,
         durationMinutes: r.durationMinutes,
@@ -161,6 +163,9 @@ export const scheduledTasksRouter = router({
         rrule: z.string().max(255).optional().nullable(),
         durationMinutes: z.number().int().positive().max(60 * 24).optional(),
         timezone: z.string().max(64).optional(),
+        // Phase 26B polish — optional human-readable annotation
+        // shown in the event-detail popover. Never reaches the agent.
+        description: z.string().max(2000).optional().nullable(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -197,6 +202,9 @@ export const scheduledTasksRouter = router({
           ? { durationMinutes: input.durationMinutes }
           : {}),
         ...(input.timezone ? { timezone: input.timezone } : {}),
+        ...(input.description !== undefined && input.description !== null
+          ? { description: input.description }
+          : {}),
       });
       return { scheduledTaskId: externalId };
     }),
@@ -223,6 +231,8 @@ export const scheduledTasksRouter = router({
         rrule: z.string().max(255).optional().nullable(),
         durationMinutes: z.number().int().positive().max(60 * 24).optional(),
         timezone: z.string().max(64).optional(),
+        // Phase 26B polish — explicit `null` clears the field.
+        description: z.string().max(2000).optional().nullable(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -271,6 +281,7 @@ export const scheduledTasksRouter = router({
         updates.durationMinutes = input.durationMinutes;
       }
       if (input.timezone !== undefined) updates.timezone = input.timezone;
+      if (input.description !== undefined) updates.description = input.description;
       if (Object.keys(updates).length === 0) {
         return { ok: true as const, noop: true as const };
       }

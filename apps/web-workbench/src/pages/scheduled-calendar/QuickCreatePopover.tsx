@@ -14,6 +14,7 @@
  * Dismissal: Esc, click outside, or pressing Cancel.
  */
 
+import { Plus } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -39,11 +40,12 @@ interface Props {
     scheduledAt: Date;
     repeatType: 'once' | 'daily' | 'weekly' | 'monthly';
     rrule?: string;
+    description?: string;
   }): Promise<void>;
 }
 
-const POPOVER_WIDTH = 320;
-const POPOVER_HEIGHT_EST = 280;
+const POPOVER_WIDTH = 360;
+const POPOVER_HEIGHT_EST = 320;
 
 export function QuickCreatePopover({
   anchor,
@@ -58,6 +60,8 @@ export function QuickCreatePopover({
     'once' | 'daily' | 'weekly' | 'monthly' | 'custom'
   >('once');
   const [rrule, setRrule] = React.useState('');
+  const [description, setDescription] = React.useState('');
+  const [showDescription, setShowDescription] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [showAdvanced, setShowAdvanced] = React.useState(false);
   const intentRef = React.useRef<HTMLInputElement | null>(null);
@@ -92,11 +96,13 @@ export function QuickCreatePopover({
       const scheduledAt = combineDateAndTime(date, timeStr);
       const finalRepeatType =
         repeatType === 'custom' ? 'once' : repeatType;
+      const trimmedDescription = description.trim();
       await onCreate({
         intent: intent.trim(),
         scheduledAt,
         repeatType: finalRepeatType,
         ...(repeatType === 'custom' && rrule.trim() ? { rrule: rrule.trim() } : {}),
+        ...(trimmedDescription ? { description: trimmedDescription } : {}),
       });
     } finally {
       setSubmitting(false);
@@ -109,14 +115,19 @@ export function QuickCreatePopover({
     <div
       ref={rootRef}
       className={cn(
-        'hd-popover-enter fixed z-50 rounded-lg border border-border bg-popover p-4 shadow-2xl',
+        'hd-popover-enter hd-quick-create fixed z-50 bg-popover',
         mobile && 'left-2 right-2 bottom-2 mx-auto',
       )}
-      style={mobile ? undefined : position}
+      style={{
+        ...(mobile ? {} : position),
+        borderRadius: 12,
+        boxShadow: '0 4px 24px rgba(0,0,0,0.12)',
+        padding: 20,
+      }}
     >
       <form onSubmit={(e) => void handleSubmit(e)}>
-        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          新建定时任务 · {formatLocalDate(date)}
+        <div className="text-xs font-medium text-muted-foreground" style={{ letterSpacing: 0.02 }}>
+          {formatLocalDate(date)}
         </div>
         <input
           ref={intentRef}
@@ -124,30 +135,73 @@ export function QuickCreatePopover({
           value={intent}
           onChange={(e) => setIntent(e.target.value)}
           placeholder="描述要做的事情…"
-          className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[#E50B6B]"
+          className="hd-quick-create__input mt-3 w-full bg-transparent text-base font-medium outline-none"
+          style={{
+            border: 'none',
+            borderBottom: '1px solid #e5e5e5',
+            padding: '6px 0',
+            color: 'inherit',
+          }}
           maxLength={2000}
         />
-        <div className="mt-2 flex items-center gap-2">
+        {!showDescription ? (
+          <button
+            type="button"
+            onClick={() => setShowDescription(true)}
+            className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <Plus className="h-3 w-3" />
+            添加备注
+          </button>
+        ) : (
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="补充说明…"
+            rows={2}
+            className="hd-quick-create__input mt-2 w-full resize-y bg-transparent text-sm outline-none"
+            style={{
+              border: 'none',
+              borderBottom: '1px solid #e5e5e5',
+              padding: '6px 0',
+              minHeight: 48,
+              color: 'inherit',
+            }}
+            maxLength={2000}
+          />
+        )}
+        <div className="mt-4 flex items-center gap-3">
           <label className="text-xs text-muted-foreground">时间</label>
           <input
             type="time"
             value={timeStr}
             onChange={(e) => setTimeStr(e.target.value)}
-            className="rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-[#E50B6B]"
+            className="hd-quick-create__time bg-transparent text-sm outline-none"
+            style={{
+              border: 'none',
+              borderBottom: '1px solid #e5e5e5',
+              padding: '4px 0',
+              color: 'inherit',
+            }}
           />
         </div>
-        <div className="mt-3 flex flex-wrap gap-1.5">
+        <div className="mt-4 flex flex-wrap gap-1.5">
           {REPEAT_PRESETS.map((p) => (
             <button
               type="button"
               key={p.value}
               onClick={() => setRepeatType(p.value)}
               className={cn(
-                'rounded-full border px-2.5 py-1 text-xs transition-colors',
+                'rounded-full px-3 py-1 text-xs transition-colors',
                 repeatType === p.value
-                  ? 'border-[#E50B6B] bg-[#E50B6B]/10 text-[#E50B6B]'
-                  : 'border-border bg-card text-muted-foreground hover:border-[#E50B6B]/50',
+                  ? 'bg-[#E50B6B]/12 text-[#E50B6B]'
+                  : 'text-muted-foreground hover:bg-foreground/[0.04]',
               )}
+              style={
+                repeatType === p.value
+                  ? { backgroundColor: 'rgba(229,11,107,0.12)', color: '#E50B6B' }
+                  : undefined
+              }
             >
               {p.label}
             </button>
@@ -168,19 +222,35 @@ export function QuickCreatePopover({
                 onChange={(e) => setRrule(e.target.value)}
                 placeholder={'FREQ=WEEKLY;BYDAY=MO,WE,FR'}
                 rows={2}
-                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus:border-[#E50B6B]"
+                className="mt-2 w-full bg-transparent font-mono text-xs outline-none"
+                style={{
+                  border: 'none',
+                  borderBottom: '1px solid #e5e5e5',
+                  padding: '6px 0',
+                  color: 'inherit',
+                }}
               />
             )}
           </div>
         )}
-        <div className="mt-4 flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onClose}
+            disabled={submitting}
+            style={{ borderRadius: 8 }}
+          >
             取消
           </Button>
           <Button
             type="submit"
             disabled={!intent.trim() || submitting}
-            style={{ backgroundColor: '#E50B6B', borderColor: '#E50B6B' }}
+            style={{
+              backgroundColor: '#E50B6B',
+              borderColor: '#E50B6B',
+              borderRadius: 8,
+            }}
             className="text-white hover:opacity-90"
           >
             {submitting ? '创建中…' : '创建'}

@@ -1,95 +1,377 @@
-/* Phase 26A — FullCalendar visual customization to match HOLA DAY
-   brand. Scoped to .hd-calendar-shell so it doesn't leak to other
-   pages that might embed a FullCalendar later.
+/* Phase 26B polish — Todoist-inspired visual rewrite.
+ *
+ * Calendar lives inside `.hd-calendar` so every selector below
+ * stays scoped (defending against FullCalendar's notoriously global
+ * default styles). The container is provided by ScheduledCalendarPage's
+ * outer wrapper.
+ *
+ * Brand magenta #E50B6B drives: today-circle, primary CTA, segment-
+ * control highlight, now-indicator line, event-block accents.
+ * Greys come from a 4-step ramp (#333 / #666 / #999 / #ccc) for a
+ * single-source-of-truth on type hierarchy.
+ *
+ * Three keyframes live at file-end (popover entrance + new-event
+ * pulse) — kept here so AppShell's single CSS import covers both
+ * the calendar and the global NotificationBell popover. */
 
-   Brand magenta #E50B6B drives the "today" highlight, active view
-   button, and event-glow pulse. The default theme is light;
-   tailwind's dark variant takes over for dark mode (root .dark class
-   that the theme-store applies). */
-
-.hd-calendar-shell {
+.hd-calendar {
   --hd-magenta: #E50B6B;
-  --hd-magenta-soft: rgba(229, 11, 107, 0.12);
-  padding: 12px;
+  --hd-magenta-rgb: 229, 11, 107;
+  --hd-text-strong: #333333;
+  --hd-text-mid: #666666;
+  --hd-text-muted: #999999;
+  --hd-text-fade: #cccccc;
+  --hd-grid: rgba(0, 0, 0, 0.06);
+  --hd-grid-strong: rgba(0, 0, 0, 0.08);
+  --hd-hover-bg: rgba(229, 11, 107, 0.03);
+  padding: 0 8px;
+  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+}
+.dark .hd-calendar {
+  --hd-text-strong: #f1f5f9;
+  --hd-text-mid: #cbd5e1;
+  --hd-text-muted: #64748b;
+  --hd-text-fade: #475569;
+  --hd-grid: rgba(255, 255, 255, 0.06);
+  --hd-grid-strong: rgba(255, 255, 255, 0.10);
+  --hd-hover-bg: rgba(229, 11, 107, 0.06);
 }
 
-/* Today's date cell highlight */
-.hd-calendar-shell .fc .fc-day-today {
-  background-color: var(--hd-magenta-soft);
-}
+/* ───────────────────────── Custom toolbar (48 px, Todoist-clean) */
 
-/* Active toolbar button (Month/Week/Day pill) */
-.hd-calendar-shell .fc .fc-button-primary:not(:disabled).fc-button-active,
-.hd-calendar-shell .fc .fc-button-primary:not(:disabled):active {
-  background-color: var(--hd-magenta);
-  border-color: var(--hd-magenta);
-  color: #ffffff;
+.hd-calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 48px;
+  padding: 0 4px;
+  margin-bottom: 16px;
 }
-.hd-calendar-shell .fc .fc-button-primary {
-  background-color: transparent;
-  color: hsl(var(--foreground));
-  border-color: hsl(var(--border));
+.hd-calendar-toolbar__nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.hd-calendar-toolbar__arrow {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--hd-text-mid);
+  border: none;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.hd-calendar-toolbar__arrow:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--hd-text-strong);
+}
+.dark .hd-calendar-toolbar__arrow:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.hd-calendar-toolbar__today {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: transparent;
+  color: var(--hd-text-strong);
+  font-size: 13px;
   font-weight: 500;
-  text-transform: none;
-  padding: 4px 10px;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.hd-calendar-toolbar__today:hover {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.18);
+}
+.dark .hd-calendar-toolbar__today {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+.dark .hd-calendar-toolbar__today:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.hd-calendar-toolbar__title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--hd-text-strong);
+  flex: 1;
+  text-align: center;
+  letter-spacing: -0.01em;
+}
+.hd-calendar-toolbar__views {
+  display: inline-flex;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 999px;
+  padding: 3px;
+  position: relative;
+}
+.dark .hd-calendar-toolbar__views {
+  background: rgba(255, 255, 255, 0.06);
+}
+.hd-calendar-toolbar__view-btn {
+  position: relative;
+  z-index: 1;
+  border: none;
+  background: transparent;
+  color: var(--hd-text-mid);
+  font-size: 13px;
+  font-weight: 500;
+  height: 26px;
+  padding: 0 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 150ms ease;
+}
+.hd-calendar-toolbar__view-btn[data-active="true"] {
+  background: var(--hd-magenta);
+  color: #ffffff;
+  font-weight: 600;
+}
+.hd-calendar-toolbar__view-btn:not([data-active="true"]):hover {
+  color: var(--hd-text-strong);
+}
+
+/* ───────────────────────── FullCalendar core overrides */
+
+.hd-calendar .fc {
+  --fc-border-color: var(--hd-grid);
+  --fc-today-bg-color: transparent;  /* we draw the today highlight ourselves */
+  --fc-page-bg-color: transparent;
+  --fc-neutral-bg-color: transparent;
+  --fc-list-event-hover-bg-color: var(--hd-hover-bg);
+  font-family: inherit;
+}
+
+/* Kill FullCalendar's default toolbar — we render our own above */
+.hd-calendar .fc-header-toolbar {
+  display: none;
+}
+
+/* All grid lines fade to whisper level */
+.hd-calendar .fc-theme-standard td,
+.hd-calendar .fc-theme-standard th,
+.hd-calendar .fc-theme-standard .fc-scrollgrid,
+.hd-calendar .fc-theme-standard .fc-scrollgrid-section > * {
+  border-color: var(--hd-grid);
+}
+.hd-calendar .fc-theme-standard .fc-scrollgrid {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Day-of-week header row */
+.hd-calendar .fc-col-header {
+  background: transparent;
+}
+.hd-calendar .fc-col-header-cell {
+  border-color: var(--hd-grid);
+  padding: 8px 0;
+}
+.hd-calendar .fc-col-header-cell-cushion {
+  color: var(--hd-text-mid);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 6px 10px;
+  text-decoration: none;
+  display: block;
+  text-align: left;
+}
+
+/* Day cells — generous 120px minimum height */
+.hd-calendar .fc-daygrid-day {
+  min-height: 120px;
+  transition: background-color 150ms ease;
+  cursor: pointer;
+}
+.hd-calendar .fc-daygrid-day:hover {
+  background-color: var(--hd-hover-bg);
+}
+.hd-calendar .fc-daygrid-day-frame {
+  padding: 6px 8px;
+  min-height: 120px;
+}
+.hd-calendar .fc-daygrid-day-top {
+  flex-direction: row;
+  justify-content: flex-start;
+  padding-bottom: 4px;
+}
+.hd-calendar .fc-daygrid-day-number {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--hd-text-strong);
+  padding: 4px 6px;
+  text-decoration: none;
+  line-height: 1;
+}
+.hd-calendar .fc-day-other .fc-daygrid-day-number {
+  color: var(--hd-text-fade);
+}
+.dark .hd-calendar .fc-day-other .fc-daygrid-day-number {
+  color: rgba(255, 255, 255, 0.18);
+}
+
+/* Today: magenta filled circle around the date number */
+.hd-calendar .fc-day-today .fc-daygrid-day-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--hd-magenta);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+/* ───────────────────────── Event blocks (Todoist-style cards) */
+
+.hd-calendar .fc-event {
+  border: none;
+  background: transparent;
+  margin: 2px 4px;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform 120ms ease;
+}
+.hd-calendar .fc-event:hover {
+  transform: translateY(-1px);
+}
+.hd-calendar .fc-daygrid-event {
+  white-space: nowrap;
+}
+
+/* The block itself — left accent bar + tinted background */
+.hd-calendar .fc-event-main {
+  position: relative;
+  border-radius: 6px;
+  padding: 4px 8px 4px 11px;
+  font-size: 13px;
+  line-height: 1.4;
+  background: var(--hd-event-bg, rgba(229, 11, 107, 0.08));
+  color: var(--hd-event-text, var(--hd-text-strong));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+.hd-calendar .fc-event-main::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--hd-event-accent, var(--hd-magenta));
+}
+.hd-calendar .fc-event:hover .fc-event-main {
+  background: var(--hd-event-bg-hover, rgba(229, 11, 107, 0.15));
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+.hd-calendar .fc-event-time,
+.hd-calendar .fc-event-title {
+  color: inherit;
+  font-weight: 500;
+}
+.hd-calendar .fc-daygrid-event-dot {
+  display: none;
+}
+
+/* ───────────────────────── TimeGrid (week/day) overrides */
+
+.hd-calendar .fc-timegrid-slot-label {
+  border-color: transparent;
+  font-size: 12px;
+  color: var(--hd-text-muted);
+  text-align: right;
+  padding-right: 8px;
+}
+.hd-calendar .fc-timegrid-slot {
+  height: 32px;
+}
+.hd-calendar .fc-timegrid-slot-lane {
+  border-color: var(--hd-grid);
+}
+.hd-calendar .fc-timegrid-slot-minor {
+  border-top-style: dotted;
+}
+.hd-calendar .fc-timegrid-col.fc-day-today {
+  background: rgba(229, 11, 107, 0.02);
+}
+.hd-calendar .fc-timegrid-axis {
+  border-color: var(--hd-grid);
+}
+.hd-calendar .fc-timegrid-col-frame {
+  cursor: pointer;
+}
+.hd-calendar .fc-timegrid-col-frame:hover {
+  background: var(--hd-hover-bg);
+}
+
+/* All-day row — hide entirely when no events live there */
+.hd-calendar .fc-timegrid-axis-frame,
+.hd-calendar .fc-daygrid-day-events:empty {
+  /* hairline so the row collapses to ~0 height when allDay is off */
+}
+
+/* Now-indicator: magenta line + dot, sits above events */
+.hd-calendar .fc-timegrid-now-indicator-line {
+  border-top: 2px solid var(--hd-magenta);
+  border-color: var(--hd-magenta);
+  z-index: 5;
+}
+.hd-calendar .fc-timegrid-now-indicator-arrow {
+  border: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--hd-magenta);
+  margin-left: -4px;
+  margin-top: -4px;
+}
+
+/* ───────────────────────── List view (mobile) */
+
+.hd-calendar .fc-list {
+  border-color: var(--hd-grid);
+}
+.hd-calendar .fc-list-day-cushion {
+  background: rgba(0, 0, 0, 0.02);
+  font-weight: 600;
+  color: var(--hd-text-strong);
+}
+.dark .hd-calendar .fc-list-day-cushion {
+  background: rgba(255, 255, 255, 0.04);
+}
+.hd-calendar .fc-list-event-time,
+.hd-calendar .fc-list-event-title {
+  color: var(--hd-text-strong);
   font-size: 13px;
 }
-.hd-calendar-shell .fc .fc-button-primary:hover {
-  background-color: hsl(var(--accent));
-  border-color: hsl(var(--border));
-}
-.hd-calendar-shell .fc .fc-button-primary:focus {
-  box-shadow: 0 0 0 2px var(--hd-magenta-soft);
-}
-.hd-calendar-shell .fc .fc-toolbar-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: hsl(var(--foreground));
+.hd-calendar .fc-list-event-dot {
+  border-color: var(--hd-event-accent, var(--hd-magenta));
+  background: var(--hd-event-accent, var(--hd-magenta));
 }
 
-/* Event blocks: rounder corners + subtle drag shadow */
-.hd-calendar-shell .fc-event {
-  border-radius: 4px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease;
-}
-.hd-calendar-shell .fc-event:hover {
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
-}
-.hd-calendar-shell .fc-event.fc-event-dragging {
-  box-shadow: 0 6px 16px rgba(229, 11, 107, 0.35);
-  transform: scale(1.02);
+/* ───────────────────────── Popover inputs — focus state */
+
+.hd-quick-create__input:focus,
+.hd-quick-create__time:focus {
+  border-bottom-color: var(--hd-magenta, #E50B6B) !important;
 }
 
-/* Now-indicator line */
-.hd-calendar-shell .fc-timegrid-now-indicator-line {
-  border-color: var(--hd-magenta);
-  border-width: 2px;
-}
-.hd-calendar-shell .fc-timegrid-now-indicator-arrow {
-  border-color: var(--hd-magenta);
-  color: var(--hd-magenta);
-}
+/* ───────────────────────── Keyframes — popover entrance + new pulse */
 
-/* Day header text */
-.hd-calendar-shell .fc-col-header-cell-cushion {
-  color: hsl(var(--muted-foreground));
-  font-weight: 500;
-}
-
-/* Grid borders integrate with the SPA's border token */
-.hd-calendar-shell .fc-theme-standard td,
-.hd-calendar-shell .fc-theme-standard th,
-.hd-calendar-shell .fc-theme-standard .fc-scrollgrid {
-  border-color: hsl(var(--border));
-}
-
-/* Popover entrance animation (scale + opacity, 150ms ease-out) */
-.hd-popover-enter {
-  animation: hd-popover-enter 150ms ease-out;
-  transform-origin: top left;
-}
 @keyframes hd-popover-enter {
   from {
     opacity: 0;
@@ -100,11 +382,11 @@
     transform: scale(1);
   }
 }
-
-/* Newly-created event pulse (one-shot magenta glow) */
-.hd-pulse-new {
-  animation: hd-pulse-new 1200ms ease-out;
+.hd-popover-enter {
+  animation: hd-popover-enter 150ms ease-out;
+  transform-origin: top left;
 }
+
 @keyframes hd-pulse-new {
   0% {
     box-shadow: 0 0 0 0 rgba(229, 11, 107, 0.7);
@@ -116,13 +398,6 @@
     box-shadow: 0 0 0 0 rgba(229, 11, 107, 0);
   }
 }
-
-/* Dark mode tweaks — the SPA toggles .dark on <html> */
-.dark .hd-calendar-shell .fc-theme-standard td,
-.dark .hd-calendar-shell .fc-theme-standard th,
-.dark .hd-calendar-shell .fc-theme-standard .fc-scrollgrid {
-  border-color: hsl(var(--border));
-}
-.dark .hd-calendar-shell .fc-list-day-cushion {
-  background-color: hsl(var(--muted));
+.hd-pulse-new {
+  animation: hd-pulse-new 1200ms ease-out;
 }

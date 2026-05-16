@@ -85,6 +85,14 @@ export const scheduledTasks = mysqlTable(
      * would drift across spring/fall clock changes.
      */
     timezone: varchar('timezone', { length: 64 }).notNull().default('Asia/Shanghai'),
+    /**
+     * Phase 26B polish — optional human-readable annotation. Shown
+     * in the event-detail popover but never passed to the agent's
+     * dispatch path (the agent only sees `intent`). Lets users tag
+     * a recurring task with context ("产品同事每周看的报告") without
+     * polluting the prompt.
+     */
+    description: text('description'),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
       .notNull()
       .default(sql`CURRENT_TIMESTAMP(3)`),

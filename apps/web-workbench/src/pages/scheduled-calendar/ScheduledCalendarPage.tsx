@@ -40,7 +40,7 @@ import type {
   EventMountArg,
 } from '@fullcalendar/core';
 
-import { Plus } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -89,6 +89,13 @@ export function ScheduledCalendarPage(): JSX.Element {
     if (typeof window === 'undefined' || !window.matchMedia) return false;
     return window.matchMedia(MOBILE_QUERY).matches;
   });
+  // Phase 26B polish — custom toolbar (we render the title + view
+  // pills + nav arrows ourselves). Mirror the FullCalendar state
+  // here so the pills know which view is active.
+  const [currentView, setCurrentView] = React.useState<
+    'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listMonth'
+  >(() => (isMobile ? 'listMonth' : 'dayGridMonth'));
+  const [toolbarTitle, setToolbarTitle] = React.useState<string>('');
   // Track row externalIds whose CREATED_AT just landed in the last
   // refresh so we can apply the magenta-glow pulse animation once.
   const [recentlyCreatedIds, setRecentlyCreatedIds] = React.useState<Set<string>>(
@@ -137,7 +144,26 @@ export function ScheduledCalendarPage(): JSX.Element {
 
   const handleDatesSet = React.useCallback((arg: DatesSetArg) => {
     setCurrentRange({ start: arg.start, end: arg.end });
+    setToolbarTitle(arg.view.title);
+    setCurrentView(arg.view.type as typeof currentView);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Toolbar action helpers — talk to the FullCalendar API ref.
+  const callApi = React.useCallback(
+    (fn: (api: NonNullable<ReturnType<NonNullable<typeof calendarRef.current>['getApi']>>) => void) => {
+      const api = calendarRef.current?.getApi();
+      if (api) fn(api);
+    },
+    [],
+  );
+  const handlePrev = React.useCallback(() => callApi((api) => api.prev()), [callApi]);
+  const handleNext = React.useCallback(() => callApi((api) => api.next()), [callApi]);
+  const handleToday = React.useCallback(() => callApi((api) => api.today()), [callApi]);
+  const handleViewChange = React.useCallback(
+    (view: typeof currentView) => callApi((api) => api.changeView(view)),
+    [callApi, currentView],
+  );
 
   const handleDateClick = React.useCallback((arg: DateClickArg) => {
     // The clicked cell's center as the anchor for the popover. arg.jsEvent
@@ -227,19 +253,35 @@ export function ScheduledCalendarPage(): JSX.Element {
     [refresh, toast],
   );
 
-  /** FullCalendar fires this per-event-mount; we apply the opacity from
-   *  the color helper directly to the rendered block so completed-past
-   *  events recede visually. */
+  /** FullCalendar fires this per-event-mount; we use it to:
+   *   1. apply CSS custom properties for the Todoist-style block
+   *      (accent + tinted bg, read by calendar-styles.css)
+   *   2. set opacity for past-completed / paused rows
+   *   3. tag newly-created rows with the magenta-glow pulse class
+   */
   const handleEventDidMount = React.useCallback(
     (arg: EventMountArg) => {
-      const opacity = (arg.event.extendedProps as { opacity?: number } | undefined)?.opacity;
-      if (typeof opacity === 'number' && opacity < 1) {
-        arg.el.style.opacity = String(opacity);
+      const ext = arg.event.extendedProps as
+        | {
+            opacity?: number;
+            accentColor?: string;
+            backgroundTint?: string;
+            backgroundTintHover?: string;
+          }
+        | undefined;
+      const el = arg.el;
+      // CSS variables consumed by .hd-calendar .fc-event-main ::before
+      // (accent bar) + base / hover background.
+      if (ext?.accentColor) el.style.setProperty('--hd-event-accent', ext.accentColor);
+      if (ext?.backgroundTint) el.style.setProperty('--hd-event-bg', ext.backgroundTint);
+      if (ext?.backgroundTintHover) {
+        el.style.setProperty('--hd-event-bg-hover', ext.backgroundTintHover);
       }
-      // Pulse animation for newly-created rows
-      const id = arg.event.id;
-      if (recentlyCreatedIds.has(id)) {
-        arg.el.classList.add('hd-pulse-new');
+      if (typeof ext?.opacity === 'number' && ext.opacity < 1) {
+        el.style.opacity = String(ext.opacity);
+      }
+      if (recentlyCreatedIds.has(arg.event.id)) {
+        el.classList.add('hd-pulse-new');
       }
     },
     [recentlyCreatedIds],
@@ -354,7 +396,61 @@ export function ScheduledCalendarPage(): JSX.Element {
           </Button>
         }
       />
-      <div className="hd-calendar-shell relative mt-4 rounded-lg border border-border bg-card">
+      <div className="hd-calendar relative mt-4">
+        {/* Custom toolbar — replaces FullCalendar's default. Three
+            regions: nav arrows + 今天, centered title, segment-
+            control view switcher. Matches Todoist's clean nav. */}
+        <div className="hd-calendar-toolbar">
+          <div className="hd-calendar-toolbar__nav">
+            <button
+              type="button"
+              className="hd-calendar-toolbar__arrow"
+              onClick={handlePrev}
+              aria-label="上一个"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className="hd-calendar-toolbar__arrow"
+              onClick={handleNext}
+              aria-label="下一个"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className="hd-calendar-toolbar__today"
+              onClick={handleToday}
+            >
+              今天
+            </button>
+          </div>
+          <div className="hd-calendar-toolbar__title">{toolbarTitle}</div>
+          <div className="hd-calendar-toolbar__views">
+            {(isMobile
+              ? ([
+                  { v: 'listMonth', label: '列表' },
+                  { v: 'timeGridDay', label: '日' },
+                ] as const)
+              : ([
+                  { v: 'dayGridMonth', label: '月' },
+                  { v: 'timeGridWeek', label: '周' },
+                  { v: 'timeGridDay', label: '日' },
+                ] as const)
+            ).map((opt) => (
+              <button
+                key={opt.v}
+                type="button"
+                data-active={currentView === opt.v ? 'true' : 'false'}
+                onClick={() => handleViewChange(opt.v)}
+                className="hd-calendar-toolbar__view-btn"
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <FullCalendar
           ref={calendarRef}
           plugins={[
@@ -365,19 +461,18 @@ export function ScheduledCalendarPage(): JSX.Element {
             rrulePlugin,
           ]}
           initialView={isMobile ? 'listMonth' : 'dayGridMonth'}
-          headerToolbar={{
-            left: 'prev,next today',
-            center: 'title',
-            right: isMobile
-              ? 'listMonth,timeGridDay'
-              : 'dayGridMonth,timeGridWeek,timeGridDay',
-          }}
-          buttonText={{
-            today: '今天',
-            month: '月',
-            week: '周',
-            day: '日',
-            list: '列表',
+          headerToolbar={false}
+          /* Day view title needs the full date — FullCalendar's
+             default for timeGridDay is just the weekday. */
+          views={{
+            timeGridDay: {
+              titleFormat: {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                weekday: 'long',
+              },
+            },
           }}
           locale="zh-cn"
           firstDay={1}
@@ -399,12 +494,17 @@ export function ScheduledCalendarPage(): JSX.Element {
           nowIndicator
         />
         {showEmpty && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="pointer-events-auto rounded-lg border border-border bg-background/90 px-6 py-4 text-center shadow-lg backdrop-blur">
-              <div className="text-sm font-medium text-foreground">
+          <div className="pointer-events-none absolute inset-x-0 top-[120px] flex items-center justify-center">
+            <div className="pointer-events-auto flex flex-col items-center px-6 py-8 text-center">
+              <CalendarDays
+                className="mb-4 h-10 w-10"
+                strokeWidth={1.5}
+                style={{ color: '#cccccc' }}
+              />
+              <div className="text-base font-semibold" style={{ color: '#333333' }}>
                 还没有定时任务
               </div>
-              <div className="mt-1 text-xs text-muted-foreground">
+              <div className="mt-1 text-sm" style={{ color: '#999999' }}>
                 点击日历任意日期，或点击右上角按钮创建
               </div>
             </div>

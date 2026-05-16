@@ -1,20 +1,20 @@
 /**
- * Phase 26A — pure helpers that translate scheduled_tasks rows into
- * FullCalendar event shape and apply status-driven color coding.
+ * Phase 26B polish — Todoist-inspired event color treatment.
  *
- * Split into its own module so the conversion logic is unit-testable
- * without spinning up React + FullCalendar's runtime.
+ * Each event renders as a tinted block with a 3 px left accent bar.
+ * `pickStatusColor` returns the (accent, soft-bg, hover-bg) triple
+ * the calendar.css consumes via `--hd-event-*` CSS variables; the
+ * UI never has to compute hover states.
  *
- * Status color mapping (per spec):
- *   active + paused=false   → magenta #E50B6B  ("waiting to fire")
- *   running                 → amber #F59E0B    ("in flight")
- *   completed               → green  #10B981
- *   failed                  → red    #EF4444
- *   paused                  → gray   #94A3B8
+ * Status mapping:
+ *   active + future        → magenta accent + 8% bg ("waiting to fire")
+ *   running                → amber accent
+ *   completed              → green accent (60% opacity for past)
+ *   failed                 → red accent (full opacity even in past)
+ *   paused                 → gray accent at 80% opacity
+ *   active + lastFailed    → red tint to warn of recurring-failure
  *
- * Past completed events render at 60% opacity to recede visually
- * (the user cares about upcoming work). Past failed events stay
- * fully opaque — they're action items still.
+ * Pure helpers — React-free + FullCalendar-free, fully unit-testable.
  */
 
 import type { EventInput } from '@fullcalendar/core';
@@ -26,6 +26,8 @@ import type { EventInput } from '@fullcalendar/core';
 export interface ScheduledTaskRow {
   scheduledTaskId: string;
   intent: string;
+  /** Phase 26B polish — optional human annotation. */
+  description?: string | null;
   repeatType: 'once' | 'daily' | 'weekly' | 'monthly';
   rrule: string | null;
   durationMinutes: number;
@@ -39,25 +41,32 @@ export interface ScheduledTaskRow {
 }
 
 export type StatusColor = {
-  /** Background of the event block. */
+  /** 3 px accent bar (left edge) + list-view dot. */
+  accent: string;
+  /** Tinted resting background (8 % opacity). */
   background: string;
-  /** Border + text contrast. */
-  border: string;
-  /** Visual opacity multiplier (0-1). */
+  /** Hover background (15 % opacity). */
+  backgroundHover: string;
+  /** Visual opacity multiplier (0–1) applied to the whole block. */
   opacity: number;
 };
 
 const COLORS = {
   magenta: '#E50B6B',
-  magentaBorder: '#9d174d',
+  magentaBg: 'rgba(229, 11, 107, 0.08)',
+  magentaBgHover: 'rgba(229, 11, 107, 0.15)',
   amber: '#F59E0B',
-  amberBorder: '#B45309',
+  amberBg: 'rgba(245, 158, 11, 0.08)',
+  amberBgHover: 'rgba(245, 158, 11, 0.15)',
   green: '#10B981',
-  greenBorder: '#047857',
+  greenBg: 'rgba(16, 185, 129, 0.08)',
+  greenBgHover: 'rgba(16, 185, 129, 0.15)',
   red: '#EF4444',
-  redBorder: '#B91C1C',
-  gray: '#94A3B8',
-  grayBorder: '#475569',
+  redBg: 'rgba(239, 68, 68, 0.08)',
+  redBgHover: 'rgba(239, 68, 68, 0.15)',
+  gray: '#9CA3AF',
+  grayBg: 'rgba(156, 163, 175, 0.08)',
+  grayBgHover: 'rgba(156, 163, 175, 0.15)',
 } as const;
 
 /**
@@ -75,32 +84,54 @@ export function pickStatusColor(
 ): StatusColor {
   const eventIsPast = eventTime.getTime() < now.getTime();
   if (row.status === 'running') {
-    return { background: COLORS.amber, border: COLORS.amberBorder, opacity: 1 };
+    return {
+      accent: COLORS.amber,
+      background: COLORS.amberBg,
+      backgroundHover: COLORS.amberBgHover,
+      opacity: 1,
+    };
   }
   if (row.status === 'paused') {
-    return { background: COLORS.gray, border: COLORS.grayBorder, opacity: 0.8 };
+    return {
+      accent: COLORS.gray,
+      background: COLORS.grayBg,
+      backgroundHover: COLORS.grayBgHover,
+      opacity: 0.8,
+    };
   }
   if (row.status === 'completed') {
     return {
-      background: COLORS.green,
-      border: COLORS.greenBorder,
+      accent: COLORS.green,
+      background: COLORS.greenBg,
+      backgroundHover: COLORS.greenBgHover,
       opacity: eventIsPast ? 0.6 : 1,
     };
   }
   if (row.status === 'failed') {
     // Failed stays fully opaque even in the past — it's an action
     // item, not a faded memory.
-    return { background: COLORS.red, border: COLORS.redBorder, opacity: 1 };
+    return {
+      accent: COLORS.red,
+      background: COLORS.redBg,
+      backgroundHover: COLORS.redBgHover,
+      opacity: 1,
+    };
   }
   // status === 'active'. If the last fire failed, show a red tint
   // even though the row is still active (the next fire is the user's
   // chance to recover).
   if (row.lastRunStatus === 'failed') {
-    return { background: COLORS.red, border: COLORS.redBorder, opacity: 0.9 };
+    return {
+      accent: COLORS.red,
+      background: COLORS.redBg,
+      backgroundHover: COLORS.redBgHover,
+      opacity: 0.9,
+    };
   }
   return {
-    background: COLORS.magenta,
-    border: COLORS.magentaBorder,
+    accent: COLORS.magenta,
+    background: COLORS.magentaBg,
+    backgroundHover: COLORS.magentaBgHover,
     // Past pending events (e.g. paused-then-resumed without
     // rescheduling) dim slightly so they don't pretend to be future.
     opacity: eventIsPast ? 0.85 : 1,
@@ -133,12 +164,17 @@ export function rowToEventInput(
   const baseProps = {
     id: row.scheduledTaskId,
     title: row.intent.length > 60 ? `${row.intent.slice(0, 60)}…` : row.intent,
-    backgroundColor: color.background,
-    borderColor: color.border,
-    textColor: '#ffffff',
+    // FullCalendar's default backgroundColor / borderColor sets the
+    // outer event wrapper. We override with TRANSPARENT so the
+    // inner .fc-event-main can use the calendar-styles.css tinted
+    // background + 3 px accent bar instead.
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
+    textColor: 'inherit',
     extendedProps: {
       scheduledTaskId: row.scheduledTaskId,
       intent: row.intent,
+      description: row.description ?? null,
       repeatType: row.repeatType,
       rrule: row.rrule,
       durationMinutes: row.durationMinutes,
@@ -148,6 +184,12 @@ export function rowToEventInput(
       lastError: row.lastError,
       lastRunAt: row.lastRunAt,
       opacity: color.opacity,
+      /** CSS-var inputs the eventDidMount handler writes onto
+       *  the .fc-event-main element. The CSS reads them via
+       *  `var(--hd-event-accent)` / `--hd-event-bg` / `--hd-event-bg-hover`. */
+      accentColor: color.accent,
+      backgroundTint: color.background,
+      backgroundTintHover: color.backgroundHover,
     },
   };
 
