@@ -1,0 +1,128 @@
+/* Phase 26A — FullCalendar visual customization to match HOLA DAY
+   brand. Scoped to .hd-calendar-shell so it doesn't leak to other
+   pages that might embed a FullCalendar later.
+
+   Brand magenta #E50B6B drives the "today" highlight, active view
+   button, and event-glow pulse. The default theme is light;
+   tailwind's dark variant takes over for dark mode (root .dark class
+   that the theme-store applies). */
+
+.hd-calendar-shell {
+  --hd-magenta: #E50B6B;
+  --hd-magenta-soft: rgba(229, 11, 107, 0.12);
+  padding: 12px;
+}
+
+/* Today's date cell highlight */
+.hd-calendar-shell .fc .fc-day-today {
+  background-color: var(--hd-magenta-soft);
+}
+
+/* Active toolbar button (Month/Week/Day pill) */
+.hd-calendar-shell .fc .fc-button-primary:not(:disabled).fc-button-active,
+.hd-calendar-shell .fc .fc-button-primary:not(:disabled):active {
+  background-color: var(--hd-magenta);
+  border-color: var(--hd-magenta);
+  color: #ffffff;
+}
+.hd-calendar-shell .fc .fc-button-primary {
+  background-color: transparent;
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--border));
+  font-weight: 500;
+  text-transform: none;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.hd-calendar-shell .fc .fc-button-primary:hover {
+  background-color: hsl(var(--accent));
+  border-color: hsl(var(--border));
+}
+.hd-calendar-shell .fc .fc-button-primary:focus {
+  box-shadow: 0 0 0 2px var(--hd-magenta-soft);
+}
+.hd-calendar-shell .fc .fc-toolbar-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+/* Event blocks: rounder corners + subtle drag shadow */
+.hd-calendar-shell .fc-event {
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.hd-calendar-shell .fc-event:hover {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+.hd-calendar-shell .fc-event.fc-event-dragging {
+  box-shadow: 0 6px 16px rgba(229, 11, 107, 0.35);
+  transform: scale(1.02);
+}
+
+/* Now-indicator line */
+.hd-calendar-shell .fc-timegrid-now-indicator-line {
+  border-color: var(--hd-magenta);
+  border-width: 2px;
+}
+.hd-calendar-shell .fc-timegrid-now-indicator-arrow {
+  border-color: var(--hd-magenta);
+  color: var(--hd-magenta);
+}
+
+/* Day header text */
+.hd-calendar-shell .fc-col-header-cell-cushion {
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
+}
+
+/* Grid borders integrate with the SPA's border token */
+.hd-calendar-shell .fc-theme-standard td,
+.hd-calendar-shell .fc-theme-standard th,
+.hd-calendar-shell .fc-theme-standard .fc-scrollgrid {
+  border-color: hsl(var(--border));
+}
+
+/* Popover entrance animation (scale + opacity, 150ms ease-out) */
+.hd-popover-enter {
+  animation: hd-popover-enter 150ms ease-out;
+  transform-origin: top left;
+}
+@keyframes hd-popover-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Newly-created event pulse (one-shot magenta glow) */
+.hd-pulse-new {
+  animation: hd-pulse-new 1200ms ease-out;
+}
+@keyframes hd-pulse-new {
+  0% {
+    box-shadow: 0 0 0 0 rgba(229, 11, 107, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 12px rgba(229, 11, 107, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(229, 11, 107, 0);
+  }
+}
+
+/* Dark mode tweaks — the SPA toggles .dark on <html> */
+.dark .hd-calendar-shell .fc-theme-standard td,
+.dark .hd-calendar-shell .fc-theme-standard th,
+.dark .hd-calendar-shell .fc-theme-standard .fc-scrollgrid {
+  border-color: hsl(var(--border));
+}
+.dark .hd-calendar-shell .fc-list-day-cushion {
+  background-color: hsl(var(--muted));
+}

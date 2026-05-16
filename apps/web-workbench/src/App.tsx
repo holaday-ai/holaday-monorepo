@@ -15,7 +15,11 @@ import { RedirectIfAuthed } from '@/pages/RedirectIfAuthed';
 import { RegisterPage } from '@/pages/RegisterPage';
 import { RolesPage } from '@/pages/RolesPage';
 import { BatchPage } from '@/pages/BatchPage';
-import { ScheduledPage } from '@/pages/ScheduledPage';
+// Phase 26A — /scheduled now renders the FullCalendar-based view.
+// The old list-view ScheduledPage is retired; ScheduledCalendarPage
+// covers the same CRUD + adds calendar interaction. The export name
+// stays `ScheduledPage` to keep this import line stable for grep.
+import { ScheduledCalendarPage as ScheduledPage } from '@/pages/scheduled-calendar/ScheduledCalendarPage';
 import { ServerErrorPage } from '@/pages/ServerErrorPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { SkillsPage } from '@/pages/SkillsPage';

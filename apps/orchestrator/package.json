@@ -55,6 +55,7 @@
     "pino-http": "10.3.0",
     "playwright": "^1.59.1",
     "pptxgenjs": "^4.0.1",
+    "rrule": "^2.8.1",
     "sharp": "^0.34.5",
     "undici": "^8.1.0",
     "ws": "8.18.0",

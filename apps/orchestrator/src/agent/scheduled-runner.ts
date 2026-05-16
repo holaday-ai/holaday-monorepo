@@ -21,6 +21,7 @@
  */
 
 import { and, eq, lte } from 'drizzle-orm';
+import { rrulestr } from 'rrule';
 import { logger } from '../config/logger.js';
 import { scheduledTasks } from '../db/schema/scheduled-tasks.js';
 
@@ -50,6 +51,9 @@ export interface ScheduledRunnerDeps {
  * the moment after which the next fire should occur; `repeatType`
  * picks the unit. For 'once' returns null (the row should be marked
  * completed instead of advanced).
+ *
+ * Legacy API — kept for callers that don't have an rrule. Use
+ * `computeNextRunFromInputs` for the Phase 26A combined logic.
  */
 export function computeNextRun(
   from: Date,
@@ -73,6 +77,48 @@ export function computeNextRun(
     return next;
   }
   return null;
+}
+
+/**
+ * Phase 26A — combined next-run computation.
+ *
+ * Priority:
+ *   1. If `rrule` is non-empty, parse with `rrulestr` and ask for the
+ *      first occurrence STRICTLY AFTER `from`. Lets users express
+ *      arbitrary RFC 5545 patterns (every weekday 9am, every other
+ *      week on Tue/Thu, etc.).
+ *   2. Otherwise fall through to `computeNextRun(from, repeatType)`
+ *      — the legacy enum-driven path; existing rows without an rrule
+ *      keep working unchanged.
+ *
+ * On rrule parse failure (malformed input from the user), logs +
+ * falls back to repeatType so a typo doesn't wedge the runner. The
+ * SPA-side editor should validate rrule before submitting; this is
+ * belt-and-braces.
+ *
+ * `inc: false` ensures we skip the moment `from` itself — if a task
+ * just fired at T, the next fire should be the SUBSEQUENT slot, not
+ * T again.
+ */
+export function computeNextRunFromInputs(opts: {
+  from: Date;
+  rrule: string | null;
+  repeatType: 'once' | 'daily' | 'weekly' | 'monthly' | 'custom';
+}): Date | null {
+  const { from, rrule, repeatType } = opts;
+  if (rrule && rrule.trim().length > 0) {
+    try {
+      const rule = rrulestr(rrule);
+      const next = rule.after(from, false);
+      return next ?? null;
+    } catch (err) {
+      logger.warn(
+        { err: errMsg(err), rrule },
+        'scheduled-runner: rrule parse failed, falling back to repeat_type',
+      );
+    }
+  }
+  return computeNextRun(from, repeatType);
 }
 
 let runnerInterval: NodeJS.Timeout | null = null;
@@ -180,6 +226,7 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
     userId: number;
     intent: string;
     repeatType: string;
+    rrule: string | null;
   }>;
   try {
     candidates = await deps.db
@@ -188,6 +235,9 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
         userId: scheduledTasks.userId,
         intent: scheduledTasks.intent,
         repeatType: scheduledTasks.repeatType,
+        // Phase 26A — when rrule is set, computeNextRunFromInputs uses
+        // it instead of repeatType.
+        rrule: scheduledTasks.rrule,
       })
       .from(scheduledTasks)
       .where(
@@ -252,10 +302,11 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
       );
     }
     const dispatchOk = dispatchedTaskId !== null && dispatchError === null;
-    const nextRun = computeNextRun(
-      now,
-      row.repeatType as 'once' | 'daily' | 'weekly' | 'monthly' | 'custom',
-    );
+    const nextRun = computeNextRunFromInputs({
+      from: now,
+      rrule: row.rrule,
+      repeatType: row.repeatType as 'once' | 'daily' | 'weekly' | 'monthly' | 'custom',
+    });
     // Truncate the error so it fits a TEXT column without an extra
     // type. 2KB is plenty for a TRPCError / stack-trace-first-line;
     // longer payloads usually mean a system error worth shortening

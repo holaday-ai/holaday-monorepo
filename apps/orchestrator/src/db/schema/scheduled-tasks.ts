@@ -3,6 +3,7 @@ import {
   bigint,
   datetime,
   index,
+  int,
   mysqlTable,
   text,
   uniqueIndex,
@@ -60,6 +61,30 @@ export const scheduledTasks = mysqlTable(
     /** Codex P1 — short error message when last_run_status='failed';
      *  null on success / not-yet-run. */
     lastError: text('last_error'),
+    /**
+     * Phase 26A — RFC 5545 RRULE for advanced recurrence (custom
+     * cron-style patterns the legacy `repeat_type` enum can't
+     * express, e.g. 'FREQ=WEEKLY;BYDAY=MO,WE,FR'). When NON-NULL the
+     * runner ignores `repeat_type` and computes next_run_at by
+     * expanding the rrule. When NULL the legacy enum-driven path
+     * runs unchanged. The FullCalendar UI also reads this to render
+     * recurring events natively via @fullcalendar/rrule.
+     */
+    rrule: varchar('rrule', { length: 255 }),
+    /**
+     * Phase 26A — visual duration in calendar grid (week / day views).
+     * Doesn't affect dispatch — a task fires at next_run_at regardless.
+     * Defaults to 30 minutes; users can resize via eventResize handles
+     * in the TimeGrid views.
+     */
+    durationMinutes: int('duration_minutes', { unsigned: true }).notNull().default(30),
+    /**
+     * Phase 26A — IANA timezone for rrule expansion across DST
+     * transitions. Defaults to 'Asia/Shanghai' (primary user base).
+     * Required for "every weekday 9am local" semantics — UTC alone
+     * would drift across spring/fall clock changes.
+     */
+    timezone: varchar('timezone', { length: 64 }).notNull().default('Asia/Shanghai'),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
       .notNull()
       .default(sql`CURRENT_TIMESTAMP(3)`),

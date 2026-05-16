@@ -20,6 +20,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   computeNextRun,
+  computeNextRunFromInputs,
   recoverStuckRunningScheduledTasks,
   startScheduledRunner,
   stopScheduledRunner,
@@ -49,6 +50,85 @@ describe('computeNextRun', () => {
     // 2026-03-15 → 2026-04-15 spans US/EU spring DST. UTC stays clean.
     const next = computeNextRun(new Date('2026-03-15T13:30:00Z'), 'monthly');
     expect(next?.toISOString()).toBe('2026-04-15T13:30:00.000Z');
+  });
+});
+
+describe('computeNextRunFromInputs — Phase 26A rrule path', () => {
+  it('falls back to repeatType when rrule is null', () => {
+    const next = computeNextRunFromInputs({
+      from: new Date('2026-05-11T09:00:00Z'),
+      rrule: null,
+      repeatType: 'daily',
+    });
+    expect(next?.toISOString()).toBe('2026-05-12T09:00:00.000Z');
+  });
+
+  it('falls back to repeatType when rrule is empty / whitespace', () => {
+    const next = computeNextRunFromInputs({
+      from: new Date('2026-05-11T09:00:00Z'),
+      rrule: '   ',
+      repeatType: 'weekly',
+    });
+    expect(next?.toISOString()).toBe('2026-05-18T09:00:00.000Z');
+  });
+
+  it('uses rrule when set: weekly on MO/WE/FR', () => {
+    // DTSTART Sunday → next occurrence is Monday.
+    const next = computeNextRunFromInputs({
+      from: new Date('2026-05-10T09:00:00Z'),
+      rrule: 'DTSTART:20260510T090000Z\nRRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR',
+      repeatType: 'weekly',
+    });
+    expect(next?.toISOString()).toBe('2026-05-11T09:00:00.000Z'); // Mon
+  });
+
+  it('uses rrule when set: every other day', () => {
+    const next = computeNextRunFromInputs({
+      from: new Date('2026-05-11T09:00:00Z'),
+      rrule: 'DTSTART:20260511T090000Z\nRRULE:FREQ=DAILY;INTERVAL=2',
+      repeatType: 'daily',
+    });
+    expect(next?.toISOString()).toBe('2026-05-13T09:00:00.000Z');
+  });
+
+  it('rrule with COUNT exhausted → null (legacy fallback would have advanced; rrule wins)', () => {
+    // Two occurrences only; if `from` is past the second, after() returns null.
+    const next = computeNextRunFromInputs({
+      from: new Date('2026-05-15T09:00:00Z'),
+      rrule: 'DTSTART:20260510T090000Z\nRRULE:FREQ=DAILY;COUNT=2',
+      repeatType: 'daily',
+    });
+    expect(next).toBeNull();
+  });
+
+  it('malformed rrule → logs + falls back to repeatType', () => {
+    const next = computeNextRunFromInputs({
+      from: new Date('2026-05-11T09:00:00Z'),
+      rrule: 'FREQ=NOT_A_REAL_FREQ',
+      repeatType: 'daily',
+    });
+    expect(next?.toISOString()).toBe('2026-05-12T09:00:00.000Z');
+  });
+
+  it('once + no rrule → null (terminal one-shot)', () => {
+    const next = computeNextRunFromInputs({
+      from: new Date('2026-05-11T09:00:00Z'),
+      rrule: null,
+      repeatType: 'once',
+    });
+    expect(next).toBeNull();
+  });
+
+  it('inc=false semantics: from-instant is NOT returned as next', () => {
+    // If from === a fire moment, the NEXT slot should be returned,
+    // not from itself. Prevents double-fire on the same tick.
+    const from = new Date('2026-05-11T09:00:00Z');
+    const next = computeNextRunFromInputs({
+      from,
+      rrule: 'DTSTART:20260511T090000Z\nRRULE:FREQ=DAILY',
+      repeatType: 'daily',
+    });
+    expect(next?.getTime()).toBeGreaterThan(from.getTime());
   });
 });
 
