@@ -8,22 +8,38 @@
  *        development build → localhost endpoints (PoC dev setup)
  *
  * Phase 25b fix: the previous default was UNCONDITIONALLY localhost,
- * so a `pnpm --filter @holaday/extension build` (production mode) shipped
- * an extension that tried to talk to 127.0.0.1:3001 / 3002. Users in
- * Chrome saw WS connection-refused on every reconnect attempt. The
- * mode-aware default means the standard build command produces a
- * working production extension without needing an .env file.
+ * so `pnpm --filter @holaday/extension build` (production mode) shipped
+ * an extension that tried to talk to 127.0.0.1:3001 / 3002.
  *
- * Override is still respected for staging / non-default routes — set
- * VITE_ORCHESTRATOR_HTTP/WS at build time to override.
+ * Phase 25b fix #2: ORCHESTRATOR_HTTP now includes the `/api` path
+ * segment. The SPA's host (hd-app.orangebench.tech, Aliyun) ONLY
+ * proxies the `/api/*` and `/ws` paths through to Vultr's orchestrator;
+ * everything else falls back to the SPA shell. Without the `/api`
+ * prefix, the extension's fetches hit `/trpc/...` and `/cookies/sync`
+ * directly on Aliyun, got the SPA index.html back as text/html, and
+ * JSON.parse threw downstream. With the prefix every endpoint resolves
+ * via the existing `${ORCHESTRATOR_HTTP}/trpc/...` / `${ORCHESTRATOR_HTTP}/cookies/sync`
+ * / `${ORCHESTRATOR_HTTP}/extension/browsing-history` call sites — no
+ * changes needed at the fetch site.
  *
- * Nginx layout on prod (from reference_deploy.md): /api/ + /trpc/ → 4001,
- * /ws → 4002. The HTTP base is the bare origin (fetches append /trpc/...).
- * The WS URL points at the /ws path which nginx strips before forwarding.
+ * Why hd-app instead of direct Vultr (207.148.70.106 / holaday.ai):
+ *   - hd-app.orangebench.tech is reachable from mainland China (the
+ *     primary user base); Vultr Singapore is not always.
+ *   - The Aliyun nginx terminates TLS + proxies / api / ws cleanly,
+ *     so the extension's chrome-extension:// origin doesn't need a
+ *     CORS exception entry on Vultr (Aliyun's vhost handles same-
+ *     origin via SPA-served headers).
+ *
+ * Nginx behaviour (verified by curl 2026-05-16):
+ *   /api/trpc/auth.me       → 401 JSON (proxied)
+ *   /api/cookies/sync       → 401 JSON (proxied)
+ *   /api/extension/...      → 401 JSON (proxied)
+ *   /trpc/auth.me           → 200 HTML (SPA fallback) ← previously bug
+ *   /ws                     → WS handshake → 4002 (proxied)
  */
 const IS_PROD = import.meta.env.PROD;
 
-const PROD_HTTP = 'https://hd-app.orangebench.tech';
+const PROD_HTTP = 'https://hd-app.orangebench.tech/api';
 const PROD_WS = 'wss://hd-app.orangebench.tech/ws';
 const DEV_HTTP = 'http://127.0.0.1:3001';
 const DEV_WS = 'ws://127.0.0.1:3002';
