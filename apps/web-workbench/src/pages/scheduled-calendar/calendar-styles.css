@@ -38,6 +38,67 @@
   --hd-hover-bg: rgba(229, 11, 107, 0.06);
 }
 
+/* ───────────────────────── Sticky header band (title + toolbar) */
+
+/* Wraps PageHeader + custom calendar toolbar. position:sticky needs
+ * a scrolling ancestor; in the AppShell layout the page content
+ * scrolls inside SidebarInset (or body in single-column mode), so
+ * top:0 pins to whichever wins. The padding-top matches what
+ * PageContainer used to provide between the body header and content
+ * — without it the title bumps into the page top. */
+.hd-calendar-sticky-band {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: hsl(var(--background));
+  padding-top: 4px;
+  margin-bottom: 4px;
+}
+
+/* FullCalendar's column-header row (Mon Tue Wed …). With
+ * stickyHeaderDates={true} FullCalendar's own CSS positions it
+ * sticky inside its scrollgrid container; we override `top` so it
+ * lands JUST BELOW the sticky band (page header + toolbar ≈ 110
+ * px on desktop with the default PageHeader heights). */
+.hd-calendar .fc-scrollgrid-section-header > * {
+  position: sticky;
+  top: 96px;
+  z-index: 9;
+  background: hsl(var(--background));
+}
+
+/* ───────────────────────── Event content (inline time · title) */
+
+/* #2 — both time AND title visible at once. FullCalendar's default
+ * stacks them, which clips the title in compact (≤ 30 min) slots.
+ * Flex-row + ellipsis on the title keeps both readable. */
+.hd-calendar .hd-event-content {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.hd-calendar .hd-event-content .hd-event-time {
+  flex-shrink: 0;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--hd-event-accent, var(--hd-magenta));
+}
+.hd-calendar .hd-event-content .hd-event-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Month view tucks the dot + time on one line; we already replaced
+ * FC's default dot via the accent bar, so override the inline
+ * .fc-daygrid-event display to fit our custom content cleanly. */
+.hd-calendar .fc-daygrid-event .hd-event-content {
+  padding: 0;
+}
+
 /* ───────────────────────── Custom toolbar (48 px, Todoist-clean) */
 
 .hd-calendar-toolbar {

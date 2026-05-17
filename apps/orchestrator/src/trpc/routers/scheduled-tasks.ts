@@ -291,7 +291,17 @@ export const scheduledTasksRouter = router({
           ? { reminderMinutes: input.reminderMinutes }
           : {}),
       });
-      return { scheduledTaskId: externalId };
+      // Phase 26B follow-up #1 — return the effective next-run time
+      // + the requested time so the SPA can toast "已调整到 X" when
+      // they differ (recurring task whose start time was already
+      // past at submit). For non-shifted creates the two match and
+      // the SPA silently shows the success toast.
+      return {
+        scheduledTaskId: externalId,
+        nextRunAt: effectiveRun,
+        requestedRunAt: requestedRun,
+        adjusted: effectiveRun.getTime() !== requestedRun.getTime(),
+      };
     }),
 
   /**

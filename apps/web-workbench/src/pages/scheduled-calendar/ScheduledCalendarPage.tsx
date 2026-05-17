@@ -35,6 +35,7 @@ import type { DateClickArg, EventResizeDoneArg } from '@fullcalendar/interaction
 import type {
   DatesSetArg,
   EventClickArg,
+  EventContentArg,
   EventDropArg,
   EventInput,
   EventMountArg,
@@ -348,6 +349,26 @@ export function ScheduledCalendarPage(): JSX.Element {
    *   2. set opacity for past-completed / paused rows
    *   3. tag newly-created rows with the magenta-glow pulse class
    */
+  /**
+   * #2 — custom event content. The default FullCalendar markup
+   * stacks .fc-event-time + .fc-event-title vertically; in
+   * compact slots (≤30 min) the second line overflows the event
+   * height and the user only sees the time. We render an inline
+   * row "time · title" so both always show and the title can
+   * ellipsis-truncate. The corresponding `.hd-event-*` CSS lives
+   * in calendar-styles.css.
+   */
+  const renderEventContent = React.useCallback((arg: EventContentArg) => {
+    const timeText = arg.timeText;
+    const title = arg.event.title;
+    return (
+      <div className="hd-event-content">
+        {timeText ? <span className="hd-event-time">{timeText}</span> : null}
+        <span className="hd-event-title">{title}</span>
+      </div>
+    );
+  }, []);
+
   const handleEventDidMount = React.useCallback(
     (arg: EventMountArg) => {
       const ext = arg.event.extendedProps as
@@ -384,6 +405,8 @@ export function ScheduledCalendarPage(): JSX.Element {
       scheduledAt: Date;
       repeatType: 'once' | 'daily' | 'weekly' | 'monthly';
       rrule?: string;
+      description?: string;
+      reminderMinutes?: number | null;
     }) => {
       try {
         const res = await trpc.scheduledTasks.create.mutate({
@@ -391,8 +414,24 @@ export function ScheduledCalendarPage(): JSX.Element {
           repeatType: input.repeatType,
           scheduledAt: input.scheduledAt.toISOString(),
           ...(input.rrule ? { rrule: input.rrule } : {}),
+          ...(input.description ? { description: input.description } : {}),
+          ...(input.reminderMinutes !== undefined
+            ? { reminderMinutes: input.reminderMinutes }
+            : {}),
         });
-        toast.show('已创建定时任务', 'info');
+        // #1 — surface roll-forward when the server adjusted the
+        // first-fire time (recurring task whose start was already
+        // past at submit). Don't block the flow with a confirm; a
+        // toast describes what happened.
+        if (res.adjusted) {
+          const adjusted = new Date(res.nextRunAt);
+          toast.show(
+            `已创建，首次执行时间调整为 ${formatRollForward(adjusted)}（所选时间已过）`,
+            'info',
+          );
+        } else {
+          toast.show('已创建定时任务', 'info');
+        }
         setRecentlyCreatedIds((prev) => {
           const next = new Set(prev);
           next.add(res.scheduledTaskId);
@@ -473,19 +512,26 @@ export function ScheduledCalendarPage(): JSX.Element {
 
   return (
     <PageContainer width="wide">
-      <PageHeader
-        title="定时任务"
-        action={
-          <Button onClick={() => setFullModalOpen(true)}>
-            <Plus className="mr-1 h-4 w-4" />
-            新建定时任务
-          </Button>
-        }
-      />
-      <div ref={shellRef} className="hd-calendar relative mt-2">
+      {/* #3 — page header + custom toolbar + FullCalendar's column
+          header (driven by stickyHeaderDates) all stay pinned at the
+          top of the scroll container while only the time grid below
+          scrolls. The wrapper is sticky; FullCalendar's internal
+          .fc-scrollgrid-section-header gets its own top offset
+          via calendar-styles.css to land just below this band. */}
+      <div className="hd-calendar-sticky-band">
+        <PageHeader
+          title="定时任务"
+          action={
+            <Button onClick={() => setFullModalOpen(true)}>
+              <Plus className="mr-1 h-4 w-4" />
+              新建定时任务
+            </Button>
+          }
+        />
         {/* Custom toolbar — replaces FullCalendar's default. Three
             regions: nav arrows + 今天, centered title, segment-
-            control view switcher. Matches Todoist's clean nav. */}
+            control view switcher. Sits inside the sticky band so it
+            pins alongside the page header. */}
         <div className="hd-calendar-toolbar">
           <div className="hd-calendar-toolbar__nav">
             <button
@@ -537,6 +583,8 @@ export function ScheduledCalendarPage(): JSX.Element {
             ))}
           </div>
         </div>
+      </div>
+      <div ref={shellRef} className="hd-calendar relative">
         <FullCalendar
           ref={calendarRef}
           plugins={[
@@ -577,7 +625,9 @@ export function ScheduledCalendarPage(): JSX.Element {
           eventClick={handleEventClick}
           datesSet={handleDatesSet}
           eventDidMount={handleEventDidMount}
+          eventContent={renderEventContent}
           nowIndicator
+          stickyHeaderDates={true}
         />
         {/* Phase 26B follow-up — the empty-state overlay obstructed
             the date grid more than it helped. The grid itself IS the
@@ -626,4 +676,36 @@ export function ScheduledCalendarPage(): JSX.Element {
       />
     </PageContainer>
   );
+}
+
+/**
+ * Format an adjusted next-run time for the roll-forward toast. Uses
+ * locale-aware "明天 09:00" / "周一 09:00" / "05-23 09:00" style so
+ * the user immediately sees the new fire time without parsing an ISO
+ * string. Pure helper — exported for testing if needed.
+ */
+function formatRollForward(at: Date): string {
+  const now = new Date();
+  const startOfDay = (d: Date) => {
+    const out = new Date(d);
+    out.setHours(0, 0, 0, 0);
+    return out;
+  };
+  const diffDays = Math.round(
+    (startOfDay(at).getTime() - startOfDay(now).getTime()) / 86_400_000,
+  );
+  const time = at.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  if (diffDays === 0) return `今天 ${time}`;
+  if (diffDays === 1) return `明天 ${time}`;
+  if (diffDays > 1 && diffDays < 7) {
+    const weekday = at.toLocaleDateString('zh-CN', { weekday: 'short' });
+    return `${weekday} ${time}`;
+  }
+  return at.toLocaleDateString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+  }) + ' ' + time;
 }
