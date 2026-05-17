@@ -87,18 +87,25 @@ export function ScheduledCalendarPage(): JSX.Element {
   const [eventDetail, setEventDetail] = React.useState<EventDetailState | null>(
     null,
   );
-  // Refs mirror the popover state so the synchronous dateClick /
-  // eventClick handlers can detect "a popover was just open before
-  // this click" — React state updates are batched after handlers,
-  // so reading `quickCreate` directly would always be stale.
-  const quickCreateRef = React.useRef<QuickCreateState | null>(null);
-  const eventDetailRef = React.useRef<EventDetailState | null>(null);
-  React.useEffect(() => {
-    quickCreateRef.current = quickCreate;
-  }, [quickCreate]);
-  React.useEffect(() => {
-    eventDetailRef.current = eventDetail;
-  }, [eventDetail]);
+  /**
+   * Cooldown timestamp set whenever a popover closes. The popover's
+   * outside-click runs on `mousedown` (closes the popover); the
+   * follow-up `click` then dispatches FullCalendar's dateClick /
+   * eventClick. Without a cooldown those two phases of the SAME
+   * gesture would close-and-reopen. We stamp the ref synchronously
+   * inside the close path (NOT via useEffect on state, which fires
+   * too late — React 18 may flush effects between mousedown and
+   * click) so the click handler sees a fresh timestamp.
+   */
+  const popoverClosedAtRef = React.useRef<number>(0);
+  const closeQuickCreate = React.useCallback(() => {
+    popoverClosedAtRef.current = Date.now();
+    setQuickCreate(null);
+  }, []);
+  const closeEventDetail = React.useCallback(() => {
+    popoverClosedAtRef.current = Date.now();
+    setEventDetail(null);
+  }, []);
   const [fullModalOpen, setFullModalOpen] = React.useState(false);
   const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
   const [isMobile, setIsMobile] = React.useState(() => {
@@ -185,6 +192,28 @@ export function ScheduledCalendarPage(): JSX.Element {
     (view: typeof currentView) => callApi((api) => api.changeView(view)),
     [callApi, currentView],
   );
+
+  /**
+   * Force the time-grid views to anchor at 08:00 on mount + on view
+   * change. FullCalendar's `scrollTime` prop alone doesn't take when
+   * `slotMinTime` is `00:00:00` and `stickyHeaderDates` is on — the
+   * sticky header eats the layout pass and the auto-scroll lands at
+   * 0. The double rAF defers past FC's own post-layout work so the
+   * scroll lands after the time grid has its real height.
+   */
+  React.useEffect(() => {
+    if (currentView !== 'timeGridWeek' && currentView !== 'timeGridDay') return;
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        calendarRef.current?.getApi()?.scrollToTime({ hour: 8 });
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      if (raf2) cancelAnimationFrame(raf2);
+    };
+  }, [currentView]);
 
   /**
    * Phase 26B follow-up — wheel + touch nav for prev/next.
@@ -284,17 +313,11 @@ export function ScheduledCalendarPage(): JSX.Element {
   }, [currentView, handleNext, handlePrev]);
 
   const handleDateClick = React.useCallback((arg: DateClickArg) => {
-    // If a popover is already open, this click is "outside that
-    // popover" — same semantic as clicking on empty page area. Per
-    // product spec, that click should ONLY dismiss the popover; the
-    // next click opens a new one. Reading refs (not state) because
-    // the outside-click mousedown that just fired hasn't flushed its
-    // setState yet.
-    if (quickCreateRef.current || eventDetailRef.current) {
-      setQuickCreate(null);
-      setEventDetail(null);
-      return;
-    }
+    // The popover's outside-click closed it on mousedown and stamped
+    // popoverClosedAtRef. This `click` is the SAME gesture — if it
+    // landed inside the cooldown window, drop it instead of opening
+    // a new popover. The user must click again to open.
+    if (Date.now() - popoverClosedAtRef.current < 250) return;
     // The clicked cell's center as the anchor for the popover. arg.jsEvent
     // gives us the source MouseEvent so we can read clientX/Y directly.
     const x = arg.jsEvent.clientX;
@@ -314,12 +337,10 @@ export function ScheduledCalendarPage(): JSX.Element {
   const handleEventClick = React.useCallback(
     (arg: EventClickArg) => {
       arg.jsEvent.preventDefault();
-      // Same close-only-when-open rule as handleDateClick.
-      if (quickCreateRef.current || eventDetailRef.current) {
-        setQuickCreate(null);
-        setEventDetail(null);
-        return;
-      }
+      // Same cooldown rule as handleDateClick — the outside-click on
+      // mousedown closed the previous popover; this click is part of
+      // the same gesture, so we drop it.
+      if (Date.now() - popoverClosedAtRef.current < 250) return;
       const id = arg.event.id;
       const row = rows.find((r) => r.scheduledTaskId === id);
       if (!row) return;
@@ -694,7 +715,7 @@ export function ScheduledCalendarPage(): JSX.Element {
           anchor={quickCreate.anchor}
           date={quickCreate.date}
           mobile={isMobile}
-          onClose={() => setQuickCreate(null)}
+          onClose={closeQuickCreate}
           onCreate={handleCreate}
         />
       )}
@@ -703,7 +724,7 @@ export function ScheduledCalendarPage(): JSX.Element {
           anchor={eventDetail.anchor}
           row={eventDetail.row}
           mobile={isMobile}
-          onClose={() => setEventDetail(null)}
+          onClose={closeEventDetail}
           onToggle={handleToggle}
           onRunNow={handleRunNow}
           onDeleteRequest={(id) => setConfirmDelete(id)}
