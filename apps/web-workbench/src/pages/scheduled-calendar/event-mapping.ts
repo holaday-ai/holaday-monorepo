@@ -28,6 +28,8 @@ export interface ScheduledTaskRow {
   intent: string;
   /** Phase 26B polish — optional human annotation. */
   description?: string | null;
+  /** Phase 26B follow-up — reminder lead time in minutes; null = off. */
+  reminderMinutes?: number | null;
   repeatType: 'once' | 'daily' | 'weekly' | 'monthly';
   rrule: string | null;
   durationMinutes: number;
@@ -175,6 +177,7 @@ export function rowToEventInput(
       scheduledTaskId: row.scheduledTaskId,
       intent: row.intent,
       description: row.description ?? null,
+      reminderMinutes: row.reminderMinutes ?? null,
       repeatType: row.repeatType,
       rrule: row.rrule,
       durationMinutes: row.durationMinutes,

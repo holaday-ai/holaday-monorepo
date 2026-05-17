@@ -30,6 +30,24 @@ const REPEAT_PRESETS: ReadonlyArray<{
   { value: 'custom', label: '自定义' },
 ];
 
+/**
+ * Phase 26B follow-up — reminder lead-time presets. `null` = "不提醒"
+ * (default), 0 = at fire time, positive = minutes before. Cap at
+ * 60 minutes for the popover; the full edit modal can offer more
+ * granular options later.
+ */
+const REMINDER_PRESETS: ReadonlyArray<{
+  value: number | null;
+  label: string;
+}> = [
+  { value: null, label: '不提醒' },
+  { value: 0, label: '执行时' },
+  { value: 5, label: '5分钟前' },
+  { value: 15, label: '15分钟前' },
+  { value: 30, label: '30分钟前' },
+  { value: 60, label: '1小时前' },
+];
+
 interface Props {
   anchor: { x: number; y: number };
   date: Date;
@@ -41,6 +59,7 @@ interface Props {
     repeatType: 'once' | 'daily' | 'weekly' | 'monthly';
     rrule?: string;
     description?: string;
+    reminderMinutes?: number | null;
   }): Promise<void>;
 }
 
@@ -62,6 +81,7 @@ export function QuickCreatePopover({
   const [rrule, setRrule] = React.useState('');
   const [description, setDescription] = React.useState('');
   const [showDescription, setShowDescription] = React.useState(false);
+  const [reminderMinutes, setReminderMinutes] = React.useState<number | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
   const [showAdvanced, setShowAdvanced] = React.useState(false);
   const intentRef = React.useRef<HTMLInputElement | null>(null);
@@ -103,6 +123,9 @@ export function QuickCreatePopover({
         repeatType: finalRepeatType,
         ...(repeatType === 'custom' && rrule.trim() ? { rrule: rrule.trim() } : {}),
         ...(trimmedDescription ? { description: trimmedDescription } : {}),
+        // Always pass the reminder field so an explicit "不提醒"
+        // (null) survives the round-trip.
+        reminderMinutes,
       });
     } finally {
       setSubmitting(false);
@@ -206,6 +229,33 @@ export function QuickCreatePopover({
               {p.label}
             </button>
           ))}
+        </div>
+        <div className="mt-3">
+          <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+            提醒
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {REMINDER_PRESETS.map((p) => (
+              <button
+                type="button"
+                key={p.value === null ? 'off' : String(p.value)}
+                onClick={() => setReminderMinutes(p.value)}
+                className={cn(
+                  'rounded-full px-3 py-1 text-xs transition-colors',
+                  reminderMinutes === p.value
+                    ? 'bg-[#E50B6B]/12 text-[#E50B6B]'
+                    : 'text-muted-foreground hover:bg-foreground/[0.04]',
+                )}
+                style={
+                  reminderMinutes === p.value
+                    ? { backgroundColor: 'rgba(229,11,107,0.12)', color: '#E50B6B' }
+                    : undefined
+                }
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
         </div>
         {repeatType === 'custom' && (
           <div className="mt-3">

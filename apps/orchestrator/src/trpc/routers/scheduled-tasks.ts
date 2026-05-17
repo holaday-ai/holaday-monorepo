@@ -170,6 +170,7 @@ export const scheduledTasksRouter = router({
           rrule: scheduledTasks.rrule,
           durationMinutes: scheduledTasks.durationMinutes,
           timezone: scheduledTasks.timezone,
+          reminderMinutes: scheduledTasks.reminderMinutes,
           nextRunAt: scheduledTasks.nextRunAt,
           lastRunAt: scheduledTasks.lastRunAt,
           lastTaskId: scheduledTasks.lastTaskId,
@@ -192,6 +193,7 @@ export const scheduledTasksRouter = router({
         rrule: r.rrule,
         durationMinutes: r.durationMinutes,
         timezone: r.timezone,
+        reminderMinutes: r.reminderMinutes,
         nextRunAt: r.nextRunAt,
         lastRunAt: r.lastRunAt,
         status: r.status,
@@ -219,6 +221,11 @@ export const scheduledTasksRouter = router({
         // Phase 26B polish — optional human-readable annotation
         // shown in the event-detail popover. Never reaches the agent.
         description: z.string().max(2000).optional().nullable(),
+        // Phase 26B follow-up — reminder lead time in minutes.
+        // null = no reminder; 0 = at fire time; positive = lead-time.
+        // Cap at 7 days so a user can't accidentally arm an absurdly
+        // early reminder that fires on a different week.
+        reminderMinutes: z.number().int().min(0).max(60 * 24 * 7).optional().nullable(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -280,6 +287,9 @@ export const scheduledTasksRouter = router({
         ...(input.description !== undefined && input.description !== null
           ? { description: input.description }
           : {}),
+        ...(input.reminderMinutes !== undefined
+          ? { reminderMinutes: input.reminderMinutes }
+          : {}),
       });
       return { scheduledTaskId: externalId };
     }),
@@ -308,6 +318,8 @@ export const scheduledTasksRouter = router({
         timezone: z.string().max(64).optional(),
         // Phase 26B polish — explicit `null` clears the field.
         description: z.string().max(2000).optional().nullable(),
+        // Phase 26B follow-up — explicit `null` clears the reminder.
+        reminderMinutes: z.number().int().min(0).max(60 * 24 * 7).optional().nullable(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -357,6 +369,14 @@ export const scheduledTasksRouter = router({
       }
       if (input.timezone !== undefined) updates.timezone = input.timezone;
       if (input.description !== undefined) updates.description = input.description;
+      if (input.reminderMinutes !== undefined) {
+        updates.reminderMinutes = input.reminderMinutes;
+        // When the user changes (or clears) the reminder lead time,
+        // reset last_reminder_run so the next runner tick can fire
+        // a fresh reminder for the current cycle without being
+        // blocked by a previous fire.
+        updates.lastReminderRun = null;
+      }
       if (Object.keys(updates).length === 0) {
         return { ok: true as const, noop: true as const };
       }

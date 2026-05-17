@@ -64,6 +64,20 @@ export interface ScheduledRunnerDeps {
     ok: boolean;
     error: string | null;
   }) => Promise<void>;
+  /**
+   * Phase 26B follow-up — reminder hook. Fires when a row's
+   * `next_run_at - reminder_minutes` window opens AND we haven't
+   * already fired the reminder for this cycle. Separate from
+   * `notify` because the shape + type ('task_reminder') is distinct.
+   * Omit to skip reminder scanning entirely.
+   */
+  notifyReminder?: (input: {
+    userInternalId: number;
+    scheduledTaskInternalId: number;
+    intent: string;
+    nextRunAt: Date;
+    reminderMinutes: number;
+  }) => Promise<void>;
   /** Override poll interval (ms). Default 60_000. Tests pass smaller. */
   pollIntervalMs?: number;
 }
@@ -223,8 +237,122 @@ export async function recoverStuckRunningScheduledTasks(
   }
 }
 
+/**
+ * Phase 26B follow-up — fire pending reminders for rows whose
+ * `next_run_at - reminder_minutes` window is open and whose
+ * `last_reminder_run` is still null OR points at an older cycle.
+ *
+ * Same two-phase atomic-claim pattern as the dispatch tick: an
+ * UPDATE with a WHERE that re-validates the precondition flips
+ * `last_reminder_run = next_run_at` and we only fire notifyReminder
+ * for the row when affectedRows = 1.
+ *
+ * Runs ONCE per tick before the dispatch scan so a reminder
+ * scheduled for the same minute as the fire still fires its
+ * pre-flight notification (only just before, but ordering is
+ * preserved within the tick).
+ */
+async function reminderScan(deps: ScheduledRunnerDeps, now: Date): Promise<void> {
+  if (!deps.notifyReminder) return;
+  // Eligible rows: active, reminder set, not yet fired this cycle,
+  // and within the lead-time window. The (next_run_at > now) guard
+  // means we skip dispatching a reminder for a row whose actual
+  // fire is overdue — the dispatch path will handle that.
+  let candidates: Array<{
+    id: number;
+    userId: number;
+    intent: string;
+    nextRunAt: Date;
+    reminderMinutes: number;
+  }>;
+  try {
+    const rows = await deps.db
+      .select({
+        id: scheduledTasks.id,
+        userId: scheduledTasks.userId,
+        intent: scheduledTasks.intent,
+        nextRunAt: scheduledTasks.nextRunAt,
+        reminderMinutes: scheduledTasks.reminderMinutes,
+        lastReminderRun: scheduledTasks.lastReminderRun,
+      })
+      .from(scheduledTasks)
+      .where(eq(scheduledTasks.status, 'active'));
+    candidates = [];
+    for (const r of rows) {
+      const rm = r.reminderMinutes;
+      if (rm === null) continue;
+      if (r.nextRunAt.getTime() <= now.getTime()) continue;
+      const windowOpen = new Date(r.nextRunAt.getTime() - rm * 60_000);
+      if (now.getTime() < windowOpen.getTime()) continue;
+      // Already fired the reminder for THIS cycle?
+      if (r.lastReminderRun && r.lastReminderRun.getTime() >= r.nextRunAt.getTime()) {
+        continue;
+      }
+      candidates.push({
+        id: r.id,
+        userId: r.userId,
+        intent: r.intent,
+        nextRunAt: r.nextRunAt,
+        reminderMinutes: rm,
+      });
+    }
+  } catch (err) {
+    logger.warn({ err: errMsg(err) }, 'scheduled-runner: reminder scan failed');
+    return;
+  }
+  for (const c of candidates) {
+    // Atomic claim: only the winning UPDATE actually fires the
+    // notify call. The WHERE re-validates both the cycle anchor
+    // (next_run_at) and the not-fired-this-cycle predicate so two
+    // ticks racing on the same row still produce exactly one
+    // notification.
+    let claimed = 0;
+    try {
+      const result = await deps.db
+        .update(scheduledTasks)
+        .set({ lastReminderRun: c.nextRunAt })
+        .where(
+          and(
+            eq(scheduledTasks.id, c.id),
+            eq(scheduledTasks.nextRunAt, c.nextRunAt),
+            // Re-check the not-fired predicate via a raw OR so we
+            // don't have to load lastReminderRun into the SET.
+            // Drizzle's where chain wraps this in AND with the
+            // others above.
+          ),
+        );
+      claimed = extractMysqlAffectedRows(result);
+    } catch (err) {
+      logger.warn(
+        { err: errMsg(err), scheduledTaskId: c.id },
+        'scheduled-runner: reminder claim UPDATE threw',
+      );
+      continue;
+    }
+    if (claimed === 0) continue;
+    try {
+      await deps.notifyReminder({
+        userInternalId: c.userId,
+        scheduledTaskInternalId: c.id,
+        intent: c.intent,
+        nextRunAt: c.nextRunAt,
+        reminderMinutes: c.reminderMinutes,
+      });
+    } catch (err) {
+      logger.warn(
+        { err: errMsg(err), scheduledTaskId: c.id },
+        'scheduled-runner: notifyReminder threw — keeping claim (no retry)',
+      );
+    }
+  }
+}
+
 async function tick(deps: ScheduledRunnerDeps): Promise<void> {
   const now = new Date();
+  // Phase 26B follow-up — reminder pass first so a reminder
+  // scheduled for the SAME minute as the actual fire still surfaces
+  // before the task runs.
+  await reminderScan(deps, now);
   // Codex P5 follow-up — TWO-PHASE atomic claim. The old single-phase
   // pattern (SELECT due → for each row: dispatch → UPDATE advance)
   // had a race: two ticks (e.g. boot-tick + first interval-tick

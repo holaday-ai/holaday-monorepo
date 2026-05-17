@@ -469,6 +469,43 @@ async function main() {
           },
         );
       },
+      // Phase 26B follow-up — reminder hook. Fires when the
+      // configured lead-time window opens and the runner has
+      // atomically claimed the cycle (so no double-fire).
+      notifyReminder: async ({
+        userInternalId,
+        scheduledTaskInternalId,
+        intent,
+        nextRunAt,
+        reminderMinutes,
+      }) => {
+        const { notify } = await import('./notifications/notification-service.js');
+        const truncatedIntent = intent.length > 60 ? `${intent.slice(0, 60)}…` : intent;
+        const fireLocal = nextRunAt.toLocaleString('zh-CN', {
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: 'Asia/Shanghai',
+        });
+        const leadCopy =
+          reminderMinutes === 0
+            ? '即将开始'
+            : reminderMinutes < 60
+              ? `${reminderMinutes} 分钟后开始`
+              : `${Math.round(reminderMinutes / 60)} 小时后开始`;
+        await notify(
+          { db, logger },
+          {
+            userInternalId,
+            scheduledTaskInternalId,
+            type: 'task_reminder',
+            title: '定时任务提醒',
+            message: `「${truncatedIntent}」${leadCopy}（${fireLocal}）。`,
+            taskName: truncatedIntent,
+          },
+        );
+      },
     });
   }
 

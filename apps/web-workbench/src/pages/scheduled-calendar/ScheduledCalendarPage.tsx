@@ -173,6 +173,78 @@ export function ScheduledCalendarPage(): JSX.Element {
     [callApi, currentView],
   );
 
+  /**
+   * Phase 26B follow-up — wheel + touch nav for prev/next.
+   *
+   * Wheel: deltaY-driven prev/next when the user scrolls inside the
+   * calendar grid. We debounce so a single trackpad swipe doesn't
+   * skip three months. Wired only on month + week views; day view
+   * still scrolls the time column naturally.
+   *
+   * Touch: swipe-left → next, swipe-right → prev when |Δx| > 50px.
+   * Same view gate (month + week). Mobile users get the same nav
+   * affordance the toolbar arrows give on desktop.
+   */
+  const shellRef = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    const el = shellRef.current;
+    if (!el) return;
+    const navEnabled = currentView === 'dayGridMonth' || currentView === 'timeGridWeek';
+    if (!navEnabled) return;
+
+    let wheelCooldownUntil = 0;
+    const WHEEL_THRESHOLD = 40;
+    const WHEEL_COOLDOWN_MS = 350;
+    const onWheel = (e: WheelEvent) => {
+      // Only react to vertical wheel motion — ignore horizontal
+      // trackpad gestures that the calendar's own scroll handles.
+      if (Math.abs(e.deltaY) < WHEEL_THRESHOLD) return;
+      // Day view (when active) needs vertical scrolling for the
+      // time grid — we already gate on currentView above, so this
+      // path only runs for month / week.
+      const now = Date.now();
+      if (now < wheelCooldownUntil) return;
+      wheelCooldownUntil = now + WHEEL_COOLDOWN_MS;
+      e.preventDefault();
+      if (e.deltaY > 0) handleNext();
+      else handlePrev();
+    };
+
+    let touchStartX: number | null = null;
+    let touchStartY: number | null = null;
+    const SWIPE_THRESHOLD_PX = 50;
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      touchStartX = e.touches[0]?.clientX ?? null;
+      touchStartY = e.touches[0]?.clientY ?? null;
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (touchStartX === null || touchStartY === null) return;
+      const endX = e.changedTouches[0]?.clientX ?? touchStartX;
+      const endY = e.changedTouches[0]?.clientY ?? touchStartY;
+      const dx = endX - touchStartX;
+      const dy = endY - touchStartY;
+      touchStartX = null;
+      touchStartY = null;
+      // Require horizontal-dominant motion so vertical scrolls
+      // (especially in week view's time grid) don't accidentally
+      // page the calendar.
+      if (Math.abs(dx) < SWIPE_THRESHOLD_PX) return;
+      if (Math.abs(dx) < Math.abs(dy) * 1.5) return;
+      if (dx < 0) handleNext();
+      else handlePrev();
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchend', onTouchEnd);
+    };
+  }, [currentView, handleNext, handlePrev]);
+
   const handleDateClick = React.useCallback((arg: DateClickArg) => {
     // The clicked cell's center as the anchor for the popover. arg.jsEvent
     // gives us the source MouseEvent so we can read clientX/Y directly.
@@ -394,7 +466,6 @@ export function ScheduledCalendarPage(): JSX.Element {
     <PageContainer width="wide">
       <PageHeader
         title="定时任务"
-        description="按日历视图管理你的定时任务，拖拽事件可以调整执行时间或持续时间。"
         action={
           <Button onClick={() => setFullModalOpen(true)}>
             <Plus className="mr-1 h-4 w-4" />
@@ -402,7 +473,7 @@ export function ScheduledCalendarPage(): JSX.Element {
           </Button>
         }
       />
-      <div className="hd-calendar relative mt-4">
+      <div ref={shellRef} className="hd-calendar relative mt-2">
         {/* Custom toolbar — replaces FullCalendar's default. Three
             regions: nav arrows + 今天, centered title, segment-
             control view switcher. Matches Todoist's clean nav. */}

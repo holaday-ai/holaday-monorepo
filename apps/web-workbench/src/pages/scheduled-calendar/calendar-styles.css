@@ -47,7 +47,10 @@
   gap: 12px;
   height: 48px;
   padding: 0 4px;
-  margin-bottom: 16px;
+  /* Phase 26B follow-up — tightened from 16 → 4 px so the toolbar
+     hugs the grid. The PageContainer's vertical padding still
+     supplies the breathing room above the toolbar. */
+  margin-bottom: 4px;
 }
 .hd-calendar-toolbar__nav {
   display: flex;

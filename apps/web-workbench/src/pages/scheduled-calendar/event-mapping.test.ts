@@ -10,6 +10,7 @@ function makeRow(over: Partial<ScheduledTaskRow>): ScheduledTaskRow {
     scheduledTaskId: 'sch_1',
     intent: 'test intent',
     description: null,
+    reminderMinutes: null,
     repeatType: 'once',
     rrule: null,
     durationMinutes: 30,
@@ -141,9 +142,12 @@ describe('rowToEventInput', () => {
     expect(ev.start).toBeUndefined();
   });
 
-  it('extendedProps carries the full color triple + description', () => {
+  it('extendedProps carries the full color triple + description + reminder', () => {
     const events = rowToEventInput(
-      makeRow({ description: '产品同事每周看的报告' }),
+      makeRow({
+        description: '产品同事每周看的报告',
+        reminderMinutes: 15,
+      }),
       { now },
     );
     const ext = events[0]?.extendedProps as Record<string, unknown>;
@@ -151,6 +155,13 @@ describe('rowToEventInput', () => {
     expect(ext.backgroundTint).toContain('229, 11, 107');
     expect(ext.backgroundTintHover).toContain('229, 11, 107');
     expect(ext.description).toBe('产品同事每周看的报告');
+    expect(ext.reminderMinutes).toBe(15);
+  });
+
+  it('reminderMinutes is null when not set on the row', () => {
+    const events = rowToEventInput(makeRow({}), { now });
+    const ext = events[0]?.extendedProps as Record<string, unknown>;
+    expect(ext.reminderMinutes).toBeNull();
   });
 
   it('title truncates at 60 chars with ellipsis', () => {

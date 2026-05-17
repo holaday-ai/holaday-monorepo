@@ -93,6 +93,21 @@ export const scheduledTasks = mysqlTable(
      * polluting the prompt.
      */
     description: text('description'),
+    /**
+     * Phase 26B follow-up — reminder lead time. NULL = no reminder.
+     * 0 = fire reminder at execution time. Positive integer = fire
+     * that many minutes before next_run_at. The runner's reminder
+     * scan + the notify hook with type='task_reminder' handle
+     * dispatch.
+     */
+    reminderMinutes: int('reminder_minutes', { unsigned: true }),
+    /**
+     * Phase 26B follow-up — records the `next_run_at` value of the
+     * cycle whose reminder we've already fired. Compared against
+     * current next_run_at to prevent double-fire within one cycle.
+     * Stays at NULL until the first reminder fires.
+     */
+    lastReminderRun: datetime('last_reminder_run', { mode: 'date', fsp: 3 }),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
       .notNull()
       .default(sql`CURRENT_TIMESTAMP(3)`),

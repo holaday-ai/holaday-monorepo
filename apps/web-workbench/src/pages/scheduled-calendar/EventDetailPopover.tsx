@@ -11,7 +11,7 @@
  * round once the popover is in real use.
  */
 
-import { Calendar, CheckCircle2, Clock, Loader2, Pause, Play, Trash2, XCircle } from 'lucide-react';
+import { Bell, BellOff, Calendar, CheckCircle2, Clock, Loader2, Pause, Play, Trash2, XCircle } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -125,6 +125,15 @@ export function EventDetailPopover({
         <span className="text-foreground">{formatDateTime(row.nextRunAt)}</span>
         <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />重复</span>
         <span className="text-foreground">{describeRepeat(row)}</span>
+        <span className="flex items-center gap-1">
+          {row.reminderMinutes == null ? (
+            <BellOff className="h-3 w-3" />
+          ) : (
+            <Bell className="h-3 w-3" style={{ color: '#E50B6B' }} />
+          )}
+          提醒
+        </span>
+        <span className="text-foreground">{describeReminder(row.reminderMinutes ?? null)}</span>
         {row.lastRunAt && (
           <>
             <span className="flex items-center gap-1"><Clock className="h-3 w-3" />上次</span>
@@ -235,6 +244,15 @@ function formatDateTime(d: Date | string | null): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function describeReminder(minutes: number | null): string {
+  if (minutes === null) return '不提醒';
+  if (minutes === 0) return '执行时';
+  if (minutes < 60) return `${minutes} 分钟前`;
+  if (minutes === 60) return '1 小时前';
+  const hours = Math.round(minutes / 60);
+  return `${hours} 小时前`;
 }
 
 function describeRepeat(row: ScheduledTaskRow): string {

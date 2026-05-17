@@ -1,0 +1,34 @@
+-- Phase 26B follow-up — task reminders.
+--
+-- Two new columns on scheduled_tasks:
+--
+--   reminder_minutes      How many minutes before next_run_at a
+--                         reminder notification should fire. NULL =
+--                         no reminder. 0 = at fire time (same as
+--                         the existing completion notification, but
+--                         pre-dispatch). Common values 5 / 15 /
+--                         30 / 60.
+--
+--   last_reminder_run     DATETIME(3) recording the `next_run_at`
+--                         value of the most-recent cycle whose
+--                         reminder has already been fired. Compared
+--                         against current next_run_at to know
+--                         whether to fire again. NULL means "never
+--                         fired any reminder yet".
+--
+-- Runner reminder-scan SQL (conceptually):
+--   WHERE reminder_minutes IS NOT NULL
+--     AND status = 'active'
+--     AND next_run_at > NOW(3)
+--     AND NOW(3) >= DATE_SUB(next_run_at, INTERVAL reminder_minutes MINUTE)
+--     AND (last_reminder_run IS NULL OR last_reminder_run < next_run_at)
+--
+-- Then a two-phase atomic claim (same pattern as dispatch) sets
+-- last_reminder_run = next_run_at; only the winning tick fires the
+-- notify({ type: 'task_reminder' }) call.
+--
+-- Both columns are nullable + no default → existing rows stay at
+-- NULL and the runner's reminder scan is a no-op until users opt in.
+
+ALTER TABLE `scheduled_tasks` ADD COLUMN `reminder_minutes` INT UNSIGNED NULL;--> statement-breakpoint
+ALTER TABLE `scheduled_tasks` ADD COLUMN `last_reminder_run` DATETIME(3) NULL;
