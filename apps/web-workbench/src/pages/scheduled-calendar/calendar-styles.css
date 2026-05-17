@@ -58,32 +58,28 @@
 /* FullCalendar's column-header row (Mon Tue Wed …). With
  * stickyHeaderDates={true} FullCalendar's own CSS positions it
  * sticky inside its scrollgrid container; we override `top` so it
- * lands JUST BELOW the sticky band (page header + toolbar ≈ 110
- * px on desktop with the default PageHeader heights). */
+ * lands JUST BELOW the sticky band. The band's actual rendered
+ * height is fed in via the `--hd-band-h` CSS variable (set by a
+ * ResizeObserver in ScheduledCalendarPage); the fallback covers
+ * the first paint before the observer fires. */
 .hd-calendar .fc-scrollgrid-section-header > * {
   position: sticky;
-  top: 96px;
+  top: var(--hd-band-h, 120px);
   z-index: 9;
   background: hsl(var(--background));
 }
 
-/* ───────────────────────── Event content (inline time · title) */
-
-/* #2 — both time AND title visible at once. FullCalendar's default
- * stacks them, which clips the title in compact (≤ 30 min) slots.
- * Flex-row + ellipsis on the title keeps both readable. */
+/* ───────────────────────── Event content (title only)
+ *
+ * Time axis on the left already locates the block; repeating the
+ * time in-block was redundant and clipped the title in compact
+ * (≤ 30 min) slots. We render only the title now — single-line,
+ * ellipsis-truncated. */
 .hd-calendar .hd-event-content {
   display: flex;
   align-items: baseline;
-  gap: 6px;
   min-width: 0;
   overflow: hidden;
-}
-.hd-calendar .hd-event-content .hd-event-time {
-  flex-shrink: 0;
-  font-weight: 600;
-  font-size: 12px;
-  color: var(--hd-event-accent, var(--hd-magenta));
 }
 .hd-calendar .hd-event-content .hd-event-title {
   min-width: 0;
@@ -92,9 +88,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Month view tucks the dot + time on one line; we already replaced
- * FC's default dot via the accent bar, so override the inline
- * .fc-daygrid-event display to fit our custom content cleanly. */
 .hd-calendar .fc-daygrid-event .hd-event-content {
   padding: 0;
 }

@@ -516,7 +516,13 @@ export function AppShell(): JSX.Element {
         mobileOpen={sidebarOpen}
         onMobileClose={() => setSidebarOpen(false)}
       />
-      <SidebarInset className="overflow-hidden bg-background">
+      {/* No `overflow-hidden` on SidebarInset — that turns it into a
+          CSS scroll container, which traps every descendant
+          `position: sticky` to a non-scrolling ancestor (sticky needs
+          the body / html scroll context to actually stick). Pages
+          that need internal scroll roll their own overflow boundary
+          (WorkbenchApp already does). */}
+      <SidebarInset className="bg-background">
         <Outlet context={ctx} />
       </SidebarInset>
 

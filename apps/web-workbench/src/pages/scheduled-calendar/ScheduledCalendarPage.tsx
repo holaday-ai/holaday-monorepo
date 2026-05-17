@@ -87,6 +87,18 @@ export function ScheduledCalendarPage(): JSX.Element {
   const [eventDetail, setEventDetail] = React.useState<EventDetailState | null>(
     null,
   );
+  // Refs mirror the popover state so the synchronous dateClick /
+  // eventClick handlers can detect "a popover was just open before
+  // this click" — React state updates are batched after handlers,
+  // so reading `quickCreate` directly would always be stale.
+  const quickCreateRef = React.useRef<QuickCreateState | null>(null);
+  const eventDetailRef = React.useRef<EventDetailState | null>(null);
+  React.useEffect(() => {
+    quickCreateRef.current = quickCreate;
+  }, [quickCreate]);
+  React.useEffect(() => {
+    eventDetailRef.current = eventDetail;
+  }, [eventDetail]);
   const [fullModalOpen, setFullModalOpen] = React.useState(false);
   const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
   const [isMobile, setIsMobile] = React.useState(() => {
@@ -187,6 +199,31 @@ export function ScheduledCalendarPage(): JSX.Element {
    * affordance the toolbar arrows give on desktop.
    */
   const shellRef = React.useRef<HTMLDivElement | null>(null);
+  const bandRef = React.useRef<HTMLDivElement | null>(null);
+  /**
+   * Measure the sticky band's rendered height and feed it to the
+   * calendar shell as a CSS custom property. calendar-styles.css
+   * reads `--hd-band-h` to offset FullCalendar's column-header sticky
+   * (so the header lands directly below the band instead of behind a
+   * hard-coded 96px guess). ResizeObserver covers font-loading
+   * reflows + responsive padding changes.
+   */
+  React.useEffect(() => {
+    const band = bandRef.current;
+    const shell = shellRef.current;
+    if (!band || !shell) return;
+    const apply = (h: number) => {
+      shell.style.setProperty('--hd-band-h', `${Math.ceil(h)}px`);
+    };
+    apply(band.getBoundingClientRect().height);
+    const ro = new ResizeObserver((entries) => {
+      const h = entries[0]?.contentRect.height ?? 0;
+      apply(h);
+    });
+    ro.observe(band);
+    return () => ro.disconnect();
+  }, []);
+
   React.useEffect(() => {
     const el = shellRef.current;
     if (!el) return;
@@ -247,6 +284,17 @@ export function ScheduledCalendarPage(): JSX.Element {
   }, [currentView, handleNext, handlePrev]);
 
   const handleDateClick = React.useCallback((arg: DateClickArg) => {
+    // If a popover is already open, this click is "outside that
+    // popover" — same semantic as clicking on empty page area. Per
+    // product spec, that click should ONLY dismiss the popover; the
+    // next click opens a new one. Reading refs (not state) because
+    // the outside-click mousedown that just fired hasn't flushed its
+    // setState yet.
+    if (quickCreateRef.current || eventDetailRef.current) {
+      setQuickCreate(null);
+      setEventDetail(null);
+      return;
+    }
     // The clicked cell's center as the anchor for the popover. arg.jsEvent
     // gives us the source MouseEvent so we can read clientX/Y directly.
     const x = arg.jsEvent.clientX;
@@ -260,24 +308,21 @@ export function ScheduledCalendarPage(): JSX.Element {
       clicked.setFullYear(now.getFullYear(), now.getMonth(), now.getDate());
       clicked.setHours(9, 0, 0, 0);
     }
-    // Mutual exclusion — if a detail popover is open, close it
-    // atomically alongside opening the quick-create so the user
-    // never sees both at once. The detail popover's own outside-
-    // click handler ALSO fires (mousedown bubbles up first), but
-    // explicit close here makes the page handler the source of
-    // truth + avoids relying on listener ordering.
-    setEventDetail(null);
     setQuickCreate({ anchor: { x, y }, date: clicked });
   }, []);
 
   const handleEventClick = React.useCallback(
     (arg: EventClickArg) => {
       arg.jsEvent.preventDefault();
+      // Same close-only-when-open rule as handleDateClick.
+      if (quickCreateRef.current || eventDetailRef.current) {
+        setQuickCreate(null);
+        setEventDetail(null);
+        return;
+      }
       const id = arg.event.id;
       const row = rows.find((r) => r.scheduledTaskId === id);
       if (!row) return;
-      // Mutual exclusion — same rationale as handleDateClick.
-      setQuickCreate(null);
       setEventDetail({
         anchor: { x: arg.jsEvent.clientX, y: arg.jsEvent.clientY },
         row,
@@ -350,20 +395,16 @@ export function ScheduledCalendarPage(): JSX.Element {
    *   3. tag newly-created rows with the magenta-glow pulse class
    */
   /**
-   * #2 — custom event content. The default FullCalendar markup
-   * stacks .fc-event-time + .fc-event-title vertically; in
-   * compact slots (≤30 min) the second line overflows the event
-   * height and the user only sees the time. We render an inline
-   * row "time · title" so both always show and the title can
-   * ellipsis-truncate. The corresponding `.hd-event-*` CSS lives
-   * in calendar-styles.css.
+   * Event blocks show ONLY the title — the time axis on the left
+   * already locates the block, repeating the time in the block was
+   * redundant + truncated the title in compact (≤30 min) slots.
+   * Falls back to "未命名任务" if the intent is empty (defensive —
+   * required at create-time, but a stale row could be empty).
    */
   const renderEventContent = React.useCallback((arg: EventContentArg) => {
-    const timeText = arg.timeText;
-    const title = arg.event.title;
+    const title = arg.event.title.trim() || '未命名任务';
     return (
       <div className="hd-event-content">
-        {timeText ? <span className="hd-event-time">{timeText}</span> : null}
         <span className="hd-event-title">{title}</span>
       </div>
     );
@@ -518,7 +559,7 @@ export function ScheduledCalendarPage(): JSX.Element {
           scrolls. The wrapper is sticky; FullCalendar's internal
           .fc-scrollgrid-section-header gets its own top offset
           via calendar-styles.css to land just below this band. */}
-      <div className="hd-calendar-sticky-band">
+      <div ref={bandRef} className="hd-calendar-sticky-band">
         <PageHeader
           title="定时任务"
           action={
@@ -597,7 +638,10 @@ export function ScheduledCalendarPage(): JSX.Element {
           initialView={isMobile ? 'listMonth' : 'timeGridWeek'}
           headerToolbar={false}
           /* Day view title needs the full date — FullCalendar's
-             default for timeGridDay is just the weekday. */
+             default for timeGridDay is just the weekday. Month view
+             swaps the day-of-month cell content to a bare number
+             (default zh-cn renders "17日" / "18日"; the suffix is
+             visually noisy in a grid of 35 cells). */
           views={{
             timeGridDay: {
               titleFormat: {
@@ -607,13 +651,23 @@ export function ScheduledCalendarPage(): JSX.Element {
                 weekday: 'long',
               },
             },
+            dayGridMonth: {
+              dayCellContent: (arg) => String(arg.date.getDate()),
+            },
           }}
           locale="zh-cn"
           firstDay={1}
           allDaySlot={false}
           slotDuration="00:30:00"
-          slotMinTime="06:00:00"
-          slotMaxTime="23:00:00"
+          slotMinTime="00:00:00"
+          slotMaxTime="24:00:00"
+          slotLabelFormat={{
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: false,
+            meridiem: false,
+          }}
+          scrollTime="08:00:00"
           height="auto"
           events={events}
           editable
