@@ -42,6 +42,11 @@ export function EventDetailPopover({
   const [busy, setBusy] = React.useState<'toggle' | 'run' | null>(null);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
 
+  // Esc + outside-click dismissal. mousedown fires BEFORE FullCalendar's
+  // own click handlers (eventClick / dateClick), so a click on a
+  // different cell or event closes this popover first; the parent's
+  // handler then opens the new one. Listeners on `document` per the
+  // popover spec.
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -49,11 +54,11 @@ export function EventDetailPopover({
     const onClickOutside = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) onClose();
     };
-    window.addEventListener('keydown', onKey);
-    window.addEventListener('mousedown', onClickOutside);
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onClickOutside);
     return () => {
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('mousedown', onClickOutside);
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onClickOutside);
     };
   }, [onClose]);
 

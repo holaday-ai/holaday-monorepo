@@ -91,7 +91,13 @@ export function QuickCreatePopover({
     intentRef.current?.focus();
   }, []);
 
-  // Esc + outside-click dismissal
+  // Esc + outside-click dismissal. The mousedown listener fires
+  // BEFORE the click handler that FullCalendar binds for dateClick,
+  // so when the user clicks another date while this popover is open,
+  // we close first; the parent's dateClick handler then opens the
+  // new popover. Listeners go on `document` (not `window`) to match
+  // the popover spec literally + match where most outside-click
+  // libraries hook in.
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -99,12 +105,11 @@ export function QuickCreatePopover({
     const onClickOutside = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) onClose();
     };
-    window.addEventListener('keydown', onKey);
-    // mousedown so the focus loss doesn't fire before the click handler
-    window.addEventListener('mousedown', onClickOutside);
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onClickOutside);
     return () => {
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('mousedown', onClickOutside);
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onClickOutside);
     };
   }, [onClose]);
 

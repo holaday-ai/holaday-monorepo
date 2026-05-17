@@ -259,6 +259,13 @@ export function ScheduledCalendarPage(): JSX.Element {
       clicked.setFullYear(now.getFullYear(), now.getMonth(), now.getDate());
       clicked.setHours(9, 0, 0, 0);
     }
+    // Mutual exclusion — if a detail popover is open, close it
+    // atomically alongside opening the quick-create so the user
+    // never sees both at once. The detail popover's own outside-
+    // click handler ALSO fires (mousedown bubbles up first), but
+    // explicit close here makes the page handler the source of
+    // truth + avoids relying on listener ordering.
+    setEventDetail(null);
     setQuickCreate({ anchor: { x, y }, date: clicked });
   }, []);
 
@@ -268,6 +275,8 @@ export function ScheduledCalendarPage(): JSX.Element {
       const id = arg.event.id;
       const row = rows.find((r) => r.scheduledTaskId === id);
       if (!row) return;
+      // Mutual exclusion — same rationale as handleDateClick.
+      setQuickCreate(null);
       setEventDetail({
         anchor: { x: arg.jsEvent.clientX, y: arg.jsEvent.clientY },
         row,
