@@ -40,7 +40,7 @@ import type {
   EventMountArg,
 } from '@fullcalendar/core';
 
-import { CalendarDays, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -74,7 +74,10 @@ export function ScheduledCalendarPage(): JSX.Element {
   const toast = useToast();
   const calendarRef = React.useRef<FullCalendar | null>(null);
   const [rows, setRows] = React.useState<ScheduledTaskRow[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  // `loading` no longer drives a UI affordance now that the empty-
+  // state overlay is gone; kept the call sites for future use (the
+  // `_` prefix marks it intentional for the linter).
+  const [, setLoading] = React.useState(true);
   const [currentRange, setCurrentRange] = React.useState<{
     start: Date;
     end: Date;
@@ -92,9 +95,14 @@ export function ScheduledCalendarPage(): JSX.Element {
   // Phase 26B polish — custom toolbar (we render the title + view
   // pills + nav arrows ourselves). Mirror the FullCalendar state
   // here so the pills know which view is active.
+  //
+  // Phase 26B follow-up — default view is WEEK (timeGridWeek). The
+  // month view felt too high-level for the daily-cadence tasks most
+  // users actually create; week shows enough detail to drop tasks
+  // into specific hour slots.
   const [currentView, setCurrentView] = React.useState<
     'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listMonth'
-  >(() => (isMobile ? 'listMonth' : 'dayGridMonth'));
+  >(() => (isMobile ? 'listMonth' : 'timeGridWeek'));
   const [toolbarTitle, setToolbarTitle] = React.useState<string>('');
   // Track row externalIds whose CREATED_AT just landed in the last
   // refresh so we can apply the magenta-glow pulse animation once.
@@ -382,8 +390,6 @@ export function ScheduledCalendarPage(): JSX.Element {
 
   // ───────────────────────────── render ─────────────────────────────
 
-  const showEmpty = !loading && rows.length === 0;
-
   return (
     <PageContainer width="wide">
       <PageHeader
@@ -460,7 +466,7 @@ export function ScheduledCalendarPage(): JSX.Element {
             interactionPlugin,
             rrulePlugin,
           ]}
-          initialView={isMobile ? 'listMonth' : 'dayGridMonth'}
+          initialView={isMobile ? 'listMonth' : 'timeGridWeek'}
           headerToolbar={false}
           /* Day view title needs the full date — FullCalendar's
              default for timeGridDay is just the weekday. */
@@ -493,23 +499,10 @@ export function ScheduledCalendarPage(): JSX.Element {
           eventDidMount={handleEventDidMount}
           nowIndicator
         />
-        {showEmpty && (
-          <div className="pointer-events-none absolute inset-x-0 top-[120px] flex items-center justify-center">
-            <div className="pointer-events-auto flex flex-col items-center px-6 py-8 text-center">
-              <CalendarDays
-                className="mb-4 h-10 w-10"
-                strokeWidth={1.5}
-                style={{ color: '#cccccc' }}
-              />
-              <div className="text-base font-semibold" style={{ color: '#333333' }}>
-                还没有定时任务
-              </div>
-              <div className="mt-1 text-sm" style={{ color: '#999999' }}>
-                点击日历任意日期，或点击右上角按钮创建
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Phase 26B follow-up — the empty-state overlay obstructed
+            the date grid more than it helped. The grid itself IS the
+            interactive surface; a "first-task" call-out covering it
+            felt like an error page. Removed. */}
       </div>
 
       {quickCreate && (

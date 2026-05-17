@@ -21,6 +21,7 @@ import { and, between, desc, eq, gte, lte, or } from 'drizzle-orm';
 // Same CJS-vs-ESM interop story.
 import rrule from 'rrule';
 import { z } from 'zod';
+import { computeNextRunFromInputs } from '../../agent/scheduled-runner.js';
 import { scheduledTasks } from '../../db/schema/scheduled-tasks.js';
 
 const { rrulestr } = rrule as { rrulestr: (s: string) => unknown };
@@ -41,6 +42,58 @@ async function requireUserId(
     throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
   }
   return row.id;
+}
+
+/**
+ * Phase 26B follow-up — advance a recurring schedule's anchor time
+ * past `now`. The user picked "today 09:00, every day" at 14:00 —
+ * we need next_run_at = tomorrow 09:00, not today 09:00 (which the
+ * runner would treat as overdue and fire immediately on the next
+ * tick).
+ *
+ * Strategy:
+ *   - rrule path: rrulestr.after(now, false) returns the first
+ *     occurrence STRICTLY AFTER now in one call (the rrule string
+ *     anchors itself via DTSTART or the embedded BYHOUR).
+ *   - enum path: advance by the cadence one unit at a time. Cap at
+ *     400 iterations so a malformed input can't infinite-loop the
+ *     request (400 covers 'monthly' starting up to a year in the past
+ *     plus margin; 'daily' covers a year; 'weekly' covers ~7 years).
+ *
+ * Returns null for repeatType='once' (caller must reject one-shots
+ * in the past separately).
+ */
+export function rollForwardToFuture(opts: {
+  initial: Date;
+  rrule: string | null;
+  repeatType: 'once' | 'daily' | 'weekly' | 'monthly' | 'custom';
+  now: Date;
+}): Date | null {
+  if (opts.repeatType === 'once' && !opts.rrule) return null;
+  if (opts.rrule) {
+    // rrule expansion is independent of `initial` — the rule itself
+    // anchors the schedule. Just ask for the next occurrence after now.
+    return computeNextRunFromInputs({
+      from: opts.now,
+      rrule: opts.rrule,
+      repeatType: opts.repeatType,
+    });
+  }
+  // Enum-driven cadence. Start at `initial` so the time-of-day
+  // component (e.g. 09:00) is preserved, then loop forward.
+  let candidate = opts.initial;
+  let safety = 400;
+  while (candidate.getTime() <= opts.now.getTime() && safety > 0) {
+    const next = computeNextRunFromInputs({
+      from: candidate,
+      rrule: null,
+      repeatType: opts.repeatType,
+    });
+    if (!next) return null;
+    candidate = next;
+    safety -= 1;
+  }
+  return candidate.getTime() > opts.now.getTime() ? candidate : null;
 }
 
 /**
@@ -170,32 +223,54 @@ export const scheduledTasksRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const userId = await requireUserId(ctx);
-      const nextRun = new Date(input.scheduledAt);
-      if (Number.isNaN(nextRun.getTime())) {
+      const requestedRun = new Date(input.scheduledAt);
+      if (Number.isNaN(requestedRun.getTime())) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: 'scheduledAt must be a valid datetime',
         });
       }
-      // Reject scheduled times in the past — usually means the user's
-      // clock skewed or they picked a time that already passed during
-      // form fill. The runner would fire it immediately on the next
-      // tick, which is rarely what they want; surface the rejection
-      // so they can re-pick.
-      if (nextRun.getTime() < Date.now() - 60_000) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: '执行时间已过去，请重新选择',
-        });
-      }
       const rrule = validateRrule(input.rrule);
+      // Phase 26B follow-up — recurring tasks should accept a past
+      // scheduledAt (the user picked "every day at 09:00" but it's
+      // already 14:00, that should create with next_run_at = tomorrow
+      // 09:00, not 400). One-shot tasks still reject — re-firing a
+      // missed one-shot in the past is never what the user wants.
+      const now = new Date();
+      const isRecurring = input.repeatType !== 'once' || rrule !== null;
+      const isPast = requestedRun.getTime() < now.getTime() - 60_000;
+      let effectiveRun = requestedRun;
+      if (isPast) {
+        if (!isRecurring) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: '执行时间已过去，请重新选择',
+          });
+        }
+        // Roll forward through the recurrence pattern until we land in
+        // the future. rrule's `.after(now, false)` handles its case in
+        // one call; the legacy enum path loops one unit at a time.
+        const rolled = rollForwardToFuture({
+          initial: requestedRun,
+          rrule,
+          repeatType: input.repeatType,
+          now,
+        });
+        if (!rolled) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: '无法计算下次执行时间，请检查重复规则',
+          });
+        }
+        effectiveRun = rolled;
+      }
       const externalId = newExternalId('scheduledTask');
       await ctx.db.insert(scheduledTasks).values({
         externalId,
         userId,
         intent: input.intent,
         repeatType: input.repeatType,
-        nextRunAt: nextRun,
+        nextRunAt: effectiveRun,
         status: 'active',
         ...(rrule ? { rrule } : {}),
         ...(input.durationMinutes !== undefined

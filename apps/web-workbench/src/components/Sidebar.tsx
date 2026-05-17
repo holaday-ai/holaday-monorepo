@@ -46,6 +46,7 @@ import {
 } from '@/components/ui/sidebar';
 import { TaskListItem } from '@/components/TaskListItem';
 import { useToast } from '@/components/ui/toast';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { UserMenu } from '@/components/UserMenu';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
@@ -546,16 +547,22 @@ export function Sidebar({
               <div className="px-2 pb-1 pt-1">
                 <ShareInviteRow />
               </div>
-              <div className="px-2">
-                <UserMenu
-                  displayName={userDisplayName}
-                  email={userEmail}
-                  plan={userPlan}
-                  onLogout={onLogout}
-                  failedTaskCount={failedTaskCount}
-                  {...(onClearFailedTasks ? { onClearFailedTasks } : {})}
-                  {...(onOpenFeedback ? { onOpenFeedback } : {})}
-                />
+              {/* Phase 26B follow-up — bell sits inline next to
+                  the UserMenu. Flex row gives the menu the available
+                  width; bell stays at a fixed 36px square on the right. */}
+              <div className="flex items-center gap-2 px-2">
+                <div className="min-w-0 flex-1">
+                  <UserMenu
+                    displayName={userDisplayName}
+                    email={userEmail}
+                    plan={userPlan}
+                    onLogout={onLogout}
+                    failedTaskCount={failedTaskCount}
+                    {...(onClearFailedTasks ? { onClearFailedTasks } : {})}
+                    {...(onOpenFeedback ? { onOpenFeedback } : {})}
+                  />
+                </div>
+                <NotificationBell />
               </div>
             </SidebarFooter>
         {/* SidebarRail — invisible hairline on the right edge that

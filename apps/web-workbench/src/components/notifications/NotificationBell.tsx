@@ -1,20 +1,22 @@
 /**
  * Phase 26B — global notification bell.
  *
- * Mounted in AppShell, fixed at the top-right of the viewport so it
- * sits above any route's main content without each page needing to
- * thread props. Polls `notification.unreadCount` every 30s for the
- * red badge; on click opens a dropdown listing the latest 50
- * notifications (lazy-loaded the first time it opens) with
- * mark-read + jump-to-task + 全部已读 + 查看全部 actions.
+ * Phase 26B follow-up — moved from a fixed top-right viewport
+ * position to an INLINE mount inside Sidebar's footer (next to the
+ * UserMenu). The previous fixed position collided with per-page
+ * CTAs (notably /scheduled's "新建定时任务" button). Inline + sidebar
+ * means the bell is global (every page renders the sidebar) and
+ * can't overlap page content.
+ *
+ * Polls `notification.unreadCount` every 30s for the badge. Dropdown
+ * opens above-right of the button (since the bell sits at the
+ * bottom of the sidebar).
  *
  * Visual:
- *   - 36px circle button, ghost on rest, accent on hover
- *   - Brand magenta dot in the bottom-right when unread > 0
+ *   - 36×36 circle button, ghost on rest, accent on hover
+ *   - Brand magenta badge bottom-right when unread > 0
  *   - Dropdown 360px wide, scrolls past ~6 rows
- *   - Smooth scale+opacity entrance (matches the calendar popovers)
- *
- * No external dep — only lucide-react + the existing tRPC client.
+ *   - Smooth scale+opacity entrance (matches calendar popovers)
  */
 
 import { Bell, CheckCheck } from 'lucide-react';
@@ -145,18 +147,15 @@ export function NotificationBell(): JSX.Element {
   const hasUnread = unreadCount > 0;
 
   return (
-    <div
-      ref={rootRef}
-      className="fixed right-4 top-3 z-40"
-    >
+    <div ref={rootRef} className="relative">
       <button
         type="button"
         onClick={handleToggle}
         aria-label="通知"
         aria-expanded={open}
         className={cn(
-          'relative flex h-9 w-9 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
-          open && 'bg-accent text-foreground',
+          'relative flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground',
+          open && 'bg-foreground/5 text-foreground',
         )}
       >
         <Bell className="h-4 w-4" />
@@ -172,7 +171,11 @@ export function NotificationBell(): JSX.Element {
       {open && (
         <div
           role="menu"
-          className="hd-popover-enter absolute right-0 top-12 w-[360px] origin-top-right rounded-lg border border-border bg-popover shadow-2xl"
+          /* Bell lives in the sidebar footer (bottom-left of the
+             viewport); open the dropdown to the RIGHT of the button
+             and anchored to the bell's vertical position. left-full
+             ml-2 places it just outside the sidebar boundary. */
+          className="hd-popover-enter absolute bottom-full left-full z-50 mb-1 ml-2 w-[360px] origin-bottom-left rounded-lg border border-border bg-popover shadow-2xl"
         >
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
             <span className="text-sm font-medium">通知</span>

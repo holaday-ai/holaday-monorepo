@@ -18,7 +18,7 @@
 
 import { TRPCError } from '@trpc/server';
 import { describe, expect, it, vi } from 'vitest';
-import { scheduledTasksRouter } from './scheduled-tasks.js';
+import { rollForwardToFuture, scheduledTasksRouter } from './scheduled-tasks.js';
 
 const fakeLogger = {
   info: vi.fn(),
@@ -195,3 +195,82 @@ describe('scheduledTasksRouter — pause / resume are gone (Codex follow-up)', (
 // Silences `TRPCError` unused-import warning on lint runs that strip
 // type-only imports.
 void TRPCError;
+
+describe('rollForwardToFuture — Phase 26B follow-up', () => {
+  const NOW = new Date('2026-05-17T14:00:00Z');
+
+  it('one-shot in the past → null (caller must reject one-shots)', () => {
+    expect(
+      rollForwardToFuture({
+        initial: new Date('2026-05-17T09:00:00Z'),
+        rrule: null,
+        repeatType: 'once',
+        now: NOW,
+      }),
+    ).toBeNull();
+  });
+
+  it('daily, today already past → tomorrow same time', () => {
+    const next = rollForwardToFuture({
+      initial: new Date('2026-05-17T09:00:00Z'),
+      rrule: null,
+      repeatType: 'daily',
+      now: NOW,
+    });
+    expect(next?.toISOString()).toBe('2026-05-18T09:00:00.000Z');
+  });
+
+  it('daily, picked YESTERDAY 09:00 → tomorrow 09:00 (loops past today)', () => {
+    const next = rollForwardToFuture({
+      initial: new Date('2026-05-16T09:00:00Z'),
+      rrule: null,
+      repeatType: 'daily',
+      now: NOW,
+    });
+    expect(next?.toISOString()).toBe('2026-05-18T09:00:00.000Z');
+  });
+
+  it('weekly, last Saturday 09:00 → this Saturday 09:00', () => {
+    const next = rollForwardToFuture({
+      // 2026-05-09 was a Saturday.
+      initial: new Date('2026-05-09T09:00:00Z'),
+      rrule: null,
+      repeatType: 'weekly',
+      now: NOW, // 2026-05-17 is Sunday
+    });
+    // +1 week → 2026-05-16; still past. +1 more → 2026-05-23.
+    expect(next?.toISOString()).toBe('2026-05-23T09:00:00.000Z');
+  });
+
+  it('monthly, last month → next month same day', () => {
+    const next = rollForwardToFuture({
+      initial: new Date('2026-04-15T09:00:00Z'),
+      rrule: null,
+      repeatType: 'monthly',
+      now: NOW,
+    });
+    expect(next?.toISOString()).toBe('2026-06-15T09:00:00.000Z');
+  });
+
+  it('initial already in the future → returns initial unchanged', () => {
+    const future = new Date('2026-05-18T09:00:00Z');
+    const next = rollForwardToFuture({
+      initial: future,
+      rrule: null,
+      repeatType: 'daily',
+      now: NOW,
+    });
+    expect(next?.toISOString()).toBe(future.toISOString());
+  });
+
+  it('rrule path: uses rrule.after(now) regardless of initial', () => {
+    const next = rollForwardToFuture({
+      // initial is a bogus value — rrule.after(now) ignores it
+      initial: new Date('1900-01-01T00:00:00Z'),
+      rrule: 'DTSTART:20260510T090000Z\nRRULE:FREQ=DAILY',
+      repeatType: 'custom',
+      now: NOW,
+    });
+    expect(next?.getTime()).toBeGreaterThan(NOW.getTime());
+  });
+});
