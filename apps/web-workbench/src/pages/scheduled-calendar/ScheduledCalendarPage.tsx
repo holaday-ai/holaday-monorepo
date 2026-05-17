@@ -194,25 +194,36 @@ export function ScheduledCalendarPage(): JSX.Element {
   );
 
   /**
-   * Force the time-grid views to anchor at 08:00 on mount + on view
-   * change. FullCalendar's `scrollTime` prop alone doesn't take when
-   * `slotMinTime` is `00:00:00` and `stickyHeaderDates` is on — the
-   * sticky header eats the layout pass and the auto-scroll lands at
-   * 0. The double rAF defers past FC's own post-layout work so the
-   * scroll lands after the time grid has its real height.
+   * Force time-grid views (week / day) to anchor at 08:00 on mount
+   * + on view change. FC's `scrollTime` prop and the immediate
+   * `scrollToTime` API call both no-op when `slotMinTime=00:00:00`
+   * and `stickyHeaderDates=true` — FC's own post-layout scroll
+   * pass races our call and lands at 0.
+   *
+   * Strategy: wait long enough for FC's render + scroll pass to
+   * settle (500 ms), then snap. Both the API and a DOM-level
+   * fallback fire — the fallback queries the actual `.fc-scroller`
+   * inside the time-grid view and writes `scrollTop` directly so
+   * we don't depend on FC's internal scrollEl bookkeeping. Slot
+   * height is measured from a live `.fc-timegrid-slot` so this
+   * survives CSS edits to the 32 px default.
+   *
+   * Month / list views don't have a vertical scroll, so we no-op.
    */
   React.useEffect(() => {
     if (currentView !== 'timeGridWeek' && currentView !== 'timeGridDay') return;
-    let raf2 = 0;
-    const raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(() => {
-        calendarRef.current?.getApi()?.scrollToTime({ hour: 8 });
-      });
-    });
-    return () => {
-      cancelAnimationFrame(raf1);
-      if (raf2) cancelAnimationFrame(raf2);
-    };
+    const id = window.setTimeout(() => {
+      calendarRef.current?.getApi()?.scrollToTime('08:00:00');
+      const shell = shellRef.current;
+      if (!shell) return;
+      const scroller = shell.querySelector<HTMLElement>('.fc-timegrid .fc-scroller');
+      if (!scroller) return;
+      const slotEl = shell.querySelector<HTMLElement>('.fc-timegrid-slot');
+      const slotH = slotEl?.getBoundingClientRect().height ?? 32;
+      // slotDuration is 30 min → 8 h = 16 slots
+      scroller.scrollTop = slotH * 16;
+    }, 500);
+    return () => window.clearTimeout(id);
   }, [currentView]);
 
   /**
