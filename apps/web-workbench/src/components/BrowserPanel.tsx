@@ -233,6 +233,28 @@ export function BrowserPanel({
   const [collapsedLocal, setCollapsedLocal] = React.useState(false);
   const collapsed = collapsedProp ?? collapsedLocal;
   const toggleCollapsed = onToggleCollapse ?? (() => setCollapsedLocal((c) => !c));
+  /**
+   * BOSS bug fix — panel content adapts to its OWN width, not the
+   * viewport. The panel is user-resizable on desktop and lives in
+   * a bottom sheet on mobile, so a viewport-width media query is
+   * the wrong axis. ResizeObserver tracks the panel root and flips
+   * `isNarrow` true under 500px; CSS / conditionals downstream use
+   * `data-narrow` (set on the root) or this state to compress the
+   * toolbar density.
+   */
+  const panelRootRef = React.useRef<HTMLDivElement | null>(null);
+  const [isNarrow, setIsNarrow] = React.useState(false);
+  React.useEffect(() => {
+    const el = panelRootRef.current;
+    if (!el) return;
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? el.clientWidth;
+      setIsNarrow(w > 0 && w < 500);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   // Interactive mode is in the global store so the TaskStream's
   // "Continue in browser" button can flip it on from the left panel.
   const interactive = useTaskStore((s) => s.browserInteractive);
@@ -797,6 +819,8 @@ export function BrowserPanel({
   const isSheet = layout === 'sheet';
   const section = (
     <section
+      ref={panelRootRef}
+      data-narrow={isNarrow ? 'true' : 'false'}
       className={cn(
         'relative flex flex-col border-l border-border backdrop-blur-xl',
         isSheet
@@ -887,8 +911,18 @@ export function BrowserPanel({
           {!fullscreen && shouldConnect && showHeader && (
           <header className="flex h-11 items-center gap-2 border-b border-border px-3 pt-2">
             <StatusDot status={status} />
-            <NavButton direction="back" title="后退" navTaskId={activeTaskId ?? null} />
-            <NavButton direction="forward" title="前进" navTaskId={activeTaskId ?? null} />
+            {/* BOSS bug fix — when the panel is narrow (< 500px),
+                hide back/forward to keep the URL bar legible. The
+                agent rarely needs them, and the user can take over
+                + use Brave's own gestures if they really need to
+                go back. Reload stays — it's the highest-utility
+                button when a page hangs. */}
+            {!isNarrow && (
+              <>
+                <NavButton direction="back" title="后退" navTaskId={activeTaskId ?? null} />
+                <NavButton direction="forward" title="前进" navTaskId={activeTaskId ?? null} />
+              </>
+            )}
             <NavButton direction="reload" title="刷新" navTaskId={activeTaskId ?? null} />
             <UrlBar
               displayUrl={displayUrl}
@@ -936,7 +970,11 @@ export function BrowserPanel({
                 <Power className="h-3.5 w-3.5" />
               )}
             </button>
-            {onToggleFullscreen && (
+            {/* Fullscreen toggle is a power-user feature; hide on
+                narrow panels (BOSS bug — toolbar was crowded). The
+                user can still open fullscreen from the keyboard
+                shortcut or by widening the panel first. */}
+            {onToggleFullscreen && !isNarrow && (
               <button
                 type="button"
                 onClick={onToggleFullscreen}

@@ -175,7 +175,7 @@
   position: relative;
   z-index: 1;
   border: none;
-  background: transparent;
+  background-color: transparent;
   color: var(--hd-text-mid);
   font-size: 13px;
   font-weight: 500;
@@ -183,15 +183,30 @@
   padding: 0 14px;
   border-radius: 999px;
   cursor: pointer;
-  transition: color 150ms ease;
+  /* BOSS bug fix — transition includes background-color (was
+     `color` only), so the magenta-on-active flip animates and we
+     don't see a stale transparent background flash. */
+  transition: background-color 150ms ease, color 150ms ease,
+    box-shadow 150ms ease;
 }
 .hd-calendar-toolbar__view-btn[data-active="true"] {
-  background: var(--hd-magenta);
-  color: #ffffff;
+  /* Force the contrast pair so a stray inherited color rule from
+     a wrapping FC class can't override. WCAG AA: magenta #E50B6B
+     against #ffffff = 5.4:1 (large text passes; normal text
+     passes at this size + 600 weight). */
+  background-color: var(--hd-magenta) !important;
+  color: #ffffff !important;
   font-weight: 600;
+  /* Soft magenta-tinted shadow so the active pill lifts above
+     the inactive flat gray of the segmented control. */
+  box-shadow: 0 1px 3px rgba(229, 11, 107, 0.25);
 }
 .hd-calendar-toolbar__view-btn:not([data-active="true"]):hover {
   color: var(--hd-text-strong);
+  background-color: rgba(0, 0, 0, 0.03);
+}
+.dark .hd-calendar-toolbar__view-btn:not([data-active="true"]):hover {
+  background-color: rgba(255, 255, 255, 0.04);
 }
 
 /* ───────────────────────── FullCalendar core overrides */

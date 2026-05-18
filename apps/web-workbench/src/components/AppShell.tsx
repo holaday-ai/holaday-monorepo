@@ -552,13 +552,20 @@ export function AppShell(): JSX.Element {
         mobileOpen={sidebarOpen}
         onMobileClose={() => setSidebarOpen(false)}
       />
-      {/* No `overflow-hidden` on SidebarInset — that turns it into a
-          CSS scroll container, which traps every descendant
-          `position: sticky` to a non-scrolling ancestor (sticky needs
-          the body / html scroll context to actually stick). Pages
-          that need internal scroll roll their own overflow boundary
-          (WorkbenchApp already does). */}
-      <SidebarInset className="bg-background">
+      {/* SidebarInset bounds the page to the viewport AND owns its
+          own scroll. Two reasons:
+            1. WorkbenchApp's composer must stay pinned to the
+               viewport bottom even on short windows (BOSS bug — at
+               500–600px the composer was being pushed below the
+               fold because body scrolled instead).
+            2. `position: sticky` descendants (calendar header band,
+               admin layouts) need a scrolling ancestor. `h-svh
+               overflow-y-auto` makes SidebarInset that ancestor;
+               sticky offsets resolve against it.
+          Pages that need internal scroll still get it via their own
+          flex-1 + overflow-y-auto blocks (WorkbenchApp, scheduled
+          calendar). */}
+      <SidebarInset className="h-svh overflow-y-auto bg-background">
         <Outlet context={ctx} />
       </SidebarInset>
 

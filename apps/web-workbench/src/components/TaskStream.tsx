@@ -1082,6 +1082,26 @@ function ScreenshotThumbnailCard({
     void fetchFileBlobAuthed({ url: payload.downloadUrl }).then((res) => {
       if (cancelled) return;
       if (!res.ok || !res.blob) {
+        // BOSS bug fix — log so DevTools shows the reason instead
+        // of a silently broken image. Common causes: 404 from a
+        // stale download URL, 401 from a missing/expired token,
+        // 410 after 24h TTL.
+        hdDebug('screenshot-preview-fetch-failed', {
+          status: res.status,
+          message: res.message,
+          url: payload.downloadUrl,
+        });
+        setFailed(true);
+        return;
+      }
+      // Defensive: server returned 200 but the body isn't an image
+      // (e.g. an HTML error page rendered with status 200). The
+      // <img> would just show alt text otherwise — confusing.
+      if (res.mime && !res.mime.startsWith('image/')) {
+        hdDebug('screenshot-preview-wrong-mime', {
+          mime: res.mime,
+          url: payload.downloadUrl,
+        });
         setFailed(true);
         return;
       }
@@ -1125,6 +1145,15 @@ function ScreenshotThumbnailCard({
             alt="截图预览"
             className="block max-h-72 w-full object-contain transition-transform group-hover:scale-[1.01]"
             loading="lazy"
+            onError={() => {
+              // BOSS bug fix — blob decoded as image failed in the
+              // browser. Fall back to the icon card so the user
+              // still has a working download path.
+              hdDebug('screenshot-preview-img-decode-failed', {
+                url: payload.downloadUrl,
+              });
+              setFailed(true);
+            }}
           />
         ) : (
           <div

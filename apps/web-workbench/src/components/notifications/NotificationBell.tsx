@@ -231,27 +231,30 @@ function NotificationItem({
       : row.type === 'task_complete'
         ? '#10B981'
         : '#94A3B8';
+  // BOSS bug fix — row was tinted with bg-accent/30 (pink in this
+  // theme) for unread, which clashed with the popover's neutral
+  // card background. Switched to a tiny leading magenta dot for
+  // the unread indicator + a neutral hover state. Matches the
+  // Cmd+K / DropdownMenu visual language in the rest of the app.
   return (
     <button
       type="button"
       onClick={onClick}
-      className={cn(
-        'flex w-full gap-3 border-b border-border/50 px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-accent/60',
-        !row.isRead && 'bg-accent/30',
-      )}
+      className="flex w-full items-start gap-2.5 border-b border-border/50 px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-foreground/[0.04]"
     >
       <span
         className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[11px] text-white"
         style={{ backgroundColor: color }}
+        aria-hidden
       >
         {icon}
       </span>
       <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
+        <div className="flex items-baseline justify-between gap-2">
           <span
             className={cn(
-              'truncate text-sm',
-              !row.isRead ? 'font-semibold text-foreground' : 'text-foreground',
+              'min-w-0 flex-1 truncate text-sm text-foreground',
+              !row.isRead && 'font-semibold',
             )}
           >
             {row.title}
@@ -264,6 +267,13 @@ function NotificationItem({
           {row.message}
         </p>
       </div>
+      {!row.isRead && (
+        <span
+          className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full"
+          style={{ backgroundColor: '#E50B6B' }}
+          aria-label="未读"
+        />
+      )}
     </button>
   );
 }
