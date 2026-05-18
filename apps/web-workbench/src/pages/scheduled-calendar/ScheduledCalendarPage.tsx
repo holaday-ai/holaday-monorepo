@@ -194,35 +194,106 @@ export function ScheduledCalendarPage(): JSX.Element {
   );
 
   /**
-   * Force time-grid views (week / day) to anchor at 08:00 on mount
-   * + on view change. FC's `scrollTime` prop and the immediate
-   * `scrollToTime` API call both no-op when `slotMinTime=00:00:00`
-   * and `stickyHeaderDates=true` — FC's own post-layout scroll
-   * pass races our call and lands at 0.
+   * Force time-grid views to anchor at 08:00 on mount / view change.
    *
-   * Strategy: wait long enough for FC's render + scroll pass to
-   * settle (500 ms), then snap. Both the API and a DOM-level
-   * fallback fire — the fallback queries the actual `.fc-scroller`
-   * inside the time-grid view and writes `scrollTop` directly so
-   * we don't depend on FC's internal scrollEl bookkeeping. Slot
-   * height is measured from a live `.fc-timegrid-slot` so this
-   * survives CSS edits to the 32 px default.
+   * Background: previous attempts (FC's `scrollTime` prop, immediate
+   * `api.scrollToTime`, double-rAF + setTimeout) all failed. Working
+   * hypothesis: with `height="auto"` and `stickyHeaderDates=true`,
+   * FC renders the entire grid at natural height and the BODY (not
+   * an internal `.fc-scroller`) is what actually scrolls. In that
+   * world, scrolling FC's API target does nothing — we have to
+   * scroll the window.
    *
-   * Month / list views don't have a vertical scroll, so we no-op.
+   * Strategy: wait 800 ms past mount, then:
+   *   1. Locate the 8:00 slot via `data-time="08:00:00"`.
+   *   2. If FC DOES have an internal scroller (height fixed in some
+   *      future state), set its scrollTop to the slot's offsetTop.
+   *   3. Otherwise scroll the window so the slot lands just below
+   *      the sticky band (read `--hd-band-h` for the offset).
+   *
+   * HD-DEBUG warns capture DOM state on prod so we can verify in
+   * Chrome DevTools what FC actually rendered. Logs go through
+   * console.warn (memory: data-driven debugging).
    */
   React.useEffect(() => {
     if (currentView !== 'timeGridWeek' && currentView !== 'timeGridDay') return;
     const id = window.setTimeout(() => {
-      calendarRef.current?.getApi()?.scrollToTime('08:00:00');
       const shell = shellRef.current;
-      if (!shell) return;
-      const scroller = shell.querySelector<HTMLElement>('.fc-timegrid .fc-scroller');
-      if (!scroller) return;
-      const slotEl = shell.querySelector<HTMLElement>('.fc-timegrid-slot');
-      const slotH = slotEl?.getBoundingClientRect().height ?? 32;
-      // slotDuration is 30 min → 8 h = 16 slots
-      scroller.scrollTop = slotH * 16;
-    }, 500);
+      const root: ParentNode = shell ?? document;
+      const scroller =
+        root.querySelector<HTMLElement>('.fc-timegrid .fc-scroller') ??
+        root.querySelector<HTMLElement>('.fc-scroller-liquid-absolute') ??
+        root.querySelector<HTMLElement>('.fc-scroller');
+      const slot8 = root.querySelector<HTMLElement>(
+        '.fc-timegrid-slot[data-time="08:00:00"]',
+      );
+      const allSlots = root.querySelectorAll<HTMLElement>(
+        '.fc-timegrid-slot[data-time]',
+      );
+
+      const scrollerInfo = scroller
+        ? {
+            scrollHeight: scroller.scrollHeight,
+            clientHeight: scroller.clientHeight,
+            scrollTop: scroller.scrollTop,
+            overflowY: getComputedStyle(scroller).overflowY,
+            isScrollable: scroller.scrollHeight > scroller.clientHeight,
+          }
+        : null;
+      console.warn('[HD-DEBUG] scroll-to-8am', {
+        currentView,
+        scrollerFound: scroller?.className ?? null,
+        scrollerInfo,
+        slot8: slot8
+          ? {
+              offsetTop: slot8.offsetTop,
+              boundingTop: slot8.getBoundingClientRect().top,
+              dataTime: slot8.dataset.time,
+            }
+          : null,
+        slotCount: allSlots.length,
+        firstSlotTime: allSlots[0]?.dataset.time ?? null,
+        lastSlotTime: allSlots[allSlots.length - 1]?.dataset.time ?? null,
+        windowScrollY: window.scrollY,
+        bodyScrollHeight: document.body.scrollHeight,
+        viewportHeight: window.innerHeight,
+      });
+
+      if (!slot8) {
+        console.warn('[HD-DEBUG] scroll-to-8am: no 8:00 slot, giving up');
+        return;
+      }
+
+      // Path A: internal scroller (if FC created one and it's
+      // actually scrollable).
+      if (scroller && scroller.scrollHeight > scroller.clientHeight) {
+        scroller.scrollTop = slot8.offsetTop;
+        console.warn(
+          '[HD-DEBUG] scroll-to-8am: set scroller.scrollTop=',
+          slot8.offsetTop,
+          '→ actual:',
+          scroller.scrollTop,
+        );
+        return;
+      }
+
+      // Path B: body scroll. Get the slot's viewport position,
+      // subtract the sticky-band height so the slot lands just
+      // below it.
+      const rect = slot8.getBoundingClientRect();
+      const bandRaw =
+        shell?.style.getPropertyValue('--hd-band-h') ||
+        getComputedStyle(shell ?? document.documentElement).getPropertyValue('--hd-band-h');
+      const bandH = parseInt(bandRaw, 10) || 120;
+      const targetY = rect.top + window.scrollY - bandH - 8;
+      window.scrollTo({ top: targetY, behavior: 'auto' });
+      console.warn(
+        '[HD-DEBUG] scroll-to-8am: window.scrollTo target=',
+        targetY,
+        'bandH=',
+        bandH,
+      );
+    }, 800);
     return () => window.clearTimeout(id);
   }, [currentView]);
 
