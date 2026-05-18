@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   ArrowRight,
+  Check,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
@@ -623,6 +624,32 @@ export function BrowserPanel({
     ? interactive && (vncStatus === 'connected' || vncStatus === 'connecting')
     : interactive && Boolean(frame) && !isBlankUrl(frame?.url);
 
+  // BOSS-feedback follow-up — the blue "你正在直接操作浏览器" banner
+  // was confusing average users because it appeared whenever the
+  // agent parked on captcha / login (browserAwaiting auto-flipped
+  // `interactive=true` in the effect below). Hide it unless the user
+  // explicitly clicked the takeover toggle. The ref tracks intent
+  // and resets when `interactive` flips back to false (next task).
+  const userInteractedRef = React.useRef(false);
+  const [showTakeoverBanner, setShowTakeoverBanner] = React.useState(false);
+  React.useEffect(() => {
+    if (!interactive) {
+      userInteractedRef.current = false;
+      setShowTakeoverBanner(false);
+    }
+  }, [interactive]);
+  const handleUserTakeoverClick = React.useCallback(() => {
+    const next = !interactive;
+    if (next) {
+      userInteractedRef.current = true;
+      setShowTakeoverBanner(true);
+    } else {
+      userInteractedRef.current = false;
+      setShowTakeoverBanner(false);
+    }
+    setInteractive(next);
+  }, [interactive, setInteractive]);
+
   // Codex P2 — hide the address bar / nav / takeover chrome when
   // the panel is open on a terminal task with no viewable evidence
   // (no live frame, no captured screenshot, no recent frame). The
@@ -843,7 +870,7 @@ export function BrowserPanel({
               status={status}
               interactiveActive={interactiveActive}
               interactive={interactive}
-              onToggleInteractive={() => setInteractive(!interactive)}
+              onToggleInteractive={handleUserTakeoverClick}
               navTaskId={activeTaskId ?? null}
               isExecuting={isExecuting}
               aborting={aborting}
@@ -882,7 +909,7 @@ export function BrowserPanel({
             )}
             <button
               type="button"
-              onClick={() => setInteractive(!interactive)}
+              onClick={handleUserTakeoverClick}
               title={
                 interactive
                   ? '退出接管 — 让 AI 继续操作'
@@ -971,7 +998,7 @@ export function BrowserPanel({
               </div>
             </div>
           )}
-          {interactiveActive && !fullscreen && (
+          {interactiveActive && showTakeoverBanner && !fullscreen && (
             <div className="border-b border-primary/40 bg-primary/10 px-3 py-1.5 text-center text-[11px] font-medium text-primary dark:border-primary/50 dark:bg-primary/20">
               你正在直接操作浏览器 · 点工具栏的接管按钮可让 AI 继续
             </div>
@@ -1437,14 +1464,25 @@ function HibernationCard({
           className="absolute inset-0 h-full w-full rounded-md object-contain opacity-25"
         />
       )}
-      <div className="relative flex flex-col items-center gap-3 rounded-lg border border-border bg-background/95 px-6 py-5 shadow-lg backdrop-blur">
-        <div className="text-3xl" aria-hidden>
-          ⏾
+      {/* BOSS feedback — calmer language for the post-task state.
+          Hibernation only fires after a task completes (gated on
+          !activeTaskId upstream), so framing it as "任务已完成 ·
+          浏览器已释放" is honest AND less alarming than "已休眠".
+          Wake button demoted from black-CTA to muted text link so
+          it doesn't compete with the final screenshot behind it. */}
+      <div className="relative flex flex-col items-center gap-2.5 rounded-lg border border-border bg-background/95 px-6 py-4 shadow-lg backdrop-blur">
+        <div
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+          aria-hidden
+        >
+          <Check className="h-5 w-5" strokeWidth={2.5} />
         </div>
         <div className="text-center">
-          <div className="text-sm font-semibold text-foreground">浏览器已休眠</div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            上次访问的页面和登录状态已保存
+          <div className="text-sm font-semibold text-foreground">
+            任务已完成
+          </div>
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            浏览器已释放，登录状态已保留
           </div>
         </div>
         <button
@@ -1452,10 +1490,10 @@ function HibernationCard({
           onClick={onWake}
           disabled={waking}
           className={cn(
-            'inline-flex items-center gap-2 rounded-md px-4 py-2 text-xs font-medium transition-colors',
+            'inline-flex items-center gap-1 text-[11px] font-medium underline-offset-2 transition-colors',
             waking
-              ? 'cursor-wait bg-muted text-muted-foreground'
-              : 'bg-foreground text-background hover:bg-foreground/85',
+              ? 'cursor-wait text-muted-foreground'
+              : 'text-muted-foreground hover:text-foreground hover:underline',
           )}
         >
           {waking ? '唤醒中…' : '唤醒浏览器'}

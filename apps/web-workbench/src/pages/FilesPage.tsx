@@ -149,7 +149,7 @@ export function FilesPage(): JSX.Element {
 
   return (
     <PageContainer width="wide">
-      <PageHeader title="文件库" description="在这里管理任务中上传和生成的文件" />
+      <PageHeader title="文件库" description="管理你上传的文件和资料" />
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-1">
           <FilterTab label="全部" active={filter === 'all'} onClick={() => setFilter('all')} />

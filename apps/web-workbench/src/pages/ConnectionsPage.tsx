@@ -83,9 +83,22 @@ export function ConnectionsPage(): JSX.Element {
   return (
     <PageContainer width="wide">
       <PageHeader
-        title="即将支持的连接器"
-        description="OAuth 与 MCP 集成正在路上 — 这里展示了规划中的服务"
+        title="连接器"
+        description="把你常用的工具接入 HOLA DAY，让 AI 直接操作"
       />
+      {/* BOSS feedback — every card was greyed-out with "即将上线"
+          and no timeline. A single banner up top sets expectations
+          so users see WHY everything is gated and roughly WHEN it
+          opens up. */}
+      <div className="mb-5 flex items-start gap-2.5 rounded-md border border-primary/30 bg-primary/5 px-3.5 py-2.5 text-[13px] text-foreground">
+        <Plug className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+        <div className="min-w-0">
+          <div className="font-medium">连接器功能正在开发中</div>
+          <div className="mt-0.5 text-[12px] text-muted-foreground">
+            预计 6 月上线。下方为规划中的服务，先睹为快。
+          </div>
+        </div>
+      </div>
       {loading ? (
         <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
           加载中…

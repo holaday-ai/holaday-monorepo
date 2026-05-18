@@ -453,7 +453,6 @@ function AgentBlock({
             // Phase 5a — pass the original intent so the 设为定时
             // button can pre-fill the ScheduledTaskDialog.
             intent={task.intent}
-            modelLabel={task.modelLabel}
             onContinueInBrowser={
               // 继续接管 only for live browser tasks. ANY terminal
               // status (completed / failed / cancelled) means the
@@ -1179,7 +1178,6 @@ function TerminalSummary({
   taskId,
   intent,
   onContinueInBrowser,
-  modelLabel,
   onSuggestionPick,
   serverSuggestions,
   attachments,
@@ -1198,7 +1196,6 @@ function TerminalSummary({
    */
   intent?: string;
   onContinueInBrowser?: () => void;
-  modelLabel?: 'sonnet' | 'opus';
   onSuggestionPick?: (intent: string) => void;
   /**
    * O5 — backend-generated suggestions arriving via
@@ -1331,31 +1328,22 @@ function TerminalSummary({
   return (
     <div className={cn('relative', tone.wrap)}>
       {isFailedLike && (
-        <div
-          className={cn(
-            'mb-3 rounded-md border px-3 py-2 text-sm',
-            status === 'failed'
-              ? 'border-red-200 bg-red-50/80 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200'
-              : 'border-border bg-muted/40 text-muted-foreground',
-          )}
-          role="alert"
-        >
-          <div className="font-medium">
-            {status === 'failed' ? '任务失败' : '已取消'}
-          </div>
-          <div className="mt-0.5 text-xs opacity-80">
-            {status === 'failed'
-              ? '下方是失败原因，可复制后用于反馈或重新执行。'
-              : '任务已取消。下方保留了已生成的部分内容。'}
-          </div>
-        </div>
+        <FailureHeaderCard
+          status={status}
+          errorText={status === 'failed' ? displayText ?? '' : ''}
+        />
       )}
       {/* Phase 4 R1 B.6 — expert-report header (only on success
           panels; failed/cancelled never carry a workflow id). */}
       {!isFailedLike && expertWorkflowId && (
         <ExpertReportHeader workflowId={expertWorkflowId} />
       )}
-      {(() => {
+      {/* BOSS feedback — skip the markdown body for failed tasks
+          to avoid duplicating the error text already shown in
+          FailureHeaderCard's collapsible. Cancelled status keeps
+          the body because there's often partial content worth
+          preserving. */}
+      {status === 'failed' ? null : (() => {
         // Empty-result fallback. When the sanitized text is
         // suspiciously short (< 20 chars after stripping markdown
         // structure / ordinals / whitespace), surface a hint card
@@ -1457,11 +1445,12 @@ function TerminalSummary({
           intent (deep vs. standard) without naming the upstream model;
           the actual claude-* ID still lives in result.metadata for
           analytics / debugging consumers. */}
-      {modelLabel && (
-        <div className="mt-3 text-[11px] text-muted-foreground dark:text-foreground/60">
-          {modelLabel === 'opus' ? '深度思考模式' : '标准执行模式'}
-        </div>
-      )}
+      {/* BOSS feedback — the "标准执行模式 / 深度思考模式" footer
+          surfaced the model tier to the user. Average users don't
+          need that signal; it added visual noise to every result
+          card. modelLabel still rides through props for analytics
+          / debugging consumers via result.metadata, just not
+          rendered here. */}
       {/* Inline copy / share footer. Replaced the prior absolute-
           positioned overlay (top-right, opacity-0 group-hover) which
           obscured the first lines of the result on overflow and
@@ -2021,4 +2010,113 @@ function extractTableData(children: React.ReactNode): TableData | null {
   });
   if (headers.length === 0 && rows.length === 0) return null;
   return { headers, rows };
+}
+
+// ───────────────────────── Failure header (user-friendly copy)
+
+interface FriendlyFailure {
+  title: string;
+  subtitle: string;
+}
+
+/**
+ * Map a raw failure message to a friendly two-line headline. The raw
+ * text is still rendered below for users who want the technical
+ * detail — this only changes the "what went wrong, at a glance"
+ * card at the top of the failure surface. Keyword match on both
+ * English + Chinese phrases.
+ */
+function classifyFriendlyFailure(errorText: string): FriendlyFailure {
+  const haystack = (errorText ?? '').toLowerCase();
+  if (
+    /dns|enotfound|getaddrinfo|net::err_name|net::err_address|无法访问|网络错误|网络异常|解析失败/.test(
+      haystack,
+    )
+  ) {
+    return {
+      title: '无法打开这个网站',
+      subtitle: '请检查网址是否正确，或换一个能直接访问的页面。',
+    };
+  }
+  if (/timeout|timed.?out|超时/.test(haystack)) {
+    return {
+      title: '操作超时',
+      subtitle: '目标网站响应太慢，请稍后再试。',
+    };
+  }
+  if (
+    /captcha|recaptcha|hcaptcha|验证码|人机|滑块|cloudflare|are you a (human|robot)/.test(
+      haystack,
+    )
+  ) {
+    return {
+      title: '网站要求验证身份',
+      subtitle: '遇到验证码或人机校验。可以接管浏览器手动通过，再让 AI 继续。',
+    };
+  }
+  if (/login|sign[\s_-]?in|登录|401|未登录|unauthor|凭据|需要授权/.test(haystack)) {
+    return {
+      title: '需要先登录',
+      subtitle: '请接管浏览器登录后再让 AI 继续。',
+    };
+  }
+  if (
+    /browser|chromium|brave|cdp|websocket|浏览器|frame[^\w]not|screencast/.test(
+      haystack,
+    )
+  ) {
+    return {
+      title: '浏览器遇到问题',
+      subtitle: '可以点重试再跑一次。',
+    };
+  }
+  return {
+    title: '任务未能完成',
+    subtitle: '请重试，或换一种描述方式（更具体的指令、提供示例数据）。',
+  };
+}
+
+function FailureHeaderCard({
+  status,
+  errorText,
+}: {
+  status: UiTask['status'];
+  errorText: string;
+}): JSX.Element {
+  const cancelled = status === 'cancelled';
+  const friendly = cancelled
+    ? { title: '已取消', subtitle: '任务已取消。下方保留了已生成的部分内容。' }
+    : classifyFriendlyFailure(errorText);
+  const hasTechnical = !cancelled && errorText.trim().length > 0;
+  const [showTechnical, setShowTechnical] = React.useState(false);
+  return (
+    <div
+      className={cn(
+        'mb-3 rounded-md border px-3 py-2 text-sm',
+        cancelled
+          ? 'border-border bg-muted/40 text-muted-foreground'
+          : 'border-red-200 bg-red-50/80 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200',
+      )}
+      role="alert"
+    >
+      <div className="font-medium">{friendly.title}</div>
+      <div className="mt-0.5 text-xs opacity-80">{friendly.subtitle}</div>
+      {hasTechnical && (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setShowTechnical((v) => !v)}
+            className="inline-flex items-center gap-1 text-[11px] font-medium underline-offset-2 hover:underline"
+          >
+            {showTechnical ? '收起技术信息 ▴' : '查看技术信息 ▾'}
+          </button>
+          {showTechnical && (
+            <pre className="mt-1.5 whitespace-pre-wrap break-words rounded bg-red-100/60 px-2 py-1.5 text-[11px] font-mono leading-relaxed text-red-900 dark:bg-red-500/10 dark:text-red-200">
+              {errorText}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }

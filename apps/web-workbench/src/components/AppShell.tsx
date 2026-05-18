@@ -276,7 +276,16 @@ export function AppShell(): JSX.Element {
   }, [wsStatus, authed, reset]);
 
   // WS reconnect / disconnect toasts.
+  //
+  // BOSS feedback: the "实时连接已恢复" toast was firing on initial
+  // page load (the WS goes idle → connecting → open, and the old
+  // guard `prev !== 'idle'` skipped only the very first frame —
+  // first-paint reconnections still triggered). Now gated on a
+  // ref that flips true ONLY when we've seen a real disconnect
+  // (prev='open' → 'closed' or 'connecting'). On initial open the
+  // ref stays false, so no toast.
   const prevWsRef = React.useRef<ConnStatus>('idle');
+  const hadDisconnectRef = React.useRef(false);
   React.useEffect(() => {
     const prev = prevWsRef.current;
     prevWsRef.current = wsStatus;
@@ -285,10 +294,12 @@ export function AppShell(): JSX.Element {
       prev === 'open' &&
       (wsStatus === 'closed' || wsStatus === 'connecting')
     ) {
+      hadDisconnectRef.current = true;
       toast.show('实时连接已断开，正在重连…', 'error');
     }
-    if (prev !== 'open' && wsStatus === 'open' && prev !== 'idle') {
-      toast.show('实时连接已恢复');
+    if (wsStatus === 'open' && hadDisconnectRef.current) {
+      hadDisconnectRef.current = false;
+      toast.show('实时连接已恢复', 'info', 3000);
     }
   }, [wsStatus, authed, toast]);
 

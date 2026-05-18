@@ -11,7 +11,12 @@ interface Toast {
 }
 
 interface ToastCtx {
-  show(text: string, kind?: ToastKind): void;
+  /**
+   * Show a toast. `durationMs` defaults to 4000; pass a shorter
+   * value for low-priority confirmations (e.g. "实时连接已恢复" at
+   * 3000ms).
+   */
+  show(text: string, kind?: ToastKind, durationMs?: number): void;
 }
 
 /**
@@ -27,13 +32,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
   const [items, setItems] = React.useState<Toast[]>([]);
   const idRef = React.useRef(0);
 
-  const show = React.useCallback<ToastCtx['show']>((text, kind = 'info') => {
-    const id = ++idRef.current;
-    setItems((prev) => [...prev, { id, text, kind }]);
-    setTimeout(() => {
-      setItems((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
-  }, []);
+  const show = React.useCallback<ToastCtx['show']>(
+    (text, kind = 'info', durationMs = 4000) => {
+      const id = ++idRef.current;
+      setItems((prev) => [...prev, { id, text, kind }]);
+      setTimeout(() => {
+        setItems((prev) => prev.filter((t) => t.id !== id));
+      }, durationMs);
+    },
+    [],
+  );
 
   const dismiss = React.useCallback((id: number) => {
     setItems((prev) => prev.filter((t) => t.id !== id));
