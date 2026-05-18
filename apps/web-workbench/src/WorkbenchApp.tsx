@@ -354,17 +354,21 @@ export function WorkbenchApp(): JSX.Element {
           onOpenSidebar={() => setOpenMobile(true)}
           sidePanelMode={sidePanelMode}
           onToggleSidePanel={() => {
-            // Toolbar click flips the panel. Mobile also pops the
-            // bottom sheet when opening so the takeover surface is
-            // reachable on small viewports.
-            onToggleSidePanel();
-            if (
-              sidePanelMode === 'closed' &&
-              typeof window !== 'undefined' &&
-              window.innerWidth < 1024
-            ) {
-              setBrowserSheetOpen(true);
+            // BOSS bug fix — on mobile (lg:hidden inline panel)
+            // the bottom sheet IS the only browser surface, so the
+            // toolbar button must toggle THAT directly. The old
+            // guard only opened the sheet when sidePanelMode was
+            // 'closed' — but for a live browser task the mode is
+            // 'browser-live' even on mobile (inline panel is just
+            // CSS-hidden), so the button looked dead.
+            const isMobile =
+              typeof window !== 'undefined' && window.innerWidth < 1024;
+            if (isMobile) {
+              setBrowserSheetOpen((open) => !open);
+              return;
             }
+            // Desktop: flip the override (closed → open → close).
+            onToggleSidePanel();
           }}
         />
       )}

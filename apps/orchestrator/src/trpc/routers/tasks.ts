@@ -5222,6 +5222,30 @@ export const tasksRouter = router({
         bodyText: typeof result?.bodyText === 'string' ? result.bodyText : '',
       };
     }),
+
+  /**
+   * BOSS bug fix — total failed-task count for the caller (across
+   * all time, not just the loaded slice). The "清除失败任务 (N)"
+   * badge was driven by tasks.filter(failed).length which only
+   * counts what the SPA store has loaded. After a server-side
+   * cleanup (admin SQL, batch delete) the badge would lag the
+   * truth. SPA bootstrap + post-clear both refetch this.
+   */
+  failedCount: protectedProcedure.query(async ({ ctx }) => {
+    const [userRow] = await ctx.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.externalId, ctx.userId))
+      .limit(1);
+    if (!userRow) return { count: 0 };
+    const [row] = await ctx.db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(tasksTable)
+      .where(
+        and(eq(tasksTable.userId, userRow.id), eq(tasksTable.status, 'failed')),
+      );
+    return { count: Number(row?.count ?? 0) };
+  }),
 });
 
 import { sql as sqlFilter } from 'drizzle-orm';

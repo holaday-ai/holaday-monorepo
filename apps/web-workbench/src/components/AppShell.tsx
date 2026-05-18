@@ -101,6 +101,23 @@ export function AppShell(): JSX.Element {
     string[] | null
   >(null);
   const [confirmClearFailed, setConfirmClearFailed] = React.useState(false);
+  /**
+   * BOSS bug fix — server-side failed-task count for the user
+   * menu badge + clear-confirm dialog. The previous
+   * `tasks.filter(failed).length` only counted what the SPA had
+   * loaded (paginated), so the badge lagged reality after
+   * out-of-band cleanups (admin SQL, deployments). Refetched on
+   * bootstrap + after the clear-all action settles.
+   */
+  const [serverFailedCount, setServerFailedCount] = React.useState(0);
+  const refreshFailedCount = React.useCallback(async () => {
+    try {
+      const res = await trpc.tasks.failedCount.query();
+      setServerFailedCount(res.count ?? 0);
+    } catch {
+      /* non-fatal — badge stays at last known value */
+    }
+  }, []);
 
   // Task store selectors.
   const tasks = useTaskStore((s) => s.tasks);
@@ -171,6 +188,7 @@ export function AppShell(): JSX.Element {
         /* silent — auth.me failure isn't fatal. */
       },
     );
+    void refreshFailedCount();
     Promise.allSettled([listFuture, meFuture]).then(finish);
     const timer = setTimeout(finish, 1500);
     void refreshProjects();
@@ -529,7 +547,7 @@ export function AppShell(): JSX.Element {
         onLogout={handleLogout}
         onOpenFeedback={() => setFeedbackOpen(true)}
         onOpenSearch={() => setSearchOpen(true)}
-        failedTaskCount={tasks.filter((t) => t.status === 'failed').length}
+        failedTaskCount={serverFailedCount}
         onClearFailedTasks={() => setConfirmClearFailed(true)}
         mobileOpen={sidebarOpen}
         onMobileClose={() => setSidebarOpen(false)}
@@ -631,14 +649,22 @@ export function AppShell(): JSX.Element {
       <ConfirmDialog
         open={confirmClearFailed}
         title="清除所有失败任务？"
-        description={`将清除 ${tasks.filter((t) => t.status === 'failed').length} 个失败任务，此操作不可恢复。\n进行中的任务不受影响。`}
-        confirmLabel={`清除 ${tasks.filter((t) => t.status === 'failed').length} 个`}
+        description={`将清除 ${serverFailedCount} 个失败任务，此操作不可恢复。\n进行中的任务不受影响。`}
+        confirmLabel={`清除 ${serverFailedCount} 个`}
         destructive
         onClose={() => setConfirmClearFailed(false)}
         onConfirm={async () => {
           setConfirmClearFailed(false);
+          // Loaded slice is what we can delete client-side per-row.
+          // BOSS bug: this can be < serverFailedCount when the user
+          // has older failed tasks beyond the paginated window —
+          // the toast reflects what we actually cleared, and the
+          // post-action refetch reconciles the badge.
           const failed = tasks.filter((t) => t.status === 'failed');
-          if (failed.length === 0) return;
+          if (failed.length === 0) {
+            void refreshFailedCount();
+            return;
+          }
           const results = await Promise.all(
             failed.map((t) =>
               deleteTask(t.taskId).then(
@@ -660,6 +686,8 @@ export function AppShell(): JSX.Element {
               `清除了 ${failed.length - errs.length} 个，${errs.length} 个失败`,
               'error',
             );
+          // Reconcile the badge with truth on the server.
+          void refreshFailedCount();
         }}
       />
 

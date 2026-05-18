@@ -820,7 +820,13 @@ export function BrowserPanel({
           size="icon"
           onClick={toggleCollapsed}
           aria-label={collapsed ? '展开浏览器' : '收起浏览器'}
-          className="absolute left-0 top-3 h-6 w-6 -translate-x-1/2 rounded-full border border-border bg-card shadow-sm"
+          /* BOSS bug fix — was top-3 which sat right next to the
+             toolbar's red stop / back / forward buttons (panel
+             left-padding starts at the same x-band). Pushed down
+             to top-1/2 (vertical center) so the collapse handle
+             reads as a panel-edge affordance, not part of the
+             browser nav row. */
+          className="absolute left-0 top-1/2 z-10 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border border-border bg-card shadow-sm"
         >
           {collapsed ? (
             <ChevronLeft className="h-3.5 w-3.5" />

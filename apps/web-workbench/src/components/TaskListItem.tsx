@@ -102,6 +102,13 @@ export function TaskListItem({
       onContextMenu={
         onContextMenu ? (e) => onContextMenu(task.taskId, e) : undefined
       }
+      /* BOSS bug fix — in batch mode the entire row is the click
+         target (was: only the inner title button, leaving the
+         leading checkbox `<span>` dead because it sits OUTSIDE
+         the button). Inner button still calls handleRowClick but
+         stopPropagation so the toggle doesn't fire twice. */
+      onClick={batchMode ? handleRowClick : undefined}
+      role={batchMode ? 'button' : undefined}
       title={rowTitle}
       className={cn(
         'group relative flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors',
@@ -109,6 +116,7 @@ export function TaskListItem({
         selected && !batchMode && 'bg-foreground/[0.06]',
         batchMode && batchChecked && 'bg-primary/10 dark:bg-primary/15',
         batchMode && batchDisabled && 'opacity-50',
+        batchMode && !batchDisabled && 'cursor-pointer',
       )}
     >
       {selected && !batchMode && (
@@ -141,7 +149,15 @@ export function TaskListItem({
       ) : (
         <button
           type="button"
-          onClick={handleRowClick}
+          onClick={(e) => {
+            handleRowClick(e);
+            // BOSS bug fix — in batch mode the parent `<div>` ALSO
+            // has onClick={handleRowClick} so the checkbox span (a
+            // sibling, outside this button) becomes clickable.
+            // Stop propagation here so a click on the title doesn't
+            // also bubble to the parent and double-toggle.
+            if (batchMode) e.stopPropagation();
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
