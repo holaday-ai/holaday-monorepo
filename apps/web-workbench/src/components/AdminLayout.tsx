@@ -130,7 +130,12 @@ function AdminSideNav({ me }: { me: AdminMe }): JSX.Element {
           to="/admin/users"
           active={pathname.startsWith('/admin/users')}
         />
-        <AdminNavItem icon={BarChart3} label="营收" disabled hint="Phase 2" />
+        <AdminNavItem
+          icon={BarChart3}
+          label="营收与成本"
+          to="/admin/finance"
+          active={pathname.startsWith('/admin/finance')}
+        />
         <AdminNavItem
           icon={GraduationCap}
           label="学习引擎"

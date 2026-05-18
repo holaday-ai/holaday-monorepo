@@ -26,6 +26,7 @@ import { llmCalls } from '../../db/schema/llm-calls.js';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
 import { adminProcedure, router } from '../trpc.js';
+import { adminFinanceRouter } from './admin-finance.js';
 
 /** Start of the Beijing day that contains `at`, expressed as a UTC instant. */
 function beijingDayStartUtc(at: Date, daysAgo = 0): Date {
@@ -448,6 +449,9 @@ export const adminRouter = router({
         })),
       };
     }),
+
+  // Phase 27B — nested finance namespace (revenue + cost).
+  finance: adminFinanceRouter,
 });
 
 // Re-export helpers for unit testing (no external consumers).
