@@ -22,10 +22,16 @@
 
 /**
  * Match the first URL-like sequence inside a string. Excludes common
- * trailing punctuation (`. , ' " < > ) ]`) that wraps URLs in human
- * writing. Captures both `http://` and `https://`.
+ * trailing punctuation (`. , ; : ' " < > ) ]`) that wraps URLs in
+ * human writing. Commas are excluded because Node's URL parser turns
+ * `https://example.com,foo` into a punycode'd
+ * `example.xn--com,-…` host — meaningless noise on the admin
+ * dashboard. Captures both `http://` and `https://`.
  */
-const URL_PATTERN = /https?:\/\/[^\s'"<>)\]]+/i;
+const URL_PATTERN = /https?:\/\/[^\s'"<>)\],;]+/i;
+/** DNS-valid host: letters, digits, dots, hyphens. Rejects punycode
+ *  artefacts the URL parser produces for malformed input. */
+const VALID_HOST = /^[a-z0-9.-]+$/;
 
 /**
  * Extract a canonical hostname from intent text.
@@ -52,6 +58,10 @@ export function extractDomain(intent: string | null | undefined): string | null 
     let host = parsed.hostname.toLowerCase();
     if (host.startsWith('www.')) host = host.slice(4);
     if (!host || !host.includes('.')) return null;
+    // Sanity-check the host against valid DNS chars. Catches cases
+    // where Node's URL parser punycoded a malformed input into a
+    // hostname with commas/etc.
+    if (!VALID_HOST.test(host)) return null;
     return host;
   } catch {
     return null;
