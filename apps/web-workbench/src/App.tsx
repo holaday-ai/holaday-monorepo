@@ -4,6 +4,8 @@ import { AppShell } from '@/components/AppShell';
 import { ToastProvider } from '@/components/ui/toast';
 import { AdminDashboardPage } from '@/pages/admin/AdminDashboardPage';
 import { AdminFinancePage } from '@/pages/admin/AdminFinancePage';
+import { AdminLearningDomainPage } from '@/pages/admin/AdminLearningDomainPage';
+import { AdminLearningPage } from '@/pages/admin/AdminLearningPage';
 import { AdminUserDetailPage } from '@/pages/admin/AdminUserDetailPage';
 import { AdminUsersPage } from '@/pages/admin/AdminUsersPage';
 import { BillingPage } from '@/pages/BillingPage';
@@ -78,6 +80,8 @@ export function App(): JSX.Element {
           <Route path="/admin/users" element={<AdminUsersPage />} />
           <Route path="/admin/users/:userId" element={<AdminUserDetailPage />} />
           <Route path="/admin/finance" element={<AdminFinancePage />} />
+          <Route path="/admin/learning" element={<AdminLearningPage />} />
+          <Route path="/admin/learning/:domain" element={<AdminLearningDomainPage />} />
         </Route>
 
         <Route element={<AppShell />}>

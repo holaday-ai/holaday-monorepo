@@ -139,8 +139,8 @@ function AdminSideNav({ me }: { me: AdminMe }): JSX.Element {
         <AdminNavItem
           icon={GraduationCap}
           label="学习引擎"
-          disabled
-          hint="Phase 3"
+          to="/admin/learning"
+          active={pathname.startsWith('/admin/learning')}
         />
       </nav>
       <div className="border-t border-border/60 px-3 py-3">
