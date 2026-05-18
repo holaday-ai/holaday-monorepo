@@ -1,0 +1,24 @@
+# Phase 28 — Cloudflare Workers config for the holaday.ai geo
+# redirect. Used with `wrangler deploy` from this directory once the
+# account is set up (see README "One-time setup BOSS owns").
+
+name = "holaday-geo-redirect"
+main = "worker.js"
+compatibility_date = "2026-05-15"
+
+# Route binding — every request to holaday.ai goes through this
+# Worker. `zone_name` must be the apex domain in CF; `pattern`
+# matches any path. www.holaday.ai is handled by the second route
+# (CF's "Workers Routes" UI allows multiple).
+[[routes]]
+pattern = "holaday.ai/*"
+zone_name = "holaday.ai"
+
+[[routes]]
+pattern = "www.holaday.ai/*"
+zone_name = "holaday.ai"
+
+# No environment-specific vars — country lookup is built into the
+# `request.cf` object the CF edge populates. If we ever want to
+# A/B the redirect or temporarily disable, add a `var.ENABLED`
+# flag here and gate on it in worker.js.
