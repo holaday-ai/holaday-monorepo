@@ -72,15 +72,24 @@ export const adminRouter = router({
     // 7-day trend (one query) — groups by Beijing date + status. We
     // reuse the same result set for today/yesterday metric cards to
     // save round-trips.
+    //
+    // The Beijing-day expression is repeated verbatim in GROUP BY
+    // (not the `day` alias). drizzle's `sql<T>` template doesn't
+    // auto-emit `AS day`, so MySQL would reject `GROUP BY day` as
+    // "Unknown column". Keeping the expression captured in a const
+    // dedupes the literal.
+    const dayExpr = sql<
+      string
+    >`DATE(DATE_ADD(${tasks.createdAt}, INTERVAL 8 HOUR))`;
     const trendRows = await ctx.db
       .select({
-        day: sql<string>`DATE(DATE_ADD(${tasks.createdAt}, INTERVAL 8 HOUR))`,
+        day: dayExpr,
         status: tasks.status,
         count: sql<number>`COUNT(*)`,
       })
       .from(tasks)
       .where(gte(tasks.createdAt, sevenDaysAgo))
-      .groupBy(sql`day`, tasks.status);
+      .groupBy(dayExpr, tasks.status);
 
     const byDay = new Map<string, { total: number; completed: number; failed: number }>();
     for (const row of trendRows) {
@@ -107,15 +116,19 @@ export const adminRouter = router({
     const yTerm = yStats.completed + yStats.failed;
 
     // Active users — separate two-row aggregate; cheap with the
-    // existing ix_tasks_user_id_created_at index.
+    // existing ix_tasks_user_id_created_at index. Same alias-in-
+    // GROUP-BY caveat as dayExpr — we repeat the CASE expression.
+    const bucketExpr = sql<
+      'today' | 'yesterday'
+    >`CASE WHEN ${tasks.createdAt} >= ${todayStart} THEN 'today' ELSE 'yesterday' END`;
     const activeUsersRows = await ctx.db
       .select({
-        bucket: sql<'today' | 'yesterday'>`CASE WHEN ${tasks.createdAt} >= ${todayStart} THEN 'today' ELSE 'yesterday' END`,
+        bucket: bucketExpr,
         distinctUsers: sql<number>`COUNT(DISTINCT ${tasks.userId})`,
       })
       .from(tasks)
       .where(gte(tasks.createdAt, yesterdayStart))
-      .groupBy(sql`bucket`);
+      .groupBy(bucketExpr);
     let activeToday = 0;
     let activeYesterday = 0;
     for (const row of activeUsersRows) {
