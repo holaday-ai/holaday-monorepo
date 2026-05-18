@@ -33,6 +33,13 @@ export const users = mysqlTable(
     email: varchar('email', { length: 255 }),
     passwordHash: varchar('password_hash', { length: 255 }).notNull(),
     plan: varchar('plan', { length: 32 }).notNull().default('free'),
+    /**
+     * Phase 27 — admin role gate. Currently two values: 'user' (the
+     * default) and 'admin' (gates the /admin tRPC routes). VARCHAR
+     * (not ENUM) so adding 'support' / 'ops' later doesn't require
+     * an ALTER TABLE.
+     */
+    role: varchar('role', { length: 16 }).notNull().default('user'),
     planExpiresAt: datetime('plan_expires_at', { mode: 'date', fsp: 3 }),
     status: varchar('status', { length: 16 }).notNull().default('active'),
     displayName: varchar('display_name', { length: 128 }),
@@ -84,6 +91,7 @@ export const users = mysqlTable(
     uniqueIndex('uk_users_phone').on(t.phone),
     index('ix_users_plan').on(t.plan),
     index('ix_users_plan_expires_at').on(t.planExpiresAt),
+    index('ix_users_role').on(t.role),
   ],
 );
 

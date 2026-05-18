@@ -40,6 +40,8 @@ interface MeProfile {
   plan: string;
   multiUser: boolean;
   selectedRoles?: string[];
+  /** Phase 27 — gates the /admin sidebar entry + route. */
+  role: 'user' | 'admin';
 }
 
 interface OutletContext {
@@ -159,6 +161,10 @@ export function AppShell(): JSX.Element {
           multiUser: Boolean((res as { multiUser?: boolean }).multiUser),
           selectedRoles:
             (res as { selectedRoles?: string[] }).selectedRoles ?? [],
+          role:
+            (res as { role?: 'user' | 'admin' }).role === 'admin'
+              ? 'admin'
+              : 'user',
         });
       },
       () => {
@@ -508,6 +514,7 @@ export function AppShell(): JSX.Element {
         userEmail={me?.email ?? null}
         userDisplayName={displayName}
         userPlan={me?.plan ?? 'free'}
+        userRole={me?.role ?? 'user'}
         onLogout={handleLogout}
         onOpenFeedback={() => setFeedbackOpen(true)}
         onOpenSearch={() => setSearchOpen(true)}

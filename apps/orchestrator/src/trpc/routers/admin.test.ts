@@ -1,0 +1,144 @@
+/**
+ * Phase 27 — admin router unit tests.
+ *
+ * Locks the two pieces of behaviour that don't need a live DB:
+ *   1. adminProcedure middleware: FORBIDDEN unless users.role='admin'.
+ *   2. Beijing-day helpers: handle DST-free zone correctly, daysAgo
+ *      window walks back exactly 24h × N at the UTC level.
+ *
+ * The query bodies (dashboard / userList / userDetail) build SQL that
+ * resists clean mocking (correlated subqueries, GROUP BY, ORDER BY
+ * subquery expressions). Their behaviour is covered by manual smoke
+ * after deploy + the type checker.
+ */
+
+import { TRPCError } from '@trpc/server';
+import { describe, expect, it, vi } from 'vitest';
+import { __adminInternals, adminRouter } from './admin.js';
+
+const { beijingDayStartUtc, beijingDayString } = __adminInternals;
+
+const fakeLogger = {
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+  child: vi.fn(),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+
+function makeCtx(roleByExternalId: Record<string, string | undefined>, userId: string | null) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db: any = {
+    select(_fields?: unknown) {
+      return {
+        from(_table: unknown) {
+          return {
+            where(predicate: unknown) {
+              return {
+                async limit(_n: number): Promise<Array<{ role: string }>> {
+                  // eslint-disable-next-line @typescript-eslint/no-require-imports
+                  const s = require('node:util').inspect(predicate, {
+                    depth: 6,
+                    getters: true,
+                  });
+                  // Find the externalId in the predicate match.
+                  for (const [ext, role] of Object.entries(roleByExternalId)) {
+                    if (s.includes(`value: '${ext}'`)) {
+                      return role ? [{ role }] : [];
+                    }
+                  }
+                  return [];
+                },
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+  return {
+    db,
+    userId,
+    logger: fakeLogger,
+  };
+}
+
+describe('adminProcedure (via adminRouter.dashboard gate)', () => {
+  it('rejects unauthenticated with UNAUTHORIZED', async () => {
+    const ctx = makeCtx({}, null);
+    const caller = adminRouter.createCaller(ctx as never);
+    await expect(caller.dashboard()).rejects.toMatchObject({
+      code: 'UNAUTHORIZED',
+    });
+  });
+
+  it("rejects non-admin role='user' with FORBIDDEN", async () => {
+    const ctx = makeCtx({ usr_alice: 'user' }, 'usr_alice');
+    const caller = adminRouter.createCaller(ctx as never);
+    await expect(caller.dashboard()).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+  });
+
+  it('rejects missing user (deleted account) with FORBIDDEN', async () => {
+    const ctx = makeCtx({}, 'usr_ghost');
+    const caller = adminRouter.createCaller(ctx as never);
+    await expect(caller.dashboard()).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+  });
+
+  it('admin role passes the gate (and proceeds into query body)', async () => {
+    // The query body will explode against this hand-rolled fake db
+    // — that's expected. We just need to assert it got PAST the
+    // FORBIDDEN check, so the rejection should NOT be FORBIDDEN.
+    const ctx = makeCtx({ usr_boss: 'admin' }, 'usr_boss');
+    const caller = adminRouter.createCaller(ctx as never);
+    try {
+      await caller.dashboard();
+      // If it didn't throw, the gate passed AND the query succeeded
+      // — either way, gate is fine.
+    } catch (err) {
+      const e = err as TRPCError;
+      expect(e.code).not.toBe('FORBIDDEN');
+      expect(e.code).not.toBe('UNAUTHORIZED');
+    }
+  });
+});
+
+describe('beijingDayStartUtc', () => {
+  it('returns the UTC instant of 00:00 Beijing for the same day', () => {
+    // 2026-05-17 06:00 UTC → still 2026-05-17 in Beijing (14:00 BJ)
+    const start = beijingDayStartUtc(new Date('2026-05-17T06:00:00Z'));
+    // Beijing day start = 2026-05-17 00:00 BJ = 2026-05-16 16:00 UTC
+    expect(start.toISOString()).toBe('2026-05-16T16:00:00.000Z');
+  });
+
+  it('walks back daysAgo whole days', () => {
+    const start = beijingDayStartUtc(new Date('2026-05-17T06:00:00Z'), 3);
+    // 3 Beijing days earlier → 2026-05-14 00:00 BJ = 2026-05-13 16:00 UTC
+    expect(start.toISOString()).toBe('2026-05-13T16:00:00.000Z');
+  });
+
+  it("preserves day boundary near midnight UTC (it's 08:xx in Beijing)", () => {
+    // 2026-05-17 00:30 UTC is 2026-05-17 08:30 BJ — same Beijing day.
+    const start = beijingDayStartUtc(new Date('2026-05-17T00:30:00Z'));
+    expect(start.toISOString()).toBe('2026-05-16T16:00:00.000Z');
+  });
+});
+
+describe('beijingDayString', () => {
+  it("formats as YYYY-MM-DD for today's Beijing day", () => {
+    expect(beijingDayString(new Date('2026-05-17T06:00:00Z'))).toBe('2026-05-17');
+  });
+
+  it('handles UTC-to-Beijing day boundary near 16:xx UTC', () => {
+    // 2026-05-17 16:30 UTC is 2026-05-18 00:30 BJ.
+    expect(beijingDayString(new Date('2026-05-17T16:30:00Z'))).toBe('2026-05-18');
+  });
+
+  it('walks back daysAgo Beijing days', () => {
+    expect(beijingDayString(new Date('2026-05-17T06:00:00Z'), 6)).toBe('2026-05-11');
+  });
+});

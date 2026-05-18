@@ -1,0 +1,314 @@
+/**
+ * Phase 27 — admin user list.
+ *
+ * Search by name/email + sort by createdAt|taskCount|lastActive +
+ * paginate (50/page). Server returns the matching rows + `total` so
+ * we can render a "X 条 / 第 N 页" footer.
+ *
+ * Clicking a row routes to /admin/users/:id (the detail page).
+ */
+
+import { ChevronLeft, ChevronRight, Loader2, Search } from 'lucide-react';
+import * as React from 'react';
+import { Link } from 'react-router-dom';
+import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
+import { formatDate, formatDateTime, truncate } from './admin-shared';
+
+type Sort = 'createdAt' | 'taskCount' | 'lastActive';
+type Order = 'asc' | 'desc';
+const PAGE_SIZE = 50;
+
+type UserListResult = Awaited<ReturnType<typeof trpc.admin.userList.query>>;
+
+export function AdminUsersPage(): JSX.Element {
+  const [search, setSearch] = React.useState('');
+  const [searchDebounced, setSearchDebounced] = React.useState('');
+  const [sort, setSort] = React.useState<Sort>('createdAt');
+  const [order, setOrder] = React.useState<Order>('desc');
+  const [offset, setOffset] = React.useState(0);
+  const [data, setData] = React.useState<UserListResult | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  // Debounce search input — 300 ms after the user stops typing,
+  // commit the value to `searchDebounced` which is what actually
+  // triggers the query effect below.
+  React.useEffect(() => {
+    const id = window.setTimeout(() => {
+      setSearchDebounced(search);
+      setOffset(0);
+    }, 300);
+    return () => window.clearTimeout(id);
+  }, [search]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    trpc.admin.userList
+      .query({
+        search: searchDebounced || undefined,
+        sort,
+        order,
+        offset,
+        limit: PAGE_SIZE,
+      })
+      .then((res) => {
+        if (!cancelled) setData(res);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [searchDebounced, sort, order, offset]);
+
+  const total = data?.total ?? 0;
+  const pageEnd = Math.min(offset + PAGE_SIZE, total);
+  const hasPrev = offset > 0;
+  const hasNext = offset + PAGE_SIZE < total;
+
+  function toggleSort(next: Sort) {
+    if (sort === next) {
+      setOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSort(next);
+      setOrder('desc');
+    }
+    setOffset(0);
+  }
+
+  return (
+    <div className="mx-auto max-w-6xl px-6 py-8">
+      <header className="mb-6">
+        <h1 className="text-xl font-semibold tracking-tight">用户管理</h1>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          全部注册用户 · 共 {total.toLocaleString('zh-CN')} 人
+        </p>
+      </header>
+
+      <div className="mb-4 flex items-center gap-3">
+        <div className="relative flex-1 max-w-md">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden
+          />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="搜索邮箱 / 名字…"
+            className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-[13px] outline-none transition-colors focus:border-[#E50B6B]"
+          />
+        </div>
+        <span className="text-[12px] text-muted-foreground">
+          排序：
+        </span>
+        <SortPill
+          label="注册日期"
+          active={sort === 'createdAt'}
+          order={sort === 'createdAt' ? order : null}
+          onClick={() => toggleSort('createdAt')}
+        />
+        <SortPill
+          label="本月任务数"
+          active={sort === 'taskCount'}
+          order={sort === 'taskCount' ? order : null}
+          onClick={() => toggleSort('taskCount')}
+        />
+        <SortPill
+          label="最后活跃"
+          active={sort === 'lastActive'}
+          order={sort === 'lastActive' ? order : null}
+          onClick={() => toggleSort('lastActive')}
+        />
+      </div>
+
+      <section className="rounded-xl border border-border bg-card p-0 shadow-sm">
+        {error && (
+          <div className="px-5 py-3 text-sm text-red-700">加载失败：{error}</div>
+        )}
+        <div className="overflow-x-auto">
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+                <th className="px-5 py-3 font-medium">用户</th>
+                <th className="px-3 py-3 font-medium">邮箱</th>
+                <th className="px-3 py-3 font-medium">套餐</th>
+                <th className="px-3 py-3 font-medium">注册日期</th>
+                <th className="px-3 py-3 font-medium">最后活跃</th>
+                <th className="px-3 py-3 font-medium text-right">本月任务</th>
+                <th className="px-5 py-3 font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && !data ? (
+                <tr>
+                  <td colSpan={7} className="py-8 text-center text-muted-foreground">
+                    <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+                    加载中…
+                  </td>
+                </tr>
+              ) : !data || data.users.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-8 text-center text-muted-foreground">
+                    {searchDebounced ? '没有匹配的用户' : '暂无用户'}
+                  </td>
+                </tr>
+              ) : (
+                data.users.map((u) => (
+                  <tr
+                    key={u.userId}
+                    className="border-b border-border/60 last:border-b-0 hover:bg-foreground/[0.02]"
+                  >
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <Avatar
+                          url={u.avatarUrl}
+                          fallback={u.displayName ?? u.email ?? '?'}
+                        />
+                        <div className="min-w-0">
+                          <div className="truncate text-foreground">
+                            {u.displayName ?? '—'}
+                          </div>
+                          {u.role === 'admin' && (
+                            <span className="mt-0.5 inline-block rounded-full bg-[rgba(229,11,107,0.12)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[#E50B6B]">
+                              admin
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-muted-foreground">
+                      {truncate(u.email ?? '—', 32)}
+                    </td>
+                    <td className="px-3 py-3 text-muted-foreground">{u.plan}</td>
+                    <td className="px-3 py-3 text-muted-foreground">
+                      {formatDate(u.createdAt)}
+                    </td>
+                    <td className="px-3 py-3 text-muted-foreground">
+                      {u.lastActiveAt ? formatDateTime(u.lastActiveAt) : '—'}
+                    </td>
+                    <td className="px-3 py-3 text-right tabular-nums text-foreground">
+                      {u.monthTaskCount.toLocaleString('zh-CN')}
+                    </td>
+                    <td className="px-5 py-3">
+                      <Link
+                        to={`/admin/users/${u.userId}`}
+                        className="text-[#E50B6B] hover:underline"
+                      >
+                        查看详情
+                      </Link>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        {/* Pagination */}
+        <div className="flex items-center justify-between border-t border-border px-5 py-3 text-[12px] text-muted-foreground">
+          <div>
+            {total > 0 && (
+              <>
+                显示 {offset + 1} – {pageEnd}（共 {total.toLocaleString('zh-CN')} 人）
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              disabled={!hasPrev}
+              onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
+              className={cn(
+                'inline-flex h-7 items-center gap-1 rounded-md border border-border px-2',
+                hasPrev
+                  ? 'cursor-pointer hover:bg-foreground/[0.04]'
+                  : 'cursor-not-allowed opacity-40',
+              )}
+            >
+              <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
+              上一页
+            </button>
+            <button
+              type="button"
+              disabled={!hasNext}
+              onClick={() => setOffset((o) => o + PAGE_SIZE)}
+              className={cn(
+                'inline-flex h-7 items-center gap-1 rounded-md border border-border px-2',
+                hasNext
+                  ? 'cursor-pointer hover:bg-foreground/[0.04]'
+                  : 'cursor-not-allowed opacity-40',
+              )}
+            >
+              下一页
+              <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SortPill({
+  label,
+  active,
+  order,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  order: Order | null;
+  onClick: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'inline-flex h-7 items-center gap-1 rounded-full border px-3 text-[12px] transition-colors',
+        active
+          ? 'border-[#E50B6B] bg-[rgba(229,11,107,0.10)] text-[#E50B6B]'
+          : 'border-border bg-transparent text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground',
+      )}
+    >
+      {label}
+      {active && (
+        <span className="text-[9px]" aria-hidden>
+          {order === 'asc' ? '↑' : '↓'}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function Avatar({
+  url,
+  fallback,
+}: {
+  url: string | null;
+  fallback: string;
+}): JSX.Element {
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt=""
+        className="h-7 w-7 shrink-0 rounded-full object-cover"
+        loading="lazy"
+      />
+    );
+  }
+  const letter = (fallback || '?').charAt(0).toUpperCase();
+  return (
+    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[rgba(229,11,107,0.12)] text-[11px] font-semibold text-[#E50B6B]">
+      {letter}
+    </div>
+  );
+}

@@ -13,6 +13,7 @@ import {
   RotateCcw,
   Search,
   Share2,
+  Shield,
   Sparkles,
   Trash2,
   X,
@@ -102,6 +103,11 @@ interface Props {
   userEmail: string | null;
   userDisplayName: string;
   userPlan: string;
+  /**
+   * Phase 27 — when 'admin', the FeatureNav renders an extra
+   * "管理后台" entry that routes to /admin. Default 'user'.
+   */
+  userRole?: 'user' | 'admin';
   onLogout(): void;
   onOpenFeedback?(): void;
   /** O12 — open the in-app settings modal instead of navigating. */
@@ -174,6 +180,7 @@ export function Sidebar({
   userEmail,
   userDisplayName,
   userPlan,
+  userRole = 'user',
   onLogout,
   onOpenFeedback,
   failedTaskCount = 0,
@@ -363,7 +370,7 @@ export function Sidebar({
         {/* SidebarNav — fixed feature shortcuts. Lives between
             SidebarHeader and SidebarContent so it stays put while
             the task list below scrolls. */}
-        <FeatureNav />
+        <FeatureNav userRole={userRole} />
 
         <SidebarContent className="px-0">
             {projectFilter && (
@@ -940,7 +947,7 @@ const FEATURES: readonly FeatureItem[] = [
  * those rows render as clickable nav links; the rest stay disabled
  * with the tooltip. Compact density (32px row).
  */
-function FeatureNav(): JSX.Element {
+function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
   const navigate = useNavigate();
   // Read pathname directly so the active highlight updates on route
   // switch without forcing a re-render through props. The shrink-0
@@ -988,6 +995,18 @@ function FeatureNav(): JSX.Element {
               </SidebarMenuItem>
             );
           })}
+          {userRole === 'admin' && (
+            <SidebarMenuItem key="admin">
+              <SidebarMenuButton
+                tooltip="管理后台"
+                isActive={pathname.startsWith('/admin')}
+                onClick={() => navigate('/admin')}
+              >
+                <Shield aria-hidden />
+                <span>管理后台</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>

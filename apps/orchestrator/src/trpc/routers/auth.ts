@@ -248,6 +248,7 @@ export const authRouter = router({
         plan: users.plan,
         planExpiresAt: users.planExpiresAt,
         selectedRoles: users.selectedRoles,
+        role: users.role,
       })
       .from(users)
       .where(eq(users.externalId, ctx.userId))
@@ -274,6 +275,9 @@ export const authRouter = router({
       // "你还没选角色" onboarding banner; saves the SPA a separate
       // roles.list round-trip on every page load.
       selectedRoles: (row.selectedRoles ?? []) as string[],
+      // Phase 27 — admin gate. SPA reads this to decide whether to
+      // render the "管理后台" sidebar entry + the /admin guard.
+      role: row.role as 'user' | 'admin',
     };
   }),
 });

@@ -1,3 +1,4 @@
+import { adminRouter } from './routers/admin.js';
 import { apiKeysRouter } from './routers/api-keys.js';
 import { authRouter } from './routers/auth.js';
 import { batchTasksRouter } from './routers/batch-tasks.js';
@@ -43,6 +44,7 @@ export const appRouter = router({
   usage: usageRouter,
   notifications: notificationsRouter,
   notificationChannels: notificationChannelsRouter,
+  admin: adminRouter,
 });
 
 export type AppRouter = typeof appRouter;

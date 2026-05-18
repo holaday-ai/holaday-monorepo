@@ -1,6 +1,10 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { AdminLayout } from '@/components/AdminLayout';
 import { AppShell } from '@/components/AppShell';
 import { ToastProvider } from '@/components/ui/toast';
+import { AdminDashboardPage } from '@/pages/admin/AdminDashboardPage';
+import { AdminUserDetailPage } from '@/pages/admin/AdminUserDetailPage';
+import { AdminUsersPage } from '@/pages/admin/AdminUsersPage';
 import { BillingPage } from '@/pages/BillingPage';
 import { HistoryPage } from '@/pages/HistoryPage';
 import { LoginPage } from '@/pages/LoginPage';
@@ -64,6 +68,15 @@ export function App(): JSX.Element {
         <Route path="/terms" element={<TermsPage />} />
         <Route path="/500" element={<ServerErrorPage />} />
         <Route path="/app" element={<AppAliasRedirect />} />
+
+        {/* Phase 27 — admin surface. Sits OUTSIDE AppShell because
+            it has its own auth + role gate and a dedicated left nav.
+            Non-admins land at "/" via the AdminLayout's redirect. */}
+        <Route element={<AdminLayout />}>
+          <Route path="/admin" element={<AdminDashboardPage />} />
+          <Route path="/admin/users" element={<AdminUsersPage />} />
+          <Route path="/admin/users/:userId" element={<AdminUserDetailPage />} />
+        </Route>
 
         <Route element={<AppShell />}>
           <Route path="/" element={<WorkbenchApp />} />
