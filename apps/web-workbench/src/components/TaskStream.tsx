@@ -1322,6 +1322,24 @@ function TerminalSummary({
     },
     [toast],
   );
+  // BOSS feedback — retry button on failed task. Creates a NEW
+  // task (not a reply), so quota + supercar prompt + role
+  // classification all run fresh. createTask emits the
+  // server.task.* WS events that the AppShell's URL effect uses to
+  // navigate to the new task automatically — no manual route push
+  // needed here.
+  const createTask = useTaskStore((s) => s.createTask);
+  const handleRetry = React.useCallback(
+    async (retryIntent: string): Promise<void> => {
+      const result = await createTask(retryIntent, []);
+      if ('error' in result) {
+        toast.show(`重试失败：${result.error}`, 'error');
+        return;
+      }
+      toast.show('已重新提交', 'info', 2000);
+    },
+    [createTask, toast],
+  );
   // Codex IA close-out — the result card no longer hosts the
   // browser-panel entry. That moved to TaskToolbar at the top of the
   // Main column so the result stays focused on the work product.
@@ -1463,15 +1481,33 @@ function TerminalSummary({
           buttons. 查看证据 lives in the top-right of the card;
           打开最终页面 keeps its own URL row below. */}
       <div className={cn('mt-3 flex items-center justify-between gap-3 border-t pt-3 text-xs text-muted-foreground', tone.divider)}>
-        <button
-          type="button"
-          onClick={() => void copyTo(plainText, '纯文本')}
-          aria-label="复制纯文本"
-          className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground"
-        >
-          <Copy className="h-3.5 w-3.5" />
-          复制
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void copyTo(plainText, '纯文本')}
+            aria-label="复制纯文本"
+            className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground"
+          >
+            <Copy className="h-3.5 w-3.5" />
+            复制
+          </button>
+          {/* BOSS feedback — retry button on failed tasks. Re-fires
+              the original intent as a brand-new task via the store
+              (NOT a reply, so quota + supercar prompt are fresh).
+              Cancelled tasks don't get retry — they were stopped
+              on purpose. */}
+          {status === 'failed' && intent && (
+            <button
+              type="button"
+              onClick={() => void handleRetry(intent)}
+              aria-label="重新执行任务"
+              className="inline-flex items-center gap-1.5 text-[#E50B6B] transition-colors hover:text-[#c80a5d]"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              重试
+            </button>
+          )}
+        </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button

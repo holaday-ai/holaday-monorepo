@@ -141,8 +141,26 @@ export function EventDetailPopover({
         <span className="text-foreground">{describeReminder(row.reminderMinutes ?? null)}</span>
         {row.lastRunAt && (
           <>
-            <span className="flex items-center gap-1"><Clock className="h-3 w-3" />上次</span>
-            <span className="text-foreground">{formatDateTime(row.lastRunAt)}</span>
+            <span className="flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              上次
+            </span>
+            <span className="flex items-center gap-1.5 text-foreground">
+              {row.lastRunStatus === 'success' ? (
+                <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                  <span aria-hidden>✅</span>
+                  <span>成功</span>
+                </span>
+              ) : row.lastRunStatus === 'failed' ? (
+                <span className="inline-flex items-center gap-1 text-red-600 dark:text-red-400">
+                  <span aria-hidden>❌</span>
+                  <span>失败</span>
+                </span>
+              ) : null}
+              <span className="text-muted-foreground">
+                · {formatDateTime(row.lastRunAt)}
+              </span>
+            </span>
           </>
         )}
       </div>

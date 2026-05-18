@@ -1,4 +1,4 @@
-import { Menu } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
 import * as React from 'react';
 import { InputArea } from '@/components/InputArea';
 import { RoleNudgeBanner } from '@/components/RoleNudgeBanner';
@@ -171,6 +171,7 @@ export function MainPanel({
             <h1 className="mb-6 text-center text-[28px] font-semibold leading-tight tracking-tight text-foreground">
               你好，{greetingName || '今天想做点什么？'}
             </h1>
+            <OnboardingHint />
             <InputArea
               key={composerKey}
               onSubmit={onSubmit}
@@ -278,6 +279,66 @@ function SuggestionChips({
  * short tap target; intent is the prefill text that lands in the
  * composer (user can edit before submitting).
  */
+/**
+ * First-time-user hint above the composer. Renders only when the
+ * user has zero tasks AND hasn't dismissed it before. ✕ closes for
+ * good (localStorage). Sits between the greeting and the composer
+ * so it doesn't compete with the input's visual weight.
+ */
+const ONBOARDING_DISMISSED_KEY = 'holaday.onboarding.first-task.dismissed';
+
+function OnboardingHint(): JSX.Element | null {
+  const tasksCount = useTaskStore((s) => s.tasks.length);
+  const [dismissed, setDismissed] = React.useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.localStorage.getItem(ONBOARDING_DISMISSED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  // Don't render until the initial task fetch has had a chance to
+  // populate. The store has no "bootstrapped" flag and tasks=[]
+  // could mean "still loading" OR "truly empty" — so wait 400 ms
+  // (longer than a typical fetch) before showing the hint. Avoids
+  // a flash for users who DO have tasks but the list is mid-fetch.
+  const [readyToShow, setReadyToShow] = React.useState(false);
+  React.useEffect(() => {
+    const id = window.setTimeout(() => setReadyToShow(true), 400);
+    return () => window.clearTimeout(id);
+  }, []);
+
+  if (!readyToShow) return null;
+  if (tasksCount > 0) return null;
+  if (dismissed) return null;
+
+  return (
+    <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-3.5 py-2.5 text-[13px] text-foreground">
+      <span className="text-base leading-none" aria-hidden>
+        👋
+      </span>
+      <div className="min-w-0 flex-1">
+        第一次来？点击下方的任务示例，或直接输入你想做的事情。
+      </div>
+      <button
+        type="button"
+        onClick={() => {
+          try {
+            window.localStorage.setItem(ONBOARDING_DISMISSED_KEY, '1');
+          } catch {
+            /* localStorage disabled — still hide for this session */
+          }
+          setDismissed(true);
+        }}
+        className="-mr-1 -mt-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground"
+        aria-label="关闭引导"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
 const SUGGESTIONS: ReadonlyArray<{ label: string; intent: string }> = [
   { label: '直播复盘', intent: '帮我复盘昨天的抖音直播数据，做总结和优化策略' },
   { label: '查资料', intent: '帮我查一下今天的科技新闻' },

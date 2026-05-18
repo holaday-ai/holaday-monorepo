@@ -220,11 +220,55 @@
       display: flex; flex-direction: column; gap: 10px;
     }
     .mock-browser .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-subtle); }
+    /* BOSS feedback — the old frame just said "实时画面 · CDP
+       screencast" which read as an unfinished placeholder. Now it
+       renders a stylised mini-browser viewport with a faux URL row +
+       fake page chrome. No fake content text — just rhythm and
+       shape so the reader's eye knows "there's a browser pane here"
+       without overpromising. */
     .mock-browser .frame {
       flex: 1; border-radius: var(--radius-sm); border: 1px solid var(--border);
-      background: linear-gradient(135deg, #f8f8f8, #ececec); min-height: 280px;
-      display: flex; align-items: center; justify-content: center;
-      color: var(--text-subtle); font-size: 12px;
+      background: #fff; min-height: 280px;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .mock-browser .frame-url {
+      display: flex; align-items: center; gap: 6px;
+      padding: 8px 10px; border-bottom: 1px solid var(--border);
+      background: #fafafa;
+    }
+    .mock-browser .frame-url-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: #cbd5e1;
+    }
+    .mock-browser .frame-url-pill {
+      flex: 1; height: 16px; border-radius: 4px;
+      background: linear-gradient(90deg, #f3f4f6 0%, #e5e7eb 50%, #f3f4f6 100%);
+      background-size: 200% 100%;
+      animation: shimmer 2.4s linear infinite;
+    }
+    .mock-browser .frame-body {
+      flex: 1; padding: 12px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .mock-browser .skeleton-row {
+      height: 9px; border-radius: 3px;
+      background: linear-gradient(90deg, #f3f4f6 0%, #e5e7eb 50%, #f3f4f6 100%);
+      background-size: 200% 100%;
+      animation: shimmer 2.4s linear infinite;
+    }
+    .mock-browser .skeleton-row.w-100 { width: 100%; }
+    .mock-browser .skeleton-row.w-80  { width: 80%; }
+    .mock-browser .skeleton-row.w-60  { width: 60%; }
+    .mock-browser .skeleton-row.w-90  { width: 90%; }
+    .mock-browser .skeleton-card {
+      margin-top: 6px;
+      height: 60px; border-radius: 6px;
+      background: linear-gradient(135deg, rgba(229,11,107,0.06), rgba(229,11,107,0.02));
+      border: 1px solid rgba(229,11,107,0.10);
+    }
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
     }
     @media (max-width: 880px) {
       .mock-app { grid-template-columns: 1fr; }
@@ -402,13 +446,66 @@
     }
 
     /* ---------- Mobile nav ---------- */
+    /* Hamburger button — hidden on desktop, shown < 720px. */
+    .nav-hamburger {
+      display: none;
+      width: 40px; height: 40px;
+      align-items: center; justify-content: center;
+      border-radius: 8px;
+      color: var(--text);
+      transition: background .15s ease;
+    }
+    .nav-hamburger:hover { background: rgba(0,0,0,0.05); }
+    .nav-hamburger svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; }
+
     @media (max-width: 720px) {
-      .nav-links .nav-link { display: none; }
-      .nav-links .btn-ghost { display: none; }
+      /* Hide the desktop link row entirely on mobile — the
+         hamburger toggles a separate drawer. */
+      .nav-links { display: none; }
+      .nav-hamburger { display: inline-flex; }
+
+      /* The drawer slides down from under the nav bar. Anchored
+         absolute to the .nav (which is position: sticky), so it
+         only covers the page below the bar. */
+      .nav.is-open .mobile-drawer { display: block; }
+      .mobile-drawer {
+        display: none;
+        position: absolute;
+        top: 64px; left: 0; right: 0;
+        background: white;
+        border-bottom: 1px solid var(--border);
+        box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+        padding: 12px 16px 20px;
+        animation: slideDown 180ms ease-out;
+      }
+      .mobile-drawer a {
+        display: block;
+        padding: 12px 4px;
+        font-size: 15px; font-weight: 500;
+        color: var(--text);
+        border-bottom: 1px solid var(--border);
+      }
+      .mobile-drawer a:last-of-type { border-bottom: none; }
+      .mobile-drawer .btn-primary {
+        margin-top: 14px;
+        width: 100%;
+        height: 46px;
+        border-bottom: none;
+      }
+      @keyframes slideDown {
+        from { opacity: 0; transform: translateY(-8px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+
       .hero { padding: 56px 0 64px; }
       section { padding: 72px 0; }
       .cta-strip { padding: 48px 24px; }
       .uc-card { padding: 18px; }
+    }
+    /* Drawer is mobile-only — explicitly hide on wider viewports
+       to prevent any leakage if a JS bug forces .is-open on desktop. */
+    @media (min-width: 721px) {
+      .mobile-drawer { display: none !important; }
     }
   </style>
 </head>
@@ -429,6 +526,30 @@
         <a class="btn btn-primary" href="/register">开始使用</a>
       </div>
     </nav>
+    <button
+      class="nav-hamburger"
+      id="nav-hamburger"
+      type="button"
+      aria-label="主菜单"
+      aria-expanded="false"
+      aria-controls="mobile-drawer"
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <line x1="4" y1="7" x2="20" y2="7"/>
+        <line x1="4" y1="12" x2="20" y2="12"/>
+        <line x1="4" y1="17" x2="20" y2="17"/>
+      </svg>
+    </button>
+  </div>
+  <!-- Mobile drawer — populated with the same items the desktop
+       nav has. Visible only when the parent .nav has .is-open
+       (toggled by the hamburger). -->
+  <div class="mobile-drawer" id="mobile-drawer" role="navigation" aria-label="移动端主菜单">
+    <a href="#how">功能</a>
+    <a href="#capabilities">能力</a>
+    <a href="#pricing">定价</a>
+    <a href="/login">登录</a>
+    <a class="btn btn-primary" href="/register">开始使用</a>
   </div>
 </header>
 
@@ -444,7 +565,7 @@
       </p>
       <div class="hero-cta">
         <a class="btn btn-primary btn-lg" href="/register">免费开始 →</a>
-        <a class="btn btn-ghost btn-lg" href="#how">查看演示</a>
+        <a class="btn btn-ghost btn-lg" href="#how">了解更多</a>
       </div>
       <div class="hero-stats">
         <div class="stat"><strong>35</strong> 个专家技能</div>
@@ -478,7 +599,22 @@
           </section>
           <aside class="mock-browser">
             <div class="label">Live Browser</div>
-            <div class="frame">实时画面 · CDP screencast</div>
+            <div class="frame" aria-hidden="true">
+              <div class="frame-url">
+                <span class="frame-url-dot"></span>
+                <span class="frame-url-dot"></span>
+                <span class="frame-url-dot"></span>
+                <span class="frame-url-pill"></span>
+              </div>
+              <div class="frame-body">
+                <div class="skeleton-row w-80"></div>
+                <div class="skeleton-row w-100"></div>
+                <div class="skeleton-row w-60"></div>
+                <div class="skeleton-card"></div>
+                <div class="skeleton-row w-90"></div>
+                <div class="skeleton-row w-60"></div>
+              </div>
+            </div>
           </aside>
         </div>
       </div>
@@ -708,6 +844,38 @@
     }
   }, { rootMargin: '0px 0px -8% 0px', threshold: 0.05 });
   document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+
+  // Mobile hamburger — toggles .is-open on the .nav header which
+  // reveals .mobile-drawer (CSS-only state). Closes when:
+  //   - user taps any link inside the drawer (anchor navigation
+  //     should dismiss the menu, not leave it stuck open)
+  //   - user taps outside the drawer + button
+  //   - viewport grows past the mobile breakpoint (responsive)
+  const hamburger = document.getElementById('nav-hamburger');
+  const drawer = document.getElementById('mobile-drawer');
+  if (hamburger && drawer && nav) {
+    const close = () => {
+      nav.classList.remove('is-open');
+      hamburger.setAttribute('aria-expanded', 'false');
+    };
+    hamburger.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const open = !nav.classList.contains('is-open');
+      nav.classList.toggle('is-open', open);
+      hamburger.setAttribute('aria-expanded', String(open));
+    });
+    drawer.addEventListener('click', (ev) => {
+      if (ev.target instanceof HTMLAnchorElement) close();
+    });
+    document.addEventListener('click', (ev) => {
+      if (!nav.classList.contains('is-open')) return;
+      if (drawer.contains(ev.target) || hamburger.contains(ev.target)) return;
+      close();
+    });
+    window.matchMedia('(min-width: 721px)').addEventListener('change', (e) => {
+      if (e.matches) close();
+    });
+  }
 </script>
 
 </body>

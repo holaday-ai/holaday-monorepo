@@ -35,11 +35,19 @@ import {
   Video,
 } from 'lucide-react';
 import * as React from 'react';
+import { useOutletContext } from 'react-router-dom';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
 import type { UiSkill } from '@/types/task';
+
+/** Per-plan skill caps. Mirrors PLAN_CATALOGUE.rolesAllowed in shared-types. */
+const SKILL_CAPS: Record<string, number> = {
+  free: 0,
+  basic: 5,
+  pro: 33,
+};
 
 type Category = UiSkill['category'];
 
@@ -110,9 +118,22 @@ const ICONS: Record<string, LucideIcon> = {
  */
 export function SkillsPage(): JSX.Element {
   const toast = useToast();
+  // BOSS feedback — surface plan-bound cap. AppShell exposes `me`
+  // via OutletContext; we only need .plan here. Default to 'free'
+  // when the shell hasn't bootstrapped yet (e.g. cold deep link).
+  const outletCtx = useOutletContext<
+    { me?: { plan?: string } | null } | null
+  >();
+  const planId = (outletCtx?.me?.plan ?? 'free') as keyof typeof SKILL_CAPS;
+  const cap = SKILL_CAPS[planId] ?? 0;
   const [skills, setSkills] = React.useState<UiSkill[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [pendingId, setPendingId] = React.useState<string | null>(null);
+  const enabledCount = React.useMemo(
+    () => skills.reduce((n, s) => (s.enabled ? n + 1 : n), 0),
+    [skills],
+  );
+  const atLimit = cap > 0 && enabledCount >= cap;
 
   React.useEffect(() => {
     let cancelled = false;
@@ -150,6 +171,20 @@ export function SkillsPage(): JSX.Element {
 
   async function onToggle(skill: UiSkill): Promise<void> {
     if (pendingId) return;
+    // BOSS feedback — UI-side cap. Server doesn't enforce a hard
+    // limit today; this is just a guard against accidental over-
+    // enablement and a clear upgrade prompt for Basic users.
+    if (!skill.enabled && cap > 0 && enabledCount >= cap) {
+      if (planId === 'pro') {
+        toast.show(`已达到 ${cap} 个技能上限`, 'error');
+      } else {
+        toast.show(
+          `已达到当前套餐的技能上限（${cap} 个）· 升级到专业版可使用全部 33 个技能`,
+          'error',
+        );
+      }
+      return;
+    }
     setPendingId(skill.id);
     // Optimistic flip.
     const next = !skill.enabled;
@@ -182,7 +217,35 @@ export function SkillsPage(): JSX.Element {
       <PageHeader
         title="专家技能"
         description="选择你常用的技能，HOLA DAY 会自动识别并调用专业工作流"
+        action={
+          cap > 0 ? (
+            <div
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12px] font-medium',
+                atLimit
+                  ? 'border-amber-300/60 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200'
+                  : 'border-border bg-card text-foreground',
+              )}
+            >
+              已启用 {enabledCount} / {cap}
+              <span className="text-muted-foreground">
+                · {planId === 'pro' ? '专业版' : planId === 'basic' ? '基础版' : '体验版'}
+              </span>
+            </div>
+          ) : null
+        }
       />
+      {/* Upgrade nudge when Basic user hits the cap. Inline banner
+          so the action sits adjacent to the skill grid the user is
+          interacting with. */}
+      {atLimit && planId !== 'pro' && (
+        <div className="mb-5 rounded-md border border-amber-300/60 bg-amber-50/60 px-3.5 py-2.5 text-[13px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <div className="font-medium">已达到 {cap} 个技能上限</div>
+          <div className="mt-0.5 text-[12px] opacity-80">
+            升级到专业版可使用全部 33 个技能。
+          </div>
+        </div>
+      )}
       {loading ? (
         <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
           加载中…
