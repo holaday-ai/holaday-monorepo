@@ -20,7 +20,7 @@
  */
 
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, gte, like, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, like, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { llmCalls } from '../../db/schema/llm-calls.js';
 import { tasks } from '../../db/schema/tasks.js';
@@ -228,55 +228,132 @@ export const adminRouter = router({
         .where(whereClause);
       const total = Number(totalRow?.total ?? 0);
 
-      // Subqueries for taskCount + lastActive so we can ORDER BY
-      // them. Drizzle exposes them as raw sql<…>() so we ORDER BY
-      // the same expression, not by an alias (MySQL can resolve
-      // either, but the expression is what's portable).
-      const monthTaskCountExpr = sql<number>`(SELECT COUNT(*) FROM tasks WHERE user_id = ${users.id} AND created_at >= ${monthStart})`;
-      const lastActiveExpr = sql<
-        Date | null
-      >`(SELECT MAX(created_at) FROM tasks WHERE user_id = ${users.id})`;
+      // Page the user rows first with whatever sort key is requested.
+      // Counts + last-active are joined in via a second query keyed
+      // by user_id so we keep the page size constant and avoid any
+      // correlated-subquery rendering surprises in drizzle.
+      //
+      // For sort='taskCount' / 'lastActive' the simple users-only
+      // sort can't be used — those values live in the aggregate
+      // tables. We grab a wider window of user ids (the whole page
+      // worth + a generous lookahead) and sort in JS after merging.
+      // For 'createdAt' (default) we use users.createdAt directly,
+      // paginate normally, and the aggregates ride along.
+      const order = input.order;
 
-      const orderExpr =
-        input.sort === 'taskCount'
-          ? monthTaskCountExpr
-          : input.sort === 'lastActive'
-            ? lastActiveExpr
-            : users.createdAt;
-      const orderedBy = input.order === 'asc' ? sql`${orderExpr} ASC` : sql`${orderExpr} DESC`;
+      // Paginated user rows.
+      let pagedUsers: Array<{
+        id: number;
+        userId: string;
+        email: string | null;
+        displayName: string | null;
+        plan: string;
+        role: string;
+        avatarUrl: string | null;
+        createdAt: Date;
+      }>;
+      if (input.sort === 'createdAt') {
+        const direction = order === 'asc' ? sql`ASC` : sql`DESC`;
+        pagedUsers = await ctx.db
+          .select({
+            id: users.id,
+            userId: users.externalId,
+            email: users.email,
+            displayName: users.displayName,
+            plan: users.plan,
+            role: users.role,
+            avatarUrl: users.avatarUrl,
+            createdAt: users.createdAt,
+          })
+          .from(users)
+          .where(whereClause)
+          .orderBy(sql`${users.createdAt} ${direction}`)
+          .limit(input.limit)
+          .offset(input.offset);
+      } else {
+        // Sort happens after we have the aggregate values for each
+        // user. We grab the entire matching set (capped at 1000 for
+        // safety) then sort + slice in JS.
+        const ALL_CAP = 1000;
+        pagedUsers = await ctx.db
+          .select({
+            id: users.id,
+            userId: users.externalId,
+            email: users.email,
+            displayName: users.displayName,
+            plan: users.plan,
+            role: users.role,
+            avatarUrl: users.avatarUrl,
+            createdAt: users.createdAt,
+          })
+          .from(users)
+          .where(whereClause)
+          .limit(ALL_CAP);
+      }
 
-      const rows = await ctx.db
-        .select({
-          userId: users.externalId,
-          email: users.email,
-          displayName: users.displayName,
-          plan: users.plan,
-          role: users.role,
-          avatarUrl: users.avatarUrl,
-          createdAt: users.createdAt,
-          monthTaskCount: monthTaskCountExpr,
-          lastActiveAt: lastActiveExpr,
-        })
-        .from(users)
-        .where(whereClause)
-        .orderBy(orderedBy)
-        .limit(input.limit)
-        .offset(input.offset);
+      const userIds = pagedUsers.map((u) => u.id);
 
-      return {
-        users: rows.map((r) => ({
-          userId: r.userId,
-          email: r.email,
-          displayName: r.displayName,
-          plan: r.plan,
-          role: r.role as 'user' | 'admin',
-          avatarUrl: r.avatarUrl,
-          createdAt: r.createdAt,
-          monthTaskCount: Number(r.monthTaskCount ?? 0),
-          lastActiveAt: r.lastActiveAt,
-        })),
-        total,
-      };
+      // Aggregates: one query per metric, keyed by user_id. Empty
+      // result map when there are no user ids (nothing to fetch).
+      const monthCountByUser = new Map<number, number>();
+      const lastActiveByUser = new Map<number, Date>();
+      if (userIds.length > 0) {
+        const monthRows = await ctx.db
+          .select({
+            userId: tasks.userId,
+            count: sql<number>`COUNT(*)`,
+          })
+          .from(tasks)
+          .where(and(inArray(tasks.userId, userIds), gte(tasks.createdAt, monthStart)))
+          .groupBy(tasks.userId);
+        for (const r of monthRows) {
+          monthCountByUser.set(Number(r.userId), Number(r.count));
+        }
+        const lastRows = await ctx.db
+          .select({
+            userId: tasks.userId,
+            maxAt: sql<Date>`MAX(${tasks.createdAt})`,
+          })
+          .from(tasks)
+          .where(inArray(tasks.userId, userIds))
+          .groupBy(tasks.userId);
+        for (const r of lastRows) {
+          if (r.maxAt) lastActiveByUser.set(Number(r.userId), r.maxAt as Date);
+        }
+      }
+
+      // Merge + (for non-createdAt sorts) sort + paginate in JS.
+      let merged = pagedUsers.map((u) => ({
+        userId: u.userId,
+        email: u.email,
+        displayName: u.displayName,
+        plan: u.plan,
+        role: u.role as 'user' | 'admin',
+        avatarUrl: u.avatarUrl,
+        createdAt: u.createdAt,
+        monthTaskCount: monthCountByUser.get(u.id) ?? 0,
+        lastActiveAt: lastActiveByUser.get(u.id) ?? null,
+      }));
+
+      if (input.sort === 'taskCount') {
+        merged.sort((a, b) =>
+          order === 'asc'
+            ? a.monthTaskCount - b.monthTaskCount
+            : b.monthTaskCount - a.monthTaskCount,
+        );
+        merged = merged.slice(input.offset, input.offset + input.limit);
+      } else if (input.sort === 'lastActive') {
+        merged.sort((a, b) => {
+          const av = a.lastActiveAt ? a.lastActiveAt.getTime() : 0;
+          const bv = b.lastActiveAt ? b.lastActiveAt.getTime() : 0;
+          return order === 'asc' ? av - bv : bv - av;
+        });
+        merged = merged.slice(input.offset, input.offset + input.limit);
+      }
+      // For sort='createdAt' the DB already paginated; merged is
+      // exactly the page.
+
+      return { users: merged, total };
     }),
 
   // ───────────────────────────────────────────────────────── userDetail ──
