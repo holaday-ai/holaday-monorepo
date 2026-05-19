@@ -381,62 +381,13 @@ export class CdpStreamer {
     return this.cdpSession;
   }
 
-  /**
-   * BUG-11 — runtime viewport override. The SPA's BrowserPanel
-   * tracks its own rendered width (ResizeObserver) and pushes the
-   * dimensions through the WS so Brave renders the page at exactly
-   * the panel's natural width — no horizontal scrollbar at 500px,
-   * no compressed desktop layout at 400px.
-   *
-   * Uses Emulation.setDeviceMetricsOverride (CDP) which is a
-   * runtime override — no page reload, no Brave restart. Phone
-   * mode (isMobile=true + deviceScaleFactor=2) at narrow widths so
-   * sites serve their mobile layout. To clear, pass `{ width: 0,
-   * height: 0 }` per the CDP spec.
-   *
-   * Idempotent: repeated calls with identical args are a no-op via
-   * a memoised hash so a noisy ResizeObserver doesn't flood CDP.
-   */
-  async setViewport(opts: {
-    width: number;
-    height: number;
-    deviceScaleFactor?: number;
-    mobile?: boolean;
-  }): Promise<void> {
-    const session = this.cdpSession;
-    if (!session) {
-      this.opts.logger.debug(
-        'cdp-streamer: setViewport called before session was open',
-      );
-      return;
-    }
-    const width = Math.max(0, Math.round(opts.width));
-    const height = Math.max(0, Math.round(opts.height));
-    const dsf = opts.deviceScaleFactor ?? 1;
-    const mobile = Boolean(opts.mobile);
-    const sig = `${width}x${height}@${dsf}${mobile ? 'm' : 'd'}`;
-    if (this.lastViewportSig === sig) return;
-    this.lastViewportSig = sig;
-    try {
-      await session.send('Emulation.setDeviceMetricsOverride', {
-        width,
-        height,
-        deviceScaleFactor: dsf,
-        mobile,
-      });
-      this.opts.logger.info(
-        { width, height, dsf, mobile },
-        'cdp-streamer: viewport overridden',
-      );
-    } catch (err) {
-      this.opts.logger.warn(
-        { err: errMsg(err), sig },
-        'cdp-streamer: setViewport failed',
-      );
-    }
-  }
-
-  private lastViewportSig: string | null = null;
+  // BUG-11 (resolved by CSS scale on SPA side) — the runtime
+  // viewport-override pipeline was removed: it triggered page
+  // reflows + screencast stalls + watchdog restarts when the panel
+  // changed size. The SPA now scales the screencast canvas with
+  // CSS transform: scale(), so Brave keeps its spawn-time viewport
+  // and the panel just renders a smaller-but-complete version of
+  // the page. No CDP calls per resize.
 }
 
 function errMsg(err: unknown): string {

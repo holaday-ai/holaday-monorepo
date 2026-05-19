@@ -245,48 +245,14 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
 
       args.ws.on('message', (raw) => {
         if (!inputHandler) return;
-        let msg:
-          | {
-              type?: string;
-              payload?:
-                | InputMessage
-                | {
-                    width: number;
-                    height: number;
-                    deviceScaleFactor?: number;
-                    mobile?: boolean;
-                  };
-            }
-          | null = null;
+        let msg: { type?: string; payload?: InputMessage } | null = null;
         try {
           msg = JSON.parse(raw.toString());
         } catch {
           return; // swallow malformed
         }
-        if (!msg || typeof msg.type !== 'string') return;
-        if (msg.type === 'input' && msg.payload) {
-          void inputHandler.handle(msg.payload as InputMessage);
-          return;
-        }
-        // BUG-11 — runtime viewport override. The SPA sends this on
-        // every debounced panel resize (and at WS open). CdpStreamer
-        // memoises identical signatures, so duplicate sends are
-        // free.
-        if (msg.type === 'viewport' && msg.payload) {
-          const p = msg.payload as {
-            width: number;
-            height: number;
-            deviceScaleFactor?: number;
-            mobile?: boolean;
-          };
-          if (
-            typeof p.width === 'number' &&
-            typeof p.height === 'number' &&
-            p.width >= 0 &&
-            p.height >= 0
-          ) {
-            void streamerRef.setViewport(p);
-          }
+        if (msg && msg.type === 'input' && msg.payload) {
+          void inputHandler.handle(msg.payload);
         }
       });
 

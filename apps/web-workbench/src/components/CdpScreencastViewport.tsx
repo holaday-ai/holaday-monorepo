@@ -90,8 +90,11 @@ export function CdpScreencastViewport({
   }, [onUrlChange]);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const hiddenInputRef = React.useRef<HTMLInputElement>(null);
-  /** Host <div> ref — ResizeObserver target for BUG-11 viewport sync. */
+  /** Host <div> ref — ResizeObserver target for BUG-11 scale sync. */
   const hostRef = React.useRef<HTMLDivElement>(null);
+  /** Imperative hook the frame-paint path uses to nudge the scale
+   *  effect when canvas.width/height changes (a new source size). */
+  const sourceDimsRecomputeRef = React.useRef<(() => void) | null>(null);
   const wsRef = React.useRef<WebSocket | null>(null);
   // Cached <img> + the most-recent JPEG src so the decode pipeline
   // doesn't re-allocate per frame. Image.decode() is async and
@@ -114,81 +117,56 @@ export function CdpScreencastViewport({
     onStatusChangeRef.current?.(status);
   }, [status]);
 
-  // BUG-11 — discrete three-bucket viewport. Panel width → one of:
-  //
-  //   < 500px:  mobile  375×812   deviceScaleFactor 2  isMobile=true
-  //   500-899:  tablet  768×1024  deviceScaleFactor 2  isMobile=false
-  //   ≥ 900px:  desktop 1280×800  deviceScaleFactor 1  isMobile=false
-  //
-  // Sends a CDP override ONLY when the bucket changes. Discrete
-  // events, no debounce. Continuous panel-width changes within
-  // the same bucket are a no-op — the page only reflows once per
-  // crossing, sites' responsive CSS picks the right breakpoint
-  // from the override, and a noisy drag can't flood CDP.
-  type ViewportBucket = 'mobile' | 'tablet' | 'desktop';
-  const BUCKET_PAYLOAD: Record<ViewportBucket, {
-    width: number;
-    height: number;
-    deviceScaleFactor: number;
-    mobile: boolean;
-  }> = React.useMemo(
-    () => ({
-      mobile: { width: 375, height: 812, deviceScaleFactor: 2, mobile: true },
-      tablet: { width: 768, height: 1024, deviceScaleFactor: 2, mobile: false },
-      desktop: { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false },
-    }),
-    [],
-  );
-  const bucketForWidth = React.useCallback(
-    (w: number): ViewportBucket => {
-      if (w < 500) return 'mobile';
-      if (w < 900) return 'tablet';
-      return 'desktop';
-    },
-    [],
-  );
-  const lastSentBucketRef = React.useRef<ViewportBucket | null>(null);
-  const sendViewport = React.useCallback((): void => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const host = hostRef.current;
-    if (!host) return;
-    const width = host.clientWidth;
-    if (width <= 0) return;
-    const bucket = bucketForWidth(width);
-    if (lastSentBucketRef.current === bucket) return;
-    lastSentBucketRef.current = bucket;
-    try {
-      ws.send(JSON.stringify({ type: 'viewport', payload: BUCKET_PAYLOAD[bucket] }));
-    } catch {
-      /* socket closing — drop */
-    }
-  }, [bucketForWidth, BUCKET_PAYLOAD]);
-
-  // Track bucket changes from: ResizeObserver on the host (panel-
-  // divider drag), window resize (OS window drag), and the WS open
-  // hook (initial sync). All call sendViewport directly — bucket
-  // memoisation handles the no-op case so we don't need debounce.
+  // BUG-11 final — pure CSS scale. Brave keeps its spawn-time
+  // viewport; the SPA scales the screencast canvas with
+  // transform: scale() so the page is always rendered complete
+  // (no crop, no reflow, no CDP round-trip). ResizeObserver on
+  // the host watches container size; we compute scale from the
+  // canvas's intrinsic dimensions (= the screencast frame size,
+  // whatever Brave is producing right now). Applied as an inline
+  // CSS variable so the browser interpolates smoothly during a
+  // drag.
   React.useEffect(() => {
-    if (status !== 'connected') return;
     const host = hostRef.current;
     if (!host) return;
-    // Reset the memoised bucket on (re)attach so the first call
-    // after a fresh WS always actually fires.
-    lastSentBucketRef.current = null;
-    sendViewport();
+    const recompute = (): void => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const srcW = canvas.width;
+      const srcH = canvas.height;
+      if (srcW <= 0 || srcH <= 0) return;
+      const rect = host.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const scale = Math.min(rect.width / srcW, rect.height / srcH);
+      // Centre the scaled canvas inside the host (letterboxing in
+      // whichever axis isn't the binding constraint). origin-top-left
+      // makes scaling predictable; translate moves the box.
+      const renderedW = srcW * scale;
+      const renderedH = srcH * scale;
+      const offsetX = (rect.width - renderedW) / 2;
+      const offsetY = (rect.height - renderedH) / 2;
+      canvas.style.setProperty('--hd-scale', String(scale));
+      canvas.style.setProperty('--hd-offset-x', `${offsetX}px`);
+      canvas.style.setProperty('--hd-offset-y', `${offsetY}px`);
+    };
+    recompute();
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver !== 'undefined') {
-      ro = new ResizeObserver(() => sendViewport());
+      ro = new ResizeObserver(recompute);
       ro.observe(host);
     }
-    const onWindowResize = () => sendViewport();
+    const onWindowResize = () => recompute();
     window.addEventListener('resize', onWindowResize);
+    // Frame arrivals also change canvas.width/height; the existing
+    // per-frame paint path calls recompute via a one-shot
+    // setSourceDimsTick below.
+    sourceDimsRecomputeRef.current = recompute;
     return () => {
       ro?.disconnect();
       window.removeEventListener('resize', onWindowResize);
+      sourceDimsRecomputeRef.current = null;
     };
-  }, [status, sendViewport]);
+  }, [status]);
 
   // ---- WS lifecycle: always-be-trying-to-connect ----
   // Browser hibernation is a normal state — the per-user pool's idle
@@ -239,11 +217,6 @@ export function CdpScreencastViewport({
           readyState: ws.readyState,
           attempt,
         });
-        // BUG-11 — push the current effective viewport on connect.
-        // The effect below also fires sendViewport on attach, but
-        // doing it here too avoids a 200ms debounce delay on the
-        // very first frame after WS open.
-        sendViewport();
       };
       ws.onmessage = (event) => {
         if (disposed) return;
@@ -307,11 +280,6 @@ export function CdpScreencastViewport({
       }
       wsRef.current = null;
     };
-    // sendViewport is stable (useCallback with deps that never
-    // change) so adding it to deps would just clutter; we'd rather
-    // not reconnect the WS if a future refactor accidentally makes
-    // sendViewport unstable.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsUrl]);
 
   // Decode a base64 JPEG and paint into the canvas. The img +
@@ -325,9 +293,15 @@ export function CdpScreencastViewport({
     if (!imgRef.current) imgRef.current = new Image();
     const img = imgRef.current;
     img.onload = () => {
+      const sizeChanged =
+        canvas.width !== img.width || canvas.height !== img.height;
       if (canvas.width !== img.width) canvas.width = img.width;
       if (canvas.height !== img.height) canvas.height = img.height;
       ctx.drawImage(img, 0, 0);
+      // BUG-11 — when the source frame size changes (first frame
+      // after attach, or Brave navigates to a page that emits a
+      // different size), kick the scale recomputer.
+      if (sizeChanged) sourceDimsRecomputeRef.current?.();
     };
     img.src = `data:image/jpeg;base64,${base64}`;
   }
@@ -344,8 +318,10 @@ export function CdpScreencastViewport({
     }
   }, []);
 
-  // (sendViewport is defined earlier — before the WS effect — so
-  // ws.onopen can call it without a TDZ issue.)
+  // (BUG-11 final — viewport plumbing fully removed. CSS scale
+  // effect above is the only sizing logic. Brave keeps its
+  // spawn-time viewport; the canvas shrinks proportionally to
+  // fit the panel.)
 
   /** Map a DOM mouse event's clientX/Y to canvas-pixel space. */
   function getCoords(e: React.MouseEvent | React.WheelEvent): { x: number; y: number } {
@@ -470,8 +446,20 @@ export function CdpScreencastViewport({
         onMouseUp={onMouseUp}
         onWheel={onWheel}
         onContextMenu={(e) => e.preventDefault()}
-        className="block h-full w-full object-contain"
-        style={{ cursor: viewOnly ? 'default' : 'crosshair' }}
+        /* BUG-11 final — pure CSS scale.
+         * The canvas keeps its intrinsic dimensions (= source
+         * frame size, set by drawFrame). transform: scale() with
+         * top-left origin shrinks it to fit the host. translate()
+         * letterboxes inside the host so the scaled canvas is
+         * centred. CSS vars are written imperatively from the
+         * ResizeObserver effect so a drag stays at native FPS
+         * (no React re-render per pixel). */
+        className="block origin-top-left will-change-transform"
+        style={{
+          cursor: viewOnly ? 'default' : 'crosshair',
+          transform:
+            'translate(var(--hd-offset-x, 0px), var(--hd-offset-y, 0px)) scale(var(--hd-scale, 1))',
+        }}
       />
       {/* Off-screen input — collects keyboard + composition so the
           canvas itself doesn't have to be focusable. */}
