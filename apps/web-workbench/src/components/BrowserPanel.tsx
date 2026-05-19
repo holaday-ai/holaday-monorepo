@@ -1308,24 +1308,56 @@ export function BrowserPanel({
                 </div>
               )
             ) : finalEvidenceFrame ? (
-              // R7 — terminal task with captured evidence. Static
-              // image of the agent's last visible state, plus the
-              // URL it was on. No interactive overlay (live Brave is
-              // gone), no activity log, no CJK input.
-              <div className="relative flex flex-col">
-                <img
-                  ref={imgRef}
-                  src={`data:image/jpeg;base64,${finalEvidenceFrame.imageBase64}`}
-                  alt="任务完成时的浏览器截图"
-                  draggable={false}
-                  onLoad={fitScreencastImg}
-                  className="block rounded-md border border-black/[0.06] shadow-sm"
-                />
-                <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2 rounded bg-black/55 px-2 py-1 text-[11px] text-white backdrop-blur">
-                  <span className="truncate">任务已完成 · 最终页面</span>
-                  {finalEvidenceFrame.url && finalEvidenceFrame.url !== 'about:blank' && (
-                    <span className="truncate font-mono opacity-80">{finalEvidenceFrame.url}</span>
-                  )}
+              // R7 — terminal task with captured evidence. The img
+              // is static (no clicks reach Brave) BUT the user can
+              // tap "接管浏览器" below to wake a fresh Brave + flip
+              // into interactive mode. The task itself is over; the
+              // takeover starts a fresh browsing session for the
+              // user to do whatever they need.
+              <div className="relative flex h-full w-full flex-col">
+                <div className="relative flex flex-1 items-center justify-center min-h-0 min-w-0">
+                  <img
+                    ref={imgRef}
+                    src={`data:image/jpeg;base64,${finalEvidenceFrame.imageBase64}`}
+                    alt="任务完成时的浏览器截图"
+                    draggable={false}
+                    onLoad={fitScreencastImg}
+                    className="block rounded-md border border-black/[0.06] shadow-sm"
+                  />
+                  <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2 rounded bg-black/55 px-2 py-1 text-[11px] text-white backdrop-blur">
+                    <span className="truncate">任务已完成 · 最终页面</span>
+                    {finalEvidenceFrame.url && finalEvidenceFrame.url !== 'about:blank' && (
+                      <span className="truncate font-mono opacity-80">{finalEvidenceFrame.url}</span>
+                    )}
+                  </div>
+                </div>
+                {/* BUG-11 issue A — terminal-task takeover entry.
+                    Calls onWake (= tasks.wakeBrowser) to ensure a
+                    fresh Brave instance is alive for the user, then
+                    flips interactive on. When the screencast WS
+                    attaches to the new instance the user is already
+                    in takeover mode. We DON'T claim to attach back
+                    to the original task's page — that's gone — but
+                    the user gets a working browser they can drive. */}
+                <div className="flex shrink-0 items-center justify-center gap-2 border-t border-border/40 bg-background/60 px-3 py-2 text-[12px]">
+                  <span className="text-muted-foreground">想继续操作？</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleUserTakeoverClick();
+                      void onWake();
+                    }}
+                    disabled={waking}
+                    className={cn(
+                      'inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition-colors',
+                      waking
+                        ? 'cursor-wait border-border bg-muted text-muted-foreground'
+                        : 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/15',
+                    )}
+                  >
+                    <Power className="h-3 w-3" />
+                    {waking ? '正在唤醒…' : '接管浏览器'}
+                  </button>
                 </div>
               </div>
             ) : (
