@@ -1128,7 +1128,16 @@ export function BrowserPanel({
                   等待浏览器加载页面...
                 </div>
               ) : (
-                <div className="relative">
+                /* BUG-11 final-final — the JPEG-fallback path renders
+                   an <img>, not the canvas branch. Without an
+                   explicit-size wrapper, the img + relative div
+                   sized each other circularly to the source's
+                   intrinsic width (e.g. 1014), bypassing the panel's
+                   real width. Wrapper now `h-full w-full min-w-0
+                   min-h-0` so it fills the panel slot; img is
+                   `absolute inset-0 w-full h-full object-contain`
+                   so it letterboxes inside that bounded box. */
+                <div className="relative h-full w-full min-h-0 min-w-0 overflow-hidden">
                   {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard capture is handled via window listener in interactive mode */}
                   <img
                     ref={imgRef}
@@ -1138,7 +1147,7 @@ export function BrowserPanel({
                     onWheel={onWheel}
                     draggable={false}
                     className={cn(
-                      'max-h-full max-w-full rounded-md border object-contain shadow-sm',
+                      'absolute inset-0 block h-full w-full rounded-md border object-contain shadow-sm',
                       interactiveActive
                         ? 'cursor-pointer border-primary ring-2 ring-primary/40'
                         : 'border-black/[0.06]',
@@ -1215,12 +1224,12 @@ export function BrowserPanel({
               // image of the agent's last visible state, plus the
               // URL it was on. No interactive overlay (live Brave is
               // gone), no activity log, no CJK input.
-              <div className="relative flex h-full w-full flex-col">
+              <div className="relative flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden">
                 <img
                   src={`data:image/jpeg;base64,${finalEvidenceFrame.imageBase64}`}
                   alt="任务完成时的浏览器截图"
                   draggable={false}
-                  className="max-h-full max-w-full rounded-md border border-black/[0.06] object-contain shadow-sm"
+                  className="block h-full w-full rounded-md border border-black/[0.06] object-contain shadow-sm"
                 />
                 <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2 rounded bg-black/55 px-2 py-1 text-[11px] text-white backdrop-blur">
                   <span className="truncate">任务已完成 · 最终页面</span>
