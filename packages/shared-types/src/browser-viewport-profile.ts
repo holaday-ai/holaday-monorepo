@@ -43,7 +43,14 @@ export interface ViewportDimensions {
 export const VIEWPORT_PROFILES: Readonly<
   Record<BrowserViewportProfile, ViewportDimensions>
 > = Object.freeze({
-  sidepanel: { width: 900, height: 900 },
+  // BUG-11 — narrowed from 900x900 to 768x1024 (iPad-portrait).
+  // The CSS-scale-to-fit-panel approach is fundamentally bounded by
+  // the spawn-time viewport; at 900 wide, scaling to a 560-px panel
+  // crops the rightmost ~150 px worth of content (e.g. baidu hot-
+  // search column). 768 hits most sites' tablet breakpoint so the
+  // layout pre-compresses, AND the scale ratio improves from
+  // 560/900≈0.62 to 560/768≈0.73 (more readable).
+  sidepanel: { width: 768, height: 1024 },
   desktop: { width: 1280, height: 800 },
   fullscreen: { width: 1440, height: 960 },
   mobile: { width: 390, height: 844 },

@@ -778,12 +778,36 @@ export function BrowserPanel({
 
   const onClick = React.useCallback(
     (e: React.MouseEvent<HTMLImageElement>) => {
-      if (!interactiveActive) return;
+      hdDebug('img-onClick fired', {
+        interactiveActive,
+        interactive,
+        useVnc,
+        hasFrame: Boolean(frame),
+        frameUrl: frame?.url ?? null,
+        browserAwaiting,
+      });
+      if (!interactiveActive) {
+        hdDebug('img-onClick skipped — interactiveActive=false', {
+          interactive,
+          frame: Boolean(frame),
+          frameUrl: frame?.url,
+        });
+        return;
+      }
       const pt = mapToViewport(e);
+      hdDebug('img-onClick mapToViewport', {
+        pt,
+        rect: imgRef.current?.getBoundingClientRect(),
+      });
       if (!pt) return;
       e.preventDefault();
       flashRipple(e.clientX, e.clientY);
       sendInput({ kind: 'click', x: pt.x, y: pt.y, button: 'left' });
+      hdDebug('img-onClick sendInput dispatched', {
+        x: pt.x,
+        y: pt.y,
+        activeTaskId,
+      });
       // Codex P2 — pull focus onto the hidden CJK input so the
       // user's next keystroke (ASCII or IME-composed CJK) goes
       // through our composition handlers instead of the page's
@@ -793,7 +817,18 @@ export function BrowserPanel({
       const el = hiddenCjkInputRef.current;
       if (el) requestAnimationFrame(() => el.focus());
     },
-    [interactiveActive, mapToViewport, sendInput, flashRipple],
+    [
+      interactiveActive,
+      mapToViewport,
+      sendInput,
+      flashRipple,
+      // Below are debug-only — listed so hdDebug captures fresh values.
+      interactive,
+      useVnc,
+      frame,
+      browserAwaiting,
+      activeTaskId,
+    ],
   );
 
   // CJK input bar — sends `insert_text` (atomic) so Chinese composed
