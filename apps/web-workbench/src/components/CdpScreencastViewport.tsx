@@ -446,15 +446,24 @@ export function CdpScreencastViewport({
         onMouseUp={onMouseUp}
         onWheel={onWheel}
         onContextMenu={(e) => e.preventDefault()}
-        /* BUG-11 final — pure CSS scale.
-         * The canvas keeps its intrinsic dimensions (= source
-         * frame size, set by drawFrame). transform: scale() with
-         * top-left origin shrinks it to fit the host. translate()
-         * letterboxes inside the host so the scaled canvas is
-         * centred. CSS vars are written imperatively from the
-         * ResizeObserver effect so a drag stays at native FPS
-         * (no React re-render per pixel). */
-        className="block origin-top-left will-change-transform"
+        /* BUG-11 final — pure CSS scale, ABSOLUTE positioning.
+         *
+         * The canvas keeps its intrinsic dimensions (set by
+         * drawFrame to match the source frame, typically 899×818).
+         * Crucially, `position: absolute` REMOVES it from layout
+         * flow — without that, the canvas's 899px layout box
+         * leaked through ancestor flex containers that didn't have
+         * min-w-0, expanding the host's measured width past the
+         * panel's real width and breaking the scale calc.
+         *
+         * Now the host's size is decoupled from the canvas's
+         * intrinsic dims. ResizeObserver reports the host's real
+         * width (= panel width); recompute writes --hd-scale and
+         * the translate offsets imperatively for native-FPS drag.
+         * origin top-left + translate centres the scaled canvas
+         * inside the host.
+         */
+        className="absolute left-0 top-0 block origin-top-left will-change-transform"
         style={{
           cursor: viewOnly ? 'default' : 'crosshair',
           transform:
