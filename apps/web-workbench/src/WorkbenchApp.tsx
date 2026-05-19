@@ -572,8 +572,15 @@ export function WorkbenchApp(): JSX.Element {
  * Single source of truth for the BrowserPanel's narrowest sane width.
  * Used by the localStorage clamp on seed, the drag handle floor, AND
  * the collapsed-flex fallback when no explicit panelPx is set.
+ *
+ * BUG-11 fix (2026-05-19): dropped from 560 → 300. At 560 + main's
+ * lg:min-w-[420] = 980 the wrapper exceeded a typical 884-px content
+ * column (1144 viewport − 260 sidebar) and the parent's overflow:hidden
+ * clipped the right edge of search-result pages by ~108 px. CSS scale
+ * on the screencast canvas already keeps the inner image readable at
+ * narrower widths, so 300 is the new floor.
  */
-const PANEL_MIN_PX = 560;
+const PANEL_MIN_PX = 300;
 
 /**
  * Picks the viewport profile baked into the task at create time.
