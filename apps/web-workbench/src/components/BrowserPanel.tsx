@@ -621,6 +621,52 @@ export function BrowserPanel({
   const [ripple, setRipple] = React.useState<{ x: number; y: number; id: number } | null>(null);
   const rippleIdRef = React.useRef(0);
   const imgRef = React.useRef<HTMLImageElement | null>(null);
+  /**
+   * BUG-11 — pure-JS sizing for the JPEG-fallback img.
+   *
+   * Five rounds of CSS attempts (object-fit, max-w-full, absolute
+   * inset-0, h-full w-full, min-w-0 chains) all failed because
+   * somewhere in the ancestor chain `min-width: auto` (flex
+   * default) let the img's 1014px intrinsic box leak through and
+   * size everything to itself. JS sizing bypasses that entirely:
+   * read host.clientWidth/Height in pixels, compute scale from
+   * naturalWidth/Height, write px on the img.
+   *
+   * `fitScreencastImg` is exposed as a callback so the img's
+   * onLoad can call it directly (frames arrive with new natural
+   * dims). ResizeObserver on the host handles panel-drag resize.
+   */
+  const screencastHostRef = React.useRef<HTMLDivElement | null>(null);
+  const fitScreencastImg = React.useCallback((): void => {
+    const host = screencastHostRef.current;
+    const img = imgRef.current;
+    if (!host || !img) return;
+    const natW = img.naturalWidth;
+    const natH = img.naturalHeight;
+    if (natW <= 0 || natH <= 0) return;
+    const hostW = host.clientWidth;
+    const hostH = host.clientHeight;
+    if (hostW <= 0 || hostH <= 0) return;
+    const scale = Math.min(hostW / natW, hostH / natH);
+    img.style.width = `${Math.round(natW * scale)}px`;
+    img.style.height = `${Math.round(natH * scale)}px`;
+  }, []);
+  React.useEffect(() => {
+    const host = screencastHostRef.current;
+    if (!host) return;
+    fitScreencastImg();
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => fitScreencastImg());
+      ro.observe(host);
+    }
+    const onWin = () => fitScreencastImg();
+    window.addEventListener('resize', onWin);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', onWin);
+    };
+  }, [fitScreencastImg]);
   // Codex P2 follow-up — hidden input for direct CJK typing on the
   // JPEG screencast path (CDP mode). Browser-native IME composition
   // events fire on this focused-but-invisible element; on
@@ -1048,6 +1094,7 @@ export function BrowserPanel({
             </div>
           )}
           <div
+            ref={screencastHostRef}
             className={cn(
               'flex flex-1 items-center justify-center overflow-hidden',
               fullscreen ? 'p-0' : 'p-3',
@@ -1137,17 +1184,23 @@ export function BrowserPanel({
                    min-h-0` so it fills the panel slot; img is
                    `absolute inset-0 w-full h-full object-contain`
                    so it letterboxes inside that bounded box. */
-                <div className="relative h-full w-full min-h-0 min-w-0 overflow-hidden">
+                <div className="relative">
                   {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard capture is handled via window listener in interactive mode */}
+                  {/* BUG-11 final — width/height set imperatively in
+                      `fitScreencastImg` (pure JS, pixel values).
+                      The wrapper has no width because the img owns
+                      its computed dims; flex centering on the
+                      content-area handles positioning. */}
                   <img
                     ref={imgRef}
                     src={`data:image/jpeg;base64,${frame.imageBase64}`}
                     alt={`screencast tick ${frame.tickIndex + 1}`}
                     onClick={onClick}
                     onWheel={onWheel}
+                    onLoad={fitScreencastImg}
                     draggable={false}
                     className={cn(
-                      'absolute inset-0 block h-full w-full rounded-md border object-contain shadow-sm',
+                      'block rounded-md border shadow-sm',
                       interactiveActive
                         ? 'cursor-pointer border-primary ring-2 ring-primary/40'
                         : 'border-black/[0.06]',
@@ -1224,12 +1277,14 @@ export function BrowserPanel({
               // image of the agent's last visible state, plus the
               // URL it was on. No interactive overlay (live Brave is
               // gone), no activity log, no CJK input.
-              <div className="relative flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden">
+              <div className="relative flex flex-col">
                 <img
+                  ref={imgRef}
                   src={`data:image/jpeg;base64,${finalEvidenceFrame.imageBase64}`}
                   alt="任务完成时的浏览器截图"
                   draggable={false}
-                  className="block h-full w-full rounded-md border border-black/[0.06] object-contain shadow-sm"
+                  onLoad={fitScreencastImg}
+                  className="block rounded-md border border-black/[0.06] shadow-sm"
                 />
                 <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2 rounded bg-black/55 px-2 py-1 text-[11px] text-white backdrop-blur">
                   <span className="truncate">任务已完成 · 最终页面</span>
