@@ -20,6 +20,7 @@ import {
   CdpScreencastViewport,
   type CdpScreencastStatus,
 } from '@/components/CdpScreencastViewport';
+import { useToast } from '@/components/ui/toast';
 import { VncViewport, type VncStatus } from '@/components/VncViewport';
 import { hdDebug } from '@/lib/hd-debug';
 import { trpc } from '@/lib/trpc';
@@ -230,6 +231,7 @@ export function BrowserPanel({
     awaitingUser === true &&
     awaitingKind != null &&
     awaitingKind !== 'clarification';
+  const toast = useToast();
   const [collapsedLocal, setCollapsedLocal] = React.useState(false);
   const collapsed = collapsedProp ?? collapsedLocal;
   const toggleCollapsed = onToggleCollapse ?? (() => setCollapsedLocal((c) => !c));
@@ -709,6 +711,18 @@ export function BrowserPanel({
   const handleUserTakeoverClick = React.useCallback(() => {
     const next = !interactive;
     if (next) {
+      // BUG-12 — per-task pool releases the Brave on completion /
+      // failure / cancel. Flipping `interactive` true on a terminal
+      // task drops the user into a red-bannered "live mode" over a
+      // frozen static frame because `screencastUrlForCdp` is gated
+      // null (line ~476) and there's no live Brave to attach to even
+      // if it weren't. Refuse the takeover and direct the user to
+      // start a fresh task — that's the only way to get a live
+      // browser back under per-task pool semantics.
+      if (taskTerminal) {
+        toast.show('浏览器已关闭，请发新任务继续', 'info');
+        return;
+      }
       userInteractedRef.current = true;
       setShowTakeoverBanner(true);
     } else {
@@ -716,7 +730,7 @@ export function BrowserPanel({
       setShowTakeoverBanner(false);
     }
     setInteractive(next);
-  }, [interactive, setInteractive]);
+  }, [interactive, taskTerminal, setInteractive, toast]);
 
   // Codex P2 — hide the address bar / nav / takeover chrome when
   // the panel is open on a terminal task with no viewable evidence
