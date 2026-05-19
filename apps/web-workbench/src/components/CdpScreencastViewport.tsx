@@ -114,91 +114,79 @@ export function CdpScreencastViewport({
     onStatusChangeRef.current?.(status);
   }, [status]);
 
-  // BUG-11 — compute + send the effective viewport. "Effective"
-  // because the panel's flex-basis can be larger than the OS
-  // window (BOSS drags panel to 533px → shrinks window to 390px →
-  // panel is still 533px but clipped by the window). The user's
-  // mental model is "what does this look like on screen", so we
-  // use `min(panel.width, window.innerWidth)` as the canonical
-  // width. < 500 → mobile emulation; ≥ 500 → desktop matching the
-  // effective width. Memoised; duplicate signatures are no-ops.
-  const lastSentSigRef = React.useRef<string | null>(null);
-  const computeEffectiveDims = React.useCallback((): {
+  // BUG-11 — discrete three-bucket viewport. Panel width → one of:
+  //
+  //   < 500px:  mobile  375×812   deviceScaleFactor 2  isMobile=true
+  //   500-899:  tablet  768×1024  deviceScaleFactor 2  isMobile=false
+  //   ≥ 900px:  desktop 1280×800  deviceScaleFactor 1  isMobile=false
+  //
+  // Sends a CDP override ONLY when the bucket changes. Discrete
+  // events, no debounce. Continuous panel-width changes within
+  // the same bucket are a no-op — the page only reflows once per
+  // crossing, sites' responsive CSS picks the right breakpoint
+  // from the override, and a noisy drag can't flood CDP.
+  type ViewportBucket = 'mobile' | 'tablet' | 'desktop';
+  const BUCKET_PAYLOAD: Record<ViewportBucket, {
     width: number;
     height: number;
-  } | null => {
-    const host = hostRef.current;
-    if (!host) return null;
-    const rect = host.getBoundingClientRect();
-    if (typeof window === 'undefined') {
-      return { width: Math.round(rect.width), height: Math.round(rect.height) };
-    }
-    const w = Math.max(0, Math.round(Math.min(rect.width, window.innerWidth)));
-    const h = Math.max(
-      0,
-      Math.round(Math.min(rect.height, window.innerHeight)),
-    );
-    return { width: w, height: h };
-  }, []);
+    deviceScaleFactor: number;
+    mobile: boolean;
+  }> = React.useMemo(
+    () => ({
+      mobile: { width: 375, height: 812, deviceScaleFactor: 2, mobile: true },
+      tablet: { width: 768, height: 1024, deviceScaleFactor: 2, mobile: false },
+      desktop: { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false },
+    }),
+    [],
+  );
+  const bucketForWidth = React.useCallback(
+    (w: number): ViewportBucket => {
+      if (w < 500) return 'mobile';
+      if (w < 900) return 'tablet';
+      return 'desktop';
+    },
+    [],
+  );
+  const lastSentBucketRef = React.useRef<ViewportBucket | null>(null);
   const sendViewport = React.useCallback((): void => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const dims = computeEffectiveDims();
-    if (!dims || dims.width === 0 || dims.height === 0) return;
-    const mobile = dims.width < 500;
-    const payload = mobile
-      ? { width: 375, height: 812, deviceScaleFactor: 2, mobile: true }
-      : {
-          width: dims.width,
-          height: dims.height,
-          deviceScaleFactor: 1,
-          mobile: false,
-        };
-    const sig = `${payload.width}x${payload.height}@${payload.deviceScaleFactor}${payload.mobile ? 'm' : 'd'}`;
-    if (lastSentSigRef.current === sig) return;
-    lastSentSigRef.current = sig;
+    const host = hostRef.current;
+    if (!host) return;
+    const width = host.clientWidth;
+    if (width <= 0) return;
+    const bucket = bucketForWidth(width);
+    if (lastSentBucketRef.current === bucket) return;
+    lastSentBucketRef.current = bucket;
     try {
-      ws.send(JSON.stringify({ type: 'viewport', payload }));
+      ws.send(JSON.stringify({ type: 'viewport', payload: BUCKET_PAYLOAD[bucket] }));
     } catch {
       /* socket closing — drop */
     }
-  }, [computeEffectiveDims]);
+  }, [bucketForWidth, BUCKET_PAYLOAD]);
 
-  // Track viewport changes from THREE sources: ResizeObserver on
-  // the host (panel-divider drag), window resize (OS window drag /
-  // mobile rotate), and the WS open hook (initial sync). All
-  // route through the same debounced flush so a flick that
-  // triggers all three only sends one CDP override.
+  // Track bucket changes from: ResizeObserver on the host (panel-
+  // divider drag), window resize (OS window drag), and the WS open
+  // hook (initial sync). All call sendViewport directly — bucket
+  // memoisation handles the no-op case so we don't need debounce.
   React.useEffect(() => {
     if (status !== 'connected') return;
     const host = hostRef.current;
     if (!host) return;
-    let timer: number | null = null;
-    const flush = () => {
-      if (timer !== null) window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        sendViewport();
-        timer = null;
-      }, 200);
-    };
-    // Initial flush — sync once on (re)attach.
+    // Reset the memoised bucket on (re)attach so the first call
+    // after a fresh WS always actually fires.
+    lastSentBucketRef.current = null;
     sendViewport();
-    // ResizeObserver tracks panel-divider drags + layout changes
-    // that don't touch the OS window (sidebar collapse, etc.).
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver !== 'undefined') {
-      ro = new ResizeObserver(() => flush());
+      ro = new ResizeObserver(() => sendViewport());
       ro.observe(host);
     }
-    // window resize: catches the case where the panel's flex-basis
-    // is fixed but the OS window shrunk past it, so the effective
-    // (visible) viewport is smaller than the panel container.
-    const onWindowResize = () => flush();
+    const onWindowResize = () => sendViewport();
     window.addEventListener('resize', onWindowResize);
     return () => {
       ro?.disconnect();
       window.removeEventListener('resize', onWindowResize);
-      if (timer !== null) window.clearTimeout(timer);
     };
   }, [status, sendViewport]);
 
