@@ -367,12 +367,16 @@ export function Sidebar({
           </SidebarMenu>
         </SidebarHeader>
 
-        {/* SidebarNav — fixed feature shortcuts. Lives between
-            SidebarHeader and SidebarContent so it stays put while
-            the task list below scrolls. */}
-        <FeatureNav userRole={userRole} />
-
+        {/* SidebarNav lives INSIDE SidebarContent so it shares the
+            same overflow-y-auto scroll area as the task list. BOSS
+            bug fix — when viewport height ≤ 800px the previous
+            "FeatureNav as a fixed band between header and content"
+            layout ate ~225px, leaving only a few pixels for the
+            task list. Now FeatureNav scrolls along with the task
+            list when space is tight; tall windows behave identically
+            because the content fits and there's no scroll. */}
         <SidebarContent className="px-0">
+            <FeatureNav userRole={userRole} />
             {projectFilter && (
               <div className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-pink-300/40 bg-pink-50/40 px-2.5 py-1.5 text-[12px] dark:border-pink-500/30 dark:bg-pink-500/10 group-data-[collapsible=icon]:hidden">
                 <FolderOpen className="h-3.5 w-3.5 shrink-0 text-pink-600 dark:text-pink-300" />
