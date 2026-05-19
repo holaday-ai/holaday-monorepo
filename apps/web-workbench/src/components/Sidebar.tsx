@@ -325,7 +325,7 @@ export function Sidebar({
             pinned; only the task list scrolls. The visual centre of
             gravity sits on "新任务" + the feature shortcuts; task
             history is a scroll surface, not a status board. */}
-        <SidebarHeader className="border-b border-sidebar-border gap-2">
+        <SidebarHeader className="shrink-0 border-b border-sidebar-border gap-2">
           <div className="flex items-center gap-2 px-1 py-1">
             <BrandMark />
             <span className="text-base font-semibold tracking-tight text-sidebar-foreground group-data-[collapsible=icon]:hidden">
@@ -492,7 +492,7 @@ export function Sidebar({
 
             </SidebarContent>
 
-            <SidebarFooter className="border-t border-sidebar-border px-0 py-2 group-data-[collapsible=icon]:hidden">
+            <SidebarFooter className="shrink-0 border-t border-sidebar-border px-0 py-2 group-data-[collapsible=icon]:hidden">
               {/* O1 — batch action bar / batch entry. When batchMode
                   is on, render the count + 全选 / 删除选中 / 取消
                   controls; otherwise show a small "批量管理" entry
