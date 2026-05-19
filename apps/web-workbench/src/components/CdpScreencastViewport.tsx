@@ -114,64 +114,90 @@ export function CdpScreencastViewport({
     onStatusChangeRef.current?.(status);
   }, [status]);
 
-  // BUG-11 — push the rendered viewport dimensions to Brave via
-  // CDP. Defined here (BEFORE the WS lifecycle effect) so the
-  // `ws.onopen` handler can call it without hitting the TDZ.
-  // sendViewport is idempotent — repeated calls with the same
-  // signature are no-ops (lastSentSigRef + the streamer's own
-  // memoiser).
+  // BUG-11 — compute + send the effective viewport. "Effective"
+  // because the panel's flex-basis can be larger than the OS
+  // window (BOSS drags panel to 533px → shrinks window to 390px →
+  // panel is still 533px but clipped by the window). The user's
+  // mental model is "what does this look like on screen", so we
+  // use `min(panel.width, window.innerWidth)` as the canonical
+  // width. < 500 → mobile emulation; ≥ 500 → desktop matching the
+  // effective width. Memoised; duplicate signatures are no-ops.
   const lastSentSigRef = React.useRef<string | null>(null);
-  const sendViewport = React.useCallback(
-    (width: number, height: number): void => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      const w = Math.max(0, Math.round(width));
-      const h = Math.max(0, Math.round(height));
-      if (w === 0 || h === 0) return;
-      const mobile = w < 500;
-      const payload = mobile
-        ? { width: 375, height: 812, deviceScaleFactor: 2, mobile: true }
-        : { width: w, height: h, deviceScaleFactor: 1, mobile: false };
-      const sig = `${payload.width}x${payload.height}@${payload.deviceScaleFactor}${payload.mobile ? 'm' : 'd'}`;
-      if (lastSentSigRef.current === sig) return;
-      lastSentSigRef.current = sig;
-      try {
-        ws.send(JSON.stringify({ type: 'viewport', payload }));
-      } catch {
-        /* socket closing — drop */
-      }
-    },
-    [],
-  );
+  const computeEffectiveDims = React.useCallback((): {
+    width: number;
+    height: number;
+  } | null => {
+    const host = hostRef.current;
+    if (!host) return null;
+    const rect = host.getBoundingClientRect();
+    if (typeof window === 'undefined') {
+      return { width: Math.round(rect.width), height: Math.round(rect.height) };
+    }
+    const w = Math.max(0, Math.round(Math.min(rect.width, window.innerWidth)));
+    const h = Math.max(
+      0,
+      Math.round(Math.min(rect.height, window.innerHeight)),
+    );
+    return { width: w, height: h };
+  }, []);
+  const sendViewport = React.useCallback((): void => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const dims = computeEffectiveDims();
+    if (!dims || dims.width === 0 || dims.height === 0) return;
+    const mobile = dims.width < 500;
+    const payload = mobile
+      ? { width: 375, height: 812, deviceScaleFactor: 2, mobile: true }
+      : {
+          width: dims.width,
+          height: dims.height,
+          deviceScaleFactor: 1,
+          mobile: false,
+        };
+    const sig = `${payload.width}x${payload.height}@${payload.deviceScaleFactor}${payload.mobile ? 'm' : 'd'}`;
+    if (lastSentSigRef.current === sig) return;
+    lastSentSigRef.current = sig;
+    try {
+      ws.send(JSON.stringify({ type: 'viewport', payload }));
+    } catch {
+      /* socket closing — drop */
+    }
+  }, [computeEffectiveDims]);
 
-  // ResizeObserver attaches when status=connected — debounce 200 ms
-  // so a drag doesn't flood CDP. Includes sendViewport in deps so
-  // re-creation invalidates the observer cleanly (it never changes
-  // in practice — useCallback with [] — but the lint rule is right
-  // to require it).
+  // Track viewport changes from THREE sources: ResizeObserver on
+  // the host (panel-divider drag), window resize (OS window drag /
+  // mobile rotate), and the WS open hook (initial sync). All
+  // route through the same debounced flush so a flick that
+  // triggers all three only sends one CDP override.
   React.useEffect(() => {
     if (status !== 'connected') return;
     const host = hostRef.current;
     if (!host) return;
-    if (typeof ResizeObserver === 'undefined') return;
     let timer: number | null = null;
-    const flush = (w: number, h: number) => {
+    const flush = () => {
       if (timer !== null) window.clearTimeout(timer);
       timer = window.setTimeout(() => {
-        sendViewport(w, h);
+        sendViewport();
         timer = null;
       }, 200);
     };
-    const initialRect = host.getBoundingClientRect();
-    sendViewport(initialRect.width, initialRect.height);
-    const ro = new ResizeObserver((entries) => {
-      const rect = entries[0]?.contentRect;
-      if (!rect) return;
-      flush(rect.width, rect.height);
-    });
-    ro.observe(host);
+    // Initial flush — sync once on (re)attach.
+    sendViewport();
+    // ResizeObserver tracks panel-divider drags + layout changes
+    // that don't touch the OS window (sidebar collapse, etc.).
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => flush());
+      ro.observe(host);
+    }
+    // window resize: catches the case where the panel's flex-basis
+    // is fixed but the OS window shrunk past it, so the effective
+    // (visible) viewport is smaller than the panel container.
+    const onWindowResize = () => flush();
+    window.addEventListener('resize', onWindowResize);
     return () => {
-      ro.disconnect();
+      ro?.disconnect();
+      window.removeEventListener('resize', onWindowResize);
       if (timer !== null) window.clearTimeout(timer);
     };
   }, [status, sendViewport]);
@@ -225,15 +251,11 @@ export function CdpScreencastViewport({
           readyState: ws.readyState,
           attempt,
         });
-        // BUG-11 — push the current panel dimensions on connect.
-        // Without this, Brave keeps its default 1280×800 viewport
-        // and a narrow panel either crops content or shows a
-        // horizontal scrollbar.
-        const host = hostRef.current;
-        if (host) {
-          const rect = host.getBoundingClientRect();
-          sendViewport(rect.width, rect.height);
-        }
+        // BUG-11 — push the current effective viewport on connect.
+        // The effect below also fires sendViewport on attach, but
+        // doing it here too avoids a 200ms debounce delay on the
+        // very first frame after WS open.
+        sendViewport();
       };
       ws.onmessage = (event) => {
         if (disposed) return;
@@ -297,6 +319,11 @@ export function CdpScreencastViewport({
       }
       wsRef.current = null;
     };
+    // sendViewport is stable (useCallback with deps that never
+    // change) so adding it to deps would just clutter; we'd rather
+    // not reconnect the WS if a future refactor accidentally makes
+    // sendViewport unstable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsUrl]);
 
   // Decode a base64 JPEG and paint into the canvas. The img +
