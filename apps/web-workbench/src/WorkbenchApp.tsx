@@ -47,6 +47,56 @@ export function WorkbenchApp(): JSX.Element {
   // Inner-workbench state.
   const [panelFullscreen, setPanelFullscreen] = React.useState(false);
   const [browserSheetOpen, setBrowserSheetOpen] = React.useState(false);
+  /**
+   * BUG-11 follow-up — viewport breakpoint flag. The inline desktop
+   * panel was rendered always (just CSS-hidden via lg:hidden below
+   * 1024px), which meant its CdpScreencastViewport stayed mounted
+   * and its WS connection stayed open even when invisible. When the
+   * bottom sheet opened on resize, BOTH viewports were live —
+   * each opened its own CDP session, each fired
+   * Emulation.setDeviceMetricsOverride, and they fought over the
+   * shared Brave page (screencast frames stalled, watchdog
+   * restarted, white-screen). Now: inline mounts only at lg+; sheet
+   * only mounts below lg. Exactly one viewport per moment.
+   *
+   * Track the breakpoint in state (not just a ref) so the render
+   * tree updates on resize. matchMedia keeps the listener cheap.
+   */
+  const [isLg, setIsLg] = React.useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    return window.matchMedia('(min-width: 1024px)').matches;
+  });
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const onChange = (e: MediaQueryListEvent) => setIsLg(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  /**
+   * When the user crosses the lg boundary WHILE the inline panel
+   * was open, bridge to the sheet so they don't suddenly see a
+   * blank main area. Vice versa when growing back: close the sheet
+   * if it was the only thing showing the panel. (Sheet stays a
+   * user-action-only surface; we don't auto-open on widen.)
+   */
+  const prevIsLgRef = React.useRef(isLg);
+  React.useEffect(() => {
+    const wasLg = prevIsLgRef.current;
+    prevIsLgRef.current = isLg;
+    if (wasLg === isLg) return;
+    // wasLg=true → isLg=false: inline panel just unmounted. If it
+    // was open, open the sheet so the user keeps seeing the panel.
+    if (wasLg && !isLg && sidePanelOverride !== 'close') {
+      setBrowserSheetOpen(true);
+    }
+    // wasLg=false → isLg=true: sheet path no longer applies. Close
+    // the sheet (the inline panel is back in the layout).
+    if (!wasLg && isLg && browserSheetOpen) {
+      setBrowserSheetOpen(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLg]);
   // Single side-panel intent flag. `null` = use the default (live
   // tasks auto-open, terminal tasks stay hidden); `'open'` /
   // `'close'` forces the panel one way regardless of the default.
@@ -373,16 +423,22 @@ export function WorkbenchApp(): JSX.Element {
         />
       )}
 
-      {!panelFullscreen && showBrowserPanel && (
+      {!panelFullscreen && showBrowserPanel && isLg && (
         <ResizeHandle onDrag={onPanelResizeDrag} onDragEnd={onPanelResizeEnd} />
       )}
 
-      {(panelFullscreen || showBrowserPanel) && (
+      {/* Inline panel: only renders at lg+ AND when the side-panel
+          state machine says it's open. Below lg the sheet branch
+          below takes over so only ONE CdpScreencastViewport mounts
+          at a time (BUG-11 follow-up — two viewports were fighting
+          over the shared Brave CDP page and stalling the
+          screencast). */}
+      {(panelFullscreen || (showBrowserPanel && isLg)) && (
         <div
           className={
             panelFullscreen
               ? 'flex h-full w-full flex-col'
-              : 'hidden h-full lg:flex lg:flex-col lg:shrink-0'
+              : 'h-full flex flex-col lg:shrink-0'
           }
           style={
             panelFullscreen
@@ -445,7 +501,13 @@ export function WorkbenchApp(): JSX.Element {
         </div>
       )}
 
-      <div className={panelFullscreen ? 'hidden' : 'lg:hidden'}>
+      {/* Bottom-sheet panel: only renders below lg. Inverse of the
+          inline panel above — exactly one viewport per moment. The
+          BrowserPanel internally returns null when `open=false`, but
+          we ALSO gate the wrapping div on !isLg so the React tree
+          never holds two parallel BrowserPanel mounts. */}
+      {!panelFullscreen && !isLg && (
+        <div>
         <BrowserPanel
           layout="sheet"
           open={browserSheetOpen}
@@ -472,7 +534,8 @@ export function WorkbenchApp(): JSX.Element {
           activeTaskId={selectedTaskId}
           poolUserId={me?.multiUser ? me.userId : null}
         />
-      </div>
+        </div>
+      )}
 
       <ConfirmDialog
         open={confirmRebuildTask !== null}
