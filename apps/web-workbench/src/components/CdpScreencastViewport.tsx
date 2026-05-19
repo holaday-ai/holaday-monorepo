@@ -90,6 +90,8 @@ export function CdpScreencastViewport({
   }, [onUrlChange]);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const hiddenInputRef = React.useRef<HTMLInputElement>(null);
+  /** Host <div> ref — ResizeObserver target for BUG-11 viewport sync. */
+  const hostRef = React.useRef<HTMLDivElement>(null);
   const wsRef = React.useRef<WebSocket | null>(null);
   // Cached <img> + the most-recent JPEG src so the decode pipeline
   // doesn't re-allocate per frame. Image.decode() is async and
@@ -111,6 +113,68 @@ export function CdpScreencastViewport({
   React.useEffect(() => {
     onStatusChangeRef.current?.(status);
   }, [status]);
+
+  // BUG-11 — push the rendered viewport dimensions to Brave via
+  // CDP. Defined here (BEFORE the WS lifecycle effect) so the
+  // `ws.onopen` handler can call it without hitting the TDZ.
+  // sendViewport is idempotent — repeated calls with the same
+  // signature are no-ops (lastSentSigRef + the streamer's own
+  // memoiser).
+  const lastSentSigRef = React.useRef<string | null>(null);
+  const sendViewport = React.useCallback(
+    (width: number, height: number): void => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const w = Math.max(0, Math.round(width));
+      const h = Math.max(0, Math.round(height));
+      if (w === 0 || h === 0) return;
+      const mobile = w < 500;
+      const payload = mobile
+        ? { width: 375, height: 812, deviceScaleFactor: 2, mobile: true }
+        : { width: w, height: h, deviceScaleFactor: 1, mobile: false };
+      const sig = `${payload.width}x${payload.height}@${payload.deviceScaleFactor}${payload.mobile ? 'm' : 'd'}`;
+      if (lastSentSigRef.current === sig) return;
+      lastSentSigRef.current = sig;
+      try {
+        ws.send(JSON.stringify({ type: 'viewport', payload }));
+      } catch {
+        /* socket closing — drop */
+      }
+    },
+    [],
+  );
+
+  // ResizeObserver attaches when status=connected — debounce 200 ms
+  // so a drag doesn't flood CDP. Includes sendViewport in deps so
+  // re-creation invalidates the observer cleanly (it never changes
+  // in practice — useCallback with [] — but the lint rule is right
+  // to require it).
+  React.useEffect(() => {
+    if (status !== 'connected') return;
+    const host = hostRef.current;
+    if (!host) return;
+    if (typeof ResizeObserver === 'undefined') return;
+    let timer: number | null = null;
+    const flush = (w: number, h: number) => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        sendViewport(w, h);
+        timer = null;
+      }, 200);
+    };
+    const initialRect = host.getBoundingClientRect();
+    sendViewport(initialRect.width, initialRect.height);
+    const ro = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect) return;
+      flush(rect.width, rect.height);
+    });
+    ro.observe(host);
+    return () => {
+      ro.disconnect();
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [status, sendViewport]);
 
   // ---- WS lifecycle: always-be-trying-to-connect ----
   // Browser hibernation is a normal state — the per-user pool's idle
@@ -161,6 +225,15 @@ export function CdpScreencastViewport({
           readyState: ws.readyState,
           attempt,
         });
+        // BUG-11 — push the current panel dimensions on connect.
+        // Without this, Brave keeps its default 1280×800 viewport
+        // and a narrow panel either crops content or shows a
+        // horizontal scrollbar.
+        const host = hostRef.current;
+        if (host) {
+          const rect = host.getBoundingClientRect();
+          sendViewport(rect.width, rect.height);
+        }
       };
       ws.onmessage = (event) => {
         if (disposed) return;
@@ -255,6 +328,9 @@ export function CdpScreencastViewport({
       /* socket closing in this tick — drop */
     }
   }, []);
+
+  // (sendViewport is defined earlier — before the WS effect — so
+  // ws.onopen can call it without a TDZ issue.)
 
   /** Map a DOM mouse event's clientX/Y to canvas-pixel space. */
   function getCoords(e: React.MouseEvent | React.WheelEvent): { x: number; y: number } {
@@ -366,6 +442,7 @@ export function CdpScreencastViewport({
 
   return (
     <div
+      ref={hostRef}
       className={cn(
         'cdp-screencast-host relative h-full w-full min-h-0 min-w-0 overflow-hidden',
         className,
