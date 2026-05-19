@@ -253,6 +253,9 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
         status === 'awaiting_user' && 'h-2 w-2 bg-amber-500 ring-2 ring-amber-300/40',
         status === 'paused' && 'bg-amber-500/80',
         status === 'completed' && 'bg-muted-foreground/35',
+        // Codex Pack A4 — partial_success uses amber to signal "look
+        // again" without screaming red. Slightly smaller than failed.
+        status === 'partial_success' && 'h-2 w-2 bg-amber-400',
         status === 'failed' && 'h-2 w-2 bg-red-500',
         status === 'cancelled' && 'bg-muted-foreground/25',
       )}
@@ -280,6 +283,11 @@ function subtitleFor(task: UiTask): string {
       return task.tickCount === 0 ? '已暂停' : `已暂停 · ${task.tickCount} 步`;
     case 'completed':
       return task.tickCount === 0 ? '已完成' : `已完成 · ${task.tickCount} 步`;
+    case 'partial_success':
+      // Codex Pack A4 — soft-failure subtitle. Sidebar row reads as
+      // terminal-but-warning; the result panel renders the yellow
+      // banner above the answer.
+      return task.tickCount === 0 ? '结果可能不完整' : `结果可能不完整 · ${task.tickCount} 步`;
     case 'failed':
       return task.tickCount === 0 ? '失败' : `失败 · ${task.tickCount} 步`;
     case 'cancelled':

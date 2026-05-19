@@ -235,6 +235,7 @@ export function Sidebar({
       tasks.filter(
         (t) =>
           t.status === 'completed' ||
+          t.status === 'partial_success' ||
           t.status === 'failed' ||
           t.status === 'cancelled',
       ).length,

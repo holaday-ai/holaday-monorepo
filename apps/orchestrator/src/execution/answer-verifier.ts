@@ -207,6 +207,12 @@ function checkCriterion(
       return checkFieldCount(criterion, answerText);
     case 'word_count':
       return checkWordCount(criterion, answerText);
+    case 'url_count':
+      return checkUrlCount(criterion, answerText);
+    case 'result_count':
+      return checkResultCount(criterion, answerText);
+    case 'price_sort':
+      return checkPriceSort(criterion, answerText);
     case 'custom':
       return checkCustom(criterion, ledger, answerText, contract);
     default: {
@@ -344,6 +350,143 @@ function checkWordCount(
       : `length ${length} outside [${min}, ${max === Infinity ? '∞' : max}]`,
     // Too short = answer is a stub / error state — fixable by re-running.
     // Too long is unlikely but treated the same.
+    severity: passed ? undefined : 'fixable',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Codex Pack A2 — output-requirement structural checks
+// ---------------------------------------------------------------------------
+
+/**
+ * url_count — assert the answer text contains at least `data.min`
+ * absolute URLs. Backstop for stock/comparison/general_with_links
+ * requirements that demand cited sources.
+ *
+ * Soft (fixable) failure: lets the verifier downgrade the verdict
+ * to partial_success rather than blocking. A genuine hard-fail
+ * would over-trigger on completed-but-source-light answers.
+ */
+function checkUrlCount(
+  criterion: SuccessCriterion,
+  answerText: string,
+): CheckResult {
+  const min = Number(criterion.data?.min ?? 1);
+  const urls = answerText.match(URL_RE) ?? [];
+  const count = urls.length;
+  const passed = count >= min;
+  return {
+    criterionId: criterion.id,
+    passed,
+    checker: 'deterministic',
+    detail: passed
+      ? `${count} URL(s) found, min ${min}`
+      : `only ${count} URL(s) found, need at least ${min}`,
+    severity: passed ? undefined : 'fixable',
+  };
+}
+
+/**
+ * result_count — count "row-like" items in the answer. Heuristics
+ * (best-effort, no LLM):
+ *   - numbered list lines  `^\s*\d+[.、]\s+`
+ *   - bullet list lines    `^\s*[-*+]\s+`
+ *   - table data rows      `^\s*\|.*\|`  excluding separator rows
+ *
+ * Returns the max of the three counts. Soft (fixable) failure when
+ * the count is below `data.min` so the verdict can flip to
+ * partial_success — the answer has content, just not enough rows.
+ */
+function checkResultCount(
+  criterion: SuccessCriterion,
+  answerText: string,
+): CheckResult {
+  const min = Number(criterion.data?.min ?? 1);
+  const lines = answerText.split(/\r?\n/);
+  let numbered = 0;
+  let bullets = 0;
+  let tableRows = 0;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (/^\d+[.、)]\s+\S/.test(line)) numbered++;
+    else if (/^[-*+]\s+\S/.test(line)) bullets++;
+    else if (/^\|.*\|$/.test(line) && !/^\|[\s|:-]+\|$/.test(line)) tableRows++;
+  }
+  // Tables include a header row; only the body rows count as
+  // result items. Subtract one when we see a table separator
+  // anywhere ahead of data rows (cheap proxy for a header).
+  const hasTableHeader = lines.some((l) => /^\|[\s|:-]+\|$/.test(l.trim()));
+  if (hasTableHeader && tableRows > 0) tableRows -= 1;
+  const count = Math.max(numbered, bullets, tableRows);
+  const passed = count >= min;
+  return {
+    criterionId: criterion.id,
+    passed,
+    checker: 'deterministic',
+    detail: passed
+      ? `${count} structured row(s) found, min ${min} (numbered=${numbered}, bullets=${bullets}, table=${tableRows})`
+      : `only ${count} structured row(s) (numbered=${numbered}, bullets=${bullets}, table=${tableRows}), need at least ${min}`,
+    severity: passed ? undefined : 'fixable',
+  };
+}
+
+const PRICE_RE = /[¥￥$]\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)|([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)\s*(?:元|RMB|人民币)/gi;
+
+/**
+ * price_sort — parse ¥/￥/$/元 prices in answer text in document
+ * order and assert monotonic asc or desc. At least 2 prices are
+ * required to evaluate; fewer = vacuous pass (result_count covers
+ * the "not enough rows" case). Non-strict monotonic (ties allowed)
+ * so duplicate prices don't fail an otherwise-sorted listing.
+ *
+ * Soft (fixable) failure — the answer has content, just wrong
+ * order.
+ */
+function checkPriceSort(
+  criterion: SuccessCriterion,
+  answerText: string,
+): CheckResult {
+  const direction = (criterion.data?.direction as 'asc' | 'desc' | undefined) ?? 'asc';
+  const prices: number[] = [];
+  PRICE_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = PRICE_RE.exec(answerText)) !== null) {
+    const raw = (m[1] ?? m[2] ?? '').replace(/,/g, '');
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) prices.push(n);
+  }
+  if (prices.length < 2) {
+    return {
+      criterionId: criterion.id,
+      passed: true,
+      checker: 'deterministic',
+      detail: `only ${prices.length} price(s) parsed — vacuously sorted`,
+    };
+  }
+  let violation: { i: number; prev: number; cur: number } | null = null;
+  for (let i = 1; i < prices.length; i++) {
+    const prev = prices[i - 1]!;
+    const cur = prices[i]!;
+    if (direction === 'asc' && cur < prev) {
+      violation = { i, prev, cur };
+      break;
+    }
+    if (direction === 'desc' && cur > prev) {
+      violation = { i, prev, cur };
+      break;
+    }
+  }
+  const passed = violation === null;
+  return {
+    criterionId: criterion.id,
+    passed,
+    checker: 'deterministic',
+    detail: passed
+      ? `${prices.length} prices in ${direction} order: ${prices.slice(0, 8).join(', ')}${
+          prices.length > 8 ? '…' : ''
+        }`
+      : `${direction} order broken at position ${violation!.i}: ${violation!.prev} → ${violation!.cur}`,
     severity: passed ? undefined : 'fixable',
   };
 }

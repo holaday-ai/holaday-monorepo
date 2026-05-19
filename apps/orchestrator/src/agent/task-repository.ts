@@ -276,6 +276,23 @@ export class TaskRepository {
           metadata?: Record<string, unknown>;
         }
       | {
+          /**
+           * Codex Pack A3 — quality-gate verdict: the runner produced a
+           * usable summary but the deterministic verifier failed at
+           * least one structural check (url_count / result_count /
+           * price_sort) with `failureLevel === 'fixable'`. Row is
+           * marked terminal with `summary` populated so the SPA can
+           * still render the answer; a yellow banner above it warns
+           * the user the result may be incomplete.
+           */
+          status: 'partial_success';
+          summary: string;
+          tickCount: number;
+          finalScreenshot?: string;
+          finalUrl?: string;
+          metadata?: Record<string, unknown>;
+        }
+      | {
           status: 'failed';
           reason: string;
           tickCount: number;
@@ -314,7 +331,12 @@ export class TaskRepository {
     const update: Partial<typeof tasks.$inferInsert> = { status: outcome.status };
     const result: Record<string, unknown> = { tickCount: outcome.tickCount };
     let eventPayload: Record<string, unknown> = { tickCount: outcome.tickCount };
-    if (outcome.status === 'completed') {
+    if (outcome.status === 'completed' || outcome.status === 'partial_success') {
+      // Codex Pack A3 — partial_success behaves like completed for
+      // persistence (summary + timestamp + evidence stamps); the
+      // verifier verdict columns persisted by `persistExecution`
+      // record WHY it landed in partial_success rather than the
+      // status column needing additional metadata.
       update.completedAt = new Date();
       update.pauseReason = null;
       result.summary = outcome.summary;

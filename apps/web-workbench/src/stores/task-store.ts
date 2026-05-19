@@ -405,6 +405,22 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             ? awaitingKindRaw
             : undefined;
         const executionMode = extractExecutionMode(detail.result);
+        // Codex Pack A4 — verifier verdict columns from tasks.detail.
+        const detailVerification = detail as typeof detail & {
+          verificationPassed?: boolean | null;
+          failureLevel?: string | null;
+        };
+        const verificationPassed =
+          typeof detailVerification.verificationPassed === 'boolean'
+            ? detailVerification.verificationPassed
+            : null;
+        const failureLevelRaw = detailVerification.failureLevel;
+        const failureLevel =
+          failureLevelRaw === 'fixable' ||
+          failureLevelRaw === 'needs_clarification' ||
+          failureLevelRaw === 'hard_fail'
+            ? failureLevelRaw
+            : null;
         return {
           stepsByTask: { ...prev.stepsByTask, [taskId]: steps },
           ...(hydratedWebSearch
@@ -449,6 +465,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                       ...(executionMode ? { executionMode } : {}),
                       ...(attachments ? { attachments } : {}),
                       ...(expertWorkflowId ? { expertWorkflowId } : {}),
+                      verificationPassed,
+                      failureLevel,
                     }
                   : t,
               );
@@ -491,6 +509,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               ...(executionMode ? { executionMode } : {}),
               ...(attachments ? { attachments } : {}),
               ...(expertWorkflowId ? { expertWorkflowId } : {}),
+              verificationPassed,
+              failureLevel,
             };
             return [synth, ...prev.tasks];
           })(),
@@ -1518,6 +1538,16 @@ export function toUiTask(row: ListRow): UiTask {
       ? humaniseTaskError(row.errorMessage)
       : null;
   const resultText = summaryFromResult ?? errorText ?? null;
+  // Codex Pack A4 — verifier verdict columns (null on legacy rows).
+  const verificationPassedRaw = (row as { verificationPassed?: unknown })
+    .verificationPassed;
+  const failureLevelRaw = (row as { failureLevel?: unknown }).failureLevel;
+  const failureLevel =
+    failureLevelRaw === 'fixable' ||
+    failureLevelRaw === 'needs_clarification' ||
+    failureLevelRaw === 'hard_fail'
+      ? failureLevelRaw
+      : null;
   return {
     taskId: row.taskId,
     intent: row.intent,
@@ -1534,6 +1564,9 @@ export function toUiTask(row: ListRow): UiTask {
     starred: r.starred === true,
     starredAt: r.starredAt ? new Date(r.starredAt as string | number | Date) : null,
     projectId: typeof r.projectId === 'string' ? r.projectId : null,
+    verificationPassed:
+      typeof verificationPassedRaw === 'boolean' ? verificationPassedRaw : null,
+    failureLevel,
   };
 }
 
@@ -1550,6 +1583,8 @@ function normaliseStatus(raw: string): UiTaskStatus {
     case 'paused':
     case 'executing':
     case 'awaiting_user':
+    // Codex Pack A4 — verifier verdict downgraded a completed run.
+    case 'partial_success':
     // Phase 24 RC follow-up — `queued` is the new pre-executing state
     // emitted by tasks.create when the BrowserPool is at capacity.
     case 'queued':

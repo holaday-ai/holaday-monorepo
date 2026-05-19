@@ -29,7 +29,55 @@ export type CriterionType =
   | 'file_exists'
   | 'field_count'
   | 'word_count'
+  | 'url_count'
+  | 'result_count'
+  | 'price_sort'
   | 'custom';
+
+/**
+ * Codex Pack A1 — intent-driven output requirements.
+ *
+ * Detected at contract-build time from the user's intent. Each kind
+ * contributes typed success criteria the verifier checks post-run.
+ * Conservative keyword matching: a STRONG signal (e.g. "股价",
+ * "前 5", "对比", "来源") attaches a requirement; weak signals stay
+ * in the general fallback so we don't fail tasks that didn't ask
+ * for the structure we'd otherwise enforce.
+ */
+export type IntentKind =
+  | 'stock_quote'
+  | 'ecommerce_listing'
+  | 'comparison'
+  | 'general_with_links'
+  | 'general';
+
+export interface OutputRequirementStock {
+  kind: 'stock';
+}
+
+export interface OutputRequirementEcommerce {
+  kind: 'ecommerce';
+  /** Minimum number of items the result must enumerate. */
+  minItems: number;
+  /** Required price ordering, or null when the user did not specify. */
+  sortOrder: 'asc' | 'desc' | null;
+}
+
+export interface OutputRequirementComparison {
+  kind: 'comparison';
+  minCandidates: number;
+}
+
+export interface OutputRequirementGeneralLinks {
+  kind: 'general_with_links';
+  minUrls: number;
+}
+
+export type OutputRequirement =
+  | OutputRequirementStock
+  | OutputRequirementEcommerce
+  | OutputRequirementComparison
+  | OutputRequirementGeneralLinks;
 
 export interface SuccessCriterion {
   id: string;
@@ -80,6 +128,15 @@ export interface ExecutionContract {
    * against the model's report. Null on non-workflow tiers.
    */
   expertWorkflowId?: string | null;
+  /**
+   * Codex Pack A1 — intent classification + typed output requirement
+   * stamped at build time. Null when the intent didn't carry a
+   * strong signal (default keyword conservatism). The verifier reads
+   * this to know which structural checks to enforce and how to
+   * phrase failure detail.
+   */
+  intentKind?: IntentKind;
+  outputRequirement?: OutputRequirement | null;
 }
 
 export interface ContractInputs {
@@ -138,6 +195,12 @@ const newCriterionId = (): string => randomUUID();
  * "full" tier currently emits the same template a future
  * LLM-augmented variant would produce — landing the LLM call
  * is part of the integration step where we can budget for it.
+ *
+ * Codex Pack A1: after the tier-specific build, classify the
+ * intent and attach typed output-requirement criteria (url_count
+ * / result_count / price_sort) on top. This is purely additive —
+ * tier criteria stay; the requirement layer adds structural
+ * checks the verifier can run without LLM cost.
  */
 export function buildContract(inputs: ContractInputs): ExecutionContract {
   const tier = pickTier(inputs);
@@ -146,7 +209,157 @@ export function buildContract(inputs: ContractInputs): ExecutionContract {
     light: buildLightTier,
     checklist: buildChecklistTier,
   };
-  return builders[tier](inputs);
+  const base = builders[tier](inputs);
+  const { kind, requirement } = classifyIntentForOutputRequirement(inputs.intent);
+  base.intentKind = kind;
+  base.outputRequirement = requirement;
+  if (requirement) {
+    base.successCriteria.push(...criteriaForRequirement(requirement));
+  }
+  return base;
+}
+
+/**
+ * Codex Pack A1 — keyword-based intent classifier.
+ *
+ * Strong-signal only: a clear stock/ecommerce/comparison cue
+ * attaches a requirement. Vague phrasing (e.g. "推荐手机" with
+ * no price or sort keywords) stays `general` so the verifier
+ * doesn't fail tasks the user never asked to structure. False
+ * positives here become spurious verifier failures, so we err
+ * on the side of "no requirement" when the signal is fuzzy.
+ *
+ * Pure function. No LLM call. Cheap to invoke per task.
+ */
+export function classifyIntentForOutputRequirement(intent: string): {
+  kind: IntentKind;
+  requirement: OutputRequirement | null;
+} {
+  const text = intent;
+
+  // Stock — explicit market-data phrasing. "价格" alone is too broad
+  // (matches ecommerce too), so require co-occurrence with "股".
+  if (/股价|股票.*价|stock\s+(price|quote)|股市.*价/i.test(text)) {
+    return { kind: 'stock_quote', requirement: { kind: 'stock' } };
+  }
+
+  // E-commerce listing — at least one product-list cue AND either a
+  // count signal or a price/sort signal.
+  const ecomCue = /商品|榜单|排行|淘宝|京东|拼多多|amazon|亚马逊|sku|商城|网购/i.test(
+    text,
+  );
+  const countMatch = text.match(/前\s*(\d+)|top\s*(\d+)|(\d+)\s*个|(\d+)\s*款/i);
+  const minItems = countMatch
+    ? Number(countMatch[1] ?? countMatch[2] ?? countMatch[3] ?? countMatch[4])
+    : NaN;
+  const sortAsc = /价格\s*(升序|从低到高|低到高)|便宜.*前|按价格升序|最便宜/i.test(
+    text,
+  );
+  const sortDesc = /价格\s*(降序|从高到低|高到低)|按价格降序|最贵/i.test(text);
+  if (ecomCue && (Number.isFinite(minItems) || sortAsc || sortDesc)) {
+    return {
+      kind: 'ecommerce_listing',
+      requirement: {
+        kind: 'ecommerce',
+        minItems: Number.isFinite(minItems) && minItems >= 1 ? minItems : 5,
+        sortOrder: sortAsc ? 'asc' : sortDesc ? 'desc' : null,
+      },
+    };
+  }
+
+  // Comparison — explicit comparison cue. "vs" / "对比" / "哪个好".
+  if (/对比|比较|对照|\bvs\.?\b|哪个(更)?(好|强|划算)|二选一|怎么选/i.test(text)) {
+    return {
+      kind: 'comparison',
+      requirement: { kind: 'comparison', minCandidates: 2 },
+    };
+  }
+
+  // General-with-links — the user explicitly asked for sources /
+  // citations / reference URLs.
+  if (/来源|引用|参考链接|参考资料|出处|reference|source\s+url|cite|引用链接/i.test(text)) {
+    return {
+      kind: 'general_with_links',
+      requirement: { kind: 'general_with_links', minUrls: 1 },
+    };
+  }
+
+  return { kind: 'general', requirement: null };
+}
+
+/**
+ * Codex Pack A1 — convert a typed `OutputRequirement` into the
+ * `SuccessCriterion[]` the verifier consumes. Each requirement
+ * kind emits the structural checks the verifier dispatches
+ * (url_count / result_count / price_sort).
+ */
+function criteriaForRequirement(req: OutputRequirement): SuccessCriterion[] {
+  switch (req.kind) {
+    case 'stock':
+      return [
+        {
+          id: newCriterionId(),
+          type: 'url_count',
+          description: '股价回复必须附带至少 1 个来源 URL（行情页 / 财经站）',
+          data: { min: 1 },
+        },
+        {
+          id: newCriterionId(),
+          type: 'field_count',
+          description: '股价回复必须包含价格与时间戳字段',
+          data: { fields: ['价格', '时间'] },
+        },
+      ];
+    case 'ecommerce': {
+      const criteria: SuccessCriterion[] = [
+        {
+          id: newCriterionId(),
+          type: 'result_count',
+          description: `结构化结果至少 ${req.minItems} 条`,
+          data: { min: req.minItems },
+        },
+        {
+          id: newCriterionId(),
+          type: 'url_count',
+          description: '每条商品至少提供一个商品/平台链接（总链接数 ≥ minItems）',
+          data: { min: req.minItems },
+        },
+      ];
+      if (req.sortOrder) {
+        criteria.push({
+          id: newCriterionId(),
+          type: 'price_sort',
+          description: `价格按 ${req.sortOrder === 'asc' ? '升序' : '降序'} 排列`,
+          data: { direction: req.sortOrder },
+        });
+      }
+      return criteria;
+    }
+    case 'comparison':
+      return [
+        {
+          id: newCriterionId(),
+          type: 'result_count',
+          description: `至少给出 ${req.minCandidates} 个候选`,
+          data: { min: req.minCandidates },
+        },
+        {
+          id: newCriterionId(),
+          type: 'url_count',
+          description: '对比结论必须附带至少 1 个来源 URL',
+          data: { min: 1 },
+        },
+      ];
+    case 'general_with_links':
+      return [
+        {
+          id: newCriterionId(),
+          type: 'url_count',
+          description: `回复必须包含至少 ${req.minUrls} 个来源链接`,
+          data: { min: req.minUrls },
+        },
+      ];
+  }
 }
 
 function pickTier(i: ContractInputs): ContractTier {

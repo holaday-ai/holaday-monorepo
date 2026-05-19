@@ -93,11 +93,14 @@ import { protectedProcedure, router } from '../trpc.js';
 // no-ops when the corresponding feature flag is off (default), so
 // importing them adds no runtime cost on a baseline deploy.
 import {
+  deriveFinalStatus,
   disposeExecution,
   initExecution,
   persistExecution,
   recordEvidence,
+  summariseVerificationFailure,
   verifyAndFinalize,
+  type FinalTerminalStatus,
   type VerifyOutput,
 } from '../../execution/execution-pipeline.js';
 import type { VerificationResult } from '../../execution/answer-verifier.js';
@@ -890,6 +893,20 @@ export const tasksRouter = router({
           executionVerification = verified.verification;
         }
 
+        // Codex Pack A3 — derive the terminal status from the runner
+        // outcome + verifier verdict. Soft-fail (fixable) becomes
+        // partial_success (keeps summary, SPA shows yellow banner);
+        // hard-fail becomes failed (with synthesised reason);
+        // anything else stays as the runner reported.
+        const terminalStatus: FinalTerminalStatus = deriveFinalStatus(
+          outcome.status,
+          executionVerification,
+        );
+        const failureSummary =
+          terminalStatus === 'failed' && executionVerification
+            ? summariseVerificationFailure(executionVerification)
+            : null;
+
         // B3 — structured task:completed log.
         const elapsedMs = Date.now() - generateStartedAt;
         const metadata = {
@@ -907,9 +924,11 @@ export const tasksRouter = router({
           {
             taskId,
             userId: ctx.userId,
-            finalStatus: outcome.status,
+            runnerStatus: outcome.status,
+            finalStatus: terminalStatus,
             ...metadata,
-            failureReason: outcome.status === 'failed' ? outcome.reason : null,
+            failureReason:
+              outcome.status === 'failed' ? outcome.reason : failureSummary,
           },
           'task:completed',
         );
@@ -937,10 +956,35 @@ export const tasksRouter = router({
         }
 
         try {
-          if (outcome.status === 'completed') {
+          if (terminalStatus === 'completed' && outcome.status === 'completed') {
             await repo.persistVisionOutcome(taskId, {
               status: 'completed',
               summary: outcome.summary,
+              tickCount: 1,
+              metadata,
+            });
+          } else if (terminalStatus === 'partial_success' && outcome.status === 'completed') {
+            // Codex Pack A3 — verifier flagged soft failure; row keeps
+            // summary, status='partial_success' so the SPA renders a
+            // yellow "结果可能不完整" banner above the answer.
+            await repo.persistVisionOutcome(taskId, {
+              status: 'partial_success',
+              summary: outcome.summary,
+              tickCount: 1,
+              metadata,
+            });
+          } else if (terminalStatus === 'failed') {
+            // Either the runner failed OR the verifier verdict
+            // escalated a completed task to failed (hard_fail). Prefer
+            // the verifier-synthesised summary when the runner thought
+            // it had succeeded; the SPA renders red "质量校验未通过".
+            const reason =
+              outcome.status === 'failed'
+                ? (outcome.reason ?? 'generate: api failed')
+                : (failureSummary ?? '质量校验未通过');
+            await repo.persistVisionOutcome(taskId, {
+              status: 'failed',
+              reason,
               tickCount: 1,
               metadata,
             });
@@ -963,13 +1007,6 @@ export const tasksRouter = router({
                 result: { ...metadata, executionMode: 'generate' as const },
               })
               .where(eq(tasksTable.externalId, taskId));
-          } else {
-            await repo.persistVisionOutcome(taskId, {
-              status: 'failed',
-              reason: outcome.reason ?? 'generate: api failed',
-              tickCount: 1,
-              metadata,
-            });
           }
         } catch (err) {
           ctx.logger.error({ err, taskId }, 'generate: persist failed');
@@ -991,12 +1028,30 @@ export const tasksRouter = router({
         );
 
         try {
-          if (outcome.status === 'completed') {
+          if (terminalStatus === 'completed' && outcome.status === 'completed') {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
               taskId,
               status: 'completed',
               ...(outcome.summary ? { summary: outcome.summary } : {}),
+            });
+          } else if (terminalStatus === 'partial_success' && outcome.status === 'completed') {
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'partial_success',
+              ...(outcome.summary ? { summary: outcome.summary } : {}),
+            });
+          } else if (terminalStatus === 'failed') {
+            const reason =
+              outcome.status === 'failed'
+                ? outcome.reason
+                : (failureSummary ?? undefined);
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'failed',
+              ...(reason ? { reason } : {}),
             });
           } else if (outcome.status === 'awaiting_user') {
             broadcastToUser(ctx.userId, {
@@ -1004,13 +1059,6 @@ export const tasksRouter = router({
               taskId,
               question: outcome.summary,
               awaitingKind: 'clarification',
-            });
-          } else {
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: 'failed',
-              ...(outcome.reason ? { reason: outcome.reason } : {}),
             });
           }
         } catch (err) {
@@ -1340,6 +1388,16 @@ export const tasksRouter = router({
           executionVerification = verified.verification;
         }
 
+        // Codex Pack A3 — verifier verdict drives the terminal status.
+        const terminalStatus: FinalTerminalStatus = deriveFinalStatus(
+          outcome.status,
+          executionVerification,
+        );
+        const failureSummary =
+          terminalStatus === 'failed' && executionVerification
+            ? summariseVerificationFailure(executionVerification)
+            : null;
+
         // B3 — structured task:completed log. Single record per task
         // termination with all fields the eval pipeline needs.
         const elapsedMs = Date.now() - scrapeStartedAt;
@@ -1358,10 +1416,11 @@ export const tasksRouter = router({
           {
             taskId,
             userId: ctx.userId,
-            finalStatus: outcome.status,
+            runnerStatus: outcome.status,
+            finalStatus: terminalStatus,
             ...metadata,
             failureReason:
-              outcome.status === 'failed' ? outcome.reason : null,
+              outcome.status === 'failed' ? outcome.reason : failureSummary,
           },
           'task:completed',
         );
@@ -1384,17 +1443,28 @@ export const tasksRouter = router({
         }
 
         try {
-          if (outcome.status === 'completed') {
+          if (terminalStatus === 'completed' && outcome.status === 'completed') {
             await repo.persistVisionOutcome(taskId, {
               status: 'completed',
               summary: outcome.summary,
               tickCount: 1,
               metadata,
             });
+          } else if (terminalStatus === 'partial_success' && outcome.status === 'completed') {
+            await repo.persistVisionOutcome(taskId, {
+              status: 'partial_success',
+              summary: outcome.summary,
+              tickCount: 1,
+              metadata,
+            });
           } else {
+            const reason =
+              outcome.status === 'failed'
+                ? outcome.reason
+                : (failureSummary ?? '质量校验未通过');
             await repo.persistVisionOutcome(taskId, {
               status: 'failed',
-              reason: outcome.reason,
+              reason,
               tickCount: 1,
               metadata,
             });
@@ -1413,19 +1483,30 @@ export const tasksRouter = router({
         );
 
         try {
-          if (outcome.status === 'completed') {
+          if (terminalStatus === 'completed' && outcome.status === 'completed') {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
               taskId,
               status: 'completed',
               ...(outcome.summary ? { summary: outcome.summary } : {}),
             });
+          } else if (terminalStatus === 'partial_success' && outcome.status === 'completed') {
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'partial_success',
+              ...(outcome.summary ? { summary: outcome.summary } : {}),
+            });
           } else {
+            const reason =
+              outcome.status === 'failed'
+                ? outcome.reason
+                : (failureSummary ?? undefined);
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
               taskId,
               status: 'failed',
-              ...(outcome.reason ? { reason: outcome.reason } : {}),
+              ...(reason ? { reason } : {}),
             });
           }
         } catch (err) {
@@ -2759,6 +2840,18 @@ export const tasksRouter = router({
               }
               executionVerification = verified.verification;
             }
+            // Codex Pack A3 — verifier verdict drives the supercar lane
+            // terminal status. The override flows through both
+            // persistSupercarOutcome (DB write) and buildTaskTerminalMessage
+            // (WS broadcast) via the new verdict params.
+            const supercarTerminalStatus: FinalTerminalStatus = deriveFinalStatus(
+              outcome.status,
+              executionVerification,
+            );
+            const supercarFailureSummary =
+              supercarTerminalStatus === 'failed' && executionVerification
+                ? summariseVerificationFailure(executionVerification)
+                : null;
             // Optimization #2 — OpenAI response formatter / style
             // layer. Runs AFTER the verifier (so we polish facts that
             // have already been grounded) and BEFORE persistence. The
@@ -2830,6 +2923,8 @@ export const tasksRouter = router({
               outcome,
               finalState,
               metadata,
+              supercarTerminalStatus,
+              supercarFailureSummary,
             );
             // Optimization #2 — stamp the formatter columns. Best-
             // effort UPDATE after the row landed; failure here logs
@@ -2919,7 +3014,15 @@ export const tasksRouter = router({
             }
             if (terminalPersisted) {
               try {
-                broadcastToUser(userId, buildTaskTerminalMessage(taskId, outcome));
+                broadcastToUser(
+                  userId,
+                  buildTaskTerminalMessage(
+                    taskId,
+                    outcome,
+                    supercarTerminalStatus,
+                    supercarFailureSummary,
+                  ),
+                );
               } catch (err) {
                 ctx.logger.warn({ err, taskId }, 'supercar: broadcast terminal failed');
               }
@@ -3838,12 +3941,13 @@ export const tasksRouter = router({
                     'awaiting_user',
                     'paused',
                     'completed',
+                    'partial_success',
                     'failed',
                     'cancelled',
                   ]),
                 )
                 .min(1)
-                .max(9),
+                .max(10),
             ])
             .optional(),
           starred: z.boolean().optional(),
@@ -3942,6 +4046,11 @@ export const tasksRouter = router({
           createdAt: tasksTable.createdAt,
           updatedAt: tasksTable.updatedAt,
           completedAt: tasksTable.completedAt,
+          // Codex Pack A4 — verifier verdict surfaced on list so the
+          // sidebar / TaskListItem can show a partial-success / hard-
+          // fail indicator without re-fetching detail.
+          verificationPassed: tasksTable.verificationPassed,
+          failureLevel: tasksTable.failureLevel,
         })
         .from(tasksTable)
         .where(and(...conds))
@@ -3989,6 +4098,8 @@ export const tasksRouter = router({
           createdAt: r.createdAt,
           updatedAt: r.updatedAt,
           completedAt: r.completedAt,
+          verificationPassed: r.verificationPassed,
+          failureLevel: r.failureLevel,
         })),
         nextCursor:
           rows.length === input.limit
@@ -4088,6 +4199,11 @@ export const tasksRouter = router({
         // waiting for a (now-impossible) WS replay.
         planText: taskRow.planText,
         planStatus: normalizeOutput(taskRow.planStatus),
+        // Codex Pack A4 — verifier verdict columns. Null on tasks
+        // that ran before the verifier flag flipped; SPA treats null
+        // as "no opinion" and renders the standard success card.
+        verificationPassed: taskRow.verificationPassed,
+        failureLevel: taskRow.failureLevel,
         createdAt: taskRow.createdAt,
         completedAt: taskRow.completedAt,
         steps: stepRows.map((s) => ({
@@ -5420,6 +5536,15 @@ async function persistSupercarOutcome(
   outcome: SupercarOutcome,
   finalState: { finalScreenshot?: string; finalUrl?: string } = {},
   metadata?: Record<string, unknown>,
+  /**
+   * Codex Pack A3 — verifier-derived overrides. When `verdict` is
+   * 'partial_success', a completed outcome persists with that status
+   * (summary preserved). When `verdict` is 'failed', a completed
+   * outcome is downgraded with `verificationReason` as the reason.
+   * Anything else falls through to the original outcome.status path.
+   */
+  verdict?: FinalTerminalStatus,
+  verificationReason?: string | null,
 ): Promise<{ persisted: boolean }> {
   // Codex P3 follow-up — forward persistVisionOutcome's `{persisted}`
   // so the caller can short-circuit terminal broadcasts / memory /
@@ -5427,6 +5552,27 @@ async function persistSupercarOutcome(
   // still in awaiting_user). See task-repository.ts atomic guard for
   // the rationale.
   try {
+    // Codex Pack A3 — verifier verdict overrides on a completed run.
+    if (outcome.status === 'completed' && verdict === 'partial_success') {
+      return await repo.persistVisionOutcome(taskId, {
+        status: 'partial_success',
+        summary: outcome.summary ?? '',
+        tickCount: outcome.iterations,
+        ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
+        ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+        ...(metadata ? { metadata } : {}),
+      });
+    }
+    if (outcome.status === 'completed' && verdict === 'failed') {
+      return await repo.persistVisionOutcome(taskId, {
+        status: 'failed',
+        reason: verificationReason ?? '质量校验未通过',
+        tickCount: outcome.iterations,
+        ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
+        ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+        ...(metadata ? { metadata } : {}),
+      });
+    }
     if (outcome.status === 'completed') {
       return await repo.persistVisionOutcome(taskId, {
         status: 'completed',
@@ -5603,7 +5749,32 @@ async function captureFinalState(
 function buildTaskTerminalMessage(
   taskId: string,
   outcome: SupercarOutcome,
+  /**
+   * Codex Pack A3 — verifier-derived overrides for the WS broadcast.
+   * When `verdict='partial_success'` and the runner completed, emit
+   * a `partial_success` terminal frame (keeps summary). When
+   * `verdict='failed'` on a completed runner, downgrade to failed
+   * with `verificationReason`.
+   */
+  verdict?: FinalTerminalStatus,
+  verificationReason?: string | null,
 ): import('@holaday/shared-types').ServerMessage {
+  if (outcome.status === 'completed' && verdict === 'partial_success') {
+    return {
+      type: 'server.task.terminal',
+      taskId,
+      status: 'partial_success',
+      ...(outcome.summary ? { summary: outcome.summary } : {}),
+    };
+  }
+  if (outcome.status === 'completed' && verdict === 'failed') {
+    return {
+      type: 'server.task.terminal',
+      taskId,
+      status: 'failed',
+      reason: verificationReason ?? '质量校验未通过',
+    };
+  }
   if (outcome.status === 'completed') {
     return {
       type: 'server.task.terminal',

@@ -377,7 +377,13 @@ export const serverVisionActSchema = z.object({
 export const serverTaskTerminalSchema = z.object({
   type: z.literal('server.task.terminal'),
   taskId: z.string(),
-  status: z.enum(['completed', 'failed', 'paused', 'cancelled']),
+  // Codex Pack A3 — `partial_success` is a new terminal status fired
+  // when the deterministic verifier's verdict comes back as
+  // `passed=false, failureLevel='fixable'`. The task produced a
+  // visible answer but failed at least one structural check
+  // (url_count / result_count / price_sort). SPA renders a yellow
+  // banner above the summary; `summary` is still populated.
+  status: z.enum(['completed', 'failed', 'paused', 'cancelled', 'partial_success']),
   summary: z.string().optional(),
   reason: z.string().optional(),
   /**

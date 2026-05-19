@@ -178,6 +178,65 @@ const NULL_OUTPUT = (text: string): VerifyOutput => ({
   finalText: text,
 });
 
+/**
+ * Codex Pack A3 — turn a verifier verdict into the runner's terminal
+ * status. The runner's own `outcome.status` ('completed' / 'failed' /
+ * 'awaiting_user') is taken as the input; verifier verdict overrides
+ * a 'completed' that didn't actually clear the structural checks:
+ *
+ *   verification null OR passed                 → keep input status
+ *   passed=false, failureLevel='hard_fail'      → 'failed'
+ *   passed=false, failureLevel='fixable'        → 'partial_success'
+ *   passed=false, failureLevel='needs_clarification'
+ *                                                → 'partial_success'
+ *                  (intake gate should have caught this earlier; if
+ *                   we reach here with a summary, treat as partial)
+ *
+ * Returns the original status when input wasn't 'completed' — the
+ * verifier never escalates a failed task and the intermediate
+ * 'awaiting_user' status is the runner's call alone.
+ */
+export type FinalTerminalStatus =
+  | 'completed'
+  | 'failed'
+  | 'partial_success'
+  | 'awaiting_user'
+  | 'cancelled'
+  | 'paused';
+
+export function deriveFinalStatus(
+  runnerStatus: string,
+  verification: VerificationResult | null,
+): FinalTerminalStatus {
+  // Coerce to the typed alphabet; any unrecognised status falls
+  // through unchanged (the runner is the source of truth for those).
+  const original = runnerStatus as FinalTerminalStatus;
+  if (!verification || verification.passed) return original;
+  if (runnerStatus !== 'completed') return original;
+  if (verification.failureLevel === 'hard_fail') return 'failed';
+  // 'fixable' AND 'needs_clarification' both map to partial_success
+  // when the runner already produced a usable summary. The
+  // alternative ('awaiting_user' for needs_clarification) would
+  // re-open a task the user already closed; that's worse UX.
+  return 'partial_success';
+}
+
+/**
+ * Codex Pack A3 — synthesise a short Chinese failure reason from the
+ * verifier's check list. Picks the first failing check with a
+ * `severity` hint, falling back to the suggested-fix string.
+ */
+export function summariseVerificationFailure(
+  verification: VerificationResult,
+): string {
+  const failed = verification.checks.find((c) => !c.passed && c.severity);
+  if (failed) return `质量校验未通过：${failed.detail}`;
+  const generic = verification.checks.find((c) => !c.passed);
+  if (generic) return `质量校验未通过：${generic.detail}`;
+  if (verification.suggestedFix) return verification.suggestedFix.split('\n')[0]!;
+  return '质量校验未通过';
+}
+
 export async function verifyAndFinalize(
   inputs: VerifyInputs,
 ): Promise<VerifyOutput> {

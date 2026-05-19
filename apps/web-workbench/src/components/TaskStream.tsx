@@ -124,6 +124,7 @@ export function TaskStream({
   //     up to read past content shouldn't yank the view back down.
   const isTerminal =
     task.status === 'completed' ||
+    task.status === 'partial_success' ||
     task.status === 'failed' ||
     task.status === 'cancelled';
   React.useEffect(() => {
@@ -154,7 +155,10 @@ export function TaskStream({
   ]);
 
   const terminal =
-    task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled';
+    task.status === 'completed' ||
+    task.status === 'partial_success' ||
+    task.status === 'failed' ||
+    task.status === 'cancelled';
 
   const humanLines = React.useMemo(() => buildHumanLines(steps), [steps]);
   // Prefer the live thinking event from the supercar loop; fall back to
@@ -439,6 +443,17 @@ function AgentBlock({
             </div>
           )}
 
+        {/* Codex Pack A4 — verification verdict banner. Sits ABOVE the
+            terminal summary so users see the quality-gate status before
+            they read the answer. Yellow for partial_success (soft fail,
+            result kept); red for failed-via-verifier (hard fail). Null
+            for tasks that ran before the verifier flag flipped on. */}
+        {terminal && task.verificationPassed === false && (
+          <VerificationBanner
+            level={task.failureLevel ?? null}
+            status={task.status}
+          />
+        )}
         {terminal && task.resultText && (
           <TerminalSummary
             status={task.status}
@@ -462,6 +477,7 @@ function AgentBlock({
               (() => {
                 const isTerminal =
                   task.status === 'completed' ||
+                  task.status === 'partial_success' ||
                   task.status === 'failed' ||
                   task.status === 'cancelled';
                 if (isTerminal) return undefined;
@@ -536,6 +552,54 @@ function AgentBlock({
  * question. The composer below (InputArea) flips to "回复 HOLA DAY..."
  * mode so Enter sends a reply instead of spawning a new task.
  */
+/**
+ * Codex Pack A4 — verification-verdict banner.
+ *
+ * Renders above the TerminalSummary when the deterministic verifier
+ * flagged the task. Two visual states:
+ *
+ *   partial_success / failureLevel='fixable' → yellow card,
+ *     "结果可能不完整，以下内容可能缺少来源或排序"
+ *
+ *   failed (via verifier) / failureLevel='hard_fail' → red card,
+ *     "质量校验未通过：…"
+ *
+ * Levels other than 'hard_fail' show the soft yellow state; pure
+ * needs_clarification doesn't reach this banner because the runner
+ * stays in awaiting_user before any partial_success persist.
+ */
+function VerificationBanner({
+  level,
+  status,
+}: {
+  level: 'fixable' | 'needs_clarification' | 'hard_fail' | null;
+  status: string;
+}): JSX.Element {
+  const isHard = level === 'hard_fail' || status === 'failed';
+  if (isHard) {
+    return (
+      <div className="rounded-xl border border-red-200/70 bg-red-50/80 px-4 py-3 text-sm text-red-900 dark:border-red-500/40 dark:bg-red-950/60 dark:text-red-100">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-red-700 dark:text-red-300">
+          质量校验未通过
+        </div>
+        <p className="mt-1 leading-relaxed">
+          以下回答未通过结构性校验（来源链接 / 结果条数 / 价格排序）。建议重新发送相同意图，或在追问里说明你需要的字段。
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-amber-200/70 bg-amber-50/80 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/60 dark:text-amber-100">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+        结果可能不完整
+      </div>
+      <p className="mt-1 leading-relaxed">
+        以下回答缺少部分要求的字段（如来源链接、足够多的结构化条目，或价格排序未达预期）。可参考使用，建议核对来源后再行动。
+      </p>
+    </div>
+  );
+}
+
 function AwaitingUserBanner({ wait }: { wait: UiAwaitingUser }): JSX.Element {
   return (
     <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-[0_1px_2px_rgba(0,0,0,0.03)] dark:border-amber-900/50 dark:bg-amber-950/30">

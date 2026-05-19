@@ -15,6 +15,7 @@ export type UiTaskStatus =
   | 'awaiting_user'
   | 'paused'
   | 'completed'
+  | 'partial_success'
   | 'failed'
   | 'cancelled';
 
@@ -117,6 +118,16 @@ export interface UiTask {
    * raw block of prose. Undefined for normal browser / generate tasks.
    */
   expertWorkflowId?: string;
+  /**
+   * Codex Pack A4 — deterministic verifier verdict, populated from
+   * `tasks.detail.verificationPassed` / `tasks.detail.failureLevel`.
+   * Drives the partial-success / hard-fail banner above the terminal
+   * summary in TaskStream. Null on tasks that ran before the verifier
+   * flag flipped on; SPA treats null as "no opinion" and renders the
+   * standard success card.
+   */
+  verificationPassed?: boolean | null;
+  failureLevel?: 'fixable' | 'needs_clarification' | 'hard_fail' | null;
 }
 
 /**
