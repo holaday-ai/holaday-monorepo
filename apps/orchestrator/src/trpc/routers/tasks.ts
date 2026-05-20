@@ -4134,6 +4134,7 @@ export const tasksRouter = router({
                 'awaiting_user',
                 'paused',
                 'completed',
+                'partial_success',
                 'failed',
                 'cancelled',
               ]),

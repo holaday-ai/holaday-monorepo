@@ -54,6 +54,7 @@ describe('tRPC tasks.list + tasks.detail', () => {
     userInternalId: number,
     intent: string,
     stepKinds: string[] = ['goto', 'extract'],
+    status = 'completed',
   ): Promise<string> {
     const { newExternalId } = await import('@holaday/shared-types');
     const { db } = await import('../../db/client.js');
@@ -64,7 +65,7 @@ describe('tRPC tasks.list + tasks.detail', () => {
     await db.insert(tasks).values({
       externalId,
       userId: userInternalId,
-      status: 'completed',
+      status,
       intent,
       plan: null,
     });
@@ -146,6 +147,43 @@ describe('tRPC tasks.list + tasks.detail', () => {
       const body2 = (await res2.json()) as typeof body1;
       expect(body2.result.data.tasks).toHaveLength(1);
       expect(body2.result.data.tasks[0]?.taskId).toBe(t1);
+    } finally {
+      await close();
+    }
+  });
+
+  it('tasks.list status filter includes partial_success in failure review sets', async () => {
+    const user = await seedUser();
+    const failed = await seedTask(user.internalId, 'hard fail row', ['goto'], 'failed');
+    const partial = await seedTask(
+      user.internalId,
+      'partial result row',
+      ['goto'],
+      'partial_success',
+    );
+    await seedTask(user.internalId, 'clean completed row', ['goto'], 'completed');
+
+    const { port, signAccessToken, close } = await bootTrpcServer();
+    try {
+      const token = await signAccessToken({ sub: user.external, plan: 'free' });
+      const res = await fetch(
+        `http://127.0.0.1:${port}/trpc/tasks.list?input=${encodeURIComponent(
+          JSON.stringify({ limit: 10, status: ['failed', 'partial_success'] }),
+        )}`,
+        { headers: { authorization: `Bearer ${token}` } },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        result: {
+          data: { tasks: { taskId: string; status: string }[] };
+        };
+      };
+      expect(body.result.data.tasks.map((t) => t.taskId).sort()).toEqual(
+        [failed, partial].sort(),
+      );
+      expect(new Set(body.result.data.tasks.map((t) => t.status))).toEqual(
+        new Set(['failed', 'partial_success']),
+      );
     } finally {
       await close();
     }

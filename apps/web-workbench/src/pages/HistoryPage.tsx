@@ -34,6 +34,8 @@ const RUNNING_STATUSES = [
   'paused',
 ] as const;
 
+const FAILED_STATUSES = ['failed', 'partial_success'] as const;
+
 type ServerTaskStatus =
   | 'pending'
   | 'planning'
@@ -42,6 +44,7 @@ type ServerTaskStatus =
   | 'awaiting_user'
   | 'paused'
   | 'completed'
+  | 'partial_success'
   | 'failed'
   | 'cancelled';
 
@@ -85,7 +88,7 @@ export function HistoryPage(): JSX.Element {
     } = { limit: 50 };
     if (debouncedQuery.length > 0) out.query = debouncedQuery;
     if (status === 'completed') out.status = 'completed';
-    else if (status === 'failed') out.status = 'failed';
+    else if (status === 'failed') out.status = [...FAILED_STATUSES];
     else if (status === 'running') out.status = [...RUNNING_STATUSES];
     if (range === '7d') out.dateFrom = new Date(Date.now() - 7 * 86400000);
     else if (range === '30d') out.dateFrom = new Date(Date.now() - 30 * 86400000);
