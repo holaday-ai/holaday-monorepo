@@ -303,7 +303,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           : Date.now();
         return {
           tickIndex: typeof s.seq === 'number' ? s.seq : idx,
-          status: s.status === 'done' ? 'done' : 'failed',
+          status: normaliseDetailStepStatus(s.status),
           actionKind: s.kind,
           actionSummary: summary,
           durationMs: out.durationMs ?? 0,
@@ -1689,5 +1689,20 @@ function normaliseStatus(raw: string): UiTaskStatus {
       return raw;
     default:
       return 'executing';
+  }
+}
+
+export function normaliseDetailStepStatus(raw: string): UiStep['status'] {
+  switch (raw) {
+    case 'done':
+    case 'ok':
+    case 'completed':
+      return 'done';
+    case 'failed':
+    case 'error':
+    case 'cancelled':
+      return 'failed';
+    default:
+      return 'running';
   }
 }
