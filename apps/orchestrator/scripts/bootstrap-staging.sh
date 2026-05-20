@@ -41,18 +41,46 @@ if [[ ! -f "$PROD_ENV" ]]; then
   exit 1
 fi
 
-# Probe for a root-mysql invocation that works. Ubuntu's default
-# MariaDB/MySQL ships with unix_socket auth for root — `mysql` from
-# a root shell connects with no creds. Some boxes require `sudo`.
-# Quote the probe SQL minimally; --batch + -N keeps output tight.
-MYSQL_ROOT=""
-if mysql -BNe 'SELECT 1' >/dev/null 2>&1; then
-  MYSQL_ROOT="mysql"
+# MySQL root authentication. Three strategies, in priority order:
+#   1. /root/.my-staging-bootstrap-pass — operator's pipe-and-purge
+#      injection (chmod 600, shred-deleted before we run any SQL).
+#   2. `mysql -BNe 'SELECT 1'` — unix_socket auth (Ubuntu default).
+#   3. `sudo mysql -BNe 'SELECT 1'` — sudo-wrapped socket.
+#
+# The password file path is intentionally NOT /root/.my.cnf —
+# .my.cnf is a long-lived config that would survive bootstrap.
+# A short-lived "bootstrap-pass" file telegraphs the intent (used
+# once + erased) and avoids confusion with persistent MySQL config.
+ROOT_PASS_FILE="/root/.my-staging-bootstrap-pass"
+ROOT_PASS=""
+MYSQL_ROOT_ARGS=()
+cleanup() {
+  ROOT_PASS=""
+  if [[ -f "$ROOT_PASS_FILE" ]]; then
+    shred -u "$ROOT_PASS_FILE" 2>/dev/null || rm -f "$ROOT_PASS_FILE"
+  fi
+}
+trap cleanup EXIT
+
+if [[ -f "$ROOT_PASS_FILE" ]]; then
+  # Read pw into shell var THEN immediately shred the file. If the
+  # script crashes between this point and exit, the file is already
+  # gone — the trap handler is belt-and-braces.
+  ROOT_PASS="$(cat "$ROOT_PASS_FILE")"
+  shred -u "$ROOT_PASS_FILE" 2>/dev/null || rm -f "$ROOT_PASS_FILE"
+  if mysql -u root --password="$ROOT_PASS" --ssl-mode=DISABLED -BNe 'SELECT 1' >/dev/null 2>&1; then
+    MYSQL_ROOT_ARGS=(mysql -u root --password="$ROOT_PASS" --ssl-mode=DISABLED)
+  else
+    echo "FATAL: piped MySQL root password rejected by server" >&2
+    exit 2
+  fi
+elif mysql -BNe 'SELECT 1' >/dev/null 2>&1; then
+  MYSQL_ROOT_ARGS=(mysql)
 elif sudo -n mysql -BNe 'SELECT 1' >/dev/null 2>&1; then
-  MYSQL_ROOT="sudo mysql"
+  MYSQL_ROOT_ARGS=(sudo mysql)
 else
-  echo "FATAL: no root-socket MySQL access — neither 'mysql -e SELECT 1' nor 'sudo mysql -e SELECT 1' works" >&2
-  echo "Hint: this box probably uses password auth for MySQL root. Operator must create the DB + user manually." >&2
+  echo "FATAL: no root MySQL access path found." >&2
+  echo "Tried: piped $ROOT_PASS_FILE, mysql -BNe, sudo mysql -BNe — all failed." >&2
   exit 2
 fi
 
@@ -64,7 +92,7 @@ STAGING_JWT_SECRET="$(openssl rand -hex 32)"
 # Run the bootstrap SQL through the working root invocation. Heredoc
 # is inline so $STAGING_DB_PASS never lands on the command line.
 # DROP + CREATE rotates the user cleanly on re-run.
-$MYSQL_ROOT --batch <<SQL
+"${MYSQL_ROOT_ARGS[@]}" --batch <<SQL
 CREATE DATABASE IF NOT EXISTS $STAGING_DB_NAME CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 DROP USER IF EXISTS '$STAGING_DB_USER'@'127.0.0.1';
 CREATE USER '$STAGING_DB_USER'@'127.0.0.1' IDENTIFIED BY '$STAGING_DB_PASS';
