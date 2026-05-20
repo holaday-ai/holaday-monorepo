@@ -1,20 +1,28 @@
 #!/usr/bin/env bash
 # Codex Round 2 / staging bootstrap — runs ON VULTR.
 #
-# Reads /opt/holaday-monorepo/apps/orchestrator/.env, creates a
-# fresh `holaday_staging` MySQL database + `holaday_staging`@
-# `127.0.0.1` user with a freshly generated password, then writes
-# /opt/holaday-monorepo/apps/orchestrator/.env.staging with the
-# staging-only overrides (DATABASE_URL, PORT, WS_PORT, JWT_SECRET,
-# STORAGE_PROVIDER=local). Every other env value (ANTHROPIC_API_KEY,
-# OAuth secrets, etc.) is inherited verbatim from prod's .env so
-# the runtime has what it needs without leaking creds back into the
-# orchestrator transcript.
+# Provisions a fully isolated staging environment on the same Vultr
+# box that hosts prod:
+#   1. Creates `holaday_staging` MySQL database via root-socket auth
+#      (root @ Vultr can hit MySQL via unix_socket — never reads
+#      prod's MySQL password).
+#   2. Creates `holaday_staging`@`127.0.0.1` MySQL user with a
+#      freshly generated password (random 32 bytes, base64-encoded).
+#   3. Grants ONLY `holaday_staging.*` to the new user — no prod-DB
+#      access, even if .env.staging leaks.
+#   4. Writes /opt/holaday-monorepo/apps/orchestrator/.env.staging
+#      with staging overrides (DATABASE_URL, PORT=4011, WS_PORT=
+#      4012, JWT_SECRET, STORAGE_PROVIDER=local, HOLADAY_FILES_DIR)
+#      and inherits everything else (ANTHROPIC_API_KEY, OAuth,
+#      etc.) verbatim from prod's .env so the runtime is functional.
+#   5. Verifies the new user can actually connect.
 #
-# Idempotent enough for a re-run: the SQL block uses CREATE
-# DATABASE IF NOT EXISTS + DROP USER IF EXISTS so a second
-# invocation rotates the staging user's password (handy if the
-# .env.staging gets lost). Aborts on any error.
+# Idempotent: re-running rotates the staging user's password +
+# regenerates JWT_SECRET. Existing rows in holaday_staging are
+# untouched (CREATE DATABASE IF NOT EXISTS).
+#
+# Never prints credentials to stdout. Output is a single OK line
+# with DB name + ports + env path.
 
 set -euo pipefail
 
@@ -25,47 +33,38 @@ STAGING_DB_USER="holaday_staging"
 STAGING_API_PORT="4011"
 STAGING_WS_PORT="4012"
 STAGING_FILES_DIR="/opt/holaday-spa-staging/files"
+MYSQL_HOST="127.0.0.1"
+MYSQL_PORT="3306"
 
 if [[ ! -f "$PROD_ENV" ]]; then
   echo "FATAL: prod .env not found at $PROD_ENV" >&2
   exit 1
 fi
 
-# Parse prod's DATABASE_URL via Node so we get robust URL parsing
-# (mysql:// can contain @, /, ? characters in the password).
-read -r MYSQL_HOST MYSQL_PORT MYSQL_USER MYSQL_PASS MYSQL_DB <<<"$(
-  node --eval '
-    const fs = require("fs");
-    const env = fs.readFileSync(process.argv[1], "utf8");
-    const line = env.split(/\r?\n/).find(l => l.startsWith("DATABASE_URL="));
-    if (!line) { console.error("DATABASE_URL missing"); process.exit(1); }
-    const raw = line.slice("DATABASE_URL=".length).replace(/^["\x27]|["\x27]$/g, "");
-    const u = new URL(raw);
-    process.stdout.write([
-      u.hostname,
-      u.port || "3306",
-      decodeURIComponent(u.username),
-      decodeURIComponent(u.password),
-      u.pathname.replace(/^\//, ""),
-    ].join(" "));
-  ' "$PROD_ENV"
-)"
-
-if [[ -z "$MYSQL_USER" || -z "$MYSQL_PASS" ]]; then
-  echo "FATAL: parsed empty MySQL credentials from $PROD_ENV" >&2
-  exit 1
+# Probe for a root-mysql invocation that works. Ubuntu's default
+# MariaDB/MySQL ships with unix_socket auth for root — `mysql` from
+# a root shell connects with no creds. Some boxes require `sudo`.
+# Quote the probe SQL minimally; --batch + -N keeps output tight.
+MYSQL_ROOT=""
+if mysql -BNe 'SELECT 1' >/dev/null 2>&1; then
+  MYSQL_ROOT="mysql"
+elif sudo -n mysql -BNe 'SELECT 1' >/dev/null 2>&1; then
+  MYSQL_ROOT="sudo mysql"
+else
+  echo "FATAL: no root-socket MySQL access — neither 'mysql -e SELECT 1' nor 'sudo mysql -e SELECT 1' works" >&2
+  echo "Hint: this box probably uses password auth for MySQL root. Operator must create the DB + user manually." >&2
+  exit 2
 fi
 
-# Generate a fresh staging password. 32 bytes base64 → ~43 chars.
+# Generate staging password + JWT secret. Both server-side; neither
+# echoed to stdout.
 STAGING_DB_PASS="$(openssl rand -base64 32 | tr -d '=+/' | head -c 40)"
 STAGING_JWT_SECRET="$(openssl rand -hex 32)"
 
-# Create the staging DB + user via the prod user's connection. The
-# prod user must have CREATE DATABASE + CREATE USER + GRANT OPTION
-# privileges. If it doesn't, the SQL block fails with an obvious
-# permission error and the operator has to run the create as root
-# manually (one-line fallback below).
-mysql -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" --password="$MYSQL_PASS" --batch --ssl-mode=DISABLED <<SQL
+# Run the bootstrap SQL through the working root invocation. Heredoc
+# is inline so $STAGING_DB_PASS never lands on the command line.
+# DROP + CREATE rotates the user cleanly on re-run.
+$MYSQL_ROOT --batch <<SQL
 CREATE DATABASE IF NOT EXISTS $STAGING_DB_NAME CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 DROP USER IF EXISTS '$STAGING_DB_USER'@'127.0.0.1';
 CREATE USER '$STAGING_DB_USER'@'127.0.0.1' IDENTIFIED BY '$STAGING_DB_PASS';
@@ -73,17 +72,21 @@ GRANT ALL PRIVILEGES ON $STAGING_DB_NAME.* TO '$STAGING_DB_USER'@'127.0.0.1';
 FLUSH PRIVILEGES;
 SQL
 
-# Write the staging .env. INHERIT every line from prod's .env, then
-# OVERRIDE the staging-specific lines at the bottom (later entries
-# beat earlier ones in dotenv-style parsers; the orchestrator uses
-# the same path so this is safe).
+# Sanity-check the new user can actually log in to the new DB.
+if ! mysql -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$STAGING_DB_USER" --password="$STAGING_DB_PASS" --ssl-mode=DISABLED "$STAGING_DB_NAME" -BNe 'SELECT 1' >/dev/null 2>&1; then
+  echo "FATAL: staging user could not connect to $STAGING_DB_NAME after bootstrap" >&2
+  exit 3
+fi
+
+# Write the staging .env. INHERIT every line from prod .env EXCEPT
+# the keys we're overriding (so dotenv parsers that don't do
+# last-wins still see the staging value), then append the staging
+# block at the bottom for parsers that do.
 mkdir -p "$(dirname "$STAGING_ENV")"
 {
-  # Inherit (filter out the keys we're overriding so dotenv parsers
-  # that DON'T do last-wins still see the staging value).
   grep -vE '^(DATABASE_URL|PORT|WS_PORT|JWT_SECRET|STORAGE_PROVIDER|R2_BUCKET|HOLADAY_FILES_DIR|NODE_ENV|HOLADAY_ENV)=' "$PROD_ENV" || true
   echo ""
-  echo "# === Codex Round 2 staging overrides (do not commit) ==="
+  echo "# === staging overrides ==="
   echo "NODE_ENV=production"
   echo "HOLADAY_ENV=staging"
   echo "PORT=$STAGING_API_PORT"
@@ -92,15 +95,11 @@ mkdir -p "$(dirname "$STAGING_ENV")"
   echo "JWT_SECRET=$STAGING_JWT_SECRET"
   echo "STORAGE_PROVIDER=local"
   echo "HOLADAY_FILES_DIR=$STAGING_FILES_DIR"
-  echo "# ANTHROPIC_API_KEY / OAuth secrets / R2 credentials inherited from prod .env above."
-  echo "# R2 intentionally NOT used on staging — STORAGE_PROVIDER=local routes uploads to"
-  echo "# $STAGING_FILES_DIR so we never touch holaday-files-prod bucket assets."
 } > "$STAGING_ENV"
 chmod 600 "$STAGING_ENV"
 chown "$(stat -c '%U' "$PROD_ENV")":"$(stat -c '%G' "$PROD_ENV")" "$STAGING_ENV"
 
 mkdir -p "$STAGING_FILES_DIR"
 
-# Confirmation. Intentionally does NOT echo the password or the
-# full DATABASE_URL — only the DB name + ports + .env path.
-echo "OK staging db=$STAGING_DB_NAME user=$STAGING_DB_USER@127.0.0.1 ports=api:$STAGING_API_PORT,ws:$STAGING_WS_PORT env=$STAGING_ENV"
+# Confirmation only — no credentials.
+echo "OK staging db=$STAGING_DB_NAME user=$STAGING_DB_USER@127.0.0.1 ports=api:$STAGING_API_PORT,ws:$STAGING_WS_PORT env=$STAGING_ENV connect_test=ok"
