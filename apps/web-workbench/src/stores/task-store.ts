@@ -550,7 +550,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       });
     } catch (err) {
       if (myToken !== hydrateToken) return;
-      set({ error: err instanceof Error ? err.message : String(err) });
+      set({ error: taskStoreError(err) });
     }
   }
 
@@ -715,7 +715,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         void hydrateDetail(prevSelected);
       }
     } catch (err) {
-      set({ loading: false, error: err instanceof Error ? err.message : String(err) });
+      set({ loading: false, error: taskStoreError(err) });
     }
   },
 
@@ -751,7 +751,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         };
       });
     } catch (err) {
-      set({ loadingMore: false, error: err instanceof Error ? err.message : String(err) });
+      set({ loadingMore: false, error: taskStoreError(err) });
     }
   },
 
@@ -857,7 +857,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       });
       return { ok: true as const };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = taskStoreError(err);
       set({ error: msg });
       return { error: msg };
     }
@@ -877,7 +877,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       await trpc.tasks.rename.mutate({ taskId, title: trimmed });
       return { ok: true as const };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = taskStoreError(err);
       set({ error: msg });
       // Roll back optimistic change by pulling the server's truth.
       void get().refreshTasks();
@@ -926,7 +926,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       }
       return { ok: res.ok };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = taskStoreError(err);
       set({ error: msg });
       return { error: msg };
     }
@@ -948,7 +948,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       }
       return { ok: res.ok };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = taskStoreError(err);
       set({ error: msg });
       return { error: msg };
     }
@@ -1022,7 +1022,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       void get().refreshTasks();
       return { taskId: res.taskId };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = taskStoreError(err);
       set({ error: msg });
       return { error: msg };
     }
@@ -1608,6 +1608,11 @@ function extractExecutionMode(
     if (m === 'browser' || m === 'generate' || m === 'scrape') return m;
   }
   return undefined;
+}
+
+function taskStoreError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  return humaniseTaskError(raw);
 }
 
 export function toUiTask(row: ListRow): UiTask {

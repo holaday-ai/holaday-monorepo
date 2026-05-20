@@ -5,6 +5,7 @@ import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
+import { humaniseTaskError, taskActionError } from '@/lib/error-copy';
 
 /**
  * Phase 5a — scheduled tasks list page. Replaces the Phase 16b
@@ -65,10 +66,7 @@ export function ScheduledPage(): JSX.Element {
       const list = await trpc.scheduledTasks.list.query();
       setRows(list as UiScheduled[]);
     } catch (err) {
-      toast.show(
-        err instanceof Error ? `加载失败：${err.message}` : '加载失败',
-        'error',
-      );
+      toast.show(taskActionError('加载失败', errorMessage(err)), 'error');
       setRows([]);
     }
   }, [toast]);
@@ -83,10 +81,7 @@ export function ScheduledPage(): JSX.Element {
       toast.show(result.status === 'active' ? '已恢复' : '已暂停');
       await reload();
     } catch (err) {
-      toast.show(
-        err instanceof Error ? err.message : '操作失败',
-        'error',
-      );
+      toast.show(taskActionError('操作失败', errorMessage(err)), 'error');
     }
   };
 
@@ -96,7 +91,7 @@ export function ScheduledPage(): JSX.Element {
       toast.show('已删除');
       await reload();
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : '删除失败', 'error');
+      toast.show(taskActionError('删除失败', errorMessage(err)), 'error');
     }
   };
 
@@ -182,7 +177,7 @@ export function ScheduledPage(): JSX.Element {
                     {r.status === 'active' && r.lastRunStatus === 'failed' && (
                       <span
                         className="rounded border border-rose-300 bg-rose-50 px-1.5 py-0.5 text-rose-700 dark:border-rose-700 dark:bg-rose-900/30 dark:text-rose-300"
-                        title={r.lastError ?? '上次执行失败'}
+                        title={humaniseTaskError(r.lastError) || '上次执行失败'}
                       >
                         上次失败
                       </span>
@@ -195,7 +190,7 @@ export function ScheduledPage(): JSX.Element {
                     {r.status === 'failed' && r.lastError && (
                       <span
                         className="cursor-help text-rose-700 dark:text-rose-300"
-                        title={r.lastError}
+                        title={humaniseTaskError(r.lastError)}
                       >
                         ⓘ 错误详情
                       </span>
@@ -291,6 +286,10 @@ export function ScheduledPage(): JSX.Element {
 function truncate(s: string, n: number): string {
   if (s.length <= n) return s;
   return `${s.slice(0, n)}…`;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 /**

@@ -38,6 +38,7 @@ import {
   downloadFileAuthed,
   fetchFileBlobAuthed,
 } from '@/lib/download-file';
+import { taskActionError } from '@/lib/error-copy';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 import { PlanCard } from '@/components/PlanCard';
 import { SearchResultCard } from '@/components/SearchResultCard';
@@ -1665,7 +1666,7 @@ function TerminalSummary({
     async (retryIntent: string): Promise<void> => {
       const result = await createTask(retryIntent, []);
       if ('error' in result) {
-        toast.show(`重试失败：${result.error}`, 'error');
+        toast.show(taskActionError('重试失败', result.error), 'error');
         return;
       }
       toast.show('已重新提交', 'info', 2000);

@@ -6,6 +6,7 @@ import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import { BatchTaskDialog } from '@/components/BatchTaskDialog';
+import { humaniseTaskError, taskActionError } from '@/lib/error-copy';
 
 /**
  * Phase 5b — batch tasks list + detail (one page, two modes).
@@ -96,7 +97,7 @@ function BatchList(): JSX.Element {
       const list = await trpc.batchTasks.list.query();
       setRows(list as UiBatchRow[]);
     } catch (err) {
-      toast.show(err instanceof Error ? `加载失败：${err.message}` : '加载失败', 'error');
+      toast.show(taskActionError('加载失败', errorMessage(err)), 'error');
       setRows([]);
     }
   }, [toast]);
@@ -212,7 +213,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
       const data = await trpc.batchTasks.detail.query({ batchId });
       setDetail(data as UiBatchDetail);
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : '加载失败', 'error');
+      toast.show(taskActionError('加载失败', errorMessage(err)), 'error');
     }
   }, [batchId, toast]);
 
@@ -233,7 +234,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
       toast.show('已取消');
       await reload();
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : '取消失败', 'error');
+      toast.show(taskActionError('取消失败', errorMessage(err)), 'error');
     }
   };
 
@@ -305,7 +306,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
                 </div>
                 {item.errorMessage && (
                   <div className="mt-1 text-[11px] text-destructive">
-                    {item.errorMessage}
+                    {humaniseTaskError(item.errorMessage)}
                   </div>
                 )}
                 {item.taskId && (
@@ -336,6 +337,10 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
       />
     </PageContainer>
   );
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 function ItemStatusIcon({ status }: { status: string }): JSX.Element {

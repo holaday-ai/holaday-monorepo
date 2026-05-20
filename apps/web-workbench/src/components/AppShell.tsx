@@ -19,6 +19,7 @@ import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import '@/pages/scheduled-calendar/calendar-styles.css';
 import { useToast } from '@/components/ui/toast';
 import { clearAccessToken, getAccessToken } from '@/lib/auth';
+import { taskActionError } from '@/lib/error-copy';
 import { trpc } from '@/lib/trpc';
 import {
   connect,
@@ -525,7 +526,7 @@ export function AppShell(): JSX.Element {
         onRetryTask={async (intent) => {
           const res = await createTask(intent);
           if ('error' in res) {
-            toast.show(`重试失败：${res.error}`, 'error');
+            toast.show(taskActionError('重试失败', res.error), 'error');
           } else if (location.pathname !== '/') {
             navigate('/');
           }

@@ -73,6 +73,11 @@ export function humaniseTaskError(raw: string | null | undefined): string {
   return trimmed;
 }
 
+export function taskActionError(action: string, raw: string | null | undefined): string {
+  const friendly = humaniseTaskError(raw);
+  return friendly ? `${action}：${friendly}` : action;
+}
+
 function looksLikeEnglishTech(s: string): boolean {
   if (s.length === 0) return false;
   let ascii = 0;

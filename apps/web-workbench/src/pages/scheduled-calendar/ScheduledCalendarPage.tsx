@@ -47,6 +47,7 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
+import { taskActionError } from '@/lib/error-copy';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
@@ -155,10 +156,7 @@ export function ScheduledCalendarPage(): JSX.Element {
       });
       setRows(res as ScheduledTaskRow[]);
     } catch (err) {
-      toast.show(
-        `加载失败：${err instanceof Error ? err.message : String(err)}`,
-        'error',
-      );
+      toast.show(taskActionError('加载失败', errorMessage(err)), 'error');
     } finally {
       setLoading(false);
     }
@@ -407,10 +405,7 @@ export function ScheduledCalendarPage(): JSX.Element {
         await refresh();
       } catch (err) {
         arg.revert();
-        toast.show(
-          `更新失败：${err instanceof Error ? err.message : String(err)}`,
-          'error',
-        );
+        toast.show(taskActionError('更新失败', errorMessage(err)), 'error');
       }
     },
     [refresh, toast],
@@ -438,10 +433,7 @@ export function ScheduledCalendarPage(): JSX.Element {
         await refresh();
       } catch (err) {
         arg.revert();
-        toast.show(
-          `更新失败：${err instanceof Error ? err.message : String(err)}`,
-          'error',
-        );
+        toast.show(taskActionError('更新失败', errorMessage(err)), 'error');
       }
     },
     [refresh, toast],
@@ -549,10 +541,7 @@ export function ScheduledCalendarPage(): JSX.Element {
         setFullModalOpen(false);
         await refresh();
       } catch (err) {
-        toast.show(
-          `创建失败：${err instanceof Error ? err.message : String(err)}`,
-          'error',
-        );
+        toast.show(taskActionError('创建失败', errorMessage(err)), 'error');
       }
     },
     [refresh, toast],
@@ -564,10 +553,7 @@ export function ScheduledCalendarPage(): JSX.Element {
         await trpc.scheduledTasks.toggle.mutate({ scheduledTaskId });
         await refresh();
       } catch (err) {
-        toast.show(
-          `操作失败：${err instanceof Error ? err.message : String(err)}`,
-          'error',
-        );
+        toast.show(taskActionError('操作失败', errorMessage(err)), 'error');
       }
     },
     [refresh, toast],
@@ -581,10 +567,7 @@ export function ScheduledCalendarPage(): JSX.Element {
         setEventDetail(null);
         await refresh();
       } catch (err) {
-        toast.show(
-          `操作失败：${err instanceof Error ? err.message : String(err)}`,
-          'error',
-        );
+        toast.show(taskActionError('操作失败', errorMessage(err)), 'error');
       }
     },
     [refresh, toast],
@@ -599,10 +582,7 @@ export function ScheduledCalendarPage(): JSX.Element {
         setConfirmDelete(null);
         await refresh();
       } catch (err) {
-        toast.show(
-          `删除失败：${err instanceof Error ? err.message : String(err)}`,
-          'error',
-        );
+        toast.show(taskActionError('删除失败', errorMessage(err)), 'error');
       }
     },
     [refresh, toast],
@@ -790,6 +770,10 @@ export function ScheduledCalendarPage(): JSX.Element {
       />
     </PageContainer>
   );
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 /**

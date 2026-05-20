@@ -268,6 +268,9 @@ function StatusIcon({ status }: { status: string }): JSX.Element {
   if (status === 'completed') {
     return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />;
   }
+  if (status === 'partial_success') {
+    return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />;
+  }
   if (status === 'failed' || status === 'cancelled') {
     return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />;
   }
@@ -284,6 +287,8 @@ function friendlyStatus(status: string): string {
   switch (status) {
     case 'completed':
       return '已完成';
+    case 'partial_success':
+      return '部分完成';
     case 'failed':
       return '失败';
     case 'cancelled':
@@ -294,6 +299,8 @@ function friendlyStatus(status: string): string {
       return '规划中';
     case 'paused':
       return '已暂停';
+    case 'queued':
+      return '排队中';
     case 'pending':
       return '排队中';
     case 'awaiting_user':

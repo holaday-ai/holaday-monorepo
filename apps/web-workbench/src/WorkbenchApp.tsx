@@ -11,6 +11,7 @@ import { ResizeHandle } from '@/components/ResizeHandle';
 import { useToast } from '@/components/ui/toast';
 import { useSidebar } from '@/components/ui/sidebar';
 import { hdDebug } from '@/lib/hd-debug';
+import { taskActionError } from '@/lib/error-copy';
 import { useTaskStore } from '@/stores/task-store';
 import { isQuotaExhausted, useQuotaStatus } from '@/lib/use-quota-status';
 import {
@@ -407,7 +408,7 @@ export function WorkbenchApp(): JSX.Element {
             if (isReplyMode && selectedTaskId) {
               const res = await replyToTask(selectedTaskId, intent, fileIds);
               if ('error' in res) {
-                toast.show(`回复失败：${res.error}`, 'error');
+                toast.show(taskActionError('回复失败', res.error), 'error');
               } else if (!res.ok) {
                 setConfirmRebuildTask({
                   taskId: selectedTaskId,
@@ -419,7 +420,7 @@ export function WorkbenchApp(): JSX.Element {
             }
             if (followUpTarget) {
               const res = await createTask(intent, fileIds, followUpTarget.taskId);
-              if ('error' in res) toast.show(`追问失败：${res.error}`, 'error');
+              if ('error' in res) toast.show(taskActionError('追问失败', res.error), 'error');
               else toast.show('已基于上一个任务追问');
               return;
             }
@@ -434,7 +435,7 @@ export function WorkbenchApp(): JSX.Element {
                   'HOLA DAY 专注浏览器任务执行（搜索、填表、数据采集等）。代码开发建议使用 Claude Code 或 Cursor。',
                 );
               } else {
-                toast.show(`发送失败：${res.error}`, 'error');
+                toast.show(taskActionError('发送失败', res.error), 'error');
               }
             }
           }}
@@ -519,7 +520,7 @@ export function WorkbenchApp(): JSX.Element {
                     enterNewTaskMode();
                     void createTask(intent).then((res) => {
                       if ('error' in res) {
-                        toast.show(`重试失败：${res.error}`, 'error');
+                        toast.show(taskActionError('重试失败', res.error), 'error');
                       }
                     });
                   }
@@ -576,7 +577,7 @@ export function WorkbenchApp(): JSX.Element {
                       enterNewTaskMode();
                       void createTask(intent).then((res) => {
                         if ('error' in res) {
-                          toast.show(`重试失败：${res.error}`, 'error');
+                          toast.show(taskActionError('重试失败', res.error), 'error');
                         }
                       });
                     }
@@ -647,7 +648,7 @@ export function WorkbenchApp(): JSX.Element {
             .join('')
             .trim();
           const res = await createTask(combined);
-          if ('error' in res) toast.show(`重建任务失败：${res.error}`, 'error');
+          if ('error' in res) toast.show(taskActionError('重建任务失败', res.error), 'error');
           else toast.show('已基于当前上下文重新创建任务');
         }}
       />
