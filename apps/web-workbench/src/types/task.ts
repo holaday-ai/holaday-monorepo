@@ -119,6 +119,13 @@ export interface UiTask {
    */
   expertWorkflowId?: string;
   /**
+   * Codex Round 2 P1-7 — user's composer pick (普通/专家/自动) stamped
+   * on task creation. Hydrated from `result.metadata.expertMode` so
+   * analytics + the SPA can show "user requested expert but no
+   * workflow matched" without re-querying.
+   */
+  expertMode?: 'normal' | 'expert' | 'auto';
+  /**
    * Codex Pack A4 — deterministic verifier verdict, populated from
    * `tasks.detail.verificationPassed` / `tasks.detail.failureLevel`.
    * Drives the partial-success / hard-fail banner above the terminal

@@ -98,6 +98,7 @@ import {
   extractFailedChecks,
   initExecution,
   persistExecution,
+  recheckPostFormat,
   recordEvidence,
   summariseVerificationFailure,
   verifyAndFinalize,
@@ -630,6 +631,21 @@ export const tasksRouter = router({
       typedWorkflowOverride ??
       expertWorkflow?.routeOverride ??
       classifiedExecutionMode;
+    // Codex Round 2 P1-7 — explicit observability log at the dispatch
+    // boundary. Lets BOSS run `pm2 logs | grep task:expert_dispatch`
+    // to compare normal vs expert outcomes (expertModeRequested ==
+    // 'normal' AND expertWorkflowMatched != null = a forced-skip that
+    // would otherwise have fired a workflow — useful for measuring
+    // "did the user opt out of value or junk").
+    ctx.logger.info(
+      {
+        userId: ctx.userId,
+        expertModeRequested: expertModeOverride,
+        expertWorkflowMatched: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+        executionMode,
+      },
+      'task:expert_dispatch',
+    );
     if (typedWorkflow != null && executionMode === 'generate') {
       ctx.logger.info(
         {
@@ -1038,22 +1054,50 @@ export const tasksRouter = router({
           expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
           logger: ctx.logger,
         });
+        // Codex Round 2 P1-5 — post-formatter recheck. If the response
+        // layer dropped a citation or merged items, downgrade the
+        // terminal verdict from completed → partial_success so the
+        // SPA's yellow banner fires with a specific "formatter shrunk
+        // the content" hint. Zero-cost when the formatter passed
+        // through (same string reference).
+        let generatePostFormatDowngrade: { downgrade: boolean; reason: string | null } = {
+          downgrade: false,
+          reason: null,
+        };
         if (
           outcome.status === 'completed' &&
           generateRl.summary !== outcome.summary
         ) {
+          generatePostFormatDowngrade = recheckPostFormat(outcome.summary, generateRl.summary);
           outcome = { ...outcome, summary: generateRl.summary };
+        }
+        let generateTerminalStatus = terminalStatus;
+        const generateExtraFailedChecks: Array<{ type: string; detail: string }> = [];
+        if (
+          generatePostFormatDowngrade.downgrade &&
+          generateTerminalStatus === 'completed'
+        ) {
+          generateTerminalStatus = 'partial_success';
+          generateExtraFailedChecks.push({
+            type: 'post_format_regression',
+            detail:
+              generatePostFormatDowngrade.reason ?? '格式化层后内容缩水',
+          });
+          ctx.logger.warn(
+            { taskId, reason: generatePostFormatDowngrade.reason },
+            'generate: post-format recheck flagged regression — downgrading to partial_success',
+          );
         }
 
         try {
-          if (terminalStatus === 'completed' && outcome.status === 'completed') {
+          if (generateTerminalStatus === 'completed' && outcome.status === 'completed') {
             await repo.persistVisionOutcome(taskId, {
               status: 'completed',
               summary: outcome.summary,
               tickCount: 1,
               metadata,
             });
-          } else if (terminalStatus === 'partial_success' && outcome.status === 'completed') {
+          } else if (generateTerminalStatus === 'partial_success' && outcome.status === 'completed') {
             // Codex Pack A3 — verifier flagged soft failure; row keeps
             // summary, status='partial_success' so the SPA renders a
             // yellow "结果可能不完整" banner above the answer.
@@ -1063,7 +1107,7 @@ export const tasksRouter = router({
               tickCount: 1,
               metadata,
             });
-          } else if (terminalStatus === 'failed') {
+          } else if (generateTerminalStatus === 'failed') {
             // Either the runner failed OR the verifier verdict
             // escalated a completed task to failed (hard_fail). Prefer
             // the verifier-synthesised summary when the runner thought
@@ -1121,18 +1165,20 @@ export const tasksRouter = router({
           // Codex Round 2 P1-6 — compute failed-check list once and
           // share it across the partial_success / failed branches.
           // Empty array on a verifier pass; SPA tolerates omission.
-          const generateFailedChecks =
-            executionVerification && !executionVerification.passed
+          const generateFailedChecks = [
+            ...(executionVerification && !executionVerification.passed
               ? extractFailedChecks(executionVerification)
-              : [];
-          if (terminalStatus === 'completed' && outcome.status === 'completed') {
+              : []),
+            ...generateExtraFailedChecks,
+          ];
+          if (generateTerminalStatus === 'completed' && outcome.status === 'completed') {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
               taskId,
               status: 'completed',
               ...(outcome.summary ? { summary: outcome.summary } : {}),
             });
-          } else if (terminalStatus === 'partial_success' && outcome.status === 'completed') {
+          } else if (generateTerminalStatus === 'partial_success' && outcome.status === 'completed') {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
               taskId,
@@ -1140,7 +1186,7 @@ export const tasksRouter = router({
               ...(outcome.summary ? { summary: outcome.summary } : {}),
               ...(generateFailedChecks.length > 0 ? { failedChecks: generateFailedChecks } : {}),
             });
-          } else if (terminalStatus === 'failed') {
+          } else if (generateTerminalStatus === 'failed') {
             const reason =
               outcome.status === 'failed'
                 ? outcome.reason
@@ -1541,22 +1587,47 @@ export const tasksRouter = router({
           expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
           logger: ctx.logger,
         });
+        // Codex Round 2 P1-5 — same post-formatter recheck as generate
+        // lane. Scrape's LLM synthesis lands a citation block at the
+        // end; the formatter rarely shrinks it, but the safety net is
+        // free when the text passes through unchanged.
+        let scrapePostFormatDowngrade: { downgrade: boolean; reason: string | null } = {
+          downgrade: false,
+          reason: null,
+        };
         if (
           outcome.status === 'completed' &&
           scrapeRl.summary !== outcome.summary
         ) {
+          scrapePostFormatDowngrade = recheckPostFormat(outcome.summary, scrapeRl.summary);
           outcome = { ...outcome, summary: scrapeRl.summary };
+        }
+        let scrapeTerminalStatus = terminalStatus;
+        const scrapeExtraFailedChecks: Array<{ type: string; detail: string }> = [];
+        if (
+          scrapePostFormatDowngrade.downgrade &&
+          scrapeTerminalStatus === 'completed'
+        ) {
+          scrapeTerminalStatus = 'partial_success';
+          scrapeExtraFailedChecks.push({
+            type: 'post_format_regression',
+            detail: scrapePostFormatDowngrade.reason ?? '格式化层后内容缩水',
+          });
+          ctx.logger.warn(
+            { taskId, reason: scrapePostFormatDowngrade.reason },
+            'scrape: post-format recheck flagged regression — downgrading to partial_success',
+          );
         }
 
         try {
-          if (terminalStatus === 'completed' && outcome.status === 'completed') {
+          if (scrapeTerminalStatus === 'completed' && outcome.status === 'completed') {
             await repo.persistVisionOutcome(taskId, {
               status: 'completed',
               summary: outcome.summary,
               tickCount: 1,
               metadata,
             });
-          } else if (terminalStatus === 'partial_success' && outcome.status === 'completed') {
+          } else if (scrapeTerminalStatus === 'partial_success' && outcome.status === 'completed') {
             await repo.persistVisionOutcome(taskId, {
               status: 'partial_success',
               summary: outcome.summary,
@@ -1591,18 +1662,20 @@ export const tasksRouter = router({
         try {
           // Codex Round 2 P1-6 — same failedChecks-on-broadcast as
           // the generate lane.
-          const scrapeFailedChecks =
-            executionVerification && !executionVerification.passed
+          const scrapeFailedChecks = [
+            ...(executionVerification && !executionVerification.passed
               ? extractFailedChecks(executionVerification)
-              : [];
-          if (terminalStatus === 'completed' && outcome.status === 'completed') {
+              : []),
+            ...scrapeExtraFailedChecks,
+          ];
+          if (scrapeTerminalStatus === 'completed' && outcome.status === 'completed') {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
               taskId,
               status: 'completed',
               ...(outcome.summary ? { summary: outcome.summary } : {}),
             });
-          } else if (terminalStatus === 'partial_success' && outcome.status === 'completed') {
+          } else if (scrapeTerminalStatus === 'partial_success' && outcome.status === 'completed') {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
               taskId,

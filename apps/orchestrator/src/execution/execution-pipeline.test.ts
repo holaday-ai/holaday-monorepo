@@ -21,9 +21,11 @@ import { _resetLedgerRegistryForTest, getLedger } from './evidence-ledger.js';
 import {
   _resetExecutionPipelineForTest,
   disposeExecution,
+  extractFailedChecks,
   getContract,
   initExecution,
   persistExecution,
+  recheckPostFormat,
   recordEvidence,
   verifyAndFinalize,
 } from './execution-pipeline.js';
@@ -573,5 +575,136 @@ describe('disposeExecution + resilience', () => {
     expect(out.verification!.tier).toBe('llm');
     const fb = out.verification!.checks.find((c) => c.criterionId === 'llm.fallback');
     expect(fb).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Codex Round 2 P1-5 — recheckPostFormat
+// ---------------------------------------------------------------------------
+
+describe('recheckPostFormat — formatter-induced regressions', () => {
+  it('no-op when before === after (formatter passed through)', () => {
+    const text = '答案：xxx';
+    const res = recheckPostFormat(text, text);
+    expect(res.downgrade).toBe(false);
+    expect(res.reason).toBeNull();
+  });
+
+  it('flags downgrade when item count drops', () => {
+    const before = [
+      '```json',
+      '{"items":[{"name":"A","price":1,"url":"https://a.com"},{"name":"B","price":2,"url":"https://b.com"}]}',
+      '```',
+    ].join('\n');
+    const after = [
+      '```json',
+      '{"items":[{"name":"A","price":1,"url":"https://a.com"}]}',
+      '```',
+    ].join('\n');
+    const res = recheckPostFormat(before, after);
+    expect(res.downgrade).toBe(true);
+    expect(res.reason).toContain('结构化结果数减少');
+    expect(res.reason).toContain('2 → 1');
+  });
+
+  it('flags downgrade when URL count drops (prose path, no structured items)', () => {
+    const before = '答案：参考 https://a.com 与 https://b.com';
+    const after = '答案：参考 https://a.com';
+    const res = recheckPostFormat(before, after);
+    expect(res.downgrade).toBe(true);
+    expect(res.reason).toContain('链接数减少');
+  });
+
+  it('does not flag when content actually grew (cosmetic re-format)', () => {
+    const before = '1. iPhone ¥6999 https://a.com\n2. iPad ¥4999 https://b.com';
+    const after = '推荐如下：\n1. iPhone ¥6999 https://a.com\n2. iPad ¥4999 https://b.com\n\n以上数据更新于 2026 年。';
+    const res = recheckPostFormat(before, after);
+    expect(res.downgrade).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Codex Round 2 P1-6 — extractFailedChecks
+// ---------------------------------------------------------------------------
+
+describe('extractFailedChecks — surfaces criterionType for SPA banner', () => {
+  it('returns empty when all checks passed', () => {
+    const out = extractFailedChecks({
+      taskId: 'tsk_x',
+      passed: true,
+      tier: 'deterministic',
+      checks: [
+        {
+          criterionId: 'c1',
+          criterionType: 'url_count',
+          passed: true,
+          checker: 'deterministic',
+          detail: 'ok',
+        },
+      ],
+    });
+    expect(out).toEqual([]);
+  });
+
+  it('uses criterionType when present', () => {
+    const out = extractFailedChecks({
+      taskId: 'tsk_x',
+      passed: false,
+      tier: 'deterministic',
+      checks: [
+        {
+          criterionId: 'abc-123',
+          criterionType: 'url_count',
+          passed: false,
+          checker: 'deterministic',
+          detail: 'only 0 URL(s) found, need at least 1',
+        },
+        {
+          criterionId: 'xyz-456',
+          criterionType: 'price_sort',
+          passed: false,
+          checker: 'deterministic',
+          detail: 'asc order broken at position 2',
+        },
+      ],
+    });
+    expect(out).toEqual([
+      { type: 'url_count', detail: 'only 0 URL(s) found, need at least 1' },
+      { type: 'price_sort', detail: 'asc order broken at position 2' },
+    ]);
+  });
+
+  it('falls back to generic.* criterionId when no criterionType', () => {
+    const out = extractFailedChecks({
+      taskId: 'tsk_x',
+      passed: false,
+      tier: 'deterministic',
+      checks: [
+        {
+          criterionId: 'generic.empty_result',
+          passed: false,
+          checker: 'deterministic',
+          detail: 'meaningful answer length 5',
+        },
+      ],
+    });
+    expect(out).toEqual([{ type: 'generic.empty_result', detail: 'meaningful answer length 5' }]);
+  });
+
+  it('marks unknown criterionId as "unknown"', () => {
+    const out = extractFailedChecks({
+      taskId: 'tsk_x',
+      passed: false,
+      tier: 'deterministic',
+      checks: [
+        {
+          criterionId: 'abc-xyz',
+          passed: false,
+          checker: 'deterministic',
+          detail: 'something broke',
+        },
+      ],
+    });
+    expect(out).toEqual([{ type: 'unknown', detail: 'something broke' }]);
   });
 });

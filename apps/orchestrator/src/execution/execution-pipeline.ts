@@ -40,8 +40,8 @@ import { eq } from 'drizzle-orm';
 import { tasks as tasksTable } from '../db/schema/tasks.js';
 import type { DB } from '../db/client.js';
 
-import type { CheckResult, VerificationResult } from './answer-verifier.js';
-import { verifyDeterministic } from './answer-verifier.js';
+import type { CheckResult, ParsedItem, VerificationResult } from './answer-verifier.js';
+import { extractStructuredItems, verifyDeterministic } from './answer-verifier.js';
 import { autoFix } from './auto-fix.js';
 import type {
   ContractInputs,
@@ -219,6 +219,50 @@ export function deriveFinalStatus(
   // alternative ('awaiting_user' for needs_clarification) would
   // re-open a task the user already closed; that's worse UX.
   return 'partial_success';
+}
+
+/**
+ * Codex Round 2 P1-5 — post-formatter lightweight recheck.
+ *
+ * The response-layer formatter runs AFTER the verifier verdict and
+ * BEFORE persist; in rare cases it can drop URLs or merge items
+ * (the OpenAI post-check usually catches this and falls back to the
+ * original, but the safety net there is itself opt-in). This helper
+ * compares structured-item + URL counts before/after format and
+ * reports a downgrade signal when either count regressed.
+ *
+ * Zero-cost no-op when the formatter didn't change the text (same
+ * reference). Re-uses `extractStructuredItems` so the comparison
+ * uses the same parser as the original verifier.
+ */
+export function recheckPostFormat(
+  before: string,
+  after: string,
+): { downgrade: boolean; reason: string | null } {
+  if (before === after) return { downgrade: false, reason: null };
+  const itemsBefore = extractStructuredItems(before);
+  const itemsAfter = extractStructuredItems(after);
+  const urlsBefore = countUrls(before, itemsBefore);
+  const urlsAfter = countUrls(after, itemsAfter);
+  const reasons: string[] = [];
+  if (itemsAfter.length < itemsBefore.length) {
+    reasons.push(`结构化结果数减少：${itemsBefore.length} → ${itemsAfter.length}`);
+  }
+  if (urlsAfter < urlsBefore) {
+    reasons.push(`链接数减少：${urlsBefore} → ${urlsAfter}`);
+  }
+  if (reasons.length === 0) return { downgrade: false, reason: null };
+  return { downgrade: true, reason: reasons.join('；') };
+}
+
+function countUrls(text: string, items: ParsedItem[]): number {
+  // Mirror checkUrlCount's strategy: prefer parsed-item URLs; fall
+  // back to global URL scan when no items are present (e.g. stock
+  // quote prose).
+  if (items.length > 0) {
+    return items.filter((it) => Boolean(it.url)).length;
+  }
+  return (text.match(/https?:\/\/[^\s,;'")\]>]+/g) ?? []).length;
 }
 
 /**

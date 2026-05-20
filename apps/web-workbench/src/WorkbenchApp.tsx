@@ -63,20 +63,24 @@ export function WorkbenchApp(): JSX.Element {
    * tree updates on resize. matchMedia keeps the listener cheap.
    */
   /**
-   * Codex Pack B2 — three-tier responsive breakpoint:
-   *   - desktop  ≥ 1200px → inline split panel (resize handle, flex)
-   *   - tablet   960-1199 → overlay panel (fixed right, backdrop)
+   * Codex Pack B2 + Round 2 P1-8 — three-tier responsive breakpoint:
+   *   - desktop  ≥ 1360px → inline split panel (resize handle, flex)
+   *   - tablet   960-1359 → overlay panel (fixed right, backdrop)
    *   - mobile   < 960px → bottom sheet (unchanged from pre-B2)
    *
-   * The previous single 1024 threshold flipped between inline and
-   * sheet — but inline at 1024 cramped both columns when the panel's
-   * 300-px floor met the main column's 480-px min-width on a typical
-   * laptop. 1200 gives ~660 px to main when the panel sits at its
-   * 540-px default, comfortable for prose + step list.
+   * Round 2 P1-8 bumped the inline threshold from 1200 → 1360. At
+   * 1200, the panel's 300-px floor + main's 480-px min-width left
+   * ~420 px for the panel header / toolbar / screencast canvas —
+   * tight enough that buttons started crowding when an expert
+   * report card sat alongside. 1360 gives ~580 px for the panel at
+   * its 540-px default. Common 13" laptops are 1280-px native and
+   * fall into the overlay tier (closer to a focused single-pane
+   * read), which the resize handle inside the overlay drawer would
+   * over-engineer anyway.
    */
   const [isDesktop, setIsDesktop] = React.useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
-    return window.matchMedia('(min-width: 1200px)').matches;
+    return window.matchMedia('(min-width: 1360px)').matches;
   });
   const [isMobile, setIsMobile] = React.useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -84,7 +88,7 @@ export function WorkbenchApp(): JSX.Element {
   });
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    const desktopMq = window.matchMedia('(min-width: 1200px)');
+    const desktopMq = window.matchMedia('(min-width: 1360px)');
     const mobileMq = window.matchMedia('(min-width: 960px)');
     const onDesktop = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
     const onMobile = (e: MediaQueryListEvent) => setIsMobile(!e.matches);

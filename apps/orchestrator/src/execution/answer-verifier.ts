@@ -366,25 +366,242 @@ function checkWordCount(
 }
 
 // ---------------------------------------------------------------------------
-// Codex Pack A2 — output-requirement structural checks
+// Codex Pack A2 + Round 2 P1-4 — output-requirement structural checks
 // ---------------------------------------------------------------------------
 
 /**
- * url_count — assert the answer text contains at least `data.min`
- * absolute URLs. Backstop for stock/comparison/general_with_links
- * requirements that demand cited sources.
+ * Codex Round 2 P1-4 — unified item extractor.
+ *
+ * Parses the model's answer into a list of {name, price, url, raw}
+ * records the structural checkers all share. Strategy in priority:
+ *   1. JSON code block (Pack C3 schema): items[] or bare array
+ *   2. Markdown table: cell-position-agnostic field detection
+ *   3. Numbered list: `1. name ¥price https://url` per line
+ *   4. Bullet list: `- text` as a coarse fallback (name only)
+ *
+ * Returns [] when no shape matches. price/url are nullable per item
+ * so the caller can decide what "incomplete" means.
+ *
+ * Why one extractor: pre-P1-4 each checker had its own line-scanner,
+ * which let "说明文字 ¥299 是参考价" leak into price_sort even when
+ * the answer had a perfectly-sorted JSON block above. Now price_sort
+ * etc. only operate on parsed structured items.
+ */
+export interface ParsedItem {
+  name: string | null;
+  price: number | null;
+  url: string | null;
+  raw: string;
+  source: 'json' | 'table' | 'list' | 'bullet';
+}
+
+export function extractStructuredItems(answerText: string): ParsedItem[] {
+  const jsonItems = tryExtractJsonItems(answerText);
+  if (jsonItems.length > 0) return jsonItems;
+  const tableItems = tryExtractTableItems(answerText);
+  if (tableItems.length > 0) return tableItems;
+  const listItems = tryExtractNumberedListItems(answerText);
+  if (listItems.length > 0) return listItems;
+  const bulletItems = tryExtractBulletItems(answerText);
+  if (bulletItems.length > 0) return bulletItems;
+  return [];
+}
+
+const JSON_BLOCK_RE = /```(?:json)?\s*([\s\S]*?)```/i;
+
+function tryExtractJsonItems(answerText: string): ParsedItem[] {
+  const m = answerText.match(JSON_BLOCK_RE);
+  if (!m || !m[1]) return [];
+  try {
+    const parsed = JSON.parse(m[1].trim()) as unknown;
+    const items = pickItemsArray(parsed);
+    if (!items) return [];
+    return items
+      .slice(0, 200) // safety cap
+      .map((raw): ParsedItem => {
+        const obj = (raw ?? {}) as Record<string, unknown>;
+        return {
+          name: pickString(obj.name),
+          price: pickNumber(obj.price),
+          url:
+            typeof obj.url === 'string' && /^https?:\/\//i.test(obj.url)
+              ? obj.url.trim()
+              : null,
+          raw: JSON.stringify(obj),
+          source: 'json',
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+function tryExtractTableItems(answerText: string): ParsedItem[] {
+  const lines = answerText.split(/\r?\n/);
+  const tableRows: string[][] = [];
+  let inTable = false;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!/^\|.*\|$/.test(line)) {
+      if (inTable) inTable = false;
+      continue;
+    }
+    if (/^\|[\s|:-]+\|$/.test(line)) {
+      inTable = true;
+      continue;
+    }
+    if (!inTable) continue;
+    tableRows.push(
+      line
+        .slice(1, -1)
+        .split('|')
+        .map((c) => c.trim()),
+    );
+  }
+  return tableRows.map((cells): ParsedItem => {
+    let name: string | null = null;
+    let price: number | null = null;
+    let url: string | null = null;
+    for (const cell of cells) {
+      const c = cell.trim();
+      if (!c) continue;
+      if (!url) {
+        const found = extractUrlFromCell(c);
+        if (found) {
+          url = found;
+          continue;
+        }
+      }
+      if (price == null) {
+        const parsedPrice = parsePriceText(c);
+        if (parsedPrice != null) {
+          price = parsedPrice;
+          continue;
+        }
+      }
+      if (!name || c.length > name.length) name = c;
+    }
+    return { name, price, url, raw: cells.join(' | '), source: 'table' };
+  });
+}
+
+const NUMBERED_LIST_RE = /^\s*\d+[.、)]\s+(.+)$/;
+
+function tryExtractNumberedListItems(answerText: string): ParsedItem[] {
+  const lines = answerText.split(/\r?\n/);
+  const items: ParsedItem[] = [];
+  for (const raw of lines) {
+    const m = raw.match(NUMBERED_LIST_RE);
+    if (!m || !m[1]) continue;
+    const body = m[1].trim();
+    const url = extractUrlFromCell(body);
+    const price = parsePriceText(body);
+    let name: string | null = body;
+    if (url) name = name.replace(url, '').trim();
+    // Strip the price token off the name with a separate parse so
+    // dropping ¥ doesn't catch random digits embedded in the name.
+    const priceMatch = body.match(
+      /[¥￥$]\s*[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?\s*(?:元|RMB|人民币)/i,
+    );
+    if (priceMatch) name = name.replace(priceMatch[0], '').trim();
+    // Trim residual punctuation (separators between fields).
+    name = name.replace(/^[—\-·,，:：、\s]+|[—\-·,，:：、\s]+$/g, '').trim();
+    items.push({
+      name: name || null,
+      price,
+      url,
+      raw: body,
+      source: 'list',
+    });
+  }
+  return items;
+}
+
+const BULLET_LIST_RE = /^\s*[-*+]\s+(.+)$/;
+
+function tryExtractBulletItems(answerText: string): ParsedItem[] {
+  const lines = answerText.split(/\r?\n/);
+  const items: ParsedItem[] = [];
+  for (const raw of lines) {
+    const m = raw.match(BULLET_LIST_RE);
+    if (!m || !m[1]) continue;
+    const body = m[1].trim();
+    if (!body) continue;
+    items.push({
+      name: body,
+      price: parsePriceText(body),
+      url: extractUrlFromCell(body),
+      raw: body,
+      source: 'bullet',
+    });
+  }
+  return items;
+}
+
+function pickItemsArray(parsed: unknown): unknown[] | null {
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === 'object') {
+    const items = (parsed as { items?: unknown }).items;
+    if (Array.isArray(items)) return items;
+    const candidates = (parsed as { candidates?: unknown }).candidates;
+    if (Array.isArray(candidates)) return candidates;
+  }
+  return null;
+}
+
+function pickString(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  return s ? s : null;
+}
+
+function pickNumber(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') return parsePriceText(v);
+  return null;
+}
+
+function parsePriceText(s: string): number | null {
+  const m = s.match(
+    /[¥￥$]\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)|([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)\s*(?:元|RMB|人民币)/i,
+  );
+  if (!m) return null;
+  const raw = (m[1] ?? m[2] ?? '').replace(/,/g, '');
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function extractUrlFromCell(c: string): string | null {
+  const md = c.match(/\[[^\]]+\]\((https?:\/\/[^)]+)\)/);
+  if (md && md[1]) return md[1];
+  const direct = c.match(/https?:\/\/\S+/);
+  if (direct) return direct[0].replace(/[)\].,;:]+$/, '');
+  return null;
+}
+
+/**
+ * url_count — assert the answer has at least `data.min` URLs.
+ * Codex Round 2 P1-4: prefer ParsedItem[].url when items are
+ * available; fall back to a global URL scan only when the answer
+ * doesn't parse as structured (e.g. stock_quote responses that come
+ * back as prose with a citation). Stops "京东 Apple 自营旗舰店"-as-
+ * bare-text from satisfying the criterion just because the prose
+ * happened to embed an unrelated URL elsewhere.
  *
  * Soft (fixable) failure: lets the verifier downgrade the verdict
- * to partial_success rather than blocking. A genuine hard-fail
- * would over-trigger on completed-but-source-light answers.
+ * to partial_success rather than blocking.
  */
 function checkUrlCount(
   criterion: SuccessCriterion,
   answerText: string,
 ): CheckResult {
   const min = Number(criterion.data?.min ?? 1);
-  const urls = answerText.match(URL_RE) ?? [];
-  const count = urls.length;
+  const items = extractStructuredItems(answerText);
+  const itemUrls = items.map((it) => it.url).filter((u): u is string => Boolean(u));
+  // Fall back to global URL count only when no items parsed at all
+  // (stock_quote / comparison responses that are mostly prose).
+  const count =
+    items.length === 0 ? (answerText.match(URL_RE) ?? []).length : itemUrls.length;
   const passed = count >= min;
   return {
     criterionId: criterion.id,
@@ -392,45 +609,24 @@ function checkUrlCount(
     passed,
     checker: 'deterministic',
     detail: passed
-      ? `${count} URL(s) found, min ${min}`
-      : `only ${count} URL(s) found, need at least ${min}`,
+      ? `${count} URL(s) found (${items.length === 0 ? 'global scan' : 'parsed items'}), min ${min}`
+      : `only ${count} URL(s) found (${items.length === 0 ? 'global scan' : 'parsed items'}), need at least ${min}`,
     severity: passed ? undefined : 'fixable',
   };
 }
 
 /**
- * result_count — count "row-like" items in the answer. Heuristics
- * (best-effort, no LLM):
- *   - numbered list lines  `^\s*\d+[.、]\s+`
- *   - bullet list lines    `^\s*[-*+]\s+`
- *   - table data rows      `^\s*\|.*\|`  excluding separator rows
- *
- * Returns the max of the three counts. Soft (fixable) failure when
- * the count is below `data.min` so the verdict can flip to
- * partial_success — the answer has content, just not enough rows.
+ * result_count — count parsed structured items. Codex Round 2 P1-4
+ * folds the prior numbered/bullet/table heuristics into a single
+ * extractor; this checker just reads its output.
  */
 function checkResultCount(
   criterion: SuccessCriterion,
   answerText: string,
 ): CheckResult {
   const min = Number(criterion.data?.min ?? 1);
-  const lines = answerText.split(/\r?\n/);
-  let numbered = 0;
-  let bullets = 0;
-  let tableRows = 0;
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) continue;
-    if (/^\d+[.、)]\s+\S/.test(line)) numbered++;
-    else if (/^[-*+]\s+\S/.test(line)) bullets++;
-    else if (/^\|.*\|$/.test(line) && !/^\|[\s|:-]+\|$/.test(line)) tableRows++;
-  }
-  // Tables include a header row; only the body rows count as
-  // result items. Subtract one when we see a table separator
-  // anywhere ahead of data rows (cheap proxy for a header).
-  const hasTableHeader = lines.some((l) => /^\|[\s|:-]+\|$/.test(l.trim()));
-  if (hasTableHeader && tableRows > 0) tableRows -= 1;
-  const count = Math.max(numbered, bullets, tableRows);
+  const items = extractStructuredItems(answerText);
+  const count = items.length;
   const passed = count >= min;
   return {
     criterionId: criterion.id,
@@ -438,44 +634,37 @@ function checkResultCount(
     passed,
     checker: 'deterministic',
     detail: passed
-      ? `${count} structured row(s) found, min ${min} (numbered=${numbered}, bullets=${bullets}, table=${tableRows})`
-      : `only ${count} structured row(s) (numbered=${numbered}, bullets=${bullets}, table=${tableRows}), need at least ${min}`,
+      ? `${count} structured item(s) found (${items[0]?.source ?? 'mixed'}), min ${min}`
+      : `only ${count} structured item(s), need at least ${min}`,
     severity: passed ? undefined : 'fixable',
   };
 }
 
-const PRICE_RE = /[¥￥$]\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)|([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)\s*(?:元|RMB|人民币)/gi;
-
 /**
- * price_sort — parse ¥/￥/$/元 prices in answer text in document
- * order and assert monotonic asc or desc. At least 2 prices are
- * required to evaluate; fewer = vacuous pass (result_count covers
- * the "not enough rows" case). Non-strict monotonic (ties allowed)
- * so duplicate prices don't fail an otherwise-sorted listing.
+ * price_sort — validate monotonic asc/desc over the parsed items'
+ * `price` field only. Codex Round 2 P1-4: no more whole-text scan,
+ * so a "建议预算 ¥2,000 起" sentence above the listing doesn't
+ * poison the ordering verdict.
  *
- * Soft (fixable) failure — the answer has content, just wrong
- * order.
+ * < 2 prices = vacuous pass (result_count handles "not enough rows").
+ * Non-strict monotonic — ties allowed for identical prices.
  */
 function checkPriceSort(
   criterion: SuccessCriterion,
   answerText: string,
 ): CheckResult {
   const direction = (criterion.data?.direction as 'asc' | 'desc' | undefined) ?? 'asc';
-  const prices: number[] = [];
-  PRICE_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = PRICE_RE.exec(answerText)) !== null) {
-    const raw = (m[1] ?? m[2] ?? '').replace(/,/g, '');
-    const n = Number(raw);
-    if (Number.isFinite(n) && n > 0) prices.push(n);
-  }
+  const items = extractStructuredItems(answerText);
+  const prices = items
+    .map((it) => it.price)
+    .filter((p): p is number => p != null && p > 0);
   if (prices.length < 2) {
     return {
       criterionId: criterion.id,
       criterionType: 'price_sort',
       passed: true,
       checker: 'deterministic',
-      detail: `only ${prices.length} price(s) parsed — vacuously sorted`,
+      detail: `only ${prices.length} structured price(s) parsed — vacuously sorted`,
     };
   }
   let violation: { i: number; prev: number; cur: number } | null = null;
@@ -498,7 +687,7 @@ function checkPriceSort(
     passed,
     checker: 'deterministic',
     detail: passed
-      ? `${prices.length} prices in ${direction} order: ${prices.slice(0, 8).join(', ')}${
+      ? `${prices.length} structured prices in ${direction} order: ${prices.slice(0, 8).join(', ')}${
           prices.length > 8 ? '…' : ''
         }`
       : `${direction} order broken at position ${violation!.i}: ${violation!.prev} → ${violation!.cur}`,
@@ -507,157 +696,47 @@ function checkPriceSort(
 }
 
 // ---------------------------------------------------------------------------
-// Codex Round 2 P0-2 — per-row ecommerce schema check
+// Codex Round 2 P0-2 + P1-4 — per-row ecommerce schema check
 // ---------------------------------------------------------------------------
 
-interface EcommerceRow {
-  index: number; // 1-based for user-facing "第 N 行" messages
-  name: string | null;
-  priceText: string | null;
-  url: string | null;
-  rawSource: 'json' | 'table';
-}
-
-const PRICE_TEXT_RE = /[¥￥$]\s*[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?\s*(?:元|RMB|人民币)/;
-const JSON_BLOCK_RE = /```(?:json)?\s*([\s\S]*?)```/i;
-
 /**
- * Extract ecommerce rows from the model answer. Tries JSON code
- * block first (structured), falls back to markdown table parsing
- * (one row per table data line). Returns an empty array if neither
- * parse strategy finds anything — the caller treats that as
- * "couldn't validate" rather than a hard failure.
+ * Codex Round 2 P1-4 — rewritten on top of the unified
+ * `extractStructuredItems` so the same parser feeds url_count /
+ * result_count / price_sort / ecommerce_rows. JSON-block answers,
+ * markdown tables, and numbered/bullet lists all flow through the
+ * single pipeline; row-level "第 N 行缺少..." copy survives.
+ *
+ * Skips bullet-source items when auditing (bullet lines rarely have
+ * full {name, price, url} triples and were never the target shape
+ * for ecommerce listings).
  */
-function extractEcommerceRows(answerText: string): EcommerceRow[] {
-  // 1. JSON block path. Per Pack C3 schema, model is asked for
-  //    {items: [{rank, name, price, url, platform}]}. We accept
-  //    either the wrapped form or a bare array.
-  const jsonMatch = answerText.match(JSON_BLOCK_RE);
-  if (jsonMatch && jsonMatch[1]) {
-    try {
-      const parsed = JSON.parse(jsonMatch[1].trim()) as unknown;
-      const items = pickItemsArray(parsed);
-      if (items && items.length > 0) {
-        return items.map((raw, i): EcommerceRow => {
-          const obj = (raw ?? {}) as Record<string, unknown>;
-          const priceVal = obj.price;
-          const priceText =
-            typeof priceVal === 'number'
-              ? String(priceVal)
-              : typeof priceVal === 'string'
-                ? priceVal
-                : null;
-          return {
-            index: i + 1,
-            name: typeof obj.name === 'string' ? obj.name.trim() : null,
-            priceText: priceText && priceText.trim() ? priceText.trim() : null,
-            url: typeof obj.url === 'string' && /^https?:\/\//i.test(obj.url) ? obj.url.trim() : null,
-            rawSource: 'json',
-          };
-        });
-      }
-    } catch {
-      // Malformed JSON block — fall through to markdown-table parse.
-    }
-  }
-  // 2. Markdown table path. Parse `| col | col | col |` lines,
-  //    skip the separator line, and infer which column is the URL
-  //    (any column where the body matches URL_OR_MD_LINK_RE in at
-  //    least one row).
-  const lines = answerText.split(/\r?\n/);
-  const tableRows: string[][] = [];
-  let inTable = false;
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!/^\|.*\|$/.test(line)) {
-      if (inTable) inTable = false;
-      continue;
-    }
-    if (/^\|[\s|:-]+\|$/.test(line)) {
-      inTable = true;
-      continue;
-    }
-    if (!inTable) continue;
-    const cells = line
-      .slice(1, -1)
-      .split('|')
-      .map((c) => c.trim());
-    tableRows.push(cells);
-  }
-  if (tableRows.length === 0) return [];
-  // Cell-position-agnostic field detection. For each cell we ask:
-  // does it look like a URL? a price? otherwise the longest non-
-  // empty text becomes the name. Robust to column reordering.
-  return tableRows.map((cells, i): EcommerceRow => {
-    let name: string | null = null;
-    let priceText: string | null = null;
-    let url: string | null = null;
-    for (const cell of cells) {
-      const c = cell.trim();
-      if (!c) continue;
-      if (!url) {
-        const urlMatch = c.match(/https?:\/\/\S+/);
-        const mdMatch = c.match(/\[[^\]]+\]\((https?:\/\/[^)]+)\)/);
-        if (urlMatch) {
-          url = urlMatch[0].replace(/[)\].,;:]+$/, '');
-          continue;
-        }
-        if (mdMatch && mdMatch[1]) {
-          url = mdMatch[1];
-          continue;
-        }
-      }
-      if (!priceText && PRICE_TEXT_RE.test(c)) {
-        priceText = c;
-        continue;
-      }
-      if (!name || c.length > name.length) {
-        name = c;
-      }
-    }
-    return { index: i + 1, name, priceText, url, rawSource: 'table' };
-  });
-}
-
-function pickItemsArray(parsed: unknown): unknown[] | null {
-  if (Array.isArray(parsed)) return parsed;
-  if (parsed && typeof parsed === 'object') {
-    const items = (parsed as { items?: unknown }).items;
-    if (Array.isArray(items)) return items;
-  }
-  return null;
-}
-
 function checkEcommerceRows(
   criterion: SuccessCriterion,
   answerText: string,
 ): CheckResult {
   const minItems = Number(criterion.data?.minItems ?? 0);
-  const rows = extractEcommerceRows(answerText);
+  const allItems = extractStructuredItems(answerText);
+  const rows = allItems.filter((it) => it.source !== 'bullet');
   if (rows.length === 0) {
-    // Couldn't parse a structured representation — fall back to
-    // soft-fail so the user knows the answer isn't in a verifiable
-    // shape. result_count handles "no rows at all" too, but we want
-    // an explicit "提取不到结构化结果" detail here.
     return {
       criterionId: criterion.id,
       criterionType: 'ecommerce_rows',
       passed: false,
       checker: 'deterministic',
-      detail: '未能从回复中解析出结构化的商品列表（应当是 JSON 块或 markdown 表格）',
+      detail: '未能从回复中解析出结构化的商品列表（应当是 JSON 块、markdown 表格或 1. 2. 3. 编号列表）',
       severity: 'fixable',
     };
   }
   const incomplete: string[] = [];
-  for (const row of rows) {
+  rows.forEach((row, i) => {
     const missing: string[] = [];
     if (!row.name) missing.push('名称');
-    if (!row.priceText) missing.push('价格');
+    if (row.price == null) missing.push('价格');
     if (!row.url) missing.push('链接');
     if (missing.length > 0) {
-      incomplete.push(`第 ${row.index} 行缺少${missing.join('、')}`);
+      incomplete.push(`第 ${i + 1} 行缺少${missing.join('、')}`);
     }
-  }
+  });
   const tooFew = rows.length < minItems;
   const passed = incomplete.length === 0 && !tooFew;
   const detailParts: string[] = [];
@@ -669,7 +748,7 @@ function checkEcommerceRows(
     passed,
     checker: 'deterministic',
     detail: passed
-      ? `已解析 ${rows.length} 条商品（${rows[0]!.rawSource}），均包含名称、价格、链接`
+      ? `已解析 ${rows.length} 条商品（${rows[0]!.source}），均包含名称、价格、链接`
       : detailParts.join('；'),
     severity: passed ? undefined : 'fixable',
   };

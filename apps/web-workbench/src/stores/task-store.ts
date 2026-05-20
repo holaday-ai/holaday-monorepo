@@ -334,6 +334,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           metadata?: {
             attachments?: unknown;
             expertWorkflowId?: unknown;
+            expertMode?: unknown;
           };
         };
         const finalScreenshot =
@@ -385,6 +386,16 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           typeof resultObj.metadata?.expertWorkflowId === 'string' &&
           resultObj.metadata.expertWorkflowId.length > 0
             ? (resultObj.metadata.expertWorkflowId as string)
+            : undefined;
+        // Codex Round 2 P1-7 — surface the user's composer pick on
+        // the task so the SPA can show "expert mode requested but no
+        // workflow matched" (and so future analytics can compare
+        // normal vs expert runs without re-querying the DB).
+        const expertMode =
+          resultObj.metadata?.expertMode === 'normal' ||
+          resultObj.metadata?.expertMode === 'expert' ||
+          resultObj.metadata?.expertMode === 'auto'
+            ? (resultObj.metadata.expertMode as 'normal' | 'expert' | 'auto')
             : undefined;
         let hydratedWebSearch: UiWebSearchEvent | null = null;
         for (const s of detail.steps ?? []) {
@@ -485,6 +496,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                       ...(executionMode ? { executionMode } : {}),
                       ...(attachments ? { attachments } : {}),
                       ...(expertWorkflowId ? { expertWorkflowId } : {}),
+                      ...(expertMode ? { expertMode } : {}),
                       verificationPassed,
                       failureLevel,
                     }

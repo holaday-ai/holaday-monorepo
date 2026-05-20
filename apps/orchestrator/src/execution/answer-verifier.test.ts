@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { verifyDeterministic } from './answer-verifier.js';
+import { extractStructuredItems, verifyDeterministic } from './answer-verifier.js';
 import { DOUYIN_REVIEW_WORKFLOW } from './expert-workflow-douyin.js';
 import type { ExecutionContract } from './execution-contract.js';
 import { buildContract } from './execution-contract.js';
@@ -790,5 +790,201 @@ describe('verifyDeterministic — workflow section_presence + source_annotation 
     expect(annotationCheck!.detail).toContain('核心数据');
     expect(annotationCheck!.severity).toBe('fixable');
     expect(result.failureLevel).toBe('fixable');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Codex Round 2 P1-4 — extractStructuredItems
+// ---------------------------------------------------------------------------
+
+describe('extractStructuredItems — JSON code block path', () => {
+  it('parses JSON items[] wrapper with name + numeric price + url', () => {
+    const answer = [
+      'Here are the top results:',
+      '```json',
+      JSON.stringify({
+        items: [
+          { name: 'iPhone 16', price: 6999, url: 'https://item.jd.com/100123.html' },
+          { name: 'iPhone 16 Pro', price: 9999, url: 'https://item.jd.com/100456.html' },
+        ],
+      }),
+      '```',
+    ].join('\n');
+    const items = extractStructuredItems(answer);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      name: 'iPhone 16',
+      price: 6999,
+      url: 'https://item.jd.com/100123.html',
+      source: 'json',
+    });
+    expect(items[1]!.price).toBe(9999);
+  });
+
+  it('parses bare JSON array form', () => {
+    const answer = '```json\n[{"name":"A","price":100,"url":"https://x.com/a"}]\n```';
+    const items = extractStructuredItems(answer);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ name: 'A', price: 100, source: 'json' });
+  });
+
+  it('parses ¥-prefixed string price via parsePriceText', () => {
+    const answer = '```json\n{"items":[{"name":"X","price":"¥1,299.99","url":"https://x.com/x"}]}\n```';
+    const items = extractStructuredItems(answer);
+    expect(items[0]!.price).toBeCloseTo(1299.99);
+  });
+
+  it('skips non-https url field (treats as missing)', () => {
+    const answer = '```json\n{"items":[{"name":"X","price":99,"url":"not-a-url"}]}\n```';
+    const items = extractStructuredItems(answer);
+    expect(items[0]!.url).toBeNull();
+  });
+
+  it('falls through to next strategy when JSON is malformed', () => {
+    const answer = [
+      '```json',
+      '{ this is not valid JSON',
+      '```',
+      '',
+      '| name | price | link |',
+      '| --- | --- | --- |',
+      '| Phone A | ¥1999 | https://example.com/a |',
+    ].join('\n');
+    const items = extractStructuredItems(answer);
+    expect(items[0]!.source).toBe('table');
+    expect(items[0]!.url).toBe('https://example.com/a');
+  });
+});
+
+describe('extractStructuredItems — markdown table path', () => {
+  it('parses cell-position-agnostic table (url + price + name in any column order)', () => {
+    const answer = [
+      '商品对比：',
+      '| 商品 | 价格 | 链接 |',
+      '| --- | --- | --- |',
+      '| iPhone 16 | ¥6,999 | https://item.jd.com/x.html |',
+      '| iPhone 16 Pro | ¥9,999 | https://item.jd.com/y.html |',
+    ].join('\n');
+    const items = extractStructuredItems(answer);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      name: 'iPhone 16',
+      price: 6999,
+      url: 'https://item.jd.com/x.html',
+      source: 'table',
+    });
+  });
+
+  it('handles markdown-link cells: [text](url) extracts the inner URL', () => {
+    const answer = [
+      '| name | url |',
+      '| --- | --- |',
+      '| Phone | [JD](https://item.jd.com/abc.html) |',
+    ].join('\n');
+    const items = extractStructuredItems(answer);
+    expect(items[0]!.url).toBe('https://item.jd.com/abc.html');
+  });
+});
+
+describe('extractStructuredItems — numbered list path', () => {
+  it('parses "1. name ¥price https://url" lines', () => {
+    const answer = [
+      '推荐如下：',
+      '1. iPhone 16 ¥6999 https://item.jd.com/a.html',
+      '2. iPhone 16 Pro ¥9999 https://item.jd.com/b.html',
+      '3. iPhone 16 Pro Max ¥12999 https://item.jd.com/c.html',
+    ].join('\n');
+    const items = extractStructuredItems(answer);
+    expect(items).toHaveLength(3);
+    expect(items[0]).toMatchObject({
+      name: 'iPhone 16',
+      price: 6999,
+      url: 'https://item.jd.com/a.html',
+      source: 'list',
+    });
+    expect(items[2]!.price).toBe(12999);
+  });
+
+  it('keeps name when URL/price absent', () => {
+    const answer = '1. iPhone 16 推荐\n2. iPhone 16 Pro 推荐';
+    const items = extractStructuredItems(answer);
+    expect(items).toHaveLength(2);
+    expect(items[0]!.url).toBeNull();
+    expect(items[0]!.price).toBeNull();
+    expect(items[0]!.name).toBe('iPhone 16 推荐');
+  });
+});
+
+describe('extractStructuredItems — bullet list (low fidelity)', () => {
+  it('treats "- text" as bullet items when nothing else matches', () => {
+    const answer = '想法：\n- 第一项\n- 第二项 ¥99\n- 第三项 https://example.com';
+    const items = extractStructuredItems(answer);
+    expect(items).toHaveLength(3);
+    expect(items[0]!.source).toBe('bullet');
+    expect(items[1]!.price).toBe(99);
+    expect(items[2]!.url).toBe('https://example.com');
+  });
+
+  it('returns [] when answer has no recognised structure', () => {
+    const answer = '这是一段纯文字回答，没有 JSON 块也没有 列表。';
+    const items = extractStructuredItems(answer);
+    expect(items).toHaveLength(0);
+  });
+});
+
+describe('price_sort — only consults parsed items (no prose poisoning)', () => {
+  it('ignores price-looking text in prose when items are sorted', () => {
+    const contract = buildContract({
+      taskId: 'tsk_ps1',
+      intent: '推荐 5 个商品按价格升序',
+      executionMode: 'generate',
+    });
+    // The intro mentions ¥10000 — but the items below are correctly
+    // sorted ¥100 → ¥200 → ¥300. Pre-P1-4 would have included
+    // ¥10000 as the first price and failed the asc check.
+    const answer = [
+      '建议预算 ¥10000 起。',
+      '',
+      '| name | price | url |',
+      '| --- | --- | --- |',
+      '| A | ¥100 | https://a.com |',
+      '| B | ¥200 | https://b.com |',
+      '| C | ¥300 | https://c.com |',
+    ].join('\n');
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_ps1'),
+      answerText: answer,
+    });
+    const sortCheck = result.checks.find((c) => c.criterionType === 'price_sort');
+    expect(sortCheck).toBeDefined();
+    expect(sortCheck!.passed).toBe(true);
+  });
+
+  it('catches reversed ordering in JSON items', () => {
+    const contract = buildContract({
+      taskId: 'tsk_ps2',
+      intent: '前 3 商品按价格升序',
+      executionMode: 'generate',
+    });
+    const answer = [
+      '```json',
+      JSON.stringify({
+        items: [
+          { name: 'C', price: 300, url: 'https://c.com' },
+          { name: 'B', price: 200, url: 'https://b.com' },
+          { name: 'A', price: 100, url: 'https://a.com' },
+        ],
+      }),
+      '```',
+    ].join('\n');
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_ps2'),
+      answerText: answer,
+    });
+    const sortCheck = result.checks.find((c) => c.criterionType === 'price_sort');
+    expect(sortCheck!.passed).toBe(false);
+    expect(sortCheck!.detail).toContain('order broken');
   });
 });
