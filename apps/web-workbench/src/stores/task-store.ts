@@ -98,6 +98,19 @@ export interface TaskStore {
    */
   progressByTask: Record<string, string>;
   /**
+   * Codex Pack B1 — coarse phase marker for the live progress chip.
+   * Backend broadcasts `server.task.progress` with a `subStatus`
+   * field when entering one of five logical phases (planning →
+   * browsing/extracting/generating → verifying). Cleared on terminal
+   * arrival so the chip never lingers after a task completes. `since`
+   * is a client-side timestamp captured the FIRST time a sub_status
+   * arrives, used to drive the 30s+ elapsed-time timer in TaskStream.
+   */
+  subStatusByTask: Record<
+    string,
+    { subStatus: 'planning' | 'browsing' | 'extracting' | 'verifying' | 'generating'; since: number }
+  >;
+  /**
    * Phase 24 RC follow-up — set of taskIds that have reached a
    * terminal state (server.task.terminal received). The
    * stale-delta guard for stream / progress handlers checks THIS
@@ -545,6 +558,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   suggestionsByTask: {},
   streamingByTask: {},
   progressByTask: {},
+  subStatusByTask: {},
   terminalTaskIds: new Set<string>(),
   animatedTaskIds: new Set<string>(),
   // Default OFF: the product story is "watch the agent" — the user
@@ -1027,6 +1041,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         // immediately — no replay on every sidebar click.
         const nextAnimatedIds = new Set(prev.animatedTaskIds);
         nextAnimatedIds.add(msg.taskId);
+        // Codex Pack B1 — clear sub-status on terminal so the chip
+        // disappears the moment a task finishes. Unlike
+        // streamingByTask / progressByTask (which we keep around to
+        // bridge the terminal → TerminalSummary handoff), the chip is
+        // a pure live-state surface — keeping it would leave "正在
+        // 操作浏览器…" hanging next to a completed result.
+        const nextSubStatus = { ...prev.subStatusByTask };
+        delete nextSubStatus[msg.taskId];
         return {
           tasks: prev.tasks.map((t) =>
             t.taskId === msg.taskId
@@ -1040,6 +1062,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           ),
           terminalTaskIds: nextTerminalIds,
           animatedTaskIds: nextAnimatedIds,
+          subStatusByTask: nextSubStatus,
           // streamingByTask + progressByTask unchanged; buffers
           // persist until resultText is rendered in their place.
         };
@@ -1114,24 +1137,57 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       // Phase 24 RC follow-up — coarse progress note (latest wins).
       // Same stale-message guard as server.task.stream — Set
       // membership, not tasks-array status.
+      // Codex Pack B1 — optional `subStatus` field drives the
+      // live-phase chip in TaskStream. Recorded with a client-side
+      // timestamp so the 30s+ elapsed timer can run without needing
+      // server clock alignment.
+      const subStatus = (msg as { subStatus?: string }).subStatus;
+      const typedSubStatus =
+        subStatus === 'planning' ||
+        subStatus === 'browsing' ||
+        subStatus === 'extracting' ||
+        subStatus === 'verifying' ||
+        subStatus === 'generating'
+          ? subStatus
+          : null;
       set((prev) => {
         const isTerminal = prev.terminalTaskIds.has(msg.taskId);
         hdDebug('progress', {
           taskId: msg.taskId,
           isTerminal,
           message: msg.message,
+          subStatus: typedSubStatus,
           gated: isTerminal,
         });
         if (isTerminal) return prev;
+        const nextSubStatus = typedSubStatus
+          ? {
+              ...prev.subStatusByTask,
+              [msg.taskId]:
+                // Reuse `since` if the chip was already up — gives a
+                // continuous timer across phase transitions instead of
+                // resetting to 0 every time the runner advances.
+                prev.subStatusByTask[msg.taskId]
+                  ? { subStatus: typedSubStatus, since: prev.subStatusByTask[msg.taskId]!.since }
+                  : { subStatus: typedSubStatus, since: Date.now() },
+            }
+          : prev.subStatusByTask;
         return {
           progressByTask: {
             ...prev.progressByTask,
             [msg.taskId]: msg.message,
           },
-          // Same rationale as the stream branch above — progress
-          // notes only come from generate / scrape, never browser.
+          subStatusByTask: nextSubStatus,
+          // Pre-B1: progress notes only came from generate / scrape, so
+          // we eagerly flipped executionMode='generate' to keep the
+          // BrowserPanel from rendering for non-browser tasks. Pack B1
+          // adds supercar/browser progress events; skip the flip when
+          // the new subStatus is `browsing` (real browser session) so
+          // the panel stays mounted.
           tasks: prev.tasks.map((t) =>
-            t.taskId === msg.taskId && t.executionMode !== 'generate'
+            t.taskId === msg.taskId &&
+            t.executionMode !== 'generate' &&
+            typedSubStatus !== 'browsing'
               ? { ...t, executionMode: 'generate' as const }
               : t,
           ),
@@ -1395,6 +1451,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       suggestionsByTask: {},
       streamingByTask: {},
       progressByTask: {},
+      subStatusByTask: {},
       terminalTaskIds: new Set<string>(),
       animatedTaskIds: new Set<string>(),
     });

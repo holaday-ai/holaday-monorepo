@@ -714,6 +714,23 @@ export const serverTaskProgressSchema = z.object({
   type: z.literal('server.task.progress'),
   taskId: z.string(),
   message: z.string(),
+  /**
+   * Codex Pack B1 — coarse phase marker for the live status chip.
+   * Transient (never persisted); the SPA only renders the latest
+   * subStatus per task in TaskStream's BoardingLine area + an elapsed-
+   * time timer at 30s+.
+   *
+   *   planning   — buildContract / classifyIntent finished, runner
+   *                hasn't dispatched yet
+   *   browsing   — supercar Brave is loaded and navigating
+   *   extracting — scrape lane firecrawl call in flight
+   *   verifying  — verifyAndFinalize entered (post-runner, pre-persist)
+   *   generating — generate / scrape LLM stream actively producing
+   *                text
+   */
+  subStatus: z
+    .enum(['planning', 'browsing', 'extracting', 'verifying', 'generating'])
+    .optional(),
 });
 
 /**

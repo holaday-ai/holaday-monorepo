@@ -9,14 +9,17 @@ import {
   ExternalLink,
   FileText,
   Globe,
+  KeyRound,
   Link2,
   Loader2,
+  LogIn,
   MessageCircleQuestion,
   MoreHorizontal,
   MousePointerClick,
   Puzzle,
   RotateCcw,
   Search,
+  ShieldAlert,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -40,6 +43,7 @@ import { PlanCard } from '@/components/PlanCard';
 import { SearchResultCard } from '@/components/SearchResultCard';
 import { StepCard } from '@/components/StepCard';
 import { hdDebug } from '@/lib/hd-debug';
+import { trpc } from '@/lib/trpc';
 import { useTaskStore } from '@/stores/task-store';
 import { cn } from '@/lib/utils';
 import type {
@@ -288,6 +292,10 @@ function AgentBlock({
   // terminal so the canonical resultText takes over.
   const streamingText = useTaskStore((s) => s.streamingByTask[task.taskId]);
   const progressMessage = useTaskStore((s) => s.progressByTask[task.taskId]);
+  // Codex Pack B1 — live sub-status chip. Backend broadcasts
+  // server.task.progress with a `subStatus` field at 5 phase
+  // boundaries; store records it + a client-side `since` timestamp.
+  const subStatusEntry = useTaskStore((s) => s.subStatusByTask[task.taskId]);
   // Set populated when a `server.task.terminal` arrives live — used
   // to gate the typewriter reveal so historical task clicks render
   // the summary statically (no per-mount replay).
@@ -371,7 +379,18 @@ function AgentBlock({
 
         {thinking && <ThinkingBlock text={thinking} />}
 
-        {!hasAnyActivity && !terminal && <BoardingLine />}
+        {/* Codex Pack B1 — live sub-status chip. Shown when the runner
+            has broadcast a phase marker AND the task isn't terminal.
+            Takes precedence over BoardingLine since the chip is the
+            more specific surface ("正在操作浏览器… 45s" beats "正在
+            分析您的请求"). */}
+        {!terminal && subStatusEntry && (
+          <LiveSubStatusChip
+            subStatus={subStatusEntry.subStatus}
+            since={subStatusEntry.since}
+          />
+        )}
+        {!hasAnyActivity && !terminal && !subStatusEntry && <BoardingLine />}
 
         {showInlineProgress && humanLines.length > 0 && (
           <HumanLineList lines={humanLines} />
@@ -400,7 +419,13 @@ function AgentBlock({
         {degrade && !executorFallback && <DegradeBanner event={degrade} />}
         {executorFallback && <ExecutorFallbackBanner fallback={executorFallback} />}
 
-        {awaitingUser && <AwaitingUserBanner wait={awaitingUser} />}
+        {awaitingUser && (
+          <AwaitingUserBanner
+            wait={awaitingUser}
+            taskId={task.taskId}
+            taskTickCount={task.tickCount}
+          />
+        )}
 
         {/* Phase 24 RC follow-up — incremental streaming output for
          *  generate + scrape tasks. Render gate (Bug 1 fix):
@@ -607,26 +632,137 @@ function VerificationBanner({
   );
 }
 
-function AwaitingUserBanner({ wait }: { wait: UiAwaitingUser }): JSX.Element {
+/**
+ * Codex Pack B3 — awaiting_user banner with typed cards.
+ *
+ * Backend already attaches `awaitingKind` to the WS event (supercar
+ * agent-loop runs login / captcha / permission probes and writes
+ * the verdict before parking). The banner reads that field and picks
+ * an icon + title + body that match the kind of input the agent is
+ * waiting for. All kinds share the same shell + progress summary +
+ * cancel/continue affordances; only the lucide icon and the body
+ * copy differ.
+ *
+ * `taskTickCount` powers the "已完成 N 步" summary. Cancel calls
+ * tasks.abort which is the existing supercar abort path; the
+ * orchestrator persists status='cancelled' and broadcasts
+ * server.task.terminal. Continue is a no-op affordance pointing the
+ * user at the composer (where tasks.reply actually lands the input).
+ */
+function AwaitingUserBanner({
+  wait,
+  taskId,
+  taskTickCount,
+}: {
+  wait: UiAwaitingUser;
+  taskId: string;
+  taskTickCount: number;
+}): JSX.Element {
+  const toast = useToast();
+  const [cancelling, setCancelling] = React.useState(false);
+  const kind = wait.awaitingKind ?? 'clarification';
+  const meta = AWAITING_KIND_META[kind] ?? AWAITING_KIND_META.clarification;
+  const Icon = meta.icon;
+  const handleCancel = React.useCallback(async () => {
+    if (cancelling) return;
+    setCancelling(true);
+    try {
+      await trpc.tasks.abort.mutate({ taskId });
+      toast.show('已取消任务', 'info', 2000);
+    } catch (err) {
+      toast.show(
+        `取消失败：${err instanceof Error ? err.message : String(err)}`,
+        'error',
+      );
+    } finally {
+      setCancelling(false);
+    }
+  }, [cancelling, taskId, toast]);
+  // Clarification questions have the agent's actual prompt in
+  // wait.question; the auth/permission kinds use a static prompt
+  // because the agent didn't compose a fresh sentence. Show the
+  // question text in clarification mode only.
+  const showAgentQuestion = kind === 'clarification' && wait.question;
   return (
     <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-[0_1px_2px_rgba(0,0,0,0.03)] dark:border-amber-900/50 dark:bg-amber-950/30">
       <div className="flex items-start gap-2.5">
-        <MessageCircleQuestion className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
+        <Icon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
         <div className="min-w-0 flex-1">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
-            HOLA DAY 想跟你确认
+            {meta.title}
           </div>
           <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-amber-950 dark:text-amber-100">
-            {wait.question}
+            {showAgentQuestion ? wait.question : meta.body}
           </p>
-          <p className="mt-2 text-[11px] text-amber-700/80 dark:text-amber-500/80">
-            在下方输入框回答，任务会继续。
-          </p>
+          {showAgentQuestion && (
+            <p className="mt-2 text-[11px] text-amber-700/80 dark:text-amber-500/80">
+              在下方输入框回答，任务会继续。
+            </p>
+          )}
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+            {taskTickCount > 0 && (
+              <span className="rounded-md border border-amber-300/60 bg-amber-100/60 px-2 py-0.5 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+                已完成 {taskTickCount} 步
+              </span>
+            )}
+            <span className="text-amber-700/70 dark:text-amber-500/70">
+              {meta.continueHint}
+            </span>
+            <button
+              type="button"
+              onClick={() => void handleCancel()}
+              disabled={cancelling}
+              className="ml-auto inline-flex h-7 items-center gap-1 rounded-md border border-amber-300/60 bg-transparent px-2.5 text-amber-800 transition-colors hover:bg-amber-100/60 disabled:opacity-60 dark:border-amber-500/40 dark:text-amber-200 dark:hover:bg-amber-500/10"
+            >
+              {cancelling ? '正在取消…' : '取消任务'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
+
+const AWAITING_KIND_META: Record<
+  NonNullable<UiAwaitingUser['awaitingKind']>,
+  {
+    icon: React.ComponentType<{ className?: string }>;
+    title: string;
+    body: string;
+    continueHint: string;
+  }
+> = {
+  login: {
+    icon: LogIn,
+    title: '需要登录',
+    body: '请在右侧浏览器中完成登录或扫码，任务会自动继续。',
+    continueHint: '在浏览器面板里完成登录',
+  },
+  captcha: {
+    icon: ShieldAlert,
+    title: '需要验证',
+    body: '请在右侧浏览器中完成验证码，任务会自动继续。',
+    continueHint: '在浏览器面板里通过验证',
+  },
+  clarification: {
+    icon: MessageCircleQuestion,
+    title: 'HOLA DAY 想跟你确认',
+    body: '需要更多信息才能继续。',
+    continueHint: '在下方输入框回答',
+  },
+  permission: {
+    icon: KeyRound,
+    title: '需要授权',
+    body: '请在右侧浏览器中授权访问，任务会自动继续。',
+    continueHint: '在浏览器面板里完成授权',
+  },
+  browser_action: {
+    icon: MousePointerClick,
+    title: '需要你接管浏览器',
+    body: '请在右侧浏览器里完成下一步操作，任务会自动继续。',
+    continueHint: '在浏览器面板里完成操作',
+  },
+};
 
 /**
  * Compact "agent is on SITE" chip shown in the stream while a task is
@@ -731,6 +867,56 @@ function LiveStatus({
         />
       )}
       <span>{label}</span>
+    </div>
+  );
+}
+
+/**
+ * Codex Pack B1 — live phase chip.
+ *
+ * Mirrors BoardingLine's visual weight but reads from the
+ * subStatusByTask store entry: shows the phase label ("正在规划任务",
+ * "正在操作浏览器", "正在生成回答", etc.) + three animated dots +,
+ * when the phase has been running for > 30s, an elapsed-time
+ * suffix ("45s") so the user knows the task is still alive on a
+ * long-running phase. Tick at 1Hz to avoid hot-rendering.
+ */
+function LiveSubStatusChip({
+  subStatus,
+  since,
+}: {
+  subStatus: 'planning' | 'browsing' | 'extracting' | 'verifying' | 'generating';
+  since: number;
+}): JSX.Element {
+  const labels: Record<typeof subStatus, string> = {
+    planning: '正在规划任务',
+    browsing: '正在操作浏览器',
+    extracting: '正在提取数据',
+    verifying: '正在验证结果',
+    generating: '正在生成回答',
+  };
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+  const elapsedSec = Math.max(0, Math.floor((now - since) / 1000));
+  const showTimer = elapsedSec >= 30;
+  return (
+    <div className="flex items-center gap-3 text-sm text-muted-foreground">
+      <span className="text-foreground/70">{labels[subStatus]}</span>
+      <span aria-hidden className="flex items-end text-muted-foreground">
+        <span className="hola-typing-dot" />
+        <span className="hola-typing-dot" />
+        <span className="hola-typing-dot" />
+      </span>
+      {showTimer && (
+        <span className="text-[11px] tabular-nums text-muted-foreground/70">
+          {elapsedSec < 60
+            ? `${elapsedSec}s`
+            : `${Math.floor(elapsedSec / 60)}分${elapsedSec % 60}s`}
+        </span>
+      )}
     </div>
   );
 }

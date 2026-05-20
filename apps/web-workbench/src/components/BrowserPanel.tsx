@@ -517,6 +517,29 @@ export function BrowserPanel({
       return n;
     });
   }, []);
+  // Codex Pack B2 — long-connecting reconnect affordance. The viewer
+  // sits in `connecting` state when noVNC is still finishing its TLS
+  // handshake / RFB protocol negotiation. Usually 1-3s; if it drags
+  // past 5s, surface a "重新连接" button so the user can force a
+  // fresh WS attempt instead of staring at the placeholder text.
+  // Tracked separately from `vncAttemptFails` (which counts
+  // disconnected/error, not slow-connect).
+  const [showReconnect, setShowReconnect] = React.useState(false);
+  const [reconnectEpoch, setReconnectEpoch] = React.useState(0);
+  React.useEffect(() => {
+    if (vncStatus !== 'connecting' && vncStatus !== 'idle') {
+      setShowReconnect(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setShowReconnect(true), 5000);
+    return () => window.clearTimeout(timer);
+  }, [vncStatus, reconnectEpoch]);
+  const handleManualReconnect = React.useCallback(() => {
+    setShowReconnect(false);
+    setVncStatus('idle');
+    setVncAttemptFails(0);
+    setReconnectEpoch((n) => n + 1);
+  }, []);
   // RC audit fix — banner grace period. The "画面已断开，重连中"
   // banner used to flip ON instantly when the WS closed, and stay on
   // for the entire backoff window (up to 5 s). For transient closes
@@ -1160,6 +1183,11 @@ export function BrowserPanel({
               <div className="relative h-full w-full">
                 {usingCdp ? (
                   <CdpScreencastViewport
+                    // Codex Pack B2 — bumping reconnectEpoch forces a
+                    // fresh CdpScreencastViewport mount, which closes
+                    // the existing WS and opens a new one. Drives the
+                    // "重新连接" button after 5s of connecting.
+                    key={`cdp-${reconnectEpoch}`}
                     wsUrl={screencastUrlForCdp}
                     viewOnly={!interactiveActive}
                     onStatusChange={(s: CdpScreencastStatus) =>
@@ -1178,6 +1206,8 @@ export function BrowserPanel({
                   />
                 ) : (
                   <VncViewport
+                    // Codex Pack B2 — same reconnect-via-remount key.
+                    key={`vnc-${reconnectEpoch}`}
                     wsUrl={vncUrl}
                     viewOnly={!interactiveActive}
                     onStatusChange={handleVncStatus}
@@ -1190,8 +1220,18 @@ export function BrowserPanel({
                   />
                 )}
                 {(vncStatus === 'idle' || vncStatus === 'connecting') && (
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/30 text-xs text-muted-foreground">
-                    连接实时画面…
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/30 text-xs text-muted-foreground">
+                    <span className="pointer-events-none">连接实时画面…</span>
+                    {showReconnect && (
+                      <button
+                        type="button"
+                        onClick={handleManualReconnect}
+                        className="pointer-events-auto inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-[11px] font-medium text-foreground transition-colors hover:bg-muted"
+                      >
+                        <RotateCw className="h-3 w-3" />
+                        重新连接
+                      </button>
+                    )}
                   </div>
                 )}
                 {vncStatus === 'disconnected' && showDisconnectBanner && (

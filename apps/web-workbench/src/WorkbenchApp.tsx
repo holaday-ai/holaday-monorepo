@@ -62,41 +62,70 @@ export function WorkbenchApp(): JSX.Element {
    * Track the breakpoint in state (not just a ref) so the render
    * tree updates on resize. matchMedia keeps the listener cheap.
    */
-  const [isLg, setIsLg] = React.useState<boolean>(() => {
+  /**
+   * Codex Pack B2 — three-tier responsive breakpoint:
+   *   - desktop  ≥ 1200px → inline split panel (resize handle, flex)
+   *   - tablet   960-1199 → overlay panel (fixed right, backdrop)
+   *   - mobile   < 960px → bottom sheet (unchanged from pre-B2)
+   *
+   * The previous single 1024 threshold flipped between inline and
+   * sheet — but inline at 1024 cramped both columns when the panel's
+   * 300-px floor met the main column's 480-px min-width on a typical
+   * laptop. 1200 gives ~660 px to main when the panel sits at its
+   * 540-px default, comfortable for prose + step list.
+   */
+  const [isDesktop, setIsDesktop] = React.useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
-    return window.matchMedia('(min-width: 1024px)').matches;
+    return window.matchMedia('(min-width: 1200px)').matches;
+  });
+  const [isMobile, setIsMobile] = React.useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return !window.matchMedia('(min-width: 960px)').matches;
   });
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    const mq = window.matchMedia('(min-width: 1024px)');
-    const onChange = (e: MediaQueryListEvent) => setIsLg(e.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
+    const desktopMq = window.matchMedia('(min-width: 1200px)');
+    const mobileMq = window.matchMedia('(min-width: 960px)');
+    const onDesktop = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    const onMobile = (e: MediaQueryListEvent) => setIsMobile(!e.matches);
+    desktopMq.addEventListener('change', onDesktop);
+    mobileMq.addEventListener('change', onMobile);
+    return () => {
+      desktopMq.removeEventListener('change', onDesktop);
+      mobileMq.removeEventListener('change', onMobile);
+    };
   }, []);
+  // tablet sits between desktop and mobile — the new overlay zone.
+  const isTablet = !isDesktop && !isMobile;
+  // Pre-B2 callers that branched on `isLg` (inline-vs-sheet) now read
+  // this alias so the existing render logic + cross-bridge effects
+  // keep working. Inline = desktop only; everything below desktop
+  // routes through a non-inline surface (overlay OR sheet).
+  const isLg = isDesktop;
   /**
-   * When the user crosses the lg boundary WHILE the inline panel
-   * was open, bridge to the sheet so they don't suddenly see a
-   * blank main area. Vice versa when growing back: close the sheet
-   * if it was the only thing showing the panel. (Sheet stays a
-   * user-action-only surface; we don't auto-open on widen.)
+   * When the user crosses the inline boundary WHILE the inline panel
+   * was open, bridge to the appropriate non-inline surface so they
+   * don't suddenly see a blank main area:
+   *   - leaving desktop → tablet: overlay opens automatically (no
+   *     extra state — the conditional render below picks it up).
+   *   - leaving tablet → mobile: open the sheet so the panel content
+   *     stays visible (sheet is a stateful drawer, not a derived
+   *     render like overlay).
+   *   - growing back to desktop: close sheet if it was open.
    */
   const prevIsLgRef = React.useRef(isLg);
   React.useEffect(() => {
     const wasLg = prevIsLgRef.current;
     prevIsLgRef.current = isLg;
     if (wasLg === isLg) return;
-    // wasLg=true → isLg=false: inline panel just unmounted. If it
-    // was open, open the sheet so the user keeps seeing the panel.
-    if (wasLg && !isLg && sidePanelOverride !== 'close') {
+    if (wasLg && !isLg && sidePanelOverride !== 'close' && isMobile) {
       setBrowserSheetOpen(true);
     }
-    // wasLg=false → isLg=true: sheet path no longer applies. Close
-    // the sheet (the inline panel is back in the layout).
     if (!wasLg && isLg && browserSheetOpen) {
       setBrowserSheetOpen(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLg]);
+  }, [isLg, isMobile]);
   // Single side-panel intent flag. `null` = use the default (live
   // tasks auto-open, terminal tasks stay hidden); `'open'` /
   // `'close'` forces the panel one way regardless of the default.
@@ -423,17 +452,17 @@ export function WorkbenchApp(): JSX.Element {
         />
       )}
 
-      {!panelFullscreen && showBrowserPanel && isLg && (
+      {!panelFullscreen && showBrowserPanel && isDesktop && (
         <ResizeHandle onDrag={onPanelResizeDrag} onDragEnd={onPanelResizeEnd} />
       )}
 
-      {/* Inline panel: only renders at lg+ AND when the side-panel
-          state machine says it's open. Below lg the sheet branch
-          below takes over so only ONE CdpScreencastViewport mounts
-          at a time (BUG-11 follow-up — two viewports were fighting
-          over the shared Brave CDP page and stalling the
-          screencast). */}
-      {(panelFullscreen || (showBrowserPanel && isLg)) && (
+      {/* Codex Pack B2 — three-tier panel rendering:
+          inline (desktop ≥1200) renders here as a flex sibling of the
+          main column; tablet (960-1199) renders below in the overlay
+          branch (fixed right, backdrop); mobile (<960) goes through
+          the existing sheet branch. Only ONE BrowserPanel mount per
+          moment so CdpScreencastViewport doesn't fight itself. */}
+      {(panelFullscreen || (showBrowserPanel && isDesktop)) && (
         <div
           className={
             panelFullscreen
@@ -472,18 +501,9 @@ export function WorkbenchApp(): JSX.Element {
             poolUserId={me?.multiUser ? me.userId : null}
             fullscreen={panelFullscreen}
             onToggleFullscreen={() => setPanelFullscreen((v) => !v)}
-            // Close button on the panel header. Sets the override to
-            // 'close' so the panel unmounts regardless of whether
-            // the task is live or terminal — toolbar icon stays so
-            // the user can re-open if they want to peek again.
-            // Both `onToggleCollapse` (legacy desktop chevron) and
-            // `onClose` (sheet header) fire the same intent now.
             onToggleCollapse={() => setSidePanelOverride('close')}
             onClose={() => setSidePanelOverride('close')}
             onReExecute={
-              // Empty-state fallback action: re-run the same intent
-              // as a fresh task. Drops the panel + selection so the
-              // user lands on the new task as it streams.
               selectedTask
                 ? () => {
                     const intent = selectedTask.intent;
@@ -501,12 +521,71 @@ export function WorkbenchApp(): JSX.Element {
         </div>
       )}
 
-      {/* Bottom-sheet panel: only renders below lg. Inverse of the
-          inline panel above — exactly one viewport per moment. The
+      {/* Codex Pack B2 — overlay panel (tablet 960-1199). Sits over
+          the main column as a fixed right-edge drawer with a backdrop
+          tap-to-close. No resize handle (the width is fixed at
+          560 px to fit comfortably while leaving room for the main
+          column underneath). */}
+      {!panelFullscreen && showBrowserPanel && isTablet && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px]"
+            aria-hidden
+            onClick={() => setSidePanelOverride('close')}
+          />
+          <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[560px] max-w-[90vw] flex-col bg-background shadow-2xl">
+            <BrowserPanel
+              frame={
+                selectedTask
+                  ? (screencastByTask[selectedTask.taskId] ?? null)
+                  : null
+              }
+              taskStatus={selectedTask?.status ?? null}
+              awaitingUser={
+                selectedTask
+                  ? Boolean(
+                      captchaWaitByTask[selectedTask.taskId] ||
+                        awaitingUserByTask[selectedTask.taskId],
+                    )
+                  : false
+              }
+              awaitingKind={
+                selectedTask && captchaWaitByTask[selectedTask.taskId]
+                  ? 'captcha'
+                  : selectedAwaitingKind
+              }
+              activeTaskId={selectedTaskId}
+              poolUserId={me?.multiUser ? me.userId : null}
+              fullscreen={false}
+              onToggleFullscreen={() => setPanelFullscreen((v) => !v)}
+              onToggleCollapse={() => setSidePanelOverride('close')}
+              onClose={() => setSidePanelOverride('close')}
+              onReExecute={
+                selectedTask
+                  ? () => {
+                      const intent = selectedTask.intent;
+                      setSidePanelOverride('close');
+                      enterNewTaskMode();
+                      void createTask(intent).then((res) => {
+                        if ('error' in res) {
+                          toast.show(`重试失败：${res.error}`, 'error');
+                        }
+                      });
+                    }
+                  : undefined
+              }
+            />
+          </div>
+        </>
+      )}
+
+      {/* Bottom-sheet panel: ONLY renders on true mobile (< 960px).
+          Tablet (960-1199) routes through the overlay branch above, so
+          the sheet doesn't double-mount alongside an overlay. The
           BrowserPanel internally returns null when `open=false`, but
-          we ALSO gate the wrapping div on !isLg so the React tree
+          we ALSO gate the wrapping div on isMobile so the React tree
           never holds two parallel BrowserPanel mounts. */}
-      {!panelFullscreen && !isLg && (
+      {!panelFullscreen && isMobile && (
         <div>
         <BrowserPanel
           layout="sheet"

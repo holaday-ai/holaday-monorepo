@@ -279,6 +279,53 @@ const ANALYSIS_INTENT_WORDS = [
   'explain ', 'describe ', 'compare ', 'overview',
   'introduction', 'what is', 'how does',
 ];
+/**
+ * Codex Pack B1 — broadcast a transient sub-status marker for the
+ * SPA's live-progress chip. Wraps `server.task.progress` so the
+ * existing handler in task-store picks it up; the new `subStatus`
+ * field tells the chip which Chinese label to render and when to
+ * start the 30s-elapsed timer. Nothing persists — purely a UX
+ * affordance for runs that take more than a few seconds.
+ *
+ * Best-effort: a broadcast failure (closed socket, JSON serialise
+ * error) is swallowed so a transient WS hiccup never tears down the
+ * runner. Labels mirror the spec table; callers may pass a more
+ * specific `message` override (e.g. "正在打开 baidu.com" instead of
+ * "正在操作浏览器…") and the SPA renders that verbatim.
+ */
+type TaskSubStatus =
+  | 'planning'
+  | 'browsing'
+  | 'extracting'
+  | 'verifying'
+  | 'generating';
+
+const TASK_SUB_STATUS_LABEL: Record<TaskSubStatus, string> = {
+  planning: '正在规划任务…',
+  browsing: '正在操作浏览器…',
+  extracting: '正在提取数据…',
+  verifying: '正在验证结果…',
+  generating: '正在生成回答…',
+};
+
+function broadcastSubStatus(
+  userId: string,
+  taskId: string,
+  subStatus: TaskSubStatus,
+  message?: string,
+): void {
+  try {
+    broadcastToUser(userId, {
+      type: 'server.task.progress',
+      taskId,
+      message: message ?? TASK_SUB_STATUS_LABEL[subStatus],
+      subStatus,
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
 function hasAnalysisIntent(lower: string): boolean {
   return ANALYSIS_INTENT_WORDS.some((w) => lower.includes(w));
 }
@@ -776,6 +823,10 @@ export const tasksRouter = router({
         expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
         hasAttachments: attachmentBlocks.length > 0,
       });
+      // Codex Pack B1 — planning chip: contract + ledger seeded, the
+      // runner hasn't dispatched yet. Fires once per task, immediately
+      // after tasks.create returns to the SPA.
+      broadcastSubStatus(ctx.userId, taskId, 'planning');
 
       // Fire-and-forget — generate doesn't share Brave instances so
       // there's no per-user FIFO queue to enqueue into. Concurrent
@@ -792,6 +843,10 @@ export const tasksRouter = router({
         const fallbackChain: string[] = ['generate'];
         let outcome;
         try {
+          // Codex Pack B1 — generating chip: about to invoke the LLM
+          // stream. runGenerateTask emits its own progress markers
+          // inside; this prefix marker covers the brief setup gap.
+          broadcastSubStatus(ctx.userId, taskId, 'generating');
           outcome = await runGenerateTask({
             taskId,
             userId: ctx.userId,
@@ -881,6 +936,9 @@ export const tasksRouter = router({
             sourceDetail: 'llm_generate_response',
             confidence: 'observed',
           });
+          // Codex Pack B1 — verifying chip: deterministic + optional
+          // LLM verifier about to run.
+          broadcastSubStatus(ctx.userId, taskId, 'verifying');
           const verified: VerifyOutput = await verifyAndFinalize({
             taskId,
             answerText: outcome.summary,
@@ -1163,6 +1221,8 @@ export const tasksRouter = router({
         expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
         hasAttachments: attachmentBlocks.length > 0,
       });
+      // Codex Pack B1 — planning chip (scrape lane).
+      broadcastSubStatus(ctx.userId, taskId, 'planning');
 
       const firecrawl = ctx.firecrawl;
       const anthropicClient = anthropicForResolver;
@@ -1176,6 +1236,8 @@ export const tasksRouter = router({
         let finalExecutionMode: 'scrape' | 'generate' = 'scrape';
         let scrapeOutcome;
         try {
+          // Codex Pack B1 — extracting chip: firecrawl about to fetch.
+          broadcastSubStatus(ctx.userId, taskId, 'extracting');
           scrapeOutcome = await runScrapeTask({
             taskId,
             userId: ctx.userId,
@@ -1376,6 +1438,8 @@ export const tasksRouter = router({
             sourceDetail: 'llm_scrape_response',
             confidence: 'observed',
           });
+          // Codex Pack B1 — verifying chip (scrape lane).
+          broadcastSubStatus(ctx.userId, taskId, 'verifying');
           const verified: VerifyOutput = await verifyAndFinalize({
             taskId,
             answerText: outcome.summary,
@@ -2376,6 +2440,10 @@ export const tasksRouter = router({
         expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
         hasAttachments: attachmentBlocks.length > 0,
       });
+      // Codex Pack B1 — planning chip (supercar/browser lane). The
+      // browsing chip fires later, right before the agent loop spins
+      // up Brave; here we just signal that the runner is staged.
+      broadcastSubStatus(ctx.userId, taskId, 'planning');
       // Captures the verifier's verdict so the .finally() persist
       // block can serialise it after the run terminates. Stays null
       // for any path that doesn't reach the verify hook (failures,
@@ -2431,6 +2499,9 @@ export const tasksRouter = router({
       // Mark the timer as unref'd so it doesn't keep the Node process
       // alive on shutdown — the pool's own draining handles cleanup.
       watchdogTimer.unref?.();
+      // Codex Pack B1 — browsing chip fires right before the agent
+      // loop actually runs (Brave allocate, first tool call, etc.).
+      broadcastSubStatus(ctx.userId, taskId, 'browsing');
       const runFn = () =>
         runSupercarWithRetry(supercarArgs, { userId, taskId, logger: ctx.logger })
           .then(async (outcome) => {
@@ -2828,6 +2899,8 @@ export const tasksRouter = router({
                 sourceDetail: 'supercar agent response',
                 confidence: 'observed',
               });
+              // Codex Pack B1 — verifying chip (supercar lane).
+              broadcastSubStatus(ctx.userId, taskId, 'verifying');
               const verified: VerifyOutput = await verifyAndFinalize({
                 taskId,
                 answerText: outcome.summary,
