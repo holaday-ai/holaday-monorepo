@@ -145,14 +145,24 @@ export function createTaskQueue(cfg: TaskQueueConfig): TaskQueue {
       inFlight,
     });
     void (async (): Promise<void> => {
+      let started = false;
       try {
         await t.onStart();
+        started = true;
         await t.runFn();
       } catch (err) {
         log('warn', 'task-queue: dispatch threw', {
           taskId: t.taskId,
           err: err instanceof Error ? err.message : String(err),
         });
+        // If onStart fails, runFn never gets a chance to release the
+        // browser slot or call signalSlotFreed(). Clear the queue's
+        // own in-flight token here so one bad DB transition cannot
+        // stall every queued task behind it.
+        if (!started) {
+          if (inFlight > 0) inFlight -= 1;
+          queueMicrotask(tryDispatch);
+        }
       }
     })();
   }

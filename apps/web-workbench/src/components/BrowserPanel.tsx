@@ -30,6 +30,7 @@ import { send as wsSend } from '@/lib/ws';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
 import type { UiScreencast, UiStep, UiTaskStatus } from '@/types/task';
+import { isTerminalStatus } from '@/types/task';
 import { liveStatusLabel } from '@/utils/step-humanize';
 
 /**
@@ -311,10 +312,7 @@ export function BrowserPanel({
   //      ended but isn't marked terminal here yet).
   // The previous "frame ?? finalEvidenceFrame ?? latestFrame" mixed
   // task A's frame into task B's panel after a task switch.
-  const taskIsTerminal =
-    taskStatus === 'completed' ||
-    taskStatus === 'failed' ||
-    taskStatus === 'cancelled';
+  const taskIsTerminal = taskStatus ? isTerminalStatus(taskStatus) : false;
   const displayFrame = taskIsTerminal
     ? finalEvidenceFrame
     : (frame ?? latestFrame ?? finalEvidenceFrame);
@@ -367,11 +365,8 @@ export function BrowserPanel({
     setCdpLiveUrl(url);
     setLastKnownUrl(url); // also feed the grace cache
   }, []);
-  const isTerminalStatus =
-    taskStatus === 'completed' ||
-    taskStatus === 'failed' ||
-    taskStatus === 'cancelled';
-  const displayUrl = isTerminalStatus
+  const terminalStatus = taskStatus ? isTerminalStatus(taskStatus) : false;
+  const displayUrl = terminalStatus
     ? (persistedFinalUrl ?? cdpLiveUrl ?? frameUrl ?? lastKnownUrl ?? 'about:blank')
     : (cdpLiveUrl ?? frameUrl ?? persistedFinalUrl ?? lastKnownUrl ?? 'about:blank');
   const abortTask = useTaskStore((s) => s.abortTask);
@@ -412,10 +407,7 @@ export function BrowserPanel({
   // Brave released — connecting to /screencast-ws/<taskId> would 409
   // and bounce through the noVNC retry/error loop. Compute taskTerminal
   // up front so the URL memo can short-circuit cleanly.
-  const taskTerminal =
-    taskStatus === 'completed' ||
-    taskStatus === 'failed' ||
-    taskStatus === 'cancelled';
+  const taskTerminal = taskStatus ? isTerminalStatus(taskStatus) : false;
   // Idle gate. Two paths can flip it on:
   //   1. There's an active task — the panel shows that task's
   //      screencast / VNC.
@@ -763,10 +755,7 @@ export function BrowserPanel({
   // becomes a "no evidence saved" placeholder + re-execute prompt.
   // interactiveActive flips it back on if the user is mid-takeover
   // for some reason (shouldn't happen on terminal but defensive).
-  const taskIsTerminalForHeader =
-    taskStatus === 'completed' ||
-    taskStatus === 'failed' ||
-    taskStatus === 'cancelled';
+  const taskIsTerminalForHeader = taskStatus ? isTerminalStatus(taskStatus) : false;
   const showHeader = shouldShowBrowserHeader({
     taskIsTerminal: taskIsTerminalForHeader,
     hasCurrentFrame: Boolean(frame),
@@ -1752,10 +1741,7 @@ function EmptyBrowserState({
   if (taskStatus === 'executing' && isBrowserTask) {
     return <div className="text-center text-xs text-muted-foreground">等待第一帧…</div>;
   }
-  const terminal =
-    taskStatus === 'completed' ||
-    taskStatus === 'failed' ||
-    taskStatus === 'cancelled';
+  const terminal = taskStatus ? isTerminalStatus(taskStatus) : false;
   if (terminal && isBrowserTask) {
     // Three branches: finalScreenshot is handled before reaching us
     // (the parent renders `finalEvidenceFrame` directly). Here we

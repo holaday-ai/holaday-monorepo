@@ -345,3 +345,12 @@ export function isActive(status: UiTaskStatus): boolean {
     status === 'paused'
   );
 }
+
+export function isTerminalStatus(status: UiTaskStatus): boolean {
+  return (
+    status === 'completed' ||
+    status === 'partial_success' ||
+    status === 'failed' ||
+    status === 'cancelled'
+  );
+}

@@ -57,6 +57,7 @@ import type {
   UiTerminalAttachment,
   UiWebSearchEvent,
 } from '@/types/task';
+import { isTerminalStatus } from '@/types/task';
 import { friendlyHost, humanizeStep, humanizedGlyph, liveStatusLabel } from '@/utils/step-humanize';
 // Phase 1 follow-up — render-time defence-in-depth sanitiser. Strips
 // markdown image references that point at agent screenshots, agent
@@ -86,6 +87,9 @@ const EMPTY_STEPS: UiStep[] = [];
 const EMPTY_REPLIES: Array<{ at: number; text: string }> = [];
 const PLAYED_TERMINAL_REVEAL_TASK_IDS = new Set<string>();
 
+function hasPausedTerminalResult(task: UiTask): boolean {
+  return task.status === 'paused' && Boolean(task.resultText);
+}
 
 /**
  * Conversational stream for one task. Emulates Claude's chat layout:
@@ -127,11 +131,7 @@ export function TaskStream({
   //   - the user is already pinned near the bottom (< 200 px from
   //     scrollHeight). Switching to a historical task or scrolling
   //     up to read past content shouldn't yank the view back down.
-  const isTerminal =
-    task.status === 'completed' ||
-    task.status === 'partial_success' ||
-    task.status === 'failed' ||
-    task.status === 'cancelled';
+  const isTerminal = isTerminalStatus(task.status) || hasPausedTerminalResult(task);
   React.useEffect(() => {
     if (isTerminal) return;
     const anchor = scrollAnchorRef.current;
@@ -159,11 +159,7 @@ export function TaskStream({
     webSearch,
   ]);
 
-  const terminal =
-    task.status === 'completed' ||
-    task.status === 'partial_success' ||
-    task.status === 'failed' ||
-    task.status === 'cancelled';
+  const terminal = isTerminalStatus(task.status) || hasPausedTerminalResult(task);
 
   const humanLines = React.useMemo(() => buildHumanLines(steps), [steps]);
   // Prefer the live thinking event from the supercar loop; fall back to
@@ -509,11 +505,7 @@ function AgentBlock({
               // user. Non-browser lanes never had a Brave to begin
               // with.
               (() => {
-                const isTerminal =
-                  task.status === 'completed' ||
-                  task.status === 'partial_success' ||
-                  task.status === 'failed' ||
-                  task.status === 'cancelled';
+                const isTerminal = isTerminalStatus(task.status) || hasPausedTerminalResult(task);
                 if (isTerminal) return undefined;
                 if (task.executionMode !== 'browser') return undefined;
                 return onContinueInBrowser;

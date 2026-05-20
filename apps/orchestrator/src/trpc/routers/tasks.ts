@@ -2588,6 +2588,7 @@ export const tasksRouter = router({
         10,
       );
       const WATCHDOG_GRACE_MS = 30_000;
+      let watchdogFinalized = false;
       const watchdogTimer = setTimeout(() => {
         ctx.logger.warn(
           {
@@ -2605,7 +2606,73 @@ export const tasksRouter = router({
         } catch {
           /* swallow — abort is best-effort */
         }
-        // Step 2: force-release the per-task Brave even if abort
+        // Step 2: mark the user-visible task terminal. The old
+        // watchdog only released Brave; if the agent loop stayed
+        // wedged, the DB row remained `executing` until the next
+        // orchestrator restart boot-sweep. That looked like an
+        // endless task to the user and kept quota/concurrency noisy.
+        void (async (): Promise<void> => {
+          const reason = '任务执行超时，已自动停止。建议：简化任务描述后重试。';
+          try {
+            const [row] = await ctx.db
+              .select({
+                status: tasksTable.status,
+                result: tasksTable.result,
+              })
+              .from(tasksTable)
+              .where(eq(tasksTable.externalId, taskId))
+              .limit(1);
+            if (!row) return;
+            if (
+              row.status === 'completed' ||
+              row.status === 'partial_success' ||
+              row.status === 'failed' ||
+              row.status === 'cancelled' ||
+              row.status === 'awaiting_user'
+            ) {
+              return;
+            }
+            const normalizedResult = normalizeOutput(row.result);
+            const prevResult =
+              normalizedResult && typeof normalizedResult === 'object'
+                ? (normalizedResult as Record<string, unknown>)
+                : {};
+            watchdogFinalized = true;
+            await ctx.db
+              .update(tasksTable)
+              .set({
+                status: 'failed',
+                errorCode: 'SUPERCAR_WATCHDOG_TIMEOUT',
+                errorMessage: reason,
+                result: {
+                  ...prevResult,
+                  reason,
+                  metadata: {
+                    ...((prevResult.metadata &&
+                    typeof prevResult.metadata === 'object'
+                      ? prevResult.metadata
+                      : {}) as Record<string, unknown>),
+                    watchdog: true,
+                  },
+                },
+                completedAt: new Date(),
+              })
+              .where(eq(tasksTable.externalId, taskId));
+            broadcastToUser(userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'failed',
+              reason,
+            });
+          } catch (err) {
+            watchdogFinalized = false;
+            ctx.logger.warn(
+              { err: err instanceof Error ? err.message : String(err), taskId },
+              'supercar: watchdog failed to persist terminal timeout',
+            );
+          }
+        })();
+        // Step 3: force-release the per-task Brave even if abort
         // didn't take. The pool's release method is idempotent: a
         // second call when the slot is already torn down no-ops.
         if (didAllocatePool && ctx.browserPool) {
@@ -2632,6 +2699,13 @@ export const tasksRouter = router({
               { taskId, status: outcome.status, iterations: outcome.iterations, toolsUsed: outcome.toolsUsed },
               'supercar: task terminated',
             );
+            if (watchdogFinalized) {
+              ctx.logger.warn(
+                { taskId, status: outcome.status },
+                'supercar: late runner outcome ignored after watchdog terminal persist',
+              );
+              return;
+            }
             // F1 — handoff to generate. User replied with manual data
             // (numeric metrics, "数据如下:", etc.); supercar exited
             // without continuing the browser loop. Run generate against

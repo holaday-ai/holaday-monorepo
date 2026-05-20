@@ -217,6 +217,44 @@ describe('createTaskQueue — drain on signalSlotFreed', () => {
     expect(onStart).not.toHaveBeenCalled();
     expect(q.size()).toBe(3);
   });
+
+  it('releases the queue in-flight token when onStart throws', async () => {
+    const pool = makePool(1, 0);
+    const q = createTaskQueue({
+      canDispatch: () => pool.active < pool.capacity,
+      capacity: pool.capacity,
+      tickMs: 5000,
+      maxDepth: 100,
+      queueTimeoutMs: 600_000,
+    });
+    const runA = vi.fn(async () => {});
+    const runB = vi.fn(async () => {});
+    const onStartB = vi.fn();
+
+    q.enqueue({
+      taskId: 'tsk_a',
+      userId: 'u',
+      runFn: runA,
+      onStart: () => {
+        throw new Error('db transition failed');
+      },
+    });
+    q.enqueue({
+      taskId: 'tsk_b',
+      userId: 'u',
+      runFn: runB,
+      onStart: onStartB,
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(runA).not.toHaveBeenCalled();
+    expect(onStartB).toHaveBeenCalledTimes(1);
+    expect(runB).toHaveBeenCalledTimes(1);
+    expect(q.size()).toBe(0);
+  });
 });
 
 describe('createTaskQueue — depth cap', () => {
