@@ -65,7 +65,7 @@ STAGING_JWT_SECRET="$(openssl rand -hex 32)"
 # privileges. If it doesn't, the SQL block fails with an obvious
 # permission error and the operator has to run the create as root
 # manually (one-line fallback below).
-mysql -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" --password="$MYSQL_PASS" --batch --skip-ssl <<SQL
+mysql -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" --password="$MYSQL_PASS" --batch --ssl=0 <<SQL
 CREATE DATABASE IF NOT EXISTS $STAGING_DB_NAME CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 DROP USER IF EXISTS '$STAGING_DB_USER'@'127.0.0.1';
 CREATE USER '$STAGING_DB_USER'@'127.0.0.1' IDENTIFIED BY '$STAGING_DB_PASS';
