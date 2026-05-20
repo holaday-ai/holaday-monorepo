@@ -189,6 +189,15 @@ const createInput = z.object({
    */
   mode: z.enum(['auto', 'plan']).optional(),
   /**
+   * Codex Pack C1 — task-level expert mode toggle. Sent by the SPA's
+   * composer (defaults to undefined = auto when the user doesn't
+   * pick). `expert` forces the typed-workflow tier on regardless of
+   * whether the intent matcher would have chosen it; `normal`
+   * forces it off (general-purpose lane, cheaper / faster). Auto is
+   * the historical behaviour: matchExpertWorkflow decides.
+   */
+  expertMode: z.enum(['normal', 'expert', 'auto']).optional(),
+  /**
    * Phase 21a — explicit skill/role id chosen for this task. When
    * present, the looksLikeCodeIntent guard is skipped: the user has
    * picked a domain expert, so "帮我写个网站翻译脚本" under 技术翻译
@@ -486,9 +495,19 @@ export const tasksRouter = router({
             '',
           ].join('\n')
         : '';
-    const expertWorkflow = matchExpertWorkflow(input.intent, {
-      hasAttachments: Boolean(input.fileIds && input.fileIds.length > 0),
-    });
+    // Codex Pack C1 — task-level expert mode override. The user's
+    // composer pick wins over the intent matcher:
+    //   'normal' → skip the legacy matcher entirely (force null)
+    //   'expert' → use whatever matcher returns; if null, the typed
+    //              matcher below may still pick one up
+    //   'auto'   → matcher unchanged (the historical behaviour)
+    const expertModeOverride = input.expertMode ?? 'auto';
+    const expertWorkflow =
+      expertModeOverride === 'normal'
+        ? null
+        : matchExpertWorkflow(input.intent, {
+            hasAttachments: Boolean(input.fileIds && input.fileIds.length > 0),
+          });
     const expertWorkflowPreamble = expertWorkflow?.promptPreamble ?? '';
     const effectiveIntent =
       planPreamble +
@@ -577,12 +596,20 @@ export const tasksRouter = router({
     // douyin-livestream-review (when user has platform-source
     // keywords) still wins; in practice the two matchers don't
     // overlap on browser-needing intents.
-    const typedWorkflowFromMatcher = getExecutionFeatureFlags().EXPERT_WORKFLOW
-      ? matchTypedExpertWorkflow({
-          intent: input.intent,
-          roleId: input.skillId ?? null,
-        })
-      : null;
+    // Codex Pack C1 — same override applies to the typed matcher.
+    // `normal` skips matching so the task drops to general-purpose
+    // generate/scrape lanes even when the intent looks like a
+    // workflow (e.g. user wants a quick 抖音 fact-check instead of
+    // the full report).
+    const typedWorkflowFromMatcher =
+      expertModeOverride === 'normal'
+        ? null
+        : getExecutionFeatureFlags().EXPERT_WORKFLOW
+          ? matchTypedExpertWorkflow({
+              intent: input.intent,
+              roleId: input.skillId ?? null,
+            })
+          : null;
     // Phase 3 R1 (Codex follow-up #2) — on follow-up tasks the chip
     // prompt usually doesn't carry workflow keywords ("生成发布日历"
     // / "深挖 ROI 不达预期" / "生成下场直播 SOP"). Fall back to the
@@ -971,6 +998,10 @@ export const tasksRouter = router({
           executionMode: 'generate' as const,
           finalExecutionMode: 'generate' as const,
           expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+          // Codex Pack C1 — user's composer pick. SPA reads this from
+          // tasks.detail.result.metadata.expertMode to decide whether
+          // to render the "本次使用了专家技能" footer chip.
+          expertMode: expertModeOverride,
           selectedRole: gatedRole === 'none' ? null : gatedRole,
           model: 'claude-sonnet-4-6',
           fallbackChain,
@@ -1469,6 +1500,7 @@ export const tasksRouter = router({
           executionMode: 'scrape' as const,
           finalExecutionMode,
           expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+          expertMode: expertModeOverride,
           selectedRole: gatedRole === 'none' ? null : gatedRole,
           model: 'claude-sonnet-4-6',
           fallbackChain,
@@ -2586,6 +2618,7 @@ export const tasksRouter = router({
                 executionMode: 'browser' as const,
                 finalExecutionMode: 'generate' as const,
                 expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+                expertMode: expertModeOverride,
                 selectedRole: gatedRole === 'none' ? null : gatedRole,
                 model: 'claude-sonnet-4-6',
                 fallbackChain: ['browser', 'generate'],
@@ -2719,6 +2752,7 @@ export const tasksRouter = router({
               executionMode: executionMode === 'browser' ? 'browser' : executionMode,
               finalExecutionMode: executionMode === 'browser' ? 'browser' : executionMode,
               expertWorkflowId: typedWorkflow?.workflowId ?? expertWorkflow?.id ?? null,
+              expertMode: expertModeOverride,
               selectedRole: gatedRole === 'none' ? null : gatedRole,
               model: opusActuallyConsumed ? 'claude-opus-4-7' : 'claude-sonnet-4-6',
               fallbackChain: ['browser'],

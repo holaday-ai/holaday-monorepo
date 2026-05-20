@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { notify } from './notification-service.js';
-import type { SendResult } from './webhook-sender.js';
+import type { sendWebhook } from './webhook-sender.js';
+
+/**
+ * Codex Pack C2 — vitest Mock generic. Vitest 2.x changed `vi.fn`'s
+ * generic from `vi.fn<TArgs, TReturn>()` to `vi.fn<TFn>()`. The test
+ * mocks `send` which has the same call signature as `sendWebhook`,
+ * so we re-export the signature once + reuse it everywhere instead
+ * of inlining the tuple form (which Vitest 2 rejects).
+ */
+type SendFn = typeof sendWebhook;
 
 /**
  * Minimal drizzle-shaped stub that captures inserts + returns canned
@@ -72,7 +81,7 @@ describe('notify', () => {
       ],
     });
     const sendMock = vi
-      .fn<[unknown, unknown, unknown], Promise<SendResult>>()
+      .fn<SendFn>()
       .mockResolvedValue({ ok: true, status: 200, attempt: 1 });
     const res = await notify(
       { db, logger: NOOP_LOGGER, send: sendMock },
@@ -96,7 +105,7 @@ describe('notify', () => {
       ],
     });
     const sendMock = vi
-      .fn<[unknown, unknown, unknown], Promise<SendResult>>()
+      .fn<SendFn>()
       .mockResolvedValueOnce({ ok: true, status: 200, attempt: 1 })
       .mockResolvedValueOnce({ ok: false, status: 500, attempt: 2, error: 'boom' });
     const res = await notify(
@@ -119,7 +128,7 @@ describe('notify', () => {
       ],
     });
     const sendMock = vi
-      .fn<[unknown, unknown, unknown], Promise<SendResult>>()
+      .fn<SendFn>()
       .mockRejectedValueOnce(new Error('unexpected throw'));
     const res = await notify(
       { db, logger: NOOP_LOGGER, send: sendMock },
@@ -180,10 +189,9 @@ describe('notify', () => {
         { externalId: 'nch_1', platform: 'wecom', webhookUrl: 'u1', customTemplate: null },
       ],
     });
-    const sendMock = vi.fn<
-      [unknown, { title: string; status: string; taskName: string }, unknown],
-      Promise<SendResult>
-    >().mockResolvedValue({ ok: true, status: 200, attempt: 1 });
+    const sendMock = vi
+      .fn<SendFn>()
+      .mockResolvedValue({ ok: true, status: 200, attempt: 1 });
     await notify(
       { db, logger: NOOP_LOGGER, send: sendMock },
       {

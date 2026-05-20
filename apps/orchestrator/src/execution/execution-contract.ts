@@ -288,6 +288,87 @@ export function classifyIntentForOutputRequirement(intent: string): {
 }
 
 /**
+ * Codex Pack C3 — JSON schema suffix appended to the runner's system
+ * prompt when the intent matches a known kind. Tells the model what
+ * structure to produce + how to flag missing fields (null), without
+ * forcing a JSON-only response (it can still wrap the JSON block in
+ * a prose explanation — the verifier just looks for the block).
+ *
+ * Pure function, no LLM call. Returns empty string for `general`
+ * intents so the prompt isn't bloated for tasks that don't need
+ * structured output.
+ */
+export function buildPromptSchemaSuffix(intent: string): string {
+  const { kind } = classifyIntentForOutputRequirement(intent);
+  const schema = INTENT_OUTPUT_SCHEMAS[kind];
+  if (!schema) return '';
+  return [
+    '',
+    '请按以下 JSON 格式输出结果（可放在 markdown 代码块里，前后可附简短说明）：',
+    '```json',
+    schema,
+    '```',
+    '如果无法获取某个字段，标为 null（不要省略字段）。',
+  ].join('\n');
+}
+
+const INTENT_OUTPUT_SCHEMAS: Partial<Record<IntentKind, string>> = {
+  stock_quote: JSON.stringify(
+    {
+      symbol: 'string',
+      price: 'number',
+      change: 'number | null',
+      change_pct: 'number | null',
+      market_time: 'ISO datetime string',
+      source_url: 'string',
+    },
+    null,
+    2,
+  ),
+  ecommerce_listing: JSON.stringify(
+    {
+      query: 'string',
+      sort_by: "'price_asc' | 'price_desc' | 'relevance'",
+      items: [
+        {
+          rank: 'number',
+          name: 'string',
+          price: 'number',
+          url: 'string',
+          platform: 'string',
+        },
+      ],
+    },
+    null,
+    2,
+  ),
+  comparison: JSON.stringify(
+    {
+      candidates: [
+        {
+          name: 'string',
+          pros: ['string'],
+          cons: ['string'],
+        },
+      ],
+      recommendation: 'string',
+      rationale: 'string',
+      sources: ['string (URL)'],
+    },
+    null,
+    2,
+  ),
+  general_with_links: JSON.stringify(
+    {
+      answer: 'string',
+      sources: ['string (URL)'],
+    },
+    null,
+    2,
+  ),
+};
+
+/**
  * Codex Pack A1 — convert a typed `OutputRequirement` into the
  * `SuccessCriterion[]` the verifier consumes. Each requirement
  * kind emits the structural checks the verifier dispatches

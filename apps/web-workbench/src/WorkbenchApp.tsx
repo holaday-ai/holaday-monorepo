@@ -200,7 +200,10 @@ export function WorkbenchApp(): JSX.Element {
   const enterNewTaskMode = useTaskStore((s) => s.enterNewTaskMode);
   const createTaskRaw = useTaskStore((s) => s.createTask);
   const createTask: typeof createTaskRaw = React.useCallback(
-    (intent, fileIds, replyToTaskId, mode, viewportProfile) => {
+    (intent, fileIds, replyToTaskId, mode, expertMode, viewportProfile) => {
+      // Pack C1 added `expertMode` at position 5; viewportProfile
+      // moved to position 6. The wrapper still auto-picks viewport
+      // from the current panel layout when callers don't pass one.
       const picked =
         viewportProfile ??
         pickViewportProfile({
@@ -208,7 +211,7 @@ export function WorkbenchApp(): JSX.Element {
           isMobile:
             typeof window !== 'undefined' && window.innerWidth < 1024,
         });
-      return createTaskRaw(intent, fileIds, replyToTaskId, mode, picked);
+      return createTaskRaw(intent, fileIds, replyToTaskId, mode, expertMode, picked);
     },
     [createTaskRaw, panelPx],
   );
@@ -389,12 +392,13 @@ export function WorkbenchApp(): JSX.Element {
                 ? 5 * 1024 * 1024
                 : 0
           }
-          onSubmit={async (intent, fileIds, mode) => {
+          onSubmit={async (intent, fileIds, mode, expertMode) => {
             hdDebug('onSubmit', {
               isReplyMode,
               followUpTaskId: followUpTarget?.taskId ?? null,
               selectedTaskId,
               mode,
+              expertMode,
             });
             if (isReplyMode && selectedTaskId) {
               const res = await replyToTask(selectedTaskId, intent, fileIds);
@@ -415,7 +419,7 @@ export function WorkbenchApp(): JSX.Element {
               else toast.show('已基于上一个任务追问');
               return;
             }
-            const res = await createTask(intent, fileIds, undefined, mode);
+            const res = await createTask(intent, fileIds, undefined, mode, expertMode);
             if ('error' in res) {
               const codeRejected =
                 res.error.includes('HOLA DAY 专注浏览器任务') ||

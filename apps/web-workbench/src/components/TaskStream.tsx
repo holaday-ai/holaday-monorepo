@@ -1768,6 +1768,23 @@ function TerminalSummary({
           card. modelLabel still rides through props for analytics
           / debugging consumers via result.metadata, just not
           rendered here. */}
+      {/* Codex Pack C1 — expert-skill footer. Shows when a typed
+          workflow id was stamped on the task metadata (the matcher
+          fired OR the user forced expert mode). Single skill per
+          task is the only shape today (X = 1); the "X 个" phrasing
+          stays per spec so a future multi-skill path renders without
+          template change. */}
+      {expertWorkflowId && (
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <Puzzle className="h-3 w-3 text-muted-foreground/70" />
+          <span>
+            本次使用了 1 个专家技能
+            {EXPERT_HEADER_META[expertWorkflowId]
+              ? `（${EXPERT_HEADER_META[expertWorkflowId]!.label}）`
+              : ''}
+          </span>
+        </div>
+      )}
       {/* Inline copy / share footer. Replaced the prior absolute-
           positioned overlay (top-right, opacity-0 group-hover) which
           obscured the first lines of the result on overflow and

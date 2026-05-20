@@ -16,6 +16,7 @@ interface Props {
     intent: string,
     fileIds: string[],
     mode?: 'auto' | 'plan',
+    expertMode?: 'normal' | 'expert' | 'auto',
   ) => Promise<void> | void;
   busy?: boolean;
   onOpenSidebar?: () => void;

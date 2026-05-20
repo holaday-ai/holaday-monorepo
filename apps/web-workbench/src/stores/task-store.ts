@@ -224,6 +224,13 @@ export interface TaskStore {
     /** O4 — 'plan' makes agent emit + wait-for-approval before executing. */
     mode?: 'auto' | 'plan',
     /**
+     * Codex Pack C1 — task-level expert mode toggle. `auto` (default)
+     * lets the orchestrator's intent matcher decide; `expert` forces
+     * the typed-workflow path; `normal` forces the general-purpose
+     * lane regardless of intent. Sent as `expertMode` on tasks.create.
+     */
+    expertMode?: 'normal' | 'expert' | 'auto',
+    /**
      * Optimization #3 R1 — picked from the SPA's current panel
      * layout (sidepanel / fullscreen / mobile sheet). Plumbed to
      * the pool so Brave + Xvfb + CDP frame caps match the user's
@@ -935,7 +942,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
   },
 
-  async createTask(intent, fileIds, replyToTaskId, mode, viewportProfile) {
+  async createTask(intent, fileIds, replyToTaskId, mode, expertMode, viewportProfile) {
     // Reject intents that are obviously control commands typed into
     // the wrong box (e.g. user typing "停止" into the composer
     // because they didn't see the Stop button). Fails client-side
@@ -952,6 +959,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
         ...(replyToTaskId ? { replyToTaskId } : {}),
         ...(mode === 'plan' ? { mode } : {}),
+        ...(expertMode && expertMode !== 'auto' ? { expertMode } : {}),
         ...(viewportProfile ? { viewportProfile } : {}),
       });
       // Optimistic insert at the top so the UI feels instant; the next
@@ -1160,7 +1168,13 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           gated: isTerminal,
         });
         if (isTerminal) return prev;
-        const nextSubStatus = typedSubStatus
+        // Explicit type annotation: the two branches of the inner
+        // ternary produce slightly different object literal types,
+        // and without this hint TS widens `nextSubStatus` to a union
+        // that no longer matches `TaskStore['subStatusByTask']` —
+        // causing the zustand `set` callback to reject the return
+        // shape (C2 TS regression repro on Pack B1 land).
+        const nextSubStatus: TaskStore['subStatusByTask'] = typedSubStatus
           ? {
               ...prev.subStatusByTask,
               [msg.taskId]:

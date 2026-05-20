@@ -24,6 +24,7 @@
 
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from 'pino';
+import { buildPromptSchemaSuffix } from '../execution/execution-contract.js';
 import { buildLayeredSystemPrompt, classifyRole } from './supercar/prompt-layers.js';
 // Phase 2 — typed expert workflow framework. When the
 // EXPERT_WORKFLOW flag is on AND the intent matches a registered
@@ -247,7 +248,17 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
     }
   }
 
-  const system = workflowReportSystem ?? buildLayeredSystemPrompt(roleId);
+  // Codex Pack C3 — JSON schema suffix. When the intent matches a
+  // known kind (stock / ecommerce / comparison / general_with_links),
+  // append a structured-output spec so the model produces a JSON
+  // block alongside its prose. The verifier's url_count /
+  // result_count / price_sort checks already validate the structure
+  // post-run; this suffix gives the model a fighting chance of
+  // producing valid output on the first try. Workflow tier already
+  // has its own structured prompt (workflowReportSystem) so we only
+  // augment the layered fallback path.
+  const schemaSuffix = workflowReportSystem ? '' : buildPromptSchemaSuffix(opts.intent);
+  const system = (workflowReportSystem ?? buildLayeredSystemPrompt(roleId)) + schemaSuffix;
 
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 

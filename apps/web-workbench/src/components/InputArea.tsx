@@ -30,6 +30,7 @@ interface Props {
     intent: string,
     fileIds: string[],
     mode?: 'auto' | 'plan',
+    expertMode?: 'normal' | 'expert' | 'auto',
   ) => Promise<void> | void;
   busy?: boolean;
   /** Forwarded ref for keyboard-shortcut focus (Cmd+N / slash). */
@@ -242,6 +243,14 @@ export function InputArea({
   // unknowingly stay in Plan for days, paying the planning round-trip
   // on every subsequent task.
   const [taskMode, setTaskMode] = React.useState<'auto' | 'plan'>('auto');
+  // Codex Pack C1 — task-level expert mode toggle. `auto` (default)
+  // lets the orchestrator decide whether to load expert skills from
+  // the user's settings + workflow registry; `expert` forces them
+  // on (typed report tier, longer timeout, richer prompt); `normal`
+  // forces them off (cheaper / faster general-purpose lane). Sent
+  // on tasks.create as `expertMode`; the backend honours it when
+  // not null.
+  const [expertMode, setExpertMode] = React.useState<'normal' | 'expert' | 'auto'>('auto');
   // One-shot cleanup of the legacy persisted preference key. Older
   // builds wrote 'plan' here and read it on every mount; users
   // upgrading would otherwise stay stuck in Plan mode silently.
@@ -402,7 +411,7 @@ export function InputArea({
     let submitOk = false;
     try {
       const result = (await Promise.resolve(
-        onSubmit(trimmed, fileIds, taskMode),
+        onSubmit(trimmed, fileIds, taskMode, expertMode),
       )) as unknown;
       // onSubmit may return void OR { ok: boolean } / { error: string }.
       // Treat undefined as success (legacy callers never threw and didn't
@@ -435,6 +444,10 @@ export function InputArea({
       // flip back to Auto after a successful submit so the user
       // explicitly re-opts in for any subsequent Plan-required task.
       setTaskMode('auto');
+      // Codex Pack C1 — expert mode is also per-message (matches
+      // taskMode semantics). Reset to `auto` so the user has to
+      // re-opt-in for every expert / normal forced task.
+      setExpertMode('auto');
     }
   }
 
@@ -675,7 +688,11 @@ export function InputArea({
         </Button>
       </div>
       <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[11px] text-muted-foreground/70">
-        <TaskModeSelector mode={taskMode} onChange={setTaskMode} />
+        <div className="flex items-center gap-1">
+          <TaskModeSelector mode={taskMode} onChange={setTaskMode} />
+          <span className="text-muted-foreground/40">·</span>
+          <ExpertModeSelector mode={expertMode} onChange={setExpertMode} />
+        </div>
         <span className="hidden sm:inline">Enter 发送</span>
       </div>
       {/* Phase 5b — multi-line detect. When the composer holds 2+
@@ -702,6 +719,81 @@ export function InputArea({
           );
         })()}
     </div>
+  );
+}
+
+/**
+ * Codex Pack C1 — expert-mode picker. Sits beside the task-mode
+ * selector and lets the user steer whether expert workflow skills
+ * (typed report tier, longer timeout, richer prompt) load for this
+ * task. Three values:
+ *   - normal: force the general-purpose lane (cheaper + faster)
+ *   - expert: force the expert workflow tier on (use even when the
+ *             intent classifier wouldn't auto-match)
+ *   - auto:   default — let the orchestrator's workflow matcher
+ *             decide based on intent + user-selected roles
+ *
+ * Sent to backend as `expertMode` on tasks.create. Resets to `auto`
+ * on every submit (mirrors TaskModeSelector behaviour).
+ */
+function ExpertModeSelector({
+  mode,
+  onChange,
+}: {
+  mode: 'normal' | 'expert' | 'auto';
+  onChange: (m: 'normal' | 'expert' | 'auto') => void;
+}): JSX.Element {
+  const [open, setOpen] = React.useState(false);
+  const label =
+    mode === 'expert' ? '专家' : mode === 'normal' ? '普通' : '自动';
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground',
+            open && 'bg-foreground/[0.05] text-foreground',
+          )}
+        >
+          <span>专家：{label}</span>
+          <ChevronDown className="h-3 w-3 opacity-70" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="start" sideOffset={6} className="w-64">
+        <DropdownMenuRadioGroup
+          value={mode}
+          onValueChange={(v) => {
+            if (v === 'normal' || v === 'expert' || v === 'auto') onChange(v);
+          }}
+        >
+          <DropdownMenuRadioItem value="auto" className="items-start py-2">
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="text-[12px] font-medium text-foreground">自动</span>
+              <span className="text-[11px] text-muted-foreground">
+                AI 根据意图决定是否启用专家技能
+              </span>
+            </span>
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="expert" className="items-start py-2">
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="text-[12px] font-medium text-foreground">专家</span>
+              <span className="text-[11px] text-muted-foreground">
+                强制加载专家技能，更长耗时，更深的报告
+              </span>
+            </span>
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="normal" className="items-start py-2">
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="text-[12px] font-medium text-foreground">普通</span>
+              <span className="text-[11px] text-muted-foreground">
+                跳过专家技能，走通用路径，速度更快
+              </span>
+            </span>
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
