@@ -128,6 +128,17 @@ export interface UiTask {
    */
   verificationPassed?: boolean | null;
   failureLevel?: 'fixable' | 'needs_clarification' | 'hard_fail' | null;
+  /**
+   * Codex Round 2 P1-6 — structured failure-check list emitted by
+   * the orchestrator on `server.task.terminal` when the verifier
+   * verdict came back partial_success or hard_fail. Each entry is
+   * `{ type, detail }` where `type` is the criterion's
+   * machine-readable category (e.g. `url_count`, `ecommerce_rows`,
+   * `generic.empty_result`) and `detail` is the raw checker output
+   * (banner extracts row-level hints like "第 3 行缺少商品链接"
+   * from the detail string). Empty / omitted on healthy tasks.
+   */
+  failedChecks?: Array<{ type: string; detail: string }> | null;
 }
 
 /**

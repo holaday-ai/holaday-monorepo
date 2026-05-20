@@ -95,6 +95,7 @@ import { protectedProcedure, router } from '../trpc.js';
 import {
   deriveFinalStatus,
   disposeExecution,
+  extractFailedChecks,
   initExecution,
   persistExecution,
   recordEvidence,
@@ -1117,6 +1118,13 @@ export const tasksRouter = router({
         );
 
         try {
+          // Codex Round 2 P1-6 — compute failed-check list once and
+          // share it across the partial_success / failed branches.
+          // Empty array on a verifier pass; SPA tolerates omission.
+          const generateFailedChecks =
+            executionVerification && !executionVerification.passed
+              ? extractFailedChecks(executionVerification)
+              : [];
           if (terminalStatus === 'completed' && outcome.status === 'completed') {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
@@ -1130,6 +1138,7 @@ export const tasksRouter = router({
               taskId,
               status: 'partial_success',
               ...(outcome.summary ? { summary: outcome.summary } : {}),
+              ...(generateFailedChecks.length > 0 ? { failedChecks: generateFailedChecks } : {}),
             });
           } else if (terminalStatus === 'failed') {
             const reason =
@@ -1141,6 +1150,7 @@ export const tasksRouter = router({
               taskId,
               status: 'failed',
               ...(reason ? { reason } : {}),
+              ...(generateFailedChecks.length > 0 ? { failedChecks: generateFailedChecks } : {}),
             });
           } else if (outcome.status === 'awaiting_user') {
             broadcastToUser(ctx.userId, {
@@ -1579,6 +1589,12 @@ export const tasksRouter = router({
         );
 
         try {
+          // Codex Round 2 P1-6 — same failedChecks-on-broadcast as
+          // the generate lane.
+          const scrapeFailedChecks =
+            executionVerification && !executionVerification.passed
+              ? extractFailedChecks(executionVerification)
+              : [];
           if (terminalStatus === 'completed' && outcome.status === 'completed') {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
@@ -1592,6 +1608,7 @@ export const tasksRouter = router({
               taskId,
               status: 'partial_success',
               ...(outcome.summary ? { summary: outcome.summary } : {}),
+              ...(scrapeFailedChecks.length > 0 ? { failedChecks: scrapeFailedChecks } : {}),
             });
           } else {
             const reason =
@@ -1603,6 +1620,7 @@ export const tasksRouter = router({
               taskId,
               status: 'failed',
               ...(reason ? { reason } : {}),
+              ...(scrapeFailedChecks.length > 0 ? { failedChecks: scrapeFailedChecks } : {}),
             });
           }
         } catch (err) {
@@ -3121,6 +3139,13 @@ export const tasksRouter = router({
             }
             if (terminalPersisted) {
               try {
+                // Codex Round 2 P1-6 — surface verifier failed checks
+                // to the SPA banner. Only populated when verifier
+                // verdict failed; empty list omitted by helper.
+                const supercarFailedChecks =
+                  executionVerification && !executionVerification.passed
+                    ? extractFailedChecks(executionVerification)
+                    : undefined;
                 broadcastToUser(
                   userId,
                   buildTaskTerminalMessage(
@@ -3128,6 +3153,7 @@ export const tasksRouter = router({
                     outcome,
                     supercarTerminalStatus,
                     supercarFailureSummary,
+                    supercarFailedChecks,
                   ),
                 );
               } catch (err) {
@@ -5865,13 +5891,23 @@ function buildTaskTerminalMessage(
    */
   verdict?: FinalTerminalStatus,
   verificationReason?: string | null,
+  /**
+   * Codex Round 2 P1-6 — list of failed structural checks for the
+   * SPA's VerificationBanner. Only meaningful when verdict !==
+   * 'completed'; callers compute it via `extractFailedChecks` from
+   * the verifier verdict and pass it through alongside the reason.
+   */
+  failedChecks?: Array<{ type: string; detail: string }>,
 ): import('@holaday/shared-types').ServerMessage {
+  const failedChecksField =
+    failedChecks && failedChecks.length > 0 ? { failedChecks } : {};
   if (outcome.status === 'completed' && verdict === 'partial_success') {
     return {
       type: 'server.task.terminal',
       taskId,
       status: 'partial_success',
       ...(outcome.summary ? { summary: outcome.summary } : {}),
+      ...failedChecksField,
     };
   }
   if (outcome.status === 'completed' && verdict === 'failed') {
@@ -5880,6 +5916,7 @@ function buildTaskTerminalMessage(
       taskId,
       status: 'failed',
       reason: verificationReason ?? '质量校验未通过',
+      ...failedChecksField,
     };
   }
   if (outcome.status === 'completed') {

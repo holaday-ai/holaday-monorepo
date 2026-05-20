@@ -222,6 +222,35 @@ export function deriveFinalStatus(
 }
 
 /**
+ * Codex Round 2 P1-6 — extract a structured list of failed checks
+ * for the terminal WS broadcast. Each entry carries the criterion's
+ * machine-readable type (so the SPA's banner can pick a localised
+ * label) and the raw detail string (for row-level extras like
+ * "第 3 行缺少商品链接"). Returns empty when nothing failed.
+ *
+ * `criterionType` is set by the structural checkers (url_count /
+ * result_count / price_sort / ecommerce_rows). The pre-Pack-A
+ * generic checks use `criterionId === 'generic.<name>'`; we strip
+ * the prefix into a synthetic type so the SPA dispatch is uniform.
+ */
+export function extractFailedChecks(
+  verification: VerificationResult,
+): Array<{ type: string; detail: string }> {
+  return verification.checks
+    .filter((c) => !c.passed)
+    .map((c) => {
+      const explicit = c.criterionType;
+      if (explicit) return { type: explicit, detail: c.detail };
+      // Fall back to the generic.<name> id form so the SPA still
+      // gets a recognisable token.
+      if (c.criterionId.startsWith('generic.')) {
+        return { type: c.criterionId, detail: c.detail };
+      }
+      return { type: 'unknown', detail: c.detail };
+    });
+}
+
+/**
  * Codex Pack A3 — synthesise a short Chinese failure reason from the
  * verifier's check list. Picks the first failing check with a
  * `severity` hint, falling back to the suggested-fix string.
@@ -447,13 +476,21 @@ function runFixLoop(
       finalText: fix.fixed,
     };
   }
-  // Recheck still failing → demote to needs_clarification.
+  // Codex Round 2 P0-1 — recheck still failing → return the
+  // SANITISED text (`fix.fixed`), not the original. autoFix has
+  // already stripped the fabricated URLs / placeholders; returning
+  // `inputs.answerText` would re-introduce them on the persisted
+  // result + the user-visible card. Verdict drops to
+  // `partial_success` via the deriveFinalStatus mapping of
+  // `fixable` rather than escalating to `needs_clarification` —
+  // the answer is genuinely partial (urls removed) and we want the
+  // SPA's yellow banner to show, not a re-opened awaiting card.
   return {
     verification: {
       ...recheck,
-      failureLevel: 'needs_clarification',
+      failureLevel: 'fixable',
     },
-    finalText: inputs.answerText,
+    finalText: fix.fixed,
   };
 }
 

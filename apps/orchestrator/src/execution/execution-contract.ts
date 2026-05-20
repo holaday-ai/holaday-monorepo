@@ -32,6 +32,13 @@ export type CriterionType =
   | 'url_count'
   | 'result_count'
   | 'price_sort'
+  // Codex Round 2 P0-2 — per-row schema check for ecommerce listings.
+  // Stricter than url_count: a result that mentions a platform name
+  // as bare text ("京东 Apple 自营旗舰店") used to satisfy url_count
+  // (no URL present at all) without ever being caught. The row-level
+  // checker parses the answer as JSON-block-first → markdown-table
+  // fallback and audits each row for name + price + url presence.
+  | 'ecommerce_rows'
   | 'custom';
 
 /**
@@ -392,6 +399,10 @@ function criteriaForRequirement(req: OutputRequirement): SuccessCriterion[] {
         },
       ];
     case 'ecommerce': {
+      // Codex Round 2 P0-2 — drop `url_count` for ecommerce in favour
+      // of `ecommerce_rows`. The row check audits each item for
+      // {name, price, url} together so a result with platform names
+      // as bare text instead of links no longer slips past.
       const criteria: SuccessCriterion[] = [
         {
           id: newCriterionId(),
@@ -401,9 +412,9 @@ function criteriaForRequirement(req: OutputRequirement): SuccessCriterion[] {
         },
         {
           id: newCriterionId(),
-          type: 'url_count',
-          description: '每条商品至少提供一个商品/平台链接（总链接数 ≥ minItems）',
-          data: { min: req.minItems },
+          type: 'ecommerce_rows',
+          description: `每行商品必须同时包含名称、价格、链接（至少 ${req.minItems} 条）`,
+          data: { minItems: req.minItems },
         },
       ];
       if (req.sortOrder) {

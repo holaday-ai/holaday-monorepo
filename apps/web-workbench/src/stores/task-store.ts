@@ -1057,6 +1057,13 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         // 操作浏览器…" hanging next to a completed result.
         const nextSubStatus = { ...prev.subStatusByTask };
         delete nextSubStatus[msg.taskId];
+        // Codex Round 2 P1-6 — terminal frame may carry the verifier
+        // verdict's failed-check list so the SPA banner can render
+        // specific bullets. Stamp onto the task; null clears prior
+        // values if a re-broadcast comes back clean.
+        const incomingFailedChecks =
+          (msg as { failedChecks?: Array<{ type: string; detail: string }> })
+            .failedChecks ?? null;
         return {
           tasks: prev.tasks.map((t) =>
             t.taskId === msg.taskId
@@ -1065,6 +1072,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                   status: msg.status,
                   ...(msg.summary ? { resultText: msg.summary } : {}),
                   ...(msg.reason ? { resultText: humaniseTaskError(msg.reason) } : {}),
+                  ...(incomingFailedChecks !== null
+                    ? { failedChecks: incomingFailedChecks }
+                    : {}),
                 }
               : t,
           ),

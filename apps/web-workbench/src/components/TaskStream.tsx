@@ -484,6 +484,7 @@ function AgentBlock({
           <VerificationBanner
             level={task.failureLevel ?? 'fixable'}
             status={task.status}
+            failedChecks={task.failedChecks ?? null}
           />
         )}
         {terminal && task.resultText && (
@@ -600,23 +601,60 @@ function AgentBlock({
  * needs_clarification doesn't reach this banner because the runner
  * stays in awaiting_user before any partial_success persist.
  */
+/**
+ * Codex Round 2 P1-6 — map check type to Chinese label. row-level
+ * hints (e.g. "第 3 行缺少商品链接") live in the detail string of
+ * `ecommerce_rows`; we surface the detail for that check and a
+ * compact label for the rest.
+ */
+const CHECK_TYPE_LABELS: Record<string, string> = {
+  url_count: '缺少来源链接',
+  result_count: '结果数量不足',
+  price_sort: '价格排序不正确',
+  ecommerce_rows: '商品行字段不完整',
+  'generic.url_grounding': '回复中存在未在 ledger 中的 URL（可能是编造）',
+  'generic.empty_result': '回复内容近似为空',
+  'generic.constraints': '触发了约束条件',
+  'generic.number_cross_check': '数据交叉校验不一致',
+};
+
+function labelForCheck(check: { type: string; detail: string }): string {
+  if (check.type === 'ecommerce_rows') {
+    // The row-level detail string is already user-readable in Chinese
+    // ("第 N 行缺少..."). Show it verbatim so the user sees which row.
+    return check.detail || CHECK_TYPE_LABELS[check.type]!;
+  }
+  return CHECK_TYPE_LABELS[check.type] ?? check.detail ?? check.type;
+}
+
 function VerificationBanner({
   level,
   status,
+  failedChecks,
 }: {
   level: 'fixable' | 'needs_clarification' | 'hard_fail' | null;
   status: string;
+  failedChecks: Array<{ type: string; detail: string }> | null;
 }): JSX.Element {
   const isHard = level === 'hard_fail' || status === 'failed';
+  const items = (failedChecks ?? []).slice(0, 5);
   if (isHard) {
     return (
       <div className="rounded-xl border border-red-200/70 bg-red-50/80 px-4 py-3 text-sm text-red-900 dark:border-red-500/40 dark:bg-red-950/60 dark:text-red-100">
         <div className="text-[11px] font-semibold uppercase tracking-wide text-red-700 dark:text-red-300">
           质量校验未通过
         </div>
-        <p className="mt-1 leading-relaxed">
-          以下回答未通过结构性校验（来源链接 / 结果条数 / 价格排序）。建议重新发送相同意图，或在追问里说明你需要的字段。
-        </p>
+        {items.length > 0 ? (
+          <ul className="mt-1 list-inside list-disc space-y-0.5 leading-relaxed">
+            {items.map((c, i) => (
+              <li key={`${c.type}-${i}`}>{labelForCheck(c)}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-1 leading-relaxed">
+            以下回答未通过结构性校验（来源链接 / 结果条数 / 价格排序）。建议重新发送相同意图，或在追问里说明你需要的字段。
+          </p>
+        )}
       </div>
     );
   }
@@ -625,9 +663,17 @@ function VerificationBanner({
       <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
         结果可能不完整
       </div>
-      <p className="mt-1 leading-relaxed">
-        以下回答缺少部分要求的字段（如来源链接、足够多的结构化条目，或价格排序未达预期）。可参考使用，建议核对来源后再行动。
-      </p>
+      {items.length > 0 ? (
+        <ul className="mt-1 list-inside list-disc space-y-0.5 leading-relaxed">
+          {items.map((c, i) => (
+            <li key={`${c.type}-${i}`}>{labelForCheck(c)}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-1 leading-relaxed">
+          以下回答缺少部分要求的字段（如来源链接、足够多的结构化条目，或价格排序未达预期）。可参考使用，建议核对来源后再行动。
+        </p>
+      )}
     </div>
   );
 }

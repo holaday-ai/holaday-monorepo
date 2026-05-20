@@ -386,6 +386,23 @@ export const serverTaskTerminalSchema = z.object({
   status: z.enum(['completed', 'failed', 'paused', 'cancelled', 'partial_success']),
   summary: z.string().optional(),
   reason: z.string().optional(),
+  // Codex Round 2 P1-6 — list of failed structural checks so the
+  // SPA's VerificationBanner can render specific bullets ("缺少
+  // 来源链接", "结果数量不足", etc.) instead of the generic copy.
+  // Server populates from verification.checks where !passed, keyed
+  // by criterionType (Pack A1/A2 checkers) or 'generic.<name>' for
+  // the URL grounding / empty-result / constraint scans. `detail`
+  // carries the raw checker output so the banner can show row-level
+  // info like "第 3 行缺少商品链接". Optional — older orchestrator
+  // builds omit it; SPA falls back to the level-only banner.
+  failedChecks: z
+    .array(
+      z.object({
+        type: z.string(),
+        detail: z.string(),
+      }),
+    )
+    .optional(),
   /**
    * F4 — backend-orchestrated handoff. When the reply handler spawns
    * a follow-up task (e.g. user's clarification revealed the workflow

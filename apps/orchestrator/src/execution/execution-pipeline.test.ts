@@ -232,9 +232,16 @@ describe('all flags on — URL fabrication autoFix loop', () => {
   });
 
   it('fabricated URL with no similar grounded → drop placeholder', async () => {
+    // Codex Round 2 P0-1 follow-up — keep the intent free of any
+    // keyword that Pack A1's classifyIntentForOutputRequirement
+    // would route to `general_with_links` (cite / 引用 / 来源 etc.).
+    // Otherwise the contract picks up a url_count >= 1 criterion
+    // that fails right after autoFix drops the only URL — the
+    // verifier verdict no longer reflects the drop-placeholder
+    // path under test.
     initExecution({
       taskId: 'tsk_f2',
-      intent: 'cite something',
+      intent: 'translate the phrase',
       executionMode: 'generate',
     });
     recordEvidence('tsk_f2', {

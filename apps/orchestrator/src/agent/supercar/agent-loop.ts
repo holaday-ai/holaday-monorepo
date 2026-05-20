@@ -3014,6 +3014,27 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       };
     }
     if (Date.now() >= deadline) {
+      // Codex Round 2 P0-3 — auth-wall probe before reporting timeout.
+      // If the agent ran out of clock on a login / captcha / permission
+      // page, the right verdict is awaiting_user (so the user can
+      // complete the wall and the task can be resumed) rather than a
+      // dead-end "操作超时" failure.
+      const probed = await probeTimeoutAuthWall(executor);
+      if (probed) {
+        const question = buildAuthParkQuestion(probed.kind, probed.url);
+        await safeCall(opts.onAwaitingUser, {
+          question,
+          at: new Date(),
+          currentUrl: probed.url,
+          awaitingKind: probed.kind,
+        });
+        return {
+          status: 'awaiting_user',
+          question,
+          iterations: iteration,
+          toolsUsed: Array.from(toolsUsed),
+        };
+      }
       return {
         status: 'timeout',
         reason: `task timeout (${Math.round(timeoutMs / 1000)}s) elapsed`,
@@ -3768,6 +3789,64 @@ async function safeCall<T>(fn: ((ev: T) => void | Promise<void>) | undefined, ev
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'supercar: callback threw');
   }
+}
+
+/**
+ * Codex Round 2 P0-3 — last-chance auth-wall probe at deadline.
+ *
+ * The in-loop park path (line ~1740) already does the full URL +
+ * title + body probe before a model-emitted awaiting_user marker.
+ * This helper runs the SAME logic synchronously after the deadline
+ * fires, so a wall-clock timeout that landed on a login / captcha
+ * / permission page reports awaiting_user (recoverable by the user)
+ * instead of a dead-end timeout.
+ *
+ * Body text intentionally skipped — pulling 1KB via page.evaluate
+ * on a tab that already raced the clock isn't a great use of the
+ * grace window. URL + title cover the common compass.jinritemai
+ * /login and explicit captcha cases; the rare body-only signal
+ * falls through to the standard timeout verdict.
+ */
+async function probeTimeoutAuthWall(
+  executor: PlaywrightExecutor | null,
+): Promise<{ kind: 'login' | 'captcha' | 'permission'; url: string | null } | null> {
+  if (!executor) return null;
+  let url: string | null = null;
+  let title: string | null = null;
+  try {
+    const livePage = (await executor.getPage()) as unknown as {
+      url?: () => string;
+      title?: () => Promise<string> | string;
+    };
+    if (typeof livePage?.url === 'function') {
+      try {
+        url = livePage.url();
+      } catch {
+        /* page torn down between turns */
+      }
+    }
+    if (typeof livePage?.title === 'function') {
+      try {
+        const t = livePage.title();
+        title = (typeof t === 'string' ? t : await t) ?? null;
+      } catch {
+        /* best-effort */
+      }
+    }
+  } catch {
+    return null;
+  }
+  if (!url && !title) return null;
+  if (detectPermissionWall({ url, title, prominentText: null }).matched) {
+    return { kind: 'permission', url };
+  }
+  if (detectCaptchaPage({ url, title, prominentText: null }).matched) {
+    return { kind: 'captcha', url };
+  }
+  if (detectLoginPage({ url, title, prominentText: null }).matched) {
+    return { kind: 'login', url };
+  }
+  return null;
 }
 
 /**
