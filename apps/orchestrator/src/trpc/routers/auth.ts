@@ -62,7 +62,7 @@ export const authRouter = router({
       if (err instanceof AuthError && err.code === 'EMAIL_TAKEN') {
         throw new TRPCError({ code: 'CONFLICT', message: err.message });
       }
-      throw err;
+      throw maskUnexpectedAuthError(ctx, 'auth.register', err);
     }
   }),
 
@@ -74,7 +74,7 @@ export const authRouter = router({
       if (err instanceof AuthError && err.code === 'INVALID_CREDENTIALS') {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: err.message });
       }
-      throw err;
+      throw maskUnexpectedAuthError(ctx, 'auth.login', err);
     }
   }),
 
@@ -103,7 +103,11 @@ export const authRouter = router({
       throw err;
     }
     const svc = new AuthService(ctx.db);
-    return await svc.loginOrRegisterByEmail(input.email);
+    try {
+      return await svc.loginOrRegisterByEmail(input.email);
+    } catch (err) {
+      throw maskUnexpectedAuthError(ctx, 'auth.verifyCode', err);
+    }
   }),
 
   // ---------------------------------------------------------------
@@ -233,7 +237,7 @@ export const authRouter = router({
       if (err instanceof AuthError && err.code === 'INVALID_CREDENTIALS') {
         throw new TRPCError({ code: 'NOT_FOUND', message: err.message });
       }
-      throw err;
+      throw maskUnexpectedAuthError(ctx, 'auth.resetPassword', err);
     }
   }),
 
@@ -282,3 +286,18 @@ export const authRouter = router({
   }),
 });
 
+function maskUnexpectedAuthError(
+  ctx: { logger?: { error: (obj: unknown, msg?: string) => void } },
+  procedure: string,
+  err: unknown,
+): TRPCError {
+  if (err instanceof TRPCError) return err;
+  ctx.logger?.error(
+    { procedure, err: err instanceof Error ? err.message : String(err) },
+    'auth: unexpected error',
+  );
+  return new TRPCError({
+    code: 'INTERNAL_SERVER_ERROR',
+    message: '登录服务暂时不可用，请稍后重试。',
+  });
+}

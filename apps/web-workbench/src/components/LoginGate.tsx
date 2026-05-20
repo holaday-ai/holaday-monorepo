@@ -101,7 +101,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
       setAccessToken(res.accessToken);
       onAuthenticated();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(authErrorMessage(err, '登录失败，请稍后重试。'));
     } finally {
       setPending(false);
     }
@@ -124,7 +124,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
       setAccessToken(res.accessToken);
       onAuthenticated();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(authErrorMessage(err, '注册失败，请稍后重试。'));
     } finally {
       setPending(false);
     }
@@ -143,7 +143,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
       setCooldown(60);
       setNotice(`验证码已发送到 ${email}，5 分钟内有效`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(authErrorMessage(err, '验证码发送失败，请稍后重试。'));
     } finally {
       setPending(false);
     }
@@ -158,7 +158,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
       setAccessToken(res.accessToken);
       onAuthenticated();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(authErrorMessage(err, '验证码校验失败，请稍后重试。'));
     } finally {
       setPending(false);
     }
@@ -181,7 +181,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
       setAccessToken(res.accessToken);
       onAuthenticated();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(authErrorMessage(err, '重置密码失败，请稍后重试。'));
     } finally {
       setPending(false);
     }
@@ -208,7 +208,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
       setCooldown(60);
       setNotice(`验证码已发送到 ${phone.slice(0, 3)}****${phone.slice(-4)}，5 分钟内有效`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(authErrorMessage(err, '短信发送失败，请稍后重试。'));
     } finally {
       setPending(false);
     }
@@ -223,7 +223,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
       setAccessToken(res.accessToken);
       onAuthenticated();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(authErrorMessage(err, '验证码校验失败，请稍后重试。'));
     } finally {
       setPending(false);
     }
@@ -435,6 +435,20 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
       </div>
     </div>
   );
+}
+
+function authErrorMessage(err: unknown, fallback: string): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const trimmed = raw.trim();
+  if (!trimmed) return fallback;
+  if (
+    /unknown column|table .* doesn't exist|sql|database|response.*json|unexpected end of json|field list/i.test(
+      trimmed,
+    )
+  ) {
+    return fallback;
+  }
+  return trimmed;
 }
 
 function TabButton({

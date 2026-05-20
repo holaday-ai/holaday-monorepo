@@ -59,6 +59,12 @@ import './calendar-styles.css';
 
 const MOBILE_QUERY = '(max-width: 640px)';
 
+type ScheduledCalendarView =
+  | 'dayGridMonth'
+  | 'timeGridWeek'
+  | 'timeGridDay'
+  | 'listMonth';
+
 interface QuickCreateState {
   /** Anchor position for the popover (viewport coords). */
   anchor: { x: number; y: number };
@@ -120,9 +126,9 @@ export function ScheduledCalendarPage(): JSX.Element {
   // month view felt too high-level for the daily-cadence tasks most
   // users actually create; week shows enough detail to drop tasks
   // into specific hour slots.
-  const [currentView, setCurrentView] = React.useState<
-    'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listMonth'
-  >(() => (isMobile ? 'listMonth' : 'timeGridWeek'));
+  const [currentView, setCurrentView] = React.useState<ScheduledCalendarView>(() =>
+    isMobile ? 'listMonth' : 'timeGridWeek',
+  );
   const [toolbarTitle, setToolbarTitle] = React.useState<string>('');
   // Track row externalIds whose CREATED_AT just landed in the last
   // refresh so we can apply the magenta-glow pulse animation once.
@@ -173,7 +179,7 @@ export function ScheduledCalendarPage(): JSX.Element {
   const handleDatesSet = React.useCallback((arg: DatesSetArg) => {
     setCurrentRange({ start: arg.start, end: arg.end });
     setToolbarTitle(arg.view.title);
-    setCurrentView(arg.view.type as typeof currentView);
+    setCurrentView(arg.view.type as ScheduledCalendarView);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -189,8 +195,8 @@ export function ScheduledCalendarPage(): JSX.Element {
   const handleNext = React.useCallback(() => callApi((api) => api.next()), [callApi]);
   const handleToday = React.useCallback(() => callApi((api) => api.today()), [callApi]);
   const handleViewChange = React.useCallback(
-    (view: typeof currentView) => callApi((api) => api.changeView(view)),
-    [callApi, currentView],
+    (view: ScheduledCalendarView) => callApi((api) => api.changeView(view)),
+    [callApi],
   );
 
   /**
@@ -210,10 +216,6 @@ export function ScheduledCalendarPage(): JSX.Element {
    *      future state), set its scrollTop to the slot's offsetTop.
    *   3. Otherwise scroll the window so the slot lands just below
    *      the sticky band (read `--hd-band-h` for the offset).
-   *
-   * HD-DEBUG warns capture DOM state on prod so we can verify in
-   * Chrome DevTools what FC actually rendered. Logs go through
-   * console.warn (memory: data-driven debugging).
    */
   React.useEffect(() => {
     if (currentView !== 'timeGridWeek' && currentView !== 'timeGridDay') return;
@@ -227,53 +229,12 @@ export function ScheduledCalendarPage(): JSX.Element {
       const slot8 = root.querySelector<HTMLElement>(
         '.fc-timegrid-slot[data-time="08:00:00"]',
       );
-      const allSlots = root.querySelectorAll<HTMLElement>(
-        '.fc-timegrid-slot[data-time]',
-      );
-
-      const scrollerInfo = scroller
-        ? {
-            scrollHeight: scroller.scrollHeight,
-            clientHeight: scroller.clientHeight,
-            scrollTop: scroller.scrollTop,
-            overflowY: getComputedStyle(scroller).overflowY,
-            isScrollable: scroller.scrollHeight > scroller.clientHeight,
-          }
-        : null;
-      console.warn('[HD-DEBUG] scroll-to-8am', {
-        currentView,
-        scrollerFound: scroller?.className ?? null,
-        scrollerInfo,
-        slot8: slot8
-          ? {
-              offsetTop: slot8.offsetTop,
-              boundingTop: slot8.getBoundingClientRect().top,
-              dataTime: slot8.dataset.time,
-            }
-          : null,
-        slotCount: allSlots.length,
-        firstSlotTime: allSlots[0]?.dataset.time ?? null,
-        lastSlotTime: allSlots[allSlots.length - 1]?.dataset.time ?? null,
-        windowScrollY: window.scrollY,
-        bodyScrollHeight: document.body.scrollHeight,
-        viewportHeight: window.innerHeight,
-      });
-
-      if (!slot8) {
-        console.warn('[HD-DEBUG] scroll-to-8am: no 8:00 slot, giving up');
-        return;
-      }
+      if (!slot8) return;
 
       // Path A: internal scroller (if FC created one and it's
       // actually scrollable).
       if (scroller && scroller.scrollHeight > scroller.clientHeight) {
         scroller.scrollTop = slot8.offsetTop;
-        console.warn(
-          '[HD-DEBUG] scroll-to-8am: set scroller.scrollTop=',
-          slot8.offsetTop,
-          '→ actual:',
-          scroller.scrollTop,
-        );
         return;
       }
 
@@ -287,12 +248,6 @@ export function ScheduledCalendarPage(): JSX.Element {
       const bandH = parseInt(bandRaw, 10) || 120;
       const targetY = rect.top + window.scrollY - bandH - 8;
       window.scrollTo({ top: targetY, behavior: 'auto' });
-      console.warn(
-        '[HD-DEBUG] scroll-to-8am: window.scrollTo target=',
-        targetY,
-        'bandH=',
-        bandH,
-      );
     }, 800);
     return () => window.clearTimeout(id);
   }, [currentView]);

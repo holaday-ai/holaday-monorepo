@@ -9,7 +9,38 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { looksLikeBrowserTakeoverPrompt } from './agent-loop.js';
+import {
+  detectAuthWallSnapshot,
+  looksLikeBrowserTakeoverPrompt,
+} from './agent-loop.js';
+
+describe('detectAuthWallSnapshot', () => {
+  it('parks douyin compass identity-selection shell as a login wall', () => {
+    expect(
+      detectAuthWallSnapshot({
+        url: 'https://compass.jinritemai.com/',
+        title: '抖音电商罗盘',
+        body: '抖音电商·罗盘 抖音电商数据 请选择您的身份 达人 商家 机构',
+      }),
+    ).toMatchObject({
+      kind: 'login',
+      url: 'https://compass.jinritemai.com/',
+    });
+  });
+
+  it('parks explicit compass login URL without waiting for body text', () => {
+    expect(
+      detectAuthWallSnapshot({
+        url: 'https://compass.jinritemai.com/login',
+        title: null,
+        body: null,
+      }),
+    ).toMatchObject({
+      kind: 'login',
+      url: 'https://compass.jinritemai.com/login',
+    });
+  });
+});
 
 describe('looksLikeBrowserTakeoverPrompt', () => {
   describe('matches takeover prompts the model actually emits', () => {

@@ -24,7 +24,9 @@
     "eval:smoke": "tsx src/eval/eval-runner.ts p0-smoke",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:migrate:numbered": "tsx scripts/apply-numbered-migrations.ts",
     "db:push": "drizzle-kit push",
+    "db:verify": "tsx scripts/verify-db-schema.ts",
     "db:studio": "drizzle-kit studio",
     "clean": "rimraf dist .turbo"
   },

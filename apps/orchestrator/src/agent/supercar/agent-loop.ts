@@ -93,6 +93,8 @@ import { env as appEnv } from '../../config/env.js';
  */
 export const STUCK_WARN_THRESHOLD = 6;
 export const STUCK_EXIT_THRESHOLD = 12;
+const AWAITING_USER_TIMEOUT_CLARIFICATION_MS = 5 * 60 * 1000;
+const AWAITING_USER_TIMEOUT_TAKEOVER_MS = 30 * 60 * 1000;
 
 /**
  * Phase 23 Step 3 — Apify actor IDs for the agent-callable scrape /
@@ -1241,6 +1243,83 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   };
   handles.set(opts.taskId, handle);
 
+  const parkForAuthWall = async (
+    kind: 'login' | 'captcha' | 'permission',
+    url: string | null,
+  ): Promise<SupercarOutcome | null> => {
+    const question = buildAuthParkQuestion(kind, url);
+    await safeCall(opts.onAwaitingUser, {
+      question,
+      at: new Date(),
+      currentUrl: url,
+      awaitingKind: kind,
+    });
+    let waitTimer: NodeJS.Timeout | null = null;
+    const replyPromise = new Promise<string>((resolve) => {
+      handle.resolveReply = resolve;
+    });
+    const timeoutPromise = new Promise<string>((resolve) => {
+      waitTimer = setTimeout(
+        () => resolve('__SUPERCAR_AWAITING_TIMEOUT__'),
+        AWAITING_USER_TIMEOUT_TAKEOVER_MS,
+      );
+    });
+    const replyOrAbort = await Promise.race([replyPromise, timeoutPromise]);
+    if (waitTimer) clearTimeout(waitTimer);
+    handle.resolveReply = null;
+    if (handle.handoffMessage !== null) {
+      const handoffMsg = handle.handoffMessage;
+      handle.handoffMessage = null;
+      convergePlanOnSuccess();
+      return {
+        status: 'handoff_to_generate',
+        question: handoffMsg,
+        iterations: iteration,
+        toolsUsed: Array.from(toolsUsed),
+      };
+    }
+    if (replyOrAbort === '__SUPERCAR_ABORT__' || cancelled) {
+      return {
+        status: 'cancelled',
+        iterations: iteration,
+        toolsUsed: Array.from(toolsUsed),
+      };
+    }
+    if (replyOrAbort === '__SUPERCAR_AWAITING_TIMEOUT__') {
+      return {
+        status: 'awaiting_user',
+        question,
+        iterations: iteration,
+        toolsUsed: Array.from(toolsUsed),
+      };
+    }
+    if (Date.now() >= deadline) {
+      return {
+        status: 'timeout',
+        reason: 'task timeout elapsed while waiting for user reply',
+        iterations: iteration,
+        toolsUsed: Array.from(toolsUsed),
+      };
+    }
+    if (
+      handle.pendingAttachmentBlocks &&
+      handle.pendingAttachmentBlocks.length > 0
+    ) {
+      const blocks = handle.pendingAttachmentBlocks;
+      handle.pendingAttachmentBlocks = null;
+      messages.push({
+        role: 'user',
+        content: [
+          ...(blocks as unknown as ContentBlockParam[]),
+          { type: 'text', text: replyOrAbort },
+        ],
+      });
+    } else {
+      messages.push({ role: 'user', content: replyOrAbort });
+    }
+    return null;
+  };
+
   try {
     while (iteration < maxIterations && Date.now() < deadline && !cancelled) {
       iteration++;
@@ -1844,8 +1923,6 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           // clarification keeps 5min (and in practice doesn't even
           // reach this path anymore — expert intake routes to generate
           // upstream).
-          const AWAITING_USER_TIMEOUT_CLARIFICATION_MS = 5 * 60 * 1000;
-          const AWAITING_USER_TIMEOUT_TAKEOVER_MS = 30 * 60 * 1000;
           // P1-A — strip the machine marker before showing the
           // question to the user. Detector consumed it; user
           // shouldn't see "[AWAITING_USER_INPUT]" verbatim.
@@ -2199,6 +2276,21 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             { taskId: opts.taskId, iteration, requested: targetUrl, landed: navUrl },
             'supercar: navigate completed',
           );
+          const authWall = await probeCurrentAuthWall(executor, navUrl, true);
+          if (authWall) {
+            logger.info(
+              {
+                taskId: opts.taskId,
+                iteration,
+                kind: authWall.kind,
+                url: authWall.url,
+              },
+              'supercar: auth wall detected immediately after navigate — parking',
+            );
+            const parkedOutcome = await parkForAuthWall(authWall.kind, authWall.url);
+            if (parkedOutcome) return parkedOutcome;
+            continue;
+          }
           // Phase 3 R4 — when goto errored or the page is blank,
           // lead with the friendly Chinese message instead of the
           // happy "已导航到 X" line. The screenshot still goes
@@ -3810,8 +3902,16 @@ async function safeCall<T>(fn: ((ev: T) => void | Promise<void>) | undefined, ev
 async function probeTimeoutAuthWall(
   executor: PlaywrightExecutor | null,
 ): Promise<{ kind: 'login' | 'captcha' | 'permission'; url: string | null } | null> {
+  return probeCurrentAuthWall(executor, null, false);
+}
+
+async function probeCurrentAuthWall(
+  executor: PlaywrightExecutor | null,
+  fallbackUrl: string | null,
+  includeBody: boolean,
+): Promise<{ kind: 'login' | 'captcha' | 'permission'; url: string | null } | null> {
   if (!executor) return null;
-  let url: string | null = null;
+  let url: string | null = fallbackUrl;
   let title: string | null = null;
   try {
     const livePage = (await executor.getPage()) as unknown as {
@@ -3836,7 +3936,17 @@ async function probeTimeoutAuthWall(
   } catch {
     return null;
   }
-  if (!url && !title) return null;
+  const body = includeBody ? await readPageText(executor) : null;
+  return detectAuthWallSnapshot({ url, title, body });
+}
+
+export function detectAuthWallSnapshot(inputs: {
+  url: string | null;
+  title: string | null;
+  body: string | null;
+}): { kind: 'login' | 'captcha' | 'permission'; url: string | null } | null {
+  const { url, title, body } = inputs;
+  if (!url && !title && !body) return null;
   if (detectPermissionWall({ url, title, prominentText: null }).matched) {
     return { kind: 'permission', url };
   }
@@ -3845,6 +3955,39 @@ async function probeTimeoutAuthWall(
   }
   if (detectLoginPage({ url, title, prominentText: null }).matched) {
     return { kind: 'login', url };
+  }
+  if (body) {
+    if (detectPermissionWall({ url: null, title: null, prominentText: body }).matched) {
+      return { kind: 'permission', url };
+    }
+    if (detectCaptchaPage({ url: null, title: null, prominentText: body }).matched) {
+      return { kind: 'captcha', url };
+    }
+    if (detectLoginPage({ url: null, title: null, prominentText: body }).matched) {
+      return { kind: 'login', url };
+    }
+    const siteConfig = matchSiteConfig(url);
+    if (siteConfig?.auth?.loginBodyPhrases) {
+      const lower = body.toLowerCase();
+      for (const phrase of siteConfig.auth.loginBodyPhrases) {
+        if (lower.includes(phrase.toLowerCase())) {
+          return { kind: 'login', url };
+        }
+      }
+    }
+  }
+  const siteConfig = matchSiteConfig(url);
+  if (siteConfig?.auth?.loginUrlPaths && url) {
+    try {
+      const path = new URL(url).pathname.toLowerCase();
+      for (const needle of siteConfig.auth.loginUrlPaths) {
+        if (path.includes(needle.toLowerCase())) {
+          return { kind: 'login', url };
+        }
+      }
+    } catch {
+      /* bad URL shape */
+    }
   }
   return null;
 }
