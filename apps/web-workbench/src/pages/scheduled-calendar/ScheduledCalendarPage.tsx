@@ -26,6 +26,7 @@
  */
 
 import FullCalendar from '@fullcalendar/react';
+import zhCnLocale from '@fullcalendar/core/locales/zh-cn';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import listPlugin from '@fullcalendar/list';
@@ -713,7 +714,8 @@ export function ScheduledCalendarPage(): JSX.Element {
               dayCellContent: (arg) => String(arg.date.getDate()),
             },
           }}
-          locale="zh-cn"
+          locale={zhCnLocale}
+          noEventsContent="暂无定时任务"
           firstDay={1}
           allDaySlot={false}
           slotDuration="00:30:00"

@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import {
   detectAuthWallSnapshot,
   looksLikeBrowserTakeoverPrompt,
+  shouldKeepAwaitingOnUserTimeout,
 } from './agent-loop.js';
 
 describe('detectAuthWallSnapshot', () => {
@@ -39,6 +40,19 @@ describe('detectAuthWallSnapshot', () => {
       kind: 'login',
       url: 'https://compass.jinritemai.com/login',
     });
+  });
+});
+
+describe('shouldKeepAwaitingOnUserTimeout', () => {
+  it('keeps browser takeover waits parked instead of completing stale text', () => {
+    expect(shouldKeepAwaitingOnUserTimeout('login')).toBe(true);
+    expect(shouldKeepAwaitingOnUserTimeout('captcha')).toBe(true);
+    expect(shouldKeepAwaitingOnUserTimeout('permission')).toBe(true);
+    expect(shouldKeepAwaitingOnUserTimeout('browser_action')).toBe(true);
+  });
+
+  it('lets plain clarification timeouts converge to the available answer', () => {
+    expect(shouldKeepAwaitingOnUserTimeout('clarification')).toBe(false);
   });
 });
 

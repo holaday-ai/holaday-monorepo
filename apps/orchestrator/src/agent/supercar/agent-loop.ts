@@ -2003,6 +2003,23 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             };
           }
           if (replyOrAbort === '__SUPERCAR_AWAITING_TIMEOUT__') {
+            if (shouldKeepAwaitingOnUserTimeout(parkAwaitingKind)) {
+              logger.info(
+                {
+                  taskId: opts.taskId,
+                  iteration,
+                  awaitingMs: AWAITING_USER_TIMEOUT_MS,
+                  awaitingKind: parkAwaitingKind,
+                },
+                'supercar: takeover awaiting-user timed out — keeping task parked',
+              );
+              return {
+                status: 'awaiting_user',
+                question: visibleQuestion,
+                iterations: iteration,
+                toolsUsed: Array.from(toolsUsed),
+              };
+            }
             // No user reply within the cap. The model already produced
             // a complete answer (the trailing question is courteous,
             // not load-bearing). Surface what we have and let the user
@@ -3837,6 +3854,12 @@ export function classifyAwaitingKind(
     return 'browser_action';
   }
   return 'clarification';
+}
+
+export function shouldKeepAwaitingOnUserTimeout(
+  kind: SupercarAwaitingKind,
+): boolean {
+  return kind !== 'clarification';
 }
 
 /**

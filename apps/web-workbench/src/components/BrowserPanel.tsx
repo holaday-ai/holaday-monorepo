@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
+import { shouldShowBrowserHeader } from '@/components/browser-panel-state';
 import {
   CdpScreencastViewport,
   type CdpScreencastStatus,
@@ -766,11 +767,12 @@ export function BrowserPanel({
     taskStatus === 'completed' ||
     taskStatus === 'failed' ||
     taskStatus === 'cancelled';
-  const hasViewableEvidence = Boolean(
-    frame || finalEvidenceFrame || latestFrame,
-  );
-  const showHeader =
-    !taskIsTerminalForHeader || hasViewableEvidence || interactiveActive;
+  const showHeader = shouldShowBrowserHeader({
+    taskIsTerminal: taskIsTerminalForHeader,
+    hasCurrentFrame: Boolean(frame),
+    hasFinalEvidence: Boolean(finalEvidenceFrame),
+    interactiveActive,
+  });
 
   const sendInput = React.useCallback(
     (payload: Omit<UserInputEvent, 'type' | 'taskId'>) => {
@@ -1363,11 +1365,10 @@ export function BrowserPanel({
               )
             ) : finalEvidenceFrame ? (
               // R7 — terminal task with captured evidence. The img
-              // is static (no clicks reach Brave) BUT the user can
-              // tap "接管浏览器" below to wake a fresh Brave + flip
-              // into interactive mode. The task itself is over; the
-              // takeover starts a fresh browsing session for the
-              // user to do whatever they need.
+              // is static (no clicks reach Brave). Per-task Brave has
+              // already been released, so this surface must stay an
+              // evidence viewer and offer a fresh re-run instead of a
+              // misleading live takeover.
               <div className="relative flex h-full w-full flex-col">
                 <div className="relative flex flex-1 items-center justify-center min-h-0 min-w-0">
                   <img
@@ -1385,33 +1386,18 @@ export function BrowserPanel({
                     )}
                   </div>
                 </div>
-                {/* BUG-11 issue A — terminal-task takeover entry.
-                    Calls onWake (= tasks.wakeBrowser) to ensure a
-                    fresh Brave instance is alive for the user, then
-                    flips interactive on. When the screencast WS
-                    attaches to the new instance the user is already
-                    in takeover mode. We DON'T claim to attach back
-                    to the original task's page — that's gone — but
-                    the user gets a working browser they can drive. */}
                 <div className="flex shrink-0 items-center justify-center gap-2 border-t border-border/40 bg-background/60 px-3 py-2 text-[12px]">
-                  <span className="text-muted-foreground">想继续操作？</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleUserTakeoverClick();
-                      void onWake();
-                    }}
-                    disabled={waking}
-                    className={cn(
-                      'inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition-colors',
-                      waking
-                        ? 'cursor-wait border-border bg-muted text-muted-foreground'
-                        : 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/15',
-                    )}
-                  >
-                    <Power className="h-3 w-3" />
-                    {waking ? '正在唤醒…' : '接管浏览器'}
-                  </button>
+                  <span className="text-muted-foreground">想继续操作？发新任务或重新执行。</span>
+                  {onReExecute && (
+                    <button
+                      type="button"
+                      onClick={onReExecute}
+                      className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-foreground/30 hover:bg-foreground/[0.04]"
+                    >
+                      <RotateCw className="h-3 w-3" />
+                      重新执行
+                    </button>
+                  )}
                 </div>
               </div>
             ) : (
