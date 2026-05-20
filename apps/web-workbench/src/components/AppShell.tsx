@@ -645,7 +645,7 @@ export function AppShell(): JSX.Element {
           );
           if (errs.length === 0) toast.show(`已删除 ${ids.length} 个任务`);
           else if (errs.length === ids.length)
-            toast.show(`删除失败：${errs[0]?.error ?? 'unknown'}`, 'error');
+            toast.show(taskActionError('删除失败', errs[0]?.error), 'error');
           else
             toast.show(
               `已删除 ${ids.length - errs.length} 个，${errs.length} 个失败`,
@@ -688,7 +688,7 @@ export function AppShell(): JSX.Element {
           );
           if (errs.length === 0) toast.show(`已清除 ${failed.length} 个失败任务`);
           else if (errs.length === failed.length)
-            toast.show(`清除失败：${errs[0]?.error ?? 'unknown'}`, 'error');
+            toast.show(taskActionError('清除失败', errs[0]?.error), 'error');
           else
             toast.show(
               `清除了 ${failed.length - errs.length} 个，${errs.length} 个失败`,
