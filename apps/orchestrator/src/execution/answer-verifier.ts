@@ -576,6 +576,17 @@ function checkCustom(
  * floor, not a ceiling.
  */
 function checkEmptyResult(answerText: string): CheckResult | null {
+  // BUG-A2 fix (2026-05-20): bypass the empty-result check when the
+  // original (un-sanitized) answer is substantial (>200 non-whitespace
+  // chars). The sanitization regex strips full header lines, ordinals,
+  // bullet markers, and table pipes — on long structured Chinese
+  // markdown reports this over-eats and trips the 20-char floor on
+  // answers users would consider rich. 200 is generous enough that a
+  // genuinely empty model output (single-line stub / pure ordinals)
+  // can't hit it. Keep the existing 20-char meaningful check as the
+  // floor for short answers where the original failure mode lives.
+  const originalContentLen = answerText.replace(/\s/g, '').length;
+  if (originalContentLen >= 200) return null;
   const meaningful = answerText
     .replace(/^#{1,6}\s+.*$/gm, '')
     .replace(/^[-*]\s+/gm, '')

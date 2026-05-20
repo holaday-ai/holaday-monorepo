@@ -445,12 +445,19 @@ function AgentBlock({
 
         {/* Codex Pack A4 — verification verdict banner. Sits ABOVE the
             terminal summary so users see the quality-gate status before
-            they read the answer. Yellow for partial_success (soft fail,
-            result kept); red for failed-via-verifier (hard fail). Null
-            for tasks that ran before the verifier flag flipped on. */}
-        {terminal && task.verificationPassed === false && (
+            they read the answer.
+            BUG-A1 (2026-05-20): keyed off task.status='partial_success'
+            instead of `verificationPassed===false`. The live
+            server.task.terminal frame ships status (which already
+            encodes the verdict via deriveFinalStatus) but does NOT yet
+            carry verificationPassed — that only lands after
+            hydrateDetail fires. Status-driven gating shows the banner
+            immediately on terminal arrival; hard-fail reasons are
+            already shown by FailureHeaderCard for status='failed' so no
+            second red banner is needed here. */}
+        {terminal && task.status === 'partial_success' && (
           <VerificationBanner
-            level={task.failureLevel ?? null}
+            level={task.failureLevel ?? 'fixable'}
             status={task.status}
           />
         )}
@@ -1464,9 +1471,21 @@ function TerminalSummary({
         // invalid. Threshold matches the orchestrator's answer-verifier
         // checkEmptyResult so the SPA never displays a near-empty
         // success card the backend would have flagged fixable.
+        //
+        // BUG-A2 fix (2026-05-20): bypass the empty-result card when
+        // the original (un-sanitized) answer is substantial (>200
+        // non-whitespace chars). Structured Chinese answers heavy on
+        // headers / tables / bullets sanitize to a small "meaningful"
+        // slice even when the user is reading a rich response — the
+        // sanitizer was stripping `^#{1,6}\s+.*$` (full header lines)
+        // and `[|*_]` table/emphasis markers, which over-eats long
+        // markdown reports. 200 is generous enough that no genuinely
+        // empty answer can hit it, but small enough to still catch
+        // the original failure mode (single-line stub / pure ordinals).
         const sanitized = sanitizeMarkdownTrailingPunctuation(
           sanitizeForRender(revealed),
         );
+        const originalContentLen = displayText.replace(/\s/g, '').length;
         // Strip markdown headers / list ordinals / table pipes /
         // collapsed whitespace before measuring — "## 报告\n1. \n"
         // is structurally non-empty but carries zero content.
@@ -1481,6 +1500,7 @@ function TerminalSummary({
         if (
           !isFailedLike &&
           !attachments?.length &&
+          originalContentLen < 200 &&
           (meaningful.length < 20 || !hasContentChars)
         ) {
           return (
