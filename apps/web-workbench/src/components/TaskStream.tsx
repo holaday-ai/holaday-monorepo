@@ -372,12 +372,8 @@ function AgentBlock({
             // a terminal state — at that point the result above and
             // the step ticker below already cover what happened, and
             // an expanded plan reads like a duplicate template log.
-            // Cancelled is terminal too — fold same as completed/failed.
-            defaultExpanded={
-              task.status !== 'completed' &&
-              task.status !== 'failed' &&
-              task.status !== 'cancelled'
-            }
+            // Fold for all terminal statuses, including partial success.
+            defaultExpanded={!isTerminalStatus(task.status)}
           />
         )}
 

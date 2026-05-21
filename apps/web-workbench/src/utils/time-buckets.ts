@@ -1,4 +1,4 @@
-import type { UiTask } from '@/types/task';
+import { isTerminalStatus, type UiTask } from '@/types/task';
 
 /**
  * Group tasks into the sidebar's time buckets: 今天 / 本周 / 更早.
@@ -35,7 +35,7 @@ export function bucketByTime(tasks: UiTask[], now: Date = new Date()): TaskBucke
 }
 
 export function isTaskDeletable(status: UiTask['status']): boolean {
-  return status === 'completed' || status === 'failed' || status === 'cancelled';
+  return isTerminalStatus(status);
 }
 
 /**
