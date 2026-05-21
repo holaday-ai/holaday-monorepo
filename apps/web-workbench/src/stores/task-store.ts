@@ -1700,8 +1700,9 @@ export function normaliseDetailStepStatus(raw: string): UiStep['status'] {
       return 'done';
     case 'failed':
     case 'error':
-    case 'cancelled':
       return 'failed';
+    case 'cancelled':
+      return 'cancelled';
     default:
       return 'running';
   }

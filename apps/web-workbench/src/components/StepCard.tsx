@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, Loader2, X } from 'lucide-react';
+import { AlertTriangle, Check, CircleSlash, Loader2, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
@@ -21,6 +21,7 @@ interface Props {
  *   - running: blue-pulsed badge (no icon yet)
  *   - done:    green badge with a check
  *   - failed:  red badge with an x
+ *   - cancelled: muted badge with a slash
  *
  * The action row below the title is the human-readable summary
  * (pre-derived on the orchestrator). Errors reveal a secondary line
@@ -126,6 +127,7 @@ function StatusBadge({ step }: { step: UiStep }): JSX.Element {
         step.status === 'running' && 'animate-pulse-dot bg-primary',
         step.status === 'done' && 'bg-primary',
         step.status === 'failed' && 'bg-red-500',
+        step.status === 'cancelled' && 'bg-muted-foreground/50 text-background',
       )}
       aria-label={`步骤 ${step.tickIndex + 1} · ${step.status}`}
     >
@@ -133,6 +135,8 @@ function StatusBadge({ step }: { step: UiStep }): JSX.Element {
         <Check className="h-3.5 w-3.5" strokeWidth={3} />
       ) : step.status === 'failed' ? (
         <X className="h-3.5 w-3.5" strokeWidth={3} />
+      ) : step.status === 'cancelled' ? (
+        <CircleSlash className="h-3.5 w-3.5" strokeWidth={2.5} />
       ) : (
         <span>{step.tickIndex + 1}</span>
       )}

@@ -17,6 +17,9 @@ describe('normaliseDetailStepStatus', () => {
   it('maps error-like states to failed', () => {
     expect(normaliseDetailStepStatus('failed')).toBe('failed');
     expect(normaliseDetailStepStatus('error')).toBe('failed');
-    expect(normaliseDetailStepStatus('cancelled')).toBe('failed');
+  });
+
+  it('keeps cancelled detail steps distinct from failures', () => {
+    expect(normaliseDetailStepStatus('cancelled')).toBe('cancelled');
   });
 });

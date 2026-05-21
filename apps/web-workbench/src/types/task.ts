@@ -216,7 +216,7 @@ export interface UiSkill {
  */
 export interface UiStep {
   tickIndex: number;
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'cancelled';
   actionKind?: string;
   actionSummary?: string;
   durationMs?: number;

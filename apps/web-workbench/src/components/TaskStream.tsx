@@ -3,6 +3,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  CircleSlash,
   Clock,
   Copy,
   Download,
@@ -979,6 +980,7 @@ function HumanLineList({ lines }: { lines: HumanLine[] }): JSX.Element {
             className={cn(
               'min-w-0 flex-1',
               line.status === 'failed' ? 'text-red-600' : 'text-foreground',
+              line.status === 'cancelled' && 'text-muted-foreground',
               line.status === 'running' && 'text-foreground',
             )}
           >
@@ -1003,6 +1005,14 @@ function LineBadge({
   if (status === 'failed') {
     return (
       <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-500" aria-hidden />
+    );
+  }
+  if (status === 'cancelled') {
+    return (
+      <CircleSlash
+        className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground"
+        aria-hidden
+      />
     );
   }
   return (
