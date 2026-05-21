@@ -61,6 +61,23 @@ function currentMonthStartUtc(): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
+type TrendStatusRow = { day: string; status: string; count: number };
+type DayStats = { total: number; completed: number; failed: number };
+
+function buildDashboardDayStats(rows: TrendStatusRow[]): Map<string, DayStats> {
+  const byDay = new Map<string, DayStats>();
+  for (const row of rows) {
+    const day = String(row.day);
+    const cur = byDay.get(day) ?? { total: 0, completed: 0, failed: 0 };
+    const c = Number(row.count);
+    cur.total += c;
+    if (row.status === 'completed') cur.completed += c;
+    else if (row.status === 'failed') cur.failed += c;
+    byDay.set(day, cur);
+  }
+  return byDay;
+}
+
 export const adminRouter = router({
   // ─────────────────────────────────────────────────────────── dashboard ──
   dashboard: adminProcedure.query(async ({ ctx }) => {
@@ -93,16 +110,7 @@ export const adminRouter = router({
       .where(gte(tasks.createdAt, sevenDaysAgo))
       .groupBy(dayExpr, tasks.status);
 
-    const byDay = new Map<string, { total: number; completed: number; failed: number }>();
-    for (const row of trendRows) {
-      const day = String(row.day);
-      const cur = byDay.get(day) ?? { total: 0, completed: 0, failed: 0 };
-      const c = Number(row.count);
-      cur.total += c;
-      if (row.status === 'completed') cur.completed += c;
-      else if (row.status === 'failed' || row.status === 'cancelled') cur.failed += c;
-      byDay.set(day, cur);
-    }
+    const byDay = buildDashboardDayStats(trendRows);
     const trend: Array<{ date: string; total: number; successRate: number }> = [];
     for (let i = 6; i >= 0; i--) {
       const dStr = beijingDayString(now, i);
@@ -458,4 +466,8 @@ export const adminRouter = router({
 });
 
 // Re-export helpers for unit testing (no external consumers).
-export const __adminInternals = { beijingDayStartUtc, beijingDayString };
+export const __adminInternals = {
+  beijingDayStartUtc,
+  beijingDayString,
+  buildDashboardDayStats,
+};

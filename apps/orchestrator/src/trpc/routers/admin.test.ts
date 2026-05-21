@@ -16,7 +16,8 @@ import { TRPCError } from '@trpc/server';
 import { describe, expect, it, vi } from 'vitest';
 import { __adminInternals, adminRouter } from './admin.js';
 
-const { beijingDayStartUtc, beijingDayString } = __adminInternals;
+const { beijingDayStartUtc, beijingDayString, buildDashboardDayStats } =
+  __adminInternals;
 
 const fakeLogger = {
   info: vi.fn(),
@@ -140,5 +141,17 @@ describe('beijingDayString', () => {
 
   it('walks back daysAgo Beijing days', () => {
     expect(beijingDayString(new Date('2026-05-17T06:00:00Z'), 6)).toBe('2026-05-11');
+  });
+});
+
+describe('buildDashboardDayStats', () => {
+  it('keeps cancelled tasks in volume but out of failure rate math', () => {
+    const stats = buildDashboardDayStats([
+      { day: '2026-05-21', status: 'completed', count: 4 },
+      { day: '2026-05-21', status: 'failed', count: 1 },
+      { day: '2026-05-21', status: 'cancelled', count: 3 },
+    ]).get('2026-05-21');
+
+    expect(stats).toEqual({ total: 8, completed: 4, failed: 1 });
   });
 });
