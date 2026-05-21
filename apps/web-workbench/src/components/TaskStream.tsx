@@ -347,6 +347,9 @@ function AgentBlock({
     Boolean(task.resultText);
 
   const showInlineProgress = !terminal;
+  const hasTerminalArtifacts =
+    Boolean(task.attachments?.length) ||
+    Boolean(task.finalUrl && task.finalUrl !== 'about:blank');
 
   // Product polish #5 — drop the "H" avatar circle. Assistant
   // output reads as a result card directly on the page (Codex /
@@ -487,10 +490,10 @@ function AgentBlock({
             failedChecks={task.failedChecks ?? null}
           />
         )}
-        {terminal && task.resultText && (
+        {terminal && (task.resultText || hasTerminalArtifacts) && (
           <TerminalSummary
             status={task.status}
-            text={task.resultText}
+            text={task.resultText ?? ''}
             // task.finalUrl is the persisted final-page URL (R7), so
             // refreshes / history clicks still surface "打开最终页面"
             // even after the live screencast has gone. Live tasks
@@ -535,7 +538,7 @@ function AgentBlock({
          *  Without this the panel renders just the H avatar — looks
          *  like the SPA broke. The retry hint mirrors the failed-card
          *  copy so the next-step is obvious. */}
-        {terminal && !task.resultText && (
+        {terminal && !task.resultText && !hasTerminalArtifacts && (
           <EmptyTerminalCard status={task.status} intent={task.intent} />
         )}
 
@@ -1689,12 +1692,26 @@ function TerminalSummary({
   };
   const hasRealUrl =
     !!currentUrl && currentUrl !== 'about:blank' && !currentUrl.startsWith('chrome://');
+  const fallbackPlainText = React.useMemo(() => {
+    if (displayText.trim().length > 0) return '';
+    const parts: string[] = [];
+    if (attachments?.length) {
+      parts.push(`任务产出了 ${attachments.length} 个文件`);
+    }
+    if (hasRealUrl) {
+      parts.push(`最终页面：${currentUrl}`);
+    }
+    return parts.join('\n');
+  }, [attachments?.length, currentUrl, displayText, hasRealUrl]);
   // Strip markdown syntax for the plain-text Copy. Keeps `[label](url)` →
   // `label`, drops `**bold**` markers, code fences, list bullets — the
   // user gets what they'd visually read. The markdown copy keeps the raw
   // source so paste into Notion / Slack / a doc editor preserves
   // structure.
-  const plainText = React.useMemo(() => stripMarkdown(displayText), [displayText]);
+  const plainText = React.useMemo(
+    () => stripMarkdown(displayText) || fallbackPlainText,
+    [displayText, fallbackPlainText],
+  );
   const copyTo = React.useCallback(
     async (value: string, label: string): Promise<void> => {
       try {
