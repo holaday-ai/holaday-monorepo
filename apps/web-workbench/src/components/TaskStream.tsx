@@ -40,6 +40,7 @@ import {
   fetchFileBlobAuthed,
 } from '@/lib/download-file';
 import { taskActionError } from '@/lib/error-copy';
+import { classifyFriendlyFailure } from '@/lib/failure-copy';
 import { terminalEmptyCopy } from '@/lib/terminal-empty-copy';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 import { PlanCard } from '@/components/PlanCard';
@@ -535,7 +536,7 @@ function AgentBlock({
          *  like the SPA broke. The retry hint mirrors the failed-card
          *  copy so the next-step is obvious. */}
         {terminal && !task.resultText && (
-          <EmptyTerminalCard status={task.status} />
+          <EmptyTerminalCard status={task.status} intent={task.intent} />
         )}
 
         {steps.length > 0 && (
@@ -1234,10 +1235,27 @@ const EXPERT_HEADER_META: Record<string, { icon: string; label: string }> = {
   'douyin-review': { icon: '🎬', label: '抖音稿件复盘' },
 };
 
-function EmptyTerminalCard({ status }: { status: UiTask['status'] }): JSX.Element {
+function EmptyTerminalCard({
+  status,
+  intent,
+}: {
+  status: UiTask['status'];
+  intent?: string;
+}): JSX.Element {
   const copy = terminalEmptyCopy(status);
   const cancelled = status === 'cancelled';
   const failed = status === 'failed';
+  const toast = useToast();
+  const createTask = useTaskStore((s) => s.createTask);
+  const handleRetry = React.useCallback(async (): Promise<void> => {
+    if (!intent) return;
+    const result = await createTask(intent, []);
+    if ('error' in result) {
+      toast.show(taskActionError('重试失败', result.error), 'error');
+      return;
+    }
+    toast.show('已重新提交', 'info', 2000);
+  }, [createTask, intent, toast]);
 
   return (
     <div
@@ -1254,6 +1272,16 @@ function EmptyTerminalCard({ status }: { status: UiTask['status'] }): JSX.Elemen
         {copy.title}
       </div>
       <div>{copy.body}</div>
+      {failed && intent && (
+        <button
+          type="button"
+          onClick={() => void handleRetry()}
+          className="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-red-300/70 bg-white/60 px-2.5 text-[11px] font-medium text-red-800 transition-colors hover:bg-white dark:border-red-400/40 dark:bg-red-400/10 dark:text-red-100 dark:hover:bg-red-400/15"
+        >
+          <RotateCcw className="h-3 w-3" />
+          重试
+        </button>
+      )}
     </div>
   );
 }
@@ -2435,68 +2463,6 @@ function extractTableData(children: React.ReactNode): TableData | null {
 }
 
 // ───────────────────────── Failure header (user-friendly copy)
-
-interface FriendlyFailure {
-  title: string;
-  subtitle: string;
-}
-
-/**
- * Map a raw failure message to a friendly two-line headline. The raw
- * text is still rendered below for users who want the technical
- * detail — this only changes the "what went wrong, at a glance"
- * card at the top of the failure surface. Keyword match on both
- * English + Chinese phrases.
- */
-function classifyFriendlyFailure(errorText: string): FriendlyFailure {
-  const haystack = (errorText ?? '').toLowerCase();
-  if (
-    /dns|enotfound|getaddrinfo|net::err_name|net::err_address|无法访问|网络错误|网络异常|解析失败/.test(
-      haystack,
-    )
-  ) {
-    return {
-      title: '无法打开这个网站',
-      subtitle: '请检查网址是否正确，或换一个能直接访问的页面。',
-    };
-  }
-  if (/timeout|timed.?out|超时/.test(haystack)) {
-    return {
-      title: '操作超时',
-      subtitle: '目标网站响应太慢，请稍后再试。',
-    };
-  }
-  if (
-    /captcha|recaptcha|hcaptcha|验证码|人机|滑块|cloudflare|are you a (human|robot)/.test(
-      haystack,
-    )
-  ) {
-    return {
-      title: '网站要求验证身份',
-      subtitle: '遇到验证码或人机校验。可以接管浏览器手动通过，再让 AI 继续。',
-    };
-  }
-  if (/login|sign[\s_-]?in|登录|401|未登录|unauthor|凭据|需要授权/.test(haystack)) {
-    return {
-      title: '需要先登录',
-      subtitle: '请接管浏览器登录后再让 AI 继续。',
-    };
-  }
-  if (
-    /browser|chromium|brave|cdp|websocket|浏览器|frame[^\w]not|screencast/.test(
-      haystack,
-    )
-  ) {
-    return {
-      title: '浏览器遇到问题',
-      subtitle: '可以点重试再跑一次。',
-    };
-  }
-  return {
-    title: '任务未能完成',
-    subtitle: '请重试，或换一种描述方式（更具体的指令、提供示例数据）。',
-  };
-}
 
 function FailureHeaderCard({
   status,
