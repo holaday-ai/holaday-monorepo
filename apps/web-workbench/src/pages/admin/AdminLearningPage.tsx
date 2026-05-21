@@ -71,7 +71,7 @@ export function AdminLearningPage(): JSX.Element {
       <header className="mb-6">
         <h1 className="text-xl font-semibold tracking-tight">学习引擎</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
-          按域名分组的执行成功率 · 数据窗口：最近 90 天
+          按域名分组的执行健康度 · 取消任务单独统计 · 数据窗口：最近 90 天
         </p>
       </header>
 
@@ -84,7 +84,7 @@ export function AdminLearningPage(): JSX.Element {
         <MetricCard
           label="高风险域名"
           value={data ? data.metrics.highRiskCount : null}
-          hint="失败率 > 50%"
+          hint="失败 / (成功 + 失败) > 50%"
           highlight
         />
         <MetricCard
@@ -156,7 +156,7 @@ export function AdminLearningPage(): JSX.Element {
                     {searchDebounced
                       ? '没有匹配的域名'
                       : filter === 'highRisk'
-                        ? '本期无高风险域名（≥ 3 次任务且失败率 > 50%）'
+                        ? '本期无高风险域名（≥ 3 次任务且失败 / 成功+失败 > 50%）'
                         : '本周无失败任务'}
                   </td>
                 </tr>

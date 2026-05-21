@@ -21,6 +21,11 @@ const STATUS_MAP: Record<string, StatusToken> = {
     textClass: 'text-emerald-700 dark:text-emerald-300',
     bgClass: 'bg-emerald-50 dark:bg-emerald-500/15',
   },
+  partial_success: {
+    label: '部分完成',
+    textClass: 'text-amber-700 dark:text-amber-300',
+    bgClass: 'bg-amber-50 dark:bg-amber-500/15',
+  },
   failed: {
     label: '失败',
     textClass: 'text-red-700 dark:text-red-300',

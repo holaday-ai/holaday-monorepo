@@ -210,7 +210,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
   );
 }
 
-function statusLabel(status: UiTask['status']): string {
+export function statusLabel(status: UiTask['status']): string {
   switch (status) {
     case 'queued':
       return '排队中';
@@ -222,6 +222,8 @@ function statusLabel(status: UiTask['status']): string {
       return '已暂停';
     case 'completed':
       return '已完成';
+    case 'partial_success':
+      return '部分完成';
     case 'failed':
       return '失败';
     case 'cancelled':
