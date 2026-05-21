@@ -73,7 +73,7 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
   }
 
   async function callTrpc(
-    route: 'confirm' | 'pause' | 'resume',
+    route: 'abort' | 'confirm' | 'pause' | 'resume',
     body: unknown,
     userExternalId: string,
   ) {
@@ -135,5 +135,22 @@ describe('tasks.confirm tRPC mutation (awaiting_user → executing | cancelled)'
       'taskRow',
     );
     expect(taskRow.status).toBe('cancelled');
+  });
+
+  it('abort cancels a durable awaiting_user task without an in-memory supercar handle', async () => {
+    const { userExternalId, taskId } = await makeUserWithAwaitingTask();
+    const { status, json } = await callTrpc('abort', { taskId }, userExternalId);
+    expect(status).toBe(200);
+    expect((json as { result: { data: { state: string } } }).result.data.state).toBe('cancelled');
+
+    const { db } = await import('../../db/client.js');
+    const { eq } = await import('drizzle-orm');
+    const { tasks } = await import('../../db/schema/tasks.js');
+    const taskRow = must(
+      (await db.select().from(tasks).where(eq(tasks.externalId, taskId)))[0],
+      'taskRow',
+    );
+    expect(taskRow.status).toBe('cancelled');
+    expect(taskRow.completedAt).not.toBeNull();
   });
 });

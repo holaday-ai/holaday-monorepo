@@ -5091,7 +5091,37 @@ export const tasksRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
       }
       const aborted = supercarAbort(input.taskId);
-      return { ok: aborted };
+      if (aborted) {
+        return { ok: true, state: 'aborting' as const };
+      }
+
+      // Auth/captcha/permission waits are durable: the supercar loop parks
+      // the row in awaiting_user and then releases its in-memory abort handle.
+      // In that state `supercarAbort()` correctly returns false, but the user
+      // still expects the visible "取消任务" button to terminally cancel it.
+      const repo = new TaskRepository(ctx.db);
+      let prev: Awaited<ReturnType<typeof loadTaskState>>;
+      try {
+        prev = await loadTaskState(repo, input.taskId, ctx.userId);
+      } catch (err) {
+        if (err instanceof TRPCError && err.code === 'NOT_FOUND') {
+          return { ok: false, state: 'not_in_flight' as const };
+        }
+        throw err;
+      }
+      const { state: next } = taskController.cancel(prev);
+      if (next === prev) {
+        return { ok: false, state: prev.status };
+      }
+
+      await repo.applyControlTransition(prev, next);
+      updateTaskStateForUser(ctx.userId, next);
+      broadcastToUser(ctx.userId, {
+        type: 'server.task.terminal',
+        taskId: input.taskId,
+        status: 'cancelled',
+      });
+      return { ok: true, state: 'cancelled' as const };
     }),
 
   /**
