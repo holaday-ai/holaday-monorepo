@@ -18,6 +18,13 @@ export function terminalEmptyCopy(status: UiTask['status']): {
     };
   }
 
+  if (status === 'partial_success') {
+    return {
+      title: '部分完成',
+      body: '任务只完成了一部分，但没有生成可用的最终回复。可以重试同样的意图继续验证。',
+    };
+  }
+
   return {
     title: '没有回复内容',
     body: '这个任务已经结束，但没有收到回复内容。重新发送一次相同意图通常就行。',

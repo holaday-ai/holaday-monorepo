@@ -507,7 +507,8 @@ function AgentBlock({
             intent={task.intent}
             onContinueInBrowser={
               // 继续接管 only for live browser tasks. ANY terminal
-              // status (completed / failed / cancelled) means the
+              // status (completed / partial_success / failed /
+              // cancelled) means the
               // Brave session is gone — the button would 404 the
               // user. Non-browser lanes never had a Brave to begin
               // with.
@@ -1249,6 +1250,8 @@ function EmptyTerminalCard({
   const copy = terminalEmptyCopy(status);
   const cancelled = status === 'cancelled';
   const failed = status === 'failed';
+  const partial = status === 'partial_success';
+  const retryable = failed || partial;
   const toast = useToast();
   const createTask = useTaskStore((s) => s.createTask);
   const handleRetry = React.useCallback(async (): Promise<void> => {
@@ -1267,6 +1270,8 @@ function EmptyTerminalCard({
         'rounded-xl border px-4 py-3 text-sm',
         cancelled
           ? 'border-border bg-muted/30 text-muted-foreground'
+          : partial
+            ? 'border-amber-200 bg-amber-50/80 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100'
           : failed
             ? 'border-red-200 bg-red-50/70 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200'
             : 'border-border bg-card text-muted-foreground',
@@ -1276,11 +1281,16 @@ function EmptyTerminalCard({
         {copy.title}
       </div>
       <div>{copy.body}</div>
-      {failed && intent && (
+      {retryable && intent && (
         <button
           type="button"
           onClick={() => void handleRetry()}
-          className="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-red-300/70 bg-white/60 px-2.5 text-[11px] font-medium text-red-800 transition-colors hover:bg-white dark:border-red-400/40 dark:bg-red-400/10 dark:text-red-100 dark:hover:bg-red-400/15"
+          className={cn(
+            'mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border bg-white/60 px-2.5 text-[11px] font-medium transition-colors hover:bg-white',
+            partial
+              ? 'border-amber-300/70 text-amber-900 dark:border-amber-400/40 dark:bg-amber-400/10 dark:text-amber-100 dark:hover:bg-amber-400/15'
+              : 'border-red-300/70 text-red-800 dark:border-red-400/40 dark:bg-red-400/10 dark:text-red-100 dark:hover:bg-red-400/15',
+          )}
         >
           <RotateCcw className="h-3 w-3" />
           重试

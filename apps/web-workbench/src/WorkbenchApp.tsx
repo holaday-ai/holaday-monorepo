@@ -12,6 +12,10 @@ import { useToast } from '@/components/ui/toast';
 import { useSidebar } from '@/components/ui/sidebar';
 import { hdDebug } from '@/lib/hd-debug';
 import { taskActionError } from '@/lib/error-copy';
+import {
+  followUpTargetForTask,
+  isLiveBrowserTaskForWorkbench,
+} from '@/lib/workbench-state';
 import { useTaskStore } from '@/stores/task-store';
 import { isQuotaExhausted, useQuotaStatus } from '@/lib/use-quota-status';
 import {
@@ -333,28 +337,18 @@ export function WorkbenchApp(): JSX.Element {
 
   // Follow-up chip — active on a terminal task that the user hasn't
   // dismissed and isn't currently in awaiting-user reply mode.
-  const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
   const isReplyMode = selectedNeedsUser;
-  const followUpTarget =
-    selectedTask &&
-    selectedTaskId &&
-    TERMINAL_STATUSES.has(selectedTask.status) &&
-    !isReplyMode &&
-    followUpDismissedTaskId !== selectedTaskId
-      ? {
-          taskId: selectedTaskId,
-          title: (selectedTask.title || selectedTask.intent || '').slice(0, 40),
-        }
-      : null;
+  const followUpTarget = followUpTargetForTask({
+    selectedTask,
+    selectedTaskId,
+    selectedNeedsUser: isReplyMode,
+    followUpDismissedTaskId,
+  });
 
   // Side-panel state machine. Derives a single `sidePanelMode` from
   // the task + the user's intent override. The renderer below maps
   // mode → "should the panel mount?".
-  const isLiveBrowserTask = Boolean(
-    selectedTask &&
-      selectedTask.executionMode === 'browser' &&
-      !TERMINAL_STATUSES.has(selectedTask.status),
-  );
+  const isLiveBrowserTask = isLiveBrowserTaskForWorkbench(selectedTask);
   const sidePanelMode: SidePanelMode = computeSidePanelMode({
     hasSelectedTask: !!selectedTaskId,
     isComposerNew: composerMode === 'new',
