@@ -60,6 +60,7 @@ export const batchTasksRouter = router({
     const user = await requireUser(ctx);
     const rows = await ctx.db
       .select({
+        id: batchTasks.id,
         externalId: batchTasks.externalId,
         name: batchTasks.name,
         status: batchTasks.status,
@@ -74,6 +75,24 @@ export const batchTasksRouter = router({
       .where(eq(batchTasks.userId, user.id))
       .orderBy(desc(batchTasks.createdAt))
       .limit(50);
+    const batchIds = rows.map((r) => r.id);
+    const itemsCancelledByBatch = new Map<number, number>();
+    if (batchIds.length > 0) {
+      const itemRows = await ctx.db
+        .select({
+          batchId: batchTaskItems.batchId,
+          status: batchTaskItems.status,
+        })
+        .from(batchTaskItems)
+        .where(inArray(batchTaskItems.batchId, batchIds));
+      for (const item of itemRows) {
+        if (item.status !== 'cancelled') continue;
+        itemsCancelledByBatch.set(
+          item.batchId,
+          (itemsCancelledByBatch.get(item.batchId) ?? 0) + 1,
+        );
+      }
+    }
     return rows.map((r) => ({
       batchId: r.externalId,
       name: r.name,
@@ -82,6 +101,7 @@ export const batchTasksRouter = router({
       itemsTotal: r.itemsTotal,
       itemsDone: r.itemsDone,
       itemsFailed: r.itemsFailed,
+      itemsCancelled: itemsCancelledByBatch.get(r.id) ?? 0,
       createdAt: r.createdAt,
       completedAt: r.completedAt,
     }));
@@ -143,6 +163,7 @@ export const batchTasksRouter = router({
         itemsTotal: batch.itemsTotal,
         itemsDone: batch.itemsDone,
         itemsFailed: batch.itemsFailed,
+        itemsCancelled: items.filter((i) => i.status === 'cancelled').length,
         createdAt: batch.createdAt,
         completedAt: batch.completedAt,
         items: items.map((i) => ({

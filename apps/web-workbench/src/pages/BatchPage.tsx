@@ -6,6 +6,7 @@ import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import { BatchTaskDialog } from '@/components/BatchTaskDialog';
+import { batchUnsuccessfulCopy } from '@/lib/batch-copy';
 import { humaniseTaskError, taskActionError } from '@/lib/error-copy';
 
 /**
@@ -29,6 +30,7 @@ interface UiBatchRow {
   itemsTotal: number;
   itemsDone: number;
   itemsFailed: number;
+  itemsCancelled?: number | null;
   createdAt: string | Date;
   completedAt: string | Date | null;
 }
@@ -177,7 +179,7 @@ function BatchList(): JSX.Element {
                       </span>
                       <span>
                         {r.itemsDone}/{r.itemsTotal} 完成
-                        {r.itemsFailed > 0 && ` · ${r.itemsFailed} 失败`}
+                        {batchUnsuccessfulCopy(r.itemsFailed, r.itemsCancelled)}
                       </span>
                       <span>并发 {r.concurrency}</span>
                       <span>{fmtDate(r.createdAt)}</span>
@@ -278,7 +280,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
       <Section>
         <div className="mb-2 text-xs text-muted-foreground">
           {detail.itemsDone} / {detail.itemsTotal} 完成
-          {detail.itemsFailed > 0 && ` · ${detail.itemsFailed} 失败`}
+          {batchUnsuccessfulCopy(detail.itemsFailed, detail.itemsCancelled)}
         </div>
         <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
           <div
