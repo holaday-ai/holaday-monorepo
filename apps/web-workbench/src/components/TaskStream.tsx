@@ -706,11 +706,15 @@ function AwaitingUserBanner({
     if (cancelling) return;
     setCancelling(true);
     try {
-      await trpc.tasks.abort.mutate({ taskId });
+      const res = await trpc.tasks.abort.mutate({ taskId });
+      if (!res.ok) {
+        toast.show(taskActionError('取消失败', `当前状态：${res.state ?? 'unknown'}`), 'error');
+        return;
+      }
       toast.show('已取消任务', 'info', 2000);
     } catch (err) {
       toast.show(
-        `取消失败：${err instanceof Error ? err.message : String(err)}`,
+        taskActionError('取消失败', err instanceof Error ? err.message : String(err)),
         'error',
       );
     } finally {

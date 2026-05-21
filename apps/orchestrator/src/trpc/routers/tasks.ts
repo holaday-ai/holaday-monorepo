@@ -5083,7 +5083,7 @@ export const tasksRouter = router({
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
       }
       const [taskRow] = await ctx.db
-        .select({ id: tasksTable.id })
+        .select({ id: tasksTable.id, status: tasksTable.status })
         .from(tasksTable)
         .where(and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)))
         .limit(1);
@@ -5095,27 +5095,32 @@ export const tasksRouter = router({
         return { ok: true, state: 'aborting' as const };
       }
 
-      // Auth/captcha/permission waits are durable: the supercar loop parks
-      // the row in awaiting_user and then releases its in-memory abort handle.
-      // In that state `supercarAbort()` correctly returns false, but the user
-      // still expects the visible "取消任务" button to terminally cancel it.
-      const repo = new TaskRepository(ctx.db);
-      let prev: Awaited<ReturnType<typeof loadTaskState>>;
-      try {
-        prev = await loadTaskState(repo, input.taskId, ctx.userId);
-      } catch (err) {
-        if (err instanceof TRPCError && err.code === 'NOT_FOUND') {
-          return { ok: false, state: 'not_in_flight' as const };
-        }
-        throw err;
-      }
-      const { state: next } = taskController.cancel(prev);
-      if (next === prev) {
-        return { ok: false, state: prev.status };
+      const cancellableStatuses = ['pending', 'planning', 'executing', 'awaiting_user', 'paused'];
+      if (!cancellableStatuses.includes(taskRow.status)) {
+        return { ok: false, state: taskRow.status };
       }
 
-      await repo.applyControlTransition(prev, next);
-      updateTaskStateForUser(ctx.userId, next);
+      // Auth/captcha/permission waits are durable: the supercar loop parks the
+      // DB row in awaiting_user and releases its in-memory abort handle. Do the
+      // control transition directly against the owned task row instead of
+      // relying on rehydrated in-memory state, which can lag behind the DB.
+      await ctx.db.transaction(async (tx) => {
+        await tx
+          .update(tasksTable)
+          .set({
+            status: 'cancelled',
+            pauseReason: null,
+            completedAt: new Date(),
+          })
+          .where(and(eq(tasksTable.id, taskRow.id), inArray(tasksTable.status, cancellableStatuses)));
+        await tx.insert(taskEvents).values({
+          externalId: newExternalId('taskEvent'),
+          taskId: taskRow.id,
+          type: 'task.cancelled',
+          actor: 'user',
+          payload: null,
+        });
+      });
       broadcastToUser(ctx.userId, {
         type: 'server.task.terminal',
         taskId: input.taskId,
