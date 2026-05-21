@@ -77,12 +77,49 @@ describe('aggregateByDomain', () => {
       total: 2,
       success: 1,
       failed: 1,
+      cancelled: 0,
     });
     expect(result.get('jd.com')).toMatchObject({
       domain: 'jd.com',
       total: 1,
       success: 1,
       failed: 0,
+      cancelled: 0,
+    });
+  });
+
+  it('keeps cancelled tasks out of failed counts and failure categories', () => {
+    const rows = [
+      makeScanRow({
+        id: 1,
+        status: 'completed',
+        intent: 'visit https://example.com/a',
+        createdAt: new Date('2026-05-01'),
+      }),
+      makeScanRow({
+        id: 2,
+        status: 'cancelled',
+        intent: 'visit https://example.com/b',
+        errorMessage: 'user cancelled',
+        createdAt: new Date('2026-05-02'),
+      }),
+      makeScanRow({
+        id: 3,
+        status: 'failed',
+        intent: 'visit https://example.com/c',
+        errorMessage: 'timeout',
+        createdAt: new Date('2026-05-03'),
+      }),
+    ];
+
+    const agg = aggregateByDomain(rows).get('example.com');
+
+    expect(agg).toMatchObject({
+      total: 3,
+      success: 1,
+      failed: 1,
+      cancelled: 1,
+      topFailureCategory: 'timeout',
     });
   });
 

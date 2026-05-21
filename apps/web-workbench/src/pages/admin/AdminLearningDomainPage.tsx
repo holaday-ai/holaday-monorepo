@@ -116,6 +116,12 @@ export function AdminLearningDomainPage(): JSX.Element {
               </span>
             </span>
             <span>
+              已取消{' '}
+              <span className="tabular-nums text-foreground">
+                {data.stats.cancelled ?? 0}
+              </span>
+            </span>
+            <span>
               首次{' '}
               <span className="text-foreground">{formatDate(data.stats.firstTaskAt)}</span>
             </span>

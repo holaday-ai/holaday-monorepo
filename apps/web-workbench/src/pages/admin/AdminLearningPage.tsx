@@ -135,7 +135,7 @@ export function AdminLearningPage(): JSX.Element {
               <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
                 <th className="px-5 py-3 font-medium">域名</th>
                 <th className="px-3 py-3 font-medium text-right">总任务</th>
-                <th className="px-3 py-3 font-medium text-right">成功 / 失败</th>
+                <th className="px-3 py-3 font-medium text-right">成功 / 失败 / 取消</th>
                 <th className="px-3 py-3 font-medium">成功率</th>
                 <th className="px-3 py-3 font-medium">最近失败</th>
                 <th className="px-3 py-3 font-medium">主要失败原因</th>
@@ -221,6 +221,8 @@ function DomainRowEl({ row }: { row: DomainRow }): JSX.Element {
         <span className="text-emerald-600">{row.success}</span>
         <span className="text-muted-foreground"> / </span>
         <span className="text-red-600">{row.failed}</span>
+        <span className="text-muted-foreground"> / </span>
+        <span className="text-muted-foreground">{row.cancelled ?? 0}</span>
       </td>
       <td className="px-3 py-3">
         <SuccessRateBar successRate={row.successRate} />

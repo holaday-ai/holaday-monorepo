@@ -57,6 +57,7 @@ interface DomainAggregate {
   total: number;
   success: number;
   failed: number;
+  cancelled: number;
   lastFailedAt: Date | null;
   /** Most-frequent failure category among this domain's failed tasks. */
   topFailureCategory: ErrorCategory | null;
@@ -98,12 +99,14 @@ function aggregateByDomain(scanRows: TaskScanRow[]): Map<string, DomainAggregate
         total: 0,
         success: 0,
         failed: 0,
+        cancelled: 0,
         lastFailedAt: null,
         topFailureCategory: null,
       } satisfies DomainAggregate);
     agg.total += 1;
     if (row.status === 'completed') agg.success += 1;
-    else if (row.status === 'failed' || row.status === 'cancelled') {
+    else if (row.status === 'cancelled') agg.cancelled += 1;
+    else if (row.status === 'failed') {
       agg.failed += 1;
       if (!agg.lastFailedAt || row.createdAt > agg.lastFailedAt) {
         agg.lastFailedAt = row.createdAt;
@@ -155,7 +158,8 @@ export const adminLearningRouter = router({
       // High-risk + AI-memory counts feed the three top-level cards.
       let highRiskCount = 0;
       for (const agg of byDomain.values()) {
-        if (agg.total >= MIN_TASKS_FOR_RANKING && agg.failed / agg.total > 0.5) {
+        const terminal = agg.success + agg.failed;
+        if (agg.total >= MIN_TASKS_FOR_RANKING && terminal > 0 && agg.failed / terminal > 0.5) {
           highRiskCount += 1;
         }
       }
@@ -175,7 +179,10 @@ export const adminLearningRouter = router({
         rows = rows.filter((r) => r.domain.includes(q));
       }
       if (args.filter === 'highRisk') {
-        rows = rows.filter((r) => r.failed / r.total > 0.5);
+        rows = rows.filter((r) => {
+          const terminal = r.success + r.failed;
+          return terminal > 0 && r.failed / terminal > 0.5;
+        });
       } else if (args.filter === 'recentFail') {
         const sevenDaysAgo = Date.now() - 7 * 86_400_000;
         rows = rows.filter(
@@ -188,7 +195,11 @@ export const adminLearningRouter = router({
           : args.sort === 'lastFailedAt'
             ? (r: DomainAggregate) => r.lastFailedAt?.getTime() ?? 0
             : (r: DomainAggregate) => r.failed / Math.max(1, r.total);
-      rows.sort((a, b) => sortKey(b) - sortKey(a));
+      const failureRateSortKey =
+        args.sort === 'failureRate'
+          ? (r: DomainAggregate) => r.failed / Math.max(1, r.success + r.failed)
+          : sortKey;
+      rows.sort((a, b) => failureRateSortKey(b) - failureRateSortKey(a));
       const total = rows.length;
       const page = rows.slice(args.offset, args.offset + args.limit);
 
@@ -203,8 +214,15 @@ export const adminLearningRouter = router({
           total: d.total,
           success: d.success,
           failed: d.failed,
-          successRate: d.total > 0 ? Math.round((d.success / d.total) * 1000) / 10 : 0,
-          failureRate: d.total > 0 ? Math.round((d.failed / d.total) * 1000) / 10 : 0,
+          cancelled: d.cancelled,
+          successRate:
+            d.success + d.failed > 0
+              ? Math.round((d.success / (d.success + d.failed)) * 1000) / 10
+              : 0,
+          failureRate:
+            d.success + d.failed > 0
+              ? Math.round((d.failed / (d.success + d.failed)) * 1000) / 10
+              : 0,
           lastFailedAt: d.lastFailedAt,
           topFailureCategory: d.topFailureCategory,
           topFailureLabel: d.topFailureCategory ? ERROR_LABELS[d.topFailureCategory] : null,
@@ -235,6 +253,7 @@ export const adminLearningRouter = router({
       let total = 0;
       let success = 0;
       let failed = 0;
+      let cancelled = 0;
       let firstAt: Date | null = null;
       let lastAt: Date | null = null;
       const failureCountByCategory = new Map<ErrorCategory, number>();
@@ -244,7 +263,8 @@ export const adminLearningRouter = router({
         if (!firstAt || r.createdAt < firstAt) firstAt = r.createdAt;
         if (!lastAt || r.createdAt > lastAt) lastAt = r.createdAt;
         if (r.status === 'completed') success += 1;
-        else if (r.status === 'failed' || r.status === 'cancelled') {
+        else if (r.status === 'cancelled') cancelled += 1;
+        else if (r.status === 'failed') {
           failed += 1;
           const cat = classifyTaskError(r.errorMessage, r.errorCode);
           failureCountByCategory.set(cat, (failureCountByCategory.get(cat) ?? 0) + 1);
@@ -330,8 +350,15 @@ export const adminLearningRouter = router({
           total,
           success,
           failed,
-          successRate: total > 0 ? Math.round((success / total) * 1000) / 10 : 0,
-          failureRate: total > 0 ? Math.round((failed / total) * 1000) / 10 : 0,
+          cancelled,
+          successRate:
+            success + failed > 0
+              ? Math.round((success / (success + failed)) * 1000) / 10
+              : 0,
+          failureRate:
+            success + failed > 0
+              ? Math.round((failed / (success + failed)) * 1000) / 10
+              : 0,
           firstTaskAt: firstAt,
           lastTaskAt: lastAt,
         },
