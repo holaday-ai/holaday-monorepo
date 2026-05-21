@@ -7,10 +7,11 @@ beforeAll(() => {
 });
 
 /**
- * Integration cover for `tasks.delete`:
+ * Integration cover for task deletion endpoints:
  *   - deleting own terminal task removes the row (and its steps/events)
  *   - deleting another user's task returns NOT_FOUND (no leak)
  *   - deleting an in-flight task is rejected with PRECONDITION_FAILED
+ *   - clearing failed tasks is server-side and scoped to the caller
  */
 
 function must<T>(v: T | null | undefined, n: string): T {
@@ -89,6 +90,17 @@ describe('tRPC tasks.delete', () => {
     });
   }
 
+  async function callClearFailed(port: number, token: string) {
+    return fetch(`http://127.0.0.1:${port}/trpc/tasks.clearFailed`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+  }
+
   it('deletes the caller\'s own terminal task', async () => {
     const user = await seedUser();
     const taskId = await seedTask(user.internalId, 'completed');
@@ -144,6 +156,46 @@ describe('tRPC tasks.delete', () => {
       const res = await callDelete(port, token, taskId);
       // tRPC maps PRECONDITION_FAILED to HTTP 412.
       expect(res.status).toBe(412);
+    } finally {
+      await close();
+    }
+  });
+
+  it("clears all failed tasks for the caller without deleting other statuses or users' rows", async () => {
+    const user = await seedUser();
+    const other = await seedUser();
+    const failedA = await seedTask(user.internalId, 'failed');
+    const failedB = await seedTask(user.internalId, 'failed');
+    const completed = await seedTask(user.internalId, 'completed');
+    const partial = await seedTask(user.internalId, 'partial_success');
+    const otherFailed = await seedTask(other.internalId, 'failed');
+    const { port, signAccessToken, close } = await bootTrpcServer();
+    try {
+      const token = await signAccessToken({ sub: user.external, plan: 'free' });
+      const res = await callClearFailed(port, token);
+      expect(res.status).toBe(200);
+
+      const { db } = await import('../../db/client.js');
+      const { inArray } = await import('drizzle-orm');
+      const { tasks } = await import('../../db/schema/tasks.js');
+      const rows = await db
+        .select({ externalId: tasks.externalId, status: tasks.status })
+        .from(tasks)
+        .where(
+          inArray(tasks.externalId, [
+            failedA,
+            failedB,
+            completed,
+            partial,
+            otherFailed,
+          ]),
+        );
+      const byId = new Map(rows.map((row) => [row.externalId, row.status]));
+      expect(byId.has(failedA)).toBe(false);
+      expect(byId.has(failedB)).toBe(false);
+      expect(byId.get(completed)).toBe('completed');
+      expect(byId.get(partial)).toBe('partial_success');
+      expect(byId.get(otherFailed)).toBe('failed');
     } finally {
       await close();
     }

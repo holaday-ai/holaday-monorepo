@@ -155,7 +155,7 @@ export function HistoryPage(): JSX.Element {
                 options={[
                   { id: 'all', label: '全部' },
                   { id: 'completed', label: '已完成' },
-                  { id: 'failed', label: '失败' },
+                  { id: 'failed', label: '异常' },
                   { id: 'running', label: '进行中' },
                 ]}
               />

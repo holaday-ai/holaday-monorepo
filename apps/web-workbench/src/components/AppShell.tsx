@@ -663,39 +663,28 @@ export function AppShell(): JSX.Element {
         onClose={() => setConfirmClearFailed(false)}
         onConfirm={async () => {
           setConfirmClearFailed(false);
-          // Loaded slice is what we can delete client-side per-row.
-          // BOSS bug: this can be < serverFailedCount when the user
-          // has older failed tasks beyond the paginated window —
-          // the toast reflects what we actually cleared, and the
-          // post-action refetch reconciles the badge.
-          const failed = tasks.filter((t) => t.status === 'failed');
-          if (failed.length === 0) {
+          try {
+            const res = await trpc.tasks.clearFailed.mutate();
+            if (res.deleted > 0) {
+              toast.show(`已清除 ${res.deleted} 个失败任务`);
+            } else {
+              toast.show('没有可清除的失败任务');
+            }
+            const active = tasks.find((t) => t.taskId === selectedTaskId);
+            if (active?.status === 'failed') {
+              enterNewTaskMode();
+            }
+            void refreshTaskList();
             void refreshFailedCount();
-            return;
-          }
-          const results = await Promise.all(
-            failed.map((t) =>
-              deleteTask(t.taskId).then(
-                (r) => r,
-                (err) => ({
-                  error: err instanceof Error ? err.message : String(err),
-                }),
-              ),
-            ),
-          );
-          const errs = results.filter(
-            (r): r is { error: string } => 'error' in r,
-          );
-          if (errs.length === 0) toast.show(`已清除 ${failed.length} 个失败任务`);
-          else if (errs.length === failed.length)
-            toast.show(taskActionError('清除失败', errs[0]?.error), 'error');
-          else
+          } catch (err) {
             toast.show(
-              `清除了 ${failed.length - errs.length} 个，${errs.length} 个失败`,
+              taskActionError(
+                '清除失败',
+                err instanceof Error ? err.message : String(err),
+              ),
               'error',
             );
-          // Reconcile the badge with truth on the server.
-          void refreshFailedCount();
+          }
         }}
       />
 

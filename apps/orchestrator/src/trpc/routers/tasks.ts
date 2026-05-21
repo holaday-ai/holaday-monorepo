@@ -5372,6 +5372,40 @@ export const tasksRouter = router({
     }),
 
   /**
+   * Clear every failed task owned by the caller, not just the first
+   * page currently loaded by the SPA. This powers the sidebar/user-menu
+   * "清除失败任务" action whose badge is already server-side via
+   * `failedCount`.
+   */
+  clearFailed: protectedProcedure.mutation(async ({ ctx }) => {
+    const [userRow] = await ctx.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.externalId, ctx.userId))
+      .limit(1);
+    if (!userRow) {
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
+    }
+
+    const failedRows = await ctx.db
+      .select({ id: tasksTable.id })
+      .from(tasksTable)
+      .where(and(eq(tasksTable.userId, userRow.id), eq(tasksTable.status, 'failed')));
+    const failedIds = failedRows.map((row) => row.id);
+    if (failedIds.length === 0) {
+      return { ok: true as const, deleted: 0 };
+    }
+
+    // task_steps cascades via FK; task_events has no FK and must be
+    // deleted explicitly to avoid orphan audit rows.
+    await ctx.db.transaction(async (tx) => {
+      await tx.delete(taskEvents).where(inArray(taskEvents.taskId, failedIds));
+      await tx.delete(tasksTable).where(inArray(tasksTable.id, failedIds));
+    });
+    return { ok: true as const, deleted: failedIds.length };
+  }),
+
+  /**
    * Rename a task (sets the display `title` column). Pass an empty
    * string to clear the override — the UI will then fall back to the
    * auto-summary of `intent`. 255-char cap mirrors the column.
