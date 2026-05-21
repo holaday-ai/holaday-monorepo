@@ -30,6 +30,7 @@
 import OpenAI from 'openai';
 import { Agent as UndiciAgent, fetch as undiciFetch } from 'undici';
 import type { Logger } from 'pino';
+import { isTaskTerminalStatus, type TaskTerminalStatus } from '../task-status.js';
 
 export const DEFAULT_RESPONSE_MODEL = 'gpt-4o-mini';
 export const DEFAULT_TIMEOUT_MS = 25_000;
@@ -77,8 +78,8 @@ export interface FormatRequest {
    * are short-but-structured; we want consistent voice).
    */
   expertWorkflowId?: string | undefined;
-  /** Task status — formatter runs on completed / failed / cancelled. */
-  terminalStatus: 'completed' | 'failed' | 'cancelled';
+  /** Task status — formatter runs on terminal task statuses. */
+  terminalStatus: TaskTerminalStatus;
 }
 
 export interface FormatMetadata {
@@ -132,14 +133,12 @@ export function isResponseLayerEnabled(env: NodeJS.ProcessEnv = process.env): bo
 /**
  * Should we even attempt to format this response? Returns false when:
  *   - flag is off
- *   - status is something other than the three terminal kinds
+ *   - status is something other than a task terminal status
  *   - response is short AND not an expert workflow report
  */
 export function shouldFormat(req: FormatRequest, env: NodeJS.ProcessEnv = process.env): boolean {
   if (!isResponseLayerEnabled(env)) return false;
-  if (req.terminalStatus !== 'completed' && req.terminalStatus !== 'failed' && req.terminalStatus !== 'cancelled') {
-    return false;
-  }
+  if (!isTaskTerminalStatus(req.terminalStatus)) return false;
   // Expert workflow reports always format, regardless of length.
   if (req.expertWorkflowId) return true;
   // Short replies (translations, single-fact answers) skip the

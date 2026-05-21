@@ -42,6 +42,7 @@ import {
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
 import type { DB } from '../db/client.js';
+import { isTaskTerminalStatus } from '../task-status.js';
 
 /** How often we re-check a dispatched task for terminal status. */
 const POLL_INTERVAL_MS = 2_000;
@@ -297,7 +298,7 @@ async function runItem(
       .from(tasks)
       .where(eq(tasks.id, taskInternalId))
       .limit(1);
-    if (tRow && isTerminal(tRow.status)) {
+    if (tRow && isTaskTerminalStatus(tRow.status)) {
       const ok = tRow.status === 'completed';
       await db
         .update(batchTaskItems)
@@ -441,14 +442,6 @@ function extractMysqlAffectedRows(result: unknown): number {
   }
   const direct = (result as { affectedRows?: number } | null)?.affectedRows;
   return typeof direct === 'number' ? direct : 0;
-}
-
-function isTerminal(status: string | null | undefined): boolean {
-  return (
-    status === 'completed' ||
-    status === 'failed' ||
-    status === 'cancelled'
-  );
 }
 
 function sleep(ms: number): Promise<void> {

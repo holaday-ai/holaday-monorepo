@@ -30,6 +30,7 @@ export type ExpectedAwaitingKind =
 
 export type ExpectedTerminalStatus =
   | 'completed'
+  | 'partial_success'
   | 'failed'
   | 'cancelled'
   | 'awaiting_user';

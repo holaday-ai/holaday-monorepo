@@ -33,6 +33,7 @@ import { signAccessToken } from '../auth/jwt.js';
 import { env } from '../config/env.js';
 import { db } from '../db/client.js';
 import { users } from '../db/schema/users.js';
+import { isTaskTerminalStatus } from '../task-status.js';
 import type {
   EvalCase,
   EvalCaseResult,
@@ -49,12 +50,6 @@ const EVAL_USER_EXTERNAL_ID =
   process.env.EVAL_USER_EXTERNAL_ID ?? 'usr_EeYpvsvLtyDzN4VLQi7BT';
 const POLL_INTERVAL_MS = 1_500;
 const DEFAULT_MAX_DURATION_MS = 180_000;
-const TERMINAL_STATUSES = new Set([
-  'completed',
-  'failed',
-  'cancelled',
-  'awaiting_user',
-]);
 
 interface TaskDetail {
   taskId: string;
@@ -150,7 +145,9 @@ async function pollUntilTerminal(
   let last: TaskDetail | undefined;
   while (Date.now() < deadline) {
     last = await callQuery<TaskDetail>('tasks.detail', { taskId }, token);
-    if (TERMINAL_STATUSES.has(last.status)) return last;
+    if (isTaskTerminalStatus(last.status) || last.status === 'awaiting_user') {
+      return last;
+    }
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
   const lastStatus = last?.status ?? 'unknown';

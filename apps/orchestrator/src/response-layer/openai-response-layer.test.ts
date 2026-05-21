@@ -89,14 +89,27 @@ describe('shouldFormat — trigger rules', () => {
     ).toBe(true);
   });
 
-  it('failed / cancelled status still triggers (spec: 失败/取消结果也触发)', () => {
+  it('partial_success / failed / cancelled status still triggers', () => {
     const env = { OPENAI_RESPONSE_LAYER_ENABLED: 'true', OPENAI_API_KEY: 'sk-x' };
+    expect(
+      shouldFormat({ original: longOriginal, terminalStatus: 'partial_success' }, env),
+    ).toBe(true);
     expect(
       shouldFormat({ original: longOriginal, terminalStatus: 'failed' }, env),
     ).toBe(true);
     expect(
       shouldFormat({ original: longOriginal, terminalStatus: 'cancelled' }, env),
     ).toBe(true);
+  });
+
+  it('live status does not trigger even if it arrives from an untyped caller', () => {
+    const env = { OPENAI_RESPONSE_LAYER_ENABLED: 'true', OPENAI_API_KEY: 'sk-x' };
+    expect(
+      shouldFormat(
+        { original: longOriginal, terminalStatus: 'awaiting_user' as never },
+        env,
+      ),
+    ).toBe(false);
   });
 });
 

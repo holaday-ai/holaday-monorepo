@@ -119,6 +119,7 @@ import {
 // would otherwise label it "已完成" because the runner respected the
 // agent's terminal decision.
 import { detectNavFailure } from '../../agent/nav-failure-detector.js';
+import { isTaskTerminalStatus } from '../../task-status.js';
 
 const taskController = new TaskController();
 
@@ -429,11 +430,10 @@ export const tasksRouter = router({
           message: '找不到要追问的任务（可能已删除或不属于你）',
         });
       }
-      const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
-      if (!TERMINAL.has(parent.status)) {
+      if (!isTaskTerminalStatus(parent.status)) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: '只能追问已完成/失败/取消的任务，正在执行的任务请用回复',
+          message: '只能追问已完成/部分完成/失败/取消的任务，正在执行的任务请用回复',
         });
       }
       const parentResult = (parent.result ?? null) as
@@ -457,11 +457,17 @@ export const tasksRouter = router({
       const summary = parentResult?.summary?.trim() ?? '';
       const reason =
         parentResult?.reason?.trim() ?? (parent.errorMessage ?? '').trim();
+      const reasonLabel =
+        parent.status === 'failed'
+          ? '失败原因'
+          : parent.status === 'partial_success'
+            ? '部分完成原因'
+            : '终止原因';
       const outcomeLine =
-        parent.status === 'completed' && summary
+        (parent.status === 'completed' || parent.status === 'partial_success') && summary
           ? `结果：${summary}`
           : reason
-            ? `${parent.status === 'failed' ? '失败原因' : '终止原因'}：${reason}`
+            ? `${reasonLabel}：${reason}`
             : `状态：${parent.status}（无详细输出）`;
       parentContextBlock = [
         '---',

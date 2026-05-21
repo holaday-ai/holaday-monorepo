@@ -32,6 +32,7 @@ import { eq } from 'drizzle-orm';
 import type { Logger } from 'pino';
 import { tasks as tasksTable } from '../db/schema/tasks.js';
 import type { DB } from '../db/client.js';
+import { isTaskTerminalStatus, type TaskTerminalStatus } from '../task-status.js';
 
 export interface RunResponseLayerForLaneInput {
   taskId: string;
@@ -67,13 +68,12 @@ function isResponseLayerActive(): boolean {
 }
 
 /**
- * Returns true iff the status is one the formatter cares about
- * (completed / failed / cancelled — the terminal triple).
+ * Returns true iff the status is one the formatter cares about.
  */
 function isFormatterTerminalStatus(
   s: string,
-): s is 'completed' | 'failed' | 'cancelled' {
-  return s === 'completed' || s === 'failed' || s === 'cancelled';
+): s is TaskTerminalStatus {
+  return isTaskTerminalStatus(s);
 }
 
 /**
