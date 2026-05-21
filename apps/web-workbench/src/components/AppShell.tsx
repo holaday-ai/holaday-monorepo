@@ -145,6 +145,24 @@ export function AppShell(): JSX.Element {
     }
   }, []);
 
+  const refreshDeletionDependentMeta = React.useCallback(() => {
+    void refreshFailedCount();
+    void refreshProjects();
+  }, [refreshFailedCount, refreshProjects]);
+
+  const failedTaskSignature = React.useMemo(() => {
+    const failedIds = tasks
+      .filter((task) => task.status === 'failed')
+      .map((task) => task.taskId)
+      .sort();
+    return failedIds.join('|');
+  }, [tasks]);
+
+  React.useEffect(() => {
+    if (!authed) return;
+    void refreshFailedCount();
+  }, [authed, failedTaskSignature, refreshFailedCount]);
+
   // Bootstrap. Runs once when `authed` flips true. Identical to the
   // pre-refactor flow inside WorkbenchApp but lifted up — every authed
   // route now boots from the same effect.
@@ -615,7 +633,10 @@ export function AppShell(): JSX.Element {
           if (!taskId) return;
           const res = await deleteTask(taskId);
           if ('error' in res) toast.show(`删除失败：${res.error}`, 'error');
-          else toast.show('任务已删除');
+          else {
+            toast.show('任务已删除');
+            refreshDeletionDependentMeta();
+          }
         }}
       />
 
@@ -651,6 +672,7 @@ export function AppShell(): JSX.Element {
               `已删除 ${ids.length - errs.length} 个，${errs.length} 个失败`,
               'error',
             );
+          refreshDeletionDependentMeta();
         }}
       />
 
@@ -675,7 +697,7 @@ export function AppShell(): JSX.Element {
               enterNewTaskMode();
             }
             void refreshTaskList();
-            void refreshFailedCount();
+            refreshDeletionDependentMeta();
           } catch (err) {
             toast.show(
               taskActionError(
