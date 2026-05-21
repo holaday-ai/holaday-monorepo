@@ -1,4 +1,4 @@
-import { CheckCircle2, Loader2, Search, XCircle } from 'lucide-react';
+import { CheckCircle2, CircleSlash, Loader2, Search, XCircle } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -274,8 +274,13 @@ function StatusIcon({ status }: { status: string }): JSX.Element {
   if (status === 'partial_success') {
     return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />;
   }
-  if (status === 'failed' || status === 'cancelled') {
+  if (status === 'failed') {
     return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />;
+  }
+  if (status === 'cancelled') {
+    return (
+      <CircleSlash className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+    );
   }
   return <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-pink-400" />;
 }

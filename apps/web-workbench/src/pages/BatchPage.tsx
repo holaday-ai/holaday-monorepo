@@ -1,4 +1,4 @@
-import { CheckCircle2, Layers, Loader2, Plus, XCircle } from 'lucide-react';
+import { CheckCircle2, CircleSlash, Layers, Loader2, Plus, XCircle } from 'lucide-react';
 import * as React from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -347,8 +347,11 @@ function ItemStatusIcon({ status }: { status: string }): JSX.Element {
   if (status === 'completed') {
     return <CheckCircle2 className="h-4 w-4 text-primary" />;
   }
-  if (status === 'failed' || status === 'cancelled') {
+  if (status === 'failed') {
     return <XCircle className="h-4 w-4 text-destructive" />;
+  }
+  if (status === 'cancelled') {
+    return <CircleSlash className="h-4 w-4 text-muted-foreground" />;
   }
   if (status === 'running') {
     return <Loader2 className="h-4 w-4 animate-spin text-primary" />;
