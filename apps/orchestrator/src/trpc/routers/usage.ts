@@ -76,13 +76,15 @@ export const usageRouter = router({
       .groupBy(tasks.status);
     let monthCompleted = 0;
     let monthFailed = 0;
+    let monthCancelled = 0;
     let monthExecuting = 0;
     let monthTasksTotal = 0;
     for (const row of statusRows) {
       const c = Number(row.count);
       monthTasksTotal += c;
       if (row.status === 'completed') monthCompleted += c;
-      else if (row.status === 'failed' || row.status === 'cancelled') monthFailed += c;
+      else if (row.status === 'failed') monthFailed += c;
+      else if (row.status === 'cancelled') monthCancelled += c;
       else if ((RUNNING_STATUSES as readonly string[]).includes(row.status)) {
         monthExecuting += c;
       }
@@ -122,6 +124,7 @@ export const usageRouter = router({
       monthTasksTotal,
       monthCompleted,
       monthFailed,
+      monthCancelled,
       monthExecuting,
       quotaLimit: snap.tasksLimit,
       quotaUsed: snap.tasksUsed,

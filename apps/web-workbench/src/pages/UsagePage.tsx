@@ -3,6 +3,7 @@ import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { trpc } from '@/lib/trpc';
+import { usageOutcomeSubcopy } from '@/lib/usage-copy';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 
@@ -89,7 +90,11 @@ export function UsagePage(): JSX.Element {
             sub={
               snap == null
                 ? '失败 — · 进行中 —'
-                : `失败 ${snap.monthFailed} · 进行中 ${snap.monthExecuting}`
+                : usageOutcomeSubcopy({
+                    failed: snap.monthFailed,
+                    cancelled: snap.monthCancelled,
+                    executing: snap.monthExecuting,
+                  })
             }
           />
           <StatCard
@@ -166,6 +171,7 @@ interface UsageSnapshot {
   monthTasksTotal: number;
   monthCompleted: number;
   monthFailed: number;
+  monthCancelled?: number | null;
   monthExecuting: number;
   quotaLimit: number;
   quotaUsed: number;
