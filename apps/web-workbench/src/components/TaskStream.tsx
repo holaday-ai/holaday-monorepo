@@ -41,6 +41,7 @@ import {
 } from '@/lib/download-file';
 import { taskActionError } from '@/lib/error-copy';
 import { classifyFriendlyFailure } from '@/lib/failure-copy';
+import { terminalArtifactFallbackText } from '@/lib/terminal-artifact-copy';
 import { terminalEmptyCopy } from '@/lib/terminal-empty-copy';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 import { PlanCard } from '@/components/PlanCard';
@@ -1692,17 +1693,15 @@ function TerminalSummary({
   };
   const hasRealUrl =
     !!currentUrl && currentUrl !== 'about:blank' && !currentUrl.startsWith('chrome://');
-  const fallbackPlainText = React.useMemo(() => {
-    if (displayText.trim().length > 0) return '';
-    const parts: string[] = [];
-    if (attachments?.length) {
-      parts.push(`任务产出了 ${attachments.length} 个文件`);
-    }
-    if (hasRealUrl) {
-      parts.push(`最终页面：${currentUrl}`);
-    }
-    return parts.join('\n');
-  }, [attachments?.length, currentUrl, displayText, hasRealUrl]);
+  const fallbackPlainText = React.useMemo(
+    () =>
+      terminalArtifactFallbackText({
+        text: displayText,
+        attachmentCount: attachments?.length ?? 0,
+        finalUrl: hasRealUrl ? currentUrl : null,
+      }),
+    [attachments?.length, currentUrl, displayText, hasRealUrl],
+  );
   // Strip markdown syntax for the plain-text Copy. Keeps `[label](url)` →
   // `label`, drops `**bold**` markers, code fences, list bullets — the
   // user gets what they'd visually read. The markdown copy keeps the raw
@@ -1712,6 +1711,7 @@ function TerminalSummary({
     () => stripMarkdown(displayText) || fallbackPlainText,
     [displayText, fallbackPlainText],
   );
+  const markdownText = displayText.trim() || fallbackPlainText;
   const copyTo = React.useCallback(
     async (value: string, label: string): Promise<void> => {
       try {
@@ -1846,10 +1846,9 @@ function TerminalSummary({
         );
       })()}
       {/* Phase 4 R1 B.5 — AttachmentBar. Hidden when attachments is
-          empty/undefined; only on success panels. Renders each
-          attachment as the existing FileDownloadCard so the auth +
-          blob-download plumbing is reused. */}
-      {!isFailedLike && attachments && attachments.length > 0 && (
+          empty/undefined. Rendered for every terminal status: failed
+          and cancelled tasks can still leave useful evidence files. */}
+      {attachments && attachments.length > 0 && (
         <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
           <div className="text-[11px] font-medium tracking-wider text-muted-foreground">
             产出文件
@@ -1953,13 +1952,13 @@ function TerminalSummary({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-44">
             <DropdownMenuItem
-              onSelect={() => void copyTo(displayText, 'Markdown')}
+              onSelect={() => void copyTo(markdownText, 'Markdown')}
             >
               <FileText className="text-muted-foreground" />
               <span>复制 Markdown</span>
             </DropdownMenuItem>
             <DropdownMenuItem
-              onSelect={() => downloadMarkdown(displayText, taskId)}
+              onSelect={() => downloadMarkdown(markdownText, taskId)}
             >
               <Download className="text-muted-foreground" />
               <span>下载 .md</span>
