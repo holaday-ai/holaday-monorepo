@@ -39,6 +39,7 @@ import {
   fetchFileBlobAuthed,
 } from '@/lib/download-file';
 import { taskActionError } from '@/lib/error-copy';
+import { terminalEmptyCopy } from '@/lib/terminal-empty-copy';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 import { PlanCard } from '@/components/PlanCard';
 import { SearchResultCard } from '@/components/SearchResultCard';
@@ -533,16 +534,7 @@ function AgentBlock({
          *  like the SPA broke. The retry hint mirrors the failed-card
          *  copy so the next-step is obvious. */}
         {terminal && !task.resultText && (
-          <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
-            <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-foreground/70">
-              {task.status === 'failed' || task.status === 'cancelled'
-                ? '任务结束'
-                : '没有回复内容'}
-            </div>
-            <div>
-              这个任务已经结束，但没有收到回复内容。重新发送一次相同意图通常就行。
-            </div>
-          </div>
+          <EmptyTerminalCard status={task.status} />
         )}
 
         {steps.length > 0 && (
@@ -1231,6 +1223,31 @@ const EXPERT_HEADER_META: Record<string, { icon: string; label: string }> = {
   'ecom-daily': { icon: '📈', label: '电商日报' },
   'douyin-review': { icon: '🎬', label: '抖音稿件复盘' },
 };
+
+function EmptyTerminalCard({ status }: { status: UiTask['status'] }): JSX.Element {
+  const copy = terminalEmptyCopy(status);
+  const cancelled = status === 'cancelled';
+  const failed = status === 'failed';
+
+  return (
+    <div
+      className={cn(
+        'rounded-xl border px-4 py-3 text-sm',
+        cancelled
+          ? 'border-border bg-muted/30 text-muted-foreground'
+          : failed
+            ? 'border-red-200 bg-red-50/70 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200'
+            : 'border-border bg-card text-muted-foreground',
+      )}
+    >
+      <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-foreground/70">
+        {copy.title}
+      </div>
+      <div>{copy.body}</div>
+    </div>
+  );
+}
+
 function ExpertReportHeader({ workflowId }: { workflowId: string }): JSX.Element | null {
   const meta = EXPERT_HEADER_META[workflowId];
   if (!meta) return null;
