@@ -1,6 +1,7 @@
 import { Globe } from 'lucide-react';
 import type { SidePanelMode } from '@/types/side-panel';
 import type { UiTask } from '@/types/task';
+import { isTerminalStatus } from '@/types/task';
 import { cn } from '@/lib/utils';
 
 /**
@@ -33,6 +34,15 @@ export function isBrowserLikely(task: UiTask): boolean {
   return BROWSER_VERBS.some((v) => intent.includes(v));
 }
 
+export function browserToolbarLabel(
+  task: UiTask,
+  sidePanelMode: SidePanelMode,
+): string {
+  if (sidePanelMode === 'browser-live') return '浏览器进行中';
+  if (sidePanelMode !== 'closed') return '关闭浏览器面板';
+  return isTerminalStatus(task.status) ? '查看浏览器证据' : '查看浏览器';
+}
+
 interface Props {
   task: UiTask | null;
   sidePanelMode: SidePanelMode;
@@ -48,7 +58,7 @@ export function TaskToolbar({
   if (!isBrowserLikely(task)) return null;
   const live = sidePanelMode === 'browser-live';
   const open = sidePanelMode !== 'closed';
-  const label = live ? '浏览器进行中' : open ? '关闭浏览器面板' : '查看浏览器';
+  const label = browserToolbarLabel(task, sidePanelMode);
   return (
     <div className="flex items-center gap-1.5">
       <button

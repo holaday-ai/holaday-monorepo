@@ -16,7 +16,10 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
-import { shouldShowBrowserHeader } from '@/components/browser-panel-state';
+import {
+  shouldShowBrowserHeader,
+  terminalEvidenceStatusLabel,
+} from '@/components/browser-panel-state';
 import {
   CdpScreencastViewport,
   type CdpScreencastStatus,
@@ -366,6 +369,7 @@ export function BrowserPanel({
     setLastKnownUrl(url); // also feed the grace cache
   }, []);
   const terminalStatus = taskStatus ? isTerminalStatus(taskStatus) : false;
+  const terminalEvidenceLabel = terminalEvidenceStatusLabel(taskStatus);
   const displayUrl = terminalStatus
     ? (persistedFinalUrl ?? cdpLiveUrl ?? frameUrl ?? lastKnownUrl ?? 'about:blank')
     : (cdpLiveUrl ?? frameUrl ?? persistedFinalUrl ?? lastKnownUrl ?? 'about:blank');
@@ -1369,7 +1373,7 @@ export function BrowserPanel({
                     className="block rounded-md border border-black/[0.06] shadow-sm"
                   />
                   <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2 rounded bg-black/55 px-2 py-1 text-[11px] text-white backdrop-blur">
-                    <span className="truncate">任务已完成 · 最终页面</span>
+                    <span className="truncate">{terminalEvidenceLabel} · 最终页面</span>
                     {finalEvidenceFrame.url && finalEvidenceFrame.url !== 'about:blank' && (
                       <span className="truncate font-mono opacity-80">{finalEvidenceFrame.url}</span>
                     )}
@@ -1743,6 +1747,7 @@ function EmptyBrowserState({
   }
   const terminal = taskStatus ? isTerminalStatus(taskStatus) : false;
   if (terminal && isBrowserTask) {
+    const statusLabel = terminalEvidenceStatusLabel(taskStatus);
     // Three branches: finalScreenshot is handled before reaching us
     // (the parent renders `finalEvidenceFrame` directly). Here we
     // only see "no screenshot" cases — either finalUrl exists (give
@@ -1753,7 +1758,7 @@ function EmptyBrowserState({
         <div className="flex flex-col items-center px-6 text-center text-muted-foreground">
           <Globe className="h-10 w-10 text-muted-foreground/40" aria-hidden />
           <div className="mt-3 text-sm font-medium text-foreground/80">
-            没有截图
+            {statusLabel}，没有截图
           </div>
           <div className="mt-1 text-xs leading-relaxed">
             这次任务结束时没有捕获截图，可打开最终页面复核。

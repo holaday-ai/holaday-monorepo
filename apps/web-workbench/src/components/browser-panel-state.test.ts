@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { shouldShowBrowserHeader } from './browser-panel-state';
+import {
+  shouldShowBrowserHeader,
+  terminalEvidenceStatusLabel,
+} from './browser-panel-state';
 
 describe('BrowserPanel state helpers', () => {
   it('does not show browser chrome for a terminal task with no task-owned evidence', () => {
@@ -30,5 +33,14 @@ describe('BrowserPanel state helpers', () => {
         interactiveActive: false,
       }),
     ).toBe(true);
+  });
+
+  it('labels terminal browser evidence by the actual task status', () => {
+    expect(terminalEvidenceStatusLabel('completed')).toBe('任务已完成');
+    expect(terminalEvidenceStatusLabel('partial_success')).toBe('部分完成');
+    expect(terminalEvidenceStatusLabel('failed')).toBe('任务未完成');
+    expect(terminalEvidenceStatusLabel('cancelled')).toBe('任务已取消');
+    expect(terminalEvidenceStatusLabel('executing')).toBe('任务已结束');
+    expect(terminalEvidenceStatusLabel(null)).toBe('任务已结束');
   });
 });
