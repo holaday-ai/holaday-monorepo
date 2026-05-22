@@ -20,7 +20,7 @@
  * importing the full tasks router graph.
  */
 
-import { and, eq, lte } from 'drizzle-orm';
+import { and, eq, isNull, lt, lte, or } from 'drizzle-orm';
 // rrule ships CJS-first (package.json main: dist/es5/rrule.js). Node 22's
 // ESM interop doesn't expose `rrulestr` as a named import on CJS modules
 // reliably — `import { rrulestr } from 'rrule'` crashes with
@@ -315,10 +315,13 @@ async function reminderScan(deps: ScheduledRunnerDeps, now: Date): Promise<void>
           and(
             eq(scheduledTasks.id, c.id),
             eq(scheduledTasks.nextRunAt, c.nextRunAt),
-            // Re-check the not-fired predicate via a raw OR so we
-            // don't have to load lastReminderRun into the SET.
-            // Drizzle's where chain wraps this in AND with the
-            // others above.
+            // Re-check the not-fired predicate in the UPDATE itself.
+            // Without this, two overlapping ticks can both select the
+            // same cycle and both deliver the reminder.
+            or(
+              isNull(scheduledTasks.lastReminderRun),
+              lt(scheduledTasks.lastReminderRun, c.nextRunAt),
+            ),
           ),
         );
       claimed = extractMysqlAffectedRows(result);

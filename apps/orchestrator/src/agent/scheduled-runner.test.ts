@@ -338,6 +338,97 @@ describe('startScheduledRunner — tick integration', () => {
     expect(updates[0]).toMatchObject({ status: 'running' });
     stopScheduledRunner();
   });
+
+  it('fires a due reminder and records the claimed cycle', async () => {
+    const nextRunAt = new Date(Date.now() + 10 * 60_000);
+    const selectResults = [
+      [
+        {
+          id: 21,
+          userId: 42,
+          intent: 'daily report',
+          nextRunAt,
+          reminderMinutes: 15,
+          lastReminderRun: null,
+        },
+      ],
+      [],
+    ];
+    const updates: Array<Record<string, unknown>> = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db: any = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(async () => selectResults.shift() ?? []),
+        })),
+      })),
+      update: vi.fn(() => ({
+        set: vi.fn((values: Record<string, unknown>) => ({
+          where: vi.fn(async () => {
+            updates.push(values);
+            return { affectedRows: 1 };
+          }),
+        })),
+      })),
+    };
+    const notifyReminder = vi.fn(async () => undefined);
+    startScheduledRunner({
+      db,
+      dispatch: vi.fn(async () => null),
+      notifyReminder,
+      pollIntervalMs: 60_000,
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(updates).toEqual([{ lastReminderRun: nextRunAt }]);
+    expect(notifyReminder).toHaveBeenCalledWith({
+      userInternalId: 42,
+      scheduledTaskInternalId: 21,
+      intent: 'daily report',
+      nextRunAt,
+      reminderMinutes: 15,
+    });
+    stopScheduledRunner();
+  });
+
+  it('does not fire a reminder when the reminder claim loses the race', async () => {
+    const nextRunAt = new Date(Date.now() + 10 * 60_000);
+    const selectResults = [
+      [
+        {
+          id: 22,
+          userId: 42,
+          intent: 'daily report',
+          nextRunAt,
+          reminderMinutes: 15,
+          lastReminderRun: null,
+        },
+      ],
+      [],
+    ];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db: any = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(async () => selectResults.shift() ?? []),
+        })),
+      })),
+      update: vi.fn(() => ({
+        set: vi.fn(() => ({
+          where: vi.fn(async () => ({ affectedRows: 0 })),
+        })),
+      })),
+    };
+    const notifyReminder = vi.fn(async () => undefined);
+    startScheduledRunner({
+      db,
+      dispatch: vi.fn(async () => null),
+      notifyReminder,
+      pollIntervalMs: 60_000,
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(notifyReminder).not.toHaveBeenCalled();
+    stopScheduledRunner();
+  });
 });
 
 describe('recoverStuckRunningScheduledTasks (boot sweep)', () => {
