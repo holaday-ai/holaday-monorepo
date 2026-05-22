@@ -36,7 +36,7 @@ interface ScheduledRow {
 }
 
 function makeCtx(rows: ScheduledRow[], userExternalId = 'usr_test') {
-  const updates: Array<{ status?: string; predicate: unknown }> = [];
+  const updates: Array<{ values: Record<string, unknown>; predicate: unknown }> = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db: any = {
     select(_fields?: unknown) {
@@ -96,7 +96,7 @@ function makeCtx(rows: ScheduledRow[], userExternalId = 'usr_test') {
               );
               if (hit) {
                 hit.status = (setValues.status as string) ?? hit.status;
-                updates.push({ status: setValues.status as string, predicate: s });
+                updates.push({ values: setValues, predicate: s });
                 return { affectedRows: 1 };
               }
               return { affectedRows: 0 };
@@ -189,6 +189,67 @@ describe('scheduledTasksRouter — pause / resume are gone (Codex follow-up)', (
     expect(names.has('delete')).toBe(true);
     expect(names.has('pause')).toBe(false);
     expect(names.has('resume')).toBe(false);
+  });
+});
+
+describe('scheduledTasksRouter.update — reminder claim reset', () => {
+  it('resets lastReminderRun when the schedule time changes', async () => {
+    const { ctx, updates } = makeCtx([
+      { externalId: 'sch_move', status: 'active', userId: 42 },
+    ]);
+    const caller = scheduledTasksRouter.createCaller(ctx);
+    const next = '2026-05-23T09:00:00.000Z';
+    await expect(
+      caller.update({ scheduledTaskId: 'sch_move', scheduledAt: next }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.values.lastReminderRun).toBeNull();
+    expect((updates[0]?.values.nextRunAt as Date).toISOString()).toBe(next);
+  });
+
+  it('resets lastReminderRun when recurrence or reminder settings change', async () => {
+    const { ctx, updates } = makeCtx([
+      { externalId: 'sch_recur', status: 'active', userId: 42 },
+    ]);
+    const caller = scheduledTasksRouter.createCaller(ctx);
+    await expect(
+      caller.update({
+        scheduledTaskId: 'sch_recur',
+        repeatType: 'weekly',
+        rrule: 'DTSTART:20260523T090000Z\nRRULE:FREQ=WEEKLY;BYDAY=MO',
+        reminderMinutes: 30,
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.values).toMatchObject({
+      repeatType: 'weekly',
+      rrule: 'DTSTART:20260523T090000Z\nRRULE:FREQ=WEEKLY;BYDAY=MO',
+      reminderMinutes: 30,
+      lastReminderRun: null,
+    });
+  });
+
+  it('does not reset lastReminderRun for presentation-only edits', async () => {
+    const { ctx, updates } = makeCtx([
+      { externalId: 'sch_note', status: 'active', userId: 42 },
+    ]);
+    const caller = scheduledTasksRouter.createCaller(ctx);
+    await expect(
+      caller.update({
+        scheduledTaskId: 'sch_note',
+        description: 'new note',
+        durationMinutes: 45,
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.values).toMatchObject({
+      description: 'new note',
+      durationMinutes: 45,
+    });
+    expect('lastReminderRun' in (updates[0]?.values ?? {})).toBe(false);
   });
 });
 

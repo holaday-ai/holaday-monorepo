@@ -356,8 +356,12 @@ export const scheduledTasksRouter = router({
       // Build the set object only with provided fields so we don't
       // accidentally clobber unspecified columns with `undefined`.
       const updates: Partial<typeof scheduledTasks.$inferInsert> = {};
+      let shouldResetReminderClaim = false;
       if (input.intent !== undefined) updates.intent = input.intent;
-      if (input.repeatType !== undefined) updates.repeatType = input.repeatType;
+      if (input.repeatType !== undefined) {
+        updates.repeatType = input.repeatType;
+        shouldResetReminderClaim = true;
+      }
       if (input.scheduledAt !== undefined) {
         const next = new Date(input.scheduledAt);
         if (Number.isNaN(next.getTime())) {
@@ -367,12 +371,14 @@ export const scheduledTasksRouter = router({
           });
         }
         updates.nextRunAt = next;
+        shouldResetReminderClaim = true;
       }
       if (input.rrule !== undefined) {
         // Allow explicit `null` to clear the rrule. validateRrule
         // returns null for empty input; setting it to null in the
         // db means "fall back to repeat_type".
         updates.rrule = validateRrule(input.rrule);
+        shouldResetReminderClaim = true;
       }
       if (input.durationMinutes !== undefined) {
         updates.durationMinutes = input.durationMinutes;
@@ -381,10 +387,13 @@ export const scheduledTasksRouter = router({
       if (input.description !== undefined) updates.description = input.description;
       if (input.reminderMinutes !== undefined) {
         updates.reminderMinutes = input.reminderMinutes;
-        // When the user changes (or clears) the reminder lead time,
-        // reset last_reminder_run so the next runner tick can fire
-        // a fresh reminder for the current cycle without being
-        // blocked by a previous fire.
+        shouldResetReminderClaim = true;
+      }
+      if (shouldResetReminderClaim) {
+        // Changing the schedule anchor, recurrence, or reminder lead
+        // time defines a fresh reminder cycle. Clear the old claim so
+        // a reminder fired for the previous next_run_at cannot block
+        // the newly-selected time.
         updates.lastReminderRun = null;
       }
       if (Object.keys(updates).length === 0) {
