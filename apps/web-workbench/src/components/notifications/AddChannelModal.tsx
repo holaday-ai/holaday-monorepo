@@ -85,6 +85,11 @@ export function AddChannelModal({
     setTestResult(null);
   }, []);
 
+  const requestClose = React.useCallback(() => {
+    if (saving || testing) return;
+    onClose();
+  }, [onClose, saving, testing]);
+
   // Reset draft state every time the modal opens. Without this, a
   // user who cancels + reopens sees their previous unsaved edits.
   React.useEffect(() => {
@@ -103,11 +108,11 @@ export function AddChannelModal({
   React.useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') requestClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open, requestClose]);
 
   if (!open) return null;
 
@@ -193,7 +198,7 @@ export function AddChannelModal({
       aria-modal="true"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) requestClose();
       }}
     >
       <div className="hd-popover-enter w-full max-w-[520px] rounded-lg border border-border bg-popover shadow-2xl">
@@ -203,7 +208,8 @@ export function AddChannelModal({
           </h3>
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
+            disabled={saving || testing}
             className="text-muted-foreground hover:text-foreground"
             aria-label="关闭"
           >
@@ -324,7 +330,12 @@ export function AddChannelModal({
           </div>
 
           <div className="flex justify-end gap-2 border-t border-border pt-3">
-            <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={requestClose}
+              disabled={saving || testing}
+            >
               取消
             </Button>
             <Button
