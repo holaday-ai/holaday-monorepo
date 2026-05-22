@@ -61,17 +61,23 @@ export function ScheduledTaskDialog({
     setDescription('');
     setRrule('');
     setScheduledAt(defaultScheduledAtLocalInput());
+    setSubmitting(false);
   }, [open, initialIntent]);
+
+  const requestClose = React.useCallback(() => {
+    if (submitting) return;
+    onClose();
+  }, [onClose, submitting]);
 
   // Esc closes when the dialog is open.
   React.useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') requestClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open, requestClose]);
 
   if (!open) return null;
 
@@ -126,7 +132,7 @@ export function ScheduledTaskDialog({
     <div
       role="dialog"
       aria-modal="true"
-      onClick={onClose}
+      onClick={requestClose}
       className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm animate-fade-in"
     >
       <div
@@ -140,7 +146,8 @@ export function ScheduledTaskDialog({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
+            disabled={submitting}
             aria-label="关闭"
             className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
           >
@@ -244,7 +251,7 @@ export function ScheduledTaskDialog({
         <footer className="flex items-center justify-end gap-2 border-t border-border bg-muted/30 px-5 py-3">
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
             disabled={submitting}
             className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
           >
