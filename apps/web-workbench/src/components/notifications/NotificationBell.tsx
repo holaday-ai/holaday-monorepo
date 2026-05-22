@@ -102,9 +102,16 @@ export function NotificationBell(): JSX.Element {
 
   const handleItemClick = React.useCallback(
     async (row: NotificationRow) => {
+      const href = scheduledNotificationHref(row.scheduledTaskInternalId);
+      if (href) {
+        setOpen(false);
+        navigate(href);
+      }
+
       // Mark read optimistically so the bell badge ticks down
       // before the round-trip resolves; reconcile on next poll
-      // if the mutation fails.
+      // if the mutation fails. Navigation happens first so a slow
+      // mark-read request never makes a notification feel dead.
       if (!row.isRead) {
         setItems((prev) =>
           prev.map((r) =>
@@ -119,11 +126,6 @@ export function NotificationBell(): JSX.Element {
         } catch {
           void refreshCount();
         }
-      }
-      const href = scheduledNotificationHref(row.scheduledTaskInternalId);
-      if (href) {
-        setOpen(false);
-        navigate(href);
       }
     },
     [navigate, refreshCount],
@@ -289,6 +291,9 @@ export function scheduledNotificationHref(
   scheduledTaskInternalId: number | null,
 ): string | null {
   if (scheduledTaskInternalId === null) return null;
+  if (!Number.isSafeInteger(scheduledTaskInternalId) || scheduledTaskInternalId <= 0) {
+    return null;
+  }
   return `/scheduled?focusScheduledTaskInternalId=${encodeURIComponent(
     String(scheduledTaskInternalId),
   )}`;

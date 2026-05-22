@@ -76,4 +76,10 @@ describe('scheduledNotificationHref', () => {
   it('does not navigate when the notification has no scheduled task link', () => {
     expect(scheduledNotificationHref(null)).toBeNull();
   });
+
+  it('rejects invalid ids instead of emitting broken deep links', () => {
+    expect(scheduledNotificationHref(0)).toBeNull();
+    expect(scheduledNotificationHref(-1)).toBeNull();
+    expect(scheduledNotificationHref(Number.NaN)).toBeNull();
+  });
 });
