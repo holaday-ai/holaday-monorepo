@@ -33,6 +33,9 @@ interface ScheduledRow {
   externalId: string;
   status: string;
   userId: number;
+  repeatType?: string;
+  rrule?: string | null;
+  nextRunAt?: Date;
 }
 
 function makeCtx(rows: ScheduledRow[], userExternalId = 'usr_test') {
@@ -65,7 +68,17 @@ function makeCtx(rows: ScheduledRow[], userExternalId = 'usr_test') {
                         s.includes(`value: '${r.externalId}'`) &&
                         s.includes(`value: ${r.userId}`),
                     );
-                    return hit ? [{ status: hit.status }] : [];
+                    return hit
+                      ? [
+                          {
+                            status: hit.status,
+                            repeatType: hit.repeatType ?? 'once',
+                            rrule: hit.rrule ?? null,
+                            nextRunAt:
+                              hit.nextRunAt ?? new Date(Date.now() + 60 * 60_000),
+                          },
+                        ]
+                      : [];
                   }
                   return [];
                 },
@@ -162,6 +175,47 @@ describe('scheduledTasksRouter.toggle — status guards (Codex follow-up)', () =
     const result = await caller.toggle({ scheduledTaskId: 'sch_p' });
     expect(result).toEqual({ ok: true, status: 'active' });
     expect(rows[0]?.status).toBe('active');
+  });
+
+  it('paused recurring row with stale nextRunAt → resumes at the next future occurrence', async () => {
+    const stale = new Date(Date.now() - 3 * 24 * 60 * 60_000);
+    const { ctx, rows, updates } = makeCtx([
+      {
+        externalId: 'sch_daily_stale',
+        status: 'paused',
+        userId: 42,
+        repeatType: 'daily',
+        nextRunAt: stale,
+      },
+    ]);
+    const caller = scheduledTasksRouter.createCaller(ctx);
+    const result = await caller.toggle({ scheduledTaskId: 'sch_daily_stale' });
+    expect(result).toEqual({ ok: true, status: 'active' });
+    expect(rows[0]?.status).toBe('active');
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.values.status).toBe('active');
+    expect(updates[0]?.values.lastReminderRun).toBeNull();
+    expect((updates[0]?.values.nextRunAt as Date).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('failed row retry keeps immediate due semantics instead of rolling forward', async () => {
+    const stale = new Date(Date.now() - 3 * 24 * 60 * 60_000);
+    const { ctx, updates } = makeCtx([
+      {
+        externalId: 'sch_fail_stale',
+        status: 'failed',
+        userId: 42,
+        repeatType: 'daily',
+        nextRunAt: stale,
+      },
+    ]);
+    const caller = scheduledTasksRouter.createCaller(ctx);
+    await expect(caller.toggle({ scheduledTaskId: 'sch_fail_stale' })).resolves.toEqual({
+      ok: true,
+      status: 'active',
+    });
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.values).toEqual({ status: 'active' });
   });
 
   it('unknown id → NOT_FOUND', async () => {

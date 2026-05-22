@@ -510,7 +510,12 @@ export const scheduledTasksRouter = router({
     .mutation(async ({ ctx, input }) => {
       const userId = await requireUserId(ctx);
       const [row] = await ctx.db
-        .select({ status: scheduledTasks.status })
+        .select({
+          status: scheduledTasks.status,
+          repeatType: scheduledTasks.repeatType,
+          rrule: scheduledTasks.rrule,
+          nextRunAt: scheduledTasks.nextRunAt,
+        })
         .from(scheduledTasks)
         .where(
           and(
@@ -544,9 +549,31 @@ export const scheduledTasksRouter = router({
       // fall through to the same "执行中" error so the SPA shows a
       // consistent message instead of "succeeded but nothing changed".
       const nextStatus = row.status === 'active' ? 'paused' : 'active';
+      const updates: Partial<typeof scheduledTasks.$inferInsert> = { status: nextStatus };
+      if (row.status === 'paused' && nextStatus === 'active') {
+        const repeatType = row.repeatType as 'once' | 'daily' | 'weekly' | 'monthly' | 'custom';
+        const isRecurring = repeatType !== 'once' || row.rrule !== null;
+        const now = new Date();
+        if (isRecurring && row.nextRunAt.getTime() <= now.getTime()) {
+          const rolled = rollForwardToFuture({
+            initial: row.nextRunAt,
+            rrule: row.rrule,
+            repeatType,
+            now,
+          });
+          if (!rolled) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: '无法计算下次执行时间，请检查重复规则',
+            });
+          }
+          updates.nextRunAt = rolled;
+          updates.lastReminderRun = null;
+        }
+      }
       const result = await ctx.db
         .update(scheduledTasks)
-        .set({ status: nextStatus })
+        .set(updates)
         .where(
           and(
             eq(scheduledTasks.externalId, input.scheduledTaskId),
