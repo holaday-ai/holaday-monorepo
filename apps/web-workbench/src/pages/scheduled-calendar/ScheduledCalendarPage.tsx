@@ -44,6 +44,7 @@ import type {
 
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import * as React from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
@@ -82,6 +83,13 @@ interface EventDetailState {
 
 export function ScheduledCalendarPage(): JSX.Element {
   const toast = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusScheduledTaskInternalId = React.useMemo(() => {
+    const raw = searchParams.get('focusScheduledTaskInternalId');
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  }, [searchParams]);
   const calendarRef = React.useRef<FullCalendar | null>(null);
   const [rows, setRows] = React.useState<ScheduledTaskRow[]>([]);
   // `loading` no longer drives a UI affordance now that the empty-
@@ -138,6 +146,7 @@ export function ScheduledCalendarPage(): JSX.Element {
   const [recentlyCreatedIds, setRecentlyCreatedIds] = React.useState<Set<string>>(
     new Set(),
   );
+  const focusedScheduledTaskRef = React.useRef<number | null>(null);
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return;
@@ -154,6 +163,9 @@ export function ScheduledCalendarPage(): JSX.Element {
       const res = await trpc.scheduledTasks.list.query({
         rangeStart: currentRange.start.toISOString(),
         rangeEnd: currentRange.end.toISOString(),
+        ...(focusScheduledTaskInternalId !== null
+          ? { focusScheduledTaskInternalId }
+          : {}),
       });
       setRows(res as ScheduledTaskRow[]);
     } catch (err) {
@@ -163,7 +175,7 @@ export function ScheduledCalendarPage(): JSX.Element {
     }
     // toast is stable; refresh re-runs only when currentRange changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentRange]);
+  }, [currentRange, focusScheduledTaskInternalId]);
 
   React.useEffect(() => {
     void refresh();
@@ -173,6 +185,48 @@ export function ScheduledCalendarPage(): JSX.Element {
     const now = new Date();
     return rows.flatMap((r) => rowToEventInput(r, { now }));
   }, [rows]);
+
+  React.useEffect(() => {
+    if (focusScheduledTaskInternalId === null) return;
+    if (focusedScheduledTaskRef.current === focusScheduledTaskInternalId) return;
+    const row = rows.find(
+      (r) => r.scheduledTaskInternalId === focusScheduledTaskInternalId,
+    );
+    if (!row) return;
+
+    const targetDate =
+      row.nextRunAt instanceof Date ? row.nextRunAt : new Date(row.nextRunAt);
+    if (currentRange && !Number.isNaN(targetDate.getTime())) {
+      const isInCurrentRange =
+        targetDate >= currentRange.start && targetDate < currentRange.end;
+      if (!isInCurrentRange) {
+        calendarRef.current?.getApi().gotoDate(targetDate);
+        return;
+      }
+    }
+
+    const viewportWidth = typeof window === 'undefined' ? 1024 : window.innerWidth;
+    const viewportHeight = typeof window === 'undefined' ? 768 : window.innerHeight;
+    setEventDetail({
+      anchor: {
+        x: Math.min(Math.max(viewportWidth / 2, 24), Math.max(24, viewportWidth - 380)),
+        y: Math.min(Math.max(viewportHeight * 0.25, 96), Math.max(96, viewportHeight - 360)),
+      },
+      row,
+    });
+    focusedScheduledTaskRef.current = focusScheduledTaskInternalId;
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('focusScheduledTaskInternalId');
+    setSearchParams(nextParams, { replace: true });
+    toast.show('已定位到相关定时任务', 'info');
+  }, [
+    currentRange,
+    focusScheduledTaskInternalId,
+    rows,
+    searchParams,
+    setSearchParams,
+    toast,
+  ]);
 
   // ───────────────────────────── handlers ─────────────────────────────
 

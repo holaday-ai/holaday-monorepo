@@ -120,13 +120,10 @@ export function NotificationBell(): JSX.Element {
           void refreshCount();
         }
       }
-      // Phase 26B v0.1 — jumping to a specific scheduled task isn't
-      // a deep-linkable route yet (the calendar has no per-task
-      // anchor). Take the user to /scheduled and let them locate
-      // the row visually. Future: ?focusTaskId=… deep-link.
-      if (row.scheduledTaskInternalId !== null) {
+      const href = scheduledNotificationHref(row.scheduledTaskInternalId);
+      if (href) {
         setOpen(false);
-        navigate('/scheduled');
+        navigate(href);
       }
     },
     [navigate, refreshCount],
@@ -286,6 +283,15 @@ export function notificationColor(type: string): string {
   if (type === 'task_reminder') return '#E50B6B';
   if (type === 'task_started') return '#F59E0B';
   return '#94A3B8';
+}
+
+export function scheduledNotificationHref(
+  scheduledTaskInternalId: number | null,
+): string | null {
+  if (scheduledTaskInternalId === null) return null;
+  return `/scheduled?focusScheduledTaskInternalId=${encodeURIComponent(
+    String(scheduledTaskInternalId),
+  )}`;
 }
 
 /**

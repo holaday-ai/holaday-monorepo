@@ -24,6 +24,7 @@ import type { EventInput } from '@fullcalendar/core';
  * type-only stub so this file doesn't need the tRPC client.
  */
 export interface ScheduledTaskRow {
+  scheduledTaskInternalId?: number;
   scheduledTaskId: string;
   intent: string;
   /** Phase 26B polish — optional human annotation. */
@@ -174,6 +175,7 @@ export function rowToEventInput(
     borderColor: 'transparent',
     textColor: 'inherit',
     extendedProps: {
+      scheduledTaskInternalId: row.scheduledTaskInternalId,
       scheduledTaskId: row.scheduledTaskId,
       intent: row.intent,
       description: row.description ?? null,

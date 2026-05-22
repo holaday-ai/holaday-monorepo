@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { formatRelative, notificationColor } from './NotificationBell.js';
+import {
+  formatRelative,
+  notificationColor,
+  scheduledNotificationHref,
+} from './NotificationBell.js';
 
 describe('formatRelative', () => {
   const now = new Date('2026-05-17T12:00:00Z');
@@ -59,5 +63,17 @@ describe('notificationColor', () => {
   it('keeps failures red and unknown notifications neutral', () => {
     expect(notificationColor('task_failed')).toBe('#EF4444');
     expect(notificationColor('future_type')).toBe('#94A3B8');
+  });
+});
+
+describe('scheduledNotificationHref', () => {
+  it('deep-links scheduled notifications to their calendar row', () => {
+    expect(scheduledNotificationHref(42)).toBe(
+      '/scheduled?focusScheduledTaskInternalId=42',
+    );
+  });
+
+  it('does not navigate when the notification has no scheduled task link', () => {
+    expect(scheduledNotificationHref(null)).toBeNull();
   });
 });

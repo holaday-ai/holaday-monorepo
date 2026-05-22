@@ -8,6 +8,7 @@ import {
 function makeRow(over: Partial<ScheduledTaskRow>): ScheduledTaskRow {
   return {
     scheduledTaskId: 'sch_1',
+    scheduledTaskInternalId: 101,
     intent: 'test intent',
     description: null,
     reminderMinutes: null,
@@ -156,6 +157,7 @@ describe('rowToEventInput', () => {
     expect(ext.backgroundTintHover).toContain('229, 11, 107');
     expect(ext.description).toBe('产品同事每周看的报告');
     expect(ext.reminderMinutes).toBe(15);
+    expect(ext.scheduledTaskInternalId).toBe(101);
   });
 
   it('reminderMinutes is null when not set on the row', () => {

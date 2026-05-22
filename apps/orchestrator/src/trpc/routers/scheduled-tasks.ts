@@ -141,6 +141,7 @@ export const scheduledTasksRouter = router({
         .object({
           rangeStart: z.string().datetime().optional(),
           rangeEnd: z.string().datetime().optional(),
+          focusScheduledTaskInternalId: z.number().int().positive().optional(),
         })
         .optional(),
     )
@@ -148,22 +149,29 @@ export const scheduledTasksRouter = router({
       const userId = await requireUserId(ctx);
       const rangeStart = input?.rangeStart ? new Date(input.rangeStart) : null;
       const rangeEnd = input?.rangeEnd ? new Date(input.rangeEnd) : null;
+      const focusScheduledTaskInternalId = input?.focusScheduledTaskInternalId ?? null;
       const baseFilter = eq(scheduledTasks.userId, userId);
-      const whereClause =
+      const rangeFilter =
         rangeStart && rangeEnd
-          ? and(
-              baseFilter,
-              or(
-                between(scheduledTasks.nextRunAt, rangeStart, rangeEnd),
-                and(
-                  gte(scheduledTasks.lastRunAt, rangeStart),
-                  lte(scheduledTasks.lastRunAt, rangeEnd),
-                ),
+          ? or(
+              between(scheduledTasks.nextRunAt, rangeStart, rangeEnd),
+              and(
+                gte(scheduledTasks.lastRunAt, rangeStart),
+                lte(scheduledTasks.lastRunAt, rangeEnd),
               ),
             )
+          : null;
+      const focusFilter =
+        focusScheduledTaskInternalId !== null
+          ? eq(scheduledTasks.id, focusScheduledTaskInternalId)
+          : null;
+      const whereClause =
+        rangeFilter
+          ? and(baseFilter, focusFilter ? or(rangeFilter, focusFilter) : rangeFilter)
           : baseFilter;
       const rows = await ctx.db
         .select({
+          id: scheduledTasks.id,
           externalId: scheduledTasks.externalId,
           intent: scheduledTasks.intent,
           description: scheduledTasks.description,
@@ -187,6 +195,7 @@ export const scheduledTasksRouter = router({
         .where(whereClause)
         .orderBy(desc(scheduledTasks.createdAt));
       return rows.map((r) => ({
+        scheduledTaskInternalId: r.id,
         scheduledTaskId: r.externalId,
         intent: r.intent,
         description: r.description,
