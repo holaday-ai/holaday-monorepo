@@ -80,6 +80,11 @@ export function AddChannelModal({
   >(null);
   const [saving, setSaving] = React.useState(false);
 
+  const updateDraft = React.useCallback((fn: () => void) => {
+    fn();
+    setTestResult(null);
+  }, []);
+
   // Reset draft state every time the modal opens. Without this, a
   // user who cancels + reopens sees their previous unsaved edits.
   React.useEffect(() => {
@@ -218,7 +223,10 @@ export function AddChannelModal({
                 <button
                   type="button"
                   key={p.value}
-                  onClick={() => setPlatform(p.value)}
+                  disabled={saving || testing}
+                  onClick={() => {
+                    updateDraft(() => setPlatform(p.value));
+                  }}
                   className={cn(
                     'rounded-md border px-2 py-2 text-left transition-colors',
                     platform === p.value
@@ -253,8 +261,12 @@ export function AddChannelModal({
               id="webhookUrl"
               type="url"
               value={webhookUrl}
-              onChange={(e) => setWebhookUrl(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                updateDraft(() => setWebhookUrl(next));
+              }}
               placeholder="https://..."
+              disabled={saving || testing}
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[#E50B6B]"
               maxLength={2000}
             />
@@ -271,8 +283,12 @@ export function AddChannelModal({
               <textarea
                 id="customTemplate"
                 value={templateJson}
-                onChange={(e) => setTemplateJson(e.target.value)}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  updateDraft(() => setTemplateJson(next));
+                }}
                 rows={6}
+                disabled={saving || testing}
                 className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus:border-[#E50B6B]"
               />
             </div>
@@ -283,7 +299,7 @@ export function AddChannelModal({
               type="button"
               variant="outline"
               onClick={() => void handleTest()}
-              disabled={testing}
+              disabled={testing || saving}
             >
               {testing ? (
                 <Loader2 className="mr-1 h-3 w-3 animate-spin" />
@@ -313,7 +329,7 @@ export function AddChannelModal({
             </Button>
             <Button
               type="submit"
-              disabled={saving}
+              disabled={saving || testing}
               style={{ backgroundColor: '#E50B6B', borderColor: '#E50B6B' }}
               className="text-white hover:opacity-90"
             >
