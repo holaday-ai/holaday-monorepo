@@ -151,6 +151,24 @@ describe('aggregateByDomain', () => {
     });
   });
 
+  it('classifies partial_success without an error message as a quality failure', () => {
+    const rows = [
+      makeScanRow({
+        id: 1,
+        status: 'partial_success',
+        intent: 'visit https://example.com/b',
+        createdAt: new Date('2026-05-02'),
+      }),
+    ];
+
+    const agg = aggregateByDomain(rows).get('example.com');
+
+    expect(agg).toMatchObject({
+      failed: 1,
+      topFailureCategory: 'quality',
+    });
+  });
+
   it("picks the most-frequent failure category per domain", () => {
     const rows = [
       makeScanRow({

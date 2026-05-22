@@ -56,6 +56,44 @@ function isLearningFailureStatus(status: string): boolean {
   return status === 'failed' || status === 'partial_success';
 }
 
+function classifyLearningFailure(row: {
+  status: string;
+  errorMessage: string | null;
+  errorCode: string | null;
+}): ErrorCategory {
+  return classifyTaskError(
+    row.errorMessage,
+    row.errorCode ?? (row.status === 'partial_success' ? 'partial_success' : null),
+  );
+}
+
+function extractPersistedFailedChecks(
+  result: unknown,
+): Array<{ type: string; detail: string }> {
+  const parsed = typeof result === 'string' ? safeJsonParse(result) : result;
+  if (!parsed || typeof parsed !== 'object') return [];
+  const raw = (parsed as Record<string, unknown>).failedChecks;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const rec = item as Record<string, unknown>;
+      if (typeof rec.type !== 'string' || typeof rec.detail !== 'string') return null;
+      const type = rec.type.trim();
+      const detail = rec.detail.trim();
+      return type && detail ? { type, detail } : null;
+    })
+    .filter((item): item is { type: string; detail: string } => item !== null);
+}
+
+function safeJsonParse(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
 interface DomainAggregate {
   domain: string;
   total: number;
@@ -115,7 +153,7 @@ function aggregateByDomain(scanRows: TaskScanRow[]): Map<string, DomainAggregate
       if (!agg.lastFailedAt || row.createdAt > agg.lastFailedAt) {
         agg.lastFailedAt = row.createdAt;
       }
-      const cat = classifyTaskError(row.errorMessage, row.errorCode);
+      const cat = classifyLearningFailure(row);
       const perCat =
         failureCountByDomainCategory.get(domain) ?? new Map<ErrorCategory, number>();
       perCat.set(cat, (perCat.get(cat) ?? 0) + 1);
@@ -270,7 +308,7 @@ export const adminLearningRouter = router({
         else if (r.status === 'cancelled') cancelled += 1;
         else if (isLearningFailureStatus(r.status)) {
           failed += 1;
-          const cat = classifyTaskError(r.errorMessage, r.errorCode);
+          const cat = classifyLearningFailure(r);
           failureCountByCategory.set(cat, (failureCountByCategory.get(cat) ?? 0) + 1);
           const prev = failureLastAtByCategory.get(cat);
           if (!prev || r.createdAt > prev) failureLastAtByCategory.set(cat, r.createdAt);
@@ -301,6 +339,7 @@ export const adminLearningRouter = router({
         title: string | null;
         status: string;
         errorMessage: string | null;
+        result: unknown;
         startedAt: Date | null;
         completedAt: Date | null;
         createdAt: Date;
@@ -314,6 +353,7 @@ export const adminLearningRouter = router({
             title: tasks.title,
             status: tasks.status,
             errorMessage: tasks.errorMessage,
+            result: tasks.result,
             startedAt: tasks.startedAt,
             completedAt: tasks.completedAt,
             createdAt: tasks.createdAt,
@@ -373,6 +413,7 @@ export const adminLearningRouter = router({
           title: r.title,
           status: r.status,
           errorMessage: r.errorMessage,
+          failedChecks: extractPersistedFailedChecks(r.result),
           createdAt: r.createdAt,
           durationMs:
             r.startedAt && r.completedAt

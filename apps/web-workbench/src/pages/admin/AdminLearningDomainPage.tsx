@@ -36,6 +36,7 @@ const CAT_COLORS: Record<string, string> = {
   captcha: '#A855F7',
   not_found: '#6366F1',
   page_structure: '#E50B6B',
+  quality: '#D97706',
   unknown: '#9CA3AF',
 };
 
@@ -206,7 +207,11 @@ export function AdminLearningDomainPage(): JSX.Element {
                 data.recentTasks.map((t) => {
                   const tk = statusToken(t.status);
                   const isExpanded = expandedTaskId === t.taskId;
-                  const hasError = t.status === 'failed' && t.errorMessage;
+                  const failedChecks =
+                    Array.isArray(t.failedChecks) ? t.failedChecks : [];
+                  const hasDiagnostics =
+                    (t.status === 'failed' || t.status === 'partial_success') &&
+                    (Boolean(t.errorMessage) || failedChecks.length > 0);
                   return (
                     <React.Fragment key={t.taskId}>
                       <tr className="border-b border-border/60 last:border-b-0 hover:bg-foreground/[0.02]">
@@ -231,7 +236,7 @@ export function AdminLearningDomainPage(): JSX.Element {
                           {formatDurationMs(t.durationMs)}
                         </td>
                         <td className="py-2 pr-3">
-                          {hasError && (
+                          {hasDiagnostics && (
                             <button
                               type="button"
                               onClick={() =>
@@ -244,17 +249,38 @@ export function AdminLearningDomainPage(): JSX.Element {
                               ) : (
                                 <ChevronRight className="h-3.5 w-3.5" aria-hidden />
                               )}
-                              错误
+                              诊断
                             </button>
                           )}
                         </td>
                       </tr>
-                      {isExpanded && hasError && (
+                      {isExpanded && hasDiagnostics && (
                         <tr className="border-b border-border/60 bg-foreground/[0.02]">
                           <td colSpan={5} className="px-3 py-2">
-                            <pre className="whitespace-pre-wrap break-all text-[11px] text-muted-foreground">
-                              {t.errorMessage}
-                            </pre>
+                            <div className="space-y-2 text-[11px] text-muted-foreground">
+                              {failedChecks.length > 0 && (
+                                <ul className="space-y-1">
+                                  {failedChecks.map((check, index) => (
+                                    <li
+                                      key={`${check.type}-${index}`}
+                                      className="flex gap-2"
+                                    >
+                                      <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800 dark:bg-amber-500/15 dark:text-amber-200">
+                                        {check.type}
+                                      </span>
+                                      <span className="min-w-0 break-words">
+                                        {check.detail}
+                                      </span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                              {t.errorMessage && (
+                                <pre className="whitespace-pre-wrap break-all">
+                                  {t.errorMessage}
+                                </pre>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       )}
