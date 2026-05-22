@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normaliseDetailStepStatus } from './task-store';
+import { normaliseDetailStepStatus, toUiTask } from './task-store';
 
 describe('normaliseDetailStepStatus', () => {
   it('maps DB completed steps to done instead of failed', () => {
@@ -21,5 +21,36 @@ describe('normaliseDetailStepStatus', () => {
 
   it('keeps cancelled detail steps distinct from failures', () => {
     expect(normaliseDetailStepStatus('cancelled')).toBe('cancelled');
+  });
+});
+
+describe('toUiTask', () => {
+  it('hydrates persisted verifier failedChecks from tasks.list result JSON', () => {
+    const task = toUiTask({
+      taskId: 'tsk_partial',
+      intent: '查价格并给来源',
+      title: null,
+      status: 'partial_success',
+      result: {
+        summary: '已找到部分结果',
+        failedChecks: [
+          { type: 'source_count', detail: '缺少来源链接' },
+          { type: ' ', detail: 'ignored' },
+          { type: 'price_sort' },
+        ],
+      },
+      errorMessage: null,
+      createdAt: new Date('2026-05-22T00:00:00Z'),
+      opusUsed: false,
+      starred: false,
+      starredAt: null,
+      projectId: null,
+      verificationPassed: false,
+      failureLevel: 'fixable',
+    } as never);
+
+    expect(task.failedChecks).toEqual([
+      { type: 'source_count', detail: '缺少来源链接' },
+    ]);
   });
 });

@@ -1094,6 +1094,14 @@ export const tasksRouter = router({
             'generate: post-format recheck flagged regression — downgrading to partial_success',
           );
         }
+        // Compute before persistence so refresh/history/detail views
+        // carry the same verifier bullets as the live terminal frame.
+        const generateFailedChecks = [
+          ...(executionVerification && !executionVerification.passed
+            ? extractFailedChecks(executionVerification)
+            : []),
+          ...generateExtraFailedChecks,
+        ];
 
         try {
           if (generateTerminalStatus === 'completed' && outcome.status === 'completed') {
@@ -1112,6 +1120,7 @@ export const tasksRouter = router({
               summary: outcome.summary,
               tickCount: 1,
               metadata,
+              failedChecks: generateFailedChecks,
             });
           } else if (generateTerminalStatus === 'failed') {
             // Either the runner failed OR the verifier verdict
@@ -1127,6 +1136,7 @@ export const tasksRouter = router({
               reason,
               tickCount: 1,
               metadata,
+              failedChecks: generateFailedChecks,
             });
           } else if (outcome.status === 'awaiting_user') {
             // Expert-workflow intake park out of the generate runner.
@@ -1168,15 +1178,6 @@ export const tasksRouter = router({
         );
 
         try {
-          // Codex Round 2 P1-6 — compute failed-check list once and
-          // share it across the partial_success / failed branches.
-          // Empty array on a verifier pass; SPA tolerates omission.
-          const generateFailedChecks = [
-            ...(executionVerification && !executionVerification.passed
-              ? extractFailedChecks(executionVerification)
-              : []),
-            ...generateExtraFailedChecks,
-          ];
           if (generateTerminalStatus === 'completed' && outcome.status === 'completed') {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
@@ -1624,6 +1625,12 @@ export const tasksRouter = router({
             'scrape: post-format recheck flagged regression — downgrading to partial_success',
           );
         }
+        const scrapeFailedChecks = [
+          ...(executionVerification && !executionVerification.passed
+            ? extractFailedChecks(executionVerification)
+            : []),
+          ...scrapeExtraFailedChecks,
+        ];
 
         try {
           if (scrapeTerminalStatus === 'completed' && outcome.status === 'completed') {
@@ -1639,6 +1646,7 @@ export const tasksRouter = router({
               summary: outcome.summary,
               tickCount: 1,
               metadata,
+              failedChecks: scrapeFailedChecks,
             });
           } else {
             const reason =
@@ -1650,6 +1658,7 @@ export const tasksRouter = router({
               reason,
               tickCount: 1,
               metadata,
+              failedChecks: scrapeFailedChecks,
             });
           }
         } catch (err) {
@@ -1666,14 +1675,6 @@ export const tasksRouter = router({
         );
 
         try {
-          // Codex Round 2 P1-6 — same failedChecks-on-broadcast as
-          // the generate lane.
-          const scrapeFailedChecks = [
-            ...(executionVerification && !executionVerification.passed
-              ? extractFailedChecks(executionVerification)
-              : []),
-            ...scrapeExtraFailedChecks,
-          ];
           if (scrapeTerminalStatus === 'completed' && outcome.status === 'completed') {
             broadcastToUser(ctx.userId, {
               type: 'server.task.terminal',
@@ -3130,6 +3131,10 @@ export const tasksRouter = router({
               supercarTerminalStatus === 'failed' && executionVerification
                 ? summariseVerificationFailure(executionVerification)
                 : null;
+            const supercarFailedChecks =
+              executionVerification && !executionVerification.passed
+                ? extractFailedChecks(executionVerification)
+                : undefined;
             // Optimization #2 — OpenAI response formatter / style
             // layer. Runs AFTER the verifier (so we polish facts that
             // have already been grounded) and BEFORE persistence. The
@@ -3203,6 +3208,7 @@ export const tasksRouter = router({
               metadata,
               supercarTerminalStatus,
               supercarFailureSummary,
+              supercarFailedChecks,
             );
             // Optimization #2 — stamp the formatter columns. Best-
             // effort UPDATE after the row landed; failure here logs
@@ -3295,10 +3301,6 @@ export const tasksRouter = router({
                 // Codex Round 2 P1-6 — surface verifier failed checks
                 // to the SPA banner. Only populated when verifier
                 // verdict failed; empty list omitted by helper.
-                const supercarFailedChecks =
-                  executionVerification && !executionVerification.passed
-                    ? extractFailedChecks(executionVerification)
-                    : undefined;
                 broadcastToUser(
                   userId,
                   buildTaskTerminalMessage(
@@ -5901,6 +5903,7 @@ async function persistSupercarOutcome(
    */
   verdict?: FinalTerminalStatus,
   verificationReason?: string | null,
+  failedChecks?: Array<{ type: string; detail: string }>,
 ): Promise<{ persisted: boolean }> {
   // Codex P3 follow-up — forward persistVisionOutcome's `{persisted}`
   // so the caller can short-circuit terminal broadcasts / memory /
@@ -5917,6 +5920,7 @@ async function persistSupercarOutcome(
         ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
         ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
         ...(metadata ? { metadata } : {}),
+        ...(failedChecks && failedChecks.length > 0 ? { failedChecks } : {}),
       });
     }
     if (outcome.status === 'completed' && verdict === 'failed') {
@@ -5927,6 +5931,7 @@ async function persistSupercarOutcome(
         ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
         ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
         ...(metadata ? { metadata } : {}),
+        ...(failedChecks && failedChecks.length > 0 ? { failedChecks } : {}),
       });
     }
     if (outcome.status === 'completed') {

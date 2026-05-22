@@ -436,6 +436,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             ? awaitingKindRaw
             : undefined;
         const executionMode = extractExecutionMode(detail.result);
+        const failedChecks = extractFailedChecks(detail.result);
         // Codex Pack A4 — verifier verdict columns from tasks.detail.
         const detailVerification = detail as typeof detail & {
           verificationPassed?: boolean | null;
@@ -497,6 +498,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                       ...(attachments ? { attachments } : {}),
                       ...(expertWorkflowId ? { expertWorkflowId } : {}),
                       ...(expertMode ? { expertMode } : {}),
+                      failedChecks,
                       verificationPassed,
                       failureLevel,
                     }
@@ -542,6 +544,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               ...(attachments ? { attachments } : {}),
               ...(expertWorkflowId ? { expertWorkflowId } : {}),
               ...(expertMode ? { expertMode } : {}),
+              failedChecks,
               verificationPassed,
               failureLevel,
             };
@@ -1538,6 +1541,27 @@ function extractSummary(result: unknown): string | null {
   return null;
 }
 
+function extractFailedChecks(
+  result: unknown,
+): Array<{ type: string; detail: string }> | null {
+  if (!result || typeof result !== 'object') return null;
+  const raw = (result as Record<string, unknown>).failedChecks;
+  if (!Array.isArray(raw)) return null;
+  const checks = raw
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const rec = item as Record<string, unknown>;
+      if (typeof rec.type !== 'string' || typeof rec.detail !== 'string') {
+        return null;
+      }
+      const type = rec.type.trim();
+      const detail = rec.detail.trim();
+      return type && detail ? { type, detail } : null;
+    })
+    .filter((item): item is { type: string; detail: string } => item !== null);
+  return checks.length > 0 ? checks : null;
+}
+
 /**
  * Read `executionMode` out of the `result` JSON. Two locations:
  *   - `result.executionMode` (parked-from-generate write path)
@@ -1629,6 +1653,7 @@ export function toUiTask(row: ListRow): UiTask {
   // bridged the gap; mapping result.summary here removes the gap
   // entirely, so those guards mostly become belt-and-suspenders.
   const summaryFromResult = extractSummary((row as { result?: unknown }).result);
+  const failedChecks = extractFailedChecks((row as { result?: unknown }).result);
   const executionMode = extractExecutionMode(
     (row as { result?: unknown }).result,
   );
@@ -1666,6 +1691,7 @@ export function toUiTask(row: ListRow): UiTask {
     verificationPassed:
       typeof verificationPassedRaw === 'boolean' ? verificationPassedRaw : null,
     failureLevel,
+    failedChecks,
   };
 }
 

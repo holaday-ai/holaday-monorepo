@@ -274,6 +274,7 @@ export class TaskRepository {
            * by `tasks.detail` consumers via `result.metadata`.
            */
           metadata?: Record<string, unknown>;
+          failedChecks?: Array<{ type: string; detail: string }>;
         }
       | {
           /**
@@ -291,6 +292,7 @@ export class TaskRepository {
           finalScreenshot?: string;
           finalUrl?: string;
           metadata?: Record<string, unknown>;
+          failedChecks?: Array<{ type: string; detail: string }>;
         }
       | {
           status: 'failed';
@@ -300,6 +302,7 @@ export class TaskRepository {
           finalScreenshot?: string;
           finalUrl?: string;
           metadata?: Record<string, unknown>;
+          failedChecks?: Array<{ type: string; detail: string }>;
         }
       | {
           status: 'paused';
@@ -343,6 +346,9 @@ export class TaskRepository {
       if (outcome.finalScreenshot) result.finalScreenshot = outcome.finalScreenshot;
       if (outcome.finalUrl) result.finalUrl = outcome.finalUrl;
       if (outcome.metadata) result.metadata = outcome.metadata;
+      if (outcome.failedChecks && outcome.failedChecks.length > 0) {
+        result.failedChecks = outcome.failedChecks;
+      }
       eventPayload = { ...eventPayload, summary: outcome.summary };
     } else if (outcome.status === 'failed') {
       update.completedAt = new Date();
@@ -353,6 +359,9 @@ export class TaskRepository {
       if (outcome.finalScreenshot) result.finalScreenshot = outcome.finalScreenshot;
       if (outcome.finalUrl) result.finalUrl = outcome.finalUrl;
       if (outcome.metadata) result.metadata = outcome.metadata;
+      if (outcome.failedChecks && outcome.failedChecks.length > 0) {
+        result.failedChecks = outcome.failedChecks;
+      }
       eventPayload = { ...eventPayload, reason: outcome.reason };
     } else if (outcome.status === 'paused') {
       update.pauseReason = 'max_steps_reached';

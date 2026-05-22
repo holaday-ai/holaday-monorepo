@@ -19,6 +19,8 @@ interface Captured {
   eventInserts: number;
   /** count of update calls inside a transaction */
   txUpdates: number;
+  taskUpdate: Record<string, unknown> | null;
+  eventPayload: Record<string, unknown> | null;
   transactionRan: boolean;
 }
 
@@ -30,6 +32,8 @@ function fakeDbWithAffectedRows(affectedRows: number) {
   const captured: Captured = {
     eventInserts: 0,
     txUpdates: 0,
+    taskUpdate: null,
+    eventPayload: null,
     transactionRan: false,
   };
 
@@ -42,17 +46,19 @@ function fakeDbWithAffectedRows(affectedRows: number) {
   });
 
   const update = () => ({
-    set: () => ({
+    set: (payload: Record<string, unknown>) => ({
       where: async () => {
         captured.txUpdates += 1;
+        captured.taskUpdate = payload;
         return [{ affectedRows }];
       },
     }),
   });
 
   const insert = () => ({
-    values: async () => {
+    values: async (payload: Record<string, unknown>) => {
       captured.eventInserts += 1;
+      captured.eventPayload = payload;
       return undefined;
     },
   });
@@ -146,6 +152,42 @@ describe('TaskRepository.persistVisionOutcome — awaiting_user state guard (Pha
     });
 
     expect(captured.eventInserts).toBe(1);
+  });
+
+  it('persists verifier failedChecks for partial_success history/detail reloads', async () => {
+    const { db, captured } = fakeDbWithAffectedRows(1);
+    const repo = new TaskRepository(db);
+    const failedChecks = [{ type: 'source_count', detail: '缺少来源链接' }];
+
+    await repo.persistVisionOutcome('tsk_partial_checks', {
+      status: 'partial_success',
+      summary: '已找到 2 个结果',
+      tickCount: 4,
+      failedChecks,
+    });
+
+    expect(captured.taskUpdate?.result).toMatchObject({
+      summary: '已找到 2 个结果',
+      failedChecks,
+    });
+  });
+
+  it('persists verifier failedChecks for hard-failed quality gates', async () => {
+    const { db, captured } = fakeDbWithAffectedRows(1);
+    const repo = new TaskRepository(db);
+    const failedChecks = [{ type: 'price_sort', detail: '价格排序不可信' }];
+
+    await repo.persistVisionOutcome('tsk_failed_checks', {
+      status: 'failed',
+      reason: '质量校验未通过',
+      tickCount: 2,
+      failedChecks,
+    });
+
+    expect(captured.taskUpdate?.result).toMatchObject({
+      reason: '质量校验未通过',
+      failedChecks,
+    });
   });
 
   it('UPDATE applied → event row written (paused → cancelled)', async () => {
