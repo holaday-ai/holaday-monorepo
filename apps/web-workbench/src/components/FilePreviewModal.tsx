@@ -40,6 +40,7 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
   const [objectUrl, setObjectUrl] = React.useState<string | null>(null);
   const [textBody, setTextBody] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const [downloading, setDownloading] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [resolvedMime, setResolvedMime] = React.useState<string>('');
 
@@ -51,6 +52,7 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
       setTextBody(null);
       setErrorMessage(null);
       setResolvedMime('');
+      setDownloading(false);
       return;
     }
     let cancelled = false;
@@ -121,12 +123,18 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
   if (!payload) return null;
 
   const handleDownload = async (): Promise<void> => {
-    const res = await downloadFileAuthed({
-      url: payload.url,
-      filename: payload.filename,
-    });
-    if (!res.ok) {
-      toast.show(downloadFailureMessage(res.status), 'error');
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      const res = await downloadFileAuthed({
+        url: payload.url,
+        filename: payload.filename,
+      });
+      if (!res.ok) {
+        toast.show(downloadFailureMessage(res.status), 'error');
+      }
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -157,12 +165,17 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
           <button
             type="button"
             onClick={() => void handleDownload()}
+            disabled={downloading}
             aria-label="下载到本地"
             title="下载到本地"
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-[12px] text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
           >
-            <Download className="h-3.5 w-3.5" />
-            下载
+            {downloading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download className="h-3.5 w-3.5" />
+            )}
+            {downloading ? '下载中' : '下载'}
           </button>
           <button
             type="button"
@@ -217,10 +230,15 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
                 <button
                   type="button"
                   onClick={() => void handleDownload()}
+                  disabled={downloading}
                   className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-[12px] text-foreground transition-colors hover:border-foreground/30 hover:bg-foreground/[0.04]"
                 >
-                  <Download className="h-3.5 w-3.5" />
-                  下载到本地
+                  {downloading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Download className="h-3.5 w-3.5" />
+                  )}
+                  {downloading ? '下载中' : '下载到本地'}
                 </button>
               </div>
             )}
