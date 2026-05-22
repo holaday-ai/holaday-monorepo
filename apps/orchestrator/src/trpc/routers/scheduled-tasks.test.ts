@@ -262,6 +262,50 @@ describe('scheduledTasksRouter.update — reminder claim reset', () => {
     expect((updates[0]?.values.nextRunAt as Date).toISOString()).toBe(next);
   });
 
+  it('rolls a recurring schedule edit in the past to the next future occurrence', async () => {
+    const stale = new Date(Date.now() - 3 * 24 * 60 * 60_000);
+    const { ctx, updates } = makeCtx([
+      {
+        externalId: 'sch_move_daily',
+        status: 'active',
+        userId: 42,
+        repeatType: 'daily',
+      },
+    ]);
+    const caller = scheduledTasksRouter.createCaller(ctx);
+    await expect(
+      caller.update({
+        scheduledTaskId: 'sch_move_daily',
+        scheduledAt: stale.toISOString(),
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.values.lastReminderRun).toBeNull();
+    expect((updates[0]?.values.nextRunAt as Date).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('rejects a one-shot schedule edit in the past', async () => {
+    const stale = new Date(Date.now() - 3 * 24 * 60 * 60_000);
+    const { ctx, updates } = makeCtx([
+      {
+        externalId: 'sch_move_once',
+        status: 'active',
+        userId: 42,
+        repeatType: 'once',
+      },
+    ]);
+    const caller = scheduledTasksRouter.createCaller(ctx);
+    await expect(
+      caller.update({
+        scheduledTaskId: 'sch_move_once',
+        scheduledAt: stale.toISOString(),
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+
+    expect(updates).toHaveLength(0);
+  });
+
   it('resets lastReminderRun when recurrence or reminder settings change', async () => {
     const { ctx, updates } = makeCtx([
       { externalId: 'sch_recur', status: 'active', userId: 42 },

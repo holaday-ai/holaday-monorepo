@@ -29,6 +29,7 @@ import { users } from '../../db/schema/users.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 const REPEAT_TYPES = ['once', 'daily', 'weekly', 'monthly'] as const;
+type ScheduleRepeatType = 'once' | 'daily' | 'weekly' | 'monthly' | 'custom';
 
 async function requireUserId(
   ctx: { db: typeof import('../../db/client.js').db; userId: string },
@@ -335,7 +336,11 @@ export const scheduledTasksRouter = router({
     .mutation(async ({ ctx, input }) => {
       const userId = await requireUserId(ctx);
       const [row] = await ctx.db
-        .select({ status: scheduledTasks.status })
+        .select({
+          status: scheduledTasks.status,
+          repeatType: scheduledTasks.repeatType,
+          rrule: scheduledTasks.rrule,
+        })
         .from(scheduledTasks)
         .where(
           and(
@@ -357,6 +362,9 @@ export const scheduledTasksRouter = router({
       // accidentally clobber unspecified columns with `undefined`.
       const updates: Partial<typeof scheduledTasks.$inferInsert> = {};
       let shouldResetReminderClaim = false;
+      const nextRepeatType = (input.repeatType ?? row.repeatType) as ScheduleRepeatType;
+      const nextRrule =
+        input.rrule !== undefined ? validateRrule(input.rrule) : row.rrule;
       if (input.intent !== undefined) updates.intent = input.intent;
       if (input.repeatType !== undefined) {
         updates.repeatType = input.repeatType;
@@ -370,14 +378,39 @@ export const scheduledTasksRouter = router({
             message: 'scheduledAt must be a valid datetime',
           });
         }
-        updates.nextRunAt = next;
+        const now = new Date();
+        const isRecurring = nextRepeatType !== 'once' || nextRrule !== null;
+        const isPast = next.getTime() < now.getTime() - 60_000;
+        if (isPast) {
+          if (!isRecurring) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: '执行时间已过去，请重新选择',
+            });
+          }
+          const rolled = rollForwardToFuture({
+            initial: next,
+            rrule: nextRrule,
+            repeatType: nextRepeatType,
+            now,
+          });
+          if (!rolled) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: '无法计算下次执行时间，请检查重复规则',
+            });
+          }
+          updates.nextRunAt = rolled;
+        } else {
+          updates.nextRunAt = next;
+        }
         shouldResetReminderClaim = true;
       }
       if (input.rrule !== undefined) {
         // Allow explicit `null` to clear the rrule. validateRrule
         // returns null for empty input; setting it to null in the
         // db means "fall back to repeat_type".
-        updates.rrule = validateRrule(input.rrule);
+        updates.rrule = nextRrule;
         shouldResetReminderClaim = true;
       }
       if (input.durationMinutes !== undefined) {
