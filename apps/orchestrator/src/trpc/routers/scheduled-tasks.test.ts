@@ -255,7 +255,12 @@ describe('scheduledTasksRouter.update — reminder claim reset', () => {
     const next = '2026-05-23T09:00:00.000Z';
     await expect(
       caller.update({ scheduledTaskId: 'sch_move', scheduledAt: next }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toMatchObject({
+      ok: true,
+      adjusted: false,
+      nextRunAt: new Date(next),
+      requestedRunAt: new Date(next),
+    });
 
     expect(updates).toHaveLength(1);
     expect(updates[0]?.values.lastReminderRun).toBeNull();
@@ -273,16 +278,47 @@ describe('scheduledTasksRouter.update — reminder claim reset', () => {
       },
     ]);
     const caller = scheduledTasksRouter.createCaller(ctx);
-    await expect(
-      caller.update({
-        scheduledTaskId: 'sch_move_daily',
-        scheduledAt: stale.toISOString(),
-      }),
-    ).resolves.toEqual({ ok: true });
+    const res = await caller.update({
+      scheduledTaskId: 'sch_move_daily',
+      scheduledAt: stale.toISOString(),
+    });
+    expect(res.ok).toBe(true);
+    expect(res.adjusted).toBe(true);
+    expect(res.requestedRunAt).toBeDefined();
+    expect(res.nextRunAt).toBeDefined();
+    if (!res.requestedRunAt || !res.nextRunAt) throw new Error('expected adjusted metadata');
+    expect(res.requestedRunAt.toISOString()).toBe(stale.toISOString());
+    expect(res.nextRunAt.getTime()).toBeGreaterThan(Date.now());
 
     expect(updates).toHaveLength(1);
     expect(updates[0]?.values.lastReminderRun).toBeNull();
     expect((updates[0]?.values.nextRunAt as Date).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('returns adjustment metadata when an rrule schedule edit rolls forward', async () => {
+    const stale = new Date(Date.now() - 3 * 24 * 60 * 60_000);
+    const { ctx, updates } = makeCtx([
+      {
+        externalId: 'sch_move_rrule',
+        status: 'active',
+        userId: 42,
+        repeatType: 'once',
+      },
+    ]);
+    const caller = scheduledTasksRouter.createCaller(ctx);
+    const res = await caller.update({
+      scheduledTaskId: 'sch_move_rrule',
+      scheduledAt: stale.toISOString(),
+      rrule: 'DTSTART:20260510T090000Z\nRRULE:FREQ=DAILY',
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.adjusted).toBe(true);
+    expect(res.nextRunAt).toBeDefined();
+    if (!res.nextRunAt) throw new Error('expected adjusted metadata');
+    expect(res.nextRunAt.getTime()).toBeGreaterThan(Date.now());
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.values.rrule).toBe('DTSTART:20260510T090000Z\nRRULE:FREQ=DAILY');
   });
 
   it('rejects a one-shot schedule edit in the past', async () => {
@@ -304,6 +340,30 @@ describe('scheduledTasksRouter.update — reminder claim reset', () => {
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
 
     expect(updates).toHaveLength(0);
+  });
+
+  it('treats a newly-added rrule as recurring when scheduledAt is in the past', async () => {
+    const stale = new Date(Date.now() - 3 * 24 * 60 * 60_000);
+    const { ctx, updates } = makeCtx([
+      {
+        externalId: 'sch_move_once_to_rrule',
+        status: 'active',
+        userId: 42,
+        repeatType: 'once',
+      },
+    ]);
+    const caller = scheduledTasksRouter.createCaller(ctx);
+    await expect(
+      caller.update({
+        scheduledTaskId: 'sch_move_once_to_rrule',
+        scheduledAt: stale.toISOString(),
+        rrule: 'DTSTART:20260510T090000Z\nRRULE:FREQ=DAILY',
+      }),
+    ).resolves.toMatchObject({ ok: true, adjusted: true });
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.values.rrule).toBe('DTSTART:20260510T090000Z\nRRULE:FREQ=DAILY');
+    expect((updates[0]?.values.nextRunAt as Date).getTime()).toBeGreaterThan(Date.now());
   });
 
   it('resets lastReminderRun when recurrence or reminder settings change', async () => {

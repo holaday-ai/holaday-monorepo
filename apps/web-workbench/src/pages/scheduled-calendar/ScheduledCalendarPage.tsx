@@ -57,6 +57,7 @@ import {
 } from './event-mapping';
 import { QuickCreatePopover } from './QuickCreatePopover';
 import { EventDetailPopover } from './EventDetailPopover';
+import { formatRollForward, nextQuickCreateDate } from './time-helpers';
 import './calendar-styles.css';
 
 const MOBILE_QUERY = '(max-width: 640px)';
@@ -358,15 +359,7 @@ export function ScheduledCalendarPage(): JSX.Element {
     // gives us the source MouseEvent so we can read clientX/Y directly.
     const x = arg.jsEvent.clientX;
     const y = arg.jsEvent.clientY;
-    // If the user clicked a date in the past, default the time to
-    // 09:00 of TODAY instead — creating in the past would 400 on the
-    // server anyway.
-    const clicked = new Date(arg.date);
-    const now = new Date();
-    if (clicked.getTime() < now.getTime()) {
-      clicked.setFullYear(now.getFullYear(), now.getMonth(), now.getDate());
-      clicked.setHours(9, 0, 0, 0);
-    }
+    const clicked = nextQuickCreateDate(new Date(arg.date));
     setQuickCreate({ anchor: { x, y }, date: clicked });
   }, []);
 
@@ -397,11 +390,18 @@ export function ScheduledCalendarPage(): JSX.Element {
         return;
       }
       try {
-        await trpc.scheduledTasks.update.mutate({
+        const res = await trpc.scheduledTasks.update.mutate({
           scheduledTaskId: id,
           scheduledAt: newStart.toISOString(),
         });
-        toast.show('已更新执行时间', 'info');
+        if ('adjusted' in res && res.adjusted) {
+          toast.show(
+            `已更新，执行时间调整为 ${formatRollForward(new Date(res.nextRunAt))}（所选时间已过）`,
+            'info',
+          );
+        } else {
+          toast.show('已更新执行时间', 'info');
+        }
         await refresh();
       } catch (err) {
         arg.revert();
@@ -774,36 +774,4 @@ export function ScheduledCalendarPage(): JSX.Element {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-/**
- * Format an adjusted next-run time for the roll-forward toast. Uses
- * locale-aware "明天 09:00" / "周一 09:00" / "05-23 09:00" style so
- * the user immediately sees the new fire time without parsing an ISO
- * string. Pure helper — exported for testing if needed.
- */
-function formatRollForward(at: Date): string {
-  const now = new Date();
-  const startOfDay = (d: Date) => {
-    const out = new Date(d);
-    out.setHours(0, 0, 0, 0);
-    return out;
-  };
-  const diffDays = Math.round(
-    (startOfDay(at).getTime() - startOfDay(now).getTime()) / 86_400_000,
-  );
-  const time = at.toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-  if (diffDays === 0) return `今天 ${time}`;
-  if (diffDays === 1) return `明天 ${time}`;
-  if (diffDays > 1 && diffDays < 7) {
-    const weekday = at.toLocaleDateString('zh-CN', { weekday: 'short' });
-    return `${weekday} ${time}`;
-  }
-  return at.toLocaleDateString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-  }) + ' ' + time;
 }

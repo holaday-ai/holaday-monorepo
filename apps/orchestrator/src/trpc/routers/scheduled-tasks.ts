@@ -362,6 +362,8 @@ export const scheduledTasksRouter = router({
       // accidentally clobber unspecified columns with `undefined`.
       const updates: Partial<typeof scheduledTasks.$inferInsert> = {};
       let shouldResetReminderClaim = false;
+      let requestedRunAt: Date | null = null;
+      let effectiveRunAt: Date | null = null;
       const nextRepeatType = (input.repeatType ?? row.repeatType) as ScheduleRepeatType;
       const nextRrule =
         input.rrule !== undefined ? validateRrule(input.rrule) : row.rrule;
@@ -378,6 +380,7 @@ export const scheduledTasksRouter = router({
             message: 'scheduledAt must be a valid datetime',
           });
         }
+        requestedRunAt = next;
         const now = new Date();
         const isRecurring = nextRepeatType !== 'once' || nextRrule !== null;
         const isPast = next.getTime() < now.getTime() - 60_000;
@@ -401,8 +404,10 @@ export const scheduledTasksRouter = router({
             });
           }
           updates.nextRunAt = rolled;
+          effectiveRunAt = rolled;
         } else {
           updates.nextRunAt = next;
+          effectiveRunAt = next;
         }
         shouldResetReminderClaim = true;
       }
@@ -450,6 +455,14 @@ export const scheduledTasksRouter = router({
           code: 'BAD_REQUEST',
           message: '该定时任务状态已变化，请刷新后重试',
         });
+      }
+      if (requestedRunAt && effectiveRunAt) {
+        return {
+          ok: true as const,
+          nextRunAt: effectiveRunAt,
+          requestedRunAt,
+          adjusted: effectiveRunAt.getTime() !== requestedRunAt.getTime(),
+        };
       }
       return { ok: true as const };
     }),
