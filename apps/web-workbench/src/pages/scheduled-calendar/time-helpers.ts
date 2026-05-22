@@ -19,6 +19,18 @@ export function nextQuickCreateDate(clicked: Date, now = new Date()): Date {
   return out;
 }
 
+export function formatDateTimeLocalInput(d: Date): string {
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+export function defaultScheduledAtLocalInput(now = new Date()): string {
+  const d = new Date(now);
+  d.setDate(d.getDate() + 1);
+  d.setHours(9, 0, 0, 0);
+  return formatDateTimeLocalInput(d);
+}
+
 /**
  * Format an adjusted next-run time for roll-forward toasts. Uses
  * locale-aware "明天 09:00" / "周一 09:00" / "05-23 09:00" style so

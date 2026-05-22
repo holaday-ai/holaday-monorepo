@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { formatRollForward, nextQuickCreateDate } from './time-helpers.js';
+import {
+  defaultScheduledAtLocalInput,
+  formatDateTimeLocalInput,
+  formatRollForward,
+  nextQuickCreateDate,
+} from './time-helpers.js';
 
 describe('nextQuickCreateDate', () => {
   it('keeps a future clicked slot unchanged', () => {
@@ -34,6 +39,20 @@ describe('formatRollForward', () => {
     );
     expect(formatRollForward(new Date('2026-05-23T09:00:00'), now)).toContain(
       '明天',
+    );
+  });
+});
+
+describe('datetime-local helpers', () => {
+  it('formats a local datetime without seconds or timezone', () => {
+    expect(formatDateTimeLocalInput(new Date(2026, 4, 22, 9, 5, 30))).toBe(
+      '2026-05-22T09:05',
+    );
+  });
+
+  it('defaults full-dialog schedules to tomorrow at 09:00', () => {
+    expect(defaultScheduledAtLocalInput(new Date(2026, 4, 22, 14, 10))).toBe(
+      '2026-05-23T09:00',
     );
   });
 });

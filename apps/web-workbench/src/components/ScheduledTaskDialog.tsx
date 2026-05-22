@@ -2,6 +2,10 @@ import { Calendar, Clock, Loader2, X } from 'lucide-react';
 import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
+import {
+  defaultScheduledAtLocalInput,
+  formatRollForward,
+} from '@/pages/scheduled-calendar/time-helpers';
 
 /**
  * Phase 5a — create-schedule modal. Reachable from:
@@ -28,6 +32,15 @@ const REPEAT_OPTIONS: ReadonlyArray<{ value: 'once' | 'daily' | 'weekly' | 'mont
   { value: 'once', label: '只运行一次' },
 ];
 
+const REMINDER_OPTIONS: ReadonlyArray<{ value: string; minutes: number | null; label: string }> = [
+  { value: 'off', minutes: null, label: '不提醒' },
+  { value: '0', minutes: 0, label: '执行时' },
+  { value: '5', minutes: 5, label: '5 分钟前' },
+  { value: '15', minutes: 15, label: '15 分钟前' },
+  { value: '30', minutes: 30, label: '30 分钟前' },
+  { value: '60', minutes: 60, label: '1 小时前' },
+];
+
 export function ScheduledTaskDialog({
   open,
   onClose,
@@ -38,10 +51,11 @@ export function ScheduledTaskDialog({
   const [intent, setIntent] = React.useState(initialIntent ?? '');
   const [repeatType, setRepeatType] =
     React.useState<'once' | 'daily' | 'weekly' | 'monthly'>('daily');
+  const [reminderValue, setReminderValue] = React.useState('off');
   // Default: tomorrow morning 9:00 local. The datetime-local input
   // expects "YYYY-MM-DDTHH:mm" in local tz — never include seconds.
   const [scheduledAt, setScheduledAt] = React.useState(() =>
-    defaultScheduledAt(),
+    defaultScheduledAtLocalInput(),
   );
   const [submitting, setSubmitting] = React.useState(false);
 
@@ -52,7 +66,8 @@ export function ScheduledTaskDialog({
     if (!open) return;
     setIntent(initialIntent ?? '');
     setRepeatType('daily');
-    setScheduledAt(defaultScheduledAt());
+    setReminderValue('off');
+    setScheduledAt(defaultScheduledAtLocalInput());
   }, [open, initialIntent]);
 
   // Esc closes when the dialog is open.
@@ -86,12 +101,22 @@ export function ScheduledTaskDialog({
     }
     setSubmitting(true);
     try {
-      await trpc.scheduledTasks.create.mutate({
+      const reminderMinutes =
+        REMINDER_OPTIONS.find((o) => o.value === reminderValue)?.minutes ?? null;
+      const res = await trpc.scheduledTasks.create.mutate({
         intent: trimmed,
         repeatType,
         scheduledAt: localDate.toISOString(),
+        reminderMinutes,
       });
-      toast.show('定时任务已创建');
+      if (res.adjusted) {
+        toast.show(
+          `定时任务已创建，首次执行时间调整为 ${formatRollForward(new Date(res.nextRunAt))}`,
+          'info',
+        );
+      } else {
+        toast.show('定时任务已创建');
+      }
       onCreated();
     } catch (err) {
       toast.show(
@@ -142,7 +167,7 @@ export function ScheduledTaskDialog({
               className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground/70 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
             />
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div>
               <label className="mb-1 block text-xs font-medium text-foreground/80">
                 重复频率
@@ -173,6 +198,22 @@ export function ScheduledTaskDialog({
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
               />
             </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-foreground/80">
+                提醒
+              </label>
+              <select
+                value={reminderValue}
+                onChange={(e) => setReminderValue(e.target.value)}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+              >
+                {REMINDER_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <p className="text-[11px] text-muted-foreground">
             执行时间使用你当前时区。每次到时间会自动新建一个任务并交给 agent 执行。
@@ -200,17 +241,4 @@ export function ScheduledTaskDialog({
       </div>
     </div>
   );
-}
-
-/**
- * Build the default "first run" timestamp shown in the picker:
- * tomorrow at 09:00 local. Format: "YYYY-MM-DDTHH:mm" (the value
- * shape datetime-local expects).
- */
-function defaultScheduledAt(): string {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  d.setHours(9, 0, 0, 0);
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
