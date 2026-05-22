@@ -92,6 +92,9 @@ export function ScheduledCalendarPage(): JSX.Element {
   }, [searchParams]);
   const calendarRef = React.useRef<FullCalendar | null>(null);
   const [rows, setRows] = React.useState<ScheduledTaskRow[]>([]);
+  const [lastRefreshFocusId, setLastRefreshFocusId] = React.useState<number | null>(
+    null,
+  );
   // `loading` no longer drives a UI affordance now that the empty-
   // state overlay is gone; kept the call sites for future use (the
   // `_` prefix marks it intentional for the linter).
@@ -168,6 +171,7 @@ export function ScheduledCalendarPage(): JSX.Element {
           : {}),
       });
       setRows(res as ScheduledTaskRow[]);
+      setLastRefreshFocusId(focusScheduledTaskInternalId);
     } catch (err) {
       toast.show(taskActionError('加载失败', errorMessage(err)), 'error');
     } finally {
@@ -192,7 +196,16 @@ export function ScheduledCalendarPage(): JSX.Element {
     const row = rows.find(
       (r) => r.scheduledTaskInternalId === focusScheduledTaskInternalId,
     );
-    if (!row) return;
+    if (!row) {
+      if (lastRefreshFocusId === focusScheduledTaskInternalId) {
+        focusedScheduledTaskRef.current = focusScheduledTaskInternalId;
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.delete('focusScheduledTaskInternalId');
+        setSearchParams(nextParams, { replace: true });
+        toast.show('没有找到这条定时任务，可能已删除或无权访问', 'error');
+      }
+      return;
+    }
 
     const targetDate =
       row.nextRunAt instanceof Date ? row.nextRunAt : new Date(row.nextRunAt);
@@ -222,6 +235,7 @@ export function ScheduledCalendarPage(): JSX.Element {
   }, [
     currentRange,
     focusScheduledTaskInternalId,
+    lastRefreshFocusId,
     rows,
     searchParams,
     setSearchParams,
