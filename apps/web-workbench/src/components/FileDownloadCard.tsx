@@ -141,15 +141,20 @@ export function parseHoladayFilePayload(raw: string): FileDownloadPayload | null
     const obj = JSON.parse(raw) as Partial<FileDownloadPayload>;
     if (
       typeof obj.fileId === 'string' &&
+      obj.fileId.trim().length > 0 &&
       typeof obj.filename === 'string' &&
+      obj.filename.trim().length > 0 &&
       typeof obj.size === 'number' &&
-      typeof obj.downloadUrl === 'string'
+      Number.isFinite(obj.size) &&
+      obj.size >= 0 &&
+      typeof obj.downloadUrl === 'string' &&
+      obj.downloadUrl.trim().length > 0
     ) {
       return {
-        fileId: obj.fileId,
-        filename: obj.filename,
+        fileId: obj.fileId.trim(),
+        filename: obj.filename.trim(),
         size: obj.size,
-        downloadUrl: obj.downloadUrl,
+        downloadUrl: obj.downloadUrl.trim(),
       };
     }
   } catch {
