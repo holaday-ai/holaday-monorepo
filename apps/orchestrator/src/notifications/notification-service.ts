@@ -8,9 +8,9 @@
  *      block the others; failures log + continue)
  *
  * The service is called from the scheduled-task runner on every
- * terminal dispatch (success OR failure). It NEVER throws — the
- * runner's correctness depends on the dispatch path continuing
- * regardless of notification outcomes.
+ * dispatch attempt. It NEVER throws — the runner's correctness
+ * depends on the dispatch path continuing regardless of notification
+ * outcomes.
  *
  * Dependencies are injected so tests can stub the DB + sender
  * without spinning up MySQL.
@@ -69,6 +69,7 @@ export interface NotifyDeps {
  * templates.
  */
 function typeToStatus(type: NotificationType): WebhookContext['status'] {
+  if (type === 'task_started') return 'started';
   if (type === 'task_failed') return 'failed';
   if (type === 'task_reminder') return 'reminder';
   return 'success';

@@ -206,4 +206,27 @@ describe('notify', () => {
     expect(ctxArg.taskName).toBe('每日新闻');
     expect(ctxArg.status).toBe('failed');
   });
+
+  it('maps task_started to a started webhook status, not success', async () => {
+    const { db } = makeDbStub({
+      channels: [
+        { externalId: 'nch_1', platform: 'wecom', webhookUrl: 'u1', customTemplate: null },
+      ],
+    });
+    const sendMock = vi
+      .fn<SendFn>()
+      .mockResolvedValue({ ok: true, status: 200, attempt: 1 });
+    await notify(
+      { db, logger: NOOP_LOGGER, send: sendMock },
+      {
+        userInternalId: 42,
+        type: 'task_started',
+        title: '定时任务已启动',
+        message: '已按计划开始执行。',
+        taskName: '每日新闻',
+      },
+    );
+    const ctxArg = sendMock.mock.calls[0]![1];
+    expect(ctxArg.status).toBe('started');
+  });
 });

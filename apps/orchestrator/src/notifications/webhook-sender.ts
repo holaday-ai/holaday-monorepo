@@ -31,7 +31,11 @@ import type { Logger } from 'pino';
 
 export type NotificationPlatform = 'wecom' | 'feishu' | 'dingtalk' | 'custom';
 
-export type NotificationType = 'task_complete' | 'task_failed' | 'task_reminder';
+export type NotificationType =
+  | 'task_started'
+  | 'task_complete'
+  | 'task_failed'
+  | 'task_reminder';
 
 /**
  * Context used to template a notification's webhook body. Same shape
@@ -43,8 +47,8 @@ export interface WebhookContext {
   title: string;
   /** Notification message body — sentence or two. */
   message: string;
-  /** 'success' | 'failed' | 'reminder' — easy switch in custom JSON. */
-  status: 'success' | 'failed' | 'reminder';
+  /** 'started' | 'success' | 'failed' | 'reminder' — easy switch in custom JSON. */
+  status: 'started' | 'success' | 'failed' | 'reminder';
   /** Short label of the underlying scheduled task. May be empty. */
   taskName: string;
 }
@@ -87,9 +91,10 @@ export function formatPresetMessage(ctx: WebhookContext): string {
   if (ctx.taskName) lines.push(`任务：${ctx.taskName}`);
   if (ctx.message) lines.push(ctx.message);
   // No trailing status line for 'success' — the title already
-  // says "完成". Surface 'failed' / 'reminder' explicitly so the
-  // user knows what kind of nudge this is.
-  if (ctx.status === 'failed') lines.push('(状态：失败)');
+  // says "完成". Surface non-terminal/attention statuses explicitly
+  // so webhook bubbles don't imply the underlying task already ended.
+  if (ctx.status === 'started') lines.push('(状态：已启动)');
+  else if (ctx.status === 'failed') lines.push('(状态：失败)');
   else if (ctx.status === 'reminder') lines.push('(状态：提醒)');
   return lines.join('\n');
 }

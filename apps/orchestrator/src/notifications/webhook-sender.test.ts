@@ -30,6 +30,18 @@ describe('formatPresetMessage', () => {
     expect(out).toContain('(状态：失败)');
   });
 
+  it('appends "(状态：已启动)" for started status', () => {
+    const out = formatPresetMessage({
+      ...CTX,
+      title: '定时任务已启动',
+      message: '已按计划开始执行。',
+      status: 'started',
+    });
+    expect(out).toContain('【定时任务已启动】');
+    expect(out).toContain('(状态：已启动)');
+    expect(out).not.toContain('状态：成功');
+  });
+
   it('appends "(状态：提醒)" for reminder status', () => {
     const out = formatPresetMessage({ ...CTX, status: 'reminder' });
     expect(out).toContain('(状态：提醒)');

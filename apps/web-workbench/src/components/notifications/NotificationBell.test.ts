@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatRelative } from './NotificationBell.js';
+import { formatRelative, notificationColor } from './NotificationBell.js';
 
 describe('formatRelative', () => {
   const now = new Date('2026-05-17T12:00:00Z');
@@ -43,5 +43,17 @@ describe('formatRelative', () => {
   it('accepts both Date and ISO string', () => {
     expect(formatRelative('2026-05-17T11:30:00Z', now)).toBe('30分钟前');
     expect(formatRelative(new Date('2026-05-17T11:30:00Z'), now)).toBe('30分钟前');
+  });
+});
+
+describe('notificationColor', () => {
+  it('keeps task_started distinct from task_complete', () => {
+    expect(notificationColor('task_started')).toBe('#F59E0B');
+    expect(notificationColor('task_complete')).toBe('#10B981');
+  });
+
+  it('keeps failures red and unknown notifications neutral', () => {
+    expect(notificationColor('task_failed')).toBe('#EF4444');
+    expect(notificationColor('future_type')).toBe('#94A3B8');
   });
 });

@@ -17,13 +17,12 @@ import { users } from './users.js';
  * Phase 26B — `notifications`: per-user inbox row.
  *
  * Written by `notification-service.notify(...)` every time a
- * scheduled task finishes (success or failure). The SPA polls this
- * for the bell-badge count + dropdown render.
+ * scheduled task dispatch starts, fails, or sends a reminder. The
+ * SPA polls this for the bell-badge count + dropdown render.
  *
  * `type` lives as a varchar (not enum) so new types can be added
- * without an ALTER. Today: 'task_complete' | 'task_failed' |
- * 'task_reminder'. 'task_reminder' is reserved for the future
- * "fire-N-minutes-early" feature.
+ * without an ALTER. Today: 'task_started' | 'task_complete' |
+ * 'task_failed' | 'task_reminder'.
  *
  * `scheduled_task_id` is nullable so a future non-scheduled-task
  * notification path (manual / system) can reuse this table without

@@ -30,7 +30,7 @@ const POLL_INTERVAL_MS = 30_000;
 
 interface NotificationRow {
   notificationId: string;
-  type: 'task_complete' | 'task_failed' | 'task_reminder' | string;
+  type: 'task_started' | 'task_complete' | 'task_failed' | 'task_reminder' | string;
   title: string;
   message: string;
   isRead: boolean;
@@ -225,12 +225,7 @@ function NotificationItem({
   onClick: () => void;
 }): JSX.Element {
   const icon = TYPE_ICON[row.type] ?? '·';
-  const color =
-    row.type === 'task_failed'
-      ? '#EF4444'
-      : row.type === 'task_complete'
-        ? '#10B981'
-        : '#94A3B8';
+  const color = notificationColor(row.type);
   // BOSS bug fix — row was tinted with bg-accent/30 (pink in this
   // theme) for unread, which clashed with the popover's neutral
   // card background. Switched to a tiny leading magenta dot for
@@ -279,10 +274,18 @@ function NotificationItem({
 }
 
 const TYPE_ICON: Record<string, string> = {
+  task_started: '▶',
   task_complete: '✓',
   task_failed: '✗',
   task_reminder: '⏰',
 };
+
+export function notificationColor(type: string): string {
+  if (type === 'task_failed') return '#EF4444';
+  if (type === 'task_complete') return '#10B981';
+  if (type === 'task_started') return '#F59E0B';
+  return '#94A3B8';
+}
 
 /**
  * Format an ISO timestamp as a Chinese relative time. Pure function.

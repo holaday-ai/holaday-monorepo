@@ -10,7 +10,7 @@ describe('buildScheduledDispatchNotification', () => {
     });
 
     expect(out).toMatchObject({
-      type: 'task_complete',
+      type: 'task_started',
       title: '定时任务已启动',
       taskName: '抓取今日新闻',
     });

@@ -15,9 +15,9 @@ export function buildScheduledDispatchNotification(input: {
   const taskName = truncateIntent(input.intent);
   if (input.ok) {
     return {
-      // Keep the existing success channel/type for inbox and webhook
-      // compatibility; the title/message now describe dispatch truth.
-      type: 'task_complete',
+      // Dispatch success means a real task was created; the task's
+      // own terminal state will be visible in the task list later.
+      type: 'task_started',
       title: '定时任务已启动',
       message: `「${taskName}」已按计划开始执行。完成后可在任务列表查看结果。`,
       taskName,
