@@ -48,7 +48,6 @@
  */
 
 import OpenAI from 'openai';
-import { Agent as UndiciAgent, fetch as undiciFetch } from 'undici';
 import type { Logger } from 'pino';
 import type {
   CheckResult,
@@ -71,10 +70,11 @@ export const DEFAULT_VERIFIER_FALLBACK_TIMEOUT_MS = 8_000;
  * verifier-fallback's user-visible latency. Default `maxRetries: 2`
  * turned 8s into 24s = directly contradicts the "non-blocking" spec.
  */
-let verifierDispatcher: UndiciAgent | null = null;
-function getVerifierDispatcher(): UndiciAgent {
+let verifierDispatcher: unknown | null = null;
+async function getVerifierDispatcher(): Promise<unknown> {
   if (!verifierDispatcher) {
-    verifierDispatcher = new UndiciAgent({
+    const { Agent } = await import('undici');
+    verifierDispatcher = new Agent({
       connect: { timeout: 5_000 },
       keepAliveTimeout: 30_000,
       keepAliveMaxTimeout: 60_000,
@@ -216,8 +216,13 @@ export async function verifyFallback(
   // maxRetries=2 turned every fallback failure into a 24s wait,
   // contradicting the "non-blocking second opinion" design.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const dispatcherFetch: any = (url: string | URL, init?: any) =>
-    undiciFetch(url as never, { ...(init ?? {}), dispatcher: getVerifierDispatcher() });
+  const dispatcherFetch: any = async (url: string | URL, init?: any) => {
+    const { fetch: undiciFetch } = await import('undici');
+    return undiciFetch(url as never, {
+      ...(init ?? {}),
+      dispatcher: await getVerifierDispatcher(),
+    });
+  };
   const client =
     deps.openaiClient ??
     new OpenAI({

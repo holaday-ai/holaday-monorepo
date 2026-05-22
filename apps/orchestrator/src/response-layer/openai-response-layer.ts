@@ -28,7 +28,6 @@
  */
 
 import OpenAI from 'openai';
-import { Agent as UndiciAgent, fetch as undiciFetch } from 'undici';
 import type { Logger } from 'pino';
 import { isTaskTerminalStatus, type TaskTerminalStatus } from '../task-status.js';
 
@@ -54,10 +53,11 @@ export const DEFAULT_TIMEOUT_MS = 25_000;
  * it; subsequent calls reuse the pool. We don't instantiate at
  * import time so the flag-off path stays zero-cost.
  */
-let openaiDispatcher: UndiciAgent | null = null;
-function getOpenAiDispatcher(): UndiciAgent {
+let openaiDispatcher: unknown | null = null;
+async function getOpenAiDispatcher(): Promise<unknown> {
   if (!openaiDispatcher) {
-    openaiDispatcher = new UndiciAgent({
+    const { Agent } = await import('undici');
+    openaiDispatcher = new Agent({
       connect: { timeout: 5_000 },
       keepAliveTimeout: 30_000,
       keepAliveMaxTimeout: 60_000,
@@ -185,8 +185,13 @@ export async function format(
   // injected into `init` so the request bypasses any
   // process-shared pool state.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const dispatcherFetch: any = (url: string | URL, init?: any) =>
-    undiciFetch(url as never, { ...(init ?? {}), dispatcher: getOpenAiDispatcher() });
+  const dispatcherFetch: any = async (url: string | URL, init?: any) => {
+    const { fetch: undiciFetch } = await import('undici');
+    return undiciFetch(url as never, {
+      ...(init ?? {}),
+      dispatcher: await getOpenAiDispatcher(),
+    });
+  };
   const client =
     deps.openaiClient ??
     new OpenAI({
