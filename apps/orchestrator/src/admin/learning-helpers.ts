@@ -75,6 +75,7 @@ export type ErrorCategory =
   | 'captcha'
   | 'not_found'
   | 'page_structure'
+  | 'quality'
   | 'unknown';
 
 /** Display label for each category, surfaced in the admin UI. */
@@ -85,6 +86,7 @@ export const ERROR_LABELS: Record<ErrorCategory, string> = {
   captcha: '验证码 / 人机',
   not_found: '页面不存在',
   page_structure: '页面结构变化',
+  quality: '结果质量',
   unknown: '其他',
 };
 
@@ -123,6 +125,12 @@ export function classifyTaskError(
   // misclassify as a 404.
   if (/element[\s_]not[\s_]found|selector[\s_]not[\s_]found|找不到元素|找不到按钮|missing.*element|页面结构|布局变化|定位失败/.test(haystack)) {
     return 'page_structure';
+  }
+  // Verifier / result-quality failures. These often surface through
+  // partial_success, where the browser technically ran but the output
+  // missed links, sources, row completeness, or other acceptance checks.
+  if (/quality|verification|validator|failed.?check|partial_success|质量|校验|验证未通过|缺少来源|缺少链接|结果不完整|信息不完整/.test(haystack)) {
+    return 'quality';
   }
   // 404 / page gone.
   if (/\b404\b|not found|页面不存在|找不到页面|页面已删除|资源不存在/.test(haystack)) {

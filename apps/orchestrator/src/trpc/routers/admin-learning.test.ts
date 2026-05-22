@@ -123,6 +123,34 @@ describe('aggregateByDomain', () => {
     });
   });
 
+  it('counts partial_success as a learning failure, not as invisible volume', () => {
+    const rows = [
+      makeScanRow({
+        id: 1,
+        status: 'completed',
+        intent: 'visit https://example.com/a',
+        createdAt: new Date('2026-05-01'),
+      }),
+      makeScanRow({
+        id: 2,
+        status: 'partial_success',
+        intent: 'visit https://example.com/b',
+        errorMessage: '质量校验未通过：缺少来源链接',
+        createdAt: new Date('2026-05-02'),
+      }),
+    ];
+
+    const agg = aggregateByDomain(rows).get('example.com');
+
+    expect(agg).toMatchObject({
+      total: 2,
+      success: 1,
+      failed: 1,
+      cancelled: 0,
+      topFailureCategory: 'quality',
+    });
+  });
+
   it("picks the most-frequent failure category per domain", () => {
     const rows = [
       makeScanRow({

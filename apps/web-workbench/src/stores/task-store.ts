@@ -215,10 +215,10 @@ export interface TaskStore {
     intent: string,
     fileIds?: string[],
     /**
-     * Phase 14 audit follow-up — when set, server treats this as
-     * a 追问 of the parent task: skips quota and prepends the
-     * parent's intent + summary so the agent has full context.
-     * The parent must be in a terminal state (completed/failed/cancelled).
+   * Phase 14 audit follow-up — when set, server treats this as
+   * a 追问 of the parent task: skips quota and prepends the
+   * parent's intent + summary so the agent has full context.
+   * The parent must be in a terminal state.
      */
     replyToTaskId?: string,
     /** O4 — 'plan' makes agent emit + wait-for-approval before executing. */
@@ -541,6 +541,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               ...(executionMode ? { executionMode } : {}),
               ...(attachments ? { attachments } : {}),
               ...(expertWorkflowId ? { expertWorkflowId } : {}),
+              ...(expertMode ? { expertMode } : {}),
               verificationPassed,
               failureLevel,
             };

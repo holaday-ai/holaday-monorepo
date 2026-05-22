@@ -95,6 +95,14 @@ describe('classifyTaskError', () => {
     expect(classifyTaskError('页面结构变化', null)).toBe('page_structure');
   });
 
+  it('identifies verifier and result-quality failures', () => {
+    expect(classifyTaskError('质量校验未通过：缺少来源链接', null)).toBe('quality');
+    expect(classifyTaskError('Result verification failed check: missing links', null)).toBe(
+      'quality',
+    );
+    expect(classifyTaskError(null, 'partial_success')).toBe('quality');
+  });
+
   it('returns unknown for unrecognised errors', () => {
     expect(classifyTaskError('Some random error happened', null)).toBe('unknown');
   });

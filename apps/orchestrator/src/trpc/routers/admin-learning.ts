@@ -52,6 +52,10 @@ type TaskScanRow = {
   createdAt: Date;
 };
 
+function isLearningFailureStatus(status: string): boolean {
+  return status === 'failed' || status === 'partial_success';
+}
+
 interface DomainAggregate {
   domain: string;
   total: number;
@@ -106,7 +110,7 @@ function aggregateByDomain(scanRows: TaskScanRow[]): Map<string, DomainAggregate
     agg.total += 1;
     if (row.status === 'completed') agg.success += 1;
     else if (row.status === 'cancelled') agg.cancelled += 1;
-    else if (row.status === 'failed') {
+    else if (isLearningFailureStatus(row.status)) {
       agg.failed += 1;
       if (!agg.lastFailedAt || row.createdAt > agg.lastFailedAt) {
         agg.lastFailedAt = row.createdAt;
@@ -264,7 +268,7 @@ export const adminLearningRouter = router({
         if (!lastAt || r.createdAt > lastAt) lastAt = r.createdAt;
         if (r.status === 'completed') success += 1;
         else if (r.status === 'cancelled') cancelled += 1;
-        else if (r.status === 'failed') {
+        else if (isLearningFailureStatus(r.status)) {
           failed += 1;
           const cat = classifyTaskError(r.errorMessage, r.errorCode);
           failureCountByCategory.set(cat, (failureCountByCategory.get(cat) ?? 0) + 1);
