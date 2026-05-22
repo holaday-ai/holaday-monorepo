@@ -283,6 +283,7 @@ const TYPE_ICON: Record<string, string> = {
 export function notificationColor(type: string): string {
   if (type === 'task_failed') return '#EF4444';
   if (type === 'task_complete') return '#10B981';
+  if (type === 'task_reminder') return '#E50B6B';
   if (type === 'task_started') return '#F59E0B';
   return '#94A3B8';
 }

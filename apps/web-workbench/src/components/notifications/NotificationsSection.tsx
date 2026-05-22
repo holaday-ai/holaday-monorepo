@@ -143,7 +143,7 @@ export function NotificationsSection(): JSX.Element {
       <Section title="通知设置">
         <Row
           label="站内通知"
-          description="任务完成或失败时在右上角铃铛收到提醒。"
+          description="任务开始、提前提醒、完成或失败时在右上角铃铛收到通知。"
         >
           <span className="text-xs text-muted-foreground">默认开启</span>
         </Row>
@@ -152,7 +152,7 @@ export function NotificationsSection(): JSX.Element {
             <div>
               <div className="text-sm font-medium">外部通知渠道</div>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                推送到企业微信 / 飞书 / 钉钉 / 自定义 webhook
+                同步推送任务开始、提前提醒、完成和失败事件
               </p>
             </div>
             <Button

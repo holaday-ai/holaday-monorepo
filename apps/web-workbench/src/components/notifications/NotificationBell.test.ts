@@ -52,6 +52,10 @@ describe('notificationColor', () => {
     expect(notificationColor('task_complete')).toBe('#10B981');
   });
 
+  it('uses the brand color for reminders', () => {
+    expect(notificationColor('task_reminder')).toBe('#E50B6B');
+  });
+
   it('keeps failures red and unknown notifications neutral', () => {
     expect(notificationColor('task_failed')).toBe('#EF4444');
     expect(notificationColor('future_type')).toBe('#94A3B8');
