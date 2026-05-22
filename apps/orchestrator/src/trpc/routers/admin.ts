@@ -72,7 +72,9 @@ function buildDashboardDayStats(rows: TrendStatusRow[]): Map<string, DayStats> {
     const c = Number(row.count);
     cur.total += c;
     if (row.status === 'completed') cur.completed += c;
-    else if (row.status === 'failed') cur.failed += c;
+    else if (row.status === 'failed' || row.status === 'partial_success') {
+      cur.failed += c;
+    }
     byDay.set(day, cur);
   }
   return byDay;

@@ -149,9 +149,10 @@ describe('buildDashboardDayStats', () => {
     const stats = buildDashboardDayStats([
       { day: '2026-05-21', status: 'completed', count: 4 },
       { day: '2026-05-21', status: 'failed', count: 1 },
+      { day: '2026-05-21', status: 'partial_success', count: 2 },
       { day: '2026-05-21', status: 'cancelled', count: 3 },
     ]).get('2026-05-21');
 
-    expect(stats).toEqual({ total: 8, completed: 4, failed: 1 });
+    expect(stats).toEqual({ total: 10, completed: 4, failed: 3 });
   });
 });

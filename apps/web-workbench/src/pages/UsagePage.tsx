@@ -91,6 +91,7 @@ export function UsagePage(): JSX.Element {
               snap == null
                 ? '失败 — · 进行中 —'
                 : usageOutcomeSubcopy({
+                    partialSuccess: snap.monthPartialSuccess,
                     failed: snap.monthFailed,
                     cancelled: snap.monthCancelled,
                     executing: snap.monthExecuting,
@@ -170,6 +171,7 @@ export function UsagePage(): JSX.Element {
 interface UsageSnapshot {
   monthTasksTotal: number;
   monthCompleted: number;
+  monthPartialSuccess?: number | null;
   monthFailed: number;
   monthCancelled?: number | null;
   monthExecuting: number;

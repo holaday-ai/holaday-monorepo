@@ -47,6 +47,43 @@ const RUNNING_STATUSES = [
   'paused',
 ] as const;
 
+type UsageStatusRow = { status: string; count: number };
+
+function summarizeMonthlyStatusRows(statusRows: UsageStatusRow[]): {
+  monthTasksTotal: number;
+  monthCompleted: number;
+  monthPartialSuccess: number;
+  monthFailed: number;
+  monthCancelled: number;
+  monthExecuting: number;
+} {
+  let monthCompleted = 0;
+  let monthPartialSuccess = 0;
+  let monthFailed = 0;
+  let monthCancelled = 0;
+  let monthExecuting = 0;
+  let monthTasksTotal = 0;
+  for (const row of statusRows) {
+    const c = Number(row.count);
+    monthTasksTotal += c;
+    if (row.status === 'completed') monthCompleted += c;
+    else if (row.status === 'partial_success') monthPartialSuccess += c;
+    else if (row.status === 'failed') monthFailed += c;
+    else if (row.status === 'cancelled') monthCancelled += c;
+    else if ((RUNNING_STATUSES as readonly string[]).includes(row.status)) {
+      monthExecuting += c;
+    }
+  }
+  return {
+    monthTasksTotal,
+    monthCompleted,
+    monthPartialSuccess,
+    monthFailed,
+    monthCancelled,
+    monthExecuting,
+  };
+}
+
 export const usageRouter = router({
   summary: protectedProcedure.query(async ({ ctx }) => {
     const [user] = await ctx.db
@@ -74,21 +111,14 @@ export const usageRouter = router({
       .from(tasks)
       .where(and(eq(tasks.userId, user.id), gte(tasks.createdAt, monthStart)))
       .groupBy(tasks.status);
-    let monthCompleted = 0;
-    let monthFailed = 0;
-    let monthCancelled = 0;
-    let monthExecuting = 0;
-    let monthTasksTotal = 0;
-    for (const row of statusRows) {
-      const c = Number(row.count);
-      monthTasksTotal += c;
-      if (row.status === 'completed') monthCompleted += c;
-      else if (row.status === 'failed') monthFailed += c;
-      else if (row.status === 'cancelled') monthCancelled += c;
-      else if ((RUNNING_STATUSES as readonly string[]).includes(row.status)) {
-        monthExecuting += c;
-      }
-    }
+    const {
+      monthTasksTotal,
+      monthCompleted,
+      monthPartialSuccess,
+      monthFailed,
+      monthCancelled,
+      monthExecuting,
+    } = summarizeMonthlyStatusRows(statusRows);
 
     // Per-day counts for the last 7 days (UTC). Same group-by
     // pattern; the days the user didn't run anything fill in as 0
@@ -123,6 +153,7 @@ export const usageRouter = router({
       plan: planId,
       monthTasksTotal,
       monthCompleted,
+      monthPartialSuccess,
       monthFailed,
       monthCancelled,
       monthExecuting,
@@ -140,3 +171,7 @@ export const usageRouter = router({
     };
   }),
 });
+
+export const __usageInternals = {
+  summarizeMonthlyStatusRows,
+};
