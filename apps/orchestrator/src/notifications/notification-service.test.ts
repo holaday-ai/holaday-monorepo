@@ -229,4 +229,27 @@ describe('notify', () => {
     const ctxArg = sendMock.mock.calls[0]![1];
     expect(ctxArg.status).toBe('started');
   });
+
+  it('maps task_reminder to a reminder webhook status, not success', async () => {
+    const { db } = makeDbStub({
+      channels: [
+        { externalId: 'nch_1', platform: 'wecom', webhookUrl: 'u1', customTemplate: null },
+      ],
+    });
+    const sendMock = vi
+      .fn<SendFn>()
+      .mockResolvedValue({ ok: true, status: 200, attempt: 1 });
+    await notify(
+      { db, logger: NOOP_LOGGER, send: sendMock },
+      {
+        userInternalId: 42,
+        type: 'task_reminder',
+        title: '定时任务提醒',
+        message: '任务即将开始。',
+        taskName: '每日新闻',
+      },
+    );
+    const ctxArg = sendMock.mock.calls[0]![1];
+    expect(ctxArg.status).toBe('reminder');
+  });
 });
