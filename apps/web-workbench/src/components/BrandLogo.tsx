@@ -23,7 +23,7 @@ export function BrandIcon({ className }: BrandImageProps): JSX.Element {
       <span
         aria-label="HOLA DAY"
         className={cn(
-          'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-[11px] font-semibold text-primary-foreground',
+          'inline-flex h-5 w-8 shrink-0 items-center justify-center rounded bg-primary text-[10px] font-semibold text-primary-foreground',
           className
         )}
       >
@@ -36,7 +36,7 @@ export function BrandIcon({ className }: BrandImageProps): JSX.Element {
     <img
       src={BRAND_ASSETS.hdSingle}
       alt="HOLA DAY"
-      className={cn('block h-7 w-auto max-w-[48px] shrink-0 object-contain', className)}
+      className={cn('block h-5 w-auto max-w-[40px] shrink-0 object-contain', className)}
       onError={() => setFailed(true)}
       draggable={false}
     />
@@ -48,7 +48,7 @@ export function BrandWordmark({ className }: BrandImageProps): JSX.Element {
 
   if (failed) {
     return (
-      <span className={cn('text-base font-semibold tracking-tight text-sidebar-foreground', className)}>
+      <span className={cn('text-sm font-semibold tracking-tight text-sidebar-foreground', className)}>
         HOLA DAY
       </span>
     );
@@ -59,14 +59,14 @@ export function BrandWordmark({ className }: BrandImageProps): JSX.Element {
       <img
         src={BRAND_ASSETS.textBlack}
         alt="HOLA DAY"
-        className={cn('block h-4 w-auto object-contain dark:hidden', className)}
+        className={cn('block h-3.5 w-auto object-contain dark:hidden', className)}
         onError={() => setFailed(true)}
         draggable={false}
       />
       <img
         src={BRAND_ASSETS.textWhite}
         alt="HOLA DAY"
-        className={cn('hidden h-4 w-auto object-contain dark:block', className)}
+        className={cn('hidden h-3.5 w-auto object-contain dark:block', className)}
         onError={() => setFailed(true)}
         draggable={false}
       />
@@ -79,7 +79,7 @@ export function FullBrandLogo({ className }: BrandImageProps): JSX.Element {
 
   if (failed) {
     return (
-      <div className={cn('text-lg font-semibold tracking-tight text-foreground', className)}>
+      <div className={cn('text-base font-semibold tracking-tight text-foreground', className)}>
         HOLA DAY
       </div>
     );
@@ -90,14 +90,14 @@ export function FullBrandLogo({ className }: BrandImageProps): JSX.Element {
       <img
         src={BRAND_ASSETS.hdLogoBlack}
         alt="HOLA DAY"
-        className={cn('block h-10 w-auto max-w-full object-contain dark:hidden', className)}
+        className={cn('block h-8 w-auto max-w-[220px] object-contain dark:hidden', className)}
         onError={() => setFailed(true)}
         draggable={false}
       />
       <img
         src={BRAND_ASSETS.hdLogoWhite}
         alt="HOLA DAY"
-        className={cn('hidden h-10 w-auto max-w-full object-contain dark:block', className)}
+        className={cn('hidden h-8 w-auto max-w-[220px] object-contain dark:block', className)}
         onError={() => setFailed(true)}
         draggable={false}
       />

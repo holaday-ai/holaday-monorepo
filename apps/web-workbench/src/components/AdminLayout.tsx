@@ -113,8 +113,8 @@ function AdminSideNav({ me }: { me: AdminMe }): JSX.Element {
       <div className="px-5 pt-5 pb-4">
         <Link to="/admin" className="block space-y-1.5">
           <div className="flex items-center gap-2">
-            <BrandIcon className="h-6 max-w-[42px]" />
-            <BrandWordmark className="h-3.5" />
+            <BrandIcon />
+            <BrandWordmark className="h-3" />
           </div>
           <div className="text-xs font-medium text-foreground/80">
             管理后台
