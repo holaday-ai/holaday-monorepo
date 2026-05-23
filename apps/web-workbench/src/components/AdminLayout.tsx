@@ -20,6 +20,7 @@
 import { LayoutDashboard, LogOut, Users, BarChart3, GraduationCap, type LucideIcon } from 'lucide-react';
 import * as React from 'react';
 import { Link, Navigate, Outlet, useLocation } from 'react-router-dom';
+import { BrandIcon, BrandWordmark } from '@/components/BrandLogo';
 import { getAccessToken, clearAccessToken } from '@/lib/auth';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
@@ -110,9 +111,13 @@ function AdminSideNav({ me }: { me: AdminMe }): JSX.Element {
   return (
     <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
       <div className="px-5 pt-5 pb-4">
-        <Link to="/admin" className="block">
-          <div className="text-sm font-semibold tracking-tight text-foreground">
-            HOLA DAY · 管理后台
+        <Link to="/admin" className="block space-y-1.5">
+          <div className="flex items-center gap-2">
+            <BrandIcon className="h-6 max-w-[42px]" />
+            <BrandWordmark className="h-3.5" />
+          </div>
+          <div className="text-xs font-medium text-foreground/80">
+            管理后台
           </div>
           <div className="mt-0.5 text-[11px] text-muted-foreground">经营驾驶舱</div>
         </Link>

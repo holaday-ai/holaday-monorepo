@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { BrandIcon, BrandWordmark } from '@/components/BrandLogo';
 import { QuotaIndicator } from '@/components/QuotaIndicator';
 import {
   DropdownMenu,
@@ -328,10 +329,8 @@ export function Sidebar({
             history is a scroll surface, not a status board. */}
         <SidebarHeader className="shrink-0 border-b border-sidebar-border gap-2">
           <div className="flex items-center gap-2 px-1 py-1">
-            <BrandMark />
-            <span className="text-base font-semibold tracking-tight text-sidebar-foreground group-data-[collapsible=icon]:hidden">
-              HOLA DAY
-            </span>
+            <BrandIcon />
+            <BrandWordmark className="group-data-[collapsible=icon]:hidden" />
           </div>
           {/* Brand magenta only on the primary action. */}
           <SidebarMenu>
@@ -913,17 +912,6 @@ function RetentionHint({
         当前套餐保留 {historyDays ?? '?'} 天 · {upgradeCopy}
       </div>
     </button>
-  );
-}
-
-function BrandMark(): JSX.Element {
-  return (
-    <span
-      aria-hidden
-      className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-pink-500 to-pink-700 text-[12px] font-bold text-white"
-    >
-      H
-    </span>
   );
 }
 

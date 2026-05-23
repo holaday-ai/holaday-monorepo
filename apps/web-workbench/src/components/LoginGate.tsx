@@ -1,5 +1,6 @@
 import { Eye, EyeOff } from 'lucide-react';
 import * as React from 'react';
+import { FullBrandLogo } from '@/components/BrandLogo';
 import { Button } from '@/components/ui/button';
 import { setAccessToken } from '@/lib/auth';
 import { trpc } from '@/lib/trpc';
@@ -236,8 +237,8 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
   return (
     <div className="flex h-full items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm space-y-4 rounded-xl border border-border bg-card p-8 shadow-sm">
-        <div className="space-y-1 text-center">
-          <div className="text-lg font-semibold tracking-tight">HOLA DAY</div>
+        <div className="space-y-2 text-center">
+          <FullBrandLogo className="mx-auto" />
           <div className="text-xs text-muted-foreground">
             {mode === 'register' && '创建新账号'}
             {mode === 'forgot' && '重置密码'}
