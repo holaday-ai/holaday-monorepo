@@ -41,6 +41,7 @@ import {
   fetchFileBlobAuthed,
 } from '@/lib/download-file';
 import { taskActionError } from '@/lib/error-copy';
+import { externalLinkConfirmDescription } from '@/lib/external-link-copy';
 import { classifyFriendlyFailure } from '@/lib/failure-copy';
 import { terminalArtifactFallbackText } from '@/lib/terminal-artifact-copy';
 import { terminalEmptyCopy } from '@/lib/terminal-empty-copy';
@@ -2215,11 +2216,7 @@ function ExternalLinkConfirm({
     <ConfirmDialog
       open={open}
       title="即将打开外部链接"
-      description={
-        open
-          ? `部分外部页面可能需要登录或无法正常访问。确认打开？\n\n${href}`
-          : undefined
-      }
+      description={open ? externalLinkConfirmDescription(href) : undefined}
       confirmLabel="打开"
       cancelLabel="取消"
       onClose={onClose}
