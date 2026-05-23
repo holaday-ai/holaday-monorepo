@@ -16,6 +16,7 @@ import { AddonPackButton } from '@/components/AddonPackButton';
 import { CnPaymentDialog, type CnProvider, type CnPurchase } from '@/components/CnPaymentDialog';
 import { PayPalButton } from '@/components/PayPalButton';
 import { Button } from '@/components/ui/button';
+import { planPaymentCtaState } from '@/lib/plan-payment-state';
 import { useToast } from '@/components/ui/toast';
 import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
@@ -191,6 +192,12 @@ export function PlanPage(): JSX.Element {
           const featured = planId === 'basic';
           const isPaid = planId !== 'free';
           const isOpen = openPayFor === planId;
+          const paymentCta = planPaymentCtaState({
+            loading: paymentOpts === null && cnOpts === null,
+            zh,
+            cnEnabled: cnOpts?.enabled ?? false,
+            paypalEnabled: paymentOpts?.paypal ?? false,
+          });
 
           // Pricing: free shows $0; paid shows the cycle's price, with
           // the first-month promo highlighted if eligible (monthly only;
@@ -379,22 +386,21 @@ export function PlanPage(): JSX.Element {
                 <Button
                   variant={featured ? 'default' : 'outline'}
                   className="w-full"
+                  disabled={paymentCta.disabled}
                   onClick={() => {
-                    if (!paymentOpts && !cnOpts) return;
-                    const anyEnabled =
-                      (cnOpts?.enabled && zh) || paymentOpts?.paypal;
-                    if (!anyEnabled) {
-                      toast.show(
-                        zh
-                          ? '支付暂未开放，联系 support@holaday.ai'
-                          : 'Payment not yet enabled, contact support@holaday.ai',
-                      );
+                    if (paymentCta.unavailableMessage) {
+                      window.location.href = supportMailtoHref({
+                        subject: zh ? '开通 HOLA DAY 付费套餐' : 'Enable HOLA DAY billing',
+                        body: zh
+                          ? `我想开通 HOLA DAY ${name} 套餐。\n\n注册邮箱：`
+                          : `I would like to enable the HOLA DAY ${name} plan.\n\nAccount email:`,
+                      });
                       return;
                     }
                     setOpenPayFor(planId);
                   }}
                 >
-                  {zh ? '升级' : 'Upgrade'}
+                  {paymentCta.label}
                 </Button>
               )}
             </div>
