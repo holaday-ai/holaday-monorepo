@@ -496,8 +496,8 @@ export function PlanPage(): JSX.Element {
       {currency === 'cny' && (
         <div className="mx-auto mt-6 max-w-xl rounded-md border border-border bg-card/60 p-3 text-center text-xs text-muted-foreground">
           {zh
-            ? '当前通过 PayPal 以美元结算（按当日汇率折算 ≈ ¥）。微信支付与支付宝即将上线。'
-            : "Charged via PayPal in USD (¥ shown at today's rate). WeChat Pay + Alipay coming soon."}
+            ? '当前通过 PayPal 以美元结算（按当日汇率折算 ≈ ¥）。本地支付和企业付款可联系支持开通。'
+            : "Charged via PayPal in USD (¥ shown at today's rate). Contact support for local payment or business billing."}
         </div>
       )}
 

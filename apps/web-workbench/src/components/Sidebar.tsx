@@ -935,10 +935,9 @@ const FEATURES: readonly FeatureItem[] = [
 ];
 
 /**
- * Feature nav between the "+ 新任务" CTA and the task list. Phase 16
- * graduates 收藏 / 项目 / 专家技能 from "即将推出" to live routes —
- * those rows render as clickable nav links; the rest stay disabled
- * with the tooltip. Compact density (32px row).
+ * Feature nav between the "+ 新任务" CTA and the task list. Live
+ * routes render as clickable nav links; disabled rows keep a neutral
+ * unavailable label. Compact density (32px row).
  */
 function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
   const navigate = useNavigate();
@@ -974,7 +973,7 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
             return (
               <SidebarMenuItem key={label}>
                 <SidebarMenuButton
-                  tooltip={`${label} · 即将推出`}
+                  tooltip={`${label} · 未开放`}
                   disabled
                   aria-disabled
                   className="cursor-not-allowed opacity-60"
@@ -982,7 +981,7 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
                   <Icon aria-hidden />
                   <span>{label}</span>
                   <span className="ml-auto text-[10px] text-sidebar-foreground/50 group-data-[collapsible=icon]:hidden">
-                    即将推出
+                    未开放
                   </span>
                 </SidebarMenuButton>
               </SidebarMenuItem>

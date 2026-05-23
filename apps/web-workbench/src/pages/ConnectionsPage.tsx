@@ -9,11 +9,13 @@ import {
   Mail,
   MessageSquare,
   Plug,
+  Send,
   Table,
   Twitter,
 } from 'lucide-react';
 import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
+import { Button } from '@/components/ui/button';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
 
@@ -43,15 +45,9 @@ const ICONS: Record<string, LucideIcon> = {
 };
 
 /**
- * P2.6 — connector roadmap page. Demoted from a top-level nav entry
- * to a roadmap surface: cards are non-interactive, no toast theatre,
- * the title says what it is ("即将支持的连接器"). Once OAuth and the
- * actual MCP wiring land, this page graduates to interactive again
- * and the sidebar entry comes back. Until then this is the honest
- * "here is what's on the way" view.
- *
- * Search/filter chrome removed alongside the click target — there's
- * nothing to act on yet, so an idle filter is just chrome.
+ * P2.6 — connector planning page. Cards remain non-interactive until
+ * OAuth and MCP wiring land, but every provider now has a concrete
+ * "request access" action instead of a dead coming-soon badge.
  */
 export function ConnectionsPage(): JSX.Element {
   const toast = useToast();
@@ -84,18 +80,14 @@ export function ConnectionsPage(): JSX.Element {
     <PageContainer width="wide">
       <PageHeader
         title="连接器"
-        description="把你常用的工具接入 HOLA DAY，让 AI 直接操作"
+        description="申请接入常用工具，让 AI 在授权范围内完成操作"
       />
-      {/* BOSS feedback — every card was greyed-out with "即将上线"
-          and no timeline. A single banner up top sets expectations
-          so users see WHY everything is gated and roughly WHEN it
-          opens up. */}
       <div className="mb-5 flex items-start gap-2.5 rounded-md border border-primary/30 bg-primary/5 px-3.5 py-2.5 text-[13px] text-foreground">
         <Plug className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
         <div className="min-w-0">
-          <div className="font-medium">连接器功能正在开发中</div>
+          <div className="font-medium">连接器按需开通</div>
           <div className="mt-0.5 text-[12px] text-muted-foreground">
-            预计 6 月上线。下方为规划中的服务，先睹为快。
+            选择需要的服务，我们会优先处理高频请求并通知你开通进度。
           </div>
         </div>
       </div>
@@ -125,9 +117,12 @@ export function ConnectionsPage(): JSX.Element {
                 <div className="line-clamp-2 text-xs text-muted-foreground">
                   {p.description}
                 </div>
-                <span className="mt-auto rounded-md border border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                  即将上线
-                </span>
+                <Button asChild variant="outline" size="sm" className="mt-auto h-7 text-[11px]">
+                  <a href={`mailto:support@holaday.ai?subject=申请接入 ${encodeURIComponent(p.name)}`}>
+                    <Send className="h-3 w-3" />
+                    申请接入
+                  </a>
+                </Button>
               </div>
             );
           })}

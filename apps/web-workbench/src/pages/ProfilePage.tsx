@@ -1,4 +1,4 @@
-import { Loader2 } from 'lucide-react';
+import { Loader2, Mail } from 'lucide-react';
 import * as React from 'react';
 import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
 import { Button } from '@/components/ui/button';
@@ -8,10 +8,9 @@ import { trpc } from '@/lib/trpc';
  * Read-only user profile view. The previous build had editable nickname /
  * phone / avatar inputs and a "修改密码" form, but neither updateProfile
  * nor changePassword tRPC procedures exist yet — the save handlers just
- * showed a fake "saved locally" toast and dropped the input. Kept the
- * page so /settings/profile doesn't 404, but the editable affordances
- * are stripped to a single disabled save button + a contact note. Lights
- * back on once the backend mutations land.
+ * showed a fake "saved locally" toast and dropped the input. Keep the
+ * page read-only and route account changes through support until the
+ * backend mutations land.
  */
 export function ProfilePage(): JSX.Element {
   const [loading, setLoading] = React.useState(true);
@@ -87,9 +86,14 @@ export function ProfilePage(): JSX.Element {
           </Row>
           <div className="mt-4 flex items-center justify-end gap-3">
             <span className="text-[11px] text-muted-foreground">
-              个人资料修改即将支持
+              如需更新资料，请联系支持
             </span>
-            <Button disabled>保存修改</Button>
+            <Button asChild variant="outline" size="sm">
+              <a href="mailto:support@holaday.ai?subject=更新 HOLA DAY 个人资料">
+                <Mail className="h-3.5 w-3.5" />
+                联系支持
+              </a>
+            </Button>
           </div>
         </Section>
 
@@ -106,7 +110,7 @@ export function ProfilePage(): JSX.Element {
             </div>
           </Row>
           <Row label="双重验证" description="使用手机或邮箱验证码二次确认登录">
-            <span className="text-xs text-muted-foreground">即将推出</span>
+            <span className="text-xs text-muted-foreground">未开启</span>
           </Row>
         </Section>
       </div>

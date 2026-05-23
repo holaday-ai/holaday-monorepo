@@ -1,4 +1,4 @@
-import { CreditCard, Plus } from 'lucide-react';
+import { CreditCard, Mail } from 'lucide-react';
 import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { formatCny, getPlanPriceCents, type PaidPlanId } from '@holaday/shared-types';
@@ -38,7 +38,7 @@ export function BillingPage(): JSX.Element {
 
   return (
     <PageContainer width="list">
-      <PageHeader title="账单与订阅" description="支付方式和历史发票" />
+      <PageHeader title="账单与订阅" description="订阅状态、支付支持和发票记录" />
       <div className="space-y-6">
         <Section title="当前订阅">
           <Row label="套餐" description="查看完整对比">
@@ -65,14 +65,10 @@ export function BillingPage(): JSX.Element {
                 one place. The tooltip surfaces the email so the user
                 doesn't have to hunt.
               */}
-              <Button
-                variant="outline"
-                size="sm"
-                disabled
-                title={`取消订阅请联系客服：${SUPPORT_EMAIL}`}
-                className="cursor-not-allowed text-red-600 opacity-50"
-              >
-                取消订阅
+              <Button asChild variant="outline" size="sm" className="text-red-600">
+                <a href={`mailto:${SUPPORT_EMAIL}?subject=取消 HOLA DAY 订阅`}>
+                  联系客服取消
+                </a>
               </Button>
               <p className="text-[11px] text-muted-foreground">
                 取消订阅请联系客服：
@@ -95,23 +91,17 @@ export function BillingPage(): JSX.Element {
                   <CreditCard className="h-4 w-4 text-muted-foreground" />
                 </div>
                 <div>
-                  <div className="text-sm font-medium">暂未绑定支付方式</div>
-                  <div className="text-[11px] text-muted-foreground">支持信用卡、支付宝、微信支付</div>
+                  <div className="text-sm font-medium">当前未保存支付方式</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    在线订阅通过结账页完成；企业付款、发票和本地支付可联系支持处理
+                  </div>
                 </div>
               </div>
-              {/*
-                P2.5 — disabled until the saved-card flow lands. The
-                old toast-only path implied the action did something.
-              */}
-              <Button
-                variant="outline"
-                size="sm"
-                disabled
-                title="即将支持"
-                className="cursor-not-allowed opacity-50"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                添加
+              <Button asChild variant="outline" size="sm">
+                <a href={`mailto:${SUPPORT_EMAIL}?subject=HOLA DAY 支付支持`}>
+                  <Mail className="h-3.5 w-3.5" />
+                  联系支持
+                </a>
               </Button>
             </div>
           </div>
@@ -119,9 +109,9 @@ export function BillingPage(): JSX.Element {
 
         <Section title="账单记录" description="付款和发票历史">
           <div className="rounded-lg border border-border bg-background px-6 py-10 text-center">
-            <p className="text-sm text-muted-foreground">账单记录即将开放</p>
+            <p className="text-sm text-muted-foreground">暂无账单记录</p>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              我们正在打磨账单导出与发票下载，敬请期待。
+              已付款用户如需发票或付款凭证，可联系 {SUPPORT_EMAIL}。
             </p>
           </div>
         </Section>
