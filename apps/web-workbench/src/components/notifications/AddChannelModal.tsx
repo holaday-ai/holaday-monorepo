@@ -15,11 +15,15 @@ import { CheckCircle2, Loader2, X, XCircle } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import {
+  NOTIFICATION_PLATFORM_LABEL,
+  type NotificationPlatform,
+} from '@/lib/notification-channel-copy';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 
 export interface ChannelDraft {
-  platform: 'wecom' | 'feishu' | 'dingtalk' | 'custom';
+  platform: NotificationPlatform;
   webhookUrl: string;
   /** Only meaningful when platform='custom'; the server ignores it
    *  for preset platforms. */
@@ -43,10 +47,26 @@ const PLATFORM_CARDS: ReadonlyArray<{
   label: string;
   hint: string;
 }> = [
-  { value: 'wecom', label: '企业微信', hint: 'qyapi.weixin.qq.com' },
-  { value: 'feishu', label: '飞书', hint: 'open.feishu.cn / lark' },
-  { value: 'dingtalk', label: '钉钉', hint: 'oapi.dingtalk.com' },
-  { value: 'custom', label: '自定义', hint: '任意 HTTP webhook + 模板' },
+  {
+    value: 'wecom',
+    label: NOTIFICATION_PLATFORM_LABEL.wecom,
+    hint: 'qyapi.weixin.qq.com',
+  },
+  {
+    value: 'feishu',
+    label: NOTIFICATION_PLATFORM_LABEL.feishu,
+    hint: 'open.feishu.cn / lark',
+  },
+  {
+    value: 'dingtalk',
+    label: NOTIFICATION_PLATFORM_LABEL.dingtalk,
+    hint: 'oapi.dingtalk.com',
+  },
+  {
+    value: 'custom',
+    label: NOTIFICATION_PLATFORM_LABEL.custom,
+    hint: '任意 HTTP webhook + 模板',
+  },
 ];
 
 const DEFAULT_CUSTOM_TEMPLATE = `{
@@ -275,6 +295,7 @@ export function AddChannelModal({
               disabled={saving || testing}
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[#EA1F59]"
               maxLength={2000}
+              autoFocus
             />
           </div>
 

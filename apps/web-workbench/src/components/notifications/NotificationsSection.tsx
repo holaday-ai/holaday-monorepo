@@ -18,6 +18,12 @@ import * as React from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import {
+  maskWebhookUrl,
+  NOTIFICATION_PLATFORM_LABEL,
+  notificationChannelDeleteDescription,
+  type NotificationPlatform,
+} from '@/lib/notification-channel-copy';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 import { Row, Section } from '@/pages/PageShell';
@@ -25,19 +31,12 @@ import { AddChannelModal, type ChannelDraft } from './AddChannelModal';
 
 interface ChannelRow {
   channelId: string;
-  platform: 'wecom' | 'feishu' | 'dingtalk' | 'custom';
+  platform: NotificationPlatform;
   webhookUrl: string;
   customTemplate: unknown;
   enabled: boolean;
   createdAt: string | Date;
 }
-
-const PLATFORM_LABEL: Record<ChannelRow['platform'], string> = {
-  wecom: '企业微信',
-  feishu: '飞书',
-  dingtalk: '钉钉',
-  custom: '自定义',
-};
 
 export function NotificationsSection(): JSX.Element {
   const toast = useToast();
@@ -138,6 +137,11 @@ export function NotificationsSection(): JSX.Element {
     }
   };
 
+  const pendingDeleteChannel =
+    confirmDelete === null
+      ? null
+      : channels.find((row) => row.channelId === confirmDelete) ?? null;
+
   return (
     <>
       <Section title="通知设置">
@@ -189,7 +193,7 @@ export function NotificationsSection(): JSX.Element {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium">
-                        {PLATFORM_LABEL[row.platform]}
+                        {NOTIFICATION_PLATFORM_LABEL[row.platform]}
                       </span>
                       {!row.enabled && (
                         <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
@@ -199,9 +203,9 @@ export function NotificationsSection(): JSX.Element {
                     </div>
                     <div
                       className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground"
-                      title={row.webhookUrl}
+                      title={maskWebhookUrl(row.webhookUrl)}
                     >
-                      {maskUrl(row.webhookUrl)}
+                      {maskWebhookUrl(row.webhookUrl)}
                     </div>
                   </div>
                   <label
@@ -261,7 +265,11 @@ export function NotificationsSection(): JSX.Element {
       <ConfirmDialog
         open={confirmDelete !== null}
         title="删除通知渠道？"
-        description="删除后该渠道将不再收到任何通知。已发出的通知不受影响。"
+        description={
+          pendingDeleteChannel
+            ? notificationChannelDeleteDescription(pendingDeleteChannel)
+            : '删除后该渠道将不再收到任何通知。已发出的通知不受影响。'
+        }
         confirmLabel="删除"
         destructive
         onClose={() => setConfirmDelete(null)}
@@ -271,21 +279,4 @@ export function NotificationsSection(): JSX.Element {
       />
     </>
   );
-}
-
-/**
- * Mask a webhook URL for the settings list. Mirrors the server's
- * `maskWebhookUrl` shape so the user sees the same masked form
- * whether they're looking at the saved config or a recent test
- * result.
- */
-function maskUrl(url: string): string {
-  try {
-    const u = new URL(url);
-    const tail = url.length > 6 ? url.slice(-6) : url;
-    return `${u.host}/...${tail}`;
-  } catch {
-    if (url.length <= 12) return url;
-    return `${url.slice(0, 6)}...${url.slice(-6)}`;
-  }
 }
