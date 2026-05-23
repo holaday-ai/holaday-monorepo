@@ -5,38 +5,26 @@ import { ApiKeysSection } from '@/components/ApiKeysSection';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { NotificationsSection } from '@/components/notifications/NotificationsSection';
 import { Button } from '@/components/ui/button';
-import { useToast } from '@/components/ui/toast';
+import { supportMailtoHref } from '@/lib/support-links';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
 import { type ThemeMode, useTheme } from '@/stores/theme-store';
 
 /**
- * Settings page — only the rows that actually persist server-side
- * or affect runtime behaviour. P2.4 audit removed three sections
- * that were UI theatre:
+ * Settings page — only the rows that actually persist server-side,
+ * route to a real support action, or affect runtime behaviour. P2.4
+ * audit removed two sections that were UI theatre:
  *   - 语言偏好: no i18n bundle wired, the toggle was a localStorage
  *     write nothing else read.
- *   - 通知: no notification pipeline (browser, push, email) — the
- *     toggles never reached anything.
  *   - 默认交互模式: not connected to the live `browserInteractive`
  *     store; R19 already set the right default (off), so the entry
  *     was duplicate plumbing.
- * If/when those land we re-introduce the sections; until then the
- * page is "AI 视角 + AI 记忆 + 账号" — three things that work.
+ * If/when those land we re-introduce the sections.
  */
 export function SettingsPage(): JSX.Element {
-  const toast = useToast();
   const { mode, setMode } = useTheme();
-
-  function confirmDelete(): void {
-    const answer = window.prompt(
-      '确认删除账号？此操作不可恢复。输入 DELETE 继续：',
-    );
-    if (answer === 'DELETE') {
-      toast.show('账号删除请求已记录，客服会在 24 小时内联系你', 'error');
-    }
-  }
+  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
 
   // Section order (Sweep P2 fix): API Key region was buried below
   // MemorySection which can hold dozens of rows on power-user
@@ -81,14 +69,37 @@ export function SettingsPage(): JSX.Element {
         <Section title="账号">
           <Row
             label="删除账号"
-            description="删除后所有任务记录、浏览器数据、订阅都会清除"
+            description="删除会清除任务记录、浏览器数据和订阅信息；需要先通过支持渠道确认身份"
           >
-            <Button variant="outline" size="sm" onClick={confirmDelete} className="text-red-600 hover:text-red-700">
-              删除账号
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDeleteDialogOpen(true)}
+              className="text-red-600 hover:text-red-700"
+            >
+              申请删除
             </Button>
           </Row>
         </Section>
       </div>
+
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title="申请删除账号？"
+        description={
+          '账号删除不可撤销。我们会通过邮件确认身份、处理订阅和数据删除，再完成账号关闭。'
+        }
+        confirmLabel="发送删除申请"
+        destructive
+        onClose={() => setDeleteDialogOpen(false)}
+        onConfirm={() => {
+          window.location.href = supportMailtoHref({
+            subject: '删除 HOLA DAY 账号',
+            body: '请协助删除我的 HOLA DAY 账号。\n\n注册邮箱：\n删除原因（选填）：',
+          });
+          setDeleteDialogOpen(false);
+        }}
+      />
     </PageContainer>
   );
 }
@@ -287,4 +298,3 @@ function MemorySection(): JSX.Element {
     </Section>
   );
 }
-

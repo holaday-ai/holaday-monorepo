@@ -68,7 +68,7 @@ export function humaniseTaskError(raw: string | null | undefined): string {
   // Last resort — any string that's >80% ASCII is probably internal
   // English; show a generic wrapper instead of leaking it.
   if (looksLikeEnglishTech(trimmed)) {
-    return '任务执行出错，请重试。如果反复出现请联系 sales@holaday.ai。';
+    return '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。';
   }
   return trimmed;
 }

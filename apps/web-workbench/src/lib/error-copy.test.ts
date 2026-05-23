@@ -4,7 +4,7 @@ import { humaniseTaskError, taskActionError } from './error-copy';
 describe('error-copy', () => {
   it('hides raw English technical failures behind friendly copy', () => {
     expect(humaniseTaskError('connect ECONNREFUSED 127.0.0.1:9222')).toBe(
-      '任务执行出错，请重试。如果反复出现请联系 sales@holaday.ai。',
+      '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
     );
   });
 

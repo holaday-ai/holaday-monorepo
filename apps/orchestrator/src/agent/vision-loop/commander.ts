@@ -786,7 +786,7 @@ function initialUserText(ctx: VisionLoopContext, obs: VisionObservation): string
   }
   if (ctx.timeoutHint) {
     lines.push('');
-    lines.push(`⚠ ${ctx.timeoutHint}`);
+    lines.push(`提示：${ctx.timeoutHint}`);
   }
   lines.push('');
   lines.push(
@@ -946,7 +946,7 @@ function initialA11yUserText(
   }
   if (ctx.timeoutHint) {
     lines.push('');
-    lines.push(`⚠ ${ctx.timeoutHint}`);
+    lines.push(`提示：${ctx.timeoutHint}`);
   }
   lines.push('');
   lines.push('Accessibility snapshot (interactive elements carry [ref=eN] markers):');

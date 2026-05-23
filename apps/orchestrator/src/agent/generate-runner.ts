@@ -328,7 +328,7 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
   const MAX_CONTINUATIONS = 2;
   const CONTINUE_PROMPT = '请继续上文，不要重复已有内容。';
   const TRUNCATION_NOTICE =
-    '\n\n---\n⚠️ 内容因长度限制被截断，如需完整版请追问。';
+    '\n\n---\n【提示】内容因长度限制被截断，如需完整版请追问。';
   const baseMessages = requestArgs.messages;
   let accumulatedSummary = '';
   let truncatedAtCap = false;
@@ -647,7 +647,7 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
       // so a partially-streamed report still ships with chips.
       const partialSummary =
         accumulatedSummary +
-        '\n\n---\n⚠️ 内容因网络/超时被截断，如需完整版请追问。';
+        '\n\n---\n【提示】内容因网络/超时被截断，如需完整版请追问。';
       return {
         status: 'completed',
         summary: workflow ? partialSummary + buildFollowUpFooter(workflow) : partialSummary,

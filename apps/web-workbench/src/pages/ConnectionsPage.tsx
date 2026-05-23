@@ -16,6 +16,7 @@ import {
 import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
+import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
 
@@ -118,7 +119,12 @@ export function ConnectionsPage(): JSX.Element {
                   {p.description}
                 </div>
                 <Button asChild variant="outline" size="sm" className="mt-auto h-7 text-[11px]">
-                  <a href={`mailto:support@holaday.ai?subject=申请接入 ${encodeURIComponent(p.name)}`}>
+                  <a
+                    href={supportMailtoHref({
+                      subject: `申请接入 ${p.name}`,
+                      body: `请协助开通 ${p.name} 连接器。\n\n注册邮箱：\n使用场景：`,
+                    })}
+                  >
                     <Send className="h-3 w-3" />
                     申请接入
                   </a>

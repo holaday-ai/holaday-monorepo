@@ -8,7 +8,7 @@
  *   - Timeout → fallback original
  *   - Happy path → formatted text returned, no fallback
  *   - Post-check: new URL → fallback / new number → fallback /
- *     removed ⚠️ → fallback / removed source badge → fallback /
+ *     removed warning marker → fallback / removed source badge → fallback /
  *     removed follow-up marker → fallback / clean rewrite → pass
  */
 
@@ -221,8 +221,8 @@ describe('format — runtime', () => {
 
 describe('postCheck — deterministic guards', () => {
   it('clean rewrite (same URLs + numbers + markers) → ok', () => {
-    const original = '⚠️ 数据异常\n详情见 https://example.com 总额 1000 元。';
-    const formatted = '⚠️ 数据异常\n详情：https://example.com，金额 1000 元。';
+    const original = '【预警】数据异常\n详情见 https://example.com 总额 1000 元。';
+    const formatted = '【预警】数据异常\n详情：https://example.com，金额 1000 元。';
     expect(postCheck(original, formatted)).toEqual({ ok: true });
   });
 
@@ -242,16 +242,16 @@ describe('postCheck — deterministic guards', () => {
     if (!r.ok) expect(r.reason).toBe('new_number_introduced');
   });
 
-  it('removed ⚠️ warning marker → fallback', () => {
-    const original = '⚠️ 数据有异常\n报告内容...';
-    const formatted = '数据有异常\n报告内容...'; // ⚠️ stripped
+  it('removed warning marker → fallback', () => {
+    const original = '【预警】数据有异常\n报告内容...';
+    const formatted = '数据有异常\n报告内容...'; // marker stripped
     const r = postCheck(original, formatted);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe('warning_marker_removed');
   });
 
-  it('removed 🟢 source badge → fallback', () => {
-    const original = '🟢 用户提供\nGMV 50000 元';
+  it('removed source badge → fallback', () => {
+    const original = '【用户提供】GMV 50000 元';
     const formatted = '用户提供\nGMV 50000 元';
     const r = postCheck(original, formatted);
     expect(r.ok).toBe(false);
@@ -281,10 +281,10 @@ describe('postCheck — deterministic guards', () => {
   });
 
   it('marker count can change as long as kind survives (formatter merged paragraphs)', () => {
-    // Two ⚠️ paragraphs in original, one in formatted — still ok
+    // Two warning paragraphs in original, one in formatted — still ok
     // because the marker KIND is preserved.
-    const original = '⚠️ 异常一\n详情。\n\n⚠️ 异常二\n详情。';
-    const formatted = '⚠️ 异常综述：异常一 + 异常二';
+    const original = '【预警】异常一\n详情。\n\n【预警】异常二\n详情。';
+    const formatted = '【预警】异常综述：异常一 + 异常二';
     expect(postCheck(original, formatted)).toEqual({ ok: true });
   });
 

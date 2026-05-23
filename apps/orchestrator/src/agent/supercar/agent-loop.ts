@@ -245,7 +245,7 @@ export function buildStuckNudge(input: StuckNudgeInput): StuckNudgeResult | null
 
 function buildWarnNudgeText(stuckCount: number): string {
   return (
-    `⚠️ 提示：页面截图已连续 ${stuckCount} 次未变化，当前操作可能未生效。\n\n` +
+    `提示：页面截图已连续 ${stuckCount} 次未变化，当前操作可能未生效。\n\n` +
     `先尝试以下浏览器内的方案，不要直接放弃 computer 工具：\n` +
     `1. **等一下**：wait 3-5 秒后再点击，某些站点首次加载慢\n` +
     `2. **让用户帮忙**：如果看起来像验证码/滑块，输出"检测到验证码，请在右侧 panel 手动完成"并停住\n` +
@@ -258,7 +258,7 @@ function buildWarnNudgeText(stuckCount: number): string {
 
 function buildExitNudgeText(stuckCount: number, hasApifyTools: boolean): string {
   const head =
-    `⚠️ 系统检测：页面已连续 ${stuckCount} 次无响应（hash 未变），浏览器路径暂时走不通。\n\n`;
+    `系统检测：页面已连续 ${stuckCount} 次无响应（hash 未变），浏览器路径暂时走不通。\n\n`;
   if (hasApifyTools) {
     // Apify-first rescue. The agent already has scrape_website /
     // search_ecommerce in its tool list — most failures here are
@@ -2962,7 +2962,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
             });
           }
           antiBotHintText =
-            `🤖 检测到 **${describeSignal(signal)}**（匹配关键词："${signal.rawMatch.slice(0, 40)}"）。\n\n` +
+            `检测到 **${describeSignal(signal)}**（匹配关键词："${signal.rawMatch.slice(0, 40)}"）。\n\n` +
             `这不是普通的页面未响应——是网站的反爬 / 人机验证机制。处理方式：\n` +
             `- 如果是**滑动验证 / 拖动滑块**：用户可以在右侧 panel 交互模式下手动完成，然后告诉你继续\n` +
             `- 如果是 **Cloudflare 质询页**：等 5 秒让它自动放行，或切 m.xxx.com 移动版绕开\n` +
@@ -2977,7 +2977,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           const swapped = await swapToHeadedIfAvailable(`antibot:${signal.type}`);
           if (swapped) {
             antiBotHintText +=
-              `\n\n🔄 系统已自动切换到 **headed 浏览器**（Lane 2，真实渲染指纹）。` +
+              `\n\n系统已自动切换到 **headed 浏览器**（Lane 2，真实渲染指纹）。` +
               `下一个 computer action 会在新浏览器里执行，之前的页面状态已重放到当前 URL。`;
           }
         } else if (activeAntiBotSignal && !signal) {

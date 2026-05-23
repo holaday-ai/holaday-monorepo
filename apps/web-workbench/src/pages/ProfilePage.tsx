@@ -2,6 +2,7 @@ import { Loader2, Mail } from 'lucide-react';
 import * as React from 'react';
 import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
 import { Button } from '@/components/ui/button';
+import { SUPPORT_EMAIL, supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 
 /**
@@ -89,7 +90,12 @@ export function ProfilePage(): JSX.Element {
               如需更新资料，请联系支持
             </span>
             <Button asChild variant="outline" size="sm">
-              <a href="mailto:support@holaday.ai?subject=更新 HOLA DAY 个人资料">
+              <a
+                href={supportMailtoHref({
+                  subject: '更新 HOLA DAY 个人资料',
+                  body: '请协助更新我的 HOLA DAY 个人资料。\n\n注册邮箱：\n需要更新的内容：',
+                })}
+              >
                 <Mail className="h-3.5 w-3.5" />
                 联系支持
               </a>
@@ -102,10 +108,10 @@ export function ProfilePage(): JSX.Element {
             <div className="rounded-md border border-dashed border-border bg-muted/40 px-3 py-3 text-xs text-muted-foreground md:w-96">
               密码修改功能开发中，请联系{' '}
               <a
-                href="mailto:support@holaday.ai"
+                href={supportMailtoHref({ subject: 'HOLA DAY 账号安全支持' })}
                 className="font-medium text-foreground underline-offset-2 hover:underline"
               >
-                support@holaday.ai
+                {SUPPORT_EMAIL}
               </a>
             </div>
           </Row>

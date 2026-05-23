@@ -5,14 +5,14 @@
  * a polished `formatted` summary. The model gets:
  *   - factual constraints (the original text + any evidence URLs;
  *     red-line "do not invent facts / URLs / numbers")
- *   - HOLA DAY style guide (markdown structure, ⚠️ for warnings,
- *     🟢🔵🟡🔴 source-tag preservation, follow-up actions marker
+ *   - HOLA DAY style guide (markdown structure, textual warning and
+ *     source-tag preservation, follow-up actions marker
  *     preservation, no Claude self-references)
  *
  * Then a DETERMINISTIC post-check verifies:
  *   - no new URLs introduced
  *   - no new numbers introduced
- *   - all original markers preserved (⚠️, 🟢🔵🟡🔴, follow-up marker)
+ *   - all original markers preserved (warning, source, follow-up marker)
  *
  * If any check fails the formatted text is dropped and we return
  * `{ formatted: original, fallbackReason }`. Caller persists both
@@ -294,7 +294,7 @@ async function callOpenAI(
     '',
     'FACTUAL CONSTRAINTS — HARD RED LINES:',
     '1. NEVER introduce a fact, URL, number, name, or claim that is not in the ORIGINAL text below.',
-    '2. NEVER remove a ⚠️ warning paragraph, a 🟢/🔵/🟡/🔴 source-tag prefix, or the <!-- HOLA_FOLLOW_UP_ACTIONS_START --> / _END marker block.',
+    '2. NEVER remove a warning paragraph, a source-tag prefix, or the <!-- HOLA_FOLLOW_UP_ACTIONS_START --> / _END marker block.',
     '3. NEVER refer to yourself or to OpenAI, Anthropic, GPT, Claude, or any underlying model.',
     '4. If you cannot polish without breaking these rules, return the ORIGINAL text unchanged.',
     '',
@@ -341,7 +341,7 @@ async function callOpenAI(
  *   1. New URL — the formatter invented a link
  *   2. New number — the formatter invented a stat / metric
  *   3. Removed marker — the formatter dropped a structural cue the
- *      SPA depends on (⚠️ box, source badge, follow-up chips)
+ *      SPA depends on (warning block, source badge, follow-up chips)
  *
  * Returns { ok: true } when all three checks pass; otherwise
  * { ok: false, reason }.
@@ -373,7 +373,7 @@ export function postCheck(
   }
   // 3. Marker preservation. If the original had a marker, the
   // formatted must too. We don't require the count to match exactly
-  // (the formatter is allowed to merge two adjacent ⚠️ paragraphs
+  // (the formatter is allowed to merge two adjacent warning paragraphs
   // into one); we just require each KIND of marker to survive.
   if (countWarningMarkers(original) > 0 && countWarningMarkers(formatted) === 0) {
     return { ok: false, reason: 'warning_marker_removed' };
@@ -436,15 +436,15 @@ function normaliseNumber(raw: string): string {
 }
 
 function countWarningMarkers(text: string): number {
-  // ⚠️ with optional variation selector U+FE0F. Match at paragraph
-  // start (after newline or at string start) — same prefix-match the
-  // SPA's WarningBlock renderer uses.
-  const re = /(^|\n)[ \t]*⚠(?:️)?/gu;
+  // Textual warning labels at paragraph start. Emoji markers were
+  // removed from the brand voice; keep a deterministic structural
+  // cue the formatter must preserve.
+  const re = /(^|\n)[ \t]*(?:【(?:提示|预警|警告|数据矛盾预警)】|(?:提示|预警|警告)：)/gu;
   return (text.match(re) ?? []).length;
 }
 function countSourceBadges(text: string): number {
-  // 🟢🔵🟡🔴 at paragraph start.
-  const re = /(^|\n)[ \t]*[🟢🔵🟡🔴]/gu;
+  // Textual source labels at paragraph start.
+  const re = /(^|\n)[ \t]*【(?:用户提供|系统检索|模型推断|需要确认|来源)】/gu;
   return (text.match(re) ?? []).length;
 }
 function hasFollowUpMarker(text: string): boolean {

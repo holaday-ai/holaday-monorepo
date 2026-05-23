@@ -252,7 +252,7 @@ describe('scheduledTasksRouter.update — reminder claim reset', () => {
       { externalId: 'sch_move', status: 'active', userId: 42 },
     ]);
     const caller = scheduledTasksRouter.createCaller(ctx);
-    const next = '2026-05-23T09:00:00.000Z';
+    const next = new Date(Date.now() + 2 * 24 * 60 * 60_000).toISOString();
     await expect(
       caller.update({ scheduledTaskId: 'sch_move', scheduledAt: next }),
     ).resolves.toMatchObject({

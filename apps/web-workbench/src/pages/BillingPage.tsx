@@ -3,10 +3,9 @@ import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { formatCny, getPlanPriceCents, type PaidPlanId } from '@holaday/shared-types';
 import { Button } from '@/components/ui/button';
+import { SUPPORT_EMAIL, supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
-
-const SUPPORT_EMAIL = 'support@holaday.ai';
 
 export function BillingPage(): JSX.Element {
   const [plan, setPlan] = React.useState<string>('free');
@@ -66,7 +65,12 @@ export function BillingPage(): JSX.Element {
                 doesn't have to hunt.
               */}
               <Button asChild variant="outline" size="sm" className="text-red-600">
-                <a href={`mailto:${SUPPORT_EMAIL}?subject=取消 HOLA DAY 订阅`}>
+                <a
+                  href={supportMailtoHref({
+                    subject: '取消 HOLA DAY 订阅',
+                    body: '请协助取消我的 HOLA DAY 订阅。\n\n注册邮箱：\n当前套餐：',
+                  })}
+                >
                   联系客服取消
                 </a>
               </Button>
@@ -98,7 +102,7 @@ export function BillingPage(): JSX.Element {
                 </div>
               </div>
               <Button asChild variant="outline" size="sm">
-                <a href={`mailto:${SUPPORT_EMAIL}?subject=HOLA DAY 支付支持`}>
+                <a href={supportMailtoHref({ subject: 'HOLA DAY 支付支持' })}>
                   <Mail className="h-3.5 w-3.5" />
                   联系支持
                 </a>

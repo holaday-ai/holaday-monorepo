@@ -17,6 +17,7 @@ import { CnPaymentDialog, type CnProvider, type CnPurchase } from '@/components/
 import { PayPalButton } from '@/components/PayPalButton';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
@@ -122,7 +123,7 @@ export function PlanPage(): JSX.Element {
             : 'Payment confirmation timed out, refresh to check status';
         }
         if (/PRECONDITION/i.test(rawMsg) || /not configured/i.test(rawMsg)) {
-          return zh ? '支付未开启，联系 sales@holaday.ai' : 'Payment not enabled, contact sales@holaday.ai';
+          return zh ? '支付未开启，联系 support@holaday.ai' : 'Payment not enabled, contact support@holaday.ai';
         }
         return zh ? `支付未完成：${rawMsg}` : `Payment incomplete: ${rawMsg}`;
       })();
@@ -314,16 +315,17 @@ export function PlanPage(): JSX.Element {
                   {zh ? '当前使用中' : 'Current'}
                 </Button>
               ) : !isPaid ? (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() =>
-                    toast.show(
-                      zh ? '降级到体验版请发邮件给 sales@holaday.ai' : 'Email sales@holaday.ai to downgrade',
-                    )
-                  }
-                >
-                  {zh ? '降级到体验版' : 'Downgrade'}
+                <Button asChild variant="outline" className="w-full">
+                  <a
+                    href={supportMailtoHref({
+                      subject: zh ? '降级到 HOLA DAY 体验版' : 'Downgrade HOLA DAY plan',
+                      body: zh
+                        ? '请协助将我的 HOLA DAY 套餐降级到体验版。\n\n注册邮箱：'
+                        : 'Please help downgrade my HOLA DAY plan to Free.\n\nAccount email:',
+                    })}
+                  >
+                    {zh ? '降级到体验版' : 'Downgrade'}
+                  </a>
                 </Button>
               ) : isOpen && (zh && cnOpts?.enabled) ? (
                 // zh locale + CN gateway live → show 微信/支付宝/PayPal trio
@@ -384,8 +386,8 @@ export function PlanPage(): JSX.Element {
                     if (!anyEnabled) {
                       toast.show(
                         zh
-                          ? '支付暂未开放，联系 sales@holaday.ai'
-                          : 'Payment not yet enabled, contact sales@holaday.ai',
+                          ? '支付暂未开放，联系 support@holaday.ai'
+                          : 'Payment not yet enabled, contact support@holaday.ai',
                       );
                       return;
                     }
