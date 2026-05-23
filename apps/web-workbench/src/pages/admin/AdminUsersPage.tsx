@@ -103,7 +103,7 @@ export function AdminUsersPage(): JSX.Element {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="搜索邮箱 / 名字…"
-            className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-[13px] outline-none transition-colors focus:border-[#E50B6B]"
+            className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-[13px] outline-none transition-colors focus:border-[#EA1F59]"
           />
         </div>
         <span className="text-[12px] text-muted-foreground">
@@ -177,7 +177,7 @@ export function AdminUsersPage(): JSX.Element {
                             {u.displayName ?? '—'}
                           </div>
                           {u.role === 'admin' && (
-                            <span className="mt-0.5 inline-block rounded-full bg-[rgba(229,11,107,0.12)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[#E50B6B]">
+                            <span className="mt-0.5 inline-block rounded-full bg-[rgba(234,31,89,0.12)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[#EA1F59]">
                               admin
                             </span>
                           )}
@@ -200,7 +200,7 @@ export function AdminUsersPage(): JSX.Element {
                     <td className="px-5 py-3">
                       <Link
                         to={`/admin/users/${u.userId}`}
-                        className="text-[#E50B6B] hover:underline"
+                        className="text-[#EA1F59] hover:underline"
                       >
                         查看详情
                       </Link>
@@ -274,7 +274,7 @@ function SortPill({
       className={cn(
         'inline-flex h-7 items-center gap-1 rounded-full border px-3 text-[12px] transition-colors',
         active
-          ? 'border-[#E50B6B] bg-[rgba(229,11,107,0.10)] text-[#E50B6B]'
+          ? 'border-[#EA1F59] bg-[rgba(234,31,89,0.10)] text-[#EA1F59]'
           : 'border-border bg-transparent text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground',
       )}
     >
@@ -307,7 +307,7 @@ function Avatar({
   }
   const letter = (fallback || '?').charAt(0).toUpperCase();
   return (
-    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[rgba(229,11,107,0.12)] text-[11px] font-semibold text-[#E50B6B]">
+    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[rgba(234,31,89,0.12)] text-[11px] font-semibold text-[#EA1F59]">
       {letter}
     </div>
   );

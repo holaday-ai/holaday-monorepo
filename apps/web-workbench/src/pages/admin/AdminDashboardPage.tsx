@@ -234,7 +234,7 @@ export function AdminDashboardPage(): JSX.Element {
                       <td className="py-2 pr-3">
                         <Link
                           to={`/admin/users/${row.user.userId}`}
-                          className="text-foreground hover:text-[#E50B6B] hover:underline"
+                          className="text-foreground hover:text-[#EA1F59] hover:underline"
                         >
                           {truncate(userLabel, 20)}
                         </Link>
@@ -323,7 +323,7 @@ function MetricCard({
           className={cn(
             'mt-1 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium',
             positive
-              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+              ? 'bg-cyan-50 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300'
               : 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-300',
           )}
         >

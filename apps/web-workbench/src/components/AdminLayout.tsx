@@ -180,7 +180,7 @@ function AdminNavItem({
   const cls = cn(
     'flex items-center gap-2 rounded-md px-3 py-2 text-[13px] font-medium transition-colors',
     active
-      ? 'bg-[rgba(229,11,107,0.10)] text-[#E50B6B]'
+      ? 'bg-[rgba(234,31,89,0.10)] text-[#EA1F59]'
       : 'text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground',
     disabled && 'cursor-not-allowed opacity-50 hover:bg-transparent hover:text-muted-foreground',
   );

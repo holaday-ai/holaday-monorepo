@@ -222,12 +222,12 @@ export function QuickCreatePopover({
               className={cn(
                 'rounded-full px-3 py-1 text-xs transition-colors',
                 repeatType === p.value
-                  ? 'bg-[#E50B6B]/12 text-[#E50B6B]'
+                  ? 'bg-[#EA1F59]/12 text-[#EA1F59]'
                   : 'text-muted-foreground hover:bg-foreground/[0.04]',
               )}
               style={
                 repeatType === p.value
-                  ? { backgroundColor: 'rgba(229,11,107,0.12)', color: '#E50B6B' }
+                  ? { backgroundColor: 'rgba(234,31,89,0.12)', color: '#EA1F59' }
                   : undefined
               }
             >
@@ -248,12 +248,12 @@ export function QuickCreatePopover({
                 className={cn(
                   'rounded-full px-3 py-1 text-xs transition-colors',
                   reminderMinutes === p.value
-                    ? 'bg-[#E50B6B]/12 text-[#E50B6B]'
+                    ? 'bg-[#EA1F59]/12 text-[#EA1F59]'
                     : 'text-muted-foreground hover:bg-foreground/[0.04]',
                 )}
                 style={
                   reminderMinutes === p.value
-                    ? { backgroundColor: 'rgba(229,11,107,0.12)', color: '#E50B6B' }
+                    ? { backgroundColor: 'rgba(234,31,89,0.12)', color: '#EA1F59' }
                     : undefined
                 }
               >
@@ -302,8 +302,8 @@ export function QuickCreatePopover({
             type="submit"
             disabled={!intent.trim() || submitting}
             style={{
-              backgroundColor: '#E50B6B',
-              borderColor: '#E50B6B',
+              backgroundColor: '#EA1F59',
+              borderColor: '#EA1F59',
               borderRadius: 8,
             }}
             className="text-white hover:opacity-90"

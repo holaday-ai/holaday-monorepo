@@ -124,7 +124,7 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
           </span>
           <ArrowUpRight className="h-3 w-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
         </div>
-        {/* Progress bar — neutral fill (no green); switches to amber/red as remaining drops. */}
+        {/* Progress bar — neutral fill; switches to amber/red as remaining drops. */}
         <div className="h-1 overflow-hidden rounded-full bg-foreground/10">
           <div
             className={cn(

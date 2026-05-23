@@ -31,11 +31,11 @@ type DomainDetail = Awaited<ReturnType<typeof trpc.admin.learning.domainDetail.q
 
 const CAT_COLORS: Record<string, string> = {
   dns_error: '#EF4444',
-  timeout: '#F59E0B',
+  timeout: '#FFC910',
   auth_required: '#3B82F6',
   captcha: '#A855F7',
   not_found: '#6366F1',
-  page_structure: '#E50B6B',
+  page_structure: '#EA1F59',
   quality: '#D97706',
   unknown: '#9CA3AF',
 };
@@ -95,7 +95,7 @@ export function AdminLearningDomainPage(): JSX.Element {
 
       {/* Identity */}
       <header className="mt-4 flex items-start gap-4">
-        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-[rgba(229,11,107,0.10)] text-[#E50B6B]">
+        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-[rgba(234,31,89,0.10)] text-[#EA1F59]">
           {/* Try the favicon service; fall back to a globe icon. */}
           <FaviconOrIcon domain={data.domain} />
         </div>

@@ -19,7 +19,7 @@ interface Props {
 /**
  * One step card in the task stream. The left badge swaps on status:
  *   - running: blue-pulsed badge (no icon yet)
- *   - done:    green badge with a check
+ *   - done:    cyan badge with a check
  *   - failed:  red badge with an x
  *   - cancelled: muted badge with a slash
  *

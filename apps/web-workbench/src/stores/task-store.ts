@@ -1295,7 +1295,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       // Layer 3: forward the anti-bot tag into the UI step. When the
       // orchestrator flagged this tick as captcha / verify / block /
       // cloudflare, StepCard renders an orange warning badge instead
-      // of plain green/red.
+      // of plain success/failure colors.
       const antiBotTag = msg.antiBot
         ? {
             type: msg.antiBot.type,

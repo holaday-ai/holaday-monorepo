@@ -17,11 +17,11 @@
     --card-foreground: 240 10% 3.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 240 10% 3.9%;
-    /* Phase 20b — brand pink (#E50B6B) replaces the neutral default
+    /* Phase 20b — brand pink (#EA1F59) replaces the neutral default
      * primary so all `bg-primary` / `text-primary` / `ring-primary`
      * surfaces (buttons, focus rings, selected sidebar items, pricing
      * "推荐" badge, etc.) pick up the brand color automatically. */
-    --primary: 338 93% 48%;
+    --primary: 343 83% 52%;
     --primary-foreground: 0 0% 100%;
     --secondary: 240 4.8% 95.9%;
     --secondary-foreground: 240 5.9% 10%;
@@ -35,7 +35,7 @@
     --destructive-foreground: 0 0% 98%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
-    --ring: 338 93% 48%;
+    --ring: 343 83% 52%;
     --radius: 0.625rem;
     /* shadcn sidebar tokens (optimization #4). Sidebar reads as a
      * subtly differentiated surface — sidebar background sits at
@@ -45,12 +45,12 @@
      * highlights match the rest of the UI. */
     --sidebar-background: 0 0% 100%;
     --sidebar-foreground: 240 10% 3.9%;
-    --sidebar-primary: 338 93% 48%;
+    --sidebar-primary: 343 83% 52%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 240 4.8% 95.9%;
     --sidebar-accent-foreground: 240 5.9% 10%;
     --sidebar-border: 240 5.9% 90%;
-    --sidebar-ring: 338 93% 48%;
+    --sidebar-ring: 343 83% 52%;
   }
 
   .dark {
@@ -68,7 +68,7 @@
     --popover-foreground: 0 0% 98%;
     /* Phase 20b — same brand pink in dark mode. White foreground
      * stays legible on the saturated pink in both themes. */
-    --primary: 338 93% 48%;
+    --primary: 343 83% 52%;
     --primary-foreground: 0 0% 100%;
     --secondary: 0 0% 14%;
     --secondary-foreground: 0 0% 98%;
@@ -80,17 +80,17 @@
     --destructive-foreground: 0 0% 98%;
     --border: 0 0% 18%;
     --input: 0 0% 14%;
-    --ring: 338 93% 48%;
+    --ring: 343 83% 52%;
     /* Dark mode sidebar tokens — sidebar bg slightly darker than
      * card so the rail reads as a distinct elevation layer. */
     --sidebar-background: 0 0% 5%;
     --sidebar-foreground: 0 0% 98%;
-    --sidebar-primary: 338 93% 48%;
+    --sidebar-primary: 343 83% 52%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 0 0% 14%;
     --sidebar-accent-foreground: 0 0% 98%;
     --sidebar-border: 0 0% 18%;
-    --sidebar-ring: 338 93% 48%;
+    --sidebar-ring: 343 83% 52%;
   }
 }
 

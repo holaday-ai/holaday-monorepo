@@ -35,8 +35,8 @@ describe('pickStatusColor', () => {
       new Date('2026-05-16T13:00:00Z'),
       now,
     );
-    expect(c.accent).toBe('#F59E0B');
-    expect(c.background).toContain('245, 158, 11');
+    expect(c.accent).toBe('#FFC910');
+    expect(c.background).toContain('255, 201, 16');
     expect(c.opacity).toBe(1);
   });
 
@@ -50,23 +50,23 @@ describe('pickStatusColor', () => {
     expect(c.opacity).toBe(0.8);
   });
 
-  it('completed in the future → green full opacity', () => {
+  it('completed in the future → cyan full opacity', () => {
     const c = pickStatusColor(
       { status: 'completed', lastRunStatus: 'success' },
       new Date('2026-05-16T13:00:00Z'),
       now,
     );
-    expect(c.accent).toBe('#10B981');
+    expect(c.accent).toBe('#42C0EF');
     expect(c.opacity).toBe(1);
   });
 
-  it('completed in the past → green at 60% opacity (recedes visually)', () => {
+  it('completed in the past → cyan at 60% opacity (recedes visually)', () => {
     const c = pickStatusColor(
       { status: 'completed', lastRunStatus: 'success' },
       new Date('2026-05-16T08:00:00Z'),
       now,
     );
-    expect(c.accent).toBe('#10B981');
+    expect(c.accent).toBe('#42C0EF');
     expect(c.opacity).toBe(0.6);
   });
 
@@ -95,8 +95,8 @@ describe('pickStatusColor', () => {
       new Date('2026-05-16T13:00:00Z'),
       now,
     );
-    expect(c.accent).toBe('#E50B6B');
-    expect(c.background).toContain('229, 11, 107');
+    expect(c.accent).toBe('#EA1F59');
+    expect(c.background).toContain('234, 31, 89');
     expect(c.opacity).toBe(1);
   });
 
@@ -152,9 +152,9 @@ describe('rowToEventInput', () => {
       { now },
     );
     const ext = events[0]?.extendedProps as Record<string, unknown>;
-    expect(ext.accentColor).toBe('#E50B6B');
-    expect(ext.backgroundTint).toContain('229, 11, 107');
-    expect(ext.backgroundTintHover).toContain('229, 11, 107');
+    expect(ext.accentColor).toBe('#EA1F59');
+    expect(ext.backgroundTint).toContain('234, 31, 89');
+    expect(ext.backgroundTintHover).toContain('234, 31, 89');
     expect(ext.description).toBe('产品同事每周看的报告');
     expect(ext.reminderMinutes).toBe(15);
     expect(ext.scheduledTaskInternalId).toBe(101);

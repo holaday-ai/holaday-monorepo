@@ -5,7 +5,7 @@
  * default styles). The container is provided by ScheduledCalendarPage's
  * outer wrapper.
  *
- * Brand magenta #E50B6B drives: today-circle, primary CTA, segment-
+ * Brand magenta #EA1F59 drives: today-circle, primary CTA, segment-
  * control highlight, now-indicator line, event-block accents.
  * Greys come from a 4-step ramp (#333 / #666 / #999 / #ccc) for a
  * single-source-of-truth on type hierarchy.
@@ -15,15 +15,15 @@
  * the calendar and the global NotificationBell popover. */
 
 .hd-calendar {
-  --hd-magenta: #E50B6B;
-  --hd-magenta-rgb: 229, 11, 107;
+  --hd-magenta: #EA1F59;
+  --hd-magenta-rgb: 234, 31, 89;
   --hd-text-strong: #333333;
   --hd-text-mid: #666666;
   --hd-text-muted: #999999;
   --hd-text-fade: #cccccc;
   --hd-grid: rgba(0, 0, 0, 0.06);
   --hd-grid-strong: rgba(0, 0, 0, 0.08);
-  --hd-hover-bg: rgba(229, 11, 107, 0.03);
+  --hd-hover-bg: rgba(234, 31, 89, 0.03);
   padding: 0 8px;
   font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC",
     "Microsoft YaHei", sans-serif;
@@ -35,7 +35,7 @@
   --hd-text-fade: #475569;
   --hd-grid: rgba(255, 255, 255, 0.06);
   --hd-grid-strong: rgba(255, 255, 255, 0.10);
-  --hd-hover-bg: rgba(229, 11, 107, 0.06);
+  --hd-hover-bg: rgba(234, 31, 89, 0.06);
 }
 
 /* ───────────────────────── Sticky header band (title + toolbar) */
@@ -191,7 +191,7 @@
 }
 .hd-calendar-toolbar__view-btn[data-active="true"] {
   /* Force the contrast pair so a stray inherited color rule from
-     a wrapping FC class can't override. WCAG AA: magenta #E50B6B
+     a wrapping FC class can't override. WCAG AA: magenta #EA1F59
      against #ffffff = 5.4:1 (large text passes; normal text
      passes at this size + 600 weight). */
   background-color: var(--hd-magenta) !important;
@@ -199,7 +199,7 @@
   font-weight: 600;
   /* Soft magenta-tinted shadow so the active pill lifts above
      the inactive flat gray of the segmented control. */
-  box-shadow: 0 1px 3px rgba(229, 11, 107, 0.25);
+  box-shadow: 0 1px 3px rgba(234, 31, 89, 0.25);
 }
 .hd-calendar-toolbar__view-btn:not([data-active="true"]):hover {
   color: var(--hd-text-strong);
@@ -329,7 +329,7 @@
   padding: 4px 8px 4px 11px;
   font-size: 13px;
   line-height: 1.4;
-  background: var(--hd-event-bg, rgba(229, 11, 107, 0.08));
+  background: var(--hd-event-bg, rgba(234, 31, 89, 0.08));
   color: var(--hd-event-text, var(--hd-text-strong));
   overflow: hidden;
   text-overflow: ellipsis;
@@ -347,7 +347,7 @@
   background: var(--hd-event-accent, var(--hd-magenta));
 }
 .hd-calendar .fc-event:hover .fc-event-main {
-  background: var(--hd-event-bg-hover, rgba(229, 11, 107, 0.15));
+  background: var(--hd-event-bg-hover, rgba(234, 31, 89, 0.15));
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
 }
 .hd-calendar .fc-event-time,
@@ -378,7 +378,7 @@
   border-top-style: dotted;
 }
 .hd-calendar .fc-timegrid-col.fc-day-today {
-  background: rgba(229, 11, 107, 0.02);
+  background: rgba(234, 31, 89, 0.02);
 }
 .hd-calendar .fc-timegrid-axis {
   border-color: var(--hd-grid);
@@ -439,7 +439,7 @@
 
 .hd-quick-create__input:focus,
 .hd-quick-create__time:focus {
-  border-bottom-color: var(--hd-magenta, #E50B6B) !important;
+  border-bottom-color: var(--hd-magenta, #EA1F59) !important;
 }
 
 /* ───────────────────────── Keyframes — popover entrance + new pulse */
@@ -461,13 +461,13 @@
 
 @keyframes hd-pulse-new {
   0% {
-    box-shadow: 0 0 0 0 rgba(229, 11, 107, 0.7);
+    box-shadow: 0 0 0 0 rgba(234, 31, 89, 0.7);
   }
   70% {
-    box-shadow: 0 0 0 12px rgba(229, 11, 107, 0);
+    box-shadow: 0 0 0 12px rgba(234, 31, 89, 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(229, 11, 107, 0);
+    box-shadow: 0 0 0 0 rgba(234, 31, 89, 0);
   }
 }
 .hd-pulse-new {

@@ -9,7 +9,7 @@
  * Status mapping:
  *   active + future        → magenta accent + 8% bg ("waiting to fire")
  *   running                → amber accent
- *   completed              → green accent (60% opacity for past)
+ *   completed              → cyan accent (60% opacity for past)
  *   failed                 → red accent (full opacity even in past)
  *   paused                 → gray accent at 80% opacity
  *   active + lastFailed    → red tint to warn of recurring-failure
@@ -55,15 +55,15 @@ export type StatusColor = {
 };
 
 const COLORS = {
-  magenta: '#E50B6B',
-  magentaBg: 'rgba(229, 11, 107, 0.08)',
-  magentaBgHover: 'rgba(229, 11, 107, 0.15)',
-  amber: '#F59E0B',
-  amberBg: 'rgba(245, 158, 11, 0.08)',
-  amberBgHover: 'rgba(245, 158, 11, 0.15)',
-  green: '#10B981',
-  greenBg: 'rgba(16, 185, 129, 0.08)',
-  greenBgHover: 'rgba(16, 185, 129, 0.15)',
+  magenta: '#EA1F59',
+  magentaBg: 'rgba(234, 31, 89, 0.08)',
+  magentaBgHover: 'rgba(234, 31, 89, 0.15)',
+  amber: '#FFC910',
+  amberBg: 'rgba(255, 201, 16, 0.10)',
+  amberBgHover: 'rgba(255, 201, 16, 0.18)',
+  cyan: '#42C0EF',
+  cyanBg: 'rgba(66, 192, 239, 0.08)',
+  cyanBgHover: 'rgba(66, 192, 239, 0.15)',
   red: '#EF4444',
   redBg: 'rgba(239, 68, 68, 0.08)',
   redBgHover: 'rgba(239, 68, 68, 0.15)',
@@ -104,9 +104,9 @@ export function pickStatusColor(
   }
   if (row.status === 'completed') {
     return {
-      accent: COLORS.green,
-      background: COLORS.greenBg,
-      backgroundHover: COLORS.greenBgHover,
+      accent: COLORS.cyan,
+      background: COLORS.cyanBg,
+      backgroundHover: COLORS.cyanBgHover,
       opacity: eventIsPast ? 0.6 : 1,
     };
   }

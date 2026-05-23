@@ -19,7 +19,7 @@
  *   - Smooth scale+opacity entrance (matches calendar popovers)
  */
 
-import { Bell, CheckCheck } from 'lucide-react';
+import { Bell, BellRing, CheckCheck, CheckCircle2, Play, XCircle } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -161,7 +161,7 @@ export function NotificationBell(): JSX.Element {
         {hasUnread && (
           <span
             className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-semibold text-white"
-            style={{ backgroundColor: '#E50B6B' }}
+            style={{ backgroundColor: '#EA1F59' }}
           >
             {badge}
           </span>
@@ -223,7 +223,7 @@ function NotificationItem({
   row: NotificationRow;
   onClick: () => void;
 }): JSX.Element {
-  const icon = TYPE_ICON[row.type] ?? '·';
+  const icon = TYPE_ICON[row.type] ?? <Bell className="h-3 w-3" />;
   const color = notificationColor(row.type);
   // BOSS bug fix — row was tinted with bg-accent/30 (pink in this
   // theme) for unread, which clashed with the popover's neutral
@@ -264,7 +264,7 @@ function NotificationItem({
       {!row.isRead && (
         <span
           className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full"
-          style={{ backgroundColor: '#E50B6B' }}
+          style={{ backgroundColor: '#EA1F59' }}
           aria-label="未读"
         />
       )}
@@ -272,18 +272,18 @@ function NotificationItem({
   );
 }
 
-const TYPE_ICON: Record<string, string> = {
-  task_started: '▶',
-  task_complete: '✓',
-  task_failed: '✗',
-  task_reminder: '⏰',
+const TYPE_ICON: Record<string, React.ReactNode> = {
+  task_started: <Play className="h-3 w-3" />,
+  task_complete: <CheckCircle2 className="h-3 w-3" />,
+  task_failed: <XCircle className="h-3 w-3" />,
+  task_reminder: <BellRing className="h-3 w-3" />,
 };
 
 export function notificationColor(type: string): string {
   if (type === 'task_failed') return '#EF4444';
-  if (type === 'task_complete') return '#10B981';
-  if (type === 'task_reminder') return '#E50B6B';
-  if (type === 'task_started') return '#F59E0B';
+  if (type === 'task_complete') return '#42C0EF';
+  if (type === 'task_reminder') return '#EA1F59';
+  if (type === 'task_started') return '#FFC910';
   return '#94A3B8';
 }
 

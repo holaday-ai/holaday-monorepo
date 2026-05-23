@@ -1373,11 +1373,11 @@ function FollowUpChips({
 
 /**
  * Phase 4 R1 — SourceBadge classifier. The model labels grounded
- * facts with a leading colored circle:
- *   🟢 = 用户提供 (user-provided)
- *   🔵 = 系统计算 (system-derived)
- *   🟡 = 模型假设 (model assumption)
- *   🔴 = 外部基准 (external benchmark)
+ * facts with a leading source marker:
+ *   user marker = 用户提供 (user-provided)
+ *   calculated marker = 系统计算 (system-derived)
+ *   assumed marker = 模型假设 (model assumption)
+ *   external marker = 外部基准 (external benchmark)
  *
  * Each gets a colored pill + tooltip so the user can scan at a
  * glance which numbers are observed vs. assumed. We only transform
@@ -1390,11 +1390,11 @@ const SOURCE_BADGES: Record<
 > = {
   '🟢': {
     label: '用户提供',
-    tone: 'border-green-300 bg-green-50 text-green-800 dark:border-green-500/40 dark:bg-green-500/10 dark:text-green-200',
+    tone: 'border-cyan-300 bg-cyan-50 text-cyan-800 dark:border-cyan-500/40 dark:bg-cyan-500/10 dark:text-cyan-200',
   },
   '🔵': {
     label: '系统计算',
-    tone: 'border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-200',
+    tone: 'border-[#42C0EF]/60 bg-[#42C0EF]/10 text-cyan-800 dark:border-[#42C0EF]/40 dark:bg-[#42C0EF]/10 dark:text-cyan-200',
   },
   '🟡': {
     label: '模型假设',
@@ -1549,7 +1549,7 @@ function formatBytesShort(bytes: number): string {
 function SourceBadge({ emoji }: { emoji: string }): JSX.Element {
   const meta = SOURCE_BADGES[emoji] ?? null;
   if (!meta) {
-    return <span aria-hidden>{emoji}</span>;
+    return <span className="sr-only">{emoji}</span>;
   }
   return (
     <span
@@ -1559,7 +1559,6 @@ function SourceBadge({ emoji }: { emoji: string }): JSX.Element {
         meta.tone,
       )}
     >
-      <span aria-hidden>{emoji}</span>
       {meta.label}
     </span>
   );
@@ -1937,7 +1936,7 @@ function TerminalSummary({
               type="button"
               onClick={() => void handleRetry(intent)}
               aria-label="重新执行任务"
-              className="inline-flex items-center gap-1.5 text-[#E50B6B] transition-colors hover:text-[#c80a5d]"
+              className="inline-flex items-center gap-1.5 text-[#EA1F59] transition-colors hover:text-[#c80a5d]"
             >
               <RotateCcw className="h-3.5 w-3.5" />
               重试
@@ -2344,10 +2343,10 @@ function makeMarkdownComponents(opts: {
     },
     // Phase 4 R1 — paragraph override. Two transforms based on the
     // FIRST text node:
-    //   1. Leading ⚠️ → wrap the entire paragraph in a yellow warning
+    //   1. Leading warning marker → wrap the entire paragraph in a yellow warning
     //      callout. The emoji is consumed (no longer shown inline)
     //      since the box itself is the visual signal.
-    //   2. Leading 🟢/🔵/🟡/🔴 → emit a SourceBadge pill before the
+    //   2. Leading source marker → emit a SourceBadge pill before the
     //      remaining text. The emoji is consumed; the badge carries
     //      the same color cue plus a hover tooltip.
     //
@@ -2359,24 +2358,22 @@ function makeMarkdownComponents(opts: {
       if (typeof first !== 'string') {
         return <p {...rest}>{children}</p>;
       }
-      // ⚠️ warning block. Match the emoji with or without the
+      // Warning block. Match the marker with or without the
       // text-style variation selector (U+FE0F) and any trailing
-      // whitespace.
+      // whitespace, but render an icon instead of the raw marker.
       const warningPrefixRe = /^[ \t]*⚠(?:️)?[ \t]*/u;
       if (warningPrefixRe.test(first)) {
         const trimmed = first.replace(warningPrefixRe, '');
         return (
           <div className="my-2 flex gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
-            <span aria-hidden className="text-base leading-tight">
-              ⚠️
-            </span>
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
             <p className="my-0 flex-1 text-[13px] leading-relaxed" {...rest}>
               {[trimmed, ...arr.slice(1)]}
             </p>
           </div>
         );
       }
-      // 🟢🔵🟡🔴 SourceBadge prefix on the first text node.
+      // SourceBadge prefix on the first text node.
       const badge = matchSourceBadgePrefix(first);
       if (badge) {
         return (

@@ -134,7 +134,7 @@ export function EventDetailPopover({
           {row.reminderMinutes == null ? (
             <BellOff className="h-3 w-3" />
           ) : (
-            <Bell className="h-3 w-3" style={{ color: '#E50B6B' }} />
+            <Bell className="h-3 w-3" style={{ color: '#EA1F59' }} />
           )}
           提醒
         </span>
@@ -147,13 +147,13 @@ export function EventDetailPopover({
             </span>
             <span className="flex items-center gap-1.5 text-foreground">
               {row.lastRunStatus === 'success' ? (
-                <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                  <span aria-hidden>✅</span>
+                <span className="inline-flex items-center gap-1 text-cyan-600 dark:text-cyan-300">
+                  <CheckCircle2 className="h-3 w-3" aria-hidden />
                   <span>成功</span>
                 </span>
               ) : row.lastRunStatus === 'failed' ? (
                 <span className="inline-flex items-center gap-1 text-red-600 dark:text-red-400">
-                  <span aria-hidden>❌</span>
+                  <XCircle className="h-3 w-3" aria-hidden />
                   <span>失败</span>
                 </span>
               ) : null}
@@ -249,10 +249,10 @@ const STATUS_LABEL: Record<ScheduledTaskRow['status'], string> = {
 };
 
 const STATUS_ICON: Record<ScheduledTaskRow['status'], React.ReactNode> = {
-  active: <Clock className="h-3 w-3" style={{ color: '#E50B6B' }} />,
+  active: <Clock className="h-3 w-3" style={{ color: '#EA1F59' }} />,
   paused: <Pause className="h-3 w-3 text-slate-500" />,
   running: <Loader2 className="h-3 w-3 animate-spin text-amber-500" />,
-  completed: <CheckCircle2 className="h-3 w-3 text-emerald-500" />,
+  completed: <CheckCircle2 className="h-3 w-3 text-cyan-500" />,
   failed: <XCircle className="h-3 w-3 text-red-500" />,
 };
 

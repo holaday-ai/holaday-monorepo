@@ -1,4 +1,4 @@
-import { MoreHorizontal } from 'lucide-react';
+import { Check, MoreHorizontal } from 'lucide-react';
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 import { type UiTask, isActive } from '@/types/task';
@@ -136,7 +136,7 @@ export function TaskListItem({
             batchDisabled && 'border-dashed',
           )}
         >
-          {batchChecked && <span className="text-[10px] leading-none">✓</span>}
+          {batchChecked && <Check className="h-3 w-3" strokeWidth={2.5} />}
         </span>
       )}
       <StatusDot status={task.status} />

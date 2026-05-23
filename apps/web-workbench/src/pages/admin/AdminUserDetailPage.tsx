@@ -28,14 +28,13 @@ import {
 type DetailData = Awaited<ReturnType<typeof trpc.admin.userDetail.query>>;
 
 const PIE_COLORS = [
-  '#E50B6B',
-  '#F59E0B',
-  '#10B981',
-  '#3B82F6',
-  '#A855F7',
+  '#EA1F59',
+  '#FFC910',
+  '#42C0EF',
+  '#57479C',
   '#EF4444',
-  '#6366F1',
-  '#84CC16',
+  '#ADADAD',
+  '#575757',
 ];
 
 export function AdminUserDetailPage(): JSX.Element {
@@ -283,7 +282,7 @@ function Badge({
       className={cn(
         'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
         highlight
-          ? 'bg-[rgba(229,11,107,0.12)] text-[#E50B6B]'
+          ? 'bg-[rgba(234,31,89,0.12)] text-[#EA1F59]'
           : 'border border-border bg-background text-muted-foreground',
       )}
     >
@@ -311,7 +310,7 @@ function Avatar({
   }
   const letter = (fallback || '?').charAt(0).toUpperCase();
   return (
-    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[rgba(229,11,107,0.12)] text-xl font-semibold text-[#E50B6B]">
+    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[rgba(234,31,89,0.12)] text-xl font-semibold text-[#EA1F59]">
       {letter}
     </div>
   );

@@ -11,7 +11,8 @@
  *      Cost tab:     summary chips + model PieChart + 30-day
  *                    LineChart + top-10 task table.
  *
- * All charts use recharts. Magenta primary, amber/green/blue
+ * All charts use recharts. Official HOLA DAY palette only:
+ * magenta, yellow, cyan, purple, red, and neutrals.
  * accents matching the calendar palette.
  */
 
@@ -43,8 +44,8 @@ type CostBreakdownData = Awaited<ReturnType<typeof trpc.admin.finance.costBreakd
 type CostByDayData = Awaited<ReturnType<typeof trpc.admin.finance.costByDay.query>>;
 type TopCostlyData = Awaited<ReturnType<typeof trpc.admin.finance.topCostlyTasks.query>>;
 
-const MAGENTA = '#E50B6B';
-const PALETTE = ['#E50B6B', '#F59E0B', '#10B981', '#3B82F6', '#A855F7', '#EF4444', '#6366F1', '#84CC16'];
+const MAGENTA = '#EA1F59';
+const PALETTE = ['#EA1F59', '#FFC910', '#42C0EF', '#57479C', '#EF4444', '#ADADAD', '#575757'];
 
 /** Format CNY cents → ¥123.45 with thousands separator. */
 function formatYuan(cents: number): string {
@@ -141,7 +142,7 @@ function ProfitBar({ summary }: { summary: SummaryData | null }): JSX.Element {
       <SummaryCard
         label="本月营收"
         value={formatYuan(summary.monthRevenueCnyCents)}
-        tint="rgba(229,11,107,0.10)"
+        tint="rgba(234,31,89,0.10)"
       />
       <SummaryCard
         label="本月成本"
@@ -152,8 +153,8 @@ function ProfitBar({ summary }: { summary: SummaryData | null }): JSX.Element {
       <SummaryCard
         label={profitPositive ? '本月利润' : '本月亏损'}
         value={formatYuan(Math.abs(summary.monthProfitCnyCents))}
-        tint={profitPositive ? 'rgba(16,185,129,0.10)' : 'rgba(239,68,68,0.10)'}
-        valueClass={profitPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}
+        tint={profitPositive ? 'rgba(66,192,239,0.10)' : 'rgba(239,68,68,0.10)'}
+        valueClass={profitPositive ? 'text-cyan-600 dark:text-cyan-300' : 'text-red-600 dark:text-red-400'}
         trend={profitPositive ? 'up' : 'down'}
       />
     </div>
@@ -183,7 +184,7 @@ function SummaryCard({
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className={cn('mt-2 flex items-baseline gap-2', valueClass)}>
         <span className="text-2xl font-semibold tracking-tight">{value}</span>
-        {trend === 'up' && <TrendingUp className="h-4 w-4 text-emerald-600" aria-hidden />}
+        {trend === 'up' && <TrendingUp className="h-4 w-4 text-cyan-600" aria-hidden />}
         {trend === 'down' && <TrendingDown className="h-4 w-4 text-red-600" aria-hidden />}
       </div>
       {sub ? <div className="mt-1 text-[11px] text-muted-foreground">{sub}</div> : null}
@@ -207,7 +208,7 @@ function TabButton({
       className={cn(
         'border-b-2 px-1 pb-3 text-[14px] font-medium transition-colors',
         active
-          ? 'border-[#E50B6B] text-[#E50B6B]'
+          ? 'border-[#EA1F59] text-[#EA1F59]'
           : 'border-transparent text-muted-foreground hover:text-foreground',
       )}
     >

@@ -6,8 +6,8 @@
  * color language they see on /scheduled.
  */
 
-export const ADMIN_MAGENTA = '#E50B6B';
-export const ADMIN_MAGENTA_SOFT = 'rgba(229,11,107,0.12)';
+export const ADMIN_MAGENTA = '#EA1F59';
+export const ADMIN_MAGENTA_SOFT = 'rgba(234,31,89,0.12)';
 
 interface StatusToken {
   label: string;
@@ -18,8 +18,8 @@ interface StatusToken {
 const STATUS_MAP: Record<string, StatusToken> = {
   completed: {
     label: '已完成',
-    textClass: 'text-emerald-700 dark:text-emerald-300',
-    bgClass: 'bg-emerald-50 dark:bg-emerald-500/15',
+    textClass: 'text-cyan-700 dark:text-cyan-300',
+    bgClass: 'bg-cyan-50 dark:bg-cyan-500/15',
   },
   partial_success: {
     label: '部分完成',

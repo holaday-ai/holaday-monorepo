@@ -236,14 +236,14 @@ export function AddChannelModal({
                   className={cn(
                     'rounded-md border px-2 py-2 text-left transition-colors',
                     platform === p.value
-                      ? 'border-[#E50B6B] bg-[#E50B6B]/10'
-                      : 'border-border bg-card hover:border-[#E50B6B]/50',
+                      ? 'border-[#EA1F59] bg-[#EA1F59]/10'
+                      : 'border-border bg-card hover:border-[#EA1F59]/50',
                   )}
                 >
                   <div
                     className={cn(
                       'text-sm font-medium',
-                      platform === p.value ? 'text-[#E50B6B]' : 'text-foreground',
+                      platform === p.value ? 'text-[#EA1F59]' : 'text-foreground',
                     )}
                   >
                     {p.label}
@@ -273,7 +273,7 @@ export function AddChannelModal({
               }}
               placeholder="https://..."
               disabled={saving || testing}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[#E50B6B]"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[#EA1F59]"
               maxLength={2000}
             />
           </div>
@@ -295,7 +295,7 @@ export function AddChannelModal({
                 }}
                 rows={6}
                 disabled={saving || testing}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus:border-[#E50B6B]"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus:border-[#EA1F59]"
               />
             </div>
           )}
@@ -316,7 +316,7 @@ export function AddChannelModal({
               <span
                 className={cn(
                   'flex items-center gap-1 text-xs',
-                  testResult.ok ? 'text-emerald-600' : 'text-red-600',
+                  testResult.ok ? 'text-cyan-600 dark:text-cyan-300' : 'text-red-600',
                 )}
               >
                 {testResult.ok ? (
@@ -341,7 +341,7 @@ export function AddChannelModal({
             <Button
               type="submit"
               disabled={saving || testing}
-              style={{ backgroundColor: '#E50B6B', borderColor: '#E50B6B' }}
+              style={{ backgroundColor: '#EA1F59', borderColor: '#EA1F59' }}
               className="text-white hover:opacity-90"
             >
               {saving ? (

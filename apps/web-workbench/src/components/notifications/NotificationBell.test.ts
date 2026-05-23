@@ -52,12 +52,12 @@ describe('formatRelative', () => {
 
 describe('notificationColor', () => {
   it('keeps task_started distinct from task_complete', () => {
-    expect(notificationColor('task_started')).toBe('#F59E0B');
-    expect(notificationColor('task_complete')).toBe('#10B981');
+    expect(notificationColor('task_started')).toBe('#FFC910');
+    expect(notificationColor('task_complete')).toBe('#42C0EF');
   });
 
   it('uses the brand color for reminders', () => {
-    expect(notificationColor('task_reminder')).toBe('#E50B6B');
+    expect(notificationColor('task_reminder')).toBe('#EA1F59');
   });
 
   it('keeps failures red and unknown notifications neutral', () => {

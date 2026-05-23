@@ -207,7 +207,7 @@ export function NotificationsSection(): JSX.Element {
                   <label
                     className={cn(
                       'flex h-5 w-9 cursor-pointer items-center rounded-full p-0.5 transition-colors',
-                      row.enabled ? 'bg-[#E50B6B]' : 'bg-muted-foreground/40',
+                      row.enabled ? 'bg-[#EA1F59]' : 'bg-muted-foreground/40',
                     )}
                     title={row.enabled ? '禁用' : '启用'}
                   >

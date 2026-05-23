@@ -5,7 +5,7 @@
  *   1. 3 metric cards (analyzed domains / high-risk / AI memories)
  *   2. Filter bar (search + filter tabs)
  *   3. Ranking table — domain, total, success/fail counts, success
- *      bar (green→red gradient), last-failed-at, top failure reason,
+ *      bar (cyan/yellow/red gradient), last-failed-at, top failure reason,
  *      action column linking to /admin/learning/:domain.
  *
  * No charts on the overview — the ranking is the story. The detail
@@ -105,7 +105,7 @@ export function AdminLearningPage(): JSX.Element {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="搜索域名…"
-            className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-[13px] outline-none transition-colors focus:border-[#E50B6B]"
+            className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-[13px] outline-none transition-colors focus:border-[#EA1F59]"
           />
         </div>
         <FilterPill active={filter === 'all'} onClick={() => setFilter('all')}>
@@ -218,7 +218,7 @@ function DomainRowEl({ row }: { row: DomainRow }): JSX.Element {
         {row.total.toLocaleString('zh-CN')}
       </td>
       <td className="px-3 py-3 text-right tabular-nums">
-        <span className="text-emerald-600">{row.success}</span>
+        <span className="text-cyan-600">{row.success}</span>
         <span className="text-muted-foreground"> / </span>
         <span className="text-red-600">{row.failed}</span>
         <span className="text-muted-foreground"> / </span>
@@ -242,7 +242,7 @@ function DomainRowEl({ row }: { row: DomainRow }): JSX.Element {
       <td className="px-5 py-3">
         <Link
           to={`/admin/learning/${encodeURIComponent(row.domain)}`}
-          className="text-[#E50B6B] hover:underline"
+          className="text-[#EA1F59] hover:underline"
         >
           查看详情
         </Link>
@@ -252,10 +252,10 @@ function DomainRowEl({ row }: { row: DomainRow }): JSX.Element {
 }
 
 function SuccessRateBar({ successRate }: { successRate: number }): JSX.Element {
-  // Interpolate red (0%) → amber (50%) → green (100%).
-  const r = successRate < 50 ? 239 : Math.round(239 - ((successRate - 50) / 50) * (239 - 16));
-  const g = successRate < 50 ? Math.round((successRate / 50) * 158) : Math.round(158 + ((successRate - 50) / 50) * (185 - 158));
-  const b = successRate < 50 ? 68 : Math.round(68 + ((successRate - 50) / 50) * (129 - 68));
+  // Interpolate red (0%) → yellow (50%) → cyan (100%).
+  const r = successRate < 50 ? 239 : Math.round(255 - ((successRate - 50) / 50) * (255 - 66));
+  const g = successRate < 50 ? Math.round(68 + (successRate / 50) * (201 - 68)) : Math.round(201 - ((successRate - 50) / 50) * (201 - 192));
+  const b = successRate < 50 ? Math.round(68 - (successRate / 50) * (68 - 16)) : Math.round(16 + ((successRate - 50) / 50) * (239 - 16));
   const color = `rgb(${r}, ${g}, ${b})`;
   return (
     <div className="flex items-center gap-2">
@@ -287,11 +287,11 @@ function MetricCard({
     <div
       className={cn(
         'rounded-xl border border-border bg-card p-4 shadow-sm',
-        highlight && 'border-[#E50B6B]/30',
+        highlight && 'border-[#EA1F59]/30',
       )}
       style={
         highlight
-          ? { backgroundImage: 'linear-gradient(135deg, rgba(229,11,107,0.10) 0%, transparent 60%)' }
+          ? { backgroundImage: 'linear-gradient(135deg, rgba(234,31,89,0.10) 0%, transparent 60%)' }
           : undefined
       }
     >
@@ -320,7 +320,7 @@ function FilterPill({
       className={cn(
         'inline-flex h-7 items-center rounded-full border px-3 text-[12px] transition-colors',
         active
-          ? 'border-[#E50B6B] bg-[rgba(229,11,107,0.10)] text-[#E50B6B]'
+          ? 'border-[#EA1F59] bg-[rgba(234,31,89,0.10)] text-[#EA1F59]'
           : 'border-border bg-transparent text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground',
       )}
     >

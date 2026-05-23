@@ -1680,7 +1680,7 @@ function HibernationCard({
           it doesn't compete with the final screenshot behind it. */}
       <div className="relative flex flex-col items-center gap-2.5 rounded-lg border border-border bg-background/95 px-6 py-4 shadow-lg backdrop-blur">
         <div
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-cyan-500/15 text-cyan-600 dark:text-cyan-300"
           aria-hidden
         >
           <Check className="h-5 w-5" strokeWidth={2.5} />

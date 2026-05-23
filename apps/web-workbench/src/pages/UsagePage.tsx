@@ -84,7 +84,7 @@ export function UsagePage(): JSX.Element {
             }
           />
           <StatCard
-            icon={<CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+            icon={<CheckCircle2 className="h-4 w-4 text-cyan-500" />}
             label="成功"
             value={loading ? '—' : String(snap?.monthCompleted ?? 0)}
             sub={
