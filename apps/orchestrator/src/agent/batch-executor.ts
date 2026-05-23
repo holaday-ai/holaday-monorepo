@@ -337,11 +337,7 @@ async function finalizeBatch(batchInternalId: number, deps: BatchExecutorDeps): 
     .select({ id: batchTaskItems.id, status: batchTaskItems.status })
     .from(batchTaskItems)
     .where(eq(batchTaskItems.batchId, batchInternalId));
-  const done = items.filter((i) => i.status === 'completed').length;
-  const failed = items.filter(
-    (i) => i.status === 'failed' || i.status === 'cancelled',
-  ).length;
-  const total = items.length;
+  const counts = summarizeBatchItemStatuses(items);
   const [batch] = await db
     .select()
     .from(batchTasks)
@@ -352,14 +348,14 @@ async function finalizeBatch(batchInternalId: number, deps: BatchExecutorDeps): 
   // partial when status is still 'running'.
   let nextStatus = batch.status;
   if (batch.status === 'running') {
-    nextStatus = failed === 0 ? 'completed' : 'partial';
+    nextStatus = counts.failed === 0 && counts.cancelled === 0 ? 'completed' : 'partial';
   }
   await db
     .update(batchTasks)
     .set({
-      itemsTotal: total,
-      itemsDone: done,
-      itemsFailed: failed,
+      itemsTotal: counts.total,
+      itemsDone: counts.done,
+      itemsFailed: counts.failed,
       status: nextStatus,
       ...(nextStatus !== 'running' ? { completedAt: new Date() } : {}),
     })
@@ -375,9 +371,10 @@ async function finalizeBatch(batchInternalId: number, deps: BatchExecutorDeps): 
       type: 'server.batch.progress',
       batchId: batch.externalId,
       status: nextStatus as 'pending' | 'running' | 'completed' | 'partial' | 'cancelled',
-      itemsTotal: total,
-      itemsDone: done,
-      itemsFailed: failed,
+      itemsTotal: counts.total,
+      itemsDone: counts.done,
+      itemsFailed: counts.failed,
+      itemsCancelled: counts.cancelled,
     });
   }
 }
@@ -408,17 +405,15 @@ async function broadcastItemUpdate(
     .select({ status: batchTaskItems.status })
     .from(batchTaskItems)
     .where(eq(batchTaskItems.batchId, batch.id));
-  const done = items.filter((i) => i.status === 'completed').length;
-  const failed = items.filter(
-    (i) => i.status === 'failed' || i.status === 'cancelled',
-  ).length;
+  const counts = summarizeBatchItemStatuses(items);
   deps.broadcastToUser(userExternalId, {
     type: 'server.batch.progress',
     batchId: batch.externalId,
     status: 'running',
-    itemsTotal: items.length,
-    itemsDone: done,
-    itemsFailed: failed,
+    itemsTotal: counts.total,
+    itemsDone: counts.done,
+    itemsFailed: counts.failed,
+    itemsCancelled: counts.cancelled,
     item: {
       batchItemId: item.externalId,
       seq: item.seq,
@@ -427,6 +422,32 @@ async function broadcastItemUpdate(
       ...(extras?.errorMessage ? { errorMessage: extras.errorMessage } : {}),
     },
   });
+}
+
+export function summarizeBatchItemStatuses(
+  items: ReadonlyArray<{ status: string }>,
+): {
+  total: number;
+  done: number;
+  failed: number;
+  cancelled: number;
+  terminal: number;
+} {
+  let done = 0;
+  let failed = 0;
+  let cancelled = 0;
+  for (const item of items) {
+    if (item.status === 'completed') done += 1;
+    else if (item.status === 'failed') failed += 1;
+    else if (item.status === 'cancelled') cancelled += 1;
+  }
+  return {
+    total: items.length,
+    done,
+    failed,
+    cancelled,
+    terminal: done + failed + cancelled,
+  };
 }
 
 /**

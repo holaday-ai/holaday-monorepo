@@ -22,7 +22,11 @@ import { newExternalId, type PlanId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
-import { executeBatch, insertBatch } from '../../agent/batch-executor.js';
+import {
+  executeBatch,
+  insertBatch,
+  summarizeBatchItemStatuses,
+} from '../../agent/batch-executor.js';
 import { batchTaskItems, batchTasks } from '../../db/schema/batch-tasks.js';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
@@ -76,7 +80,10 @@ export const batchTasksRouter = router({
       .orderBy(desc(batchTasks.createdAt))
       .limit(50);
     const batchIds = rows.map((r) => r.id);
-    const itemsCancelledByBatch = new Map<number, number>();
+    const countsByBatch = new Map<
+      number,
+      ReturnType<typeof summarizeBatchItemStatuses>
+    >();
     if (batchIds.length > 0) {
       const itemRows = await ctx.db
         .select({
@@ -85,26 +92,36 @@ export const batchTasksRouter = router({
         })
         .from(batchTaskItems)
         .where(inArray(batchTaskItems.batchId, batchIds));
+      const statusesByBatch = new Map<number, Array<{ status: string }>>();
       for (const item of itemRows) {
-        if (item.status !== 'cancelled') continue;
-        itemsCancelledByBatch.set(
-          item.batchId,
-          (itemsCancelledByBatch.get(item.batchId) ?? 0) + 1,
-        );
+        const bucket = statusesByBatch.get(item.batchId) ?? [];
+        bucket.push({ status: item.status });
+        statusesByBatch.set(item.batchId, bucket);
+      }
+      for (const [id, statuses] of statusesByBatch) {
+        countsByBatch.set(id, summarizeBatchItemStatuses(statuses));
       }
     }
-    return rows.map((r) => ({
-      batchId: r.externalId,
-      name: r.name,
-      status: r.status,
-      concurrency: r.concurrency,
-      itemsTotal: r.itemsTotal,
-      itemsDone: r.itemsDone,
-      itemsFailed: r.itemsFailed,
-      itemsCancelled: itemsCancelledByBatch.get(r.id) ?? 0,
-      createdAt: r.createdAt,
-      completedAt: r.completedAt,
-    }));
+    return rows.map((r) => {
+      const counts = countsByBatch.get(r.id) ?? {
+        total: r.itemsTotal,
+        done: r.itemsDone,
+        failed: r.itemsFailed,
+        cancelled: 0,
+      };
+      return {
+        batchId: r.externalId,
+        name: r.name,
+        status: r.status,
+        concurrency: r.concurrency,
+        itemsTotal: counts.total,
+        itemsDone: counts.done,
+        itemsFailed: counts.failed,
+        itemsCancelled: counts.cancelled,
+        createdAt: r.createdAt,
+        completedAt: r.completedAt,
+      };
+    });
   }),
 
   detail: protectedProcedure
@@ -155,15 +172,16 @@ export const batchTasksRouter = router({
           .where(inArray(tasks.id, taskInternalIds));
         for (const r of taskRows) tasksById.set(r.id, r.externalId);
       }
+      const counts = summarizeBatchItemStatuses(items);
       return {
         batchId: batch.externalId,
         name: batch.name,
         status: batch.status,
         concurrency: batch.concurrency,
-        itemsTotal: batch.itemsTotal,
-        itemsDone: batch.itemsDone,
-        itemsFailed: batch.itemsFailed,
-        itemsCancelled: items.filter((i) => i.status === 'cancelled').length,
+        itemsTotal: counts.total,
+        itemsDone: counts.done,
+        itemsFailed: counts.failed,
+        itemsCancelled: counts.cancelled,
         createdAt: batch.createdAt,
         completedAt: batch.completedAt,
         items: items.map((i) => ({

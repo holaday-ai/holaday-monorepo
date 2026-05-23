@@ -15,7 +15,43 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { executeBatch, runWithConcurrency } from './batch-executor.js';
+import {
+  executeBatch,
+  runWithConcurrency,
+  summarizeBatchItemStatuses,
+} from './batch-executor.js';
+
+describe('summarizeBatchItemStatuses — split terminal counters', () => {
+  it('keeps failed and cancelled separate for reporting', () => {
+    expect(
+      summarizeBatchItemStatuses([
+        { status: 'completed' },
+        { status: 'failed' },
+        { status: 'cancelled' },
+        { status: 'running' },
+      ]),
+    ).toEqual({
+      total: 4,
+      done: 1,
+      failed: 1,
+      cancelled: 1,
+      terminal: 3,
+    });
+  });
+
+  it('does not count cancelled items as failed', () => {
+    expect(
+      summarizeBatchItemStatuses([
+        { status: 'cancelled' },
+        { status: 'cancelled' },
+      ]),
+    ).toMatchObject({
+      failed: 0,
+      cancelled: 2,
+      terminal: 2,
+    });
+  });
+});
 
 describe('runWithConcurrency — concurrent dispatch', () => {
   it('runs up to `concurrency` items in parallel', async () => {

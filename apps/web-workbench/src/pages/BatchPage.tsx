@@ -255,7 +255,11 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
 
   const pct =
     detail.itemsTotal > 0
-      ? Math.round(((detail.itemsDone + detail.itemsFailed) / detail.itemsTotal) * 100)
+      ? Math.round(
+          ((detail.itemsDone + detail.itemsFailed + (detail.itemsCancelled ?? 0)) /
+            detail.itemsTotal) *
+            100,
+        )
       : 0;
 
   const canCancel = detail.status === 'pending' || detail.status === 'running';

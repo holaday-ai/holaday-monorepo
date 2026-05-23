@@ -767,6 +767,7 @@ export const serverBatchProgressSchema = z.object({
   itemsTotal: z.number().int().nonnegative(),
   itemsDone: z.number().int().nonnegative(),
   itemsFailed: z.number().int().nonnegative(),
+  itemsCancelled: z.number().int().nonnegative().optional(),
   item: z
     .object({
       batchItemId: z.string(),
