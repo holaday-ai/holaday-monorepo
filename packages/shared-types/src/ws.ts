@@ -752,10 +752,10 @@ export const serverTaskProgressSchema = z.object({
 
 /**
  * Phase 5b — batch task progress. Fires whenever a batch's parent
- * counters change (item dispatched / completed / failed) OR the
- * batch's status flips (pending → running → completed / partial /
- * cancelled). The SPA's batch list/detail view updates its progress
- * bar + item rows from these events without re-fetching.
+ * counters change (item dispatched / completed / failed / cancelled)
+ * OR the batch's status flips (pending → running → completed /
+ * partial / cancelled). The SPA's batch list/detail view updates its
+ * progress bar + item rows from these events without re-fetching.
  *
  * `item` is included on every event for the row that triggered the
  * fire (or null for a status-only change with no item delta).

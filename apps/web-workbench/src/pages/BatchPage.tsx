@@ -7,7 +7,13 @@ import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import { BatchTaskDialog } from '@/components/BatchTaskDialog';
 import { batchUnsuccessfulCopy } from '@/lib/batch-copy';
+import {
+  applyBatchProgressToDetail,
+  applyBatchProgressToRows,
+  type BatchProgressFrame,
+} from '@/lib/batch-progress';
 import { humaniseTaskError, taskActionError } from '@/lib/error-copy';
+import { onServerMessage } from '@/lib/ws';
 
 /**
  * Phase 5b — batch tasks list + detail (one page, two modes).
@@ -16,10 +22,8 @@ import { humaniseTaskError, taskActionError } from '@/lib/error-copy';
  * bar + per-item rows with task deep-links. Otherwise we render the
  * list of the user's batches with a "新建批量" button.
  *
- * Live updates come through the global WS handler in task-store —
- * server.batch.progress events refresh the displayed counters
- * without a re-fetch. (Today this page does a manual reload on
- * mount + on a 5s poll for safety; the WS hook is a follow-up.)
+ * Live updates come from `server.batch.progress` frames, with a 5s
+ * poll as a safety net if the WS connection drops.
  */
 
 interface UiBatchRow {
@@ -107,6 +111,15 @@ function BatchList(): JSX.Element {
   React.useEffect(() => {
     void reload();
   }, [reload]);
+
+  React.useEffect(() => {
+    return onServerMessage((msg) => {
+      if (!isBatchProgressFrame(msg)) return;
+      setRows((current) =>
+        current ? applyBatchProgressToRows(current, msg) : current,
+      );
+    });
+  }, []);
 
   return (
     <PageContainer width="list">
@@ -221,14 +234,22 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
 
   React.useEffect(() => {
     void reload();
-    // Lightweight polling — server.batch.progress WS events also
-    // refresh state via the task-store hook, but the 5s poll is the
-    // safety net in case the WS dropped.
+    // Lightweight polling — WS events update immediately; this keeps
+    // the view correct after reconnects or missed frames.
     const handle = setInterval(() => {
       void reload();
     }, 5_000);
     return () => clearInterval(handle);
   }, [reload]);
+
+  React.useEffect(() => {
+    return onServerMessage((msg) => {
+      if (!isBatchProgressFrame(msg)) return;
+      setDetail((current) =>
+        current ? applyBatchProgressToDetail(current, msg) : current,
+      );
+    });
+  }, []);
 
   const performCancel = async (): Promise<void> => {
     try {
@@ -347,6 +368,14 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function isBatchProgressFrame(msg: unknown): msg is BatchProgressFrame {
+  return (
+    typeof msg === 'object' &&
+    msg !== null &&
+    (msg as { type?: unknown }).type === 'server.batch.progress'
+  );
 }
 
 function ItemStatusIcon({ status }: { status: string }): JSX.Element {
