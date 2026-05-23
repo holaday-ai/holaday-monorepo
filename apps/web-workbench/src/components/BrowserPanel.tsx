@@ -1344,7 +1344,7 @@ export function BrowserPanel({
                       )}
                       title="切换输入方式（当 IME 直打不工作时使用浮动输入框）"
                     >
-                      ✏️ 输入框
+                      输入框
                     </button>
                   )}
                   {interactiveActive && cjkFallbackOpen && (
@@ -1815,21 +1815,21 @@ function activityGlyph(kind?: string): string {
   switch (kind) {
     case 'click':
     case 'click_ref':
-      return '🖱';
+      return '点';
     case 'type':
     case 'type_in_ref':
-      return '⌨️';
+      return '输';
     case 'key':
     case 'press_key':
       return '⏎';
     case 'scroll':
-      return '↕';
+      return '滚';
     case 'navigate':
       return '→';
     case 'wait':
-      return '⏳';
+      return '等';
     case 'wait_for_human':
-      return '🧑';
+      return '人';
     default:
       return '•';
   }

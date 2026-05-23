@@ -69,9 +69,9 @@ export function buildReportSystemPrompt(opts: {
   lines.push('## 数据校验结果');
   for (const v of validatorResults) {
     if (v.passed) {
-      lines.push(`- ✅ \`${v.validatorId}\`: ${v.description} → 通过`);
+      lines.push(`- 通过 \`${v.validatorId}\`: ${v.description}`);
     } else {
-      lines.push(`- ⚠️ \`${v.validatorId}\`: ${v.description} → 未通过`);
+      lines.push(`- 未通过 \`${v.validatorId}\`: ${v.description}`);
       if (v.message) lines.push(`  - ${v.message}`);
     }
   }
@@ -82,10 +82,10 @@ export function buildReportSystemPrompt(opts: {
     '- 直接输出 Markdown 报告，不要以解释 / 引言开场。第一行就是第一个 section 的标题。',
   );
   lines.push(
-    '- 严格按 section 顺序输出。每个 section 必须用提供的 title 字符串（含 emoji）。',
+    '- 严格按 section 顺序输出。每个 section 必须用提供的 title 字符串。',
   );
   lines.push(
-    '- 数据校验如果有 ⚠️，"数据校验" section 必须重述失败项；不要在后续 section 引用矛盾数据。',
+    '- 数据校验如果有未通过项，"数据校验" section 必须重述失败项；不要在后续 section 引用矛盾数据。',
   );
   lines.push('- 不要重复展示用户的 JSON 数据；用表格或项目符号呈现核心指标。');
   lines.push('- 不要在末尾自己加"如有疑问请告知"等套话；followUpActions 由系统拼接。');
@@ -94,7 +94,7 @@ export function buildReportSystemPrompt(opts: {
 }
 
 function formatSectionDirective(s: ReportSection): string {
-  const annot = s.sourceAnnotation ? ' [需要 🟢🔵🟡🔴 来源标注]' : '';
+  const annot = s.sourceAnnotation ? ' [需要来源标注：[用户提供]/[系统计算]/[模型假设]/[外部来源]]' : '';
   const guidance = s.guidance ? `\n  > ${s.guidance}` : '';
   return `- **${s.title}** (id: \`${s.id}\`)${annot}${guidance}`;
 }
@@ -124,7 +124,7 @@ export function buildFollowUpFooter(workflow: ExpertWorkflowContract): string {
   lines.push('---');
   lines.push('');
   lines.push(FOLLOW_UP_ACTIONS_MARKER_OPEN);
-  lines.push('### 🚀 下一步建议');
+  lines.push('### 下一步建议');
   lines.push('');
   for (const a of workflow.followUpActions) {
     // Encode the prompt so newlines / parens survive the

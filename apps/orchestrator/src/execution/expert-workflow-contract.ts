@@ -20,8 +20,8 @@
  *      Failure → needs_clarification with a precise message.
  *   3. ReportSection — required / optional sections the verifier
  *      must see in the model's output. Some sections require
- *      source-annotation glyphs (🟢 user / 🔵 calculated / 🟡 model
- *      assumed / 🔴 external).
+ *      source-annotation markers ([用户提供] / [系统计算] /
+ *      [模型假设] / [外部来源]).
  *   4. FollowUpAction — labelled prompts the SPA renders as chips
  *      under the report ("生成下场直播 SOP", etc.).
  *   5. ExpertWorkflowContract — the bundle of all four for one
@@ -113,7 +113,7 @@ export interface DataValidator {
  * a missing required section as failure.
  *
  * `sourceAnnotation: true` — the section's content must include
- * source glyphs (🟢🔵🟡🔴). Verifier scans for them.
+ * source markers. Verifier scans for them.
  */
 export interface ReportSection {
   id: string;

@@ -1225,15 +1225,15 @@ export function sanitizeMarkdownTrailingPunctuation(text: string): string {
  * surface a header that names what the user is looking at instead
  * of just a wall of prose. Unknown ids → null (no header).
  *
- * The icon + label list lives here rather than in a registry file
- * because there are only three workflows; adding a fourth is a
- * one-line edit. If the count grows the right move is to derive
- * this from packages/shared-types.
+ * The label list lives here rather than in a registry file because
+ * there are only three workflows; adding a fourth is a one-line
+ * edit. If the count grows the right move is to derive this from
+ * packages/shared-types.
  */
-const EXPERT_HEADER_META: Record<string, { icon: string; label: string }> = {
-  'content-topic': { icon: '📝', label: '选题分析' },
-  'ecom-daily': { icon: '📈', label: '电商日报' },
-  'douyin-review': { icon: '🎬', label: '抖音稿件复盘' },
+const EXPERT_HEADER_META: Record<string, { label: string }> = {
+  'content-topic': { label: '选题分析' },
+  'ecom-daily': { label: '电商日报' },
+  'douyin-review': { label: '抖音稿件复盘' },
 };
 
 function EmptyTerminalCard({
@@ -1301,9 +1301,6 @@ function ExpertReportHeader({ workflowId }: { workflowId: string }): JSX.Element
   if (!meta) return null;
   return (
     <div className="mb-3 flex items-center gap-2 border-b border-primary/30 pb-2 text-sm font-semibold text-primary dark:border-primary/40">
-      <span aria-hidden className="text-base">
-        {meta.icon}
-      </span>
       <span>{meta.label}</span>
     </div>
   );
@@ -1380,35 +1377,51 @@ function FollowUpChips({
  *   external marker = 外部基准 (external benchmark)
  *
  * Each gets a colored pill + tooltip so the user can scan at a
- * glance which numbers are observed vs. assumed. We only transform
- * the LEADING emoji on a paragraph — the same emoji further down in
- * a sentence stays as plain text.
+ * glance which numbers are observed vs. assumed. New reports use
+ * bracketed markers. Legacy markers are accepted via escaped code
+ * points so old task history still renders cleanly.
  */
 const SOURCE_BADGES: Record<
   string,
   { label: string; tone: string }
 > = {
-  '🟢': {
+  '[用户提供]': {
     label: '用户提供',
     tone: 'border-cyan-300 bg-cyan-50 text-cyan-800 dark:border-cyan-500/40 dark:bg-cyan-500/10 dark:text-cyan-200',
   },
-  '🔵': {
+  '[系统计算]': {
     label: '系统计算',
     tone: 'border-[#42C0EF]/60 bg-[#42C0EF]/10 text-cyan-800 dark:border-[#42C0EF]/40 dark:bg-[#42C0EF]/10 dark:text-cyan-200',
   },
-  '🟡': {
+  '[模型假设]': {
     label: '模型假设',
     tone: 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200',
   },
-  '🔴': {
+  '[外部来源]': {
     label: '外部基准',
     tone: 'border-red-300 bg-red-50 text-red-800 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200',
   },
 };
-function matchSourceBadgePrefix(text: string): { emoji: string; rest: string } | null {
-  for (const key of Object.keys(SOURCE_BADGES)) {
-    if (text.startsWith(key)) {
-      return { emoji: key, rest: text.slice(key.length).replace(/^\s+/, '') };
+
+const LEGACY_SOURCE_BADGES: readonly { marker: string; replacement: keyof typeof SOURCE_BADGES }[] = [
+  { marker: '\u{1F7E2}', replacement: '[用户提供]' },
+  { marker: '\u{1F535}', replacement: '[系统计算]' },
+  { marker: '\u{1F7E1}', replacement: '[模型假设]' },
+  { marker: '\u{1F534}', replacement: '[外部来源]' },
+];
+
+function matchSourceBadgePrefix(text: string): { marker: string; rest: string } | null {
+  for (const marker of Object.keys(SOURCE_BADGES)) {
+    if (text.startsWith(marker)) {
+      return { marker, rest: text.slice(marker.length).replace(/^\s+/, '') };
+    }
+  }
+  for (const legacy of LEGACY_SOURCE_BADGES) {
+    if (text.startsWith(legacy.marker)) {
+      return {
+        marker: legacy.replacement,
+        rest: text.slice(legacy.marker.length).replace(/^\s+/, ''),
+      };
     }
   }
   return null;
@@ -1546,10 +1559,10 @@ function formatBytesShort(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function SourceBadge({ emoji }: { emoji: string }): JSX.Element {
-  const meta = SOURCE_BADGES[emoji] ?? null;
+function SourceBadge({ marker }: { marker: string }): JSX.Element {
+  const meta = SOURCE_BADGES[marker] ?? null;
   if (!meta) {
-    return <span className="sr-only">{emoji}</span>;
+    return <span className="sr-only">{marker}</span>;
   }
   return (
     <span
@@ -1608,7 +1621,7 @@ function TerminalSummary({
   /**
    * Phase 4 R1 — expert workflow id from
    * `result.metadata.expertWorkflowId`. When present, renders a
-   * "📈 电商日报" / "📝 选题分析" / "🎬 抖音稿件复盘" header above
+   * "电商日报" / "选题分析" / "抖音稿件复盘" header above
    * the markdown body. Unknown ids fall through to no header.
    */
   expertWorkflowId?: string;
@@ -2344,10 +2357,10 @@ function makeMarkdownComponents(opts: {
     // Phase 4 R1 — paragraph override. Two transforms based on the
     // FIRST text node:
     //   1. Leading warning marker → wrap the entire paragraph in a yellow warning
-    //      callout. The emoji is consumed (no longer shown inline)
+    //      callout. The source marker is consumed (no longer shown inline)
     //      since the box itself is the visual signal.
     //   2. Leading source marker → emit a SourceBadge pill before the
-    //      remaining text. The emoji is consumed; the badge carries
+    //      remaining text. The source marker is consumed; the badge carries
     //      the same color cue plus a hover tooltip.
     //
     // Everything else falls through to the default ReactMarkdown
@@ -2361,7 +2374,7 @@ function makeMarkdownComponents(opts: {
       // Warning block. Match the marker with or without the
       // text-style variation selector (U+FE0F) and any trailing
       // whitespace, but render an icon instead of the raw marker.
-      const warningPrefixRe = /^[ \t]*⚠(?:️)?[ \t]*/u;
+      const warningPrefixRe = /^[ \t]*\u26A0(?:\uFE0F)?[ \t]*/u;
       if (warningPrefixRe.test(first)) {
         const trimmed = first.replace(warningPrefixRe, '');
         return (
@@ -2378,7 +2391,7 @@ function makeMarkdownComponents(opts: {
       if (badge) {
         return (
           <p {...rest}>
-            <SourceBadge emoji={badge.emoji} />
+            <SourceBadge marker={badge.marker} />
             {[badge.rest, ...arr.slice(1)]}
           </p>
         );

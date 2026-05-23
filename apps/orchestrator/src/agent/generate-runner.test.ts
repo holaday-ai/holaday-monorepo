@@ -292,7 +292,7 @@ describe('runGenerateTask (phase 22a)', () => {
     it('flag ON + ready → model call uses workflow system prompt + footer appended', async () => {
       // The mock client captures the system prompt the runner sends so
       // we can assert it carries the workflow's directive markers
-      // (source-annotation glyphs, section list).
+      // (source-annotation markers, section list).
       let systemPromptSeen = '';
       const stream = vi.fn(
         (params: { system: { text: string }[] }, _reqOpts?: unknown): unknown => {
@@ -303,7 +303,7 @@ describe('runGenerateTask (phase 22a)', () => {
           };
           const finalMessagePromise = new Promise<unknown>((resolve) => {
             queueMicrotask(() => {
-              const text = '## 📊 核心数据\n本场 GMV ¥100000 (🟢 用户提供) ...';
+              const text = '## 核心数据\n本场 GMV ¥100000 ([用户提供] 用户提供) ...';
               emit('text', text, text);
               resolve({
                 id: 'msg_test',
@@ -340,7 +340,7 @@ describe('runGenerateTask (phase 22a)', () => {
       expect(outcome.status).toBe('completed');
       // System prompt swapped to workflow report directives:
       expect(systemPromptSeen).toContain('抖音直播复盘');
-      expect(systemPromptSeen).toContain('🟢');
+      expect(systemPromptSeen).toContain('[用户提供]');
       expect(systemPromptSeen).toContain('核心数据');
       expect(systemPromptSeen).toContain('"gmv": 100000');
       // Follow-up footer appended:

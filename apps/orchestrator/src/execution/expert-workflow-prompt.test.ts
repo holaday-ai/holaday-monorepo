@@ -36,7 +36,7 @@ describe('buildReportSystemPrompt — clean data', () => {
   });
 
   it('flags source-annotation sections explicitly', () => {
-    expect(prompt).toContain('需要 🟢🔵🟡🔴 来源标注');
+    expect(prompt).toContain('需要来源标注');
   });
 
   it('embeds the extracted user data as JSON', () => {
@@ -46,7 +46,7 @@ describe('buildReportSystemPrompt — clean data', () => {
 
   it('marks all validators as passed', () => {
     for (const v of ALL_PASSED) {
-      expect(prompt).toContain(`✅ \`${v.validatorId}\``);
+      expect(prompt).toContain(`通过 \`${v.validatorId}\``);
     }
   });
 
@@ -82,13 +82,13 @@ describe('buildReportSystemPrompt — failed validator surfaces in prompt', () =
     validatorResults: failedSet,
   });
 
-  it('marks failed validator with ⚠️ + message', () => {
-    expect(prompt).toContain('⚠️ `gmv_order_price`');
+  it('marks failed validator with 未通过 + message', () => {
+    expect(prompt).toContain('未通过 `gmv_order_price`');
     expect(prompt).toContain('GMV ÷ 订单数 = ¥400');
   });
 
-  it('passed validators still get ✅', () => {
-    expect(prompt).toContain('✅ `conversion_sanity`');
+  it('passed validators still get pass marker', () => {
+    expect(prompt).toContain('通过 `conversion_sanity`');
   });
 });
 
@@ -102,7 +102,7 @@ describe('buildFollowUpFooter', () => {
     const footer = buildFollowUpFooter(W);
     expect(footer).toContain(FOLLOW_UP_ACTIONS_MARKER_OPEN);
     expect(footer).toContain(FOLLOW_UP_ACTIONS_MARKER_CLOSE);
-    expect(footer).toContain('🚀 下一步建议');
+    expect(footer).toContain('下一步建议');
     expect(footer).toContain('生成下场直播 SOP');
     expect(footer).toContain('分析单品表现');
     expect(footer).toContain('对比上场数据');

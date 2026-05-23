@@ -315,9 +315,6 @@ function OnboardingHint(): JSX.Element | null {
 
   return (
     <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-3.5 py-2.5 text-[13px] text-foreground">
-      <span className="text-base leading-none" aria-hidden>
-        👋
-      </span>
       <div className="min-w-0 flex-1">
         第一次来？点击下方的任务示例，或直接输入你想做的事情。
       </div>

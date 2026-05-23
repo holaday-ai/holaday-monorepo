@@ -10,10 +10,10 @@ import { humaniseTaskError, taskActionError } from '@/lib/error-copy';
 /**
  * Phase 5a — scheduled tasks list page. Replaces the Phase 16b
  * roadmap placeholder. Wires through to scheduledTasksRouter:
- *   list      → render rows
- *   toggle    → pause ↔ active flip on the row
- *   delete    → remove
- *   create    → modal popup (see ScheduledTaskDialog)
+ *   list      -> render rows
+ *   toggle    -> pause <-> active flip on the row
+ *   delete    -> remove
+ *   create    -> modal popup (see ScheduledTaskDialog)
  *
  * Row shape: name (intent slice) · 频率 · 上次/下次执行 · 状态. One-shot
  * schedules that already fired show as 'completed' and are read-only

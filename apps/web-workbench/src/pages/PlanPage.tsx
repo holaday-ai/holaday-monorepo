@@ -504,7 +504,7 @@ export function PlanPage(): JSX.Element {
       {/* Sandbox-mode warning */}
       {paymentOpts?.paypalEnv === 'sandbox' && (
         <div className="mx-auto mt-3 max-w-xl rounded-md border border-amber-300/50 bg-amber-50/50 p-3 text-center text-xs text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-200">
-          {zh ? '⚠ PayPal 处于 sandbox 模式 — 任何支付都不会实际扣款' : '⚠ PayPal in sandbox mode — no real charges'}
+          {zh ? '提示：PayPal 处于 sandbox 模式，任何支付都不会实际扣款' : 'Notice: PayPal is in sandbox mode, no real charges'}
         </div>
       )}
 

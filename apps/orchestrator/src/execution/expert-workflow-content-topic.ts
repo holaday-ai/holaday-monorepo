@@ -135,7 +135,7 @@ const DATA_VALIDATORS: readonly DataValidator[] = [];
 const REPORT_SECTIONS: readonly ReportSection[] = [
   {
     id: 'data_validation',
-    title: '⚠️ 数据校验',
+    title: '数据校验',
     required: true,
     sourceAnnotation: false,
     guidance:
@@ -143,23 +143,23 @@ const REPORT_SECTIONS: readonly ReportSection[] = [
   },
   {
     id: 'topic_directions',
-    title: '🎯 选题方向',
+    title: '选题方向',
     required: true,
     sourceAnnotation: true,
     guidance:
-      '从 5-7 个不同维度产出选题方向。每个方向 1-2 句话说明角度 + 适用场景。每个方向后必须标注 🟢/🔵/🟡/🔴：🟢 用户关键词命中 / 🔵 平台机制推导 / 🟡 模型经验 / 🔴 外部基准引用。禁止只列 3 个或更少（输出深度不够）。',
+      '从 5-7 个不同维度产出选题方向。每个方向 1-2 句话说明角度 + 适用场景。每个方向后必须标注 [用户提供]/ [系统计算]/ [模型假设]/ [外部来源]：[用户提供] 用户关键词命中 / [系统计算] 平台机制推导 / [模型假设] 模型经验 / [外部来源] 外部基准引用。禁止只列 3 个或更少（输出深度不够）。',
   },
   {
     id: 'title_candidates',
-    title: '📝 标题候选',
+    title: '标题候选',
     required: true,
     sourceAnnotation: true,
     guidance:
-      '为上面每个选题方向生成 3-5 个标题候选。标题之间风格要差异化（数字党 / 反问 / 痛点 / 情绪 / 场景），不要堆同一个套路。每组标题前注明方向 id；每个标题后用括号标注主打钩子（数字 / 反问 / 痛点 / 情绪 / 场景）+ 来源 🟢🔵🟡🔴。',
+      '为上面每个选题方向生成 3-5 个标题候选。标题之间风格要差异化（数字党 / 反问 / 痛点 / 情绪 / 场景），不要堆同一个套路。每组标题前注明方向 id；每个标题后用括号标注主打钩子（数字 / 反问 / 痛点 / 情绪 / 场景）+ 来源 [用户提供]/ [系统计算]/ [模型假设]/ [外部来源]。',
   },
   {
     id: 'content_outline',
-    title: '📋 内容大纲',
+    title: '内容大纲',
     required: true,
     sourceAnnotation: false,
     guidance:
@@ -167,15 +167,15 @@ const REPORT_SECTIONS: readonly ReportSection[] = [
   },
   {
     id: 'publishing_strategy',
-    title: '⏰ 发布策略',
+    title: '发布策略',
     required: true,
     sourceAnnotation: true,
     guidance:
-      '基于平台 + 品类给出最佳发布时段（具体到时间窗如 19:30-21:00）、发布频率（每周 X 条）、互动玩法（评论引导 / 私信钩子 / 置顶回复）。时段判断必须标注 🟡（经验估计）或 🔴（公开行业数据来源）。禁止给"高峰时段发布"这种抽象建议。',
+      '基于平台 + 品类给出最佳发布时段（具体到时间窗如 19:30-21:00）、发布频率（每周 X 条）、互动玩法（评论引导 / 私信钩子 / 置顶回复）。时段判断必须标注 [模型假设]（经验估计）或 [外部来源]（公开行业数据来源）。禁止给"高峰时段发布"这种抽象建议。',
   },
   {
     id: 'execution_checklist',
-    title: '✅ 执行 Checklist',
+    title: '执行 Checklist',
     required: true,
     sourceAnnotation: false,
     guidance:
@@ -183,11 +183,11 @@ const REPORT_SECTIONS: readonly ReportSection[] = [
   },
   {
     id: 'competitor_reference',
-    title: '🔍 竞品参考',
+    title: '竞品参考',
     required: false,
     sourceAnnotation: true,
     guidance:
-      '可选 — 仅当用户提供了 competitors 时输出。基于用户给的竞品名称：列每个账号的内容母题 + 标题套路 + 我们的差异化空白（写"我们做 X，他们没做"）。来源标注：🟢 用户提供账号名 / 🔴 公开内容观察。没提供竞品就完全跳过整个 section（不写空标题）。',
+      '可选 — 仅当用户提供了 competitors 时输出。基于用户给的竞品名称：列每个账号的内容母题 + 标题套路 + 我们的差异化空白（写"我们做 X，他们没做"）。来源标注：[用户提供] 用户提供账号名 / [外部来源] 公开内容观察。没提供竞品就完全跳过整个 section（不写空标题）。',
   },
 ] as const;
 
@@ -214,10 +214,10 @@ const SYSTEM_PROMPT_PREAMBLE = [
   '你是内容选题策划专家。用户已经提供了品类 + 平台（必填）和可选的人群 / 竞品 / 关键词 / 内容形式 / 选题数量 / 节点。请按下方 7 个 section 结构生成选题报告。',
   '',
   '## 来源标注规则（每个选题方向、标题、发布时段建议都必须标注一种）',
-  '- 🟢 用户提供：直接用了用户给的关键词 / 竞品 / 人群信息推导。',
-  '- 🔵 平台机制：基于平台已知机制（小红书 SEO 长尾、抖音前 3 秒钩子、B 站标题党约束等）推导。',
-  '- 🟡 模型假设：基于行业经验的推断，必须显式写"假设"或"经验估计"。',
-  '- 🔴 外部来源：引用公开数据 / 行业报告，必须标注来源名称（不可编造来源）。',
+  '- [用户提供]：直接用了用户给的关键词 / 竞品 / 人群信息推导。',
+  '- [系统计算]：基于平台已知机制（小红书 SEO 长尾、抖音前 3 秒钩子、B 站标题党约束等）推导。',
+  '- [模型假设]：基于行业经验的推断，必须显式写"假设"或"经验估计"。',
+  '- [外部来源]：引用公开数据 / 行业报告，必须标注来源名称（不可编造来源）。',
   '',
   '## 硬性约束',
   '- "选题方向" section 至少 5 个，最多 7 个。少于 5 个直接判失败 — 内容策划深度不够。',

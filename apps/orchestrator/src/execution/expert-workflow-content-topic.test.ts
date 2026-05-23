@@ -85,11 +85,11 @@ describe('CONTENT_TOPIC_WORKFLOW — shape', () => {
     ]);
   });
 
-  it('system prompt preamble pins glyphs + section format', () => {
-    expect(W.systemPromptPreamble).toContain('🟢');
-    expect(W.systemPromptPreamble).toContain('🔵');
-    expect(W.systemPromptPreamble).toContain('🟡');
-    expect(W.systemPromptPreamble).toContain('🔴');
+  it('system prompt preamble pins source markers + section format', () => {
+    expect(W.systemPromptPreamble).toContain('[用户提供]');
+    expect(W.systemPromptPreamble).toContain('[系统计算]');
+    expect(W.systemPromptPreamble).toContain('[模型假设]');
+    expect(W.systemPromptPreamble).toContain('[外部来源]');
     expect(W.systemPromptPreamble).toContain('5 个');
     expect(W.systemPromptPreamble).toContain('Markdown checkbox');
   });

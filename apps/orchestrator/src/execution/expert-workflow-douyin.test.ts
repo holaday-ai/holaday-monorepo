@@ -56,11 +56,11 @@ describe('DOUYIN_REVIEW_WORKFLOW — shape', () => {
     ]);
   });
 
-  it('system prompt preamble locks source glyphs + section title format', () => {
-    expect(W.systemPromptPreamble).toContain('🟢');
-    expect(W.systemPromptPreamble).toContain('🔵');
-    expect(W.systemPromptPreamble).toContain('🟡');
-    expect(W.systemPromptPreamble).toContain('🔴');
+  it('system prompt preamble locks source markers + section title format', () => {
+    expect(W.systemPromptPreamble).toContain('[用户提供]');
+    expect(W.systemPromptPreamble).toContain('[系统计算]');
+    expect(W.systemPromptPreamble).toContain('[模型假设]');
+    expect(W.systemPromptPreamble).toContain('[外部来源]');
     expect(W.systemPromptPreamble).toContain('checkbox');
     expect(W.systemPromptPreamble).toContain('数据校验未通过');
   });

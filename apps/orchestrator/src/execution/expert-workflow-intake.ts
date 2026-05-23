@@ -153,8 +153,8 @@ function combineQuestions(
   lines.push(`「${workflow.name}」数据校验提示：`);
   lines.push('');
   for (const f of failed) {
-    if (f.message) lines.push(`⚠️ ${f.message}`);
-    if (f.suggestedFix) lines.push(`💡 ${f.suggestedFix}`);
+    if (f.message) lines.push(`注意：${f.message}`);
+    if (f.suggestedFix) lines.push(`建议：${f.suggestedFix}`);
     lines.push('');
   }
   lines.push('---');
@@ -176,8 +176,8 @@ function buildContradictionQuestion(
   lines.push(`「${workflow.name}」数据校验未通过：`);
   lines.push('');
   for (const f of failed) {
-    if (f.message) lines.push(`⚠️ ${f.message}`);
-    if (f.suggestedFix) lines.push(`💡 ${f.suggestedFix}`);
+    if (f.message) lines.push(`注意：${f.message}`);
+    if (f.suggestedFix) lines.push(`建议：${f.suggestedFix}`);
     lines.push('');
   }
   lines.push('请确认数据后我再继续生成复盘报告。');

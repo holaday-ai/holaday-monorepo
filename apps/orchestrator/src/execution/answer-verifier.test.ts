@@ -637,30 +637,30 @@ const fullTierContract = (taskId: string): ExecutionContract =>
   });
 
 // Compact but realistic — every required section title and at
-// least one annotation glyph per annotated section. Long enough
+// least one source marker per annotated section. Long enough
 // to clear the full-tier word_count threshold (200 chars).
 const COMPLETE_REPORT = [
   '# 直播复盘报告',
   '',
-  '## ⚠️ 数据校验',
+  '## 数据校验',
   '所有数据已通过交叉校验。',
   '',
-  '## 📊 核心数据',
-  '- GMV: ¥100000 🟢',
-  '- 订单数: 1250 🟢',
-  '- 客单价: ¥80 🟢',
-  '- UV: 20000 🟢',
-  '- 转化率: 6.25% 🔵 (订单数÷UV)',
+  '## 核心数据',
+  '- GMV: ¥100000 [用户提供]',
+  '- 订单数: 1250 [用户提供]',
+  '- 客单价: ¥80 [用户提供]',
+  '- UV: 20000 [用户提供]',
+  '- 转化率: 6.25% [系统计算] (订单数÷UV)',
   '',
-  '## 🔍 问题诊断',
-  '主要问题：UV 分布不均 🟢；客单价偏低 🟢；ROI 处于行业平均线 🟡。',
+  '## 问题诊断',
+  '主要问题：UV 分布不均 [用户提供]；客单价偏低 [用户提供]；ROI 处于行业平均线 [模型假设]。',
   '',
-  '## 💡 优化动作',
+  '## 优化动作',
   '1. 把主推品 X 从第 3 位上架位调整到第 1 位。',
   '2. 调整千川投放定向到「下单意向」人群。',
   '3. 增加直播话术节奏点位，每 15 分钟提及一次促销节点。',
   '',
-  '## ✅ 下场直播 Checklist',
+  '## 下场直播 Checklist',
   '- [ ] 开播前 30 分钟完成商品上架顺序调整',
   '- [ ] 主推品话术彩排 3 遍',
   '- [ ] 千川投放计划开播前 2 小时启动',
@@ -722,9 +722,9 @@ describe('verifyDeterministic — workflow section_presence + source_annotation 
   });
 
   it('missing required section: section_presence fails as fixable', () => {
-    // Drop the "💡 优化动作" section entirely.
+    // Drop the "优化动作" section entirely.
     const truncated = COMPLETE_REPORT.replace(
-      /## 💡 优化动作[\s\S]*?(?=## ✅)/,
+      /## 优化动作[\s\S]*?(?=## 下场直播 Checklist)/,
       '',
     );
     const contract = fullTierContract('tsk_wf_missing');
@@ -752,13 +752,13 @@ describe('verifyDeterministic — workflow section_presence + source_annotation 
     expect(result.failureLevel).toBe('fixable');
   });
 
-  it('annotated section without 🟢🔵🟡🔴: source_annotation fails as fixable', () => {
-    // Strip all glyphs out of the 核心数据 section while keeping
+  it('annotated section without source markers: source_annotation fails as fixable', () => {
+    // Strip all source markers out of the 核心数据 section while keeping
     // its title intact.
     const stripped = COMPLETE_REPORT.replace(
-      /## 📊 核心数据[\s\S]*?(?=## 🔍)/,
+      /## 核心数据[\s\S]*?(?=## 问题诊断)/,
       [
-        '## 📊 核心数据',
+        '## 核心数据',
         '- GMV: ¥100000',
         '- 订单数: 1250',
         '- 客单价: ¥80',

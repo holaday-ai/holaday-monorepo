@@ -69,11 +69,11 @@ describe('ECOM_DAILY_WORKFLOW — shape', () => {
     ]);
   });
 
-  it('system prompt locks section format + glyphs', () => {
-    expect(W.systemPromptPreamble).toContain('🟢');
-    expect(W.systemPromptPreamble).toContain('🔵');
-    expect(W.systemPromptPreamble).toContain('🟡');
-    expect(W.systemPromptPreamble).toContain('🔴');
+  it('system prompt locks section format + source markers', () => {
+    expect(W.systemPromptPreamble).toContain('[用户提供]');
+    expect(W.systemPromptPreamble).toContain('[系统计算]');
+    expect(W.systemPromptPreamble).toContain('[模型假设]');
+    expect(W.systemPromptPreamble).toContain('[外部来源]');
     expect(W.systemPromptPreamble).toContain('Markdown checkbox');
     expect(W.systemPromptPreamble).toContain('编造同比');
   });

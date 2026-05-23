@@ -17,9 +17,8 @@
  *     diagnosis / optimization / next_stream_checklist /
  *     industry_benchmark). 5 required, 1 optional.
  *   - 3 follow-up actions for the SPA's chip rail.
- *   - Sonnet-facing system prompt preamble that pins the source-
- *     annotation glyph rules (🟢🔵🟡🔴) and the section-by-section
- *     output structure.
+ *   - Sonnet-facing system prompt preamble that pins the source
+ *     annotation rules and the section-by-section output structure.
  *
  * Pure data — no I/O, no React, no model client. The intake
  * handler (Day 2) and report generator (Day 3) consume this
@@ -256,31 +255,31 @@ const DATA_VALIDATORS: readonly DataValidator[] = [
 const REPORT_SECTIONS: readonly ReportSection[] = [
   {
     id: 'data_validation',
-    title: '⚠️ 数据校验',
+    title: '数据校验',
     required: true,
     sourceAnnotation: false,
     guidance:
-      '列出每个 validator 的结果。通过的写"已通过"。失败的写"⚠️"+具体差异+建议确认项。',
+      '列出每个 validator 的结果。通过的写"已通过"。失败的写"注意："+具体差异+建议确认项。',
   },
   {
     id: 'core_metrics',
-    title: '📊 核心数据',
+    title: '核心数据',
     required: true,
     sourceAnnotation: true,
     guidance:
-      '表格形式列出所有 5 个核心指标 + 提供的可选指标。每个数字后标注 🟢/🔵/🟡/🔴 表示来源。',
+      '表格形式列出所有 5 个核心指标 + 提供的可选指标。每个数字后标注 [用户提供]/ [系统计算]/ [模型假设]/ [外部来源] 表示来源。',
   },
   {
     id: 'diagnosis',
-    title: '🔍 问题诊断',
+    title: '问题诊断',
     required: true,
     sourceAnnotation: true,
     guidance:
-      '指出 2-4 个核心问题。每个结论必须标注依据：🟢 用户数据 / 🔵 计算 / 🟡 模型假设 / 🔴 外部基准。',
+      '指出 2-4 个核心问题。每个结论必须标注依据：[用户提供] 用户数据 / [系统计算] 计算 / [模型假设] 模型假设 / [外部来源] 外部基准。',
   },
   {
     id: 'optimization',
-    title: '💡 优化动作',
+    title: '优化动作',
     required: true,
     sourceAnnotation: false,
     guidance:
@@ -288,7 +287,7 @@ const REPORT_SECTIONS: readonly ReportSection[] = [
   },
   {
     id: 'next_stream_checklist',
-    title: '✅ 下场直播 Checklist',
+    title: '下场直播 Checklist',
     required: true,
     sourceAnnotation: false,
     guidance:
@@ -296,7 +295,7 @@ const REPORT_SECTIONS: readonly ReportSection[] = [
   },
   {
     id: 'industry_benchmark',
-    title: '📈 行业参考',
+    title: '行业参考',
     required: false,
     sourceAnnotation: true,
     guidance:
@@ -324,10 +323,10 @@ const SYSTEM_PROMPT_PREAMBLE = [
   '你是抖音直播复盘专家。用户已经提供了直播数据（在「数据」section）和数据校验结果（在「校验」section）。请按下方 6 个 section 结构生成报告。',
   '',
   '## 来源标注规则（每个数字必须标注一种）',
-  '- 🟢 用户提供：直接引用用户给的原始数据。',
-  '- 🔵 系统计算：从用户数据推导（如 GMV÷订单=客单价），标注计算公式。',
-  '- 🟡 模型假设：基于行业经验的推断，必须显式标注"假设"或"经验估计"字样。',
-  '- 🔴 外部来源：引用第三方数据/报告，标注来源名称（不可编造来源）。',
+  '- [用户提供]：直接引用用户给的原始数据。',
+  '- [系统计算]：从用户数据推导（如 GMV÷订单=客单价），标注计算公式。',
+  '- [模型假设]：基于行业经验的推断，必须显式标注"假设"或"经验估计"字样。',
+  '- [外部来源]：引用第三方数据/报告，标注来源名称（不可编造来源）。',
   '',
   '## 硬性约束',
   '- 如果"校验" section 有失败项，**不得使用矛盾数据继续推导**。报告以"数据校验未通过，需用户确认"开头，然后只列出无矛盾部分的诊断。',

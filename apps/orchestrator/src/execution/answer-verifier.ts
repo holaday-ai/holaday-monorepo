@@ -1049,31 +1049,40 @@ function escapeRegex(s: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Source-annotation glyphs the workflow report prompt pins. The
- * verifier only requires that AT LEAST ONE of these markers
- * appears inside a section that demanded annotation. Stricter
- * counting (e.g. every numeric line must have one) belongs in the
- * LLM tier — too noisy for deterministic.
+ * Source-annotation markers the workflow report prompt pins. The
+ * verifier only requires that AT LEAST ONE of these markers appears
+ * inside a section that demanded annotation. Stricter counting
+ * belongs in the LLM tier because it is too noisy for deterministic.
  */
-const SOURCE_ANNOTATION_GLYPHS = ['🟢', '🔵', '🟡', '🔴'] as const;
+const SOURCE_ANNOTATION_MARKERS = [
+  '[用户提供]',
+  '[系统计算]',
+  '[模型假设]',
+  '[外部来源]',
+] as const;
+const LEGACY_SOURCE_ANNOTATION_MARKERS = [
+  '\u{1F7E2}',
+  '\u{1F535}',
+  '\u{1F7E1}',
+  '\u{1F534}',
+] as const;
 
 /**
- * Strip emoji + leading/trailing whitespace so 抖音's "📊 核心数据"
- * still matches a model that wrote "核心数据" or "核心数据 📊". The
+ * Strip decorative symbols + leading/trailing whitespace so a titled
+ * section still matches if a model adds or removes visual markers. The
  * goal is forgiving title comparison — the model will sometimes
  * drop the leading icon, sometimes restate it differently. The
  * core noun phrase is the load-bearing identifier.
  *
- * Range covered: BMP emoji block + the supplementary ranges that
- * cover ✅ ⚠️ 📊 🔍 💡 📈 🟢 etc. Done with codepoint-aware regex
- * (Unicode property escapes) so we don't list every glyph.
+ * Range covered: BMP decorative symbol block + the supplementary ranges that
+ * codepoint-aware regex keeps the list broad without naming every symbol.
  */
 function normaliseSectionTitle(s: string): string {
   return (
     s
       .replace(/\p{Extended_Pictographic}/gu, '')
-      // Variation selector (U+FE0F) often follows ✅ etc.
-      .replace(/️/g, '')
+      // Variation selector (U+FE0F) often follows decorative symbols.
+      .replace(/\uFE0F/g, '')
       .replace(/\s+/g, '')
       .trim()
   );
@@ -1083,9 +1092,9 @@ function normaliseSectionTitle(s: string): string {
  * Locate the slice of `text` that belongs to a section identified
  * by `title`. Two-pass approach:
  *   1. find the title using normalised comparison (forgiving — ignores
- *      emoji + whitespace differences in the model's heading style)
+ *      decorative marker + whitespace differences in the model's heading style)
  *   2. return the body from the ORIGINAL text so source-annotation
- *      glyphs (🟢🔵🟡🔴) survive for the annotation check
+ *      markers survive for the annotation check
  *
  * Returns null when the title isn't found at all.
  */
@@ -1101,7 +1110,7 @@ function extractSectionBody(
   if (startIdx === -1) return null;
 
   // Skip past the original characters that contributed to the
-  // matched title. Original text may have extra emoji or spaces
+  // matched title. Original text may have extra decorative markers or spaces
   // between the core characters, so probe forward until we've
   // consumed enough normalised chars.
   let bodyStart = startIdx;
@@ -1123,7 +1132,7 @@ function extractSectionBody(
 }
 
 /**
- * Find the first index in `text` (original — emoji + whitespace
+ * Find the first index in `text` (original — marker + whitespace
  * intact) where the normalised suffix starts with `needleCore`
  * (already normalised). Returns -1 if no match. Quadratic worst
  * case but inputs are short.
@@ -1148,7 +1157,7 @@ function findNormalisedIndex(
 
 /**
  * Section-presence check. For every required `ReportSection`,
- * confirm its title (or the title minus emoji/whitespace) appears
+ * confirm its title (or the title minus marker/whitespace) appears
  * in the answer text. Missing required sections → fixable failure
  * so autoFix can re-prompt the model to fill the gap. Optional
  * sections being absent never fails.
@@ -1181,8 +1190,8 @@ function checkWorkflowSectionPresence(
 
 /**
  * Source-annotation check. For every section flagged
- * `sourceAnnotation: true`, confirm at least one annotation glyph
- * (🟢🔵🟡🔴) appears inside that section's body. A required
+ * `sourceAnnotation: true`, confirm at least one source annotation
+ * appears inside that section's body. A required
  * section that's missing entirely is already caught by
  * section_presence — here we vacuous-pass so we don't double-fail.
  * An optional section that's missing is also vacuous-pass.
@@ -1208,7 +1217,9 @@ function checkWorkflowSourceAnnotation(
       // matters when the section exists.
       continue;
     }
-    const hasAny = SOURCE_ANNOTATION_GLYPHS.some((g) => body.includes(g));
+    const hasAny = [...SOURCE_ANNOTATION_MARKERS, ...LEGACY_SOURCE_ANNOTATION_MARKERS].some((marker) =>
+      body.includes(marker),
+    );
     if (!hasAny) unannotated.push(section.title);
   }
   const passed = unannotated.length === 0;
@@ -1217,7 +1228,7 @@ function checkWorkflowSourceAnnotation(
     passed,
     checker: 'deterministic',
     detail: passed
-      ? 'all annotated sections include 🟢/🔵/🟡/🔴 markers'
+      ? 'all annotated sections include source markers'
       : `sections missing source markers: ${unannotated.join('、')}`,
     severity: passed ? undefined : 'fixable',
   };

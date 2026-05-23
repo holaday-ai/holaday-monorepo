@@ -263,31 +263,31 @@ const DATA_VALIDATORS: readonly DataValidator[] = [
 const REPORT_SECTIONS: readonly ReportSection[] = [
   {
     id: 'data_validation',
-    title: '⚠️ 数据校验',
+    title: '数据校验',
     required: true,
     sourceAnnotation: false,
     guidance:
-      '列出每个 validator 的结果。通过的写"已通过"或"已通过（字段缺失，跳过）"。失败的写"⚠️"+具体差异+建议确认项。',
+      '列出每个 validator 的结果。通过的写"已通过"或"已通过（字段缺失，跳过）"。失败的写"注意："+具体差异+建议确认项。',
   },
   {
     id: 'core_metrics',
-    title: '📊 核心数据',
+    title: '核心数据',
     required: true,
     sourceAnnotation: true,
     guidance:
-      '表格形式列出所有提供的指标 + 系统计算的派生指标（如 UV 价值、获客成本）。每个数字后标注 🟢 用户提供 / 🔵 系统计算 / 🟡 模型假设 / 🔴 外部基准。',
+      '表格形式列出所有提供的指标 + 系统计算的派生指标（如 UV 价值、获客成本）。每个数字后标注 [用户提供] 用户提供 / [系统计算] 系统计算 / [模型假设] 模型假设 / [外部来源] 外部基准。',
   },
   {
     id: 'anomaly_diagnosis',
-    title: '🔍 异动诊断',
+    title: '异动诊断',
     required: true,
     sourceAnnotation: true,
     guidance:
-      '基于今日数据 vs 行业经验基准 / 用户提供的历史范围（如有），指出 2-4 个核心异动点。每个结论必须标注依据：🟢 用户数据 / 🔵 计算 / 🟡 模型假设 / 🔴 外部基准。**禁止编造同比环比数字** — 没有历史就明确写"未提供历史，以行业经验为参考"。',
+      '基于今日数据 vs 行业经验基准 / 用户提供的历史范围（如有），指出 2-4 个核心异动点。每个结论必须标注依据：[用户提供] 用户数据 / [系统计算] 计算 / [模型假设] 模型假设 / [外部来源] 外部基准。**禁止编造同比环比数字** — 没有历史就明确写"未提供历史，以行业经验为参考"。',
   },
   {
     id: 'channel_analysis',
-    title: '📈 渠道拆解',
+    title: '渠道拆解',
     required: false,
     sourceAnnotation: true,
     guidance:
@@ -295,7 +295,7 @@ const REPORT_SECTIONS: readonly ReportSection[] = [
   },
   {
     id: 'tomorrow_priorities',
-    title: '🎯 明日重点',
+    title: '明日重点',
     required: true,
     sourceAnnotation: false,
     guidance:
@@ -303,15 +303,15 @@ const REPORT_SECTIONS: readonly ReportSection[] = [
   },
   {
     id: 'trend_alert',
-    title: '📉 趋势预警',
+    title: '趋势预警',
     required: true,
     sourceAnnotation: true,
     guidance:
-      '基于今日数据是否有趋势性预警（连续亏损、退款率上升、ROI 持续走低等）。无趋势数据就基于今日单点经验判断，必须标注 🟡（经验估计）。',
+      '基于今日数据是否有趋势性预警（连续亏损、退款率上升、ROI 持续走低等）。无趋势数据就基于今日单点经验判断，必须标注 [模型假设]（经验估计）。',
   },
   {
     id: 'execution_checklist',
-    title: '✅ 执行 Checklist',
+    title: '执行 Checklist',
     required: true,
     sourceAnnotation: false,
     guidance:
@@ -342,10 +342,10 @@ const SYSTEM_PROMPT_PREAMBLE = [
   '你是电商运营日报专家。用户已经提供了日期 + 营收（必填）和可选的订单 / UV / 转化率 / 客单价 / 投放 / ROI / 退款 / 新客 / TOP SKU。请按下方 7 个 section 结构生成日报。',
   '',
   '## 来源标注规则（每个数字必须标注一种）',
-  '- 🟢 用户提供：直接引用用户给的原始数据。',
-  '- 🔵 系统计算：从用户数据推导（如 UV 价值 = 营收÷UV、ROI = 营收÷投放消耗）。',
-  '- 🟡 模型假设：基于行业经验的推断，必须显式写"假设"或"经验估计"字样。',
-  '- 🔴 外部来源：引用第三方数据/报告，必须标注来源名称（不可编造）。',
+  '- [用户提供]：直接引用用户给的原始数据。',
+  '- [系统计算]：从用户数据推导（如 UV 价值 = 营收÷UV、ROI = 营收÷投放消耗）。',
+  '- [模型假设]：基于行业经验的推断，必须显式写"假设"或"经验估计"字样。',
+  '- [外部来源]：引用第三方数据/报告，必须标注来源名称（不可编造）。',
   '',
   '## 硬性约束',
   '- 如果"校验" section 有失败项，**不得使用矛盾数据继续推导**。报告以"数据校验未通过，需用户确认"开头，然后只列出无矛盾部分的诊断。',

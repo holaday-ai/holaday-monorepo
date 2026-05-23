@@ -114,7 +114,7 @@ export interface UiTask {
    * Phase 4 R1 — expert workflow id stamped under metadata when the
    * supercar ran a typed workflow (douyin-review / content-topic /
    * ecom-daily). Drives the expert-report header above the markdown
-   * body so users see "📈 电商日报" / "📝 选题分析" rather than a
+   * body so users see "电商日报" / "选题分析" rather than a
    * raw block of prose. Undefined for normal browser / generate tasks.
    */
   expertWorkflowId?: string;
