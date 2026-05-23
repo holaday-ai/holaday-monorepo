@@ -50,6 +50,7 @@ import { TaskListItem } from '@/components/TaskListItem';
 import { useToast } from '@/components/ui/toast';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { UserMenu } from '@/components/UserMenu';
+import { copyTextToClipboard } from '@/lib/copy-text';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
 import type { UiProject, UiTask } from '@/types/task';
@@ -1015,10 +1016,9 @@ function ShareInviteRow(): JSX.Element {
   const toast = useToast();
   const onShare = React.useCallback(async () => {
     const url = typeof window !== 'undefined' ? window.location.origin : '';
-    try {
-      await navigator.clipboard?.writeText(url);
+    if (await copyTextToClipboard(url)) {
       toast.show('邀请链接已复制');
-    } catch {
+    } else {
       toast.show('复制失败，请手动复制地址栏链接');
     }
   }, [toast]);

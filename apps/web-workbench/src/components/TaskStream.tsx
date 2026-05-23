@@ -34,6 +34,7 @@ import remarkGfm from 'remark-gfm';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
+import { copyTextToClipboard } from '@/lib/copy-text';
 import {
   downloadFailureMessage,
   downloadFileAuthed,
@@ -1732,10 +1733,9 @@ function TerminalSummary({
   const markdownText = displayText.trim() || fallbackPlainText;
   const copyTo = React.useCallback(
     async (value: string, label: string): Promise<void> => {
-      try {
-        await navigator.clipboard.writeText(value);
+      if (await copyTextToClipboard(value)) {
         toast.show(`已复制${label}`);
-      } catch {
+      } else {
         toast.show('复制失败', 'error');
       }
     },

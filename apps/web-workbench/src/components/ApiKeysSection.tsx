@@ -3,6 +3,7 @@ import * as React from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import { copyTextToClipboard } from '@/lib/copy-text';
 import { trpc } from '@/lib/trpc';
 import { Section } from '@/pages/PageShell';
 
@@ -103,10 +104,9 @@ export function ApiKeysSection(): JSX.Element {
 
   const copyPlaintext = async (): Promise<void> => {
     if (!fresh) return;
-    try {
-      await navigator.clipboard.writeText(fresh.plaintext);
+    if (await copyTextToClipboard(fresh.plaintext)) {
       toast.show('已复制 API Key');
-    } catch {
+    } else {
       toast.show('复制失败', 'error');
     }
   };
@@ -300,10 +300,9 @@ function WebhookDocs(): JSX.Element {
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const webhookUrl = `${origin}/api/webhooks/tasks`;
   const copyUrl = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(webhookUrl);
+    if (await copyTextToClipboard(webhookUrl)) {
       toast.show('已复制 Webhook URL');
-    } catch {
+    } else {
       toast.show('复制失败', 'error');
     }
   };
