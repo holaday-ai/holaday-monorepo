@@ -241,9 +241,9 @@ export function ProjectsPage(): JSX.Element {
         onClose={() => setPendingDelete(null)}
         onConfirm={async () => {
           const p = pendingDelete;
-          setPendingDelete(null);
           if (!p) return;
           await performDelete(p);
+          setPendingDelete(null);
         }}
       />
     </PageContainer>

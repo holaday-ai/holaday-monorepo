@@ -233,9 +233,9 @@ export function FilesPage(): JSX.Element {
         onClose={() => setPendingDelete(null)}
         onConfirm={async () => {
           const f = pendingDelete;
-          setPendingDelete(null);
           if (!f) return;
           await performDelete(f);
+          setPendingDelete(null);
         }}
       />
     </PageContainer>

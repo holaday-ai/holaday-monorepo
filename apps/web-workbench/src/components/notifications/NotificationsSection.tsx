@@ -273,8 +273,8 @@ export function NotificationsSection(): JSX.Element {
         confirmLabel="删除"
         destructive
         onClose={() => setConfirmDelete(null)}
-        onConfirm={() => {
-          if (confirmDelete) void handleDelete(confirmDelete);
+        onConfirm={async () => {
+          if (confirmDelete) await handleDelete(confirmDelete);
         }}
       />
     </>

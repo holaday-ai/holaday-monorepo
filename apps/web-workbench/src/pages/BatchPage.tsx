@@ -358,8 +358,8 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
         destructive
         onClose={() => setConfirmCancel(false)}
         onConfirm={async () => {
-          setConfirmCancel(false);
           await performCancel();
+          setConfirmCancel(false);
         }}
       />
     </PageContainer>

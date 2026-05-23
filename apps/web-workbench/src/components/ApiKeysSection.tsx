@@ -272,9 +272,9 @@ export function ApiKeysSection(): JSX.Element {
         onClose={() => setPendingRevoke(null)}
         onConfirm={async () => {
           const k = pendingRevoke;
-          setPendingRevoke(null);
           if (!k) return;
           await performRevoke(k);
+          setPendingRevoke(null);
         }}
       />
     </Section>

@@ -274,9 +274,9 @@ export function ScheduledPage(): JSX.Element {
         onClose={() => setConfirmDelete(null)}
         onConfirm={async () => {
           const row = confirmDelete;
-          setConfirmDelete(null);
           if (!row) return;
           await performDelete(row.scheduledTaskId);
+          setConfirmDelete(null);
         }}
       />
     </PageContainer>
