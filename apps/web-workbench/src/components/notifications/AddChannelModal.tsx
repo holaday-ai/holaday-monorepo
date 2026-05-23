@@ -206,7 +206,7 @@ export function AddChannelModal({
         if (e.target === e.currentTarget) requestClose();
       }}
     >
-      <div className="hd-popover-enter w-full max-w-[520px] rounded-lg border border-border bg-popover shadow-2xl">
+      <div className="hd-popover-enter flex max-h-[calc(100dvh-2rem)] w-full max-w-[520px] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-2xl">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 className="text-sm font-semibold">
             {initial ? '编辑通知渠道' : '添加通知渠道'}
@@ -223,7 +223,7 @@ export function AddChannelModal({
         </div>
         <form
           onSubmit={(e) => void handleSubmit(e)}
-          className="space-y-4 px-4 py-4"
+          className="flex-1 space-y-4 overflow-y-auto px-4 py-4"
         >
           <div>
             <label className="mb-2 block text-xs font-medium text-muted-foreground">
@@ -335,7 +335,7 @@ export function AddChannelModal({
             )}
           </div>
 
-          <div className="flex justify-end gap-2 border-t border-border pt-3">
+          <div className="sticky bottom-0 -mx-4 -mb-4 flex justify-end gap-2 border-t border-border bg-popover px-4 pb-4 pt-3">
             <Button
               type="button"
               variant="ghost"

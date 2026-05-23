@@ -189,7 +189,7 @@ export function ApiKeysSection(): JSX.Element {
       </div>
 
       {creating && (
-        <div className="mb-4 flex items-center gap-2 rounded-md border border-border bg-card/60 px-3 py-2">
+        <div className="mb-4 flex flex-col gap-2 rounded-md border border-border bg-card/60 px-3 py-2 sm:flex-row sm:items-center">
           <input
             type="text"
             value={newName}
@@ -211,20 +211,22 @@ export function ApiKeysSection(): JSX.Element {
               if (el && document.activeElement !== el) el.focus();
             }}
           />
-          <Button size="sm" onClick={() => void submit()} disabled={submitting}>
-            {submitting ? '创建中…' : '创建'}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              setCreating(false);
-              setNewName('');
-            }}
-            disabled={submitting}
-          >
-            取消
-          </Button>
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+            <Button size="sm" onClick={() => void submit()} disabled={submitting}>
+              {submitting ? '创建中…' : '创建'}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setCreating(false);
+                setNewName('');
+              }}
+              disabled={submitting}
+            >
+              取消
+            </Button>
+          </div>
         </div>
       )}
 
