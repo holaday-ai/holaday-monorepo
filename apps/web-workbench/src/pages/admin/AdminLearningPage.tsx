@@ -17,6 +17,7 @@ import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
+import { learningEmptyCopy } from './admin-learning-copy';
 import { formatDateTime, truncate } from './admin-shared';
 
 type OverviewData = Awaited<ReturnType<typeof trpc.admin.learning.overview.query>>;
@@ -153,11 +154,7 @@ export function AdminLearningPage(): JSX.Element {
               ) : !data || data.domains.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-8 text-center text-muted-foreground">
-                    {searchDebounced
-                      ? '没有匹配的域名'
-                      : filter === 'highRisk'
-                        ? '本期无高风险域名（≥ 3 次任务且失败 / 成功+失败 > 50%）'
-                        : '本周无失败任务'}
+                    {learningEmptyCopy({ search: searchDebounced, filter })}
                   </td>
                 </tr>
               ) : (

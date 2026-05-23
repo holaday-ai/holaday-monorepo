@@ -42,16 +42,22 @@ export function BatchTaskDialog({
     if (!open) return;
     setName('');
     setPasteText(initialPrompts && initialPrompts.length > 0 ? initialPrompts.join('\n') : '');
+    setSubmitting(false);
   }, [open, initialPrompts]);
+
+  const requestClose = React.useCallback(() => {
+    if (submitting) return;
+    onClose();
+  }, [onClose, submitting]);
 
   React.useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') requestClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open, requestClose]);
 
   if (!open) return null;
 
@@ -89,7 +95,7 @@ export function BatchTaskDialog({
     <div
       role="dialog"
       aria-modal="true"
-      onClick={onClose}
+      onClick={requestClose}
       className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm animate-fade-in"
     >
       <div
@@ -103,7 +109,8 @@ export function BatchTaskDialog({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
+            disabled={submitting}
             aria-label="关闭"
             className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
           >
@@ -151,7 +158,7 @@ export function BatchTaskDialog({
         <footer className="flex items-center justify-end gap-2 border-t border-border bg-muted/30 px-5 py-3">
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
             disabled={submitting}
             className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
           >

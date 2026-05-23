@@ -28,6 +28,7 @@ import {
   downloadFailureMessage,
   downloadFileAuthed,
 } from '@/lib/download-file';
+import { filesEmptyCopy, type FileFilter } from '@/lib/files-empty-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
@@ -40,7 +41,7 @@ interface UiFile {
   createdAt: Date | string;
 }
 
-type Filter = 'all' | 'images' | 'documents';
+type Filter = FileFilter;
 
 /**
  * P2.8 — files library. Each row shows two always-visible primary
@@ -128,6 +129,8 @@ export function FilesPage(): JSX.Element {
     });
   }
 
+  const emptyCopy = filesEmptyCopy({ query: q, filter });
+
   // 复制下载链接 is intentionally gone: the orchestrator's
   // /api/files/:id/download endpoint requires an Authorization
   // header, so a raw link copied to clipboard 401s the moment the
@@ -182,9 +185,11 @@ export function FilesPage(): JSX.Element {
       ) : files.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
           <FileIcon className="h-8 w-8 text-muted-foreground/40" />
-          <div className="text-sm font-medium text-foreground/80">还没有文件</div>
+          <div className="text-sm font-medium text-foreground/80">
+            {emptyCopy.title}
+          </div>
           <div className="text-xs text-muted-foreground">
-            在任务输入框点 + 号上传文件，文件会出现在这里。
+            {emptyCopy.body}
           </div>
         </div>
       ) : (
