@@ -30,6 +30,7 @@ import {
 } from '@/lib/download-file';
 import { filesEmptyCopy, type FileFilter } from '@/lib/files-empty-copy';
 import { trpc } from '@/lib/trpc';
+import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
 
@@ -65,11 +66,15 @@ export function FilesPage(): JSX.Element {
   const [previewing, setPreviewing] = React.useState<FilePreviewPayload | null>(
     null,
   );
+  const debouncedQuery = useDebouncedValue(q.trim(), 250);
 
   const refresh = React.useCallback(async () => {
     setLoading(true);
     try {
-      const list = await trpc.files.list.query({ type: filter, q: q.trim() || undefined });
+      const list = await trpc.files.list.query({
+        type: filter,
+        q: debouncedQuery || undefined,
+      });
       setFiles(list as UiFile[]);
     } catch (err) {
       toast.show(
@@ -79,7 +84,7 @@ export function FilesPage(): JSX.Element {
     } finally {
       setLoading(false);
     }
-  }, [filter, q, toast]);
+  }, [debouncedQuery, filter, toast]);
 
   React.useEffect(() => {
     void refresh();

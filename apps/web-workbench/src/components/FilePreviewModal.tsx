@@ -5,6 +5,7 @@ import {
   downloadFileAuthed,
   fetchFileBlobAuthed,
 } from '@/lib/download-file';
+import { filePreviewKind } from '@/lib/file-preview-kind';
 import { useToast } from '@/components/ui/toast';
 
 export interface FilePreviewPayload {
@@ -48,7 +49,10 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
   // payload is null (modal closed).
   React.useEffect(() => {
     if (!payload) {
-      setObjectUrl(null);
+      setObjectUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
       setTextBody(null);
       setErrorMessage(null);
       setResolvedMime('');
@@ -58,7 +62,10 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
     let cancelled = false;
     setLoading(true);
     setErrorMessage(null);
-    setObjectUrl(null);
+    setObjectUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
     setTextBody(null);
     setResolvedMime('');
     void fetchFileBlobAuthed({ url: payload.url }).then(async (res) => {
@@ -70,11 +77,7 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
       }
       const mime = res.mime ?? payload.mimetype ?? '';
       setResolvedMime(mime);
-      if (
-        mime.startsWith('text/') ||
-        mime === 'application/json' ||
-        /\.(md|txt|json|csv)$/i.test(payload.filename)
-      ) {
+      if (filePreviewKind({ mime, filename: payload.filename }) === 'text') {
         // Decode small text payloads inline. Cap at ~1MB so a huge
         // log file doesn't lock up the renderer.
         if (res.blob.size <= 1_000_000) {
@@ -139,8 +142,7 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
   };
 
   const mime = resolvedMime || payload.mimetype;
-  const isImage = mime.startsWith('image/');
-  const isPdf = mime === 'application/pdf' || /\.pdf$/i.test(payload.filename);
+  const kind = filePreviewKind({ mime, filename: payload.filename });
 
   return (
     <div
@@ -197,14 +199,14 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
               <div className="text-xs">{errorMessage}</div>
             </div>
           )}
-          {!loading && !errorMessage && objectUrl && isImage && (
+          {!loading && !errorMessage && objectUrl && kind === 'image' && (
             <img
               src={objectUrl}
               alt={payload.filename}
               className="max-h-full max-w-full object-contain"
             />
           )}
-          {!loading && !errorMessage && objectUrl && isPdf && !isImage && (
+          {!loading && !errorMessage && objectUrl && kind === 'pdf' && (
             <iframe
               src={objectUrl}
               title={payload.filename}
@@ -220,8 +222,7 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
             !errorMessage &&
             !objectUrl &&
             textBody === null &&
-            !isImage &&
-            !isPdf && (
+            kind === 'download' && (
               <div className="flex flex-col items-center gap-2 px-6 text-center text-sm text-muted-foreground">
                 <FileText className="h-8 w-8 text-muted-foreground/40" />
                 <div className="font-medium text-foreground/85">
