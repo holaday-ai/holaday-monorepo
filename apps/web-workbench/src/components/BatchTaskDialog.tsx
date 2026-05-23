@@ -1,6 +1,7 @@
 import { Layers, Loader2, X } from 'lucide-react';
 import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
+import { parseBatchPrompts } from '@/lib/batch-prompts';
 import { trpc } from '@/lib/trpc';
 
 /**
@@ -61,17 +62,15 @@ export function BatchTaskDialog({
 
   if (!open) return null;
 
-  const prompts = pasteText
-    .split('\n')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  const parsedPrompts = parseBatchPrompts(pasteText, MAX_ITEMS);
+  const prompts = parsedPrompts.prompts;
 
   const submit = async (): Promise<void> => {
     if (prompts.length === 0) {
       toast.show('请至少输入一项任务', 'error');
       return;
     }
-    if (prompts.length > MAX_ITEMS) {
+    if (parsedPrompts.overLimit) {
       toast.show(`一次最多 ${MAX_ITEMS} 项`, 'error');
       return;
     }
@@ -136,6 +135,8 @@ export function BatchTaskDialog({
               <span>任务列表（每行一项）</span>
               <span className="text-muted-foreground">
                 {prompts.length} / {MAX_ITEMS}
+                {parsedPrompts.duplicateCount > 0 &&
+                  ` · 已去重 ${parsedPrompts.duplicateCount} 项`}
               </span>
             </label>
             <textarea
