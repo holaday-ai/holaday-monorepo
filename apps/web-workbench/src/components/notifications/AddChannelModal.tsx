@@ -19,6 +19,7 @@ import {
   NOTIFICATION_PLATFORM_LABEL,
   type NotificationPlatform,
 } from '@/lib/notification-channel-copy';
+import { buildNotificationChannelDraft } from '@/lib/notification-channel-draft';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 
@@ -137,27 +138,11 @@ export function AddChannelModal({
   if (!open) return null;
 
   const buildDraft = (): ChannelDraft | { error: string } => {
-    if (!webhookUrl.trim()) return { error: '请填写 webhook URL' };
-    try {
-      new URL(webhookUrl.trim());
-    } catch {
-      return { error: 'webhook URL 格式不正确' };
-    }
-    if (platform === 'custom') {
-      try {
-        const parsed = JSON.parse(templateJson) as unknown;
-        return {
-          platform,
-          webhookUrl: webhookUrl.trim(),
-          customTemplate: parsed,
-        };
-      } catch (err) {
-        return {
-          error: `自定义模板不是合法 JSON：${err instanceof Error ? err.message : String(err)}`,
-        };
-      }
-    }
-    return { platform, webhookUrl: webhookUrl.trim() };
+    return buildNotificationChannelDraft({
+      platform,
+      webhookUrl,
+      templateJson,
+    });
   };
 
   const handleTest = async (): Promise<void> => {
