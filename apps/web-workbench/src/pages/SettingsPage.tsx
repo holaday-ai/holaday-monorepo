@@ -1,10 +1,11 @@
-import { ChevronRight, Monitor, Moon, Sun, X } from 'lucide-react';
+import { ChevronRight, Loader2, Monitor, Moon, Sun, X } from 'lucide-react';
 import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { ApiKeysSection } from '@/components/ApiKeysSection';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { NotificationsSection } from '@/components/notifications/NotificationsSection';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 import { supportMailtoHref } from '@/lib/support-links';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
@@ -193,35 +194,66 @@ const CATEGORY_LABEL_ZH: Record<string, string> = {
  * what the agent remembers is the polish, not the entry method.
  */
 function MemorySection(): JSX.Element {
+  const toast = useToast();
   const [memories, setMemories] = React.useState<MemoryRow[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [confirming, setConfirming] = React.useState(false);
+  const [deletingIds, setDeletingIds] = React.useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
 
   const refresh = React.useCallback(async () => {
     setLoading(true);
     try {
       const res = await trpc.memory.list.query();
       setMemories(res.memories as MemoryRow[]);
-    } catch {
+    } catch (err) {
+      toast.show(
+        err instanceof Error ? `加载记忆失败：${err.message}` : '加载记忆失败',
+        'error',
+      );
       setMemories([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [toast]);
 
   React.useEffect(() => {
     void refresh();
   }, [refresh]);
 
   const handleDelete = async (externalId: string): Promise<void> => {
-    await trpc.memory.delete.mutate({ externalId });
-    setMemories((prev) => prev.filter((m) => m.externalId !== externalId));
+    setDeletingIds((prev) => new Set(prev).add(externalId));
+    try {
+      await trpc.memory.delete.mutate({ externalId });
+      setMemories((prev) => prev.filter((m) => m.externalId !== externalId));
+      toast.show('已删除记忆', 'info');
+    } catch (err) {
+      toast.show(
+        err instanceof Error ? `删除失败：${err.message}` : '删除失败',
+        'error',
+      );
+    } finally {
+      setDeletingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(externalId);
+        return next;
+      });
+    }
   };
 
   const handleClear = async (): Promise<void> => {
-    await trpc.memory.clear.mutate();
-    setMemories([]);
-    setConfirming(false);
+    try {
+      await trpc.memory.clear.mutate();
+      setMemories([]);
+      setConfirming(false);
+      toast.show('已清空 AI 记忆', 'info');
+    } catch (err) {
+      toast.show(
+        err instanceof Error ? `清空失败：${err.message}` : '清空失败',
+        'error',
+      );
+    }
   };
 
   return (
@@ -235,6 +267,7 @@ function MemorySection(): JSX.Element {
             <button
               type="button"
               onClick={() => setConfirming(true)}
+              disabled={loading}
               className="shrink-0 text-xs text-red-600 underline-offset-2 hover:underline dark:text-red-400"
             >
               清空全部
@@ -250,36 +283,44 @@ function MemorySection(): JSX.Element {
           </div>
         ) : (
           <ul className="space-y-2">
-            {memories.map((m) => (
-              <li
-                key={m.externalId}
-                className="rounded-md border border-border bg-card px-3 py-2 text-sm"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                        {CATEGORY_LABEL_ZH[m.category] ?? m.category}
-                      </span>
-                      <span className="truncate text-sm font-medium text-foreground">
-                        {m.keyName}
-                      </span>
+            {memories.map((m) => {
+              const deleting = deletingIds.has(m.externalId);
+              return (
+                <li
+                  key={m.externalId}
+                  className="rounded-md border border-border bg-card px-3 py-2 text-sm"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                          {CATEGORY_LABEL_ZH[m.category] ?? m.category}
+                        </span>
+                        <span className="truncate text-sm font-medium text-foreground">
+                          {m.keyName}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        {m.value}
+                      </p>
                     </div>
-                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                      {m.value}
-                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void handleDelete(m.externalId)}
+                      disabled={deleting}
+                      aria-label="删除记忆"
+                      className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:text-red-400"
+                    >
+                      {deleting ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <X className="h-3.5 w-3.5" />
+                      )}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleDelete(m.externalId)}
-                    aria-label="删除记忆"
-                    className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-red-600 dark:hover:text-red-400"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         )}
 
@@ -291,7 +332,7 @@ function MemorySection(): JSX.Element {
             confirmLabel="清空全部"
             destructive
             onClose={() => setConfirming(false)}
-            onConfirm={() => void handleClear()}
+            onConfirm={handleClear}
           />
         )}
       </div>
