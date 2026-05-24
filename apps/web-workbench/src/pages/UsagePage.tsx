@@ -1,17 +1,20 @@
-import { Activity, CheckCircle2, Clock } from 'lucide-react';
+import { Activity, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
 import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { trpc } from '@/lib/trpc';
 import { usageOutcomeSubcopy } from '@/lib/usage-copy';
+import {
+  hasRecentUsage,
+  usageDayBars,
+  usagePageSummary,
+  usagePercent,
+  usageQuotaTotal,
+  type UsageDayBar,
+} from '@/lib/usage-page-state';
+import { supportMailtoHref } from '@/lib/support-links';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
-
-interface DayBar {
-  date: string;
-  label: string;
-  count: number;
-}
 
 /**
  * Usage dashboard. P1.3 — single data source: `usage.summary`. The
@@ -22,147 +25,186 @@ interface DayBar {
  * so every counter on the page can be reconciled.
  */
 export function UsagePage(): JSX.Element {
+  const mountedRef = React.useRef(false);
   const [snap, setSnap] = React.useState<UsageSnapshot | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
-  React.useEffect(() => {
-    let active = true;
-    void trpc.usage.summary
-      .query()
-      .then((res) => {
-        if (!active) return;
-        setSnap(res as UsageSnapshot);
-        setLoading(false);
-      })
-      .catch((err) => {
-        if (!active) return;
-        setError(err instanceof Error ? err.message : String(err));
-        setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
+  const refresh = React.useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await trpc.usage.summary.query();
+      if (!mountedRef.current) return;
+      setSnap(res as UsageSnapshot);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
   }, []);
 
-  const totalQuota =
-    snap == null ? null : snap.quotaLimit + snap.quotaBonus;
-  const pct =
-    totalQuota == null || totalQuota === 0
-      ? 0
-      : Math.min(100, Math.round((snap?.quotaUsed ? snap.quotaUsed : 0) / totalQuota * 100));
-  const bars: DayBar[] = React.useMemo(() => {
+  React.useEffect(() => {
+    mountedRef.current = true;
+    void refresh();
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [refresh]);
+
+  const totalQuota = snap == null ? null : usageQuotaTotal(snap);
+  const pct = totalQuota == null ? 0 : usagePercent(snap?.quotaUsed ?? 0, totalQuota);
+  const bars: readonly UsageDayBar[] = React.useMemo(() => {
     if (!snap) return [];
-    return snap.dailyCounts.map((d) => ({
-      date: d.date,
-      label: formatDay(new Date(`${d.date}T00:00:00Z`)),
-      count: d.count,
-    }));
+    return usageDayBars(snap.dailyCounts);
   }, [snap]);
   const maxBar = Math.max(1, ...bars.map((b) => b.count));
+  const summary = usagePageSummary({ loading, error, snapshot: snap });
 
   return (
     <PageContainer width="wide">
-      <PageHeader title="用量" description="当月任务额度和执行统计" />
-      <div className="space-y-6">
-        {error && (
-          <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 text-xs text-red-700">
-            读取用量失败：{error}
+      <PageHeader
+        title="用量"
+        description="当月任务额度和执行统计"
+        action={
+          <div className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground">
+            {summary}
           </div>
-        )}
-        <div className="grid gap-4 md:grid-cols-3">
-          <StatCard
-            icon={<Activity className="h-4 w-4" />}
-            label="本月执行记录"
-            value={loading ? '—' : String(snap?.monthTasksTotal ?? 0)}
-            sub={
-              snap == null
-                ? '配额 — 个'
-                : snap.quotaBonus > 0
-                ? `配额 ${snap.quotaLimit} + 加量 ${snap.quotaBonus}`
-                : `配额 ${snap.quotaLimit} 个`
-            }
-          />
-          <StatCard
-            icon={<CheckCircle2 className="h-4 w-4 text-cyan-500" />}
-            label="成功"
-            value={loading ? '—' : String(snap?.monthCompleted ?? 0)}
-            sub={
-              snap == null
-                ? '失败 — · 进行中 —'
-                : usageOutcomeSubcopy({
-                    partialSuccess: snap.monthPartialSuccess,
-                    failed: snap.monthFailed,
-                    cancelled: snap.monthCancelled,
-                    executing: snap.monthExecuting,
-                  })
-            }
-          />
-          <StatCard
-            icon={<Clock className="h-4 w-4 text-pink-500" />}
-            label="剩余额度"
-            value={loading ? '—' : String(snap?.quotaRemaining ?? 0)}
-            sub={totalQuota == null ? '加载中…' : `${pct}% 已使用`}
-          />
-        </div>
-
-        <Section title="额度使用进度">
-          <p className="mb-3 text-[11px] text-muted-foreground">
-            额度仅计入成功消耗的任务，失败和系统任务不扣额度。
-          </p>
-          <div className="flex items-center gap-3">
-            <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-              <div
-                className={cn(
-                  'h-full transition-all',
-                  pct >= 90 ? 'bg-red-500' : pct >= 75 ? 'bg-amber-500' : 'bg-primary',
-                )}
-                style={{ width: `${pct}%` }}
+        }
+      />
+      <div className="space-y-6">
+        {loading ? (
+          <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+            用量加载中…
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card/40 px-6 py-12 text-center">
+            <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
+            <div className="text-sm font-medium text-foreground/80">用量加载失败</div>
+            <div className="max-w-md text-xs leading-5 text-muted-foreground">{error}</div>
+            <div className="mt-1 flex flex-wrap justify-center gap-2">
+              <Button type="button" size="sm" onClick={() => void refresh()}>
+                重试
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <a
+                  href={supportMailtoHref({
+                    subject: '用量统计加载失败',
+                    body: '用量统计加载失败，请协助排查。\n\n注册邮箱：\n出现时间：',
+                  })}
+                >
+                  联系支持
+                </a>
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-4 md:grid-cols-3">
+              <StatCard
+                icon={<Activity className="h-4 w-4" />}
+                label="本月执行记录"
+                value={loading ? '—' : String(snap?.monthTasksTotal ?? 0)}
+                sub={
+                  snap == null
+                    ? '配额 — 个'
+                    : snap.quotaBonus > 0
+                      ? `配额 ${snap.quotaLimit} + 加量 ${snap.quotaBonus}`
+                      : `配额 ${snap.quotaLimit} 个`
+                }
+              />
+              <StatCard
+                icon={<CheckCircle2 className="h-4 w-4 text-cyan-500" />}
+                label="成功"
+                value={loading ? '—' : String(snap?.monthCompleted ?? 0)}
+                sub={
+                  snap == null
+                    ? '失败 — · 进行中 —'
+                    : usageOutcomeSubcopy({
+                        partialSuccess: snap.monthPartialSuccess,
+                        failed: snap.monthFailed,
+                        cancelled: snap.monthCancelled,
+                        executing: snap.monthExecuting,
+                      })
+                }
+              />
+              <StatCard
+                icon={<Clock className="h-4 w-4 text-pink-500" />}
+                label="剩余额度"
+                value={loading ? '—' : String(snap?.quotaRemaining ?? 0)}
+                sub={totalQuota == null ? '加载中…' : `${pct}% 已使用`}
               />
             </div>
-            <span className="text-xs tabular-nums text-muted-foreground">
-              {snap?.quotaUsed ?? 0} / {totalQuota ?? '—'}
-            </span>
-          </div>
-          {pct >= 75 && (
-            <div className="mt-3 flex items-center justify-between rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
-              <div>
-                <div className="text-xs font-medium">额度即将用完</div>
-                <div className="text-[11px] text-muted-foreground">
-                  升级套餐后立即获得更多任务额度
-                </div>
-              </div>
-              <Link to="/plan">
-                <Button size="sm" variant="outline">
-                  查看套餐
-                </Button>
-              </Link>
-            </div>
-          )}
-        </Section>
 
-        <Section title="最近 7 天">
-          <div className="flex items-end justify-between gap-2 px-1 pb-4 pt-2">
-            {bars.map((b) => {
-              const h = b.count === 0 ? 4 : Math.max(6, Math.round((b.count / maxBar) * 120));
-              return (
-                <div key={b.date} className="flex min-w-0 flex-1 flex-col items-center gap-1.5">
-                  <div className="text-[10px] tabular-nums text-muted-foreground">
-                    {b.count || ''}
-                  </div>
+            <Section title="额度使用进度">
+              <p className="mb-3 text-[11px] text-muted-foreground">
+                额度仅计入成功消耗的任务，失败和系统任务不扣额度。
+              </p>
+              <div className="flex items-center gap-3">
+                <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
                   <div
                     className={cn(
-                      'w-full rounded-t-md transition-all',
-                      b.count > 0 ? 'bg-primary/80' : 'bg-muted',
+                      'h-full transition-all',
+                      pct >= 90 ? 'bg-red-500' : pct >= 75 ? 'bg-amber-500' : 'bg-primary',
                     )}
-                    style={{ height: h }}
+                    style={{ width: `${pct}%` }}
                   />
-                  <div className="text-[10px] text-muted-foreground">{b.label}</div>
                 </div>
-              );
-            })}
-          </div>
-        </Section>
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {snap?.quotaUsed ?? 0} / {totalQuota ?? '—'}
+                </span>
+              </div>
+              {pct >= 75 && (
+                <div className="mt-3 flex items-center justify-between rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
+                  <div>
+                    <div className="text-xs font-medium">额度即将用完</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      升级套餐后立即获得更多任务额度
+                    </div>
+                  </div>
+                  <Link to="/plan">
+                    <Button size="sm" variant="outline">
+                      查看套餐
+                    </Button>
+                  </Link>
+                </div>
+              )}
+            </Section>
+
+            <Section title="最近 7 天">
+              {hasRecentUsage(bars) ? (
+                <div className="flex items-end justify-between gap-2 px-1 pb-4 pt-2">
+                  {bars.map((b) => {
+                    const h = b.count === 0 ? 4 : Math.max(6, Math.round((b.count / maxBar) * 120));
+                    return (
+                      <div key={b.date} className="flex min-w-0 flex-1 flex-col items-center gap-1.5">
+                        <div className="text-[10px] tabular-nums text-muted-foreground">
+                          {b.count || ''}
+                        </div>
+                        <div
+                          className={cn(
+                            'w-full rounded-t-md transition-all',
+                            b.count > 0 ? 'bg-primary/80' : 'bg-muted',
+                          )}
+                          style={{ height: h }}
+                        />
+                        <div className="text-[10px] text-muted-foreground">{b.label}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-border bg-background px-6 py-10 text-center">
+                  <div className="text-sm font-medium text-foreground/80">最近 7 天暂无执行记录</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    创建任务后，这里会显示每天的执行次数。
+                  </div>
+                </div>
+              )}
+            </Section>
+          </>
+        )}
       </div>
     </PageContainer>
   );
@@ -203,15 +245,4 @@ function StatCard({
       <div className="mt-1 text-xs text-muted-foreground">{sub}</div>
     </div>
   );
-}
-
-function formatDay(d: Date): string {
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  const copy = new Date(d);
-  copy.setUTCHours(0, 0, 0, 0);
-  const diff = Math.round((today.getTime() - copy.getTime()) / 86400000);
-  if (diff === 0) return '今天';
-  if (diff === 1) return '昨天';
-  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
 }

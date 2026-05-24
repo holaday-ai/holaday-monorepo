@@ -1,7 +1,13 @@
-import { Loader2, Mail } from 'lucide-react';
+import { AlertCircle, Loader2, Mail } from 'lucide-react';
 import * as React from 'react';
 import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
 import { Button } from '@/components/ui/button';
+import {
+  profileDisplayName,
+  profileInitial,
+  profilePageSummary,
+  profileUpdateMailBody,
+} from '@/lib/profile-page-state';
 import { SUPPORT_EMAIL, supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 
@@ -14,45 +20,95 @@ import { trpc } from '@/lib/trpc';
  * backend mutations land.
  */
 export function ProfilePage(): JSX.Element {
+  const mountedRef = React.useRef(false);
   const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [email, setEmail] = React.useState('');
   const [displayName, setDisplayName] = React.useState('');
 
-  React.useEffect(() => {
-    let active = true;
-    trpc.auth.me.query().then(
-      (res) => {
-        if (!active) return;
-        setEmail(res.email ?? '');
-        setDisplayName(res.displayName ?? '');
-        setLoading(false);
-      },
-      () => {
-        if (!active) return;
-        setLoading(false);
-      },
-    );
-    return () => {
-      active = false;
-    };
+  const refresh = React.useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const res = await trpc.auth.me.query();
+      if (!mountedRef.current) return;
+      setEmail(res.email ?? '');
+      setDisplayName(res.displayName ?? '');
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setLoadError(err instanceof Error ? err.message : '请稍后重试');
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
   }, []);
 
-  const initial = (displayName || email || '?').slice(0, 1).toUpperCase();
+  React.useEffect(() => {
+    mountedRef.current = true;
+    void refresh();
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [refresh]);
 
-  if (loading) {
+  const summary = profilePageSummary({ loading, error: loadError, email });
+  const preferredName = profileDisplayName({ displayName, email });
+  const initial = profileInitial({ displayName, email });
+
+  if (loading || loadError) {
     return (
       <PageContainer width="form">
-        <PageHeader title="个人资料" />
-        <div className="flex h-64 items-center justify-center">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-        </div>
+        <PageHeader
+          title="个人资料"
+          description="管理你的基本信息"
+          action={
+            <div className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground">
+              {summary}
+            </div>
+          }
+        />
+        {loadError ? (
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card/40 px-6 py-12 text-center">
+            <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
+            <div className="text-sm font-medium text-foreground/80">资料加载失败</div>
+            <div className="max-w-md text-xs leading-5 text-muted-foreground">
+              {loadError}
+            </div>
+            <div className="mt-1 flex flex-wrap justify-center gap-2">
+              <Button type="button" size="sm" onClick={() => void refresh()}>
+                重试
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <a
+                  href={supportMailtoHref({
+                    subject: '个人资料加载失败',
+                    body: '个人资料加载失败，请协助排查。\n\n注册邮箱：\n出现时间：',
+                  })}
+                >
+                  联系支持
+                </a>
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex h-64 items-center justify-center">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        )}
       </PageContainer>
     );
   }
 
   return (
     <PageContainer width="form">
-      <PageHeader title="个人资料" description="管理你的基本信息" />
+      <PageHeader
+        title="个人资料"
+        description="管理你的基本信息"
+        action={
+          <div className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground">
+            {summary}
+          </div>
+        }
+      />
       <div className="space-y-6">
         <Section>
           <div className="flex flex-col items-start gap-6 md:flex-row md:items-center">
@@ -60,7 +116,7 @@ export function ProfilePage(): JSX.Element {
               {initial}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-base font-semibold">{displayName || email}</div>
+              <div className="text-base font-semibold">{preferredName}</div>
               <div className="mt-0.5 text-xs text-muted-foreground">{email}</div>
             </div>
           </div>
@@ -93,7 +149,7 @@ export function ProfilePage(): JSX.Element {
               <a
                 href={supportMailtoHref({
                   subject: '更新 HOLA DAY 个人资料',
-                  body: '请协助更新我的 HOLA DAY 个人资料。\n\n注册邮箱：\n需要更新的内容：',
+                  body: profileUpdateMailBody(email),
                 })}
               >
                 <Mail className="h-3.5 w-3.5" />
