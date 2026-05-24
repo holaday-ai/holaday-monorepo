@@ -1,4 +1,4 @@
-import { FolderOpen, MoreHorizontal, Plus, Trash2 } from 'lucide-react';
+import { AlertCircle, FolderOpen, MoreHorizontal, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -9,6 +9,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/components/ui/toast';
+import {
+  PROJECT_NAME_MAX_LENGTH,
+  projectCountSummary,
+  projectNameState,
+} from '@/lib/project-page-state';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
@@ -28,21 +33,36 @@ export function ProjectsPage(): JSX.Element {
   const [searchParams] = useSearchParams();
   const [projects, setProjects] = React.useState<UiProject[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   // Auto-open the create form when arrived via Sidebar's
   // right-click "新建项目" submenu (passes ?create=1).
   const [creating, setCreating] = React.useState(searchParams.get('create') === '1');
   const [newName, setNewName] = React.useState('');
+  const [createTouched, setCreateTouched] = React.useState(false);
   const [creatingNow, setCreatingNow] = React.useState(false);
   const [pendingDelete, setPendingDelete] = React.useState<UiProject | null>(null);
+  const createState = projectNameState(
+    newName,
+    projects.map((project) => project.name),
+  );
+  const showCreateError = createTouched && createState.error !== null;
+  const projectSummary = projectCountSummary({
+    count: projects.length,
+    loading,
+    error: loadError,
+  });
 
   const refresh = React.useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const list = await trpc.projects.list.query();
       setProjects(list as UiProject[]);
     } catch (err) {
+      const message = err instanceof Error ? err.message : '请稍后重试';
+      setLoadError(message);
       toast.show(
-        err instanceof Error ? `加载失败：${err.message}` : '加载失败',
+        err instanceof Error ? `项目加载失败：${err.message}` : '项目加载失败',
         'error',
       );
     } finally {
@@ -55,13 +75,14 @@ export function ProjectsPage(): JSX.Element {
   }, [refresh]);
 
   async function onCreate(): Promise<void> {
-    const name = newName.trim();
-    if (!name || creatingNow) return;
+    setCreateTouched(true);
+    if (!createState.canSubmit || creatingNow) return;
     setCreatingNow(true);
     try {
-      await trpc.projects.create.mutate({ name });
-      toast.show(`已创建项目「${name}」`);
+      await trpc.projects.create.mutate({ name: createState.name });
+      toast.show(`已创建项目「${createState.name}」`);
       setNewName('');
+      setCreateTouched(false);
       setCreating(false);
       await refresh();
     } catch (err) {
@@ -96,7 +117,10 @@ export function ProjectsPage(): JSX.Element {
           !creating ? (
             <button
               type="button"
-              onClick={() => setCreating(true)}
+              onClick={() => {
+                setCreating(true);
+                setCreateTouched(false);
+              }}
               className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90"
             >
               <Plus className="h-4 w-4" />
@@ -106,7 +130,7 @@ export function ProjectsPage(): JSX.Element {
         }
       />
       <div className="mb-3 text-xs text-muted-foreground">
-        共 {projects.length} 个项目
+        {projectSummary}
       </div>
 
       {creating && (
@@ -115,44 +139,75 @@ export function ProjectsPage(): JSX.Element {
             e.preventDefault();
             void onCreate();
           }}
-          className="mb-4 flex items-center gap-2 rounded-lg border border-border bg-card p-3"
+          className="mb-4 rounded-lg border border-border bg-card p-3"
         >
-          <input
-            autoFocus
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                setCreating(false);
-                setNewName('');
-              }
-            }}
-            placeholder="项目名称（≤100 字）"
-            maxLength={100}
-            className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm focus-visible:border-foreground/30 focus-visible:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={!newName.trim() || creatingNow}
-            className={cn(
-              'rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
-              newName.trim() && !creatingNow
-                ? 'bg-foreground text-background hover:bg-foreground/85'
-                : 'cursor-not-allowed bg-muted text-muted-foreground',
-            )}
-          >
-            创建
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setCreating(false);
-              setNewName('');
-            }}
-            className="rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-foreground/[0.05]"
-          >
-            取消
-          </button>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+            <div className="min-w-0 flex-1">
+              <input
+                autoFocus
+                value={newName}
+                onBlur={() => setCreateTouched(true)}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape' && !creatingNow) {
+                    setCreating(false);
+                    setNewName('');
+                    setCreateTouched(false);
+                  }
+                }}
+                placeholder="项目名称（≤100 字）"
+                maxLength={PROJECT_NAME_MAX_LENGTH}
+                aria-invalid={showCreateError}
+                aria-describedby="project-name-help"
+                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus-visible:border-foreground/30 focus-visible:outline-none"
+              />
+              <div
+                id="project-name-help"
+                className={cn(
+                  'mt-1 flex items-center justify-between gap-3 text-xs',
+                  showCreateError ? 'text-primary' : 'text-muted-foreground',
+                )}
+              >
+                <span role={showCreateError ? 'alert' : undefined}>
+                  {showCreateError ? createState.error : '创建后可把相关任务归到同一个项目。'}
+                </span>
+                <span className="shrink-0 tabular-nums">
+                  {createState.length}/{PROJECT_NAME_MAX_LENGTH}
+                </span>
+              </div>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <button
+                type="submit"
+                disabled={!createState.canSubmit || creatingNow}
+                className={cn(
+                  'rounded-md px-3 py-1.5 text-xs font-medium transition-colors sm:h-8',
+                  createState.canSubmit && !creatingNow
+                    ? 'bg-foreground text-background hover:bg-foreground/85'
+                    : 'cursor-not-allowed bg-muted text-muted-foreground',
+                )}
+              >
+                {creatingNow ? '创建中…' : '创建'}
+              </button>
+              <button
+                type="button"
+                disabled={creatingNow}
+                onClick={() => {
+                  setCreating(false);
+                  setNewName('');
+                  setCreateTouched(false);
+                }}
+                className={cn(
+                  'rounded-md px-3 py-1.5 text-xs text-muted-foreground transition-colors sm:h-8',
+                  creatingNow
+                    ? 'cursor-not-allowed opacity-60'
+                    : 'hover:bg-foreground/[0.05]',
+                )}
+              >
+                取消
+              </button>
+            </div>
+          </div>
         </form>
       )}
 
@@ -160,13 +215,39 @@ export function ProjectsPage(): JSX.Element {
         <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
           加载中…
         </div>
+      ) : loadError ? (
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card/40 px-6 py-12 text-center">
+          <AlertCircle className="h-8 w-8 text-primary" />
+          <div className="text-sm font-medium text-foreground/80">项目加载失败</div>
+          <div className="max-w-md text-xs leading-5 text-muted-foreground">
+            {loadError}
+          </div>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="mt-1 inline-flex h-8 items-center rounded-md bg-foreground px-3 text-xs font-medium text-background transition hover:bg-foreground/85"
+          >
+            重试
+          </button>
+        </div>
       ) : projects.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
           <FolderOpen className="h-8 w-8 text-muted-foreground/40" />
           <div className="text-sm font-medium text-foreground/80">还没有项目</div>
           <div className="text-xs text-muted-foreground">
             创建一个项目来分组管理你的任务。
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              setCreating(true);
+              setCreateTouched(false);
+            }}
+            className="mt-1 inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition hover:opacity-90"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            新建项目
+          </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
