@@ -1,18 +1,36 @@
-import { CheckCircle2, CircleSlash, Layers, Loader2, Plus, XCircle } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle2,
+  CircleSlash,
+  Layers,
+  Loader2,
+  Plus,
+  RefreshCw,
+  XCircle,
+} from 'lucide-react';
 import * as React from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import { BatchTaskDialog } from '@/components/BatchTaskDialog';
 import { batchUnsuccessfulCopy } from '@/lib/batch-copy';
 import {
+  batchDetailSummary,
+  batchErrorMessage,
+  batchListSummary,
+  batchProgressPercent,
+  batchStatusCopy,
+} from '@/lib/batch-page-state';
+import {
   applyBatchProgressToDetail,
   applyBatchProgressToRows,
   type BatchProgressFrame,
 } from '@/lib/batch-progress';
 import { humaniseTaskError, taskActionError } from '@/lib/error-copy';
+import { supportMailtoHref } from '@/lib/support-links';
 import { onServerMessage } from '@/lib/ws';
 
 /**
@@ -79,6 +97,8 @@ function BatchList(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const [rows, setRows] = React.useState<UiBatchRow[] | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   // Phase 5b — when InputArea routes here with `state.initialPrompts`
   // (multi-line composer detect), auto-open the create dialog with
   // those lines pre-filled. One-shot: we clear the state after using
@@ -99,12 +119,17 @@ function BatchList(): JSX.Element {
   }, [incomingPrompts]);
 
   const reload = React.useCallback(async () => {
+    setLoading(true);
     try {
       const list = await trpc.batchTasks.list.query();
       setRows(list as UiBatchRow[]);
+      setLoadError(null);
     } catch (err) {
-      toast.show(taskActionError('加载失败', errorMessage(err)), 'error');
-      setRows([]);
+      const message = batchErrorMessage(err);
+      toast.show(taskActionError('加载失败', message), 'error');
+      setLoadError(message);
+    } finally {
+      setLoading(false);
     }
   }, [toast]);
 
@@ -121,31 +146,73 @@ function BatchList(): JSX.Element {
     });
   }, []);
 
+  const rowCount = rows?.length ?? 0;
+  const summary = batchListSummary({ loading, error: loadError, count: rowCount });
+  const statusCopy = batchStatusCopy({
+    loading,
+    error: loadError,
+    hasData: rowCount > 0,
+    target: 'list',
+  });
+
   return (
     <PageContainer width="list">
       <PageHeader
         title="批量任务"
         description="一次提交多个任务，按套餐并发执行"
         action={
-          <button
-            type="button"
-            onClick={() => setDialogOpen(true)}
-            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90"
-          >
-            <Plus className="h-4 w-4" />
-            新建批量任务
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="hidden items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground sm:inline-flex">
+              {summary}
+            </div>
+            <Button type="button" variant="outline" size="sm" onClick={() => void reload()} disabled={loading}>
+              {loading ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <RefreshCw className="mr-1 h-3.5 w-3.5" aria-hidden />
+              )}
+              刷新
+            </Button>
+            <Button type="button" onClick={() => setDialogOpen(true)} size="sm">
+              <Plus className="mr-1 h-4 w-4" aria-hidden />
+              新建批量任务
+            </Button>
+          </div>
         }
       />
       <Section>
-        <div className="mb-3 text-xs text-muted-foreground">
-          {rows == null
-            ? '加载中…'
-            : rows.length === 0
-              ? '还没有批量任务。'
-              : `共 ${rows.length} 个批量任务`}
-        </div>
-        {rows && rows.length === 0 && (
+        {statusCopy && (loading || rowCount > 0) && (
+          <StatusNotice
+            copy={statusCopy}
+            loading={loading}
+            onRetry={() => void reload()}
+            supportSubject="批量任务列表加载失败"
+            supportBody="批量任务列表加载失败，请协助排查。"
+          />
+        )}
+        {loading && rows == null && (
+          <div className="space-y-3">
+            {[0, 1, 2].map((idx) => (
+              <div key={idx} className="flex items-start gap-3 rounded-lg border border-border/60 p-3">
+                <div className="h-7 w-7 rounded-md bg-muted" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="h-3 w-40 rounded bg-muted" />
+                  <div className="h-3 w-64 max-w-full rounded bg-muted" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {!loading && loadError && rows == null && (
+          <HardErrorState
+            title="批量任务加载失败"
+            message={loadError}
+            onRetry={() => void reload()}
+            supportSubject="批量任务列表加载失败"
+            supportBody="批量任务列表加载失败，请协助排查。"
+          />
+        )}
+        {rows && rows.length === 0 && !loadError && (
           <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
               <Layers className="h-5 w-5" />
@@ -221,14 +288,22 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
   const toast = useToast();
   const navigate = useNavigate();
   const [detail, setDetail] = React.useState<UiBatchDetail | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = React.useState(false);
 
   const reload = React.useCallback(async () => {
+    setLoading(true);
     try {
       const data = await trpc.batchTasks.detail.query({ batchId });
       setDetail(data as UiBatchDetail);
+      setLoadError(null);
     } catch (err) {
-      toast.show(taskActionError('加载失败', errorMessage(err)), 'error');
+      const message = batchErrorMessage(err);
+      toast.show(taskActionError('加载失败', message), 'error');
+      setLoadError(message);
+    } finally {
+      setLoading(false);
     }
   }, [batchId, toast]);
 
@@ -257,31 +332,86 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
       toast.show('已取消');
       await reload();
     } catch (err) {
-      toast.show(taskActionError('取消失败', errorMessage(err)), 'error');
+      toast.show(taskActionError('取消失败', batchErrorMessage(err)), 'error');
     }
   };
+
+  const finishedCount = detail
+    ? detail.itemsDone + detail.itemsFailed + (detail.itemsCancelled ?? 0)
+    : 0;
+  const detailSummary = batchDetailSummary({
+    loading,
+    error: loadError,
+    total: detail?.itemsTotal ?? null,
+    finished: finishedCount,
+  });
+  const detailStatusCopy = batchStatusCopy({
+    loading,
+    error: loadError,
+    hasData: detail != null,
+    target: 'detail',
+  });
 
   if (!detail) {
     return (
       <PageContainer width="list">
-        <PageHeader title="批量任务详情" />
+        <PageHeader
+          title="批量任务详情"
+          action={
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="hidden items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground sm:inline-flex">
+                {detailSummary}
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => void reload()} disabled={loading}>
+                {loading ? (
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : (
+                  <RefreshCw className="mr-1 h-3.5 w-3.5" aria-hidden />
+                )}
+                刷新
+              </Button>
+            </div>
+          }
+        />
         <Section>
-          <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-            加载中…
-          </div>
+          {loading ? (
+            <div className="space-y-3">
+              <div className="h-3 w-32 rounded bg-muted" />
+              <div className="h-2 w-full rounded-full bg-muted" />
+              {[0, 1, 2].map((idx) => (
+                <div key={idx} className="flex items-start gap-3 border-t border-border py-3 first:border-t-0">
+                  <div className="h-4 w-4 rounded-full bg-muted" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="h-3 w-20 rounded bg-muted" />
+                    <div className="h-3 w-72 max-w-full rounded bg-muted" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : loadError ? (
+            <HardErrorState
+              title="批量任务详情加载失败"
+              message={loadError}
+              onRetry={() => void reload()}
+              supportSubject="批量任务详情加载失败"
+              supportBody="批量任务详情加载失败，请协助排查。"
+            />
+          ) : (
+            <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+              暂无批量任务详情
+            </div>
+          )}
         </Section>
       </PageContainer>
     );
   }
 
-  const pct =
-    detail.itemsTotal > 0
-      ? Math.round(
-          ((detail.itemsDone + detail.itemsFailed + (detail.itemsCancelled ?? 0)) /
-            detail.itemsTotal) *
-            100,
-        )
-      : 0;
+  const pct = batchProgressPercent({
+    total: detail.itemsTotal,
+    done: detail.itemsDone,
+    failed: detail.itemsFailed,
+    cancelled: detail.itemsCancelled,
+  });
 
   const canCancel = detail.status === 'pending' || detail.status === 'running';
 
@@ -291,18 +421,36 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
         title={detail.name ?? `批量任务 · ${detail.itemsTotal} 项`}
         description={`并发 ${detail.concurrency} · ${STATUS_LABEL[detail.status] ?? detail.status}`}
         action={
-          canCancel ? (
-            <button
-              type="button"
-              onClick={() => setConfirmCancel(true)}
-              className="inline-flex h-9 items-center rounded-md border border-border px-3 text-sm text-muted-foreground transition-colors hover:border-destructive/60 hover:text-destructive"
-            >
-              取消批量
-            </button>
-          ) : null
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="hidden items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground sm:inline-flex">
+              {detailSummary}
+            </div>
+            <Button type="button" variant="outline" size="sm" onClick={() => void reload()} disabled={loading}>
+              {loading ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <RefreshCw className="mr-1 h-3.5 w-3.5" aria-hidden />
+              )}
+              刷新
+            </Button>
+            {canCancel && (
+              <Button type="button" variant="outline" size="sm" onClick={() => setConfirmCancel(true)}>
+                取消批量
+              </Button>
+            )}
+          </div>
         }
       />
       <Section>
+        {detailStatusCopy && (
+          <StatusNotice
+            copy={detailStatusCopy}
+            loading={loading}
+            onRetry={() => void reload()}
+            supportSubject="批量任务详情加载失败"
+            supportBody="批量任务详情加载失败，请协助排查。"
+          />
+        )}
         <div className="mb-2 text-xs text-muted-foreground">
           {detail.itemsDone} / {detail.itemsTotal} 完成
           {batchUnsuccessfulCopy(detail.itemsFailed, detail.itemsCancelled)}
@@ -366,15 +514,98 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
   );
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
 function isBatchProgressFrame(msg: unknown): msg is BatchProgressFrame {
   return (
     typeof msg === 'object' &&
     msg !== null &&
     (msg as { type?: unknown }).type === 'server.batch.progress'
+  );
+}
+
+function StatusNotice({
+  copy,
+  loading,
+  onRetry,
+  supportSubject,
+  supportBody,
+}: {
+  copy: { readonly title: string; readonly body: string };
+  loading: boolean;
+  onRetry(): void;
+  supportSubject: string;
+  supportBody: string;
+}): JSX.Element {
+  const isError = copy.title.includes('失败');
+  return (
+    <div className="mb-4 rounded-xl border border-border bg-card/80 px-4 py-3 shadow-sm">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-2">
+          {isError ? (
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+          ) : (
+            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />
+          )}
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-foreground/85">{copy.title}</div>
+            <div className="mt-0.5 text-xs leading-5 text-muted-foreground">{copy.body}</div>
+          </div>
+        </div>
+        {isError && (
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={onRetry} disabled={loading}>
+              {loading ? '重试中…' : '重试'}
+            </Button>
+            <Button asChild type="button" variant="outline" size="sm">
+              <a
+                href={supportMailtoHref({
+                  subject: supportSubject,
+                  body: `${supportBody}\n\n注册邮箱：\n出现时间：`,
+                })}
+              >
+                联系支持
+              </a>
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function HardErrorState({
+  title,
+  message,
+  onRetry,
+  supportSubject,
+  supportBody,
+}: {
+  title: string;
+  message: string;
+  onRetry(): void;
+  supportSubject: string;
+  supportBody: string;
+}): JSX.Element {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card/40 px-6 py-12 text-center">
+      <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
+      <div className="text-sm font-medium text-foreground/80">{title}</div>
+      <div className="max-w-md text-xs leading-5 text-muted-foreground">{message}</div>
+      <div className="mt-1 flex flex-wrap justify-center gap-2">
+        <Button type="button" size="sm" onClick={onRetry}>
+          重试
+        </Button>
+        <Button asChild type="button" variant="outline" size="sm">
+          <a
+            href={supportMailtoHref({
+              subject: supportSubject,
+              body: `${supportBody}\n\n注册邮箱：\n出现时间：`,
+            })}
+          >
+            联系支持
+          </a>
+        </Button>
+      </div>
+    </div>
   );
 }
 
