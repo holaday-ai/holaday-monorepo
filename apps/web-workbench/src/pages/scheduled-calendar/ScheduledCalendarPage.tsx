@@ -42,13 +42,14 @@ import type {
   EventMountArg,
 } from '@fullcalendar/core';
 
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { AlertCircle, ChevronLeft, ChevronRight, Loader2, Plus } from 'lucide-react';
 import * as React from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import { taskActionError } from '@/lib/error-copy';
+import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
@@ -59,6 +60,11 @@ import {
 import { QuickCreatePopover } from './QuickCreatePopover';
 import { EventDetailPopover } from './EventDetailPopover';
 import { formatRollForward, nextQuickCreateDate } from './time-helpers';
+import {
+  scheduledCalendarErrorMessage,
+  scheduledCalendarStatusCopy,
+  scheduledCalendarSummary,
+} from './scheduled-calendar-state';
 import './calendar-styles.css';
 
 const MOBILE_QUERY = '(max-width: 640px)';
@@ -95,10 +101,8 @@ export function ScheduledCalendarPage(): JSX.Element {
   const [lastRefreshFocusId, setLastRefreshFocusId] = React.useState<number | null>(
     null,
   );
-  // `loading` no longer drives a UI affordance now that the empty-
-  // state overlay is gone; kept the call sites for future use (the
-  // `_` prefix marks it intentional for the linter).
-  const [, setLoading] = React.useState(true);
+  const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [currentRange, setCurrentRange] = React.useState<{
     start: Date;
     end: Date;
@@ -172,8 +176,11 @@ export function ScheduledCalendarPage(): JSX.Element {
       });
       setRows(res as ScheduledTaskRow[]);
       setLastRefreshFocusId(focusScheduledTaskInternalId);
+      setLoadError(null);
     } catch (err) {
-      toast.show(taskActionError('加载失败', errorMessage(err)), 'error');
+      const message = scheduledCalendarErrorMessage(err, '加载失败');
+      setLoadError(message);
+      toast.show(taskActionError('加载失败', message), 'error');
     } finally {
       setLoading(false);
     }
@@ -189,6 +196,16 @@ export function ScheduledCalendarPage(): JSX.Element {
     const now = new Date();
     return rows.flatMap((r) => rowToEventInput(r, { now }));
   }, [rows]);
+  const pageSummary = scheduledCalendarSummary({
+    loading,
+    error: loadError,
+    count: rows.length,
+  });
+  const statusCopy = scheduledCalendarStatusCopy({
+    loading,
+    error: loadError,
+    count: rows.length,
+  });
 
   React.useEffect(() => {
     if (focusScheduledTaskInternalId === null) return;
@@ -669,11 +686,17 @@ export function ScheduledCalendarPage(): JSX.Element {
       <div ref={bandRef} className="hd-calendar-sticky-band">
         <PageHeader
           title="定时任务"
+          description="按计划自动执行任务"
           action={
-            <Button onClick={() => setFullModalOpen(true)}>
-              <Plus className="mr-1 h-4 w-4" />
-              新建定时任务
-            </Button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground">
+                {pageSummary}
+              </div>
+              <Button onClick={() => setFullModalOpen(true)}>
+                <Plus className="mr-1 h-4 w-4" />
+                新建定时任务
+              </Button>
+            </div>
           }
         />
         {/* Custom toolbar — replaces FullCalendar's default. Three
@@ -733,6 +756,42 @@ export function ScheduledCalendarPage(): JSX.Element {
         </div>
       </div>
       <div ref={shellRef} className="hd-calendar relative">
+        {statusCopy && (
+          <div className="mb-3 rounded-xl border border-border bg-card/80 px-4 py-3 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-start gap-2">
+                {loadError ? (
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                ) : loading ? (
+                  <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />
+                ) : (
+                  <Plus className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                )}
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-foreground/85">{statusCopy.title}</div>
+                  <div className="mt-0.5 text-xs leading-5 text-muted-foreground">{statusCopy.body}</div>
+                </div>
+              </div>
+              {loadError && (
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
+                    {loading ? '重试中…' : '重试'}
+                  </Button>
+                  <Button asChild type="button" variant="outline" size="sm">
+                    <a
+                      href={supportMailtoHref({
+                        subject: '定时任务日历加载失败',
+                        body: '定时任务日历加载失败，请协助排查。\n\n注册邮箱：\n出现时间：',
+                      })}
+                    >
+                      联系支持
+                    </a>
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         <FullCalendar
           ref={calendarRef}
           plugins={[
