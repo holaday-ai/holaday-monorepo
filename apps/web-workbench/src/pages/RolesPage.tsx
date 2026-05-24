@@ -1,4 +1,4 @@
-import { Check, Lock } from 'lucide-react';
+import { AlertCircle, Check, Lock } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -8,6 +8,14 @@ import {
 } from '@holaday/shared-types';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import {
+  groupRoleCatalogue,
+  roleLimitMessage,
+  rolePageSummary,
+  rolePlanLabel,
+  roleRemainingChanges,
+} from '@/lib/roles-page-state';
+import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
@@ -38,16 +46,6 @@ interface ListResponse {
   needsRoleRepair?: boolean;
 }
 
-const CATEGORY_ORDER: Array<{ key: RoleDefinition['category']; nameZh: string }> = [
-  { key: 'marketing', nameZh: '营销 & 内容' },
-  { key: 'ecommerce', nameZh: '电商 & 运营' },
-  { key: 'product', nameZh: '产品 & 项目' },
-  { key: 'data', nameZh: '数据 & 分析' },
-  { key: 'support', nameZh: '支持 & 合规' },
-  { key: 'hr', nameZh: 'HR & 供应链' },
-  { key: 'specialty', nameZh: '专项' },
-];
-
 /**
  * Role selection page. Three states based on plan:
  *
@@ -62,24 +60,45 @@ const CATEGORY_ORDER: Array<{ key: RoleDefinition['category']; nameZh: string }>
 export function RolesPage(): JSX.Element {
   const navigate = useNavigate();
   const toast = useToast();
+  const mountedRef = React.useRef(false);
   const [data, setData] = React.useState<ListResponse | null>(null);
   const [draft, setDraft] = React.useState<string[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
 
-  const refresh = React.useCallback(() => {
-    trpc.roles.list.query().then(
-      (res) => {
+  const refresh = React.useCallback(
+    async (options: { silent?: boolean } = {}) => {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const res = await trpc.roles.list.query();
+        if (!mountedRef.current) return;
         setData(res as ListResponse);
         setDraft((res as ListResponse).selected);
-      },
-      () => {
-        toast.show('读取角色列表失败');
-      },
-    );
-  }, [toast]);
+      } catch (err) {
+        if (!mountedRef.current) return;
+        const message = err instanceof Error ? err.message : '请稍后重试';
+        setLoadError(message);
+        if (!options.silent) {
+          toast.show(
+            err instanceof Error ? `角色加载失败：${err.message}` : '角色加载失败',
+            'error',
+          );
+        }
+      } finally {
+        if (mountedRef.current) setLoading(false);
+      }
+    },
+    [toast],
+  );
 
   React.useEffect(() => {
-    refresh();
+    mountedRef.current = true;
+    void refresh({ silent: true });
+    return () => {
+      mountedRef.current = false;
+    };
   }, [refresh]);
 
   const isPro = data?.plan === 'pro';
@@ -94,7 +113,7 @@ export function RolesPage(): JSX.Element {
           return prev.filter((x) => x !== id);
         }
         if (prev.length >= BASIC_ROLE_PICK_LIMIT) {
-          toast.show(`最多选择 ${BASIC_ROLE_PICK_LIMIT} 个角色`);
+          toast.show(roleLimitMessage(BASIC_ROLE_PICK_LIMIT), 'error');
           return prev;
         }
         return [...prev, id];
@@ -137,29 +156,87 @@ export function RolesPage(): JSX.Element {
       toast.show('已保存');
     } catch (err) {
       const msg = err instanceof Error ? err.message : '保存失败';
-      toast.show(msg);
+      toast.show(msg, 'error');
     } finally {
       setSaving(false);
     }
   }, [data, draft, toast]);
 
-  if (!data) {
+  const grouped = React.useMemo(
+    () => (data ? groupRoleCatalogue(data.catalogue) : []),
+    [data],
+  );
+  const summary = rolePageSummary({
+    loading,
+    error: loadError,
+    plan: data?.plan,
+    selectedCount: draft.length,
+    totalCount: data?.catalogue.length ?? 0,
+    pickLimit: data?.pickLimit ?? BASIC_ROLE_PICK_LIMIT,
+  });
+
+  if (loading || loadError || !data) {
     return (
       <PageContainer width="wide">
-        <PageHeader title="专业角色" description="挑选 AI 在工作时使用的视角" />
-        <div className="text-sm text-muted-foreground">读取中…</div>
+        <PageHeader
+          title="专业角色"
+          description="挑选 AI 在工作时使用的视角"
+          action={
+            <div className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground">
+              {summary}
+            </div>
+          }
+        />
+        {loadError ? (
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card/40 px-6 py-12 text-center">
+            <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
+            <div className="text-sm font-medium text-foreground/80">角色加载失败</div>
+            <div className="max-w-md text-xs leading-5 text-muted-foreground">
+              {loadError}
+            </div>
+            <div className="mt-1 flex flex-wrap justify-center gap-2">
+              <Button type="button" size="sm" onClick={() => void refresh()}>
+                重试
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <a
+                  href={supportMailtoHref({
+                    subject: '专业角色列表加载失败',
+                    body: '专业角色列表加载失败，请协助排查。\n\n注册邮箱：\n出现时间：',
+                  })}
+                >
+                  联系支持
+                </a>
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+            读取中…
+          </div>
+        )}
       </PageContainer>
     );
   }
 
-  const grouped = CATEGORY_ORDER.map((cat) => ({
-    ...cat,
-    items: data.catalogue.filter((r) => r.category === cat.key),
-  }));
-
   return (
     <PageContainer width="wide">
-      <PageHeader title="专业角色" description="挑选 AI 在工作时使用的视角" />
+      <PageHeader
+        title="专业角色"
+        description="挑选 AI 在工作时使用的视角"
+        action={
+          <div
+            className={cn(
+              'inline-flex items-center rounded-full border px-3 py-1 text-[12px] font-medium',
+              isBasic && draft.length > BASIC_ROLE_PICK_LIMIT
+                ? 'border-amber-300/60 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200'
+                : 'border-border bg-card text-foreground',
+            )}
+          >
+            {summary}
+          </div>
+        }
+      />
       {isFree && (
         <div className="mb-6 rounded-lg border border-amber-300/40 bg-amber-50/50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-200">
           免费版没有角色权限。
@@ -224,7 +301,7 @@ export function RolesPage(): JSX.Element {
               已选 {draft.length} / {BASIC_ROLE_PICK_LIMIT}
             </span>
             <span>
-              本月可切换 {Math.max(0, ROLE_CHANGES_PER_MONTH - data.changesThisMonth)} 次（共
+              本月可切换 {roleRemainingChanges(data.changesThisMonth, ROLE_CHANGES_PER_MONTH)} 次（共
               {ROLE_CHANGES_PER_MONTH} 次）
             </span>
           </div>
@@ -251,13 +328,13 @@ export function RolesPage(): JSX.Element {
 
       {isPro && (
         <div className="mb-6 rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
-          专业版默认开启全部 33 个角色，AI 会根据任务自动匹配最合适的视角。
+          {rolePlanLabel(data.plan)}默认开启全部 {data.catalogue.length} 个角色，AI 会根据任务自动匹配最合适的视角。
         </div>
       )}
 
       <div className="space-y-8">
         {grouped.map((group) => (
-          <Section key={group.key} title={group.nameZh}>
+          <Section key={group.key} title={`${group.nameZh} · ${group.items.length} 个`}>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {group.items.map((role) => {
                 const checked = draft.includes(role.id);
