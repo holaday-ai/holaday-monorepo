@@ -1,4 +1,5 @@
 import {
+  AlertCircle,
   BarChart3,
   BookOpen,
   Calculator,
@@ -36,7 +37,15 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useOutletContext } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import {
+  groupSkillsByCategory,
+  skillCardBadge,
+  skillLimitMessage,
+  skillPageSummary,
+} from '@/lib/skills-page-state';
+import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
@@ -48,24 +57,6 @@ const SKILL_CAPS: Record<string, number> = {
   basic: 5,
   pro: 33,
 };
-
-type Category = UiSkill['category'];
-
-// Phase 20b — full 9-category set + '其他' fallback. Anything not in
-// this list is silently dropped from the page; all categories used in
-// `agent/skills/skill-meta.ts` MUST appear here.
-const CATEGORY_ORDER: readonly Category[] = [
-  '运营',
-  '内容',
-  '商业分析',
-  '产品',
-  '法律',
-  '人力',
-  '行政',
-  '财务',
-  '翻译',
-  '其他',
-];
 
 /**
  * Static lookup of the lucide icons referenced by the backend's
@@ -118,6 +109,7 @@ const ICONS: Record<string, LucideIcon> = {
  */
 export function SkillsPage(): JSX.Element {
   const toast = useToast();
+  const mountedRef = React.useRef(false);
   // BOSS feedback — surface plan-bound cap. AppShell exposes `me`
   // via OutletContext; we only need .plan here. Default to 'free'
   // when the shell hasn't bootstrapped yet (e.g. cold deep link).
@@ -128,6 +120,7 @@ export function SkillsPage(): JSX.Element {
   const cap = SKILL_CAPS[planId] ?? 0;
   const [skills, setSkills] = React.useState<UiSkill[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [pendingId, setPendingId] = React.useState<string | null>(null);
   const enabledCount = React.useMemo(
     () => skills.reduce((n, s) => (s.enabled ? n + 1 : n), 0),
@@ -135,39 +128,50 @@ export function SkillsPage(): JSX.Element {
   );
   const atLimit = cap > 0 && enabledCount >= cap;
 
-  React.useEffect(() => {
-    let cancelled = false;
-    void (async () => {
+  const refresh = React.useCallback(
+    async (options: { silent?: boolean } = {}) => {
+      setLoading(true);
+      setLoadError(null);
       try {
         const list = await trpc.skills.list.query();
-        if (!cancelled) setSkills(list as UiSkill[]);
+        if (!mountedRef.current) return;
+        setSkills(list as UiSkill[]);
       } catch (err) {
-        if (!cancelled) {
+        if (!mountedRef.current) return;
+        const message = err instanceof Error ? err.message : '请稍后重试';
+        setLoadError(message);
+        if (!options.silent) {
           toast.show(
-            err instanceof Error ? `加载失败：${err.message}` : '加载失败',
+            err instanceof Error ? `技能加载失败：${err.message}` : '技能加载失败',
             'error',
           );
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (mountedRef.current) setLoading(false);
       }
+    },
+    [toast],
+  );
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    void (async () => {
+      await refresh({ silent: true });
     })();
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
     };
-  }, [toast]);
+  }, [refresh]);
 
-  const grouped = React.useMemo(() => {
-    const m = new Map<Category, UiSkill[]>();
-    for (const s of skills) {
-      const arr = m.get(s.category) ?? [];
-      arr.push(s);
-      m.set(s.category, arr);
-    }
-    return CATEGORY_ORDER.map((c) => ({ category: c, items: m.get(c) ?? [] })).filter(
-      (g) => g.items.length > 0,
-    );
-  }, [skills]);
+  const grouped = React.useMemo(() => groupSkillsByCategory(skills), [skills]);
+  const summary = skillPageSummary({
+    loading,
+    error: loadError,
+    totalCount: skills.length,
+    enabledCount,
+    cap,
+    planId,
+  });
 
   async function onToggle(skill: UiSkill): Promise<void> {
     if (pendingId) return;
@@ -175,14 +179,7 @@ export function SkillsPage(): JSX.Element {
     // limit today; this is just a guard against accidental over-
     // enablement and a clear upgrade prompt for Basic users.
     if (!skill.enabled && cap > 0 && enabledCount >= cap) {
-      if (planId === 'pro') {
-        toast.show(`已达到 ${cap} 个技能上限`, 'error');
-      } else {
-        toast.show(
-          `已达到当前套餐的技能上限（${cap} 个）· 升级到专业版可使用全部 33 个技能`,
-          'error',
-        );
-      }
+      toast.show(skillLimitMessage({ cap, planId }), 'error');
       return;
     }
     setPendingId(skill.id);
@@ -218,21 +215,16 @@ export function SkillsPage(): JSX.Element {
         title="专家技能"
         description="选择你常用的技能，HOLA DAY 会自动识别并调用专业工作流"
         action={
-          cap > 0 ? (
-            <div
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12px] font-medium',
-                atLimit
-                  ? 'border-amber-300/60 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200'
-                  : 'border-border bg-card text-foreground',
-              )}
-            >
-              已启用 {enabledCount} / {cap}
-              <span className="text-muted-foreground">
-                · {planId === 'pro' ? '专业版' : planId === 'basic' ? '基础版' : '体验版'}
-              </span>
-            </div>
-          ) : null
+          <div
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12px] font-medium',
+              atLimit && !loadError && !loading
+                ? 'border-amber-300/60 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200'
+                : 'border-border bg-card text-foreground',
+            )}
+          >
+            {summary}
+          </div>
         }
       />
       {/* Upgrade nudge when Basic user hits the cap. Inline banner
@@ -250,23 +242,66 @@ export function SkillsPage(): JSX.Element {
         <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
           加载中…
         </div>
+      ) : loadError ? (
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card/40 px-6 py-12 text-center">
+          <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
+          <div className="text-sm font-medium text-foreground/80">技能加载失败</div>
+          <div className="max-w-md text-xs leading-5 text-muted-foreground">
+            {loadError}
+          </div>
+          <div className="mt-1 flex flex-wrap justify-center gap-2">
+            <Button type="button" size="sm" onClick={() => void refresh()}>
+              重试
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <a
+                href={supportMailtoHref({
+                  subject: '专家技能列表加载失败',
+                  body: '专家技能列表加载失败，请协助排查。\n\n注册邮箱：\n出现时间：',
+                })}
+              >
+                联系支持
+              </a>
+            </Button>
+          </div>
+        </div>
       ) : grouped.length === 0 ? (
-        <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-          暂无可用技能
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
+          <Sparkles className="h-8 w-8 text-muted-foreground/40" />
+          <div className="text-sm font-medium text-foreground/80">暂无可用技能</div>
+          <div className="max-w-md text-xs leading-5 text-muted-foreground">
+            当前技能目录为空。你可以联系支持，让我们确认套餐和技能配置。
+          </div>
+          <Button asChild variant="outline" size="sm" className="mt-1">
+            <a
+              href={supportMailtoHref({
+                subject: '专家技能目录为空',
+                body: '专家技能目录为空，请协助确认。\n\n注册邮箱：',
+              })}
+            >
+              联系支持
+            </a>
+          </Button>
         </div>
       ) : (
         <div className="space-y-8">
           {grouped.map(({ category, items }) => (
             <section key={category}>
-              <h2 className="mb-3 text-xs font-semibold tracking-wider text-muted-foreground">
-                {category}
-              </h2>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h2 className="text-xs font-semibold tracking-wider text-muted-foreground">
+                  {category}
+                </h2>
+                <div className="text-[11px] text-muted-foreground">
+                  {items.length} 个
+                </div>
+              </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {items.map((s) => (
                   <SkillCard
                     key={s.id}
                     skill={s}
                     pending={pendingId === s.id}
+                    blocked={pendingId !== null && pendingId !== s.id}
                     onToggle={() => void onToggle(s)}
                   />
                 ))}
@@ -282,10 +317,12 @@ export function SkillsPage(): JSX.Element {
 function SkillCard({
   skill,
   pending,
+  blocked,
   onToggle,
 }: {
   skill: UiSkill;
   pending: boolean;
+  blocked: boolean;
   onToggle: () => void;
 }): JSX.Element {
   const Icon = ICONS[skill.icon] ?? Sparkles;
@@ -293,14 +330,15 @@ function SkillCard({
     <button
       type="button"
       onClick={onToggle}
-      disabled={pending}
+      disabled={pending || blocked}
       aria-pressed={skill.enabled}
+      aria-busy={pending}
       className={cn(
         'group relative flex flex-col items-start gap-2 rounded-xl border p-4 text-left transition-all',
         skill.enabled
           ? 'border-primary/60 bg-primary/5 shadow-sm dark:border-primary/40 dark:bg-primary/10'
           : 'border-border bg-card hover:border-foreground/20 hover:bg-foreground/[0.02]',
-        pending && 'opacity-60',
+        (pending || blocked) && 'opacity-60',
       )}
     >
       <div
@@ -318,12 +356,14 @@ function SkillCard({
       <span
         className={cn(
           'absolute right-3 top-3 rounded-md px-2 py-0.5 text-[10px] font-medium',
-          skill.enabled
-            ? 'bg-primary text-primary-foreground'
-            : 'border border-border text-muted-foreground',
+          pending
+            ? 'border border-border bg-background text-muted-foreground'
+            : skill.enabled
+              ? 'bg-primary text-primary-foreground'
+              : 'border border-border text-muted-foreground',
         )}
       >
-        {skill.enabled ? '已启用' : '启用'}
+        {skillCardBadge({ enabled: skill.enabled, pending })}
       </span>
     </button>
   );
