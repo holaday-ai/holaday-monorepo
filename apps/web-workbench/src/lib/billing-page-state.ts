@@ -1,0 +1,37 @@
+import { formatCny, getPlanPriceCents, type PaidPlanId } from '@holaday/shared-types';
+
+export function billingPlanLabel(plan: string | null | undefined): string {
+  if (plan === 'pro') return 'Pro';
+  if (plan === 'basic') return 'Basic';
+  return 'Free · 试用';
+}
+
+export function isPaidBillingPlan(plan: string | null | undefined): plan is PaidPlanId {
+  return plan === 'pro' || plan === 'basic';
+}
+
+export function nextBillingAmountText(plan: string | null | undefined): string {
+  if (!isPaidBillingPlan(plan)) return '—';
+  return formatCny(getPlanPriceCents(plan, 'monthly', 'cny', false));
+}
+
+export function nextBillingDateText(plan: string | null | undefined, planExpiresAt: string | null): string {
+  if (!isPaidBillingPlan(plan) || !planExpiresAt) return '—';
+  const timestamp = Date.parse(planExpiresAt);
+  if (!Number.isFinite(timestamp)) return '—';
+  return new Date(timestamp).toISOString().slice(0, 10);
+}
+
+export function billingPageSummary(options: {
+  readonly loading: boolean;
+  readonly error: string | null;
+  readonly plan: string | null | undefined;
+}): string {
+  if (options.loading) return '订阅加载中…';
+  if (options.error) return '订阅加载失败';
+  return `${billingPlanLabel(options.plan)} · 当前订阅`;
+}
+
+export function cancellationMailBody(planLabel: string): string {
+  return `请协助取消我的 HOLA DAY 订阅。\n\n注册邮箱：\n当前套餐：${planLabel}`;
+}
