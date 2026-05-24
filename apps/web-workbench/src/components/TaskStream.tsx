@@ -43,6 +43,7 @@ import {
 import { taskActionError } from '@/lib/error-copy';
 import { externalLinkConfirmDescription } from '@/lib/external-link-copy';
 import { classifyFriendlyFailure } from '@/lib/failure-copy';
+import { downloadMarkdownFile } from '@/lib/markdown-download';
 import { terminalArtifactFallbackText } from '@/lib/terminal-artifact-copy';
 import { terminalEmptyCopy } from '@/lib/terminal-empty-copy';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
@@ -1977,7 +1978,13 @@ function TerminalSummary({
               <span>复制 Markdown</span>
             </DropdownMenuItem>
             <DropdownMenuItem
-              onSelect={() => downloadMarkdown(markdownText, taskId)}
+              onSelect={() => {
+                if (downloadMarkdownFile(markdownText, taskId)) {
+                  toast.show('已开始下载 Markdown');
+                } else {
+                  toast.show('下载失败，请复制 Markdown 后手动保存', 'error');
+                }
+              }}
             >
               <Download className="text-muted-foreground" />
               <span>下载 .md</span>
@@ -2111,30 +2118,6 @@ function TerminalSummary({
  * mangle copied output; users who want structure preserved can hit
  * the second button to copy the raw markdown.
  */
-/**
- * Phase 4 R2 4e — client-side markdown export. Wraps displayText
- * in a Blob and triggers a download named after the task id (so a
- * later session can find the file again from the local filesystem).
- * No auth needed — the content is whatever's on screen.
- */
-function downloadMarkdown(text: string, taskId?: string): void {
-  try {
-    const filename = `${taskId ?? 'holaday-task'}.md`;
-    const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5_000);
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[TaskStream] markdown export failed', err);
-  }
-}
-
 function stripMarkdown(input: string): string {
   let out = input;
   // Strip code fences (keep inner text).
