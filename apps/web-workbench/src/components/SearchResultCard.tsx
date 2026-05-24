@@ -1,4 +1,10 @@
 import * as React from 'react';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { externalLinkConfirmDescription } from '@/lib/external-link-copy';
+import {
+  buildSearchSourceLink,
+  type SearchSourceLink,
+} from '@/lib/search-source-link';
 
 export interface SearchSource {
   /** Page title from the search engine. Trimmed; never empty. */
@@ -18,20 +24,37 @@ interface Props {
 /**
  * Renders a list of web-search source cards Claude-style: row of
  * favicon + domain + title, with the snippet on the second line.
- * Click opens the URL in a new tab. Used inside the per-iteration
- * `WebSearchLine` so users can see WHERE the agent's information
- * came from, not just that a search happened.
+ * Click asks for confirmation before opening the URL in a new tab.
+ * Used inside the per-iteration `WebSearchLine` so users can see
+ * WHERE the agent's information came from, not just that a search
+ * happened.
  */
 export function SearchResultCard({ sources, initialVisible = 6 }: Props): JSX.Element | null {
   const [expanded, setExpanded] = React.useState(false);
-  if (!sources || sources.length === 0) return null;
-  const visible = expanded ? sources : sources.slice(0, initialVisible);
-  const hidden = sources.length - visible.length;
+  const [pendingHref, setPendingHref] = React.useState<string | null>(null);
+  const safeSources = React.useMemo(
+    () =>
+      sources
+        .map((source) => ({ source, link: buildSearchSourceLink(source.url) }))
+        .filter(
+          (row): row is { source: SearchSource; link: SearchSourceLink } =>
+            row.link !== null,
+        ),
+    [sources],
+  );
+  if (safeSources.length === 0) return null;
+  const visible = expanded ? safeSources : safeSources.slice(0, initialVisible);
+  const hidden = safeSources.length - visible.length;
   return (
     <div className="mt-2 flex flex-col">
       <div className="divide-y divide-border/40">
-        {visible.map((s, i) => (
-          <SourceRow key={`${s.url}-${i}`} source={s} />
+        {visible.map(({ source, link }, i) => (
+          <SourceRow
+            key={`${link.href}-${i}`}
+            source={source}
+            link={link}
+            onOpen={setPendingHref}
+          />
         ))}
       </div>
       {hidden > 0 && !expanded && (
@@ -44,18 +67,44 @@ export function SearchResultCard({ sources, initialVisible = 6 }: Props): JSX.El
           展开 {hidden} 条更多来源
         </button>
       )}
+      <ConfirmDialog
+        open={pendingHref !== null}
+        title="即将打开外部链接"
+        description={
+          pendingHref ? externalLinkConfirmDescription(pendingHref) : undefined
+        }
+        confirmLabel="打开"
+        cancelLabel="取消"
+        onClose={() => setPendingHref(null)}
+        onConfirm={() => {
+          const href = pendingHref;
+          setPendingHref(null);
+          if (href) window.open(href, '_blank', 'noopener,noreferrer');
+        }}
+      />
     </div>
   );
 }
 
-function SourceRow({ source }: { source: SearchSource }): JSX.Element {
-  const domain = safeDomain(source.url);
-  const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`;
+function SourceRow({
+  source,
+  link,
+  onOpen,
+}: {
+  source: SearchSource;
+  link: SearchSourceLink;
+  onOpen: (href: string) => void;
+}): JSX.Element {
+  const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(link.domain)}&sz=32`;
   return (
     <a
-      href={source.url}
+      href={link.href}
       target="_blank"
       rel="noopener noreferrer"
+      onClick={(e) => {
+        e.preventDefault();
+        onOpen(link.href);
+      }}
       className="group flex items-start gap-2.5 px-1 py-2 transition-colors hover:bg-foreground/[0.03]"
     >
       <img
@@ -71,7 +120,7 @@ function SourceRow({ source }: { source: SearchSource }): JSX.Element {
       />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">{domain}</span>
+          <span className="text-xs text-muted-foreground">{link.domain}</span>
         </div>
         <div className="truncate text-sm font-medium text-foreground group-hover:underline">
           {source.title}
@@ -82,12 +131,4 @@ function SourceRow({ source }: { source: SearchSource }): JSX.Element {
       </div>
     </a>
   );
-}
-
-function safeDomain(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return url.slice(0, 40);
-  }
 }
