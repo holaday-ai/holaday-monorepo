@@ -15,6 +15,7 @@ import {
   Square,
 } from 'lucide-react';
 import * as React from 'react';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import {
   shouldShowBrowserHeader,
@@ -27,6 +28,10 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { VncViewport, type VncStatus } from '@/components/VncViewport';
 import { browserNavFailureMessage } from '@/lib/browser-nav-copy';
+import {
+  externalLinkConfirmDescription,
+  safeExternalHttpHref,
+} from '@/lib/external-link-copy';
 import { hdDebug } from '@/lib/hd-debug';
 import { trpc } from '@/lib/trpc';
 import { useStreamToken } from '@/lib/use-stream-token';
@@ -1137,21 +1142,20 @@ export function BrowserPanel({
                       screencast is up, the inline interactive
                       takeover already handles the login flow inside
                       the panel.
-                    The button opens the login URL in a new tab so
-                    the user can complete the login flow on the live
-                    site, then come back and reply to the task. */}
+                    The button confirms the login URL before opening
+                    a new tab so the user can complete the login flow
+                    on the live site, then come back and reply to the
+                    task. */}
                 {awaitingKind === 'login' &&
                   !frame &&
                   persistedFinalUrl && (
-                    <a
+                    <SafeExternalLinkButton
                       href={persistedFinalUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
                       className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-amber-500/60 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-900 hover:bg-amber-100 hover:text-amber-950 dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/20"
                     >
                       <ExternalLink className="h-3 w-3" />
                       在新标签打开登录页
-                    </a>
+                    </SafeExternalLinkButton>
                   )}
               </div>
             </div>
@@ -1749,12 +1753,13 @@ function EmptyBrowserState({
   const terminal = taskStatus ? isTerminalStatus(taskStatus) : false;
   if (terminal && isBrowserTask) {
     const statusLabel = terminalEvidenceStatusLabel(taskStatus);
+    const safeFinalUrl = safeExternalHttpHref(finalUrl);
     // Three branches: finalScreenshot is handled before reaching us
     // (the parent renders `finalEvidenceFrame` directly). Here we
     // only see "no screenshot" cases — either finalUrl exists (give
     // the user a link to verify) or nothing was saved at all (offer
     // to re-execute the intent).
-    if (finalUrl) {
+    if (safeFinalUrl) {
       return (
         <div className="flex flex-col items-center px-6 text-center text-muted-foreground">
           <Globe className="h-10 w-10 text-muted-foreground/40" aria-hidden />
@@ -1764,17 +1769,15 @@ function EmptyBrowserState({
           <div className="mt-1 text-xs leading-relaxed">
             这次任务结束时没有捕获截图，可打开最终页面复核。
           </div>
-          <a
-            href={finalUrl}
-            target="_blank"
-            rel="noopener noreferrer"
+          <SafeExternalLinkButton
+            href={safeFinalUrl}
             className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[12px] text-foreground transition-colors hover:border-foreground/30 hover:bg-foreground/[0.04]"
           >
             <ExternalLink className="h-3 w-3" />
             <span className="max-w-[260px] truncate font-mono text-[11px]">
-              {finalUrl}
+              {safeFinalUrl}
             </span>
-          </a>
+          </SafeExternalLinkButton>
         </div>
       );
     }
@@ -1809,6 +1812,46 @@ function EmptyBrowserState({
         你可以观察或亲自接管。
       </div>
     </div>
+  );
+}
+
+function SafeExternalLinkButton({
+  href,
+  className,
+  children,
+}: {
+  href: string | null | undefined;
+  className?: string;
+  children: React.ReactNode;
+}): JSX.Element | null {
+  const [pendingHref, setPendingHref] = React.useState<string | null>(null);
+  const safeHref = safeExternalHttpHref(href);
+  if (!safeHref) return null;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setPendingHref(safeHref)}
+        className={className}
+      >
+        {children}
+      </button>
+      <ConfirmDialog
+        open={pendingHref !== null}
+        title="即将打开外部链接"
+        description={
+          pendingHref ? externalLinkConfirmDescription(pendingHref) : undefined
+        }
+        confirmLabel="打开"
+        cancelLabel="取消"
+        onClose={() => setPendingHref(null)}
+        onConfirm={() => {
+          const target = pendingHref;
+          setPendingHref(null);
+          if (target) window.open(target, '_blank', 'noopener,noreferrer');
+        }}
+      />
+    </>
   );
 }
 
