@@ -3,6 +3,15 @@ import * as React from 'react';
 import { FullBrandLogo } from '@/components/BrandLogo';
 import { Button } from '@/components/ui/button';
 import { setAccessToken } from '@/lib/auth';
+import {
+  authErrorMessage,
+  isValidChinaPhone,
+  isValidEmail,
+  maskChinaPhone,
+  normaliseCodeInput,
+  normaliseEmailInput,
+  normalisePhoneInput,
+} from '@/lib/login-gate-validation';
 import { trpc } from '@/lib/trpc';
 
 interface Props {
@@ -96,9 +105,18 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
   async function handleLogin(e: React.FormEvent): Promise<void> {
     e.preventDefault();
     resetTransient();
+    const cleanEmail = normaliseEmailInput(email);
+    if (!isValidEmail(cleanEmail)) {
+      setError('请输入有效邮箱');
+      return;
+    }
+    if (!password) {
+      setError('请输入密码');
+      return;
+    }
     setPending(true);
     try {
-      const res = await trpc.auth.login.mutate({ email, password });
+      const res = await trpc.auth.login.mutate({ email: cleanEmail, password });
       setAccessToken(res.accessToken);
       onAuthenticated();
     } catch (err) {
@@ -111,6 +129,11 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
   async function handleRegister(e: React.FormEvent): Promise<void> {
     e.preventDefault();
     resetTransient();
+    const cleanEmail = normaliseEmailInput(email);
+    if (!isValidEmail(cleanEmail)) {
+      setError('请输入有效邮箱');
+      return;
+    }
     if (password !== confirm) {
       setError('两次输入的密码不一致');
       return;
@@ -121,7 +144,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
     }
     setPending(true);
     try {
-      const res = await trpc.auth.register.mutate({ email, password });
+      const res = await trpc.auth.register.mutate({ email: cleanEmail, password });
       setAccessToken(res.accessToken);
       onAuthenticated();
     } catch (err) {
@@ -133,16 +156,17 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
 
   async function handleSendCode(): Promise<void> {
     resetTransient();
-    if (!email.trim()) {
-      setError('请先输入邮箱');
+    const cleanEmail = normaliseEmailInput(email);
+    if (!isValidEmail(cleanEmail)) {
+      setError('请输入有效邮箱');
       return;
     }
     setPending(true);
     try {
-      await trpc.auth.sendCode.mutate({ email });
+      await trpc.auth.sendCode.mutate({ email: cleanEmail });
       setCodeSent(true);
       setCooldown(60);
-      setNotice(`验证码已发送到 ${email}，5 分钟内有效`);
+      setNotice(`验证码已发送到 ${cleanEmail}，5 分钟内有效`);
     } catch (err) {
       setError(authErrorMessage(err, '验证码发送失败，请稍后重试。'));
     } finally {
@@ -153,9 +177,18 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
   async function handleVerifyCode(e: React.FormEvent): Promise<void> {
     e.preventDefault();
     resetTransient();
+    const cleanEmail = normaliseEmailInput(email);
+    if (!isValidEmail(cleanEmail)) {
+      setError('请输入有效邮箱');
+      return;
+    }
+    if (code.length !== 6) {
+      setError('请输入 6 位验证码');
+      return;
+    }
     setPending(true);
     try {
-      const res = await trpc.auth.verifyCode.mutate({ email, code });
+      const res = await trpc.auth.verifyCode.mutate({ email: cleanEmail, code });
       setAccessToken(res.accessToken);
       onAuthenticated();
     } catch (err) {
@@ -168,6 +201,15 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
   async function handleResetPassword(e: React.FormEvent): Promise<void> {
     e.preventDefault();
     resetTransient();
+    const cleanEmail = normaliseEmailInput(email);
+    if (!isValidEmail(cleanEmail)) {
+      setError('请输入有效邮箱');
+      return;
+    }
+    if (code.length !== 6) {
+      setError('请输入 6 位验证码');
+      return;
+    }
     if (password.length < 8) {
       setError('新密码至少 8 位');
       return;
@@ -178,7 +220,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
     }
     setPending(true);
     try {
-      const res = await trpc.auth.resetPassword.mutate({ email, code, password });
+      const res = await trpc.auth.resetPassword.mutate({ email: cleanEmail, code, password });
       setAccessToken(res.accessToken);
       onAuthenticated();
     } catch (err) {
@@ -198,16 +240,17 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
   // ---------------------------------------------------------------
   async function handleSendSms(): Promise<void> {
     resetTransient();
-    if (!/^1[3-9]\d{9}$/.test(phone)) {
+    if (!isValidChinaPhone(phone)) {
       setError('请输入 11 位中国大陆手机号');
       return;
     }
+    const cleanPhone = normalisePhoneInput(phone);
     setPending(true);
     try {
-      await trpc.auth.smsSend.mutate({ phone });
+      await trpc.auth.smsSend.mutate({ phone: cleanPhone });
       setCodeSent(true);
       setCooldown(60);
-      setNotice(`验证码已发送到 ${phone.slice(0, 3)}****${phone.slice(-4)}，5 分钟内有效`);
+      setNotice(`验证码已发送到 ${maskChinaPhone(cleanPhone)}，5 分钟内有效`);
     } catch (err) {
       setError(authErrorMessage(err, '短信发送失败，请稍后重试。'));
     } finally {
@@ -218,9 +261,18 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
   async function handleVerifySms(e: React.FormEvent): Promise<void> {
     e.preventDefault();
     resetTransient();
+    if (!isValidChinaPhone(phone)) {
+      setError('请输入 11 位中国大陆手机号');
+      return;
+    }
+    if (code.length !== 6) {
+      setError('请输入 6 位验证码');
+      return;
+    }
+    const cleanPhone = normalisePhoneInput(phone);
     setPending(true);
     try {
-      const res = await trpc.auth.smsVerify.mutate({ phone, code });
+      const res = await trpc.auth.smsVerify.mutate({ phone: cleanPhone, code });
       setAccessToken(res.accessToken);
       onAuthenticated();
     } catch (err) {
@@ -267,8 +319,8 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
         )}
 
         {mode === 'login' && (
-          <form onSubmit={handleLogin} className="space-y-3">
-            <EmailInput value={email} onChange={setEmail} />
+          <form onSubmit={handleLogin} className="space-y-3" noValidate>
+            <EmailInput value={email} onChange={setEmail} autoFocus />
             <PasswordInput
               value={password}
               onChange={setPassword}
@@ -283,7 +335,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
                 忘记密码？
               </button>
             </div>
-            {error && <div className="text-xs text-destructive">{error}</div>}
+            <InlineMessage tone="error">{error}</InlineMessage>
             <Button type="submit" className="w-full" disabled={pending}>
               {pending ? '登录中…' : '登录'}
             </Button>
@@ -291,8 +343,8 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
         )}
 
         {mode === 'register' && (
-          <form onSubmit={handleRegister} className="space-y-3">
-            <EmailInput value={email} onChange={setEmail} />
+          <form onSubmit={handleRegister} className="space-y-3" noValidate>
+            <EmailInput value={email} onChange={setEmail} autoFocus />
             <PasswordInput
               value={password}
               onChange={setPassword}
@@ -305,7 +357,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
               autoComplete="new-password"
               label="确认密码"
             />
-            {error && <div className="text-xs text-destructive">{error}</div>}
+            <InlineMessage tone="error">{error}</InlineMessage>
             <Button type="submit" className="w-full" disabled={pending}>
               {pending ? '注册中…' : '注册并登录'}
             </Button>
@@ -313,8 +365,8 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
         )}
 
         {mode === 'emailCode' && (
-          <form onSubmit={handleVerifyCode} className="space-y-3">
-            <EmailInput value={email} onChange={setEmail} />
+          <form onSubmit={handleVerifyCode} className="space-y-3" noValidate>
+            <EmailInput value={email} onChange={setEmail} autoFocus />
             <CodeRow
               code={code}
               onChange={setCode}
@@ -323,8 +375,8 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
               codeSent={codeSent}
               pending={pending}
             />
-            {notice && <div className="text-xs text-blue-700 dark:text-blue-400">{notice}</div>}
-            {error && <div className="text-xs text-destructive">{error}</div>}
+            <InlineMessage tone="notice">{notice}</InlineMessage>
+            <InlineMessage tone="error">{error}</InlineMessage>
             <Button type="submit" className="w-full" disabled={pending || code.length !== 6}>
               {pending ? '验证中…' : '验证并登录'}
             </Button>
@@ -332,8 +384,8 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
         )}
 
         {mode === 'phone' && (
-          <form onSubmit={handleVerifySms} className="space-y-3">
-            <PhoneInput value={phone} onChange={setPhone} />
+          <form onSubmit={handleVerifySms} className="space-y-3" noValidate>
+            <PhoneInput value={phone} onChange={setPhone} autoFocus />
             <CodeRow
               code={code}
               onChange={setCode}
@@ -342,8 +394,8 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
               codeSent={codeSent}
               pending={pending}
             />
-            {notice && <div className="text-xs text-blue-700 dark:text-blue-400">{notice}</div>}
-            {error && <div className="text-xs text-destructive">{error}</div>}
+            <InlineMessage tone="notice">{notice}</InlineMessage>
+            <InlineMessage tone="error">{error}</InlineMessage>
             <Button type="submit" className="w-full" disabled={pending || code.length !== 6}>
               {pending ? '验证中…' : '验证并登录'}
             </Button>
@@ -351,8 +403,8 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
         )}
 
         {mode === 'forgot' && (
-          <form onSubmit={handleResetPassword} className="space-y-3">
-            <EmailInput value={email} onChange={setEmail} />
+          <form onSubmit={handleResetPassword} className="space-y-3" noValidate>
+            <EmailInput value={email} onChange={setEmail} autoFocus />
             <CodeRow
               code={code}
               onChange={setCode}
@@ -373,8 +425,8 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
               autoComplete="new-password"
               label="确认新密码"
             />
-            {notice && <div className="text-xs text-blue-700 dark:text-blue-400">{notice}</div>}
-            {error && <div className="text-xs text-destructive">{error}</div>}
+            <InlineMessage tone="notice">{notice}</InlineMessage>
+            <InlineMessage tone="error">{error}</InlineMessage>
             <Button type="submit" className="w-full" disabled={pending || code.length !== 6}>
               {pending ? '重置中…' : '重置密码并登录'}
             </Button>
@@ -438,20 +490,6 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
   );
 }
 
-function authErrorMessage(err: unknown, fallback: string): string {
-  const raw = err instanceof Error ? err.message : String(err);
-  const trimmed = raw.trim();
-  if (!trimmed) return fallback;
-  if (
-    /unknown column|table .* doesn't exist|sql|database|response.*json|unexpected end of json|field list/i.test(
-      trimmed,
-    )
-  ) {
-    return fallback;
-  }
-  return trimmed;
-}
-
 function TabButton({
   active,
   onClick,
@@ -469,6 +507,25 @@ function TabButton({
     >
       {children}
     </button>
+  );
+}
+
+function InlineMessage({
+  tone,
+  children,
+}: {
+  tone: 'error' | 'notice';
+  children: string | null;
+}): JSX.Element | null {
+  if (!children) return null;
+  return (
+    <div
+      role={tone === 'error' ? 'alert' : 'status'}
+      aria-live={tone === 'error' ? 'assertive' : 'polite'}
+      className={`text-xs ${tone === 'error' ? 'text-destructive' : 'text-blue-700 dark:text-blue-400'}`}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -498,8 +555,10 @@ function CodeRow({
           maxLength={6}
           placeholder="6 位数字"
           required
+          autoComplete="one-time-code"
+          name="one-time-code"
           value={code}
-          onChange={(e) => onChange(e.target.value.replace(/\D/g, ''))}
+          onChange={(e) => onChange(normaliseCodeInput(e.target.value))}
           className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         />
         <Button
@@ -519,9 +578,11 @@ function CodeRow({
 function EmailInput({
   value,
   onChange,
+  autoFocus = false,
 }: {
   value: string;
   onChange: (v: string) => void;
+  autoFocus?: boolean;
 }): JSX.Element {
   return (
     <label className="block space-y-1">
@@ -530,6 +591,9 @@ function EmailInput({
         type="email"
         required
         autoComplete="email"
+        name="email"
+        placeholder="you@example.com"
+        autoFocus={autoFocus}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -540,17 +604,17 @@ function EmailInput({
 
 /**
  * Phase 12 — phone-number input. Strips everything that isn't a
- * digit on input so paste-from-formatted (e.g. "+86 138-0000-1234")
- * lands as the canonical 11-digit form the backend regex expects.
- * Caps at 11 digits to keep the input physically incapable of
- * holding a +86 prefix.
+ * digit on input, strips a pasted/typed +86 or 0086 country code when present,
+ * then caps at the canonical 11-digit form the backend regex expects.
  */
 function PhoneInput({
   value,
   onChange,
+  autoFocus = false,
 }: {
   value: string;
   onChange: (v: string) => void;
+  autoFocus?: boolean;
 }): JSX.Element {
   return (
     <label className="block space-y-1">
@@ -565,9 +629,11 @@ function PhoneInput({
           required
           maxLength={11}
           autoComplete="tel-national"
+          name="phone"
           placeholder="138 0000 0000"
+          autoFocus={autoFocus}
           value={value}
-          onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 11))}
+          onChange={(e) => onChange(normalisePhoneInput(e.target.value))}
           className="w-full rounded-r-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         />
       </div>
