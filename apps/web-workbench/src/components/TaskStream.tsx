@@ -49,6 +49,7 @@ import { classifyFriendlyFailure } from '@/lib/failure-copy';
 import { downloadMarkdownFile } from '@/lib/markdown-download';
 import { terminalArtifactFallbackText } from '@/lib/terminal-artifact-copy';
 import { terminalEmptyCopy } from '@/lib/terminal-empty-copy';
+import { verificationBannerCopy } from '@/lib/verification-banner-copy';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 import { PlanCard } from '@/components/PlanCard';
 import { SearchResultCard } from '@/components/SearchResultCard';
@@ -99,6 +100,12 @@ const PLAYED_TERMINAL_REVEAL_TASK_IDS = new Set<string>();
 
 function hasPausedTerminalResult(task: UiTask): boolean {
   return task.status === 'paused' && Boolean(task.resultText);
+}
+
+function shouldShowVerificationBanner(task: UiTask): boolean {
+  if (task.status === 'partial_success') return true;
+  if (task.verificationPassed === false) return true;
+  return (task.failedChecks?.length ?? 0) > 0;
 }
 
 /**
@@ -474,19 +481,13 @@ function AgentBlock({
             </div>
           )}
 
-        {/* Codex Pack A4 — verification verdict banner. Sits ABOVE the
-            terminal summary so users see the quality-gate status before
-            they read the answer.
-            BUG-A1 (2026-05-20): keyed off task.status='partial_success'
-            instead of `verificationPassed===false`. The live
-            server.task.terminal frame ships status (which already
-            encodes the verdict via deriveFinalStatus) but does NOT yet
-            carry verificationPassed — that only lands after
-            hydrateDetail fires. Status-driven gating shows the banner
-            immediately on terminal arrival; hard-fail reasons are
-            already shown by FailureHeaderCard for status='failed' so no
-            second red banner is needed here. */}
-        {terminal && task.status === 'partial_success' && (
+        {/* Verification verdict banner. It appears as soon as the
+            terminal status itself encodes a partial result, and also
+            after detail hydration when verificationPassed=false or
+            failed checks are present. This catches hard-fail verifier
+            cases without showing a generic banner for ordinary runtime
+            failures. */}
+        {terminal && shouldShowVerificationBanner(task) && (
           <VerificationBanner
             level={task.failureLevel ?? 'fixable'}
             status={task.status}
@@ -579,48 +580,6 @@ function AgentBlock({
  * question. The composer below (InputArea) flips to "回复 HOLA DAY..."
  * mode so Enter sends a reply instead of spawning a new task.
  */
-/**
- * Codex Pack A4 — verification-verdict banner.
- *
- * Renders above the TerminalSummary when the deterministic verifier
- * flagged the task. Two visual states:
- *
- *   partial_success / failureLevel='fixable' → yellow card,
- *     "结果可能不完整，以下内容可能缺少来源或排序"
- *
- *   failed (via verifier) / failureLevel='hard_fail' → red card,
- *     "质量校验未通过：…"
- *
- * Levels other than 'hard_fail' show the soft yellow state; pure
- * needs_clarification doesn't reach this banner because the runner
- * stays in awaiting_user before any partial_success persist.
- */
-/**
- * Codex Round 2 P1-6 — map check type to Chinese label. row-level
- * hints (e.g. "第 3 行缺少商品链接") live in the detail string of
- * `ecommerce_rows`; we surface the detail for that check and a
- * compact label for the rest.
- */
-const CHECK_TYPE_LABELS: Record<string, string> = {
-  url_count: '缺少来源链接',
-  result_count: '结果数量不足',
-  price_sort: '价格排序不正确',
-  ecommerce_rows: '商品行字段不完整',
-  'generic.url_grounding': '回复中存在未在 ledger 中的 URL（可能是编造）',
-  'generic.empty_result': '回复内容近似为空',
-  'generic.constraints': '触发了约束条件',
-  'generic.number_cross_check': '数据交叉校验不一致',
-};
-
-function labelForCheck(check: { type: string; detail: string }): string {
-  if (check.type === 'ecommerce_rows') {
-    // The row-level detail string is already user-readable in Chinese
-    // ("第 N 行缺少..."). Show it verbatim so the user sees which row.
-    return check.detail || CHECK_TYPE_LABELS[check.type]!;
-  }
-  return CHECK_TYPE_LABELS[check.type] ?? check.detail ?? check.type;
-}
-
 function VerificationBanner({
   level,
   status,
@@ -630,44 +589,50 @@ function VerificationBanner({
   status: string;
   failedChecks: Array<{ type: string; detail: string }> | null;
 }): JSX.Element {
-  const isHard = level === 'hard_fail' || status === 'failed';
-  const items = (failedChecks ?? []).slice(0, 5);
-  if (isHard) {
-    return (
-      <div className="rounded-xl border border-red-200/70 bg-red-50/80 px-4 py-3 text-sm text-red-900 dark:border-red-500/40 dark:bg-red-950/60 dark:text-red-100">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-red-700 dark:text-red-300">
-          质量校验未通过
-        </div>
-        {items.length > 0 ? (
-          <ul className="mt-1 list-inside list-disc space-y-0.5 leading-relaxed">
-            {items.map((c, i) => (
-              <li key={`${c.type}-${i}`}>{labelForCheck(c)}</li>
-            ))}
-          </ul>
-        ) : (
-          <p className="mt-1 leading-relaxed">
-            以下回答未通过结构性校验（来源链接 / 结果条数 / 价格排序）。建议重新发送相同意图，或在追问里说明你需要的字段。
-          </p>
-        )}
-      </div>
-    );
-  }
+  const copy = verificationBannerCopy({ level, status, failedChecks });
+  const isDanger = copy.tone === 'danger';
   return (
-    <div className="rounded-xl border border-amber-200/70 bg-amber-50/80 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/60 dark:text-amber-100">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
-        结果可能不完整
-      </div>
-      {items.length > 0 ? (
-        <ul className="mt-1 list-inside list-disc space-y-0.5 leading-relaxed">
-          {items.map((c, i) => (
-            <li key={`${c.type}-${i}`}>{labelForCheck(c)}</li>
-          ))}
-        </ul>
-      ) : (
-        <p className="mt-1 leading-relaxed">
-          以下回答缺少部分要求的字段（如来源链接、足够多的结构化条目，或价格排序未达预期）。可参考使用，建议核对来源后再行动。
-        </p>
+    <div
+      className={cn(
+        'rounded-xl border px-4 py-3 text-sm shadow-sm',
+        isDanger
+          ? 'border-red-200/70 bg-red-50/80 text-red-900 dark:border-red-500/40 dark:bg-red-950/60 dark:text-red-100'
+          : 'border-amber-200/70 bg-amber-50/80 text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/60 dark:text-amber-100',
       )}
+    >
+      <div className="flex items-start gap-2.5">
+        {isDanger ? (
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-300" />
+        ) : (
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" />
+        )}
+        <div className="min-w-0 flex-1">
+          <div
+            className={cn(
+              'text-[11px] font-semibold uppercase tracking-wide',
+              isDanger
+                ? 'text-red-700 dark:text-red-300'
+                : 'text-amber-700 dark:text-amber-300',
+            )}
+          >
+            {copy.eyebrow}
+          </div>
+          <div className="mt-0.5 font-medium">{copy.title}</div>
+          <p className="mt-1 leading-relaxed">{copy.body}</p>
+          {copy.checks.length > 0 && (
+            <ul className="mt-2 list-inside list-disc space-y-0.5 leading-relaxed">
+              {copy.checks.map((label, i) => (
+                <li key={`${label}-${i}`}>{label}</li>
+              ))}
+            </ul>
+          )}
+          {copy.hiddenCount > 0 && (
+            <div className="mt-1 text-xs opacity-75">
+              另有 {copy.hiddenCount} 项检查未展开
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
