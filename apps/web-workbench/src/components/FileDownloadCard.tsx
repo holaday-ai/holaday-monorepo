@@ -147,18 +147,33 @@ export function parseHoladayFilePayload(raw: string): FileDownloadPayload | null
       typeof obj.size === 'number' &&
       Number.isFinite(obj.size) &&
       obj.size >= 0 &&
-      typeof obj.downloadUrl === 'string' &&
-      obj.downloadUrl.trim().length > 0
+      typeof obj.downloadUrl === 'string'
     ) {
+      const downloadUrl = normaliseFileDownloadUrl(obj.downloadUrl);
+      if (!downloadUrl) return null;
       return {
         fileId: obj.fileId.trim(),
         filename: obj.filename.trim(),
         size: obj.size,
-        downloadUrl: obj.downloadUrl.trim(),
+        downloadUrl,
       };
     }
   } catch {
     // Fall through to null
   }
   return null;
+}
+
+function normaliseFileDownloadUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('/api/files/')) return null;
+  if (trimmed.startsWith('//')) return null;
+  try {
+    const parsed = new URL(trimmed, 'https://holaday.local');
+    if (parsed.origin !== 'https://holaday.local') return null;
+    if (!/^\/api\/files\/[^/]+\/download$/.test(parsed.pathname)) return null;
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return null;
+  }
 }

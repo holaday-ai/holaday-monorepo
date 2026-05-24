@@ -38,4 +38,38 @@ describe('parseHoladayFilePayload', () => {
     expect(parseHoladayFilePayload(JSON.stringify({ ...base, size: -1 }))).toBeNull();
     expect(parseHoladayFilePayload(JSON.stringify({ ...base, size: Number.NaN }))).toBeNull();
   });
+
+  it('only accepts same-origin Holaday file download paths', () => {
+    const base = {
+      fileId: 'file_123',
+      filename: 'report.csv',
+      size: 1,
+      downloadUrl: '/api/files/file_123/download',
+    };
+
+    expect(
+      parseHoladayFilePayload(
+        JSON.stringify({
+          ...base,
+          downloadUrl: '/api/files/file_123/download?download=1#ready',
+        }),
+      )?.downloadUrl,
+    ).toBe('/api/files/file_123/download?download=1#ready');
+    expect(
+      parseHoladayFilePayload(
+        JSON.stringify({
+          ...base,
+          downloadUrl: 'https://evil.example/api/files/file_123/download',
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      parseHoladayFilePayload(
+        JSON.stringify({
+          ...base,
+          downloadUrl: '/api/files/file_123/preview',
+        }),
+      ),
+    ).toBeNull();
+  });
 });
