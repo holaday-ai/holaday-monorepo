@@ -1,4 +1,4 @@
-import { Activity, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
+import { Activity, AlertCircle, CheckCircle2, Clock, Loader2, RefreshCw } from 'lucide-react';
 import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -7,9 +7,11 @@ import { usageOutcomeSubcopy } from '@/lib/usage-copy';
 import {
   hasRecentUsage,
   usageDayBars,
+  usageErrorMessage,
   usagePageSummary,
   usagePercent,
   usageQuotaTotal,
+  usageStatusCopy,
   type UsageDayBar,
 } from '@/lib/usage-page-state';
 import { supportMailtoHref } from '@/lib/support-links';
@@ -32,14 +34,14 @@ export function UsagePage(): JSX.Element {
 
   const refresh = React.useCallback(async () => {
     setLoading(true);
-    setError(null);
     try {
       const res = await trpc.usage.summary.query();
       if (!mountedRef.current) return;
       setSnap(res as UsageSnapshot);
+      setError(null);
     } catch (err) {
       if (!mountedRef.current) return;
-      setError(err instanceof Error ? err.message : String(err));
+      setError(usageErrorMessage(err));
     } finally {
       if (mountedRef.current) setLoading(false);
     }
@@ -61,6 +63,7 @@ export function UsagePage(): JSX.Element {
   }, [snap]);
   const maxBar = Math.max(1, ...bars.map((b) => b.count));
   const summary = usagePageSummary({ loading, error, snapshot: snap });
+  const statusCopy = usageStatusCopy({ loading, error, snapshot: snap });
 
   return (
     <PageContainer width="wide">
@@ -68,17 +71,82 @@ export function UsagePage(): JSX.Element {
         title="用量"
         description="当月任务额度和执行统计"
         action={
-          <div className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground">
-            {summary}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="hidden items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground sm:inline-flex">
+              {summary}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void refresh()}
+              disabled={loading}
+            >
+              {loading ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <RefreshCw className="mr-1 h-3.5 w-3.5" aria-hidden />
+              )}
+              刷新
+            </Button>
           </div>
         }
       />
       <div className="space-y-6">
-        {loading ? (
-          <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-            用量加载中…
+        {statusCopy && (loading || snap != null) && (
+          <div className="rounded-xl border border-border bg-card/80 px-4 py-3 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-start gap-2">
+                {error ? (
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                ) : (
+                  <Loader2
+                    className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground"
+                    aria-hidden
+                  />
+                )}
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-foreground/85">{statusCopy.title}</div>
+                  <div className="mt-0.5 text-xs leading-5 text-muted-foreground">{statusCopy.body}</div>
+                </div>
+              </div>
+              {error && (
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void refresh()}
+                    disabled={loading}
+                  >
+                    {loading ? '重试中…' : '重试'}
+                  </Button>
+                  <Button asChild variant="outline" size="sm">
+                    <a
+                      href={supportMailtoHref({
+                        subject: '用量统计加载失败',
+                        body: '用量统计加载失败，请协助排查。\n\n注册邮箱：\n出现时间：',
+                      })}
+                    >
+                      联系支持
+                    </a>
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
-        ) : error ? (
+        )}
+        {loading && snap == null ? (
+          <div className="grid gap-4 md:grid-cols-3">
+            {['本月执行记录', '成功', '剩余额度'].map((label) => (
+              <div key={label} className="rounded-xl border border-border bg-card p-5 shadow-sm">
+                <div className="mb-3 h-3 w-24 rounded bg-muted" />
+                <div className="h-8 w-16 rounded bg-muted" />
+                <div className="mt-3 h-3 w-32 rounded bg-muted" />
+              </div>
+            ))}
+          </div>
+        ) : error && snap == null ? (
           <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card/40 px-6 py-12 text-center">
             <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
             <div className="text-sm font-medium text-foreground/80">用量加载失败</div>
@@ -105,7 +173,7 @@ export function UsagePage(): JSX.Element {
               <StatCard
                 icon={<Activity className="h-4 w-4" />}
                 label="本月执行记录"
-                value={loading ? '—' : String(snap?.monthTasksTotal ?? 0)}
+                value={snap == null ? '—' : String(snap.monthTasksTotal)}
                 sub={
                   snap == null
                     ? '配额 — 个'
@@ -117,7 +185,7 @@ export function UsagePage(): JSX.Element {
               <StatCard
                 icon={<CheckCircle2 className="h-4 w-4 text-cyan-500" />}
                 label="成功"
-                value={loading ? '—' : String(snap?.monthCompleted ?? 0)}
+                value={snap == null ? '—' : String(snap.monthCompleted)}
                 sub={
                   snap == null
                     ? '失败 — · 进行中 —'
@@ -132,7 +200,7 @@ export function UsagePage(): JSX.Element {
               <StatCard
                 icon={<Clock className="h-4 w-4 text-pink-500" />}
                 label="剩余额度"
-                value={loading ? '—' : String(snap?.quotaRemaining ?? 0)}
+                value={snap == null ? '—' : String(snap.quotaRemaining)}
                 sub={totalQuota == null ? '加载中…' : `${pct}% 已使用`}
               />
             </div>
