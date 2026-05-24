@@ -100,27 +100,34 @@ export function PageHeader({
  * rounded border + card bg so pages feel like part of one system.
  */
 export function Section({
+  id,
   title,
   description,
   children,
   className,
 }: {
+  id?: string;
   title?: string;
   description?: string;
   children: React.ReactNode;
   className?: string;
 }): JSX.Element {
+  const headingId = id && title ? `${id}-heading` : undefined;
   return (
     <section
+      id={id}
+      aria-labelledby={headingId}
       className={cn(
-        'rounded-xl border border-border bg-card p-6 shadow-sm',
+        'scroll-mt-24 rounded-xl border border-border bg-card p-6 shadow-sm',
         className,
       )}
     >
       {(title || description) && (
         <header className="mb-4">
           {title && (
-            <h2 className="text-base font-semibold tracking-tight">{title}</h2>
+            <h2 id={headingId} className="text-base font-semibold tracking-tight">
+              {title}
+            </h2>
           )}
           {description && (
             <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>

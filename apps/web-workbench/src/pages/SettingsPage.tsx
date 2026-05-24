@@ -1,12 +1,18 @@
 import { ChevronRight, Loader2, Monitor, Moon, Sun, X } from 'lucide-react';
 import * as React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { ApiKeysSection } from '@/components/ApiKeysSection';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { NotificationsSection } from '@/components/notifications/NotificationsSection';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { supportMailtoHref } from '@/lib/support-links';
+import {
+  SETTINGS_SECTIONS,
+  normaliseSettingsHash,
+  settingsSectionHref,
+  type SettingsSectionId,
+} from '@/lib/settings-sections';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
@@ -25,7 +31,25 @@ import { type ThemeMode, useTheme } from '@/stores/theme-store';
  */
 export function SettingsPage(): JSX.Element {
   const { mode, setMode } = useTheme();
+  const location = useLocation();
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
+  const activeSection = normaliseSettingsHash(location.hash) ?? 'appearance';
+
+  React.useEffect(() => {
+    const sectionId = normaliseSettingsHash(location.hash);
+    if (!sectionId) return;
+
+    const scrollToSection = (): void => {
+      document.getElementById(sectionId)?.scrollIntoView({ block: 'start' });
+    };
+
+    const frame = window.requestAnimationFrame(scrollToSection);
+    const timer = window.setTimeout(scrollToSection, 350);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [location.hash]);
 
   // Section order (Sweep P2 fix): API Key region was buried below
   // MemorySection which can hold dozens of rows on power-user
@@ -36,8 +60,9 @@ export function SettingsPage(): JSX.Element {
   return (
     <PageContainer width="form">
       <PageHeader title="设置" description="外观、角色、开发者、记忆与账号" />
+      <SettingsSectionNav active={activeSection} />
       <div className="space-y-6">
-        <Section title="外观">
+        <Section id="appearance" title="外观">
           <Row
             label="主题"
             description="跟随系统、浅色或深色。立即生效，记到本地。"
@@ -46,7 +71,7 @@ export function SettingsPage(): JSX.Element {
           </Row>
         </Section>
 
-        <Section title="AI 视角">
+        <Section id="roles" title="AI 视角">
           <Link
             to="/settings/roles"
             className="-mx-4 flex items-center justify-between gap-4 rounded-md px-4 py-3 transition-colors hover:bg-foreground/[0.04]"
@@ -61,13 +86,17 @@ export function SettingsPage(): JSX.Element {
           </Link>
         </Section>
 
-        <ApiKeysSection />
+        <div id="api-keys" className="scroll-mt-24">
+          <ApiKeysSection />
+        </div>
 
         <MemorySection />
 
-        <NotificationsSection />
+        <div id="notifications" className="scroll-mt-24">
+          <NotificationsSection />
+        </div>
 
-        <Section title="账号">
+        <Section id="account" title="账号">
           <Row
             label="删除账号"
             description="删除会清除任务记录、浏览器数据和订阅信息；需要先通过支持渠道确认身份"
@@ -102,6 +131,33 @@ export function SettingsPage(): JSX.Element {
         }}
       />
     </PageContainer>
+  );
+}
+
+function SettingsSectionNav({ active }: { active: SettingsSectionId }): JSX.Element {
+  return (
+    <nav
+      aria-label="设置分区"
+      className="sticky top-3 z-10 mb-5 rounded-lg border border-border bg-background/90 p-1 shadow-sm backdrop-blur"
+    >
+      <div className="grid grid-cols-3 gap-1 sm:grid-cols-6">
+        {SETTINGS_SECTIONS.map((section) => (
+          <Link
+            key={section.id}
+            to={settingsSectionHref(section.id)}
+            aria-current={active === section.id ? 'true' : undefined}
+            className={cn(
+              'rounded-md px-2.5 py-1.5 text-center text-xs font-medium transition-colors',
+              active === section.id
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground',
+            )}
+          >
+            {section.label}
+          </Link>
+        ))}
+      </div>
+    </nav>
   );
 }
 
@@ -257,7 +313,7 @@ function MemorySection(): JSX.Element {
   };
 
   return (
-    <Section title="AI 记忆">
+    <Section id="memory" title="AI 记忆">
       <div className="space-y-3">
         <div className="flex items-start justify-between gap-3 text-sm text-muted-foreground">
           <p className="leading-relaxed">
