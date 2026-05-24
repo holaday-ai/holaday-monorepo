@@ -1457,6 +1457,9 @@ function ScreenshotThumbnailCard({
   const toast = useToast();
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
   const [failed, setFailed] = React.useState(false);
+  const [downloadState, setDownloadState] = React.useState<
+    'idle' | 'loading' | 'failed'
+  >('idle');
   React.useEffect(() => {
     let cancelled = false;
     let createdUrl: string | null = null;
@@ -1494,6 +1497,11 @@ function ScreenshotThumbnailCard({
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
   }, [payload.downloadUrl]);
+  React.useEffect(() => {
+    if (downloadState !== 'failed') return;
+    const id = window.setTimeout(() => setDownloadState('idle'), 3_000);
+    return () => window.clearTimeout(id);
+  }, [downloadState]);
 
   // Auth fetch failed — fall back to the original card so the user
   // can still try a manual click (which retries the fetch).
@@ -1501,11 +1509,16 @@ function ScreenshotThumbnailCard({
     return <FileDownloadCard payload={payload} />;
   }
   const handleClick = async (): Promise<void> => {
+    if (downloadState === 'loading') return;
+    setDownloadState('loading');
     const result = await downloadFileAuthed({
       url: payload.downloadUrl,
       filename: payload.filename,
     });
-    if (!result.ok) {
+    if (result.ok) {
+      setDownloadState('idle');
+    } else {
+      setDownloadState('failed');
       toast.show(downloadFailureMessage(result.status), 'error');
     }
   };
@@ -1513,9 +1526,15 @@ function ScreenshotThumbnailCard({
     <button
       type="button"
       onClick={() => void handleClick()}
+      disabled={downloadState === 'loading'}
+      aria-busy={downloadState === 'loading'}
       className={cn(
-        'group my-2 flex w-full max-w-md flex-col gap-2 overflow-hidden rounded-xl border border-border bg-card p-2 text-left shadow-sm transition-colors',
-        'hover:border-foreground/30 hover:bg-foreground/[0.03]',
+        'group my-2 flex w-full max-w-md flex-col gap-2 overflow-hidden rounded-xl border bg-card p-2 text-left shadow-sm transition-colors',
+        downloadState === 'failed'
+          ? 'border-destructive/40 bg-destructive/5'
+          : downloadState === 'loading'
+            ? 'border-primary/40 opacity-80'
+            : 'border-border hover:border-foreground/30 hover:bg-foreground/[0.03]',
       )}
       aria-label={`下载截图 ${payload.filename}`}
     >
@@ -1547,10 +1566,32 @@ function ScreenshotThumbnailCard({
         <div className="min-w-0 flex-1 truncate font-medium" title={payload.filename}>
           {payload.filename}
         </div>
-        <div className="text-[11px] text-muted-foreground">
-          {formatBytesShort(payload.size)} · 24h
+        <div
+          className={cn(
+            'text-[11px]',
+            downloadState === 'failed'
+              ? 'text-destructive'
+              : 'text-muted-foreground',
+          )}
+        >
+          {downloadState === 'loading'
+            ? '正在下载…'
+            : downloadState === 'failed'
+              ? '下载失败，点击重试'
+              : `${formatBytesShort(payload.size)} · 24h`}
         </div>
-        <Download className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
+        {downloadState === 'loading' ? (
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+        ) : (
+          <Download
+            className={cn(
+              'h-4 w-4 shrink-0 transition-colors',
+              downloadState === 'failed'
+                ? 'text-destructive'
+                : 'text-muted-foreground group-hover:text-primary',
+            )}
+          />
+        )}
       </div>
     </button>
   );

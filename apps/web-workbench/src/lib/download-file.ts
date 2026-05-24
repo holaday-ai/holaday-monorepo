@@ -20,6 +20,16 @@ export interface DownloadResult {
   message: string;
 }
 
+export function safeDownloadFilename(filename: string): string {
+  const trimmed = filename.trim();
+  const cleaned = trimmed
+    .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/^[.-]+|-+$/g, '')
+    .slice(0, 180);
+  return cleaned || 'holaday-file';
+}
+
 interface BaseInput {
   /** Relative or absolute URL for the file (e.g. `/api/files/:id/download`). */
   url: string;
@@ -51,7 +61,7 @@ export async function downloadFileAuthed(
     const objectUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = objectUrl;
-    a.download = input.filename;
+    a.download = safeDownloadFilename(input.filename);
     document.body.appendChild(a);
     a.click();
     a.remove();
