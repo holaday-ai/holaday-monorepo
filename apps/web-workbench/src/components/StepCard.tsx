@@ -1,6 +1,12 @@
 import { AlertTriangle, Check, CircleSlash, Loader2, X } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import * as React from 'react';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import {
+  externalLinkConfirmDescription,
+  safeExternalHttpHref,
+} from '@/lib/external-link-copy';
 import { cn } from '@/lib/utils';
 import type { UiStep } from '@/types/task';
 
@@ -30,6 +36,11 @@ interface Props {
 export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
   const title = stepTitle(step);
   const antiBotHigh = step.antiBot?.confidence === 'high';
+  const [pendingHref, setPendingHref] = React.useState<string | null>(null);
+  const markdownComponents = React.useMemo(
+    () => makeStepMarkdownComponents(setPendingHref),
+    [],
+  );
   return (
     <div className="relative flex animate-fade-in items-start gap-3">
       {/* Timeline rail — a 2px line centered behind the badge. */}
@@ -78,9 +89,12 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
           // font-mono since markdown body text reads better in the
           // default sans stack. The typography overrides keep
           // paragraphs flush with the box and the lists / code spans
-          // tight.
+          // tight. Links are confirmed before leaving the workbench.
           <div className="prose prose-sm prose-neutral mt-1.5 max-w-none rounded-md bg-muted px-3 py-2 leading-relaxed text-foreground/80 prose-p:my-0 prose-p:text-xs prose-strong:font-semibold prose-strong:text-foreground prose-code:rounded prose-code:bg-muted-foreground/10 prose-code:px-1 prose-code:text-[11px] dark:prose-invert">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={markdownComponents}
+            >
               {step.actionSummary}
             </ReactMarkdown>
             {step.status === 'running' && <Cursor />}
@@ -90,9 +104,49 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
         {step.status === 'failed' && step.message && !step.antiBot && (
           <div className="mt-1.5 text-xs text-red-500">{step.message}</div>
         )}
+        <ConfirmDialog
+          open={pendingHref !== null}
+          title="即将打开外部链接"
+          description={
+            pendingHref ? externalLinkConfirmDescription(pendingHref) : undefined
+          }
+          confirmLabel="打开"
+          cancelLabel="取消"
+          onClose={() => setPendingHref(null)}
+          onConfirm={() => {
+            const href = pendingHref;
+            setPendingHref(null);
+            if (href) window.open(href, '_blank', 'noopener,noreferrer');
+          }}
+        />
       </div>
     </div>
   );
+}
+
+function makeStepMarkdownComponents(
+  setPendingHref: React.Dispatch<React.SetStateAction<string | null>>,
+): Components {
+  return {
+    a: ({ href, children, ...rest }) => {
+      const safeHref = safeExternalHttpHref(href);
+      if (!safeHref) return <span {...rest}>{children}</span>;
+      return (
+        <a
+          href={safeHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => {
+            e.preventDefault();
+            setPendingHref(safeHref);
+          }}
+          {...rest}
+        >
+          {children}
+        </a>
+      );
+    },
+  };
 }
 
 function AntiBotNotice({ step }: { step: UiStep }): JSX.Element {

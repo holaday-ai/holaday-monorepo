@@ -2,6 +2,11 @@ import { Check, ChevronDown, ChevronRight, Loader2, X } from 'lucide-react';
 import * as React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import {
+  externalLinkConfirmDescription,
+  safeExternalHttpHref,
+} from '@/lib/external-link-copy';
 import { cn } from '@/lib/utils';
 
 export interface PlanStepStatus {
@@ -47,6 +52,7 @@ export function PlanCard({
   defaultExpanded = true,
 }: Props): JSX.Element {
   const [expanded, setExpanded] = React.useState(defaultExpanded);
+  const [pendingHref, setPendingHref] = React.useState<string | null>(null);
   // Re-sync expansion when the caller's default flips — happens when
   // a task transitions in-flight → terminal, where we want the plan
   // to fold itself on first render of the terminal state. If the
@@ -100,23 +106,48 @@ export function PlanCard({
               ol: ({ children }) => {
                 return <PlanList statusByIdx={statusByIdx}>{children}</PlanList>;
               },
-              a: ({ href, children, ...rest }) => (
-                <a
-                  href={href ?? '#'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary underline decoration-primary/40 underline-offset-2 hover:text-primary/80 dark:text-primary"
-                  {...rest}
-                >
-                  {children}
-                </a>
-              ),
+              a: ({ href, children, ...rest }) => {
+                const safeHref = safeExternalHttpHref(href);
+                if (!safeHref) {
+                  return <span {...rest}>{children}</span>;
+                }
+                return (
+                  <a
+                    href={safeHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setPendingHref(safeHref);
+                    }}
+                    className="text-primary underline decoration-primary/40 underline-offset-2 hover:text-primary/80 dark:text-primary"
+                    {...rest}
+                  >
+                    {children}
+                  </a>
+                );
+              },
             }}
           >
             {planText}
           </ReactMarkdown>
         </div>
       )}
+      <ConfirmDialog
+        open={pendingHref !== null}
+        title="即将打开外部链接"
+        description={
+          pendingHref ? externalLinkConfirmDescription(pendingHref) : undefined
+        }
+        confirmLabel="打开"
+        cancelLabel="取消"
+        onClose={() => setPendingHref(null)}
+        onConfirm={() => {
+          const href = pendingHref;
+          setPendingHref(null);
+          if (href) window.open(href, '_blank', 'noopener,noreferrer');
+        }}
+      />
     </div>
   );
 }

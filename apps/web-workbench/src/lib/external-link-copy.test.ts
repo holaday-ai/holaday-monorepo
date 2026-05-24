@@ -2,7 +2,26 @@ import { describe, expect, it } from 'vitest';
 import {
   displayExternalHref,
   externalLinkConfirmDescription,
+  safeExternalHttpHref,
 } from './external-link-copy';
+
+describe('safeExternalHttpHref', () => {
+  it('keeps http and https URLs', () => {
+    expect(safeExternalHttpHref(' https://example.com/report ')).toBe(
+      'https://example.com/report',
+    );
+    expect(safeExternalHttpHref('http://example.com/path')).toBe(
+      'http://example.com/path',
+    );
+  });
+
+  it('rejects non-web or malformed URLs', () => {
+    expect(safeExternalHttpHref('javascript:alert(1)')).toBeNull();
+    expect(safeExternalHttpHref('data:text/html,<h1>x</h1>')).toBeNull();
+    expect(safeExternalHttpHref('/relative/path')).toBeNull();
+    expect(safeExternalHttpHref('not a url')).toBeNull();
+  });
+});
 
 describe('displayExternalHref', () => {
   it('keeps short URLs intact', () => {

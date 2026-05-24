@@ -1,5 +1,19 @@
 const MAX_EXTERNAL_LINK_DISPLAY = 96;
 
+export function safeExternalHttpHref(href: string | null | undefined): string | null {
+  const trimmed = href?.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
 export function externalLinkConfirmDescription(href: string): string {
   return `部分外部页面可能需要登录或无法正常访问。确认打开？\n\n${displayExternalHref(href)}`;
 }
