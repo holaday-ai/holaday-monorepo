@@ -19,6 +19,7 @@ import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import '@/pages/scheduled-calendar/calendar-styles.css';
 import { useToast } from '@/components/ui/toast';
 import { clearAccessToken, getAccessToken } from '@/lib/auth';
+import { authSessionExpiredMessage, isAuthSessionError } from '@/lib/auth-session';
 import { taskActionError } from '@/lib/error-copy';
 import { trpc } from '@/lib/trpc';
 import {
@@ -102,6 +103,7 @@ export function AppShell(): JSX.Element {
     string[] | null
   >(null);
   const [confirmClearFailed, setConfirmClearFailed] = React.useState(false);
+  const authInvalidatedRef = React.useRef(false);
   /**
    * BOSS bug fix — server-side failed-task count for the user
    * menu badge + clear-confirm dialog. The previous
@@ -150,6 +152,23 @@ export function AppShell(): JSX.Element {
     void refreshProjects();
   }, [refreshFailedCount, refreshProjects]);
 
+  const invalidateAuthSession = React.useCallback(() => {
+    if (authInvalidatedRef.current) return;
+    authInvalidatedRef.current = true;
+    clearAccessToken();
+    reset();
+    disconnect();
+    setMe(null);
+    setAuthed(false);
+    setBootstrapped(false);
+    toast.show(authSessionExpiredMessage(), 'error');
+  }, [reset, toast]);
+
+  const handleAuthenticated = React.useCallback(() => {
+    authInvalidatedRef.current = false;
+    setAuthed(true);
+  }, []);
+
   const failedTaskSignature = React.useMemo(() => {
     const failedIds = tasks
       .filter((task) => task.status === 'failed')
@@ -169,7 +188,9 @@ export function AppShell(): JSX.Element {
   React.useEffect(() => {
     if (!authed) return;
     let done = false;
+    let authInvalidated = false;
     const finish = (): void => {
+      if (authInvalidated) return;
       if (!done) {
         done = true;
         setBootstrapped(true);
@@ -189,6 +210,7 @@ export function AppShell(): JSX.Element {
     const listFuture = refreshTaskList();
     const meFuture = trpc.auth.me.query().then(
       (res) => {
+        if (authInvalidated) return;
         setMe({
           userId: res.userId,
           email: res.email,
@@ -203,8 +225,11 @@ export function AppShell(): JSX.Element {
               : 'user',
         });
       },
-      () => {
-        /* silent — auth.me failure isn't fatal. */
+      (err) => {
+        if (isAuthSessionError(err)) {
+          authInvalidated = true;
+          invalidateAuthSession();
+        }
       },
     );
     void refreshFailedCount();
@@ -220,7 +245,7 @@ export function AppShell(): JSX.Element {
       offStatus();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authed]);
+  }, [authed, invalidateAuthSession]);
 
   // URL → store: deep-link / browser back-forward. The URL is the
   // source of truth — if `?task=xxx` is present, sync it. Only the
@@ -303,14 +328,9 @@ export function AppShell(): JSX.Element {
   // Auth invalidated by server (bad / expired token).
   React.useEffect(() => {
     if (wsStatus === 'unauthorized' && authed) {
-      clearAccessToken();
-      reset();
-      disconnect();
-      setMe(null);
-      setAuthed(false);
-      setBootstrapped(false);
+      invalidateAuthSession();
     }
-  }, [wsStatus, authed, reset]);
+  }, [wsStatus, authed, invalidateAuthSession]);
 
   // WS reconnect / disconnect toasts.
   //
@@ -476,7 +496,7 @@ export function AppShell(): JSX.Element {
   const filteredTasks = projectFilter ? (projectTasks ?? []) : visibleTasks;
 
   if (!authed) {
-    return <LoginGate onAuthenticated={() => setAuthed(true)} />;
+    return <LoginGate onAuthenticated={handleAuthenticated} />;
   }
   if (!bootstrapped) return <AppSkeleton />;
 
