@@ -41,7 +41,10 @@ import {
   fetchFileBlobAuthed,
 } from '@/lib/download-file';
 import { taskActionError } from '@/lib/error-copy';
-import { externalLinkConfirmDescription } from '@/lib/external-link-copy';
+import {
+  externalLinkConfirmDescription,
+  safeExternalHttpHref,
+} from '@/lib/external-link-copy';
 import { classifyFriendlyFailure } from '@/lib/failure-copy';
 import { downloadMarkdownFile } from '@/lib/markdown-download';
 import { terminalArtifactFallbackText } from '@/lib/terminal-artifact-copy';
@@ -1753,16 +1756,16 @@ function TerminalSummary({
     wrap: 'rounded-xl border border-border bg-card px-5 py-4 text-foreground shadow-sm dark:bg-card/80',
     divider: 'border-border',
   };
-  const hasRealUrl =
-    !!currentUrl && currentUrl !== 'about:blank' && !currentUrl.startsWith('chrome://');
+  const safeCurrentUrl = safeExternalHttpHref(currentUrl);
+  const hasRealUrl = safeCurrentUrl !== null;
   const fallbackPlainText = React.useMemo(
     () =>
       terminalArtifactFallbackText({
         text: displayText,
         attachmentCount: attachments?.length ?? 0,
-        finalUrl: hasRealUrl ? currentUrl : null,
+        finalUrl: safeCurrentUrl,
       }),
-    [attachments?.length, currentUrl, displayText, hasRealUrl],
+    [attachments?.length, displayText, safeCurrentUrl],
   );
   // Strip markdown syntax for the plain-text Copy. Keeps `[label](url)` →
   // `label`, drops `**bold**` markers, code fences, list bullets — the
@@ -2107,12 +2110,14 @@ function TerminalSummary({
           {hasRealUrl && (
             <button
               type="button"
-              onClick={() => setPendingLink(currentUrl ?? null)}
+              onClick={() => setPendingLink(safeCurrentUrl)}
               className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 font-medium text-foreground/85 shadow-sm transition hover:border-foreground/30 hover:bg-foreground/[0.04]"
             >
               <ExternalLink className="h-3.5 w-3.5" />
               打开最终页面
-              <span className="max-w-[180px] truncate text-muted-foreground">{currentUrl}</span>
+              <span className="max-w-[180px] truncate text-muted-foreground">
+                {safeCurrentUrl}
+              </span>
             </button>
           )}
         </div>
@@ -2235,17 +2240,18 @@ function ExternalLinkConfirm({
   onClose: () => void;
   onConfirm: (href: string) => void;
 }): JSX.Element {
-  const open = href !== null;
+  const safeHref = safeExternalHttpHref(href);
+  const open = safeHref !== null;
   return (
     <ConfirmDialog
       open={open}
       title="即将打开外部链接"
-      description={open ? externalLinkConfirmDescription(href) : undefined}
+      description={safeHref ? externalLinkConfirmDescription(safeHref) : undefined}
       confirmLabel="打开"
       cancelLabel="取消"
       onClose={onClose}
       onConfirm={() => {
-        if (href) onConfirm(href);
+        if (safeHref) onConfirm(safeHref);
       }}
     />
   );
@@ -2267,26 +2273,30 @@ function makeMarkdownComponents(opts: {
   onExternalClick?: (href: string) => void;
 }): Components {
   return {
-    a: ({ href, children, ...rest }) => (
-      <a
-        href={href ?? '#'}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={
-          opts.onExternalClick && href
-            ? (e) => {
-                e.preventDefault();
-                opts.onExternalClick?.(href);
-              }
-            : undefined
-        }
-        className="inline-flex items-center gap-1 text-primary underline decoration-primary/40 underline-offset-2 hover:text-primary/80 dark:text-primary dark:hover:text-primary/80"
-        {...rest}
-      >
-        {children}
-        <ExternalLink className="h-3 w-3" aria-hidden />
-      </a>
-    ),
+    a: ({ href, children, ...rest }) => {
+      const safeHref = safeExternalHttpHref(href);
+      if (!safeHref) return <span {...rest}>{children}</span>;
+      return (
+        <a
+          href={safeHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={
+            opts.onExternalClick
+              ? (e) => {
+                  e.preventDefault();
+                  opts.onExternalClick?.(safeHref);
+                }
+              : undefined
+          }
+          className="inline-flex items-center gap-1 text-primary underline decoration-primary/40 underline-offset-2 hover:text-primary/80 dark:text-primary dark:hover:text-primary/80"
+          {...rest}
+        >
+          {children}
+          <ExternalLink className="h-3 w-3" aria-hidden />
+        </a>
+      );
+    },
     table: ({ children, ...rest }) => (
       // Item 5 — mobile <640px renders the table as one card per
       // row with explicit "Header: value" lines. The desktop table
