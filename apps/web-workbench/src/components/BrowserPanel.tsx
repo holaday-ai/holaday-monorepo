@@ -26,6 +26,7 @@ import {
 } from '@/components/CdpScreencastViewport';
 import { useToast } from '@/components/ui/toast';
 import { VncViewport, type VncStatus } from '@/components/VncViewport';
+import { browserNavFailureMessage } from '@/lib/browser-nav-copy';
 import { hdDebug } from '@/lib/hd-debug';
 import { trpc } from '@/lib/trpc';
 import { useStreamToken } from '@/lib/use-stream-token';
@@ -1993,6 +1994,7 @@ function UrlBar({
    */
   navTaskId: string | null;
 }): JSX.Element {
+  const toast = useToast();
   // Local editing state. Resync to the prop whenever the agent
   // navigates (or the user clicks back/forward) so the bar always
   // reflects the live page url unless the user is mid-edit.
@@ -2017,12 +2019,15 @@ function UrlBar({
         ...(navTaskId ? { taskId: navTaskId } : {}),
       });
       if (!res.ok) {
-        // Soft failure: snap back. The most likely reason is
-        // `no_executor` (browser hibernated) — the panel's
-        // hibernation card / wake button is the recovery surface.
+        const message = browserNavFailureMessage(res.reason, 'goto');
+        if (message) toast.show(message, 'error');
         setDraft(displayUrl);
       }
-    } catch {
+    } catch (err) {
+      toast.show(
+        err instanceof Error ? `跳转失败：${err.message}` : '跳转失败，请稍后重试',
+        'error',
+      );
       setDraft(displayUrl);
     } finally {
       setPending(false);
@@ -2069,10 +2074,9 @@ function UrlBar({
 
 /**
  * Small 20x20 icon button that fires `tasks.browserNav` on the shared
- * Brave instance. Fire-and-forget — the VNC stream updates within a
- * tick so we don't need to block the UI or show a result toast. A
- * silent failure on no_executor / nav_failed is fine; the user just
- * clicks again.
+ * Brave instance. The stream updates within a tick on success; failed
+ * actions surface a small, specific toast instead of looking like a
+ * dead button.
  */
 function NavButton({
   direction,
@@ -2084,6 +2088,7 @@ function NavButton({
   /** F3 — same as UrlBar's navTaskId. Null falls through to user-pick. */
   navTaskId: string | null;
 }): JSX.Element {
+  const toast = useToast();
   const [pending, setPending] = React.useState(false);
   const Icon = direction === 'back' ? ArrowLeft : direction === 'forward' ? ArrowRight : RotateCw;
   return (
@@ -2095,12 +2100,21 @@ function NavButton({
       onClick={async () => {
         setPending(true);
         try {
-          await trpc.tasks.browserNav.mutate({
+          const res = await trpc.tasks.browserNav.mutate({
             direction,
             ...(navTaskId ? { taskId: navTaskId } : {}),
           });
-        } catch {
-          /* silent — see docstring */
+          if (!res.ok) {
+            const message = browserNavFailureMessage(res.reason, direction);
+            if (message) toast.show(message, 'error');
+          }
+        } catch (err) {
+          toast.show(
+            err instanceof Error
+              ? `浏览器操作失败：${err.message}`
+              : '浏览器操作失败，请稍后重试',
+            'error',
+          );
         } finally {
           setPending(false);
         }
