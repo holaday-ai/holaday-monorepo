@@ -291,7 +291,7 @@ export function Sidebar({
   // We just bind mobile open via setOpenMobile so the legacy
   // `mobileOpen` prop continues to drive the Sheet from
   // WorkbenchApp's hamburger button.
-  const { setOpenMobile } = useSidebar();
+  const { isMobile, setOpenMobile } = useSidebar();
   React.useEffect(() => {
     setOpenMobile(!!mobileOpen);
   }, [mobileOpen, setOpenMobile]);
@@ -574,7 +574,7 @@ export function Sidebar({
                     {...(onOpenFeedback ? { onOpenFeedback } : {})}
                   />
                 </div>
-                <NotificationBell />
+                {!isMobile && <NotificationBell />}
               </div>
             </SidebarFooter>
         {/* SidebarRail — invisible hairline on the right edge that

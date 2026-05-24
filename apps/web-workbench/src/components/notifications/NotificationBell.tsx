@@ -1,12 +1,11 @@
 /**
  * Phase 26B — global notification bell.
  *
- * Phase 26B follow-up — moved from a fixed top-right viewport
+ * Phase 26B follow-up — moved desktop from a fixed top-right viewport
  * position to an INLINE mount inside Sidebar's footer (next to the
- * UserMenu). The previous fixed position collided with per-page
- * CTAs (notably /scheduled's "新建定时任务" button). Inline + sidebar
- * means the bell is global (every page renders the sidebar) and
- * can't overlap page content.
+ * UserMenu). Mobile keeps a header-safe floating mount because the
+ * sidebar footer lives inside a drawer and would otherwise make
+ * notifications unreachable.
  *
  * Polls `notification.unreadCount` every 30s for the badge. Dropdown
  * opens above-right of the button (since the bell sits at the
@@ -19,12 +18,26 @@
  *   - Smooth scale+opacity entrance (matches calendar popovers)
  */
 
-import { Bell, BellRing, CheckCheck, CheckCircle2, Play, XCircle } from 'lucide-react';
+import {
+  AlertCircle,
+  Bell,
+  BellRing,
+  CheckCheck,
+  CheckCircle2,
+  Loader2,
+  Play,
+  XCircle,
+} from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
+import {
+  notificationErrorMessage,
+  notificationListStatusCopy,
+  notificationListSummary,
+} from '@/lib/notification-bell-state';
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -38,12 +51,23 @@ interface NotificationRow {
   scheduledTaskInternalId: number | null;
 }
 
-export function NotificationBell(): JSX.Element {
+type NotificationBellPlacement = 'sidebar-footer' | 'mobile-header';
+
+interface NotificationBellProps {
+  placement?: NotificationBellPlacement;
+}
+
+export function NotificationBell({
+  placement = 'sidebar-footer',
+}: NotificationBellProps): JSX.Element {
   const navigate = useNavigate();
   const [unreadCount, setUnreadCount] = React.useState<number>(0);
   const [open, setOpen] = React.useState(false);
   const [items, setItems] = React.useState<NotificationRow[]>([]);
   const [loading, setLoading] = React.useState(false);
+  const [listError, setListError] = React.useState<string | null>(null);
+  const [actionError, setActionError] = React.useState<string | null>(null);
+  const [markingAll, setMarkingAll] = React.useState(false);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
 
   // Poll the cheap COUNT query every 30s, plus an immediate fetch
@@ -85,8 +109,9 @@ export function NotificationBell(): JSX.Element {
     try {
       const res = await trpc.notifications.list.query({ limit: 50 });
       setItems(res as NotificationRow[]);
-    } catch {
-      // Surface nothing — empty list is the worst case.
+      setListError(null);
+    } catch (err) {
+      setListError(notificationErrorMessage(err, '通知暂时无法加载，请稍后重试。'));
     } finally {
       setLoading(false);
     }
@@ -108,6 +133,7 @@ export function NotificationBell(): JSX.Element {
         navigate(href);
       }
 
+      setActionError(null);
       // Mark read optimistically so the bell badge ticks down
       // before the round-trip resolves; reconcile on next poll
       // if the mutation fails. Navigation happens first so a slow
@@ -124,26 +150,43 @@ export function NotificationBell(): JSX.Element {
             notificationId: row.notificationId,
           });
         } catch {
+          setActionError('未能标记为已读，稍后会自动重新同步。');
           void refreshCount();
+          if (open) void fetchList();
         }
       }
     },
-    [navigate, refreshCount],
+    [fetchList, navigate, open, refreshCount],
   );
 
   const handleMarkAll = React.useCallback(async () => {
+    setActionError(null);
+    setMarkingAll(true);
     setItems((prev) => prev.map((r) => ({ ...r, isRead: true })));
     setUnreadCount(0);
     try {
       await trpc.notifications.markAllRead.mutate();
     } catch {
+      setActionError('全部已读失败，已恢复最新通知状态。');
       void refreshCount();
       void fetchList();
+    } finally {
+      setMarkingAll(false);
     }
   }, [fetchList, refreshCount]);
 
   const badge = unreadCount > 99 ? '99+' : String(unreadCount);
   const hasUnread = unreadCount > 0;
+  const summary = notificationListSummary({
+    loading,
+    error: listError,
+    count: items.length,
+  });
+  const statusCopy = notificationListStatusCopy({
+    loading,
+    error: listError,
+    count: items.length,
+  });
 
   return (
     <div ref={rootRef} className="relative">
@@ -170,36 +213,62 @@ export function NotificationBell(): JSX.Element {
       {open && (
         <div
           role="menu"
-          /* Bell lives in the sidebar footer (bottom-left of the
-             viewport); open the dropdown to the RIGHT of the button
-             and anchored to the bell's vertical position. left-full
-             ml-2 places it just outside the sidebar boundary. */
-          className="hd-popover-enter absolute bottom-full left-full z-50 mb-1 ml-2 w-[360px] origin-bottom-left rounded-lg border border-border bg-popover shadow-2xl"
+          className={cn(
+            'hd-popover-enter absolute z-50 rounded-lg border border-border bg-popover shadow-2xl',
+            placement === 'mobile-header'
+              ? 'right-0 top-full mt-1 w-[min(calc(100vw-24px),360px)] origin-top-right'
+              : 'bottom-full left-full mb-1 ml-2 w-[360px] origin-bottom-left',
+          )}
         >
-          <div className="flex items-center justify-between border-b border-border px-3 py-2">
-            <span className="text-sm font-medium">通知</span>
+          <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
+            <div className="min-w-0">
+              <span className="text-sm font-medium">通知</span>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">{summary}</div>
+            </div>
             {hasUnread && (
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
                 onClick={() => void handleMarkAll()}
+                disabled={markingAll}
                 className="h-7 px-2 text-xs"
               >
-                <CheckCheck className="mr-1 h-3 w-3" />
-                全部已读
+                {markingAll ? (
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden />
+                ) : (
+                  <CheckCheck className="mr-1 h-3 w-3" aria-hidden />
+                )}
+                {markingAll ? '同步中…' : '全部已读'}
               </Button>
             )}
           </div>
           <div className="max-h-[400px] overflow-y-auto">
+            {actionError && (
+              <div className="border-b border-border/50 bg-primary/5 px-3 py-2 text-xs leading-5 text-primary">
+                {actionError}
+              </div>
+            )}
+            {statusCopy && (
+              <NotificationStatusNotice
+                copy={statusCopy}
+                loading={loading}
+                onRetry={() => void fetchList()}
+              />
+            )}
             {loading && items.length === 0 ? (
-              <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-                加载中…
-              </div>
+              <NotificationSkeleton />
             ) : items.length === 0 ? (
-              <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-                还没有通知
-              </div>
+              listError ? (
+                <NotificationHardError
+                  message={listError}
+                  onRetry={() => void fetchList()}
+                />
+              ) : (
+                <div className="px-3 py-8 text-center text-xs text-muted-foreground">
+                  还没有通知
+                </div>
+              )
             ) : (
               items.map((row) => (
                 <NotificationItem
@@ -212,6 +281,85 @@ export function NotificationBell(): JSX.Element {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function NotificationStatusNotice({
+  copy,
+  loading,
+  onRetry,
+}: {
+  copy: { readonly title: string; readonly body: string };
+  loading: boolean;
+  onRetry(): void;
+}): JSX.Element {
+  const isError = copy.title.includes('失败');
+  return (
+    <div className="border-b border-border/50 px-3 py-2.5">
+      <div className="flex items-start gap-2">
+        {isError ? (
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+        ) : (
+          <Loader2
+            className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground"
+            aria-hidden
+          />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-medium text-foreground/85">{copy.title}</div>
+          <div className="mt-0.5 text-[11px] leading-5 text-muted-foreground">{copy.body}</div>
+        </div>
+        {isError && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onRetry}
+            disabled={loading}
+            className="h-7 px-2 text-xs"
+          >
+            {loading ? '重试中…' : '重试'}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function NotificationHardError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry(): void;
+}): JSX.Element {
+  return (
+    <div className="px-3 py-8 text-center">
+      <AlertCircle className="mx-auto h-7 w-7 text-primary" aria-hidden />
+      <div className="mt-2 text-sm font-medium text-foreground/85">通知加载失败</div>
+      <div className="mx-auto mt-1 max-w-[260px] text-xs leading-5 text-muted-foreground">
+        {message}
+      </div>
+      <Button type="button" size="sm" className="mt-3" onClick={onRetry}>
+        重试
+      </Button>
+    </div>
+  );
+}
+
+function NotificationSkeleton(): JSX.Element {
+  return (
+    <div className="space-y-3 px-3 py-4">
+      {[0, 1, 2].map((idx) => (
+        <div key={idx} className="flex items-start gap-2.5">
+          <div className="h-5 w-5 shrink-0 rounded-full bg-muted" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="h-3 w-32 rounded bg-muted" />
+            <div className="h-3 w-56 max-w-full rounded bg-muted" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

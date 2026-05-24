@@ -9,10 +9,15 @@ import {
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { FeedbackDialog } from '@/components/FeedbackDialog';
 import { LoginGate } from '@/components/LoginGate';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { SearchOverlay } from '@/components/SearchOverlay';
 import { Sidebar } from '@/components/Sidebar';
 import { AppSkeleton } from '@/components/Skeleton';
-import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
+import {
+  SidebarInset,
+  SidebarProvider,
+  useSidebar,
+} from '@/components/ui/sidebar';
 // Phase 26B — hd-popover-enter keyframe is defined in the calendar's
 // CSS but used by NotificationBell + other popovers too. Import here
 // so it's available globally even before the user opens /scheduled.
@@ -607,6 +612,7 @@ export function AppShell(): JSX.Element {
       <SidebarInset className="h-svh overflow-y-auto bg-background">
         <Outlet context={ctx} />
       </SidebarInset>
+      <MobileNotificationBellSlot />
 
       <SearchOverlay
         open={searchOpen}
@@ -739,6 +745,16 @@ export function AppShell(): JSX.Element {
         </div>
       )}
     </SidebarProvider>
+  );
+}
+
+function MobileNotificationBellSlot(): JSX.Element | null {
+  const { isMobile, openMobile } = useSidebar();
+  if (!isMobile || openMobile) return null;
+  return (
+    <div className="fixed right-3 top-1.5 z-40 md:hidden">
+      <NotificationBell placement="mobile-header" />
+    </div>
   );
 }
 
