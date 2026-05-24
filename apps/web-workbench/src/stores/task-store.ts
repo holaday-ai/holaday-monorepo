@@ -780,7 +780,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
     try {
       await trpc.tasks.star.mutate({ taskId, starred: next });
-    } catch {
+    } catch (err) {
       if (before) {
         // Local row existed and the RPC failed — revert the optimistic
         // flip so the UI matches the server.
@@ -797,8 +797,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         }));
       }
       // Nothing to revert when the task wasn't in the local slice;
-      // the caller (StarredPage) handles its own optimistic remove
-      // and re-fetches on failure.
+      // the caller (StarredPage) handles its own optimistic remove.
+      throw err;
     }
   },
 

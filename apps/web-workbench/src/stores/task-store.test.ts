@@ -1,5 +1,22 @@
-import { describe, expect, it } from 'vitest';
-import { normaliseDetailStepStatus, toUiTask } from './task-store';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { trpc } from '@/lib/trpc';
+import type { UiTask } from '@/types/task';
+import { normaliseDetailStepStatus, toUiTask, useTaskStore } from './task-store';
+
+vi.mock('@/lib/trpc', () => ({
+  trpc: {
+    tasks: {
+      star: { mutate: vi.fn() },
+    },
+  },
+}));
+
+const starMutate = vi.mocked(trpc.tasks.star.mutate);
+
+beforeEach(() => {
+  starMutate.mockReset();
+  useTaskStore.getState().reset();
+});
 
 describe('normaliseDetailStepStatus', () => {
   it('maps DB completed steps to done instead of failed', () => {
@@ -52,5 +69,39 @@ describe('toUiTask', () => {
     expect(task.failedChecks).toEqual([
       { type: 'source_count', detail: '缺少来源链接' },
     ]);
+  });
+});
+
+describe('togglePin', () => {
+  it('rethrows pin RPC failures after reverting local optimistic state', async () => {
+    const task: UiTask = {
+      taskId: 'tsk_pinned',
+      intent: '查一下明天东京天气',
+      title: null,
+      status: 'completed',
+      tickCount: 0,
+      createdAt: new Date('2026-05-24T00:00:00.000Z'),
+      starred: true,
+      starredAt: new Date('2026-05-24T00:00:00.000Z'),
+    };
+    starMutate.mockRejectedValueOnce(new Error('offline'));
+    useTaskStore.setState({ tasks: [task] });
+
+    await expect(useTaskStore.getState().togglePin('tsk_pinned', false)).rejects.toThrow(
+      'offline',
+    );
+
+    expect(useTaskStore.getState().tasks[0]?.starred).toBe(true);
+    expect(starMutate).toHaveBeenCalledWith({ taskId: 'tsk_pinned', starred: false });
+  });
+
+  it('rethrows missing-row pin failures so callers can roll back their own lists', async () => {
+    starMutate.mockRejectedValueOnce(new Error('offline'));
+
+    await expect(useTaskStore.getState().togglePin('older_pin', false)).rejects.toThrow(
+      'offline',
+    );
+
+    expect(starMutate).toHaveBeenCalledWith({ taskId: 'older_pin', starred: false });
   });
 });

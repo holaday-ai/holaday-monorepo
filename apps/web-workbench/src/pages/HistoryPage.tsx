@@ -1,7 +1,16 @@
-import { CheckCircle2, CircleSlash, Loader2, Search, XCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle2, CircleSlash, Loader2, RotateCcw, Search, XCircle } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { supportMailtoHref } from '@/lib/support-links';
+import {
+  formatTaskHubTime,
+  hasHistoryFilters,
+  historyPageSummary,
+  taskHubErrorMessage,
+  type HistoryRangeFilter,
+  type HistoryStatusFilter,
+} from '@/lib/task-hub-state';
 import { historyEmptyCopy, taskStatusLabel } from '@/lib/task-status-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
@@ -12,8 +21,8 @@ import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 // so a single string compares against the raw API row without
 // translation. The earlier 'succeeded' value never matched anything
 // because the DB has no such status.
-type StatusFilter = 'all' | 'completed' | 'failed' | 'running';
-type RangeFilter = '7d' | '30d' | 'all';
+type StatusFilter = HistoryStatusFilter;
+type RangeFilter = HistoryRangeFilter;
 
 interface HistoryTask {
   taskId: string;
@@ -114,7 +123,7 @@ export function HistoryPage(): JSX.Element {
         if (append) setLoadMoreError(null);
         else setError(null);
       } catch (err) {
-        const message = err instanceof Error ? err.message : '加载失败';
+        const message = taskHubErrorMessage(err, '加载失败');
         if (append) setLoadMoreError(message);
         else setError(message);
       } finally {
@@ -152,7 +161,7 @@ export function HistoryPage(): JSX.Element {
         setTasks([]);
         setCursor(null);
         setHasMore(false);
-        setError(err instanceof Error ? err.message : '加载失败');
+        setError(taskHubErrorMessage(err, '加载失败'));
       })
       .finally(() => {
         if (myToken !== fetchToken.current) return;
@@ -160,11 +169,40 @@ export function HistoryPage(): JSX.Element {
         setInitialLoad(false);
       });
   }, [baseInput]);
-  const emptyCopy = historyEmptyCopy({ query: debouncedQuery, status, range });
+  const filtered = hasHistoryFilters({ query: debouncedQuery, status, range });
+  const emptyCopy = historyEmptyCopy({
+    query: debouncedQuery,
+    status,
+    range: filtered ? range : 'all',
+  });
+  const summary = historyPageSummary({
+    loading,
+    error,
+    count: tasks.length,
+    hasMore,
+    query: debouncedQuery,
+    status,
+    range,
+  });
+
+  function resetFilters(): void {
+    setStatus('all');
+    setRange('30d');
+    setQuery('');
+    setDebouncedQuery('');
+  }
 
   return (
     <PageContainer width="wide">
-      <PageHeader title="任务历史" description="全部历史记录" />
+      <PageHeader
+        title="任务历史"
+        description="全部历史记录"
+        action={
+          <div className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground">
+            {summary}
+          </div>
+        }
+      />
       <div className="space-y-4">
         <Section>
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -188,6 +226,16 @@ export function HistoryPage(): JSX.Element {
                   { id: 'all', label: '全部' },
                 ]}
               />
+              {filtered && (
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition hover:bg-foreground/[0.05] hover:text-foreground"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  重置筛选
+                </button>
+              )}
             </div>
             <div className="relative md:w-72">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -204,27 +252,39 @@ export function HistoryPage(): JSX.Element {
 
         <Section>
           {initialLoad && loading ? (
-            <div className="flex h-48 items-center justify-center">
+            <div className="flex h-48 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              任务历史加载中…
             </div>
           ) : error ? (
-            <div className="flex h-48 flex-col items-center justify-center text-center">
-              <XCircle className="h-6 w-6 text-red-500" />
+            <div className="flex h-56 flex-col items-center justify-center text-center">
+              <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
               <div className="mt-3 text-sm font-medium text-foreground/80">
                 历史任务加载失败
               </div>
               <div className="mt-1 max-w-md text-xs text-muted-foreground">
                 {error}
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="mt-3"
-                onClick={() => void fetchPage(null, false)}
-                disabled={loading}
-              >
-                {loading ? '重试中…' : '重试'}
-              </Button>
+              <div className="mt-3 flex flex-wrap justify-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void fetchPage(null, false)}
+                  disabled={loading}
+                >
+                  {loading ? '重试中…' : '重试'}
+                </Button>
+                <Button asChild size="sm" variant="outline">
+                  <a
+                    href={supportMailtoHref({
+                      subject: '任务历史加载失败',
+                      body: '任务历史加载失败，请协助排查。\n\n注册邮箱：\n出现时间：',
+                    })}
+                  >
+                    联系支持
+                  </a>
+                </Button>
+              </div>
             </div>
           ) : tasks.length === 0 ? (
             <div className="flex h-48 flex-col items-center justify-center text-center">
@@ -234,6 +294,16 @@ export function HistoryPage(): JSX.Element {
               <div className="mt-1 text-[11px] text-muted-foreground">
                 {emptyCopy.body}
               </div>
+              {filtered && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-3"
+                  onClick={resetFilters}
+                >
+                  重置筛选
+                </Button>
+              )}
             </div>
           ) : (
             <ul className="divide-y divide-border">
@@ -250,7 +320,7 @@ export function HistoryPage(): JSX.Element {
                         {t.intent || '未命名任务'}
                       </div>
                       <div className="mt-0.5 text-[11px] text-muted-foreground">
-                        {formatTime(t.createdAt)} · {taskStatusLabel(t.status)}
+                        {formatTaskHubTime(t.createdAt)} · {taskStatusLabel(t.status)}
                       </div>
                     </div>
                     <span className="shrink-0 self-center pr-2 text-[11px] text-muted-foreground opacity-0 group-hover:opacity-100">
@@ -340,19 +410,4 @@ function StatusIcon({ status }: { status: string }): JSX.Element {
     );
   }
   return <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-pink-400" />;
-}
-
-function formatTime(v: string | number | Date): string {
-  const ts = typeof v === 'string' ? Date.parse(v) : typeof v === 'number' ? v : v.getTime?.() ?? 0;
-  if (!Number.isFinite(ts)) return '—';
-  const d = new Date(ts);
-  const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  if (sameDay) {
-    return `今天 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  }
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
