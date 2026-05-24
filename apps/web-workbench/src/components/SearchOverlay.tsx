@@ -1,5 +1,9 @@
 import { Loader2, Search, X } from 'lucide-react';
 import * as React from 'react';
+import {
+  taskSearchEmptyCopy,
+  taskStatusLabel,
+} from '@/lib/task-status-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import type { UiTask, UiTaskStatus } from '@/types/task';
@@ -34,6 +38,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
   const [active, setActive] = React.useState(0);
   const [serverResults, setServerResults] = React.useState<ServerTaskRow[]>([]);
   const [searching, setSearching] = React.useState(false);
+  const [searchError, setSearchError] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
@@ -42,6 +47,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
     setActive(0);
     setServerResults([]);
     setSearching(false);
+    setSearchError(false);
     // Focus after mount so the browser accepts the focus call.
     const id = requestAnimationFrame(() => inputRef.current?.focus());
     return () => cancelAnimationFrame(id);
@@ -59,9 +65,11 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
     if (trimmed.length === 0) {
       setServerResults([]);
       setSearching(false);
+      setSearchError(false);
       return;
     }
     setSearching(true);
+    setSearchError(false);
     const myToken = ++requestToken.current;
     const handle = window.setTimeout(() => {
       void trpc.tasks.list
@@ -77,11 +85,13 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
             })),
           );
           setSearching(false);
+          setSearchError(false);
         })
         .catch(() => {
           if (myToken !== requestToken.current) return;
           setServerResults([]);
           setSearching(false);
+          setSearchError(true);
         });
     }, 300);
     return () => window.clearTimeout(handle);
@@ -106,6 +116,11 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
   }, [filtered.length, active]);
 
   if (!open) return null;
+  const emptyCopy = taskSearchEmptyCopy({
+    query,
+    searching,
+    error: searchError,
+  });
 
   function onKey(e: React.KeyboardEvent): void {
     if (e.key === 'Escape') {
@@ -172,8 +187,13 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
         </div>
         <ul className="max-h-[50vh] overflow-y-auto p-1">
           {filtered.length === 0 && (
-            <li className="px-3 py-4 text-center text-xs text-muted-foreground">
-              没有匹配的任务
+            <li className="px-4 py-7 text-center">
+              <div className="text-sm font-medium text-foreground/80">
+                {emptyCopy.title}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {emptyCopy.body}
+              </div>
             </li>
           )}
           {filtered.map((t, i) => (
@@ -194,7 +214,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                   {t.title && t.title.trim().length > 0 ? t.title : t.intent}
                 </span>
                 <span className="truncate text-[11px] text-muted-foreground">
-                  {statusLabel(t.status)}
+                  {taskStatusLabel(t.status)}
                 </span>
               </button>
             </li>
@@ -208,27 +228,4 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
       </div>
     </div>
   );
-}
-
-export function statusLabel(status: UiTask['status']): string {
-  switch (status) {
-    case 'queued':
-      return '排队中';
-    case 'executing':
-      return '执行中';
-    case 'awaiting_user':
-      return '等待你回复';
-    case 'paused':
-      return '已暂停';
-    case 'completed':
-      return '已完成';
-    case 'partial_success':
-      return '部分完成';
-    case 'failed':
-      return '失败';
-    case 'cancelled':
-      return '已取消';
-    default:
-      return '';
-  }
 }

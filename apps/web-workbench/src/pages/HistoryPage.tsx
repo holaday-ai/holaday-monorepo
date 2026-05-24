@@ -2,6 +2,7 @@ import { CheckCircle2, CircleSlash, Loader2, Search, XCircle } from 'lucide-reac
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { historyEmptyCopy, taskStatusLabel } from '@/lib/task-status-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
@@ -63,6 +64,8 @@ export function HistoryPage(): JSX.Element {
   const [hasMore, setHasMore] = React.useState(true);
   const [loading, setLoading] = React.useState(false);
   const [initialLoad, setInitialLoad] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [loadMoreError, setLoadMoreError] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<StatusFilter>('all');
   const [range, setRange] = React.useState<RangeFilter>('30d');
   const [query, setQuery] = React.useState('');
@@ -108,6 +111,12 @@ export function HistoryPage(): JSX.Element {
         setTasks((prev) => (append ? [...prev, ...list] : list));
         setCursor(res?.nextCursor ?? null);
         setHasMore(Boolean(res?.nextCursor));
+        if (append) setLoadMoreError(null);
+        else setError(null);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '加载失败';
+        if (append) setLoadMoreError(message);
+        else setError(message);
       } finally {
         setLoading(false);
         setInitialLoad(false);
@@ -126,6 +135,8 @@ export function HistoryPage(): JSX.Element {
     setCursor(null);
     setHasMore(true);
     setLoading(true);
+    setError(null);
+    setLoadMoreError(null);
     void trpc.tasks.list
       .query(baseInput)
       .then((res) => {
@@ -134,6 +145,14 @@ export function HistoryPage(): JSX.Element {
         setTasks(list);
         setCursor(res?.nextCursor ?? null);
         setHasMore(Boolean(res?.nextCursor));
+        setError(null);
+      })
+      .catch((err) => {
+        if (myToken !== fetchToken.current) return;
+        setTasks([]);
+        setCursor(null);
+        setHasMore(false);
+        setError(err instanceof Error ? err.message : '加载失败');
       })
       .finally(() => {
         if (myToken !== fetchToken.current) return;
@@ -141,6 +160,7 @@ export function HistoryPage(): JSX.Element {
         setInitialLoad(false);
       });
   }, [baseInput]);
+  const emptyCopy = historyEmptyCopy({ query: debouncedQuery, status, range });
 
   return (
     <PageContainer width="wide">
@@ -187,10 +207,33 @@ export function HistoryPage(): JSX.Element {
             <div className="flex h-48 items-center justify-center">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
+          ) : error ? (
+            <div className="flex h-48 flex-col items-center justify-center text-center">
+              <XCircle className="h-6 w-6 text-red-500" />
+              <div className="mt-3 text-sm font-medium text-foreground/80">
+                历史任务加载失败
+              </div>
+              <div className="mt-1 max-w-md text-xs text-muted-foreground">
+                {error}
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-3"
+                onClick={() => void fetchPage(null, false)}
+                disabled={loading}
+              >
+                {loading ? '重试中…' : '重试'}
+              </Button>
+            </div>
           ) : tasks.length === 0 ? (
             <div className="flex h-48 flex-col items-center justify-center text-center">
-              <div className="text-sm text-muted-foreground">没有符合条件的任务</div>
-              <div className="mt-1 text-[11px] text-muted-foreground">换个筛选试试</div>
+              <div className="text-sm font-medium text-foreground/80">
+                {emptyCopy.title}
+              </div>
+              <div className="mt-1 text-[11px] text-muted-foreground">
+                {emptyCopy.body}
+              </div>
             </div>
           ) : (
             <ul className="divide-y divide-border">
@@ -207,7 +250,7 @@ export function HistoryPage(): JSX.Element {
                         {t.intent || '未命名任务'}
                       </div>
                       <div className="mt-0.5 text-[11px] text-muted-foreground">
-                        {formatTime(t.createdAt)} · {friendlyStatus(t.status)}
+                        {formatTime(t.createdAt)} · {taskStatusLabel(t.status)}
                       </div>
                     </div>
                     <span className="shrink-0 self-center pr-2 text-[11px] text-muted-foreground opacity-0 group-hover:opacity-100">
@@ -219,7 +262,21 @@ export function HistoryPage(): JSX.Element {
             </ul>
           )}
 
-          {hasMore && !initialLoad && (
+          {loadMoreError && !error && (
+            <div className="mt-4 flex flex-col items-center gap-2 rounded-md border border-red-200/70 bg-red-50/70 px-3 py-2 text-center text-xs text-red-700 dark:border-red-500/40 dark:bg-red-950/40 dark:text-red-200">
+              <div>加载更多失败：{loadMoreError}</div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void fetchPage(cursor, true)}
+                disabled={loading}
+              >
+                {loading ? '重试中…' : '重试加载更多'}
+              </Button>
+            </div>
+          )}
+
+          {hasMore && !initialLoad && !error && !loadMoreError && (
             <div className="mt-4 flex justify-center">
               <Button
                 variant="outline"
@@ -283,39 +340,6 @@ function StatusIcon({ status }: { status: string }): JSX.Element {
     );
   }
   return <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-pink-400" />;
-}
-
-/**
- * Translate the orchestrator's raw `tasks.status` value into the
- * UI label. Covers every status the DB column can hold today; the
- * default returns the raw string so a future enum extension is
- * surfaced visibly instead of silently dropped.
- */
-function friendlyStatus(status: string): string {
-  switch (status) {
-    case 'completed':
-      return '已完成';
-    case 'partial_success':
-      return '部分完成';
-    case 'failed':
-      return '失败';
-    case 'cancelled':
-      return '已取消';
-    case 'executing':
-      return '执行中';
-    case 'planning':
-      return '规划中';
-    case 'paused':
-      return '已暂停';
-    case 'queued':
-      return '排队中';
-    case 'pending':
-      return '排队中';
-    case 'awaiting_user':
-      return '等待操作';
-    default:
-      return status;
-  }
 }
 
 function formatTime(v: string | number | Date): string {
