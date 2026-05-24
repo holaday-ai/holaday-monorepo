@@ -1,5 +1,6 @@
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { LoginGate } from '@/components/LoginGate';
+import { authRedirectTarget } from '@/lib/auth-redirect';
 
 /**
  * Standalone register route. Pre-selects the register mode on
@@ -8,5 +9,12 @@ import { LoginGate } from '@/components/LoginGate';
  */
 export function RegisterPage(): JSX.Element {
   const navigate = useNavigate();
-  return <LoginGate initialMode="register" onAuthenticated={() => navigate('/', { replace: true })} />;
+  const location = useLocation();
+  const target = authRedirectTarget(location.search);
+  return (
+    <LoginGate
+      initialMode="register"
+      onAuthenticated={() => navigate(target, { replace: true })}
+    />
+  );
 }

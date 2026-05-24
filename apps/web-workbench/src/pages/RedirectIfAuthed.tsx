@@ -1,6 +1,7 @@
 import * as React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { getAccessToken } from '@/lib/auth';
+import { authRedirectTarget } from '@/lib/auth-redirect';
 
 /**
  * Mirror of RequireAuth — bounces an ALREADY-authenticated visitor
@@ -16,8 +17,9 @@ import { getAccessToken } from '@/lib/auth';
  */
 export function RedirectIfAuthed({ children }: { children: React.ReactNode }): JSX.Element {
   const token = getAccessToken();
+  const location = useLocation();
   if (token) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={authRedirectTarget(location.search)} replace />;
   }
   return <>{children}</>;
 }
