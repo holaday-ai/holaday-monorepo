@@ -6,6 +6,16 @@ export interface QuotaIndicatorSnapshotLike {
   readonly bonusTasks: number;
 }
 
+export interface QuotaSnapshot extends QuotaIndicatorSnapshotLike {
+  readonly tasksUsed: number;
+  readonly opusUsed: number;
+  readonly opusLimit: number | null;
+  readonly opusRemaining: number | null;
+  readonly bonusOpus: number;
+  readonly concurrentCount: number;
+  readonly concurrencyLimit: number;
+}
+
 export interface QuotaTaskState {
   readonly totalLimit: number;
   readonly remaining: number;
@@ -16,11 +26,14 @@ export interface QuotaTaskState {
 }
 
 export function quotaTaskState(snap: QuotaIndicatorSnapshotLike): QuotaTaskState {
-  const totalLimit = Math.max(0, snap.tasksLimit) + Math.max(0, snap.bonusTasks);
+  const tasksLimit = finiteNumberOrZero(snap.tasksLimit);
+  const bonusTasks = finiteNumberOrZero(snap.bonusTasks);
+  const tasksRemaining = finiteNumberOrZero(snap.tasksRemaining);
+  const totalLimit = Math.max(0, tasksLimit) + Math.max(0, bonusTasks);
   const remaining =
     totalLimit > 0
-      ? Math.min(totalLimit, Math.max(0, snap.tasksRemaining))
-      : Math.max(0, snap.tasksRemaining);
+      ? Math.min(totalLimit, Math.max(0, tasksRemaining))
+      : Math.max(0, tasksRemaining);
   const usedPct =
     totalLimit > 0
       ? Math.min(100, Math.max(0, Math.round(((totalLimit - remaining) / totalLimit) * 100)))
@@ -36,6 +49,49 @@ export function quotaTaskState(snap: QuotaIndicatorSnapshotLike): QuotaTaskState
   };
 }
 
+export function normalizeQuotaSnapshot(value: unknown): QuotaSnapshot | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const period = raw.period === 'day' || raw.period === 'month' ? raw.period : null;
+  if (!period) return null;
+
+  const tasksUsed = finiteNumber(raw.tasksUsed);
+  const tasksLimit = finiteNumber(raw.tasksLimit);
+  const tasksRemaining = finiteNumber(raw.tasksRemaining);
+  const bonusTasks = finiteNumber(raw.bonusTasks);
+  const opusUsed = finiteNumber(raw.opusUsed);
+  const bonusOpus = finiteNumber(raw.bonusOpus);
+  const concurrentCount = finiteNumber(raw.concurrentCount);
+  const concurrencyLimit = finiteNumber(raw.concurrencyLimit);
+  if (
+    tasksUsed == null ||
+    tasksLimit == null ||
+    tasksRemaining == null ||
+    bonusTasks == null ||
+    opusUsed == null ||
+    bonusOpus == null ||
+    concurrentCount == null ||
+    concurrencyLimit == null
+  ) {
+    return null;
+  }
+
+  return {
+    plan: typeof raw.plan === 'string' && raw.plan.trim() ? raw.plan : 'free',
+    period,
+    tasksUsed,
+    tasksLimit,
+    tasksRemaining,
+    bonusTasks,
+    opusUsed,
+    opusLimit: nullableFiniteNumber(raw.opusLimit),
+    opusRemaining: nullableFiniteNumber(raw.opusRemaining),
+    bonusOpus,
+    concurrentCount,
+    concurrencyLimit,
+  };
+}
+
 export function quotaRefreshErrorMessage(
   err: unknown,
   fallback = '额度暂时无法刷新，请稍后重试。',
@@ -43,6 +99,19 @@ export function quotaRefreshErrorMessage(
   if (err instanceof Error && err.message.trim()) return err.message;
   if (typeof err === 'string' && err.trim()) return err;
   return fallback;
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function nullableFiniteNumber(value: unknown): number | null {
+  if (value == null) return null;
+  return finiteNumber(value);
+}
+
+function finiteNumberOrZero(value: unknown): number {
+  return finiteNumber(value) ?? 0;
 }
 
 export function quotaRefreshStatusCopy({

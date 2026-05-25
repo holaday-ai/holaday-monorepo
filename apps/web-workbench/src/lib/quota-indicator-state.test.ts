@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  normalizeQuotaSnapshot,
   quotaRefreshErrorMessage,
   quotaRefreshStatusCopy,
   quotaTaskState,
@@ -39,6 +40,68 @@ describe('quota indicator state helpers', () => {
       lowOnTasks: true,
       outOfTasks: true,
     });
+
+    expect(
+      quotaTaskState({
+        plan: 'pro',
+        period: 'month',
+        tasksLimit: Number.NaN,
+        tasksRemaining: Number.POSITIVE_INFINITY,
+        bonusTasks: 0,
+      }),
+    ).toMatchObject({
+      totalLimit: 0,
+      remaining: 0,
+      usedPct: 0,
+      lowOnTasks: false,
+      outOfTasks: false,
+    });
+  });
+
+  it('normalizes valid quota snapshots and rejects malformed payloads', () => {
+    expect(
+      normalizeQuotaSnapshot({
+        plan: 'pro',
+        period: 'month',
+        tasksUsed: 3,
+        tasksLimit: 20,
+        tasksRemaining: 17,
+        bonusTasks: 2,
+        opusUsed: 1,
+        opusLimit: null,
+        opusRemaining: null,
+        bonusOpus: 0,
+        concurrentCount: 0,
+        concurrencyLimit: 3,
+      }),
+    ).toMatchObject({
+      plan: 'pro',
+      period: 'month',
+      tasksLimit: 20,
+      tasksRemaining: 17,
+      opusLimit: null,
+    });
+
+    expect(
+      normalizeQuotaSnapshot({
+        daily: { used: 1, limit: 100 },
+        monthly: { used: 1, limit: 1000 },
+      }),
+    ).toBeNull();
+    expect(
+      normalizeQuotaSnapshot({
+        plan: 'pro',
+        period: 'month',
+        tasksUsed: 1,
+        tasksLimit: Number.NaN,
+        tasksRemaining: 3,
+        bonusTasks: 0,
+        opusUsed: 0,
+        bonusOpus: 0,
+        concurrentCount: 0,
+        concurrencyLimit: 3,
+      }),
+    ).toBeNull();
   });
 
   it('keeps refresh failure copy distinct for stale and unavailable states', () => {

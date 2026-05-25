@@ -1,20 +1,9 @@
 import * as React from 'react';
+import {
+  normalizeQuotaSnapshot,
+  type QuotaSnapshot,
+} from '@/lib/quota-indicator-state';
 import { trpc } from '@/lib/trpc';
-
-export interface QuotaSnapshot {
-  plan: string;
-  period: 'day' | 'month';
-  tasksUsed: number;
-  tasksLimit: number;
-  tasksRemaining: number;
-  bonusTasks: number;
-  opusUsed: number;
-  opusLimit: number | null;
-  opusRemaining: number | null;
-  bonusOpus: number;
-  concurrentCount: number;
-  concurrencyLimit: number;
-}
 
 interface State {
   snap: QuotaSnapshot | null;
@@ -41,7 +30,7 @@ export function useQuotaStatus(refreshKey?: number | string): State {
     trpc.quota.status.query().then(
       (res) => {
         if (cancelled) return;
-        setSnap(res as QuotaSnapshot);
+        setSnap(normalizeQuotaSnapshot(res));
         setLoading(false);
       },
       () => {

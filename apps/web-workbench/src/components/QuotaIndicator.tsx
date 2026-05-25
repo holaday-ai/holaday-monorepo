@@ -2,27 +2,14 @@ import { AlertCircle, ArrowUpRight, Loader2, RotateCw } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+  normalizeQuotaSnapshot,
+  type QuotaSnapshot,
   quotaRefreshErrorMessage,
   quotaRefreshStatusCopy,
   quotaTaskState,
 } from '@/lib/quota-indicator-state';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
-
-interface QuotaSnapshot {
-  plan: string;
-  period: 'day' | 'month';
-  tasksUsed: number;
-  tasksLimit: number;
-  tasksRemaining: number;
-  bonusTasks: number;
-  opusUsed: number;
-  opusLimit: number | null;
-  opusRemaining: number | null;
-  bonusOpus: number;
-  concurrentCount: number;
-  concurrencyLimit: number;
-}
 
 interface Props {
   /** Compact rail variant — vertical icon strip can't fit the bar. */
@@ -51,8 +38,13 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
     setLoading(true);
     trpc.quota.status.query().then(
       (res) => {
-        setSnap(res as QuotaSnapshot);
-        setError(null);
+        const nextSnap = normalizeQuotaSnapshot(res);
+        if (nextSnap) {
+          setSnap(nextSnap);
+          setError(null);
+        } else {
+          setError('额度数据格式异常，请稍后重试。');
+        }
         setLoading(false);
       },
       (err) => {
@@ -68,8 +60,13 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
     trpc.quota.status.query().then(
       (res) => {
         if (cancelled) return;
-        setSnap(res as QuotaSnapshot);
-        setError(null);
+        const nextSnap = normalizeQuotaSnapshot(res);
+        if (nextSnap) {
+          setSnap(nextSnap);
+          setError(null);
+        } else {
+          setError('额度数据格式异常，请稍后重试。');
+        }
         setLoading(false);
       },
       (err) => {
