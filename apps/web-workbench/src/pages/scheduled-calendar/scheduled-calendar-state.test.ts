@@ -43,7 +43,7 @@ describe('scheduled calendar state helpers', () => {
 
   it('normalizes unknown errors', () => {
     expect(scheduledCalendarErrorMessage(new Error('offline'))).toBe('offline');
-    expect(scheduledCalendarErrorMessage('bad')).toBe('请稍后重试');
+    expect(scheduledCalendarErrorMessage('bad')).toBe('bad');
+    expect(scheduledCalendarErrorMessage({})).toBe('请稍后重试');
   });
 });
-

@@ -52,6 +52,6 @@ export function scheduledCalendarStatusCopy({
 
 export function scheduledCalendarErrorMessage(err: unknown, fallback = '请稍后重试'): string {
   if (err instanceof Error && err.message.trim()) return err.message;
+  if (typeof err === 'string' && err.trim()) return err;
   return fallback;
 }
-

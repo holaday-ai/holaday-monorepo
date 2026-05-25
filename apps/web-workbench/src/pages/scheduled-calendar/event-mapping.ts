@@ -43,6 +43,14 @@ export interface ScheduledTaskRow {
   createdAt: string | Date;
 }
 
+export function normalizeScheduledTaskRows(value: unknown): ScheduledTaskRow[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const row = normalizeScheduledTaskRow(entry);
+    return row ? [row] : [];
+  });
+}
+
 export type StatusColor = {
   /** 3 px accent bar (left edge) + list-view dot. */
   accent: string;
@@ -162,7 +170,8 @@ export function rowToEventInput(
   const nextRunAt = row.nextRunAt instanceof Date ? row.nextRunAt : new Date(row.nextRunAt);
   if (Number.isNaN(nextRunAt.getTime())) return [];
   const color = pickStatusColor(row, nextRunAt, opts.now);
-  const durationMs = Math.max(1, row.durationMinutes) * 60_000;
+  const durationMinutes = Math.max(1, row.durationMinutes);
+  const durationMs = durationMinutes * 60_000;
 
   const baseProps = {
     id: row.scheduledTaskId,
@@ -182,7 +191,7 @@ export function rowToEventInput(
       reminderMinutes: row.reminderMinutes ?? null,
       repeatType: row.repeatType,
       rrule: row.rrule,
-      durationMinutes: row.durationMinutes,
+      durationMinutes,
       timezone: row.timezone,
       status: row.status,
       lastRunStatus: row.lastRunStatus,
@@ -206,7 +215,7 @@ export function rowToEventInput(
       {
         ...baseProps,
         rrule: row.rrule,
-        duration: { minutes: row.durationMinutes },
+        duration: { minutes: durationMinutes },
       },
     ];
   }
@@ -223,4 +232,92 @@ export function rowToEventInput(
       end: new Date(nextRunAt.getTime() + durationMs),
     },
   ];
+}
+
+function normalizeScheduledTaskRow(value: unknown): ScheduledTaskRow | null {
+  if (!isRecord(value)) return null;
+  const scheduledTaskId = safeText(value.scheduledTaskId);
+  if (!scheduledTaskId) return null;
+  const nextRunAt = safeDateValue(value.nextRunAt);
+  if (!nextRunAt) return null;
+  return {
+    scheduledTaskId,
+    scheduledTaskInternalId: safePositiveInteger(value.scheduledTaskInternalId),
+    intent: safeText(value.intent) || '未命名任务',
+    description: safeNullableText(value.description),
+    reminderMinutes: safeNonNegativeInteger(value.reminderMinutes),
+    repeatType: normalizeRepeatType(value.repeatType),
+    rrule: safeNullableText(value.rrule),
+    durationMinutes: safePositiveInteger(value.durationMinutes) ?? 30,
+    timezone: safeText(value.timezone) || 'Asia/Shanghai',
+    nextRunAt,
+    lastRunAt: safeNullableDateValue(value.lastRunAt),
+    status: normalizeStatus(value.status),
+    lastRunStatus: normalizeLastRunStatus(value.lastRunStatus),
+    lastError: safeNullableText(value.lastError),
+    createdAt: safeDateValue(value.createdAt) ?? '',
+  };
+}
+
+function normalizeRepeatType(value: unknown): ScheduledTaskRow['repeatType'] {
+  return value === 'daily' ||
+    value === 'weekly' ||
+    value === 'monthly' ||
+    value === 'once'
+    ? value
+    : 'once';
+}
+
+function normalizeStatus(value: unknown): ScheduledTaskRow['status'] {
+  return value === 'paused' ||
+    value === 'running' ||
+    value === 'completed' ||
+    value === 'failed' ||
+    value === 'active'
+    ? value
+    : 'active';
+}
+
+function normalizeLastRunStatus(value: unknown): ScheduledTaskRow['lastRunStatus'] {
+  return value === 'success' || value === 'failed' ? value : null;
+}
+
+function safeNullableText(value: unknown): string | null {
+  const text = safeText(value);
+  return text || null;
+}
+
+function safeText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function safePositiveInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : undefined;
+}
+
+function safeNonNegativeInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+function safeDateValue(value: unknown): string | Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const date = new Date(trimmed);
+  return Number.isNaN(date.getTime()) ? null : trimmed;
+}
+
+function safeNullableDateValue(value: unknown): string | Date | null {
+  return value === null || value === undefined ? null : safeDateValue(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

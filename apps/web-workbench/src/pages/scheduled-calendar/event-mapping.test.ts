@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  normalizeScheduledTaskRows,
   pickStatusColor,
   rowToEventInput,
   type ScheduledTaskRow,
@@ -185,5 +186,110 @@ describe('rowToEventInput', () => {
     expect(
       (events[0]?.end as Date).getTime() - (events[0]?.start as Date).getTime(),
     ).toBe(90 * 60_000);
+  });
+
+  it('clamps recurring event duration before passing it to FullCalendar', () => {
+    const events = rowToEventInput(
+      makeRow({ durationMinutes: 0, rrule: 'FREQ=DAILY' }),
+      { now },
+    );
+    expect(events[0]?.duration).toEqual({ minutes: 1 });
+    expect((events[0]?.extendedProps as Record<string, unknown>).durationMinutes).toBe(1);
+  });
+});
+
+describe('normalizeScheduledTaskRows', () => {
+  it('normalizes scheduled task rows before calendar rendering', () => {
+    expect(
+      normalizeScheduledTaskRows([
+        {
+          scheduledTaskId: ' sch_1 ',
+          scheduledTaskInternalId: 123,
+          intent: ' Weekly report ',
+          description: '  Product update ',
+          reminderMinutes: 15,
+          repeatType: 'weekly',
+          rrule: ' FREQ=WEEKLY ',
+          durationMinutes: 45,
+          timezone: ' Asia/Tokyo ',
+          nextRunAt: ' 2026-05-25T10:00:00.000Z ',
+          lastRunAt: ' 2026-05-24T10:00:00.000Z ',
+          status: 'paused',
+          lastRunStatus: 'success',
+          lastError: ' previous warning ',
+          createdAt: ' 2026-05-20T00:00:00.000Z ',
+        },
+      ]),
+    ).toEqual([
+      {
+        scheduledTaskId: 'sch_1',
+        scheduledTaskInternalId: 123,
+        intent: 'Weekly report',
+        description: 'Product update',
+        reminderMinutes: 15,
+        repeatType: 'weekly',
+        rrule: 'FREQ=WEEKLY',
+        durationMinutes: 45,
+        timezone: 'Asia/Tokyo',
+        nextRunAt: '2026-05-25T10:00:00.000Z',
+        lastRunAt: '2026-05-24T10:00:00.000Z',
+        status: 'paused',
+        lastRunStatus: 'success',
+        lastError: 'previous warning',
+        createdAt: '2026-05-20T00:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('drops rows without stable identity or schedule time', () => {
+    expect(
+      normalizeScheduledTaskRows([
+        null,
+        { scheduledTaskId: '', nextRunAt: '2026-05-25T10:00:00.000Z' },
+        { scheduledTaskId: 'sch_bad', nextRunAt: 'not-a-date' },
+      ]),
+    ).toEqual([]);
+  });
+
+  it('falls back from malformed optional fields safely', () => {
+    expect(
+      normalizeScheduledTaskRows([
+        {
+          scheduledTaskId: 'sch_2',
+          scheduledTaskInternalId: -1,
+          intent: { unsafe: true },
+          description: { unsafe: true },
+          reminderMinutes: -5,
+          repeatType: 'yearly',
+          rrule: { unsafe: true },
+          durationMinutes: 0,
+          timezone: { unsafe: true },
+          nextRunAt: '2026-05-25T10:00:00.000Z',
+          lastRunAt: { unsafe: true },
+          status: 'unknown',
+          lastRunStatus: 'almost',
+          lastError: { unsafe: true },
+          createdAt: { unsafe: true },
+        },
+      ]),
+    ).toEqual([
+      {
+        scheduledTaskId: 'sch_2',
+        scheduledTaskInternalId: undefined,
+        intent: '未命名任务',
+        description: null,
+        reminderMinutes: null,
+        repeatType: 'once',
+        rrule: null,
+        durationMinutes: 30,
+        timezone: 'Asia/Shanghai',
+        nextRunAt: '2026-05-25T10:00:00.000Z',
+        lastRunAt: null,
+        status: 'active',
+        lastRunStatus: null,
+        lastError: null,
+        createdAt: '',
+      },
+    ]);
   });
 });

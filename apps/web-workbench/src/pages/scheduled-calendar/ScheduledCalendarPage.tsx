@@ -54,6 +54,7 @@ import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 import {
+  normalizeScheduledTaskRows,
   rowToEventInput,
   type ScheduledTaskRow,
 } from './event-mapping';
@@ -175,7 +176,7 @@ export function ScheduledCalendarPage(): JSX.Element {
           ? { focusScheduledTaskInternalId }
           : {}),
       });
-      setRows(res as ScheduledTaskRow[]);
+      setRows(normalizeScheduledTaskRows(res));
       setLastRefreshFocusId(focusScheduledTaskInternalId);
       setLoadError(null);
     } catch (err) {
