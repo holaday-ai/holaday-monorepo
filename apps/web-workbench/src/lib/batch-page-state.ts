@@ -7,11 +7,12 @@ export function batchListSummary({
   readonly error: string | null;
   readonly count: number;
 }): string {
-  if (loading && count === 0) return '批量任务加载中…';
-  if (error && count > 0) return `刷新失败 · 显示 ${count} 个批量`;
+  const safeCount = safeBatchCount(count);
+  if (loading && safeCount === 0) return '批量任务加载中…';
+  if (error && safeCount > 0) return `刷新失败 · 显示 ${safeCount} 个批量`;
   if (error) return '批量任务加载失败';
-  if (count === 0) return '暂无批量任务';
-  return `共 ${count} 个批量任务`;
+  if (safeCount === 0) return '暂无批量任务';
+  return `共 ${safeCount} 个批量任务`;
 }
 
 export function batchDetailSummary({
@@ -25,11 +26,13 @@ export function batchDetailSummary({
   readonly total: number | null;
   readonly finished: number;
 }): string {
-  if (loading && total == null) return '详情加载中…';
-  if (error && total != null) return '刷新失败 · 显示上次详情';
+  const safeTotal = total == null ? null : safeBatchCount(total);
+  const safeFinished = safeBatchCount(finished);
+  if (loading && safeTotal == null) return '详情加载中…';
+  if (error && safeTotal != null) return '刷新失败 · 显示上次详情';
   if (error) return '详情加载失败';
-  if (total == null) return '暂无详情';
-  return `${finished} / ${total} 已处理`;
+  if (safeTotal == null) return '暂无详情';
+  return `${safeFinished} / ${safeTotal} 已处理`;
 }
 
 export function batchStatusCopy({
@@ -76,13 +79,22 @@ export function batchProgressPercent({
   readonly failed: number;
   readonly cancelled?: number | null;
 }): number {
-  if (total <= 0) return 0;
-  const finished = Math.max(0, done) + Math.max(0, failed) + Math.max(0, cancelled ?? 0);
-  return Math.min(100, Math.max(0, Math.round((finished / total) * 100)));
+  const safeTotal = safeBatchCount(total);
+  if (safeTotal <= 0) return 0;
+  const finished =
+    safeBatchCount(done) +
+    safeBatchCount(failed) +
+    safeBatchCount(cancelled ?? 0);
+  return Math.min(100, Math.max(0, Math.round((finished / safeTotal) * 100)));
 }
 
 export function batchErrorMessage(err: unknown, fallback = '请稍后重试'): string {
   if (err instanceof Error && err.message.trim()) return err.message;
   if (typeof err === 'string' && err.trim()) return err;
   return fallback;
+}
+
+export function safeBatchCount(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
 }

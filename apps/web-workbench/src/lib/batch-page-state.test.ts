@@ -5,6 +5,7 @@ import {
   batchListSummary,
   batchProgressPercent,
   batchStatusCopy,
+  safeBatchCount,
 } from './batch-page-state';
 
 describe('batch page state helpers', () => {
@@ -57,11 +58,38 @@ describe('batch page state helpers', () => {
     expect(batchProgressPercent({ total: 10, done: 99, failed: 0, cancelled: 0 })).toBe(100);
     expect(batchProgressPercent({ total: 0, done: 1, failed: 1, cancelled: 1 })).toBe(0);
     expect(batchProgressPercent({ total: 10, done: -1, failed: -1, cancelled: -1 })).toBe(0);
+    expect(
+      batchProgressPercent({
+        total: Number.NaN,
+        done: Number.POSITIVE_INFINITY,
+        failed: 1,
+        cancelled: 1,
+      }),
+    ).toBe(0);
   });
 
   it('normalizes unknown errors', () => {
     expect(batchErrorMessage(new Error('offline'))).toBe('offline');
     expect(batchErrorMessage('bad gateway')).toBe('bad gateway');
     expect(batchErrorMessage({})).toBe('请稍后重试');
+  });
+
+  it('normalizes malformed batch counters before rendering', () => {
+    expect(safeBatchCount(Number.NaN)).toBe(0);
+    expect(safeBatchCount(Number.POSITIVE_INFINITY)).toBe(0);
+    expect(safeBatchCount('7')).toBe(0);
+    expect(safeBatchCount(-3)).toBe(0);
+    expect(safeBatchCount(4.8)).toBe(4);
+    expect(batchListSummary({ loading: false, error: null, count: Number.NaN })).toBe(
+      '暂无批量任务',
+    );
+    expect(
+      batchDetailSummary({
+        loading: false,
+        error: null,
+        total: Number.NaN,
+        finished: Number.POSITIVE_INFINITY,
+      }),
+    ).toBe('0 / 0 已处理');
   });
 });

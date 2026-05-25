@@ -23,6 +23,7 @@ import {
   batchListSummary,
   batchProgressPercent,
   batchStatusCopy,
+  safeBatchCount,
 } from '@/lib/batch-page-state';
 import {
   applyBatchProgressToDetail,
@@ -241,7 +242,7 @@ function BatchList(): JSX.Element {
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="line-clamp-1 text-sm font-medium">
-                      {r.name ?? `批量任务 · ${r.itemsTotal} 项`}
+                      {r.name ?? `批量任务 · ${safeBatchCount(r.itemsTotal)} 项`}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
                       <span
@@ -258,10 +259,13 @@ function BatchList(): JSX.Element {
                         {STATUS_LABEL[r.status] ?? r.status}
                       </span>
                       <span>
-                        {r.itemsDone}/{r.itemsTotal} 完成
-                        {batchUnsuccessfulCopy(r.itemsFailed, r.itemsCancelled)}
+                        {safeBatchCount(r.itemsDone)}/{safeBatchCount(r.itemsTotal)} 完成
+                        {batchUnsuccessfulCopy(
+                          safeBatchCount(r.itemsFailed),
+                          safeBatchCount(r.itemsCancelled ?? 0),
+                        )}
                       </span>
-                      <span>并发 {r.concurrency}</span>
+                      <span>并发 {safeBatchCount(r.concurrency)}</span>
                       <span>{fmtDate(r.createdAt)}</span>
                     </div>
                   </div>
@@ -336,13 +340,15 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
     }
   };
 
-  const finishedCount = detail
-    ? detail.itemsDone + detail.itemsFailed + (detail.itemsCancelled ?? 0)
-    : 0;
+  const detailDone = safeBatchCount(detail?.itemsDone);
+  const detailFailed = safeBatchCount(detail?.itemsFailed);
+  const detailCancelled = safeBatchCount(detail?.itemsCancelled ?? 0);
+  const detailTotal = detail ? safeBatchCount(detail.itemsTotal) : null;
+  const finishedCount = detailDone + detailFailed + detailCancelled;
   const detailSummary = batchDetailSummary({
     loading,
     error: loadError,
-    total: detail?.itemsTotal ?? null,
+    total: detailTotal,
     finished: finishedCount,
   });
   const detailStatusCopy = batchStatusCopy({
@@ -407,10 +413,10 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
   }
 
   const pct = batchProgressPercent({
-    total: detail.itemsTotal,
-    done: detail.itemsDone,
-    failed: detail.itemsFailed,
-    cancelled: detail.itemsCancelled,
+    total: detailTotal ?? 0,
+    done: detailDone,
+    failed: detailFailed,
+    cancelled: detailCancelled,
   });
 
   const canCancel = detail.status === 'pending' || detail.status === 'running';
@@ -418,8 +424,8 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
   return (
     <PageContainer width="list">
       <PageHeader
-        title={detail.name ?? `批量任务 · ${detail.itemsTotal} 项`}
-        description={`并发 ${detail.concurrency} · ${STATUS_LABEL[detail.status] ?? detail.status}`}
+        title={detail.name ?? `批量任务 · ${detailTotal ?? 0} 项`}
+        description={`并发 ${safeBatchCount(detail.concurrency)} · ${STATUS_LABEL[detail.status] ?? detail.status}`}
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
             <div className="hidden items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground sm:inline-flex">
@@ -452,8 +458,8 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
           />
         )}
         <div className="mb-2 text-xs text-muted-foreground">
-          {detail.itemsDone} / {detail.itemsTotal} 完成
-          {batchUnsuccessfulCopy(detail.itemsFailed, detail.itemsCancelled)}
+          {detailDone} / {detailTotal ?? 0} 完成
+          {batchUnsuccessfulCopy(detailFailed, detailCancelled)}
         </div>
         <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
           <div
