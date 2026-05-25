@@ -24,7 +24,9 @@ ALIYUN_HOST="root@47.99.169.186"
 SPA_PATH="/opt/holaday-spa/dist"
 BACKUP_PATH="/opt/holaday-spa/dist.bak"
 DIST_DIR="apps/web-workbench/dist"
-SMOKE_URL="https://hd-app.orangebench.tech/"
+# Probe the SPA entry, not the marketing root, so the response contains
+# both the smoke marker and the deployed bundle hash.
+SMOKE_URL="https://hd-app.orangebench.tech/app"
 SMOKE_MARKER="HOLA DAY"
 TARBALL="/tmp/holaday-spa-dist.tar.gz"
 
@@ -34,6 +36,7 @@ VULTR_HOST="root@207.148.70.106"
 VULTR_SPA_PATH="/opt/holaday-monorepo/apps/web-workbench/dist"
 VULTR_BACKUP_PATH="/opt/holaday-monorepo/apps/web-workbench/dist.bak"
 VULTR_SMOKE_URL="https://holaday.ai/app"
+VULTR_SMOKE_RESOLVE="holaday.ai:443:207.148.70.106"
 
 # sshpass + non-interactive password — pulled from env so the
 # password doesn't end up in shell history. Falls back to interactive
@@ -98,16 +101,27 @@ run_with_retry_filtered() {
   done
 }
 
+count_matches() {
+  local needle="$1"
+  local path="$2"
+  local count
+
+  count=$(grep -F -c -- "$needle" "$path" 2>/dev/null || true)
+  printf '%s\n' "${count:-0}" | head -1
+}
+
 smoke_check() {
   local label="$1"
   local url="$2"
   local response_path="$3"
+  shift 3
+  local curl_args=("$@")
   local http_code marker_count bundle_count attempt
 
   for attempt in 1 2; do
-    http_code=$(curl -s --max-time 15 -o "$response_path" -w '%{http_code}' "$url" 2>&1 || true)
-    marker_count=$(grep -c "$SMOKE_MARKER" "$response_path" 2>/dev/null || echo 0)
-    bundle_count=$(grep -c "$NEW_HASH" "$response_path" 2>/dev/null || echo 0)
+    http_code=$(curl -s --max-time 15 "${curl_args[@]}" -o "$response_path" -w '%{http_code}' "$url" 2>&1 || true)
+    marker_count=$(count_matches "$SMOKE_MARKER" "$response_path")
+    bundle_count=$(count_matches "$NEW_HASH" "$response_path")
     if [[ "$http_code" == "200" ]] && ((marker_count > 0)) && ((bundle_count > 0)); then
       echo "✅ $label smoke check passed"
       return 0
@@ -195,9 +209,9 @@ run_with_retry_filtered "Vultr extract" "${VULTR_SSH[@]}" "$VULTR_HOST" \
   "cd /opt/holaday-monorepo/apps/web-workbench && \
    rm -rf dist && tar xzf /tmp/holaday-spa-dist.tar.gz"
 
-echo "→ Vultr smoke check ($VULTR_SMOKE_URL must return '$SMOKE_MARKER' + $NEW_HASH)"
+echo "→ Vultr smoke check ($VULTR_SMOKE_URL via $VULTR_SMOKE_RESOLVE must return '$SMOKE_MARKER' + $NEW_HASH)"
 sleep 2
-if ! smoke_check "Vultr" "$VULTR_SMOKE_URL" /tmp/vultr-smoke.html; then
+if ! smoke_check "Vultr" "$VULTR_SMOKE_URL" /tmp/vultr-smoke.html --resolve "$VULTR_SMOKE_RESOLVE"; then
   echo "❌ Vultr smoke FAILED — rolling Vultr back"
   run_with_retry "Vultr rollback" "${VULTR_SSH[@]}" "$VULTR_HOST" \
     "rm -rf $VULTR_SPA_PATH && mv $VULTR_BACKUP_PATH $VULTR_SPA_PATH"
