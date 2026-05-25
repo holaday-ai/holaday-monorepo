@@ -115,11 +115,10 @@ smoke_check() {
   local url="$2"
   local response_path="$3"
   shift 3
-  local curl_args=("$@")
   local http_code marker_count bundle_count attempt
 
   for attempt in 1 2; do
-    http_code=$(curl -s --max-time 15 "${curl_args[@]}" -o "$response_path" -w '%{http_code}' "$url" 2>&1 || true)
+    http_code=$(curl -s --max-time 15 "$@" -o "$response_path" -w '%{http_code}' "$url" 2>&1 || true)
     marker_count=$(count_matches "$SMOKE_MARKER" "$response_path")
     bundle_count=$(count_matches "$NEW_HASH" "$response_path")
     if [[ "$http_code" == "200" ]] && ((marker_count > 0)) && ((bundle_count > 0)); then
