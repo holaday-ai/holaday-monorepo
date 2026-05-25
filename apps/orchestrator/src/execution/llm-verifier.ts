@@ -75,11 +75,17 @@ export interface AnthropicMessageCreateParams {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
 }
 
+export interface AnthropicRequestOptions {
+  signal?: AbortSignal;
+  timeout?: number;
+  maxRetries?: number;
+}
+
 export interface AnthropicLikeClient {
   messages: {
     create(
       params: AnthropicMessageCreateParams,
-      opts?: { signal?: AbortSignal },
+      opts?: AnthropicRequestOptions,
     ): Promise<AnthropicMessageResponse>;
   };
 }
@@ -125,17 +131,24 @@ export async function verifyWithLlm(
   const userPayload = buildUserPayload(inputs);
 
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), timeoutMs);
 
   try {
-    const response = await inputs.client.messages.create(
-      {
-        model,
-        max_tokens: DEFAULT_LLM_VERIFIER_MAX_TOKENS,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: userPayload }],
-      },
-      { signal: ac.signal },
+    const response = await withVerifierTimeout(
+      inputs.client.messages.create(
+        {
+          model,
+          max_tokens: DEFAULT_LLM_VERIFIER_MAX_TOKENS,
+          system: SYSTEM_PROMPT,
+          messages: [{ role: 'user', content: userPayload }],
+        },
+        {
+          signal: ac.signal,
+          timeout: timeoutMs,
+          maxRetries: 0,
+        },
+      ),
+      timeoutMs,
+      ac,
     );
 
     const text = extractText(response);
@@ -163,8 +176,6 @@ export async function verifyWithLlm(
         ? `llm verifier: timed out after ${timeoutMs}ms — non-blocking pass`
         : `llm verifier: ${err instanceof Error ? err.message : String(err)} — non-blocking pass`,
     );
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -335,4 +346,35 @@ function nonBlockingPass(
       },
     ],
   };
+}
+
+function withVerifierTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  ac: AbortController,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      ac.abort();
+      reject(new Error(`llm verifier timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
 }

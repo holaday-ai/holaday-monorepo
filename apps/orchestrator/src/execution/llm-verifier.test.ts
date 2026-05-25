@@ -13,6 +13,7 @@ import {
   type AnthropicLikeClient,
   type AnthropicMessageContentBlock,
   type AnthropicMessageCreateParams,
+  type AnthropicRequestOptions,
   type AnthropicMessageResponse,
 } from './llm-verifier.js';
 
@@ -27,6 +28,8 @@ interface ClientOptions {
   rejectWith?: Error;
   /** When true, never resolves until aborted. */
   hangForever?: boolean;
+  /** When true, never resolves and ignores abort. */
+  ignoreAbort?: boolean;
   /** Override response shape entirely. */
   contentOverride?: AnthropicMessageContentBlock[];
 }
@@ -38,7 +41,7 @@ function makeClient(opts: ClientOptions = {}): {
   const createMock = vi.fn(
     (
       _params: AnthropicMessageCreateParams,
-      reqOpts?: { signal?: AbortSignal },
+      reqOpts?: AnthropicRequestOptions,
     ): Promise<AnthropicMessageResponse> => {
       if (opts.hangForever) {
         return new Promise((_resolve, reject) => {
@@ -52,6 +55,9 @@ function makeClient(opts: ClientOptions = {}): {
             else reqOpts.signal.addEventListener('abort', onAbort);
           }
         });
+      }
+      if (opts.ignoreAbort) {
+        return new Promise(() => undefined);
       }
       if (opts.rejectWith) return Promise.reject(opts.rejectWith);
       const content: AnthropicMessageContentBlock[] =
@@ -237,6 +243,18 @@ describe('verifyWithLlm — pass', () => {
     expect(body.contract.taskId).toBe('tsk_m');
   });
 
+  it('bounds verifier requests with no SDK retries', async () => {
+    const { contract, ledger, answerText } = makeFullPassingResult('tsk_bounds');
+    const { client, createMock } = makeClient({
+      textOut: '{"passed":true,"issues":[]}',
+    });
+    await verifyWithLlm({ contract, ledger, answerText, client, timeoutMs: 1234 });
+    const requestOptions = createMock.mock.calls[0]![1] as AnthropicRequestOptions;
+    expect(requestOptions.timeout).toBe(1234);
+    expect(requestOptions.maxRetries).toBe(0);
+    expect(requestOptions.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it('respects model override', async () => {
     const { contract, ledger, answerText } = makeFullPassingResult('tsk_mo');
     const { client, createMock } = makeClient({
@@ -355,6 +373,24 @@ describe('verifyWithLlm — non-blocking fallbacks', () => {
     expect(result.checks[0]!.criterionId).toBe('llm.fallback');
     expect(result.checks[0]!.detail).toContain('timed out');
     expect(result.failureLevel).toBeUndefined();
+  });
+
+  it('hard timeout: fallback pass even when the SDK ignores abort', async () => {
+    const { contract, ledger, answerText } = makeFullPassingResult('tsk_hard_to');
+    const { client } = makeClient({ ignoreAbort: true });
+    const startedAt = Date.now();
+    const result = await verifyWithLlm({
+      contract,
+      ledger,
+      answerText,
+      client,
+      timeoutMs: 40,
+    });
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(result.passed).toBe(true);
+    expect(result.tier).toBe('llm');
+    expect(result.checks[0]!.criterionId).toBe('llm.fallback');
+    expect(result.checks[0]!.detail).toContain('timed out');
   });
 
   it('default timeout is 15s (sanity check on the constant)', () => {
