@@ -2,7 +2,6 @@ import { Menu, X } from 'lucide-react';
 import * as React from 'react';
 import { InputArea } from '@/components/InputArea';
 import { RoleNudgeBanner } from '@/components/RoleNudgeBanner';
-import { TaskStream } from '@/components/TaskStream';
 import { TaskToolbar, isBrowserLikely } from '@/components/TaskToolbar';
 import { Button } from '@/components/ui/button';
 import type { ComposerSubmitResult } from '@/components/composer-submit';
@@ -10,6 +9,12 @@ import { shouldResetComposerOnSelectionChange } from '@/components/composer-rese
 import { useTaskStore } from '@/stores/task-store';
 import type { SidePanelMode } from '@/types/side-panel';
 import type { UiTask } from '@/types/task';
+
+const TaskStream = React.lazy(() =>
+  import('@/components/TaskStream').then((module) => ({
+    default: module.TaskStream,
+  })),
+);
 
 interface Props {
   task: UiTask | null;
@@ -218,10 +223,12 @@ export function MainPanel({
             </div>
           )}
           <div className="flex-1 overflow-y-auto">
-            <TaskStream
-              task={task}
-              onPickSuggestion={handlePickFromTaskSummary}
-            />
+            <React.Suspense fallback={<TaskStreamFallback />}>
+              <TaskStream
+                task={task}
+                onPickSuggestion={handlePickFromTaskSummary}
+              />
+            </React.Suspense>
           </div>
           {userPlan ? (
             <RoleNudgeBanner
@@ -247,6 +254,14 @@ export function MainPanel({
         </>
       )}
     </main>
+  );
+}
+
+function TaskStreamFallback(): JSX.Element {
+  return (
+    <div className="mx-auto flex min-h-[220px] max-w-3xl items-center justify-center px-6 text-sm text-muted-foreground">
+      加载任务详情…
+    </div>
   );
 }
 

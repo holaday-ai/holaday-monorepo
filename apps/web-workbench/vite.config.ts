@@ -26,6 +26,9 @@ export default defineConfig({
   //     a task with a streaming/terminal answer)
   //   - calendar: @fullcalendar/* (only loaded on /scheduled-calendar)
   //   - charts: recharts (only loaded on /admin/finance + /admin/learning)
+  //   - ui-helpers: tiny class composition helpers used by the shell and
+  //     by recharts. Keep them out of charts so the entry chunk never
+  //     imports the whole chart vendor bundle just to call `cn()`.
   //   - radix: @radix-ui/* (shared across pages — keep as one chunk
   //     to avoid n^2 split overhead)
   //   - vendor: react + react-dom (long-cache; rarely changes)
@@ -50,6 +53,13 @@ export default defineConfig({
             return 'markdown';
           }
           if (id.includes('@fullcalendar')) return 'calendar';
+          if (
+            id.includes('/clsx/') ||
+            id.includes('/tailwind-merge/') ||
+            id.includes('/class-variance-authority/')
+          ) {
+            return 'ui-helpers';
+          }
           if (id.includes('recharts') || id.includes('victory')) return 'charts';
           if (id.includes('@radix-ui')) return 'radix';
           if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')) {
