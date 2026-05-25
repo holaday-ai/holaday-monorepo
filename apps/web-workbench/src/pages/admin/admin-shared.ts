@@ -9,6 +9,8 @@
 export const ADMIN_MAGENTA = '#EA1F59';
 export const ADMIN_MAGENTA_SOFT = 'rgba(234,31,89,0.12)';
 
+type UnknownRecord = Record<string, unknown>;
+
 interface StatusToken {
   label: string;
   textClass: string;
@@ -69,6 +71,13 @@ const STATUS_MAP: Record<string, StatusToken> = {
 };
 
 export function statusToken(status: string): StatusToken {
+  if (!status) {
+    return {
+      label: '未知',
+      textClass: 'text-zinc-600 dark:text-zinc-300',
+      bgClass: 'bg-zinc-100 dark:bg-zinc-500/15',
+    };
+  }
   return (
     STATUS_MAP[status] ?? {
       label: status,
@@ -78,9 +87,58 @@ export function statusToken(status: string): StatusToken {
   );
 }
 
+export function asRecord(value: unknown): UnknownRecord {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as UnknownRecord)
+    : {};
+}
+
+export function safeArray<T = unknown>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+export function finiteNumber(value: unknown, fallback = 0): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+export function nullableFiniteNumber(value: unknown): number | null {
+  if (value == null) return null;
+  const parsed = finiteNumber(value, Number.NaN);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function nonNegativeNumber(value: unknown, fallback = 0): number {
+  return Math.max(0, finiteNumber(value, fallback));
+}
+
+export function clampNumber(value: unknown, min: number, max: number, fallback = min): number {
+  const parsed = finiteNumber(value, fallback);
+  if (parsed < min) return min;
+  if (parsed > max) return max;
+  return parsed;
+}
+
+export function safeText(value: unknown, fallback = '—'): string {
+  return typeof value === 'string' && value.trim() ? value : fallback;
+}
+
+export function optionalText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+export function formatInteger(value: unknown): string {
+  return nonNegativeNumber(value).toLocaleString('zh-CN');
+}
+
 export function formatDurationMs(ms: number | null): string {
-  if (ms == null || !Number.isFinite(ms) || ms <= 0) return '—';
-  const seconds = Math.round(ms / 1000);
+  const parsed = nullableFiniteNumber(ms);
+  if (parsed == null || parsed <= 0) return '—';
+  const seconds = Math.round(parsed / 1000);
   if (seconds < 60) return `${seconds}秒`;
   const minutes = Math.floor(seconds / 60);
   const remSec = seconds % 60;
@@ -112,12 +170,14 @@ export function formatDate(at: string | Date | null): string {
 
 /** Truncate a string to `max` chars with an ellipsis. */
 export function truncate(s: string | null | undefined, max = 60): string {
-  if (!s) return '';
-  return s.length > max ? `${s.slice(0, max)}…` : s;
+  const value = typeof s === 'string' ? s : '';
+  return value.length > max ? `${value.slice(0, max)}…` : value;
 }
 
 /** Day-over-day delta percentage. Returns null when prev is unset or zero. */
 export function dayDelta(value: number, prev: number | null | undefined): number | null {
-  if (prev == null || prev === 0) return null;
-  return ((value - prev) / prev) * 100;
+  const current = finiteNumber(value, 0);
+  const previous = nullableFiniteNumber(prev);
+  if (previous == null || previous === 0) return null;
+  return ((current - previous) / previous) * 100;
 }

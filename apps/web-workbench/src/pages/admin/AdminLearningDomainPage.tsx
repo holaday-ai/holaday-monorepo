@@ -20,9 +20,17 @@ import { Link, useParams } from 'react-router-dom';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import {
+  asRecord,
+  clampNumber,
   formatDate,
   formatDateTime,
   formatDurationMs,
+  formatInteger,
+  nullableFiniteNumber,
+  nonNegativeNumber,
+  optionalText,
+  safeArray,
+  safeText,
   statusToken,
   truncate,
 } from './admin-shared';
@@ -89,6 +97,8 @@ export function AdminLearningDomainPage(): JSX.Element {
     );
   }
 
+  const view = normalizeDomainDetail(data, domain);
+
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
       <BackLink />
@@ -97,38 +107,38 @@ export function AdminLearningDomainPage(): JSX.Element {
       <header className="mt-4 flex items-start gap-4">
         <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-[rgba(234,31,89,0.10)] text-[#EA1F59]">
           {/* Try the favicon service; fall back to a globe icon. */}
-          <FaviconOrIcon domain={data.domain} />
+          <FaviconOrIcon domain={view.domain} />
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-xl font-semibold tracking-tight">
-            {data.domain}
+            {view.domain}
           </h1>
           <div className="mt-1 flex flex-wrap items-center gap-3 text-[12px] text-muted-foreground">
             <span>
               总任务{' '}
               <span className="tabular-nums text-foreground">
-                {data.stats.total.toLocaleString('zh-CN')}
+                {formatInteger(view.stats.total)}
               </span>
             </span>
             <span>
               成功率{' '}
               <span className="tabular-nums text-foreground">
-                {data.stats.successRate.toFixed(1)}%
+                {view.stats.successRate.toFixed(1)}%
               </span>
             </span>
             <span>
               已取消{' '}
               <span className="tabular-nums text-foreground">
-                {data.stats.cancelled ?? 0}
+                {formatInteger(view.stats.cancelled)}
               </span>
             </span>
             <span>
               首次{' '}
-              <span className="text-foreground">{formatDate(data.stats.firstTaskAt)}</span>
+              <span className="text-foreground">{formatDate(view.stats.firstTaskAt)}</span>
             </span>
             <span>
               最近{' '}
-              <span className="text-foreground">{formatDate(data.stats.lastTaskAt)}</span>
+              <span className="text-foreground">{formatDate(view.stats.lastTaskAt)}</span>
             </span>
           </div>
         </div>
@@ -138,19 +148,19 @@ export function AdminLearningDomainPage(): JSX.Element {
       <Section
         title="失败模式分析"
         hint={
-          data.stats.failed === 0
+          view.stats.failed === 0
             ? '本期无失败'
-            : `${data.stats.failed} 次失败 · 按类型分组`
+            : `${formatInteger(view.stats.failed)} 次失败 · 按类型分组`
         }
         className="mt-6"
       >
-        {data.failureBreakdown.length === 0 ? (
+        {view.failureBreakdown.length === 0 ? (
           <div className="flex h-24 items-center justify-center text-[12px] text-muted-foreground">
             本期无失败任务
           </div>
         ) : (
           <div className="space-y-2.5">
-            {data.failureBreakdown.map((b) => (
+            {view.failureBreakdown.map((b) => (
               <div key={b.category} className="flex items-center gap-3">
                 <div className="w-28 shrink-0 text-[12px] text-foreground">
                   {b.label}
@@ -166,7 +176,7 @@ export function AdminLearningDomainPage(): JSX.Element {
                   />
                   <div className="absolute inset-0 flex items-center justify-end px-2">
                     <span className="text-[12px] font-medium tabular-nums text-foreground">
-                      {b.count} ({b.share.toFixed(1)}%)
+                      {formatInteger(b.count)} ({b.share.toFixed(1)}%)
                     </span>
                   </div>
                 </div>
@@ -182,7 +192,7 @@ export function AdminLearningDomainPage(): JSX.Element {
       {/* Recent tasks */}
       <Section
         title="最近任务"
-        hint={`显示 ${data.recentTasks.length} 条`}
+        hint={`显示 ${view.recentTasks.length} 条`}
         className="mt-6"
       >
         <div className="overflow-x-auto">
@@ -197,14 +207,14 @@ export function AdminLearningDomainPage(): JSX.Element {
               </tr>
             </thead>
             <tbody>
-              {data.recentTasks.length === 0 ? (
+              {view.recentTasks.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="py-6 text-center text-muted-foreground">
                     本期无任务
                   </td>
                 </tr>
               ) : (
-                data.recentTasks.map((t) => {
+                view.recentTasks.map((t) => {
                   const tk = statusToken(t.status);
                   const isExpanded = expandedTaskId === t.taskId;
                   const failedChecks =
@@ -297,20 +307,20 @@ export function AdminLearningDomainPage(): JSX.Element {
       <Section
         title="AI 记忆"
         hint={
-          data.memories.length > 0
-            ? `${data.memories.length} 条 site_state`
+          view.memories.length > 0
+            ? `${view.memories.length} 条 site_state`
             : '尚未记录'
         }
         className="mt-6"
       >
-        {data.memories.length === 0 ? (
+        {view.memories.length === 0 ? (
           <div className="flex h-24 items-center justify-center gap-2 text-[12px] text-muted-foreground">
             <Brain className="h-4 w-4" aria-hidden />
             暂无该网站的学习记录
           </div>
         ) : (
           <div className="space-y-3">
-            {data.memories.map((m) => (
+            {view.memories.map((m) => (
               <div
                 key={m.externalId}
                 className="rounded-md border border-border bg-background p-3"
@@ -333,6 +343,60 @@ export function AdminLearningDomainPage(): JSX.Element {
       </Section>
     </div>
   );
+}
+
+function normalizeDomainDetail(value: DomainDetail, fallbackDomain: string) {
+  const root = asRecord(value);
+  const stats = asRecord(root.stats);
+  return {
+    domain: safeText(root.domain, fallbackDomain),
+    stats: {
+      total: nonNegativeNumber(stats.total),
+      successRate: clampNumber(stats.successRate, 0, 100),
+      cancelled: nonNegativeNumber(stats.cancelled),
+      failed: nonNegativeNumber(stats.failed),
+      firstTaskAt: optionalText(stats.firstTaskAt),
+      lastTaskAt: optionalText(stats.lastTaskAt),
+    },
+    failureBreakdown: safeArray(root.failureBreakdown).map((item, index) => {
+      const row = asRecord(item);
+      return {
+        category: safeText(row.category, `unknown-${index}`),
+        label: safeText(row.label, '未知'),
+        count: nonNegativeNumber(row.count),
+        share: clampNumber(row.share, 0, 100),
+        lastAt: optionalText(row.lastAt),
+      };
+    }),
+    recentTasks: safeArray(root.recentTasks).map((item, index) => {
+      const row = asRecord(item);
+      return {
+        taskId: safeText(row.taskId, `unknown-${index}`),
+        createdAt: optionalText(row.createdAt),
+        title: optionalText(row.title),
+        intent: optionalText(row.intent),
+        status: safeText(row.status, ''),
+        durationMs: nullableFiniteNumber(row.durationMs),
+        errorMessage: optionalText(row.errorMessage),
+        failedChecks: safeArray(row.failedChecks).map((checkItem, checkIndex) => {
+          const check = asRecord(checkItem);
+          return {
+            type: safeText(check.type, `check-${checkIndex}`),
+            detail: safeText(check.detail),
+          };
+        }),
+      };
+    }),
+    memories: safeArray(root.memories).map((item, index) => {
+      const row = asRecord(item);
+      return {
+        externalId: safeText(row.externalId, `unknown-${index}`),
+        keyName: safeText(row.keyName),
+        value: safeText(row.value, ''),
+        updatedAt: optionalText(row.updatedAt),
+      };
+    }),
+  };
 }
 
 function BackLink(): JSX.Element {

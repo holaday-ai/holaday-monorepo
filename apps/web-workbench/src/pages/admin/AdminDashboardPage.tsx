@@ -29,9 +29,17 @@ import { cn } from '@/lib/utils';
 import {
   ADMIN_MAGENTA,
   ADMIN_MAGENTA_SOFT,
+  asRecord,
+  clampNumber,
   dayDelta,
+  finiteNumber,
   formatDateTime,
   formatDurationMs,
+  formatInteger,
+  nullableFiniteNumber,
+  optionalText,
+  safeArray,
+  safeText,
   statusToken,
   truncate,
 } from './admin-shared';
@@ -78,6 +86,23 @@ export function AdminDashboardPage(): JSX.Element {
     );
   }
 
+  const metricsRecord = asRecord(data.metrics);
+  const metrics = {
+    todayTasks: normalizeMetric(metricsRecord.todayTasks),
+    successRate: normalizeMetric(metricsRecord.successRate, { percentage: true }),
+    activeUsers: normalizeMetric(metricsRecord.activeUsers),
+    totalUsers: normalizeMetric(metricsRecord.totalUsers),
+  };
+  const trend = safeArray(data.trend).map((item) => {
+    const row = asRecord(item);
+    return {
+      date: safeText(row.date, ''),
+      total: finiteNumber(row.total, 0),
+      successRate: clampNumber(row.successRate, 0, 100),
+    };
+  });
+  const recent = safeArray(data.recent).map(normalizeRecentTask);
+
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
       <header className="mb-6">
@@ -91,31 +116,31 @@ export function AdminDashboardPage(): JSX.Element {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           label="今日任务"
-          value={data.metrics.todayTasks.value.toLocaleString('zh-CN')}
-          prev={data.metrics.todayTasks.prev}
-          current={data.metrics.todayTasks.value}
+          value={formatInteger(metrics.todayTasks.value)}
+          prev={metrics.todayTasks.prev}
+          current={metrics.todayTasks.value}
           unit=""
         />
         <MetricCard
           label="执行成功率"
-          value={`${data.metrics.successRate.value.toFixed(1)}%`}
-          prev={data.metrics.successRate.prev}
-          current={data.metrics.successRate.value}
+          value={`${metrics.successRate.value.toFixed(1)}%`}
+          prev={metrics.successRate.prev}
+          current={metrics.successRate.value}
           unit="pp"
           isPercentage
         />
         <MetricCard
           label="今日活跃用户"
-          value={data.metrics.activeUsers.value.toLocaleString('zh-CN')}
-          prev={data.metrics.activeUsers.prev}
-          current={data.metrics.activeUsers.value}
+          value={formatInteger(metrics.activeUsers.value)}
+          prev={metrics.activeUsers.prev}
+          current={metrics.activeUsers.value}
           unit=""
         />
         <MetricCard
           label="总注册用户"
-          value={data.metrics.totalUsers.value.toLocaleString('zh-CN')}
+          value={formatInteger(metrics.totalUsers.value)}
           prev={null}
-          current={data.metrics.totalUsers.value}
+          current={metrics.totalUsers.value}
           unit=""
         />
       </div>
@@ -131,7 +156,7 @@ export function AdminDashboardPage(): JSX.Element {
         <div className="h-72 w-full">
           <ResponsiveContainer>
             <ComposedChart
-              data={data.trend}
+              data={trend}
               margin={{ top: 10, right: 16, left: 0, bottom: 0 }}
             >
               <CartesianGrid stroke="rgba(0,0,0,0.06)" vertical={false} />
@@ -211,14 +236,14 @@ export function AdminDashboardPage(): JSX.Element {
               </tr>
             </thead>
             <tbody>
-              {data.recent.length === 0 ? (
+              {recent.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-6 text-center text-muted-foreground">
                     暂无任务
                   </td>
                 </tr>
               ) : (
-                data.recent.map((row) => {
+                recent.map((row) => {
                   const tk = statusToken(row.status);
                   const userLabel =
                     row.user.displayName ??
@@ -232,12 +257,18 @@ export function AdminDashboardPage(): JSX.Element {
                         {formatDateTime(row.createdAt)}
                       </td>
                       <td className="py-2 pr-3">
-                        <Link
-                          to={`/admin/users/${row.user.userId}`}
-                          className="text-foreground hover:text-[#EA1F59] hover:underline"
-                        >
-                          {truncate(userLabel, 20)}
-                        </Link>
+                        {row.user.userId ? (
+                          <Link
+                            to={`/admin/users/${row.user.userId}`}
+                            className="text-foreground hover:text-[#EA1F59] hover:underline"
+                          >
+                            {truncate(userLabel, 20)}
+                          </Link>
+                        ) : (
+                          <span className="text-foreground">
+                            {truncate(userLabel, 20)}
+                          </span>
+                        )}
                       </td>
                       <td className="py-2 pr-3 text-foreground">
                         {truncate(row.title ?? row.intent, 50)}
@@ -269,6 +300,44 @@ export function AdminDashboardPage(): JSX.Element {
       </section>
     </div>
   );
+}
+
+interface AdminMetricValue {
+  value: number;
+  prev: number | null;
+}
+
+function normalizeMetric(
+  metric: unknown,
+  options?: { percentage?: boolean },
+): AdminMetricValue {
+  const row = asRecord(metric);
+  const value = options?.percentage
+    ? clampNumber(row.value, 0, 100)
+    : finiteNumber(row.value, 0);
+  return {
+    value,
+    prev: nullableFiniteNumber(row.prev),
+  };
+}
+
+function normalizeRecentTask(value: unknown, index: number) {
+  const row = asRecord(value);
+  const user = asRecord(row.user);
+  return {
+    taskId: safeText(row.taskId, `unknown-${index}`),
+    createdAt: optionalText(row.createdAt),
+    title: optionalText(row.title),
+    intent: optionalText(row.intent),
+    status: safeText(row.status, ''),
+    durationMs: nullableFiniteNumber(row.durationMs),
+    model: optionalText(row.model),
+    user: {
+      userId: optionalText(user.userId),
+      displayName: optionalText(user.displayName),
+      email: optionalText(user.email),
+    },
+  };
 }
 
 function MetricCard({

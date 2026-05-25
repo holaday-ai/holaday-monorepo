@@ -18,10 +18,20 @@ import { Link } from 'react-router-dom';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { learningEmptyCopy } from './admin-learning-copy';
-import { formatDateTime, truncate } from './admin-shared';
+import {
+  asRecord,
+  clampNumber,
+  formatDateTime,
+  formatInteger,
+  nonNegativeNumber,
+  optionalText,
+  safeArray,
+  safeText,
+  truncate,
+} from './admin-shared';
 
 type OverviewData = Awaited<ReturnType<typeof trpc.admin.learning.overview.query>>;
-type DomainRow = OverviewData['domains'][number];
+type DomainRow = ReturnType<typeof normalizeLearningOverview>['domains'][number];
 type Filter = 'all' | 'highRisk' | 'recentFail';
 
 const PAGE_SIZE = 50;
@@ -67,6 +77,8 @@ export function AdminLearningPage(): JSX.Element {
     };
   }, [searchDebounced, filter, offset]);
 
+  const normalized = normalizeLearningOverview(data);
+
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
       <header className="mb-6">
@@ -79,18 +91,18 @@ export function AdminLearningPage(): JSX.Element {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <MetricCard
           label="已分析域名"
-          value={data ? data.metrics.analyzedDomainsCount : null}
+          value={data ? normalized.metrics.analyzedDomainsCount : null}
           hint="至少出现过一次"
         />
         <MetricCard
           label="高风险域名"
-          value={data ? data.metrics.highRiskCount : null}
+          value={data ? normalized.metrics.highRiskCount : null}
           hint="失败 / (成功 + 失败) > 50%"
           highlight
         />
         <MetricCard
           label="AI 记忆条数"
-          value={data ? data.metrics.aiMemoriesCount : null}
+          value={data ? normalized.metrics.aiMemoriesCount : null}
           hint="site_state 类型"
         />
       </div>
@@ -151,24 +163,24 @@ export function AdminLearningPage(): JSX.Element {
                     加载中…
                   </td>
                 </tr>
-              ) : !data || data.domains.length === 0 ? (
+              ) : !data || normalized.domains.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-8 text-center text-muted-foreground">
                     {learningEmptyCopy({ search: searchDebounced, filter })}
                   </td>
                 </tr>
               ) : (
-                data.domains.map((d) => <DomainRowEl key={d.domain} row={d} />)
+                normalized.domains.map((d) => <DomainRowEl key={d.domain} row={d} />)
               )}
             </tbody>
           </table>
         </div>
         {/* Pagination */}
-        {data && data.total > PAGE_SIZE && (
+        {data && normalized.total > PAGE_SIZE && (
           <div className="flex items-center justify-between border-t border-border px-5 py-3 text-[12px] text-muted-foreground">
             <div>
-              显示 {offset + 1} – {Math.min(offset + PAGE_SIZE, data.total)}（共{' '}
-              {data.total.toLocaleString('zh-CN')} 个域名）
+              显示 {offset + 1} – {Math.min(offset + PAGE_SIZE, normalized.total)}（共{' '}
+              {formatInteger(normalized.total)} 个域名）
             </div>
             <div className="flex items-center gap-1">
               <button
@@ -186,11 +198,11 @@ export function AdminLearningPage(): JSX.Element {
               </button>
               <button
                 type="button"
-                disabled={offset + PAGE_SIZE >= data.total}
+                disabled={offset + PAGE_SIZE >= normalized.total}
                 onClick={() => setOffset((o) => o + PAGE_SIZE)}
                 className={cn(
                   'inline-flex h-7 items-center rounded-md border border-border px-2',
-                  offset + PAGE_SIZE >= data.total
+                  offset + PAGE_SIZE >= normalized.total
                     ? 'cursor-not-allowed opacity-40'
                     : 'hover:bg-foreground/[0.04]',
                 )}
@@ -205,6 +217,32 @@ export function AdminLearningPage(): JSX.Element {
   );
 }
 
+function normalizeLearningOverview(value: OverviewData | null) {
+  const root = asRecord(value);
+  const metrics = asRecord(root.metrics);
+  return {
+    metrics: {
+      analyzedDomainsCount: nonNegativeNumber(metrics.analyzedDomainsCount),
+      highRiskCount: nonNegativeNumber(metrics.highRiskCount),
+      aiMemoriesCount: nonNegativeNumber(metrics.aiMemoriesCount),
+    },
+    total: nonNegativeNumber(root.total),
+    domains: safeArray(root.domains).map((item, index) => {
+      const row = asRecord(item);
+      return {
+        domain: safeText(row.domain, `unknown-${index}`),
+        total: nonNegativeNumber(row.total),
+        success: nonNegativeNumber(row.success),
+        failed: nonNegativeNumber(row.failed),
+        cancelled: nonNegativeNumber(row.cancelled),
+        successRate: clampNumber(row.successRate, 0, 100),
+        lastFailedAt: optionalText(row.lastFailedAt),
+        topFailureLabel: optionalText(row.topFailureLabel),
+      };
+    }),
+  };
+}
+
 function DomainRowEl({ row }: { row: DomainRow }): JSX.Element {
   return (
     <tr className="border-b border-border/60 last:border-b-0 hover:bg-foreground/[0.02]">
@@ -212,14 +250,14 @@ function DomainRowEl({ row }: { row: DomainRow }): JSX.Element {
         <span className="truncate">{truncate(row.domain, 40)}</span>
       </td>
       <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">
-        {row.total.toLocaleString('zh-CN')}
+        {formatInteger(row.total)}
       </td>
       <td className="px-3 py-3 text-right tabular-nums">
         <span className="text-cyan-600">{row.success}</span>
         <span className="text-muted-foreground"> / </span>
         <span className="text-red-600">{row.failed}</span>
         <span className="text-muted-foreground"> / </span>
-        <span className="text-muted-foreground">{row.cancelled ?? 0}</span>
+        <span className="text-muted-foreground">{formatInteger(row.cancelled)}</span>
       </td>
       <td className="px-3 py-3">
         <SuccessRateBar successRate={row.successRate} />
@@ -294,7 +332,7 @@ function MetricCard({
     >
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
-        {value == null ? '—' : value.toLocaleString('zh-CN')}
+        {value == null ? '—' : formatInteger(value)}
       </div>
       <div className="mt-1 text-[11px] text-muted-foreground">{hint}</div>
     </div>

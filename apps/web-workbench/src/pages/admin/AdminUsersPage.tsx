@@ -13,7 +13,17 @@ import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
-import { formatDate, formatDateTime, truncate } from './admin-shared';
+import {
+  asRecord,
+  formatDate,
+  formatDateTime,
+  formatInteger,
+  nullableFiniteNumber,
+  optionalText,
+  safeArray,
+  safeText,
+  truncate,
+} from './admin-shared';
 
 type Sort = 'createdAt' | 'taskCount' | 'lastActive';
 type Order = 'asc' | 'desc';
@@ -68,7 +78,8 @@ export function AdminUsersPage(): JSX.Element {
     };
   }, [searchDebounced, sort, order, offset]);
 
-  const total = data?.total ?? 0;
+  const users = safeArray(data?.users).map(normalizeUserRow);
+  const total = nullableFiniteNumber(data?.total) ?? users.length;
   const pageEnd = Math.min(offset + PAGE_SIZE, total);
   const hasPrev = offset > 0;
   const hasNext = offset + PAGE_SIZE < total;
@@ -88,7 +99,7 @@ export function AdminUsersPage(): JSX.Element {
       <header className="mb-6">
         <h1 className="text-xl font-semibold tracking-tight">用户管理</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
-          全部注册用户 · 共 {total.toLocaleString('zh-CN')} 人
+          全部注册用户 · 共 {formatInteger(total)} 人
         </p>
       </header>
 
@@ -154,24 +165,21 @@ export function AdminUsersPage(): JSX.Element {
                     加载中…
                   </td>
                 </tr>
-              ) : !data || data.users.length === 0 ? (
+              ) : !data || users.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-8 text-center text-muted-foreground">
                     {searchDebounced ? '没有匹配的用户' : '暂无用户'}
                   </td>
                 </tr>
               ) : (
-                data.users.map((u) => (
+                users.map((u, index) => (
                   <tr
-                    key={u.userId}
+                    key={u.userId || `unknown-${index}`}
                     className="border-b border-border/60 last:border-b-0 hover:bg-foreground/[0.02]"
                   >
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-2.5">
-                        <Avatar
-                          url={u.avatarUrl}
-                          fallback={u.displayName ?? u.email ?? '?'}
-                        />
+                        <Avatar url={u.avatarUrl} fallback={u.displayName ?? u.email ?? '?'} />
                         <div className="min-w-0">
                           <div className="truncate text-foreground">
                             {u.displayName ?? '—'}
@@ -195,15 +203,19 @@ export function AdminUsersPage(): JSX.Element {
                       {u.lastActiveAt ? formatDateTime(u.lastActiveAt) : '—'}
                     </td>
                     <td className="px-3 py-3 text-right tabular-nums text-foreground">
-                      {u.monthTaskCount.toLocaleString('zh-CN')}
+                      {formatInteger(u.monthTaskCount)}
                     </td>
                     <td className="px-5 py-3">
-                      <Link
-                        to={`/admin/users/${u.userId}`}
-                        className="text-[#EA1F59] hover:underline"
-                      >
-                        查看详情
-                      </Link>
+                      {u.userId ? (
+                        <Link
+                          to={`/admin/users/${u.userId}`}
+                          className="text-[#EA1F59] hover:underline"
+                        >
+                          查看详情
+                        </Link>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -216,7 +228,7 @@ export function AdminUsersPage(): JSX.Element {
           <div>
             {total > 0 && (
               <>
-                显示 {offset + 1} – {pageEnd}（共 {total.toLocaleString('zh-CN')} 人）
+                显示 {offset + 1} – {pageEnd}（共 {formatInteger(total)} 人）
               </>
             )}
           </div>
@@ -254,6 +266,21 @@ export function AdminUsersPage(): JSX.Element {
       </section>
     </div>
   );
+}
+
+function normalizeUserRow(value: unknown) {
+  const row = asRecord(value);
+  return {
+    userId: optionalText(row.userId),
+    avatarUrl: optionalText(row.avatarUrl),
+    displayName: optionalText(row.displayName),
+    email: optionalText(row.email),
+    plan: safeText(row.plan),
+    role: safeText(row.role, 'user'),
+    createdAt: optionalText(row.createdAt),
+    lastActiveAt: optionalText(row.lastActiveAt),
+    monthTaskCount: nullableFiniteNumber(row.monthTaskCount) ?? 0,
+  };
 }
 
 function SortPill({

@@ -34,7 +34,17 @@ import {
 } from 'recharts';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
-import { formatDateTime, truncate } from './admin-shared';
+import {
+  asRecord,
+  finiteNumber,
+  formatDateTime,
+  formatInteger,
+  nonNegativeNumber,
+  optionalText,
+  safeArray,
+  safeText,
+  truncate,
+} from './admin-shared';
 
 type SummaryData = Awaited<ReturnType<typeof trpc.admin.finance.summary.query>>;
 type PlanData = Awaited<ReturnType<typeof trpc.admin.finance.revenueByPlan.query>>;
@@ -48,23 +58,24 @@ const MAGENTA = '#EA1F59';
 const PALETTE = ['#EA1F59', '#FFC910', '#42C0EF', '#57479C', '#EF4444', '#ADADAD', '#575757'];
 
 /** Format CNY cents → ¥123.45 with thousands separator. */
-function formatYuan(cents: number): string {
-  const yuan = cents / 100;
+function formatYuan(cents: unknown): string {
+  const yuan = finiteNumber(cents, 0) / 100;
   return `¥${yuan.toLocaleString('zh-CN', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
 }
 
-function formatYuanCompact(cents: number): string {
-  const yuan = cents / 100;
+function formatYuanCompact(cents: unknown): string {
+  const yuan = finiteNumber(cents, 0) / 100;
   return `¥${yuan.toLocaleString('zh-CN', { maximumFractionDigits: 0 })}`;
 }
 
-function formatTokens(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}K`;
-  return tokens.toLocaleString('zh-CN');
+function formatTokens(tokens: unknown): string {
+  const value = nonNegativeNumber(tokens);
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return formatInteger(value);
 }
 
 type Tab = 'revenue' | 'cost';
@@ -136,7 +147,8 @@ function ProfitBar({ summary }: { summary: SummaryData | null }): JSX.Element {
       </div>
     );
   }
-  const profitPositive = summary.monthProfitCnyCents >= 0;
+  const profit = finiteNumber(summary.monthProfitCnyCents, 0);
+  const profitPositive = profit >= 0;
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
       <SummaryCard
@@ -152,7 +164,7 @@ function ProfitBar({ summary }: { summary: SummaryData | null }): JSX.Element {
       />
       <SummaryCard
         label={profitPositive ? '本月利润' : '本月亏损'}
-        value={formatYuan(Math.abs(summary.monthProfitCnyCents))}
+        value={formatYuan(Math.abs(profit))}
         tint={profitPositive ? 'rgba(66,192,239,0.10)' : 'rgba(239,68,68,0.10)'}
         valueClass={profitPositive ? 'text-cyan-600 dark:text-cyan-300' : 'text-red-600 dark:text-red-400'}
         trend={profitPositive ? 'up' : 'down'}
@@ -247,7 +259,30 @@ function RevenueTab(): JSX.Element {
   }
   if (!plan || !month || !funnel) return <LoadingPane />;
 
-  const totalCnyPlan = plan.plans.reduce((sum, p) => sum + p.monthRevenueCnyCents, 0);
+  const planRows = safeArray(plan.plans).map((item) => {
+    const row = asRecord(item);
+    return {
+      plan: safeText(row.plan, 'unknown'),
+      userCount: nonNegativeNumber(row.userCount),
+      monthRevenueCnyCents: nonNegativeNumber(row.monthRevenueCnyCents),
+    };
+  });
+  const monthSeries = safeArray(month.series).map((item) => {
+    const row = asRecord(item);
+    return {
+      month: safeText(row.month, ''),
+      revenueCnyCents: nonNegativeNumber(row.revenueCnyCents),
+    };
+  });
+  const funnelStages = safeArray(funnel.stages).map((item) => {
+    const row = asRecord(item);
+    return {
+      label: safeText(row.label, '—'),
+      count: nonNegativeNumber(row.count),
+    };
+  });
+  const ltvCnyCents = nonNegativeNumber(funnel.ltvCnyCents);
+  const totalCnyPlan = planRows.reduce((sum, p) => sum + p.monthRevenueCnyCents, 0);
 
   return (
     <div className="space-y-6">
@@ -264,7 +299,7 @@ function RevenueTab(): JSX.Element {
                 <ResponsiveContainer>
                   <PieChart>
                     <Pie
-                      data={plan.plans.filter((p) => p.monthRevenueCnyCents > 0)}
+                      data={planRows.filter((p) => p.monthRevenueCnyCents > 0)}
                       dataKey="monthRevenueCnyCents"
                       nameKey="plan"
                       cx="50%"
@@ -273,7 +308,7 @@ function RevenueTab(): JSX.Element {
                       outerRadius={68}
                       paddingAngle={2}
                     >
-                      {plan.plans
+                      {planRows
                         .filter((p) => p.monthRevenueCnyCents > 0)
                         .map((_p, i) => (
                           <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
@@ -291,7 +326,7 @@ function RevenueTab(): JSX.Element {
                 </ResponsiveContainer>
               </div>
               <div className="min-w-0 flex-1 space-y-1.5 text-[12px]">
-                {plan.plans.map((p, i) => (
+                {planRows.map((p, i) => (
                   <div key={p.plan} className="flex items-center gap-2">
                     <span
                       className="h-2.5 w-2.5 shrink-0 rounded-sm"
@@ -299,7 +334,7 @@ function RevenueTab(): JSX.Element {
                     />
                     <span className="min-w-0 flex-1 capitalize text-foreground">{p.plan}</span>
                     <span className="tabular-nums text-muted-foreground">
-                      {p.userCount.toLocaleString('zh-CN')} 人 · {formatYuanCompact(p.monthRevenueCnyCents)}
+                      {formatInteger(p.userCount)} 人 · {formatYuanCompact(p.monthRevenueCnyCents)}
                     </span>
                   </div>
                 ))}
@@ -313,7 +348,7 @@ function RevenueTab(): JSX.Element {
           <div className="h-56 w-full">
             <ResponsiveContainer>
               <BarChart
-                data={month.series}
+                data={monthSeries}
                 margin={{ top: 10, right: 16, left: 0, bottom: 0 }}
               >
                 <CartesianGrid stroke="rgba(0,0,0,0.06)" vertical={false} />
@@ -346,10 +381,10 @@ function RevenueTab(): JSX.Element {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Section title="转化漏斗" hint="累计" className="lg:col-span-2">
           <div className="space-y-2.5">
-            {funnel.stages.map((stage, i) => {
-              const top = funnel.stages[0]?.count ?? 1;
+            {funnelStages.map((stage, i) => {
+              const top = funnelStages[0]?.count ?? 1;
               const widthPct = top > 0 ? (stage.count / top) * 100 : 0;
-              const prevCount = i > 0 ? funnel.stages[i - 1]?.count ?? 0 : null;
+              const prevCount = i > 0 ? funnelStages[i - 1]?.count ?? 0 : null;
               const conv = prevCount && prevCount > 0 ? (stage.count / prevCount) * 100 : null;
               return (
                 <div key={stage.label} className="flex items-center gap-3">
@@ -367,7 +402,7 @@ function RevenueTab(): JSX.Element {
                     />
                     <div className="absolute inset-0 flex items-center justify-end px-2">
                       <span className="text-[12px] font-medium tabular-nums text-foreground">
-                        {stage.count.toLocaleString('zh-CN')}
+                        {formatInteger(stage.count)}
                       </span>
                     </div>
                   </div>
@@ -381,7 +416,7 @@ function RevenueTab(): JSX.Element {
         </Section>
         <Section title="付费用户 LTV" hint="累计订阅收入 / 付费人数">
           <div className="text-3xl font-semibold tracking-tight text-foreground">
-            {formatYuan(funnel.ltvCnyCents)}
+            {formatYuan(ltvCnyCents)}
           </div>
           <div className="mt-1 text-[12px] text-muted-foreground">
             含全部 subscription 类型订单（USD 已折算为 CNY）
@@ -420,16 +455,50 @@ function CostTab(): JSX.Element {
   if (err) return <ErrorPane msg={err} />;
   if (!breakdown || !byDay || !topCostly) return <LoadingPane />;
 
-  const totalLlmCost = breakdown.models.reduce((s, m) => s + m.costCnyCents, 0);
-  const totalCalls = breakdown.models.reduce((s, m) => s + m.callCount, 0);
-  const totalTokens = breakdown.models.reduce((s, m) => s + m.totalTokens, 0);
+  const models = safeArray(breakdown.models).map((item) => {
+    const row = asRecord(item);
+    return {
+      model: safeText(row.model, 'unknown'),
+      costCnyCents: nonNegativeNumber(row.costCnyCents),
+      callCount: nonNegativeNumber(row.callCount),
+      totalTokens: nonNegativeNumber(row.totalTokens),
+    };
+  });
+  const daySeries = safeArray(byDay.series).map((item) => {
+    const row = asRecord(item);
+    return {
+      date: safeText(row.date, ''),
+      costCnyCents: nonNegativeNumber(row.costCnyCents),
+    };
+  });
+  const topCostlyTasks = safeArray(topCostly.tasks).map((item, index) => {
+    const row = asRecord(item);
+    const user = asRecord(row.user);
+    return {
+      taskId: optionalText(row.taskId) ?? `unknown-${index}`,
+      title: optionalText(row.title),
+      intent: optionalText(row.intent),
+      model: optionalText(row.model),
+      callCount: nonNegativeNumber(row.callCount),
+      totalTokens: nonNegativeNumber(row.totalTokens),
+      costCnyCents: nonNegativeNumber(row.costCnyCents),
+      user: {
+        displayName: optionalText(user.displayName),
+        email: optionalText(user.email),
+        userId: optionalText(user.userId),
+      },
+    };
+  });
+  const totalLlmCost = models.reduce((s, m) => s + m.costCnyCents, 0);
+  const totalCalls = models.reduce((s, m) => s + m.callCount, 0);
+  const totalTokens = models.reduce((s, m) => s + m.totalTokens, 0);
 
   return (
     <div className="space-y-6">
       {/* Cost summary chips */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <ChipCard label="本月 LLM 成本" value={formatYuan(totalLlmCost)} />
-        <ChipCard label="本月 LLM 调用" value={`${totalCalls.toLocaleString('zh-CN')} 次`} />
+        <ChipCard label="本月 LLM 调用" value={`${formatInteger(totalCalls)} 次`} />
         <ChipCard label="本月 Token 用量" value={formatTokens(totalTokens)} />
         <ChipCard
           label="单次调用均价"
@@ -442,7 +511,7 @@ function CostTab(): JSX.Element {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Model breakdown */}
         <Section title="按模型成本分布">
-          {breakdown.models.length === 0 ? (
+          {models.length === 0 ? (
             <div className="flex h-44 items-center justify-center text-[12px] text-muted-foreground">
               本月暂无 LLM 调用
             </div>
@@ -452,7 +521,7 @@ function CostTab(): JSX.Element {
                 <ResponsiveContainer>
                   <PieChart>
                     <Pie
-                      data={breakdown.models}
+                      data={models}
                       dataKey="costCnyCents"
                       nameKey="model"
                       cx="50%"
@@ -461,7 +530,7 @@ function CostTab(): JSX.Element {
                       outerRadius={68}
                       paddingAngle={2}
                     >
-                      {breakdown.models.map((_m, i) => (
+                      {models.map((_m, i) => (
                         <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
                       ))}
                     </Pie>
@@ -477,7 +546,7 @@ function CostTab(): JSX.Element {
                 </ResponsiveContainer>
               </div>
               <div className="min-w-0 flex-1 space-y-1.5 text-[12px]">
-                {breakdown.models.slice(0, 8).map((m, i) => {
+                {models.slice(0, 8).map((m, i) => {
                   const pct = totalLlmCost > 0 ? (m.costCnyCents / totalLlmCost) * 100 : 0;
                   return (
                     <div key={m.model} className="flex items-center gap-2">
@@ -502,7 +571,7 @@ function CostTab(): JSX.Element {
           <div className="h-56 w-full">
             <ResponsiveContainer>
               <LineChart
-                data={byDay.series}
+                data={daySeries}
                 margin={{ top: 10, right: 16, left: 0, bottom: 0 }}
               >
                 <CartesianGrid stroke="rgba(0,0,0,0.06)" vertical={false} />
@@ -553,16 +622,16 @@ function CostTab(): JSX.Element {
               </tr>
             </thead>
             <tbody>
-              {topCostly.tasks.length === 0 ? (
+              {topCostlyTasks.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-6 text-center text-muted-foreground">
                     本月暂无任务
                   </td>
                 </tr>
               ) : (
-                topCostly.tasks.map((t, i) => (
+                topCostlyTasks.map((t) => (
                   <tr
-                    key={t.taskId ?? i}
+                    key={t.taskId}
                     className="border-b border-border/60 last:border-b-0 hover:bg-foreground/[0.02]"
                   >
                     <td className="py-2 pr-3 text-foreground">
@@ -576,7 +645,7 @@ function CostTab(): JSX.Element {
                     </td>
                     <td className="py-2 pr-3 text-muted-foreground">{t.model ?? '—'}</td>
                     <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
-                      {t.callCount.toLocaleString('zh-CN')}
+                      {formatInteger(t.callCount)}
                     </td>
                     <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
                       {formatTokens(t.totalTokens)}

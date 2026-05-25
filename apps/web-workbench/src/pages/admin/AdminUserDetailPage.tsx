@@ -18,9 +18,16 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import {
+  asRecord,
+  formatInteger,
   formatDate,
   formatDateTime,
   formatDurationMs,
+  nullableFiniteNumber,
+  nonNegativeNumber,
+  optionalText,
+  safeArray,
+  safeText,
   statusToken,
   truncate,
 } from './admin-shared';
@@ -88,7 +95,7 @@ export function AdminUserDetailPage(): JSX.Element {
     );
   }
 
-  const { user, usage, recentTasks } = data;
+  const { user, usage, recentTasks } = normalizeUserDetail(data);
   const totalCalls = usage.modelDistribution.reduce((sum, m) => sum + m.calls, 0);
 
   return (
@@ -130,7 +137,7 @@ export function AdminUserDetailPage(): JSX.Element {
             本月任务数
           </h2>
           <div className="mt-2 text-3xl font-semibold text-foreground">
-            {usage.monthTasks.toLocaleString('zh-CN')}
+            {formatInteger(usage.monthTasks)}
           </div>
           <div className="mt-1 text-[12px] text-muted-foreground">
             自然月窗口 · UTC
@@ -195,7 +202,7 @@ export function AdminUserDetailPage(): JSX.Element {
                         {m.model}
                       </span>
                       <span className="tabular-nums text-muted-foreground">
-                        {m.calls.toLocaleString('zh-CN')} · {pct.toFixed(1)}%
+                        {formatInteger(m.calls)} · {pct.toFixed(1)}%
                       </span>
                     </div>
                   );
@@ -268,6 +275,49 @@ export function AdminUserDetailPage(): JSX.Element {
       </section>
     </div>
   );
+}
+
+function normalizeUserDetail(value: DetailData) {
+  const root = asRecord(value);
+  const user = asRecord(root.user);
+  const usage = asRecord(root.usage);
+  return {
+    user: {
+      userId: safeText(user.userId, ''),
+      avatarUrl: optionalText(user.avatarUrl),
+      displayName: optionalText(user.displayName),
+      email: optionalText(user.email),
+      phone: optionalText(user.phone),
+      plan: safeText(user.plan),
+      status: safeText(user.status, 'unknown'),
+      role: safeText(user.role, 'user'),
+      createdAt: optionalText(user.createdAt),
+      planExpiresAt: optionalText(user.planExpiresAt),
+    },
+    usage: {
+      monthTasks: nonNegativeNumber(usage.monthTasks),
+      modelDistribution: safeArray(usage.modelDistribution)
+        .map((item) => {
+          const row = asRecord(item);
+          return {
+            model: safeText(row.model, 'unknown'),
+            calls: nonNegativeNumber(row.calls),
+          };
+        })
+        .filter((row) => row.calls > 0),
+    },
+    recentTasks: safeArray(root.recentTasks).map((item, index) => {
+      const row = asRecord(item);
+      return {
+        taskId: safeText(row.taskId, `unknown-${index}`),
+        createdAt: optionalText(row.createdAt),
+        title: optionalText(row.title),
+        intent: optionalText(row.intent),
+        status: safeText(row.status, ''),
+        durationMs: nullableFiniteNumber(row.durationMs),
+      };
+    }),
+  };
 }
 
 function Badge({
