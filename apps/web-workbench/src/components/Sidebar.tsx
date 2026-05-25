@@ -51,6 +51,10 @@ import { useToast } from '@/components/ui/toast';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { UserMenu } from '@/components/UserMenu';
 import { copyTextToClipboard } from '@/lib/copy-text';
+import {
+  deletableTaskIdsForBatchSelection,
+  pruneBatchSelection,
+} from '@/lib/sidebar-batch-selection';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
 import type { UiProject, UiTask } from '@/types/task';
@@ -256,10 +260,24 @@ export function Sidebar({
   // Promise.allSettled for the network calls.
   const [batchMode, setBatchMode] = React.useState(false);
   const [batchSelected, setBatchSelected] = React.useState<Set<string>>(new Set());
+  const batchDeletableTaskIds = React.useMemo(
+    () => new Set(deletableTaskIdsForBatchSelection(uniqueTasks)),
+    [uniqueTasks],
+  );
+  const selectedBatchDeleteIds = React.useMemo(
+    () => [...pruneBatchSelection(batchSelected, batchDeletableTaskIds)],
+    [batchDeletableTaskIds, batchSelected],
+  );
+  React.useEffect(() => {
+    setBatchSelected((prev) => {
+      const next = pruneBatchSelection(prev, batchDeletableTaskIds);
+      if (next.size === prev.size) return prev;
+      return next;
+    });
+  }, [batchDeletableTaskIds]);
   const toggleBatchSelect = React.useCallback(
     (id: string) => {
-      const status = tasks.find((t) => t.taskId === id)?.status;
-      if (status && !isTaskDeletable(status)) return;
+      if (!batchDeletableTaskIds.has(id)) return;
       setBatchSelected((prev) => {
         const next = new Set(prev);
         if (next.has(id)) next.delete(id);
@@ -267,24 +285,20 @@ export function Sidebar({
         return next;
       });
     },
-    [tasks],
+    [batchDeletableTaskIds],
   );
   const exitBatchMode = React.useCallback(() => {
     setBatchMode(false);
     setBatchSelected(new Set());
   }, []);
   const selectAllVisible = React.useCallback(() => {
-    setBatchSelected(
-      new Set(
-        tasks.filter((t) => isTaskDeletable(t.status)).map((t) => t.taskId),
-      ),
-    );
-  }, [tasks]);
+    setBatchSelected(new Set(batchDeletableTaskIds));
+  }, [batchDeletableTaskIds]);
   const deleteSelected = React.useCallback(() => {
-    if (batchSelected.size === 0 || !onDeleteTasks) return;
-    onDeleteTasks(Array.from(batchSelected));
+    if (selectedBatchDeleteIds.length === 0 || !onDeleteTasks) return;
+    onDeleteTasks(selectedBatchDeleteIds);
     exitBatchMode();
-  }, [batchSelected, onDeleteTasks, exitBatchMode]);
+  }, [exitBatchMode, onDeleteTasks, selectedBatchDeleteIds]);
 
   // Optimization #4 — shadcn SidebarProvider owns the open/collapse
   // state (cookie-persisted + Cmd+B shortcut + smooth transitions).
@@ -500,7 +514,7 @@ export function Sidebar({
                   button alongside the quota indicator. */}
               {batchMode ? (
                 <div className="mx-2 mb-2 flex items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary dark:border-primary/40 dark:bg-primary/15">
-                  <span className="font-medium">已选 {batchSelected.size}</span>
+                  <span className="font-medium">已选 {selectedBatchDeleteIds.length}</span>
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
@@ -512,10 +526,10 @@ export function Sidebar({
                     <button
                       type="button"
                       onClick={deleteSelected}
-                      disabled={batchSelected.size === 0}
+                      disabled={selectedBatchDeleteIds.length === 0}
                       className={cn(
                         'rounded px-2 py-0.5 font-medium',
-                        batchSelected.size === 0
+                        selectedBatchDeleteIds.length === 0
                           ? 'cursor-not-allowed opacity-50'
                           : 'bg-red-600 text-white hover:bg-red-700',
                       )}
