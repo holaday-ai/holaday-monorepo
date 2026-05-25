@@ -1,39 +1,46 @@
+import { lazy, Suspense, type ComponentType, type LazyExoticComponent, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AdminLayout } from '@/components/AdminLayout';
 import { AppShell } from '@/components/AppShell';
 import { ToastProvider } from '@/components/ui/toast';
-import { AdminDashboardPage } from '@/pages/admin/AdminDashboardPage';
-import { AdminFinancePage } from '@/pages/admin/AdminFinancePage';
-import { AdminLearningDomainPage } from '@/pages/admin/AdminLearningDomainPage';
-import { AdminLearningPage } from '@/pages/admin/AdminLearningPage';
-import { AdminUserDetailPage } from '@/pages/admin/AdminUserDetailPage';
-import { AdminUsersPage } from '@/pages/admin/AdminUsersPage';
-import { BillingPage } from '@/pages/BillingPage';
-import { HistoryPage } from '@/pages/HistoryPage';
 import { LoginPage } from '@/pages/LoginPage';
-import { NotFoundPage } from '@/pages/NotFoundPage';
-import { PlanPage } from '@/pages/PlanPage';
-import { PrivacyPage } from '@/pages/PrivacyPage';
-import { ConnectionsPage } from '@/pages/ConnectionsPage';
-import { FilesPage } from '@/pages/FilesPage';
-import { ProfilePage } from '@/pages/ProfilePage';
-import { ProjectsPage } from '@/pages/ProjectsPage';
 import { RedirectIfAuthed } from '@/pages/RedirectIfAuthed';
 import { RegisterPage } from '@/pages/RegisterPage';
-import { RolesPage } from '@/pages/RolesPage';
-import { BatchPage } from '@/pages/BatchPage';
-// Phase 26A — /scheduled now renders the FullCalendar-based view.
-// The old list-view ScheduledPage is retired; ScheduledCalendarPage
-// covers the same CRUD + adds calendar interaction. The export name
-// stays `ScheduledPage` to keep this import line stable for grep.
-import { ScheduledCalendarPage as ScheduledPage } from '@/pages/scheduled-calendar/ScheduledCalendarPage';
-import { ServerErrorPage } from '@/pages/ServerErrorPage';
-import { SettingsPage } from '@/pages/SettingsPage';
-import { SkillsPage } from '@/pages/SkillsPage';
-import { StarredPage } from '@/pages/StarredPage';
-import { TermsPage } from '@/pages/TermsPage';
-import { UsagePage } from '@/pages/UsagePage';
 import { WorkbenchApp } from './WorkbenchApp';
+
+const AdminDashboardPage = lazyRoute(() => import('@/pages/admin/AdminDashboardPage'), 'AdminDashboardPage');
+const AdminFinancePage = lazyRoute(() => import('@/pages/admin/AdminFinancePage'), 'AdminFinancePage');
+const AdminLearningDomainPage = lazyRoute(
+  () => import('@/pages/admin/AdminLearningDomainPage'),
+  'AdminLearningDomainPage',
+);
+const AdminLearningPage = lazyRoute(() => import('@/pages/admin/AdminLearningPage'), 'AdminLearningPage');
+const AdminUserDetailPage = lazyRoute(() => import('@/pages/admin/AdminUserDetailPage'), 'AdminUserDetailPage');
+const AdminUsersPage = lazyRoute(() => import('@/pages/admin/AdminUsersPage'), 'AdminUsersPage');
+const BatchPage = lazyRoute(() => import('@/pages/BatchPage'), 'BatchPage');
+const BillingPage = lazyRoute(() => import('@/pages/BillingPage'), 'BillingPage');
+const ConnectionsPage = lazyRoute(() => import('@/pages/ConnectionsPage'), 'ConnectionsPage');
+const FilesPage = lazyRoute(() => import('@/pages/FilesPage'), 'FilesPage');
+const HistoryPage = lazyRoute(() => import('@/pages/HistoryPage'), 'HistoryPage');
+const NotFoundPage = lazyRoute(() => import('@/pages/NotFoundPage'), 'NotFoundPage');
+const PlanPage = lazyRoute(() => import('@/pages/PlanPage'), 'PlanPage');
+const PrivacyPage = lazyRoute(() => import('@/pages/PrivacyPage'), 'PrivacyPage');
+const ProfilePage = lazyRoute(() => import('@/pages/ProfilePage'), 'ProfilePage');
+const ProjectsPage = lazyRoute(() => import('@/pages/ProjectsPage'), 'ProjectsPage');
+const RolesPage = lazyRoute(() => import('@/pages/RolesPage'), 'RolesPage');
+// Phase 26A — /scheduled renders the FullCalendar-based view. Keep
+// the route variable name stable while loading the heavy calendar page
+// only when the user actually opens scheduled tasks.
+const ScheduledPage = lazyRoute(
+  () => import('@/pages/scheduled-calendar/ScheduledCalendarPage'),
+  'ScheduledCalendarPage',
+);
+const ServerErrorPage = lazyRoute(() => import('@/pages/ServerErrorPage'), 'ServerErrorPage');
+const SettingsPage = lazyRoute(() => import('@/pages/SettingsPage'), 'SettingsPage');
+const SkillsPage = lazyRoute(() => import('@/pages/SkillsPage'), 'SkillsPage');
+const StarredPage = lazyRoute(() => import('@/pages/StarredPage'), 'StarredPage');
+const TermsPage = lazyRoute(() => import('@/pages/TermsPage'), 'TermsPage');
+const UsagePage = lazyRoute(() => import('@/pages/UsagePage'), 'UsagePage');
 
 /**
  * Route table. Every authed route lives inside one `<AppShell>` layout
@@ -67,41 +74,41 @@ export function App(): JSX.Element {
             </RedirectIfAuthed>
           }
         />
-        <Route path="/privacy" element={<PrivacyPage />} />
-        <Route path="/terms" element={<TermsPage />} />
-        <Route path="/500" element={<ServerErrorPage />} />
+        <Route path="/privacy" element={lazyElement(<PrivacyPage />)} />
+        <Route path="/terms" element={lazyElement(<TermsPage />)} />
+        <Route path="/500" element={lazyElement(<ServerErrorPage />)} />
         <Route path="/app" element={<AppAliasRedirect />} />
 
         {/* Phase 27 — admin surface. Sits OUTSIDE AppShell because
             it has its own auth + role gate and a dedicated left nav.
             Non-admins land at "/" via the AdminLayout's redirect. */}
         <Route element={<AdminLayout />}>
-          <Route path="/admin" element={<AdminDashboardPage />} />
-          <Route path="/admin/users" element={<AdminUsersPage />} />
-          <Route path="/admin/users/:userId" element={<AdminUserDetailPage />} />
-          <Route path="/admin/finance" element={<AdminFinancePage />} />
-          <Route path="/admin/learning" element={<AdminLearningPage />} />
-          <Route path="/admin/learning/:domain" element={<AdminLearningDomainPage />} />
+          <Route path="/admin" element={lazyElement(<AdminDashboardPage />)} />
+          <Route path="/admin/users" element={lazyElement(<AdminUsersPage />)} />
+          <Route path="/admin/users/:userId" element={lazyElement(<AdminUserDetailPage />)} />
+          <Route path="/admin/finance" element={lazyElement(<AdminFinancePage />)} />
+          <Route path="/admin/learning" element={lazyElement(<AdminLearningPage />)} />
+          <Route path="/admin/learning/:domain" element={lazyElement(<AdminLearningDomainPage />)} />
         </Route>
 
         <Route element={<AppShell />}>
           <Route path="/" element={<WorkbenchApp />} />
-          <Route path="/profile" element={<ProfilePage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/settings/roles" element={<RolesPage />} />
-          <Route path="/plan" element={<PlanPage />} />
-          <Route path="/billing" element={<BillingPage />} />
-          <Route path="/usage" element={<UsagePage />} />
-          <Route path="/history" element={<HistoryPage />} />
-          <Route path="/skills" element={<SkillsPage />} />
-          <Route path="/projects" element={<ProjectsPage />} />
-          <Route path="/starred" element={<StarredPage />} />
-          <Route path="/files" element={<FilesPage />} />
-          <Route path="/scheduled" element={<ScheduledPage />} />
-          <Route path="/batch" element={<BatchPage />} />
-          <Route path="/batch/:batchId" element={<BatchPage />} />
-          <Route path="/connections" element={<ConnectionsPage />} />
-          <Route path="*" element={<NotFoundPage />} />
+          <Route path="/profile" element={lazyElement(<ProfilePage />)} />
+          <Route path="/settings" element={lazyElement(<SettingsPage />)} />
+          <Route path="/settings/roles" element={lazyElement(<RolesPage />)} />
+          <Route path="/plan" element={lazyElement(<PlanPage />)} />
+          <Route path="/billing" element={lazyElement(<BillingPage />)} />
+          <Route path="/usage" element={lazyElement(<UsagePage />)} />
+          <Route path="/history" element={lazyElement(<HistoryPage />)} />
+          <Route path="/skills" element={lazyElement(<SkillsPage />)} />
+          <Route path="/projects" element={lazyElement(<ProjectsPage />)} />
+          <Route path="/starred" element={lazyElement(<StarredPage />)} />
+          <Route path="/files" element={lazyElement(<FilesPage />)} />
+          <Route path="/scheduled" element={lazyElement(<ScheduledPage />)} />
+          <Route path="/batch" element={lazyElement(<BatchPage />)} />
+          <Route path="/batch/:batchId" element={lazyElement(<BatchPage />)} />
+          <Route path="/connections" element={lazyElement(<ConnectionsPage />)} />
+          <Route path="*" element={lazyElement(<NotFoundPage />)} />
         </Route>
       </Routes>
     </ToastProvider>
@@ -120,5 +127,28 @@ function AppAliasRedirect(): JSX.Element {
       to={{ pathname: '/', search: location.search, hash: location.hash }}
       replace
     />
+  );
+}
+
+function lazyRoute<T extends ComponentType<unknown>>(
+  loader: () => Promise<Record<string, T>>,
+  exportName: string,
+): LazyExoticComponent<T> {
+  return lazy(() =>
+    loader().then((module) => ({
+      default: module[exportName],
+    })),
+  );
+}
+
+function lazyElement(children: ReactNode): JSX.Element {
+  return <Suspense fallback={<RouteLoading />}>{children}</Suspense>;
+}
+
+function RouteLoading(): JSX.Element {
+  return (
+    <div className="flex min-h-[240px] items-center justify-center text-sm text-muted-foreground">
+      加载中…
+    </div>
   );
 }

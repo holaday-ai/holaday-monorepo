@@ -34,6 +34,14 @@ export default defineConfig({
   build: {
     target: 'esnext',
     chunkSizeWarningLimit: 700,
+    modulePreload: {
+      resolveDependencies(_filename, deps, context) {
+        if (context.hostType !== 'html') return deps;
+        // Chart routes are now async. Keep the HTML shell from eager-preloading
+        // their vendor chunk before the user navigates to a chart-heavy page.
+        return deps.filter((dep) => !dep.includes('charts-'));
+      },
+    },
     rollupOptions: {
       output: {
         manualChunks(id: string): string | undefined {
