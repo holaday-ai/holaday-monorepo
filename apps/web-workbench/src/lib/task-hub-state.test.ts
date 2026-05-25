@@ -4,6 +4,7 @@ import {
   hasHistoryFilters,
   historyFilterRequestKey,
   historyPageSummary,
+  mergeTaskHubRowsById,
   shouldApplyHistoryResponse,
   starredPageSummary,
   taskHubErrorMessage,
@@ -109,6 +110,19 @@ describe('task hub state helpers', () => {
         activeKey,
       }),
     ).toBe(false);
+  });
+
+  it('merges paginated hub rows by replacing duplicates in place', () => {
+    const older = { taskId: 'tsk_dup', status: 'executing' };
+    const stable = { taskId: 'tsk_stable', status: 'completed' };
+    const fresh = { taskId: 'tsk_dup', status: 'completed' };
+    const appended = { taskId: 'tsk_new', status: 'failed' };
+
+    expect(mergeTaskHubRowsById([older, stable], [fresh, appended])).toEqual([
+      fresh,
+      stable,
+      appended,
+    ]);
   });
 
   it('formats dates and errors defensively', () => {

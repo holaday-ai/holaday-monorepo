@@ -8,6 +8,7 @@ import { useToast } from '@/components/ui/toast';
 import { supportMailtoHref } from '@/lib/support-links';
 import {
   formatTaskHubTime,
+  mergeTaskHubRowsById,
   starredPageSummary,
   taskHubErrorMessage,
 } from '@/lib/task-hub-state';
@@ -63,7 +64,7 @@ export function StarredPage(): JSX.Element {
         });
         if (myToken !== fetchToken.current) return;
         const list = (res?.tasks ?? []) as PinnedRow[];
-        setItems((prev) => (append ? [...prev, ...list] : list));
+        setItems((prev) => (append ? mergeTaskHubRowsById(prev, list) : list));
         setCursor(res?.nextCursor ?? null);
         setHasMore(Boolean(res?.nextCursor));
         if (append) setLoadMoreError(null);

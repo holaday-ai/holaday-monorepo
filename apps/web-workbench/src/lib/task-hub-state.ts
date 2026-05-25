@@ -82,6 +82,27 @@ export function taskHubErrorMessage(err: unknown, fallback = '请稍后重试'):
   return fallback;
 }
 
+export function mergeTaskHubRowsById<T extends { readonly taskId: string }>(
+  current: readonly T[],
+  incoming: readonly T[],
+): T[] {
+  const merged = [...current];
+  const indexByTaskId = new Map<string, number>();
+  merged.forEach((item, index) => indexByTaskId.set(item.taskId, index));
+
+  for (const item of incoming) {
+    const existingIndex = indexByTaskId.get(item.taskId);
+    if (existingIndex === undefined) {
+      indexByTaskId.set(item.taskId, merged.length);
+      merged.push(item);
+      continue;
+    }
+    merged[existingIndex] = item;
+  }
+
+  return merged;
+}
+
 export function formatTaskHubTime(value: string | number | Date | null | undefined, now = new Date()): string {
   if (value == null) return '—';
   const ts =

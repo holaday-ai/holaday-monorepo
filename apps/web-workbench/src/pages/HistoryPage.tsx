@@ -8,6 +8,7 @@ import {
   hasHistoryFilters,
   historyFilterRequestKey,
   historyPageSummary,
+  mergeTaskHubRowsById,
   shouldApplyHistoryResponse,
   taskHubErrorMessage,
   type HistoryRangeFilter,
@@ -136,7 +137,7 @@ export function HistoryPage(): JSX.Element {
           return;
         }
         const list = (res?.tasks ?? []) as HistoryTask[];
-        setTasks((prev) => (append ? [...prev, ...list] : list));
+        setTasks((prev) => (append ? mergeTaskHubRowsById(prev, list) : list));
         setCursor(res?.nextCursor ?? null);
         setHasMore(Boolean(res?.nextCursor));
         if (append) setLoadMoreError(null);
