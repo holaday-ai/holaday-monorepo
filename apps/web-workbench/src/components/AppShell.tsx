@@ -41,6 +41,7 @@ import {
 } from '@/lib/project-task-filter-state';
 import { shouldKeepProjectFilterForPickedTask } from '@/lib/task-selection-url-state';
 import { trpc } from '@/lib/trpc';
+import { normalizeTaskActionCount } from '@/lib/workbench-state';
 import {
   connect,
   disconnect,
@@ -129,7 +130,9 @@ export function AppShell(): JSX.Element {
   const refreshFailedCount = React.useCallback(async () => {
     try {
       const res = await trpc.tasks.failedCount.query();
-      setServerFailedCount(res.count ?? 0);
+      setServerFailedCount(
+        normalizeTaskActionCount((res as { count?: unknown } | null)?.count),
+      );
     } catch {
       /* non-fatal — badge stays at last known value */
     }
@@ -776,9 +779,12 @@ export function AppShell(): JSX.Element {
           setConfirmClearFailed(false);
           try {
             const res = await trpc.tasks.clearFailed.mutate();
-            if (res.deleted > 0) {
+            const deleted = normalizeTaskActionCount(
+              (res as { deleted?: unknown } | null)?.deleted,
+            );
+            if (deleted > 0) {
               setProjectTaskFilter(projectTaskFilterAfterFailedTasksCleared);
-              toast.show(`已清除 ${res.deleted} 个失败任务`);
+              toast.show(`已清除 ${deleted} 个失败任务`);
             } else {
               toast.show('没有可清除的失败任务');
             }

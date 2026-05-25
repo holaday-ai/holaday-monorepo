@@ -3,6 +3,7 @@ import type { UiTask } from '@/types/task';
 import {
   followUpTargetForTask,
   isLiveBrowserTaskForWorkbench,
+  normalizeTaskActionCount,
 } from './workbench-state';
 
 function task(overrides: Partial<UiTask> = {}): UiTask {
@@ -65,5 +66,16 @@ describe('workbench state helpers', () => {
         followUpDismissedTaskId: null,
       }),
     ).toBeNull();
+  });
+
+  it('normalizes task action counts before rendering destructive copy', () => {
+    expect(normalizeTaskActionCount(3)).toBe(3);
+    expect(normalizeTaskActionCount(3.9)).toBe(3);
+    expect(normalizeTaskActionCount(0)).toBe(0);
+    expect(normalizeTaskActionCount(-1)).toBe(0);
+    expect(normalizeTaskActionCount(Number.NaN)).toBe(0);
+    expect(normalizeTaskActionCount(Number.POSITIVE_INFINITY)).toBe(0);
+    expect(normalizeTaskActionCount('4')).toBe(0);
+    expect(normalizeTaskActionCount({ count: 4 })).toBe(0);
   });
 });

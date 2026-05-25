@@ -26,3 +26,8 @@ export function followUpTargetForTask(input: {
     title: (selectedTask.title || selectedTask.intent || '').slice(0, 40),
   };
 }
+
+export function normalizeTaskActionCount(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+}

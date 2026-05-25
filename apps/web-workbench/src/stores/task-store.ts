@@ -365,6 +365,20 @@ function omitRuntimeKeys<T extends Record<string, unknown>>(
   return next ?? record;
 }
 
+function omitRuntimeKey<T extends Record<string, unknown>>(record: T, key: string): T {
+  if (!Object.prototype.hasOwnProperty.call(record, key)) return record;
+  const next = { ...record };
+  delete next[key];
+  return next;
+}
+
+function omitTaskIdFromSet(values: ReadonlySet<string>, taskId: string): ReadonlySet<string> {
+  if (!values.has(taskId)) return values;
+  const next = new Set(values);
+  next.delete(taskId);
+  return next;
+}
+
 export function mergeTaskPagesReplacingDuplicates(
   current: readonly UiTask[],
   incoming: readonly UiTask[],
@@ -923,18 +937,6 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         storeNavigate?.(null);
       }
       set((prev) => {
-        const stepsByTask = { ...prev.stepsByTask };
-        delete stepsByTask[taskId];
-        const screencastByTask = { ...prev.screencastByTask };
-        delete screencastByTask[taskId];
-        const captchaWaitByTask = { ...prev.captchaWaitByTask };
-        delete captchaWaitByTask[taskId];
-        const executorFallbackByTask = { ...prev.executorFallbackByTask };
-        delete executorFallbackByTask[taskId];
-        const degradeByTask = { ...prev.degradeByTask };
-        delete degradeByTask[taskId];
-        const userRepliesByTask = { ...prev.userRepliesByTask };
-        delete userRepliesByTask[taskId];
         const nextTasks = prev.tasks.filter((t) => t.taskId !== taskId);
         // If the user is deleting the currently selected task, drop
         // them into new-task mode rather than auto-jumping to the
@@ -951,12 +953,22 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           tasks: nextTasks,
           selectedTaskId: nextSelected,
           composerMode: nextComposerMode,
-          stepsByTask,
-          screencastByTask,
-          captchaWaitByTask,
-          executorFallbackByTask,
-          degradeByTask,
-          userRepliesByTask,
+          browserLiveRequested: wasActive ? false : prev.browserLiveRequested,
+          stepsByTask: omitRuntimeKey(prev.stepsByTask, taskId),
+          screencastByTask: omitRuntimeKey(prev.screencastByTask, taskId),
+          captchaWaitByTask: omitRuntimeKey(prev.captchaWaitByTask, taskId),
+          executorFallbackByTask: omitRuntimeKey(prev.executorFallbackByTask, taskId),
+          degradeByTask: omitRuntimeKey(prev.degradeByTask, taskId),
+          awaitingUserByTask: omitRuntimeKey(prev.awaitingUserByTask, taskId),
+          userRepliesByTask: omitRuntimeKey(prev.userRepliesByTask, taskId),
+          webSearchByTask: omitRuntimeKey(prev.webSearchByTask, taskId),
+          thinkingByTask: omitRuntimeKey(prev.thinkingByTask, taskId),
+          suggestionsByTask: omitRuntimeKey(prev.suggestionsByTask, taskId),
+          streamingByTask: omitRuntimeKey(prev.streamingByTask, taskId),
+          progressByTask: omitRuntimeKey(prev.progressByTask, taskId),
+          subStatusByTask: omitRuntimeKey(prev.subStatusByTask, taskId),
+          terminalTaskIds: omitTaskIdFromSet(prev.terminalTaskIds, taskId),
+          animatedTaskIds: omitTaskIdFromSet(prev.animatedTaskIds, taskId),
         };
       });
       return { ok: true as const };

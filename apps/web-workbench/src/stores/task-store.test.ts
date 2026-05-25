@@ -598,6 +598,86 @@ describe('deleteTask', () => {
     expect(useTaskStore.getState().composerMode).toBe('task');
     expect(navigate).not.toHaveBeenCalled();
   });
+
+  it('clears every per-task runtime cache when deleting the active task', async () => {
+    deleteMutate.mockResolvedValueOnce({ ok: true } as never);
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_active', status: 'executing' })],
+      selectedTaskId: 'tsk_active',
+      composerMode: 'task',
+      browserLiveRequested: true,
+      stepsByTask: {
+        tsk_active: [{ tickIndex: 1, status: 'running', startedAt: 1 }],
+      },
+      screencastByTask: {
+        tsk_active: {
+          tickIndex: 1,
+          imageBase64: 'frame',
+          url: 'https://example.com',
+          viewport: { width: 100, height: 100 },
+          timestamp: '2026-05-25T00:00:00.000Z',
+        },
+      },
+      captchaWaitByTask: {
+        tsk_active: {
+          antiBotType: 'captcha',
+          message: 'captcha',
+          deadlineMs: 1000,
+          startedAt: 1,
+        },
+      },
+      executorFallbackByTask: { tsk_active: { available: false, at: 1 } },
+      degradeByTask: {
+        tsk_active: {
+          level: 2,
+          strategy: 'extension',
+          ok: false,
+          message: 'fallback',
+          at: 1,
+        },
+      },
+      awaitingUserByTask: {
+        tsk_active: { question: 'Continue?', at: 1, awaitingKind: 'clarification' },
+      },
+      userRepliesByTask: { tsk_active: [{ at: 1, text: 'yes' }] },
+      webSearchByTask: {
+        tsk_active: { iteration: 1, query: 'holaday', at: 1 },
+      },
+      thinkingByTask: { tsk_active: { summary: 'thinking', at: 1 } },
+      suggestionsByTask: { tsk_active: ['follow up'] },
+      streamingByTask: { tsk_active: 'stream' },
+      progressByTask: { tsk_active: 'working' },
+      subStatusByTask: {
+        tsk_active: { subStatus: 'planning', since: 1 },
+      },
+      terminalTaskIds: new Set(['tsk_active', 'tsk_keep']),
+      animatedTaskIds: new Set(['tsk_active', 'tsk_keep']),
+    });
+
+    await expect(useTaskStore.getState().deleteTask('tsk_active')).resolves.toEqual({
+      ok: true,
+    });
+
+    const state = useTaskStore.getState();
+    expect(state.selectedTaskId).toBeNull();
+    expect(state.composerMode).toBe('new');
+    expect(state.browserLiveRequested).toBe(false);
+    expect(state.stepsByTask.tsk_active).toBeUndefined();
+    expect(state.screencastByTask.tsk_active).toBeUndefined();
+    expect(state.captchaWaitByTask.tsk_active).toBeUndefined();
+    expect(state.executorFallbackByTask.tsk_active).toBeUndefined();
+    expect(state.degradeByTask.tsk_active).toBeUndefined();
+    expect(state.awaitingUserByTask.tsk_active).toBeUndefined();
+    expect(state.userRepliesByTask.tsk_active).toBeUndefined();
+    expect(state.webSearchByTask.tsk_active).toBeUndefined();
+    expect(state.thinkingByTask.tsk_active).toBeUndefined();
+    expect(state.suggestionsByTask.tsk_active).toBeUndefined();
+    expect(state.streamingByTask.tsk_active).toBeUndefined();
+    expect(state.progressByTask.tsk_active).toBeUndefined();
+    expect(state.subStatusByTask.tsk_active).toBeUndefined();
+    expect([...state.terminalTaskIds]).toEqual(['tsk_keep']);
+    expect([...state.animatedTaskIds]).toEqual(['tsk_keep']);
+  });
 });
 
 describe('togglePin', () => {
