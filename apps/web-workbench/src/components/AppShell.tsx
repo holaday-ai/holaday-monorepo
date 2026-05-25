@@ -59,9 +59,13 @@ interface MeProfile {
 
 interface OutletContext {
   me: MeProfile | null;
-  refreshProjects(): void;
+  refreshProjects(): Promise<ProjectRefreshResult>;
   projects: readonly UiProject[];
 }
+
+type ProjectRefreshResult =
+  | { ok: true; projects: UiProject[] }
+  | { error: string };
 
 /**
  * The one and only authed shell. Every authed route renders inside
@@ -149,12 +153,16 @@ export function AppShell(): JSX.Element {
   const reset = useTaskStore((s) => s.reset);
 
   // Refresh projects on demand (used after move-to-project).
-  const refreshProjects = React.useCallback(async () => {
+  const refreshProjects = React.useCallback(async (): Promise<ProjectRefreshResult> => {
     try {
       const list = await trpc.projects.list.query();
-      setProjects(list as UiProject[]);
-    } catch {
-      /* silent */
+      const nextProjects = list as UiProject[];
+      setProjects(nextProjects);
+      return { ok: true, projects: nextProjects };
+    } catch (err) {
+      return {
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }, []);
 
@@ -537,9 +545,7 @@ export function AppShell(): JSX.Element {
   const displayName = preferredDisplayName(me);
   const ctx: OutletContext = {
     me,
-    refreshProjects: () => {
-      void refreshProjects();
-    },
+    refreshProjects,
     projects,
   };
 

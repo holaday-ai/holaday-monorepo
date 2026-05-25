@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/components/ui/toast';
+import { useAppShellContext } from '@/components/AppShell';
 import {
   PROJECT_NAME_MAX_LENGTH,
   projectCountSummary,
@@ -30,9 +31,12 @@ import type { UiProject } from '@/types/task';
 export function ProjectsPage(): JSX.Element {
   const toast = useToast();
   const navigate = useNavigate();
+  const { projects: shellProjects, refreshProjects } = useAppShellContext();
   const [searchParams] = useSearchParams();
-  const [projects, setProjects] = React.useState<UiProject[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  const [projects, setProjects] = React.useState<UiProject[]>(() => [
+    ...shellProjects,
+  ]);
+  const [loading, setLoading] = React.useState(shellProjects.length === 0);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   // Auto-open the create form when arrived via Sidebar's
   // right-click "新建项目" submenu (passes ?create=1).
@@ -51,24 +55,26 @@ export function ProjectsPage(): JSX.Element {
     loading,
     error: loadError,
   });
+  const hasProjects = projects.length > 0;
+  const initialLoading = loading && !hasProjects;
+  const fullPageError = loadError && !hasProjects;
 
   const refresh = React.useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    try {
-      const list = await trpc.projects.list.query();
-      setProjects(list as UiProject[]);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '请稍后重试';
+    const res = await refreshProjects();
+    if ('error' in res) {
+      const message = res.error || '请稍后重试';
       setLoadError(message);
-      toast.show(
-        err instanceof Error ? `项目加载失败：${err.message}` : '项目加载失败',
-        'error',
-      );
-    } finally {
+      toast.show(`项目加载失败：${message}`, 'error');
+    } else {
+      setProjects(res.projects);
       setLoading(false);
+      return res.projects;
     }
-  }, [toast]);
+    setLoading(false);
+    return null;
+  }, [refreshProjects, toast]);
 
   React.useEffect(() => {
     void refresh();
@@ -211,11 +217,35 @@ export function ProjectsPage(): JSX.Element {
         </form>
       )}
 
-      {loading ? (
+      {loadError && hasProjects && (
+        <div className="mb-4 flex flex-col gap-2 rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-xs text-primary sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-2">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0">
+              项目列表刷新失败，当前保留上次结果：{loadError}
+            </span>
+          </div>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => void refresh()}
+            className={cn(
+              'h-7 shrink-0 rounded-md px-2.5 text-xs font-medium transition-colors',
+              loading
+                ? 'cursor-not-allowed bg-primary/10 text-primary/60'
+                : 'bg-primary text-primary-foreground hover:opacity-90',
+            )}
+          >
+            {loading ? '重试中…' : '重试'}
+          </button>
+        </div>
+      )}
+
+      {initialLoading ? (
         <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
           加载中…
         </div>
-      ) : loadError ? (
+      ) : fullPageError ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card/40 px-6 py-12 text-center">
           <AlertCircle className="h-8 w-8 text-primary" />
           <div className="text-sm font-medium text-foreground/80">项目加载失败</div>

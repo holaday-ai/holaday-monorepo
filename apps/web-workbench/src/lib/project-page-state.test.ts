@@ -45,7 +45,13 @@ describe('project page state helpers', () => {
 
   it('summarizes loading, failed, empty, and populated project lists', () => {
     expect(projectCountSummary({ count: 0, loading: true, error: null })).toBe('项目加载中…');
+    expect(projectCountSummary({ count: 3, loading: true, error: null })).toBe(
+      '正在刷新 3 个项目…',
+    );
     expect(projectCountSummary({ count: 0, loading: false, error: 'offline' })).toBe('项目加载失败');
+    expect(projectCountSummary({ count: 3, loading: false, error: 'offline' })).toBe(
+      '共 3 个项目，上次刷新失败',
+    );
     expect(projectCountSummary({ count: 0, loading: false, error: null })).toBe('尚无项目');
     expect(projectCountSummary({ count: 3, loading: false, error: null })).toBe('共 3 个项目');
   });

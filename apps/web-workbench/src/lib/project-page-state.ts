@@ -45,7 +45,11 @@ export function projectCountSummary(options: {
   readonly loading: boolean;
   readonly error: string | null;
 }): string {
+  if (options.loading && options.count > 0)
+    return `正在刷新 ${options.count} 个项目…`;
   if (options.loading) return '项目加载中…';
+  if (options.error && options.count > 0)
+    return `共 ${options.count} 个项目，上次刷新失败`;
   if (options.error) return '项目加载失败';
   if (options.count === 0) return '尚无项目';
   return `共 ${options.count} 个项目`;
