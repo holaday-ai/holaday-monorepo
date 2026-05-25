@@ -1,5 +1,11 @@
-import { Loader2, Search, X } from 'lucide-react';
+import { AlertCircle, Loader2, RotateCw, Search, X } from 'lucide-react';
 import * as React from 'react';
+import { Button } from '@/components/ui/button';
+import {
+  nextSearchActiveIndex,
+  searchOverlayErrorMessage,
+  searchOverlayStatusCopy,
+} from '@/lib/search-overlay-state';
 import {
   taskSearchEmptyCopy,
   taskStatusLabel,
@@ -37,17 +43,23 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
   const [query, setQuery] = React.useState('');
   const [active, setActive] = React.useState(0);
   const [serverResults, setServerResults] = React.useState<ServerTaskRow[]>([]);
+  const [resultQuery, setResultQuery] = React.useState('');
   const [searching, setSearching] = React.useState(false);
-  const [searchError, setSearchError] = React.useState(false);
+  const [searchError, setSearchError] = React.useState<string | null>(null);
+  const [searchNonce, setSearchNonce] = React.useState(0);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const resultQueryRef = React.useRef('');
 
   React.useEffect(() => {
     if (!open) return;
     setQuery('');
     setActive(0);
     setServerResults([]);
+    setResultQuery('');
+    resultQueryRef.current = '';
     setSearching(false);
-    setSearchError(false);
+    setSearchError(null);
+    setSearchNonce(0);
     // Focus after mount so the browser accepts the focus call.
     const id = requestAnimationFrame(() => inputRef.current?.focus());
     return () => cancelAnimationFrame(id);
@@ -64,12 +76,14 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
     const trimmed = query.trim();
     if (trimmed.length === 0) {
       setServerResults([]);
+      setResultQuery('');
+      resultQueryRef.current = '';
       setSearching(false);
-      setSearchError(false);
+      setSearchError(null);
       return;
     }
     setSearching(true);
-    setSearchError(false);
+    setSearchError(null);
     const myToken = ++requestToken.current;
     const handle = window.setTimeout(() => {
       void trpc.tasks.list
@@ -84,18 +98,24 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
               status: t.status as UiTaskStatus,
             })),
           );
+          setResultQuery(trimmed);
+          resultQueryRef.current = trimmed;
           setSearching(false);
-          setSearchError(false);
+          setSearchError(null);
         })
-        .catch(() => {
+        .catch((err) => {
           if (myToken !== requestToken.current) return;
-          setServerResults([]);
+          if (resultQueryRef.current !== trimmed) {
+            setServerResults([]);
+            setResultQuery('');
+            resultQueryRef.current = '';
+          }
           setSearching(false);
-          setSearchError(true);
+          setSearchError(searchOverlayErrorMessage(err));
         });
     }, 300);
     return () => window.clearTimeout(handle);
-  }, [open, query]);
+  }, [open, query, searchNonce]);
 
   const filtered: ServerTaskRow[] = React.useMemo(() => {
     if (!query.trim()) {
@@ -108,19 +128,27 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
         status: t.status,
       }));
     }
-    return serverResults;
-  }, [query, tasks, serverResults]);
+    return resultQuery === query.trim() ? serverResults : [];
+  }, [query, tasks, serverResults, resultQuery]);
 
   React.useEffect(() => {
-    if (active >= filtered.length) setActive(0);
+    if (filtered.length === 0 && active !== 0) setActive(0);
+    else if (active < 0 || active >= filtered.length) setActive(0);
   }, [filtered.length, active]);
 
   if (!open) return null;
   const emptyCopy = taskSearchEmptyCopy({
     query,
     searching,
-    error: searchError,
+    error: searchError !== null,
   });
+  const statusCopy = searchOverlayStatusCopy({
+    query,
+    searching,
+    error: searchError,
+    resultCount: filtered.length,
+  });
+  const retrySearch = (): void => setSearchNonce((n) => n + 1);
 
   function onKey(e: React.KeyboardEvent): void {
     if (e.key === 'Escape') {
@@ -130,12 +158,16 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
     }
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setActive((i) => Math.min(i + 1, filtered.length - 1));
+      setActive((i) =>
+        nextSearchActiveIndex({ current: i, direction: 'down', count: filtered.length }),
+      );
       return;
     }
     if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setActive((i) => Math.max(i - 1, 0));
+      setActive((i) =>
+        nextSearchActiveIndex({ current: i, direction: 'up', count: filtered.length }),
+      );
       return;
     }
     if (e.key === 'Enter') {
@@ -186,6 +218,29 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
           </button>
         </div>
         <ul className="max-h-[50vh] overflow-y-auto p-1">
+          {statusCopy && filtered.length > 0 && (
+            <li className="mb-1 rounded-md border border-border/60 bg-primary/5 px-3 py-2 text-xs text-primary">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium">{statusCopy.title}</div>
+                  <div className="mt-0.5 truncate opacity-80" title={statusCopy.body}>
+                    {statusCopy.body}
+                  </div>
+                </div>
+                {statusCopy.retry && (
+                  <button
+                    type="button"
+                    onClick={retrySearch}
+                    className="inline-flex h-6 shrink-0 items-center gap-1 rounded border border-primary/20 px-2 text-[11px] hover:bg-primary/10"
+                  >
+                    <RotateCw className="h-3 w-3" />
+                    重试
+                  </button>
+                )}
+              </div>
+            </li>
+          )}
           {filtered.length === 0 && (
             <li className="px-4 py-7 text-center">
               <div className="text-sm font-medium text-foreground/80">
@@ -194,6 +249,18 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
               <div className="mt-1 text-xs text-muted-foreground">
                 {emptyCopy.body}
               </div>
+              {statusCopy?.retry && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={retrySearch}
+                  className="mt-3 h-8"
+                >
+                  <RotateCw className="mr-1.5 h-3.5 w-3.5" />
+                  重试搜索
+                </Button>
+              )}
             </li>
           )}
           {filtered.map((t, i) => (
@@ -221,8 +288,12 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
           ))}
         </ul>
         <div className="flex items-center justify-end gap-3 border-t border-border bg-muted/30 px-3 py-1.5 text-[10px] text-muted-foreground">
-          <span>↑↓ 选择</span>
-          <span>Enter 打开</span>
+          {filtered.length > 0 && (
+            <>
+              <span>↑↓ 选择</span>
+              <span>Enter 打开</span>
+            </>
+          )}
           <span>Esc 关闭</span>
         </div>
       </div>
