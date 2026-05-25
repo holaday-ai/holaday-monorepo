@@ -1,8 +1,15 @@
-import { Copy, Eye, EyeOff, Key, Plus, Trash2 } from 'lucide-react';
+import { AlertCircle, Copy, Eye, EyeOff, Key, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import {
+  apiKeySettingsErrorMessage,
+  normalizeApiKeyRows,
+  normalizeFreshApiKey,
+  type ApiKeyRowView,
+  type FreshApiKeyView,
+} from '@/lib/api-key-settings-state';
 import { copyTextToClipboard } from '@/lib/copy-text';
 import { trpc } from '@/lib/trpc';
 import { Section } from '@/pages/PageShell';
@@ -22,49 +29,39 @@ import { Section } from '@/pages/PageShell';
  * key (row stays for audit, lookups stop matching).
  */
 
-interface UiApiKey {
-  apiKeyId: string;
-  name: string;
-  keyPrefix: string;
-  lastUsedAt: string | Date | null;
-  expiresAt: string | Date | null;
-  revokedAt: string | Date | null;
-  createdAt: string | Date;
-}
-
-/** State of the freshly-minted key currently being shown one-time. */
-interface FreshKeyState {
-  apiKeyId: string;
-  plaintext: string;
-  name: string;
-}
-
 export function ApiKeysSection(): JSX.Element {
   const toast = useToast();
-  const [rows, setRows] = React.useState<UiApiKey[] | null>(null);
+  const [rows, setRows] = React.useState<ApiKeyRowView[] | null>(null);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [creating, setCreating] = React.useState(false);
   const [newName, setNewName] = React.useState('');
-  const [fresh, setFresh] = React.useState<FreshKeyState | null>(null);
+  const [fresh, setFresh] = React.useState<FreshApiKeyView | null>(null);
   const [reveal, setReveal] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   // Revocation is high-risk on a settings page — every deployed
   // webhook starts 401-ing the moment we hit the endpoint. Surface
   // the key's name + prefix + last-used time in a product-internal
   // ConfirmDialog so the user can verify what they're killing.
-  const [pendingRevoke, setPendingRevoke] = React.useState<UiApiKey | null>(null);
+  const [pendingRevoke, setPendingRevoke] = React.useState<ApiKeyRowView | null>(null);
 
-  const reload = React.useCallback(async (): Promise<void> => {
+  const reload = React.useCallback(async (options: { silent?: boolean } = {}): Promise<void> => {
     try {
       const list = await trpc.apiKeys.list.query();
-      setRows(list as UiApiKey[]);
+      setRows(normalizeApiKeyRows(list));
+      setLoadError(null);
     } catch (err) {
-      toast.show(err instanceof Error ? `加载失败：${err.message}` : '加载失败', 'error');
-      setRows([]);
+      const message = apiKeySettingsErrorMessage(
+        err,
+        'API Key 暂时无法加载，请稍后重试。',
+      );
+      setLoadError(message);
+      if (!options.silent) toast.show(`加载失败：${message}`, 'error');
+      setRows((current) => current ?? []);
     }
   }, [toast]);
 
   React.useEffect(() => {
-    void reload();
+    void reload({ silent: true });
   }, [reload]);
 
   const submit = async (): Promise<void> => {
@@ -76,29 +73,25 @@ export function ApiKeysSection(): JSX.Element {
     setSubmitting(true);
     try {
       const result = await trpc.apiKeys.create.mutate({ name: trimmed });
-      setFresh({
-        apiKeyId: result.apiKeyId,
-        plaintext: result.plaintext,
-        name: result.name,
-      });
+      setFresh(normalizeFreshApiKey(result, trimmed));
       setReveal(false);
       setCreating(false);
       setNewName('');
       await reload();
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : '创建失败', 'error');
+      toast.show(apiKeySettingsErrorMessage(err, '创建失败'), 'error');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const performRevoke = async (key: UiApiKey): Promise<void> => {
+  const performRevoke = async (key: ApiKeyRowView): Promise<void> => {
     try {
       await trpc.apiKeys.revoke.mutate({ apiKeyId: key.apiKeyId });
       toast.show('已撤销');
       await reload();
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : '撤销失败', 'error');
+      toast.show(apiKeySettingsErrorMessage(err, '撤销失败'), 'error');
     }
   };
 
@@ -235,6 +228,8 @@ export function ApiKeysSection(): JSX.Element {
           <div className="flex h-20 items-center justify-center text-xs text-muted-foreground">
             加载中…
           </div>
+        ) : loadError && activeRows.length === 0 && revokedRows.length === 0 ? (
+          <ApiKeyLoadError message={loadError} onRetry={() => void reload()} />
         ) : activeRows.length === 0 && revokedRows.length === 0 ? (
           <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
             <Key className="h-6 w-6 text-muted-foreground/60" />
@@ -280,6 +275,27 @@ export function ApiKeysSection(): JSX.Element {
         }}
       />
     </Section>
+  );
+}
+
+function ApiKeyLoadError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry(): void;
+}): JSX.Element {
+  return (
+    <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+      <AlertCircle className="h-6 w-6 text-primary" aria-hidden />
+      <div className="text-sm font-medium text-foreground/85">API Key 加载失败</div>
+      <div className="max-w-md text-xs leading-5 text-muted-foreground">
+        {message}
+      </div>
+      <Button type="button" size="sm" className="mt-1" onClick={onRetry}>
+        重试
+      </Button>
+    </div>
   );
 }
 
@@ -385,7 +401,7 @@ function ApiKeyRow({
   onRevoke,
   muted,
 }: {
-  row: UiApiKey;
+  row: ApiKeyRowView;
   onRevoke?: () => void;
   muted?: boolean;
 }): JSX.Element {
