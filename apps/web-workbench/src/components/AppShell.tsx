@@ -27,6 +27,7 @@ import { clearAccessToken, getAccessToken } from '@/lib/auth';
 import { authSessionExpiredMessage, isAuthSessionError } from '@/lib/auth-session';
 import { taskActionError } from '@/lib/error-copy';
 import {
+  projectTaskFilterAfterTaskMove,
   refreshProjectTaskFilterState,
   resolveProjectFilteredTasks,
   type ProjectTaskFilterState,
@@ -608,7 +609,14 @@ export function AppShell(): JSX.Element {
         }}
         projects={projects}
         onMoveTaskToProject={async (taskId, projectId) => {
-          await moveTaskToProject(taskId, projectId);
+          const res = await moveTaskToProject(taskId, projectId);
+          if ('error' in res) {
+            toast.show(taskActionError('移动失败', res.error), 'error');
+            return;
+          }
+          setProjectTaskFilter((prev) =>
+            projectTaskFilterAfterTaskMove(prev, { taskId, projectId }),
+          );
           void refreshProjects();
         }}
         onCreateProject={() => navigate('/projects?create=1')}

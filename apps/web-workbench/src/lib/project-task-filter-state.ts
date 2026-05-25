@@ -41,3 +41,14 @@ export function resolveProjectFilteredTasks(
   if (state?.projectId !== projectId) return [];
   return state.tasks;
 }
+
+export function projectTaskFilterAfterTaskMove(
+  state: ProjectTaskFilterState | null,
+  options: { readonly taskId: string; readonly projectId: string | null },
+): ProjectTaskFilterState | null {
+  if (!state) return null;
+  if (options.projectId === state.projectId) return state;
+  const tasks = state.tasks.filter((task) => task.taskId !== options.taskId);
+  if (tasks.length === state.tasks.length) return state;
+  return { ...state, tasks };
+}

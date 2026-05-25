@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { UiTask } from '@/types/task';
 import {
   emptyProjectTaskFilterState,
+  projectTaskFilterAfterTaskMove,
   refreshProjectTaskFilterState,
   resolveProjectFilteredTasks,
 } from './project-task-filter-state';
@@ -61,6 +62,41 @@ describe('project task filter state', () => {
       loading: true,
       error: null,
     });
+  });
+
+  it('removes a moved task from the active project filter', () => {
+    const state = {
+      projectId: 'proj_a',
+      tasks: [task('tsk_a'), task('tsk_b')],
+      loading: false,
+      error: null,
+    };
+
+    expect(
+      projectTaskFilterAfterTaskMove(state, {
+        taskId: 'tsk_a',
+        projectId: 'proj_b',
+      }),
+    ).toEqual({
+      ...state,
+      tasks: [task('tsk_b')],
+    });
+  });
+
+  it('keeps the active project filter when the task remains in that project', () => {
+    const state = {
+      projectId: 'proj_a',
+      tasks: [task('tsk_a')],
+      loading: false,
+      error: null,
+    };
+
+    expect(
+      projectTaskFilterAfterTaskMove(state, {
+        taskId: 'tsk_a',
+        projectId: 'proj_a',
+      }),
+    ).toBe(state);
   });
 });
 

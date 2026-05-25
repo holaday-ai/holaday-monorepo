@@ -211,7 +211,10 @@ export interface TaskStore {
    * Phase 16b — move a task into a project (or out of one when
    * projectId === null). Optimistic; reverts the row on server error.
    */
-  moveTaskToProject(taskId: string, projectId: string | null): Promise<void>;
+  moveTaskToProject(
+    taskId: string,
+    projectId: string | null,
+  ): Promise<{ ok: true } | { error: string }>;
   createTask(
     intent: string,
     fileIds?: string[],
@@ -943,18 +946,22 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
   async moveTaskToProject(taskId, projectId) {
     const before = get().tasks.find((t) => t.taskId === taskId);
-    if (!before) return;
+    if (!before) return { ok: true };
     set((prev) => ({
       tasks: prev.tasks.map((t) => (t.taskId === taskId ? { ...t, projectId } : t)),
     }));
     try {
       await trpc.tasks.moveToProject.mutate({ taskId, projectId });
-    } catch {
+      return { ok: true };
+    } catch (err) {
+      const msg = taskStoreError(err);
       set((prev) => ({
         tasks: prev.tasks.map((t) =>
           t.taskId === taskId ? { ...t, projectId: before.projectId ?? null } : t,
         ),
+        error: msg,
       }));
+      return { error: msg };
     }
   },
 

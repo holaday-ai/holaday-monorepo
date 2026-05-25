@@ -14,16 +14,19 @@ vi.mock('@/lib/trpc', () => ({
   trpc: {
     tasks: {
       list: { query: vi.fn() },
+      moveToProject: { mutate: vi.fn() },
       star: { mutate: vi.fn() },
     },
   },
 }));
 
 const listQuery = vi.mocked(trpc.tasks.list.query);
+const moveToProjectMutate = vi.mocked(trpc.tasks.moveToProject.mutate);
 const starMutate = vi.mocked(trpc.tasks.star.mutate);
 
 beforeEach(() => {
   listQuery.mockReset();
+  moveToProjectMutate.mockReset();
   starMutate.mockReset();
   useTaskStore.getState().reset();
 });
@@ -263,6 +266,46 @@ describe('loadMoreTasks', () => {
     expect(state.streamingByTask.tsk_dup).toBeUndefined();
     expect(state.progressByTask.tsk_dup).toBeUndefined();
     expect(state.subStatusByTask.tsk_dup).toBeUndefined();
+  });
+});
+
+describe('moveTaskToProject', () => {
+  it('returns an error and rolls back when the project move fails', async () => {
+    const original = task({
+      taskId: 'tsk_move',
+      status: 'completed',
+      projectId: 'proj_a',
+    });
+    moveToProjectMutate.mockRejectedValueOnce(new Error('offline'));
+    useTaskStore.setState({ tasks: [original], error: null });
+
+    await expect(
+      useTaskStore.getState().moveTaskToProject('tsk_move', 'proj_b'),
+    ).resolves.toEqual({ error: '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。' });
+
+    expect(moveToProjectMutate).toHaveBeenCalledWith({
+      taskId: 'tsk_move',
+      projectId: 'proj_b',
+    });
+    expect(useTaskStore.getState().tasks[0]?.projectId).toBe('proj_a');
+    expect(useTaskStore.getState().error).toBe(
+      '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
+    );
+  });
+
+  it('keeps the optimistic project move when the server accepts it', async () => {
+    moveToProjectMutate.mockResolvedValueOnce({ ok: true } as never);
+    useTaskStore.setState({
+      tasks: [
+        task({ taskId: 'tsk_move', status: 'completed', projectId: 'proj_a' }),
+      ],
+    });
+
+    await expect(
+      useTaskStore.getState().moveTaskToProject('tsk_move', null),
+    ).resolves.toEqual({ ok: true });
+
+    expect(useTaskStore.getState().tasks[0]?.projectId).toBeNull();
   });
 });
 
