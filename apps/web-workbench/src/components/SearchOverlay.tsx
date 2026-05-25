@@ -3,8 +3,10 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import {
   nextSearchActiveIndex,
+  normalizeSearchOverlayRows,
   searchOverlayErrorMessage,
   searchOverlayStatusCopy,
+  type SearchOverlayRow,
 } from '@/lib/search-overlay-state';
 import {
   taskSearchEmptyCopy,
@@ -12,7 +14,7 @@ import {
 } from '@/lib/task-status-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
-import type { UiTask, UiTaskStatus } from '@/types/task';
+import type { UiTask } from '@/types/task';
 
 interface Props {
   open: boolean;
@@ -26,13 +28,6 @@ interface Props {
   onPick(taskId: string): void;
 }
 
-interface ServerTaskRow {
-  taskId: string;
-  intent: string;
-  title: string | null;
-  status: UiTaskStatus;
-}
-
 /**
  * Cmd/Ctrl+K palette — a modal list over the whole app. Empty input
  * shows the recent task list from the store; typing kicks off a 300 ms
@@ -42,7 +37,7 @@ interface ServerTaskRow {
 export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Element | null {
   const [query, setQuery] = React.useState('');
   const [active, setActive] = React.useState(0);
-  const [serverResults, setServerResults] = React.useState<ServerTaskRow[]>([]);
+  const [serverResults, setServerResults] = React.useState<SearchOverlayRow[]>([]);
   const [resultQuery, setResultQuery] = React.useState('');
   const [searching, setSearching] = React.useState(false);
   const [searchError, setSearchError] = React.useState<string | null>(null);
@@ -90,14 +85,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
         .query({ query: trimmed, limit: 20 })
         .then((res) => {
           if (myToken !== requestToken.current) return;
-          setServerResults(
-            res.tasks.map((t) => ({
-              taskId: t.taskId,
-              intent: t.intent,
-              title: t.title,
-              status: t.status as UiTaskStatus,
-            })),
-          );
+          setServerResults(normalizeSearchOverlayRows(res?.tasks));
           setResultQuery(trimmed);
           resultQueryRef.current = trimmed;
           setSearching(false);
@@ -117,7 +105,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
     return () => window.clearTimeout(handle);
   }, [open, query, searchNonce]);
 
-  const filtered: ServerTaskRow[] = React.useMemo(() => {
+  const filtered: SearchOverlayRow[] = React.useMemo(() => {
     if (!query.trim()) {
       // Cold palette: show the most recent loaded tasks so the user
       // has somewhere to land before typing.

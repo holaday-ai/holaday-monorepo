@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   nextSearchActiveIndex,
+  normalizeSearchOverlayRows,
   searchOverlayErrorMessage,
   searchOverlayStatusCopy,
 } from './search-overlay-state';
@@ -42,5 +43,44 @@ describe('search overlay state helpers', () => {
     expect(searchOverlayErrorMessage(new Error('offline'))).toBe('offline');
     expect(searchOverlayErrorMessage('bad gateway')).toBe('bad gateway');
     expect(searchOverlayErrorMessage({})).toBe('搜索暂时不可用，请稍后重试。');
+  });
+
+  it('normalizes server search rows before rendering', () => {
+    expect(
+      normalizeSearchOverlayRows([
+        null,
+        { taskId: '', intent: 'missing id' },
+        {
+          taskId: ' tsk_1 ',
+          intent: '  Weekly report  ',
+          title: '  Report title  ',
+          status: 'completed',
+        },
+        {
+          taskId: 'tsk_2',
+          intent: { unsafe: true },
+          title: { unsafe: true },
+          status: 'mystery',
+        },
+      ]),
+    ).toEqual([
+      {
+        taskId: 'tsk_1',
+        intent: 'Weekly report',
+        title: 'Report title',
+        status: 'completed',
+      },
+      {
+        taskId: 'tsk_2',
+        intent: '未命名任务',
+        title: null,
+        status: 'queued',
+      },
+    ]);
+  });
+
+  it('treats malformed search row collections as empty', () => {
+    expect(normalizeSearchOverlayRows({ tasks: [] })).toEqual([]);
+    expect(normalizeSearchOverlayRows('bad')).toEqual([]);
   });
 });
