@@ -827,7 +827,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     set({ loading: true, error: null });
     try {
       const res = await trpc.tasks.list.query({ limit: 50 });
-      const freshList: UiTask[] = res.tasks.map(toUiTask);
+      const freshList = normalizeTaskListRows(res?.tasks);
       // P1-C: preserve the active selection's UiTask object across
       // a list refresh. Deep-linked oldies (not in the first 50) get
       // upserted by the hydrate path, and that synth must survive a
@@ -852,8 +852,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       set((prev) => ({
         tasks,
         loading: false,
-        tasksCursor: res.nextCursor ?? null,
-        tasksHasMore: res.nextCursor != null,
+        tasksCursor: normalizeTaskListCursor(res?.nextCursor),
+        tasksHasMore: normalizeTaskListCursor(res?.nextCursor) != null,
         ...pruneRuntimeStateForTerminalTasks(prev, tasks),
       }));
       if (prevSelected) {
@@ -881,7 +881,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     set({ loadingMore: true });
     try {
       const res = await trpc.tasks.list.query({ limit: 50, cursor: tasksCursor });
-      const moreTasks: UiTask[] = res.tasks.map(toUiTask);
+      const moreTasks = normalizeTaskListRows(res?.tasks);
       set((prev) => {
         // De-dupe defensively in case a row landed on both pages
         // (e.g. a task whose id equals the cursor boundary). The
@@ -891,8 +891,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         return {
           tasks: merged,
           loadingMore: false,
-          tasksCursor: res.nextCursor ?? null,
-          tasksHasMore: res.nextCursor != null,
+          tasksCursor: normalizeTaskListCursor(res?.nextCursor),
+          tasksHasMore: normalizeTaskListCursor(res?.nextCursor) != null,
           ...pruneRuntimeStateForTerminalTasks(prev, moreTasks),
         };
       });
@@ -1791,6 +1791,37 @@ function taskStoreError(err: unknown): string {
   return humaniseTaskError(raw);
 }
 
+export function normalizeTaskListRows(value: unknown): UiTask[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const row = normalizeTaskListRow(entry);
+    return row ? [toUiTask(row as ListRow)] : [];
+  });
+}
+
+export function normalizeTaskListCursor(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
+}
+
+function normalizeTaskListRow(value: unknown): Record<string, unknown> | null {
+  if (!isTaskListRecord(value)) return null;
+  const taskId = safeTaskListText(value.taskId);
+  if (!taskId) return null;
+  return {
+    ...value,
+    taskId,
+    intent: safeTaskListText(value.intent) || '未命名任务',
+    title: safeNullableTaskListText(value.title),
+    status: safeTaskListText(value.status) || 'queued',
+    createdAt: safeTaskListDate(value.createdAt) ?? 0,
+    starredAt: safeNullableTaskListDate(value.starredAt),
+    projectId: safeNullableTaskListText(value.projectId),
+    errorMessage: safeNullableTaskListText(value.errorMessage),
+  };
+}
+
 export function toUiTask(row: ListRow): UiTask {
   const opusUsed = (row as { opusUsed?: unknown }).opusUsed === true;
   const r = row as { starred?: unknown; starredAt?: unknown; projectId?: unknown };
@@ -1824,26 +1855,52 @@ export function toUiTask(row: ListRow): UiTask {
       ? failureLevelRaw
       : null;
   return {
-    taskId: row.taskId,
-    intent: row.intent,
-    title: typeof (row as { title?: unknown }).title === 'string' ? ((row as { title: string }).title) : null,
-    status: normaliseStatus(row.status),
+    taskId: safeTaskListText((row as { taskId?: unknown }).taskId),
+    intent: safeTaskListText((row as { intent?: unknown }).intent) || '未命名任务',
+    title: safeNullableTaskListText((row as { title?: unknown }).title),
+    status: normaliseStatus(safeTaskListText((row as { status?: unknown }).status) || 'queued'),
     // The list endpoint doesn't expose tickCount directly; we leave 0
     // for now and let G4's ws events fill it in as ticks stream.
     tickCount: 0,
     ...(resultText ? { resultText } : {}),
     ...(executionMode ? { executionMode } : {}),
     // tRPC serializes Date to string over the wire; coerce back.
-    createdAt: new Date(row.createdAt as unknown as string | number | Date),
+    createdAt: new Date(safeTaskListDate((row as { createdAt?: unknown }).createdAt) ?? 0),
     modelLabel: opusUsed ? 'opus' : 'sonnet',
     starred: r.starred === true,
-    starredAt: r.starredAt ? new Date(r.starredAt as string | number | Date) : null,
-    projectId: typeof r.projectId === 'string' ? r.projectId : null,
+    starredAt: safeNullableTaskListDate(r.starredAt),
+    projectId: safeNullableTaskListText(r.projectId),
     verificationPassed:
       typeof verificationPassedRaw === 'boolean' ? verificationPassedRaw : null,
     failureLevel,
     failedChecks,
   };
+}
+
+function safeNullableTaskListText(value: unknown): string | null {
+  const text = safeTaskListText(value);
+  return text || null;
+}
+
+function safeTaskListText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function safeNullableTaskListDate(value: unknown): Date | null {
+  const normalized = safeTaskListDate(value);
+  return normalized == null ? null : new Date(normalized);
+}
+
+function safeTaskListDate(value: unknown): string | number | Date | null {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed && !Number.isNaN(Date.parse(trimmed)) ? trimmed : null;
+}
+
+function isTaskListRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 function normaliseStatus(raw: string): UiTaskStatus {

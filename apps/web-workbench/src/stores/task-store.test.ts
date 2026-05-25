@@ -4,6 +4,8 @@ import type { UiTask } from '@/types/task';
 import {
   mergeFirstPageWithPreservedSelection,
   mergeTaskPagesReplacingDuplicates,
+  normalizeTaskListCursor,
+  normalizeTaskListRows,
   normaliseDetailStepStatus,
   pruneRuntimeStateForTerminalTasks,
   setStoreNavigate,
@@ -87,6 +89,58 @@ describe('toUiTask', () => {
     expect(task.failedChecks).toEqual([
       { type: 'source_count', detail: '缺少来源链接' },
     ]);
+  });
+
+  it('normalizes malformed task list rows safely', () => {
+    expect(
+      normalizeTaskListRows([
+        null,
+        { taskId: '', intent: 'missing id' },
+        {
+          taskId: ' tsk_valid ',
+          intent: '  Build launch report  ',
+          title: '  Launch report  ',
+          status: 'completed',
+          createdAt: ' 2026-05-25T00:00:00.000Z ',
+          starred: true,
+          starredAt: ' 2026-05-25T00:01:00.000Z ',
+          projectId: ' prj_1 ',
+        },
+        {
+          taskId: 'tsk_fallback',
+          intent: { unsafe: true },
+          title: { unsafe: true },
+          status: { unsafe: true },
+          createdAt: { unsafe: true },
+          starredAt: 'not-a-date',
+          projectId: { unsafe: true },
+        },
+      ]),
+    ).toMatchObject([
+      {
+        taskId: 'tsk_valid',
+        intent: 'Build launch report',
+        title: 'Launch report',
+        status: 'completed',
+        starred: true,
+        projectId: 'prj_1',
+      },
+      {
+        taskId: 'tsk_fallback',
+        intent: '未命名任务',
+        title: null,
+        status: 'queued',
+        starredAt: null,
+        projectId: null,
+      },
+    ]);
+  });
+
+  it('treats malformed task lists and cursors as empty', () => {
+    expect(normalizeTaskListRows({ tasks: [] })).toEqual([]);
+    expect(normalizeTaskListCursor(51)).toBe(51);
+    expect(normalizeTaskListCursor(0)).toBeNull();
+    expect(normalizeTaskListCursor('51')).toBeNull();
   });
 });
 
@@ -223,6 +277,39 @@ describe('task page merging', () => {
   });
 });
 
+describe('refreshTaskList', () => {
+  it('survives malformed first-page rows and cursor values', async () => {
+    listQuery.mockResolvedValueOnce({
+      tasks: [
+        { taskId: '', intent: 'missing id' },
+        {
+          taskId: 'tsk_boot',
+          intent: { unsafe: true },
+          title: { unsafe: true },
+          status: { unsafe: true },
+          createdAt: { unsafe: true },
+        },
+      ],
+      nextCursor: 'bad-cursor',
+    } as never);
+
+    await useTaskStore.getState().refreshTaskList();
+
+    const state = useTaskStore.getState();
+    expect(state.loading).toBe(false);
+    expect(state.error).toBeNull();
+    expect(state.tasksHasMore).toBe(false);
+    expect(state.tasksCursor).toBeNull();
+    expect(state.tasks).toHaveLength(1);
+    expect(state.tasks[0]).toMatchObject({
+      taskId: 'tsk_boot',
+      intent: '未命名任务',
+      title: null,
+      status: 'queued',
+    });
+  });
+});
+
 describe('loadMoreTasks', () => {
   it('uses fresh duplicate rows and clears terminal live state from paginated API rows', async () => {
     listQuery.mockResolvedValueOnce({
@@ -271,6 +358,44 @@ describe('loadMoreTasks', () => {
     expect(state.streamingByTask.tsk_dup).toBeUndefined();
     expect(state.progressByTask.tsk_dup).toBeUndefined();
     expect(state.subStatusByTask.tsk_dup).toBeUndefined();
+  });
+
+  it('ignores malformed pagination rows and cursors without failing the sidebar', async () => {
+    listQuery.mockResolvedValueOnce({
+      tasks: [
+        null,
+        { taskId: '', intent: 'missing id' },
+        {
+          taskId: 'tsk_next',
+          intent: { unsafe: true },
+          status: { unsafe: true },
+          createdAt: { unsafe: true },
+        },
+      ],
+      nextCursor: 'bad-cursor',
+    } as never);
+
+    useTaskStore.setState({
+      tasks: [task({ taskId: 'tsk_existing', status: 'completed' })],
+      tasksCursor: 51,
+      tasksHasMore: true,
+      loadingMore: false,
+    });
+
+    await useTaskStore.getState().loadMoreTasks();
+
+    const state = useTaskStore.getState();
+    expect(state.loadingMore).toBe(false);
+    expect(state.tasksHasMore).toBe(false);
+    expect(state.tasksCursor).toBeNull();
+    expect(state.tasks.map((item) => item.taskId)).toEqual([
+      'tsk_existing',
+      'tsk_next',
+    ]);
+    expect(state.tasks[1]).toMatchObject({
+      intent: '未命名任务',
+      status: 'queued',
+    });
   });
 });
 

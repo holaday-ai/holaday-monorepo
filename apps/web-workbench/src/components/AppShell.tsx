@@ -48,7 +48,7 @@ import {
   onStatus,
   type ConnStatus,
 } from '@/lib/ws';
-import { setStoreNavigate, toUiTask, useTaskStore } from '@/stores/task-store';
+import { normalizeTaskListRows, setStoreNavigate, useTaskStore } from '@/stores/task-store';
 import type { UiProject, UiTask } from '@/types/task';
 import { applyHistoryRetention } from '@/utils/time-buckets';
 import { PLAN_CATALOGUE, type PlanId } from '@holaday/shared-types';
@@ -494,7 +494,7 @@ export function AppShell(): JSX.Element {
       .query({ projectId: projectFilter, limit: 50 })
       .then((res) => {
         if (cancelled) return;
-        const fresh: UiTask[] = (res?.tasks ?? []).map((t) => toUiTask(t));
+        const fresh: UiTask[] = normalizeTaskListRows(res?.tasks);
         setProjectTaskFilter({
           projectId: projectFilter,
           tasks: fresh,
