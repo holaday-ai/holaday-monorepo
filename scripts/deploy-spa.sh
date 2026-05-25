@@ -43,6 +43,82 @@ if [[ -n "${ALIYUN_PASSWORD:-}" ]]; then
   SSHPASS_ARGS=(sshpass -p "$ALIYUN_PASSWORD")
 fi
 SSH_OPTS=(-o StrictHostKeyChecking=no -o NumberOfPasswordPrompts=1 -o ConnectTimeout=15)
+REMOTE_RETRIES="${DEPLOY_REMOTE_RETRIES:-3}"
+REMOTE_RETRY_SLEEP="${DEPLOY_REMOTE_RETRY_SLEEP:-5}"
+
+if ! [[ "$REMOTE_RETRIES" =~ ^[1-9][0-9]*$ ]]; then
+  echo "❌ DEPLOY_REMOTE_RETRIES must be a positive integer" >&2
+  exit 1
+fi
+if ! [[ "$REMOTE_RETRY_SLEEP" =~ ^[0-9]+$ ]]; then
+  echo "❌ DEPLOY_REMOTE_RETRY_SLEEP must be a non-negative integer" >&2
+  exit 1
+fi
+
+run_with_retry() {
+  local label="$1"
+  shift
+  local attempt rc
+
+  for ((attempt = 1; attempt <= REMOTE_RETRIES; attempt++)); do
+    if "$@"; then
+      return 0
+    fi
+    rc=$?
+    if ((attempt == REMOTE_RETRIES)); then
+      echo "❌ $label failed after $attempt attempt(s) (exit $rc)" >&2
+      return "$rc"
+    fi
+    echo "⚠️  $label failed (exit $rc); retrying in ${REMOTE_RETRY_SLEEP}s ($attempt/$REMOTE_RETRIES)" >&2
+    sleep "$REMOTE_RETRY_SLEEP"
+  done
+}
+
+run_with_retry_filtered() {
+  local label="$1"
+  shift
+  local attempt rc tmp
+
+  for ((attempt = 1; attempt <= REMOTE_RETRIES; attempt++)); do
+    tmp=$(mktemp)
+    if "$@" >"$tmp" 2>&1; then
+      grep -v 'LIBARCHIVE.xattr' "$tmp" || true
+      rm -f "$tmp"
+      return 0
+    fi
+    rc=$?
+    grep -v 'LIBARCHIVE.xattr' "$tmp" || true
+    rm -f "$tmp"
+    if ((attempt == REMOTE_RETRIES)); then
+      echo "❌ $label failed after $attempt attempt(s) (exit $rc)" >&2
+      return "$rc"
+    fi
+    echo "⚠️  $label failed (exit $rc); retrying in ${REMOTE_RETRY_SLEEP}s ($attempt/$REMOTE_RETRIES)" >&2
+    sleep "$REMOTE_RETRY_SLEEP"
+  done
+}
+
+smoke_check() {
+  local label="$1"
+  local url="$2"
+  local response_path="$3"
+  local http_code marker_count bundle_count attempt
+
+  for attempt in 1 2; do
+    http_code=$(curl -s --max-time 15 -o "$response_path" -w '%{http_code}' "$url" 2>&1 || true)
+    marker_count=$(grep -c "$SMOKE_MARKER" "$response_path" 2>/dev/null || echo 0)
+    bundle_count=$(grep -c "$NEW_HASH" "$response_path" 2>/dev/null || echo 0)
+    if [[ "$http_code" == "200" ]] && ((marker_count > 0)) && ((bundle_count > 0)); then
+      echo "✅ $label smoke check passed"
+      return 0
+    fi
+    echo "   attempt $attempt: http=$http_code, marker=$marker_count, bundle=$bundle_count"
+    sleep 3
+  done
+
+  echo "❌ $label smoke FAILED" >&2
+  return 1
+}
 
 if [[ ! -d "$DIST_DIR" ]]; then
   echo "❌ $DIST_DIR not found. Run: pnpm --filter @holaday/web-workbench build" >&2
@@ -52,53 +128,39 @@ fi
 NEW_HASH=$(grep -o 'index-[^"]*\.js' "$DIST_DIR/index.html" | head -1 || echo unknown)
 echo "📦 Local bundle: $NEW_HASH"
 
+ALIYUN_SSH=("${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}")
+ALIYUN_SCP=("${SSHPASS_ARGS[@]}" scp "${SSH_OPTS[@]}")
+
 echo "→ Backing up current dist on Aliyun"
-"${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$ALIYUN_HOST" \
+run_with_retry "Aliyun backup" "${ALIYUN_SSH[@]}" "$ALIYUN_HOST" \
   "rm -rf $BACKUP_PATH && cp -r $SPA_PATH $BACKUP_PATH"
 
 echo "→ Packing + uploading $DIST_DIR"
 rm -f "$TARBALL"
 tar czf "$TARBALL" -C apps/web-workbench dist
-"${SSHPASS_ARGS[@]}" scp "${SSH_OPTS[@]}" "$TARBALL" "$ALIYUN_HOST:/tmp/" >/dev/null
+run_with_retry "Aliyun upload" "${ALIYUN_SCP[@]}" "$TARBALL" "$ALIYUN_HOST:/tmp/" >/dev/null
 
 echo "→ Extracting on Aliyun"
-"${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$ALIYUN_HOST" \
-  "cd /opt/holaday-spa && tar xzf /tmp/holaday-spa-dist.tar.gz" \
-  2>&1 | grep -v 'LIBARCHIVE.xattr' || true
+run_with_retry_filtered "Aliyun extract" "${ALIYUN_SSH[@]}" "$ALIYUN_HOST" \
+  "cd /opt/holaday-spa && tar xzf /tmp/holaday-spa-dist.tar.gz"
 
-echo "→ Smoke check ($SMOKE_URL must return '$SMOKE_MARKER')"
+echo "→ Smoke check ($SMOKE_URL must return '$SMOKE_MARKER' + $NEW_HASH)"
 sleep 2
-# 2 attempts so a transient network blip on the first try doesn't
-# nuke a healthy deploy. The actual page test is identical: HTML
-# response must contain the marker string.
-SMOKE_OK=0
-SMOKE_LOG=""
-for attempt in 1 2; do
-  SMOKE_LOG=$(curl -s --max-time 15 -o /tmp/smoke-resp.html -w '%{http_code}' "$SMOKE_URL" 2>&1)
-  if [[ "$SMOKE_LOG" == "200" ]] && grep -q "$SMOKE_MARKER" /tmp/smoke-resp.html; then
-    SMOKE_OK=1
-    break
-  fi
-  echo "   attempt $attempt: http=$SMOKE_LOG, marker=$(grep -c "$SMOKE_MARKER" /tmp/smoke-resp.html 2>/dev/null || echo 0)"
-  sleep 3
-done
-if [[ "$SMOKE_OK" == "1" ]]; then
-  echo "✅ Smoke check passed"
-else
+if ! smoke_check "Aliyun" "$SMOKE_URL" /tmp/smoke-resp.html; then
   echo "❌ Smoke check FAILED — rolling back"
   echo "Last response head:"
   head -5 /tmp/smoke-resp.html 2>/dev/null | sed 's/^/   /'
-  "${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$ALIYUN_HOST" \
+  run_with_retry "Aliyun rollback" "${ALIYUN_SSH[@]}" "$ALIYUN_HOST" \
     "rm -rf $SPA_PATH && mv $BACKUP_PATH $SPA_PATH"
   echo "🔄 Rolled back to previous version"
   exit 1
 fi
 
-DEPLOYED_HASH=$("${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$ALIYUN_HOST" \
+DEPLOYED_HASH=$(run_with_retry "Aliyun bundle hash" "${ALIYUN_SSH[@]}" "$ALIYUN_HOST" \
   "grep -o 'index-[^\"]*\.js' $SPA_PATH/index.html | head -1")
 echo "✅ Aliyun bundle: $DEPLOYED_HASH"
 if [[ "$DEPLOYED_HASH" != "$NEW_HASH" ]]; then
-  echo "⚠️  Hash mismatch — local $NEW_HASH vs Aliyun $DEPLOYED_HASH" >&2
+  echo "❌ Hash mismatch — local $NEW_HASH vs Aliyun $DEPLOYED_HASH" >&2
   exit 1
 fi
 
@@ -111,9 +173,9 @@ fi
 echo
 echo "→ Mirroring to Vultr (holaday.ai)"
 if [[ -z "${VULTR_PASSWORD:-}" ]]; then
-  echo "⚠️  VULTR_PASSWORD unset — skipping Vultr mirror (Aliyun-only deploy)" >&2
-  echo "    holaday.ai will stay on its current bundle until next push." >&2
-  exit 0
+  echo "❌ VULTR_PASSWORD unset — refusing partial SPA deploy" >&2
+  echo "    Set VULTR_PASSWORD so holaday.ai and Aliyun serve the same bundle." >&2
+  exit 1
 fi
 
 VULTR_SSH=(sshpass -e ssh "${SSH_OPTS[@]}")
@@ -121,45 +183,32 @@ VULTR_SCP=(sshpass -e scp "${SSH_OPTS[@]}")
 export SSHPASS="$VULTR_PASSWORD"
 
 echo "→ Backing up Vultr dist"
-"${VULTR_SSH[@]}" "$VULTR_HOST" \
+run_with_retry "Vultr backup" "${VULTR_SSH[@]}" "$VULTR_HOST" \
   "rm -rf $VULTR_BACKUP_PATH && \
    if [ -d $VULTR_SPA_PATH ]; then cp -r $VULTR_SPA_PATH $VULTR_BACKUP_PATH; fi"
 
 echo "→ Uploading tarball to Vultr"
-"${VULTR_SCP[@]}" "$TARBALL" "$VULTR_HOST:/tmp/" >/dev/null
+run_with_retry "Vultr upload" "${VULTR_SCP[@]}" "$TARBALL" "$VULTR_HOST:/tmp/" >/dev/null
 
 echo "→ Extracting on Vultr"
-"${VULTR_SSH[@]}" "$VULTR_HOST" \
+run_with_retry_filtered "Vultr extract" "${VULTR_SSH[@]}" "$VULTR_HOST" \
   "cd /opt/holaday-monorepo/apps/web-workbench && \
-   rm -rf dist && tar xzf /tmp/holaday-spa-dist.tar.gz" \
-  2>&1 | grep -v 'LIBARCHIVE.xattr' || true
+   rm -rf dist && tar xzf /tmp/holaday-spa-dist.tar.gz"
 
-echo "→ Vultr smoke check ($VULTR_SMOKE_URL must return '$SMOKE_MARKER')"
+echo "→ Vultr smoke check ($VULTR_SMOKE_URL must return '$SMOKE_MARKER' + $NEW_HASH)"
 sleep 2
-VULTR_OK=0
-for attempt in 1 2; do
-  VULTR_LOG=$(curl -s --max-time 15 -o /tmp/vultr-smoke.html -w '%{http_code}' "$VULTR_SMOKE_URL" 2>&1)
-  if [[ "$VULTR_LOG" == "200" ]] && grep -q "$SMOKE_MARKER" /tmp/vultr-smoke.html; then
-    VULTR_OK=1
-    break
-  fi
-  echo "   attempt $attempt: http=$VULTR_LOG"
-  sleep 3
-done
-if [[ "$VULTR_OK" == "1" ]]; then
-  echo "✅ Vultr smoke check passed"
-else
+if ! smoke_check "Vultr" "$VULTR_SMOKE_URL" /tmp/vultr-smoke.html; then
   echo "❌ Vultr smoke FAILED — rolling Vultr back"
-  "${VULTR_SSH[@]}" "$VULTR_HOST" \
+  run_with_retry "Vultr rollback" "${VULTR_SSH[@]}" "$VULTR_HOST" \
     "rm -rf $VULTR_SPA_PATH && mv $VULTR_BACKUP_PATH $VULTR_SPA_PATH"
   echo "🔄 Vultr rolled back. Aliyun deploy remains."
   exit 1
 fi
 
-VULTR_DEPLOYED_HASH=$("${VULTR_SSH[@]}" "$VULTR_HOST" \
+VULTR_DEPLOYED_HASH=$(run_with_retry "Vultr bundle hash" "${VULTR_SSH[@]}" "$VULTR_HOST" \
   "grep -o 'index-[^\"]*\.js' $VULTR_SPA_PATH/index.html | head -1")
 echo "✅ Vultr bundle:  $VULTR_DEPLOYED_HASH"
 if [[ "$VULTR_DEPLOYED_HASH" != "$NEW_HASH" ]]; then
-  echo "⚠️  Vultr hash mismatch — local $NEW_HASH vs Vultr $VULTR_DEPLOYED_HASH" >&2
+  echo "❌ Vultr hash mismatch — local $NEW_HASH vs Vultr $VULTR_DEPLOYED_HASH" >&2
   exit 1
 fi
