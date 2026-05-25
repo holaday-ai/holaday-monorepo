@@ -26,6 +26,11 @@ import { useToast } from '@/components/ui/toast';
 import { clearAccessToken, getAccessToken } from '@/lib/auth';
 import { authSessionExpiredMessage, isAuthSessionError } from '@/lib/auth-session';
 import { taskActionError } from '@/lib/error-copy';
+import {
+  refreshProjectTaskFilterState,
+  resolveProjectFilteredTasks,
+  type ProjectTaskFilterState,
+} from '@/lib/project-task-filter-state';
 import { trpc } from '@/lib/trpc';
 import {
   connect,
@@ -479,26 +484,49 @@ export function AppShell(): JSX.Element {
 
   // Project-scoped task list. Only fetched when the URL pins a
   // project — sub-pages don't trigger this.
-  const [projectTasks, setProjectTasks] = React.useState<UiTask[] | null>(null);
+  const [projectTaskFilter, setProjectTaskFilter] =
+    React.useState<ProjectTaskFilterState | null>(null);
   React.useEffect(() => {
     if (!projectFilter) {
-      setProjectTasks(null);
+      setProjectTaskFilter(null);
       return;
     }
     let cancelled = false;
+    setProjectTaskFilter((prev) =>
+      refreshProjectTaskFilterState(prev, projectFilter),
+    );
     void trpc.tasks.list
       .query({ projectId: projectFilter, limit: 50 })
       .then((res) => {
         if (cancelled) return;
         const fresh: UiTask[] = (res?.tasks ?? []).map((t) => toUiTask(t));
-        setProjectTasks(fresh);
+        setProjectTaskFilter({
+          projectId: projectFilter,
+          tasks: fresh,
+          loading: false,
+          error: null,
+        });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        setProjectTaskFilter((prev) =>
+          prev?.projectId === projectFilter
+            ? { ...prev, loading: false, error: msg }
+            : prev,
+        );
+        toast.show(taskActionError('项目任务加载失败', msg), 'error');
       });
     return () => {
       cancelled = true;
     };
-  }, [projectFilter]);
+  }, [projectFilter, toast]);
 
-  const filteredTasks = projectFilter ? (projectTasks ?? []) : visibleTasks;
+  const filteredTasks = resolveProjectFilteredTasks(
+    projectFilter,
+    projectTaskFilter,
+    visibleTasks,
+  );
 
   if (!authed) {
     return <LoginGate onAuthenticated={handleAuthenticated} />;

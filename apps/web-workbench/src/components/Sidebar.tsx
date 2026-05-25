@@ -57,7 +57,7 @@ import type { UiProject, UiTask } from '@/types/task';
 import { bucketByTime, isTaskDeletable } from '@/utils/time-buckets';
 
 interface Props {
-  tasks: UiTask[];
+  tasks: readonly UiTask[];
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
   onNewTask: () => void;
