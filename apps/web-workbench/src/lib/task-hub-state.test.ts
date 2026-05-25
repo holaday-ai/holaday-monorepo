@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   formatTaskHubTime,
   hasHistoryFilters,
+  historyFilterRequestKey,
   historyPageSummary,
+  shouldApplyHistoryResponse,
   starredPageSummary,
   taskHubErrorMessage,
 } from './task-hub-state';
@@ -27,6 +29,17 @@ describe('task hub state helpers', () => {
         range: '30d',
       }),
     ).toBe('历史任务加载中…');
+    expect(
+      historyPageSummary({
+        loading: false,
+        error: 'offline',
+        count: 8,
+        hasMore: true,
+        query: '',
+        status: 'all',
+        range: '30d',
+      }),
+    ).toBe('刷新失败 · 显示 8+ 条');
     expect(
       historyPageSummary({
         loading: false,
@@ -69,9 +82,33 @@ describe('task hub state helpers', () => {
     expect(starredPageSummary({ loading: false, error: 'offline', count: 0, hasMore: false })).toBe(
       '置顶任务加载失败',
     );
+    expect(starredPageSummary({ loading: false, error: 'offline', count: 3, hasMore: true })).toBe(
+      '刷新失败 · 显示 3+ 个',
+    );
     expect(starredPageSummary({ loading: false, error: null, count: 50, hasMore: true })).toBe(
       '已置顶 50+ 个',
     );
+  });
+
+  it('keys history requests to the active filter set', () => {
+    const activeKey = historyFilterRequestKey({
+      query: ' 报表 ',
+      status: 'failed',
+      range: '7d',
+    });
+    expect(activeKey).toBe('failed\n7d\n报表');
+    expect(
+      shouldApplyHistoryResponse({
+        requestKey: activeKey,
+        activeKey,
+      }),
+    ).toBe(true);
+    expect(
+      shouldApplyHistoryResponse({
+        requestKey: 'all\n30d\n',
+        activeKey,
+      }),
+    ).toBe(false);
   });
 
   it('formats dates and errors defensively', () => {

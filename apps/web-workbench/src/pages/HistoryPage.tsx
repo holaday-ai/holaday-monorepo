@@ -6,7 +6,9 @@ import { supportMailtoHref } from '@/lib/support-links';
 import {
   formatTaskHubTime,
   hasHistoryFilters,
+  historyFilterRequestKey,
   historyPageSummary,
+  shouldApplyHistoryResponse,
   taskHubErrorMessage,
   type HistoryRangeFilter,
   type HistoryStatusFilter,
@@ -79,6 +81,7 @@ export function HistoryPage(): JSX.Element {
   const [range, setRange] = React.useState<RangeFilter>('30d');
   const [query, setQuery] = React.useState('');
   const [debouncedQuery, setDebouncedQuery] = React.useState('');
+  const fetchToken = React.useRef(0);
 
   // Debounce the search input by 300 ms — keystrokes shouldn't each
   // trigger a fresh paged query.
@@ -106,9 +109,16 @@ export function HistoryPage(): JSX.Element {
     else if (range === '30d') out.dateFrom = new Date(Date.now() - 30 * 86400000);
     return out;
   }, [debouncedQuery, status, range]);
+  const filterRequestKey = React.useMemo(
+    () => historyFilterRequestKey({ query: debouncedQuery, status, range }),
+    [debouncedQuery, range, status],
+  );
+  const activeFilterKeyRef = React.useRef(filterRequestKey);
 
   const fetchPage = React.useCallback(
     async (nextCursor: number | null, append: boolean): Promise<void> => {
+      const requestKey = filterRequestKey;
+      const myToken = append ? fetchToken.current : ++fetchToken.current;
       setLoading(true);
       try {
         const input = {
@@ -116,6 +126,15 @@ export function HistoryPage(): JSX.Element {
           ...(nextCursor ? { cursor: nextCursor } : {}),
         };
         const res = await trpc.tasks.list.query(input);
+        if (
+          !shouldApplyHistoryResponse({
+            requestKey,
+            activeKey: activeFilterKeyRef.current,
+          }) ||
+          myToken !== fetchToken.current
+        ) {
+          return;
+        }
         const list = (res?.tasks ?? []) as HistoryTask[];
         setTasks((prev) => (append ? [...prev, ...list] : list));
         setCursor(res?.nextCursor ?? null);
@@ -123,23 +142,40 @@ export function HistoryPage(): JSX.Element {
         if (append) setLoadMoreError(null);
         else setError(null);
       } catch (err) {
+        if (
+          !shouldApplyHistoryResponse({
+            requestKey,
+            activeKey: activeFilterKeyRef.current,
+          }) ||
+          myToken !== fetchToken.current
+        ) {
+          return;
+        }
         const message = taskHubErrorMessage(err, '加载失败');
         if (append) setLoadMoreError(message);
         else setError(message);
       } finally {
-        setLoading(false);
-        setInitialLoad(false);
+        if (
+          shouldApplyHistoryResponse({
+            requestKey,
+            activeKey: activeFilterKeyRef.current,
+          }) &&
+          myToken === fetchToken.current
+        ) {
+          setLoading(false);
+          setInitialLoad(false);
+        }
       }
     },
-    [baseInput],
+    [baseInput, filterRequestKey],
   );
 
   // Filter set changed → drop the existing list + refetch from the
   // top. Token guard so a stale response from the previous filter
   // doesn't overwrite the new one.
-  const fetchToken = React.useRef(0);
   React.useEffect(() => {
     const myToken = ++fetchToken.current;
+    activeFilterKeyRef.current = filterRequestKey;
     setTasks([]);
     setCursor(null);
     setHasMore(true);
@@ -149,7 +185,15 @@ export function HistoryPage(): JSX.Element {
     void trpc.tasks.list
       .query(baseInput)
       .then((res) => {
-        if (myToken !== fetchToken.current) return;
+        if (
+          myToken !== fetchToken.current ||
+          !shouldApplyHistoryResponse({
+            requestKey: filterRequestKey,
+            activeKey: activeFilterKeyRef.current,
+          })
+        ) {
+          return;
+        }
         const list = (res?.tasks ?? []) as HistoryTask[];
         setTasks(list);
         setCursor(res?.nextCursor ?? null);
@@ -157,18 +201,34 @@ export function HistoryPage(): JSX.Element {
         setError(null);
       })
       .catch((err) => {
-        if (myToken !== fetchToken.current) return;
+        if (
+          myToken !== fetchToken.current ||
+          !shouldApplyHistoryResponse({
+            requestKey: filterRequestKey,
+            activeKey: activeFilterKeyRef.current,
+          })
+        ) {
+          return;
+        }
         setTasks([]);
         setCursor(null);
         setHasMore(false);
         setError(taskHubErrorMessage(err, '加载失败'));
       })
       .finally(() => {
-        if (myToken !== fetchToken.current) return;
+        if (
+          myToken !== fetchToken.current ||
+          !shouldApplyHistoryResponse({
+            requestKey: filterRequestKey,
+            activeKey: activeFilterKeyRef.current,
+          })
+        ) {
+          return;
+        }
         setLoading(false);
         setInitialLoad(false);
       });
-  }, [baseInput]);
+  }, [baseInput, filterRequestKey]);
   const filtered = hasHistoryFilters({ query: debouncedQuery, status, range });
   const emptyCopy = historyEmptyCopy({
     query: debouncedQuery,
@@ -184,6 +244,7 @@ export function HistoryPage(): JSX.Element {
     status,
     range,
   });
+  const loadingWithoutRows = loading && tasks.length === 0;
 
   function resetFilters(): void {
     setStatus('all');
@@ -251,7 +312,7 @@ export function HistoryPage(): JSX.Element {
         </Section>
 
         <Section>
-          {initialLoad && loading ? (
+          {loadingWithoutRows ? (
             <div className="flex h-48 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               任务历史加载中…
