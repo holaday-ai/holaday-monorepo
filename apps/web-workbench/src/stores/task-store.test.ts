@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { trpc } from '@/lib/trpc';
 import type { UiTask } from '@/types/task';
-import { normaliseDetailStepStatus, toUiTask, useTaskStore } from './task-store';
+import {
+  normaliseDetailStepStatus,
+  pruneRuntimeStateForTerminalTasks,
+  toUiTask,
+  useTaskStore,
+} from './task-store';
 
 vi.mock('@/lib/trpc', () => ({
   trpc: {
@@ -69,6 +74,106 @@ describe('toUiTask', () => {
     expect(task.failedChecks).toEqual([
       { type: 'source_count', detail: '缺少来源链接' },
     ]);
+  });
+});
+
+describe('pruneRuntimeStateForTerminalTasks', () => {
+  it('clears live-only status for terminal tasks from API refreshes', () => {
+    const patch = pruneRuntimeStateForTerminalTasks(
+      {
+        terminalTaskIds: new Set<string>(),
+        captchaWaitByTask: {
+          tsk_done: {
+            antiBotType: 'captcha',
+            message: 'captcha',
+            startedAt: 1,
+            deadlineMs: 10,
+          },
+        },
+        executorFallbackByTask: {
+          tsk_done: { available: true, at: 1 },
+        },
+        degradeByTask: {
+          tsk_done: {
+            level: 1,
+            strategy: 'profile_rotation',
+            ok: true,
+            message: 'rotated',
+            handoffToExtension: false,
+            at: 1,
+          },
+        },
+        awaitingUserByTask: {
+          tsk_done: { question: 'still there?', at: 1 },
+        },
+        streamingByTask: { tsk_done: 'old stream', tsk_live: 'keep stream' },
+        progressByTask: { tsk_done: '正在验证结果…', tsk_live: 'keep progress' },
+        subStatusByTask: {
+          tsk_done: { subStatus: 'verifying', since: 1 },
+          tsk_live: { subStatus: 'browsing', since: 1 },
+        },
+      },
+      [
+        {
+          taskId: 'tsk_done',
+          intent: 'done',
+          title: null,
+          status: 'completed',
+          tickCount: 1,
+          resultText: '完成',
+          createdAt: new Date('2026-05-25T00:00:00.000Z'),
+        },
+        {
+          taskId: 'tsk_live',
+          intent: 'live',
+          title: null,
+          status: 'executing',
+          tickCount: 1,
+          createdAt: new Date('2026-05-25T00:00:00.000Z'),
+        },
+      ],
+    );
+
+    expect(patch.terminalTaskIds?.has('tsk_done')).toBe(true);
+    expect(patch.subStatusByTask).toEqual({
+      tsk_live: { subStatus: 'browsing', since: 1 },
+    });
+    expect(patch.streamingByTask).toEqual({ tsk_live: 'keep stream' });
+    expect(patch.progressByTask).toEqual({ tsk_live: 'keep progress' });
+    expect(patch.awaitingUserByTask).toEqual({});
+    expect(patch.captchaWaitByTask).toEqual({});
+    expect(patch.executorFallbackByTask).toEqual({});
+    expect(patch.degradeByTask).toEqual({});
+  });
+
+  it('keeps streaming and progress as a bridge until result text is present', () => {
+    const patch = pruneRuntimeStateForTerminalTasks(
+      {
+        terminalTaskIds: new Set<string>(),
+        captchaWaitByTask: {},
+        executorFallbackByTask: {},
+        degradeByTask: {},
+        awaitingUserByTask: {},
+        streamingByTask: { tsk_done: 'bridge stream' },
+        progressByTask: { tsk_done: 'bridge progress' },
+        subStatusByTask: { tsk_done: { subStatus: 'verifying', since: 1 } },
+      },
+      [
+        {
+          taskId: 'tsk_done',
+          intent: 'done',
+          title: null,
+          status: 'completed',
+          tickCount: 1,
+          createdAt: new Date('2026-05-25T00:00:00.000Z'),
+        },
+      ],
+    );
+
+    expect(patch.terminalTaskIds?.has('tsk_done')).toBe(true);
+    expect(patch.subStatusByTask).toEqual({});
+    expect(patch.streamingByTask).toBeUndefined();
+    expect(patch.progressByTask).toBeUndefined();
   });
 });
 

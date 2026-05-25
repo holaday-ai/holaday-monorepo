@@ -15,6 +15,7 @@ import type {
   UiThinkingEvent,
   UiWebSearchEvent,
 } from '@/types/task';
+import { isTerminalStatus } from '@/types/task';
 
 /**
  * Single source of truth for the task list + selection. Data flows in
@@ -257,6 +258,110 @@ export interface TaskStore {
   reset(): void;
 }
 
+type RuntimeStateKey =
+  | 'captchaWaitByTask'
+  | 'executorFallbackByTask'
+  | 'degradeByTask'
+  | 'awaitingUserByTask'
+  | 'streamingByTask'
+  | 'progressByTask'
+  | 'subStatusByTask';
+
+type RuntimeStatePatch = Pick<TaskStore, RuntimeStateKey | 'terminalTaskIds'>;
+
+export function pruneRuntimeStateForTerminalTasks(
+  prev: Pick<TaskStore, RuntimeStateKey | 'terminalTaskIds'>,
+  tasks: readonly UiTask[],
+): Partial<RuntimeStatePatch> {
+  const terminalTasks = tasks.filter((task) => isTerminalStatus(task.status));
+  if (terminalTasks.length === 0) return {};
+
+  const terminalIds = new Set(terminalTasks.map((task) => task.taskId));
+  const terminalIdsWithResult = new Set(
+    terminalTasks
+      .filter((task) => typeof task.resultText === 'string' && task.resultText.length > 0)
+      .map((task) => task.taskId),
+  );
+
+  const patch: Partial<RuntimeStatePatch> = {};
+  const nextTerminalTaskIds = new Set(prev.terminalTaskIds);
+  let terminalChanged = false;
+  for (const taskId of terminalIds) {
+    if (nextTerminalTaskIds.has(taskId)) continue;
+    nextTerminalTaskIds.add(taskId);
+    terminalChanged = true;
+  }
+  if (terminalChanged) patch.terminalTaskIds = nextTerminalTaskIds;
+
+  const nextCaptchaWaitByTask = omitRuntimeKeys(
+    prev.captchaWaitByTask,
+    terminalIds,
+  );
+  if (nextCaptchaWaitByTask !== prev.captchaWaitByTask) {
+    patch.captchaWaitByTask = nextCaptchaWaitByTask;
+  }
+
+  const nextExecutorFallbackByTask = omitRuntimeKeys(
+    prev.executorFallbackByTask,
+    terminalIds,
+  );
+  if (nextExecutorFallbackByTask !== prev.executorFallbackByTask) {
+    patch.executorFallbackByTask = nextExecutorFallbackByTask;
+  }
+
+  const nextDegradeByTask = omitRuntimeKeys(prev.degradeByTask, terminalIds);
+  if (nextDegradeByTask !== prev.degradeByTask) {
+    patch.degradeByTask = nextDegradeByTask;
+  }
+
+  const nextAwaitingUserByTask = omitRuntimeKeys(
+    prev.awaitingUserByTask,
+    terminalIds,
+  );
+  if (nextAwaitingUserByTask !== prev.awaitingUserByTask) {
+    patch.awaitingUserByTask = nextAwaitingUserByTask;
+  }
+
+  const nextSubStatusByTask = omitRuntimeKeys(prev.subStatusByTask, terminalIds);
+  if (nextSubStatusByTask !== prev.subStatusByTask) {
+    patch.subStatusByTask = nextSubStatusByTask;
+  }
+
+  // Keep streaming/progress as a bridge until canonical resultText is
+  // present. Once the API refresh confirms a terminal result, those
+  // live buffers are stale and can no longer improve the handoff.
+  const nextStreamingByTask = omitRuntimeKeys(
+    prev.streamingByTask,
+    terminalIdsWithResult,
+  );
+  if (nextStreamingByTask !== prev.streamingByTask) {
+    patch.streamingByTask = nextStreamingByTask;
+  }
+
+  const nextProgressByTask = omitRuntimeKeys(
+    prev.progressByTask,
+    terminalIdsWithResult,
+  );
+  if (nextProgressByTask !== prev.progressByTask) {
+    patch.progressByTask = nextProgressByTask;
+  }
+
+  return patch;
+}
+
+function omitRuntimeKeys<T extends Record<string, unknown>>(
+  record: T,
+  keys: ReadonlySet<string>,
+): T {
+  let next: T | null = null;
+  for (const key of keys) {
+    if (!(key in record)) continue;
+    next ??= { ...record };
+    delete next[key];
+  }
+  return next ?? record;
+}
+
 // URL-write callback registered by WorkbenchApp at mount. Earlier the
 // store→URL sync lived in a useEffect that watched selectedTaskId and
 // called `navigate()`; that created an infinite loop on every sidebar
@@ -447,12 +552,100 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             ? detailVerification.verificationPassed
             : null;
         const failureLevelRaw = detailVerification.failureLevel;
-        const failureLevel =
+        const failureLevel: UiTask['failureLevel'] =
           failureLevelRaw === 'fixable' ||
           failureLevelRaw === 'needs_clarification' ||
           failureLevelRaw === 'hard_fail'
             ? failureLevelRaw
             : null;
+        const nextAwaitingUserByTask = awaitingQuestion
+          ? {
+              ...prev.awaitingUserByTask,
+              [taskId]: {
+                question: awaitingQuestion,
+                at: Date.now(),
+                ...(awaitingKind ? { awaitingKind } : {}),
+              },
+            }
+          : (() => {
+              if (!prev.awaitingUserByTask[taskId])
+                return prev.awaitingUserByTask;
+              const next = { ...prev.awaitingUserByTask };
+              delete next[taskId];
+              return next;
+            })();
+        const nextTasks: UiTask[] = (() => {
+          const exists = prev.tasks.some((t) => t.taskId === taskId);
+          if (exists) {
+            return prev.tasks.map((t) =>
+              t.taskId === taskId
+                ? {
+                    ...t,
+                    status: detail.status as UiTaskStatus,
+                    tickCount: Math.max(t.tickCount, steps.length),
+                    ...(resultText ? { resultText } : {}),
+                    ...(planText ? { planText } : {}),
+                    ...(planStatus ? { planStatus } : {}),
+                    ...(finalScreenshot ? { finalScreenshot } : {}),
+                    ...(finalUrl ? { finalUrl } : {}),
+                    ...(awaitingKind ? { awaitingKind } : {}),
+                    ...(executionMode ? { executionMode } : {}),
+                    ...(attachments ? { attachments } : {}),
+                    ...(expertWorkflowId ? { expertWorkflowId } : {}),
+                    ...(expertMode ? { expertMode } : {}),
+                    failedChecks,
+                    verificationPassed,
+                    failureLevel,
+                  }
+                : t,
+            );
+          }
+          // P1-C — deep link to a task older than the first page.
+          // synthesise UiTask from detail, prepend.
+          const detailExtras = detail as typeof detail & {
+            opusUsed?: boolean;
+            starred?: boolean;
+            starredAt?: Date | string | null;
+            projectId?: string | null;
+          };
+          const synth: UiTask = {
+            taskId,
+            intent: detail.intent,
+            title:
+              typeof detail.title === 'string' ? detail.title : null,
+            status: detail.status as UiTaskStatus,
+            tickCount: steps.length,
+            ...(resultText ? { resultText } : {}),
+            createdAt: new Date(
+              detail.createdAt as unknown as string | number | Date,
+            ),
+            modelLabel: detailExtras.opusUsed === true ? 'opus' : 'sonnet',
+            starred: detailExtras.starred === true,
+            starredAt: detailExtras.starredAt
+              ? new Date(
+                  detailExtras.starredAt as unknown as string | number | Date,
+                )
+              : null,
+            projectId:
+              typeof detailExtras.projectId === 'string'
+                ? detailExtras.projectId
+                : null,
+            ...(planText ? { planText } : {}),
+            ...(planStatus ? { planStatus } : {}),
+            ...(finalScreenshot ? { finalScreenshot } : {}),
+            ...(finalUrl ? { finalUrl } : {}),
+            ...(awaitingKind ? { awaitingKind } : {}),
+            ...(executionMode ? { executionMode } : {}),
+            ...(attachments ? { attachments } : {}),
+            ...(expertWorkflowId ? { expertWorkflowId } : {}),
+            ...(expertMode ? { expertMode } : {}),
+            failedChecks,
+            verificationPassed,
+            failureLevel,
+          };
+          return [synth, ...prev.tasks];
+        })();
+        const hydratedTask = nextTasks.find((task) => task.taskId === taskId);
         return {
           stepsByTask: { ...prev.stepsByTask, [taskId]: steps },
           ...(hydratedWebSearch
@@ -463,93 +656,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                 },
               }
             : {}),
-          awaitingUserByTask: awaitingQuestion
-            ? {
-                ...prev.awaitingUserByTask,
-                [taskId]: {
-                  question: awaitingQuestion,
-                  at: Date.now(),
-                  ...(awaitingKind ? { awaitingKind } : {}),
-                },
-              }
-            : (() => {
-                if (!prev.awaitingUserByTask[taskId])
-                  return prev.awaitingUserByTask;
-                const next = { ...prev.awaitingUserByTask };
-                delete next[taskId];
-                return next;
-              })(),
-          tasks: (() => {
-            const exists = prev.tasks.some((t) => t.taskId === taskId);
-            if (exists) {
-              return prev.tasks.map((t) =>
-                t.taskId === taskId
-                  ? {
-                      ...t,
-                      status: detail.status as UiTaskStatus,
-                      tickCount: Math.max(t.tickCount, steps.length),
-                      ...(resultText ? { resultText } : {}),
-                      ...(planText ? { planText } : {}),
-                      ...(planStatus ? { planStatus } : {}),
-                      ...(finalScreenshot ? { finalScreenshot } : {}),
-                      ...(finalUrl ? { finalUrl } : {}),
-                      ...(awaitingKind ? { awaitingKind } : {}),
-                      ...(executionMode ? { executionMode } : {}),
-                      ...(attachments ? { attachments } : {}),
-                      ...(expertWorkflowId ? { expertWorkflowId } : {}),
-                      ...(expertMode ? { expertMode } : {}),
-                      failedChecks,
-                      verificationPassed,
-                      failureLevel,
-                    }
-                  : t,
-              );
-            }
-            // P1-C — deep link to a task older than the first page.
-            // synthesise UiTask from detail, prepend.
-            const detailExtras = detail as typeof detail & {
-              opusUsed?: boolean;
-              starred?: boolean;
-              starredAt?: Date | string | null;
-              projectId?: string | null;
-            };
-            const synth: UiTask = {
-              taskId,
-              intent: detail.intent,
-              title:
-                typeof detail.title === 'string' ? detail.title : null,
-              status: detail.status as UiTaskStatus,
-              tickCount: steps.length,
-              ...(resultText ? { resultText } : {}),
-              createdAt: new Date(
-                detail.createdAt as unknown as string | number | Date,
-              ),
-              modelLabel: detailExtras.opusUsed === true ? 'opus' : 'sonnet',
-              starred: detailExtras.starred === true,
-              starredAt: detailExtras.starredAt
-                ? new Date(
-                    detailExtras.starredAt as unknown as string | number | Date,
-                  )
-                : null,
-              projectId:
-                typeof detailExtras.projectId === 'string'
-                  ? detailExtras.projectId
-                  : null,
-              ...(planText ? { planText } : {}),
-              ...(planStatus ? { planStatus } : {}),
-              ...(finalScreenshot ? { finalScreenshot } : {}),
-              ...(finalUrl ? { finalUrl } : {}),
-              ...(awaitingKind ? { awaitingKind } : {}),
-              ...(executionMode ? { executionMode } : {}),
-              ...(attachments ? { attachments } : {}),
-              ...(expertWorkflowId ? { expertWorkflowId } : {}),
-              ...(expertMode ? { expertMode } : {}),
-              failedChecks,
-              verificationPassed,
-              failureLevel,
-            };
-            return [synth, ...prev.tasks];
-          })(),
+          awaitingUserByTask: nextAwaitingUserByTask,
+          tasks: nextTasks,
+          ...(hydratedTask
+            ? pruneRuntimeStateForTerminalTasks(
+                { ...prev, awaitingUserByTask: nextAwaitingUserByTask },
+                [hydratedTask],
+              )
+            : {}),
         };
       });
     } catch (err) {
@@ -704,12 +818,13 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       // bootstrap, a sidebar / search / history click, or a
       // successful createTask. This call just delivers fresh task
       // data and re-hydrates the active selection if there is one.
-      set({
+      set((prev) => ({
         tasks,
         loading: false,
         tasksCursor: res.nextCursor ?? null,
         tasksHasMore: res.nextCursor != null,
-      });
+        ...pruneRuntimeStateForTerminalTasks(prev, tasks),
+      }));
       if (prevSelected) {
         // Selection unchanged but the underlying detail might have
         // moved on (task completed, awaiting_user prompt added,
