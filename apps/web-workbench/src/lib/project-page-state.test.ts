@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PROJECT_NAME_MAX_LENGTH,
   normalizeProjectName,
+  normalizeProjectRows,
   projectCountSummary,
   projectNameState,
 } from './project-page-state';
@@ -54,5 +55,51 @@ describe('project page state helpers', () => {
     );
     expect(projectCountSummary({ count: 0, loading: false, error: null })).toBe('尚无项目');
     expect(projectCountSummary({ count: 3, loading: false, error: null })).toBe('共 3 个项目');
+  });
+
+  it('normalizes project list rows before shell/menu rendering', () => {
+    expect(
+      normalizeProjectRows([
+        null,
+        {
+          projectId: ' proj_a ',
+          name: ' Launch ',
+          description: ' Growth work ',
+          createdAt: '2026-05-25T00:00:00.000Z',
+          updatedAt: '2026-05-25T01:00:00.000Z',
+          taskCount: 3.8,
+        },
+        {
+          projectId: 'proj_b',
+          name: { unsafe: true },
+          description: { unsafe: true },
+          createdAt: 'bad-date',
+          updatedAt: Number.POSITIVE_INFINITY,
+          taskCount: Number.NaN,
+        },
+        {
+          projectId: '',
+          name: 'missing id',
+          taskCount: 2,
+        },
+      ]),
+    ).toEqual([
+      {
+        projectId: 'proj_a',
+        name: 'Launch',
+        description: 'Growth work',
+        createdAt: '2026-05-25T00:00:00.000Z',
+        updatedAt: '2026-05-25T01:00:00.000Z',
+        taskCount: 3,
+      },
+      {
+        projectId: 'proj_b',
+        name: '未命名项目',
+        description: null,
+        createdAt: new Date(0),
+        updatedAt: new Date(0),
+        taskCount: 0,
+      },
+    ]);
   });
 });

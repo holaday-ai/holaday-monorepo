@@ -39,6 +39,7 @@ import {
   resolveProjectFilteredTasks,
   type ProjectTaskFilterState,
 } from '@/lib/project-task-filter-state';
+import { normalizeProjectRows } from '@/lib/project-page-state';
 import { shouldKeepProjectFilterForPickedTask } from '@/lib/task-selection-url-state';
 import { trpc } from '@/lib/trpc';
 import { normalizeTaskActionCount } from '@/lib/workbench-state';
@@ -157,7 +158,7 @@ export function AppShell(): JSX.Element {
   const refreshProjects = React.useCallback(async (): Promise<ProjectRefreshResult> => {
     try {
       const list = await trpc.projects.list.query();
-      const nextProjects = list as UiProject[];
+      const nextProjects = normalizeProjectRows(list);
       setProjects(nextProjects);
       return { ok: true, projects: nextProjects };
     } catch (err) {

@@ -1,3 +1,5 @@
+import type { UiProject } from '@/types/task';
+
 export const PROJECT_NAME_MAX_LENGTH = 100;
 
 export interface ProjectNameState {
@@ -53,4 +55,49 @@ export function projectCountSummary(options: {
   if (options.error) return '项目加载失败';
   if (options.count === 0) return '尚无项目';
   return `共 ${options.count} 个项目`;
+}
+
+export function normalizeProjectRows(value: unknown): UiProject[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const projectId = safeProjectText(entry.projectId);
+    if (!projectId) return [];
+    return [
+      {
+        projectId,
+        name: safeProjectText(entry.name) || '未命名项目',
+        description: safeProjectNullableText(entry.description),
+        createdAt: safeProjectDate(entry.createdAt) ?? new Date(0),
+        updatedAt: safeProjectDate(entry.updatedAt) ?? new Date(0),
+        taskCount: safeProjectCount(entry.taskCount),
+      },
+    ];
+  });
+}
+
+function safeProjectText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function safeProjectNullableText(value: unknown): string | null {
+  const text = safeProjectText(value);
+  return text || null;
+}
+
+function safeProjectDate(value: unknown): string | Date | null {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value === 'number') return Number.isFinite(value) ? new Date(value) : null;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed && !Number.isNaN(Date.parse(trimmed)) ? trimmed : null;
+}
+
+function safeProjectCount(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
