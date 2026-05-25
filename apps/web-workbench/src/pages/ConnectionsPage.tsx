@@ -22,23 +22,13 @@ import {
   connectionPageSummary,
   connectionProviderStatus,
   groupConnectionProviders,
+  normalizeConnectionProviders,
+  type ConnectionProviderView,
 } from '@/lib/connection-page-state';
 import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
 import { cn } from '@/lib/utils';
-
-type Category = 'productivity' | 'communication' | 'storage' | 'development' | 'social';
-
-interface UiProvider {
-  id: string;
-  name: string;
-  icon: string;
-  description: string;
-  category: Category;
-  oauthSupported: boolean;
-  comingSoon: boolean;
-}
 
 const ICONS: Record<string, LucideIcon> = {
   Calendar,
@@ -61,7 +51,7 @@ const ICONS: Record<string, LucideIcon> = {
 export function ConnectionsPage(): JSX.Element {
   const toast = useToast();
   const mountedRef = React.useRef(false);
-  const [providers, setProviders] = React.useState<UiProvider[]>([]);
+  const [providers, setProviders] = React.useState<ConnectionProviderView[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
 
@@ -70,9 +60,9 @@ export function ConnectionsPage(): JSX.Element {
       setLoading(true);
       setLoadError(null);
       try {
-        const list = await trpc.connections.list.query();
+        const list = normalizeConnectionProviders(await trpc.connections.list.query());
         if (!mountedRef.current) return;
-        setProviders(list as UiProvider[]);
+        setProviders(list);
       } catch (err) {
         if (!mountedRef.current) return;
         const message = err instanceof Error ? err.message : '请稍后重试';
@@ -202,7 +192,7 @@ export function ConnectionsPage(): JSX.Element {
   );
 }
 
-function ConnectionProviderCard({ provider }: { provider: UiProvider }): JSX.Element {
+function ConnectionProviderCard({ provider }: { provider: ConnectionProviderView }): JSX.Element {
   const Icon = ICONS[provider.icon] ?? Plug;
   const status = connectionProviderStatus(provider);
 

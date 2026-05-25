@@ -4,6 +4,8 @@ import {
   connectionPageSummary,
   connectionProviderStatus,
   groupConnectionProviders,
+  normalizeConnectionProviders,
+  safeConnectionCount,
   type ConnectionProviderLike,
 } from './connection-page-state';
 
@@ -70,10 +72,88 @@ describe('connection page state helpers', () => {
     expect(connectionPageSummary({ count: 10, categoryCount: 5, loading: false, error: null })).toBe(
       '已规划 10 个连接器 · 5 类工具',
     );
+    expect(
+      connectionPageSummary({
+        count: Number.NaN,
+        categoryCount: Number.POSITIVE_INFINITY,
+        loading: false,
+        error: null,
+      }),
+    ).toBe('暂无规划连接器');
   });
 
   it('asks for the concrete provider and use case in the request body', () => {
     expect(connectionAccessMailBody('GitHub')).toContain('请协助开通 GitHub 连接器。');
     expect(connectionAccessMailBody('GitHub')).toContain('需要执行的典型操作：');
+  });
+
+  it('normalizes malformed connection provider responses', () => {
+    const rows = normalizeConnectionProviders([
+      {
+        id: ' github ',
+        name: ' GitHub ',
+        category: 'development',
+        oauthSupported: true,
+        comingSoon: false,
+        icon: 'Github',
+        description: '  Code hosting  ',
+      },
+      {
+        id: 'bad-category',
+        name: 'Bad Category',
+        category: 'unknown',
+      },
+      {
+        id: 'bad-name',
+        name: { unsafe: true },
+        category: 'productivity',
+      },
+      null,
+    ]);
+
+    expect(rows).toEqual([
+      {
+        id: 'github',
+        name: 'GitHub',
+        category: 'development',
+        oauthSupported: true,
+        comingSoon: false,
+        icon: 'Github',
+        description: 'Code hosting',
+      },
+    ]);
+  });
+
+  it('uses safe fallbacks for optional provider fields', () => {
+    expect(
+      normalizeConnectionProviders([
+        {
+          id: 'custom',
+          name: 'Custom App',
+          category: 'productivity',
+        },
+      ]),
+    ).toEqual([
+      {
+        id: 'custom',
+        name: 'Custom App',
+        category: 'productivity',
+        oauthSupported: false,
+        comingSoon: true,
+        icon: 'Plug',
+        description: '暂未提供说明。',
+      },
+    ]);
+  });
+
+  it('rejects non-array provider payloads and sanitizes counts', () => {
+    expect(() => normalizeConnectionProviders({ providers: [] })).toThrow(
+      '连接器数据格式异常，请稍后重试。',
+    );
+    expect(safeConnectionCount(Number.NaN)).toBe(0);
+    expect(safeConnectionCount(Number.POSITIVE_INFINITY)).toBe(0);
+    expect(safeConnectionCount('3')).toBe(0);
+    expect(safeConnectionCount(-1)).toBe(0);
+    expect(safeConnectionCount(3.9)).toBe(3);
   });
 });
