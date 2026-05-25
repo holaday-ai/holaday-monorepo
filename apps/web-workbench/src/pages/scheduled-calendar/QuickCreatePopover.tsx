@@ -14,13 +14,19 @@
  * Dismissal: Esc, click outside, or pressing Cancel.
  */
 
-import { Plus } from 'lucide-react';
+import { Loader2, Plus } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import {
+  quickCreateCanSubmit,
+  quickCreateSubmitLabel,
+  quickCreateValidationMessage,
+  type QuickCreateRepeatType,
+} from './quick-create-state';
 
 const REPEAT_PRESETS: ReadonlyArray<{
-  value: 'once' | 'daily' | 'weekly' | 'monthly' | 'custom';
+  value: QuickCreateRepeatType;
   label: string;
 }> = [
   { value: 'once', label: '不重复' },
@@ -64,7 +70,7 @@ interface Props {
 }
 
 const POPOVER_WIDTH = 360;
-const POPOVER_HEIGHT_EST = 320;
+const POPOVER_HEIGHT_EST = 460;
 
 export function QuickCreatePopover({
   anchor,
@@ -75,14 +81,13 @@ export function QuickCreatePopover({
 }: Props): JSX.Element {
   const [intent, setIntent] = React.useState('');
   const [timeStr, setTimeStr] = React.useState(() => formatLocalTime(date));
-  const [repeatType, setRepeatType] = React.useState<
-    'once' | 'daily' | 'weekly' | 'monthly' | 'custom'
-  >('once');
+  const [repeatType, setRepeatType] = React.useState<QuickCreateRepeatType>('once');
   const [rrule, setRrule] = React.useState('');
   const [description, setDescription] = React.useState('');
   const [showDescription, setShowDescription] = React.useState(false);
   const [reminderMinutes, setReminderMinutes] = React.useState<number | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
+  const [submitError, setSubmitError] = React.useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = React.useState(false);
   const intentRef = React.useRef<HTMLInputElement | null>(null);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
@@ -100,10 +105,10 @@ export function QuickCreatePopover({
   // libraries hook in.
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !submitting) onClose();
     };
     const onClickOutside = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) onClose();
+      if (!submitting && !rootRef.current?.contains(e.target as Node)) onClose();
     };
     document.addEventListener('keydown', onKey);
     document.addEventListener('mousedown', onClickOutside);
@@ -111,11 +116,18 @@ export function QuickCreatePopover({
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('mousedown', onClickOutside);
     };
-  }, [onClose]);
+  }, [onClose, submitting]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!intent.trim() || submitting) return;
+    const validationMessage = quickCreateValidationMessage({ repeatType, rrule });
+    if (validationMessage) {
+      setShowAdvanced(true);
+      setSubmitError(validationMessage);
+      return;
+    }
+    setSubmitError(null);
     setSubmitting(true);
     try {
       const scheduledAt = combineDateAndTime(date, timeStr);
@@ -137,13 +149,26 @@ export function QuickCreatePopover({
     }
   };
 
+  const handleRepeatSelect = (value: QuickCreateRepeatType) => {
+    setRepeatType(value);
+    setSubmitError(null);
+    if (value === 'custom') setShowAdvanced(true);
+  };
+
   const position = computePosition(anchor, mobile);
+  const canCreate = quickCreateCanSubmit({
+    intent,
+    repeatType,
+    rrule,
+    submitting,
+  });
 
   return (
     <div
       ref={rootRef}
+      aria-busy={submitting}
       className={cn(
-        'hd-popover-enter hd-quick-create fixed z-50 bg-popover',
+        'hd-popover-enter hd-quick-create fixed z-[85] max-h-[calc(100vh-1rem)] overflow-y-auto bg-popover',
         mobile && 'left-2 right-2 bottom-2 mx-auto',
       )}
       style={{
@@ -161,7 +186,10 @@ export function QuickCreatePopover({
           ref={intentRef}
           type="text"
           value={intent}
-          onChange={(e) => setIntent(e.target.value)}
+          onChange={(e) => {
+            setIntent(e.target.value);
+            setSubmitError(null);
+          }}
           placeholder="描述要做的事情…"
           className="hd-quick-create__input mt-3 w-full bg-transparent text-base font-medium outline-none"
           style={{
@@ -171,12 +199,17 @@ export function QuickCreatePopover({
             color: 'inherit',
           }}
           maxLength={2000}
+          disabled={submitting}
         />
         {!showDescription ? (
           <button
             type="button"
-            onClick={() => setShowDescription(true)}
-            className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              setShowDescription(true);
+              setSubmitError(null);
+            }}
+            disabled={submitting}
+            className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
           >
             <Plus className="h-3 w-3" />
             添加备注
@@ -196,6 +229,7 @@ export function QuickCreatePopover({
               color: 'inherit',
             }}
             maxLength={2000}
+            disabled={submitting}
           />
         )}
         <div className="mt-4 flex items-center gap-3">
@@ -203,7 +237,10 @@ export function QuickCreatePopover({
           <input
             type="time"
             value={timeStr}
-            onChange={(e) => setTimeStr(e.target.value)}
+            onChange={(e) => {
+              setTimeStr(e.target.value);
+              setSubmitError(null);
+            }}
             className="hd-quick-create__time bg-transparent text-sm outline-none"
             style={{
               border: 'none',
@@ -211,6 +248,7 @@ export function QuickCreatePopover({
               padding: '4px 0',
               color: 'inherit',
             }}
+            disabled={submitting}
           />
         </div>
         <div className="mt-4 flex flex-wrap gap-1.5">
@@ -218,9 +256,10 @@ export function QuickCreatePopover({
             <button
               type="button"
               key={p.value}
-              onClick={() => setRepeatType(p.value)}
+              onClick={() => handleRepeatSelect(p.value)}
+              disabled={submitting}
               className={cn(
-                'rounded-full px-3 py-1 text-xs transition-colors',
+                'rounded-full px-3 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-60',
                 repeatType === p.value
                   ? 'bg-[#EA1F59]/12 text-[#EA1F59]'
                   : 'text-muted-foreground hover:bg-foreground/[0.04]',
@@ -245,8 +284,9 @@ export function QuickCreatePopover({
                 type="button"
                 key={p.value === null ? 'off' : String(p.value)}
                 onClick={() => setReminderMinutes(p.value)}
+                disabled={submitting}
                 className={cn(
-                  'rounded-full px-3 py-1 text-xs transition-colors',
+                  'rounded-full px-3 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-60',
                   reminderMinutes === p.value
                     ? 'bg-[#EA1F59]/12 text-[#EA1F59]'
                     : 'text-muted-foreground hover:bg-foreground/[0.04]',
@@ -267,14 +307,18 @@ export function QuickCreatePopover({
             <button
               type="button"
               onClick={() => setShowAdvanced((v) => !v)}
-              className="text-xs text-muted-foreground hover:text-foreground"
+              disabled={submitting}
+              className="text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
             >
               {showAdvanced ? '收起 ▴' : '展开 RRULE 高级 ▾'}
             </button>
             {showAdvanced && (
               <textarea
                 value={rrule}
-                onChange={(e) => setRrule(e.target.value)}
+                onChange={(e) => {
+                  setRrule(e.target.value);
+                  setSubmitError(null);
+                }}
                 placeholder={'FREQ=WEEKLY;BYDAY=MO,WE,FR'}
                 rows={2}
                 className="mt-2 w-full bg-transparent font-mono text-xs outline-none"
@@ -284,11 +328,17 @@ export function QuickCreatePopover({
                   padding: '6px 0',
                   color: 'inherit',
                 }}
+                disabled={submitting}
               />
             )}
           </div>
         )}
-        <div className="mt-5 flex justify-end gap-2">
+        {submitError && (
+          <div className="mt-3 rounded-md border border-[#EA1F59]/20 bg-[#EA1F59]/[0.06] px-3 py-2 text-xs text-[#EA1F59]">
+            {submitError}
+          </div>
+        )}
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
           <Button
             type="button"
             variant="ghost"
@@ -300,6 +350,7 @@ export function QuickCreatePopover({
           </Button>
           <Button
             type="submit"
+            data-can-create={canCreate ? 'true' : 'false'}
             disabled={!intent.trim() || submitting}
             style={{
               backgroundColor: '#EA1F59',
@@ -308,7 +359,8 @@ export function QuickCreatePopover({
             }}
             className="text-white hover:opacity-90"
           >
-            {submitting ? '创建中…' : '创建'}
+            {submitting && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            {quickCreateSubmitLabel(submitting)}
           </Button>
         </div>
       </form>
