@@ -22,38 +22,38 @@ import {
   maskWebhookUrl,
   NOTIFICATION_PLATFORM_LABEL,
   notificationChannelDeleteDescription,
-  type NotificationPlatform,
 } from '@/lib/notification-channel-copy';
+import {
+  normalizeNotificationChannels,
+  notificationChannelsLoadErrorMessage,
+  type NotificationChannelRow,
+} from '@/lib/notification-channel-state';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 import { Row, Section } from '@/pages/PageShell';
 import { AddChannelModal, type ChannelDraft } from './AddChannelModal';
 
-interface ChannelRow {
-  channelId: string;
-  platform: NotificationPlatform;
-  webhookUrl: string;
-  customTemplate: unknown;
-  enabled: boolean;
-  createdAt: string | Date;
-}
-
 export function NotificationsSection(): JSX.Element {
   const toast = useToast();
-  const [channels, setChannels] = React.useState<ChannelRow[]>([]);
+  const [channels, setChannels] = React.useState<NotificationChannelRow[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [modalOpen, setModalOpen] = React.useState(false);
-  const [editingChannel, setEditingChannel] = React.useState<ChannelRow | null>(null);
+  const [editingChannel, setEditingChannel] =
+    React.useState<NotificationChannelRow | null>(null);
   const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await trpc.notificationChannels.list.query();
-      setChannels(res as ChannelRow[]);
+      setChannels(normalizeNotificationChannels(res));
     } catch (err) {
+      const message = notificationChannelsLoadErrorMessage(err);
+      setLoadError(message);
       toast.show(
-        `加载失败：${err instanceof Error ? err.message : String(err)}`,
+        `加载失败：${message}`,
         'error',
       );
     } finally {
@@ -66,7 +66,7 @@ export function NotificationsSection(): JSX.Element {
     void refresh();
   }, [refresh]);
 
-  const handleToggle = async (row: ChannelRow): Promise<void> => {
+  const handleToggle = async (row: NotificationChannelRow): Promise<void> => {
     const next = !row.enabled;
     setChannels((prev) =>
       prev.map((c) => (c.channelId === row.channelId ? { ...c, enabled: next } : c)),
@@ -171,6 +171,21 @@ export function NotificationsSection(): JSX.Element {
               添加渠道
             </Button>
           </div>
+          {loadError && !loading && (
+            <div className="mx-4 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#EA1F59]/25 bg-[#EA1F59]/5 px-3 py-2 text-xs text-muted-foreground">
+              <span className="min-w-0 flex-1">
+                通知渠道加载失败：{loadError}
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void refresh()}
+              >
+                重试
+              </Button>
+            </div>
+          )}
           {loading ? (
             <div className="px-4 pb-4 text-xs text-muted-foreground">
               <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
