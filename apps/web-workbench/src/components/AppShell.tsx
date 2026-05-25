@@ -34,6 +34,7 @@ import {
   resolveProjectFilteredTasks,
   type ProjectTaskFilterState,
 } from '@/lib/project-task-filter-state';
+import { shouldKeepProjectFilterForPickedTask } from '@/lib/task-selection-url-state';
 import { trpc } from '@/lib/trpc';
 import {
   connect,
@@ -666,9 +667,29 @@ export function AppShell(): JSX.Element {
           setSearchOpen(false);
           if (location.pathname !== '/') {
             navigate(`/?task=${encodeURIComponent(taskId)}`);
-          } else {
-            selectTask(taskId, 'ui');
+            return;
           }
+          const pickedTask = tasks.find((task) => task.taskId === taskId);
+          if (
+            shouldKeepProjectFilterForPickedTask({
+              currentProjectId: projectFilter,
+              taskProjectId: pickedTask?.projectId,
+            })
+          ) {
+            selectTask(taskId, 'ui');
+            return;
+          }
+          const next = new URLSearchParams(searchParams);
+          next.delete('project');
+          next.set('task', taskId);
+          navigate(
+            {
+              pathname: '/',
+              search: next.toString() ? `?${next.toString()}` : '',
+            },
+            { replace: true },
+          );
+          selectTask(taskId, 'url');
         }}
       />
 
