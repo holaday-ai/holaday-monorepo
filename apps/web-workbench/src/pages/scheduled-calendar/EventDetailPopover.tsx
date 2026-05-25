@@ -15,6 +15,13 @@ import { Bell, BellOff, Calendar, CheckCircle2, Clock, Loader2, Pause, Play, Tra
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import {
+  describeScheduledEventReminder,
+  describeScheduledEventRepeat,
+  scheduledEventCanRunNow,
+  scheduledEventCanToggle,
+  scheduledEventToggleLabel,
+} from './event-detail-state';
 import type { ScheduledTaskRow } from './event-mapping';
 
 interface Props {
@@ -28,7 +35,7 @@ interface Props {
 }
 
 const POPOVER_WIDTH = 360;
-const POPOVER_HEIGHT_EST = 320;
+const POPOVER_HEIGHT_EST = 460;
 
 export function EventDetailPopover({
   anchor,
@@ -49,10 +56,10 @@ export function EventDetailPopover({
   // popover spec.
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && busy === null) onClose();
     };
     const onClickOutside = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) onClose();
+      if (busy === null && !rootRef.current?.contains(e.target as Node)) onClose();
     };
     document.addEventListener('keydown', onKey);
     document.addEventListener('mousedown', onClickOutside);
@@ -60,9 +67,10 @@ export function EventDetailPopover({
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('mousedown', onClickOutside);
     };
-  }, [onClose]);
+  }, [busy, onClose]);
 
   const wrap = async (kind: 'toggle' | 'run', fn: () => Promise<void>) => {
+    if (busy !== null) return;
     setBusy(kind);
     try {
       await fn();
@@ -74,17 +82,17 @@ export function EventDetailPopover({
   const position = computePosition(anchor, mobile);
   const statusLabel = STATUS_LABEL[row.status] ?? row.status;
   const statusIcon = STATUS_ICON[row.status];
-  const canToggle = row.status === 'active' || row.status === 'paused' || row.status === 'failed';
-  const canRunNow = row.status === 'active' || row.status === 'paused' || row.status === 'failed';
-  const toggleLabel =
-    row.status === 'paused' ? '恢复' : row.status === 'failed' ? '重新启用' : '暂停';
+  const canToggle = scheduledEventCanToggle(row.status);
+  const canRunNow = scheduledEventCanRunNow(row.status);
+  const toggleLabel = scheduledEventToggleLabel(row.status);
   const ToggleIcon = row.status === 'paused' || row.status === 'failed' ? Play : Pause;
 
   return (
     <div
       ref={rootRef}
+      aria-busy={busy !== null}
       className={cn(
-        'hd-popover-enter fixed z-50 bg-popover',
+        'hd-popover-enter fixed z-[75] max-h-[calc(100vh-1rem)] overflow-y-auto bg-popover',
         mobile && 'left-2 right-2 bottom-2 mx-auto',
       )}
       style={{
@@ -129,7 +137,7 @@ export function EventDetailPopover({
         <span className="flex items-center gap-1"><Clock className="h-3 w-3" />下次</span>
         <span className="text-foreground">{formatDateTime(row.nextRunAt)}</span>
         <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />重复</span>
-        <span className="text-foreground">{describeRepeat(row)}</span>
+        <span className="text-foreground">{describeScheduledEventRepeat(row)}</span>
         <span className="flex items-center gap-1">
           {row.reminderMinutes == null ? (
             <BellOff className="h-3 w-3" />
@@ -138,7 +146,9 @@ export function EventDetailPopover({
           )}
           提醒
         </span>
-        <span className="text-foreground">{describeReminder(row.reminderMinutes ?? null)}</span>
+        <span className="text-foreground">
+          {describeScheduledEventReminder(row.reminderMinutes ?? null)}
+        </span>
         {row.lastRunAt && (
           <>
             <span className="flex items-center gap-1">
@@ -210,8 +220,12 @@ export function EventDetailPopover({
           type="button"
           variant="ghost"
           size="sm"
-          onClick={() => onDeleteRequest(row.scheduledTaskId)}
-          className="text-red-600 hover:bg-red-500/10 hover:text-red-700 dark:text-red-400"
+          disabled={busy !== null}
+          onClick={() => {
+            if (busy !== null) return;
+            onDeleteRequest(row.scheduledTaskId);
+          }}
+          className="text-red-600 hover:bg-red-500/10 hover:text-red-700 disabled:cursor-wait disabled:opacity-55 dark:text-red-400"
         >
           <Trash2 className="mr-1 h-3 w-3" />
           删除
@@ -267,31 +281,4 @@ function formatDateTime(d: Date | string | null): string {
     hour: '2-digit',
     minute: '2-digit',
   });
-}
-
-function describeReminder(minutes: number | null): string {
-  if (minutes === null) return '不提醒';
-  if (minutes === 0) return '执行时';
-  if (minutes < 60) return `${minutes} 分钟前`;
-  if (minutes === 60) return '1 小时前';
-  const hours = Math.round(minutes / 60);
-  return `${hours} 小时前`;
-}
-
-function describeRepeat(row: ScheduledTaskRow): string {
-  if (row.rrule && row.rrule.trim().length > 0) {
-    return `自定义：${row.rrule.length > 40 ? `${row.rrule.slice(0, 40)}…` : row.rrule}`;
-  }
-  switch (row.repeatType) {
-    case 'once':
-      return '只运行一次';
-    case 'daily':
-      return '每天';
-    case 'weekly':
-      return '每周';
-    case 'monthly':
-      return '每月';
-    default:
-      return row.repeatType;
-  }
 }

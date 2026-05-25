@@ -65,6 +65,7 @@ import {
   scheduledCalendarStatusCopy,
   scheduledCalendarSummary,
 } from './scheduled-calendar-state';
+import { scheduledEventToggleSuccessMessage } from './event-detail-state';
 import './calendar-styles.css';
 
 const MOBILE_QUERY = '(max-width: 640px)';
@@ -635,13 +636,24 @@ export function ScheduledCalendarPage(): JSX.Element {
   const handleToggle = React.useCallback(
     async (scheduledTaskId: string) => {
       try {
-        await trpc.scheduledTasks.toggle.mutate({ scheduledTaskId });
+        const previousStatus = rows.find(
+          (row) => row.scheduledTaskId === scheduledTaskId,
+        )?.status;
+        const result = await trpc.scheduledTasks.toggle.mutate({ scheduledTaskId });
+        toast.show(
+          scheduledEventToggleSuccessMessage({
+            previousStatus,
+            nextStatus: result.status,
+          }),
+          'info',
+        );
+        setEventDetail(null);
         await refresh();
       } catch (err) {
         toast.show(taskActionError('操作失败', errorMessage(err)), 'error');
       }
     },
-    [refresh, toast],
+    [refresh, rows, toast],
   );
 
   const handleRunNow = React.useCallback(
