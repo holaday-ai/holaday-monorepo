@@ -6,6 +6,7 @@ import {
   mergeTaskPagesReplacingDuplicates,
   normaliseDetailStepStatus,
   pruneRuntimeStateForTerminalTasks,
+  setStoreNavigate,
   toUiTask,
   useTaskStore,
 } from './task-store';
@@ -14,6 +15,7 @@ vi.mock('@/lib/trpc', () => ({
   trpc: {
     tasks: {
       list: { query: vi.fn() },
+      delete: { mutate: vi.fn() },
       moveToProject: { mutate: vi.fn() },
       star: { mutate: vi.fn() },
     },
@@ -21,13 +23,16 @@ vi.mock('@/lib/trpc', () => ({
 }));
 
 const listQuery = vi.mocked(trpc.tasks.list.query);
+const deleteMutate = vi.mocked(trpc.tasks.delete.mutate);
 const moveToProjectMutate = vi.mocked(trpc.tasks.moveToProject.mutate);
 const starMutate = vi.mocked(trpc.tasks.star.mutate);
 
 beforeEach(() => {
   listQuery.mockReset();
+  deleteMutate.mockReset();
   moveToProjectMutate.mockReset();
   starMutate.mockReset();
+  setStoreNavigate(null);
   useTaskStore.getState().reset();
 });
 
@@ -306,6 +311,56 @@ describe('moveTaskToProject', () => {
     ).resolves.toEqual({ ok: true });
 
     expect(useTaskStore.getState().tasks[0]?.projectId).toBeNull();
+  });
+});
+
+describe('deleteTask', () => {
+  it('removes the active task and clears the task URL', async () => {
+    const navigate = vi.fn();
+    setStoreNavigate(navigate);
+    deleteMutate.mockResolvedValueOnce({ ok: true } as never);
+    useTaskStore.setState({
+      tasks: [
+        task({ taskId: 'tsk_active', status: 'completed' }),
+        task({ taskId: 'tsk_other', status: 'completed' }),
+      ],
+      selectedTaskId: 'tsk_active',
+      composerMode: 'task',
+    });
+
+    await expect(useTaskStore.getState().deleteTask('tsk_active')).resolves.toEqual({
+      ok: true,
+    });
+
+    expect(deleteMutate).toHaveBeenCalledWith({ taskId: 'tsk_active' });
+    expect(useTaskStore.getState().tasks.map((item) => item.taskId)).toEqual([
+      'tsk_other',
+    ]);
+    expect(useTaskStore.getState().selectedTaskId).toBeNull();
+    expect(useTaskStore.getState().composerMode).toBe('new');
+    expect(navigate).toHaveBeenCalledWith(null);
+  });
+
+  it('keeps the current selection when deleting another task', async () => {
+    const navigate = vi.fn();
+    setStoreNavigate(navigate);
+    deleteMutate.mockResolvedValueOnce({ ok: true } as never);
+    useTaskStore.setState({
+      tasks: [
+        task({ taskId: 'tsk_active', status: 'completed' }),
+        task({ taskId: 'tsk_other', status: 'completed' }),
+      ],
+      selectedTaskId: 'tsk_active',
+      composerMode: 'task',
+    });
+
+    await expect(useTaskStore.getState().deleteTask('tsk_other')).resolves.toEqual({
+      ok: true,
+    });
+
+    expect(useTaskStore.getState().selectedTaskId).toBe('tsk_active');
+    expect(useTaskStore.getState().composerMode).toBe('task');
+    expect(navigate).not.toHaveBeenCalled();
   });
 });
 

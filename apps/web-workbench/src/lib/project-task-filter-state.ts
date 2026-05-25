@@ -52,3 +52,23 @@ export function projectTaskFilterAfterTaskMove(
   if (tasks.length === state.tasks.length) return state;
   return { ...state, tasks };
 }
+
+export function projectTaskFilterAfterTaskDelete(
+  state: ProjectTaskFilterState | null,
+  taskIds: readonly string[],
+): ProjectTaskFilterState | null {
+  if (!state || taskIds.length === 0) return state;
+  const deleted = new Set(taskIds);
+  const tasks = state.tasks.filter((task) => !deleted.has(task.taskId));
+  if (tasks.length === state.tasks.length) return state;
+  return { ...state, tasks };
+}
+
+export function projectTaskFilterAfterFailedTasksCleared(
+  state: ProjectTaskFilterState | null,
+): ProjectTaskFilterState | null {
+  if (!state) return null;
+  const tasks = state.tasks.filter((task) => task.status !== 'failed');
+  if (tasks.length === state.tasks.length) return state;
+  return { ...state, tasks };
+}

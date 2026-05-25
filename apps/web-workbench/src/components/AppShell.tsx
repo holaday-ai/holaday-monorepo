@@ -27,6 +27,8 @@ import { clearAccessToken, getAccessToken } from '@/lib/auth';
 import { authSessionExpiredMessage, isAuthSessionError } from '@/lib/auth-session';
 import { taskActionError } from '@/lib/error-copy';
 import {
+  projectTaskFilterAfterFailedTasksCleared,
+  projectTaskFilterAfterTaskDelete,
   projectTaskFilterAfterTaskMove,
   refreshProjectTaskFilterState,
   resolveProjectFilteredTasks,
@@ -702,6 +704,9 @@ export function AppShell(): JSX.Element {
           const res = await deleteTask(taskId);
           if ('error' in res) toast.show(`删除失败：${res.error}`, 'error');
           else {
+            setProjectTaskFilter((prev) =>
+              projectTaskFilterAfterTaskDelete(prev, [taskId]),
+            );
             toast.show('任务已删除');
             refreshDeletionDependentMeta();
           }
@@ -722,19 +727,31 @@ export function AppShell(): JSX.Element {
           const results = await Promise.all(
             ids.map((id) =>
               deleteTask(id).then(
-                (r) => r,
+                (result) => ({ id, result }),
                 (err) => ({
-                  error: err instanceof Error ? err.message : String(err),
+                  id,
+                  result: {
+                    error: err instanceof Error ? err.message : String(err),
+                  },
                 }),
               ),
             ),
           );
+          const deletedIds = results
+            .filter((entry) => !('error' in entry.result))
+            .map((entry) => entry.id);
           const errs = results.filter(
-            (r): r is { error: string } => 'error' in r,
+            (entry): entry is { id: string; result: { error: string } } =>
+              'error' in entry.result,
           );
+          if (deletedIds.length > 0) {
+            setProjectTaskFilter((prev) =>
+              projectTaskFilterAfterTaskDelete(prev, deletedIds),
+            );
+          }
           if (errs.length === 0) toast.show(`已删除 ${ids.length} 个任务`);
           else if (errs.length === ids.length)
-            toast.show(taskActionError('删除失败', errs[0]?.error), 'error');
+            toast.show(taskActionError('删除失败', errs[0]?.result.error), 'error');
           else
             toast.show(
               `已删除 ${ids.length - errs.length} 个，${errs.length} 个失败`,
@@ -756,6 +773,7 @@ export function AppShell(): JSX.Element {
           try {
             const res = await trpc.tasks.clearFailed.mutate();
             if (res.deleted > 0) {
+              setProjectTaskFilter(projectTaskFilterAfterFailedTasksCleared);
               toast.show(`已清除 ${res.deleted} 个失败任务`);
             } else {
               toast.show('没有可清除的失败任务');

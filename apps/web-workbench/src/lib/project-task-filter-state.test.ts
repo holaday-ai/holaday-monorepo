@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { UiTask } from '@/types/task';
 import {
   emptyProjectTaskFilterState,
+  projectTaskFilterAfterFailedTasksCleared,
+  projectTaskFilterAfterTaskDelete,
   projectTaskFilterAfterTaskMove,
   refreshProjectTaskFilterState,
   resolveProjectFilteredTasks,
@@ -98,9 +100,52 @@ describe('project task filter state', () => {
       }),
     ).toBe(state);
   });
+
+  it('removes deleted tasks from the active project filter', () => {
+    const state = {
+      projectId: 'proj_a',
+      tasks: [task('tsk_a'), task('tsk_b'), task('tsk_c')],
+      loading: false,
+      error: null,
+    };
+
+    expect(projectTaskFilterAfterTaskDelete(state, ['tsk_b', 'tsk_missing'])).toEqual({
+      ...state,
+      tasks: [task('tsk_a'), task('tsk_c')],
+    });
+  });
+
+  it('keeps the project filter reference when no deleted task is visible', () => {
+    const state = {
+      projectId: 'proj_a',
+      tasks: [task('tsk_a')],
+      loading: false,
+      error: null,
+    };
+
+    expect(projectTaskFilterAfterTaskDelete(state, ['tsk_missing'])).toBe(state);
+  });
+
+  it('removes failed tasks after the clear-failed action succeeds', () => {
+    const state = {
+      projectId: 'proj_a',
+      tasks: [
+        task('tsk_done'),
+        task('tsk_failed', { status: 'failed' }),
+        task('tsk_cancelled', { status: 'cancelled' }),
+      ],
+      loading: false,
+      error: null,
+    };
+
+    expect(projectTaskFilterAfterFailedTasksCleared(state)).toEqual({
+      ...state,
+      tasks: [task('tsk_done'), task('tsk_cancelled', { status: 'cancelled' })],
+    });
+  });
 });
 
-function task(taskId: string): UiTask {
+function task(taskId: string, overrides: Partial<UiTask> = {}): UiTask {
   return {
     taskId,
     intent: 'project task',
@@ -108,5 +153,6 @@ function task(taskId: string): UiTask {
     status: 'completed',
     tickCount: 0,
     createdAt: new Date('2026-05-25T00:00:00.000Z'),
+    ...overrides,
   };
 }

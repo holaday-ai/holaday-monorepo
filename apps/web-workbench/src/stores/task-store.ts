@@ -968,6 +968,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   async deleteTask(taskId) {
     try {
       await trpc.tasks.delete.mutate({ taskId });
+      const deletedActiveTask = get().selectedTaskId === taskId;
+      if (deletedActiveTask) {
+        abortInFlightHydrate();
+        storeNavigate?.(null);
+      }
       set((prev) => {
         const stepsByTask = { ...prev.stepsByTask };
         delete stepsByTask[taskId];
