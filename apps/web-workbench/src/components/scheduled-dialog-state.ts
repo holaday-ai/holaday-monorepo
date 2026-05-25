@@ -34,6 +34,10 @@ export function reminderMinutesForValue(value: string): number | null {
   return REMINDER_OPTIONS.find((o) => o.value === value)?.minutes ?? null;
 }
 
+export function scheduledCreateButtonLabel(submitting: boolean): string {
+  return submitting ? '创建中…' : '创建';
+}
+
 export function buildScheduledCreatePayload(input: {
   intent: string;
   repeatType: DialogRepeatType;

@@ -10,6 +10,7 @@ import {
   buildScheduledCreatePayload,
   REMINDER_OPTIONS,
   REPEAT_OPTIONS,
+  scheduledCreateButtonLabel,
   type DialogRepeatType,
 } from './scheduled-dialog-state';
 
@@ -49,6 +50,7 @@ export function ScheduledTaskDialog({
     defaultScheduledAtLocalInput(),
   );
   const [submitting, setSubmitting] = React.useState(false);
+  const intentRef = React.useRef<HTMLTextAreaElement>(null);
 
   // Reset whenever the dialog re-opens so a stale draft from a prior
   // open doesn't bleed into the new context (especially when the
@@ -62,6 +64,8 @@ export function ScheduledTaskDialog({
     setRrule('');
     setScheduledAt(defaultScheduledAtLocalInput());
     setSubmitting(false);
+    const id = requestAnimationFrame(() => intentRef.current?.focus());
+    return () => cancelAnimationFrame(id);
   }, [open, initialIntent]);
 
   const requestClose = React.useCallback(() => {
@@ -82,6 +86,7 @@ export function ScheduledTaskDialog({
   if (!open) return null;
 
   const submit = async (): Promise<void> => {
+    if (submitting) return;
     const trimmed = intent.trim();
     if (!trimmed) {
       toast.show('请填写任务内容', 'error');
@@ -133,7 +138,7 @@ export function ScheduledTaskDialog({
       role="dialog"
       aria-modal="true"
       onClick={requestClose}
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-[95] flex items-start justify-center overflow-y-auto bg-black/40 p-3 py-6 backdrop-blur-sm animate-fade-in sm:items-center sm:p-4"
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -160,7 +165,9 @@ export function ScheduledTaskDialog({
               任务内容
             </label>
             <textarea
+              ref={intentRef}
               value={intent}
+              disabled={submitting}
               onChange={(e) => setIntent(e.target.value)}
               rows={3}
               maxLength={2000}
@@ -175,6 +182,7 @@ export function ScheduledTaskDialog({
               </label>
               <select
                 value={repeatType}
+                disabled={submitting}
                 onChange={(e) =>
                   setRepeatType(e.target.value as DialogRepeatType)
                 }
@@ -195,6 +203,7 @@ export function ScheduledTaskDialog({
               <input
                 type="datetime-local"
                 value={scheduledAt}
+                disabled={submitting}
                 onChange={(e) => setScheduledAt(e.target.value)}
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
               />
@@ -205,6 +214,7 @@ export function ScheduledTaskDialog({
               </label>
               <select
                 value={reminderValue}
+                disabled={submitting}
                 onChange={(e) => setReminderValue(e.target.value)}
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
               >
@@ -222,6 +232,7 @@ export function ScheduledTaskDialog({
             </label>
             <textarea
               value={description}
+              disabled={submitting}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
               maxLength={2000}
@@ -236,6 +247,7 @@ export function ScheduledTaskDialog({
               </label>
               <textarea
                 value={rrule}
+                disabled={submitting}
                 onChange={(e) => setRrule(e.target.value)}
                 rows={2}
                 maxLength={255}
@@ -248,7 +260,7 @@ export function ScheduledTaskDialog({
             执行时间使用你当前时区。每次到时间会自动新建一个任务并交给 agent 执行。
           </p>
         </div>
-        <footer className="flex items-center justify-end gap-2 border-t border-border bg-muted/30 px-5 py-3">
+        <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-border bg-muted/30 px-5 py-3">
           <button
             type="button"
             onClick={requestClose}
@@ -264,7 +276,7 @@ export function ScheduledTaskDialog({
             className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90 disabled:opacity-60"
           >
             {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            创建
+            {scheduledCreateButtonLabel(submitting)}
           </button>
         </footer>
       </div>

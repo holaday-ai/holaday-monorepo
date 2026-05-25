@@ -1,5 +1,10 @@
 import { Layers, Loader2, X } from 'lucide-react';
 import * as React from 'react';
+import {
+  batchCreateButtonLabel,
+  batchCreateDisabled,
+  batchPromptCountCopy,
+} from '@/components/batch-dialog-state';
 import { useToast } from '@/components/ui/toast';
 import { parseBatchPrompts } from '@/lib/batch-prompts';
 import { trpc } from '@/lib/trpc';
@@ -38,12 +43,15 @@ export function BatchTaskDialog({
   const [name, setName] = React.useState('');
   const [pasteText, setPasteText] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   React.useEffect(() => {
     if (!open) return;
     setName('');
     setPasteText(initialPrompts && initialPrompts.length > 0 ? initialPrompts.join('\n') : '');
     setSubmitting(false);
+    const id = requestAnimationFrame(() => textareaRef.current?.focus());
+    return () => cancelAnimationFrame(id);
   }, [open, initialPrompts]);
 
   const requestClose = React.useCallback(() => {
@@ -64,8 +72,14 @@ export function BatchTaskDialog({
 
   const parsedPrompts = parseBatchPrompts(pasteText, MAX_ITEMS);
   const prompts = parsedPrompts.prompts;
+  const submitDisabled = batchCreateDisabled({
+    submitting,
+    promptCount: prompts.length,
+    overLimit: parsedPrompts.overLimit,
+  });
 
   const submit = async (): Promise<void> => {
+    if (submitting) return;
     if (prompts.length === 0) {
       toast.show('请至少输入一项任务', 'error');
       return;
@@ -95,7 +109,7 @@ export function BatchTaskDialog({
       role="dialog"
       aria-modal="true"
       onClick={requestClose}
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-[95] flex items-start justify-center overflow-y-auto bg-black/40 p-3 py-6 backdrop-blur-sm animate-fade-in sm:items-center sm:p-4"
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -125,6 +139,7 @@ export function BatchTaskDialog({
               type="text"
               value={name}
               maxLength={200}
+              disabled={submitting}
               onChange={(e) => setName(e.target.value)}
               placeholder="例如：10 个竞品最新动态"
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground/70 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
@@ -133,14 +148,23 @@ export function BatchTaskDialog({
           <div>
             <label className="mb-1 flex items-center justify-between text-xs font-medium text-foreground/80">
               <span>任务列表（每行一项）</span>
-              <span className="text-muted-foreground">
-                {prompts.length} / {MAX_ITEMS}
-                {parsedPrompts.duplicateCount > 0 &&
-                  ` · 已去重 ${parsedPrompts.duplicateCount} 项`}
+              <span
+                className={
+                  parsedPrompts.overLimit ? 'text-primary' : 'text-muted-foreground'
+                }
+              >
+                {batchPromptCountCopy({
+                  promptCount: prompts.length,
+                  maxItems: MAX_ITEMS,
+                  duplicateCount: parsedPrompts.duplicateCount,
+                  overLimit: parsedPrompts.overLimit,
+                })}
               </span>
             </label>
             <textarea
+              ref={textareaRef}
               value={pasteText}
+              disabled={submitting}
               onChange={(e) => setPasteText(e.target.value)}
               rows={8}
               placeholder={[
@@ -156,7 +180,7 @@ export function BatchTaskDialog({
             每一项都是一个独立的任务，部分失败不会影响其他任务。
           </p>
         </div>
-        <footer className="flex items-center justify-end gap-2 border-t border-border bg-muted/30 px-5 py-3">
+        <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-border bg-muted/30 px-5 py-3">
           <button
             type="button"
             onClick={requestClose}
@@ -168,11 +192,11 @@ export function BatchTaskDialog({
           <button
             type="button"
             onClick={() => void submit()}
-            disabled={submitting || prompts.length === 0}
+            disabled={submitDisabled}
             className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90 disabled:opacity-60"
           >
             {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            创建并开始
+            {batchCreateButtonLabel(submitting)}
           </button>
         </footer>
       </div>

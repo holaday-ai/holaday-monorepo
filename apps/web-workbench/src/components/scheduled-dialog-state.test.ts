@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildScheduledCreatePayload,
   reminderMinutesForValue,
+  scheduledCreateButtonLabel,
 } from './scheduled-dialog-state.js';
 
 describe('scheduled dialog state helpers', () => {
@@ -9,6 +10,11 @@ describe('scheduled dialog state helpers', () => {
     expect(reminderMinutesForValue('off')).toBeNull();
     expect(reminderMinutesForValue('15')).toBe(15);
     expect(reminderMinutesForValue('unknown')).toBeNull();
+  });
+
+  it('names the busy submit state', () => {
+    expect(scheduledCreateButtonLabel(false)).toBe('创建');
+    expect(scheduledCreateButtonLabel(true)).toBe('创建中…');
   });
 
   it('builds a normal daily create payload with description and reminder', () => {
