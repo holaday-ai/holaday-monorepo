@@ -3,6 +3,7 @@ import {
   notificationErrorMessage,
   notificationListStatusCopy,
   notificationListSummary,
+  safeNotificationCount,
 } from './notification-bell-state';
 
 describe('notification bell state helpers', () => {
@@ -37,5 +38,19 @@ describe('notification bell state helpers', () => {
     expect(notificationErrorMessage(new Error('offline'))).toBe('offline');
     expect(notificationErrorMessage('bad gateway')).toBe('bad gateway');
     expect(notificationErrorMessage({})).toBe('请稍后重试');
+  });
+
+  it('normalizes malformed notification counts before rendering', () => {
+    expect(safeNotificationCount(Number.NaN)).toBe(0);
+    expect(safeNotificationCount(Number.POSITIVE_INFINITY)).toBe(0);
+    expect(safeNotificationCount('4')).toBe(0);
+    expect(safeNotificationCount(-2)).toBe(0);
+    expect(safeNotificationCount(2.9)).toBe(2);
+    expect(notificationListSummary({ loading: false, error: null, count: Number.NaN })).toBe(
+      '暂无通知',
+    );
+    expect(notificationListStatusCopy({ loading: true, error: null, count: 'bad' })?.title).toBe(
+      '通知加载中…',
+    );
   });
 });

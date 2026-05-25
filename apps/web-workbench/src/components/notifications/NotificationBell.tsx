@@ -37,6 +37,7 @@ import {
   notificationErrorMessage,
   notificationListStatusCopy,
   notificationListSummary,
+  safeNotificationCount,
 } from '@/lib/notification-bell-state';
 
 const POLL_INTERVAL_MS = 30_000;
@@ -75,7 +76,7 @@ export function NotificationBell({
   const refreshCount = React.useCallback(async () => {
     try {
       const res = await trpc.notifications.unreadCount.query();
-      setUnreadCount(res.count);
+      setUnreadCount(safeNotificationCount((res as { count?: unknown }).count));
     } catch {
       // Network blip — keep last value, retry next tick.
     }
@@ -108,7 +109,7 @@ export function NotificationBell({
     setLoading(true);
     try {
       const res = await trpc.notifications.list.query({ limit: 50 });
-      setItems(res as NotificationRow[]);
+      setItems(normalizeNotificationRows(res));
       setListError(null);
     } catch (err) {
       setListError(notificationErrorMessage(err, '通知暂时无法加载，请稍后重试。'));
@@ -144,7 +145,7 @@ export function NotificationBell({
             r.notificationId === row.notificationId ? { ...r, isRead: true } : r,
           ),
         );
-        setUnreadCount((c) => Math.max(0, c - 1));
+        setUnreadCount((c) => Math.max(0, safeNotificationCount(c) - 1));
         try {
           await trpc.notifications.markRead.mutate({
             notificationId: row.notificationId,
@@ -175,8 +176,9 @@ export function NotificationBell({
     }
   }, [fetchList, refreshCount]);
 
-  const badge = unreadCount > 99 ? '99+' : String(unreadCount);
-  const hasUnread = unreadCount > 0;
+  const safeUnreadCount = safeNotificationCount(unreadCount);
+  const badge = safeUnreadCount > 99 ? '99+' : String(safeUnreadCount);
+  const hasUnread = safeUnreadCount > 0;
   const summary = notificationListSummary({
     loading,
     error: listError,
@@ -283,6 +285,42 @@ export function NotificationBell({
       )}
     </div>
   );
+}
+
+function normalizeNotificationRows(value: unknown): NotificationRow[] {
+  if (!Array.isArray(value)) {
+    throw new Error('通知数据格式异常，请稍后重试。');
+  }
+  return value.flatMap((row, index): NotificationRow[] => {
+    if (typeof row !== 'object' || row === null) return [];
+    const raw = row as Record<string, unknown>;
+    const notificationId =
+      typeof raw.notificationId === 'string' && raw.notificationId.trim()
+        ? raw.notificationId
+        : null;
+    if (!notificationId) return [];
+    const scheduledTaskInternalId =
+      typeof raw.scheduledTaskInternalId === 'number' &&
+      Number.isSafeInteger(raw.scheduledTaskInternalId) &&
+      raw.scheduledTaskInternalId > 0
+        ? raw.scheduledTaskInternalId
+        : null;
+    const createdAt =
+      typeof raw.createdAt === 'string' || raw.createdAt instanceof Date
+        ? raw.createdAt
+        : '';
+    return [
+      {
+        notificationId,
+        type: typeof raw.type === 'string' ? raw.type : 'unknown',
+        title: typeof raw.title === 'string' && raw.title.trim() ? raw.title : `通知 ${index + 1}`,
+        message: typeof raw.message === 'string' ? raw.message : '',
+        isRead: raw.isRead === true,
+        createdAt,
+        scheduledTaskInternalId,
+      },
+    ];
+  });
 }
 
 function NotificationStatusNotice({
