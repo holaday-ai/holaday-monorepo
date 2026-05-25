@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { trpc } from '@/lib/trpc';
 import type { UiTask } from '@/types/task';
 import {
+  mergeFirstPageWithPreservedSelection,
+  mergeTaskPagesReplacingDuplicates,
   normaliseDetailStepStatus,
   pruneRuntimeStateForTerminalTasks,
   toUiTask,
@@ -11,14 +13,17 @@ import {
 vi.mock('@/lib/trpc', () => ({
   trpc: {
     tasks: {
+      list: { query: vi.fn() },
       star: { mutate: vi.fn() },
     },
   },
 }));
 
+const listQuery = vi.mocked(trpc.tasks.list.query);
 const starMutate = vi.mocked(trpc.tasks.star.mutate);
 
 beforeEach(() => {
+  listQuery.mockReset();
   starMutate.mockReset();
   useTaskStore.getState().reset();
 });
@@ -177,6 +182,90 @@ describe('pruneRuntimeStateForTerminalTasks', () => {
   });
 });
 
+describe('task page merging', () => {
+  it('replaces duplicate pagination rows in place with fresher server data', () => {
+    const older = task({ taskId: 'tsk_dup', status: 'executing' });
+    const stable = task({ taskId: 'tsk_stable', status: 'completed' });
+    const fresh = task({
+      taskId: 'tsk_dup',
+      status: 'completed',
+      resultText: 'fresh result',
+    });
+    const appended = task({ taskId: 'tsk_new', status: 'completed' });
+
+    expect(mergeTaskPagesReplacingDuplicates([older, stable], [fresh, appended])).toEqual([
+      fresh,
+      stable,
+      appended,
+    ]);
+  });
+
+  it('keeps a preserved deep-link selection ahead of the first page once', () => {
+    const selected = task({ taskId: 'tsk_selected', status: 'completed' });
+    const first = task({ taskId: 'tsk_first', status: 'executing' });
+
+    expect(mergeFirstPageWithPreservedSelection([first], selected)).toEqual([
+      selected,
+      first,
+    ]);
+    expect(mergeFirstPageWithPreservedSelection([selected, first], selected)).toEqual([
+      selected,
+      first,
+    ]);
+  });
+});
+
+describe('loadMoreTasks', () => {
+  it('uses fresh duplicate rows and clears terminal live state from paginated API rows', async () => {
+    listQuery.mockResolvedValueOnce({
+      tasks: [
+        taskRow({
+          taskId: 'tsk_dup',
+          status: 'completed',
+          result: { summary: 'fresh result' },
+        }),
+        taskRow({ taskId: 'tsk_new', status: 'completed' }),
+      ],
+      nextCursor: null,
+    });
+
+    useTaskStore.setState({
+      tasks: [
+        task({ taskId: 'tsk_dup', status: 'executing' }),
+        task({ taskId: 'tsk_stable', status: 'completed' }),
+      ],
+      tasksCursor: 51,
+      tasksHasMore: true,
+      loadingMore: false,
+      terminalTaskIds: new Set<string>(),
+      streamingByTask: { tsk_dup: 'old stream' },
+      progressByTask: { tsk_dup: '正在验证结果…' },
+      subStatusByTask: { tsk_dup: { subStatus: 'verifying', since: 1 } },
+    });
+
+    await useTaskStore.getState().loadMoreTasks();
+
+    expect(listQuery).toHaveBeenCalledWith({ limit: 50, cursor: 51 });
+    const state = useTaskStore.getState();
+    expect(state.loadingMore).toBe(false);
+    expect(state.tasksHasMore).toBe(false);
+    expect(state.tasks.map((item) => item.taskId)).toEqual([
+      'tsk_dup',
+      'tsk_stable',
+      'tsk_new',
+    ]);
+    expect(state.tasks[0]).toMatchObject({
+      taskId: 'tsk_dup',
+      status: 'completed',
+      resultText: 'fresh result',
+    });
+    expect(state.terminalTaskIds.has('tsk_dup')).toBe(true);
+    expect(state.streamingByTask.tsk_dup).toBeUndefined();
+    expect(state.progressByTask.tsk_dup).toBeUndefined();
+    expect(state.subStatusByTask.tsk_dup).toBeUndefined();
+  });
+});
+
 describe('togglePin', () => {
   it('rethrows pin RPC failures after reverting local optimistic state', async () => {
     const task: UiTask = {
@@ -210,3 +299,32 @@ describe('togglePin', () => {
     expect(starMutate).toHaveBeenCalledWith({ taskId: 'older_pin', starred: false });
   });
 });
+
+function task(overrides: Partial<UiTask> & { taskId: string }): UiTask {
+  return {
+    intent: 'test task',
+    title: null,
+    status: 'executing',
+    tickCount: 0,
+    createdAt: new Date('2026-05-25T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+function taskRow(overrides: Record<string, unknown> & { taskId: string }): never {
+  return {
+    intent: 'test task',
+    title: null,
+    status: 'executing',
+    result: null,
+    errorMessage: null,
+    createdAt: new Date('2026-05-25T00:00:00.000Z'),
+    opusUsed: false,
+    starred: false,
+    starredAt: null,
+    projectId: null,
+    verificationPassed: null,
+    failureLevel: null,
+    ...overrides,
+  } as never;
+}

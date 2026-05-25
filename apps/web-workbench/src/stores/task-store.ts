@@ -362,6 +362,44 @@ function omitRuntimeKeys<T extends Record<string, unknown>>(
   return next ?? record;
 }
 
+export function mergeTaskPagesReplacingDuplicates(
+  current: readonly UiTask[],
+  incoming: readonly UiTask[],
+): UiTask[] {
+  const merged = [...current];
+  const indexByTaskId = new Map<string, number>();
+  merged.forEach((task, index) => indexByTaskId.set(task.taskId, index));
+
+  for (const task of incoming) {
+    const existingIndex = indexByTaskId.get(task.taskId);
+    if (existingIndex === undefined) {
+      indexByTaskId.set(task.taskId, merged.length);
+      merged.push(task);
+      continue;
+    }
+    merged[existingIndex] = task;
+  }
+
+  return merged;
+}
+
+export function mergeFirstPageWithPreservedSelection(
+  firstPage: readonly UiTask[],
+  preservedSelected: UiTask | null,
+): UiTask[] {
+  const merged = preservedSelected
+    ? [preservedSelected, ...firstPage]
+    : [...firstPage];
+  const seen = new Set<string>();
+  const tasks: UiTask[] = [];
+  for (const task of merged) {
+    if (seen.has(task.taskId)) continue;
+    seen.add(task.taskId);
+    tasks.push(task);
+  }
+  return tasks;
+}
+
 // URL-write callback registered by WorkbenchApp at mount. Earlier the
 // store→URL sync lived in a useEffect that watched selectedTaskId and
 // called `navigate()`; that created an infinite loop on every sidebar
@@ -797,20 +835,10 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         prevSelected && !freshIds.has(prevSelected)
           ? get().tasks.find((t) => t.taskId === prevSelected) ?? null
           : null;
-      const merged: UiTask[] = preservedSelected
-        ? [preservedSelected, ...freshList]
-        : freshList;
-      // Belt-and-braces dedupe. preservedSelected is already gated on
-      // !freshIds.has(prevSelected) so a duplicate is unlikely, but
-      // any future merge path adding to the head shouldn't trip the
-      // Sidebar into rendering the same row in 置顶 and a time bucket.
-      const seen = new Set<string>();
-      const tasks: UiTask[] = [];
-      for (const t of merged) {
-        if (seen.has(t.taskId)) continue;
-        seen.add(t.taskId);
-        tasks.push(t);
-      }
+      const tasks = mergeFirstPageWithPreservedSelection(
+        freshList,
+        preservedSelected,
+      );
       // refreshTaskList NEVER decides selectedTaskId. Cold start of
       // `/` lands in new-task mode (composerMode='new' default)
       // with the sidebar populated but nothing selected. Selection
@@ -853,20 +881,16 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       const moreTasks: UiTask[] = res.tasks.map(toUiTask);
       set((prev) => {
         // De-dupe defensively in case a row landed on both pages
-        // (e.g. a task whose id equals the cursor boundary). Last
-        // write wins so the freshly-fetched row replaces the stale.
-        const seen = new Set<string>();
-        const merged: UiTask[] = [];
-        for (const t of [...prev.tasks, ...moreTasks]) {
-          if (seen.has(t.taskId)) continue;
-          seen.add(t.taskId);
-          merged.push(t);
-        }
+        // (e.g. a task whose id equals the cursor boundary). The
+        // freshly-fetched row replaces the stale copy in place so
+        // status/result updates land without the sidebar jumping.
+        const merged = mergeTaskPagesReplacingDuplicates(prev.tasks, moreTasks);
         return {
           tasks: merged,
           loadingMore: false,
           tasksCursor: res.nextCursor ?? null,
           tasksHasMore: res.nextCursor != null,
+          ...pruneRuntimeStateForTerminalTasks(prev, moreTasks),
         };
       });
     } catch (err) {
