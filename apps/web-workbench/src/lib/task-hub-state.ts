@@ -1,6 +1,16 @@
 export type HistoryStatusFilter = 'all' | 'completed' | 'failed' | 'running';
 export type HistoryRangeFilter = '7d' | '30d' | 'all';
 
+export interface NormalizedTaskHubRow {
+  readonly taskId: string;
+  readonly intent: string;
+  readonly title: string | null;
+  readonly status: string;
+  readonly createdAt: string | number | Date;
+  readonly completedAt: string | number | Date | null;
+  readonly starredAt: string | number | Date | null;
+}
+
 export function hasHistoryFilters({
   query,
   status,
@@ -79,6 +89,7 @@ export function starredPageSummary({
 
 export function taskHubErrorMessage(err: unknown, fallback = '请稍后重试'): string {
   if (err instanceof Error && err.message.trim()) return err.message;
+  if (typeof err === 'string' && err.trim()) return err;
   return fallback;
 }
 
@@ -120,4 +131,76 @@ export function formatTaskHubTime(value: string | number | Date | null | undefin
   const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   if (sameDay) return `今天 ${hhmm}`;
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${hhmm}`;
+}
+
+export function normalizeTaskHubRows(value: unknown): NormalizedTaskHubRow[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const row = normalizeTaskHubRow(entry);
+    return row ? [row] : [];
+  });
+}
+
+export function normalizeTaskHubCursor(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
+}
+
+function normalizeTaskHubRow(value: unknown): NormalizedTaskHubRow | null {
+  if (!isRecord(value)) return null;
+  const taskId = safeTaskHubText(value.taskId);
+  if (!taskId) return null;
+  return {
+    taskId,
+    intent: safeTaskHubText(value.intent) || '未命名任务',
+    title: safeNullableTaskHubText(value.title),
+    status: normalizeTaskHubStatus(value.status),
+    createdAt: safeTaskHubDate(value.createdAt) ?? '',
+    completedAt: safeNullableTaskHubDate(value.completedAt),
+    starredAt: safeNullableTaskHubDate(value.starredAt),
+  };
+}
+
+function normalizeTaskHubStatus(value: unknown): string {
+  return value === 'pending' ||
+    value === 'planning' ||
+    value === 'queued' ||
+    value === 'executing' ||
+    value === 'awaiting_user' ||
+    value === 'paused' ||
+    value === 'completed' ||
+    value === 'partial_success' ||
+    value === 'failed' ||
+    value === 'cancelled'
+    ? value
+    : 'queued';
+}
+
+function safeNullableTaskHubText(value: unknown): string | null {
+  const text = safeTaskHubText(value);
+  return text || null;
+}
+
+function safeTaskHubText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function safeNullableTaskHubDate(value: unknown): string | number | Date | null {
+  return value == null ? null : safeTaskHubDate(value);
+}
+
+function safeTaskHubDate(value: unknown): string | number | Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return Number.isNaN(Date.parse(trimmed)) ? null : trimmed;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

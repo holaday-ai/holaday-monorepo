@@ -9,10 +9,13 @@ import {
   historyFilterRequestKey,
   historyPageSummary,
   mergeTaskHubRowsById,
+  normalizeTaskHubCursor,
+  normalizeTaskHubRows,
   shouldApplyHistoryResponse,
   taskHubErrorMessage,
   type HistoryRangeFilter,
   type HistoryStatusFilter,
+  type NormalizedTaskHubRow,
 } from '@/lib/task-hub-state';
 import { historyEmptyCopy, taskStatusLabel } from '@/lib/task-status-copy';
 import { trpc } from '@/lib/trpc';
@@ -27,13 +30,7 @@ import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 type StatusFilter = HistoryStatusFilter;
 type RangeFilter = HistoryRangeFilter;
 
-interface HistoryTask {
-  taskId: string;
-  intent: string;
-  status: string;
-  createdAt: string | number | Date;
-  completedAt: string | number | Date | null;
-}
+type HistoryTask = NormalizedTaskHubRow;
 
 // "进行中" maps to all non-terminal DB statuses — the chip is a UX
 // shortcut, the server still receives the explicit list so the WHERE
@@ -136,10 +133,11 @@ export function HistoryPage(): JSX.Element {
         ) {
           return;
         }
-        const list = (res?.tasks ?? []) as HistoryTask[];
+        const list = normalizeTaskHubRows(res?.tasks);
         setTasks((prev) => (append ? mergeTaskHubRowsById(prev, list) : list));
-        setCursor(res?.nextCursor ?? null);
-        setHasMore(Boolean(res?.nextCursor));
+        const responseCursor = normalizeTaskHubCursor(res?.nextCursor);
+        setCursor(responseCursor);
+        setHasMore(responseCursor !== null);
         if (append) setLoadMoreError(null);
         else setError(null);
       } catch (err) {
@@ -195,10 +193,11 @@ export function HistoryPage(): JSX.Element {
         ) {
           return;
         }
-        const list = (res?.tasks ?? []) as HistoryTask[];
+        const list = normalizeTaskHubRows(res?.tasks);
         setTasks(list);
-        setCursor(res?.nextCursor ?? null);
-        setHasMore(Boolean(res?.nextCursor));
+        const responseCursor = normalizeTaskHubCursor(res?.nextCursor);
+        setCursor(responseCursor);
+        setHasMore(responseCursor !== null);
         setError(null);
       })
       .catch((err) => {

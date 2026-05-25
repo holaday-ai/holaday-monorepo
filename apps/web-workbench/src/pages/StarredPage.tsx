@@ -2,20 +2,21 @@ import { AlertCircle, Loader2, Pin, PinOff } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTaskStore } from '@/stores/task-store';
-import { taskDisplayTitle } from '@/components/TaskListItem';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { supportMailtoHref } from '@/lib/support-links';
 import {
   formatTaskHubTime,
   mergeTaskHubRowsById,
+  normalizeTaskHubCursor,
+  normalizeTaskHubRows,
   starredPageSummary,
   taskHubErrorMessage,
+  type NormalizedTaskHubRow,
 } from '@/lib/task-hub-state';
 import { taskStatusLabel } from '@/lib/task-status-copy';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
-import type { UiTaskStatus } from '@/types/task';
 
 /**
  * 置顶任务 — pinned-task hub. Pin state is server-persisted (the
@@ -26,12 +27,11 @@ import type { UiTaskStatus } from '@/types/task';
  * into a local Set.
  */
 
-interface PinnedRow {
-  taskId: string;
-  intent: string;
-  title: string | null;
-  status: UiTaskStatus;
-  starredAt: string | number | Date | null;
+type PinnedRow = NormalizedTaskHubRow;
+
+function pinnedTaskTitle(row: Pick<PinnedRow, 'title' | 'intent'>, maxLength = 60): string {
+  const title = row.title?.trim() || row.intent;
+  return title.length > maxLength ? `${title.slice(0, maxLength - 1)}…` : title;
 }
 
 export function StarredPage(): JSX.Element {
@@ -63,10 +63,11 @@ export function StarredPage(): JSX.Element {
           ...(nextCursor ? { cursor: nextCursor } : {}),
         });
         if (myToken !== fetchToken.current) return;
-        const list = (res?.tasks ?? []) as PinnedRow[];
+        const list = normalizeTaskHubRows(res?.tasks);
         setItems((prev) => (append ? mergeTaskHubRowsById(prev, list) : list));
-        setCursor(res?.nextCursor ?? null);
-        setHasMore(Boolean(res?.nextCursor));
+        const responseCursor = normalizeTaskHubCursor(res?.nextCursor);
+        setCursor(responseCursor);
+        setHasMore(responseCursor !== null);
         if (append) setLoadMoreError(null);
         else {
           setLoadError(null);
@@ -195,17 +196,7 @@ export function StarredPage(): JSX.Element {
                   className="min-w-0 flex-1 text-left"
                 >
                   <div className="truncate text-sm text-foreground hover:underline">
-                    {taskDisplayTitle(
-                      {
-                        taskId: t.taskId,
-                        intent: t.intent,
-                        title: t.title,
-                        status: t.status,
-                        tickCount: 0,
-                        createdAt: new Date(0),
-                      },
-                      60,
-                    )}
+                    {pinnedTaskTitle(t)}
                   </div>
                   <div className="mt-0.5 text-[11px] text-muted-foreground">
                     {taskStatusLabel(t.status)} · 置顶于 {formatTaskHubTime(t.starredAt)}

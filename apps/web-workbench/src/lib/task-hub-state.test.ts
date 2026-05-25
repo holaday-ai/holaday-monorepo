@@ -5,6 +5,8 @@ import {
   historyFilterRequestKey,
   historyPageSummary,
   mergeTaskHubRowsById,
+  normalizeTaskHubCursor,
+  normalizeTaskHubRows,
   shouldApplyHistoryResponse,
   starredPageSummary,
   taskHubErrorMessage,
@@ -131,6 +133,68 @@ describe('task hub state helpers', () => {
     expect(formatTaskHubTime('2026-05-20T01:05:00.000Z', now)).toBe('2026-05-20 10:05');
     expect(formatTaskHubTime('not-a-date', now)).toBe('—');
     expect(taskHubErrorMessage(new Error('offline'))).toBe('offline');
-    expect(taskHubErrorMessage('bad')).toBe('请稍后重试');
+    expect(taskHubErrorMessage('bad')).toBe('bad');
+    expect(taskHubErrorMessage({})).toBe('请稍后重试');
+  });
+
+  it('normalizes task hub rows before history or starred rendering', () => {
+    expect(
+      normalizeTaskHubRows([
+        null,
+        { taskId: '', intent: 'missing id' },
+        {
+          taskId: ' tsk_1 ',
+          intent: ' Check weekly metrics ',
+          title: '  Metrics summary ',
+          status: 'completed',
+          createdAt: ' 2026-05-25T00:00:00.000Z ',
+          completedAt: ' 2026-05-25T00:05:00.000Z ',
+          starredAt: 1780000000000,
+        },
+      ]),
+    ).toEqual([
+      {
+        taskId: 'tsk_1',
+        intent: 'Check weekly metrics',
+        title: 'Metrics summary',
+        status: 'completed',
+        createdAt: '2026-05-25T00:00:00.000Z',
+        completedAt: '2026-05-25T00:05:00.000Z',
+        starredAt: 1780000000000,
+      },
+    ]);
+  });
+
+  it('falls back from malformed task hub fields safely', () => {
+    expect(
+      normalizeTaskHubRows([
+        {
+          taskId: 'tsk_2',
+          intent: { unsafe: true },
+          title: { unsafe: true },
+          status: 'mystery',
+          createdAt: { unsafe: true },
+          completedAt: Number.POSITIVE_INFINITY,
+          starredAt: 'not-a-date',
+        },
+      ]),
+    ).toEqual([
+      {
+        taskId: 'tsk_2',
+        intent: '未命名任务',
+        title: null,
+        status: 'queued',
+        createdAt: '',
+        completedAt: null,
+        starredAt: null,
+      },
+    ]);
+  });
+
+  it('normalizes task hub cursors', () => {
+    expect(normalizeTaskHubCursor(50)).toBe(50);
+    expect(normalizeTaskHubCursor(0)).toBeNull();
+    expect(normalizeTaskHubCursor('50')).toBeNull();
+    expect(normalizeTaskHubCursor(Number.NaN)).toBeNull();
   });
 });
