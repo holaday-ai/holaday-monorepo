@@ -433,64 +433,34 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   async function hydrateDetail(taskId: string): Promise<void> {
     const myToken = ++hydrateToken;
     try {
-      const detail = await trpc.tasks.detail.query({ taskId });
+      const rawDetail = await trpc.tasks.detail.query({ taskId });
       if (myToken !== hydrateToken) return;
-      const steps: UiStep[] = (detail.steps ?? []).map((s, idx) => {
-        const out = (s.output ?? {}) as {
-          message?: string;
-          mode?: string;
-          durationMs?: number;
-          antiBot?: UiStep['antiBot'];
-        };
-        const summary =
-          ((s.input ?? {}) as { summary?: string }).summary ?? s.kind;
-        const startedAt = s.startedAt
-          ? new Date(s.startedAt as unknown as string | number | Date).getTime()
-          : Date.now();
-        return {
-          tickIndex: typeof s.seq === 'number' ? s.seq : idx,
-          status: normaliseDetailStepStatus(s.status),
-          actionKind: s.kind,
-          actionSummary: summary,
-          durationMs: out.durationMs ?? 0,
-          ...(out.message ? { message: out.message } : {}),
-          ...(out.antiBot ? { antiBot: out.antiBot } : {}),
-          startedAt,
-        };
-      });
+      const detail: Record<string, unknown> = isTaskListRecord(rawDetail)
+        ? rawDetail
+        : {};
+      const steps = normalizeTaskDetailSteps(detail.steps);
       set((prev) => {
         const rawResultText = extractSummary(detail.result);
         const isFailed =
-          detail.status === 'failed' || detail.status === 'cancelled';
+          safeTaskListText(detail.status) === 'failed' ||
+          safeTaskListText(detail.status) === 'cancelled';
         const resultText = rawResultText
           ? isFailed
             ? humaniseTaskError(rawResultText)
             : rawResultText
           : undefined;
-        const detailWithPlan = detail as typeof detail & {
-          planText?: string | null;
-          planStatus?: UiTask['planStatus'] | null;
-        };
-        const planText = detailWithPlan.planText ?? undefined;
-        const planStatus =
-          (detailWithPlan.planStatus as UiTask['planStatus']) ?? undefined;
-        const resultObj = (detail.result ?? {}) as {
-          finalScreenshot?: string;
-          finalUrl?: string;
-          metadata?: {
-            attachments?: unknown;
-            expertWorkflowId?: unknown;
-            expertMode?: unknown;
-          };
-        };
+        const detailStatus = normaliseStatus(safeTaskListText(detail.status) || 'queued');
+        const planText = safeTaskListText(detail.planText) || undefined;
+        const planStatus = normalizeTaskPlanStatus(detail.planStatus);
+        const resultObj = isTaskListRecord(detail.result) ? detail.result : {};
+        const metadata = isTaskListRecord(resultObj.metadata) ? resultObj.metadata : {};
         const finalScreenshot =
-          typeof resultObj.finalScreenshot === 'string' &&
-          resultObj.finalScreenshot.length > 0
-            ? resultObj.finalScreenshot
+          safeTaskListText(resultObj.finalScreenshot).length > 0
+            ? safeTaskListText(resultObj.finalScreenshot)
             : undefined;
         const finalUrl =
-          typeof resultObj.finalUrl === 'string' && resultObj.finalUrl.length > 0
-            ? resultObj.finalUrl
+          safeTaskListText(resultObj.finalUrl).length > 0
+            ? safeTaskListText(resultObj.finalUrl)
             : undefined;
         // Phase 4 R1 — hydrate metadata.attachments[] +
         // metadata.expertWorkflowId from the terminal-state JSON.
@@ -498,7 +468,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         // the shape validates so a malformed metadata block can't
         // crash the renderer.
         const attachments: UiTask['attachments'] | undefined = (() => {
-          const arr = resultObj.metadata?.attachments;
+          const arr = metadata.attachments;
           if (!Array.isArray(arr) || arr.length === 0) return undefined;
           const cleaned = arr
             .map((entry) => {
@@ -529,50 +499,45 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           return cleaned.length > 0 ? cleaned : undefined;
         })();
         const expertWorkflowId =
-          typeof resultObj.metadata?.expertWorkflowId === 'string' &&
-          resultObj.metadata.expertWorkflowId.length > 0
-            ? (resultObj.metadata.expertWorkflowId as string)
+          safeTaskListText(metadata.expertWorkflowId).length > 0
+            ? safeTaskListText(metadata.expertWorkflowId)
             : undefined;
         // Codex Round 2 P1-7 — surface the user's composer pick on
         // the task so the SPA can show "expert mode requested but no
         // workflow matched" (and so future analytics can compare
         // normal vs expert runs without re-querying the DB).
         const expertMode =
-          resultObj.metadata?.expertMode === 'normal' ||
-          resultObj.metadata?.expertMode === 'expert' ||
-          resultObj.metadata?.expertMode === 'auto'
-            ? (resultObj.metadata.expertMode as 'normal' | 'expert' | 'auto')
+          metadata.expertMode === 'normal' ||
+          metadata.expertMode === 'expert' ||
+          metadata.expertMode === 'auto'
+            ? metadata.expertMode
             : undefined;
         let hydratedWebSearch: UiWebSearchEvent | null = null;
-        for (const s of detail.steps ?? []) {
-          const out = (s.output ?? {}) as {
-            webSearches?: ReadonlyArray<{
-              query: string;
-              sources?: ReadonlyArray<{ title: string; url: string; snippet?: string }>;
-            }>;
-          };
+        const rawSteps = Array.isArray(detail.steps) ? detail.steps : [];
+        for (const [idx, s] of rawSteps.entries()) {
+          if (!isTaskListRecord(s)) continue;
+          const out = isTaskListRecord(s.output) ? s.output : {};
           const arr = out.webSearches;
-          if (!arr || arr.length === 0) continue;
+          if (!Array.isArray(arr) || arr.length === 0) continue;
           const last = arr[arr.length - 1];
-          if (!last) continue;
+          if (!isTaskListRecord(last)) continue;
+          const query = safeTaskListText(last.query);
+          if (!query) continue;
+          const sources = normalizeWebSearchSources(last.sources);
           hydratedWebSearch = {
-            iteration: typeof s.seq === 'number' ? s.seq : 0,
-            query: last.query,
+            iteration: typeof s.seq === 'number' && Number.isFinite(s.seq) ? s.seq : idx,
+            query,
             at: Date.now(),
-            ...(last.sources && last.sources.length > 0
-              ? { sources: last.sources }
+            ...(sources.length > 0
+              ? { sources }
               : {}),
           };
         }
         const awaitingQuestion =
-          detail.status === 'awaiting_user' &&
-          typeof (detail as { awaitingQuestion?: string | null }).awaitingQuestion ===
-            'string'
-            ? (detail as { awaitingQuestion?: string | null }).awaitingQuestion ??
-              null
+          detailStatus === 'awaiting_user'
+            ? safeTaskListText(detail.awaitingQuestion) || null
             : null;
-        const awaitingKindRaw = (detail as { awaitingKind?: string | null })
-          .awaitingKind;
+        const awaitingKindRaw = detail.awaitingKind;
         const awaitingKind: UiAwaitingUser['awaitingKind'] =
           awaitingKindRaw === 'login' ||
           awaitingKindRaw === 'captcha' ||
@@ -622,7 +587,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               t.taskId === taskId
                 ? {
                     ...t,
-                    status: detail.status as UiTaskStatus,
+                    status: detailStatus,
                     tickCount: Math.max(t.tickCount, steps.length),
                     ...(resultText ? { resultText } : {}),
                     ...(planText ? { planText } : {}),
@@ -643,34 +608,18 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           }
           // P1-C — deep link to a task older than the first page.
           // synthesise UiTask from detail, prepend.
-          const detailExtras = detail as typeof detail & {
-            opusUsed?: boolean;
-            starred?: boolean;
-            starredAt?: Date | string | null;
-            projectId?: string | null;
-          };
           const synth: UiTask = {
             taskId,
-            intent: detail.intent,
-            title:
-              typeof detail.title === 'string' ? detail.title : null,
-            status: detail.status as UiTaskStatus,
+            intent: safeTaskListText(detail.intent) || '未命名任务',
+            title: safeNullableTaskListText(detail.title),
+            status: detailStatus,
             tickCount: steps.length,
             ...(resultText ? { resultText } : {}),
-            createdAt: new Date(
-              detail.createdAt as unknown as string | number | Date,
-            ),
-            modelLabel: detailExtras.opusUsed === true ? 'opus' : 'sonnet',
-            starred: detailExtras.starred === true,
-            starredAt: detailExtras.starredAt
-              ? new Date(
-                  detailExtras.starredAt as unknown as string | number | Date,
-                )
-              : null,
-            projectId:
-              typeof detailExtras.projectId === 'string'
-                ? detailExtras.projectId
-                : null,
+            createdAt: new Date(safeTaskListDate(detail.createdAt) ?? 0),
+            modelLabel: detail.opusUsed === true ? 'opus' : 'sonnet',
+            starred: detail.starred === true,
+            starredAt: safeNullableTaskListDate(detail.starredAt),
+            projectId: safeNullableTaskListText(detail.projectId),
             ...(planText ? { planText } : {}),
             ...(planStatus ? { planStatus } : {}),
             ...(finalScreenshot ? { finalScreenshot } : {}),
@@ -1687,8 +1636,10 @@ type ListRow = Awaited<ReturnType<typeof trpc.tasks.list.query>>['tasks'][number
 function extractSummary(result: unknown): string | null {
   if (!result || typeof result !== 'object') return null;
   const r = result as Record<string, unknown>;
-  if (typeof r.summary === 'string' && r.summary.length > 0) return r.summary;
-  if (typeof r.reason === 'string' && r.reason.length > 0) return r.reason;
+  const summary = safeTaskListText(r.summary);
+  if (summary) return summary;
+  const reason = safeTaskListText(r.reason);
+  if (reason) return reason;
   return null;
 }
 
@@ -1805,6 +1756,63 @@ export function normalizeTaskListCursor(value: unknown): number | null {
     : null;
 }
 
+export function normalizeTaskDetailSteps(value: unknown, now = Date.now()): UiStep[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry, idx) => {
+    if (!isTaskListRecord(entry)) return [];
+    const output = isTaskListRecord(entry.output) ? entry.output : {};
+    const input = isTaskListRecord(entry.input) ? entry.input : {};
+    const kind = safeTaskListText(entry.kind) || 'step';
+    const summary = safeTaskListText(input.summary) || kind;
+    const startedAtValue = safeTaskListDate(entry.startedAt);
+    const startedAt =
+      startedAtValue == null ? now : new Date(startedAtValue).getTime();
+    const durationMs =
+      typeof output.durationMs === 'number' && Number.isFinite(output.durationMs)
+        ? Math.max(0, output.durationMs)
+        : 0;
+    const message = safeTaskListText(output.message);
+    const antiBot = normalizeStepAntiBot(output.antiBot);
+    return [
+      {
+        tickIndex:
+          typeof entry.seq === 'number' && Number.isSafeInteger(entry.seq)
+            ? entry.seq
+            : idx,
+        status: normaliseDetailStepStatus(safeTaskListText(entry.status)),
+        actionKind: kind,
+        actionSummary: summary,
+        durationMs,
+        ...(message ? { message } : {}),
+        ...(antiBot ? { antiBot } : {}),
+        startedAt: Number.isFinite(startedAt) ? startedAt : now,
+      },
+    ];
+  });
+}
+
+function normalizeTaskPlanStatus(value: unknown): UiTask['planStatus'] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  type PlanStatusEntry = NonNullable<UiTask['planStatus']>[number];
+  const cleaned: PlanStatusEntry[] = value.flatMap((entry) => {
+    if (!isTaskListRecord(entry)) return [];
+    const idx = typeof entry.idx === 'number' && Number.isSafeInteger(entry.idx)
+      ? entry.idx
+      : null;
+    const status: PlanStatusEntry['status'] | null =
+      entry.status === 'pending' ||
+      entry.status === 'running' ||
+      entry.status === 'done' ||
+      entry.status === 'failed'
+        ? entry.status
+        : null;
+    if (idx == null || status == null) return [];
+    const note = safeTaskListText(entry.note);
+    return [{ idx, status, ...(note ? { note } : {}) }];
+  });
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
 function normalizeTaskListRow(value: unknown): Record<string, unknown> | null {
   if (!isTaskListRecord(value)) return null;
   const taskId = safeTaskListText(value.taskId);
@@ -1820,6 +1828,39 @@ function normalizeTaskListRow(value: unknown): Record<string, unknown> | null {
     projectId: safeNullableTaskListText(value.projectId),
     errorMessage: safeNullableTaskListText(value.errorMessage),
   };
+}
+
+function normalizeWebSearchSources(
+  value: unknown,
+): ReadonlyArray<{ title: string; url: string; snippet?: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!isTaskListRecord(entry)) return [];
+    const title = safeTaskListText(entry.title);
+    const url = safeTaskListText(entry.url);
+    if (!title || !url) return [];
+    const snippet = safeTaskListText(entry.snippet);
+    return [{ title, url, ...(snippet ? { snippet } : {}) }];
+  });
+}
+
+function normalizeStepAntiBot(value: unknown): UiStep['antiBot'] | undefined {
+  if (!isTaskListRecord(value)) return undefined;
+  const type =
+    value.type === 'captcha' ||
+    value.type === 'verify' ||
+    value.type === 'block' ||
+    value.type === 'cloudflare'
+      ? value.type
+      : null;
+  const confidence =
+    value.confidence === 'high' || value.confidence === 'medium'
+      ? value.confidence
+      : null;
+  const message = safeTaskListText(value.message);
+  return type && confidence && message
+    ? { type, confidence, message }
+    : undefined;
 }
 
 export function toUiTask(row: ListRow): UiTask {

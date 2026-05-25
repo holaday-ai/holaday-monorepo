@@ -4,6 +4,7 @@ import type { UiTask } from '@/types/task';
 import {
   mergeFirstPageWithPreservedSelection,
   mergeTaskPagesReplacingDuplicates,
+  normalizeTaskDetailSteps,
   normalizeTaskListCursor,
   normalizeTaskListRows,
   normaliseDetailStepStatus,
@@ -17,6 +18,7 @@ vi.mock('@/lib/trpc', () => ({
   trpc: {
     tasks: {
       list: { query: vi.fn() },
+      detail: { query: vi.fn() },
       delete: { mutate: vi.fn() },
       moveToProject: { mutate: vi.fn() },
       star: { mutate: vi.fn() },
@@ -25,12 +27,14 @@ vi.mock('@/lib/trpc', () => ({
 }));
 
 const listQuery = vi.mocked(trpc.tasks.list.query);
+const detailQuery = vi.mocked(trpc.tasks.detail.query);
 const deleteMutate = vi.mocked(trpc.tasks.delete.mutate);
 const moveToProjectMutate = vi.mocked(trpc.tasks.moveToProject.mutate);
 const starMutate = vi.mocked(trpc.tasks.star.mutate);
 
 beforeEach(() => {
   listQuery.mockReset();
+  detailQuery.mockReset();
   deleteMutate.mockReset();
   moveToProjectMutate.mockReset();
   starMutate.mockReset();
@@ -58,6 +62,64 @@ describe('normaliseDetailStepStatus', () => {
 
   it('keeps cancelled detail steps distinct from failures', () => {
     expect(normaliseDetailStepStatus('cancelled')).toBe('cancelled');
+  });
+
+  it('normalizes malformed detail steps defensively', () => {
+    expect(
+      normalizeTaskDetailSteps(
+        [
+          null,
+          {
+            seq: 3,
+            status: 'completed',
+            kind: ' browse ',
+            input: { summary: ' Open page ' },
+            output: {
+              durationMs: 1200,
+              message: ' ok ',
+              antiBot: {
+                type: 'captcha',
+                confidence: 'high',
+                message: ' captcha seen ',
+              },
+            },
+            startedAt: '2026-05-25T00:00:00.000Z',
+          },
+          {
+            seq: Number.POSITIVE_INFINITY,
+            status: { unsafe: true },
+            kind: { unsafe: true },
+            input: { summary: { unsafe: true } },
+            output: { durationMs: Number.POSITIVE_INFINITY },
+            startedAt: 'not-a-date',
+          },
+        ],
+        123,
+      ),
+    ).toEqual([
+      {
+        tickIndex: 3,
+        status: 'done',
+        actionKind: 'browse',
+        actionSummary: 'Open page',
+        durationMs: 1200,
+        message: 'ok',
+        antiBot: {
+          type: 'captcha',
+          confidence: 'high',
+          message: 'captcha seen',
+        },
+        startedAt: Date.parse('2026-05-25T00:00:00.000Z'),
+      },
+      {
+        tickIndex: 2,
+        status: 'running',
+        actionKind: 'step',
+        actionSummary: 'step',
+        durationMs: 0,
+        startedAt: 123,
+      },
+    ]);
   });
 });
 
@@ -310,6 +372,55 @@ describe('refreshTaskList', () => {
   });
 });
 
+describe('selectTask detail hydration', () => {
+  it('survives malformed detail rows and synthesizes a safe selected task', async () => {
+    detailQuery.mockResolvedValueOnce({
+      intent: { unsafe: true },
+      title: { unsafe: true },
+      status: { unsafe: true },
+      createdAt: { unsafe: true },
+      steps: { unsafe: true },
+      planText: { unsafe: true },
+      planStatus: [{ idx: 'bad', status: 'done' }],
+      awaitingQuestion: { unsafe: true },
+      result: {
+        summary: '  Done summary  ',
+        finalScreenshot: { unsafe: true },
+        finalUrl: { unsafe: true },
+        metadata: {
+          attachments: [{ fileId: 'bad' }],
+          expertWorkflowId: { unsafe: true },
+          expertMode: 'bad',
+        },
+      },
+      verificationPassed: 'bad',
+      failureLevel: 'bad',
+    } as never);
+
+    useTaskStore.getState().selectTask('tsk_detail', 'ui');
+    await flushPromises();
+
+    const state = useTaskStore.getState();
+    expect(state.error).toBeNull();
+    expect(state.stepsByTask.tsk_detail).toEqual([]);
+    expect(state.tasks[0]).toMatchObject({
+      taskId: 'tsk_detail',
+      intent: '未命名任务',
+      title: null,
+      status: 'queued',
+      resultText: 'Done summary',
+      createdAt: new Date(0),
+      starredAt: null,
+      projectId: null,
+      verificationPassed: null,
+      failureLevel: null,
+    });
+    expect(state.tasks[0]?.attachments).toBeUndefined();
+    expect(state.tasks[0]?.planStatus).toBeUndefined();
+    expect(state.awaitingUserByTask.tsk_detail).toBeUndefined();
+  });
+});
+
 describe('loadMoreTasks', () => {
   it('uses fresh duplicate rows and clears terminal live state from paginated API rows', async () => {
     listQuery.mockResolvedValueOnce({
@@ -532,6 +643,10 @@ function task(overrides: Partial<UiTask> & { taskId: string }): UiTask {
     createdAt: new Date('2026-05-25T00:00:00.000Z'),
     ...overrides,
   };
+}
+
+async function flushPromises(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function taskRow(overrides: Record<string, unknown> & { taskId: string }): never {
