@@ -1,5 +1,18 @@
 import { formatCny, getPlanPriceCents, type PaidPlanId } from '@holaday/shared-types';
 
+export interface BillingSnapshot {
+  readonly plan: string;
+  readonly planExpiresAt: string | null;
+}
+
+export function normalizeBillingSnapshot(value: unknown): BillingSnapshot {
+  const raw = isRecord(value) ? value : {};
+  return {
+    plan: safeBillingText(raw.plan) || 'free',
+    planExpiresAt: safeBillingNullableText(raw.planExpiresAt),
+  };
+}
+
 export function billingPlanLabel(plan: string | null | undefined): string {
   if (plan === 'pro') return 'Pro';
   if (plan === 'basic') return 'Basic';
@@ -34,4 +47,26 @@ export function billingPageSummary(options: {
 
 export function cancellationMailBody(planLabel: string): string {
   return `请协助取消我的 HOLA DAY 订阅。\n\n注册邮箱：\n当前套餐：${planLabel}`;
+}
+
+export function billingLoadErrorMessage(
+  err: unknown,
+  fallback = '订阅信息暂时无法加载，请稍后重试。',
+): string {
+  if (err instanceof Error && err.message.trim()) return err.message;
+  if (typeof err === 'string' && err.trim()) return err;
+  return fallback;
+}
+
+function safeBillingNullableText(value: unknown): string | null {
+  const text = safeBillingText(value);
+  return text || null;
+}
+
+function safeBillingText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

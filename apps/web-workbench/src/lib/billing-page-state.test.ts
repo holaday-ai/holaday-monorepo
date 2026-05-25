@@ -1,14 +1,38 @@
 import { describe, expect, it } from 'vitest';
 import {
+  billingLoadErrorMessage,
   billingPageSummary,
   billingPlanLabel,
   cancellationMailBody,
   isPaidBillingPlan,
   nextBillingAmountText,
   nextBillingDateText,
+  normalizeBillingSnapshot,
 } from './billing-page-state';
 
 describe('billing page state helpers', () => {
+  it('normalizes billing snapshots before rendering subscription details', () => {
+    expect(
+      normalizeBillingSnapshot({
+        plan: ' pro ',
+        planExpiresAt: ' 2026-06-24T00:00:00.000Z ',
+      }),
+    ).toEqual({
+      plan: 'pro',
+      planExpiresAt: '2026-06-24T00:00:00.000Z',
+    });
+    expect(
+      normalizeBillingSnapshot({
+        plan: { unsafe: true },
+        planExpiresAt: { unsafe: true },
+      }),
+    ).toEqual({ plan: 'free', planExpiresAt: null });
+    expect(normalizeBillingSnapshot(null)).toEqual({
+      plan: 'free',
+      planExpiresAt: null,
+    });
+  });
+
   it('labels billing plans', () => {
     expect(billingPlanLabel('free')).toBe('Free · 试用');
     expect(billingPlanLabel('basic')).toBe('Basic');
@@ -41,5 +65,11 @@ describe('billing page state helpers', () => {
 
   it('includes the current plan in cancellation support copy', () => {
     expect(cancellationMailBody('Pro')).toContain('当前套餐：Pro');
+  });
+
+  it('normalizes billing loading errors', () => {
+    expect(billingLoadErrorMessage(new Error('offline'))).toBe('offline');
+    expect(billingLoadErrorMessage('bad gateway')).toBe('bad gateway');
+    expect(billingLoadErrorMessage({})).toBe('订阅信息暂时无法加载，请稍后重试。');
   });
 });

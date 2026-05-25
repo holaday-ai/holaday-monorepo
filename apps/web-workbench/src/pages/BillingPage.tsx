@@ -3,21 +3,19 @@ import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
+  billingLoadErrorMessage,
   billingPageSummary,
   billingPlanLabel,
   cancellationMailBody,
+  type BillingSnapshot,
   isPaidBillingPlan,
   nextBillingAmountText,
   nextBillingDateText,
+  normalizeBillingSnapshot,
 } from '@/lib/billing-page-state';
 import { SUPPORT_EMAIL, supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
-
-interface BillingSnapshot {
-  plan: string;
-  planExpiresAt: string | null;
-}
 
 export function BillingPage(): JSX.Element {
   const mountedRef = React.useRef(false);
@@ -29,15 +27,12 @@ export function BillingPage(): JSX.Element {
     setLoading(true);
     setLoadError(null);
     try {
-      const res = await trpc.auth.me.query();
+      const next = normalizeBillingSnapshot(await trpc.auth.me.query());
       if (!mountedRef.current) return;
-      setSnapshot({
-        plan: res.plan,
-        planExpiresAt: res.planExpiresAt ?? null,
-      });
+      setSnapshot(next);
     } catch (err) {
       if (!mountedRef.current) return;
-      setLoadError(err instanceof Error ? err.message : '请稍后重试');
+      setLoadError(billingLoadErrorMessage(err));
     } finally {
       if (mountedRef.current) setLoading(false);
     }

@@ -16,22 +16,19 @@ import { AddonPackButton } from '@/components/AddonPackButton';
 import { CnPaymentDialog, type CnProvider, type CnPurchase } from '@/components/CnPaymentDialog';
 import { PayPalButton } from '@/components/PayPalButton';
 import { Button } from '@/components/ui/button';
-import { planPaymentCtaState } from '@/lib/plan-payment-state';
+import { normalizeAuthMeProfile } from '@/lib/auth-me-state';
+import {
+  normalizeCnPaymentOptions,
+  normalizePaymentOptions,
+  planPaymentCtaState,
+  type CnPaymentOptions,
+  type PaymentOptions,
+} from '@/lib/plan-payment-state';
 import { useToast } from '@/components/ui/toast';
 import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
-
-interface PaymentOptions {
-  paypal: boolean;
-  paypalClientId: string | null;
-  paypalEnv: 'sandbox' | 'live' | null;
-}
-
-interface CnPaymentOptions {
-  enabled: boolean;
-}
 
 /**
  * Pick currency by browser locale. zh-* (mainland + HK + TW) gets ¥;
@@ -81,7 +78,7 @@ export function PlanPage(): JSX.Element {
 
   const refreshUser = React.useCallback(() => {
     trpc.auth.me.query().then(
-      (res) => setCurrentPlan(res.plan),
+      (res) => setCurrentPlan(normalizeAuthMeProfile(res).plan),
       () => {
         /* not logged in — keep showing free as current */
       },
@@ -91,11 +88,11 @@ export function PlanPage(): JSX.Element {
   React.useEffect(() => {
     refreshUser();
     trpc.payment.options.query().then(
-      (res) => setPaymentOpts(res),
+      (res) => setPaymentOpts(normalizePaymentOptions(res)),
       () => setPaymentOpts({ paypal: false, paypalClientId: null, paypalEnv: null }),
     );
     trpc.payment.cnOptions.query().then(
-      (res) => setCnOpts(res),
+      (res) => setCnOpts(normalizeCnPaymentOptions(res)),
       () => setCnOpts({ enabled: false }),
     );
   }, [refreshUser]);

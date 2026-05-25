@@ -1,8 +1,38 @@
+export interface PaymentOptions {
+  readonly paypal: boolean;
+  readonly paypalClientId: string | null;
+  readonly paypalEnv: 'sandbox' | 'live' | null;
+}
+
+export interface CnPaymentOptions {
+  readonly enabled: boolean;
+}
+
 interface PaymentStateInput {
   loading: boolean;
   zh: boolean;
   cnEnabled?: boolean | null;
   paypalEnabled?: boolean | null;
+}
+
+export function normalizePaymentOptions(value: unknown): PaymentOptions {
+  if (!isRecord(value)) return emptyPaymentOptions();
+  const paypalClientId = safeText(value.paypalClientId);
+  const paypalEnabled = value.paypal === true && paypalClientId.length > 0;
+  return {
+    paypal: paypalEnabled,
+    paypalClientId: paypalEnabled ? paypalClientId : null,
+    paypalEnv:
+      value.paypalEnv === 'sandbox' || value.paypalEnv === 'live'
+        ? value.paypalEnv
+        : null,
+  };
+}
+
+export function normalizeCnPaymentOptions(value: unknown): CnPaymentOptions {
+  return {
+    enabled: isRecord(value) && value.enabled === true,
+  };
 }
 
 export function planPaymentCtaState(input: PaymentStateInput): {
@@ -33,4 +63,16 @@ export function planPaymentCtaState(input: PaymentStateInput): {
     label: input.zh ? '升级' : 'Upgrade',
     unavailableMessage: null,
   };
+}
+
+function emptyPaymentOptions(): PaymentOptions {
+  return { paypal: false, paypalClientId: null, paypalEnv: null };
+}
+
+function safeText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

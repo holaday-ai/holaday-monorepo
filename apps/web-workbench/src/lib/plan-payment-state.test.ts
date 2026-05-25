@@ -1,5 +1,64 @@
 import { describe, expect, it } from 'vitest';
-import { planPaymentCtaState } from './plan-payment-state';
+import {
+  normalizeCnPaymentOptions,
+  normalizePaymentOptions,
+  planPaymentCtaState,
+} from './plan-payment-state';
+
+describe('normalizePaymentOptions', () => {
+  it('keeps PayPal enabled only with a usable client id', () => {
+    expect(
+      normalizePaymentOptions({
+        paypal: true,
+        paypalClientId: ' client-id ',
+        paypalEnv: 'live',
+      }),
+    ).toEqual({
+      paypal: true,
+      paypalClientId: 'client-id',
+      paypalEnv: 'live',
+    });
+
+    expect(
+      normalizePaymentOptions({
+        paypal: true,
+        paypalClientId: { unsafe: true },
+        paypalEnv: 'sandbox',
+      }),
+    ).toEqual({
+      paypal: false,
+      paypalClientId: null,
+      paypalEnv: 'sandbox',
+    });
+  });
+
+  it('falls back to unavailable payment options for malformed payloads', () => {
+    expect(normalizePaymentOptions(null)).toEqual({
+      paypal: false,
+      paypalClientId: null,
+      paypalEnv: null,
+    });
+    expect(
+      normalizePaymentOptions({
+        paypal: 'true',
+        paypalClientId: 'client-id',
+        paypalEnv: 'production',
+      }),
+    ).toEqual({
+      paypal: false,
+      paypalClientId: null,
+      paypalEnv: null,
+    });
+  });
+});
+
+describe('normalizeCnPaymentOptions', () => {
+  it('enables local payment only when explicitly true', () => {
+    expect(normalizeCnPaymentOptions({ enabled: true })).toEqual({ enabled: true });
+    expect(normalizeCnPaymentOptions({ enabled: 'true' })).toEqual({ enabled: false });
+    expect(normalizeCnPaymentOptions(null)).toEqual({ enabled: false });
+  });
+});
 
 describe('planPaymentCtaState', () => {
   it('disables the upgrade CTA while payment options load', () => {
