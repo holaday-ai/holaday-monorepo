@@ -1,4 +1,4 @@
-import { ChevronRight, Loader2, Monitor, Moon, Sun, X } from 'lucide-react';
+import { AlertCircle, ChevronRight, Loader2, Monitor, Moon, Sun, X } from 'lucide-react';
 import * as React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ApiKeysSection } from '@/components/ApiKeysSection';
@@ -7,6 +7,12 @@ import { NotificationsSection } from '@/components/notifications/NotificationsSe
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { supportMailtoHref } from '@/lib/support-links';
+import {
+  memoryCategoryLabel,
+  memoryLoadErrorMessage,
+  normalizeMemoryRows,
+  type MemoryRowView,
+} from '@/lib/memory-settings-state';
 import {
   SETTINGS_SECTIONS,
   normaliseSettingsHash,
@@ -225,22 +231,6 @@ function ThemeOption({
   );
 }
 
-interface MemoryRow {
-  externalId: string;
-  category: string;
-  keyName: string;
-  value: string;
-  expiresAt: string | null;
-  updatedAt: string;
-}
-
-const CATEGORY_LABEL_ZH: Record<string, string> = {
-  preference: '偏好',
-  site_state: '网站状态',
-  task_history: '任务历史',
-  execution_tip: '执行经验',
-};
-
 /**
  * Phase 13 Dim 5 — AI memory management.
  *
@@ -251,23 +241,24 @@ const CATEGORY_LABEL_ZH: Record<string, string> = {
  */
 function MemorySection(): JSX.Element {
   const toast = useToast();
-  const [memories, setMemories] = React.useState<MemoryRow[]>([]);
+  const [memories, setMemories] = React.useState<MemoryRowView[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [confirming, setConfirming] = React.useState(false);
   const [deletingIds, setDeletingIds] = React.useState<ReadonlySet<string>>(
     () => new Set(),
   );
 
-  const refresh = React.useCallback(async () => {
+  const refresh = React.useCallback(async (options: { silent?: boolean } = {}) => {
     setLoading(true);
     try {
       const res = await trpc.memory.list.query();
-      setMemories(res.memories as MemoryRow[]);
+      setMemories(normalizeMemoryRows(res));
+      setLoadError(null);
     } catch (err) {
-      toast.show(
-        err instanceof Error ? `加载记忆失败：${err.message}` : '加载记忆失败',
-        'error',
-      );
+      const message = memoryLoadErrorMessage(err);
+      setLoadError(message);
+      if (!options.silent) toast.show(`加载记忆失败：${message}`, 'error');
       setMemories([]);
     } finally {
       setLoading(false);
@@ -275,7 +266,7 @@ function MemorySection(): JSX.Element {
   }, [toast]);
 
   React.useEffect(() => {
-    void refresh();
+    void refresh({ silent: true });
   }, [refresh]);
 
   const handleDelete = async (externalId: string): Promise<void> => {
@@ -333,6 +324,24 @@ function MemorySection(): JSX.Element {
 
         {loading ? (
           <div className="text-xs text-muted-foreground">加载中…</div>
+        ) : loadError ? (
+          <div className="rounded-md border border-border bg-card/40 px-3 py-4 text-center">
+            <AlertCircle className="mx-auto h-6 w-6 text-primary" aria-hidden />
+            <div className="mt-2 text-sm font-medium text-foreground/85">
+              AI 记忆加载失败
+            </div>
+            <div className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
+              {loadError}
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              className="mt-3"
+              onClick={() => void refresh()}
+            >
+              重试
+            </Button>
+          </div>
         ) : memories.length === 0 ? (
           <div className="rounded-md border border-dashed border-border bg-card/40 px-3 py-3 text-xs text-muted-foreground">
             还没有记忆。完成一些任务后这里会逐步填充。
@@ -350,7 +359,7 @@ function MemorySection(): JSX.Element {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                          {CATEGORY_LABEL_ZH[m.category] ?? m.category}
+                          {memoryCategoryLabel(m.category)}
                         </span>
                         <span className="truncate text-sm font-medium text-foreground">
                           {m.keyName}
