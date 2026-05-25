@@ -24,6 +24,11 @@ import {
 import '@/pages/scheduled-calendar/calendar-styles.css';
 import { useToast } from '@/components/ui/toast';
 import { clearAccessToken, getAccessToken } from '@/lib/auth';
+import {
+  normalizeAuthMeProfile,
+  preferredAuthDisplayName,
+  type NormalizedAuthMeProfile,
+} from '@/lib/auth-me-state';
 import { authSessionExpiredMessage, isAuthSessionError } from '@/lib/auth-session';
 import { taskActionError } from '@/lib/error-copy';
 import {
@@ -48,17 +53,7 @@ import type { UiProject, UiTask } from '@/types/task';
 import { applyHistoryRetention } from '@/utils/time-buckets';
 import { PLAN_CATALOGUE, type PlanId } from '@holaday/shared-types';
 
-interface MeProfile {
-  userId: string;
-  email: string | null;
-  phone?: string | null;
-  displayName: string | null;
-  plan: string;
-  multiUser: boolean;
-  selectedRoles?: string[];
-  /** Phase 27 — gates the /admin sidebar entry + route. */
-  role: 'user' | 'admin';
-}
+type MeProfile = NormalizedAuthMeProfile;
 
 interface OutletContext {
   me: MeProfile | null;
@@ -233,19 +228,7 @@ export function AppShell(): JSX.Element {
     const meFuture = trpc.auth.me.query().then(
       (res) => {
         if (authInvalidated) return;
-        setMe({
-          userId: res.userId,
-          email: res.email,
-          displayName: res.displayName,
-          plan: res.plan,
-          multiUser: Boolean((res as { multiUser?: boolean }).multiUser),
-          selectedRoles:
-            (res as { selectedRoles?: string[] }).selectedRoles ?? [],
-          role:
-            (res as { role?: 'user' | 'admin' }).role === 'admin'
-              ? 'admin'
-              : 'user',
-        });
+        setMe(normalizeAuthMeProfile(res));
       },
       (err) => {
         if (isAuthSessionError(err)) {
@@ -545,7 +528,7 @@ export function AppShell(): JSX.Element {
   }
   if (!bootstrapped) return <AppSkeleton />;
 
-  const displayName = preferredDisplayName(me);
+  const displayName = preferredAuthDisplayName(me);
   const ctx: OutletContext = {
     me,
     refreshProjects,
@@ -846,17 +829,4 @@ function MobileNotificationBellSlot(): JSX.Element | null {
  */
 export function useAppShellContext(): OutletContext {
   return useOutletContext<OutletContext>();
-}
-
-function preferredDisplayName(me: MeProfile | null): string {
-  if (!me) return '';
-  const raw = me.displayName?.trim();
-  const looksMasked = raw ? /\d{3}\**\d{4}/.test(raw) : false;
-  if (raw && !looksMasked) return raw;
-  if (me.phone) return `用户_${me.phone.slice(-4)}`;
-  if (me.email) {
-    const at = me.email.indexOf('@');
-    return at > 0 ? me.email.slice(0, at) : me.email;
-  }
-  return '用户';
 }

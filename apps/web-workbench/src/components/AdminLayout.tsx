@@ -22,15 +22,18 @@ import * as React from 'react';
 import { Link, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { BrandIcon, BrandWordmark } from '@/components/BrandLogo';
 import { getAccessToken, clearAccessToken } from '@/lib/auth';
+import {
+  normalizeAuthMeProfile,
+  preferredAuthDisplayName,
+  type NormalizedAuthMeProfile,
+} from '@/lib/auth-me-state';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 
-interface AdminMe {
-  userId: string;
-  email: string | null;
-  displayName: string | null;
-  role: 'user' | 'admin';
-}
+type AdminMe = Pick<
+  NormalizedAuthMeProfile,
+  'userId' | 'email' | 'phone' | 'displayName' | 'role'
+>;
 
 interface AdminOutletContext {
   me: AdminMe;
@@ -55,18 +58,19 @@ export function AdminLayout(): JSX.Element {
       .query()
       .then((res) => {
         if (cancelled) return;
-        const role = (res as { role?: 'user' | 'admin' }).role === 'admin' ? 'admin' : 'user';
-        if (role !== 'admin') {
+        const me = normalizeAuthMeProfile(res);
+        if (me.role !== 'admin') {
           setGate({ status: 'forbidden' });
           return;
         }
         setGate({
           status: 'ok',
           me: {
-            userId: res.userId,
-            email: res.email,
-            displayName: res.displayName,
-            role,
+            userId: me.userId,
+            email: me.email,
+            phone: me.phone,
+            displayName: me.displayName,
+            role: me.role,
           },
         });
       })
@@ -150,7 +154,7 @@ function AdminSideNav({ me }: { me: AdminMe }): JSX.Element {
       </nav>
       <div className="border-t border-border/60 px-3 py-3">
         <div className="truncate px-2 text-[12px] font-medium text-foreground">
-          {me.displayName ?? '管理员'}
+          {preferredAuthDisplayName(me)}
         </div>
         <div className="truncate px-2 text-[11px] text-muted-foreground">
           {me.email ?? '—'}

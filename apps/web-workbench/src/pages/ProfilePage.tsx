@@ -3,8 +3,10 @@ import * as React from 'react';
 import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
 import { Button } from '@/components/ui/button';
 import {
+  normalizeProfileSnapshot,
   profileDisplayName,
   profileInitial,
+  profileLoadErrorMessage,
   profilePageSummary,
   profileUpdateMailBody,
 } from '@/lib/profile-page-state';
@@ -30,13 +32,13 @@ export function ProfilePage(): JSX.Element {
     setLoading(true);
     setLoadError(null);
     try {
-      const res = await trpc.auth.me.query();
+      const res = normalizeProfileSnapshot(await trpc.auth.me.query());
       if (!mountedRef.current) return;
-      setEmail(res.email ?? '');
-      setDisplayName(res.displayName ?? '');
+      setEmail(res.email);
+      setDisplayName(res.displayName);
     } catch (err) {
       if (!mountedRef.current) return;
-      setLoadError(err instanceof Error ? err.message : '请稍后重试');
+      setLoadError(profileLoadErrorMessage(err));
     } finally {
       if (mountedRef.current) setLoading(false);
     }
