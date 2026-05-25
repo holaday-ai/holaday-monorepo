@@ -22,6 +22,10 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
+import {
+  type ComposerSubmitResult,
+  shouldClearComposerAfterSubmit,
+} from '@/components/composer-submit';
 import { isUploadError, uploadFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
 
@@ -31,7 +35,7 @@ interface Props {
     fileIds: string[],
     mode?: 'auto' | 'plan',
     expertMode?: 'normal' | 'expert' | 'auto',
-  ) => Promise<void> | void;
+  ) => Promise<ComposerSubmitResult> | ComposerSubmitResult;
   busy?: boolean;
   /** Forwarded ref for keyboard-shortcut focus (Cmd+N / slash). */
   inputRef?: React.Ref<HTMLTextAreaElement>;
@@ -417,19 +421,11 @@ export function InputArea({
       // Treat undefined as success (legacy callers never threw and didn't
       // signal failure). If a structured `{ error }` came back, surface
       // it and keep the input.
-      if (result == null) {
-        submitOk = true;
-      } else if (typeof result === 'object') {
-        const r = result as { ok?: boolean; error?: string };
-        if (r.error) {
-          toast.show(r.error, 'error');
-          submitOk = false;
-        } else {
-          submitOk = r.ok !== false;
-        }
-      } else {
-        submitOk = true;
+      if (typeof result === 'object' && result != null) {
+        const r = result as { error?: string };
+        if (r.error) toast.show(r.error, 'error');
       }
+      submitOk = shouldClearComposerAfterSubmit(result);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.show(`提交失败：${msg}`, 'error');

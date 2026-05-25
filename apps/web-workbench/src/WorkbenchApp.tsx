@@ -8,6 +8,10 @@ import { BrowserPanel } from '@/components/BrowserPanel';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { MainPanel } from '@/components/MainPanel';
 import { ResizeHandle } from '@/components/ResizeHandle';
+import {
+  clearComposerOnSubmitSuccess,
+  keepComposerOnSubmitFailure,
+} from '@/components/composer-submit';
 import { useToast } from '@/components/ui/toast';
 import { useSidebar } from '@/components/ui/sidebar';
 import { hdDebug } from '@/lib/hd-debug';
@@ -403,20 +407,25 @@ export function WorkbenchApp(): JSX.Element {
               const res = await replyToTask(selectedTaskId, intent, fileIds);
               if ('error' in res) {
                 toast.show(taskActionError('回复失败', res.error), 'error');
+                return keepComposerOnSubmitFailure;
               } else if (!res.ok) {
                 setConfirmRebuildTask({
                   taskId: selectedTaskId,
                   intent: selectedTask?.intent ?? '',
                   pendingMessage: intent,
                 });
+                return keepComposerOnSubmitFailure;
               }
-              return;
+              return clearComposerOnSubmitSuccess;
             }
             if (followUpTarget) {
               const res = await createTask(intent, fileIds, followUpTarget.taskId);
-              if ('error' in res) toast.show(taskActionError('追问失败', res.error), 'error');
-              else toast.show('已基于上一个任务追问');
-              return;
+              if ('error' in res) {
+                toast.show(taskActionError('追问失败', res.error), 'error');
+                return keepComposerOnSubmitFailure;
+              }
+              toast.show('已基于上一个任务追问');
+              return clearComposerOnSubmitSuccess;
             }
             const res = await createTask(intent, fileIds, undefined, mode, expertMode);
             if ('error' in res) {
@@ -431,7 +440,9 @@ export function WorkbenchApp(): JSX.Element {
               } else {
                 toast.show(taskActionError('发送失败', res.error), 'error');
               }
+              return keepComposerOnSubmitFailure;
             }
+            return clearComposerOnSubmitSuccess;
           }}
           onOpenSidebar={() => setOpenMobile(true)}
           sidePanelMode={sidePanelMode}

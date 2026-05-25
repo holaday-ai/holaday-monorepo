@@ -5,6 +5,7 @@ import { RoleNudgeBanner } from '@/components/RoleNudgeBanner';
 import { TaskStream } from '@/components/TaskStream';
 import { TaskToolbar, isBrowserLikely } from '@/components/TaskToolbar';
 import { Button } from '@/components/ui/button';
+import type { ComposerSubmitResult } from '@/components/composer-submit';
 import { shouldResetComposerOnSelectionChange } from '@/components/composer-reset';
 import { useTaskStore } from '@/stores/task-store';
 import type { SidePanelMode } from '@/types/side-panel';
@@ -17,7 +18,7 @@ interface Props {
     fileIds: string[],
     mode?: 'auto' | 'plan',
     expertMode?: 'normal' | 'expert' | 'auto',
-  ) => Promise<void> | void;
+  ) => Promise<ComposerSubmitResult> | ComposerSubmitResult;
   busy?: boolean;
   onOpenSidebar?: () => void;
   // Codex follow-up — onOpenBrowser removed (panel now auto-opens).
