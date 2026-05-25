@@ -1,6 +1,7 @@
 import { Menu, X } from 'lucide-react';
 import * as React from 'react';
 import { InputArea } from '@/components/InputArea';
+import { LazyLoadBoundary } from '@/components/LazyLoadBoundary';
 import { RoleNudgeBanner } from '@/components/RoleNudgeBanner';
 import { TaskToolbar, isBrowserLikely } from '@/components/TaskToolbar';
 import { Button } from '@/components/ui/button';
@@ -223,12 +224,14 @@ export function MainPanel({
             </div>
           )}
           <div className="flex-1 overflow-y-auto">
-            <React.Suspense fallback={<TaskStreamFallback />}>
-              <TaskStream
-                task={task}
-                onPickSuggestion={handlePickFromTaskSummary}
-              />
-            </React.Suspense>
+            <LazyLoadBoundary surfaceLabel="任务详情" resetKey={task.taskId}>
+              <React.Suspense fallback={<TaskStreamFallback />}>
+                <TaskStream
+                  task={task}
+                  onPickSuggestion={handlePickFromTaskSummary}
+                />
+              </React.Suspense>
+            </LazyLoadBoundary>
           </div>
           {userPlan ? (
             <RoleNudgeBanner
