@@ -5,6 +5,8 @@ import {
   batchListSummary,
   batchProgressPercent,
   batchStatusCopy,
+  normalizeBatchDetail,
+  normalizeBatchRows,
   safeBatchCount,
 } from './batch-page-state';
 
@@ -91,5 +93,132 @@ describe('batch page state helpers', () => {
         finished: Number.POSITIVE_INFINITY,
       }),
     ).toBe('0 / 0 已处理');
+  });
+
+  it('normalizes batch list rows before rendering', () => {
+    expect(
+      normalizeBatchRows([
+        null,
+        { name: 'missing id', batchId: '', itemsTotal: 1 },
+        {
+          batchId: ' batch_1 ',
+          name: ' Competitor scan ',
+          status: 'partial',
+          concurrency: 3,
+          itemsTotal: 10.9,
+          itemsDone: 4,
+          itemsFailed: 2,
+          itemsCancelled: 1,
+          createdAt: ' 2026-05-25T00:00:00.000Z ',
+          completedAt: null,
+        },
+      ]),
+    ).toEqual([
+      {
+        batchId: 'batch_1',
+        name: 'Competitor scan',
+        status: 'partial',
+        concurrency: 3,
+        itemsTotal: 10,
+        itemsDone: 4,
+        itemsFailed: 2,
+        itemsCancelled: 1,
+        createdAt: '2026-05-25T00:00:00.000Z',
+        completedAt: null,
+      },
+    ]);
+  });
+
+  it('falls back from malformed batch row fields safely', () => {
+    expect(
+      normalizeBatchRows([
+        {
+          batchId: 'batch_2',
+          name: { unsafe: true },
+          status: 'unknown',
+          concurrency: -1,
+          itemsTotal: Number.NaN,
+          itemsDone: Number.POSITIVE_INFINITY,
+          itemsFailed: -2,
+          itemsCancelled: { unsafe: true },
+          createdAt: { unsafe: true },
+          completedAt: { unsafe: true },
+        },
+      ]),
+    ).toEqual([
+      {
+        batchId: 'batch_2',
+        name: null,
+        status: 'pending',
+        concurrency: 1,
+        itemsTotal: 0,
+        itemsDone: 0,
+        itemsFailed: 0,
+        itemsCancelled: 0,
+        createdAt: '',
+        completedAt: null,
+      },
+    ]);
+  });
+
+  it('normalizes batch detail items and drops item rows without ids', () => {
+    const detail = normalizeBatchDetail({
+      batchId: 'batch_3',
+      name: null,
+      status: 'running',
+      concurrency: 2,
+      itemsTotal: 2,
+      itemsDone: 1,
+      itemsFailed: 0,
+      itemsCancelled: 0,
+      createdAt: '2026-05-25T00:00:00.000Z',
+      completedAt: null,
+      items: [
+        { batchItemId: '', prompt: 'missing id' },
+        {
+          batchItemId: ' item_1 ',
+          seq: -10,
+          prompt: { unsafe: true },
+          status: 'unknown',
+          errorMessage: { unsafe: true },
+          taskId: { unsafe: true },
+          createdAt: { unsafe: true },
+          completedAt: { unsafe: true },
+        },
+        {
+          batchItemId: 'item_2',
+          seq: 7,
+          prompt: ' Launch checklist ',
+          status: 'completed',
+          errorMessage: null,
+          taskId: ' tsk_1 ',
+          createdAt: '2026-05-25T00:00:00.000Z',
+          completedAt: '2026-05-25T00:05:00.000Z',
+        },
+      ],
+    });
+
+    expect(detail?.items).toEqual([
+      {
+        batchItemId: 'item_1',
+        seq: 1,
+        prompt: '未命名任务',
+        status: 'pending',
+        errorMessage: null,
+        taskId: null,
+        createdAt: '',
+        completedAt: null,
+      },
+      {
+        batchItemId: 'item_2',
+        seq: 7,
+        prompt: 'Launch checklist',
+        status: 'completed',
+        errorMessage: null,
+        taskId: 'tsk_1',
+        createdAt: '2026-05-25T00:00:00.000Z',
+        completedAt: '2026-05-25T00:05:00.000Z',
+      },
+    ]);
   });
 });

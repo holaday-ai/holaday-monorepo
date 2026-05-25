@@ -21,6 +21,10 @@ import {
   batchDetailSummary,
   batchErrorMessage,
   batchListSummary,
+  normalizeBatchDetail,
+  normalizeBatchRows,
+  type NormalizedBatchDetail,
+  type NormalizedBatchRow,
   batchProgressPercent,
   batchStatusCopy,
   safeBatchCount,
@@ -44,32 +48,6 @@ import { onServerMessage } from '@/lib/ws';
  * Live updates come from `server.batch.progress` frames, with a 5s
  * poll as a safety net if the WS connection drops.
  */
-
-interface UiBatchRow {
-  batchId: string;
-  name: string | null;
-  status: string;
-  concurrency: number;
-  itemsTotal: number;
-  itemsDone: number;
-  itemsFailed: number;
-  itemsCancelled?: number | null;
-  createdAt: string | Date;
-  completedAt: string | Date | null;
-}
-
-interface UiBatchDetail extends UiBatchRow {
-  items: Array<{
-    batchItemId: string;
-    seq: number;
-    prompt: string;
-    status: string;
-    errorMessage: string | null;
-    taskId: string | null;
-    createdAt: string | Date;
-    completedAt: string | Date | null;
-  }>;
-}
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '等待中',
@@ -97,7 +75,7 @@ function BatchList(): JSX.Element {
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
-  const [rows, setRows] = React.useState<UiBatchRow[] | null>(null);
+  const [rows, setRows] = React.useState<NormalizedBatchRow[] | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   // Phase 5b — when InputArea routes here with `state.initialPrompts`
@@ -123,7 +101,7 @@ function BatchList(): JSX.Element {
     setLoading(true);
     try {
       const list = await trpc.batchTasks.list.query();
-      setRows(list as UiBatchRow[]);
+      setRows(normalizeBatchRows(list));
       setLoadError(null);
     } catch (err) {
       const message = batchErrorMessage(err);
@@ -291,7 +269,7 @@ function BatchList(): JSX.Element {
 function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
   const toast = useToast();
   const navigate = useNavigate();
-  const [detail, setDetail] = React.useState<UiBatchDetail | null>(null);
+  const [detail, setDetail] = React.useState<NormalizedBatchDetail | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = React.useState(false);
@@ -300,7 +278,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
     setLoading(true);
     try {
       const data = await trpc.batchTasks.detail.query({ batchId });
-      setDetail(data as UiBatchDetail);
+      setDetail(normalizeBatchDetail(data));
       setLoadError(null);
     } catch (err) {
       const message = batchErrorMessage(err);

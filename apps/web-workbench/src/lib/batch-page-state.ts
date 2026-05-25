@@ -1,3 +1,31 @@
+export interface NormalizedBatchRow {
+  readonly batchId: string;
+  readonly name: string | null;
+  readonly status: string;
+  readonly concurrency: number;
+  readonly itemsTotal: number;
+  readonly itemsDone: number;
+  readonly itemsFailed: number;
+  readonly itemsCancelled: number;
+  readonly createdAt: string | Date;
+  readonly completedAt: string | Date | null;
+}
+
+export interface NormalizedBatchItem {
+  readonly batchItemId: string;
+  readonly seq: number;
+  readonly prompt: string;
+  readonly status: string;
+  readonly errorMessage: string | null;
+  readonly taskId: string | null;
+  readonly createdAt: string | Date;
+  readonly completedAt: string | Date | null;
+}
+
+export interface NormalizedBatchDetail extends NormalizedBatchRow {
+  readonly items: NormalizedBatchItem[];
+}
+
 export function batchListSummary({
   loading,
   error,
@@ -97,4 +125,113 @@ export function batchErrorMessage(err: unknown, fallback = '请稍后重试'): s
 export function safeBatchCount(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
   return Math.max(0, Math.floor(value));
+}
+
+export function normalizeBatchRows(value: unknown): NormalizedBatchRow[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const row = normalizeBatchRow(entry);
+    return row ? [row] : [];
+  });
+}
+
+export function normalizeBatchDetail(value: unknown): NormalizedBatchDetail | null {
+  const row = normalizeBatchRow(value);
+  if (!row || !isRecord(value)) return null;
+  const items = Array.isArray(value.items)
+    ? value.items.flatMap((entry, index) => {
+        const item = normalizeBatchItem(entry, index);
+        return item ? [item] : [];
+      })
+    : [];
+  return { ...row, items };
+}
+
+function normalizeBatchRow(value: unknown): NormalizedBatchRow | null {
+  if (!isRecord(value)) return null;
+  const batchId = safeBatchText(value.batchId);
+  if (!batchId) return null;
+  return {
+    batchId,
+    name: safeNullableBatchText(value.name),
+    status: normalizeBatchStatus(value.status),
+    concurrency: positiveBatchCount(value.concurrency),
+    itemsTotal: safeBatchCount(value.itemsTotal),
+    itemsDone: safeBatchCount(value.itemsDone),
+    itemsFailed: safeBatchCount(value.itemsFailed),
+    itemsCancelled: safeBatchCount(value.itemsCancelled),
+    createdAt: safeBatchDate(value.createdAt) ?? '',
+    completedAt: safeNullableBatchDate(value.completedAt),
+  };
+}
+
+function normalizeBatchItem(value: unknown, fallbackSeq: number): NormalizedBatchItem | null {
+  if (!isRecord(value)) return null;
+  const batchItemId = safeBatchText(value.batchItemId);
+  if (!batchItemId) return null;
+  return {
+    batchItemId,
+    seq:
+      typeof value.seq === 'number' && Number.isSafeInteger(value.seq) && value.seq >= 0
+        ? value.seq
+        : fallbackSeq,
+    prompt: safeBatchText(value.prompt) || '未命名任务',
+    status: normalizeBatchItemStatus(value.status),
+    errorMessage: safeNullableBatchText(value.errorMessage),
+    taskId: safeNullableBatchText(value.taskId),
+    createdAt: safeBatchDate(value.createdAt) ?? '',
+    completedAt: safeNullableBatchDate(value.completedAt),
+  };
+}
+
+function normalizeBatchStatus(value: unknown): string {
+  return value === 'pending' ||
+    value === 'running' ||
+    value === 'completed' ||
+    value === 'partial' ||
+    value === 'cancelled'
+    ? value
+    : 'pending';
+}
+
+function normalizeBatchItemStatus(value: unknown): string {
+  return value === 'pending' ||
+    value === 'running' ||
+    value === 'completed' ||
+    value === 'failed' ||
+    value === 'cancelled'
+    ? value
+    : 'pending';
+}
+
+function positiveBatchCount(value: unknown): number {
+  const count = safeBatchCount(value);
+  return count > 0 ? count : 1;
+}
+
+function safeNullableBatchText(value: unknown): string | null {
+  const text = safeBatchText(value);
+  return text || null;
+}
+
+function safeBatchText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function safeNullableBatchDate(value: unknown): string | Date | null {
+  return value == null ? null : safeBatchDate(value);
+}
+
+function safeBatchDate(value: unknown): string | Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return Number.isNaN(new Date(trimmed).getTime()) ? null : trimmed;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

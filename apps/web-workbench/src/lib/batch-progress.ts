@@ -34,10 +34,29 @@ export interface BatchProgressFrame {
   };
 }
 
+export function normalizeBatchProgressFrame(value: unknown): BatchProgressFrame | null {
+  if (!isRecord(value) || value.type !== 'server.batch.progress') return null;
+  const batchId = safeProgressText(value.batchId);
+  if (!batchId) return null;
+  const item = normalizeProgressItem(value.item);
+  return {
+    type: 'server.batch.progress',
+    batchId,
+    status: normalizeBatchProgressStatus(value.status),
+    itemsTotal: safeProgressCount(value.itemsTotal),
+    itemsDone: safeProgressCount(value.itemsDone),
+    itemsFailed: safeProgressCount(value.itemsFailed),
+    itemsCancelled: safeProgressCount(value.itemsCancelled),
+    ...(item ? { item } : {}),
+  };
+}
+
 export function applyBatchProgressToRows<T extends BatchProgressRow>(
   rows: T[],
-  frame: BatchProgressFrame,
+  rawFrame: BatchProgressFrame,
 ): T[] {
+  const frame = normalizeBatchProgressFrame(rawFrame);
+  if (!frame) return rows;
   let changed = false;
   const next = rows.map((row) => {
     if (row.batchId !== frame.batchId) return row;
@@ -49,8 +68,10 @@ export function applyBatchProgressToRows<T extends BatchProgressRow>(
 
 export function applyBatchProgressToDetail<T extends BatchProgressDetail>(
   detail: T,
-  frame: BatchProgressFrame,
+  rawFrame: BatchProgressFrame,
 ): T {
+  const frame = normalizeBatchProgressFrame(rawFrame);
+  if (!frame) return detail;
   if (detail.batchId !== frame.batchId) return detail;
   const next = applyBatchCounters(detail, frame);
   if (!frame.item) return next;
@@ -80,4 +101,51 @@ function applyBatchCounters<T extends BatchProgressRow>(
     itemsFailed: frame.itemsFailed,
     itemsCancelled: frame.itemsCancelled ?? row.itemsCancelled ?? 0,
   };
+}
+
+function normalizeProgressItem(value: unknown): BatchProgressFrame['item'] | undefined {
+  if (!isRecord(value)) return undefined;
+  const batchItemId = safeProgressText(value.batchItemId);
+  if (!batchItemId) return undefined;
+  const taskId = safeProgressText(value.taskId);
+  const errorMessage = safeProgressText(value.errorMessage);
+  return {
+    batchItemId,
+    status: normalizeBatchItemProgressStatus(value.status),
+    ...(taskId ? { taskId } : {}),
+    ...(errorMessage ? { errorMessage } : {}),
+  };
+}
+
+function normalizeBatchProgressStatus(value: unknown): string {
+  return value === 'pending' ||
+    value === 'running' ||
+    value === 'completed' ||
+    value === 'partial' ||
+    value === 'cancelled'
+    ? value
+    : 'pending';
+}
+
+function normalizeBatchItemProgressStatus(value: unknown): string {
+  return value === 'pending' ||
+    value === 'running' ||
+    value === 'completed' ||
+    value === 'failed' ||
+    value === 'cancelled'
+    ? value
+    : 'pending';
+}
+
+function safeProgressCount(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+}
+
+function safeProgressText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

@@ -1,6 +1,7 @@
 import {
   applyBatchProgressToDetail,
   applyBatchProgressToRows,
+  normalizeBatchProgressFrame,
   type BatchProgressFrame,
 } from './batch-progress';
 import { describe, expect, it } from 'vitest';
@@ -114,5 +115,60 @@ describe('batch progress helpers', () => {
         detail.items[1],
       ],
     });
+  });
+
+  it('normalizes malformed live progress frames before applying them', () => {
+    expect(
+      normalizeBatchProgressFrame({
+        type: 'server.batch.progress',
+        batchId: ' batch_1 ',
+        status: 'unknown',
+        itemsTotal: Number.NaN,
+        itemsDone: 2.8,
+        itemsFailed: -1,
+        itemsCancelled: { unsafe: true },
+        item: {
+          batchItemId: ' item_1 ',
+          status: 'unknown',
+          taskId: { unsafe: true },
+          errorMessage: { unsafe: true },
+        },
+      }),
+    ).toEqual({
+      type: 'server.batch.progress',
+      batchId: 'batch_1',
+      status: 'pending',
+      itemsTotal: 0,
+      itemsDone: 2,
+      itemsFailed: 0,
+      itemsCancelled: 0,
+      item: {
+        batchItemId: 'item_1',
+        status: 'pending',
+      },
+    });
+  });
+
+  it('ignores malformed progress frames without a stable batch id', () => {
+    expect(normalizeBatchProgressFrame({ type: 'server.batch.progress' })).toBeNull();
+    const rows = [
+      {
+        batchId: 'batch_1',
+        status: 'running',
+        itemsTotal: 1,
+        itemsDone: 0,
+        itemsFailed: 0,
+      },
+    ];
+    expect(
+      applyBatchProgressToRows(rows, {
+        type: 'server.batch.progress',
+        batchId: '',
+        status: 'completed',
+        itemsTotal: 1,
+        itemsDone: 1,
+        itemsFailed: 0,
+      }),
+    ).toBe(rows);
   });
 });
