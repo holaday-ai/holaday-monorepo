@@ -259,13 +259,13 @@ export function HistoryPage(): JSX.Element {
         title="任务历史"
         description="全部历史记录"
         action={
-          <div className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground">
+          <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
             {summary}
           </div>
         }
       />
       <div className="space-y-4">
-        <Section>
+        <Section className="rounded-[8px] border-[#DCDDDD] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex flex-wrap items-center gap-2">
               <FilterGroup<StatusFilter>
@@ -291,7 +291,7 @@ export function HistoryPage(): JSX.Element {
                 <button
                   type="button"
                   onClick={resetFilters}
-                  className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition hover:bg-foreground/[0.05] hover:text-foreground"
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-[#DCDDDD] bg-white px-2 text-xs text-[#595757] transition-colors hover:border-[#ADADAD] hover:text-[#EA1F59]"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
                   重置筛选
@@ -305,21 +305,21 @@ export function HistoryPage(): JSX.Element {
                 placeholder="搜索任务内容"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                className="w-full rounded-md border border-input bg-background py-2 pl-8 pr-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="w-full rounded-[8px] border border-[#DCDDDD] bg-white py-2 pl-8 pr-3 text-sm shadow-[0_1px_2px_rgba(15,23,42,0.03)] focus-visible:border-[#ADADAD] focus-visible:outline-none"
               />
             </div>
           </div>
         </Section>
 
-        <Section>
+        <Section className="rounded-[8px] border-[#DCDDDD] bg-white p-0 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           {loadingWithoutRows ? (
             <div className="flex h-48 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Loader2 className="h-5 w-5 animate-spin text-[#EA1F59]" />
               任务历史加载中…
             </div>
           ) : error ? (
             <div className="flex h-56 flex-col items-center justify-center text-center">
-              <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
+              <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
               <div className="mt-3 text-sm font-medium text-foreground/80">
                 历史任务加载失败
               </div>
@@ -330,12 +330,18 @@ export function HistoryPage(): JSX.Element {
                 <Button
                   size="sm"
                   variant="outline"
+                  className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
                   onClick={() => void fetchPage(null, false)}
                   disabled={loading}
                 >
                   {loading ? '重试中…' : '重试'}
                 </Button>
-                <Button asChild size="sm" variant="outline">
+                <Button
+                  asChild
+                  size="sm"
+                  variant="outline"
+                  className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                >
                   <a
                     href={supportMailtoHref({
                       subject: '任务历史加载失败',
@@ -359,7 +365,7 @@ export function HistoryPage(): JSX.Element {
                 <Button
                   size="sm"
                   variant="outline"
-                  className="mt-3"
+                  className="mt-3 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
                   onClick={resetFilters}
                 >
                   重置筛选
@@ -367,24 +373,24 @@ export function HistoryPage(): JSX.Element {
               )}
             </div>
           ) : (
-            <ul className="divide-y divide-border">
+            <ul className="divide-y divide-[#EFEFEF]">
               {tasks.map((t) => (
                 <li key={t.taskId}>
                   <button
                     type="button"
                     onClick={() => navigate(`/?task=${encodeURIComponent(t.taskId)}`)}
-                    className="group flex w-full items-start gap-3 py-3 text-left transition-colors hover:bg-muted/40"
+                    className="group flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-[#EFEFEF]/35"
                   >
                     <StatusIcon status={t.status} />
                     <div className="min-w-0 flex-1 px-1">
-                      <div className="truncate text-sm font-medium group-hover:underline">
+                      <div className="truncate text-sm font-medium group-hover:text-[#EA1F59]">
                         {t.intent || '未命名任务'}
                       </div>
                       <div className="mt-0.5 text-[11px] text-muted-foreground">
                         {formatTaskHubTime(t.createdAt)} · {taskStatusLabel(t.status)}
                       </div>
                     </div>
-                    <span className="shrink-0 self-center pr-2 text-[11px] text-muted-foreground opacity-0 group-hover:opacity-100">
+                    <span className="shrink-0 self-center pr-2 text-[11px] text-[#595757] opacity-0 group-hover:text-[#EA1F59] group-hover:opacity-100">
                       查看 →
                     </span>
                   </button>
@@ -394,11 +400,12 @@ export function HistoryPage(): JSX.Element {
           )}
 
           {loadMoreError && !error && (
-            <div className="mt-4 flex flex-col items-center gap-2 rounded-md border border-red-200/70 bg-red-50/70 px-3 py-2 text-center text-xs text-red-700 dark:border-red-500/40 dark:bg-red-950/40 dark:text-red-200">
+            <div className="mx-4 mb-4 mt-4 flex flex-col items-center gap-2 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-3 py-2 text-center text-xs text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
               <div>加载更多失败：{loadMoreError}</div>
               <Button
                 variant="outline"
                 size="sm"
+                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
                 onClick={() => void fetchPage(cursor, true)}
                 disabled={loading}
               >
@@ -408,10 +415,11 @@ export function HistoryPage(): JSX.Element {
           )}
 
           {hasMore && !initialLoad && !error && !loadMoreError && (
-            <div className="mt-4 flex justify-center">
+            <div className="mt-4 flex justify-center pb-4">
               <Button
                 variant="outline"
                 size="sm"
+                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
                 onClick={() => void fetchPage(cursor, true)}
                 disabled={loading}
               >
@@ -435,17 +443,17 @@ function FilterGroup<T extends string>({
   options: Array<{ id: T; label: string }>;
 }): JSX.Element {
   return (
-    <div className="inline-flex gap-0.5 rounded-md bg-muted p-0.5 text-xs">
+    <div className="inline-flex gap-0.5 rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/55 p-0.5 text-xs">
       {options.map((o) => (
         <button
           key={o.id}
           type="button"
           onClick={() => onChange(o.id)}
           className={cn(
-            'rounded px-2.5 py-1 transition-colors',
+            'rounded-md px-2.5 py-1 transition-colors',
             value === o.id
-              ? 'bg-background text-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground',
+              ? 'bg-white text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.06)]'
+              : 'text-[#595757] hover:text-foreground',
           )}
         >
           {o.label}
@@ -457,18 +465,18 @@ function FilterGroup<T extends string>({
 
 function StatusIcon({ status }: { status: string }): JSX.Element {
   if (status === 'completed') {
-    return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />;
+    return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#42C0EF]" />;
   }
   if (status === 'partial_success') {
-    return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />;
+    return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#FFC910]" />;
   }
   if (status === 'failed') {
-    return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />;
+    return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" />;
   }
   if (status === 'cancelled') {
     return (
       <CircleSlash className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
     );
   }
-  return <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-pink-400" />;
+  return <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#EA1F59]" />;
 }

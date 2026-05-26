@@ -141,10 +141,17 @@ function BatchList(): JSX.Element {
         description="一次提交多个任务，按套餐并发执行"
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <div className="hidden items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground sm:inline-flex">
+            <div className="hidden items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)] sm:inline-flex">
               {summary}
             </div>
-            <Button type="button" variant="outline" size="sm" onClick={() => void reload()} disabled={loading}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+              onClick={() => void reload()}
+              disabled={loading}
+            >
               {loading ? (
                 <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
               ) : (
@@ -159,7 +166,7 @@ function BatchList(): JSX.Element {
           </div>
         }
       />
-      <Section>
+      <Section className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
         {statusCopy && (loading || rowCount > 0) && (
           <StatusNotice
             copy={statusCopy}
@@ -172,11 +179,11 @@ function BatchList(): JSX.Element {
         {loading && rows == null && (
           <div className="space-y-3">
             {[0, 1, 2].map((idx) => (
-              <div key={idx} className="flex items-start gap-3 rounded-lg border border-border/60 p-3">
-                <div className="h-7 w-7 rounded-md bg-muted" />
+              <div key={idx} className="flex items-start gap-3 rounded-[8px] border border-[#DCDDDD] p-3">
+                <div className="h-7 w-7 rounded-md bg-[#EFEFEF]" />
                 <div className="min-w-0 flex-1 space-y-2">
-                  <div className="h-3 w-40 rounded bg-muted" />
-                  <div className="h-3 w-64 max-w-full rounded bg-muted" />
+                  <div className="h-3 w-40 rounded bg-[#EFEFEF]" />
+                  <div className="h-3 w-64 max-w-full rounded bg-[#EFEFEF]" />
                 </div>
               </div>
             ))}
@@ -192,8 +199,8 @@ function BatchList(): JSX.Element {
           />
         )}
         {rows && rows.length === 0 && !loadError && (
-          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <div className="flex flex-col items-center gap-3 rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-12 text-center">
+            <div className="flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#DCDDDD] bg-white text-[#EA1F59]">
               <Layers className="h-5 w-5" />
             </div>
             <div className="space-y-1">
@@ -207,19 +214,19 @@ function BatchList(): JSX.Element {
           </div>
         )}
         {rows && rows.length > 0 && (
-          <ul className="divide-y divide-border">
+          <ul className="divide-y divide-[#EFEFEF]">
             {rows.map((r) => (
               <li key={r.batchId}>
                 <button
                   type="button"
                   onClick={() => navigate(`/batch/${encodeURIComponent(r.batchId)}`)}
-                  className="flex w-full items-start gap-3 py-3 text-left transition-colors hover:bg-foreground/[0.03]"
+                  className="group flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-[#EFEFEF]/35"
                 >
-                  <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                  <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#EA1F59]">
                     <Layers className="h-3.5 w-3.5" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="line-clamp-1 text-sm font-medium">
+                    <div className="line-clamp-1 text-sm font-medium group-hover:text-[#EA1F59]">
                       {r.name ?? `批量任务 · ${safeBatchCount(r.itemsTotal)} 项`}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
@@ -228,10 +235,10 @@ function BatchList(): JSX.Element {
                           r.status === 'completed'
                             ? 'text-foreground/80'
                             : r.status === 'partial'
-                              ? 'text-amber-700 dark:text-amber-300'
+                              ? 'text-[#FFC910]'
                               : r.status === 'cancelled' || r.status === 'pending'
                                 ? 'text-muted-foreground'
-                                : 'text-primary'
+                                : 'text-[#EA1F59]'
                         }
                       >
                         {STATUS_LABEL[r.status] ?? r.status}
@@ -343,10 +350,17 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
           title="批量任务详情"
           action={
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <div className="hidden items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground sm:inline-flex">
+              <div className="hidden items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)] sm:inline-flex">
                 {detailSummary}
               </div>
-              <Button type="button" variant="outline" size="sm" onClick={() => void reload()} disabled={loading}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                onClick={() => void reload()}
+                disabled={loading}
+              >
                 {loading ? (
                   <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
                 ) : (
@@ -357,17 +371,17 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
             </div>
           }
         />
-        <Section>
+        <Section className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           {loading ? (
             <div className="space-y-3">
-              <div className="h-3 w-32 rounded bg-muted" />
-              <div className="h-2 w-full rounded-full bg-muted" />
+              <div className="h-3 w-32 rounded bg-[#EFEFEF]" />
+              <div className="h-2 w-full rounded-full bg-[#EFEFEF]" />
               {[0, 1, 2].map((idx) => (
-                <div key={idx} className="flex items-start gap-3 border-t border-border py-3 first:border-t-0">
-                  <div className="h-4 w-4 rounded-full bg-muted" />
+                <div key={idx} className="flex items-start gap-3 border-t border-[#EFEFEF] py-3 first:border-t-0">
+                  <div className="h-4 w-4 rounded-full bg-[#EFEFEF]" />
                   <div className="min-w-0 flex-1 space-y-2">
-                    <div className="h-3 w-20 rounded bg-muted" />
-                    <div className="h-3 w-72 max-w-full rounded bg-muted" />
+                    <div className="h-3 w-20 rounded bg-[#EFEFEF]" />
+                    <div className="h-3 w-72 max-w-full rounded bg-[#EFEFEF]" />
                   </div>
                 </div>
               ))}
@@ -406,10 +420,17 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
         description={`并发 ${safeBatchCount(detail.concurrency)} · ${STATUS_LABEL[detail.status] ?? detail.status}`}
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <div className="hidden items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground sm:inline-flex">
+            <div className="hidden items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)] sm:inline-flex">
               {detailSummary}
             </div>
-            <Button type="button" variant="outline" size="sm" onClick={() => void reload()} disabled={loading}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+              onClick={() => void reload()}
+              disabled={loading}
+            >
               {loading ? (
                 <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
               ) : (
@@ -418,14 +439,20 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
               刷新
             </Button>
             {canCancel && (
-              <Button type="button" variant="outline" size="sm" onClick={() => setConfirmCancel(true)}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-[#DCDDDD] bg-white text-[#EA1F59] hover:border-[#EA1F59]/35 hover:bg-white hover:text-[#EA1F59]"
+                onClick={() => setConfirmCancel(true)}
+              >
                 取消批量
               </Button>
             )}
           </div>
         }
       />
-      <Section>
+      <Section className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
         {detailStatusCopy && (
           <StatusNotice
             copy={detailStatusCopy}
@@ -439,14 +466,14 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
           {detailDone} / {detailTotal ?? 0} 完成
           {batchUnsuccessfulCopy(detailFailed, detailCancelled)}
         </div>
-        <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+        <div className="h-2 w-full overflow-hidden rounded-full bg-[#EFEFEF]">
           <div
-            className="h-full rounded-full bg-primary transition-[width]"
+            className="h-full rounded-full bg-[#EA1F59] transition-[width]"
             style={{ width: `${pct}%` }}
             aria-label={`${pct}%`}
           />
         </div>
-        <ul className="mt-5 divide-y divide-border">
+        <ul className="mt-5 divide-y divide-[#EFEFEF]">
           {detail.items.map((item) => (
             <li key={item.batchItemId} className="flex items-start gap-3 py-3">
               <div className="mt-0.5 shrink-0">
@@ -464,7 +491,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
                   {item.prompt}
                 </div>
                 {item.errorMessage && (
-                  <div className="mt-1 text-[11px] text-destructive">
+                  <div className="mt-1 text-[11px] text-[#EA1F59]">
                     {humaniseTaskError(item.errorMessage)}
                   </div>
                 )}
@@ -472,7 +499,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
                   <button
                     type="button"
                     onClick={() => navigate(`/?task=${encodeURIComponent(item.taskId!)}`)}
-                    className="mt-1 inline-flex items-center text-[11px] text-primary underline decoration-primary/40 underline-offset-2 transition-colors hover:text-primary/80"
+                    className="mt-1 inline-flex items-center text-[11px] text-[#EA1F59] underline decoration-[#EA1F59]/40 underline-offset-2 transition-colors hover:text-[#D91B51]"
                   >
                     打开任务详情 →
                   </button>
@@ -521,13 +548,13 @@ function StatusNotice({
 }): JSX.Element {
   const isError = copy.title.includes('失败');
   return (
-    <div className="mb-4 rounded-xl border border-border bg-card/80 px-4 py-3 shadow-sm">
+    <div className="mb-4 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-start gap-2">
           {isError ? (
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" aria-hidden />
           ) : (
-            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />
+            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#EA1F59]" aria-hidden />
           )}
           <div className="min-w-0">
             <div className="text-sm font-medium text-foreground/85">{copy.title}</div>
@@ -536,10 +563,23 @@ function StatusNotice({
         </div>
         {isError && (
           <div className="flex shrink-0 flex-wrap gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={onRetry} disabled={loading}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+              onClick={onRetry}
+              disabled={loading}
+            >
               {loading ? '重试中…' : '重试'}
             </Button>
-            <Button asChild type="button" variant="outline" size="sm">
+            <Button
+              asChild
+              type="button"
+              variant="outline"
+              size="sm"
+              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+            >
               <a
                 href={supportMailtoHref({
                   subject: supportSubject,
@@ -570,15 +610,21 @@ function HardErrorState({
   supportBody: string;
 }): JSX.Element {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card/40 px-6 py-12 text-center">
-      <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
+    <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+      <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
       <div className="text-sm font-medium text-foreground/80">{title}</div>
       <div className="max-w-md text-xs leading-5 text-muted-foreground">{message}</div>
       <div className="mt-1 flex flex-wrap justify-center gap-2">
         <Button type="button" size="sm" onClick={onRetry}>
           重试
         </Button>
-        <Button asChild type="button" variant="outline" size="sm">
+        <Button
+          asChild
+          type="button"
+          variant="outline"
+          size="sm"
+          className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+        >
           <a
             href={supportMailtoHref({
               subject: supportSubject,
@@ -595,18 +641,18 @@ function HardErrorState({
 
 function ItemStatusIcon({ status }: { status: string }): JSX.Element {
   if (status === 'completed') {
-    return <CheckCircle2 className="h-4 w-4 text-primary" />;
+    return <CheckCircle2 className="h-4 w-4 text-[#42C0EF]" />;
   }
   if (status === 'failed') {
-    return <XCircle className="h-4 w-4 text-destructive" />;
+    return <XCircle className="h-4 w-4 text-[#EA1F59]" />;
   }
   if (status === 'cancelled') {
     return <CircleSlash className="h-4 w-4 text-muted-foreground" />;
   }
   if (status === 'running') {
-    return <Loader2 className="h-4 w-4 animate-spin text-primary" />;
+    return <Loader2 className="h-4 w-4 animate-spin text-[#EA1F59]" />;
   }
-  return <div className="h-4 w-4 rounded-full border border-border" />;
+  return <div className="h-4 w-4 rounded-full border border-[#DCDDDD]" />;
 }
 
 function fmtDate(input: string | Date | null | undefined): string {

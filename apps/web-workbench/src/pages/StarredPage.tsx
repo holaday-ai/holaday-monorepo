@@ -140,26 +140,31 @@ export function StarredPage(): JSX.Element {
         title="置顶任务"
         description="置顶的任务会固定在侧边栏顶部"
         action={
-          <div className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground">
+          <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
             {summary}
           </div>
         }
       />
       {initialLoad ? (
         <div className="flex h-48 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          <Loader2 className="h-5 w-5 animate-spin text-[#EA1F59]" />
           置顶任务加载中…
         </div>
       ) : loadError ? (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card/40 px-6 py-12 text-center">
-          <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
+        <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+          <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
           <div className="text-sm font-medium text-foreground/80">置顶任务加载失败</div>
           <div className="max-w-md text-xs leading-5 text-muted-foreground">{loadError}</div>
           <div className="mt-1 flex flex-wrap justify-center gap-2">
             <Button type="button" size="sm" onClick={() => void fetchPage(null, false)} disabled={loading}>
               {loading ? '重试中…' : '重试'}
             </Button>
-            <Button asChild variant="outline" size="sm">
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+            >
               <a
                 href={supportMailtoHref({
                   subject: '置顶任务加载失败',
@@ -172,7 +177,7 @@ export function StarredPage(): JSX.Element {
           </div>
         </div>
       ) : items.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
+        <div className="flex flex-col items-center gap-2 rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <Pin className="h-8 w-8 text-muted-foreground/40" />
           <div className="text-sm font-medium text-foreground/80">
             还没有置顶任务
@@ -183,19 +188,21 @@ export function StarredPage(): JSX.Element {
         </div>
       ) : (
         <>
-          <div className="divide-y divide-border rounded-xl border border-border bg-card">
+          <div className="divide-y divide-[#EFEFEF] rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
             {items.map((t) => (
               <div
                 key={t.taskId}
-                className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-foreground/[0.03]"
+                className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-[#EFEFEF]/35"
               >
-                <Pin className="h-4 w-4 shrink-0 text-primary" />
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#EA1F59]">
+                  <Pin className="h-3.5 w-3.5" />
+                </span>
                 <button
                   type="button"
                   onClick={() => open(t.taskId)}
                   className="min-w-0 flex-1 text-left"
                 >
-                  <div className="truncate text-sm text-foreground hover:underline">
+                  <div className="truncate text-sm text-foreground group-hover:text-[#EA1F59]">
                     {pinnedTaskTitle(t)}
                   </div>
                   <div className="mt-0.5 text-[11px] text-muted-foreground">
@@ -208,7 +215,7 @@ export function StarredPage(): JSX.Element {
                   aria-label="取消置顶"
                   title={unpinningIds.has(t.taskId) ? '取消置顶中…' : '取消置顶'}
                   disabled={unpinningIds.has(t.taskId)}
-                  className="rounded p-1 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground disabled:cursor-wait disabled:opacity-50"
+                  className="rounded-md p-1 text-[#595757] transition-colors hover:bg-[#EFEFEF]/70 hover:text-[#EA1F59] disabled:cursor-wait disabled:opacity-50"
                 >
                   {unpinningIds.has(t.taskId) ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -220,11 +227,12 @@ export function StarredPage(): JSX.Element {
             ))}
           </div>
           {loadMoreError && (
-            <div className="mt-4 flex flex-col items-center gap-2 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-center text-xs text-primary">
+            <div className="mt-4 flex flex-col items-center gap-2 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-3 py-2 text-center text-xs text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
               <div>加载更多失败：{loadMoreError}</div>
               <Button
                 variant="outline"
                 size="sm"
+                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
                 onClick={() => void fetchPage(cursor, true)}
                 disabled={loading}
               >
@@ -237,6 +245,7 @@ export function StarredPage(): JSX.Element {
               <Button
                 variant="outline"
                 size="sm"
+                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
                 onClick={() => void fetchPage(cursor, true)}
                 disabled={loading}
               >
