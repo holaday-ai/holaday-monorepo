@@ -127,9 +127,12 @@ export function normalizeRoleSelectResponse(
 
 function normalizeRoleCatalogue(value: unknown): RoleDefinition[] {
   if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
   return value.flatMap((entry) => {
     const role = normalizeRoleDefinition(entry);
-    return role ? [role] : [];
+    if (!role || seen.has(role.id)) return [];
+    seen.add(role.id);
+    return [role];
   });
 }
 

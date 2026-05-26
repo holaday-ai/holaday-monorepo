@@ -120,6 +120,10 @@ describe('roles page state helpers', () => {
       catalogue: [
         roles[0],
         {
+          ...roles[0],
+          nameZh: '重复客服',
+        },
+        {
           id: ' loose ',
           nameZh: '',
           nameEn: '',
