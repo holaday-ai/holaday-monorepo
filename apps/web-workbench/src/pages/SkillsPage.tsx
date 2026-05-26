@@ -41,6 +41,8 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import {
   groupSkillsByCategory,
+  normalizeSkillRows,
+  normalizeSkillToggleResponse,
   skillCardBadge,
   skillLimitMessage,
   skillPageSummary,
@@ -133,9 +135,9 @@ export function SkillsPage(): JSX.Element {
       setLoading(true);
       setLoadError(null);
       try {
-        const list = await trpc.skills.list.query();
+        const list = normalizeSkillRows(await trpc.skills.list.query());
         if (!mountedRef.current) return;
-        setSkills(list as UiSkill[]);
+        setSkills(list);
       } catch (err) {
         if (!mountedRef.current) return;
         const message = err instanceof Error ? err.message : '请稍后重试';
@@ -187,7 +189,10 @@ export function SkillsPage(): JSX.Element {
     const next = !skill.enabled;
     setSkills((prev) => prev.map((s) => (s.id === skill.id ? { ...s, enabled: next } : s)));
     try {
-      const res = await trpc.skills.toggle.mutate({ skillId: skill.id });
+      const res = normalizeSkillToggleResponse(
+        await trpc.skills.toggle.mutate({ skillId: skill.id }),
+        next,
+      );
       // Server is the source of truth — sync if it returned a different value.
       if (res.enabled !== next) {
         setSkills((prev) =>
@@ -217,10 +222,10 @@ export function SkillsPage(): JSX.Element {
         action={
           <div
             className={cn(
-              'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12px] font-medium',
+              'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12px] font-medium shadow-sm',
               atLimit && !loadError && !loading
-                ? 'border-amber-300/60 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200'
-                : 'border-border bg-card text-foreground',
+                ? 'border-[#FFC910]/70 bg-[#FFC910]/15 text-foreground dark:border-[#FFC910]/45 dark:bg-[#FFC910]/12'
+                : 'border-[#EA1F59]/20 bg-[#EA1F59]/[0.045] text-foreground',
             )}
           >
             {summary}
@@ -231,9 +236,9 @@ export function SkillsPage(): JSX.Element {
           so the action sits adjacent to the skill grid the user is
           interacting with. */}
       {atLimit && planId !== 'pro' && (
-        <div className="mb-5 rounded-md border border-amber-300/60 bg-amber-50/60 px-3.5 py-2.5 text-[13px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+        <div className="mb-5 rounded-[8px] border border-[#FFC910]/60 bg-[#FFC910]/12 px-4 py-3 text-[13px] text-foreground shadow-sm">
           <div className="font-medium">已达到 {cap} 个技能上限</div>
-          <div className="mt-0.5 text-[12px] opacity-80">
+          <div className="mt-0.5 text-[12px] text-muted-foreground">
             升级到专业版可使用全部 33 个技能。
           </div>
         </div>
@@ -243,7 +248,7 @@ export function SkillsPage(): JSX.Element {
           加载中…
         </div>
       ) : loadError ? (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card/40 px-6 py-12 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-[8px] border border-border bg-card/40 px-6 py-12 text-center">
           <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
           <div className="text-sm font-medium text-foreground/80">技能加载失败</div>
           <div className="max-w-md text-xs leading-5 text-muted-foreground">
@@ -266,7 +271,7 @@ export function SkillsPage(): JSX.Element {
           </div>
         </div>
       ) : grouped.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-[8px] border border-dashed border-border bg-card/40 px-6 py-12 text-center">
           <Sparkles className="h-8 w-8 text-muted-foreground/40" />
           <div className="text-sm font-medium text-foreground/80">暂无可用技能</div>
           <div className="max-w-md text-xs leading-5 text-muted-foreground">
@@ -287,15 +292,15 @@ export function SkillsPage(): JSX.Element {
         <div className="space-y-8">
           {grouped.map(({ category, items }) => (
             <section key={category}>
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h2 className="text-xs font-semibold tracking-wider text-muted-foreground">
+              <div className="mb-3 flex items-center justify-between gap-3 border-b border-border/70 pb-2">
+                <h2 className="text-[11px] font-semibold uppercase tracking-wide text-foreground/70">
                   {category}
                 </h2>
-                <div className="text-[11px] text-muted-foreground">
+                <div className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground">
                   {items.length} 个
                 </div>
               </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {items.map((s) => (
                   <SkillCard
                     key={s.id}
@@ -334,33 +339,37 @@ function SkillCard({
       aria-pressed={skill.enabled}
       aria-busy={pending}
       className={cn(
-        'group relative flex flex-col items-start gap-2 rounded-xl border p-4 text-left transition-all',
+        'group relative flex min-h-[124px] flex-col items-start gap-2 rounded-[8px] border p-4 text-left shadow-sm transition-colors',
         skill.enabled
-          ? 'border-primary/60 bg-primary/5 shadow-sm dark:border-primary/40 dark:bg-primary/10'
-          : 'border-border bg-card hover:border-foreground/20 hover:bg-foreground/[0.02]',
+          ? 'border-[#EA1F59]/50 bg-[#EA1F59]/[0.055] ring-1 ring-[#EA1F59]/10 dark:border-[#EA1F59]/45 dark:bg-[#EA1F59]/10'
+          : 'border-border bg-card hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/[0.025]',
         (pending || blocked) && 'opacity-60',
       )}
     >
       <div
         className={cn(
-          'flex h-9 w-9 items-center justify-center rounded-lg transition-colors',
+          'flex h-9 w-9 items-center justify-center rounded-md transition-colors',
           skill.enabled
-            ? 'bg-primary text-primary-foreground'
-            : 'bg-muted text-muted-foreground group-hover:bg-foreground/10',
+            ? 'bg-[#EA1F59] text-white shadow-sm'
+            : 'border border-border bg-background text-muted-foreground group-hover:border-[#EA1F59]/30 group-hover:text-[#EA1F59]',
         )}
       >
         <Icon className="h-4 w-4" aria-hidden />
       </div>
-      <div className="text-sm font-medium text-foreground">{skill.name}</div>
-      <div className="line-clamp-2 text-xs text-muted-foreground">{skill.description}</div>
+      <div className="min-w-0 pr-14 text-sm font-medium leading-5 text-foreground">
+        {skill.name}
+      </div>
+      <div className="line-clamp-2 text-xs leading-5 text-muted-foreground">
+        {skill.description}
+      </div>
       <span
         className={cn(
-          'absolute right-3 top-3 rounded-md px-2 py-0.5 text-[10px] font-medium',
+          'absolute right-3 top-3 rounded-full px-2 py-0.5 text-[10px] font-medium',
           pending
-            ? 'border border-border bg-background text-muted-foreground'
+            ? 'border border-[#42C0EF]/45 bg-[#42C0EF]/10 text-cyan-700 dark:text-cyan-200'
             : skill.enabled
-              ? 'bg-primary text-primary-foreground'
-              : 'border border-border text-muted-foreground',
+              ? 'bg-[#EA1F59] text-white shadow-sm'
+              : 'border border-border bg-background text-muted-foreground',
         )}
       >
         {skillCardBadge({ enabled: skill.enabled, pending })}

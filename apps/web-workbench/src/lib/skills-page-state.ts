@@ -20,6 +20,10 @@ export const SKILL_CATEGORY_ORDER: readonly SkillCategory[] = [
   '其他',
 ];
 
+export interface SkillToggleSnapshot {
+  readonly enabled: boolean;
+}
+
 const PLAN_LABELS: Record<string, string> = {
   free: '体验版',
   basic: '基础版',
@@ -77,4 +81,64 @@ export function skillCardBadge(options: {
 }): string {
   if (options.pending) return '保存中…';
   return options.enabled ? '已启用' : '启用';
+}
+
+export function normalizeSkillRows(value: unknown): UiSkill[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.flatMap((entry) => {
+    const skill = normalizeSkillRow(entry);
+    if (!skill || seen.has(skill.id)) return [];
+    seen.add(skill.id);
+    return [skill];
+  });
+}
+
+export function normalizeSkillToggleResponse(
+  value: unknown,
+  fallbackEnabled: boolean,
+): SkillToggleSnapshot {
+  if (!isRecord(value)) return { enabled: fallbackEnabled };
+  return {
+    enabled:
+      typeof value.enabled === 'boolean' ? value.enabled : fallbackEnabled,
+  };
+}
+
+function normalizeSkillRow(value: unknown): UiSkill | null {
+  if (!isRecord(value)) return null;
+  const id = safeSkillText(value.id);
+  if (!id) return null;
+  const name = safeSkillText(value.name) || id;
+  return {
+    id,
+    name,
+    icon: safeSkillText(value.icon) || 'Sparkles',
+    category: normalizeSkillCategory(value.category),
+    description: safeSkillText(value.description) || '暂无技能说明',
+    enabled: value.enabled === true,
+  };
+}
+
+function normalizeSkillCategory(value: unknown): SkillCategory {
+  return value === '运营' ||
+    value === '内容' ||
+    value === '商业分析' ||
+    value === '产品' ||
+    value === '法律' ||
+    value === '人力' ||
+    value === '行政' ||
+    value === '财务' ||
+    value === '翻译' ||
+    value === '其他'
+    ? value
+    : '其他';
+}
+
+function safeSkillText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

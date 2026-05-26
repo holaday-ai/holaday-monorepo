@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   groupSkillsByCategory,
+  normalizeSkillRows,
+  normalizeSkillToggleResponse,
   skillCardBadge,
   skillLimitMessage,
   skillPageSummary,
@@ -98,5 +100,65 @@ describe('skills page state helpers', () => {
     expect(skillCardBadge({ enabled: false, pending: false })).toBe('启用');
     expect(skillCardBadge({ enabled: true, pending: false })).toBe('已启用');
     expect(skillCardBadge({ enabled: true, pending: true })).toBe('保存中…');
+  });
+
+  it('normalizes skill list payloads before rendering', () => {
+    expect(
+      normalizeSkillRows([
+        {
+          id: ' content ',
+          name: ' 内容助手 ',
+          icon: ' PenTool ',
+          category: '内容',
+          description: ' 写作 ',
+          enabled: true,
+        },
+        {
+          id: 'loose',
+          name: '',
+          icon: '',
+          category: 'bad',
+          description: null,
+          enabled: 'yes',
+        },
+        { id: 'content', name: 'duplicate', category: '运营' },
+        { id: '', name: 'empty' },
+        null,
+      ]),
+    ).toEqual([
+      {
+        id: 'content',
+        name: '内容助手',
+        icon: 'PenTool',
+        category: '内容',
+        description: '写作',
+        enabled: true,
+      },
+      {
+        id: 'loose',
+        name: 'loose',
+        icon: 'Sparkles',
+        category: '其他',
+        description: '暂无技能说明',
+        enabled: false,
+      },
+    ]);
+  });
+
+  it('normalizes malformed skill list payloads to empty', () => {
+    expect(normalizeSkillRows(null)).toEqual([]);
+    expect(normalizeSkillRows({ id: 'skill' })).toEqual([]);
+  });
+
+  it('normalizes toggle responses with an optimistic fallback', () => {
+    expect(normalizeSkillToggleResponse({ enabled: false }, true)).toEqual({
+      enabled: false,
+    });
+    expect(normalizeSkillToggleResponse({ enabled: 'bad' }, true)).toEqual({
+      enabled: true,
+    });
+    expect(normalizeSkillToggleResponse(null, false)).toEqual({
+      enabled: false,
+    });
   });
 });
