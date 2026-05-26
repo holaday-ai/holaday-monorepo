@@ -120,24 +120,26 @@ export function ProjectsPage(): JSX.Element {
         title="项目"
         description="按项目分组管理你的任务"
         action={
-          !creating ? (
-            <button
-              type="button"
-              onClick={() => {
-                setCreating(true);
-                setCreateTouched(false);
-              }}
-              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90"
-            >
-              <Plus className="h-4 w-4" />
-              新建项目
-            </button>
-          ) : null
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+              {projectSummary}
+            </div>
+            {!creating && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCreating(true);
+                  setCreateTouched(false);
+                }}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#EA1F59] px-3 text-sm font-medium text-white shadow-[0_1px_2px_rgba(15,23,42,0.08)] transition hover:bg-[#D91B51]"
+              >
+                <Plus className="h-4 w-4" />
+                新建项目
+              </button>
+            )}
+          </div>
         }
       />
-      <div className="mb-3 text-xs text-muted-foreground">
-        {projectSummary}
-      </div>
 
       {creating && (
         <form
@@ -145,7 +147,7 @@ export function ProjectsPage(): JSX.Element {
             e.preventDefault();
             void onCreate();
           }}
-          className="mb-4 rounded-lg border border-border bg-card p-3"
+          className="mb-4 rounded-[8px] border border-[#DCDDDD] bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
         >
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
             <div className="min-w-0 flex-1">
@@ -165,13 +167,13 @@ export function ProjectsPage(): JSX.Element {
                 maxLength={PROJECT_NAME_MAX_LENGTH}
                 aria-invalid={showCreateError}
                 aria-describedby="project-name-help"
-                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus-visible:border-foreground/30 focus-visible:outline-none"
+                className="w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-1.5 text-sm shadow-[0_1px_2px_rgba(15,23,42,0.03)] focus-visible:border-[#ADADAD] focus-visible:outline-none"
               />
               <div
                 id="project-name-help"
                 className={cn(
                   'mt-1 flex items-center justify-between gap-3 text-xs',
-                  showCreateError ? 'text-primary' : 'text-muted-foreground',
+                  showCreateError ? 'text-[#EA1F59]' : 'text-muted-foreground',
                 )}
               >
                 <span role={showCreateError ? 'alert' : undefined}>
@@ -189,8 +191,8 @@ export function ProjectsPage(): JSX.Element {
                 className={cn(
                   'rounded-md px-3 py-1.5 text-xs font-medium transition-colors sm:h-8',
                   createState.canSubmit && !creatingNow
-                    ? 'bg-foreground text-background hover:bg-foreground/85'
-                    : 'cursor-not-allowed bg-muted text-muted-foreground',
+                    ? 'bg-[#EA1F59] text-white hover:bg-[#D91B51]'
+                    : 'cursor-not-allowed border border-[#DCDDDD] bg-[#EFEFEF]/60 text-muted-foreground',
                 )}
               >
                 {creatingNow ? '创建中…' : '创建'}
@@ -204,10 +206,10 @@ export function ProjectsPage(): JSX.Element {
                   setCreateTouched(false);
                 }}
                 className={cn(
-                  'rounded-md px-3 py-1.5 text-xs text-muted-foreground transition-colors sm:h-8',
+                  'rounded-md border border-transparent px-3 py-1.5 text-xs text-[#595757] transition-colors sm:h-8',
                   creatingNow
                     ? 'cursor-not-allowed opacity-60'
-                    : 'hover:bg-foreground/[0.05]',
+                    : 'hover:border-[#DCDDDD] hover:bg-white hover:text-foreground',
                 )}
               >
                 取消
@@ -218,9 +220,9 @@ export function ProjectsPage(): JSX.Element {
       )}
 
       {loadError && hasProjects && (
-        <div className="mb-4 flex flex-col gap-2 rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-xs text-primary sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-4 flex flex-col gap-2 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-3 py-2 text-xs text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px] sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-start gap-2">
-            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#EA1F59]" />
             <span className="min-w-0">
               项目列表刷新失败，当前保留上次结果：{loadError}
             </span>
@@ -232,8 +234,8 @@ export function ProjectsPage(): JSX.Element {
             className={cn(
               'h-7 shrink-0 rounded-md px-2.5 text-xs font-medium transition-colors',
               loading
-                ? 'cursor-not-allowed bg-primary/10 text-primary/60'
-                : 'bg-primary text-primary-foreground hover:opacity-90',
+                ? 'cursor-not-allowed border border-[#DCDDDD] bg-[#EFEFEF]/60 text-muted-foreground'
+                : 'border border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:text-[#EA1F59]',
             )}
           >
             {loading ? '重试中…' : '重试'}
@@ -246,7 +248,7 @@ export function ProjectsPage(): JSX.Element {
           加载中…
         </div>
       ) : fullPageError ? (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card/40 px-6 py-12 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <AlertCircle className="h-8 w-8 text-primary" />
           <div className="text-sm font-medium text-foreground/80">项目加载失败</div>
           <div className="max-w-md text-xs leading-5 text-muted-foreground">
@@ -255,13 +257,13 @@ export function ProjectsPage(): JSX.Element {
           <button
             type="button"
             onClick={() => void refresh()}
-            className="mt-1 inline-flex h-8 items-center rounded-md bg-foreground px-3 text-xs font-medium text-background transition hover:bg-foreground/85"
+            className="mt-1 inline-flex h-8 items-center rounded-md bg-[#EA1F59] px-3 text-xs font-medium text-white transition hover:bg-[#D91B51]"
           >
             重试
           </button>
         </div>
       ) : projects.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <FolderOpen className="h-8 w-8 text-muted-foreground/40" />
           <div className="text-sm font-medium text-foreground/80">还没有项目</div>
           <div className="text-xs text-muted-foreground">
@@ -273,7 +275,7 @@ export function ProjectsPage(): JSX.Element {
               setCreating(true);
               setCreateTouched(false);
             }}
-            className="mt-1 inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition hover:opacity-90"
+            className="mt-1 inline-flex h-8 items-center gap-1.5 rounded-md bg-[#EA1F59] px-3 text-xs font-medium text-white transition hover:bg-[#D91B51]"
           >
             <Plus className="h-3.5 w-3.5" />
             新建项目
@@ -284,7 +286,7 @@ export function ProjectsPage(): JSX.Element {
           {projects.map((p) => (
             <div
               key={p.projectId}
-              className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 transition-colors hover:border-foreground/20 hover:bg-foreground/[0.02]"
+              className="group flex flex-col gap-2 rounded-[8px] border border-[#DCDDDD] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-[transform,border-color,box-shadow] hover:-translate-y-px hover:border-[#ADADAD] hover:shadow-[0_5px_16px_rgba(15,23,42,0.055)]"
             >
               <div className="flex items-start gap-2">
                 <button
@@ -292,9 +294,11 @@ export function ProjectsPage(): JSX.Element {
                   onClick={() => navigate(`/?project=${p.projectId}`)}
                   className="flex min-w-0 flex-1 items-start gap-2 text-left"
                 >
-                  <FolderOpen className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors group-hover:border-[#ADADAD]">
+                    <FolderOpen className="h-4 w-4" aria-hidden />
+                  </span>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-foreground hover:underline">
+                    <div className="truncate text-sm font-medium text-foreground hover:text-[#EA1F59]">
                       {p.name}
                     </div>
                     {p.description && (
@@ -310,7 +314,7 @@ export function ProjectsPage(): JSX.Element {
                       type="button"
                       aria-label={`项目 ${p.name} 操作`}
                       title="更多"
-                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/60 hover:text-foreground"
                     >
                       <MoreHorizontal className="h-4 w-4" />
                     </button>
@@ -324,7 +328,7 @@ export function ProjectsPage(): JSX.Element {
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onSelect={() => setPendingDelete(p)}
-                      className="text-red-600 focus:bg-red-500/10 focus:text-red-600 dark:text-red-400 dark:focus:text-red-300"
+                      className="text-[#EA1F59] focus:bg-[#EA1F59]/[0.06] focus:text-[#EA1F59]"
                     >
                       <Trash2 />
                       <span>删除项目</span>
