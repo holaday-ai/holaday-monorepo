@@ -64,10 +64,13 @@ run_with_retry() {
   local attempt rc
 
   for ((attempt = 1; attempt <= REMOTE_RETRIES; attempt++)); do
-    if "$@"; then
+    set +e
+    "$@"
+    rc=$?
+    set -e
+    if ((rc == 0)); then
       return 0
     fi
-    rc=$?
     if ((attempt == REMOTE_RETRIES)); then
       echo "❌ $label failed after $attempt attempt(s) (exit $rc)" >&2
       return "$rc"
@@ -84,12 +87,15 @@ run_with_retry_filtered() {
 
   for ((attempt = 1; attempt <= REMOTE_RETRIES; attempt++)); do
     tmp=$(mktemp)
-    if "$@" >"$tmp" 2>&1; then
+    set +e
+    "$@" >"$tmp" 2>&1
+    rc=$?
+    set -e
+    if ((rc == 0)); then
       grep -v 'LIBARCHIVE.xattr' "$tmp" || true
       rm -f "$tmp"
       return 0
     fi
-    rc=$?
     grep -v 'LIBARCHIVE.xattr' "$tmp" || true
     rm -f "$tmp"
     if ((attempt == REMOTE_RETRIES)); then
