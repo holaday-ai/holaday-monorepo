@@ -74,13 +74,14 @@ export function UsagePage(): JSX.Element {
         description="当月任务额度和执行统计"
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <div className="hidden items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground sm:inline-flex">
+            <div className="hidden items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)] sm:inline-flex">
               {summary}
             </div>
             <Button
               type="button"
               variant="outline"
               size="sm"
+              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
               onClick={() => void refresh()}
               disabled={loading}
             >
@@ -96,14 +97,14 @@ export function UsagePage(): JSX.Element {
       />
       <div className="space-y-6">
         {statusCopy && (loading || snap != null) && (
-          <div className="rounded-xl border border-border bg-card/80 px-4 py-3 shadow-sm">
+          <div className="rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-start gap-2">
                 {error ? (
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" aria-hidden />
                 ) : (
                   <Loader2
-                    className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground"
+                    className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#EA1F59]"
                     aria-hidden
                   />
                 )}
@@ -118,12 +119,18 @@ export function UsagePage(): JSX.Element {
                     type="button"
                     variant="outline"
                     size="sm"
+                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
                     onClick={() => void refresh()}
                     disabled={loading}
                   >
                     {loading ? '重试中…' : '重试'}
                   </Button>
-                  <Button asChild variant="outline" size="sm">
+                  <Button
+                    asChild
+                    variant="outline"
+                    size="sm"
+                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                  >
                     <a
                       href={supportMailtoHref({
                         subject: '用量统计加载失败',
@@ -141,23 +148,28 @@ export function UsagePage(): JSX.Element {
         {loading && snap == null ? (
           <div className="grid gap-4 md:grid-cols-3">
             {['本月执行记录', '成功', '剩余额度'].map((label) => (
-              <div key={label} className="rounded-xl border border-border bg-card p-5 shadow-sm">
-                <div className="mb-3 h-3 w-24 rounded bg-muted" />
-                <div className="h-8 w-16 rounded bg-muted" />
-                <div className="mt-3 h-3 w-32 rounded bg-muted" />
+              <div key={label} className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+                <div className="mb-3 h-3 w-24 rounded bg-[#EFEFEF]" />
+                <div className="h-8 w-16 rounded bg-[#EFEFEF]" />
+                <div className="mt-3 h-3 w-32 rounded bg-[#EFEFEF]" />
               </div>
             ))}
           </div>
         ) : error && snap == null ? (
-          <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card/40 px-6 py-12 text-center">
-            <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
+          <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+            <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
             <div className="text-sm font-medium text-foreground/80">用量加载失败</div>
             <div className="max-w-md text-xs leading-5 text-muted-foreground">{error}</div>
             <div className="mt-1 flex flex-wrap justify-center gap-2">
               <Button type="button" size="sm" onClick={() => void refresh()}>
                 重试
               </Button>
-              <Button asChild variant="outline" size="sm">
+              <Button
+                asChild
+                variant="outline"
+                size="sm"
+                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+              >
                 <a
                   href={supportMailtoHref({
                     subject: '用量统计加载失败',
@@ -185,7 +197,7 @@ export function UsagePage(): JSX.Element {
                 }
               />
               <StatCard
-                icon={<CheckCircle2 className="h-4 w-4 text-cyan-500" />}
+                icon={<CheckCircle2 className="h-4 w-4 text-[#42C0EF]" />}
                 label="成功"
                 value={snap == null ? '—' : String(snap.monthCompleted)}
                 sub={
@@ -200,23 +212,23 @@ export function UsagePage(): JSX.Element {
                 }
               />
               <StatCard
-                icon={<Clock className="h-4 w-4 text-pink-500" />}
+                icon={<Clock className="h-4 w-4 text-[#EA1F59]" />}
                 label="剩余额度"
                 value={snap == null ? '—' : String(snap.quotaRemaining)}
                 sub={totalQuota == null ? '加载中…' : `${pct}% 已使用`}
               />
             </div>
 
-            <Section title="额度使用进度">
+            <Section title="额度使用进度" className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
               <p className="mb-3 text-[11px] text-muted-foreground">
                 额度仅计入成功消耗的任务，失败和系统任务不扣额度。
               </p>
               <div className="flex items-center gap-3">
-                <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#EFEFEF]">
                   <div
                     className={cn(
                       'h-full transition-all',
-                      pct >= 90 ? 'bg-red-500' : pct >= 75 ? 'bg-amber-500' : 'bg-primary',
+                      pct >= 90 ? 'bg-[#EA1F59]' : pct >= 75 ? 'bg-[#FFC910]' : 'bg-[#EA1F59]',
                     )}
                     style={{ width: `${pct}%` }}
                   />
@@ -226,7 +238,7 @@ export function UsagePage(): JSX.Element {
                 </span>
               </div>
               {pct >= 75 && (
-                <div className="mt-3 flex items-center justify-between rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
+                <div className="mt-3 flex items-center justify-between rounded-[8px] border border-[#DCDDDD] border-l-[#FFC910] bg-white p-3 [border-left-width:3px]">
                   <div>
                     <div className="text-xs font-medium">额度即将用完</div>
                     <div className="text-[11px] text-muted-foreground">
@@ -234,7 +246,7 @@ export function UsagePage(): JSX.Element {
                     </div>
                   </div>
                   <Link to="/plan">
-                    <Button size="sm" variant="outline">
+                    <Button size="sm" variant="outline" className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]">
                       查看套餐
                     </Button>
                   </Link>
@@ -242,7 +254,7 @@ export function UsagePage(): JSX.Element {
               )}
             </Section>
 
-            <Section title="最近 7 天">
+            <Section title="最近 7 天" className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
               {hasRecentUsage(bars) ? (
                 <div className="flex items-end justify-between gap-2 px-1 pb-4 pt-2">
                   {bars.map((b) => {
@@ -255,7 +267,7 @@ export function UsagePage(): JSX.Element {
                         <div
                           className={cn(
                             'w-full rounded-t-md transition-all',
-                            b.count > 0 ? 'bg-primary/80' : 'bg-muted',
+                            b.count > 0 ? 'bg-[#EA1F59]/80' : 'bg-[#EFEFEF]',
                           )}
                           style={{ height: h }}
                         />
@@ -265,7 +277,7 @@ export function UsagePage(): JSX.Element {
                   })}
                 </div>
               ) : (
-                <div className="rounded-lg border border-dashed border-border bg-background px-6 py-10 text-center">
+                <div className="rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-10 text-center">
                   <div className="text-sm font-medium text-foreground/80">最近 7 天暂无执行记录</div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     创建任务后，这里会显示每天的执行次数。
@@ -292,9 +304,11 @@ function StatCard({
   sub: string;
 }): JSX.Element {
   return (
-    <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-      <div className="mb-2 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        {icon}
+    <div className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+      <div className="mb-2 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-[#595757]">
+        <span className="flex h-7 w-7 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757]">
+          {icon}
+        </span>
         <span>{label}</span>
       </div>
       <div className="text-3xl font-semibold tracking-tight tabular-nums">{value}</div>

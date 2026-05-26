@@ -63,14 +63,14 @@ export function ProfilePage(): JSX.Element {
           title="个人资料"
           description="管理你的基本信息"
           action={
-            <div className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground">
+            <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
               {summary}
             </div>
           }
         />
         {loadError ? (
-          <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card/40 px-6 py-12 text-center">
-            <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
+          <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+            <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
             <div className="text-sm font-medium text-foreground/80">资料加载失败</div>
             <div className="max-w-md text-xs leading-5 text-muted-foreground">
               {loadError}
@@ -79,7 +79,12 @@ export function ProfilePage(): JSX.Element {
               <Button type="button" size="sm" onClick={() => void refresh()}>
                 重试
               </Button>
-              <Button asChild variant="outline" size="sm">
+              <Button
+                asChild
+                variant="outline"
+                size="sm"
+                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+              >
                 <a
                   href={supportMailtoHref({
                     subject: '个人资料加载失败',
@@ -93,7 +98,7 @@ export function ProfilePage(): JSX.Element {
           </div>
         ) : (
           <div className="flex h-64 items-center justify-center">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            <Loader2 className="h-5 w-5 animate-spin text-[#EA1F59]" />
           </div>
         )}
       </PageContainer>
@@ -106,15 +111,15 @@ export function ProfilePage(): JSX.Element {
         title="个人资料"
         description="管理你的基本信息"
         action={
-          <div className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground">
+          <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
             {summary}
           </div>
         }
       />
       <div className="space-y-6">
-        <Section>
+        <Section className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <div className="flex flex-col items-start gap-6 md:flex-row md:items-center">
-            <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-pink-400 to-pink-600 text-2xl font-semibold text-white">
+            <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-[8px] border border-[#EA1F59]/35 bg-white text-2xl font-semibold text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
               {initial}
             </div>
             <div className="min-w-0 flex-1">
@@ -124,14 +129,14 @@ export function ProfilePage(): JSX.Element {
           </div>
         </Section>
 
-        <Section title="基本信息">
+        <Section title="基本信息" className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <Row label="昵称" description="显示在左下角和任务通知里">
             <input
               type="text"
               value={displayName}
               readOnly
               disabled
-              className="w-full rounded-md border border-input bg-muted px-3 py-2 text-sm text-muted-foreground md:w-64"
+              className="w-full rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/45 px-3 py-2 text-sm text-muted-foreground md:w-64"
             />
           </Row>
           <Row label="邮箱" description="用于登录和安全通知">
@@ -140,14 +145,19 @@ export function ProfilePage(): JSX.Element {
               value={email}
               readOnly
               disabled
-              className="w-full rounded-md border border-input bg-muted px-3 py-2 text-sm text-muted-foreground md:w-64"
+              className="w-full rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/45 px-3 py-2 text-sm text-muted-foreground md:w-64"
             />
           </Row>
           <div className="mt-4 flex items-center justify-end gap-3">
             <span className="text-[11px] text-muted-foreground">
               如需更新资料，请联系支持
             </span>
-            <Button asChild variant="outline" size="sm">
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+            >
               <a
                 href={supportMailtoHref({
                   subject: '更新 HOLA DAY 个人资料',
@@ -161,13 +171,13 @@ export function ProfilePage(): JSX.Element {
           </div>
         </Section>
 
-        <Section title="账号安全">
+        <Section title="账号安全" className="rounded-[8px] border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <Row label="密码" description="最近修改：未知">
-            <div className="rounded-md border border-dashed border-border bg-muted/40 px-3 py-3 text-xs text-muted-foreground md:w-96">
+            <div className="rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-3 py-3 text-xs text-muted-foreground md:w-96">
               密码修改功能开发中，请联系{' '}
               <a
                 href={supportMailtoHref({ subject: 'HOLA DAY 账号安全支持' })}
-                className="font-medium text-foreground underline-offset-2 hover:underline"
+                className="font-medium text-[#EA1F59] underline-offset-2 hover:underline"
               >
                 {SUPPORT_EMAIL}
               </a>
