@@ -6,12 +6,14 @@ import { trpc } from '@/lib/trpc';
 import { usageOutcomeSubcopy } from '@/lib/usage-copy';
 import {
   hasRecentUsage,
+  normalizeUsageSnapshot,
   usageDayBars,
   usageErrorMessage,
   usagePageSummary,
   usagePercent,
   usageQuotaTotal,
   usageStatusCopy,
+  type NormalizedUsageSnapshot,
   type UsageDayBar,
 } from '@/lib/usage-page-state';
 import { supportMailtoHref } from '@/lib/support-links';
@@ -28,7 +30,7 @@ import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
  */
 export function UsagePage(): JSX.Element {
   const mountedRef = React.useRef(false);
-  const [snap, setSnap] = React.useState<UsageSnapshot | null>(null);
+  const [snap, setSnap] = React.useState<NormalizedUsageSnapshot | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -37,7 +39,7 @@ export function UsagePage(): JSX.Element {
     try {
       const res = await trpc.usage.summary.query();
       if (!mountedRef.current) return;
-      setSnap(res as UsageSnapshot);
+      setSnap(normalizeUsageSnapshot(res));
       setError(null);
     } catch (err) {
       if (!mountedRef.current) return;
@@ -276,20 +278,6 @@ export function UsagePage(): JSX.Element {
       </div>
     </PageContainer>
   );
-}
-
-interface UsageSnapshot {
-  monthTasksTotal: number;
-  monthCompleted: number;
-  monthPartialSuccess?: number | null;
-  monthFailed: number;
-  monthCancelled?: number | null;
-  monthExecuting: number;
-  quotaLimit: number;
-  quotaUsed: number;
-  quotaRemaining: number;
-  quotaBonus: number;
-  dailyCounts: Array<{ date: string; count: number }>;
 }
 
 function StatCard({

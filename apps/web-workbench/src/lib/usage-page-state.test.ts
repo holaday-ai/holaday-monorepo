@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatUsageDay,
   hasRecentUsage,
+  normalizeUsageSnapshot,
   usageDayBars,
   usageErrorMessage,
   usagePageSummary,
@@ -12,8 +13,14 @@ import {
 
 const snapshot = {
   monthTasksTotal: 12,
+  monthCompleted: 7,
+  monthPartialSuccess: 1,
+  monthFailed: 2,
+  monthCancelled: 1,
+  monthExecuting: 1,
   quotaLimit: 20,
   quotaUsed: 8,
+  quotaRemaining: 17,
   quotaBonus: 5,
   dailyCounts: [
     { date: '2026-05-23', count: 2 },
@@ -71,13 +78,67 @@ describe('usage page state helpers', () => {
       [
         { date: '2026-05-23', count: -1 },
         { date: '2026-05-24', count: 2 },
+        { date: 'bad-date', count: 1 },
       ],
       new Date('2026-05-24T00:00:00.000Z'),
     );
 
-    expect(bars.map((bar) => bar.count)).toEqual([0, 2]);
+    expect(bars.map((bar) => bar.count)).toEqual([0, 2, 1]);
+    expect(bars.map((bar) => bar.label)).toEqual(['昨天', '今天', '—']);
     expect(hasRecentUsage(bars)).toBe(true);
     expect(hasRecentUsage([{ count: 0 }, { count: 0 }])).toBe(false);
+  });
+
+  it('normalizes usage summary payloads before rendering', () => {
+    expect(
+      normalizeUsageSnapshot({
+        monthTasksTotal: '12.9',
+        monthCompleted: '7',
+        monthPartialSuccess: 1.8,
+        monthFailed: -2,
+        monthCancelled: null,
+        monthExecuting: Number.POSITIVE_INFINITY,
+        quotaLimit: '20',
+        quotaUsed: '8.8',
+        quotaBonus: 5,
+        dailyCounts: [
+          { date: ' 2026-05-23 ', count: '2.9' },
+          { date: 'bad-date', count: 99 },
+          { date: '2026-05-24', count: -1 },
+        ],
+      }),
+    ).toEqual({
+      monthTasksTotal: 12,
+      monthCompleted: 7,
+      monthPartialSuccess: 1,
+      monthFailed: 0,
+      monthCancelled: 0,
+      monthExecuting: 0,
+      quotaLimit: 20,
+      quotaUsed: 8,
+      quotaRemaining: 17,
+      quotaBonus: 5,
+      dailyCounts: [
+        { date: '2026-05-23', count: 2 },
+        { date: '2026-05-24', count: 0 },
+      ],
+    });
+  });
+
+  it('uses an empty safe snapshot for malformed usage payloads', () => {
+    expect(normalizeUsageSnapshot(null)).toEqual({
+      monthTasksTotal: 0,
+      monthCompleted: 0,
+      monthPartialSuccess: 0,
+      monthFailed: 0,
+      monthCancelled: 0,
+      monthExecuting: 0,
+      quotaLimit: 0,
+      quotaUsed: 0,
+      quotaRemaining: 0,
+      quotaBonus: 0,
+      dailyCounts: [],
+    });
   });
 
   it('normalizes unknown usage errors', () => {
