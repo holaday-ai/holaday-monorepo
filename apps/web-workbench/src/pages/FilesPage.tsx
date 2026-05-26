@@ -29,19 +29,18 @@ import {
   downloadFileAuthed,
 } from '@/lib/download-file';
 import { formatFileSize } from '@/lib/file-size';
+import {
+  formatFileRelativeDate,
+  normalizeFileRows,
+  type NormalizedFileRow,
+} from '@/lib/files-page-state';
 import { filesEmptyCopy, type FileFilter } from '@/lib/files-empty-copy';
 import { trpc } from '@/lib/trpc';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
 
-interface UiFile {
-  fileId: string;
-  filename: string;
-  mimetype: string;
-  sizeBytes: number;
-  createdAt: Date | string;
-}
+type UiFile = NormalizedFileRow;
 
 type Filter = FileFilter;
 
@@ -76,7 +75,7 @@ export function FilesPage(): JSX.Element {
         type: filter,
         q: debouncedQuery || undefined,
       });
-      setFiles(list as UiFile[]);
+      setFiles(normalizeFileRows(list));
     } catch (err) {
       toast.show(
         err instanceof Error ? `加载失败：${err.message}` : '加载失败',
@@ -282,7 +281,6 @@ function FileRow({
   onDelete: () => void;
 }): JSX.Element {
   const Icon = iconForMime(file.mimetype);
-  const date = new Date(file.createdAt as string | number | Date);
   return (
     <div className="flex flex-col gap-1.5 px-4 py-2.5 transition-colors hover:bg-foreground/[0.03] sm:grid sm:grid-cols-[1fr_auto_auto_auto] sm:items-center sm:gap-3">
       {/* Filename = preview. Always reachable, no hover required. */}
@@ -300,7 +298,9 @@ function FileRow({
       {/* Size + time always rendered. Mobile shows them inline beneath
           the filename; sm+ snaps them into the grid columns. */}
       <div className="flex items-center gap-3 text-xs text-muted-foreground sm:contents">
-        <span className="whitespace-nowrap sm:text-xs">{formatRelative(date)}</span>
+        <span className="whitespace-nowrap sm:text-xs">
+          {formatFileRelativeDate(file.createdAt)}
+        </span>
         <span className="whitespace-nowrap sm:text-xs">{formatFileSize(file.sizeBytes)}</span>
       </div>
       {/* Always-visible primary action + More menu. No hover-only
@@ -358,16 +358,4 @@ function iconForMime(mime: string): typeof FileIcon {
     return FileText;
   }
   return FileIcon;
-}
-
-function formatRelative(d: Date): string {
-  const now = Date.now();
-  const t = d.getTime();
-  if (Number.isNaN(t)) return '';
-  const diff = now - t;
-  const day = 24 * 3600 * 1000;
-  if (diff < day) return '今天';
-  if (diff < 2 * day) return '昨天';
-  if (diff < 7 * day) return `${Math.floor(diff / day)}天前`;
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
 }
