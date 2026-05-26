@@ -136,7 +136,7 @@ export function PlanPage(): JSX.Element {
         title={zh ? '套餐与定价' : 'Plans & Pricing'}
         description={zh ? '选择适合你的版本' : 'Pick the version that fits you'}
       />
-      <div className="mx-auto mb-8 max-w-2xl text-center">
+      <div className="mx-auto mb-7 max-w-2xl text-center">
         <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">
           {zh ? '让 AI 替你搞定浏览器里的一切' : 'Let AI handle everything in your browser'}
         </h2>
@@ -148,13 +148,15 @@ export function PlanPage(): JSX.Element {
       </div>
 
       {/* Cycle toggle */}
-      <div className="mx-auto mb-8 flex items-center justify-center">
-        <div className="inline-flex rounded-full border border-border bg-card p-1 text-sm">
+      <div className="mx-auto mb-7 flex items-center justify-center">
+        <div className="inline-flex rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/55 p-0.5 text-sm shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <button
             onClick={() => setCycle('monthly')}
             className={cn(
-              'rounded-full px-4 py-1.5 transition-colors',
-              cycle === 'monthly' ? 'bg-foreground text-background' : 'text-muted-foreground',
+              'rounded-md px-4 py-1.5 transition-colors',
+              cycle === 'monthly'
+                ? 'bg-white text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.06)]'
+                : 'text-[#595757] hover:text-foreground',
             )}
           >
             {zh ? '按月' : 'Monthly'}
@@ -162,15 +164,19 @@ export function PlanPage(): JSX.Element {
           <button
             onClick={() => setCycle('yearly')}
             className={cn(
-              'flex items-center gap-1.5 rounded-full px-4 py-1.5 transition-colors',
-              cycle === 'yearly' ? 'bg-foreground text-background' : 'text-muted-foreground',
+              'flex items-center gap-1.5 rounded-md px-4 py-1.5 transition-colors',
+              cycle === 'yearly'
+                ? 'bg-white text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.06)]'
+                : 'text-[#595757] hover:text-foreground',
             )}
           >
             <span>{zh ? '按年' : 'Yearly'}</span>
             <span
               className={cn(
-                'rounded-full px-1.5 py-0.5 text-[10px] font-medium',
-                cycle === 'yearly' ? 'bg-background/20 text-background' : 'bg-foreground/10 text-foreground',
+                'rounded-full border px-1.5 py-0.5 text-[10px] font-medium',
+                cycle === 'yearly'
+                  ? 'border-[#EA1F59]/30 bg-white text-[#EA1F59]'
+                  : 'border-[#DCDDDD] bg-white text-[#595757]',
               )}
             >
               {zh ? '省 17%' : '-17%'}
@@ -231,27 +237,37 @@ export function PlanPage(): JSX.Element {
             <div
               key={planId}
               className={cn(
-                'relative flex flex-col rounded-2xl border bg-card p-6 shadow-sm transition-shadow',
-                featured ? 'border-primary/60 shadow-md ring-1 ring-primary/20' : 'border-border',
+                'group relative flex flex-col overflow-hidden rounded-[8px] border bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-[transform,border-color,box-shadow]',
+                featured
+                  ? 'border-[#EA1F59]/45 hover:-translate-y-px hover:shadow-[0_8px_24px_rgba(15,23,42,0.07)]'
+                  : 'border-[#DCDDDD] hover:-translate-y-px hover:border-[#ADADAD] hover:shadow-[0_5px_16px_rgba(15,23,42,0.055)]',
               )}
             >
               {featured && !isCurrent && (
-                <div className="absolute -top-2.5 left-6 rounded-full bg-primary px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary-foreground">
-                  {zh ? '推荐' : 'Recommended'}
-                </div>
+                <div className="absolute inset-x-0 top-0 h-0.5 bg-[#EA1F59]" />
               )}
-              {isCurrent && (
-                <div className="absolute -top-2.5 left-6 rounded-full bg-foreground px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-background">
-                  {zh ? '当前套餐' : 'Current Plan'}
-                </div>
-              )}
+              {isCurrent && <div className="absolute inset-x-0 top-0 h-0.5 bg-[#57479C]" />}
 
-              <div className="mb-5">
-                <h3 className="text-lg font-semibold">{name}</h3>
-                <p className="mt-1 text-xs text-muted-foreground">{tagline}</p>
+              <div className="mb-5 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="text-lg font-semibold">{name}</h3>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{tagline}</p>
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  {featured && !isCurrent && (
+                    <span className="rounded-full border border-[#EA1F59]/35 bg-white px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[#EA1F59]">
+                      {zh ? '推荐' : 'Recommended'}
+                    </span>
+                  )}
+                  {isCurrent && (
+                    <span className="rounded-full border border-[#57479C]/30 bg-white px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[#57479C]">
+                      {zh ? '当前' : 'Current'}
+                    </span>
+                  )}
+                </div>
               </div>
 
-              <div className="mb-2 flex items-baseline gap-2">
+              <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
                 <span className="text-3xl font-semibold tracking-tight">{priceMain}</span>
                 <span className="text-xs text-muted-foreground">{priceUnit}</span>
                 {priceStrike && (
@@ -261,11 +277,11 @@ export function PlanPage(): JSX.Element {
               {firstMonthHint ? (
                 <p className="mb-4 text-xs text-muted-foreground">{firstMonthHint}</p>
               ) : (
-                <div className="mb-4" />
+                <div className="mb-4 h-4" />
               )}
 
               {/* Tasks + concurrency + roles callout */}
-              <div className="mb-4 rounded-md border border-border/50 bg-background/40 px-3 py-2 text-xs">
+              <div className="mb-4 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-xs shadow-[0_1px_2px_rgba(15,23,42,0.02)]">
                 <div className="font-medium text-foreground">
                   {planId === 'free'
                     ? zh
@@ -305,10 +321,12 @@ export function PlanPage(): JSX.Element {
                 </div>
               </div>
 
-              <ul className="mb-6 flex-1 space-y-2">
+              <ul className="mb-6 flex-1 space-y-2.5">
                 {features.map((f) => (
                   <li key={f} className="flex items-start gap-2 text-sm">
-                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                    <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-[#EA1F59]/35 bg-white text-[#EA1F59]">
+                      <Check className="h-3 w-3" />
+                    </span>
                     <span className="text-muted-foreground">{f}</span>
                   </li>
                 ))}
@@ -319,7 +337,11 @@ export function PlanPage(): JSX.Element {
                   {zh ? '当前使用中' : 'Current'}
                 </Button>
               ) : !isPaid ? (
-                <Button asChild variant="outline" className="w-full">
+                <Button
+                  asChild
+                  variant="outline"
+                  className="w-full border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                >
                   <a
                     href={supportMailtoHref({
                       subject: zh ? '降级到 HOLA DAY 体验版' : 'Downgrade HOLA DAY plan',
@@ -348,7 +370,7 @@ export function PlanPage(): JSX.Element {
                   </Button>
                   <Button
                     variant="outline"
-                    className="w-full"
+                    className="w-full border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
                     onClick={() =>
                       setCnDialog({
                         provider: 'alipay',
@@ -382,7 +404,11 @@ export function PlanPage(): JSX.Element {
               ) : (
                 <Button
                   variant={featured ? 'default' : 'outline'}
-                  className="w-full"
+                  className={cn(
+                    'w-full',
+                    !featured &&
+                      'border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]',
+                  )}
                   disabled={paymentCta.disabled}
                   onClick={() => {
                     if (paymentCta.unavailableMessage) {
@@ -432,8 +458,10 @@ export function PlanPage(): JSX.Element {
                   <div
                     key={packId}
                     className={cn(
-                      'flex flex-col rounded-2xl border bg-card p-5 shadow-sm',
-                      allowed ? 'border-border' : 'border-border/40 opacity-60',
+                      'flex flex-col rounded-[8px] border bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-[transform,border-color,box-shadow]',
+                      allowed
+                        ? 'border-[#DCDDDD] hover:-translate-y-px hover:border-[#ADADAD] hover:shadow-[0_5px_16px_rgba(15,23,42,0.055)]'
+                        : 'border-[#DCDDDD] opacity-60',
                     )}
                   >
                     <div className="flex items-start justify-between">
@@ -451,7 +479,9 @@ export function PlanPage(): JSX.Element {
                               } this period`}
                         </p>
                       </div>
-                      <Plus className="h-4 w-4 text-muted-foreground" />
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757]">
+                        <Plus className="h-3.5 w-3.5" />
+                      </span>
                     </div>
                     <div className="mt-4 flex items-baseline gap-2">
                       <span className="text-2xl font-semibold tracking-tight">
@@ -484,7 +514,7 @@ export function PlanPage(): JSX.Element {
                       <Button
                         variant="outline"
                         size="sm"
-                        className="mt-4 w-full"
+                        className="mt-4 w-full border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
                         onClick={() => setOpenAddonFor(packId)}
                       >
                         {zh ? '购买' : 'Buy'}
@@ -499,7 +529,7 @@ export function PlanPage(): JSX.Element {
 
       {/* CN-locale note: PayPal still settles in USD */}
       {currency === 'cny' && (
-        <div className="mx-auto mt-6 max-w-xl rounded-md border border-border bg-card/60 p-3 text-center text-xs text-muted-foreground">
+        <div className="mx-auto mt-6 max-w-xl rounded-[8px] border border-[#DCDDDD] border-l-[#42C0EF] bg-white p-3 text-center text-xs text-muted-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
           {zh
             ? '当前通过 PayPal 以美元结算（按当日汇率折算 ≈ ¥）。本地支付和企业付款可联系支持开通。'
             : "Charged via PayPal in USD (¥ shown at today's rate). Contact support for local payment or business billing."}
@@ -508,7 +538,7 @@ export function PlanPage(): JSX.Element {
 
       {/* Sandbox-mode warning */}
       {paymentOpts?.paypalEnv === 'sandbox' && (
-        <div className="mx-auto mt-3 max-w-xl rounded-md border border-amber-300/50 bg-amber-50/50 p-3 text-center text-xs text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-200">
+        <div className="mx-auto mt-3 max-w-xl rounded-[8px] border border-[#DCDDDD] border-l-[#FFC910] bg-white p-3 text-center text-xs text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
           {zh ? '提示：PayPal 处于 sandbox 模式，任何支付都不会实际扣款' : 'Notice: PayPal is in sandbox mode, no real charges'}
         </div>
       )}

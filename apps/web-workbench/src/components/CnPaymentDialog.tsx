@@ -15,7 +15,7 @@
  *      bridge regardless of provider)
  */
 
-import { Loader2, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, X } from 'lucide-react';
 import * as React from 'react';
 import * as QRCode from 'qrcode';
 import { trpc } from '@/lib/trpc';
@@ -160,76 +160,89 @@ export function CnPaymentDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="relative w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-xl">
+      <div className="relative w-full max-w-md overflow-hidden rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.16)]">
         <button
           type="button"
           onClick={onClose}
           aria-label="关闭"
-          className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+          className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground"
         >
           <X className="h-4 w-4" />
         </button>
 
-        <div className="mb-4">
-          <h3 className="text-lg font-semibold">{providerName}</h3>
-          {description && (
-            <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+        <div className="border-b border-[#EFEFEF] px-5 py-4">
+          <div className="flex items-start gap-3 pr-8">
+            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#EA1F59]">
+              {provider === 'wechat' ? '微' : '支'}
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-base font-semibold">{providerName}</h3>
+              {description && (
+                <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{description}</p>
+              )}
+              {amountCents != null && (
+                <div className="mt-2 text-2xl font-semibold tracking-tight">
+                  ¥{(amountCents / 100).toFixed(2)}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="px-5 py-5">
+          {phase === 'creating' && (
+            <div className="flex items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-3 text-sm text-muted-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+              <Loader2 className="h-4 w-4 animate-spin text-[#EA1F59]" />
+              正在创建订单…
+            </div>
           )}
-          {amountCents != null && (
-            <div className="mt-2 text-2xl font-semibold tracking-tight">
-              ¥{(amountCents / 100).toFixed(2)}
+
+          {phase === 'awaiting' && provider === 'wechat' && qrDataUrl && (
+            <div className="flex flex-col items-center gap-3">
+              <div className="rounded-[8px] border border-[#DCDDDD] bg-white p-2 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+                <img
+                  src={qrDataUrl}
+                  alt="微信支付二维码"
+                  width={240}
+                  height={240}
+                  className="rounded-md"
+                />
+              </div>
+              <div className="rounded-[8px] border border-[#DCDDDD] border-l-[#42C0EF] bg-white px-3 py-2 text-center text-xs text-muted-foreground [border-left-width:3px]">
+                用微信扫码支付，完成后此页会自动更新
+              </div>
+            </div>
+          )}
+
+          {phase === 'awaiting' && provider === 'alipay' && (
+            <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-4 py-6 text-center text-sm shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+              <Loader2 className="h-5 w-5 animate-spin text-[#EA1F59]" />
+              <div>已在新窗口打开支付宝，付款完成后此页会自动更新。</div>
+              <div className="text-xs text-muted-foreground">
+                没看到新窗口？检查浏览器是否拦截了弹窗。
+              </div>
+            </div>
+          )}
+
+          {phase === 'confirmed' && (
+            <div className="flex items-start gap-2 rounded-[8px] border border-[#DCDDDD] border-l-[#42C0EF] bg-white px-3 py-3 text-sm text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#42C0EF]" />
+              <span>支付确认成功，正在刷新套餐…</span>
+            </div>
+          )}
+
+          {phase === 'failed' && errorText && (
+            <div className="flex items-start gap-2 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-3 py-3 text-sm text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" />
+              <span>{errorText}</span>
             </div>
           )}
         </div>
-
-        {phase === 'creating' && (
-          <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            正在创建订单…
-          </div>
-        )}
-
-        {phase === 'awaiting' && provider === 'wechat' && qrDataUrl && (
-          <div className="flex flex-col items-center gap-3 py-2">
-            <img
-              src={qrDataUrl}
-              alt="微信支付二维码"
-              width={240}
-              height={240}
-              className="rounded-md border border-border"
-            />
-            <div className="text-xs text-muted-foreground">
-              用微信扫码支付，完成后此页会自动更新
-            </div>
-          </div>
-        )}
-
-        {phase === 'awaiting' && provider === 'alipay' && (
-          <div className="flex flex-col items-center gap-3 py-6 text-sm">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            <div>已在新窗口打开支付宝，付款完成后此页会自动更新。</div>
-            <div className="text-xs text-muted-foreground">
-              没看到新窗口？检查浏览器是否拦截了弹窗。
-            </div>
-          </div>
-        )}
-
-        {phase === 'confirmed' && (
-          <div className="rounded-md border border-amber-300/40 bg-amber-50/40 px-3 py-3 text-sm dark:border-amber-700/40 dark:bg-amber-950/20">
-            支付确认成功，正在刷新套餐…
-          </div>
-        )}
-
-        {phase === 'failed' && errorText && (
-          <div className="rounded-md border border-red-300/40 bg-red-50/40 px-3 py-3 text-sm text-red-800 dark:border-red-700/40 dark:bg-red-950/20 dark:text-red-300">
-            {errorText}
-          </div>
-        )}
       </div>
     </div>
   );
