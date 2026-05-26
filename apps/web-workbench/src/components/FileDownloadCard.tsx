@@ -5,6 +5,7 @@ import {
   downloadFailureMessage,
   downloadFileAuthed,
 } from '@/lib/download-file';
+import { formatFileSize } from '@/lib/file-size';
 import { cn } from '@/lib/utils';
 
 export interface FileDownloadPayload {
@@ -98,7 +99,7 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
             ? '正在下载…'
             : state === 'failed'
               ? '下载失败，点击重试'
-              : `${formatBytes(payload.size)} · 24h 内可下载`}
+              : `${formatFileSize(payload.size)} · 24h 内可下载`}
         </div>
       </div>
       {state === 'loading' ? (
@@ -123,12 +124,6 @@ function FileTypeIcon({ filename }: { filename: string }): JSX.Element {
   if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) return <ImageIcon className={cls} />;
   if (['pdf', 'docx', 'doc', 'txt', 'md', 'json'].includes(ext)) return <FileText className={cls} />;
   return <File className={cls} />;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /**

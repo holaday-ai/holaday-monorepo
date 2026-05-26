@@ -1,4 +1,5 @@
 import { File, FileSpreadsheet, FileText, Image as ImageIcon, Loader2, X } from 'lucide-react';
+import { formatFileSize } from '@/lib/file-size';
 import { cn } from '@/lib/utils';
 
 export interface DraftAttachment {
@@ -73,7 +74,7 @@ export function AttachmentChip({ attachment, onRemove }: Props): JSX.Element {
       </span>
       {!isError && !isUploading && (
         <span className="shrink-0 text-[10px] text-muted-foreground/80">
-          {formatBytes(attachment.size)}
+          {formatFileSize(attachment.size)}
         </span>
       )}
       <button
@@ -94,10 +95,4 @@ function FileTypeIcon({ mimetype }: { mimetype: string }): JSX.Element {
   if (mimetype.includes('spreadsheet') || mimetype === 'text/csv') return <FileSpreadsheet className={cn} />;
   if (mimetype === 'application/pdf' || mimetype.startsWith('text/')) return <FileText className={cn} />;
   return <File className={cn} />;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

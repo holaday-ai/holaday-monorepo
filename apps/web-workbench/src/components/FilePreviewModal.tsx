@@ -5,6 +5,7 @@ import {
   downloadFileAuthed,
   fetchFileBlobAuthed,
 } from '@/lib/download-file';
+import { formatFileSize } from '@/lib/file-size';
 import { filePreviewKind } from '@/lib/file-preview-kind';
 import { useToast } from '@/components/ui/toast';
 
@@ -161,7 +162,7 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
               {payload.filename}
             </div>
             <div className="text-[11px] text-muted-foreground">
-              {formatBytes(payload.sizeBytes)} · {mime || '未知类型'}
+              {formatFileSize(payload.sizeBytes)} · {mime || '未知类型'}
             </div>
           </div>
           <button
@@ -247,10 +248,4 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
       </div>
     </div>
   );
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }

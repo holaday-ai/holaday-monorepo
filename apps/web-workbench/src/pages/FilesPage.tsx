@@ -28,6 +28,7 @@ import {
   downloadFailureMessage,
   downloadFileAuthed,
 } from '@/lib/download-file';
+import { formatFileSize } from '@/lib/file-size';
 import { filesEmptyCopy, type FileFilter } from '@/lib/files-empty-copy';
 import { trpc } from '@/lib/trpc';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
@@ -225,7 +226,7 @@ export function FilesPage(): JSX.Element {
         title="删除这个文件？"
         description={
           pendingDelete
-            ? `${pendingDelete.filename} · ${formatBytes(pendingDelete.sizeBytes)}\n已完成任务的结果文本不会受影响，但文件的下载链接会失效。`
+            ? `${pendingDelete.filename} · ${formatFileSize(pendingDelete.sizeBytes)}\n已完成任务的结果文本不会受影响，但文件的下载链接会失效。`
             : ''
         }
         confirmLabel="删除"
@@ -300,7 +301,7 @@ function FileRow({
           the filename; sm+ snaps them into the grid columns. */}
       <div className="flex items-center gap-3 text-xs text-muted-foreground sm:contents">
         <span className="whitespace-nowrap sm:text-xs">{formatRelative(date)}</span>
-        <span className="whitespace-nowrap sm:text-xs">{formatBytes(file.sizeBytes)}</span>
+        <span className="whitespace-nowrap sm:text-xs">{formatFileSize(file.sizeBytes)}</span>
       </div>
       {/* Always-visible primary action + More menu. No hover-only
           opacity tricks — every action is reachable on touch. */}
@@ -357,12 +358,6 @@ function iconForMime(mime: string): typeof FileIcon {
     return FileText;
   }
   return FileIcon;
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function formatRelative(d: Date): string {

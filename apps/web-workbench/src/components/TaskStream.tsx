@@ -46,6 +46,7 @@ import {
   safeExternalHttpHref,
 } from '@/lib/external-link-copy';
 import { classifyFriendlyFailure } from '@/lib/failure-copy';
+import { formatFileSize } from '@/lib/file-size';
 import { downloadMarkdownFile } from '@/lib/markdown-download';
 import { terminalArtifactFallbackText } from '@/lib/terminal-artifact-copy';
 import { terminalEmptyCopy } from '@/lib/terminal-empty-copy';
@@ -1546,7 +1547,7 @@ function ScreenshotThumbnailCard({
             ? '正在下载…'
             : downloadState === 'failed'
               ? '下载失败，点击重试'
-              : `${formatBytesShort(payload.size)} · 24h`}
+              : `${formatFileSize(payload.size)} · 24h`}
         </div>
         {downloadState === 'loading' ? (
           <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
@@ -1563,12 +1564,6 @@ function ScreenshotThumbnailCard({
       </div>
     </button>
   );
-}
-
-function formatBytesShort(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function SourceBadge({ marker }: { marker: string }): JSX.Element {
