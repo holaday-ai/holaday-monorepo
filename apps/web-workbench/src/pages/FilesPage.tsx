@@ -135,6 +135,13 @@ export function FilesPage(): JSX.Element {
   }
 
   const emptyCopy = filesEmptyCopy({ query: q, filter });
+  const summary = loading
+    ? '文件加载中…'
+    : files.length > 0
+      ? `已加载 ${files.length} 个文件`
+      : q.trim()
+        ? '没有匹配文件'
+        : '文件库为空';
 
   // 复制下载链接 is intentionally gone: the orchestrator's
   // /api/files/:id/download endpoint requires an Authorization
@@ -157,9 +164,17 @@ export function FilesPage(): JSX.Element {
 
   return (
     <PageContainer width="wide">
-      <PageHeader title="文件库" description="管理你上传的文件和资料" />
+      <PageHeader
+        title="文件库"
+        description="管理你上传的文件和资料"
+        action={
+          <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+            {summary}
+          </div>
+        }
+      />
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-1">
+        <div className="inline-flex w-fit items-center gap-0.5 rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/55 p-0.5">
           <FilterTab label="全部" active={filter === 'all'} onClick={() => setFilter('all')} />
           <FilterTab
             label="图片"
@@ -178,7 +193,7 @@ export function FilesPage(): JSX.Element {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="搜索文件名…"
-            className="w-full rounded-md border border-input bg-background py-1.5 pl-8 pr-3 text-sm focus-visible:border-foreground/30 focus-visible:outline-none sm:w-64"
+            className="w-full rounded-[8px] border border-[#DCDDDD] bg-white py-1.5 pl-8 pr-3 text-sm shadow-[0_1px_2px_rgba(15,23,42,0.03)] focus-visible:border-[#ADADAD] focus-visible:outline-none sm:w-64"
           />
         </div>
       </div>
@@ -188,7 +203,7 @@ export function FilesPage(): JSX.Element {
           加载中…
         </div>
       ) : files.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
+        <div className="flex flex-col items-center gap-2 rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <FileIcon className="h-8 w-8 text-muted-foreground/40" />
           <div className="text-sm font-medium text-foreground/80">
             {emptyCopy.title}
@@ -198,14 +213,14 @@ export function FilesPage(): JSX.Element {
           </div>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-border bg-card">
-          <div className="hidden grid-cols-[1fr_auto_auto_auto] items-center gap-3 border-b border-border bg-muted/40 px-4 py-2 text-[11px] font-medium tracking-wider text-muted-foreground sm:grid">
+        <div className="overflow-hidden rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+          <div className="hidden grid-cols-[1fr_auto_auto_auto] items-center gap-3 border-b border-[#EFEFEF] bg-white px-4 py-2 text-[11px] font-medium tracking-wider text-[#595757] sm:grid">
             <div>名称</div>
             <div>已修改</div>
             <div>大小</div>
             <div />
           </div>
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-[#EFEFEF]">
             {files.map((f) => (
               <FileRow
                 key={f.fileId}
@@ -256,10 +271,10 @@ function FilterTab({
       type="button"
       onClick={onClick}
       className={cn(
-        'rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
+        'rounded-md px-3 py-1.5 text-xs font-medium transition-[background-color,box-shadow,color]',
         active
-          ? 'bg-foreground text-background'
-          : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground',
+          ? 'bg-white text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.05)]'
+          : 'text-[#595757] hover:bg-white/70 hover:text-foreground',
       )}
     >
       {label}
@@ -282,16 +297,18 @@ function FileRow({
 }): JSX.Element {
   const Icon = iconForMime(file.mimetype);
   return (
-    <div className="flex flex-col gap-1.5 px-4 py-2.5 transition-colors hover:bg-foreground/[0.03] sm:grid sm:grid-cols-[1fr_auto_auto_auto] sm:items-center sm:gap-3">
+    <div className="flex flex-col gap-1.5 px-4 py-2.5 transition-colors hover:bg-[#EFEFEF]/35 sm:grid sm:grid-cols-[1fr_auto_auto_auto] sm:items-center sm:gap-3">
       {/* Filename = preview. Always reachable, no hover required. */}
       <button
         type="button"
         onClick={onPreview}
         title={`预览 ${file.filename}`}
-        className="flex min-w-0 items-center gap-2.5 text-left"
+        className="group flex min-w-0 items-center gap-2.5 text-left"
       >
-        <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 truncate text-sm text-foreground hover:underline">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors group-hover:border-[#ADADAD]">
+          <Icon className="h-4 w-4" aria-hidden />
+        </span>
+        <span className="min-w-0 truncate text-sm font-medium text-foreground group-hover:text-[#EA1F59]">
           {file.filename}
         </span>
       </button>
@@ -309,7 +326,7 @@ function FileRow({
         <button
           type="button"
           onClick={onUseInNewTask}
-          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium text-foreground/85 transition-colors hover:border-foreground/30 hover:bg-foreground/[0.04]"
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-xs font-medium text-[#595757] transition-colors hover:border-[#ADADAD] hover:text-[#EA1F59]"
         >
           <Plus className="h-3.5 w-3.5" />
           用于新任务
@@ -320,7 +337,7 @@ function FileRow({
               type="button"
               aria-label="更多操作"
               title="更多"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/60 hover:text-foreground"
             >
               <MoreHorizontal className="h-4 w-4" />
             </button>
@@ -336,7 +353,7 @@ function FileRow({
             </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={onDelete}
-              className="text-red-600 focus:bg-red-500/10 focus:text-red-600 dark:text-red-400 dark:focus:text-red-300"
+              className="text-[#EA1F59] focus:bg-[#EA1F59]/[0.06] focus:text-[#EA1F59]"
             >
               <Trash2 />
               <span>删除</span>
