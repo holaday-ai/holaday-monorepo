@@ -10,41 +10,18 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import {
   groupRoleCatalogue,
+  normalizeRoleListResponse,
+  normalizeRoleSelectResponse,
   roleLimitMessage,
   rolePageSummary,
   rolePlanLabel,
   roleRemainingChanges,
+  type RoleListSnapshot,
 } from '@/lib/roles-page-state';
 import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
-
-interface ListResponse {
-  plan: string;
-  selected: string[];
-  catalogue: readonly RoleDefinition[];
-  pickLimit: number;
-  changesThisMonth: number;
-  changesLimit: number;
-  /**
-   * P1-A — true when a Basic-plan user has more entries in
-   * selected_roles than the 5-pick limit (legacy state from the
-   * skill/role split migration). Drives the warning banner that
-   * tells them to trim before saving.
-   */
-  overLimit?: boolean;
-  /**
-   * P1-final — true when the server filtered Pro-only ids out of
-   * the Basic user's selected_roles before returning. The user
-   * was previously locked: Pro-only cards render as disabled on
-   * Basic, so they couldn't uncheck the Pro-only ids, so save
-   * always failed (`roles.select` rejects ids outside OPEN_POOL).
-   * Banner tells them to just hit Save — `selected` is already
-   * sanitized so the save will land a clean list.
-   */
-  needsRoleRepair?: boolean;
-}
 
 /**
  * Role selection page. Three states based on plan:
@@ -61,7 +38,7 @@ export function RolesPage(): JSX.Element {
   const navigate = useNavigate();
   const toast = useToast();
   const mountedRef = React.useRef(false);
-  const [data, setData] = React.useState<ListResponse | null>(null);
+  const [data, setData] = React.useState<RoleListSnapshot | null>(null);
   const [draft, setDraft] = React.useState<string[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -72,10 +49,10 @@ export function RolesPage(): JSX.Element {
       setLoading(true);
       setLoadError(null);
       try {
-        const res = await trpc.roles.list.query();
+        const res = normalizeRoleListResponse(await trpc.roles.list.query());
         if (!mountedRef.current) return;
-        setData(res as ListResponse);
-        setDraft((res as ListResponse).selected);
+        setData(res);
+        setDraft([...res.selected]);
       } catch (err) {
         if (!mountedRef.current) return;
         const message = err instanceof Error ? err.message : '请稍后重试';
@@ -104,6 +81,8 @@ export function RolesPage(): JSX.Element {
   const isPro = data?.plan === 'pro';
   const isBasic = data?.plan === 'basic';
   const isFree = data?.plan === 'free' || (!isPro && !isBasic);
+  const currentPickLimit = data?.pickLimit ?? BASIC_ROLE_PICK_LIMIT;
+  const currentChangesLimit = data?.changesLimit ?? ROLE_CHANGES_PER_MONTH;
 
   const toggle = React.useCallback(
     (id: string) => {
@@ -112,14 +91,14 @@ export function RolesPage(): JSX.Element {
         if (prev.includes(id)) {
           return prev.filter((x) => x !== id);
         }
-        if (prev.length >= BASIC_ROLE_PICK_LIMIT) {
-          toast.show(roleLimitMessage(BASIC_ROLE_PICK_LIMIT), 'error');
+        if (prev.length >= currentPickLimit) {
+          toast.show(roleLimitMessage(currentPickLimit), 'error');
           return prev;
         }
         return [...prev, id];
       });
     },
-    [isBasic, toast],
+    [currentPickLimit, isBasic, toast],
   );
 
   const dirty = React.useMemo(() => {
@@ -140,13 +119,21 @@ export function RolesPage(): JSX.Element {
     if (!data) return;
     setSaving(true);
     try {
-      const res = await trpc.roles.select.mutate({ roleIds: draft });
+      const res = normalizeRoleSelectResponse(
+        await trpc.roles.select.mutate({ roleIds: draft }),
+        {
+          selected: draft,
+          changesThisMonth: data.changesThisMonth,
+          changesLimit: data.changesLimit,
+        },
+      );
       setData((prev) =>
         prev
           ? {
               ...prev,
-              selected: res.selected,
+              selected: [...res.selected],
               changesThisMonth: res.changesThisMonth,
+              changesLimit: res.changesLimit,
               // Save persisted the sanitized list — the DB row is
               // now clean, so drop the repair banner immediately.
               needsRoleRepair: false,
@@ -172,7 +159,7 @@ export function RolesPage(): JSX.Element {
     plan: data?.plan,
     selectedCount: draft.length,
     totalCount: data?.catalogue.length ?? 0,
-    pickLimit: data?.pickLimit ?? BASIC_ROLE_PICK_LIMIT,
+    pickLimit: currentPickLimit,
   });
 
   if (loading || loadError || !data) {
@@ -266,7 +253,7 @@ export function RolesPage(): JSX.Element {
           {draft.length > BASIC_ROLE_PICK_LIMIT ? (
             <>
               检测到不适用于当前套餐的角色已被自动移除。请先取消勾选至
-              <span className="font-semibold"> {BASIC_ROLE_PICK_LIMIT} 个以内 </span>
+              <span className="font-semibold"> {currentPickLimit} 个以内 </span>
               再保存。
             </>
           ) : (
@@ -279,10 +266,10 @@ export function RolesPage(): JSX.Element {
         </div>
       )}
 
-      {isBasic && !data.needsRoleRepair && draft.length > BASIC_ROLE_PICK_LIMIT && (
+      {isBasic && !data.needsRoleRepair && draft.length > currentPickLimit && (
         <div className="mb-4 rounded-lg border border-amber-300/40 bg-amber-50/50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-200">
           你当前选择 <span className="font-semibold">{draft.length}</span> 个角色，
-          超出基础版 {BASIC_ROLE_PICK_LIMIT} 个上限。请取消勾选至 {BASIC_ROLE_PICK_LIMIT} 个以内
+          超出基础版 {currentPickLimit} 个上限。请取消勾选至 {currentPickLimit} 个以内
           再保存，否则新任务将无法创建。
         </div>
       )}
@@ -293,16 +280,16 @@ export function RolesPage(): JSX.Element {
             <span
               className={cn(
                 'text-sm font-medium',
-                draft.length > BASIC_ROLE_PICK_LIMIT
+                draft.length > currentPickLimit
                   ? 'text-red-600 dark:text-red-400'
                   : 'text-foreground',
               )}
             >
-              已选 {draft.length} / {BASIC_ROLE_PICK_LIMIT}
+              已选 {draft.length} / {currentPickLimit}
             </span>
             <span>
-              本月可切换 {roleRemainingChanges(data.changesThisMonth, ROLE_CHANGES_PER_MONTH)} 次（共
-              {ROLE_CHANGES_PER_MONTH} 次）
+              本月可切换 {roleRemainingChanges(data.changesThisMonth, currentChangesLimit)} 次（共
+              {currentChangesLimit} 次）
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -317,7 +304,7 @@ export function RolesPage(): JSX.Element {
             <Button
               type="button"
               size="sm"
-              disabled={!dirty || saving || draft.length > BASIC_ROLE_PICK_LIMIT}
+              disabled={!dirty || saving || draft.length > currentPickLimit}
               onClick={() => void save()}
             >
               {saving ? '保存中…' : dirty ? '保存' : '已保存'}

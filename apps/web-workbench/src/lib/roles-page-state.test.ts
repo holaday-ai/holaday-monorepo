@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { RoleDefinition } from '@holaday/shared-types';
 import {
   groupRoleCatalogue,
+  normalizeRoleListResponse,
+  normalizeRoleSelectResponse,
   roleLimitMessage,
   rolePageSummary,
   rolePlanLabel,
@@ -109,5 +111,88 @@ describe('roles page state helpers', () => {
 
   it('describes the basic pick limit', () => {
     expect(roleLimitMessage(5)).toBe('最多选择 5 个角色');
+  });
+
+  it('normalizes role list payloads before rendering', () => {
+    const snapshot = normalizeRoleListResponse({
+      plan: 'basic',
+      selected: [' support ', 'missing', 'support', 123],
+      catalogue: [
+        roles[0],
+        {
+          id: ' loose ',
+          nameZh: '',
+          nameEn: '',
+          descriptionZh: 123,
+          descriptionEn: null,
+          tier: 'bad',
+          category: 'bad',
+        },
+        { id: '', nameZh: 'empty' },
+      ],
+      pickLimit: 4.9,
+      changesThisMonth: 1.8,
+      changesLimit: -1,
+    });
+
+    expect(snapshot).toEqual({
+      plan: 'basic',
+      selected: ['support'],
+      catalogue: [
+        roles[0],
+        {
+          id: 'loose',
+          nameZh: 'loose',
+          nameEn: 'loose',
+          descriptionZh: '',
+          descriptionEn: '',
+          tier: 'open',
+          category: 'specialty',
+        },
+      ],
+      pickLimit: 4,
+      changesThisMonth: 1,
+      changesLimit: 3,
+      overLimit: false,
+      needsRoleRepair: true,
+    });
+  });
+
+  it('uses safe defaults for malformed role list payloads', () => {
+    expect(normalizeRoleListResponse(null)).toEqual({
+      plan: 'free',
+      selected: [],
+      catalogue: [],
+      pickLimit: 5,
+      changesThisMonth: 0,
+      changesLimit: 3,
+      overLimit: false,
+      needsRoleRepair: false,
+    });
+  });
+
+  it('normalizes role select responses with a fallback snapshot', () => {
+    expect(
+      normalizeRoleSelectResponse(
+        { selected: [' a ', 'a', 'b'], changesThisMonth: 2.9 },
+        { selected: ['fallback'], changesThisMonth: 1, changesLimit: 3 },
+      ),
+    ).toEqual({
+      selected: ['a', 'b'],
+      changesThisMonth: 2,
+      changesLimit: 3,
+    });
+
+    expect(
+      normalizeRoleSelectResponse(null, {
+        selected: ['fallback'],
+        changesThisMonth: 1,
+        changesLimit: 3,
+      }),
+    ).toEqual({
+      selected: ['fallback'],
+      changesThisMonth: 1,
+      changesLimit: 3,
+    });
   });
 });
