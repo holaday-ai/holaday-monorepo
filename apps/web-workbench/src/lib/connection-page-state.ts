@@ -65,6 +65,12 @@ export function connectionProviderStatus(provider: ConnectionProviderLike): stri
   return '按需开通';
 }
 
+export function connectionProviderActionLabel(provider: ConnectionProviderLike): string {
+  if (provider.oauthSupported && !provider.comingSoon) return '申请连接';
+  if (provider.oauthSupported) return '申请试用';
+  return '申请接入';
+}
+
 export function connectionPageSummary(options: {
   readonly count: unknown;
   readonly categoryCount: unknown;
@@ -87,6 +93,7 @@ export function normalizeConnectionProviders(value: unknown): ConnectionProvider
   if (!Array.isArray(value)) {
     throw new Error('连接器数据格式异常，请稍后重试。');
   }
+  const seen = new Set<string>();
   return value.flatMap((item): ConnectionProviderView[] => {
     if (typeof item !== 'object' || item === null) return [];
     const raw = item as Record<string, unknown>;
@@ -94,6 +101,8 @@ export function normalizeConnectionProviders(value: unknown): ConnectionProvider
     const name = safeText(raw.name);
     const category = safeConnectionCategory(raw.category);
     if (!id || !name || !category) return [];
+    if (seen.has(id)) return [];
+    seen.add(id);
     return [
       {
         id,

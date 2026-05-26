@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import {
   connectionAccessMailBody,
   connectionPageSummary,
+  connectionProviderActionLabel,
   connectionProviderStatus,
   groupConnectionProviders,
   normalizeConnectionProviders,
@@ -107,13 +108,15 @@ export function ConnectionsPage(): JSX.Element {
         title="连接器"
         description="申请接入常用工具，让 AI 在授权范围内完成操作"
         action={
-          <div className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground">
+          <div className="inline-flex items-center rounded-full border border-[#57479C]/20 bg-[#57479C]/[0.045] px-3 py-1 text-[12px] font-medium text-foreground shadow-sm">
             {summary}
           </div>
         }
       />
-      <div className="mb-5 flex items-start gap-2.5 rounded-md border border-primary/30 bg-primary/5 px-3.5 py-2.5 text-[13px] text-foreground">
-        <Plug className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+      <div className="mb-5 flex items-start gap-3 rounded-[8px] border border-[#57479C]/20 bg-[#57479C]/[0.045] px-4 py-3 text-[13px] text-foreground shadow-sm animate-fade-in motion-reduce:animate-none">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[#57479C] text-white shadow-sm">
+          <Plug className="h-4 w-4" aria-hidden />
+        </div>
         <div className="min-w-0">
           <div className="font-medium">连接器按需开通</div>
           <div className="mt-0.5 text-[12px] text-muted-foreground">
@@ -126,7 +129,7 @@ export function ConnectionsPage(): JSX.Element {
           加载中…
         </div>
       ) : loadError ? (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card/40 px-6 py-12 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-[8px] border border-border bg-card/40 px-6 py-12 text-center animate-fade-in motion-reduce:animate-none">
           <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
           <div className="text-sm font-medium text-foreground/80">连接器加载失败</div>
           <div className="max-w-md text-xs leading-5 text-muted-foreground">
@@ -149,7 +152,7 @@ export function ConnectionsPage(): JSX.Element {
           </div>
         </div>
       ) : providers.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-[8px] border border-dashed border-border bg-card/40 px-6 py-12 text-center animate-fade-in motion-reduce:animate-none">
           <Plug className="h-8 w-8 text-muted-foreground/40" />
           <div className="text-sm font-medium text-foreground/80">暂无规划连接器</div>
           <div className="max-w-md text-xs leading-5 text-muted-foreground">
@@ -171,15 +174,15 @@ export function ConnectionsPage(): JSX.Element {
         <div className="space-y-8">
           {providerGroups.map((group) => (
             <section key={group.category}>
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h2 className="text-xs font-semibold tracking-wider text-muted-foreground">
+              <div className="mb-3 flex items-center justify-between gap-3 border-b border-border/70 pb-2">
+                <h2 className="text-[11px] font-semibold uppercase tracking-wide text-foreground/70">
                   {group.label}
                 </h2>
-                <div className="text-[11px] text-muted-foreground">
+                <div className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground">
                   {group.items.length} 个
                 </div>
               </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {group.items.map((provider) => (
                   <ConnectionProviderCard key={provider.id} provider={provider} />
                 ))}
@@ -195,29 +198,61 @@ export function ConnectionsPage(): JSX.Element {
 function ConnectionProviderCard({ provider }: { provider: ConnectionProviderView }): JSX.Element {
   const Icon = ICONS[provider.icon] ?? Plug;
   const status = connectionProviderStatus(provider);
+  const tone = provider.oauthSupported
+    ? provider.comingSoon
+      ? 'preparing'
+      : 'ready'
+    : 'request';
 
   return (
-    <article className="flex min-h-44 flex-col items-start gap-2 rounded-xl border border-border bg-card/60 p-4 text-left transition-colors hover:border-foreground/20 hover:bg-foreground/[0.02]">
+    <article
+      className={cn(
+        'group flex min-h-[176px] flex-col items-start gap-2 rounded-[8px] border bg-card/80 p-4 text-left shadow-sm transition-[transform,border-color,box-shadow,background-color] duration-150 animate-fade-in motion-reduce:animate-none motion-reduce:transition-none motion-reduce:hover:translate-y-0',
+        tone === 'ready'
+          ? 'border-[#42C0EF]/35 hover:-translate-y-0.5 hover:border-[#42C0EF]/60 hover:bg-[#42C0EF]/[0.035] hover:shadow-md'
+          : tone === 'preparing'
+            ? 'border-[#57479C]/28 hover:-translate-y-0.5 hover:border-[#57479C]/55 hover:bg-[#57479C]/[0.035] hover:shadow-md'
+            : 'border-border hover:-translate-y-0.5 hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/[0.025] hover:shadow-md',
+      )}
+    >
       <div className="flex w-full items-start justify-between gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+        <div
+          className={cn(
+            'flex h-9 w-9 items-center justify-center rounded-md border transition-colors',
+            tone === 'ready'
+              ? 'border-[#42C0EF]/35 bg-[#42C0EF]/10 text-cyan-700 dark:text-cyan-200'
+              : tone === 'preparing'
+                ? 'border-[#57479C]/35 bg-[#57479C]/10 text-[#57479C] dark:text-purple-200'
+                : 'border-border bg-background text-muted-foreground group-hover:border-[#EA1F59]/30 group-hover:text-[#EA1F59]',
+          )}
+        >
           <Icon className="h-4 w-4" aria-hidden />
         </div>
         <span
           className={cn(
-            'rounded-md border px-2 py-0.5 text-[10px] font-medium',
-            status === '可连接'
-              ? 'border-cyan-300/60 bg-cyan-50 text-cyan-800 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:text-cyan-200'
-              : 'border-border bg-background text-muted-foreground',
+            'rounded-full border px-2 py-0.5 text-[10px] font-medium',
+            tone === 'ready'
+              ? 'border-[#42C0EF]/45 bg-[#42C0EF]/10 text-cyan-700 dark:text-cyan-200'
+              : tone === 'preparing'
+                ? 'border-[#57479C]/35 bg-[#57479C]/10 text-[#57479C] dark:text-purple-200'
+                : 'border-border bg-background text-muted-foreground',
           )}
         >
           {status}
         </span>
       </div>
-      <div className="text-sm font-medium text-foreground/80">{provider.name}</div>
+      <div className="min-w-0 pr-2 text-sm font-medium leading-5 text-foreground">
+        {provider.name}
+      </div>
       <div className="line-clamp-2 text-xs leading-5 text-muted-foreground">
         {provider.description}
       </div>
-      <Button asChild variant="outline" size="sm" className="mt-auto h-7 text-[11px]">
+      <Button
+        asChild
+        variant="outline"
+        size="sm"
+        className="mt-auto h-7 border-border bg-background text-[11px] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/[0.035] hover:text-foreground"
+      >
         <a
           href={supportMailtoHref({
             subject: `申请接入 ${provider.name}`,
@@ -225,7 +260,7 @@ function ConnectionProviderCard({ provider }: { provider: ConnectionProviderView
           })}
         >
           <Send className="h-3 w-3" />
-          申请接入
+          {connectionProviderActionLabel(provider)}
         </a>
       </Button>
     </article>

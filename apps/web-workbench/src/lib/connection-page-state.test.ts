@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   connectionAccessMailBody,
   connectionPageSummary,
+  connectionProviderActionLabel,
   connectionProviderStatus,
   groupConnectionProviders,
   normalizeConnectionProviders,
@@ -59,6 +60,20 @@ describe('connection page state helpers', () => {
     ).toBe('授权准备中');
   });
 
+  it('labels provider request actions by rollout state', () => {
+    expect(connectionProviderActionLabel(providers[0]!)).toBe('申请接入');
+    expect(connectionProviderActionLabel(providers[2]!)).toBe('申请连接');
+    expect(
+      connectionProviderActionLabel({
+        id: 'slack',
+        name: 'Slack',
+        category: 'communication',
+        oauthSupported: true,
+        comingSoon: true,
+      }),
+    ).toBe('申请试用');
+  });
+
   it('summarizes loading, failed, empty, and populated connection states', () => {
     expect(connectionPageSummary({ count: 0, categoryCount: 0, loading: true, error: null })).toBe(
       '连接器加载中…',
@@ -97,6 +112,13 @@ describe('connection page state helpers', () => {
         comingSoon: false,
         icon: 'Github',
         description: '  Code hosting  ',
+      },
+      {
+        id: ' github ',
+        name: 'Duplicate GitHub',
+        category: 'development',
+        oauthSupported: false,
+        comingSoon: true,
       },
       {
         id: 'bad-category',
