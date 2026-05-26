@@ -92,13 +92,13 @@ export function EventDetailPopover({
       ref={rootRef}
       aria-busy={busy !== null}
       className={cn(
-        'hd-popover-enter fixed z-[75] max-h-[calc(100vh-1rem)] overflow-y-auto bg-popover',
+        'hd-popover-enter fixed z-[75] max-h-[calc(100vh-1rem)] overflow-y-auto border border-[#DCDDDD] bg-white',
         mobile && 'left-2 right-2 bottom-2 mx-auto',
       )}
       style={{
         ...(mobile ? {} : position),
-        borderRadius: 12,
-        boxShadow: '0 4px 24px rgba(0,0,0,0.12)',
+        borderRadius: 8,
+        boxShadow: '0 16px 48px rgba(15,23,42,0.12)',
         padding: 20,
       }}
     >
@@ -108,7 +108,7 @@ export function EventDetailPopover({
             {statusIcon}
             {statusLabel}
             {row.lastRunStatus === 'failed' && row.status === 'active' && (
-              <span className="ml-1 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-400">
+              <span className="ml-1 rounded bg-[#EA1F59]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#EA1F59]">
                 上次失败
               </span>
             )}
@@ -124,7 +124,7 @@ export function EventDetailPopover({
           className="mt-3 whitespace-pre-wrap text-xs text-muted-foreground"
           style={{
             padding: '8px 10px',
-            background: 'rgba(0,0,0,0.03)',
+            background: '#EFEFEF',
             borderRadius: 8,
             lineHeight: 1.5,
           }}
@@ -157,12 +157,12 @@ export function EventDetailPopover({
             </span>
             <span className="flex items-center gap-1.5 text-foreground">
               {row.lastRunStatus === 'success' ? (
-                <span className="inline-flex items-center gap-1 text-cyan-600 dark:text-cyan-300">
+                <span className="inline-flex items-center gap-1 text-[#42C0EF]">
                   <CheckCircle2 className="h-3 w-3" aria-hidden />
                   <span>成功</span>
                 </span>
               ) : row.lastRunStatus === 'failed' ? (
-                <span className="inline-flex items-center gap-1 text-red-600 dark:text-red-400">
+                <span className="inline-flex items-center gap-1 text-[#EA1F59]">
                   <XCircle className="h-3 w-3" aria-hidden />
                   <span>失败</span>
                 </span>
@@ -176,7 +176,7 @@ export function EventDetailPopover({
       </div>
 
       {row.lastError && row.lastRunStatus === 'failed' && (
-        <div className="mt-3 rounded-md bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-300">
+        <div className="mt-3 rounded-[8px] border border-[#EA1F59]/20 bg-[#EA1F59]/[0.06] px-3 py-2 text-xs text-[#EA1F59]">
           <div className="mb-0.5 font-semibold">上次错误</div>
           <div className="break-words font-mono text-[11px]">{row.lastError}</div>
         </div>
@@ -189,6 +189,7 @@ export function EventDetailPopover({
             variant="outline"
             size="sm"
             disabled={busy !== null}
+            className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
             onClick={() =>
               void wrap('toggle', async () => {
                 await onToggle(row.scheduledTaskId);
@@ -205,6 +206,7 @@ export function EventDetailPopover({
             variant="outline"
             size="sm"
             disabled={busy !== null}
+            className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
             onClick={() =>
               void wrap('run', async () => {
                 await onRunNow(row.scheduledTaskId);
@@ -225,7 +227,7 @@ export function EventDetailPopover({
             if (busy !== null) return;
             onDeleteRequest(row.scheduledTaskId);
           }}
-          className="text-red-600 hover:bg-red-500/10 hover:text-red-700 disabled:cursor-wait disabled:opacity-55 dark:text-red-400"
+          className="text-[#EA1F59] hover:bg-[#EA1F59]/10 hover:text-[#D91B51] disabled:cursor-wait disabled:opacity-55"
         >
           <Trash2 className="mr-1 h-3 w-3" />
           删除
@@ -264,10 +266,10 @@ const STATUS_LABEL: Record<ScheduledTaskRow['status'], string> = {
 
 const STATUS_ICON: Record<ScheduledTaskRow['status'], React.ReactNode> = {
   active: <Clock className="h-3 w-3" style={{ color: '#EA1F59' }} />,
-  paused: <Pause className="h-3 w-3 text-slate-500" />,
-  running: <Loader2 className="h-3 w-3 animate-spin text-amber-500" />,
-  completed: <CheckCircle2 className="h-3 w-3 text-cyan-500" />,
-  failed: <XCircle className="h-3 w-3 text-red-500" />,
+  paused: <Pause className="h-3 w-3 text-[#ADADAD]" />,
+  running: <Loader2 className="h-3 w-3 animate-spin text-[#FFC910]" />,
+  completed: <CheckCircle2 className="h-3 w-3 text-[#42C0EF]" />,
+  failed: <XCircle className="h-3 w-3 text-[#EA1F59]" />,
 };
 
 function formatDateTime(d: Date | string | null): string {

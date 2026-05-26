@@ -79,9 +79,9 @@ export function PageHeader({
   action,
 }: PageHeaderProps): JSX.Element {
   return (
-    <header className="mb-6 flex items-start justify-between gap-4">
+    <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0">
-        <h1 className="text-xl font-semibold leading-tight tracking-tight text-foreground">
+        <h1 className="text-xl font-semibold leading-tight text-foreground">
           {title}
         </h1>
         {description && (
@@ -90,7 +90,11 @@ export function PageHeader({
           </p>
         )}
       </div>
-      {action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
+      {action && (
+        <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
+          {action}
+        </div>
+      )}
     </header>
   );
 }
@@ -118,14 +122,14 @@ export function Section({
       id={id}
       aria-labelledby={headingId}
       className={cn(
-        'scroll-mt-24 rounded-xl border border-border bg-card p-6 shadow-sm',
+        'scroll-mt-24 rounded-[8px] border border-[#DCDDDD] bg-white p-6 shadow-[0_1px_2px_rgba(15,23,42,0.03)]',
         className,
       )}
     >
       {(title || description) && (
         <header className="mb-4">
           {title && (
-            <h2 id={headingId} className="text-base font-semibold tracking-tight">
+            <h2 id={headingId} className="text-base font-semibold">
               {title}
             </h2>
           )}
@@ -153,7 +157,7 @@ export function Row({
   children: React.ReactNode;
 }): JSX.Element {
   return (
-    <div className="flex flex-col gap-2 border-b border-border py-4 last:border-b-0 md:flex-row md:items-center md:justify-between md:gap-6">
+    <div className="flex flex-col gap-2 border-b border-[#EFEFEF] py-4 last:border-b-0 md:flex-row md:items-center md:justify-between md:gap-6">
       <div className="min-w-0">
         <div className="text-sm font-medium">{label}</div>
         {description && (

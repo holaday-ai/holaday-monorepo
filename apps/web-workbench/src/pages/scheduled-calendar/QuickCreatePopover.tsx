@@ -168,18 +168,18 @@ export function QuickCreatePopover({
       ref={rootRef}
       aria-busy={submitting}
       className={cn(
-        'hd-popover-enter hd-quick-create fixed z-[85] max-h-[calc(100vh-1rem)] overflow-y-auto bg-popover',
+        'hd-popover-enter hd-quick-create fixed z-[85] max-h-[calc(100vh-1rem)] overflow-y-auto border border-[#DCDDDD] bg-white',
         mobile && 'left-2 right-2 bottom-2 mx-auto',
       )}
       style={{
         ...(mobile ? {} : position),
-        borderRadius: 12,
-        boxShadow: '0 4px 24px rgba(0,0,0,0.12)',
+        borderRadius: 8,
+        boxShadow: '0 16px 48px rgba(15,23,42,0.12)',
         padding: 20,
       }}
     >
       <form onSubmit={(e) => void handleSubmit(e)}>
-        <div className="text-xs font-medium text-muted-foreground" style={{ letterSpacing: 0.02 }}>
+        <div className="text-xs font-medium text-muted-foreground">
           {formatLocalDate(date)}
         </div>
         <input
@@ -194,7 +194,7 @@ export function QuickCreatePopover({
           className="hd-quick-create__input mt-3 w-full bg-transparent text-base font-medium outline-none"
           style={{
             border: 'none',
-            borderBottom: '1px solid #e5e5e5',
+            borderBottom: '1px solid #DCDDDD',
             padding: '6px 0',
             color: 'inherit',
           }}
@@ -223,7 +223,7 @@ export function QuickCreatePopover({
             className="hd-quick-create__input mt-2 w-full resize-y bg-transparent text-sm outline-none"
             style={{
               border: 'none',
-              borderBottom: '1px solid #e5e5e5',
+              borderBottom: '1px solid #DCDDDD',
               padding: '6px 0',
               minHeight: 48,
               color: 'inherit',
@@ -244,7 +244,7 @@ export function QuickCreatePopover({
             className="hd-quick-create__time bg-transparent text-sm outline-none"
             style={{
               border: 'none',
-              borderBottom: '1px solid #e5e5e5',
+              borderBottom: '1px solid #DCDDDD',
               padding: '4px 0',
               color: 'inherit',
             }}
@@ -261,12 +261,12 @@ export function QuickCreatePopover({
               className={cn(
                 'rounded-full px-3 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-60',
                 repeatType === p.value
-                  ? 'bg-[#EA1F59]/12 text-[#EA1F59]'
-                  : 'text-muted-foreground hover:bg-foreground/[0.04]',
+                  ? 'bg-[#EA1F59]/10 text-[#EA1F59]'
+                  : 'text-muted-foreground hover:bg-[#EFEFEF] hover:text-[#595757]',
               )}
               style={
                 repeatType === p.value
-                  ? { backgroundColor: 'rgba(234,31,89,0.12)', color: '#EA1F59' }
+                  ? { backgroundColor: 'rgba(234,31,89,0.10)', color: '#EA1F59' }
                   : undefined
               }
             >
@@ -288,12 +288,12 @@ export function QuickCreatePopover({
                 className={cn(
                   'rounded-full px-3 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-60',
                   reminderMinutes === p.value
-                    ? 'bg-[#EA1F59]/12 text-[#EA1F59]'
-                    : 'text-muted-foreground hover:bg-foreground/[0.04]',
+                    ? 'bg-[#EA1F59]/10 text-[#EA1F59]'
+                    : 'text-muted-foreground hover:bg-[#EFEFEF] hover:text-[#595757]',
                 )}
                 style={
                   reminderMinutes === p.value
-                    ? { backgroundColor: 'rgba(234,31,89,0.12)', color: '#EA1F59' }
+                    ? { backgroundColor: 'rgba(234,31,89,0.10)', color: '#EA1F59' }
                     : undefined
                 }
               >
@@ -324,7 +324,7 @@ export function QuickCreatePopover({
                 className="mt-2 w-full bg-transparent font-mono text-xs outline-none"
                 style={{
                   border: 'none',
-                  borderBottom: '1px solid #e5e5e5',
+                  borderBottom: '1px solid #DCDDDD',
                   padding: '6px 0',
                   color: 'inherit',
                 }}
@@ -344,6 +344,7 @@ export function QuickCreatePopover({
             variant="ghost"
             onClick={onClose}
             disabled={submitting}
+            className="text-[#595757] hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
             style={{ borderRadius: 8 }}
           >
             取消

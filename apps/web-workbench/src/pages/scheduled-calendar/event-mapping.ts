@@ -8,11 +8,11 @@
  *
  * Status mapping:
  *   active + future        → magenta accent + 8% bg ("waiting to fire")
- *   running                → amber accent
+ *   running                → yellow accent
  *   completed              → cyan accent (60% opacity for past)
- *   failed                 → red accent (full opacity even in past)
- *   paused                 → gray accent at 80% opacity
- *   active + lastFailed    → red tint to warn of recurring-failure
+ *   failed                 → magenta accent (full opacity even in past)
+ *   paused                 → neutral accent at 80% opacity
+ *   active + lastFailed    → magenta tint to warn of recurring-failure
  *
  * Pure helpers — React-free + FullCalendar-free, fully unit-testable.
  */
@@ -66,18 +66,15 @@ const COLORS = {
   magenta: '#EA1F59',
   magentaBg: 'rgba(234, 31, 89, 0.08)',
   magentaBgHover: 'rgba(234, 31, 89, 0.15)',
-  amber: '#FFC910',
-  amberBg: 'rgba(255, 201, 16, 0.10)',
-  amberBgHover: 'rgba(255, 201, 16, 0.18)',
+  yellow: '#FFC910',
+  yellowBg: 'rgba(255, 201, 16, 0.10)',
+  yellowBgHover: 'rgba(255, 201, 16, 0.18)',
   cyan: '#42C0EF',
   cyanBg: 'rgba(66, 192, 239, 0.08)',
   cyanBgHover: 'rgba(66, 192, 239, 0.15)',
-  red: '#EF4444',
-  redBg: 'rgba(239, 68, 68, 0.08)',
-  redBgHover: 'rgba(239, 68, 68, 0.15)',
-  gray: '#9CA3AF',
-  grayBg: 'rgba(156, 163, 175, 0.08)',
-  grayBgHover: 'rgba(156, 163, 175, 0.15)',
+  neutral: '#ADADAD',
+  neutralBg: 'rgba(173, 173, 173, 0.10)',
+  neutralBgHover: 'rgba(173, 173, 173, 0.18)',
 } as const;
 
 /**
@@ -96,17 +93,17 @@ export function pickStatusColor(
   const eventIsPast = eventTime.getTime() < now.getTime();
   if (row.status === 'running') {
     return {
-      accent: COLORS.amber,
-      background: COLORS.amberBg,
-      backgroundHover: COLORS.amberBgHover,
+      accent: COLORS.yellow,
+      background: COLORS.yellowBg,
+      backgroundHover: COLORS.yellowBgHover,
       opacity: 1,
     };
   }
   if (row.status === 'paused') {
     return {
-      accent: COLORS.gray,
-      background: COLORS.grayBg,
-      backgroundHover: COLORS.grayBgHover,
+      accent: COLORS.neutral,
+      background: COLORS.neutralBg,
+      backgroundHover: COLORS.neutralBgHover,
       opacity: 0.8,
     };
   }
@@ -122,20 +119,20 @@ export function pickStatusColor(
     // Failed stays fully opaque even in the past — it's an action
     // item, not a faded memory.
     return {
-      accent: COLORS.red,
-      background: COLORS.redBg,
-      backgroundHover: COLORS.redBgHover,
+      accent: COLORS.magenta,
+      background: COLORS.magentaBg,
+      backgroundHover: COLORS.magentaBgHover,
       opacity: 1,
     };
   }
-  // status === 'active'. If the last fire failed, show a red tint
-  // even though the row is still active (the next fire is the user's
-  // chance to recover).
+  // status === 'active'. If the last fire failed, keep a magenta
+  // warning tint even though the row is still active. The next fire
+  // is the user's chance to recover.
   if (row.lastRunStatus === 'failed') {
     return {
-      accent: COLORS.red,
-      background: COLORS.redBg,
-      backgroundHover: COLORS.redBgHover,
+      accent: COLORS.magenta,
+      background: COLORS.magentaBg,
+      backgroundHover: COLORS.magentaBgHover,
       opacity: 0.9,
     };
   }

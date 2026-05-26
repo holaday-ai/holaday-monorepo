@@ -30,7 +30,7 @@ function makeRow(over: Partial<ScheduledTaskRow>): ScheduledTaskRow {
 describe('pickStatusColor', () => {
   const now = new Date('2026-05-16T12:00:00Z');
 
-  it('running → amber accent, full opacity', () => {
+  it('running → yellow accent, full opacity', () => {
     const c = pickStatusColor(
       { status: 'running', lastRunStatus: null },
       new Date('2026-05-16T13:00:00Z'),
@@ -47,7 +47,7 @@ describe('pickStatusColor', () => {
       new Date('2026-05-16T13:00:00Z'),
       now,
     );
-    expect(c.accent).toBe('#9CA3AF');
+    expect(c.accent).toBe('#ADADAD');
     expect(c.opacity).toBe(0.8);
   });
 
@@ -71,23 +71,23 @@ describe('pickStatusColor', () => {
     expect(c.opacity).toBe(0.6);
   });
 
-  it('failed in the past → red full opacity (still actionable)', () => {
+  it('failed in the past → magenta full opacity (still actionable)', () => {
     const c = pickStatusColor(
       { status: 'failed', lastRunStatus: 'failed' },
       new Date('2026-05-16T08:00:00Z'),
       now,
     );
-    expect(c.accent).toBe('#EF4444');
+    expect(c.accent).toBe('#EA1F59');
     expect(c.opacity).toBe(1);
   });
 
-  it('active + last fire failed → red tint (recurring-failure warning)', () => {
+  it('active + last fire failed → magenta tint (recurring-failure warning)', () => {
     const c = pickStatusColor(
       { status: 'active', lastRunStatus: 'failed' },
       new Date('2026-05-16T13:00:00Z'),
       now,
     );
-    expect(c.accent).toBe('#EF4444');
+    expect(c.accent).toBe('#EA1F59');
   });
 
   it('active in the future → magenta brand color, full opacity', () => {

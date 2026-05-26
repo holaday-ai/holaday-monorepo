@@ -702,10 +702,13 @@ export function ScheduledCalendarPage(): JSX.Element {
           description="按计划自动执行任务"
           action={
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <div className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground">
+              <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
                 {pageSummary}
               </div>
-              <Button onClick={() => setFullModalOpen(true)}>
+              <Button
+                onClick={() => setFullModalOpen(true)}
+                className="bg-[#EA1F59] text-white shadow-[0_1px_2px_rgba(15,23,42,0.06)] hover:bg-[#D91B51]"
+              >
                 <Plus className="mr-1 h-4 w-4" />
                 新建定时任务
               </Button>
@@ -770,15 +773,15 @@ export function ScheduledCalendarPage(): JSX.Element {
       </div>
       <div ref={shellRef} className="hd-calendar relative">
         {statusCopy && (
-          <div className="mb-3 rounded-xl border border-border bg-card/80 px-4 py-3 shadow-sm">
+          <div className="mb-3 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-start gap-2">
                 {loadError ? (
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" aria-hidden />
                 ) : loading ? (
-                  <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />
+                  <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#EA1F59]" aria-hidden />
                 ) : (
-                  <Plus className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                  <Plus className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" aria-hidden />
                 )}
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-foreground/85">{statusCopy.title}</div>
@@ -787,10 +790,23 @@ export function ScheduledCalendarPage(): JSX.Element {
               </div>
               {loadError && (
                 <div className="flex shrink-0 flex-wrap gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                    onClick={() => void refresh()}
+                    disabled={loading}
+                  >
                     {loading ? '重试中…' : '重试'}
                   </Button>
-                  <Button asChild type="button" variant="outline" size="sm">
+                  <Button
+                    asChild
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                  >
                     <a
                       href={supportMailtoHref({
                         subject: '定时任务日历加载失败',

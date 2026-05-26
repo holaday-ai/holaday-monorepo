@@ -138,15 +138,15 @@ export function ScheduledTaskDialog({
       role="dialog"
       aria-modal="true"
       onClick={requestClose}
-      className="fixed inset-0 z-[95] flex items-start justify-center overflow-y-auto bg-black/40 p-3 py-6 backdrop-blur-sm animate-fade-in sm:items-center sm:p-4"
+      className="fixed inset-0 z-[95] flex items-start justify-center overflow-y-auto bg-black/30 p-3 py-6 backdrop-blur-sm animate-fade-in sm:items-center sm:p-4"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-card shadow-xl"
+        className="w-full max-w-2xl overflow-hidden rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_18px_56px_rgba(15,23,42,0.14)]"
       >
-        <header className="flex items-center justify-between border-b border-border px-5 py-3">
+        <header className="flex items-center justify-between border-b border-[#EFEFEF] px-5 py-3">
           <div className="flex items-center gap-2 text-sm font-semibold">
-            <Clock className="h-4 w-4 text-primary" />
+            <Clock className="h-4 w-4 text-[#EA1F59]" />
             新建定时任务
           </div>
           <button
@@ -154,7 +154,7 @@ export function ScheduledTaskDialog({
             onClick={requestClose}
             disabled={submitting}
             aria-label="关闭"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
           >
             <X className="h-4 w-4" />
           </button>
@@ -172,7 +172,7 @@ export function ScheduledTaskDialog({
               rows={3}
               maxLength={2000}
               placeholder="例如：复盘昨天的电商日报，对比上周表现并给出优化策略"
-              className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground/70 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+              className="w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/70 focus-visible:border-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
             />
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -186,7 +186,7 @@ export function ScheduledTaskDialog({
                 onChange={(e) =>
                   setRepeatType(e.target.value as DialogRepeatType)
                 }
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                className="w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm focus-visible:border-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
               >
                 {REPEAT_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
@@ -205,7 +205,7 @@ export function ScheduledTaskDialog({
                 value={scheduledAt}
                 disabled={submitting}
                 onChange={(e) => setScheduledAt(e.target.value)}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                className="w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm focus-visible:border-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
               />
             </div>
             <div>
@@ -216,7 +216,7 @@ export function ScheduledTaskDialog({
                 value={reminderValue}
                 disabled={submitting}
                 onChange={(e) => setReminderValue(e.target.value)}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                className="w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm focus-visible:border-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
               >
                 {REMINDER_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
@@ -237,7 +237,7 @@ export function ScheduledTaskDialog({
               rows={2}
               maxLength={2000}
               placeholder="补充上下文、输出要求或接收人"
-              className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground/70 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+              className="w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/70 focus-visible:border-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
             />
           </div>
           {repeatType === 'custom' && (
@@ -252,7 +252,7 @@ export function ScheduledTaskDialog({
                 rows={2}
                 maxLength={255}
                 placeholder={'DTSTART:20260523T090000Z\nRRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR'}
-                className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 font-mono text-xs placeholder:text-muted-foreground/70 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                className="w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 font-mono text-xs placeholder:text-muted-foreground/70 focus-visible:border-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
               />
             </div>
           )}
@@ -260,12 +260,12 @@ export function ScheduledTaskDialog({
             执行时间使用你当前时区。每次到时间会自动新建一个任务并交给 agent 执行。
           </p>
         </div>
-        <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-border bg-muted/30 px-5 py-3">
+        <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-[#EFEFEF] bg-white px-5 py-3">
           <button
             type="button"
             onClick={requestClose}
             disabled={submitting}
-            className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            className="rounded-[8px] px-3 py-1.5 text-sm text-[#595757] transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
           >
             取消
           </button>
@@ -273,7 +273,7 @@ export function ScheduledTaskDialog({
             type="button"
             onClick={() => void submit()}
             disabled={submitting}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90 disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#EA1F59] px-3 py-1.5 text-sm font-medium text-white shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition hover:bg-[#D91B51] disabled:opacity-60"
           >
             {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {scheduledCreateButtonLabel(submitting)}
