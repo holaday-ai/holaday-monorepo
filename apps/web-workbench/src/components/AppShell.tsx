@@ -32,9 +32,14 @@ import {
 import { authSessionExpiredMessage, isAuthSessionError } from '@/lib/auth-session';
 import { taskActionError } from '@/lib/error-copy';
 import {
+  projectFilterChipState,
+  projectTaskFilterAppendPage,
   projectTaskFilterAfterFailedTasksCleared,
   projectTaskFilterAfterTaskDelete,
   projectTaskFilterAfterTaskMove,
+  projectTaskFilterFirstPage,
+  projectTaskFilterLoadMoreFailed,
+  projectTaskFilterStartLoadMore,
   refreshProjectTaskFilterState,
   resolveProjectFilteredTasks,
   type ProjectTaskFilterState,
@@ -50,7 +55,12 @@ import {
   onStatus,
   type ConnStatus,
 } from '@/lib/ws';
-import { normalizeTaskListRows, setStoreNavigate, useTaskStore } from '@/stores/task-store';
+import {
+  normalizeTaskListCursor,
+  normalizeTaskListRows,
+  setStoreNavigate,
+  useTaskStore,
+} from '@/stores/task-store';
 import type { UiProject, UiTask } from '@/types/task';
 import { applyHistoryRetention } from '@/utils/time-buckets';
 import { PLAN_CATALOGUE, type PlanId } from '@holaday/shared-types';
@@ -499,12 +509,13 @@ export function AppShell(): JSX.Element {
       .then((res) => {
         if (cancelled) return;
         const fresh: UiTask[] = normalizeTaskListRows(res?.tasks);
-        setProjectTaskFilter({
+        setProjectTaskFilter(projectTaskFilterFirstPage({
           projectId: projectFilter,
           tasks: fresh,
-          loading: false,
-          error: null,
-        });
+          nextCursor: normalizeTaskListCursor(
+            (res as { nextCursor?: unknown } | null)?.nextCursor,
+          ),
+        }));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -526,6 +537,60 @@ export function AppShell(): JSX.Element {
     projectTaskFilter,
     visibleTasks,
   );
+  const projectFilterChip = projectFilterChipState({
+    projectId: projectFilter,
+    projectName: activeProject?.name,
+    state: projectTaskFilter,
+  });
+  const loadMoreProjectTasks = React.useCallback(() => {
+    const current = projectTaskFilter;
+    if (
+      !projectFilter ||
+      !current ||
+      current.projectId !== projectFilter ||
+      current.loadingMore ||
+      !current.hasMore ||
+      current.nextCursor === null
+    ) {
+      return;
+    }
+    const cursor = current.nextCursor;
+    setProjectTaskFilter((prev) => projectTaskFilterStartLoadMore(prev, projectFilter));
+    void trpc.tasks.list
+      .query({ projectId: projectFilter, limit: 50, cursor })
+      .then((res) => {
+        const fresh = normalizeTaskListRows(res?.tasks);
+        setProjectTaskFilter((prev) =>
+          projectTaskFilterAppendPage(prev, {
+            projectId: projectFilter,
+            tasks: fresh,
+            nextCursor: normalizeTaskListCursor(
+              (res as { nextCursor?: unknown } | null)?.nextCursor,
+            ),
+          }),
+        );
+      })
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        setProjectTaskFilter((prev) =>
+          projectTaskFilterLoadMoreFailed(prev, {
+            projectId: projectFilter,
+            error: msg,
+          }),
+        );
+        toast.show(taskActionError('更多项目任务加载失败', msg), 'error');
+      });
+  }, [projectFilter, projectTaskFilter, toast]);
+  const projectPagerOverride = React.useMemo(() => {
+    if (!projectFilter || projectTaskFilter?.projectId !== projectFilter) {
+      return undefined;
+    }
+    return {
+      hasMore: projectTaskFilter.hasMore,
+      loadingMore: projectTaskFilter.loadingMore,
+      onLoadMore: loadMoreProjectTasks,
+    };
+  }, [loadMoreProjectTasks, projectFilter, projectTaskFilter]);
 
   if (!authed) {
     return <LoginGate onAuthenticated={handleAuthenticated} />;
@@ -554,11 +619,10 @@ export function AppShell(): JSX.Element {
         hiddenTaskCount={projectFilter ? 0 : hiddenByRetentionCount}
         historyDays={historyDays}
         projectFilter={
-          activeProject
-            ? { projectId: activeProject.projectId, name: activeProject.name }
-            : null
+          projectFilterChip
         }
         onClearProjectFilter={() => navigate('/')}
+        pagerOverride={projectPagerOverride}
         selectedTaskId={selectedTaskId}
         onSelectTask={(taskId) => {
           if (location.pathname !== '/') {

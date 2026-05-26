@@ -55,6 +55,7 @@ import {
   deletableTaskIdsForBatchSelection,
   pruneBatchSelection,
 } from '@/lib/sidebar-batch-selection';
+import type { ProjectFilterChipState } from '@/lib/project-task-filter-state';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';
 import type { UiProject, UiTask } from '@/types/task';
@@ -100,7 +101,7 @@ interface Props {
    * above the task list (the WorkbenchApp has already filtered
    * the tasks array down to that project).
    */
-  projectFilter?: { projectId: string; name: string } | null;
+  projectFilter?: ProjectFilterChipState | null;
   onClearProjectFilter?(): void;
   // Codex follow-up — onOpenBrowser entry removed; the BrowserPanel
   // now reveals itself only when a browser-mode task is selected
@@ -393,16 +394,44 @@ export function Sidebar({
         <SidebarContent className="px-0">
             <FeatureNav userRole={userRole} />
             {projectFilter && (
-              <div className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-pink-300/40 bg-pink-50/40 px-2.5 py-1.5 text-[12px] dark:border-pink-500/30 dark:bg-pink-500/10 group-data-[collapsible=icon]:hidden">
-                <FolderOpen className="h-3.5 w-3.5 shrink-0 text-pink-600 dark:text-pink-300" />
-                <span className="min-w-0 flex-1 truncate text-foreground">
-                  项目：{projectFilter.name}
-                </span>
+              <div
+                className={cn(
+                  'mx-2 mb-2 flex items-start gap-2 rounded-md border px-2.5 py-1.5 text-[12px] group-data-[collapsible=icon]:hidden',
+                  projectFilter.tone === 'error'
+                    ? 'border-red-300/60 bg-red-50/60 dark:border-red-500/30 dark:bg-red-500/10'
+                    : 'border-pink-300/40 bg-pink-50/40 dark:border-pink-500/30 dark:bg-pink-500/10',
+                )}
+              >
+                <FolderOpen
+                  className={cn(
+                    'mt-0.5 h-3.5 w-3.5 shrink-0',
+                    projectFilter.tone === 'error'
+                      ? 'text-red-600 dark:text-red-300'
+                      : 'text-pink-600 dark:text-pink-300',
+                  )}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-foreground">
+                    项目：{projectFilter.name}
+                  </div>
+                  {projectFilter.detail && (
+                    <div
+                      className={cn(
+                        'mt-0.5 truncate text-[11px]',
+                        projectFilter.tone === 'error'
+                          ? 'text-red-700 dark:text-red-300'
+                          : 'text-muted-foreground',
+                      )}
+                    >
+                      {projectFilter.detail}
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => onClearProjectFilter?.()}
                   aria-label="清除项目筛选"
-                  className="rounded p-0.5 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                  className="mt-0.5 rounded p-0.5 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
                 >
                   <X className="h-3 w-3" />
                 </button>
