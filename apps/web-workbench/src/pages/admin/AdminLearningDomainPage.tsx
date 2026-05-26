@@ -20,6 +20,8 @@ import { Link, useParams } from 'react-router-dom';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import {
+  ADMIN_DIVIDER,
+  ADMIN_MAGENTA,
   asRecord,
   clampNumber,
   formatDate,
@@ -38,14 +40,14 @@ import {
 type DomainDetail = Awaited<ReturnType<typeof trpc.admin.learning.domainDetail.query>>;
 
 const CAT_COLORS: Record<string, string> = {
-  dns_error: '#EF4444',
+  dns_error: '#EA1F59',
   timeout: '#FFC910',
-  auth_required: '#3B82F6',
-  captcha: '#A855F7',
-  not_found: '#6366F1',
+  auth_required: '#42C0EF',
+  captcha: '#57479C',
+  not_found: '#595757',
   page_structure: '#EA1F59',
-  quality: '#D97706',
-  unknown: '#9CA3AF',
+  quality: '#8A6A00',
+  unknown: '#ADADAD',
 };
 
 export function AdminLearningDomainPage(): JSX.Element {
@@ -82,7 +84,7 @@ export function AdminLearningDomainPage(): JSX.Element {
     return (
       <div className="mx-auto max-w-5xl px-6 py-10">
         <BackLink />
-        <div className="mt-4 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mt-4 rounded-[8px] border border-[#EA1F59]/25 border-l-[#EA1F59] bg-white px-4 py-3 text-sm text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
           加载失败：{error}
         </div>
       </div>
@@ -105,12 +107,17 @@ export function AdminLearningDomainPage(): JSX.Element {
 
       {/* Identity */}
       <header className="mt-4 flex items-start gap-4">
-        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-[rgba(234,31,89,0.10)] text-[#EA1F59]">
+        <div
+          className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[8px] text-[#EA1F59]"
+          style={{
+            backgroundImage: `linear-gradient(135deg, ${ADMIN_MAGENTA}18 0%, ${ADMIN_DIVIDER} 100%)`,
+          }}
+        >
           {/* Try the favicon service; fall back to a globe icon. */}
           <FaviconOrIcon domain={view.domain} />
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-xl font-semibold tracking-tight">
+          <h1 className="truncate text-xl font-semibold">
             {view.domain}
           </h1>
           <div className="mt-1 flex flex-wrap items-center gap-3 text-[12px] text-muted-foreground">
@@ -165,12 +172,12 @@ export function AdminLearningDomainPage(): JSX.Element {
                 <div className="w-28 shrink-0 text-[12px] text-foreground">
                   {b.label}
                 </div>
-                <div className="relative h-7 flex-1 rounded-md bg-foreground/[0.04]">
+                <div className="relative h-7 flex-1 rounded-[8px] bg-[#EFEFEF]">
                   <div
-                    className="h-full rounded-md transition-all"
+                    className="h-full rounded-[8px] transition-all"
                     style={{
                       width: `${Math.max(b.share, 3)}%`,
-                      backgroundColor: CAT_COLORS[b.category] ?? '#9CA3AF',
+                      backgroundColor: CAT_COLORS[b.category] ?? '#ADADAD',
                       opacity: 0.85,
                     }}
                   />
@@ -198,7 +205,7 @@ export function AdminLearningDomainPage(): JSX.Element {
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
-              <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+              <tr className="border-b border-[#EFEFEF] text-left text-[11px] uppercase text-muted-foreground">
                 <th className="py-2 pr-3 font-medium">时间</th>
                 <th className="py-2 pr-3 font-medium">任务</th>
                 <th className="py-2 pr-3 font-medium">状态</th>
@@ -224,7 +231,7 @@ export function AdminLearningDomainPage(): JSX.Element {
                     (Boolean(t.errorMessage) || failedChecks.length > 0);
                   return (
                     <React.Fragment key={t.taskId}>
-                      <tr className="border-b border-border/60 last:border-b-0 hover:bg-foreground/[0.02]">
+                      <tr className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
                         <td className="py-2 pr-3 text-muted-foreground">
                           {formatDateTime(t.createdAt)}
                         </td>
@@ -252,7 +259,7 @@ export function AdminLearningDomainPage(): JSX.Element {
                               onClick={() =>
                                 setExpandedTaskId(isExpanded ? null : t.taskId)
                               }
-                              className="inline-flex items-center gap-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                              className="inline-flex items-center gap-0.5 rounded-[8px] px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
                             >
                               {isExpanded ? (
                                 <ChevronDown className="h-3.5 w-3.5" aria-hidden />
@@ -265,7 +272,7 @@ export function AdminLearningDomainPage(): JSX.Element {
                         </td>
                       </tr>
                       {isExpanded && hasDiagnostics && (
-                        <tr className="border-b border-border/60 bg-foreground/[0.02]">
+                        <tr className="border-b border-[#EFEFEF] bg-[#EFEFEF]/30">
                           <td colSpan={5} className="px-3 py-2">
                             <div className="space-y-2 text-[11px] text-muted-foreground">
                               {failedChecks.length > 0 && (
@@ -275,7 +282,7 @@ export function AdminLearningDomainPage(): JSX.Element {
                                       key={`${check.type}-${index}`}
                                       className="flex gap-2"
                                     >
-                                      <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800 dark:bg-amber-500/15 dark:text-amber-200">
+                                      <span className="shrink-0 rounded-[6px] bg-[#FFC910]/20 px-1.5 py-0.5 font-medium text-[#8A6A00]">
                                         {check.type}
                                       </span>
                                       <span className="min-w-0 break-words">
@@ -286,7 +293,7 @@ export function AdminLearningDomainPage(): JSX.Element {
                                 </ul>
                               )}
                               {t.errorMessage && (
-                                <pre className="whitespace-pre-wrap break-all">
+                                <pre className="whitespace-pre-wrap break-all rounded-[8px] border border-[#DCDDDD] bg-white p-2">
                                   {t.errorMessage}
                                 </pre>
                               )}
@@ -323,7 +330,7 @@ export function AdminLearningDomainPage(): JSX.Element {
             {view.memories.map((m) => (
               <div
                 key={m.externalId}
-                className="rounded-md border border-border bg-background p-3"
+                className="rounded-[8px] border border-[#DCDDDD] bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.02)]"
               >
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="truncate text-[12px] font-medium text-foreground">
@@ -403,7 +410,7 @@ function BackLink(): JSX.Element {
   return (
     <Link
       to="/admin/learning"
-      className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground"
+      className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
     >
       <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
       返回学习引擎
@@ -441,12 +448,12 @@ function Section({
 }): JSX.Element {
   return (
     <section
-      className={cn('rounded-xl border border-border bg-card p-5 shadow-sm', className)}
+      className={cn('rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]', className)}
     >
       <header className="mb-4 flex items-baseline justify-between">
-        <h2 className="text-base font-semibold tracking-tight">{title}</h2>
+        <h2 className="text-base font-semibold">{title}</h2>
         {hint ? (
-          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+          <span className="text-[11px] uppercase text-muted-foreground">
             {hint}
           </span>
         ) : null}

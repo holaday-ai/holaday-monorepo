@@ -27,7 +27,6 @@ import {
   LineChart,
   Pie,
   PieChart,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
@@ -35,6 +34,8 @@ import {
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import {
+  ADMIN_BORDER,
+  ADMIN_MAGENTA,
   asRecord,
   finiteNumber,
   formatDateTime,
@@ -54,8 +55,7 @@ type CostBreakdownData = Awaited<ReturnType<typeof trpc.admin.finance.costBreakd
 type CostByDayData = Awaited<ReturnType<typeof trpc.admin.finance.costByDay.query>>;
 type TopCostlyData = Awaited<ReturnType<typeof trpc.admin.finance.topCostlyTasks.query>>;
 
-const MAGENTA = '#EA1F59';
-const PALETTE = ['#EA1F59', '#FFC910', '#42C0EF', '#57479C', '#EF4444', '#ADADAD', '#575757'];
+const PALETTE = ['#EA1F59', '#FFC910', '#42C0EF', '#57479C', '#ADADAD', '#595757'];
 
 /** Format CNY cents → ¥123.45 with thousands separator. */
 function formatYuan(cents: unknown): string {
@@ -100,7 +100,7 @@ export function AdminFinancePage(): JSX.Element {
     return (
       <div className="mx-auto max-w-6xl px-6 py-10">
         <h1 className="text-xl font-semibold">营收与成本</h1>
-        <div className="mt-4 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mt-4 rounded-[8px] border border-[#EA1F59]/25 border-l-[#EA1F59] bg-white px-4 py-3 text-sm text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
           加载失败：{error}
         </div>
       </div>
@@ -110,7 +110,7 @@ export function AdminFinancePage(): JSX.Element {
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
       <header className="mb-6">
-        <h1 className="text-xl font-semibold tracking-tight">营收与成本</h1>
+        <h1 className="text-xl font-semibold">营收与成本</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
           经营驾驶舱 · 本月数据 · USD→CNY 按 7.2 折算
         </p>
@@ -119,7 +119,7 @@ export function AdminFinancePage(): JSX.Element {
       <ProfitBar summary={summary} />
 
       {/* Tab switcher */}
-      <div className="mt-8 border-b border-border">
+      <div className="mt-8 border-b border-[#EFEFEF]">
         <div className="flex gap-6">
           <TabButton active={tab === 'revenue'} onClick={() => setTab('revenue')}>
             营收明细
@@ -142,7 +142,7 @@ function ProfitBar({ summary }: { summary: SummaryData | null }): JSX.Element {
     return (
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="h-24 animate-pulse rounded-xl border border-border bg-card" />
+          <div key={i} className="h-24 animate-pulse rounded-[8px] border border-[#DCDDDD] bg-white" />
         ))}
       </div>
     );
@@ -159,14 +159,14 @@ function ProfitBar({ summary }: { summary: SummaryData | null }): JSX.Element {
       <SummaryCard
         label="本月成本"
         value={formatYuan(summary.monthCostCnyCents)}
-        tint="rgba(245,158,11,0.10)"
+        tint="rgba(255,201,16,0.18)"
         sub={`LLM ${formatYuanCompact(summary.monthLlmCostCnyCents)} · 服务器 ${formatYuanCompact(summary.monthServerCostCnyCents)}`}
       />
       <SummaryCard
         label={profitPositive ? '本月利润' : '本月亏损'}
         value={formatYuan(Math.abs(profit))}
-        tint={profitPositive ? 'rgba(66,192,239,0.10)' : 'rgba(239,68,68,0.10)'}
-        valueClass={profitPositive ? 'text-cyan-600 dark:text-cyan-300' : 'text-red-600 dark:text-red-400'}
+        tint={profitPositive ? 'rgba(66,192,239,0.12)' : 'rgba(234,31,89,0.10)'}
+        valueClass={profitPositive ? 'text-[#1688AA]' : 'text-[#EA1F59]'}
         trend={profitPositive ? 'up' : 'down'}
       />
     </div>
@@ -190,14 +190,14 @@ function SummaryCard({
 }): JSX.Element {
   return (
     <div
-      className="rounded-xl border border-border bg-card p-4 shadow-sm"
+      className="rounded-[8px] border border-[#DCDDDD] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
       style={{ backgroundImage: `linear-gradient(135deg, ${tint} 0%, transparent 60%)` }}
     >
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-[11px] uppercase text-muted-foreground">{label}</div>
       <div className={cn('mt-2 flex items-baseline gap-2', valueClass)}>
-        <span className="text-2xl font-semibold tracking-tight">{value}</span>
-        {trend === 'up' && <TrendingUp className="h-4 w-4 text-cyan-600" aria-hidden />}
-        {trend === 'down' && <TrendingDown className="h-4 w-4 text-red-600" aria-hidden />}
+        <span className="text-2xl font-semibold">{value}</span>
+        {trend === 'up' && <TrendingUp className="h-4 w-4 text-[#1688AA]" aria-hidden />}
+        {trend === 'down' && <TrendingDown className="h-4 w-4 text-[#EA1F59]" aria-hidden />}
       </div>
       {sub ? <div className="mt-1 text-[11px] text-muted-foreground">{sub}</div> : null}
     </div>
@@ -221,7 +221,7 @@ function TabButton({
         'border-b-2 px-1 pb-3 text-[14px] font-medium transition-colors',
         active
           ? 'border-[#EA1F59] text-[#EA1F59]'
-          : 'border-transparent text-muted-foreground hover:text-foreground',
+          : 'border-transparent text-muted-foreground hover:text-[#EA1F59]',
       )}
     >
       {children}
@@ -294,10 +294,10 @@ function RevenueTab(): JSX.Element {
               本月暂无完成的订单
             </div>
           ) : (
-            <div className="flex items-center gap-6">
-              <div className="h-44 w-44 shrink-0">
-                <ResponsiveContainer>
-                  <PieChart>
+            <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
+              <MeasuredChartFrame className="h-44 w-44 shrink-0">
+                {({ width, height }) => (
+                  <PieChart width={width} height={height}>
                     <Pie
                       data={planRows.filter((p) => p.monthRevenueCnyCents > 0)}
                       dataKey="monthRevenueCnyCents"
@@ -315,7 +315,7 @@ function RevenueTab(): JSX.Element {
                         ))}
                     </Pie>
                     <Tooltip
-                      contentStyle={{ borderRadius: 8, border: '1px solid rgba(0,0,0,0.08)', fontSize: 12 }}
+                      contentStyle={{ borderRadius: 8, border: `1px solid ${ADMIN_BORDER}`, fontSize: 12 }}
                       formatter={(value, _name, ctx) => {
                         const v = typeof value === 'number' ? value : Number(value ?? 0);
                         const p = (ctx as { payload?: { plan?: string } } | undefined)?.payload;
@@ -323,8 +323,8 @@ function RevenueTab(): JSX.Element {
                       }}
                     />
                   </PieChart>
-                </ResponsiveContainer>
-              </div>
+                )}
+              </MeasuredChartFrame>
               <div className="min-w-0 flex-1 space-y-1.5 text-[12px]">
                 {planRows.map((p, i) => (
                   <div key={p.plan} className="flex items-center gap-2">
@@ -345,10 +345,12 @@ function RevenueTab(): JSX.Element {
 
         {/* Monthly revenue trend */}
         <Section title="月度营收（近 6 个月）">
-          <div className="h-56 w-full">
-            <ResponsiveContainer>
+          <MeasuredChartFrame className="h-56 w-full">
+            {({ width, height }) => (
               <BarChart
                 data={monthSeries}
+                width={width}
+                height={height}
                 margin={{ top: 10, right: 16, left: 0, bottom: 0 }}
               >
                 <CartesianGrid stroke="rgba(0,0,0,0.06)" vertical={false} />
@@ -364,16 +366,16 @@ function RevenueTab(): JSX.Element {
                   tickFormatter={(v: number) => formatYuanCompact(v)}
                 />
                 <Tooltip
-                  contentStyle={{ borderRadius: 8, border: '1px solid rgba(0,0,0,0.08)', fontSize: 12 }}
+                  contentStyle={{ borderRadius: 8, border: `1px solid ${ADMIN_BORDER}`, fontSize: 12 }}
                   formatter={(value) => {
                     const v = typeof value === 'number' ? value : Number(value ?? 0);
                     return [formatYuan(v), '营收'];
                   }}
                 />
-                <Bar dataKey="revenueCnyCents" fill={MAGENTA} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="revenueCnyCents" fill={ADMIN_MAGENTA} radius={[4, 4, 0, 0]} />
               </BarChart>
-            </ResponsiveContainer>
-          </div>
+            )}
+          </MeasuredChartFrame>
         </Section>
       </div>
 
@@ -391,12 +393,12 @@ function RevenueTab(): JSX.Element {
                   <div className="w-24 shrink-0 text-[12px] text-muted-foreground">
                     {stage.label}
                   </div>
-                  <div className="relative h-7 flex-1 rounded-md bg-foreground/[0.04]">
+                  <div className="relative h-7 flex-1 rounded-[8px] bg-[#EFEFEF]">
                     <div
-                      className="h-full rounded-md transition-all"
+                      className="h-full rounded-[8px] transition-all"
                       style={{
                         width: `${Math.max(widthPct, 3)}%`,
-                        backgroundColor: MAGENTA,
+                        backgroundColor: ADMIN_MAGENTA,
                         opacity: 0.85 - i * 0.15,
                       }}
                     />
@@ -415,7 +417,7 @@ function RevenueTab(): JSX.Element {
           </div>
         </Section>
         <Section title="付费用户 LTV" hint="累计订阅收入 / 付费人数">
-          <div className="text-3xl font-semibold tracking-tight text-foreground">
+          <div className="text-3xl font-semibold text-foreground">
             {formatYuan(ltvCnyCents)}
           </div>
           <div className="mt-1 text-[12px] text-muted-foreground">
@@ -513,13 +515,13 @@ function CostTab(): JSX.Element {
         <Section title="按模型成本分布">
           {models.length === 0 ? (
             <div className="flex h-44 items-center justify-center text-[12px] text-muted-foreground">
-              本月暂无 LLM 调用
+            本月暂无 LLM 调用
             </div>
           ) : (
-            <div className="flex items-center gap-6">
-              <div className="h-44 w-44 shrink-0">
-                <ResponsiveContainer>
-                  <PieChart>
+            <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
+              <MeasuredChartFrame className="h-44 w-44 shrink-0">
+                {({ width, height }) => (
+                  <PieChart width={width} height={height}>
                     <Pie
                       data={models}
                       dataKey="costCnyCents"
@@ -535,7 +537,7 @@ function CostTab(): JSX.Element {
                       ))}
                     </Pie>
                     <Tooltip
-                      contentStyle={{ borderRadius: 8, border: '1px solid rgba(0,0,0,0.08)', fontSize: 12 }}
+                      contentStyle={{ borderRadius: 8, border: `1px solid ${ADMIN_BORDER}`, fontSize: 12 }}
                       formatter={(value, _name, ctx) => {
                         const v = typeof value === 'number' ? value : Number(value ?? 0);
                         const p = (ctx as { payload?: { model?: string } } | undefined)?.payload;
@@ -543,8 +545,8 @@ function CostTab(): JSX.Element {
                       }}
                     />
                   </PieChart>
-                </ResponsiveContainer>
-              </div>
+                )}
+              </MeasuredChartFrame>
               <div className="min-w-0 flex-1 space-y-1.5 text-[12px]">
                 {models.slice(0, 8).map((m, i) => {
                   const pct = totalLlmCost > 0 ? (m.costCnyCents / totalLlmCost) * 100 : 0;
@@ -568,10 +570,12 @@ function CostTab(): JSX.Element {
 
         {/* Cost by day (30 days) */}
         <Section title="按日成本趋势（近 30 天）">
-          <div className="h-56 w-full">
-            <ResponsiveContainer>
+          <MeasuredChartFrame className="h-56 w-full">
+            {({ width, height }) => (
               <LineChart
                 data={daySeries}
+                width={width}
+                height={height}
                 margin={{ top: 10, right: 16, left: 0, bottom: 0 }}
               >
                 <CartesianGrid stroke="rgba(0,0,0,0.06)" vertical={false} />
@@ -588,7 +592,7 @@ function CostTab(): JSX.Element {
                   tickFormatter={(v: number) => formatYuanCompact(v)}
                 />
                 <Tooltip
-                  contentStyle={{ borderRadius: 8, border: '1px solid rgba(0,0,0,0.08)', fontSize: 12 }}
+                  contentStyle={{ borderRadius: 8, border: `1px solid ${ADMIN_BORDER}`, fontSize: 12 }}
                   formatter={(value) => {
                     const v = typeof value === 'number' ? value : Number(value ?? 0);
                     return [formatYuan(v), '成本'];
@@ -597,13 +601,13 @@ function CostTab(): JSX.Element {
                 <Line
                   type="monotone"
                   dataKey="costCnyCents"
-                  stroke={MAGENTA}
+                  stroke={ADMIN_MAGENTA}
                   strokeWidth={2}
                   dot={false}
                 />
               </LineChart>
-            </ResponsiveContainer>
-          </div>
+            )}
+          </MeasuredChartFrame>
         </Section>
       </div>
 
@@ -612,7 +616,7 @@ function CostTab(): JSX.Element {
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
-              <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+              <tr className="border-b border-[#EFEFEF] text-left text-[11px] uppercase text-muted-foreground">
                 <th className="py-2 pr-3 font-medium">任务</th>
                 <th className="py-2 pr-3 font-medium">用户</th>
                 <th className="py-2 pr-3 font-medium">模型</th>
@@ -632,7 +636,7 @@ function CostTab(): JSX.Element {
                 topCostlyTasks.map((t) => (
                   <tr
                     key={t.taskId}
-                    className="border-b border-border/60 last:border-b-0 hover:bg-foreground/[0.02]"
+                    className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35"
                   >
                     <td className="py-2 pr-3 text-foreground">
                       {truncate(t.title ?? t.intent ?? '—', 60)}
@@ -670,9 +674,48 @@ function CostTab(): JSX.Element {
 
 function ChipCard({ label, value }: { label: string; value: string }): JSX.Element {
   return (
-    <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-1 text-xl font-semibold tracking-tight text-foreground">{value}</div>
+    <div className="rounded-[8px] border border-[#DCDDDD] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+      <div className="text-[11px] uppercase text-muted-foreground">{label}</div>
+      <div className="mt-1 text-xl font-semibold text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function MeasuredChartFrame({
+  className,
+  children,
+}: {
+  className: string;
+  children: (size: { width: number; height: number }) => React.ReactNode;
+}): JSX.Element {
+  const ref = React.useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = React.useState({ width: 0, height: 0 });
+
+  React.useEffect(() => {
+    const element = ref.current;
+    if (!element) return undefined;
+
+    const updateSize = () => {
+      const rect = element.getBoundingClientRect();
+      setSize({
+        width: Math.max(0, Math.floor(rect.width)),
+        height: Math.max(0, Math.floor(rect.height)),
+      });
+    };
+
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={ref} className={className}>
+      {size.width > 0 && size.height > 0 ? (
+        children(size)
+      ) : (
+        <div className="h-full w-full rounded-[8px] bg-[#EFEFEF]/45" />
+      )}
     </div>
   );
 }
@@ -689,11 +732,11 @@ function Section({
   className?: string;
 }): JSX.Element {
   return (
-    <section className={cn('rounded-xl border border-border bg-card p-5 shadow-sm', className)}>
+    <section className={cn('rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]', className)}>
       <header className="mb-4 flex items-baseline justify-between">
-        <h2 className="text-base font-semibold tracking-tight">{title}</h2>
+        <h2 className="text-base font-semibold">{title}</h2>
         {hint ? (
-          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+          <span className="text-[11px] uppercase text-muted-foreground">
             {hint}
           </span>
         ) : null}
@@ -714,7 +757,7 @@ function LoadingPane(): JSX.Element {
 
 function ErrorPane({ msg }: { msg: string }): JSX.Element {
   return (
-    <div className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <div className="rounded-[8px] border border-[#EA1F59]/25 border-l-[#EA1F59] bg-white px-4 py-3 text-sm text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
       加载失败：{msg}
     </div>
   );

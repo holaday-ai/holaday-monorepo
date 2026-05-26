@@ -14,10 +14,13 @@
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import * as React from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
+import { Cell, Pie, PieChart, Tooltip } from 'recharts';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import {
+  ADMIN_BORDER,
+  ADMIN_DIVIDER,
+  ADMIN_MAGENTA,
   asRecord,
   formatInteger,
   formatDate,
@@ -39,9 +42,8 @@ const PIE_COLORS = [
   '#FFC910',
   '#42C0EF',
   '#57479C',
-  '#EF4444',
   '#ADADAD',
-  '#575757',
+  '#595757',
 ];
 
 export function AdminUserDetailPage(): JSX.Element {
@@ -75,12 +77,12 @@ export function AdminUserDetailPage(): JSX.Element {
       <div className="mx-auto max-w-5xl px-6 py-10">
         <Link
           to="/admin/users"
-          className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground"
+          className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
         >
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
           返回用户列表
         </Link>
-        <div className="mt-4 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mt-4 rounded-[8px] border border-[#EA1F59]/25 border-l-[#EA1F59] bg-white px-4 py-3 text-sm text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
           加载失败：{error}
         </div>
       </div>
@@ -102,7 +104,7 @@ export function AdminUserDetailPage(): JSX.Element {
     <div className="mx-auto max-w-6xl px-6 py-8">
       <Link
         to="/admin/users"
-        className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground"
+        className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
       >
         <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
         返回用户列表
@@ -111,7 +113,7 @@ export function AdminUserDetailPage(): JSX.Element {
       <header className="mt-4 flex items-start gap-4">
         <Avatar url={user.avatarUrl} fallback={user.displayName ?? user.email ?? '?'} />
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-xl font-semibold tracking-tight">
+          <h1 className="truncate text-xl font-semibold">
             {user.displayName ?? '—'}
           </h1>
           <p className="mt-0.5 text-[13px] text-muted-foreground">
@@ -132,8 +134,8 @@ export function AdminUserDetailPage(): JSX.Element {
       </header>
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
-          <h2 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+          <h2 className="text-[11px] font-medium uppercase text-muted-foreground">
             本月任务数
           </h2>
           <div className="mt-2 text-3xl font-semibold text-foreground">
@@ -143,8 +145,8 @@ export function AdminUserDetailPage(): JSX.Element {
             自然月窗口 · UTC
           </div>
         </section>
-        <section className="rounded-xl border border-border bg-card p-5 shadow-sm lg:col-span-2">
-          <h2 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)] lg:col-span-2">
+          <h2 className="mb-2 text-[11px] font-medium uppercase text-muted-foreground">
             本月模型分布
           </h2>
           {totalCalls === 0 ? (
@@ -152,42 +154,40 @@ export function AdminUserDetailPage(): JSX.Element {
               本月暂无 LLM 调用记录
             </div>
           ) : (
-            <div className="flex items-center gap-6">
+            <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
               <div className="h-44 w-44 shrink-0">
-                <ResponsiveContainer>
-                  <PieChart>
-                    <Pie
-                      data={usage.modelDistribution}
-                      dataKey="calls"
-                      nameKey="model"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={36}
-                      outerRadius={68}
-                      paddingAngle={2}
-                    >
-                      {usage.modelDistribution.map((_m, i) => (
-                        <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        borderRadius: 8,
-                        border: '1px solid rgba(0,0,0,0.08)',
-                        fontSize: 12,
-                      }}
-                      formatter={(value, _name, ctx) => {
-                        const v = typeof value === 'number' ? value : Number(value ?? 0);
-                        const payload = (ctx as { payload?: { model?: string } } | undefined)
-                          ?.payload;
-                        const pct = totalCalls
-                          ? ((v / totalCalls) * 100).toFixed(1)
-                          : '0';
-                        return [`${v} (${pct}%)`, payload?.model ?? '模型'];
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
+                <PieChart width={176} height={176}>
+                  <Pie
+                    data={usage.modelDistribution}
+                    dataKey="calls"
+                    nameKey="model"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={36}
+                    outerRadius={68}
+                    paddingAngle={2}
+                  >
+                    {usage.modelDistribution.map((_m, i) => (
+                      <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      borderRadius: 8,
+                      border: `1px solid ${ADMIN_BORDER}`,
+                      fontSize: 12,
+                    }}
+                    formatter={(value, _name, ctx) => {
+                      const v = typeof value === 'number' ? value : Number(value ?? 0);
+                      const payload = (ctx as { payload?: { model?: string } } | undefined)
+                        ?.payload;
+                      const pct = totalCalls
+                        ? ((v / totalCalls) * 100).toFixed(1)
+                        : '0';
+                      return [`${v} (${pct}%)`, payload?.model ?? '模型'];
+                    }}
+                  />
+                </PieChart>
               </div>
               <div className="flex-1 space-y-1.5">
                 {usage.modelDistribution.slice(0, 8).map((m, i) => {
@@ -213,17 +213,17 @@ export function AdminUserDetailPage(): JSX.Element {
         </section>
       </div>
 
-      <section className="mt-6 rounded-xl border border-border bg-card p-5 shadow-sm">
+      <section className="mt-6 rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
         <header className="mb-4 flex items-baseline justify-between">
-          <h2 className="text-base font-semibold tracking-tight">任务历史</h2>
-          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+          <h2 className="text-base font-semibold">任务历史</h2>
+          <span className="text-[11px] uppercase text-muted-foreground">
             最近 {recentTasks.length} 条
           </span>
         </header>
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
-              <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+              <tr className="border-b border-[#EFEFEF] text-left text-[11px] uppercase text-muted-foreground">
                 <th className="py-2 pr-3 font-medium">时间</th>
                 <th className="py-2 pr-3 font-medium">任务</th>
                 <th className="py-2 pr-3 font-medium">状态</th>
@@ -243,7 +243,7 @@ export function AdminUserDetailPage(): JSX.Element {
                   return (
                     <tr
                       key={row.taskId}
-                      className="border-b border-border/60 last:border-b-0 hover:bg-foreground/[0.02]"
+                      className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35"
                     >
                       <td className="py-2 pr-3 text-muted-foreground">
                         {formatDateTime(row.createdAt)}
@@ -333,7 +333,7 @@ function Badge({
         'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
         highlight
           ? 'bg-[rgba(234,31,89,0.12)] text-[#EA1F59]'
-          : 'border border-border bg-background text-muted-foreground',
+          : 'border border-[#DCDDDD] bg-white text-muted-foreground',
       )}
     >
       {children}
@@ -360,7 +360,12 @@ function Avatar({
   }
   const letter = (fallback || '?').charAt(0).toUpperCase();
   return (
-    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[rgba(234,31,89,0.12)] text-xl font-semibold text-[#EA1F59]">
+    <div
+      className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-xl font-semibold text-[#EA1F59]"
+      style={{
+        backgroundImage: `linear-gradient(135deg, ${ADMIN_MAGENTA}18 0%, ${ADMIN_DIVIDER} 100%)`,
+      }}
+    >
       {letter}
     </div>
   );
