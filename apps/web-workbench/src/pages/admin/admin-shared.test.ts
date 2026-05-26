@@ -15,7 +15,8 @@ describe('admin statusToken', () => {
     const token = statusToken('partial_success');
 
     expect(token.label).toBe('部分完成');
-    expect(token.textClass).toContain('amber');
+    expect(token.textClass).toContain('#8A6A00');
+    expect(token.bgClass).toContain('#FFC910');
   });
 
   it('falls back for missing statuses', () => {

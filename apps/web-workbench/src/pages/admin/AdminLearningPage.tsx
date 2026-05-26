@@ -82,7 +82,7 @@ export function AdminLearningPage(): JSX.Element {
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
       <header className="mb-6">
-        <h1 className="text-xl font-semibold tracking-tight">学习引擎</h1>
+        <h1 className="text-xl font-semibold">学习引擎</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
           按域名分组的执行健康度 · 取消任务单独统计 · 数据窗口：最近 90 天
         </p>
@@ -118,7 +118,7 @@ export function AdminLearningPage(): JSX.Element {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="搜索域名…"
-            className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-[13px] outline-none transition-colors focus:border-[#EA1F59]"
+            className="w-full rounded-[8px] border border-[#DCDDDD] bg-white py-2 pl-9 pr-3 text-[13px] outline-none transition-colors focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
           />
         </div>
         <FilterPill active={filter === 'all'} onClick={() => setFilter('all')}>
@@ -138,14 +138,14 @@ export function AdminLearningPage(): JSX.Element {
         </FilterPill>
       </div>
 
-      <section className="mt-4 rounded-xl border border-border bg-card p-0 shadow-sm">
+      <section className="mt-4 rounded-[8px] border border-[#DCDDDD] bg-white p-0 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
         {error && (
-          <div className="px-5 py-3 text-sm text-red-700">加载失败：{error}</div>
+          <div className="border-b border-[#EFEFEF] px-5 py-3 text-sm text-[#EA1F59]">加载失败：{error}</div>
         )}
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
-              <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+              <tr className="border-b border-[#EFEFEF] text-left text-[11px] uppercase text-muted-foreground">
                 <th className="px-5 py-3 font-medium">域名</th>
                 <th className="px-3 py-3 font-medium text-right">总任务</th>
                 <th className="px-3 py-3 font-medium text-right">成功 / 失败 / 取消</th>
@@ -177,7 +177,7 @@ export function AdminLearningPage(): JSX.Element {
         </div>
         {/* Pagination */}
         {data && normalized.total > PAGE_SIZE && (
-          <div className="flex items-center justify-between border-t border-border px-5 py-3 text-[12px] text-muted-foreground">
+          <div className="flex items-center justify-between border-t border-[#EFEFEF] px-5 py-3 text-[12px] text-muted-foreground">
             <div>
               显示 {offset + 1} – {Math.min(offset + PAGE_SIZE, normalized.total)}（共{' '}
               {formatInteger(normalized.total)} 个域名）
@@ -188,10 +188,10 @@ export function AdminLearningPage(): JSX.Element {
                 disabled={offset === 0}
                 onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
                 className={cn(
-                  'inline-flex h-7 items-center rounded-md border border-border px-2',
+                  'inline-flex h-7 items-center rounded-[8px] border border-[#DCDDDD] px-2',
                   offset === 0
                     ? 'cursor-not-allowed opacity-40'
-                    : 'hover:bg-foreground/[0.04]',
+                    : 'hover:bg-[#EFEFEF] hover:text-[#EA1F59]',
                 )}
               >
                 上一页
@@ -201,10 +201,10 @@ export function AdminLearningPage(): JSX.Element {
                 disabled={offset + PAGE_SIZE >= normalized.total}
                 onClick={() => setOffset((o) => o + PAGE_SIZE)}
                 className={cn(
-                  'inline-flex h-7 items-center rounded-md border border-border px-2',
+                  'inline-flex h-7 items-center rounded-[8px] border border-[#DCDDDD] px-2',
                   offset + PAGE_SIZE >= normalized.total
                     ? 'cursor-not-allowed opacity-40'
-                    : 'hover:bg-foreground/[0.04]',
+                    : 'hover:bg-[#EFEFEF] hover:text-[#EA1F59]',
                 )}
               >
                 下一页
@@ -245,7 +245,7 @@ function normalizeLearningOverview(value: OverviewData | null) {
 
 function DomainRowEl({ row }: { row: DomainRow }): JSX.Element {
   return (
-    <tr className="border-b border-border/60 last:border-b-0 hover:bg-foreground/[0.02]">
+    <tr className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35">
       <td className="px-5 py-3 font-medium text-foreground">
         <span className="truncate">{truncate(row.domain, 40)}</span>
       </td>
@@ -253,9 +253,9 @@ function DomainRowEl({ row }: { row: DomainRow }): JSX.Element {
         {formatInteger(row.total)}
       </td>
       <td className="px-3 py-3 text-right tabular-nums">
-        <span className="text-cyan-600">{row.success}</span>
+        <span className="text-[#1688AA]">{row.success}</span>
         <span className="text-muted-foreground"> / </span>
-        <span className="text-red-600">{row.failed}</span>
+        <span className="text-[#EA1F59]">{row.failed}</span>
         <span className="text-muted-foreground"> / </span>
         <span className="text-muted-foreground">{formatInteger(row.cancelled)}</span>
       </td>
@@ -267,7 +267,7 @@ function DomainRowEl({ row }: { row: DomainRow }): JSX.Element {
       </td>
       <td className="px-3 py-3">
         {row.topFailureLabel ? (
-          <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+          <span className="inline-flex items-center rounded-full bg-[#FFC910]/20 px-2 py-0.5 text-[11px] font-medium text-[#8A6A00]">
             {row.topFailureLabel}
           </span>
         ) : (
@@ -287,14 +287,14 @@ function DomainRowEl({ row }: { row: DomainRow }): JSX.Element {
 }
 
 function SuccessRateBar({ successRate }: { successRate: number }): JSX.Element {
-  // Interpolate red (0%) → yellow (50%) → cyan (100%).
-  const r = successRate < 50 ? 239 : Math.round(255 - ((successRate - 50) / 50) * (255 - 66));
-  const g = successRate < 50 ? Math.round(68 + (successRate / 50) * (201 - 68)) : Math.round(201 - ((successRate - 50) / 50) * (201 - 192));
-  const b = successRate < 50 ? Math.round(68 - (successRate / 50) * (68 - 16)) : Math.round(16 + ((successRate - 50) / 50) * (239 - 16));
+  // Interpolate brand magenta (0%) → yellow (50%) → cyan (100%).
+  const r = successRate < 50 ? Math.round(234 + (successRate / 50) * (255 - 234)) : Math.round(255 - ((successRate - 50) / 50) * (255 - 66));
+  const g = successRate < 50 ? Math.round(31 + (successRate / 50) * (201 - 31)) : Math.round(201 - ((successRate - 50) / 50) * (201 - 192));
+  const b = successRate < 50 ? Math.round(89 - (successRate / 50) * (89 - 16)) : Math.round(16 + ((successRate - 50) / 50) * (239 - 16));
   const color = `rgb(${r}, ${g}, ${b})`;
   return (
     <div className="flex items-center gap-2">
-      <div className="relative h-2 w-24 overflow-hidden rounded-full bg-foreground/[0.06]">
+      <div className="relative h-2 w-24 overflow-hidden rounded-full bg-[#EFEFEF]">
         <div
           className="h-full transition-all"
           style={{ width: `${successRate}%`, backgroundColor: color }}
@@ -321,7 +321,7 @@ function MetricCard({
   return (
     <div
       className={cn(
-        'rounded-xl border border-border bg-card p-4 shadow-sm',
+        'rounded-[8px] border border-[#DCDDDD] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)]',
         highlight && 'border-[#EA1F59]/30',
       )}
       style={
@@ -330,8 +330,8 @@ function MetricCard({
           : undefined
       }
     >
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+      <div className="text-[11px] uppercase text-muted-foreground">{label}</div>
+      <div className="mt-2 text-2xl font-semibold text-foreground">
         {value == null ? '—' : formatInteger(value)}
       </div>
       <div className="mt-1 text-[11px] text-muted-foreground">{hint}</div>
@@ -356,7 +356,7 @@ function FilterPill({
         'inline-flex h-7 items-center rounded-full border px-3 text-[12px] transition-colors',
         active
           ? 'border-[#EA1F59] bg-[rgba(234,31,89,0.10)] text-[#EA1F59]'
-          : 'border-border bg-transparent text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground',
+          : 'border-[#DCDDDD] bg-white text-muted-foreground hover:bg-[#EFEFEF] hover:text-[#EA1F59]',
       )}
     >
       {children}

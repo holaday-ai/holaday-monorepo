@@ -99,7 +99,7 @@ export function AdminLayout(): JSX.Element {
   const ctx: AdminOutletContext = { me: gate.me };
 
   return (
-    <div className="flex h-svh bg-background text-foreground">
+    <div className="flex h-svh bg-white text-foreground">
       <AdminSideNav me={gate.me} />
       <main className="flex-1 overflow-y-auto">
         <Outlet context={ctx} />
@@ -113,7 +113,7 @@ function AdminSideNav({ me }: { me: AdminMe }): JSX.Element {
   const pathname = location.pathname;
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
+    <aside className="flex w-56 shrink-0 flex-col border-r border-[#DCDDDD] bg-white text-sidebar-foreground">
       <div className="px-5 pt-5 pb-4">
         <Link to="/admin" className="block space-y-1.5">
           <div className="flex items-center gap-2">
@@ -152,7 +152,7 @@ function AdminSideNav({ me }: { me: AdminMe }): JSX.Element {
           active={pathname.startsWith('/admin/learning')}
         />
       </nav>
-      <div className="border-t border-border/60 px-3 py-3">
+      <div className="border-t border-[#EFEFEF] px-3 py-3">
         <div className="truncate px-2 text-[12px] font-medium text-foreground">
           {preferredAuthDisplayName(me)}
         </div>
@@ -161,7 +161,7 @@ function AdminSideNav({ me }: { me: AdminMe }): JSX.Element {
         </div>
         <Link
           to="/"
-          className="mt-2 flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+          className="mt-2 flex items-center gap-2 rounded-[8px] px-2 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
         >
           <LogOut className="h-3.5 w-3.5" aria-hidden />
           返回工作台
@@ -187,10 +187,10 @@ function AdminNavItem({
   hint?: string;
 }): JSX.Element {
   const cls = cn(
-    'flex items-center gap-2 rounded-md px-3 py-2 text-[13px] font-medium transition-colors',
+    'flex items-center gap-2 rounded-[8px] px-3 py-2 text-[13px] font-medium transition-colors',
     active
       ? 'bg-[rgba(234,31,89,0.10)] text-[#EA1F59]'
-      : 'text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground',
+      : 'text-muted-foreground hover:bg-[#EFEFEF] hover:text-foreground',
     disabled && 'cursor-not-allowed opacity-50 hover:bg-transparent hover:text-muted-foreground',
   );
   if (disabled || !to) {

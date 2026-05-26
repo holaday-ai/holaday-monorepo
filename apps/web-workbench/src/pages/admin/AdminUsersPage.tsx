@@ -97,7 +97,7 @@ export function AdminUsersPage(): JSX.Element {
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
       <header className="mb-6">
-        <h1 className="text-xl font-semibold tracking-tight">用户管理</h1>
+        <h1 className="text-xl font-semibold">用户管理</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
           全部注册用户 · 共 {formatInteger(total)} 人
         </p>
@@ -114,7 +114,7 @@ export function AdminUsersPage(): JSX.Element {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="搜索邮箱 / 名字…"
-            className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-[13px] outline-none transition-colors focus:border-[#EA1F59]"
+            className="w-full rounded-[8px] border border-[#DCDDDD] bg-white py-2 pl-9 pr-3 text-[13px] outline-none transition-colors focus:border-[#EA1F59] focus:ring-2 focus:ring-[#EA1F59]/15"
           />
         </div>
         <span className="text-[12px] text-muted-foreground">
@@ -140,14 +140,14 @@ export function AdminUsersPage(): JSX.Element {
         />
       </div>
 
-      <section className="rounded-xl border border-border bg-card p-0 shadow-sm">
+      <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-0 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
         {error && (
-          <div className="px-5 py-3 text-sm text-red-700">加载失败：{error}</div>
+          <div className="border-b border-[#EFEFEF] px-5 py-3 text-sm text-[#EA1F59]">加载失败：{error}</div>
         )}
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
-              <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+              <tr className="border-b border-[#EFEFEF] text-left text-[11px] uppercase text-muted-foreground">
                 <th className="px-5 py-3 font-medium">用户</th>
                 <th className="px-3 py-3 font-medium">邮箱</th>
                 <th className="px-3 py-3 font-medium">套餐</th>
@@ -175,7 +175,7 @@ export function AdminUsersPage(): JSX.Element {
                 users.map((u, index) => (
                   <tr
                     key={u.userId || `unknown-${index}`}
-                    className="border-b border-border/60 last:border-b-0 hover:bg-foreground/[0.02]"
+                    className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35"
                   >
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-2.5">
@@ -185,7 +185,7 @@ export function AdminUsersPage(): JSX.Element {
                             {u.displayName ?? '—'}
                           </div>
                           {u.role === 'admin' && (
-                            <span className="mt-0.5 inline-block rounded-full bg-[rgba(234,31,89,0.12)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[#EA1F59]">
+                            <span className="mt-0.5 inline-block rounded-full bg-[rgba(234,31,89,0.10)] px-1.5 py-0.5 text-[10px] font-medium uppercase text-[#EA1F59]">
                               admin
                             </span>
                           )}
@@ -224,7 +224,7 @@ export function AdminUsersPage(): JSX.Element {
           </table>
         </div>
         {/* Pagination */}
-        <div className="flex items-center justify-between border-t border-border px-5 py-3 text-[12px] text-muted-foreground">
+        <div className="flex items-center justify-between border-t border-[#EFEFEF] px-5 py-3 text-[12px] text-muted-foreground">
           <div>
             {total > 0 && (
               <>
@@ -238,9 +238,9 @@ export function AdminUsersPage(): JSX.Element {
               disabled={!hasPrev}
               onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
               className={cn(
-                'inline-flex h-7 items-center gap-1 rounded-md border border-border px-2',
+                'inline-flex h-7 items-center gap-1 rounded-[8px] border border-[#DCDDDD] px-2',
                 hasPrev
-                  ? 'cursor-pointer hover:bg-foreground/[0.04]'
+                  ? 'cursor-pointer hover:bg-[#EFEFEF] hover:text-[#EA1F59]'
                   : 'cursor-not-allowed opacity-40',
               )}
             >
@@ -252,9 +252,9 @@ export function AdminUsersPage(): JSX.Element {
               disabled={!hasNext}
               onClick={() => setOffset((o) => o + PAGE_SIZE)}
               className={cn(
-                'inline-flex h-7 items-center gap-1 rounded-md border border-border px-2',
+                'inline-flex h-7 items-center gap-1 rounded-[8px] border border-[#DCDDDD] px-2',
                 hasNext
-                  ? 'cursor-pointer hover:bg-foreground/[0.04]'
+                  ? 'cursor-pointer hover:bg-[#EFEFEF] hover:text-[#EA1F59]'
                   : 'cursor-not-allowed opacity-40',
               )}
             >
@@ -302,7 +302,7 @@ function SortPill({
         'inline-flex h-7 items-center gap-1 rounded-full border px-3 text-[12px] transition-colors',
         active
           ? 'border-[#EA1F59] bg-[rgba(234,31,89,0.10)] text-[#EA1F59]'
-          : 'border-border bg-transparent text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground',
+          : 'border-[#DCDDDD] bg-white text-muted-foreground hover:bg-[#EFEFEF] hover:text-[#EA1F59]',
       )}
     >
       {label}

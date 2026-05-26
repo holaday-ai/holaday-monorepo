@@ -8,6 +8,9 @@
 
 export const ADMIN_MAGENTA = '#EA1F59';
 export const ADMIN_MAGENTA_SOFT = 'rgba(234,31,89,0.12)';
+export const ADMIN_BORDER = '#DCDDDD';
+export const ADMIN_DIVIDER = '#EFEFEF';
+export const ADMIN_TEXT_MUTED = '#595757';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -20,53 +23,53 @@ interface StatusToken {
 const STATUS_MAP: Record<string, StatusToken> = {
   completed: {
     label: '已完成',
-    textClass: 'text-cyan-700 dark:text-cyan-300',
-    bgClass: 'bg-cyan-50 dark:bg-cyan-500/15',
+    textClass: 'text-[#1688AA]',
+    bgClass: 'bg-[#42C0EF]/10',
   },
   partial_success: {
     label: '部分完成',
-    textClass: 'text-amber-700 dark:text-amber-300',
-    bgClass: 'bg-amber-50 dark:bg-amber-500/15',
+    textClass: 'text-[#8A6A00]',
+    bgClass: 'bg-[#FFC910]/20',
   },
   failed: {
     label: '失败',
-    textClass: 'text-red-700 dark:text-red-300',
-    bgClass: 'bg-red-50 dark:bg-red-500/15',
+    textClass: 'text-[#EA1F59]',
+    bgClass: 'bg-[#EA1F59]/10',
   },
   cancelled: {
     label: '已取消',
-    textClass: 'text-zinc-600 dark:text-zinc-300',
-    bgClass: 'bg-zinc-100 dark:bg-zinc-500/15',
+    textClass: 'text-[#595757]',
+    bgClass: 'bg-[#EFEFEF]',
   },
   running: {
     label: '执行中',
-    textClass: 'text-amber-700 dark:text-amber-300',
-    bgClass: 'bg-amber-50 dark:bg-amber-500/15',
+    textClass: 'text-[#8A6A00]',
+    bgClass: 'bg-[#FFC910]/20',
   },
   executing: {
     label: '执行中',
-    textClass: 'text-amber-700 dark:text-amber-300',
-    bgClass: 'bg-amber-50 dark:bg-amber-500/15',
+    textClass: 'text-[#8A6A00]',
+    bgClass: 'bg-[#FFC910]/20',
   },
   planning: {
     label: '规划中',
-    textClass: 'text-blue-700 dark:text-blue-300',
-    bgClass: 'bg-blue-50 dark:bg-blue-500/15',
+    textClass: 'text-[#57479C]',
+    bgClass: 'bg-[#57479C]/10',
   },
   awaiting_user: {
     label: '等待用户',
-    textClass: 'text-purple-700 dark:text-purple-300',
-    bgClass: 'bg-purple-50 dark:bg-purple-500/15',
+    textClass: 'text-[#57479C]',
+    bgClass: 'bg-[#57479C]/10',
   },
   paused: {
     label: '已暂停',
-    textClass: 'text-zinc-600 dark:text-zinc-300',
-    bgClass: 'bg-zinc-100 dark:bg-zinc-500/15',
+    textClass: 'text-[#595757]',
+    bgClass: 'bg-[#EFEFEF]',
   },
   pending: {
     label: '排队中',
-    textClass: 'text-zinc-600 dark:text-zinc-300',
-    bgClass: 'bg-zinc-100 dark:bg-zinc-500/15',
+    textClass: 'text-[#595757]',
+    bgClass: 'bg-[#EFEFEF]',
   },
 };
 
@@ -74,15 +77,15 @@ export function statusToken(status: string): StatusToken {
   if (!status) {
     return {
       label: '未知',
-      textClass: 'text-zinc-600 dark:text-zinc-300',
-      bgClass: 'bg-zinc-100 dark:bg-zinc-500/15',
+      textClass: 'text-[#595757]',
+      bgClass: 'bg-[#EFEFEF]',
     };
   }
   return (
     STATUS_MAP[status] ?? {
       label: status,
-      textClass: 'text-zinc-600 dark:text-zinc-300',
-      bgClass: 'bg-zinc-100 dark:bg-zinc-500/15',
+      textClass: 'text-[#595757]',
+      bgClass: 'bg-[#EFEFEF]',
     }
   );
 }

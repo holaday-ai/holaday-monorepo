@@ -19,7 +19,6 @@ import {
   CartesianGrid,
   ComposedChart,
   Line,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
@@ -29,6 +28,7 @@ import { cn } from '@/lib/utils';
 import {
   ADMIN_MAGENTA,
   ADMIN_MAGENTA_SOFT,
+  ADMIN_BORDER,
   asRecord,
   clampNumber,
   dayDelta,
@@ -49,6 +49,8 @@ type DashboardData = Awaited<ReturnType<typeof trpc.admin.dashboard.query>>;
 export function AdminDashboardPage(): JSX.Element {
   const [data, setData] = React.useState<DashboardData | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const chartFrameRef = React.useRef<HTMLDivElement | null>(null);
+  const [chartSize, setChartSize] = React.useState({ width: 0, height: 0 });
 
   React.useEffect(() => {
     let cancelled = false;
@@ -67,11 +69,29 @@ export function AdminDashboardPage(): JSX.Element {
     };
   }, []);
 
+  React.useEffect(() => {
+    const element = chartFrameRef.current;
+    if (!element) return undefined;
+
+    const updateSize = () => {
+      const rect = element.getBoundingClientRect();
+      setChartSize({
+        width: Math.max(0, Math.floor(rect.width)),
+        height: Math.max(0, Math.floor(rect.height)),
+      });
+    };
+
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [data]);
+
   if (error) {
     return (
       <div className="mx-auto max-w-5xl px-6 py-10">
         <h1 className="text-xl font-semibold">仪表盘</h1>
-        <div className="mt-4 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-700 dark:bg-red-900/30 dark:text-red-300">
+        <div className="mt-4 rounded-[8px] border border-[#EA1F59]/25 border-l-[#EA1F59] bg-white px-4 py-3 text-sm text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
           加载失败：{error}
         </div>
       </div>
@@ -106,7 +126,7 @@ export function AdminDashboardPage(): JSX.Element {
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
       <header className="mb-6">
-        <h1 className="text-xl font-semibold tracking-tight">仪表盘</h1>
+        <h1 className="text-xl font-semibold">仪表盘</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
           今日运行情况一览 · 数据按北京时间 (UTC+8) 计算
         </p>
@@ -146,17 +166,19 @@ export function AdminDashboardPage(): JSX.Element {
       </div>
 
       {/* Trend */}
-      <section className="mt-8 rounded-xl border border-border bg-card p-5 shadow-sm">
+      <section className="mt-8 rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
         <header className="mb-4 flex items-baseline justify-between">
-          <h2 className="text-base font-semibold tracking-tight">过去 7 天趋势</h2>
-          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+          <h2 className="text-base font-semibold">过去 7 天趋势</h2>
+          <span className="text-[11px] uppercase text-muted-foreground">
             任务量 · 成功率
           </span>
         </header>
-        <div className="h-72 w-full">
-          <ResponsiveContainer>
+        <div ref={chartFrameRef} className="h-72 w-full min-w-0">
+          {chartSize.width > 0 && chartSize.height > 0 ? (
             <ComposedChart
               data={trend}
+              width={chartSize.width}
+              height={chartSize.height}
               margin={{ top: 10, right: 16, left: 0, bottom: 0 }}
             >
               <CartesianGrid stroke="rgba(0,0,0,0.06)" vertical={false} />
@@ -183,7 +205,7 @@ export function AdminDashboardPage(): JSX.Element {
               <Tooltip
                 contentStyle={{
                   borderRadius: 8,
-                  border: '1px solid rgba(0,0,0,0.08)',
+                  border: `1px solid ${ADMIN_BORDER}`,
                   fontSize: 12,
                 }}
                 formatter={(value, name) => {
@@ -211,22 +233,24 @@ export function AdminDashboardPage(): JSX.Element {
                 dot={{ r: 3, stroke: '#444', strokeWidth: 1, fill: '#fff' }}
               />
             </ComposedChart>
-          </ResponsiveContainer>
+          ) : (
+            <div className="h-full rounded-[8px] bg-[#EFEFEF]/45" />
+          )}
         </div>
       </section>
 
       {/* Recent tasks */}
-      <section className="mt-8 rounded-xl border border-border bg-card p-5 shadow-sm">
+      <section className="mt-8 rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
         <header className="mb-4 flex items-baseline justify-between">
-          <h2 className="text-base font-semibold tracking-tight">最近任务</h2>
-          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+          <h2 className="text-base font-semibold">最近任务</h2>
+          <span className="text-[11px] uppercase text-muted-foreground">
             最新 20 条
           </span>
         </header>
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
-              <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+              <tr className="border-b border-[#EFEFEF] text-left text-[11px] uppercase text-muted-foreground">
                 <th className="py-2 pr-3 font-medium">时间</th>
                 <th className="py-2 pr-3 font-medium">用户</th>
                 <th className="py-2 pr-3 font-medium">任务</th>
@@ -251,7 +275,7 @@ export function AdminDashboardPage(): JSX.Element {
                   return (
                     <tr
                       key={row.taskId}
-                      className="border-b border-border/60 last:border-b-0 hover:bg-foreground/[0.02]"
+                      className="border-b border-[#EFEFEF] last:border-b-0 hover:bg-[#EFEFEF]/35"
                     >
                       <td className="py-2 pr-3 text-muted-foreground">
                         {formatDateTime(row.createdAt)}
@@ -378,13 +402,13 @@ function MetricCard({
   }
   return (
     <div
-      className="rounded-xl border border-border bg-card p-4 shadow-sm"
+      className="rounded-[8px] border border-[#DCDDDD] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
       style={{ backgroundImage: `linear-gradient(135deg, ${ADMIN_MAGENTA_SOFT} 0%, transparent 60%)` }}
     >
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+      <div className="text-[11px] uppercase text-muted-foreground">
         {label}
       </div>
-      <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+      <div className="mt-2 text-2xl font-semibold text-foreground">
         {value}
       </div>
       {deltaLabel ? (
@@ -392,8 +416,8 @@ function MetricCard({
           className={cn(
             'mt-1 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium',
             positive
-              ? 'bg-cyan-50 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300'
-              : 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-300',
+              ? 'bg-[#42C0EF]/10 text-[#1688AA]'
+              : 'bg-[#EA1F59]/10 text-[#EA1F59]',
           )}
         >
           {positive ? (
