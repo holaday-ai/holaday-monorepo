@@ -108,13 +108,13 @@ export function ConnectionsPage(): JSX.Element {
         title="连接器"
         description="申请接入常用工具，让 AI 在授权范围内完成操作"
         action={
-          <div className="inline-flex items-center rounded-full border border-[#57479C]/20 bg-[#57479C]/[0.045] px-3 py-1 text-[12px] font-medium text-foreground shadow-sm">
+          <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
             {summary}
           </div>
         }
       />
-      <div className="mb-5 flex items-start gap-3 rounded-[8px] border border-[#57479C]/20 bg-[#57479C]/[0.045] px-4 py-3 text-[13px] text-foreground shadow-sm animate-fade-in motion-reduce:animate-none">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[#57479C] text-white shadow-sm">
+      <div className="mb-5 flex items-start gap-3 rounded-[8px] border border-[#DCDDDD] border-l-[#57479C] bg-white px-4 py-3 text-[13px] text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] animate-fade-in motion-reduce:animate-none [border-left-width:3px]">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#57479C]">
           <Plug className="h-4 w-4" aria-hidden />
         </div>
         <div className="min-w-0">
@@ -129,7 +129,7 @@ export function ConnectionsPage(): JSX.Element {
           加载中…
         </div>
       ) : loadError ? (
-        <div className="flex flex-col items-center gap-3 rounded-[8px] border border-border bg-card/40 px-6 py-12 text-center animate-fade-in motion-reduce:animate-none">
+        <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center animate-fade-in motion-reduce:animate-none">
           <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
           <div className="text-sm font-medium text-foreground/80">连接器加载失败</div>
           <div className="max-w-md text-xs leading-5 text-muted-foreground">
@@ -152,7 +152,7 @@ export function ConnectionsPage(): JSX.Element {
           </div>
         </div>
       ) : providers.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-[8px] border border-dashed border-border bg-card/40 px-6 py-12 text-center animate-fade-in motion-reduce:animate-none">
+        <div className="flex flex-col items-center gap-3 rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-12 text-center animate-fade-in motion-reduce:animate-none">
           <Plug className="h-8 w-8 text-muted-foreground/40" />
           <div className="text-sm font-medium text-foreground/80">暂无规划连接器</div>
           <div className="max-w-md text-xs leading-5 text-muted-foreground">
@@ -174,11 +174,11 @@ export function ConnectionsPage(): JSX.Element {
         <div className="space-y-8">
           {providerGroups.map((group) => (
             <section key={group.category}>
-              <div className="mb-3 flex items-center justify-between gap-3 border-b border-border/70 pb-2">
-                <h2 className="text-[11px] font-semibold uppercase tracking-wide text-foreground/70">
+              <div className="mb-3 flex items-center justify-between gap-3 border-b border-[#EFEFEF] pb-2">
+                <h2 className="text-[11px] font-semibold uppercase tracking-wide text-[#595757]">
                   {group.label}
                 </h2>
-                <div className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground">
+                <div className="rounded-full border border-[#DCDDDD] bg-white px-2 py-0.5 text-[11px] text-[#595757]">
                   {group.items.length} 个
                 </div>
               </div>
@@ -207,23 +207,23 @@ function ConnectionProviderCard({ provider }: { provider: ConnectionProviderView
   return (
     <article
       className={cn(
-        'group flex min-h-[176px] flex-col items-start gap-2 rounded-[8px] border bg-card/80 p-4 text-left shadow-sm transition-[transform,border-color,box-shadow,background-color] duration-150 animate-fade-in motion-reduce:animate-none motion-reduce:transition-none motion-reduce:hover:translate-y-0',
+        'group flex min-h-[176px] flex-col items-start gap-2 rounded-[8px] border bg-white p-4 text-left shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-[transform,border-color,box-shadow] duration-150 animate-fade-in motion-reduce:animate-none motion-reduce:transition-none motion-reduce:hover:translate-y-0',
         tone === 'ready'
-          ? 'border-[#42C0EF]/35 hover:-translate-y-0.5 hover:border-[#42C0EF]/60 hover:bg-[#42C0EF]/[0.035] hover:shadow-md'
+          ? 'border-[#DCDDDD] hover:-translate-y-px hover:border-[#ADADAD] hover:shadow-[0_5px_16px_rgba(15,23,42,0.055)]'
           : tone === 'preparing'
-            ? 'border-[#57479C]/28 hover:-translate-y-0.5 hover:border-[#57479C]/55 hover:bg-[#57479C]/[0.035] hover:shadow-md'
-            : 'border-border hover:-translate-y-0.5 hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/[0.025] hover:shadow-md',
+            ? 'border-[#DCDDDD] hover:-translate-y-px hover:border-[#ADADAD] hover:shadow-[0_5px_16px_rgba(15,23,42,0.055)]'
+            : 'border-[#DCDDDD] hover:-translate-y-px hover:border-[#ADADAD] hover:shadow-[0_5px_16px_rgba(15,23,42,0.055)]',
       )}
     >
       <div className="flex w-full items-start justify-between gap-3">
         <div
           className={cn(
-            'flex h-9 w-9 items-center justify-center rounded-md border transition-colors',
+            'flex h-9 w-9 items-center justify-center rounded-md border bg-white transition-colors',
             tone === 'ready'
-              ? 'border-[#42C0EF]/35 bg-[#42C0EF]/10 text-cyan-700 dark:text-cyan-200'
+              ? 'border-[#42C0EF]/45 text-[#217EA0]'
               : tone === 'preparing'
-                ? 'border-[#57479C]/35 bg-[#57479C]/10 text-[#57479C] dark:text-purple-200'
-                : 'border-border bg-background text-muted-foreground group-hover:border-[#EA1F59]/30 group-hover:text-[#EA1F59]',
+                ? 'border-[#57479C]/35 text-[#57479C]'
+                : 'border-[#DCDDDD] text-[#595757] group-hover:border-[#ADADAD]',
           )}
         >
           <Icon className="h-4 w-4" aria-hidden />
@@ -232,10 +232,10 @@ function ConnectionProviderCard({ provider }: { provider: ConnectionProviderView
           className={cn(
             'rounded-full border px-2 py-0.5 text-[10px] font-medium',
             tone === 'ready'
-              ? 'border-[#42C0EF]/45 bg-[#42C0EF]/10 text-cyan-700 dark:text-cyan-200'
+              ? 'border-[#42C0EF]/45 bg-white text-[#217EA0]'
               : tone === 'preparing'
-                ? 'border-[#57479C]/35 bg-[#57479C]/10 text-[#57479C] dark:text-purple-200'
-                : 'border-border bg-background text-muted-foreground',
+                ? 'border-[#57479C]/35 bg-white text-[#57479C]'
+                : 'border-[#DCDDDD] bg-white text-[#595757]',
           )}
         >
           {status}
@@ -251,7 +251,7 @@ function ConnectionProviderCard({ provider }: { provider: ConnectionProviderView
         asChild
         variant="outline"
         size="sm"
-        className="mt-auto h-7 border-border bg-background text-[11px] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/[0.035] hover:text-foreground"
+        className="mt-auto h-7 border-[#DCDDDD] bg-white text-[11px] text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
       >
         <a
           href={supportMailtoHref({

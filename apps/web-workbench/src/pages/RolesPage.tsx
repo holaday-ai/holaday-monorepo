@@ -169,13 +169,13 @@ export function RolesPage(): JSX.Element {
           title="专业角色"
           description="挑选 AI 在工作时使用的视角"
           action={
-            <div className="inline-flex items-center rounded-full border border-[#EA1F59]/20 bg-[#EA1F59]/[0.045] px-3 py-1 text-[12px] font-medium text-foreground shadow-sm">
+            <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
               {summary}
             </div>
           }
         />
         {loadError ? (
-          <div className="flex flex-col items-center gap-3 rounded-[8px] border border-border bg-card/40 px-6 py-12 text-center animate-fade-in motion-reduce:animate-none">
+          <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center animate-fade-in motion-reduce:animate-none">
             <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
             <div className="text-sm font-medium text-foreground/80">角色加载失败</div>
             <div className="max-w-md text-xs leading-5 text-muted-foreground">
@@ -214,12 +214,12 @@ export function RolesPage(): JSX.Element {
         action={
           <div
             className={cn(
-              'inline-flex items-center rounded-full border px-3 py-1 text-[12px] font-medium shadow-sm',
+              'inline-flex items-center rounded-full border bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]',
               isBasic && draft.length > BASIC_ROLE_PICK_LIMIT
-                ? 'border-[#FFC910]/70 bg-[#FFC910]/15 text-foreground dark:border-[#FFC910]/45 dark:bg-[#FFC910]/12'
+                ? 'border-[#FFC910]/65'
                 : isPro
-                  ? 'border-[#57479C]/20 bg-[#57479C]/[0.045] text-foreground'
-                  : 'border-[#EA1F59]/20 bg-[#EA1F59]/[0.045] text-foreground',
+                  ? 'border-[#57479C]/25'
+                  : 'border-[#DCDDDD]',
             )}
           >
             {summary}
@@ -227,8 +227,8 @@ export function RolesPage(): JSX.Element {
         }
       />
       {isFree && (
-        <div className="mb-6 flex items-start gap-3 rounded-[8px] border border-[#FFC910]/60 bg-[#FFC910]/12 px-4 py-3 text-sm text-foreground shadow-sm animate-fade-in motion-reduce:animate-none">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[#FFC910] text-foreground shadow-sm">
+        <div className="mb-6 flex items-start gap-3 rounded-[8px] border border-[#DCDDDD] border-l-[#FFC910] bg-white px-4 py-3 text-sm text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] animate-fade-in motion-reduce:animate-none [border-left-width:3px]">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757]">
             <Crown className="h-4 w-4" aria-hidden />
           </div>
           <div className="min-w-0">
@@ -256,7 +256,7 @@ export function RolesPage(): JSX.Element {
             many draft picks)
       */}
       {isBasic && data.needsRoleRepair && (
-        <div className="mb-4 rounded-[8px] border border-[#EA1F59]/30 bg-[#EA1F59]/[0.045] px-4 py-3 text-sm text-foreground shadow-sm animate-fade-in motion-reduce:animate-none">
+        <div className="mb-4 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-4 py-3 text-sm text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] animate-fade-in motion-reduce:animate-none [border-left-width:3px]">
           {draft.length > BASIC_ROLE_PICK_LIMIT ? (
             <>
               检测到不适用于当前套餐的角色已被自动移除。请先取消勾选至
@@ -274,7 +274,7 @@ export function RolesPage(): JSX.Element {
       )}
 
       {isBasic && !data.needsRoleRepair && draft.length > currentPickLimit && (
-        <div className="mb-4 rounded-[8px] border border-[#FFC910]/60 bg-[#FFC910]/12 px-4 py-3 text-sm text-foreground shadow-sm animate-fade-in motion-reduce:animate-none">
+        <div className="mb-4 rounded-[8px] border border-[#DCDDDD] border-l-[#FFC910] bg-white px-4 py-3 text-sm text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] animate-fade-in motion-reduce:animate-none [border-left-width:3px]">
           你当前选择 <span className="font-semibold">{draft.length}</span> 个角色，
           超出基础版 {currentPickLimit} 个上限。请取消勾选至 {currentPickLimit} 个以内
           再保存，否则新任务将无法创建。
@@ -282,13 +282,13 @@ export function RolesPage(): JSX.Element {
       )}
 
       {isBasic && (
-        <div className="mb-6 flex flex-col gap-3 rounded-[8px] border border-border bg-card/80 px-4 py-3 shadow-sm animate-fade-in motion-reduce:animate-none sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-6 flex flex-col gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] animate-fade-in motion-reduce:animate-none sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-[220px] flex-1 text-xs text-muted-foreground">
             <span
               className={cn(
                 'text-sm font-medium',
                 draft.length > currentPickLimit
-                  ? 'text-red-600 dark:text-red-400'
+                  ? 'text-[#EA1F59]'
                   : 'text-foreground',
               )}
             >
@@ -298,7 +298,7 @@ export function RolesPage(): JSX.Element {
               本月可切换 {roleRemainingChanges(data.changesThisMonth, currentChangesLimit)} 次（共
               {currentChangesLimit} 次）
             </span>
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+            <div className="mt-2 h-1 overflow-hidden rounded-full bg-[#EFEFEF]">
               <div
                 className={cn(
                   'h-full rounded-full transition-[width] duration-300',
@@ -332,8 +332,8 @@ export function RolesPage(): JSX.Element {
       )}
 
       {isPro && (
-        <div className="mb-6 flex items-start gap-3 rounded-[8px] border border-[#57479C]/20 bg-[#57479C]/[0.045] px-4 py-3 text-sm text-foreground shadow-sm animate-fade-in motion-reduce:animate-none">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[#57479C] text-white shadow-sm">
+        <div className="mb-6 flex items-start gap-3 rounded-[8px] border border-[#DCDDDD] border-l-[#57479C] bg-white px-4 py-3 text-sm text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] animate-fade-in motion-reduce:animate-none [border-left-width:3px]">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#57479C]">
             <Sparkles className="h-4 w-4" aria-hidden />
           </div>
           <div className="min-w-0 text-muted-foreground">
@@ -345,11 +345,11 @@ export function RolesPage(): JSX.Element {
       <div className="space-y-8">
         {grouped.map((group) => (
           <section key={group.key}>
-            <div className="mb-3 flex items-center justify-between gap-3 border-b border-border/70 pb-2">
-              <h2 className="text-[11px] font-semibold uppercase tracking-wide text-foreground/70">
+            <div className="mb-3 flex items-center justify-between gap-3 border-b border-[#EFEFEF] pb-2">
+              <h2 className="text-[11px] font-semibold uppercase tracking-wide text-[#595757]">
                 {group.nameZh}
               </h2>
-              <div className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground">
+              <div className="rounded-full border border-[#DCDDDD] bg-white px-2 py-0.5 text-[11px] text-[#595757]">
                 {group.items.length} 个
               </div>
             </div>
@@ -393,13 +393,13 @@ function RoleCard({ role, checked, locked, disabled, onClick }: CardProps): JSX.
       type={onClick ? 'button' : undefined}
       onClick={onClick}
       className={cn(
-        'group relative flex min-h-[128px] flex-col gap-2 rounded-[8px] border bg-card/80 p-4 text-left shadow-sm transition-[transform,border-color,box-shadow,background-color] duration-150 animate-fade-in motion-reduce:animate-none motion-reduce:transition-none motion-reduce:hover:translate-y-0',
+        'group relative flex min-h-[128px] flex-col gap-2 rounded-[8px] border bg-white p-4 text-left shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-[transform,border-color,box-shadow] duration-150 animate-fade-in motion-reduce:animate-none motion-reduce:transition-none motion-reduce:hover:translate-y-0',
         onClick &&
-          'hover:-translate-y-0.5 hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/[0.025] hover:shadow-md',
+          'hover:-translate-y-px hover:border-[#ADADAD] hover:shadow-[0_5px_16px_rgba(15,23,42,0.055)]',
         checked && !locked
-          ? 'border-[#EA1F59]/50 bg-[#EA1F59]/[0.055] ring-1 ring-[#EA1F59]/10'
-          : 'border-border',
-        locked && 'border-[#57479C]/20 bg-[#57479C]/[0.025]',
+          ? 'border-[#DCDDDD]'
+          : 'border-[#DCDDDD]',
+        locked && 'border-[#DCDDDD]',
         disabled && !onClick && 'cursor-default',
       )}
     >
@@ -407,18 +407,18 @@ function RoleCard({ role, checked, locked, disabled, onClick }: CardProps): JSX.
         <span className="text-sm font-medium leading-tight">{role.nameZh}</span>
         {locked ? (
           <span
-            className="inline-flex items-center gap-1 rounded-full border border-[#57479C]/35 bg-[#57479C]/10 px-1.5 py-0.5 text-[10px] font-medium text-[#57479C] dark:text-purple-200"
+            className="inline-flex items-center gap-1 rounded-full border border-[#57479C]/30 bg-white px-1.5 py-0.5 text-[10px] font-medium text-[#57479C]"
             title="升级到专业版解锁"
           >
             <Lock className="h-2.5 w-2.5" />
             专业版
           </span>
         ) : checked ? (
-          <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#EA1F59] text-white shadow-sm">
+          <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[#EA1F59] bg-white text-[#EA1F59]">
             <Check className="h-2.5 w-2.5" />
           </span>
         ) : (
-          <span className="inline-block h-4 w-4 rounded-full border border-border bg-background group-hover:border-[#EA1F59]/35" />
+          <span className="inline-block h-4 w-4 rounded-full border border-[#DCDDDD] bg-white group-hover:border-[#ADADAD]" />
         )}
       </div>
       <p className="text-[11px] leading-snug text-muted-foreground">{role.descriptionZh}</p>
