@@ -70,10 +70,10 @@ export function TaskToolbar({
         className={cn(
           'inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium transition-colors',
           live
-            ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/15'
+            ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59] hover:bg-[#EA1F59]/15'
             : open
-              ? 'border-foreground/20 bg-foreground/[0.04] text-foreground'
-              : 'border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground',
+              ? 'border-[#DCDDDD] bg-white text-foreground shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/90'
+              : 'border-[#DCDDDD] bg-white text-muted-foreground hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 hover:text-foreground dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10',
         )}
       >
         <Globe className="h-3.5 w-3.5" />

@@ -100,6 +100,11 @@ interface Props {
 const ACCEPT_FILES = '.csv,.xlsx,.xls,.pdf,.txt,.json,.md';
 const ACCEPT_IMAGES = '.png,.jpg,.jpeg,.webp,.gif,image/*';
 const MAX_ATTACHMENTS = 5;
+const COMPOSER_SURFACE =
+  'border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/90';
+const COMPOSER_FIELD_FOCUS =
+  'focus-within:border-[#EA1F59]/40 focus-within:shadow-[0_8px_24px_rgba(17,24,39,0.08)] focus-within:ring-2 focus-within:ring-[#EA1F59]/10';
+const COMPOSER_DIVIDER = 'border-[#DCDDDD]/80 dark:border-white/10';
 
 type ComposerExpertWorkflow = {
   id: 'douyin-livestream-review';
@@ -504,10 +509,12 @@ export function InputArea({
     >
       <div
         className={cn(
-          'relative rounded-[20px] border bg-background shadow-[0_8px_24px_rgba(0,0,0,0.06)] focus-within:border-foreground/20 focus-within:shadow-[0_10px_28px_rgba(0,0,0,0.08)]',
+          'relative overflow-hidden rounded-lg border transition-[border-color,box-shadow]',
+          COMPOSER_SURFACE,
+          COMPOSER_FIELD_FOCUS,
           dragActive
-            ? 'border-foreground/30 ring-2 ring-foreground/10'
-            : 'border-input',
+            ? 'border-[#42C0EF]/60 ring-2 ring-[#42C0EF]/15'
+            : '',
         )}
       >
         {followUpTarget && !replyMode && (
@@ -516,7 +523,7 @@ export function InputArea({
           // ghost button on the right lets the user opt out into a
           // fresh task. Brand magenta stays scoped to the send
           // button + actionable chips elsewhere.
-          <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          <div className={cn('flex items-center gap-2 border-b bg-[#EFEFEF]/35 px-3 py-2 text-xs text-muted-foreground', COMPOSER_DIVIDER)}>
             <span className="shrink-0 font-medium text-foreground/80">
               继续这个任务
             </span>
@@ -531,7 +538,7 @@ export function InputArea({
               onClick={onCancelFollowUp}
               aria-label="取消追问，发新任务"
               title="取消追问，发新任务"
-              className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-white hover:text-foreground dark:hover:bg-white/10"
             >
               <X className="h-3 w-3" aria-hidden />
               发新任务
@@ -539,7 +546,7 @@ export function InputArea({
           </div>
         )}
         {attachments.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 border-b border-border px-3 py-2">
+          <div className={cn('flex flex-wrap gap-1.5 border-b px-3 py-2', COMPOSER_DIVIDER)}>
             {attachments.map((a, i) => (
               <AttachmentChip
                 key={`${a.filename}-${i}`}
@@ -577,7 +584,7 @@ export function InputArea({
                   : '描述你想让 HOLA DAY 做什么...'
           }
           rows={2}
-          className="min-h-[88px] resize-none border-0 bg-transparent px-4 pb-12 pt-4 pr-14 text-[15px] leading-relaxed shadow-none focus-visible:ring-0"
+          className="min-h-[92px] resize-none border-0 bg-transparent px-4 pb-12 pt-4 pr-14 text-[15px] leading-relaxed shadow-none placeholder:text-muted-foreground/55 focus-visible:ring-0"
           style={{ maxHeight: '10rem' }}
           disabled={disabled}
         />
@@ -600,8 +607,8 @@ export function InputArea({
                   aria-label="添加附件"
                   title="添加附件"
                   className={cn(
-                    'inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground',
-                    plusMenuOpen && 'bg-foreground/[0.05] text-foreground',
+                    'inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:border-[#DCDDDD] hover:bg-[#EFEFEF]/55 hover:text-foreground dark:hover:border-white/10 dark:hover:bg-white/10',
+                    plusMenuOpen && 'border-[#DCDDDD] bg-[#EFEFEF]/55 text-foreground dark:border-white/10 dark:bg-white/10',
                   )}
                 >
                   <Plus className="h-4 w-4" />
@@ -641,7 +648,7 @@ export function InputArea({
               }}
               aria-label="升级基础版可添加附件"
               title="升级基础版可添加附件"
-              className="inline-flex h-8 w-8 cursor-not-allowed items-center justify-center rounded-md text-muted-foreground/40"
+              className="inline-flex h-8 w-8 cursor-not-allowed items-center justify-center rounded-md border border-transparent text-muted-foreground/40"
             >
               <Plus className="h-4 w-4" />
             </button>
@@ -673,7 +680,7 @@ export function InputArea({
           size="icon"
           onClick={() => void handleSubmit()}
           disabled={disabled || value.trim().length === 0}
-          className="absolute bottom-2.5 right-2.5 h-8 w-8 rounded-full"
+          className="absolute bottom-2.5 right-2.5 h-8 w-8 rounded-full bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.18)] hover:bg-[#EA1F59]/90 focus-visible:ring-[#EA1F59]/25"
           aria-label={submitting ? '发送中' : '发送'}
         >
           {submitting ? (
@@ -707,7 +714,7 @@ export function InputArea({
               onClick={() => {
                 navigate('/batch', { state: { initialPrompts: lines } });
               }}
-              className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-[11px] font-medium text-primary transition hover:bg-primary/20"
+              className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[#57479C]/25 bg-[#57479C]/10 px-3 py-1 text-[11px] font-medium text-[#57479C] transition hover:bg-[#57479C]/15 dark:border-[#57479C]/45 dark:text-[#DCDDDD]"
             >
               <span aria-hidden>≣</span>
               提交为批量任务（{lines.length} 项）
@@ -748,8 +755,8 @@ function ExpertModeSelector({
         <button
           type="button"
           className={cn(
-            'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground',
-            open && 'bg-foreground/[0.05] text-foreground',
+            'inline-flex items-center gap-1 rounded-md border border-transparent px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-[#DCDDDD] hover:bg-white hover:text-foreground dark:hover:border-white/10 dark:hover:bg-white/10',
+            open && 'border-[#DCDDDD] bg-white text-foreground dark:border-white/10 dark:bg-white/10',
           )}
         >
           <span>专家：{label}</span>
@@ -815,8 +822,8 @@ function TaskModeSelector({
         <button
           type="button"
           className={cn(
-            'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground',
-            open && 'bg-foreground/[0.05] text-foreground',
+            'inline-flex items-center gap-1 rounded-md border border-transparent px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-[#DCDDDD] hover:bg-white hover:text-foreground dark:hover:border-white/10 dark:hover:bg-white/10',
+            open && 'border-[#DCDDDD] bg-white text-foreground dark:border-white/10 dark:bg-white/10',
           )}
         >
           <span>{label}</span>
@@ -872,18 +879,18 @@ function ExpertWorkflowHint({
   const actions = guidanceActionsForWorkflow(workflow);
 
   return (
-    <div className="border-b border-border bg-amber-50/70 px-3 py-2 text-xs text-amber-950 dark:bg-amber-500/10 dark:text-amber-100">
+    <div className={cn('border-b bg-[#FFC910]/10 px-3 py-2 text-xs text-[#595757] dark:bg-[#FFC910]/10 dark:text-foreground', COMPOSER_DIVIDER)}>
       <div className="flex items-start gap-2">
-        <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+        <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#57479C]" aria-hidden />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="font-medium">已匹配：{workflow.name}</span>
             {missingLabels.length > 0 ? (
-              <span className="text-amber-900/75 dark:text-amber-100/75">
+              <span className="text-muted-foreground">
                 还缺 {missingLabels.join('、')}
               </span>
             ) : (
-              <span className="text-amber-900/75 dark:text-amber-100/75">
+              <span className="text-muted-foreground">
                 信息已基本足够，发送后会按专家复盘结构执行
               </span>
             )}
@@ -901,7 +908,7 @@ function ExpertWorkflowHint({
                       onPickText(action.label);
                     }
                   }}
-                  className="rounded-full border border-amber-300/80 bg-white/75 px-2 py-1 text-[11px] text-amber-950 transition hover:bg-amber-100 dark:border-amber-300/30 dark:bg-amber-300/10 dark:text-amber-50 dark:hover:bg-amber-300/20"
+                  className="rounded-full border border-[#DCDDDD] bg-white px-2 py-1 text-[11px] text-[#595757] transition hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-transparent dark:text-foreground dark:hover:bg-white/10"
                 >
                   {action.label}
                 </button>
@@ -1014,16 +1021,16 @@ function QuotaExhaustedCard({
     : '购买加量包当月立即生效，或升级套餐拿更高月度额度';
   return (
     <div className="mx-auto w-full max-w-3xl px-6 pb-6">
-      <div className="rounded-2xl border border-amber-300/40 bg-amber-50/40 px-5 py-4 dark:border-amber-700/40 dark:bg-amber-950/20">
+      <div className="rounded-lg border border-[#FFC910]/55 bg-white px-5 py-4 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#FFC910]/35 dark:bg-card/90">
         <div className="flex items-start gap-3">
-          <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300">
+          <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[#FFC910]/20 text-[#57479C]">
             <Sparkles className="h-3.5 w-3.5" />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-amber-900 dark:text-amber-100">
+            <div className="text-sm font-semibold text-foreground">
               {headline}
             </div>
-            <p className="mt-0.5 text-xs text-amber-900/80 dark:text-amber-200/80">
+            <p className="mt-0.5 text-xs text-muted-foreground">
               {subline}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
@@ -1032,14 +1039,18 @@ function QuotaExhaustedCard({
                   size="sm"
                   variant="outline"
                   onClick={() => navigate('/plan')}
-                  className="gap-1.5"
+                  className="gap-1.5 border-[#DCDDDD] bg-white hover:bg-[#EFEFEF]/50"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   购买加量包
                 </Button>
               )}
               {!isPro && (
-                <Button size="sm" onClick={() => navigate('/plan')}>
+                <Button
+                  size="sm"
+                  onClick={() => navigate('/plan')}
+                  className="bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90"
+                >
                   {isFree ? '升级到基础版' : '升级到专业版'}
                 </Button>
               )}

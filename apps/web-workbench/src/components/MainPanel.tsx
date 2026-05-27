@@ -215,7 +215,7 @@ export function MainPanel({
               work product). Only rendered for browser-shaped tasks
               so generate / scrape don't pay a header height. */}
           {isBrowserLikely(task) && (
-            <div className="flex h-10 items-center justify-end gap-2 border-b border-border/40 px-4">
+            <div className="flex h-10 items-center justify-end gap-2 border-b border-[#DCDDDD]/70 bg-white/60 px-4 backdrop-blur dark:border-white/10 dark:bg-card/50">
               <TaskToolbar
                 task={task}
                 sidePanelMode={sidePanelMode}
@@ -285,7 +285,7 @@ function SuggestionChips({
           key={s.label}
           type="button"
           onClick={() => onPick(s.intent)}
-          className="inline-flex h-7 items-center rounded-full border border-border bg-card px-3 text-[12px] text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-foreground/[0.04] hover:text-foreground"
+          className="inline-flex h-7 items-center rounded-full border border-[#DCDDDD] bg-white px-3 text-[12px] text-muted-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 hover:text-foreground dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
         >
           {s.label}
         </button>
@@ -333,7 +333,7 @@ function OnboardingHint(): JSX.Element | null {
   if (dismissed) return null;
 
   return (
-    <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-3.5 py-2.5 text-[13px] text-foreground">
+    <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-[#DCDDDD] bg-white px-3.5 py-2.5 text-[13px] text-foreground shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/90">
       <div className="min-w-0 flex-1">
         第一次来？点击下方的任务示例，或直接输入你想做的事情。
       </div>
@@ -347,7 +347,7 @@ function OnboardingHint(): JSX.Element | null {
           }
           setDismissed(true);
         }}
-        className="-mr-1 -mt-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground"
+        className="-mr-1 -mt-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
         aria-label="关闭引导"
       >
         <X className="h-3.5 w-3.5" />
