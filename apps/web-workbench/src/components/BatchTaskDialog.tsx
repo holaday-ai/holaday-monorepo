@@ -1,4 +1,4 @@
-import { Layers, Loader2, X } from 'lucide-react';
+import { Layers, Loader2, Plus, Trash2, X } from 'lucide-react';
 import * as React from 'react';
 import {
   batchCreateButtonLabel,
@@ -6,17 +6,16 @@ import {
   batchPromptCountCopy,
 } from '@/components/batch-dialog-state';
 import { useToast } from '@/components/ui/toast';
-import { parseBatchPrompts } from '@/lib/batch-prompts';
+import { parseBatchPromptItems } from '@/lib/batch-prompts';
 import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
 
 /**
  * Phase 5b — create-batch modal.
  *
- * Two ways to submit:
- *   1. Paste a list — one prompt per non-empty line. We split on
- *      newlines, trim, drop empties.
- *   2. Click "添加一项" to add an explicit row (handy for prompts
- *      that span multiple paragraphs).
+ * Users add one task card at a time. Each card can include a goal,
+ * inputs, and step-by-step instructions; cards are submitted as
+ * independent prompts so one task's steps never bleed into another.
  *
  * The server caps to 50 items and applies the per-plan concurrency
  * automatically; this dialog doesn't let the user pick concurrency
@@ -41,16 +40,16 @@ export function BatchTaskDialog({
 }: Props): JSX.Element | null {
   const toast = useToast();
   const [name, setName] = React.useState('');
-  const [pasteText, setPasteText] = React.useState('');
+  const [items, setItems] = React.useState<string[]>(['']);
   const [submitting, setSubmitting] = React.useState(false);
-  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const textareaRefs = React.useRef<Array<HTMLTextAreaElement | null>>([]);
 
   React.useEffect(() => {
     if (!open) return;
     setName('');
-    setPasteText(initialPrompts && initialPrompts.length > 0 ? initialPrompts.join('\n') : '');
+    setItems(initialPrompts && initialPrompts.length > 0 ? initialPrompts : ['']);
     setSubmitting(false);
-    const id = requestAnimationFrame(() => textareaRef.current?.focus());
+    const id = requestAnimationFrame(() => textareaRefs.current[0]?.focus());
     return () => cancelAnimationFrame(id);
   }, [open, initialPrompts]);
 
@@ -70,13 +69,32 @@ export function BatchTaskDialog({
 
   if (!open) return null;
 
-  const parsedPrompts = parseBatchPrompts(pasteText, MAX_ITEMS);
+  const parsedPrompts = parseBatchPromptItems(items, MAX_ITEMS);
   const prompts = parsedPrompts.prompts;
   const submitDisabled = batchCreateDisabled({
     submitting,
     promptCount: prompts.length,
     overLimit: parsedPrompts.overLimit,
   });
+
+  const updateItem = (index: number, value: string): void => {
+    setItems((prev) => prev.map((item, idx) => (idx === index ? value : item)));
+  };
+
+  const addItem = (): void => {
+    if (items.length >= MAX_ITEMS || submitting) return;
+    const nextIndex = items.length;
+    setItems((prev) => [...prev, '']);
+    requestAnimationFrame(() => textareaRefs.current[nextIndex]?.focus());
+  };
+
+  const removeItem = (index: number): void => {
+    if (submitting) return;
+    setItems((prev) => {
+      const next = prev.filter((_, idx) => idx !== index);
+      return next.length > 0 ? next : [''];
+    });
+  };
 
   const submit = async (): Promise<void> => {
     if (submitting) return;
@@ -109,15 +127,15 @@ export function BatchTaskDialog({
       role="dialog"
       aria-modal="true"
       onClick={requestClose}
-      className="fixed inset-0 z-[95] flex items-start justify-center overflow-y-auto bg-black/40 p-3 py-6 backdrop-blur-sm animate-fade-in sm:items-center sm:p-4"
+      className="fixed inset-0 z-[95] flex items-start justify-center overflow-y-auto bg-black/35 p-3 py-6 backdrop-blur-sm animate-fade-in sm:items-center sm:p-4"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-xl overflow-hidden rounded-2xl border border-border bg-card shadow-xl"
+        className="w-full max-w-xl overflow-hidden rounded-lg border border-[#DCDDDD] bg-white shadow-[0_16px_48px_rgba(17,24,39,0.16)] dark:border-white/10 dark:bg-card"
       >
-        <header className="flex items-center justify-between border-b border-border px-5 py-3">
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <Layers className="h-4 w-4 text-primary" />
+        <header className="flex items-center justify-between border-b border-[#DCDDDD]/80 px-5 py-3 dark:border-white/10">
+          <div className="flex items-center gap-2 text-sm font-semibold text-[#2F2F2F] dark:text-foreground">
+            <Layers className="h-4 w-4 text-[#EA1F59]" />
             新建批量任务
           </div>
           <button
@@ -125,7 +143,7 @@ export function BatchTaskDialog({
             onClick={requestClose}
             disabled={submitting}
             aria-label="关闭"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
           >
             <X className="h-4 w-4" />
           </button>
@@ -142,16 +160,26 @@ export function BatchTaskDialog({
               disabled={submitting}
               onChange={(e) => setName(e.target.value)}
               placeholder="例如：10 个竞品最新动态"
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground/70 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+              className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
             />
           </div>
           <div>
-            <label className="mb-1 flex items-center justify-between text-xs font-medium text-foreground/80">
-              <span>任务列表（每行一项）</span>
+            <div className="mb-2 flex items-start justify-between gap-3">
+              <div>
+                <label className="block text-xs font-medium text-foreground/80">
+                  任务步骤
+                </label>
+                <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                  一个卡片就是一个独立任务。每张卡里写清目标、输入信息和执行步骤。
+                </p>
+              </div>
               <span
-                className={
-                  parsedPrompts.overLimit ? 'text-primary' : 'text-muted-foreground'
-                }
+                className={cn(
+                  'shrink-0 rounded-md border px-2 py-1 text-[11px]',
+                  parsedPrompts.overLimit
+                    ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
+                    : 'border-[#DCDDDD] bg-white text-muted-foreground dark:border-white/10 dark:bg-card',
+                )}
               >
                 {batchPromptCountCopy({
                   promptCount: prompts.length,
@@ -160,32 +188,71 @@ export function BatchTaskDialog({
                   overLimit: parsedPrompts.overLimit,
                 })}
               </span>
-            </label>
-            <textarea
-              ref={textareaRef}
-              value={pasteText}
-              disabled={submitting}
-              onChange={(e) => setPasteText(e.target.value)}
-              rows={8}
-              placeholder={[
-                '帮我查一下 Anthropic 最新动态',
-                '帮我查一下 OpenAI 最新动态',
-                '帮我查一下 Google DeepMind 最新动态',
-              ].join('\n')}
-              className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 font-mono text-sm placeholder:text-muted-foreground/70 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-            />
+            </div>
+            <div className="space-y-3">
+              {items.map((item, index) => (
+                <div
+                  key={index}
+                  className="rounded-md border border-[#DCDDDD] bg-white p-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85"
+                >
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-md bg-[#EA1F59] text-[11px] font-semibold text-white">
+                        {index + 1}
+                      </span>
+                      <span className="text-xs font-medium text-[#2F2F2F] dark:text-foreground">
+                        任务 {index + 1}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeItem(index)}
+                      disabled={submitting || items.length === 1}
+                      aria-label={`删除任务 ${index + 1}`}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:pointer-events-none disabled:opacity-40"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <textarea
+                    ref={(node) => {
+                      textareaRefs.current[index] = node;
+                    }}
+                    value={item}
+                    disabled={submitting}
+                    onChange={(e) => updateItem(index, e.target.value)}
+                    rows={4}
+                    placeholder={[
+                      '目标：帮我查一下 OpenAI 最新动态',
+                      '步骤：1. 搜近期新闻 2. 找官方来源 3. 总结成三条',
+                      '输出：给出链接和简短判断',
+                    ].join('\n')}
+                    className="w-full resize-y rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm leading-6 placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
+                  />
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={addItem}
+              disabled={submitting || items.length >= MAX_ITEMS}
+              className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-3 text-xs font-medium text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 disabled:pointer-events-none disabled:opacity-50 dark:border-white/10 dark:bg-card dark:text-foreground dark:hover:bg-white/10"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              添加一个任务
+            </button>
           </div>
           <p className="text-[11px] text-muted-foreground">
             批量任务会按你的套餐并发执行：免费 1 个、基础 3 个、专业 5 个。
             每一项都是一个独立的任务，部分失败不会影响其他任务。
           </p>
         </div>
-        <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-border bg-muted/30 px-5 py-3">
+        <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-[#DCDDDD]/80 bg-white px-5 py-3 dark:border-white/10 dark:bg-card">
           <button
             type="button"
             onClick={requestClose}
             disabled={submitting}
-            className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
           >
             取消
           </button>
@@ -193,7 +260,7 @@ export function BatchTaskDialog({
             type="button"
             onClick={() => void submit()}
             disabled={submitDisabled}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90 disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 rounded-md bg-[#EA1F59] px-3 py-1.5 text-sm font-medium text-white shadow-[0_4px_12px_rgba(234,31,89,0.16)] transition hover:bg-[#EA1F59]/90 disabled:opacity-60"
           >
             {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {batchCreateButtonLabel(submitting)}

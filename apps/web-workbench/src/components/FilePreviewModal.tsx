@@ -147,16 +147,16 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal
       onClick={onClose}
     >
       <div
-        className="flex h-[min(90vh,820px)] w-[min(92vw,960px)] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl"
+        className="flex h-[min(90vh,820px)] w-[min(92vw,960px)] flex-col overflow-hidden rounded-lg border border-[#DCDDDD] bg-white shadow-[0_16px_48px_rgba(17,24,39,0.16)] dark:border-white/10 dark:bg-card"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5">
+        <header className="flex items-center justify-between gap-3 border-b border-[#DCDDDD]/80 px-4 py-2.5 dark:border-white/10">
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium text-foreground" title={payload.filename}>
               {payload.filename}
@@ -171,7 +171,7 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
             disabled={downloading}
             aria-label="下载到本地"
             title="下载到本地"
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-[12px] text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[12px] text-muted-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
           >
             {downloading ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -184,18 +184,18 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
             type="button"
             onClick={onClose}
             aria-label="关闭预览"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
           >
             <X className="h-4 w-4" />
           </button>
         </header>
-        <div className="relative flex flex-1 items-center justify-center overflow-auto bg-muted/30">
+        <div className="relative flex flex-1 items-center justify-center overflow-auto bg-[#EFEFEF]/45 dark:bg-background/40">
           {loading && (
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           )}
           {!loading && errorMessage && (
             <div className="flex flex-col items-center gap-2 px-6 text-center text-sm text-muted-foreground">
-              <ExternalLink className="h-8 w-8 text-muted-foreground/40" />
+              <ExternalLink className="h-8 w-8 text-[#EA1F59]" />
               <div className="font-medium text-foreground/85">无法加载预览</div>
               <div className="text-xs">{errorMessage}</div>
             </div>
@@ -215,7 +215,7 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
             />
           )}
           {!loading && !errorMessage && textBody !== null && (
-            <pre className="m-0 max-h-full w-full overflow-auto whitespace-pre-wrap break-words bg-background px-6 py-4 font-mono text-[12px] text-foreground/90">
+            <pre className="m-0 max-h-full w-full overflow-auto whitespace-pre-wrap break-words bg-white px-6 py-4 font-mono text-[12px] text-[#2F2F2F] dark:bg-card dark:text-foreground">
               {textBody}
             </pre>
           )}
@@ -225,7 +225,7 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
             textBody === null &&
             kind === 'download' && (
               <div className="flex flex-col items-center gap-2 px-6 text-center text-sm text-muted-foreground">
-                <FileText className="h-8 w-8 text-muted-foreground/40" />
+                <FileText className="h-8 w-8 text-[#595757]" />
                 <div className="font-medium text-foreground/85">
                   无法预览此文件类型
                 </div>
@@ -233,7 +233,7 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
                   type="button"
                   onClick={() => void handleDownload()}
                   disabled={downloading}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-[12px] text-foreground transition-colors hover:border-foreground/30 hover:bg-foreground/[0.04]"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[12px] text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
                 >
                   {downloading ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />

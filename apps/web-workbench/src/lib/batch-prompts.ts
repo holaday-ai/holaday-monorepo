@@ -9,10 +9,14 @@ export function parseBatchPrompts(
   text: string,
   maxItems: number,
 ): ParsedBatchPrompts {
-  const raw = text
-    .split('\n')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  return parseBatchPromptItems(text.split('\n'), maxItems);
+}
+
+export function parseBatchPromptItems(
+  items: readonly string[],
+  maxItems: number,
+): ParsedBatchPrompts {
+  const raw = items.map((s) => s.trim()).filter((s) => s.length > 0);
   const seen = new Set<string>();
   const prompts: string[] = [];
   let duplicateCount = 0;

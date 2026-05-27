@@ -91,14 +91,14 @@ export function UserMenu({
         aria-label={compact ? `用户菜单：${displayName || email || ''}` : undefined}
         title={compact ? displayName || email || '用户' : undefined}
         className={cn(
-          'flex items-center rounded-md transition-colors hover:bg-foreground/5',
+          'flex items-center rounded-md transition-colors hover:bg-[#EFEFEF]/70 dark:hover:bg-white/10',
           compact
             ? 'h-10 w-10 justify-center'
             : 'w-full gap-3 px-2 py-1.5 text-left',
-          open && 'bg-foreground/5',
+          open && 'bg-[#EFEFEF]/70 dark:bg-white/10',
         )}
       >
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-pink-400 to-pink-600 text-sm font-semibold text-white">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[#EA1F59] text-sm font-semibold text-white shadow-[0_4px_12px_rgba(234,31,89,0.16)]">
           {initial}
         </div>
         {!compact && (
@@ -112,16 +112,16 @@ export function UserMenu({
         <div
           role="menu"
           className={cn(
-            'absolute bottom-full z-50 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg animate-fade-in',
+            'absolute bottom-full z-50 rounded-lg border border-[#DCDDDD] bg-white p-1 text-foreground shadow-[0_16px_48px_rgba(17,24,39,0.16)] animate-fade-in dark:border-white/10 dark:bg-card',
             compact ? 'left-full mb-0 ml-2 min-w-[220px]' : 'left-0 right-0 mb-2',
           )}
         >
           {email && (
-            <div className="truncate border-b border-border px-3 py-2 text-[11px] text-muted-foreground">
+            <div className="truncate border-b border-[#DCDDDD]/80 px-3 py-2 text-[11px] text-muted-foreground dark:border-white/10">
               {email}
             </div>
           )}
-          <div className="border-b border-border py-1">
+          <div className="border-b border-[#DCDDDD]/80 py-1 dark:border-white/10">
             <MenuItem icon={<UserIcon className="h-3.5 w-3.5" />} onClick={() => go('/profile')}>
               个人资料
             </MenuItem>
@@ -148,7 +148,7 @@ export function UserMenu({
             外观
           </div>
           <ThemeSwitcher mode={mode} onChange={setMode} />
-          <div className="mt-1 border-t border-border pt-1">
+          <div className="mt-1 border-t border-[#DCDDDD]/80 pt-1 dark:border-white/10">
             {onClearFailedTasks && failedTaskCount > 0 && (
               <MenuItem
                 icon={<Trash2 className="h-3.5 w-3.5" />}
@@ -196,7 +196,7 @@ function ThemeSwitcher({
   onChange(m: ThemeMode): void;
 }): JSX.Element {
   return (
-    <div className="grid grid-cols-3 gap-1 rounded-md bg-muted p-0.5">
+    <div className="grid grid-cols-3 gap-1 rounded-md bg-[#EFEFEF]/70 p-0.5 dark:bg-white/10">
       <ThemeOption active={mode === 'light'} onClick={() => onChange('light')} label="浅色">
         <Sun className="h-3.5 w-3.5" />
       </ThemeOption>
@@ -230,8 +230,8 @@ function ThemeOption({
       className={cn(
         'flex flex-col items-center justify-center gap-0.5 rounded px-1 py-1.5 text-[10px] transition-colors',
         active
-          ? 'bg-background text-foreground shadow-sm'
-          : 'text-muted-foreground hover:text-foreground',
+          ? 'bg-white text-foreground shadow-[0_1px_3px_rgba(17,24,39,0.08)] dark:bg-card'
+          : 'text-muted-foreground hover:bg-white/55 hover:text-foreground dark:hover:bg-white/10',
       )}
     >
       {children}
@@ -259,8 +259,8 @@ function MenuItem({
       className={cn(
         'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
         destructive
-          ? 'text-red-600 hover:bg-red-500/10 dark:text-red-400'
-          : 'text-foreground hover:bg-foreground/5',
+          ? 'text-[#EA1F59] hover:bg-[#EA1F59]/10'
+          : 'text-foreground hover:bg-[#EFEFEF]/70 dark:hover:bg-white/10',
       )}
     >
       <span className="opacity-80">{icon}</span>
