@@ -116,6 +116,25 @@ export function batchProgressPercent({
   return Math.min(100, Math.max(0, Math.round((finished / safeTotal) * 100)));
 }
 
+export function batchRemainingCount({
+  total,
+  done,
+  failed,
+  cancelled,
+}: {
+  readonly total: number;
+  readonly done: number;
+  readonly failed: number;
+  readonly cancelled?: number | null;
+}): number {
+  const safeTotal = safeBatchCount(total);
+  const finished =
+    safeBatchCount(done) +
+    safeBatchCount(failed) +
+    safeBatchCount(cancelled ?? 0);
+  return Math.max(0, safeTotal - finished);
+}
+
 export function batchErrorMessage(err: unknown, fallback = '请稍后重试'): string {
   if (err instanceof Error && err.message.trim()) return err.message;
   if (typeof err === 'string' && err.trim()) return err;

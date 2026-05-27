@@ -4,6 +4,7 @@ import {
   batchErrorMessage,
   batchListSummary,
   batchProgressPercent,
+  batchRemainingCount,
   batchStatusCopy,
   normalizeBatchDetail,
   normalizeBatchRows,
@@ -62,6 +63,21 @@ describe('batch page state helpers', () => {
     expect(batchProgressPercent({ total: 10, done: -1, failed: -1, cancelled: -1 })).toBe(0);
     expect(
       batchProgressPercent({
+        total: Number.NaN,
+        done: Number.POSITIVE_INFINITY,
+        failed: 1,
+        cancelled: 1,
+      }),
+    ).toBe(0);
+  });
+
+  it('calculates remaining batch work defensively', () => {
+    expect(batchRemainingCount({ total: 10, done: 4, failed: 1, cancelled: 1 })).toBe(4);
+    expect(batchRemainingCount({ total: 10, done: 99, failed: 0, cancelled: 0 })).toBe(0);
+    expect(batchRemainingCount({ total: 0, done: 1, failed: 1, cancelled: 1 })).toBe(0);
+    expect(batchRemainingCount({ total: 10, done: -1, failed: -1, cancelled: -1 })).toBe(10);
+    expect(
+      batchRemainingCount({
         total: Number.NaN,
         done: Number.POSITIVE_INFINITY,
         failed: 1,

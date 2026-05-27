@@ -26,6 +26,7 @@ import {
   type NormalizedBatchDetail,
   type NormalizedBatchRow,
   batchProgressPercent,
+  batchRemainingCount,
   batchStatusCopy,
   safeBatchCount,
 } from '@/lib/batch-page-state';
@@ -410,6 +411,12 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
     failed: detailFailed,
     cancelled: detailCancelled,
   });
+  const detailRemaining = batchRemainingCount({
+    total: detailTotal ?? 0,
+    done: detailDone,
+    failed: detailFailed,
+    cancelled: detailCancelled,
+  });
 
   const canCancel = detail.status === 'pending' || detail.status === 'running';
 
@@ -462,9 +469,18 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
             supportBody="批量任务详情加载失败，请协助排查。"
           />
         )}
-        <div className="mb-2 text-xs text-muted-foreground">
-          {detailDone} / {detailTotal ?? 0} 完成
-          {batchUnsuccessfulCopy(detailFailed, detailCancelled)}
+        <div className="mb-4 grid gap-2 sm:grid-cols-4">
+          <BatchMetric label="成功" value={detailDone} tone="success" />
+          <BatchMetric label="失败" value={detailFailed} tone="danger" />
+          <BatchMetric label="取消" value={detailCancelled} tone="neutral" />
+          <BatchMetric label="剩余" value={detailRemaining} tone="pending" />
+        </div>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>
+            {finishedCount} / {detailTotal ?? 0} 已处理
+            {batchUnsuccessfulCopy(detailFailed, detailCancelled)}
+          </span>
+          <span className="font-mono text-[#595757]">{pct}%</span>
         </div>
         <div className="h-2 w-full overflow-hidden rounded-full bg-[#EFEFEF]">
           <div
@@ -653,6 +669,32 @@ function ItemStatusIcon({ status }: { status: string }): JSX.Element {
     return <Loader2 className="h-4 w-4 animate-spin text-[#EA1F59]" />;
   }
   return <div className="h-4 w-4 rounded-full border border-[#DCDDDD]" />;
+}
+
+function BatchMetric({
+  label,
+  value,
+  tone,
+}: {
+  readonly label: string;
+  readonly value: number;
+  readonly tone: 'success' | 'danger' | 'neutral' | 'pending';
+}): JSX.Element {
+  const toneClass = {
+    success: 'border-[#42C0EF]/35 bg-[rgba(66,192,239,0.10)] text-[#1688AA]',
+    danger: 'border-[#EA1F59]/30 bg-[rgba(234,31,89,0.08)] text-[#EA1F59]',
+    neutral: 'border-[#DCDDDD] bg-[#EFEFEF]/50 text-[#595757]',
+    pending: 'border-[#FFC910]/45 bg-[rgba(255,201,16,0.12)] text-[#8A6A00]',
+  }[tone];
+
+  return (
+    <div
+      className={`flex min-h-16 items-center justify-between rounded-[8px] border px-3 py-2 ${toneClass}`}
+    >
+      <span className="text-[12px] font-medium text-[#595757]">{label}</span>
+      <span className="font-mono text-lg font-semibold tabular-nums">{safeBatchCount(value)}</span>
+    </div>
+  );
 }
 
 function fmtDate(input: string | Date | null | undefined): string {
