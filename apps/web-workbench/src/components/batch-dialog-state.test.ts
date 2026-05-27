@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  batchActiveIndexAfterRemove,
   batchCreateButtonLabel,
   batchCreateDisabled,
   batchPromptCountCopy,
@@ -35,5 +36,20 @@ describe('batch dialog state helpers', () => {
   it('names the busy submit state', () => {
     expect(batchCreateButtonLabel(false)).toBe('创建并开始');
     expect(batchCreateButtonLabel(true)).toBe('创建中…');
+  });
+
+  it('keeps the guided task card focused after removing cards', () => {
+    expect(
+      batchActiveIndexAfterRemove({ activeIndex: 0, removedIndex: 0, itemCount: 1 }),
+    ).toBe(0);
+    expect(
+      batchActiveIndexAfterRemove({ activeIndex: 2, removedIndex: 2, itemCount: 4 }),
+    ).toBe(1);
+    expect(
+      batchActiveIndexAfterRemove({ activeIndex: 3, removedIndex: 1, itemCount: 4 }),
+    ).toBe(2);
+    expect(
+      batchActiveIndexAfterRemove({ activeIndex: 0, removedIndex: 3, itemCount: 4 }),
+    ).toBe(0);
   });
 });

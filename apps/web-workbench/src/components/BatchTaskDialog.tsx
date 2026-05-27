@@ -1,6 +1,7 @@
-import { Layers, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { ChevronDown, Layers, Loader2, Plus, Trash2, X } from 'lucide-react';
 import * as React from 'react';
 import {
+  batchActiveIndexAfterRemove,
   batchCreateButtonLabel,
   batchCreateDisabled,
   batchPromptCountCopy,
@@ -52,6 +53,7 @@ export function BatchTaskDialog({
   const [items, setItems] = React.useState<BatchTaskDraft[]>([
     { ...EMPTY_BATCH_TASK_DRAFT },
   ]);
+  const [activeIndex, setActiveIndex] = React.useState(0);
   const [submitting, setSubmitting] = React.useState(false);
   const goalRefs = React.useRef<Array<HTMLInputElement | null>>([]);
 
@@ -63,6 +65,7 @@ export function BatchTaskDialog({
         ? initialPrompts.map(batchTaskDraftFromPrompt)
         : [{ ...EMPTY_BATCH_TASK_DRAFT }],
     );
+    setActiveIndex(0);
     setSubmitting(false);
     const id = requestAnimationFrame(() => goalRefs.current[0]?.focus());
     return () => cancelAnimationFrame(id);
@@ -110,6 +113,7 @@ export function BatchTaskDialog({
     if (items.length >= MAX_ITEMS || submitting) return;
     const nextIndex = items.length;
     setItems((prev) => [...prev, { ...EMPTY_BATCH_TASK_DRAFT }]);
+    setActiveIndex(nextIndex);
     requestAnimationFrame(() => goalRefs.current[nextIndex]?.focus());
   };
 
@@ -119,13 +123,21 @@ export function BatchTaskDialog({
       const next = prev.filter((_, idx) => idx !== index);
       return next.length > 0 ? next : [{ ...EMPTY_BATCH_TASK_DRAFT }];
     });
+    setActiveIndex((current) => {
+      return batchActiveIndexAfterRemove({
+        activeIndex: current,
+        removedIndex: index,
+        itemCount: items.length,
+      });
+    });
   };
 
   const submit = async (): Promise<void> => {
     if (submitting) return;
     if (invalidGoalIndex != null) {
       toast.show(`请先填写任务 ${invalidGoalIndex + 1} 的目标`, 'error');
-      goalRefs.current[invalidGoalIndex]?.focus();
+      setActiveIndex(invalidGoalIndex);
+      requestAnimationFrame(() => goalRefs.current[invalidGoalIndex]?.focus());
       return;
     }
     if (prompts.length === 0) {
@@ -220,94 +232,117 @@ export function BatchTaskDialog({
               </span>
             </div>
             <div className="space-y-3">
-              {items.map((item, index) => (
-                <div
-                  key={index}
-                  className={cn(
-                    'rounded-[8px] border bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] dark:bg-card/85',
-                    batchTaskDraftMissingGoal(item)
-                      ? 'border-[#EA1F59]/40'
-                      : 'border-[#DCDDDD] dark:border-white/10',
-                  )}
-                >
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-5 w-5 items-center justify-center rounded-md bg-[#EA1F59] text-[11px] font-semibold text-white">
-                        {index + 1}
-                      </span>
-                      <span className="text-xs font-medium text-[#2F2F2F] dark:text-foreground">
-                        任务 {index + 1}
-                      </span>
-                      <TaskDraftProgressPill draft={item} />
+              {items.map((item, index) => {
+                const isActive = activeIndex === index;
+                const missingGoal = batchTaskDraftMissingGoal(item);
+                return (
+                  <div
+                    key={index}
+                    className={cn(
+                      'rounded-[8px] border bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-colors dark:bg-card/85',
+                      missingGoal
+                        ? 'border-[#EA1F59]/40'
+                        : isActive
+                          ? 'border-[#EA1F59]/25'
+                          : 'border-[#DCDDDD] dark:border-white/10',
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setActiveIndex(index)}
+                        disabled={submitting}
+                        aria-expanded={isActive}
+                        className="min-w-0 flex-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/15 disabled:pointer-events-none"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[#EA1F59] text-[11px] font-semibold text-white">
+                            {index + 1}
+                          </span>
+                          <span className="truncate text-xs font-medium text-[#2F2F2F] dark:text-foreground">
+                            任务 {index + 1}
+                          </span>
+                          <TaskDraftProgressPill draft={item} />
+                          <ChevronDown
+                            className={cn(
+                              'ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform',
+                              isActive ? 'rotate-180' : 'rotate-0',
+                            )}
+                          />
+                        </div>
+                        {!isActive && <TaskDraftSummary draft={item} />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeItem(index)}
+                        disabled={submitting || items.length === 1}
+                        aria-label={`删除任务 ${index + 1}`}
+                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:pointer-events-none disabled:opacity-40"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => removeItem(index)}
-                      disabled={submitting || items.length === 1}
-                      aria-label={`删除任务 ${index + 1}`}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:pointer-events-none disabled:opacity-40"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    {isActive && (
+                      <div className="mt-3 grid gap-2">
+                        <label className="grid gap-1">
+                          <span className="text-[11px] font-medium text-[#595757]">
+                            目标
+                          </span>
+                          <input
+                            ref={(node) => {
+                              goalRefs.current[index] = node;
+                            }}
+                            value={item.goal}
+                            disabled={submitting}
+                            onChange={(e) => updateItem(index, 'goal', e.target.value)}
+                            placeholder="例如：查 OpenAI 最新动态"
+                            className={cn(
+                              'w-full rounded-md border bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:bg-card',
+                              missingGoal
+                                ? 'border-[#EA1F59]/45'
+                                : 'border-[#DCDDDD] dark:border-white/10',
+                            )}
+                          />
+                          {missingGoal && (
+                            <span className="text-[11px] leading-4 text-[#EA1F59]">
+                              这张任务卡已经填写了步骤或输出，请补充目标。
+                            </span>
+                          )}
+                        </label>
+                        <label className="grid gap-1">
+                          <span className="text-[11px] font-medium text-[#595757]">
+                            步骤
+                          </span>
+                          <textarea
+                            value={item.steps}
+                            disabled={submitting}
+                            onChange={(e) => updateItem(index, 'steps', e.target.value)}
+                            rows={3}
+                            placeholder={[
+                              '1. 搜近期新闻',
+                              '2. 找官方来源',
+                              '3. 总结成三条',
+                            ].join('\n')}
+                            className="w-full resize-y rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm leading-6 placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
+                          />
+                        </label>
+                        <label className="grid gap-1">
+                          <span className="text-[11px] font-medium text-[#595757]">
+                            输出要求
+                          </span>
+                          <input
+                            value={item.output}
+                            disabled={submitting}
+                            onChange={(e) => updateItem(index, 'output', e.target.value)}
+                            placeholder="例如：给出链接、三条摘要和判断"
+                            className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
+                          />
+                        </label>
+                      </div>
+                    )}
                   </div>
-                  <div className="grid gap-2">
-                    <label className="grid gap-1">
-                      <span className="text-[11px] font-medium text-[#595757]">
-                        目标
-                      </span>
-                      <input
-                        ref={(node) => {
-                          goalRefs.current[index] = node;
-                        }}
-                        value={item.goal}
-                        disabled={submitting}
-                        onChange={(e) => updateItem(index, 'goal', e.target.value)}
-                        placeholder="例如：查 OpenAI 最新动态"
-                        className={cn(
-                          'w-full rounded-md border bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:bg-card',
-                          batchTaskDraftMissingGoal(item)
-                            ? 'border-[#EA1F59]/45'
-                            : 'border-[#DCDDDD] dark:border-white/10',
-                        )}
-                      />
-                      {batchTaskDraftMissingGoal(item) && (
-                        <span className="text-[11px] leading-4 text-[#EA1F59]">
-                          这张任务卡已经填写了步骤或输出，请补充目标。
-                        </span>
-                      )}
-                    </label>
-                    <label className="grid gap-1">
-                      <span className="text-[11px] font-medium text-[#595757]">
-                        步骤
-                      </span>
-                      <textarea
-                        value={item.steps}
-                        disabled={submitting}
-                        onChange={(e) => updateItem(index, 'steps', e.target.value)}
-                        rows={3}
-                        placeholder={[
-                          '1. 搜近期新闻',
-                          '2. 找官方来源',
-                          '3. 总结成三条',
-                        ].join('\n')}
-                        className="w-full resize-y rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm leading-6 placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
-                      />
-                    </label>
-                    <label className="grid gap-1">
-                      <span className="text-[11px] font-medium text-[#595757]">
-                        输出要求
-                      </span>
-                      <input
-                        value={item.output}
-                        disabled={submitting}
-                        onChange={(e) => updateItem(index, 'output', e.target.value)}
-                        placeholder="例如：给出链接、三条摘要和判断"
-                        className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
-                      />
-                    </label>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <button
               type="button"
@@ -373,5 +408,31 @@ function TaskDraftProgressPill({ draft }: { draft: BatchTaskDraft }): JSX.Elemen
             ? `${progress.count}/3`
             : '未填写'}
     </span>
+  );
+}
+
+function TaskDraftSummary({ draft }: { draft: BatchTaskDraft }): JSX.Element {
+  const title = draft.goal.trim() || '还没有目标';
+  const details = [
+    draft.steps.trim() ? '已写步骤' : null,
+    draft.output.trim() ? '有输出要求' : null,
+  ].filter(Boolean);
+
+  return (
+    <div className="mt-2 min-w-0 pl-7">
+      <p
+        className={cn(
+          'truncate text-xs',
+          draft.goal.trim()
+            ? 'text-[#2F2F2F] dark:text-foreground'
+            : 'text-muted-foreground',
+        )}
+      >
+        {title}
+      </p>
+      <p className="mt-1 truncate text-[11px] text-muted-foreground">
+        {details.length > 0 ? details.join(' · ') : '点击展开后填写目标、步骤和输出。'}
+      </p>
+    </div>
   );
 }

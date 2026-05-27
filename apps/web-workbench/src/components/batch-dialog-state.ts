@@ -30,3 +30,19 @@ export function batchPromptCountCopy({
   if (overLimit) parts.push(`超过上限 ${maxItems} 项`);
   return parts.join(' · ');
 }
+
+export function batchActiveIndexAfterRemove({
+  activeIndex,
+  removedIndex,
+  itemCount,
+}: {
+  readonly activeIndex: number;
+  readonly removedIndex: number;
+  readonly itemCount: number;
+}): number {
+  if (itemCount <= 1) return 0;
+  const nextLastIndex = itemCount - 2;
+  if (activeIndex === removedIndex) return Math.max(0, removedIndex - 1);
+  if (activeIndex > removedIndex) return activeIndex - 1;
+  return Math.min(activeIndex, nextLastIndex);
+}
