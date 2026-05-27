@@ -97,6 +97,15 @@ export function PlanPage(): JSX.Element {
     );
   }, [refreshUser]);
 
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.location.hash !== '#addons') return;
+    const id = requestAnimationFrame(() => {
+      document.getElementById('addons')?.scrollIntoView({ block: 'start' });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [currentPlan, paymentOpts?.paypal, paymentOpts?.paypalClientId]);
+
   const isFirstMonthEligible = currentPlan === 'free';
 
   const handlePaymentSuccess = React.useCallback(
@@ -437,7 +446,7 @@ export function PlanPage(): JSX.Element {
       {(currentPlan === 'basic' || currentPlan === 'pro') &&
         paymentOpts?.paypal &&
         paymentOpts.paypalClientId && (
-          <div className="mt-12">
+          <div id="addons" className="mt-12 scroll-mt-6">
             <div className="mb-4 text-center">
               <h3 className="text-lg font-semibold tracking-tight">
                 {zh ? '加量包' : 'Add-on packs'}

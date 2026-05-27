@@ -26,6 +26,7 @@ import {
   type ComposerSubmitResult,
   shouldClearComposerAfterSubmit,
 } from '@/components/composer-submit';
+import { quotaExhaustedCopy } from '@/lib/quota-exhausted-copy';
 import { isUploadError, uploadFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
 
@@ -1013,46 +1014,51 @@ function QuotaExhaustedCard({
   plan: string;
   navigate: (path: string) => void;
 }): JSX.Element {
-  const isFree = plan === 'free';
-  const isPro = plan === 'pro';
-  const headline = isFree ? '今日额度已用完' : '本月额度已用完';
-  const subline = isFree
-    ? '免费版每天 3 次任务，明天再来或升级基础版立即解锁'
-    : '购买加量包当月立即生效，或升级套餐拿更高月度额度';
+  const copy = quotaExhaustedCopy(plan);
   return (
     <div className="mx-auto w-full max-w-3xl px-6 pb-6">
-      <div className="rounded-lg border border-[#FFC910]/55 bg-white px-5 py-4 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#FFC910]/35 dark:bg-card/90">
-        <div className="flex items-start gap-3">
-          <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[#FFC910]/20 text-[#57479C]">
+      <div className="rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-5 py-4 shadow-[0_4px_18px_rgba(15,23,42,0.055)] [border-left-width:3px] dark:border-white/10 dark:border-l-[#EA1F59] dark:bg-card/90">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[#FFC910]/35 bg-[#FFC910]/15 text-[#57479C]">
             <Sparkles className="h-3.5 w-3.5" />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-foreground">
-              {headline}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-sm font-semibold text-foreground">
+                {copy.headline}
+              </div>
+              <span className="rounded-[8px] border border-[#EFEFEF] bg-[#FAFAFA] px-2 py-0.5 text-[11px] font-medium text-[#595757]">
+                {copy.badge}
+              </span>
             </div>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {subline}
+            <p className="mt-1 max-w-xl text-xs leading-5 text-[#595757]">
+              {copy.subline}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
-              {!isFree && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => navigate('/plan')}
-                  className="gap-1.5 border-[#DCDDDD] bg-white hover:bg-[#EFEFEF]/50"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  购买加量包
-                </Button>
-              )}
-              {!isPro && (
-                <Button
-                  size="sm"
-                  onClick={() => navigate('/plan')}
-                  className="bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90"
-                >
-                  {isFree ? '升级到基础版' : '升级到专业版'}
-                </Button>
+              {copy.actions.map((action) =>
+                action.primary ? (
+                  <Button
+                    key={action.kind}
+                    size="sm"
+                    onClick={() => navigate(action.path)}
+                    className="bg-[#EA1F59] text-white hover:bg-[#D91B51]"
+                  >
+                    {action.label}
+                  </Button>
+                ) : (
+                  <Button
+                    key={action.kind}
+                    size="sm"
+                    variant="outline"
+                    onClick={() => navigate(action.path)}
+                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 hover:text-[#EA1F59]"
+                  >
+                    {action.kind === 'addon' && (
+                      <Plus className="mr-1.5 h-3.5 w-3.5" />
+                    )}
+                    {action.label}
+                  </Button>
+                )
               )}
             </div>
           </div>

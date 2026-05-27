@@ -1,10 +1,10 @@
-import type { CnProvider } from '@/components/CnPaymentDialog';
+export type CnPaymentProvider = 'wechat' | 'alipay';
 
-export function cnPaymentProviderLabel(provider: CnProvider): string {
+export function cnPaymentProviderLabel(provider: CnPaymentProvider): string {
   return provider === 'wechat' ? '微信支付' : '支付宝';
 }
 
-export function cnPaymentProviderMark(provider: CnProvider): string {
+export function cnPaymentProviderMark(provider: CnPaymentProvider): string {
   return provider === 'wechat' ? '微' : '支';
 }
 
