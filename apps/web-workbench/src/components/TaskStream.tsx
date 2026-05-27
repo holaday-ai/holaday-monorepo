@@ -98,6 +98,9 @@ interface Props {
 const EMPTY_STEPS: UiStep[] = [];
 const EMPTY_REPLIES: Array<{ at: number; text: string }> = [];
 const PLAYED_TERMINAL_REVEAL_TASK_IDS = new Set<string>();
+const TRUST_SURFACE =
+  'rounded-lg border border-[#DCDDDD] bg-white/95 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85';
+const TRUST_DIVIDER = 'border-[#DCDDDD]/80 dark:border-white/10';
 
 function hasPausedTerminalResult(task: UiTask): boolean {
   return task.status === 'paused' && Boolean(task.resultText);
@@ -462,7 +465,7 @@ function AgentBlock({
          *  no-op — only the supplementary controls (copy button,
          *  suggestion chips) light up when resultText lands. */}
         {!task.resultText && (progressMessage || streamingText) && (
-            <div className="rounded-xl border border-border bg-card px-5 py-4 text-foreground shadow-sm dark:bg-card/80">
+            <div className={cn(TRUST_SURFACE, 'px-5 py-4 text-foreground')}>
               {progressMessage && !streamingText && (
                 <div className="text-xs text-muted-foreground">
                   <span className="inline-block animate-pulse">●</span>{' '}
@@ -595,25 +598,25 @@ function VerificationBanner({
   return (
     <div
       className={cn(
-        'rounded-xl border px-4 py-3 text-sm shadow-sm',
+        'rounded-lg border px-4 py-3 text-sm shadow-[0_1px_3px_rgba(17,24,39,0.05)]',
         isDanger
-          ? 'border-red-200/70 bg-red-50/80 text-red-900 dark:border-red-500/40 dark:bg-red-950/60 dark:text-red-100'
-          : 'border-amber-200/70 bg-amber-50/80 text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/60 dark:text-amber-100',
+          ? 'border-[#EA1F59]/35 bg-white text-[#595757] dark:border-[#EA1F59]/35 dark:bg-card/85 dark:text-foreground'
+          : 'border-[#FFC910]/60 bg-white text-[#595757] dark:border-[#FFC910]/35 dark:bg-card/85 dark:text-foreground',
       )}
     >
       <div className="flex items-start gap-2.5">
         {isDanger ? (
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-300" />
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" />
         ) : (
-          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" />
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-[#FFC910]" />
         )}
         <div className="min-w-0 flex-1">
           <div
             className={cn(
               'text-[11px] font-semibold uppercase tracking-wide',
               isDanger
-                ? 'text-red-700 dark:text-red-300'
-                : 'text-amber-700 dark:text-amber-300',
+                ? 'text-[#EA1F59]'
+                : 'text-[#57479C]',
             )}
           >
             {copy.eyebrow}
@@ -694,35 +697,35 @@ function AwaitingUserBanner({
   // question text in clarification mode only.
   const showAgentQuestion = kind === 'clarification' && wait.question;
   return (
-    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-[0_1px_2px_rgba(0,0,0,0.03)] dark:border-amber-900/50 dark:bg-amber-950/30">
+    <div className="rounded-lg border border-[#FFC910]/55 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#FFC910]/35 dark:bg-card/85">
       <div className="flex items-start gap-2.5">
-        <Icon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
+        <Icon className="mt-0.5 h-4 w-4 shrink-0 text-[#57479C]" />
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[#57479C]">
             {meta.title}
           </div>
-          <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-amber-950 dark:text-amber-100">
+          <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
             {showAgentQuestion ? wait.question : meta.body}
           </p>
           {showAgentQuestion && (
-            <p className="mt-2 text-[11px] text-amber-700/80 dark:text-amber-500/80">
+            <p className="mt-2 text-[11px] text-muted-foreground">
               在下方输入框回答，任务会继续。
             </p>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
             {taskTickCount > 0 && (
-              <span className="rounded-md border border-amber-300/60 bg-amber-100/60 px-2 py-0.5 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+              <span className="rounded-md border border-[#FFC910]/55 bg-[#FFC910]/10 px-2 py-0.5 text-[#595757] dark:border-[#FFC910]/35 dark:text-foreground">
                 已完成 {taskTickCount} 步
               </span>
             )}
-            <span className="text-amber-700/70 dark:text-amber-500/70">
+            <span className="text-muted-foreground">
               {meta.continueHint}
             </span>
             <button
               type="button"
               onClick={() => void handleCancel()}
               disabled={cancelling}
-              className="ml-auto inline-flex h-7 items-center gap-1 rounded-md border border-amber-300/60 bg-transparent px-2.5 text-amber-800 transition-colors hover:bg-amber-100/60 disabled:opacity-60 dark:border-amber-500/40 dark:text-amber-200 dark:hover:bg-amber-500/10"
+              className="ml-auto inline-flex h-7 items-center gap-1 rounded-md border border-[#DCDDDD] bg-transparent px-2.5 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:opacity-60 dark:border-white/10 dark:text-foreground dark:hover:bg-white/10"
             >
               {cancelling ? '正在取消…' : '取消任务'}
             </button>
@@ -791,8 +794,8 @@ function CurrentUrlChip({ url }: { url: string }): JSX.Element | null {
   }
   const label = friendlyHost(host);
   return (
-    <div className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground">
-      <Globe className="h-3 w-3 shrink-0 text-blue-500" />
+    <div className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-[#DCDDDD] bg-white/80 px-2.5 py-1 text-[11px] text-muted-foreground dark:border-white/10 dark:bg-white/5">
+      <Globe className="h-3 w-3 shrink-0 text-[#42C0EF]" />
       <span className="truncate text-foreground/80">
         当前页：<span className="font-medium">{label}</span>
       </span>
@@ -814,7 +817,7 @@ function WebSearchLine({ event }: { event: UiWebSearchEvent }): JSX.Element {
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-start gap-2 text-sm leading-relaxed text-muted-foreground">
-        <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-500" />
+        <Search className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#42C0EF]" />
         <span className="min-w-0 flex-1">
           正在联网搜索 <span className="text-foreground">"{event.query}"</span>
         </span>
@@ -865,7 +868,7 @@ function LiveStatus({
     <div
       className={cn(
         'flex items-center gap-2 text-[13px] leading-5',
-        red ? 'text-red-600' : 'text-muted-foreground',
+        red ? 'text-[#EA1F59]' : 'text-muted-foreground',
       )}
     >
       {red ? (
@@ -953,7 +956,7 @@ function HumanLineList({ lines }: { lines: HumanLine[] }): JSX.Element {
           <span
             className={cn(
               'min-w-0 flex-1',
-              line.status === 'failed' ? 'text-red-600' : 'text-foreground',
+              line.status === 'failed' ? 'text-[#EA1F59]' : 'text-foreground',
               line.status === 'cancelled' && 'text-muted-foreground',
               line.status === 'running' && 'text-foreground',
             )}
@@ -978,7 +981,7 @@ function LineBadge({
   }
   if (status === 'failed') {
     return (
-      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-500" aria-hidden />
+      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#EA1F59]" aria-hidden />
     );
   }
   if (status === 'cancelled') {
@@ -992,7 +995,7 @@ function LineBadge({
   return (
     <Check
       aria-hidden
-      className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-500"
+      className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#42C0EF]"
       strokeWidth={3}
       aria-label={glyph}
     />
@@ -1071,16 +1074,16 @@ function CaptchaWaitBanner({ wait }: { wait: UiCaptchaWait }): JSX.Element {
   return (
     <div
       role="alert"
-      className="flex animate-fade-in items-start gap-3 rounded-xl border border-amber-300 bg-amber-50/80 px-4 py-3 dark:border-amber-500/40 dark:bg-amber-500/10"
+      className="flex animate-fade-in items-start gap-3 rounded-lg border border-[#FFC910]/55 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#FFC910]/35 dark:bg-card/85"
     >
-      <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 animate-pulse-dot text-amber-600" />
+      <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 animate-pulse-dot text-[#57479C]" />
       <div className="min-w-0 flex-1 text-sm">
-        <div className="font-semibold text-amber-900">目标网站需要人工验证</div>
-        <div className="mt-1 text-xs text-amber-900/80">{wait.message}</div>
-        <div className="mt-1 text-xs text-amber-900/80">
+        <div className="font-semibold text-foreground">目标网站需要人工验证</div>
+        <div className="mt-1 text-xs text-muted-foreground">{wait.message}</div>
+        <div className="mt-1 text-xs text-muted-foreground">
           请在右侧 Chrome 窗口中完成验证，HOLA DAY 将自动继续。
         </div>
-        <div className="mt-2 text-[11px] font-medium text-amber-900/70">
+        <div className="mt-2 text-[11px] font-medium text-[#57479C]">
           自动恢复窗口剩余：{remainingSec}s
         </div>
       </div>
@@ -1097,12 +1100,12 @@ function ExecutorFallbackBanner({
     return (
       <div
         role="alert"
-        className="flex animate-fade-in items-start gap-3 rounded-xl border border-red-300 bg-red-50/70 px-4 py-3 dark:border-red-500/40 dark:bg-red-500/10"
+        className="flex animate-fade-in items-start gap-3 rounded-lg border border-[#EA1F59]/35 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#EA1F59]/35 dark:bg-card/85"
       >
-        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-[#EA1F59]" />
         <div className="min-w-0 flex-1 text-sm">
-          <div className="font-semibold text-red-900">反爬保护触发，但扩展未连接</div>
-          <div className="mt-1 text-xs text-red-900/80">
+          <div className="font-semibold text-foreground">反爬保护触发，但扩展未连接</div>
+          <div className="mt-1 text-xs text-muted-foreground">
             HOLA DAY 想切到 Chrome 扩展继续任务，但没有检测到在线的扩展客户端。请安装并打开
             HOLA DAY 扩展后重试。
           </div>
@@ -1111,11 +1114,11 @@ function ExecutorFallbackBanner({
     );
   }
   return (
-    <div className="flex animate-fade-in items-start gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 dark:border-primary/40 dark:bg-primary/15">
-      <Puzzle className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+    <div className="flex animate-fade-in items-start gap-3 rounded-lg border border-[#42C0EF]/40 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#42C0EF]/35 dark:bg-card/85">
+      <Puzzle className="mt-0.5 h-5 w-5 shrink-0 text-[#42C0EF]" />
       <div className="min-w-0 flex-1 text-sm">
-        <div className="font-semibold text-primary">已切换到浏览器扩展模式执行</div>
-        <div className="mt-1 text-xs text-primary/80">
+        <div className="font-semibold text-foreground">已切换到浏览器扩展模式执行</div>
+        <div className="mt-1 text-xs text-muted-foreground">
           连续检测到反爬拦截，HOLA DAY 切到 Chrome 扩展继续任务，后续步骤通过扩展内的 CDP 驱动
           执行。
         </div>
@@ -1140,14 +1143,14 @@ function DegradeBanner({ event }: { event: UiDegradeEvent }): JSX.Element {
   const message =
     DEGRADE_LEVEL_COPY[event.level] ?? '正在尝试替代方案…';
   return (
-    <div className="flex animate-fade-in items-start gap-3 rounded-xl border border-pink-300 bg-pink-50/70 px-4 py-3 dark:border-pink-500/40 dark:bg-pink-500/10">
-      <Puzzle className="mt-0.5 h-5 w-5 shrink-0 text-pink-600" />
+    <div className="flex animate-fade-in items-start gap-3 rounded-lg border border-[#EA1F59]/35 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#EA1F59]/35 dark:bg-card/85">
+      <Puzzle className="mt-0.5 h-5 w-5 shrink-0 text-[#EA1F59]" />
       <div className="min-w-0 flex-1 text-sm">
-        <div className="font-medium text-pink-900 dark:text-pink-100">
+        <div className="font-medium text-foreground">
           {message}
         </div>
         {!event.ok && (
-          <div className="mt-1 text-xs text-pink-900/80 dark:text-pink-100/80">
+          <div className="mt-1 text-xs text-muted-foreground">
             上一次尝试未生效，继续切换方式。
           </div>
         )}
@@ -1235,17 +1238,17 @@ function EmptyTerminalCard({
   return (
     <div
       className={cn(
-        'rounded-xl border px-4 py-3 text-sm',
+        'rounded-lg border px-4 py-3 text-sm shadow-[0_1px_3px_rgba(17,24,39,0.05)]',
         cancelled
-          ? 'border-border bg-muted/30 text-muted-foreground'
+          ? 'border-[#DCDDDD] bg-[#EFEFEF]/35 text-muted-foreground dark:border-white/10 dark:bg-white/5'
           : partial
-            ? 'border-amber-200 bg-amber-50/80 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100'
+            ? 'border-[#FFC910]/55 bg-white text-[#595757] dark:border-[#FFC910]/35 dark:bg-card/85 dark:text-foreground'
           : failed
-            ? 'border-red-200 bg-red-50/70 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200'
-            : 'border-border bg-card text-muted-foreground',
+            ? 'border-[#EA1F59]/35 bg-white text-[#595757] dark:border-[#EA1F59]/35 dark:bg-card/85 dark:text-foreground'
+            : 'border-[#DCDDDD] bg-white text-muted-foreground dark:border-white/10 dark:bg-card/85',
       )}
     >
-      <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-foreground/70">
+      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground/70">
         {copy.title}
       </div>
       <div>{copy.body}</div>
@@ -1254,10 +1257,10 @@ function EmptyTerminalCard({
           type="button"
           onClick={() => void handleRetry()}
           className={cn(
-            'mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border bg-white/60 px-2.5 text-[11px] font-medium transition-colors hover:bg-white',
+            'mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border bg-white/70 px-2.5 text-[11px] font-medium transition-colors hover:bg-[#EFEFEF]/50 dark:bg-transparent dark:hover:bg-white/10',
             partial
-              ? 'border-amber-300/70 text-amber-900 dark:border-amber-400/40 dark:bg-amber-400/10 dark:text-amber-100 dark:hover:bg-amber-400/15'
-              : 'border-red-300/70 text-red-800 dark:border-red-400/40 dark:bg-red-400/10 dark:text-red-100 dark:hover:bg-red-400/15',
+              ? 'border-[#FFC910]/60 text-[#57479C] dark:border-[#FFC910]/35 dark:text-foreground'
+              : 'border-[#EA1F59]/40 text-[#EA1F59] dark:border-[#EA1F59]/35',
           )}
         >
           <RotateCcw className="h-3 w-3" />
@@ -1321,8 +1324,8 @@ function FollowUpChips({
   onPick(intent: string): void;
 }): JSX.Element {
   return (
-    <div className="mt-4 flex flex-wrap gap-2 border-t border-border/40 pt-3">
-      <div className="basis-full text-[11px] font-medium tracking-wider text-muted-foreground">
+    <div className="mt-4 flex flex-wrap gap-2 border-t border-[#DCDDDD]/70 pt-3 dark:border-white/10">
+      <div className="basis-full text-[11px] font-medium tracking-wide text-muted-foreground">
         后续操作
       </div>
       {actions.map((a, i) => (
@@ -1330,7 +1333,7 @@ function FollowUpChips({
           key={`${i}-${a.slice(0, 12)}`}
           type="button"
           onClick={() => onPick(a)}
-          className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary transition hover:bg-primary/20 dark:border-primary/40 dark:bg-primary/15 dark:text-primary-foreground dark:hover:bg-primary/25"
+          className="inline-flex items-center gap-1.5 rounded-full border border-[#EA1F59]/25 bg-[#EA1F59]/10 px-3 py-1 text-xs font-medium text-[#EA1F59] transition hover:border-[#EA1F59]/40 hover:bg-[#EA1F59]/15 dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10"
         >
           <span aria-hidden>→</span>
           <span className="max-w-[220px] truncate">{a}</span>
@@ -1367,11 +1370,11 @@ const SOURCE_BADGES: Record<
   },
   '[模型假设]': {
     label: '模型假设',
-    tone: 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200',
+    tone: 'border-[#FFC910]/60 bg-[#FFC910]/10 text-[#595757] dark:border-[#FFC910]/40 dark:bg-[#FFC910]/10 dark:text-foreground',
   },
   '[外部来源]': {
     label: '外部基准',
-    tone: 'border-red-300 bg-red-50 text-red-800 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200',
+    tone: 'border-[#EA1F59]/35 bg-[#EA1F59]/5 text-[#EA1F59] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10',
   },
 };
 
@@ -1498,12 +1501,12 @@ function ScreenshotThumbnailCard({
       disabled={downloadState === 'loading'}
       aria-busy={downloadState === 'loading'}
       className={cn(
-        'group my-2 flex w-full max-w-md flex-col gap-2 overflow-hidden rounded-xl border bg-card p-2 text-left shadow-sm transition-colors',
+        'group my-2 flex w-full max-w-md flex-col gap-2 overflow-hidden rounded-lg border bg-white p-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors dark:bg-card/85',
         downloadState === 'failed'
-          ? 'border-destructive/40 bg-destructive/5'
+          ? 'border-[#EA1F59]/40 bg-[#EA1F59]/5'
           : downloadState === 'loading'
-            ? 'border-primary/40 opacity-80'
-            : 'border-border hover:border-foreground/30 hover:bg-foreground/[0.03]',
+            ? 'border-[#57479C]/40 opacity-85'
+            : 'border-[#DCDDDD] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/35 dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/[0.04]',
       )}
       aria-label={`下载截图 ${payload.filename}`}
     >
@@ -1539,7 +1542,7 @@ function ScreenshotThumbnailCard({
           className={cn(
             'text-[11px]',
             downloadState === 'failed'
-              ? 'text-destructive'
+              ? 'text-[#EA1F59]'
               : 'text-muted-foreground',
           )}
         >
@@ -1556,8 +1559,8 @@ function ScreenshotThumbnailCard({
             className={cn(
               'h-4 w-4 shrink-0 transition-colors',
               downloadState === 'failed'
-                ? 'text-destructive'
-                : 'text-muted-foreground group-hover:text-primary',
+                ? 'text-[#EA1F59]'
+                : 'text-muted-foreground group-hover:text-[#EA1F59]',
             )}
           />
         )}
@@ -1713,8 +1716,8 @@ function TerminalSummary({
   // alert dialog. Failure / cancellation get a small inline alert
   // block at the top of the card; the wrap itself stays calm.
   const tone = {
-    wrap: 'rounded-xl border border-border bg-card px-5 py-4 text-foreground shadow-sm dark:bg-card/80',
-    divider: 'border-border',
+    wrap: cn(TRUST_SURFACE, 'px-5 py-4 text-foreground'),
+    divider: TRUST_DIVIDER,
   };
   const safeCurrentUrl = safeExternalHttpHref(currentUrl);
   const hasRealUrl = safeCurrentUrl !== null;
@@ -1829,9 +1832,9 @@ function TerminalSummary({
           (meaningful.length < 20 || !hasContentChars)
         ) {
           return (
-            <div className="rounded-md border border-amber-300/50 bg-amber-50/70 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+            <div className="rounded-md border border-[#FFC910]/55 bg-[#FFC910]/10 px-3 py-2.5 text-sm text-[#595757] dark:border-[#FFC910]/35 dark:text-foreground">
               <div className="font-medium">结果内容不足</div>
-              <div className="mt-1 text-xs text-amber-900/80 dark:text-amber-200/80">
+              <div className="mt-1 text-xs text-muted-foreground">
                 这次输出几乎没有有效内容。建议重新执行或换一种描述
                 方式（更具体的指令、提供示例数据、缩小范围）。
               </div>
@@ -1840,7 +1843,7 @@ function TerminalSummary({
                   <button
                     type="button"
                     onClick={() => onSuggestionPick(intent)}
-                    className="inline-flex h-7 items-center gap-1.5 rounded-md border border-amber-400/60 bg-amber-100/60 px-2.5 text-[11px] font-medium text-amber-900 transition-colors hover:bg-amber-200/60 dark:border-amber-400/40 dark:bg-amber-400/10 dark:text-amber-100 dark:hover:bg-amber-400/15"
+                    className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#FFC910]/60 bg-white/70 px-2.5 text-[11px] font-medium text-[#57479C] transition-colors hover:bg-white dark:border-[#FFC910]/35 dark:bg-transparent dark:text-foreground dark:hover:bg-white/10"
                   >
                     <RotateCcw className="h-3 w-3" />
                     重新执行
@@ -1852,7 +1855,7 @@ function TerminalSummary({
                     const feedback = displayText.trim() || '(空结果)';
                     void copyTo(feedback, '反馈内容');
                   }}
-                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-amber-400/60 bg-white/40 px-2.5 text-[11px] font-medium text-amber-900 transition-colors hover:bg-white/70 dark:border-amber-400/40 dark:bg-transparent dark:text-amber-100 dark:hover:bg-amber-400/10"
+                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white/60 px-2.5 text-[11px] font-medium text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-white dark:border-white/10 dark:bg-transparent dark:text-foreground dark:hover:bg-white/10"
                 >
                   <Copy className="h-3 w-3" />
                   复制反馈
@@ -1873,8 +1876,8 @@ function TerminalSummary({
           empty/undefined. Rendered for every terminal status: failed
           and cancelled tasks can still leave useful evidence files. */}
       {attachments && attachments.length > 0 && (
-        <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
-          <div className="text-[11px] font-medium tracking-wider text-muted-foreground">
+        <div className={cn('mt-3 flex flex-col gap-2 border-t pt-3', TRUST_DIVIDER)}>
+          <div className="text-[11px] font-medium tracking-wide text-muted-foreground">
             产出文件
           </div>
           {attachments.map((a) => {
@@ -2033,8 +2036,8 @@ function TerminalSummary({
           onSubmit (followUpTarget detection inherits
           replyToTaskId for free parent context). */}
       {suggestions.length > 0 && onSuggestionPick && revealed === displayText && (
-        <div className="mt-4 flex flex-col gap-0.5 border-t border-border/40 pt-3">
-          <div className="mb-1 text-[11px] font-medium tracking-wider text-muted-foreground">
+        <div className="mt-4 flex flex-col gap-0.5 border-t border-[#DCDDDD]/70 pt-3 dark:border-white/10">
+          <div className="mb-1 text-[11px] font-medium tracking-wide text-muted-foreground">
             继续探索
           </div>
           {suggestions.map((s, i) => (
@@ -2061,7 +2064,7 @@ function TerminalSummary({
             <button
               type="button"
               onClick={onContinueInBrowser}
-              className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-card px-3 py-1.5 font-medium text-primary shadow-sm transition hover:bg-primary/10 dark:border-primary/50 dark:hover:bg-primary/15"
+              className="inline-flex items-center gap-1.5 rounded-md border border-[#EA1F59]/35 bg-white px-3 py-1.5 font-medium text-[#EA1F59] shadow-[0_1px_2px_rgba(17,24,39,0.04)] transition hover:bg-[#EA1F59]/10 dark:bg-transparent dark:hover:bg-[#EA1F59]/10"
             >
               <MousePointerClick className="h-3.5 w-3.5" />
               继续接管
@@ -2071,7 +2074,7 @@ function TerminalSummary({
             <button
               type="button"
               onClick={() => setPendingLink(safeCurrentUrl)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 font-medium text-foreground/85 shadow-sm transition hover:border-foreground/30 hover:bg-foreground/[0.04]"
+              className="inline-flex items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-3 py-1.5 font-medium text-foreground/85 shadow-[0_1px_2px_rgba(17,24,39,0.04)] transition hover:border-[#ADADAD] hover:bg-[#EFEFEF]/45 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
             >
               <ExternalLink className="h-3.5 w-3.5" />
               打开最终页面
@@ -2369,7 +2372,7 @@ function makeMarkdownComponents(opts: {
       if (warningPrefixRe.test(first)) {
         const trimmed = first.replace(warningPrefixRe, '');
         return (
-          <div className="my-2 flex gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+          <div className="my-2 flex gap-2 rounded-md border border-[#FFC910]/60 bg-[#FFC910]/10 px-3 py-2 text-[#595757] dark:border-[#FFC910]/40 dark:text-foreground">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
             <p className="my-0 flex-1 text-[13px] leading-relaxed" {...rest}>
               {[trimmed, ...arr.slice(1)]}
@@ -2505,8 +2508,8 @@ function FailureHeaderCard({
       className={cn(
         'mb-3 rounded-md border px-3 py-2 text-sm',
         cancelled
-          ? 'border-border bg-muted/40 text-muted-foreground'
-          : 'border-red-200 bg-red-50/80 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200',
+          ? 'border-[#DCDDDD] bg-[#EFEFEF]/45 text-muted-foreground dark:border-white/10 dark:bg-white/5'
+          : 'border-[#EA1F59]/35 bg-[#EA1F59]/5 text-[#595757] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10 dark:text-foreground',
       )}
       role="alert"
     >
@@ -2522,7 +2525,7 @@ function FailureHeaderCard({
             {showTechnical ? '收起技术信息 ▴' : '查看技术信息 ▾'}
           </button>
           {showTechnical && (
-            <pre className="mt-1.5 whitespace-pre-wrap break-words rounded bg-red-100/60 px-2 py-1.5 text-[11px] font-mono leading-relaxed text-red-900 dark:bg-red-500/10 dark:text-red-200">
+            <pre className="mt-1.5 whitespace-pre-wrap break-words rounded bg-white/70 px-2 py-1.5 text-[11px] font-mono leading-relaxed text-[#595757] dark:bg-white/10 dark:text-foreground">
               {errorText}
             </pre>
           )}

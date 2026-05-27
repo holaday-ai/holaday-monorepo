@@ -62,11 +62,11 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
       <StatusBadge step={step} />
       <div
         className={cn(
-          'min-w-0 flex-1 rounded-xl border px-4 py-3 transition-colors',
+          'min-w-0 flex-1 rounded-lg border px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.04)] transition-colors',
           antiBotHigh
-            ? 'border-amber-300 bg-amber-50/70 dark:border-amber-500/40 dark:bg-amber-500/10'
-            : 'border-border bg-card/80',
-          step.status === 'running' && 'ring-1 ring-primary/40',
+            ? 'border-[#FFC910]/60 bg-[#FFC910]/10 dark:border-[#FFC910]/40 dark:bg-[#FFC910]/10'
+            : 'border-[#DCDDDD] bg-white/90 dark:border-white/10 dark:bg-card/80',
+          step.status === 'running' && 'border-[#EA1F59]/35 ring-1 ring-[#EA1F59]/15',
         )}
       >
         <div className="flex items-baseline justify-between gap-3">
@@ -90,7 +90,7 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
           // default sans stack. The typography overrides keep
           // paragraphs flush with the box and the lists / code spans
           // tight. Links are confirmed before leaving the workbench.
-          <div className="prose prose-sm prose-neutral mt-1.5 max-w-none rounded-md bg-muted px-3 py-2 leading-relaxed text-foreground/80 prose-p:my-0 prose-p:text-xs prose-strong:font-semibold prose-strong:text-foreground prose-code:rounded prose-code:bg-muted-foreground/10 prose-code:px-1 prose-code:text-[11px] dark:prose-invert">
+          <div className="prose prose-sm prose-neutral mt-1.5 max-w-none rounded-md bg-[#EFEFEF]/60 px-3 py-2 leading-relaxed text-foreground/80 prose-p:my-0 prose-p:text-xs prose-strong:font-semibold prose-strong:text-foreground prose-code:rounded prose-code:bg-white/80 prose-code:px-1 prose-code:text-[11px] dark:prose-invert dark:bg-white/5 dark:prose-code:bg-white/10">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={markdownComponents}
@@ -102,7 +102,7 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
         )}
         {step.antiBot && <AntiBotNotice step={step} />}
         {step.status === 'failed' && step.message && !step.antiBot && (
-          <div className="mt-1.5 text-xs text-red-500">{step.message}</div>
+          <div className="mt-1.5 text-xs text-[#EA1F59]">{step.message}</div>
         )}
         <ConfirmDialog
           open={pendingHref !== null}
@@ -155,10 +155,10 @@ function AntiBotNotice({ step }: { step: UiStep }): JSX.Element {
   return (
     <div
       className={cn(
-        'mt-1.5 flex items-start gap-2 rounded-md px-3 py-2 text-xs',
+        'mt-1.5 flex items-start gap-2 rounded-md border px-3 py-2 text-xs',
         signal.confidence === 'high'
-          ? 'bg-amber-100/80 text-amber-900'
-          : 'bg-muted/60 text-muted-foreground',
+          ? 'border-[#FFC910]/55 bg-[#FFC910]/10 text-[#595757] dark:border-[#FFC910]/35 dark:text-foreground'
+          : 'border-[#DCDDDD] bg-[#EFEFEF]/55 text-muted-foreground dark:border-white/10 dark:bg-white/5',
       )}
     >
       <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -178,9 +178,9 @@ function StatusBadge({ step }: { step: UiStep }): JSX.Element {
     <div
       className={cn(
         'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white',
-        step.status === 'running' && 'animate-pulse-dot bg-primary',
-        step.status === 'done' && 'bg-primary',
-        step.status === 'failed' && 'bg-red-500',
+        step.status === 'running' && 'animate-pulse-dot bg-[#EA1F59]',
+        step.status === 'done' && 'bg-[#42C0EF]',
+        step.status === 'failed' && 'bg-[#EA1F59]',
         step.status === 'cancelled' && 'bg-muted-foreground/50 text-background',
       )}
       aria-label={`步骤 ${step.tickIndex + 1} · ${step.status}`}

@@ -67,20 +67,20 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
       disabled={state === 'loading'}
       aria-busy={state === 'loading'}
       className={cn(
-        'my-2 flex w-full max-w-md items-center gap-3 rounded-xl border bg-card px-4 py-3 text-left text-sm shadow-sm transition-colors',
+        'my-2 flex w-full max-w-md items-center gap-3 rounded-lg border bg-white px-4 py-3 text-left text-sm shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors dark:bg-card/85',
         state === 'failed'
-          ? 'border-destructive/40 bg-destructive/5'
+          ? 'border-[#EA1F59]/40 bg-[#EA1F59]/5'
           : state === 'loading'
-            ? 'border-primary/40 opacity-80'
-            : 'border-border hover:border-foreground/30 hover:bg-foreground/[0.03]',
+            ? 'border-[#57479C]/40 opacity-85'
+            : 'border-[#DCDDDD] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/35 dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/[0.04]',
       )}
     >
       <span
         className={cn(
           'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md',
           state === 'failed'
-            ? 'bg-destructive/10 text-destructive'
-            : 'bg-foreground/[0.06] text-foreground',
+            ? 'bg-[#EA1F59]/10 text-[#EA1F59]'
+            : 'bg-[#EFEFEF] text-[#595757] dark:bg-white/10 dark:text-foreground',
         )}
       >
         <FileTypeIcon filename={payload.filename} />
@@ -92,7 +92,7 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
         <div
           className={cn(
             'text-[11px]',
-            state === 'failed' ? 'text-destructive' : 'text-muted-foreground',
+            state === 'failed' ? 'text-[#EA1F59]' : 'text-muted-foreground',
           )}
         >
           {state === 'loading'
@@ -108,7 +108,7 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
         <Download
           className={cn(
             'h-4 w-4 shrink-0',
-            state === 'failed' ? 'text-destructive' : 'text-muted-foreground',
+            state === 'failed' ? 'text-[#EA1F59]' : 'text-muted-foreground',
           )}
         />
       )}
