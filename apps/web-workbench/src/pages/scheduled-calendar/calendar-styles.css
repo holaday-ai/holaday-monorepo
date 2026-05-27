@@ -180,9 +180,9 @@
   z-index: 1;
   border: none;
   background-color: transparent;
-  color: var(--hd-text-mid);
+  color: #595757;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   height: 26px;
   padding: 0 14px;
   border-radius: 6px;
@@ -194,20 +194,19 @@
     box-shadow 150ms ease;
 }
 .hd-calendar-toolbar__view-btn[data-active="true"] {
-  /* Force the contrast pair so a stray inherited color rule from
-     a wrapping FC class can't override. WCAG AA: magenta #EA1F59
-     against #ffffff = 5.4:1 (large text passes; normal text
-     passes at this size + 600 weight). */
-  background-color: var(--hd-magenta) !important;
-  color: #ffffff !important;
+  /* Keep active text readable even during FullCalendar view swaps:
+     magenta text on white stays clear if the segmented-control gray
+     is still repainting for a frame. */
+  background-color: #ffffff !important;
+  color: var(--hd-magenta) !important;
   font-weight: 600;
-  /* Soft magenta-tinted shadow so the active pill lifts above
-     the inactive flat gray of the segmented control. */
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  box-shadow:
+    inset 0 0 0 1px rgba(234, 31, 89, 0.28),
+    0 1px 2px rgba(15, 23, 42, 0.06);
 }
 .hd-calendar-toolbar__view-btn:not([data-active="true"]):hover {
-  color: var(--hd-magenta);
-  background-color: rgba(255, 255, 255, 0.72);
+  color: #1f1f1f;
+  background-color: rgba(255, 255, 255, 0.78);
 }
 .dark .hd-calendar-toolbar__view-btn:not([data-active="true"]):hover {
   background-color: rgba(255, 255, 255, 0.04);

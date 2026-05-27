@@ -14,12 +14,14 @@
  * Dismissal: Esc, click outside, or pressing Cancel.
  */
 
-import { Loader2, Plus } from 'lucide-react';
+import { Bell, ChevronDown, ChevronUp, Clock, Loader2, Plus, Repeat2 } from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   quickCreateCanSubmit,
+  quickCreateReminderLabel,
+  quickCreateRepeatLabel,
   quickCreateSubmitLabel,
   quickCreateValidationMessage,
   type QuickCreateRepeatType,
@@ -70,7 +72,7 @@ interface Props {
 }
 
 const POPOVER_WIDTH = 360;
-const POPOVER_HEIGHT_EST = 460;
+const POPOVER_HEIGHT_EST = 560;
 
 export function QuickCreatePopover({
   anchor,
@@ -162,45 +164,55 @@ export function QuickCreatePopover({
     rrule,
     submitting,
   });
+  const customRuleMissing = repeatType === 'custom' && !rrule.trim();
 
   return (
     <div
       ref={rootRef}
       aria-busy={submitting}
       className={cn(
-        'hd-popover-enter hd-quick-create fixed z-[85] max-h-[calc(100vh-1rem)] overflow-y-auto border border-[#DCDDDD] bg-white',
+        'hd-popover-enter hd-quick-create fixed z-[85] max-h-[calc(100vh-1rem)] overflow-y-auto border border-[#DCDDDD] bg-white text-[#1f1f1f]',
         mobile && 'left-2 right-2 bottom-2 mx-auto',
       )}
       style={{
         ...(mobile ? {} : position),
         borderRadius: 8,
-        boxShadow: '0 16px 48px rgba(15,23,42,0.12)',
-        padding: 20,
+        boxShadow: '0 18px 54px rgba(15,23,42,0.14)',
+        padding: 16,
       }}
     >
       <form onSubmit={(e) => void handleSubmit(e)}>
-        <div className="text-xs font-medium text-muted-foreground">
-          {formatLocalDate(date)}
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-medium text-[#595757]">
+              {formatLocalDate(date)}
+            </div>
+            <div className="mt-1 text-sm font-semibold text-[#1f1f1f]">
+              快速创建定时任务
+            </div>
+          </div>
+          <div className="rounded-[8px] border border-[#EFEFEF] bg-[#FAFAFA] px-2.5 py-1 text-[11px] font-medium text-[#595757]">
+            {quickCreateRepeatLabel(repeatType)}
+          </div>
         </div>
-        <input
-          ref={intentRef}
-          type="text"
-          value={intent}
-          onChange={(e) => {
-            setIntent(e.target.value);
-            setSubmitError(null);
-          }}
-          placeholder="描述要做的事情…"
-          className="hd-quick-create__input mt-3 w-full bg-transparent text-base font-medium outline-none"
-          style={{
-            border: 'none',
-            borderBottom: '1px solid #DCDDDD',
-            padding: '6px 0',
-            color: 'inherit',
-          }}
-          maxLength={2000}
-          disabled={submitting}
-        />
+        <div className="rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2.5 focus-within:border-[#EA1F59]/50 focus-within:ring-2 focus-within:ring-[#EA1F59]/10">
+          <label className="text-[11px] font-medium text-[#595757]">
+            任务内容
+          </label>
+          <input
+            ref={intentRef}
+            type="text"
+            value={intent}
+            onChange={(e) => {
+              setIntent(e.target.value);
+              setSubmitError(null);
+            }}
+            placeholder="描述要做的事情…"
+            className="hd-quick-create__input mt-1 w-full bg-transparent text-sm font-medium text-[#1f1f1f] outline-none placeholder:text-[#ADADAD]"
+            maxLength={2000}
+            disabled={submitting}
+          />
+        </div>
         {!showDescription ? (
           <button
             type="button"
@@ -209,7 +221,7 @@ export function QuickCreatePopover({
               setSubmitError(null);
             }}
             disabled={submitting}
-            className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
+            className="mt-2 inline-flex items-center gap-1 rounded-[8px] px-1 py-1 text-xs text-[#595757] hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-55"
           >
             <Plus className="h-3 w-3" />
             添加备注
@@ -220,38 +232,37 @@ export function QuickCreatePopover({
             onChange={(e) => setDescription(e.target.value)}
             placeholder="补充说明…"
             rows={2}
-            className="hd-quick-create__input mt-2 w-full resize-y bg-transparent text-sm outline-none"
-            style={{
-              border: 'none',
-              borderBottom: '1px solid #DCDDDD',
-              padding: '6px 0',
-              minHeight: 48,
-              color: 'inherit',
-            }}
+            className="hd-quick-create__input mt-2 w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none placeholder:text-[#ADADAD] focus:border-[#EA1F59]/50 focus:ring-2 focus:ring-[#EA1F59]/10"
             maxLength={2000}
             disabled={submitting}
           />
         )}
-        <div className="mt-4 flex items-center gap-3">
-          <label className="text-xs text-muted-foreground">时间</label>
-          <input
-            type="time"
-            value={timeStr}
-            onChange={(e) => {
-              setTimeStr(e.target.value);
-              setSubmitError(null);
-            }}
-            className="hd-quick-create__time bg-transparent text-sm outline-none"
-            style={{
-              border: 'none',
-              borderBottom: '1px solid #DCDDDD',
-              padding: '4px 0',
-              color: 'inherit',
-            }}
-            disabled={submitting}
-          />
+        <div className="mt-4 rounded-[8px] border border-[#EFEFEF] bg-[#FAFAFA] p-3">
+          <div className="flex items-center justify-between gap-3">
+            <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#595757]">
+              <Clock className="h-3.5 w-3.5 text-[#57479C]" />
+              执行时间
+            </label>
+            <input
+              type="time"
+              value={timeStr}
+              onChange={(e) => {
+                setTimeStr(e.target.value);
+                setSubmitError(null);
+              }}
+              className="hd-quick-create__time rounded-[8px] border border-[#DCDDDD] bg-white px-2.5 py-1.5 text-sm font-medium text-[#1f1f1f] outline-none focus:border-[#EA1F59]/50 focus:ring-2 focus:ring-[#EA1F59]/10"
+              disabled={submitting}
+            />
+          </div>
+          <div className="mt-2 text-[11px] text-[#595757]">
+            {timeStr} 执行，{quickCreateReminderLabel(reminderMinutes)}
+          </div>
         </div>
-        <div className="mt-4 flex flex-wrap gap-1.5">
+        <div className="mt-4 flex items-center gap-1.5 text-xs font-medium text-[#595757]">
+          <Repeat2 className="h-3.5 w-3.5 text-[#42C0EF]" />
+          重复方式
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-5">
           {REPEAT_PRESETS.map((p) => (
             <button
               type="button"
@@ -259,26 +270,22 @@ export function QuickCreatePopover({
               onClick={() => handleRepeatSelect(p.value)}
               disabled={submitting}
               className={cn(
-                'rounded-full px-3 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                'rounded-[8px] border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
                 repeatType === p.value
-                  ? 'bg-[#EA1F59]/10 text-[#EA1F59]'
-                  : 'text-muted-foreground hover:bg-[#EFEFEF] hover:text-[#595757]',
+                  ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
+                  : 'border-[#EFEFEF] bg-white text-[#595757] hover:border-[#DCDDDD] hover:bg-[#EFEFEF]',
               )}
-              style={
-                repeatType === p.value
-                  ? { backgroundColor: 'rgba(234,31,89,0.10)', color: '#EA1F59' }
-                  : undefined
-              }
             >
               {p.label}
             </button>
           ))}
         </div>
         <div className="mt-3">
-          <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+          <div className="mb-1.5 inline-flex items-center gap-1.5 text-xs font-medium text-[#595757]">
+            <Bell className="h-3.5 w-3.5 text-[#FFC910]" />
             提醒
           </div>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="grid grid-cols-3 gap-1.5">
             {REMINDER_PRESETS.map((p) => (
               <button
                 type="button"
@@ -286,16 +293,11 @@ export function QuickCreatePopover({
                 onClick={() => setReminderMinutes(p.value)}
                 disabled={submitting}
                 className={cn(
-                  'rounded-full px-3 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                  'rounded-[8px] border px-2 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
                   reminderMinutes === p.value
-                    ? 'bg-[#EA1F59]/10 text-[#EA1F59]'
-                    : 'text-muted-foreground hover:bg-[#EFEFEF] hover:text-[#595757]',
+                    ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
+                    : 'border-[#EFEFEF] bg-white text-[#595757] hover:border-[#DCDDDD] hover:bg-[#EFEFEF]',
                 )}
-                style={
-                  reminderMinutes === p.value
-                    ? { backgroundColor: 'rgba(234,31,89,0.10)', color: '#EA1F59' }
-                    : undefined
-                }
               >
                 {p.label}
               </button>
@@ -308,28 +310,39 @@ export function QuickCreatePopover({
               type="button"
               onClick={() => setShowAdvanced((v) => !v)}
               disabled={submitting}
-              className="text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
+              className="inline-flex items-center gap-1 rounded-[8px] px-1 py-1 text-xs font-medium text-[#595757] hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-55"
             >
-              {showAdvanced ? '收起 ▴' : '展开 RRULE 高级 ▾'}
+              {showAdvanced ? (
+                <>
+                  <ChevronUp className="h-3.5 w-3.5" />
+                  收起 RRULE
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-3.5 w-3.5" />
+                  展开 RRULE
+                </>
+              )}
             </button>
             {showAdvanced && (
-              <textarea
-                value={rrule}
-                onChange={(e) => {
-                  setRrule(e.target.value);
-                  setSubmitError(null);
-                }}
-                placeholder={'FREQ=WEEKLY;BYDAY=MO,WE,FR'}
-                rows={2}
-                className="mt-2 w-full bg-transparent font-mono text-xs outline-none"
-                style={{
-                  border: 'none',
-                  borderBottom: '1px solid #DCDDDD',
-                  padding: '6px 0',
-                  color: 'inherit',
-                }}
-                disabled={submitting}
-              />
+              <div className="mt-2">
+                <textarea
+                  value={rrule}
+                  onChange={(e) => {
+                    setRrule(e.target.value);
+                    setSubmitError(null);
+                  }}
+                  placeholder={'FREQ=WEEKLY;BYDAY=MO,WE,FR'}
+                  rows={2}
+                  className="w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 font-mono text-xs outline-none placeholder:text-[#ADADAD] focus:border-[#EA1F59]/50 focus:ring-2 focus:ring-[#EA1F59]/10"
+                  disabled={submitting}
+                />
+                {customRuleMissing && (
+                  <div className="mt-1 text-[11px] text-[#EA1F59]">
+                    填写 RRULE 后才能创建，或切回预设频率。
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}
@@ -352,7 +365,7 @@ export function QuickCreatePopover({
           <Button
             type="submit"
             data-can-create={canCreate ? 'true' : 'false'}
-            disabled={!intent.trim() || submitting}
+            disabled={!canCreate}
             style={{
               backgroundColor: '#EA1F59',
               borderColor: '#EA1F59',
