@@ -6,6 +6,13 @@ import {
   batchPromptCountCopy,
 } from '@/components/batch-dialog-state';
 import { useToast } from '@/components/ui/toast';
+import {
+  batchTaskDraftFromPrompt,
+  batchTaskDraftProgress,
+  composeBatchTaskPrompt,
+  EMPTY_BATCH_TASK_DRAFT,
+  type BatchTaskDraft,
+} from '@/lib/batch-task-draft';
 import { parseBatchPromptItems } from '@/lib/batch-prompts';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
@@ -40,16 +47,22 @@ export function BatchTaskDialog({
 }: Props): JSX.Element | null {
   const toast = useToast();
   const [name, setName] = React.useState('');
-  const [items, setItems] = React.useState<string[]>(['']);
+  const [items, setItems] = React.useState<BatchTaskDraft[]>([
+    { ...EMPTY_BATCH_TASK_DRAFT },
+  ]);
   const [submitting, setSubmitting] = React.useState(false);
-  const textareaRefs = React.useRef<Array<HTMLTextAreaElement | null>>([]);
+  const goalRefs = React.useRef<Array<HTMLInputElement | null>>([]);
 
   React.useEffect(() => {
     if (!open) return;
     setName('');
-    setItems(initialPrompts && initialPrompts.length > 0 ? initialPrompts : ['']);
+    setItems(
+      initialPrompts && initialPrompts.length > 0
+        ? initialPrompts.map(batchTaskDraftFromPrompt)
+        : [{ ...EMPTY_BATCH_TASK_DRAFT }],
+    );
     setSubmitting(false);
-    const id = requestAnimationFrame(() => textareaRefs.current[0]?.focus());
+    const id = requestAnimationFrame(() => goalRefs.current[0]?.focus());
     return () => cancelAnimationFrame(id);
   }, [open, initialPrompts]);
 
@@ -69,7 +82,8 @@ export function BatchTaskDialog({
 
   if (!open) return null;
 
-  const parsedPrompts = parseBatchPromptItems(items, MAX_ITEMS);
+  const composedItems = items.map(composeBatchTaskPrompt);
+  const parsedPrompts = parseBatchPromptItems(composedItems, MAX_ITEMS);
   const prompts = parsedPrompts.prompts;
   const submitDisabled = batchCreateDisabled({
     submitting,
@@ -77,22 +91,28 @@ export function BatchTaskDialog({
     overLimit: parsedPrompts.overLimit,
   });
 
-  const updateItem = (index: number, value: string): void => {
-    setItems((prev) => prev.map((item, idx) => (idx === index ? value : item)));
+  const updateItem = (
+    index: number,
+    field: keyof BatchTaskDraft,
+    value: string,
+  ): void => {
+    setItems((prev) =>
+      prev.map((item, idx) => (idx === index ? { ...item, [field]: value } : item)),
+    );
   };
 
   const addItem = (): void => {
     if (items.length >= MAX_ITEMS || submitting) return;
     const nextIndex = items.length;
-    setItems((prev) => [...prev, '']);
-    requestAnimationFrame(() => textareaRefs.current[nextIndex]?.focus());
+    setItems((prev) => [...prev, { ...EMPTY_BATCH_TASK_DRAFT }]);
+    requestAnimationFrame(() => goalRefs.current[nextIndex]?.focus());
   };
 
   const removeItem = (index: number): void => {
     if (submitting) return;
     setItems((prev) => {
       const next = prev.filter((_, idx) => idx !== index);
-      return next.length > 0 ? next : [''];
+      return next.length > 0 ? next : [{ ...EMPTY_BATCH_TASK_DRAFT }];
     });
   };
 
@@ -131,7 +151,7 @@ export function BatchTaskDialog({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-xl overflow-hidden rounded-lg border border-[#DCDDDD] bg-white shadow-[0_16px_48px_rgba(17,24,39,0.16)] dark:border-white/10 dark:bg-card"
+        className="w-full max-w-2xl overflow-hidden rounded-lg border border-[#DCDDDD] bg-white shadow-[0_16px_48px_rgba(17,24,39,0.16)] dark:border-white/10 dark:bg-card"
       >
         <header className="flex items-center justify-between border-b border-[#DCDDDD]/80 px-5 py-3 dark:border-white/10">
           <div className="flex items-center gap-2 text-sm font-semibold text-[#2F2F2F] dark:text-foreground">
@@ -167,10 +187,10 @@ export function BatchTaskDialog({
             <div className="mb-2 flex items-start justify-between gap-3">
               <div>
                 <label className="block text-xs font-medium text-foreground/80">
-                  任务步骤
+                  任务列表
                 </label>
                 <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                  一个卡片就是一个独立任务。每张卡里写清目标、输入信息和执行步骤。
+                  一个卡片就是一个独立任务。每张卡里写清目标、执行步骤和输出要求。
                 </p>
               </div>
               <span
@@ -193,7 +213,7 @@ export function BatchTaskDialog({
               {items.map((item, index) => (
                 <div
                   key={index}
-                  className="rounded-md border border-[#DCDDDD] bg-white p-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85"
+                  className="rounded-[8px] border border-[#DCDDDD] bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] dark:border-white/10 dark:bg-card/85"
                 >
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
@@ -203,6 +223,7 @@ export function BatchTaskDialog({
                       <span className="text-xs font-medium text-[#2F2F2F] dark:text-foreground">
                         任务 {index + 1}
                       </span>
+                      <TaskDraftProgressPill draft={item} />
                     </div>
                     <button
                       type="button"
@@ -214,21 +235,52 @@ export function BatchTaskDialog({
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
-                  <textarea
-                    ref={(node) => {
-                      textareaRefs.current[index] = node;
-                    }}
-                    value={item}
-                    disabled={submitting}
-                    onChange={(e) => updateItem(index, e.target.value)}
-                    rows={4}
-                    placeholder={[
-                      '目标：帮我查一下 OpenAI 最新动态',
-                      '步骤：1. 搜近期新闻 2. 找官方来源 3. 总结成三条',
-                      '输出：给出链接和简短判断',
-                    ].join('\n')}
-                    className="w-full resize-y rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm leading-6 placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
-                  />
+                  <div className="grid gap-2">
+                    <label className="grid gap-1">
+                      <span className="text-[11px] font-medium text-[#595757]">
+                        目标
+                      </span>
+                      <input
+                        ref={(node) => {
+                          goalRefs.current[index] = node;
+                        }}
+                        value={item.goal}
+                        disabled={submitting}
+                        onChange={(e) => updateItem(index, 'goal', e.target.value)}
+                        placeholder="例如：查 OpenAI 最新动态"
+                        className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
+                      />
+                    </label>
+                    <label className="grid gap-1">
+                      <span className="text-[11px] font-medium text-[#595757]">
+                        步骤
+                      </span>
+                      <textarea
+                        value={item.steps}
+                        disabled={submitting}
+                        onChange={(e) => updateItem(index, 'steps', e.target.value)}
+                        rows={3}
+                        placeholder={[
+                          '1. 搜近期新闻',
+                          '2. 找官方来源',
+                          '3. 总结成三条',
+                        ].join('\n')}
+                        className="w-full resize-y rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm leading-6 placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
+                      />
+                    </label>
+                    <label className="grid gap-1">
+                      <span className="text-[11px] font-medium text-[#595757]">
+                        输出要求
+                      </span>
+                      <input
+                        value={item.output}
+                        disabled={submitting}
+                        onChange={(e) => updateItem(index, 'output', e.target.value)}
+                        placeholder="例如：给出链接、三条摘要和判断"
+                        className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
+                      />
+                    </label>
+                  </div>
                 </div>
               ))}
             </div>
@@ -268,5 +320,24 @@ export function BatchTaskDialog({
         </footer>
       </div>
     </div>
+  );
+}
+
+function TaskDraftProgressPill({ draft }: { draft: BatchTaskDraft }): JSX.Element {
+  const progress = batchTaskDraftProgress(draft);
+  const ready = progress.count === 3;
+  return (
+    <span
+      className={cn(
+        'rounded-full border px-1.5 py-0.5 text-[10px] font-medium',
+        ready
+          ? 'border-[#42C0EF]/35 bg-[#42C0EF]/10 text-[#1688AA]'
+          : progress.count > 0
+            ? 'border-[#FFC910]/55 bg-[#FFC910]/12 text-[#8A6A00]'
+            : 'border-[#DCDDDD] bg-white text-[#595757]',
+      )}
+    >
+      {ready ? '已完整' : progress.count > 0 ? `${progress.count}/3` : '未填写'}
+    </span>
   );
 }
