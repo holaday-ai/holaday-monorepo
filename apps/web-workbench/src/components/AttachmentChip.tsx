@@ -1,5 +1,5 @@
 import { File, FileSpreadsheet, FileText, Image as ImageIcon, Loader2, X } from 'lucide-react';
-import { formatFileSize } from '@/lib/file-size';
+import { attachmentChipCopy } from '@/lib/attachment-chip-copy';
 import { cn } from '@/lib/utils';
 
 export interface DraftAttachment {
@@ -40,6 +40,7 @@ interface Props {
 export function AttachmentChip({ attachment, onRemove }: Props): JSX.Element {
   const isError = attachment.status === 'error';
   const isUploading = attachment.status === 'uploading';
+  const copy = attachmentChipCopy(attachment);
   const hasImagePreview =
     attachment.mimetype.startsWith('image/') &&
     typeof attachment.previewDataUrl === 'string' &&
@@ -47,11 +48,14 @@ export function AttachmentChip({ attachment, onRemove }: Props): JSX.Element {
   return (
     <div
       className={cn(
-        'inline-flex max-w-[260px] items-center gap-1.5 rounded-md border px-2 py-1 text-xs',
+        'inline-flex max-w-full items-center gap-2 rounded-[8px] border bg-white px-2 py-1.5 text-xs shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-colors sm:max-w-[320px]',
         isError
-          ? 'border-red-300/60 bg-red-50/40 text-red-700 dark:border-red-700/40 dark:bg-red-950/20 dark:text-red-400'
-          : 'border-border bg-card',
+          ? 'border-[#EA1F59]/28 bg-[#EA1F59]/[0.04] text-foreground dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10'
+          : isUploading
+            ? 'border-[#42C0EF]/35 text-foreground dark:border-[#42C0EF]/35 dark:bg-white/[0.04]'
+            : 'border-[#DCDDDD] text-foreground dark:border-white/10 dark:bg-white/[0.04]',
       )}
+      title={copy.title}
     >
       {hasImagePreview ? (
         <img
@@ -60,37 +64,54 @@ export function AttachmentChip({ attachment, onRemove }: Props): JSX.Element {
           aria-hidden
           draggable={false}
           className={cn(
-            'h-7 w-7 shrink-0 rounded object-cover',
+            'h-8 w-8 shrink-0 rounded-[7px] border border-[#EFEFEF] object-cover',
             isUploading && 'opacity-60',
+            isError && 'opacity-70',
           )}
         />
       ) : isUploading ? (
-        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
+        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] border border-[#42C0EF]/30 bg-white text-[#1688AA]">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        </span>
       ) : (
-        <FileTypeIcon mimetype={attachment.mimetype} />
-      )}
-      <span className="min-w-0 flex-1 truncate" title={attachment.filename}>
-        {attachment.filename}
-      </span>
-      {!isError && !isUploading && (
-        <span className="shrink-0 text-[10px] text-muted-foreground/80">
-          {formatFileSize(attachment.size)}
+        <span
+          className={cn(
+            'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] border bg-white',
+            isError
+              ? 'border-[#EA1F59]/25 text-[#EA1F59]'
+              : 'border-[#DCDDDD] text-[#595757]',
+          )}
+        >
+          <FileTypeIcon mimetype={attachment.mimetype} />
         </span>
       )}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium text-foreground">
+          {attachment.filename || '未命名附件'}
+        </span>
+        <span
+          className={cn(
+            'block truncate text-[10px] leading-4',
+            isError ? 'text-[#EA1F59]' : 'text-[#595757]',
+          )}
+        >
+          {isUploading ? copy.statusText : copy.detailText}
+        </span>
+      </span>
       <button
         type="button"
         onClick={onRemove}
-        aria-label="移除附件"
-        className="shrink-0 rounded text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+        aria-label={copy.removeLabel}
+        className="shrink-0 rounded-[6px] p-0.5 text-[#ADADAD] transition-colors hover:bg-[#EFEFEF]/70 hover:text-[#595757] dark:hover:bg-white/10"
       >
-        <X className="h-3 w-3" />
+        <X className="h-3.5 w-3.5" />
       </button>
     </div>
   );
 }
 
 function FileTypeIcon({ mimetype }: { mimetype: string }): JSX.Element {
-  const cn = 'h-3 w-3 shrink-0 text-muted-foreground';
+  const cn = 'h-3.5 w-3.5 shrink-0';
   if (mimetype.startsWith('image/')) return <ImageIcon className={cn} />;
   if (mimetype.includes('spreadsheet') || mimetype === 'text/csv') return <FileSpreadsheet className={cn} />;
   if (mimetype === 'application/pdf' || mimetype.startsWith('text/')) return <FileText className={cn} />;

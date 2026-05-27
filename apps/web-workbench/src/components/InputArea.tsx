@@ -387,7 +387,7 @@ export function InputArea({
               : a,
           ),
         );
-        toast.show(msg);
+        toast.show(msg, 'error');
       }
     }
   }
