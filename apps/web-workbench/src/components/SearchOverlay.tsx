@@ -177,37 +177,39 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
       role="dialog"
       aria-modal="true"
       onClick={onClose}
-      className="fixed inset-0 z-[70] flex items-start justify-center bg-black/30 p-4 pt-24 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-[70] flex items-start justify-center bg-black/25 p-4 pt-20 backdrop-blur-sm animate-fade-in sm:pt-24"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg overflow-hidden rounded-xl border border-border bg-popover shadow-xl"
+        className="w-full max-w-lg overflow-hidden rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_18px_60px_rgba(15,23,42,0.18)]"
       >
-        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-          <Search className="h-4 w-4 text-muted-foreground" />
+        <div className="flex items-center gap-2 border-b border-[#EFEFEF] px-3 py-2.5">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] bg-[#EA1F59]/10 text-[#EA1F59]">
+            <Search className="h-4 w-4" />
+          </div>
           <input
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKey}
             placeholder="搜索任务…"
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
           {searching && (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-[#EA1F59]" />
           )}
           <button
             type="button"
             onClick={onClose}
             aria-label="关闭"
-            className="rounded p-0.5 text-muted-foreground hover:bg-foreground/5"
+            className="flex h-7 w-7 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
           >
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
-        <ul className="max-h-[50vh] overflow-y-auto p-1">
+        <ul className="max-h-[52vh] overflow-y-auto p-1.5">
           {statusCopy && filtered.length > 0 && (
-            <li className="mb-1 rounded-md border border-border/60 bg-primary/5 px-3 py-2 text-xs text-primary">
+            <li className="mb-1.5 rounded-[8px] border border-[#EA1F59]/20 bg-[#EA1F59]/5 px-3 py-2 text-xs text-[#EA1F59]">
               <div className="flex items-start gap-2">
                 <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
                 <div className="min-w-0 flex-1">
@@ -220,7 +222,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                   <button
                     type="button"
                     onClick={retrySearch}
-                    className="inline-flex h-6 shrink-0 items-center gap-1 rounded border border-primary/20 px-2 text-[11px] hover:bg-primary/10"
+                    className="inline-flex h-6 shrink-0 items-center gap-1 rounded-[8px] border border-[#EA1F59]/20 px-2 text-[11px] transition-colors hover:bg-[#EA1F59]/10"
                   >
                     <RotateCw className="h-3 w-3" />
                     重试
@@ -231,8 +233,15 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
           )}
           {filtered.length === 0 && (
             <li className="px-4 py-7 text-center">
-              <div className="text-sm font-medium text-foreground/80">
-                {emptyCopy.title}
+              <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-[8px] bg-[#EFEFEF] text-muted-foreground">
+                {searching ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Search className="h-4 w-4" />
+                )}
+              </div>
+              <div className="mt-3 text-sm font-medium text-foreground/80">
+                {searching ? '正在搜索…' : emptyCopy.title}
               </div>
               <div className="mt-1 text-xs text-muted-foreground">
                 {emptyCopy.body}
@@ -243,7 +252,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                   variant="outline"
                   size="sm"
                   onClick={retrySearch}
-                  className="mt-3 h-8"
+                  className="mt-3 h-8 rounded-[8px] border-[#DCDDDD] hover:border-[#EA1F59]/40 hover:text-[#EA1F59]"
                 >
                   <RotateCw className="mr-1.5 h-3.5 w-3.5" />
                   重试搜索
@@ -251,40 +260,84 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
               )}
             </li>
           )}
-          {filtered.map((t, i) => (
-            <li key={t.taskId}>
-              <button
-                type="button"
-                onMouseEnter={() => setActive(i)}
-                onClick={() => {
-                  onPick(t.taskId);
-                  onClose();
-                }}
-                className={cn(
-                  'flex w-full flex-col gap-0.5 rounded-md px-3 py-2 text-left transition-colors',
-                  i === active ? 'bg-foreground/5' : 'hover:bg-foreground/5',
-                )}
-              >
-                <span className="truncate text-sm text-foreground">
-                  {t.title && t.title.trim().length > 0 ? t.title : t.intent}
-                </span>
-                <span className="truncate text-[11px] text-muted-foreground">
-                  {taskStatusLabel(t.status)}
-                </span>
-              </button>
-            </li>
-          ))}
+          {filtered.map((t, i) => {
+            const displayTitle = t.title && t.title.trim().length > 0 ? t.title : t.intent;
+            const secondary = displayTitle === t.intent ? taskStatusLabel(t.status) : t.intent;
+            return (
+              <li key={t.taskId}>
+                <button
+                  type="button"
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => {
+                    onPick(t.taskId);
+                    onClose();
+                  }}
+                  className={cn(
+                    'group flex w-full items-start gap-3 rounded-[8px] border border-transparent px-3 py-2.5 text-left transition-colors',
+                    i === active
+                      ? 'border-[#EA1F59]/20 bg-[#EA1F59]/10 shadow-[inset_3px_0_0_#EA1F59]'
+                      : 'hover:bg-[#EFEFEF]/60',
+                  )}
+                >
+                  <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] bg-[#EFEFEF] text-muted-foreground transition-colors group-hover:text-[#EA1F59]">
+                    <Search className="h-3.5 w-3.5" aria-hidden />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <span className="block truncate text-sm text-foreground">
+                      {displayTitle}
+                    </span>
+                    <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                      {secondary}
+                    </span>
+                  </div>
+                  <SearchStatusBadge status={t.status} />
+                </button>
+              </li>
+            );
+          })}
         </ul>
-        <div className="flex items-center justify-end gap-3 border-t border-border bg-muted/30 px-3 py-1.5 text-[10px] text-muted-foreground">
+        <div className="flex items-center justify-end gap-2 border-t border-[#EFEFEF] bg-[#EFEFEF]/35 px-3 py-2 text-[10px] text-muted-foreground">
           {filtered.length > 0 && (
             <>
-              <span>↑↓ 选择</span>
-              <span>Enter 打开</span>
+              <KeyHint>↑↓ 选择</KeyHint>
+              <KeyHint>Enter 打开</KeyHint>
             </>
           )}
-          <span>Esc 关闭</span>
+          <KeyHint>Esc 关闭</KeyHint>
         </div>
       </div>
     </div>
+  );
+}
+
+function SearchStatusBadge({ status }: { status: string }): JSX.Element {
+  return (
+    <span
+      className={cn(
+        'mt-0.5 hidden shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium sm:inline-flex',
+        searchStatusTone(status),
+      )}
+    >
+      {taskStatusLabel(status)}
+    </span>
+  );
+}
+
+function searchStatusTone(status: string): string {
+  if (status === 'completed') return 'bg-[#42C0EF]/10 text-[#1688AA]';
+  if (status === 'failed') return 'bg-[#EA1F59]/10 text-[#EA1F59]';
+  if (status === 'partial_success') return 'bg-[#FFC910]/20 text-[#8A6A00]';
+  if (status === 'cancelled') return 'bg-[#EFEFEF] text-[#595757]';
+  if (status === 'executing' || status === 'queued' || status === 'awaiting_user') {
+    return 'bg-[#57479C]/10 text-[#57479C]';
+  }
+  return 'bg-[#EFEFEF] text-[#595757]';
+}
+
+function KeyHint({ children }: { children: React.ReactNode }): JSX.Element {
+  return (
+    <span className="rounded-[6px] border border-[#DCDDDD] bg-white px-1.5 py-0.5">
+      {children}
+    </span>
   );
 }

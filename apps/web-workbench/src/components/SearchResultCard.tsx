@@ -47,7 +47,7 @@ export function SearchResultCard({ sources, initialVisible = 6 }: Props): JSX.El
   const hidden = safeSources.length - visible.length;
   return (
     <div className="mt-2 flex flex-col">
-      <div className="divide-y divide-border/40">
+      <div className="overflow-hidden rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.02)]">
         {visible.map(({ source, link }, i) => (
           <SourceRow
             key={`${link.href}-${i}`}
@@ -61,7 +61,7 @@ export function SearchResultCard({ sources, initialVisible = 6 }: Props): JSX.El
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="mt-1.5 inline-flex items-center gap-1 self-start text-xs text-muted-foreground hover:text-foreground"
+          className="mt-1.5 inline-flex items-center gap-1 self-start rounded-[8px] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
         >
           <span aria-hidden className="text-[10px]">▾</span>
           展开 {hidden} 条更多来源
@@ -105,7 +105,7 @@ function SourceRow({
         e.preventDefault();
         onOpen(link.href);
       }}
-      className="group flex items-start gap-2.5 px-1 py-2 transition-colors hover:bg-foreground/[0.03]"
+      className="group flex items-start gap-2.5 border-b border-[#EFEFEF] px-3 py-2.5 transition-colors last:border-b-0 hover:bg-[#EFEFEF]/50"
     >
       <img
         src={faviconUrl}
@@ -113,16 +113,16 @@ function SourceRow({
         width={16}
         height={16}
         loading="lazy"
-        className="mt-0.5 h-4 w-4 shrink-0 rounded-sm"
+        className="mt-0.5 h-4 w-4 shrink-0 rounded-[4px]"
         onError={(e) => {
           (e.currentTarget as HTMLImageElement).style.visibility = 'hidden';
         }}
       />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">{link.domain}</span>
+          <span className="truncate text-xs text-muted-foreground">{link.domain}</span>
         </div>
-        <div className="truncate text-sm font-medium text-foreground group-hover:underline">
+        <div className="truncate text-sm font-medium text-foreground group-hover:text-[#EA1F59]">
           {source.title}
         </div>
         {source.snippet && (
