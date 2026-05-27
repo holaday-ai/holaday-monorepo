@@ -3,6 +3,7 @@ import * as React from 'react';
 import { FullBrandLogo } from '@/components/BrandLogo';
 import { Button } from '@/components/ui/button';
 import { setAccessToken } from '@/lib/auth';
+import { cn } from '@/lib/utils';
 import {
   authErrorMessage,
   isValidChinaPhone,
@@ -21,6 +22,14 @@ interface Props {
 }
 
 type Mode = 'login' | 'register' | 'emailCode' | 'forgot' | 'phone';
+
+const LOGIN_SURFACE =
+  'border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/90';
+const LOGIN_INPUT =
+  'border-[#DCDDDD] bg-white shadow-none placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card';
+const LOGIN_PRIMARY =
+  'bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.16)] hover:bg-[#EA1F59]/90';
+const LOGIN_LINK = 'text-[#EA1F59] underline-offset-2 hover:underline';
 
 /**
  * Login / register / forgot-password card. Modes:
@@ -287,8 +296,8 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
   };
 
   return (
-    <div className="flex h-full items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm space-y-4 rounded-xl border border-border bg-card p-8 shadow-sm">
+    <div className="flex h-full items-center justify-center bg-[#EFEFEF]/45 px-4 py-8 dark:bg-background">
+      <div className={cn('w-full max-w-[400px] space-y-5 rounded-lg p-8', LOGIN_SURFACE)}>
         <div className="space-y-2 text-center">
           <FullBrandLogo className="mx-auto" />
           <div className="text-xs text-muted-foreground">
@@ -301,7 +310,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
         </div>
 
         {(mode === 'login' || mode === 'emailCode' || mode === 'phone') && (
-          <div className="flex gap-1 rounded-md bg-muted/50 p-1 text-xs">
+          <div className="flex gap-1 rounded-lg border border-[#DCDDDD] bg-[#EFEFEF]/55 p-1 text-xs dark:border-white/10 dark:bg-white/5">
             <TabButton active={mode === 'login'} onClick={() => switchMode('login')}>
               密码登录
             </TabButton>
@@ -336,7 +345,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
               </button>
             </div>
             <InlineMessage tone="error">{error}</InlineMessage>
-            <Button type="submit" className="w-full" disabled={pending}>
+            <Button type="submit" className={cn('w-full', LOGIN_PRIMARY)} disabled={pending}>
               {pending ? '登录中…' : '登录'}
             </Button>
           </form>
@@ -358,7 +367,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
               label="确认密码"
             />
             <InlineMessage tone="error">{error}</InlineMessage>
-            <Button type="submit" className="w-full" disabled={pending}>
+            <Button type="submit" className={cn('w-full', LOGIN_PRIMARY)} disabled={pending}>
               {pending ? '注册中…' : '注册并登录'}
             </Button>
           </form>
@@ -377,7 +386,11 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
             />
             <InlineMessage tone="notice">{notice}</InlineMessage>
             <InlineMessage tone="error">{error}</InlineMessage>
-            <Button type="submit" className="w-full" disabled={pending || code.length !== 6}>
+            <Button
+              type="submit"
+              className={cn('w-full', LOGIN_PRIMARY)}
+              disabled={pending || code.length !== 6}
+            >
               {pending ? '验证中…' : '验证并登录'}
             </Button>
           </form>
@@ -396,7 +409,11 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
             />
             <InlineMessage tone="notice">{notice}</InlineMessage>
             <InlineMessage tone="error">{error}</InlineMessage>
-            <Button type="submit" className="w-full" disabled={pending || code.length !== 6}>
+            <Button
+              type="submit"
+              className={cn('w-full', LOGIN_PRIMARY)}
+              disabled={pending || code.length !== 6}
+            >
               {pending ? '验证中…' : '验证并登录'}
             </Button>
           </form>
@@ -427,14 +444,18 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
             />
             <InlineMessage tone="notice">{notice}</InlineMessage>
             <InlineMessage tone="error">{error}</InlineMessage>
-            <Button type="submit" className="w-full" disabled={pending || code.length !== 6}>
+            <Button
+              type="submit"
+              className={cn('w-full', LOGIN_PRIMARY)}
+              disabled={pending || code.length !== 6}
+            >
               {pending ? '重置中…' : '重置密码并登录'}
             </Button>
             <div className="text-center text-xs text-muted-foreground">
               <button
                 type="button"
                 onClick={() => switchMode('login')}
-                className="text-primary underline-offset-2 hover:underline"
+                className={LOGIN_LINK}
               >
                 返回登录
               </button>
@@ -451,10 +472,15 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
         {loginOptions.google && mode !== 'forgot' && (
           <>
             <div className="relative text-center text-[10px] uppercase text-muted-foreground">
-              <span className="relative z-10 bg-card px-2">或</span>
-              <div className="absolute inset-y-1/2 left-0 right-0 border-t border-border" />
+              <span className="relative z-10 bg-white px-2 dark:bg-card">或</span>
+              <div className="absolute inset-y-1/2 left-0 right-0 border-t border-[#DCDDDD] dark:border-white/10" />
             </div>
-            <Button type="button" variant="outline" className="w-full" onClick={handleGoogle}>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full border-[#DCDDDD] bg-white hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+              onClick={handleGoogle}
+            >
               {mode === 'register' ? '使用 Google 注册' : '使用 Google 登录'}
             </Button>
           </>
@@ -467,7 +493,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
               <button
                 type="button"
                 onClick={() => switchMode('login')}
-                className="ml-1 text-primary underline-offset-2 hover:underline"
+                className={cn('ml-1', LOGIN_LINK)}
               >
                 直接登录
               </button>
@@ -478,7 +504,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
               <button
                 type="button"
                 onClick={() => switchMode('register')}
-                className="ml-1 text-primary underline-offset-2 hover:underline"
+                className={cn('ml-1', LOGIN_LINK)}
               >
                 注册
               </button>
@@ -503,7 +529,12 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
-      className={`flex-1 rounded px-2 py-1 font-medium transition ${active ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+      className={cn(
+        'min-w-0 flex-1 rounded-md border px-2 py-1 font-medium transition-colors',
+        active
+          ? 'border-[#DCDDDD] bg-white text-foreground shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card'
+          : 'border-transparent text-muted-foreground hover:bg-white/70 hover:text-foreground dark:hover:bg-white/10',
+      )}
     >
       {children}
     </button>
@@ -522,7 +553,12 @@ function InlineMessage({
     <div
       role={tone === 'error' ? 'alert' : 'status'}
       aria-live={tone === 'error' ? 'assertive' : 'polite'}
-      className={`text-xs ${tone === 'error' ? 'text-destructive' : 'text-blue-700 dark:text-blue-400'}`}
+      className={cn(
+        'rounded-md border px-3 py-2 text-xs',
+        tone === 'error'
+          ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
+          : 'border-[#42C0EF]/35 bg-[#42C0EF]/10 text-[#595757] dark:text-foreground',
+      )}
     >
       {children}
     </div>
@@ -559,14 +595,14 @@ function CodeRow({
           name="one-time-code"
           value={code}
           onChange={(e) => onChange(normaliseCodeInput(e.target.value))}
-          className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className={cn('min-w-0 flex-1 rounded-md px-3 py-2 text-sm', LOGIN_INPUT)}
         />
         <Button
           type="button"
           variant="outline"
           onClick={onSend}
           disabled={pending || cooldown > 0}
-          className="whitespace-nowrap"
+          className="whitespace-nowrap border-[#DCDDDD] bg-white hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
         >
           {cooldown > 0 ? `${cooldown}s` : codeSent ? '重新发送' : '发送验证码'}
         </Button>
@@ -596,7 +632,7 @@ function EmailInput({
         autoFocus={autoFocus}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className={cn('w-full rounded-md px-3 py-2 text-sm', LOGIN_INPUT)}
       />
     </label>
   );
@@ -620,7 +656,7 @@ function PhoneInput({
     <label className="block space-y-1">
       <span className="text-xs font-medium text-muted-foreground">手机号</span>
       <div className="flex">
-        <span className="inline-flex shrink-0 items-center rounded-l-md border border-r-0 border-input bg-muted/40 px-3 text-xs text-muted-foreground">
+        <span className="inline-flex shrink-0 items-center rounded-l-md border border-r-0 border-[#DCDDDD] bg-[#EFEFEF]/60 px-3 text-xs text-muted-foreground dark:border-white/10 dark:bg-white/5">
           +86
         </span>
         <input
@@ -634,7 +670,7 @@ function PhoneInput({
           autoFocus={autoFocus}
           value={value}
           onChange={(e) => onChange(normalisePhoneInput(e.target.value))}
-          className="w-full rounded-r-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className={cn('w-full rounded-r-md px-3 py-2 text-sm', LOGIN_INPUT)}
         />
       </div>
     </label>
@@ -663,7 +699,7 @@ function PasswordInput({
           autoComplete={autoComplete}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full rounded-md border border-input bg-background px-3 py-2 pr-10 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className={cn('w-full rounded-md px-3 py-2 pr-10 text-sm', LOGIN_INPUT)}
         />
         <button
           type="button"
