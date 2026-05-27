@@ -12,6 +12,7 @@ import {
   Globe,
   KeyRound,
   Link2,
+  ListChecks,
   Loader2,
   LogIn,
   MessageCircleQuestion,
@@ -50,6 +51,11 @@ import { formatFileSize } from '@/lib/file-size';
 import { downloadMarkdownFile } from '@/lib/markdown-download';
 import { terminalArtifactFallbackText } from '@/lib/terminal-artifact-copy';
 import { terminalEmptyCopy } from '@/lib/terminal-empty-copy';
+import {
+  stepDetailSummary,
+  stepStatusText,
+  type StepDetailSummary,
+} from '@/lib/step-card-state';
 import { verificationBannerCopy } from '@/lib/verification-banner-copy';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 import { PlanCard } from '@/components/PlanCard';
@@ -189,7 +195,7 @@ export function TaskStream({
   const thinking = thinkingEvent?.summary ?? pickThinking(steps);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 px-6 pb-4 pt-8">
+    <div className="mx-auto max-w-3xl space-y-4 px-6 pb-10 pt-8 sm:pb-6">
       <UserBubble intent={task.intent} />
       {userReplies.map((r) => (
         <UserBubble key={r.at} intent={r.text} />
@@ -354,6 +360,7 @@ function AgentBlock({
     return undefined;
   }, [steps]);
   const latestRunningStatus = steps[steps.length - 1]?.status ?? 'done';
+  const detailSummary = React.useMemo(() => stepDetailSummary(steps), [steps]);
 
   const hasAnyActivity =
     humanLines.length > 0 ||
@@ -555,6 +562,7 @@ function AgentBlock({
           <DetailToggle
             open={detailOpen}
             count={steps.length}
+            summary={detailSummary}
             onToggle={() => setDetailOpen((v) => !v)}
           >
             {terminal && humanLines.length > 0 && (
@@ -977,39 +985,43 @@ function LineBadge({
   glyph: string;
 }): JSX.Element {
   if (status === 'running') {
-    return <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />;
+    return (
+      <span className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#EA1F59]" aria-label={stepStatusText(status)}>
+        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+      </span>
+    );
   }
   if (status === 'failed') {
     return (
-      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#EA1F59]" aria-hidden />
+      <span className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#EA1F59]" aria-label={stepStatusText(status)}>
+        <AlertCircle className="h-3.5 w-3.5" aria-hidden />
+      </span>
     );
   }
   if (status === 'cancelled') {
     return (
-      <CircleSlash
-        className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground"
-        aria-hidden
-      />
+      <span className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-muted-foreground" aria-label={stepStatusText(status)}>
+        <CircleSlash className="h-3.5 w-3.5" aria-hidden />
+      </span>
     );
   }
   return (
-    <Check
-      aria-hidden
-      className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#42C0EF]"
-      strokeWidth={3}
-      aria-label={glyph}
-    />
+    <span className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#42C0EF]" aria-label={`${stepStatusText(status)} · ${glyph}`}>
+      <Check className="h-3.5 w-3.5" strokeWidth={3} aria-hidden />
+    </span>
   );
 }
 
 function DetailToggle({
   open,
   count,
+  summary,
   onToggle,
   children,
 }: {
   open: boolean;
   count: number;
+  summary: StepDetailSummary;
   onToggle(): void;
   children: React.ReactNode;
 }): JSX.Element {
@@ -1019,18 +1031,44 @@ function DetailToggle({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+        className="group flex w-full items-center justify-between gap-3 rounded-[8px] border border-[#DCDDDD] bg-white/85 px-3 py-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.04)] transition-colors hover:border-[#ADADAD] hover:bg-white dark:border-white/10 dark:bg-card/80 dark:hover:bg-card"
       >
-        {open ? (
-          <ChevronDown className="h-3 w-3" />
-        ) : (
-          <ChevronRight className="h-3 w-3" />
-        )}
-        {open ? '收起详细步骤' : `查看详细步骤（${count} 步）`}
+        <span className="flex min-w-0 items-center gap-2.5">
+          <span
+            className={cn(
+              'flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border',
+              stepDetailToneClass(summary.tone),
+            )}
+          >
+            <ListChecks className="h-3.5 w-3.5" aria-hidden />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-sm font-medium text-foreground">详细步骤</span>
+            <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+              {summary.label}
+            </span>
+          </span>
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#DCDDDD] bg-white px-2.5 py-1 text-[11px] font-medium text-[#595757] transition-colors group-hover:border-[#ADADAD] dark:border-white/10 dark:bg-transparent dark:text-foreground">
+          {open ? (
+            <ChevronDown className="h-3 w-3" />
+          ) : (
+            <ChevronRight className="h-3 w-3" />
+          )}
+          {open ? '收起' : `${count} 步`}
+        </span>
       </button>
       {open && children}
     </div>
   );
+}
+
+function stepDetailToneClass(tone: StepDetailSummary['tone']): string {
+  if (tone === 'failed') return 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]';
+  if (tone === 'running') return 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]';
+  if (tone === 'done') return 'border-[#42C0EF]/45 bg-[#42C0EF]/10 text-[#42C0EF]';
+  if (tone === 'cancelled') return 'border-[#ADADAD]/55 bg-[#EFEFEF]/70 text-[#595757]';
+  return 'border-[#DCDDDD] bg-white text-[#595757]';
 }
 
 function ThinkingBlock({ text }: { text: string }): JSX.Element {

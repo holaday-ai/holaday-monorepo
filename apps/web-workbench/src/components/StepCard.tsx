@@ -7,6 +7,7 @@ import {
   externalLinkConfirmDescription,
   safeExternalHttpHref,
 } from '@/lib/external-link-copy';
+import { stepStatusLabel } from '@/lib/step-card-state';
 import { cn } from '@/lib/utils';
 import type { UiStep } from '@/types/task';
 
@@ -47,7 +48,7 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
       {!isFirst && (
         <span
           aria-hidden
-          className="absolute left-3 top-0 h-3 w-px -translate-x-1/2 bg-border"
+          className="absolute left-3 top-0 h-3 w-px -translate-x-1/2 bg-[#DCDDDD] dark:bg-white/10"
         />
       )}
       {!isLast && (
@@ -55,14 +56,16 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
           aria-hidden
           className={cn(
             'absolute left-3 top-6 bottom-0 w-px -translate-x-1/2',
-            step.status === 'running' ? 'bg-primary/70 animate-pulse-dot' : 'bg-border',
+            step.status === 'running'
+              ? 'animate-pulse-dot bg-[#EA1F59]/45'
+              : 'bg-[#DCDDDD] dark:bg-white/10',
           )}
         />
       )}
       <StatusBadge step={step} />
       <div
         className={cn(
-          'min-w-0 flex-1 rounded-lg border px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.04)] transition-colors',
+          'min-w-0 flex-1 rounded-[8px] border px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.04)] transition-colors',
           antiBotHigh
             ? 'border-[#FFC910]/60 bg-[#FFC910]/10 dark:border-[#FFC910]/40 dark:bg-[#FFC910]/10'
             : 'border-[#DCDDDD] bg-white/90 dark:border-white/10 dark:bg-card/80',
@@ -72,11 +75,11 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
         <div className="flex items-baseline justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             {step.status === 'running' && (
-              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[#EA1F59]" />
             )}
             <div className="truncate text-sm font-medium text-foreground">{title}</div>
           </div>
-          <div className="shrink-0 text-xs text-muted-foreground">
+          <div className="shrink-0 rounded-full border border-[#DCDDDD] bg-white px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground dark:border-white/10 dark:bg-transparent">
             {step.durationMs != null ? formatDuration(step.durationMs) : '…'}
           </div>
         </div>
@@ -90,7 +93,7 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
           // default sans stack. The typography overrides keep
           // paragraphs flush with the box and the lists / code spans
           // tight. Links are confirmed before leaving the workbench.
-          <div className="prose prose-sm prose-neutral mt-1.5 max-w-none rounded-md bg-[#EFEFEF]/60 px-3 py-2 leading-relaxed text-foreground/80 prose-p:my-0 prose-p:text-xs prose-strong:font-semibold prose-strong:text-foreground prose-code:rounded prose-code:bg-white/80 prose-code:px-1 prose-code:text-[11px] dark:prose-invert dark:bg-white/5 dark:prose-code:bg-white/10">
+          <div className="prose prose-sm prose-neutral mt-2 max-w-none rounded-[8px] border border-[#DCDDDD]/70 bg-[#EFEFEF]/45 px-3 py-2 leading-relaxed text-foreground/80 prose-p:my-0 prose-p:text-xs prose-a:text-[#EA1F59] prose-a:decoration-[#EA1F59]/35 prose-strong:font-semibold prose-strong:text-foreground prose-code:rounded prose-code:bg-white/80 prose-code:px-1 prose-code:text-[11px] dark:prose-invert dark:border-white/10 dark:bg-white/5 dark:prose-code:bg-white/10">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={markdownComponents}
@@ -177,13 +180,13 @@ function StatusBadge({ step }: { step: UiStep }): JSX.Element {
   return (
     <div
       className={cn(
-        'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white',
+        'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white shadow-[0_1px_2px_rgba(17,24,39,0.08)]',
         step.status === 'running' && 'animate-pulse-dot bg-[#EA1F59]',
         step.status === 'done' && 'bg-[#42C0EF]',
         step.status === 'failed' && 'bg-[#EA1F59]',
-        step.status === 'cancelled' && 'bg-muted-foreground/50 text-background',
+        step.status === 'cancelled' && 'border border-[#DCDDDD] bg-[#EFEFEF] text-[#595757]',
       )}
-      aria-label={`步骤 ${step.tickIndex + 1} · ${step.status}`}
+      aria-label={stepStatusLabel(step.status, step.tickIndex)}
     >
       {step.status === 'done' ? (
         <Check className="h-3.5 w-3.5" strokeWidth={3} />
