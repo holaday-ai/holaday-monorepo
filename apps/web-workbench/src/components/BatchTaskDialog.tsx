@@ -7,10 +7,12 @@ import {
 } from '@/components/batch-dialog-state';
 import { useToast } from '@/components/ui/toast';
 import {
+  batchTaskDraftMissingGoal,
   batchTaskDraftFromPrompt,
   batchTaskDraftProgress,
   composeBatchTaskPrompt,
   EMPTY_BATCH_TASK_DRAFT,
+  firstBatchTaskDraftMissingGoal,
   type BatchTaskDraft,
 } from '@/lib/batch-task-draft';
 import { parseBatchPromptItems } from '@/lib/batch-prompts';
@@ -82,7 +84,10 @@ export function BatchTaskDialog({
 
   if (!open) return null;
 
-  const composedItems = items.map(composeBatchTaskPrompt);
+  const invalidGoalIndex = firstBatchTaskDraftMissingGoal(items);
+  const composedItems = items
+    .filter((item) => item.goal.trim().length > 0)
+    .map(composeBatchTaskPrompt);
   const parsedPrompts = parseBatchPromptItems(composedItems, MAX_ITEMS);
   const prompts = parsedPrompts.prompts;
   const submitDisabled = batchCreateDisabled({
@@ -118,6 +123,11 @@ export function BatchTaskDialog({
 
   const submit = async (): Promise<void> => {
     if (submitting) return;
+    if (invalidGoalIndex != null) {
+      toast.show(`请先填写任务 ${invalidGoalIndex + 1} 的目标`, 'error');
+      goalRefs.current[invalidGoalIndex]?.focus();
+      return;
+    }
     if (prompts.length === 0) {
       toast.show('请至少输入一项任务', 'error');
       return;
@@ -213,7 +223,12 @@ export function BatchTaskDialog({
               {items.map((item, index) => (
                 <div
                   key={index}
-                  className="rounded-[8px] border border-[#DCDDDD] bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] dark:border-white/10 dark:bg-card/85"
+                  className={cn(
+                    'rounded-[8px] border bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] dark:bg-card/85',
+                    batchTaskDraftMissingGoal(item)
+                      ? 'border-[#EA1F59]/40'
+                      : 'border-[#DCDDDD] dark:border-white/10',
+                  )}
                 >
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
@@ -248,8 +263,18 @@ export function BatchTaskDialog({
                         disabled={submitting}
                         onChange={(e) => updateItem(index, 'goal', e.target.value)}
                         placeholder="例如：查 OpenAI 最新动态"
-                        className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
+                        className={cn(
+                          'w-full rounded-md border bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:bg-card',
+                          batchTaskDraftMissingGoal(item)
+                            ? 'border-[#EA1F59]/45'
+                            : 'border-[#DCDDDD] dark:border-white/10',
+                        )}
                       />
+                      {batchTaskDraftMissingGoal(item) && (
+                        <span className="text-[11px] leading-4 text-[#EA1F59]">
+                          这张任务卡已经填写了步骤或输出，请补充目标。
+                        </span>
+                      )}
                     </label>
                     <label className="grid gap-1">
                       <span className="text-[11px] font-medium text-[#595757]">
@@ -326,18 +351,27 @@ export function BatchTaskDialog({
 function TaskDraftProgressPill({ draft }: { draft: BatchTaskDraft }): JSX.Element {
   const progress = batchTaskDraftProgress(draft);
   const ready = progress.count === 3;
+  const missingGoal = batchTaskDraftMissingGoal(draft);
   return (
     <span
       className={cn(
         'rounded-full border px-1.5 py-0.5 text-[10px] font-medium',
-        ready
+        missingGoal
+          ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
+          : ready
           ? 'border-[#42C0EF]/35 bg-[#42C0EF]/10 text-[#1688AA]'
           : progress.count > 0
             ? 'border-[#FFC910]/55 bg-[#FFC910]/12 text-[#8A6A00]'
             : 'border-[#DCDDDD] bg-white text-[#595757]',
       )}
     >
-      {ready ? '已完整' : progress.count > 0 ? `${progress.count}/3` : '未填写'}
+      {missingGoal
+        ? '缺目标'
+        : ready
+          ? '已完整'
+          : progress.count > 0
+            ? `${progress.count}/3`
+            : '未填写'}
     </span>
   );
 }

@@ -14,6 +14,7 @@ export interface BatchTaskDraftProgress {
   readonly hasGoal: boolean;
   readonly hasSteps: boolean;
   readonly hasOutput: boolean;
+  readonly missingGoal: boolean;
   readonly count: number;
 }
 
@@ -42,6 +43,25 @@ export function composeBatchTaskPrompt(draft: BatchTaskDraft): string {
   return parts.join('\n');
 }
 
+export function batchTaskDraftHasContent(draft: BatchTaskDraft): boolean {
+  return (
+    draft.goal.trim().length > 0 ||
+    draft.steps.trim().length > 0 ||
+    draft.output.trim().length > 0
+  );
+}
+
+export function batchTaskDraftMissingGoal(draft: BatchTaskDraft): boolean {
+  return draft.goal.trim().length === 0 && batchTaskDraftHasContent(draft);
+}
+
+export function firstBatchTaskDraftMissingGoal(
+  drafts: readonly BatchTaskDraft[],
+): number | null {
+  const index = drafts.findIndex(batchTaskDraftMissingGoal);
+  return index >= 0 ? index : null;
+}
+
 export function batchTaskDraftProgress(draft: BatchTaskDraft): BatchTaskDraftProgress {
   const hasGoal = draft.goal.trim().length > 0;
   const hasSteps = draft.steps.trim().length > 0;
@@ -50,6 +70,7 @@ export function batchTaskDraftProgress(draft: BatchTaskDraft): BatchTaskDraftPro
     hasGoal,
     hasSteps,
     hasOutput,
+    missingGoal: !hasGoal && (hasSteps || hasOutput),
     count: [hasGoal, hasSteps, hasOutput].filter(Boolean).length,
   };
 }

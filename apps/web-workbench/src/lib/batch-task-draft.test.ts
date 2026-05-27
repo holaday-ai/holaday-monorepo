@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  batchTaskDraftHasContent,
   batchTaskDraftFromPrompt,
+  batchTaskDraftMissingGoal,
   batchTaskDraftProgress,
   composeBatchTaskPrompt,
+  firstBatchTaskDraftMissingGoal,
 } from './batch-task-draft.js';
 
 describe('batch task draft helpers', () => {
@@ -45,7 +48,21 @@ describe('batch task draft helpers', () => {
       hasGoal: true,
       hasSteps: false,
       hasOutput: true,
+      missingGoal: false,
       count: 2,
     });
+  });
+
+  it('detects partially filled cards without a goal', () => {
+    const drafts = [
+      { goal: '', steps: '', output: '' },
+      { goal: '', steps: '1. 先搜索', output: '' },
+      { goal: '查价格', steps: '', output: '' },
+    ];
+
+    expect(batchTaskDraftHasContent(drafts[0])).toBe(false);
+    expect(batchTaskDraftMissingGoal(drafts[1])).toBe(true);
+    expect(firstBatchTaskDraftMissingGoal(drafts)).toBe(1);
+    expect(batchTaskDraftProgress(drafts[1]).missingGoal).toBe(true);
   });
 });
