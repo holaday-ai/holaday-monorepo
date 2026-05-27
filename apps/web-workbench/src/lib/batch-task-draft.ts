@@ -70,6 +70,24 @@ export function firstBatchTaskDraftMissingGoal(
   return index >= 0 ? index : null;
 }
 
+export function duplicateBatchTaskDraftIndices(
+  drafts: readonly BatchTaskDraft[],
+): Set<number> {
+  const seen = new Set<string>();
+  const duplicates = new Set<number>();
+  drafts.forEach((draft, index) => {
+    if (draft.goal.trim().length === 0) return;
+    const prompt = composeBatchTaskPrompt(draft).trim();
+    if (!prompt) return;
+    if (seen.has(prompt)) {
+      duplicates.add(index);
+      return;
+    }
+    seen.add(prompt);
+  });
+  return duplicates;
+}
+
 export function batchTaskDraftProgress(draft: BatchTaskDraft): BatchTaskDraftProgress {
   const hasGoal = draft.goal.trim().length > 0;
   const hasSteps = draft.steps.trim().length > 0;

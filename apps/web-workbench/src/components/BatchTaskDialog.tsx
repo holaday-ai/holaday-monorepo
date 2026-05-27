@@ -14,6 +14,7 @@ import {
   batchTaskDraftFromPrompt,
   batchTaskDraftProgress,
   composeBatchTaskPrompt,
+  duplicateBatchTaskDraftIndices,
   EMPTY_BATCH_TASK_DRAFT,
   firstBatchTaskDraftMissingGoal,
   type BatchTaskDraft,
@@ -94,6 +95,7 @@ export function BatchTaskDialog({
     .filter((item) => item.goal.trim().length > 0)
     .map(composeBatchTaskPrompt);
   const parsedPrompts = parseBatchPromptItems(composedItems, MAX_ITEMS);
+  const duplicateDraftIndices = duplicateBatchTaskDraftIndices(items);
   const prompts = parsedPrompts.prompts;
   const submitDisabled = batchCreateDisabled({
     submitting,
@@ -254,6 +256,7 @@ export function BatchTaskDialog({
                 const emptyDraft = batchTaskDraftIsEmpty(item);
                 const showEmptyHint = emptyDraft && (items.length > 1 || prompts.length > 0);
                 const canReuseDetail = batchTaskDraftHasReusableDetail(item);
+                const duplicateDraft = duplicateDraftIndices.has(index);
                 return (
                   <div
                     key={index}
@@ -261,9 +264,11 @@ export function BatchTaskDialog({
                       'rounded-[8px] border bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-colors dark:bg-card/85',
                       missingGoal
                         ? 'border-[#EA1F59]/40'
-                        : isActive
-                          ? 'border-[#EA1F59]/25'
-                          : 'border-[#DCDDDD] dark:border-white/10',
+                        : duplicateDraft
+                          ? 'border-[#FFC910]/60'
+                          : isActive
+                            ? 'border-[#EA1F59]/25'
+                            : 'border-[#DCDDDD] dark:border-white/10',
                     )}
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -281,7 +286,10 @@ export function BatchTaskDialog({
                           <span className="truncate text-xs font-medium text-[#2F2F2F] dark:text-foreground">
                             任务 {index + 1}
                           </span>
-                          <TaskDraftProgressPill draft={item} />
+                          <TaskDraftProgressPill
+                            draft={item}
+                            duplicate={duplicateDraft}
+                          />
                           <ChevronDown
                             className={cn(
                               'ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform',
@@ -289,7 +297,12 @@ export function BatchTaskDialog({
                             )}
                           />
                         </div>
-                        {!isActive && <TaskDraftSummary draft={item} />}
+                        {!isActive && (
+                          <TaskDraftSummary
+                            draft={item}
+                            duplicate={duplicateDraft}
+                          />
+                        )}
                       </button>
                       <div className="flex shrink-0 items-center gap-1">
                         <button
@@ -348,6 +361,11 @@ export function BatchTaskDialog({
                           {showEmptyHint && (
                             <span className="text-[11px] leading-4 text-muted-foreground">
                               空白任务不会提交；填写目标后才计入批量。
+                            </span>
+                          )}
+                          {duplicateDraft && (
+                            <span className="text-[11px] leading-4 text-[#8A6A00]">
+                              与前面的任务重复，提交时只保留第一张。
                             </span>
                           )}
                         </label>
@@ -425,7 +443,13 @@ export function BatchTaskDialog({
   );
 }
 
-function TaskDraftProgressPill({ draft }: { draft: BatchTaskDraft }): JSX.Element {
+function TaskDraftProgressPill({
+  draft,
+  duplicate,
+}: {
+  draft: BatchTaskDraft;
+  duplicate: boolean;
+}): JSX.Element {
   const progress = batchTaskDraftProgress(draft);
   const ready = progress.count === 3;
   const missingGoal = batchTaskDraftMissingGoal(draft);
@@ -436,6 +460,8 @@ function TaskDraftProgressPill({ draft }: { draft: BatchTaskDraft }): JSX.Elemen
         'rounded-full border px-1.5 py-0.5 text-[10px] font-medium',
         missingGoal
           ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
+          : duplicate
+            ? 'border-[#FFC910]/55 bg-[#FFC910]/12 text-[#8A6A00]'
           : ready
             ? 'border-[#42C0EF]/35 bg-[#42C0EF]/10 text-[#1688AA]'
             : emptyDraft
@@ -445,6 +471,8 @@ function TaskDraftProgressPill({ draft }: { draft: BatchTaskDraft }): JSX.Elemen
     >
       {missingGoal
         ? '缺目标'
+        : duplicate
+          ? '重复'
         : ready
           ? '已完整'
           : emptyDraft
@@ -454,7 +482,13 @@ function TaskDraftProgressPill({ draft }: { draft: BatchTaskDraft }): JSX.Elemen
   );
 }
 
-function TaskDraftSummary({ draft }: { draft: BatchTaskDraft }): JSX.Element {
+function TaskDraftSummary({
+  draft,
+  duplicate,
+}: {
+  draft: BatchTaskDraft;
+  duplicate: boolean;
+}): JSX.Element {
   const emptyDraft = batchTaskDraftIsEmpty(draft);
   const title = draft.goal.trim() || (emptyDraft ? '空白任务' : '还没有目标');
   const details = [
@@ -475,7 +509,9 @@ function TaskDraftSummary({ draft }: { draft: BatchTaskDraft }): JSX.Element {
         {title}
       </p>
       <p className="mt-1 truncate text-[11px] text-muted-foreground">
-        {emptyDraft
+        {duplicate
+          ? '重复任务；提交时只保留第一张。'
+          : emptyDraft
           ? '不会提交；填写目标后才计入批量。'
           : details.length > 0
             ? details.join(' · ')

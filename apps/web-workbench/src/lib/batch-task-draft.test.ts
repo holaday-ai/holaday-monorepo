@@ -7,6 +7,7 @@ import {
   batchTaskDraftMissingGoal,
   batchTaskDraftProgress,
   composeBatchTaskPrompt,
+  duplicateBatchTaskDraftIndices,
   firstBatchTaskDraftMissingGoal,
 } from './batch-task-draft.js';
 
@@ -88,5 +89,18 @@ describe('batch task draft helpers', () => {
         output: '给出来源',
       }),
     ).toBe(true);
+  });
+
+  it('detects duplicate structured task cards by submitted prompt', () => {
+    const duplicateIndices = duplicateBatchTaskDraftIndices([
+      { goal: '查 OpenAI', steps: '1. 找官网', output: '摘要' },
+      { goal: '', steps: '', output: '' },
+      { goal: '查 OpenAI', steps: '1. 找官网', output: '摘要' },
+      { goal: '查 OpenAI', steps: '1. 找官网', output: '表格' },
+      { goal: '', steps: '1. 找官网', output: '摘要' },
+      { goal: '查 OpenAI', steps: '1. 找官网', output: '摘要' },
+    ]);
+
+    expect([...duplicateIndices]).toEqual([2, 5]);
   });
 });
