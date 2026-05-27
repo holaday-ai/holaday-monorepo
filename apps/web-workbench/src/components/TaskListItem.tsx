@@ -112,9 +112,9 @@ export function TaskListItem({
       title={rowTitle}
       className={cn(
         'group relative flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors',
-        'hover:bg-foreground/5',
-        selected && !batchMode && 'bg-foreground/[0.06]',
-        batchMode && batchChecked && 'bg-primary/10 dark:bg-primary/15',
+        'hover:bg-[#EFEFEF]/55 dark:hover:bg-white/10',
+        selected && !batchMode && 'bg-[#EA1F59]/10 text-[#EA1F59]',
+        batchMode && batchChecked && 'bg-[#57479C]/10 dark:bg-[#57479C]/20',
         batchMode && batchDisabled && 'opacity-50',
         batchMode && !batchDisabled && 'cursor-pointer',
       )}
@@ -122,7 +122,7 @@ export function TaskListItem({
       {selected && !batchMode && (
         <span
           aria-hidden
-          className="absolute inset-y-1 left-0 w-[2px] rounded-r bg-primary"
+          className="absolute inset-y-1 left-0 w-[2px] rounded-r bg-[#EA1F59]"
         />
       )}
       {batchMode && (
@@ -131,7 +131,7 @@ export function TaskListItem({
           className={cn(
             'flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors',
             batchChecked
-              ? 'border-foreground bg-foreground text-background'
+              ? 'border-[#57479C] bg-[#57479C] text-white'
               : 'border-muted-foreground/40',
             batchDisabled && 'border-dashed',
           )}
@@ -179,10 +179,10 @@ export function TaskListItem({
           type="button"
           aria-label="任务菜单"
           onClick={(e) => {
-            e.stopPropagation();
-            onContextMenu(task.taskId, e);
-          }}
-          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-100 transition-opacity hover:bg-foreground/10 focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+          e.stopPropagation();
+          onContextMenu(task.taskId, e);
+        }}
+          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-100 transition-opacity hover:bg-[#EFEFEF]/70 hover:text-foreground focus-visible:opacity-100 dark:hover:bg-white/10 lg:opacity-0 lg:group-hover:opacity-100"
         >
           <MoreHorizontal className="h-3.5 w-3.5" />
         </button>
@@ -234,7 +234,7 @@ function RenameInput({
         }
       }}
       onBlur={() => onCommit(value)}
-      className="min-w-0 flex-1 rounded border border-primary/40 bg-background px-1.5 py-0 text-[13px] leading-5 shadow-sm focus-visible:outline-none"
+      className="min-w-0 flex-1 rounded border border-[#EA1F59]/40 bg-white px-1.5 py-0 text-[13px] leading-5 shadow-sm focus-visible:outline-none dark:bg-card"
     />
   );
 }
@@ -244,19 +244,19 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
     <span
       className={cn(
         'inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/35',
-        status === 'queued' && 'animate-pulse-dot bg-amber-400',
-        status === 'executing' && 'animate-pulse-dot bg-primary',
+        status === 'queued' && 'animate-pulse-dot bg-[#FFC910]',
+        status === 'executing' && 'animate-pulse-dot bg-[#42C0EF]',
         // Awaiting-user + failed stand out — these are the rows the
         // user has to come back to. Everything else stays a muted 6px
         // grey dot so the sidebar reads as the workspace nav, not a
         // status board.
-        status === 'awaiting_user' && 'h-2 w-2 bg-amber-500 ring-2 ring-amber-300/40',
-        status === 'paused' && 'bg-amber-500/80',
+        status === 'awaiting_user' && 'h-2 w-2 bg-[#FFC910] ring-2 ring-[#FFC910]/35',
+        status === 'paused' && 'bg-[#FFC910]/80',
         status === 'completed' && 'bg-muted-foreground/35',
-        // Codex Pack A4 — partial_success uses amber to signal "look
-        // again" without screaming red. Slightly smaller than failed.
-        status === 'partial_success' && 'h-2 w-2 bg-amber-400',
-        status === 'failed' && 'h-2 w-2 bg-red-500',
+        // Codex Pack A4 — partial_success uses the brand yellow to
+        // signal "look again" without reading as destructive.
+        status === 'partial_success' && 'h-2 w-2 bg-[#FFC910]',
+        status === 'failed' && 'h-2 w-2 bg-[#EA1F59]',
         status === 'cancelled' && 'bg-muted-foreground/25',
       )}
       aria-hidden

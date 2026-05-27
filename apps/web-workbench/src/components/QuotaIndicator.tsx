@@ -82,7 +82,7 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
 
   if (loading && !snap) {
     return compact ? null : (
-      <div className="px-2 py-1.5 text-[10px] text-muted-foreground/60">读取额度…</div>
+      <div className="px-2 py-1.5 text-[10px] text-muted-foreground/60">读取额度...</div>
     );
   }
   if (!snap) {
@@ -90,9 +90,9 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
     const copy = quotaRefreshStatusCopy({ error, hasSnapshot: false });
     return (
       <div className="mb-2 px-2">
-        <div className="rounded-md border border-border bg-background/40 px-2.5 py-2 text-[11px]">
+        <div className="rounded-md border border-[#DCDDDD] bg-white px-2.5 py-2 text-[11px] shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/90">
           <div className="flex items-start gap-2">
-            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#EA1F59]" aria-hidden />
             <div className="min-w-0 flex-1">
               <div className="font-medium text-foreground">
                 {copy?.title ?? '额度暂时不可用'}
@@ -130,10 +130,10 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
         className={cn(
           'mt-1 inline-flex h-6 w-10 items-center justify-center rounded text-[10px] font-medium',
           outOfTasks
-            ? 'bg-red-500/10 text-red-600 dark:text-red-400'
+            ? 'bg-[#EA1F59]/10 text-[#EA1F59]'
             : lowOnTasks
-              ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
-              : 'text-muted-foreground hover:bg-foreground/5',
+              ? 'bg-[#FFC910]/15 text-[#595757]'
+              : 'text-muted-foreground hover:bg-[#EFEFEF]/60 dark:hover:bg-white/10',
         )}
       >
         {remaining}
@@ -147,8 +147,8 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
         type="button"
         onClick={() => navigate('/plan')}
         className={cn(
-          'group flex w-full flex-col gap-1 rounded-md border border-border bg-background/40 px-2.5 py-2 text-left transition-colors',
-          'hover:bg-foreground/[0.04]',
+          'group flex w-full flex-col gap-1 rounded-md border border-[#DCDDDD] bg-white px-2.5 py-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors dark:border-white/10 dark:bg-card/90',
+          'hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:hover:bg-white/10',
         )}
       >
         <div className="flex items-center justify-between text-[11px]">
@@ -158,16 +158,16 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
           </span>
           <ArrowUpRight className="h-3 w-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
         </div>
-        {/* Progress bar — neutral fill; switches to amber/red as remaining drops. */}
-        <div className="h-1 overflow-hidden rounded-full bg-foreground/10">
+        {/* Progress bar — neutral fill; switches to brand yellow/pink as remaining drops. */}
+        <div className="h-1 overflow-hidden rounded-full bg-[#EFEFEF] dark:bg-white/10">
           <div
             className={cn(
               'h-full rounded-full transition-[width] duration-300',
               outOfTasks
-                ? 'bg-red-500/70'
+                ? 'bg-[#EA1F59]/75'
                 : lowOnTasks
-                  ? 'bg-amber-500/70'
-                  : 'bg-foreground/60',
+                  ? 'bg-[#FFC910]'
+                  : 'bg-[#42C0EF]',
             )}
             style={{ width: `${usedPct}%` }}
           />
@@ -190,12 +190,12 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
           )}
         </div>
         {outOfTasks && (
-          <div className="text-[10px] font-medium text-red-600 dark:text-red-400">
+          <div className="text-[10px] font-medium text-[#EA1F59]">
             {snap.plan === 'free' ? '今日额度已用完，明天再来或升级' : '本月额度已用完，购买加量包'}
           </div>
         )}
         {refreshCopy && (
-          <div className="flex items-center justify-between gap-2 rounded bg-primary/5 px-2 py-1 text-[10px] text-primary">
+          <div className="flex items-center justify-between gap-2 rounded bg-[#EA1F59]/10 px-2 py-1 text-[10px] text-[#EA1F59]">
             <span className="min-w-0 truncate" title={refreshCopy.body}>
               {refreshCopy.title}
             </span>
@@ -227,8 +227,8 @@ function QuotaRetryButton({
       className={cn(
         'inline-flex shrink-0 items-center justify-center rounded transition-colors disabled:cursor-not-allowed disabled:opacity-60',
         compact
-          ? 'h-5 w-5 hover:bg-primary/10'
-          : 'h-7 gap-1 border border-border px-2 text-[11px] text-foreground hover:bg-foreground/[0.04]',
+          ? 'h-5 w-5 hover:bg-[#EA1F59]/10'
+          : 'h-7 gap-1 border border-[#DCDDDD] bg-white px-2 text-[11px] text-foreground hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10',
       )}
       aria-label={loading ? '正在重试额度刷新' : '重试额度刷新'}
     >

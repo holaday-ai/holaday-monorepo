@@ -61,6 +61,8 @@ import { useTaskStore } from '@/stores/task-store';
 import type { UiProject, UiTask } from '@/types/task';
 import { bucketByTime, isTaskDeletable } from '@/utils/time-buckets';
 
+const SIDEBAR_BORDER = 'border-[#DCDDDD] dark:border-white/10';
+
 interface Props {
   tasks: readonly UiTask[];
   selectedTaskId: string | null;
@@ -343,7 +345,7 @@ export function Sidebar({
             pinned; only the task list scrolls. The visual centre of
             gravity sits on "新任务" + the feature shortcuts; task
             history is a scroll surface, not a status board. */}
-        <SidebarHeader className="shrink-0 border-b border-sidebar-border gap-2">
+        <SidebarHeader className={cn('shrink-0 gap-2 border-b bg-white/70 backdrop-blur dark:bg-card/70', SIDEBAR_BORDER)}>
           <div className="flex items-center gap-2 px-1 py-1">
             <BrandIcon />
             <BrandWordmark className="group-data-[collapsible=icon]:hidden" />
@@ -357,7 +359,7 @@ export function Sidebar({
                   onNewTask();
                   onMobileClose?.();
                 }}
-                className="bg-primary text-primary-foreground font-medium hover:bg-primary/90 hover:text-primary-foreground data-[active=true]:bg-primary data-[active=true]:text-primary-foreground"
+                className="bg-[#EA1F59] font-medium text-white shadow-[0_4px_12px_rgba(234,31,89,0.16)] hover:bg-[#EA1F59]/90 hover:text-white data-[active=true]:bg-[#EA1F59] data-[active=true]:text-white"
               >
                 <Plus />
                 <span>新任务</span>
@@ -368,12 +370,12 @@ export function Sidebar({
                 <SidebarMenuButton
                   tooltip="搜索任务 (⌘K)"
                   onClick={() => onOpenSearch()}
-                  className="text-sidebar-foreground/80"
+                  className="border border-transparent text-sidebar-foreground/80 hover:border-[#DCDDDD] hover:bg-[#EFEFEF]/50 dark:hover:border-white/10 dark:hover:bg-white/10"
                 >
                   <Search />
                   <span className="flex flex-1 items-center justify-between">
                     搜索任务
-                    <kbd className="rounded border border-sidebar-border/50 bg-sidebar-accent/40 px-1 py-0.5 text-[10px] font-sans text-sidebar-foreground/60">
+                    <kbd className="rounded border border-[#DCDDDD] bg-white px-1 py-0.5 text-[10px] font-sans text-sidebar-foreground/60 dark:border-white/10 dark:bg-transparent">
                       ⌘K
                     </kbd>
                   </span>
@@ -391,23 +393,23 @@ export function Sidebar({
             task list. Now FeatureNav scrolls along with the task
             list when space is tight; tall windows behave identically
             because the content fits and there's no scroll. */}
-        <SidebarContent className="px-0">
+        <SidebarContent className="px-0 bg-white/45 dark:bg-transparent">
             <FeatureNav userRole={userRole} />
             {projectFilter && (
               <div
                 className={cn(
                   'mx-2 mb-2 flex items-start gap-2 rounded-md border px-2.5 py-1.5 text-[12px] group-data-[collapsible=icon]:hidden',
                   projectFilter.tone === 'error'
-                    ? 'border-red-300/60 bg-red-50/60 dark:border-red-500/30 dark:bg-red-500/10'
-                    : 'border-pink-300/40 bg-pink-50/40 dark:border-pink-500/30 dark:bg-pink-500/10',
+                    ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 dark:border-[#EA1F59]/35'
+                    : 'border-[#57479C]/25 bg-[#57479C]/10 dark:border-[#57479C]/40',
                 )}
               >
                 <FolderOpen
                   className={cn(
                     'mt-0.5 h-3.5 w-3.5 shrink-0',
                     projectFilter.tone === 'error'
-                      ? 'text-red-600 dark:text-red-300'
-                      : 'text-pink-600 dark:text-pink-300',
+                      ? 'text-[#EA1F59]'
+                      : 'text-[#57479C]',
                   )}
                 />
                 <div className="min-w-0 flex-1">
@@ -419,7 +421,7 @@ export function Sidebar({
                       className={cn(
                         'mt-0.5 truncate text-[11px]',
                         projectFilter.tone === 'error'
-                          ? 'text-red-700 dark:text-red-300'
+                          ? 'text-[#EA1F59]'
                           : 'text-muted-foreground',
                       )}
                     >
@@ -431,7 +433,7 @@ export function Sidebar({
                   type="button"
                   onClick={() => onClearProjectFilter?.()}
                   aria-label="清除项目筛选"
-                  className="mt-0.5 rounded p-0.5 text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                  className="mt-0.5 rounded p-0.5 text-muted-foreground hover:bg-white/70 hover:text-foreground dark:hover:bg-white/10"
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -536,19 +538,19 @@ export function Sidebar({
 
             </SidebarContent>
 
-            <SidebarFooter className="shrink-0 border-t border-sidebar-border px-0 py-2 group-data-[collapsible=icon]:hidden">
+            <SidebarFooter className={cn('shrink-0 border-t bg-white/70 px-0 py-2 backdrop-blur group-data-[collapsible=icon]:hidden dark:bg-card/70', SIDEBAR_BORDER)}>
               {/* O1 — batch action bar / batch entry. When batchMode
                   is on, render the count + 全选 / 删除选中 / 取消
                   controls; otherwise show a small "批量管理" entry
                   button alongside the quota indicator. */}
               {batchMode ? (
-                <div className="mx-2 mb-2 flex items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary dark:border-primary/40 dark:bg-primary/15">
+                <div className="mx-2 mb-2 flex items-center justify-between gap-2 rounded-md border border-[#57479C]/25 bg-[#57479C]/10 px-2 py-1.5 text-[11px] text-[#57479C] dark:border-[#57479C]/40 dark:text-[#DCDDDD]">
                   <span className="font-medium">已选 {selectedBatchDeleteIds.length}</span>
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
                       onClick={selectAllVisible}
-                      className="rounded px-2 py-0.5 hover:bg-primary/20"
+                      className="rounded px-2 py-0.5 hover:bg-white/70 dark:hover:bg-white/10"
                     >
                       全选
                     </button>
@@ -560,7 +562,7 @@ export function Sidebar({
                         'rounded px-2 py-0.5 font-medium',
                         selectedBatchDeleteIds.length === 0
                           ? 'cursor-not-allowed opacity-50'
-                          : 'bg-red-600 text-white hover:bg-red-700',
+                          : 'bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90',
                       )}
                     >
                       删除选中
@@ -568,7 +570,7 @@ export function Sidebar({
                     <button
                       type="button"
                       onClick={exitBatchMode}
-                      className="rounded px-2 py-0.5 hover:bg-primary/20"
+                      className="rounded px-2 py-0.5 hover:bg-white/70 dark:hover:bg-white/10"
                     >
                       取消
                     </button>
@@ -580,7 +582,7 @@ export function Sidebar({
                     <button
                       type="button"
                       onClick={() => setBatchMode(true)}
-                      className="rounded px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
+                      className="rounded-md border border-transparent px-2 py-0.5 text-[11px] text-muted-foreground hover:border-[#DCDDDD] hover:bg-white hover:text-foreground dark:hover:border-white/10 dark:hover:bg-white/10"
                     >
                       批量管理
                     </button>
@@ -834,7 +836,7 @@ function TaskContextMenu({
             onSelect={onDelete}
             className={cn(
               menu.deletable &&
-                'text-red-600 focus:bg-red-500/10 focus:text-red-600 dark:text-red-400 dark:focus:text-red-300',
+                'text-[#EA1F59] focus:bg-[#EA1F59]/10 focus:text-[#EA1F59]',
             )}
           >
             <Trash2 className={menu.deletable ? '' : 'text-muted-foreground'} />
@@ -920,7 +922,7 @@ function LoadMoreTasksButton({
       type="button"
       onClick={onLoadMore}
       disabled={loadingMore}
-      className="mx-3 my-2 block w-[calc(100%-1.5rem)] rounded-md border border-black/[0.06] px-2 py-1.5 text-center text-xs text-muted-foreground hover:bg-muted/40 disabled:opacity-60"
+      className="mx-3 my-2 block w-[calc(100%-1.5rem)] rounded-md border border-[#DCDDDD] bg-white px-2 py-1.5 text-center text-xs text-muted-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
     >
       {loadingMore ? '加载中…' : '加载更多任务'}
     </button>
@@ -947,7 +949,7 @@ function RetentionHint({
     <button
       type="button"
       onClick={() => navigate('/plan')}
-      className="mx-2 mt-3 block w-[calc(100%-1rem)] rounded-md border border-dashed border-border bg-card/40 px-3 py-2 text-left text-[11px] text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-foreground/[0.03]"
+      className="mx-2 mt-3 block w-[calc(100%-1rem)] rounded-md border border-dashed border-[#DCDDDD] bg-white px-3 py-2 text-left text-[11px] text-muted-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
     >
       <div className="font-medium text-foreground/80">
         {hiddenCount} 个更早的任务已隐藏
@@ -992,7 +994,7 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
   const pathname =
     typeof window !== 'undefined' ? window.location.pathname : '';
   return (
-    <SidebarGroup className="shrink-0 border-b border-sidebar-border/60">
+    <SidebarGroup className="shrink-0 border-b border-[#DCDDDD]/70 dark:border-white/10">
       <SidebarGroupLabel className="px-3 text-[11px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
         快捷入口
       </SidebarGroupLabel>
@@ -1003,11 +1005,16 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
               const isActive = pathname === href;
               return (
                 <SidebarMenuItem key={label}>
-                  <SidebarMenuButton
-                    tooltip={label}
-                    isActive={isActive}
-                    onClick={() => navigate(href)}
-                  >
+                <SidebarMenuButton
+                  tooltip={label}
+                  isActive={isActive}
+                  onClick={() => navigate(href)}
+                  className={cn(
+                    'border border-transparent text-sidebar-foreground/85 hover:border-[#DCDDDD] hover:bg-[#EFEFEF]/50 dark:hover:border-white/10 dark:hover:bg-white/10',
+                    isActive &&
+                      'border-[#EA1F59]/25 bg-[#EA1F59]/10 text-[#EA1F59] hover:bg-[#EA1F59]/10',
+                  )}
+                >
                     <Icon aria-hidden />
                     <span>{label}</span>
                   </SidebarMenuButton>
@@ -1037,6 +1044,11 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
                 tooltip="管理后台"
                 isActive={pathname.startsWith('/admin')}
                 onClick={() => navigate('/admin')}
+                className={cn(
+                  'border border-transparent hover:border-[#DCDDDD] hover:bg-[#EFEFEF]/50 dark:hover:border-white/10 dark:hover:bg-white/10',
+                  pathname.startsWith('/admin') &&
+                    'border-[#EA1F59]/25 bg-[#EA1F59]/10 text-[#EA1F59] hover:bg-[#EA1F59]/10',
+                )}
               >
                 <Shield aria-hidden />
                 <span>管理后台</span>
@@ -1069,7 +1081,7 @@ function ShareInviteRow(): JSX.Element {
     <button
       type="button"
       onClick={() => void onShare()}
-      className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+      className="flex w-full items-center gap-2.5 rounded-md border border-transparent px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:border-[#DCDDDD] hover:bg-white hover:text-foreground dark:hover:border-white/10 dark:hover:bg-white/10"
     >
       <Share2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
       <span>与好友分享 HOLA DAY</span>
