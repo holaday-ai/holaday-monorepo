@@ -38,6 +38,30 @@ export function scheduledCreateButtonLabel(submitting: boolean): string {
   return submitting ? '创建中…' : '创建';
 }
 
+export function scheduledRepeatSummary(repeatType: DialogRepeatType): string {
+  switch (repeatType) {
+    case 'once':
+      return '只运行一次';
+    case 'weekly':
+      return '每周重复';
+    case 'monthly':
+      return '每月重复';
+    case 'custom':
+      return '自定义重复';
+    case 'daily':
+    default:
+      return '每天重复';
+  }
+}
+
+export function scheduledReminderSummary(value: string): string {
+  const minutes = reminderMinutesForValue(value);
+  if (minutes === null) return '不提醒';
+  if (minutes === 0) return '执行时提醒';
+  if (minutes === 60) return '提前 1 小时提醒';
+  return `提前 ${minutes} 分钟提醒`;
+}
+
 export function buildScheduledCreatePayload(input: {
   intent: string;
   repeatType: DialogRepeatType;

@@ -1,6 +1,7 @@
-import { Calendar, Clock, Loader2, X } from 'lucide-react';
+import { Bell, Calendar, Clock, Loader2, Repeat2, X } from 'lucide-react';
 import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
+import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 import {
   defaultScheduledAtLocalInput,
@@ -11,6 +12,8 @@ import {
   REMINDER_OPTIONS,
   REPEAT_OPTIONS,
   scheduledCreateButtonLabel,
+  scheduledReminderSummary,
+  scheduledRepeatSummary,
   type DialogRepeatType,
 } from './scheduled-dialog-state';
 
@@ -85,10 +88,13 @@ export function ScheduledTaskDialog({
 
   if (!open) return null;
 
+  const trimmedIntent = intent.trim();
+  const customRuleMissing = repeatType === 'custom' && !rrule.trim();
+  const canSubmit = Boolean(trimmedIntent && scheduledAt && !customRuleMissing && !submitting);
+
   const submit = async (): Promise<void> => {
-    if (submitting) return;
-    const trimmed = intent.trim();
-    if (!trimmed) {
+    if (!canSubmit) return;
+    if (!trimmedIntent) {
       toast.show('请填写任务内容', 'error');
       return;
     }
@@ -106,7 +112,7 @@ export function ScheduledTaskDialog({
     setSubmitting(true);
     try {
       const payload = buildScheduledCreatePayload({
-        intent: trimmed,
+        intent: trimmedIntent,
         repeatType,
         scheduledAt: localDate,
         reminderValue,
@@ -142,12 +148,17 @@ export function ScheduledTaskDialog({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-2xl overflow-hidden rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_18px_56px_rgba(15,23,42,0.14)]"
+        className="w-full max-w-2xl overflow-hidden rounded-[8px] border border-[#DCDDDD] bg-white text-[#1f1f1f] shadow-[0_18px_56px_rgba(15,23,42,0.14)]"
       >
-        <header className="flex items-center justify-between border-b border-[#EFEFEF] px-5 py-3">
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <Clock className="h-4 w-4 text-[#EA1F59]" />
-            新建定时任务
+        <header className="flex items-start justify-between gap-4 border-b border-[#EFEFEF] px-5 py-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Clock className="h-4 w-4 text-[#EA1F59]" />
+              新建定时任务
+            </div>
+            <div className="mt-1 text-xs text-[#595757]">
+              {scheduledRepeatSummary(repeatType)} · {scheduledReminderSummary(reminderValue)}
+            </div>
           </div>
           <button
             type="button"
@@ -160,8 +171,8 @@ export function ScheduledTaskDialog({
           </button>
         </header>
         <div className="max-h-[calc(100vh-8rem)] space-y-4 overflow-y-auto p-5">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-foreground/80">
+          <div className="rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2.5 focus-within:border-[#EA1F59]/50 focus-within:ring-2 focus-within:ring-[#EA1F59]/10">
+            <label className="block text-[11px] font-medium text-[#595757]">
               任务内容
             </label>
             <textarea
@@ -172,62 +183,77 @@ export function ScheduledTaskDialog({
               rows={3}
               maxLength={2000}
               placeholder="例如：复盘昨天的电商日报，对比上周表现并给出优化策略"
-              className="w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/70 focus-visible:border-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+              className="mt-1 w-full resize-y border-none bg-transparent p-0 text-sm font-medium text-[#1f1f1f] outline-none placeholder:text-[#ADADAD]"
             />
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-foreground/80">
-                重复频率
-              </label>
-              <select
-                value={repeatType}
-                disabled={submitting}
-                onChange={(e) =>
-                  setRepeatType(e.target.value as DialogRepeatType)
-                }
-                className="w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm focus-visible:border-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
-              >
-                {REPEAT_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-foreground/80">
-                <Calendar className="mr-1 inline-block h-3 w-3" />
-                首次执行
+          <div className="rounded-[8px] border border-[#EFEFEF] bg-[#FAFAFA] p-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#595757]">
+                <Calendar className="h-3.5 w-3.5 text-[#57479C]" />
+                首次执行时间
               </label>
               <input
                 type="datetime-local"
                 value={scheduledAt}
                 disabled={submitting}
                 onChange={(e) => setScheduledAt(e.target.value)}
-                className="w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm focus-visible:border-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+                className="w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm font-medium text-[#1f1f1f] focus-visible:border-[#EA1F59]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 sm:w-auto"
               />
             </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-foreground/80">
-                提醒
-              </label>
-              <select
-                value={reminderValue}
-                disabled={submitting}
-                onChange={(e) => setReminderValue(e.target.value)}
-                className="w-full rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm focus-visible:border-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
-              >
-                {REMINDER_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
+            <div className="mt-2 text-[11px] text-[#595757]">
+              执行时间使用你当前时区，到点会自动新建任务并交给 agent 执行。
             </div>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-foreground/80">
+            <div className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-[#595757]">
+              <Repeat2 className="h-3.5 w-3.5 text-[#42C0EF]" />
+              重复频率
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+              {REPEAT_OPTIONS.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => setRepeatType(o.value)}
+                  className={cn(
+                    'rounded-[8px] border px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                    repeatType === o.value
+                      ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
+                      : 'border-[#EFEFEF] bg-white text-[#595757] hover:border-[#DCDDDD] hover:bg-[#EFEFEF] hover:text-[#1f1f1f]',
+                  )}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-[#595757]">
+              <Bell className="h-3.5 w-3.5 text-[#FFC910]" />
+              提醒
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
+              {REMINDER_OPTIONS.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => setReminderValue(o.value)}
+                  className={cn(
+                    'rounded-[8px] border px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                    reminderValue === o.value
+                      ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
+                      : 'border-[#EFEFEF] bg-white text-[#595757] hover:border-[#DCDDDD] hover:bg-[#EFEFEF] hover:text-[#1f1f1f]',
+                  )}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-[#595757]">
               备注
             </label>
             <textarea
@@ -237,12 +263,12 @@ export function ScheduledTaskDialog({
               rows={2}
               maxLength={2000}
               placeholder="补充上下文、输出要求或接收人"
-              className="w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-muted-foreground/70 focus-visible:border-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+              className="w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-sm placeholder:text-[#ADADAD] focus-visible:border-[#EA1F59]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10"
             />
           </div>
           {repeatType === 'custom' && (
             <div>
-              <label className="mb-1 block text-xs font-medium text-foreground/80">
+              <label className="mb-1 block text-xs font-medium text-[#595757]">
                 自定义重复规则
               </label>
               <textarea
@@ -252,13 +278,15 @@ export function ScheduledTaskDialog({
                 rows={2}
                 maxLength={255}
                 placeholder={'DTSTART:20260523T090000Z\nRRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR'}
-                className="w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 font-mono text-xs placeholder:text-muted-foreground/70 focus-visible:border-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+                className="w-full resize-y rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 font-mono text-xs placeholder:text-[#ADADAD] focus-visible:border-[#EA1F59]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10"
               />
+              {customRuleMissing && (
+                <div className="mt-1 text-[11px] text-[#EA1F59]">
+                  填写 RRULE 后才能创建，或切回预设频率。
+                </div>
+              )}
             </div>
           )}
-          <p className="text-[11px] text-muted-foreground">
-            执行时间使用你当前时区。每次到时间会自动新建一个任务并交给 agent 执行。
-          </p>
         </div>
         <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-[#EFEFEF] bg-white px-5 py-3">
           <button
@@ -272,7 +300,7 @@ export function ScheduledTaskDialog({
           <button
             type="button"
             onClick={() => void submit()}
-            disabled={submitting}
+            disabled={!canSubmit}
             className="inline-flex items-center gap-1.5 rounded-[8px] bg-[#EA1F59] px-3 py-1.5 text-sm font-medium text-white shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition hover:bg-[#D91B51] disabled:opacity-60"
           >
             {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}

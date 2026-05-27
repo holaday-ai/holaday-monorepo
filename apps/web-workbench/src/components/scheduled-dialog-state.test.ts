@@ -3,6 +3,8 @@ import {
   buildScheduledCreatePayload,
   reminderMinutesForValue,
   scheduledCreateButtonLabel,
+  scheduledReminderSummary,
+  scheduledRepeatSummary,
 } from './scheduled-dialog-state.js';
 
 describe('scheduled dialog state helpers', () => {
@@ -15,6 +17,16 @@ describe('scheduled dialog state helpers', () => {
   it('names the busy submit state', () => {
     expect(scheduledCreateButtonLabel(false)).toBe('创建');
     expect(scheduledCreateButtonLabel(true)).toBe('创建中…');
+  });
+
+  it('describes repeat and reminder selections', () => {
+    expect(scheduledRepeatSummary('daily')).toBe('每天重复');
+    expect(scheduledRepeatSummary('once')).toBe('只运行一次');
+    expect(scheduledRepeatSummary('custom')).toBe('自定义重复');
+    expect(scheduledReminderSummary('off')).toBe('不提醒');
+    expect(scheduledReminderSummary('0')).toBe('执行时提醒');
+    expect(scheduledReminderSummary('15')).toBe('提前 15 分钟提醒');
+    expect(scheduledReminderSummary('60')).toBe('提前 1 小时提醒');
   });
 
   it('builds a normal daily create payload with description and reminder', () => {
