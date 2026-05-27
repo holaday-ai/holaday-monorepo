@@ -198,8 +198,8 @@ export function NotificationBell({
         aria-label="通知"
         aria-expanded={open}
         className={cn(
-          'relative flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground',
-          open && 'bg-foreground/5 text-foreground',
+          'relative flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10',
+          open && 'bg-[#EFEFEF]/70 text-foreground dark:bg-white/10',
         )}
       >
         <Bell className="h-4 w-4" />
@@ -216,13 +216,13 @@ export function NotificationBell({
         <div
           role="menu"
           className={cn(
-            'hd-popover-enter absolute z-50 rounded-lg border border-border bg-popover shadow-2xl',
+            'hd-popover-enter absolute z-50 overflow-hidden rounded-lg border border-[#DCDDDD] bg-white shadow-[0_16px_48px_rgba(17,24,39,0.16)] dark:border-white/10 dark:bg-card',
             placement === 'mobile-header'
               ? 'right-0 top-full mt-1 w-[min(calc(100vw-24px),360px)] origin-top-right'
               : 'bottom-full left-full mb-1 ml-2 w-[360px] origin-bottom-left',
           )}
         >
-          <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
+          <div className="flex items-center justify-between gap-3 border-b border-[#DCDDDD]/80 px-3 py-2.5 dark:border-white/10">
             <div className="min-w-0">
               <span className="text-sm font-medium">通知</span>
               <div className="mt-0.5 text-[11px] text-muted-foreground">{summary}</div>
@@ -234,7 +234,7 @@ export function NotificationBell({
                 variant="ghost"
                 onClick={() => void handleMarkAll()}
                 disabled={markingAll}
-                className="h-7 px-2 text-xs"
+                className="h-7 px-2 text-xs hover:bg-[#EFEFEF]/70 dark:hover:bg-white/10"
               >
                 {markingAll ? (
                   <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden />
@@ -247,7 +247,7 @@ export function NotificationBell({
           </div>
           <div className="max-h-[400px] overflow-y-auto">
             {actionError && (
-              <div className="border-b border-border/50 bg-primary/5 px-3 py-2 text-xs leading-5 text-primary">
+              <div className="border-b border-[#EA1F59]/20 bg-[#EA1F59]/10 px-3 py-2 text-xs leading-5 text-[#EA1F59] dark:border-[#EA1F59]/30">
                 {actionError}
               </div>
             )}
@@ -334,10 +334,10 @@ function NotificationStatusNotice({
 }): JSX.Element {
   const isError = copy.title.includes('失败');
   return (
-    <div className="border-b border-border/50 px-3 py-2.5">
+    <div className="border-b border-[#DCDDDD]/70 px-3 py-2.5 dark:border-white/10">
       <div className="flex items-start gap-2">
         {isError ? (
-          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#EA1F59]" aria-hidden />
         ) : (
           <Loader2
             className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground"
@@ -374,7 +374,7 @@ function NotificationHardError({
 }): JSX.Element {
   return (
     <div className="px-3 py-8 text-center">
-      <AlertCircle className="mx-auto h-7 w-7 text-primary" aria-hidden />
+      <AlertCircle className="mx-auto h-7 w-7 text-[#EA1F59]" aria-hidden />
       <div className="mt-2 text-sm font-medium text-foreground/85">通知加载失败</div>
       <div className="mx-auto mt-1 max-w-[260px] text-xs leading-5 text-muted-foreground">
         {message}
@@ -420,7 +420,7 @@ function NotificationItem({
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-start gap-2.5 border-b border-border/50 px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-foreground/[0.04]"
+      className="flex w-full items-start gap-2.5 border-b border-[#DCDDDD]/70 px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-[#EFEFEF]/55 dark:border-white/10 dark:hover:bg-white/10"
     >
       <span
         className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[11px] text-white"
@@ -466,11 +466,11 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
 };
 
 export function notificationColor(type: string): string {
-  if (type === 'task_failed') return '#EF4444';
+  if (type === 'task_failed') return '#EA1F59';
   if (type === 'task_complete') return '#42C0EF';
   if (type === 'task_reminder') return '#EA1F59';
   if (type === 'task_started') return '#FFC910';
-  return '#94A3B8';
+  return '#ADADAD';
 }
 
 export function scheduledNotificationHref(

@@ -60,9 +60,9 @@ describe('notificationColor', () => {
     expect(notificationColor('task_reminder')).toBe('#EA1F59');
   });
 
-  it('keeps failures red and unknown notifications neutral', () => {
-    expect(notificationColor('task_failed')).toBe('#EF4444');
-    expect(notificationColor('future_type')).toBe('#94A3B8');
+  it('uses brand pink for failures and a neutral fallback', () => {
+    expect(notificationColor('task_failed')).toBe('#EA1F59');
+    expect(notificationColor('future_type')).toBe('#ADADAD');
   });
 });
 

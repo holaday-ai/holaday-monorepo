@@ -192,7 +192,7 @@ export function NotificationsSection(): JSX.Element {
               加载中…
             </div>
           ) : channels.length === 0 ? (
-            <div className="rounded-md border border-dashed border-border bg-card/40 px-4 py-3 text-xs text-muted-foreground mx-4 mb-2">
+            <div className="mx-4 mb-2 rounded-md border border-dashed border-[#DCDDDD] bg-white px-4 py-3 text-xs text-muted-foreground dark:border-white/10 dark:bg-card/85">
               还没有外部通知渠道。
             </div>
           ) : (
@@ -200,9 +200,9 @@ export function NotificationsSection(): JSX.Element {
               {channels.map((row) => (
                 <li
                   key={row.channelId}
-                  className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2"
+                  className="flex items-center gap-3 rounded-md border border-[#DCDDDD] bg-white px-3 py-2 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85"
                 >
-                  <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded bg-muted text-foreground">
+                  <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-[#EFEFEF]/55 text-[#595757] dark:border-white/10 dark:bg-white/10 dark:text-foreground">
                     <MessageSquare className="h-3.5 w-3.5" />
                   </span>
                   <div className="min-w-0 flex-1">
@@ -256,7 +256,7 @@ export function NotificationsSection(): JSX.Element {
                   <button
                     type="button"
                     onClick={() => setConfirmDelete(row.channelId)}
-                    className="text-muted-foreground hover:text-red-600"
+                    className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-[#EA1F59]/10 hover:text-[#EA1F59]"
                     aria-label="删除渠道"
                   >
                     <Trash2 className="h-3.5 w-3.5" />

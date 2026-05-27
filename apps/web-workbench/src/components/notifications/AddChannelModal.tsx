@@ -201,21 +201,21 @@ export function AddChannelModal({
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) requestClose();
       }}
     >
-      <div className="hd-popover-enter flex max-h-[calc(100dvh-2rem)] w-full max-w-[520px] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-2xl">
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <h3 className="text-sm font-semibold">
+      <div className="hd-popover-enter flex max-h-[calc(100dvh-2rem)] w-full max-w-[520px] flex-col overflow-hidden rounded-lg border border-[#DCDDDD] bg-white shadow-[0_16px_48px_rgba(17,24,39,0.16)] dark:border-white/10 dark:bg-card">
+        <div className="flex items-center justify-between border-b border-[#DCDDDD]/80 px-4 py-3 dark:border-white/10">
+          <h3 className="text-sm font-semibold text-[#2F2F2F] dark:text-foreground">
             {initial ? '编辑通知渠道' : '添加通知渠道'}
           </h3>
           <button
             type="button"
             onClick={requestClose}
             disabled={saving || testing}
-            className="text-muted-foreground hover:text-foreground"
+            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
             aria-label="关闭"
           >
             <X className="h-4 w-4" />
@@ -241,8 +241,8 @@ export function AddChannelModal({
                   className={cn(
                     'rounded-md border px-2 py-2 text-left transition-colors',
                     platform === p.value
-                      ? 'border-[#EA1F59] bg-[#EA1F59]/10'
-                      : 'border-border bg-card hover:border-[#EA1F59]/50',
+                      ? 'border-[#EA1F59]/70 bg-[#EA1F59]/10 shadow-[0_1px_3px_rgba(17,24,39,0.05)]'
+                      : 'border-[#DCDDDD] bg-white hover:border-[#EA1F59]/45 hover:bg-[#EFEFEF]/30 dark:border-white/10 dark:bg-card/85 dark:hover:bg-white/10',
                   )}
                 >
                   <div
@@ -278,7 +278,7 @@ export function AddChannelModal({
               }}
               placeholder="https://..."
               disabled={saving || testing}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[#EA1F59]"
+              className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 text-sm outline-none placeholder:text-muted-foreground/55 focus:border-[#EA1F59]/45 focus:ring-2 focus:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
               maxLength={2000}
               autoFocus
             />
@@ -301,7 +301,7 @@ export function AddChannelModal({
                 }}
                 rows={6}
                 disabled={saving || testing}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus:border-[#EA1F59]"
+                className="w-full rounded-md border border-[#DCDDDD] bg-white px-3 py-2 font-mono text-xs outline-none focus:border-[#EA1F59]/45 focus:ring-2 focus:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card"
               />
             </div>
           )}
@@ -322,7 +322,10 @@ export function AddChannelModal({
               <span
                 className={cn(
                   'flex items-center gap-1 text-xs',
-                  testResult.ok ? 'text-cyan-600 dark:text-cyan-300' : 'text-red-600',
+                  'rounded-md border px-2.5 py-1.5',
+                  testResult.ok
+                    ? 'border-[#42C0EF]/35 bg-[#42C0EF]/10 text-[#595757] dark:text-foreground'
+                    : 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]',
                 )}
               >
                 {testResult.ok ? (
@@ -335,20 +338,20 @@ export function AddChannelModal({
             )}
           </div>
 
-          <div className="sticky bottom-0 -mx-4 -mb-4 flex justify-end gap-2 border-t border-border bg-popover px-4 pb-4 pt-3">
+          <div className="sticky bottom-0 -mx-4 -mb-4 flex justify-end gap-2 border-t border-[#DCDDDD]/80 bg-white px-4 pb-4 pt-3 dark:border-white/10 dark:bg-card">
             <Button
               type="button"
               variant="ghost"
               onClick={requestClose}
               disabled={saving || testing}
+              className="hover:bg-[#EFEFEF]/70 dark:hover:bg-white/10"
             >
               取消
             </Button>
             <Button
               type="submit"
               disabled={saving || testing}
-              style={{ backgroundColor: '#EA1F59', borderColor: '#EA1F59' }}
-              className="text-white hover:opacity-90"
+              className="bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.16)] hover:bg-[#EA1F59]/90"
             >
               {saving ? (
                 <Loader2 className="mr-1 h-3 w-3 animate-spin" />
