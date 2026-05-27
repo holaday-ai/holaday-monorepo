@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronRight, Loader2, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, ListChecks, Loader2, X } from 'lucide-react';
 import * as React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -7,11 +7,12 @@ import {
   externalLinkConfirmDescription,
   safeExternalHttpHref,
 } from '@/lib/external-link-copy';
+import { planProgressSummary, type PlanStepState } from '@/lib/plan-card-state';
 import { cn } from '@/lib/utils';
 
 export interface PlanStepStatus {
   idx: number;
-  status: 'pending' | 'running' | 'done' | 'failed';
+  status: PlanStepState;
   note?: string;
 }
 
@@ -75,31 +76,50 @@ export function PlanCard({
     return map;
   }, [planStatus]);
 
-  const stepCount = planStatus?.length ?? 0;
-  const doneCount = (planStatus ?? []).filter((s) => s.status === 'done').length;
+  const progress = React.useMemo(
+    () => planProgressSummary(planStatus ?? null),
+    [planStatus],
+  );
 
   return (
-    <div className="rounded-xl border border-border bg-card/60 px-5 py-4">
+    <div className="rounded-[8px] border border-[#DCDDDD] bg-white px-5 py-4 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="mb-2 flex w-full items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground/80"
+        className="flex w-full items-start justify-between gap-3 text-left"
         aria-expanded={expanded}
       >
-        {expanded ? (
-          <ChevronDown className="h-3 w-3" />
-        ) : (
-          <ChevronRight className="h-3 w-3" />
-        )}
-        <span>执行计划</span>
-        {!expanded && stepCount > 0 && (
-          <span className="ml-1 text-[10px] normal-case tracking-normal text-muted-foreground/70">
-            · {doneCount}/{stepCount} 步
+        <span className="flex min-w-0 items-start gap-2.5">
+          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border border-[#DCDDDD] bg-white text-[#EA1F59]">
+            <ListChecks className="h-3.5 w-3.5" />
           </span>
-        )}
+          <span className="min-w-0">
+            <span className="block text-sm font-medium text-foreground">执行计划</span>
+            <span className="mt-0.5 block text-[11px] text-muted-foreground">
+              {progress.label}
+            </span>
+          </span>
+        </span>
+        <span className="mt-1 inline-flex shrink-0 items-center gap-1 rounded-full border border-[#DCDDDD] bg-white px-2.5 py-1 text-[11px] font-medium text-[#595757] transition-colors hover:border-[#ADADAD]">
+          {expanded ? (
+            <ChevronDown className="h-3 w-3" />
+          ) : (
+            <ChevronRight className="h-3 w-3" />
+          )}
+          {expanded ? '收起' : '展开'}
+        </span>
       </button>
+      {progress.total > 0 && (
+        <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[#EFEFEF]">
+          <div
+            className={`h-full rounded-full transition-[width] ${planProgressFillTone(progress.tone)}`}
+            style={{ width: `${progress.percent}%` }}
+            aria-label={`${progress.percent}%`}
+          />
+        </div>
+      )}
       {expanded && (
-        <div className="prose prose-sm prose-neutral max-w-none prose-ol:my-1 prose-li:my-0.5 dark:prose-invert">
+        <div className="prose prose-sm prose-neutral mt-3 max-w-none prose-ol:my-1 prose-li:my-0.5 dark:prose-invert">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
@@ -120,7 +140,7 @@ export function PlanCard({
                       e.preventDefault();
                       setPendingHref(safeHref);
                     }}
-                    className="text-primary underline decoration-primary/40 underline-offset-2 hover:text-primary/80 dark:text-primary"
+                    className="text-[#EA1F59] underline decoration-[#EA1F59]/35 underline-offset-2 hover:text-[#D91B51] dark:text-[#EA1F59]"
                     {...rest}
                   >
                     {children}
@@ -164,13 +184,15 @@ function PlanList({
   children: React.ReactNode;
   statusByIdx: Map<number, PlanStepStatus>;
 }): JSX.Element {
+  let itemIndex = 0;
   return (
     <ol className="list-none pl-0">
-      {React.Children.map(children, (child, idx) => {
+      {React.Children.map(children, (child) => {
         if (!React.isValidElement(child)) return child;
-        const status = statusByIdx.get(idx);
+        itemIndex += 1;
+        const status = statusByIdx.get(itemIndex);
         return (
-          <li key={idx} className="flex items-start gap-2 py-0.5">
+          <li key={itemIndex} className="flex items-start gap-2 py-0.5">
             <StatusPill state={status?.status ?? 'pending'} />
             <div className="min-w-0 flex-1">
               {(child as React.ReactElement).props.children}
@@ -191,26 +213,32 @@ function StatusPill({
     'mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px]';
   if (state === 'done') {
     return (
-      <span className={cn(cls, 'bg-primary text-white')} aria-label="done">
+      <span className={cn(cls, 'bg-[#42C0EF] text-white')} aria-label="done">
         <Check className="h-2.5 w-2.5" strokeWidth={3} />
       </span>
     );
   }
   if (state === 'failed') {
     return (
-      <span className={cn(cls, 'bg-red-500 text-white')} aria-label="failed">
+      <span className={cn(cls, 'bg-[#EA1F59] text-white')} aria-label="failed">
         <X className="h-2.5 w-2.5" strokeWidth={3} />
       </span>
     );
   }
   if (state === 'running') {
     return (
-      <span className={cn(cls, 'bg-primary text-white animate-pulse-dot')} aria-label="running">
+      <span className={cn(cls, 'animate-pulse-dot bg-[#EA1F59] text-white')} aria-label="running">
         <Loader2 className="h-2.5 w-2.5 animate-spin" />
       </span>
     );
   }
   return (
-    <span className={cn(cls, 'border border-border bg-muted text-muted-foreground')} aria-label="pending" />
+    <span className={cn(cls, 'border border-[#DCDDDD] bg-[#EFEFEF]/50 text-muted-foreground')} aria-label="pending" />
   );
+}
+
+function planProgressFillTone(tone: 'idle' | 'running' | 'done' | 'failed'): string {
+  if (tone === 'done') return 'bg-[#42C0EF]';
+  if (tone === 'idle') return 'bg-[#ADADAD]';
+  return 'bg-[#EA1F59]';
 }
