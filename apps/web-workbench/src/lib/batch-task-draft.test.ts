@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  batchTaskDraftHasReusableDetail,
   batchTaskDraftHasContent,
   batchTaskDraftFromPrompt,
   batchTaskDraftMissingGoal,
@@ -64,5 +65,25 @@ describe('batch task draft helpers', () => {
     expect(batchTaskDraftMissingGoal(drafts[1])).toBe(true);
     expect(firstBatchTaskDraftMissingGoal(drafts)).toBe(1);
     expect(batchTaskDraftProgress(drafts[1]).missingGoal).toBe(true);
+  });
+
+  it('detects cards with reusable steps or output details', () => {
+    expect(
+      batchTaskDraftHasReusableDetail({ goal: '查价格', steps: '', output: '' }),
+    ).toBe(false);
+    expect(
+      batchTaskDraftHasReusableDetail({
+        goal: '查价格',
+        steps: '1. 找官网',
+        output: '',
+      }),
+    ).toBe(true);
+    expect(
+      batchTaskDraftHasReusableDetail({
+        goal: '',
+        steps: '',
+        output: '给出来源',
+      }),
+    ).toBe(true);
   });
 });

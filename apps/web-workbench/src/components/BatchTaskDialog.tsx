@@ -1,4 +1,4 @@
-import { ChevronDown, Layers, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { ChevronDown, Copy, Layers, Loader2, Plus, Trash2, X } from 'lucide-react';
 import * as React from 'react';
 import {
   batchActiveIndexAfterRemove,
@@ -8,6 +8,7 @@ import {
 } from '@/components/batch-dialog-state';
 import { useToast } from '@/components/ui/toast';
 import {
+  batchTaskDraftHasReusableDetail,
   batchTaskDraftMissingGoal,
   batchTaskDraftFromPrompt,
   batchTaskDraftProgress,
@@ -67,8 +68,8 @@ export function BatchTaskDialog({
     );
     setActiveIndex(0);
     setSubmitting(false);
-    const id = requestAnimationFrame(() => goalRefs.current[0]?.focus());
-    return () => cancelAnimationFrame(id);
+    const id = window.setTimeout(() => goalRefs.current[0]?.focus(), 0);
+    return () => window.clearTimeout(id);
   }, [open, initialPrompts]);
 
   const requestClose = React.useCallback(() => {
@@ -114,7 +115,7 @@ export function BatchTaskDialog({
     const nextIndex = items.length;
     setItems((prev) => [...prev, { ...EMPTY_BATCH_TASK_DRAFT }]);
     setActiveIndex(nextIndex);
-    requestAnimationFrame(() => goalRefs.current[nextIndex]?.focus());
+    window.setTimeout(() => goalRefs.current[nextIndex]?.focus(), 0);
   };
 
   const removeItem = (index: number): void => {
@@ -132,12 +133,26 @@ export function BatchTaskDialog({
     });
   };
 
+  const reuseItemDetail = (index: number): void => {
+    if (items.length >= MAX_ITEMS || submitting) return;
+    const source = items[index];
+    if (!batchTaskDraftHasReusableDetail(source)) return;
+    const nextIndex = index + 1;
+    setItems((prev) => [
+      ...prev.slice(0, nextIndex),
+      { goal: '', steps: source.steps, output: source.output },
+      ...prev.slice(nextIndex),
+    ]);
+    setActiveIndex(nextIndex);
+    window.setTimeout(() => goalRefs.current[nextIndex]?.focus(), 0);
+  };
+
   const submit = async (): Promise<void> => {
     if (submitting) return;
     if (invalidGoalIndex != null) {
       toast.show(`请先填写任务 ${invalidGoalIndex + 1} 的目标`, 'error');
       setActiveIndex(invalidGoalIndex);
-      requestAnimationFrame(() => goalRefs.current[invalidGoalIndex]?.focus());
+      window.setTimeout(() => goalRefs.current[invalidGoalIndex]?.focus(), 0);
       return;
     }
     if (prompts.length === 0) {
@@ -235,6 +250,7 @@ export function BatchTaskDialog({
               {items.map((item, index) => {
                 const isActive = activeIndex === index;
                 const missingGoal = batchTaskDraftMissingGoal(item);
+                const canReuseDetail = batchTaskDraftHasReusableDetail(item);
                 return (
                   <div
                     key={index}
@@ -272,15 +288,33 @@ export function BatchTaskDialog({
                         </div>
                         {!isActive && <TaskDraftSummary draft={item} />}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => removeItem(index)}
-                        disabled={submitting || items.length === 1}
-                        aria-label={`删除任务 ${index + 1}`}
-                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:pointer-events-none disabled:opacity-40"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => reuseItemDetail(index)}
+                          disabled={
+                            submitting || items.length >= MAX_ITEMS || !canReuseDetail
+                          }
+                          title={
+                            canReuseDetail
+                              ? `复用任务 ${index + 1} 的步骤和输出`
+                              : '先写步骤或输出后再复用'
+                          }
+                          aria-label={`复用任务 ${index + 1} 的步骤和输出`}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#57479C]/10 hover:text-[#57479C] disabled:pointer-events-none disabled:opacity-35"
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeItem(index)}
+                          disabled={submitting || items.length === 1}
+                          aria-label={`删除任务 ${index + 1}`}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:pointer-events-none disabled:opacity-40"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                     {isActive && (
                       <div className="mt-3 grid gap-2">

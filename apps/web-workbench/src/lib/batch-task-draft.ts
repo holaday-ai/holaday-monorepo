@@ -55,6 +55,10 @@ export function batchTaskDraftMissingGoal(draft: BatchTaskDraft): boolean {
   return draft.goal.trim().length === 0 && batchTaskDraftHasContent(draft);
 }
 
+export function batchTaskDraftHasReusableDetail(draft: BatchTaskDraft): boolean {
+  return draft.steps.trim().length > 0 || draft.output.trim().length > 0;
+}
+
 export function firstBatchTaskDraftMissingGoal(
   drafts: readonly BatchTaskDraft[],
 ): number | null {
