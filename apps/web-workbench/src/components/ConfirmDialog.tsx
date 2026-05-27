@@ -11,8 +11,8 @@ interface Props {
   /** Label for the cancel button. Defaults to "取消". */
   cancelLabel?: string;
   /**
-   * Destructive styling paints the confirm button red and the close-on-
-   * backdrop focus trap so keyboard users land on "取消" by default.
+   * Destructive styling paints the confirm button with the brand pink
+   * warning tone while the focus trap lands on "取消" by default.
    */
   destructive?: boolean;
   onConfirm(): void | Promise<void>;
@@ -22,8 +22,8 @@ interface Props {
 /**
  * Centered modal replacing `window.confirm`. Backdrop blurs the
  * workbench, Escape + backdrop click cancel, Enter on the confirm
- * button commits. Matches the rest of the dark-capable theme via
- * shadcn CSS tokens — no bespoke colors beyond destructive red.
+ * button commits. Shared trust surface for delete / external-link
+ * confirms, so it stays quiet and brand-consistent.
  */
 export function ConfirmDialog({
   open,
@@ -67,21 +67,21 @@ export function ConfirmDialog({
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-dialog-title"
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/35 px-4 backdrop-blur-sm animate-fade-in"
       onMouseDown={(e) => {
         // Close on backdrop click (not on dialog body clicks).
         if (e.target === e.currentTarget && !busy) onClose();
       }}
     >
-      <div className="w-full max-w-sm rounded-xl border border-border bg-card p-5 text-card-foreground shadow-xl">
+      <div className="w-full max-w-sm rounded-lg border border-[#DCDDDD] bg-white p-5 text-card-foreground shadow-[0_16px_48px_rgba(17,24,39,0.16)] dark:border-white/10 dark:bg-card">
         <h2
           id="confirm-dialog-title"
-          className="text-base font-semibold tracking-tight"
+          className="text-base font-semibold tracking-tight text-[#2F2F2F] dark:text-foreground"
         >
           {title}
         </h2>
         {description && (
-          <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
+          <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[#595757] dark:text-muted-foreground">
             {description}
           </p>
         )}
@@ -92,6 +92,7 @@ export function ConfirmDialog({
             size="sm"
             onClick={onClose}
             disabled={busy}
+            className="hover:bg-[#EFEFEF]/70 dark:hover:bg-white/10"
           >
             {cancelLabel}
           </Button>
@@ -100,8 +101,10 @@ export function ConfirmDialog({
             onClick={handleConfirm}
             disabled={busy}
             className={cn(
-              destructive &&
-                'bg-red-600 text-white shadow-sm hover:bg-red-700 focus-visible:ring-red-500',
+              'shadow-[0_4px_12px_rgba(234,31,89,0.16)] focus-visible:ring-[#EA1F59]/25',
+              destructive
+                ? 'bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90'
+                : 'bg-[#57479C] text-white hover:bg-[#57479C]/90',
             )}
           >
             {busy ? '处理中…' : confirmLabel}
