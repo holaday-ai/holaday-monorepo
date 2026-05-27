@@ -3,6 +3,7 @@ import {
   batchTaskDraftHasReusableDetail,
   batchTaskDraftHasContent,
   batchTaskDraftFromPrompt,
+  batchTaskDraftIsEmpty,
   batchTaskDraftMissingGoal,
   batchTaskDraftProgress,
   composeBatchTaskPrompt,
@@ -62,7 +63,9 @@ describe('batch task draft helpers', () => {
     ];
 
     expect(batchTaskDraftHasContent(drafts[0])).toBe(false);
+    expect(batchTaskDraftIsEmpty(drafts[0])).toBe(true);
     expect(batchTaskDraftMissingGoal(drafts[1])).toBe(true);
+    expect(batchTaskDraftIsEmpty(drafts[1])).toBe(false);
     expect(firstBatchTaskDraftMissingGoal(drafts)).toBe(1);
     expect(batchTaskDraftProgress(drafts[1]).missingGoal).toBe(true);
   });

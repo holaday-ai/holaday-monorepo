@@ -9,6 +9,7 @@ import {
 import { useToast } from '@/components/ui/toast';
 import {
   batchTaskDraftHasReusableDetail,
+  batchTaskDraftIsEmpty,
   batchTaskDraftMissingGoal,
   batchTaskDraftFromPrompt,
   batchTaskDraftProgress,
@@ -250,6 +251,8 @@ export function BatchTaskDialog({
               {items.map((item, index) => {
                 const isActive = activeIndex === index;
                 const missingGoal = batchTaskDraftMissingGoal(item);
+                const emptyDraft = batchTaskDraftIsEmpty(item);
+                const showEmptyHint = emptyDraft && (items.length > 1 || prompts.length > 0);
                 const canReuseDetail = batchTaskDraftHasReusableDetail(item);
                 return (
                   <div
@@ -342,6 +345,11 @@ export function BatchTaskDialog({
                               这张任务卡已经填写了步骤或输出，请补充目标。
                             </span>
                           )}
+                          {showEmptyHint && (
+                            <span className="text-[11px] leading-4 text-muted-foreground">
+                              空白任务不会提交；填写目标后才计入批量。
+                            </span>
+                          )}
                         </label>
                         <label className="grid gap-1">
                           <span className="text-[11px] font-medium text-[#595757]">
@@ -421,6 +429,7 @@ function TaskDraftProgressPill({ draft }: { draft: BatchTaskDraft }): JSX.Elemen
   const progress = batchTaskDraftProgress(draft);
   const ready = progress.count === 3;
   const missingGoal = batchTaskDraftMissingGoal(draft);
+  const emptyDraft = batchTaskDraftIsEmpty(draft);
   return (
     <span
       className={cn(
@@ -428,25 +437,26 @@ function TaskDraftProgressPill({ draft }: { draft: BatchTaskDraft }): JSX.Elemen
         missingGoal
           ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
           : ready
-          ? 'border-[#42C0EF]/35 bg-[#42C0EF]/10 text-[#1688AA]'
-          : progress.count > 0
-            ? 'border-[#FFC910]/55 bg-[#FFC910]/12 text-[#8A6A00]'
-            : 'border-[#DCDDDD] bg-white text-[#595757]',
+            ? 'border-[#42C0EF]/35 bg-[#42C0EF]/10 text-[#1688AA]'
+            : emptyDraft
+              ? 'border-[#DCDDDD] bg-[#EFEFEF]/55 text-[#595757]'
+              : 'border-[#FFC910]/55 bg-[#FFC910]/12 text-[#8A6A00]',
       )}
     >
       {missingGoal
         ? '缺目标'
         : ready
           ? '已完整'
-          : progress.count > 0
-            ? `${progress.count}/3`
-            : '未填写'}
+          : emptyDraft
+            ? '空白'
+            : `${progress.count}/3`}
     </span>
   );
 }
 
 function TaskDraftSummary({ draft }: { draft: BatchTaskDraft }): JSX.Element {
-  const title = draft.goal.trim() || '还没有目标';
+  const emptyDraft = batchTaskDraftIsEmpty(draft);
+  const title = draft.goal.trim() || (emptyDraft ? '空白任务' : '还没有目标');
   const details = [
     draft.steps.trim() ? '已写步骤' : null,
     draft.output.trim() ? '有输出要求' : null,
@@ -465,7 +475,11 @@ function TaskDraftSummary({ draft }: { draft: BatchTaskDraft }): JSX.Element {
         {title}
       </p>
       <p className="mt-1 truncate text-[11px] text-muted-foreground">
-        {details.length > 0 ? details.join(' · ') : '点击展开后填写目标、步骤和输出。'}
+        {emptyDraft
+          ? '不会提交；填写目标后才计入批量。'
+          : details.length > 0
+            ? details.join(' · ')
+            : '点击展开后填写目标、步骤和输出。'}
       </p>
     </div>
   );

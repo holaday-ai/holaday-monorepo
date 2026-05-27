@@ -51,6 +51,10 @@ export function batchTaskDraftHasContent(draft: BatchTaskDraft): boolean {
   );
 }
 
+export function batchTaskDraftIsEmpty(draft: BatchTaskDraft): boolean {
+  return !batchTaskDraftHasContent(draft);
+}
+
 export function batchTaskDraftMissingGoal(draft: BatchTaskDraft): boolean {
   return draft.goal.trim().length === 0 && batchTaskDraftHasContent(draft);
 }
