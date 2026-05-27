@@ -109,11 +109,24 @@ export function batchProgressPercent({
 }): number {
   const safeTotal = safeBatchCount(total);
   if (safeTotal <= 0) return 0;
-  const finished =
+  const finished = batchFinishedCount({ done, failed, cancelled });
+  return Math.min(100, Math.max(0, Math.round((finished / safeTotal) * 100)));
+}
+
+export function batchFinishedCount({
+  done,
+  failed,
+  cancelled,
+}: {
+  readonly done: number;
+  readonly failed: number;
+  readonly cancelled?: number | null;
+}): number {
+  return (
     safeBatchCount(done) +
     safeBatchCount(failed) +
-    safeBatchCount(cancelled ?? 0);
-  return Math.min(100, Math.max(0, Math.round((finished / safeTotal) * 100)));
+    safeBatchCount(cancelled ?? 0)
+  );
 }
 
 export function batchRemainingCount({
@@ -128,10 +141,7 @@ export function batchRemainingCount({
   readonly cancelled?: number | null;
 }): number {
   const safeTotal = safeBatchCount(total);
-  const finished =
-    safeBatchCount(done) +
-    safeBatchCount(failed) +
-    safeBatchCount(cancelled ?? 0);
+  const finished = batchFinishedCount({ done, failed, cancelled });
   return Math.max(0, safeTotal - finished);
 }
 

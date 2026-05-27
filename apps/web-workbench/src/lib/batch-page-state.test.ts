@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   batchDetailSummary,
   batchErrorMessage,
+  batchFinishedCount,
   batchListSummary,
   batchProgressPercent,
   batchRemainingCount,
@@ -69,6 +70,18 @@ describe('batch page state helpers', () => {
         cancelled: 1,
       }),
     ).toBe(0);
+  });
+
+  it('calculates finished batch work defensively', () => {
+    expect(batchFinishedCount({ done: 4, failed: 1, cancelled: 1 })).toBe(6);
+    expect(batchFinishedCount({ done: -1, failed: -1, cancelled: -1 })).toBe(0);
+    expect(
+      batchFinishedCount({
+        done: Number.POSITIVE_INFINITY,
+        failed: Number.NaN,
+        cancelled: 2.8,
+      }),
+    ).toBe(2);
   });
 
   it('calculates remaining batch work defensively', () => {

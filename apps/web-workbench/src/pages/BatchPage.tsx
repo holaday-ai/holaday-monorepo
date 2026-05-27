@@ -25,6 +25,7 @@ import {
   normalizeBatchRows,
   type NormalizedBatchDetail,
   type NormalizedBatchRow,
+  batchFinishedCount,
   batchProgressPercent,
   batchRemainingCount,
   batchStatusCopy,
@@ -217,46 +218,11 @@ function BatchList(): JSX.Element {
         {rows && rows.length > 0 && (
           <ul className="divide-y divide-[#EFEFEF]">
             {rows.map((r) => (
-              <li key={r.batchId}>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/batch/${encodeURIComponent(r.batchId)}`)}
-                  className="group flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-[#EFEFEF]/35"
-                >
-                  <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#EA1F59]">
-                    <Layers className="h-3.5 w-3.5" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="line-clamp-1 text-sm font-medium group-hover:text-[#EA1F59]">
-                      {r.name ?? `批量任务 · ${safeBatchCount(r.itemsTotal)} 项`}
-                    </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                      <span
-                        className={
-                          r.status === 'completed'
-                            ? 'text-foreground/80'
-                            : r.status === 'partial'
-                              ? 'text-[#FFC910]'
-                              : r.status === 'cancelled' || r.status === 'pending'
-                                ? 'text-muted-foreground'
-                                : 'text-[#EA1F59]'
-                        }
-                      >
-                        {STATUS_LABEL[r.status] ?? r.status}
-                      </span>
-                      <span>
-                        {safeBatchCount(r.itemsDone)}/{safeBatchCount(r.itemsTotal)} 完成
-                        {batchUnsuccessfulCopy(
-                          safeBatchCount(r.itemsFailed),
-                          safeBatchCount(r.itemsCancelled ?? 0),
-                        )}
-                      </span>
-                      <span>并发 {safeBatchCount(r.concurrency)}</span>
-                      <span>{fmtDate(r.createdAt)}</span>
-                    </div>
-                  </div>
-                </button>
-              </li>
+              <BatchListRow
+                key={r.batchId}
+                row={r}
+                onOpen={() => navigate(`/batch/${encodeURIComponent(r.batchId)}`)}
+              />
             ))}
           </ul>
         )}
@@ -271,6 +237,70 @@ function BatchList(): JSX.Element {
         initialPrompts={initialPrompts}
       />
     </PageContainer>
+  );
+}
+
+function BatchListRow({
+  row,
+  onOpen,
+}: {
+  readonly row: NormalizedBatchRow;
+  readonly onOpen: () => void;
+}): JSX.Element {
+  const total = safeBatchCount(row.itemsTotal);
+  const done = safeBatchCount(row.itemsDone);
+  const failed = safeBatchCount(row.itemsFailed);
+  const cancelled = safeBatchCount(row.itemsCancelled ?? 0);
+  const finished = batchFinishedCount({ done, failed, cancelled });
+  const remaining = batchRemainingCount({ total, done, failed, cancelled });
+  const pct = batchProgressPercent({ total, done, failed, cancelled });
+  const statusTone = batchStatusTone(row.status);
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="group flex w-full items-start gap-3 px-4 py-3.5 text-left transition-colors hover:bg-[#EFEFEF]/35"
+      >
+        <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#EA1F59] transition-colors group-hover:border-[#EA1F59]/35">
+          <Layers className="h-3.5 w-3.5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="line-clamp-1 text-sm font-medium group-hover:text-[#EA1F59]">
+                {row.name ?? `批量任务 · ${total} 项`}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                <span className={statusTone}>
+                  {STATUS_LABEL[row.status] ?? row.status}
+                </span>
+                <span>并发 {safeBatchCount(row.concurrency)}</span>
+                <span>{fmtDate(row.createdAt)}</span>
+              </div>
+            </div>
+            <div className="shrink-0 rounded-full border border-[#DCDDDD] bg-white px-2.5 py-1 text-[11px] font-medium text-[#595757]">
+              {pct}%
+            </div>
+          </div>
+          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[#EFEFEF]">
+            <div
+              className={`h-full rounded-full transition-[width] ${batchProgressFillTone(row.status)}`}
+              style={{ width: `${pct}%` }}
+              aria-label={`${pct}%`}
+            />
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            <span>
+              {finished}/{total} 已处理
+              {batchUnsuccessfulCopy(failed, cancelled)}
+            </span>
+            {remaining > 0 && <span>剩余 {remaining}</span>}
+          </div>
+        </div>
+      </button>
+    </li>
   );
 }
 
@@ -330,7 +360,11 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
   const detailFailed = safeBatchCount(detail?.itemsFailed);
   const detailCancelled = safeBatchCount(detail?.itemsCancelled ?? 0);
   const detailTotal = detail ? safeBatchCount(detail.itemsTotal) : null;
-  const finishedCount = detailDone + detailFailed + detailCancelled;
+  const finishedCount = batchFinishedCount({
+    done: detailDone,
+    failed: detailFailed,
+    cancelled: detailCancelled,
+  });
   const detailSummary = batchDetailSummary({
     loading,
     error: loadError,
@@ -484,7 +518,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
         </div>
         <div className="h-2 w-full overflow-hidden rounded-full bg-[#EFEFEF]">
           <div
-            className="h-full rounded-full bg-[#EA1F59] transition-[width]"
+            className={`h-full rounded-full transition-[width] ${batchProgressFillTone(detail.status)}`}
             style={{ width: `${pct}%` }}
             aria-label={`${pct}%`}
           />
@@ -695,6 +729,19 @@ function BatchMetric({
       <span className="font-mono text-lg font-semibold tabular-nums">{safeBatchCount(value)}</span>
     </div>
   );
+}
+
+function batchStatusTone(status: string): string {
+  if (status === 'completed') return 'text-[#1688AA]';
+  if (status === 'partial') return 'text-[#8A6A00]';
+  if (status === 'running') return 'text-[#EA1F59]';
+  return 'text-muted-foreground';
+}
+
+function batchProgressFillTone(status: string): string {
+  if (status === 'completed') return 'bg-[#42C0EF]';
+  if (status === 'cancelled' || status === 'pending') return 'bg-[#ADADAD]';
+  return 'bg-[#EA1F59]';
 }
 
 function fmtDate(input: string | Date | null | undefined): string {
