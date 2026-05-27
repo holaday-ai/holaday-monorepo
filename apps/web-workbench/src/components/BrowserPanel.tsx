@@ -56,6 +56,9 @@ import { liveStatusLabel } from '@/utils/step-humanize';
  * screencast-only rendering.
  */
 const VNC_PATH = (import.meta.env.VITE_VNC_PATH as string | undefined) ?? '/vnc/websockify';
+const BROWSER_SURFACE =
+  'border-[#DCDDDD] bg-white/95 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85';
+const BROWSER_DIVIDER = 'border-[#DCDDDD]/80 dark:border-white/10';
 
 /**
  * Build the VNC WebSocket URL for the current panel session.
@@ -941,9 +944,9 @@ export function BrowserPanel({
       ref={panelRootRef}
       data-narrow={isNarrow ? 'true' : 'false'}
       className={cn(
-        'relative flex flex-col border-l border-border backdrop-blur-xl',
+        'relative flex flex-col border-l border-[#DCDDDD] backdrop-blur-xl dark:border-white/10',
         isSheet
-          ? 'fixed inset-x-0 bottom-0 z-[75] h-[75vh] rounded-t-xl border-t border-l-0 shadow-2xl animate-fade-in'
+          ? 'fixed inset-x-0 bottom-0 z-[75] h-[75vh] rounded-t-lg border-t border-l-0 shadow-2xl animate-fade-in'
           : 'h-full transition-[width] duration-150',
         // Desktop: fill the parent wrapper (App owns the flex-basis /
         // resize logic). The collapsed rail stays a local state the
@@ -969,7 +972,7 @@ export function BrowserPanel({
              to top-1/2 (vertical center) so the collapse handle
              reads as a panel-edge affordance, not part of the
              browser nav row. */
-          className="absolute left-0 top-1/2 z-10 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border border-border bg-card shadow-sm"
+          className="absolute left-0 top-1/2 z-10 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.08)] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-card"
         >
           {collapsed ? (
             <ChevronLeft className="h-3.5 w-3.5" />
@@ -1028,7 +1031,7 @@ export function BrowserPanel({
             />
           )}
           {!fullscreen && shouldConnect && showHeader && (
-          <header className="flex h-11 items-center gap-2 border-b border-border px-3 pt-2">
+          <header className={cn('flex h-11 items-center gap-2 border-b px-3 pt-2', BROWSER_DIVIDER)}>
             <StatusDot status={status} />
             {/* BOSS bug fix — when the panel is narrow (< 500px),
                 hide back/forward to keep the URL bar legible. The
@@ -1058,8 +1061,8 @@ export function BrowserPanel({
                 className={cn(
                   'inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[11px] font-medium transition-colors',
                   aborting
-                    ? 'cursor-wait border-border bg-muted text-muted-foreground'
-                    : 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300',
+                    ? 'cursor-wait border-[#DCDDDD] bg-[#EFEFEF] text-muted-foreground dark:border-white/10 dark:bg-white/5'
+                    : 'border-[#EA1F59]/35 bg-white text-[#EA1F59] hover:bg-[#EA1F59]/10 dark:border-[#EA1F59]/35 dark:bg-transparent dark:hover:bg-[#EA1F59]/10',
                 )}
               >
                 <Square className="h-3 w-3" strokeWidth={2.5} />
@@ -1079,7 +1082,7 @@ export function BrowserPanel({
               className={cn(
                 'inline-flex h-6 w-6 items-center justify-center rounded-md border transition-colors',
                 interactive
-                  ? 'border-primary/40 bg-primary/10 text-primary'
+                  ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
                   : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5',
               )}
             >
@@ -1117,16 +1120,16 @@ export function BrowserPanel({
           {browserAwaiting && (
             <div
               role="alert"
-              className="flex animate-pulse-dot items-center gap-3 border-b-2 border-amber-400 bg-amber-100 px-4 py-3 text-amber-900 shadow-inner dark:border-amber-500 dark:bg-amber-500/20 dark:text-amber-100"
+              className="mx-3 mt-3 flex animate-fade-in items-start gap-3 rounded-lg border border-[#FFC910]/60 bg-white px-4 py-3 text-[#595757] shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#FFC910]/35 dark:bg-card/85 dark:text-foreground"
             >
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-500 text-base font-bold text-white">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#FFC910]/20 text-base font-bold text-[#57479C]">
                 !
               </span>
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-semibold">
                   {awaitingKindBannerTitle(awaitingKind)}
                 </div>
-                <div className="mt-0.5 text-xs text-amber-900/80 dark:text-amber-100/80">
+                <div className="mt-0.5 text-xs text-muted-foreground">
                   {awaitingKindBannerBody(awaitingKind)}
                 </div>
                 {/* Phase 1 follow-up — login park resume affordance.
@@ -1151,7 +1154,7 @@ export function BrowserPanel({
                   persistedFinalUrl && (
                     <SafeExternalLinkButton
                       href={persistedFinalUrl}
-                      className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-amber-500/60 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-900 hover:bg-amber-100 hover:text-amber-950 dark:border-amber-400/60 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/20"
+                      className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-[#FFC910]/60 bg-[#FFC910]/10 px-2.5 py-1 text-[11px] font-medium text-[#57479C] hover:bg-[#FFC910]/15 dark:border-[#FFC910]/35 dark:text-foreground"
                     >
                       <ExternalLink className="h-3 w-3" />
                       在新标签打开登录页
@@ -1161,7 +1164,7 @@ export function BrowserPanel({
             </div>
           )}
           {interactiveActive && showTakeoverBanner && !fullscreen && (
-            <div className="border-b border-primary/40 bg-primary/10 px-3 py-1.5 text-center text-[11px] font-medium text-primary dark:border-primary/50 dark:bg-primary/20">
+            <div className="mx-3 mt-2 rounded-md border border-[#EA1F59]/25 bg-[#EA1F59]/10 px-3 py-1.5 text-center text-[11px] font-medium text-[#EA1F59] dark:border-[#EA1F59]/35">
               你正在直接操作浏览器 · 点工具栏的接管按钮可让 AI 继续
             </div>
           )}
@@ -1170,7 +1173,9 @@ export function BrowserPanel({
             className={cn(
               'flex flex-1 items-center justify-center overflow-hidden',
               fullscreen ? 'p-0' : 'p-3',
-              interactiveActive ? 'bg-primary/5' : 'bg-muted/40',
+              interactiveActive
+                ? 'bg-[#EA1F59]/5'
+                : 'bg-[#EFEFEF]/50 dark:bg-white/[0.03]',
             )}
           >
             {hibernated ? (
@@ -1198,9 +1203,9 @@ export function BrowserPanel({
                     }
                     onUrlChange={onCdpUrlChange}
                     className={cn(
-                      'rounded-md border shadow-sm',
+                      'rounded-md border shadow-[0_1px_3px_rgba(17,24,39,0.06)]',
                       interactiveActive
-                        ? 'border-primary ring-2 ring-primary/40'
+                        ? 'border-[#EA1F59]/45 ring-2 ring-[#EA1F59]/15'
                         : 'border-black/[0.06]',
                     )}
                   />
@@ -1212,9 +1217,9 @@ export function BrowserPanel({
                     viewOnly={!interactiveActive}
                     onStatusChange={handleVncStatus}
                     className={cn(
-                      'rounded-md border shadow-sm',
+                      'rounded-md border shadow-[0_1px_3px_rgba(17,24,39,0.06)]',
                       interactiveActive
-                        ? 'border-primary ring-2 ring-primary/40'
+                        ? 'border-[#EA1F59]/45 ring-2 ring-[#EA1F59]/15'
                         : 'border-black/[0.06]',
                     )}
                   />
@@ -1226,7 +1231,7 @@ export function BrowserPanel({
                       <button
                         type="button"
                         onClick={handleManualReconnect}
-                        className="pointer-events-auto inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-[11px] font-medium text-foreground transition-colors hover:bg-muted"
+                        className="pointer-events-auto inline-flex h-7 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
                       >
                         <RotateCw className="h-3 w-3" />
                         重新连接
@@ -1235,7 +1240,7 @@ export function BrowserPanel({
                   </div>
                 )}
                 {vncStatus === 'disconnected' && showDisconnectBanner && (
-                  <div className="pointer-events-none absolute right-2 top-2 rounded bg-amber-500/90 px-2 py-0.5 text-[10px] font-semibold text-white">
+                  <div className="pointer-events-none absolute right-2 top-2 rounded bg-[#FFC910]/95 px-2 py-0.5 text-[10px] font-semibold text-[#595757] shadow-sm">
                     画面已断开，重连中
                   </div>
                 )}
@@ -1289,16 +1294,16 @@ export function BrowserPanel({
                     onLoad={fitScreencastImg}
                     draggable={false}
                     className={cn(
-                      'block rounded-md border shadow-sm',
+                      'block rounded-md border shadow-[0_1px_3px_rgba(17,24,39,0.06)]',
                       interactiveActive
-                        ? 'cursor-pointer border-primary ring-2 ring-primary/40'
+                        ? 'cursor-pointer border-[#EA1F59]/45 ring-2 ring-[#EA1F59]/15'
                         : 'border-black/[0.06]',
                     )}
                   />
                   {ripple && (
                     <span
                       aria-hidden
-                      className="pointer-events-none absolute block h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-500/70 animate-click-pulse"
+                      className="pointer-events-none absolute block h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#EA1F59]/70 animate-click-pulse"
                       style={{ left: ripple.x, top: ripple.y }}
                     />
                   )}
@@ -1375,7 +1380,7 @@ export function BrowserPanel({
                     alt="任务完成时的浏览器截图"
                     draggable={false}
                     onLoad={fitScreencastImg}
-                    className="block rounded-md border border-black/[0.06] shadow-sm"
+                    className="block rounded-md border border-black/[0.06] shadow-[0_1px_3px_rgba(17,24,39,0.06)]"
                   />
                   <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2 rounded bg-black/55 px-2 py-1 text-[11px] text-white backdrop-blur">
                     <span className="truncate">{terminalEvidenceLabel} · 最终页面</span>
@@ -1384,13 +1389,13 @@ export function BrowserPanel({
                     )}
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center justify-center gap-2 border-t border-border/40 bg-background/60 px-3 py-2 text-[12px]">
+                <div className={cn('flex shrink-0 items-center justify-center gap-2 border-t bg-background/70 px-3 py-2 text-[12px]', BROWSER_DIVIDER)}>
                   <span className="text-muted-foreground">想继续操作？发新任务或重新执行。</span>
                   {onReExecute && (
                     <button
                       type="button"
                       onClick={onReExecute}
-                      className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-foreground/30 hover:bg-foreground/[0.04]"
+                      className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
                     >
                       <RotateCw className="h-3 w-3" />
                       重新执行
@@ -1408,7 +1413,7 @@ export function BrowserPanel({
             )}
           </div>
           {!fullscreen && shouldConnect && showHeader && (
-            <footer className="flex h-7 items-center justify-between border-t border-border px-3 text-[11px] text-muted-foreground">
+            <footer className={cn('flex h-7 items-center justify-between border-t px-3 text-[11px] text-muted-foreground', BROWSER_DIVIDER)}>
               <span>{frame ? `${frame.viewport.width}×${frame.viewport.height}` : '—'}</span>
               <span>{frame ? `第 ${frame.tickIndex + 1} 帧` : ''}</span>
             </footer>
@@ -1683,9 +1688,9 @@ function HibernationCard({
           浏览器已释放" is honest AND less alarming than "已休眠".
           Wake button demoted from black-CTA to muted text link so
           it doesn't compete with the final screenshot behind it. */}
-      <div className="relative flex flex-col items-center gap-2.5 rounded-lg border border-border bg-background/95 px-6 py-4 shadow-lg backdrop-blur">
+      <div className={cn('relative flex flex-col items-center gap-2.5 rounded-lg px-6 py-4 backdrop-blur', BROWSER_SURFACE)}>
         <div
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-cyan-500/15 text-cyan-600 dark:text-cyan-300"
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-[#42C0EF]/15 text-[#42C0EF]"
           aria-hidden
         >
           <Check className="h-5 w-5" strokeWidth={2.5} />
@@ -1748,7 +1753,17 @@ function EmptyBrowserState({
   onReExecute?: () => void;
 }): JSX.Element {
   if (taskStatus === 'executing' && isBrowserTask) {
-    return <div className="text-center text-xs text-muted-foreground">等待第一帧…</div>;
+    return (
+      <div className={cn('flex flex-col items-center gap-2.5 rounded-lg px-6 py-4 text-center', BROWSER_SURFACE)}>
+        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#EA1F59]/10 text-[#EA1F59]">
+          <Globe className="h-4 w-4 animate-pulse-dot" aria-hidden />
+        </div>
+        <div>
+          <div className="text-sm font-medium text-foreground">等待浏览器画面</div>
+          <div className="mt-0.5 text-xs text-muted-foreground">正在连接当前任务的实时页面。</div>
+        </div>
+      </div>
+    );
   }
   const terminal = taskStatus ? isTerminalStatus(taskStatus) : false;
   if (terminal && isBrowserTask) {
@@ -1761,8 +1776,8 @@ function EmptyBrowserState({
     // to re-execute the intent).
     if (safeFinalUrl) {
       return (
-        <div className="flex flex-col items-center px-6 text-center text-muted-foreground">
-          <Globe className="h-10 w-10 text-muted-foreground/40" aria-hidden />
+        <div className={cn('flex flex-col items-center px-6 py-4 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-lg')}>
+          <Globe className="h-10 w-10 text-[#42C0EF]/70" aria-hidden />
           <div className="mt-3 text-sm font-medium text-foreground/80">
             {statusLabel}，没有截图
           </div>
@@ -1771,7 +1786,7 @@ function EmptyBrowserState({
           </div>
           <SafeExternalLinkButton
             href={safeFinalUrl}
-            className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[12px] text-foreground transition-colors hover:border-foreground/30 hover:bg-foreground/[0.04]"
+            className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 py-1 text-[12px] text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
           >
             <ExternalLink className="h-3 w-3" />
             <span className="max-w-[260px] truncate font-mono text-[11px]">
@@ -1782,8 +1797,8 @@ function EmptyBrowserState({
       );
     }
     return (
-      <div className="flex flex-col items-center px-6 text-center text-muted-foreground">
-        <Globe className="h-10 w-10 text-muted-foreground/40" aria-hidden />
+      <div className={cn('flex flex-col items-center px-6 py-4 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-lg')}>
+        <Globe className="h-10 w-10 text-[#42C0EF]/70" aria-hidden />
         <div className="mt-3 text-sm font-medium text-foreground/80">
           这条历史任务没有保存浏览器证据
         </div>
@@ -1794,7 +1809,7 @@ function EmptyBrowserState({
           <button
             type="button"
             onClick={onReExecute}
-            className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1 text-[12px] text-foreground transition-colors hover:border-foreground/30 hover:bg-foreground/[0.04]"
+            className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
           >
             重新执行
           </button>
@@ -1803,8 +1818,8 @@ function EmptyBrowserState({
     );
   }
   return (
-    <div className="flex flex-col items-center px-6 text-center text-muted-foreground">
-      <Globe className="h-10 w-10 text-muted-foreground/40" aria-hidden />
+    <div className={cn('flex flex-col items-center px-6 py-4 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-lg')}>
+      <Globe className="h-10 w-10 text-[#42C0EF]/70" aria-hidden />
       <div className="mt-3 text-sm font-medium text-foreground/80">浏览器将在这里显示</div>
       <div className="mt-1 text-xs leading-relaxed">
         创建一个任务后，HOLA DAY 的浏览器画面会实时出现在这里，
@@ -1999,8 +2014,8 @@ function StatusDot({ status }: { status: DotStatus }): JSX.Element {
       className={cn(
         'inline-block h-2 w-2 rounded-full',
         status === 'idle' && 'bg-muted-foreground/40',
-        status === 'live' && 'animate-pulse-dot bg-primary',
-        status === 'error' && 'bg-red-500',
+        status === 'live' && 'animate-pulse-dot bg-[#42C0EF]',
+        status === 'error' && 'bg-[#EA1F59]',
       )}
     />
   );
@@ -2106,9 +2121,9 @@ function UrlBar({
       aria-label="浏览器地址栏 (Enter 跳转, Esc 还原)"
       className={cn(
         'min-w-0 flex-1 truncate rounded-md border bg-transparent px-2 py-1 font-mono text-[11px] outline-none transition-colors',
-        'border-transparent text-muted-foreground hover:border-border hover:bg-muted/40',
+        'border-transparent text-muted-foreground hover:border-[#DCDDDD] hover:bg-[#EFEFEF]/50 dark:hover:border-white/10 dark:hover:bg-white/5',
         'focus:border-foreground/20 focus:bg-background focus:text-foreground focus:ring-0',
-        interactiveActive && 'border-primary/40',
+        interactiveActive && 'border-[#EA1F59]/35',
         pending && 'cursor-wait opacity-60',
       )}
     />
@@ -2164,7 +2179,7 @@ function NavButton({
       }}
       className={cn(
         'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors',
-        'hover:bg-foreground/5 hover:text-foreground',
+        'hover:bg-[#EFEFEF]/60 hover:text-foreground dark:hover:bg-white/10',
         pending && 'opacity-50',
       )}
     >
@@ -2289,7 +2304,7 @@ function FullscreenFloatingToolbar({
             'inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[11px] font-medium transition-colors',
             aborting
               ? 'cursor-wait border-white/20 bg-white/10 text-white/60'
-              : 'border-red-300/40 bg-red-500/15 text-red-200 hover:bg-red-500/25',
+              : 'border-[#EA1F59]/35 bg-[#EA1F59]/15 text-white hover:bg-[#EA1F59]/25',
           )}
         >
           <Square className="h-3 w-3" strokeWidth={2.5} />
@@ -2303,7 +2318,7 @@ function FullscreenFloatingToolbar({
         aria-label={interactive ? '退出接管' : '接管'}
         className={cn(
           'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-white/85 transition-colors hover:bg-white/10',
-          interactive && 'bg-primary/35 text-white',
+          interactive && 'bg-[#EA1F59]/35 text-white',
         )}
       >
         <Hand className="h-3.5 w-3.5" />
