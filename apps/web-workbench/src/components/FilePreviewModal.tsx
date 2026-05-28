@@ -170,15 +170,14 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
             onClick={() => void handleDownload()}
             disabled={downloading}
             aria-label="下载到本地"
-            title="下载到本地"
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[12px] text-muted-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
+            title={downloading ? '下载中' : '下载'}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-muted-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
           >
             {downloading ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
               <Download className="h-3.5 w-3.5" />
             )}
-            {downloading ? '下载中' : '下载'}
           </button>
           <button
             type="button"
