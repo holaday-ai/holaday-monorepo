@@ -114,6 +114,12 @@ const MODE_MENU_CLASS =
   'rounded-[8px] border-[#DCDDDD] bg-white p-1.5 shadow-[0_12px_32px_rgba(17,24,39,0.12)] dark:border-white/10 dark:bg-card';
 const MODE_MENU_ITEM_CLASS =
   'items-start rounded-[6px] py-2 text-[13px] focus:bg-[#EFEFEF]/70 data-[state=checked]:bg-[#EA1F59]/5 dark:focus:bg-white/10 dark:data-[state=checked]:bg-[#EA1F59]/10';
+const ATTACHMENT_TRIGGER_CLASS =
+  'inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#DCDDDD] bg-white/70 text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/75 dark:hover:bg-white/10';
+const ATTACHMENT_TRIGGER_ACTIVE =
+  'border-[#EA1F59]/35 bg-[#EA1F59]/5 text-[#EA1F59] dark:border-[#EA1F59]/40 dark:bg-[#EA1F59]/10';
+const ATTACHMENT_MENU_ITEM_CLASS =
+  'items-start gap-2.5 rounded-[6px] px-2 py-2.5 text-[13px] focus:bg-[#EFEFEF]/70 dark:focus:bg-white/10';
 
 type ComposerExpertWorkflow = {
   id: 'douyin-livestream-review';
@@ -616,8 +622,8 @@ export function InputArea({
                   aria-label="添加附件"
                   title="添加附件"
                   className={cn(
-                    'inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:border-[#DCDDDD] hover:bg-[#EFEFEF]/55 hover:text-foreground dark:hover:border-white/10 dark:hover:bg-white/10',
-                    plusMenuOpen && 'border-[#DCDDDD] bg-[#EFEFEF]/55 text-foreground dark:border-white/10 dark:bg-white/10',
+                    ATTACHMENT_TRIGGER_CLASS,
+                    plusMenuOpen && ATTACHMENT_TRIGGER_ACTIVE,
                   )}
                 >
                   <Plus className="h-4 w-4" />
@@ -626,26 +632,42 @@ export function InputArea({
               <DropdownMenuContent
                 side="top"
                 align="start"
-                sideOffset={6}
-                className="w-40"
+                sideOffset={8}
+                className={cn('w-60', MODE_MENU_CLASS)}
               >
                 <DropdownMenuItem
+                  className={ATTACHMENT_MENU_ITEM_CLASS}
                   onSelect={() => {
                     setPlusMenuOpen(false);
                     fileInputRef.current?.click();
                   }}
                 >
-                  <FileText className="text-muted-foreground" />
-                  <span>上传文件</span>
+                  <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-[#57479C]/8 text-[#57479C]">
+                    <FileText className="h-4 w-4" />
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="font-medium text-foreground">上传文件</span>
+                    <span className="whitespace-nowrap text-[11px] leading-snug text-muted-foreground">
+                      CSV、PDF、Markdown 或表格
+                    </span>
+                  </span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
+                  className={ATTACHMENT_MENU_ITEM_CLASS}
                   onSelect={() => {
                     setPlusMenuOpen(false);
                     imageInputRef.current?.click();
                   }}
                 >
-                  <ImageIcon className="text-muted-foreground" />
-                  <span>上传图片</span>
+                  <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-[#42C0EF]/10 text-[#208CB8] dark:text-[#42C0EF]">
+                    <ImageIcon className="h-4 w-4" />
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="font-medium text-foreground">上传图片</span>
+                    <span className="whitespace-nowrap text-[11px] leading-snug text-muted-foreground">
+                      截图、PNG、JPG 或 WebP
+                    </span>
+                  </span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -657,7 +679,7 @@ export function InputArea({
               }}
               aria-label="升级基础版可添加附件"
               title="升级基础版可添加附件"
-              className="inline-flex h-8 w-8 cursor-not-allowed items-center justify-center rounded-md border border-transparent text-muted-foreground/40"
+              className="inline-flex h-8 w-8 cursor-not-allowed items-center justify-center rounded-[8px] border border-[#DCDDDD]/70 bg-white/50 text-[#ADADAD] dark:border-white/10 dark:bg-white/5"
             >
               <Plus className="h-4 w-4" />
             </button>
