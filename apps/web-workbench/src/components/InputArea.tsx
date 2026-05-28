@@ -534,14 +534,12 @@ export function InputArea({
         )}
       >
         {followUpTarget && !replyMode && (
-          // Neutral context chip — primary magenta was reading as a
-          // warning banner. The chip just states the context; the
-          // ghost button on the right lets the user opt out into a
-          // fresh task. Brand magenta stays scoped to the send
-          // button + actionable chips elsewhere.
+          // The selected terminal task becomes the context for the
+          // next message. Say that directly; "continue/send new"
+          // read like two competing send actions.
           <div className={cn('flex items-center gap-2 border-b bg-[#EFEFEF]/35 px-3 py-2 text-xs text-muted-foreground', COMPOSER_DIVIDER)}>
             <span className="shrink-0 font-medium text-foreground/80">
-              继续这个任务
+              追问当前任务
             </span>
             <span
               className="min-w-0 flex-1 truncate"
@@ -552,12 +550,12 @@ export function InputArea({
             <button
               type="button"
               onClick={onCancelFollowUp}
-              aria-label="取消追问，发新任务"
-              title="取消追问，发新任务"
+              aria-label="清空当前任务上下文，改为新目标"
+              title="清空当前任务上下文，改为新目标"
               className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-white hover:text-foreground dark:hover:bg-white/10"
             >
               <X className="h-3 w-3" aria-hidden />
-              发新任务
+              改为新目标
             </button>
           </div>
         )}
@@ -594,7 +592,7 @@ export function InputArea({
             replyMode
               ? '回复 HOLA DAY...'
               : followUpTarget
-                ? '追问这个任务...'
+                ? '补充问题或下一步指令...'
                 : expertWorkflow
                   ? '补充直播场次、数据来源或你想要的报告形式...'
                   : '描述你想让 HOLA DAY 做什么...'

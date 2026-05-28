@@ -2161,7 +2161,7 @@ function TerminalSummary({
       {suggestions.length > 0 && onSuggestionPick && revealed === displayText && (
         <div className="mt-4 rounded-[8px] border border-[#DCDDDD] bg-white p-2.5 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85">
           <div className="mb-2 flex items-center justify-between gap-3 px-1 text-[11px] font-medium tracking-wide text-muted-foreground">
-            继续这个任务
+            下一步建议
             <span>{suggestions.length} 项</span>
           </div>
           {suggestions.map((s, i) => (
