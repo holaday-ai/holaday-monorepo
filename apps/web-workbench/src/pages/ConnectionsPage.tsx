@@ -28,7 +28,7 @@ import {
 } from '@/lib/connection-page-state';
 import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
-import { PageContainer, PageHeader } from '@/pages/PageShell';
+import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
 import { cn } from '@/lib/utils';
 
 const ICONS: Record<string, LucideIcon> = {
@@ -125,9 +125,7 @@ export function ConnectionsPage(): JSX.Element {
         </div>
       </div>
       {loading ? (
-        <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-          加载中…
-        </div>
+        <PageLoadingPanel label="连接器加载中" description="正在同步可申请的服务" />
       ) : loadError ? (
         <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center animate-fade-in motion-reduce:animate-none">
           <AlertCircle className="h-8 w-8 text-primary" aria-hidden />

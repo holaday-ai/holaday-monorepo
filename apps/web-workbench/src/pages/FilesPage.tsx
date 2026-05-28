@@ -38,7 +38,7 @@ import { filesEmptyCopy, type FileFilter } from '@/lib/files-empty-copy';
 import { trpc } from '@/lib/trpc';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { cn } from '@/lib/utils';
-import { PageContainer, PageHeader } from '@/pages/PageShell';
+import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
 
 type UiFile = NormalizedFileRow;
 
@@ -199,9 +199,7 @@ export function FilesPage(): JSX.Element {
       </div>
 
       {loading ? (
-        <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-          加载中…
-        </div>
+        <PageLoadingPanel label="文件加载中" description="正在整理文件库" />
       ) : files.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <FileIcon className="h-8 w-8 text-muted-foreground/40" />

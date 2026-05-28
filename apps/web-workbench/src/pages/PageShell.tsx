@@ -99,6 +99,40 @@ export function PageHeader({
   );
 }
 
+export function PageLoadingPanel({
+  label = '加载中',
+  description = '正在准备最新内容',
+}: {
+  label?: string;
+  description?: string;
+}): JSX.Element {
+  return (
+    <div
+      aria-label={label}
+      aria-live="polite"
+      className="rounded-[8px] border border-[#DCDDDD] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)] animate-fade-in motion-reduce:animate-none"
+    >
+      <div className="flex items-center gap-3">
+        <div className="h-9 w-9 rounded-[8px] bg-[#EA1F59]/90 shadow-[0_8px_18px_rgba(234,31,89,0.16)]" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-[#595757]">{label}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{description}</div>
+        </div>
+      </div>
+      <div className="mt-5 grid gap-2 sm:grid-cols-3">
+        <div className="hola-skel h-14 rounded-[8px] bg-[#EFEFEF]/85" />
+        <div className="hola-skel h-14 rounded-[8px] bg-[#EFEFEF]/85" />
+        <div className="hola-skel h-14 rounded-[8px] bg-[#EFEFEF]/85" />
+      </div>
+      <div className="mt-4 space-y-2">
+        <div className="hola-skel h-3 w-full bg-[#EFEFEF]/85" />
+        <div className="hola-skel h-3 w-5/6 bg-[#EFEFEF]/85" />
+        <div className="hola-skel h-3 w-2/3 bg-[#EFEFEF]/85" />
+      </div>
+    </div>
+  );
+}
+
 /**
  * Card-style section used on most secondary pages. Consistent
  * rounded border + card bg so pages feel like part of one system.

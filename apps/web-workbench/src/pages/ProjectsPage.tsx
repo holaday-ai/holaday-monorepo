@@ -17,7 +17,7 @@ import {
 } from '@/lib/project-page-state';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
-import { PageContainer, PageHeader } from '@/pages/PageShell';
+import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
 import type { UiProject } from '@/types/task';
 
 /**
@@ -244,9 +244,7 @@ export function ProjectsPage(): JSX.Element {
       )}
 
       {initialLoading ? (
-        <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-          加载中…
-        </div>
+        <PageLoadingPanel label="项目加载中" description="正在同步项目列表" />
       ) : fullPageError ? (
         <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <AlertCircle className="h-8 w-8 text-primary" />

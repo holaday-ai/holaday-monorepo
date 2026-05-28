@@ -50,7 +50,7 @@ import {
 import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
-import { PageContainer, PageHeader } from '@/pages/PageShell';
+import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
 import type { UiSkill } from '@/types/task';
 
 /** Per-plan skill caps. Mirrors PLAN_CATALOGUE.rolesAllowed in shared-types. */
@@ -244,9 +244,7 @@ export function SkillsPage(): JSX.Element {
         </div>
       )}
       {loading ? (
-        <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-          加载中…
-        </div>
+        <PageLoadingPanel label="技能加载中" description="正在同步专家技能目录" />
       ) : loadError ? (
         <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center">
           <AlertCircle className="h-8 w-8 text-primary" aria-hidden />

@@ -20,7 +20,12 @@ import {
 import { historyEmptyCopy, taskStatusLabel } from '@/lib/task-status-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
-import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
+import {
+  PageContainer,
+  PageHeader,
+  PageLoadingPanel,
+  Section,
+} from '@/pages/PageShell';
 
 // Filter values use the same vocabulary as the orchestrator's
 // `tasks.status` column ('completed' / 'failed' / 'executing' / …)
@@ -313,9 +318,8 @@ export function HistoryPage(): JSX.Element {
 
         <Section className="rounded-[8px] border-[#DCDDDD] bg-white p-0 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           {loadingWithoutRows ? (
-            <div className="flex h-48 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin text-[#EA1F59]" />
-              任务历史加载中…
+            <div className="p-4">
+              <PageLoadingPanel label="任务历史加载中" description="正在同步历史任务" />
             </div>
           ) : error ? (
             <div className="flex h-56 flex-col items-center justify-center text-center">

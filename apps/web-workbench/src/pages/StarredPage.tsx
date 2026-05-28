@@ -16,7 +16,7 @@ import {
 } from '@/lib/task-hub-state';
 import { taskStatusLabel } from '@/lib/task-status-copy';
 import { trpc } from '@/lib/trpc';
-import { PageContainer, PageHeader } from '@/pages/PageShell';
+import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
 
 /**
  * 置顶任务 — pinned-task hub. Pin state is server-persisted (the
@@ -146,10 +146,7 @@ export function StarredPage(): JSX.Element {
         }
       />
       {initialLoad ? (
-        <div className="flex h-48 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin text-[#EA1F59]" />
-          置顶任务加载中…
-        </div>
+        <PageLoadingPanel label="置顶任务加载中" description="正在同步固定任务" />
       ) : loadError ? (
         <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
