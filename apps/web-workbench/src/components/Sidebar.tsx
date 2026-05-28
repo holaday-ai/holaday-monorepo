@@ -345,7 +345,7 @@ export function Sidebar({
             pinned; only the task list scrolls. The visual centre of
             gravity sits on "新任务" + the feature shortcuts; task
             history is a scroll surface, not a status board. */}
-        <SidebarHeader className={cn('shrink-0 gap-2 border-b bg-white/70 backdrop-blur dark:bg-card/70', SIDEBAR_BORDER)}>
+        <SidebarHeader className={cn('shrink-0 gap-2 border-b bg-white/60 backdrop-blur dark:bg-card/70', SIDEBAR_BORDER)}>
           <div className="flex items-center gap-2 px-1 py-1">
             <BrandIcon />
             <BrandWordmark className="group-data-[collapsible=icon]:hidden" />
@@ -359,7 +359,7 @@ export function Sidebar({
                   onNewTask();
                   onMobileClose?.();
                 }}
-                className="bg-[#EA1F59] font-medium text-white shadow-[0_4px_12px_rgba(234,31,89,0.16)] hover:bg-[#EA1F59]/90 hover:text-white data-[active=true]:bg-[#EA1F59] data-[active=true]:text-white"
+                className="rounded-[8px] bg-[#EA1F59] font-medium text-white shadow-[0_3px_10px_rgba(234,31,89,0.14)] hover:bg-[#EA1F59]/90 hover:text-white data-[active=true]:bg-[#EA1F59] data-[active=true]:text-white"
               >
                 <Plus />
                 <span>新任务</span>
@@ -370,12 +370,12 @@ export function Sidebar({
                 <SidebarMenuButton
                   tooltip="搜索任务 (⌘K)"
                   onClick={() => onOpenSearch()}
-                  className="border border-transparent text-sidebar-foreground/80 hover:border-[#DCDDDD] hover:bg-[#EFEFEF]/50 dark:hover:border-white/10 dark:hover:bg-white/10"
+                  className="rounded-[8px] border border-transparent text-[#595757] hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:text-foreground/70 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
                 >
                   <Search />
                   <span className="flex flex-1 items-center justify-between">
                     搜索任务
-                    <kbd className="rounded border border-[#DCDDDD] bg-white px-1 py-0.5 text-[10px] font-sans text-sidebar-foreground/60 dark:border-white/10 dark:bg-transparent">
+                    <kbd className="rounded-[5px] border border-[#DCDDDD]/75 bg-white/65 px-1 py-0.5 text-[10px] font-sans text-[#ADADAD] dark:border-white/10 dark:bg-transparent">
                       ⌘K
                     </kbd>
                   </span>
@@ -995,7 +995,7 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
     typeof window !== 'undefined' ? window.location.pathname : '';
   return (
     <SidebarGroup className="shrink-0 border-b border-[#DCDDDD]/70 dark:border-white/10">
-      <SidebarGroupLabel className="px-3 text-[11px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
+      <SidebarGroupLabel className="px-3 text-[11px] font-medium tracking-normal text-[#ADADAD]">
         快捷入口
       </SidebarGroupLabel>
       <SidebarGroupContent>
@@ -1010,7 +1010,7 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
                   isActive={isActive}
                   onClick={() => navigate(href)}
                   className={cn(
-                    'border border-transparent text-sidebar-foreground/85 hover:border-[#DCDDDD] hover:bg-[#EFEFEF]/50 dark:hover:border-white/10 dark:hover:bg-white/10',
+                    'rounded-[8px] border border-transparent text-[#595757] hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:text-foreground/75 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
                     isActive &&
                       'border-[#EA1F59]/25 bg-[#EA1F59]/10 text-[#EA1F59] hover:bg-[#EA1F59]/10',
                   )}
@@ -1045,7 +1045,7 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
                 isActive={pathname.startsWith('/admin')}
                 onClick={() => navigate('/admin')}
                 className={cn(
-                  'border border-transparent hover:border-[#DCDDDD] hover:bg-[#EFEFEF]/50 dark:hover:border-white/10 dark:hover:bg-white/10',
+                  'rounded-[8px] border border-transparent hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
                   pathname.startsWith('/admin') &&
                     'border-[#EA1F59]/25 bg-[#EA1F59]/10 text-[#EA1F59] hover:bg-[#EA1F59]/10',
                 )}
