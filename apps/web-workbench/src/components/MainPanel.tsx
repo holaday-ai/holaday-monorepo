@@ -292,7 +292,7 @@ function SuggestionChips({
   onPick(intent: string): void;
 }): JSX.Element {
   return (
-    <div className="mx-auto mt-5 flex max-w-[660px] flex-wrap items-center justify-center gap-2">
+    <div className="mx-auto mt-4 flex max-w-[640px] flex-wrap items-center justify-center gap-1.5">
       {SUGGESTIONS.map((s) => {
         const Icon = s.icon;
         return (
@@ -300,7 +300,8 @@ function SuggestionChips({
             key={s.label}
             type="button"
             onClick={() => onPick(s.intent)}
-            className="group inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[#DCDDDD] bg-white/75 px-3 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/75 dark:hover:bg-white/10"
+            aria-label={`用示例填入：${s.label}`}
+            className="group inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[#DCDDDD]/75 bg-white/55 px-2.5 text-[12px] font-medium text-[#595757] shadow-[0_1px_1px_rgba(17,24,39,0.02)] transition-colors hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/75 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
           >
             <Icon className="h-3.5 w-3.5 text-[#ADADAD] transition-colors group-hover:text-[#EA1F59]" />
             {s.label}
@@ -350,8 +351,8 @@ function OnboardingHint(): JSX.Element | null {
   if (dismissed) return null;
 
   return (
-    <div className="mb-4 flex items-start gap-2.5 rounded-[8px] border border-[#DCDDDD]/90 bg-white/80 px-3 py-2.5 text-[13px] text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] dark:border-white/10 dark:bg-white/5 dark:text-foreground/75">
-      <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] bg-[#EA1F59]/8 text-[#EA1F59]">
+    <div className="mb-4 flex items-start gap-2.5 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-3 py-2 text-[13px] text-[#595757] shadow-[0_1px_1px_rgba(17,24,39,0.02)] dark:border-white/10 dark:bg-white/5 dark:text-foreground/75">
+      <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] bg-[#EA1F59]/7 text-[#EA1F59]">
         <Sparkles className="h-3.5 w-3.5" />
       </span>
       <div className="min-w-0 flex-1 leading-relaxed">
@@ -367,7 +368,7 @@ function OnboardingHint(): JSX.Element | null {
           }
           setDismissed(true);
         }}
-        className="-mr-1 -mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px] text-[#ADADAD] transition-colors hover:bg-[#EFEFEF]/75 hover:text-[#595757] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:hover:bg-white/10 dark:hover:text-foreground"
+        className="-mr-1 -mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px] text-[#ADADAD] transition-colors hover:bg-[#EFEFEF]/70 hover:text-[#595757] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:hover:bg-white/10 dark:hover:text-foreground"
         aria-label="关闭引导"
       >
         <X className="h-3.5 w-3.5" />
