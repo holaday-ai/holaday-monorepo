@@ -198,8 +198,8 @@ export function NotificationBell({
         aria-label="通知"
         aria-expanded={open}
         className={cn(
-          'relative flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10',
-          open && 'bg-[#EFEFEF]/70 text-foreground dark:bg-white/10',
+          'relative flex h-9 w-9 items-center justify-center rounded-[8px] border border-transparent text-[#595757] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:text-foreground/70 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
+          open && 'border-[#EA1F59]/25 bg-[#EA1F59]/5 text-[#EA1F59] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10',
         )}
       >
         <Bell className="h-4 w-4" />
@@ -216,7 +216,7 @@ export function NotificationBell({
         <div
           role="menu"
           className={cn(
-            'hd-popover-enter absolute z-50 overflow-hidden rounded-lg border border-[#DCDDDD] bg-white shadow-[0_16px_48px_rgba(17,24,39,0.16)] dark:border-white/10 dark:bg-card',
+            'hd-popover-enter absolute z-50 overflow-hidden rounded-[8px] border border-[#DCDDDD]/85 bg-white shadow-[0_12px_32px_rgba(17,24,39,0.12)] dark:border-white/10 dark:bg-card',
             placement === 'mobile-header'
               ? 'right-0 top-full mt-1 w-[min(calc(100vw-24px),360px)] origin-top-right'
               : 'bottom-full left-full mb-1 ml-2 w-[360px] origin-bottom-left',
@@ -234,7 +234,7 @@ export function NotificationBell({
                 variant="ghost"
                 onClick={() => void handleMarkAll()}
                 disabled={markingAll}
-                className="h-7 px-2 text-xs hover:bg-[#EFEFEF]/70 dark:hover:bg-white/10"
+                className="h-7 rounded-[6px] px-2 text-xs hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:hover:bg-white/10"
               >
                 {markingAll ? (
                   <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden />
@@ -355,7 +355,7 @@ function NotificationStatusNotice({
             size="sm"
             onClick={onRetry}
             disabled={loading}
-            className="h-7 px-2 text-xs"
+            className="h-7 rounded-[6px] border-[#DCDDDD]/75 px-2 text-xs text-[#595757] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
           >
             {loading ? '重试中…' : '重试'}
           </Button>
@@ -420,7 +420,7 @@ function NotificationItem({
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-start gap-2.5 border-b border-[#DCDDDD]/70 px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-[#EFEFEF]/55 dark:border-white/10 dark:hover:bg-white/10"
+      className="flex w-full items-start gap-2.5 border-b border-[#DCDDDD]/70 px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-[#EA1F59]/5 dark:border-white/10 dark:hover:bg-white/10"
     >
       <span
         className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[11px] text-white"

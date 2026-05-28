@@ -91,14 +91,14 @@ export function UserMenu({
         aria-label={compact ? `用户菜单：${displayName || email || ''}` : undefined}
         title={compact ? displayName || email || '用户' : undefined}
         className={cn(
-          'flex items-center rounded-md transition-colors hover:bg-[#EFEFEF]/70 dark:hover:bg-white/10',
+          'flex items-center rounded-[8px] border border-transparent transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
           compact
             ? 'h-10 w-10 justify-center'
             : 'w-full gap-3 px-2 py-1.5 text-left',
-          open && 'bg-[#EFEFEF]/70 dark:bg-white/10',
+          open && 'border-[#EA1F59]/25 bg-[#EA1F59]/5 dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10',
         )}
       >
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[#EA1F59] text-sm font-semibold text-white shadow-[0_4px_12px_rgba(234,31,89,0.16)]">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-[#EA1F59] text-sm font-semibold text-white shadow-[0_3px_10px_rgba(234,31,89,0.14)]">
           {initial}
         </div>
         {!compact && (
@@ -112,7 +112,7 @@ export function UserMenu({
         <div
           role="menu"
           className={cn(
-            'absolute bottom-full z-50 rounded-lg border border-[#DCDDDD] bg-white p-1 text-foreground shadow-[0_16px_48px_rgba(17,24,39,0.16)] animate-fade-in dark:border-white/10 dark:bg-card',
+            'absolute bottom-full z-50 rounded-[8px] border border-[#DCDDDD]/85 bg-white p-1 text-foreground shadow-[0_12px_32px_rgba(17,24,39,0.12)] animate-fade-in dark:border-white/10 dark:bg-card',
             compact ? 'left-full mb-0 ml-2 min-w-[220px]' : 'left-0 right-0 mb-2',
           )}
         >
@@ -196,7 +196,7 @@ function ThemeSwitcher({
   onChange(m: ThemeMode): void;
 }): JSX.Element {
   return (
-    <div className="grid grid-cols-3 gap-1 rounded-md bg-[#EFEFEF]/70 p-0.5 dark:bg-white/10">
+    <div className="grid grid-cols-3 gap-1 rounded-[8px] bg-[#EFEFEF]/60 p-0.5 dark:bg-white/10">
       <ThemeOption active={mode === 'light'} onClick={() => onChange('light')} label="浅色">
         <Sun className="h-3.5 w-3.5" />
       </ThemeOption>
@@ -228,10 +228,10 @@ function ThemeOption({
       aria-pressed={active}
       title={label}
       className={cn(
-        'flex flex-col items-center justify-center gap-0.5 rounded px-1 py-1.5 text-[10px] transition-colors',
+        'flex flex-col items-center justify-center gap-0.5 rounded-[6px] px-1 py-1.5 text-[10px] transition-colors',
         active
-          ? 'bg-white text-foreground shadow-[0_1px_3px_rgba(17,24,39,0.08)] dark:bg-card'
-          : 'text-muted-foreground hover:bg-white/55 hover:text-foreground dark:hover:bg-white/10',
+          ? 'bg-white text-[#EA1F59] shadow-[0_1px_2px_rgba(17,24,39,0.05)] dark:bg-card dark:text-foreground'
+          : 'text-[#595757] hover:bg-white/65 hover:text-foreground dark:text-foreground/65 dark:hover:bg-white/10',
       )}
     >
       {children}
@@ -257,10 +257,10 @@ function MenuItem({
       role="menuitem"
       onClick={onClick}
       className={cn(
-        'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
+        'flex w-full items-center gap-2 rounded-[6px] px-2.5 py-1.5 text-left text-sm transition-colors',
         destructive
           ? 'text-[#EA1F59] hover:bg-[#EA1F59]/10'
-          : 'text-foreground hover:bg-[#EFEFEF]/70 dark:hover:bg-white/10',
+          : 'text-[#595757] hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:text-foreground/75 dark:hover:bg-white/10 dark:hover:text-foreground',
       )}
     >
       <span className="opacity-80">{icon}</span>
