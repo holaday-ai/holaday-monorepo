@@ -1,3 +1,4 @@
+import { ChevronDown, ChevronUp, ExternalLink, Globe2 } from 'lucide-react';
 import * as React from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { externalLinkConfirmDescription } from '@/lib/external-link-copy';
@@ -47,24 +48,45 @@ export function SearchResultCard({ sources, initialVisible = 6 }: Props): JSX.El
   const hidden = safeSources.length - visible.length;
   return (
     <div className="mt-2 flex flex-col">
-      <div className="overflow-hidden rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.02)]">
+      <div className="overflow-hidden rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85">
+        <div className="flex items-center justify-between gap-3 border-b border-[#EFEFEF] bg-[#EFEFEF]/35 px-3 py-2 dark:border-white/10 dark:bg-white/[0.03]">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#42C0EF]" />
+            <span className="truncate text-[11px] font-medium text-foreground/80">
+              搜索来源
+            </span>
+          </div>
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            {safeSources.length} 条
+          </span>
+        </div>
         {visible.map(({ source, link }, i) => (
           <SourceRow
             key={`${link.href}-${i}`}
+            index={i + 1}
             source={source}
             link={link}
             onOpen={setPendingHref}
           />
         ))}
       </div>
-      {hidden > 0 && !expanded && (
+      {safeSources.length > initialVisible && (
         <button
           type="button"
-          onClick={() => setExpanded(true)}
-          className="mt-1.5 inline-flex items-center gap-1 self-start rounded-[8px] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
+          onClick={() => setExpanded((value) => !value)}
+          className="mt-1.5 inline-flex items-center gap-1.5 self-start rounded-[8px] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/15 dark:hover:bg-white/5"
         >
-          <span aria-hidden className="text-[10px]">▾</span>
-          展开 {hidden} 条更多来源
+          {expanded ? (
+            <>
+              <ChevronUp className="h-3 w-3" />
+              收起来源
+            </>
+          ) : (
+            <>
+              <ChevronDown className="h-3 w-3" />
+              展开 {hidden} 条更多来源
+            </>
+          )}
         </button>
       )}
       <ConfirmDialog
@@ -87,10 +109,12 @@ export function SearchResultCard({ sources, initialVisible = 6 }: Props): JSX.El
 }
 
 function SourceRow({
+  index,
   source,
   link,
   onOpen,
 }: {
+  index: number;
   source: SearchSource;
   link: SearchSourceLink;
   onOpen: (href: string) => void;
@@ -105,28 +129,42 @@ function SourceRow({
         e.preventDefault();
         onOpen(link.href);
       }}
-      className="group flex items-start gap-2.5 border-b border-[#EFEFEF] px-3 py-2.5 transition-colors last:border-b-0 hover:bg-[#EFEFEF]/50"
+      aria-label={`打开搜索来源：${source.title}`}
+      className="group flex items-start gap-2.5 border-b border-[#EFEFEF] px-3 py-2.5 transition-colors last:border-b-0 hover:bg-[#EFEFEF]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#EA1F59]/15 dark:border-white/10 dark:hover:bg-white/[0.04]"
     >
-      <img
-        src={faviconUrl}
-        alt=""
-        width={16}
-        height={16}
-        loading="lazy"
-        className="mt-0.5 h-4 w-4 shrink-0 rounded-[4px]"
-        onError={(e) => {
-          (e.currentTarget as HTMLImageElement).style.visibility = 'hidden';
-        }}
-      />
+      <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[#DCDDDD] bg-white text-[10px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.04)] dark:border-white/10 dark:bg-white/5 dark:text-foreground/70">
+        {index}
+      </span>
+      <span className="relative mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-[6px] border border-[#DCDDDD]/80 bg-[#EFEFEF]/55 text-[#42C0EF] dark:border-white/10 dark:bg-white/5">
+        <Globe2 className="h-3 w-3" />
+        <img
+          src={faviconUrl}
+          alt=""
+          width={20}
+          height={20}
+          loading="lazy"
+          className="absolute inset-0 h-full w-full object-cover"
+          onError={(e) => {
+            (e.currentTarget as HTMLImageElement).remove();
+          }}
+        />
+      </span>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <span className="truncate text-xs text-muted-foreground">{link.domain}</span>
+        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="truncate">{link.domain}</span>
+          <span aria-hidden className="shrink-0 text-muted-foreground/45">/</span>
+          <span className="truncate text-muted-foreground/80">{link.pathLabel}</span>
         </div>
-        <div className="truncate text-sm font-medium text-foreground group-hover:text-[#EA1F59]">
-          {source.title}
+        <div className="mt-0.5 flex min-w-0 items-start gap-2">
+          <span className="line-clamp-2 flex-1 text-sm font-medium leading-snug text-foreground transition-colors group-hover:text-[#EA1F59]">
+            {source.title}
+          </span>
+          <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/55 transition-colors group-hover:text-[#EA1F59]" />
         </div>
         {source.snippet && (
-          <div className="line-clamp-2 text-xs text-muted-foreground">{source.snippet}</div>
+          <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+            {source.snippet}
+          </div>
         )}
       </div>
     </a>
