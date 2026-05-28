@@ -2275,19 +2275,25 @@ function makeMarkdownComponents(opts: {
       <ResponsiveMarkdownTable rest={rest}>{children}</ResponsiveMarkdownTable>
     ),
     thead: ({ children, ...rest }) => (
-      <thead className="bg-muted/60 text-[12px] font-medium text-foreground" {...rest}>
+      <thead
+        className="bg-[#EFEFEF]/70 text-[11px] font-medium uppercase text-muted-foreground dark:bg-white/[0.04]"
+        {...rest}
+      >
         {children}
       </thead>
     ),
     tbody: ({ children, ...rest }) => <tbody {...rest}>{children}</tbody>,
     tr: ({ children, ...rest }) => (
-      <tr className="border-b border-border last:border-b-0" {...rest}>
+      <tr
+        className="border-b border-[#DCDDDD]/70 transition-colors last:border-b-0 hover:bg-[#EFEFEF]/30 dark:border-white/10 dark:hover:bg-white/[0.03]"
+        {...rest}
+      >
         {children}
       </tr>
     ),
     th: ({ children, ...rest }) => (
       <th
-        className="whitespace-nowrap border-r border-border px-3 py-2 text-left last:border-r-0"
+        className="whitespace-nowrap border-r border-[#DCDDDD]/70 px-3 py-2 text-left last:border-r-0 dark:border-white/10"
         {...rest}
       >
         {children}
@@ -2295,7 +2301,7 @@ function makeMarkdownComponents(opts: {
     ),
     td: ({ children, ...rest }) => (
       <td
-        className="border-r border-border px-3 py-2 align-top last:border-r-0"
+        className="border-r border-[#DCDDDD]/70 px-3 py-2 align-top text-foreground/85 last:border-r-0 dark:border-white/10"
         {...rest}
       >
         {children}
@@ -2419,9 +2425,9 @@ function ResponsiveMarkdownTable({
   const data = React.useMemo(() => extractTableData(children), [children]);
   return (
     <>
-      <div className="relative my-3 -mx-1 hidden overflow-x-auto rounded-md after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-6 after:rounded-r-md after:bg-gradient-to-l after:from-background after:to-transparent sm:block">
+      <div className="relative my-3 -mx-1 hidden overflow-x-auto rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.05)] after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-6 after:bg-gradient-to-l after:from-white after:to-transparent dark:border-white/10 dark:bg-card/85 dark:after:from-card sm:block">
         <table
-          className="w-auto border-collapse rounded-md border border-border text-left text-[13px]"
+          className="w-auto min-w-full border-collapse text-left text-[13px]"
           {...rest}
         >
           {children}
@@ -2432,17 +2438,23 @@ function ResponsiveMarkdownTable({
           {data.rows.map((row, ri) => (
             <div
               key={ri}
-              className="space-y-1 rounded-md border border-border bg-muted/30 p-3 text-[13px]"
+              className="rounded-[8px] border border-[#DCDDDD] bg-white p-3 text-[13px] shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85"
             >
+              <div className="mb-2 flex items-center gap-2 border-b border-[#EFEFEF] pb-2 text-[11px] font-medium text-muted-foreground dark:border-white/10">
+                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#DCDDDD] bg-[#EFEFEF]/55 text-[10px] text-[#595757] dark:border-white/10 dark:bg-white/5 dark:text-foreground/70">
+                  {ri + 1}
+                </span>
+                <span>表格记录</span>
+              </div>
               {row.map((cell, ci) => (
                 <div
                   key={ci}
-                  className="flex flex-col gap-0.5 border-b border-border/50 pb-1 last:border-b-0 last:pb-0 [overflow-wrap:anywhere]"
+                  className="flex flex-col gap-0.5 border-b border-[#EFEFEF] py-1.5 first:pt-0 last:border-b-0 last:pb-0 dark:border-white/10 [overflow-wrap:anywhere]"
                 >
-                  <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    {data.headers[ci] ?? ''}
+                  <span className="text-[11px] font-medium text-muted-foreground">
+                    {data.headers[ci] ?? `字段 ${ci + 1}`}
                   </span>
-                  <span className="text-foreground">{cell}</span>
+                  <span className="leading-relaxed text-foreground/90">{cell}</span>
                 </div>
               ))}
             </div>
@@ -2463,7 +2475,7 @@ function extractTableData(children: React.ReactNode): TableData | null {
   const rows: React.ReactNode[][] = [];
   React.Children.forEach(children, (section) => {
     if (!React.isValidElement(section)) return;
-    const sectionType = section.type;
+    const sectionType = markdownElementTagName(section);
     if (sectionType === 'thead') {
       const trProps = (section.props as { children?: React.ReactNode }).children;
       React.Children.forEach(trProps, (tr) => {
@@ -2490,6 +2502,12 @@ function extractTableData(children: React.ReactNode): TableData | null {
   });
   if (headers.length === 0 && rows.length === 0) return null;
   return { headers, rows };
+}
+
+function markdownElementTagName(element: React.ReactElement): string | null {
+  if (typeof element.type === 'string') return element.type;
+  const props = element.props as { node?: { tagName?: unknown } };
+  return typeof props.node?.tagName === 'string' ? props.node.tagName : null;
 }
 
 // ───────────────────────── Failure header (user-friendly copy)
