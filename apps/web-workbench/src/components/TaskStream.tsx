@@ -1635,19 +1635,14 @@ function MarkdownCodeBlock({
           type="button"
           onClick={() => void handleCopy()}
           disabled={!text}
-          className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-white hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/10"
-          aria-label="复制代码块"
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-white hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/10"
+          aria-label={copied ? '代码块已复制' : '复制代码块'}
+          title={copied ? '已复制' : '复制代码'}
         >
           {copied ? (
-            <>
-              <Check className="h-3.5 w-3.5 text-[#42C0EF]" aria-hidden />
-              已复制
-            </>
+            <Check className="h-3.5 w-3.5 text-[#42C0EF]" aria-hidden />
           ) : (
-            <>
-              <Copy className="h-3.5 w-3.5" aria-hidden />
-              复制
-            </>
+            <Copy className="h-3.5 w-3.5" aria-hidden />
           )}
         </button>
       </div>
@@ -1963,10 +1958,11 @@ function TerminalSummary({
                     const feedback = displayText.trim() || '(空结果)';
                     void copyTo(feedback, '反馈内容');
                   }}
-                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white/60 px-2.5 text-[11px] font-medium text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-white dark:border-white/10 dark:bg-transparent dark:text-foreground dark:hover:bg-white/10"
+                  aria-label="复制反馈内容"
+                  title="复制反馈"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[#DCDDDD] bg-white/60 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-white dark:border-white/10 dark:bg-transparent dark:text-foreground dark:hover:bg-white/10"
                 >
                   <Copy className="h-3 w-3" />
-                  复制反馈
                 </button>
               </div>
             </div>
