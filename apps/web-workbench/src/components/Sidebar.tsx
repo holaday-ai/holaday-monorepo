@@ -877,7 +877,8 @@ interface GroupProps {
 /**
  * Optimization #4 follow-up — task-history group uses the shadcn
  * `<SidebarGroup>` shell + `<SidebarGroupLabel>` so the section
- * heading picks up the canonical 11px uppercase grey label style.
+ * heading keeps the canonical 11px rhythm without shouting over the
+ * task rows.
  * In icon-mode the group hides via the standard
  * `group-data-[collapsible=icon]:hidden` selector inherited by the
  * shadcn `SidebarMenuSub` family — we apply it directly here so
@@ -887,8 +888,11 @@ interface GroupProps {
 function TaskGroup({ title, children }: GroupProps): JSX.Element {
   return (
     <SidebarGroup className="py-0 group-data-[collapsible=icon]:hidden">
-      <SidebarGroupLabel className="px-3 text-[11px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-        {title}
+      <SidebarGroupLabel className="px-3 text-[11px] font-medium tracking-normal text-[#ADADAD]">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-1 w-1 rounded-full bg-[#DCDDDD]" aria-hidden />
+          {title}
+        </span>
       </SidebarGroupLabel>
       <SidebarGroupContent>
         <div className="space-y-px">{children}</div>
@@ -936,8 +940,9 @@ function LoadMoreTasksButton({
       type="button"
       onClick={onLoadMore}
       disabled={loadingMore}
-      className="mx-3 my-2 block w-[calc(100%-1.5rem)] rounded-md border border-[#DCDDDD] bg-white px-2 py-1.5 text-center text-xs text-muted-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+      className="mx-2 my-2 inline-flex w-[calc(100%-1rem)] items-center justify-center gap-1.5 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-2 py-1.5 text-center text-xs text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
     >
+      <RotateCcw className={cn('h-3 w-3', loadingMore && 'animate-spin')} aria-hidden />
       {loadingMore ? '加载中…' : '加载更多任务'}
     </button>
   );
@@ -963,13 +968,18 @@ function RetentionHint({
     <button
       type="button"
       onClick={() => navigate('/plan')}
-      className="mx-2 mt-3 block w-[calc(100%-1rem)] rounded-md border border-dashed border-[#DCDDDD] bg-white px-3 py-2 text-left text-[11px] text-muted-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+      className="group mx-2 mt-3 flex w-[calc(100%-1rem)] items-start gap-2 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-3 py-2 text-left text-[11px] text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
     >
-      <div className="font-medium text-foreground/80">
-        {hiddenCount} 个更早的任务已隐藏
-      </div>
-      <div className="mt-0.5">
-        当前套餐保留 {historyDays ?? '?'} 天 · {upgradeCopy}
+      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] border border-[#EA1F59]/15 bg-[#EA1F59]/10 text-[#EA1F59]">
+        <Clock className="h-3 w-3" aria-hidden />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="font-medium text-[#595757] dark:text-foreground/85">
+          {hiddenCount} 个更早的任务已隐藏
+        </div>
+        <div className="mt-0.5 leading-4 text-[#ADADAD]">
+          当前套餐保留 {historyDays ?? '?'} 天 · {upgradeCopy}
+        </div>
       </div>
     </button>
   );
