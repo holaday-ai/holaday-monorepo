@@ -1580,12 +1580,14 @@ function SourceBadge({ marker }: { marker: ResultSourceMarker }): JSX.Element {
   }
   return (
     <span
-      title={meta.label}
+      title={`${meta.label}：${meta.description}`}
+      aria-label={`${meta.label}：${meta.description}`}
       className={cn(
-        'mr-1.5 inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium align-middle shadow-[0_1px_2px_rgba(17,24,39,0.03)]',
+        'mr-1.5 inline-flex items-center gap-1.5 rounded-[6px] border px-1.5 py-0.5 text-[10px] font-medium leading-none align-middle shadow-[0_1px_2px_rgba(17,24,39,0.03)]',
         meta.tone,
       )}
     >
+      <span aria-hidden className={cn('h-1.5 w-1.5 rounded-full', meta.dotTone)} />
       {meta.label}
     </span>
   );

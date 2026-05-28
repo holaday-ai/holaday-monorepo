@@ -17,12 +17,21 @@ describe('result-source-badges', () => {
   });
 
   it('keeps result badge tones inside the Holaday brand palette', () => {
-    const tones = Object.values(RESULT_SOURCE_BADGES).map((badge) => badge.tone).join(' ');
+    const tones = Object.values(RESULT_SOURCE_BADGES)
+      .map((badge) => `${badge.tone} ${badge.dotTone}`)
+      .join(' ');
 
     expect(tones).toContain('#EA1F59');
     expect(tones).toContain('#57479C');
     expect(tones).toContain('#42C0EF');
     expect(tones).toContain('#FFC910');
     expect(tones).not.toMatch(/\b(cyan|green|red|emerald|lime)-/);
+  });
+
+  it('explains each badge without exposing raw markers', () => {
+    for (const [marker, badge] of Object.entries(RESULT_SOURCE_BADGES)) {
+      expect(badge.description.length).toBeGreaterThan(8);
+      expect(badge.description).not.toContain(marker);
+    }
   });
 });

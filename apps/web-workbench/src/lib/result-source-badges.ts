@@ -6,25 +6,35 @@ export type ResultSourceMarker =
 
 export interface ResultSourceBadgeMeta {
   readonly label: string;
+  readonly description: string;
   readonly tone: string;
+  readonly dotTone: string;
 }
 
 export const RESULT_SOURCE_BADGES: Record<ResultSourceMarker, ResultSourceBadgeMeta> = {
   '[用户提供]': {
     label: '用户提供',
-    tone: 'border-[#42C0EF]/55 bg-[#42C0EF]/10 text-[#595757] dark:border-[#42C0EF]/40 dark:bg-[#42C0EF]/10 dark:text-foreground',
+    description: '来自你上传、输入或选择的资料',
+    tone: 'border-[#42C0EF]/35 bg-[#42C0EF]/10 text-[#595757] dark:border-[#42C0EF]/35 dark:bg-[#42C0EF]/10 dark:text-foreground',
+    dotTone: 'bg-[#42C0EF]',
   },
   '[系统计算]': {
     label: '系统计算',
-    tone: 'border-[#57479C]/40 bg-[#57479C]/10 text-[#57479C] dark:border-[#57479C]/45 dark:bg-[#57479C]/15 dark:text-foreground',
+    description: '由 HOLA DAY 根据上下文计算或汇总',
+    tone: 'border-[#57479C]/30 bg-[#57479C]/10 text-[#57479C] dark:border-[#57479C]/40 dark:bg-[#57479C]/15 dark:text-foreground',
+    dotTone: 'bg-[#57479C]',
   },
   '[模型假设]': {
     label: '模型假设',
-    tone: 'border-[#FFC910]/60 bg-[#FFC910]/10 text-[#595757] dark:border-[#FFC910]/40 dark:bg-[#FFC910]/10 dark:text-foreground',
+    description: '需要你复核的推断或未确认前提',
+    tone: 'border-[#FFC910]/50 bg-[#FFC910]/10 text-[#595757] dark:border-[#FFC910]/40 dark:bg-[#FFC910]/10 dark:text-foreground',
+    dotTone: 'bg-[#FFC910]',
   },
   '[外部来源]': {
     label: '外部基准',
-    tone: 'border-[#EA1F59]/35 bg-[#EA1F59]/5 text-[#EA1F59] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10',
+    description: '来自网页、第三方页面或外部基准',
+    tone: 'border-[#EA1F59]/30 bg-[#EA1F59]/5 text-[#EA1F59] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10',
+    dotTone: 'bg-[#EA1F59]',
   },
 };
 
