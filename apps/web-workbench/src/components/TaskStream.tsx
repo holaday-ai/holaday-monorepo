@@ -2180,27 +2180,47 @@ function TerminalSummary({
         </div>
       )}
       {(hasRealUrl || onContinueInBrowser) && (
-        <div className={cn('mt-4 flex flex-wrap items-center gap-2 border-t pt-3 text-xs', tone.divider)}>
+        <div
+          className={cn(
+            'mt-4 grid gap-2 border-t pt-3 text-xs sm:grid-cols-2',
+            tone.divider,
+          )}
+        >
           {onContinueInBrowser && (
             <button
               type="button"
               onClick={onContinueInBrowser}
-              className="inline-flex items-center gap-1.5 rounded-md border border-[#EA1F59]/35 bg-white px-3 py-1.5 font-medium text-[#EA1F59] shadow-[0_1px_2px_rgba(17,24,39,0.04)] transition hover:bg-[#EA1F59]/10 dark:bg-transparent dark:hover:bg-[#EA1F59]/10"
+              className="group flex min-h-12 items-start gap-2 rounded-[8px] border border-[#EA1F59]/25 bg-white px-3 py-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors hover:border-[#EA1F59]/40 hover:bg-[#EA1F59]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 dark:border-[#EA1F59]/35 dark:bg-white/5 dark:hover:bg-[#EA1F59]/10"
             >
-              <MousePointerClick className="h-3.5 w-3.5" />
-              继续接管
+              <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-[#EA1F59]/10 text-[#EA1F59] transition-colors group-hover:bg-[#EA1F59]/15">
+                <MousePointerClick className="h-3.5 w-3.5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-medium text-[#EA1F59]">
+                  继续接管
+                </span>
+                <span className="mt-0.5 block leading-5 text-muted-foreground">
+                  回到当前浏览器会话继续操作
+                </span>
+              </span>
             </button>
           )}
           {hasRealUrl && (
             <button
               type="button"
               onClick={() => setPendingLink(safeCurrentUrl)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-3 py-1.5 font-medium text-foreground/85 shadow-[0_1px_2px_rgba(17,24,39,0.04)] transition hover:border-[#ADADAD] hover:bg-[#EFEFEF]/45 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+              className="group flex min-h-12 min-w-0 items-start gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
             >
-              <ExternalLink className="h-3.5 w-3.5" />
-              打开最终页面
-              <span className="max-w-[180px] truncate text-muted-foreground">
-                {safeCurrentUrl}
+              <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-[#EFEFEF]/70 text-[#595757] transition-colors group-hover:bg-white dark:bg-white/10 dark:text-foreground/80">
+                <ExternalLink className="h-3.5 w-3.5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-medium text-foreground/85">
+                  打开最终页面
+                </span>
+                <span className="mt-0.5 block truncate leading-5 text-muted-foreground">
+                  {safeCurrentUrl}
+                </span>
               </span>
             </button>
           )}
