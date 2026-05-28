@@ -1368,21 +1368,27 @@ function FollowUpChips({
   onPick(intent: string): void;
 }): JSX.Element {
   return (
-    <div className="mt-4 flex flex-wrap gap-2 border-t border-[#DCDDDD]/70 pt-3 dark:border-white/10">
-      <div className="basis-full text-[11px] font-medium tracking-wide text-muted-foreground">
+    <div className="mt-4 rounded-[8px] border border-[#DCDDDD] bg-white p-2.5 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85">
+      <div className="mb-2 flex items-center justify-between gap-3 px-1 text-[11px] font-medium tracking-wide text-muted-foreground">
         后续操作
+        <span>{actions.length} 项</span>
       </div>
-      {actions.map((a, i) => (
-        <button
-          key={`${i}-${a.slice(0, 12)}`}
-          type="button"
-          onClick={() => onPick(a)}
-          className="inline-flex items-center gap-1.5 rounded-full border border-[#EA1F59]/25 bg-[#EA1F59]/10 px-3 py-1 text-xs font-medium text-[#EA1F59] transition hover:border-[#EA1F59]/40 hover:bg-[#EA1F59]/15 dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10"
-        >
-          <ChevronRight className="h-3 w-3" aria-hidden />
-          <span className="max-w-[220px] truncate">{a}</span>
-        </button>
-      ))}
+      <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap">
+        {actions.map((a, i) => (
+          <button
+            key={`${i}-${a.slice(0, 12)}`}
+            type="button"
+            onClick={() => onPick(a)}
+            className="group inline-flex min-h-8 max-w-full items-start gap-2 rounded-[6px] border border-[#DCDDDD] bg-white px-2.5 py-1.5 text-left text-xs font-medium text-[#595757] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 sm:max-w-[280px] dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:bg-[#EA1F59]/10 dark:hover:text-foreground"
+          >
+            <ChevronRight
+              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#ADADAD] transition-transform group-hover:translate-x-0.5 group-hover:text-[#EA1F59]"
+              aria-hidden
+            />
+            <span className="min-w-0 flex-1 leading-5">{a}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -2147,29 +2153,28 @@ function TerminalSummary({
       {followUpActions.length > 0 && onSuggestionPick && revealed === displayText && (
         <FollowUpChips actions={followUpActions} onPick={onSuggestionPick} />
       )}
-      {/* Plain-text suggestion links. Cleaner than the prior blue
-          card style — each row is just a borderless ghost button
-          with a leading → arrow that translates on hover. Click
-          fires onSuggestionPick which routes through the parent's
-          onSubmit (followUpTarget detection inherits
-          replyToTaskId for free parent context). */}
+      {/* Plain-text suggestion links. Kept as a compact next-step
+          card instead of loose text rows, so long suggestions stay
+          readable on mobile. Click fires onSuggestionPick which
+          routes through the parent's onSubmit (followUpTarget
+          detection inherits replyToTaskId for free parent context). */}
       {suggestions.length > 0 && onSuggestionPick && revealed === displayText && (
-        <div className="mt-4 flex flex-col gap-0.5 border-t border-[#DCDDDD]/70 pt-3 dark:border-white/10">
-          <div className="mb-1 text-[11px] font-medium tracking-wide text-muted-foreground">
-            继续探索
+        <div className="mt-4 rounded-[8px] border border-[#DCDDDD] bg-white p-2.5 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85">
+          <div className="mb-2 flex items-center justify-between gap-3 px-1 text-[11px] font-medium tracking-wide text-muted-foreground">
+            继续这个任务
+            <span>{suggestions.length} 项</span>
           </div>
           {suggestions.map((s, i) => (
             <button
               key={`${i}-${s.slice(0, 10)}`}
               type="button"
               onClick={() => onSuggestionPick(s)}
-              className="group flex w-full items-center gap-2 rounded px-1 py-1 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
+              className="group flex w-full items-start gap-2 rounded-[6px] px-2.5 py-2 text-left text-xs text-[#595757] transition-colors hover:bg-[#EFEFEF]/55 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 dark:text-foreground/75 dark:hover:bg-white/10 dark:hover:text-foreground"
             >
-              <ChevronRight
-                aria-hidden
-                className="h-3 w-3 shrink-0 text-muted-foreground/70 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
-              />
-              <span className="min-w-0 flex-1 truncate group-hover:underline">{s}</span>
+              <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[#DCDDDD] bg-[#EFEFEF]/55 text-[10px] font-medium text-[#595757] transition-colors group-hover:border-[#EA1F59]/35 group-hover:bg-[#EA1F59]/5 group-hover:text-[#EA1F59] dark:border-white/10 dark:bg-white/5 dark:text-foreground/70">
+                {i + 1}
+              </span>
+              <span className="min-w-0 flex-1 leading-5">{s}</span>
             </button>
           ))}
         </div>
