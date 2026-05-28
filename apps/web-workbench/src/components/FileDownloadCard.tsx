@@ -5,6 +5,12 @@ import {
   downloadFailureMessage,
   downloadFileAuthed,
 } from '@/lib/download-file';
+import {
+  classifyDownloadFileKind,
+  downloadFileKindLabel,
+  downloadFileMetaLabel,
+  type DownloadFileKind,
+} from '@/lib/file-download-card-copy';
 import { formatFileSize } from '@/lib/file-size';
 import { cn } from '@/lib/utils';
 
@@ -37,6 +43,12 @@ export interface FileDownloadPayload {
 export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }): JSX.Element {
   const toast = useToast();
   const [state, setState] = React.useState<'idle' | 'loading' | 'failed'>('idle');
+  const kind = classifyDownloadFileKind(payload.filename);
+  const kindLabel = downloadFileKindLabel(kind);
+  const metaLabel = downloadFileMetaLabel({
+    filename: payload.filename,
+    formattedSize: formatFileSize(payload.size),
+  });
   // Reset transient 'failed' state ~3s after firing so a retry click
   // looks fresh instead of stuck red.
   React.useEffect(() => {
@@ -67,26 +79,29 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
       disabled={state === 'loading'}
       aria-busy={state === 'loading'}
       className={cn(
-        'my-2 flex w-full max-w-md items-center gap-3 rounded-lg border bg-white px-4 py-3 text-left text-sm shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors dark:bg-card/85',
+        'group my-2 flex w-full max-w-md items-center gap-3 rounded-[8px] border bg-white px-3 py-3 text-left text-sm shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors dark:bg-card/85 sm:px-4',
         state === 'failed'
           ? 'border-[#EA1F59]/40 bg-[#EA1F59]/5'
           : state === 'loading'
-            ? 'border-[#57479C]/40 opacity-85'
+            ? 'border-[#57479C]/40 bg-[#57479C]/5 opacity-90'
             : 'border-[#DCDDDD] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/35 dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/[0.04]',
       )}
+      aria-label={`下载${kindLabel} ${payload.filename}`}
     >
       <span
         className={cn(
-          'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md',
+          'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border',
           state === 'failed'
-            ? 'bg-[#EA1F59]/10 text-[#EA1F59]'
-            : 'bg-[#EFEFEF] text-[#595757] dark:bg-white/10 dark:text-foreground',
+            ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
+            : state === 'loading'
+              ? 'border-[#57479C]/30 bg-[#57479C]/10 text-[#57479C]'
+              : 'border-[#DCDDDD] bg-[#EFEFEF]/55 text-[#595757] group-hover:border-[#42C0EF]/45 group-hover:bg-[#42C0EF]/10 group-hover:text-[#42C0EF] dark:border-white/10 dark:bg-white/10 dark:text-foreground',
         )}
       >
-        <FileTypeIcon filename={payload.filename} />
+        <FileTypeIcon kind={kind} />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="truncate font-medium" title={payload.filename}>
+        <div className="truncate font-medium text-foreground" title={payload.filename}>
           {payload.filename}
         </div>
         <div
@@ -99,16 +114,18 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
             ? '正在下载…'
             : state === 'failed'
               ? '下载失败，点击重试'
-              : `${formatFileSize(payload.size)} · 24h 内可下载`}
+              : metaLabel}
         </div>
       </div>
       {state === 'loading' ? (
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#EA1F59]" />
       ) : (
         <Download
           className={cn(
-            'h-4 w-4 shrink-0',
-            state === 'failed' ? 'text-[#EA1F59]' : 'text-muted-foreground',
+            'h-4 w-4 shrink-0 transition-colors',
+            state === 'failed'
+              ? 'text-[#EA1F59]'
+              : 'text-muted-foreground group-hover:text-[#EA1F59]',
           )}
         />
       )}
@@ -116,13 +133,12 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
   );
 }
 
-function FileTypeIcon({ filename }: { filename: string }): JSX.Element {
-  const ext = filename.toLowerCase().split('.').pop() ?? '';
+function FileTypeIcon({ kind }: { kind: DownloadFileKind }): JSX.Element {
   const cls = 'h-4 w-4';
-  if (['xlsx', 'xls', 'csv'].includes(ext)) return <FileSpreadsheet className={cls} />;
-  if (['pptx', 'ppt'].includes(ext)) return <Presentation className={cls} />;
-  if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) return <ImageIcon className={cls} />;
-  if (['pdf', 'docx', 'doc', 'txt', 'md', 'json'].includes(ext)) return <FileText className={cls} />;
+  if (kind === 'spreadsheet') return <FileSpreadsheet className={cls} />;
+  if (kind === 'presentation') return <Presentation className={cls} />;
+  if (kind === 'image') return <ImageIcon className={cls} />;
+  if (kind === 'document') return <FileText className={cls} />;
   return <File className={cls} />;
 }
 
