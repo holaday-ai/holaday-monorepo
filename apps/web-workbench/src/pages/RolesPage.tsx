@@ -267,7 +267,7 @@ export function RolesPage(): JSX.Element {
             <>
               检测到不适用于当前套餐的角色已被自动移除。请直接点
               <span className="font-semibold">「保存」</span>
-              以修复你的角色设置；之后即可正常创建新任务。
+              以修复你的角色设置；之后即可正常创建新目标。
             </>
           )}
         </div>
@@ -277,7 +277,7 @@ export function RolesPage(): JSX.Element {
         <div className="mb-4 rounded-[8px] border border-[#DCDDDD] border-l-[#FFC910] bg-white px-4 py-3 text-sm text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] animate-fade-in motion-reduce:animate-none [border-left-width:3px]">
           你当前选择 <span className="font-semibold">{draft.length}</span> 个角色，
           超出基础版 {currentPickLimit} 个上限。请取消勾选至 {currentPickLimit} 个以内
-          再保存，否则新任务将无法创建。
+          再保存，否则新目标将无法创建。
         </div>
       )}
 

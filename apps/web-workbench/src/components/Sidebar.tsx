@@ -182,7 +182,7 @@ export function Sidebar({
   projectFilter,
   onClearProjectFilter,
   // Search button lives in SidebarHeader now. When this callback is
-  // provided we render a 搜索任务 / ⌘K row under "新任务"; when
+  // provided we render a 搜索任务 / ⌘K row under "新目标"; when
   // omitted we just don't render it (Cmd+K shortcut still works via
   // AppShell's keyboard handler regardless).
   onOpenSearch,
@@ -343,7 +343,7 @@ export function Sidebar({
         {/* Codex info-architecture rework: the Sidebar reads as four
             stable segments. Header / SidebarNav / SidebarFooter are
             pinned; only the task list scrolls. The visual centre of
-            gravity sits on "新任务" + the feature shortcuts; task
+            gravity sits on "新目标" + the feature shortcuts; task
             history is a scroll surface, not a status board. */}
         <SidebarHeader className={cn('shrink-0 gap-2 border-b bg-white/60 backdrop-blur dark:bg-card/70', SIDEBAR_BORDER)}>
           <div className="flex items-center gap-2 px-1 py-1">
@@ -354,7 +354,7 @@ export function Sidebar({
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
-                tooltip="新任务 (/)"
+                tooltip="新目标 (/)"
                 onClick={() => {
                   onNewTask();
                   onMobileClose?.();
@@ -362,7 +362,7 @@ export function Sidebar({
                 className="rounded-[8px] bg-[#EA1F59] font-medium text-white shadow-[0_3px_10px_rgba(234,31,89,0.14)] hover:bg-[#EA1F59]/90 hover:text-white data-[active=true]:bg-[#EA1F59] data-[active=true]:text-white"
               >
                 <Plus />
-                <span>新任务</span>
+                <span>新目标</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
             {onOpenSearch && (
@@ -526,7 +526,7 @@ export function Sidebar({
                     还没有任务
                   </div>
                   <div className="mt-1 text-[11px] leading-4 text-[#ADADAD]">
-                    新任务会出现在这里，方便继续、重命名或批量整理。
+                    新目标会出现在这里，方便追问、重命名或批量整理。
                   </div>
                 </div>
               )}
@@ -1005,7 +1005,7 @@ const FEATURES: readonly FeatureItem[] = [
 ];
 
 /**
- * Feature nav between the "+ 新任务" CTA and the task list. Live
+ * Feature nav between the "+ 新目标" CTA and the task list. Live
  * routes render as clickable nav links; disabled rows keep a neutral
  * unavailable label. Compact density (32px row).
  */

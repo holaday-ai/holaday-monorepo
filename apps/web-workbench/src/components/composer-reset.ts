@@ -8,7 +8,7 @@
  *                          InputArea component instance is reused, so
  *                          local `value` state survives without an
  *                          explicit reset)
- *   - task A → null      (user clicked "新任务" from a task detail —
+ *   - task A → null      (user clicked "新目标" from a task detail —
  *                          previously SKIPPED in the guard, which left
  *                          any typed-but-unsent text in the composer.
  *                          This was the "occasionally doesn't clear

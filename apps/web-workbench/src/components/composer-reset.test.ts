@@ -24,7 +24,7 @@ describe('shouldResetComposerOnSelectionChange', () => {
    * skipped this transition because `next` is null/falsy. With the
    * `prev != null` guard the reset fires correctly — typed-but-
    * unsent text in the composer from a reply / follow-up session
-   * is wiped when the user clicks "新任务".
+   * is wiped when the user clicks "新目标".
    */
   it('task → null IS a reset (new-task click from a task page wipes draft)', () => {
     expect(shouldResetComposerOnSelectionChange('tsk_A', null)).toBe(true);
