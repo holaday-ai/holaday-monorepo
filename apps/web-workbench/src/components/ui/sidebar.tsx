@@ -264,6 +264,8 @@ const SidebarTrigger = React.forwardRef<
       data-sidebar="trigger"
       variant="ghost"
       size="icon"
+      aria-label="切换侧边栏"
+      title="切换侧边栏"
       className={cn('h-7 w-7', className)}
       onClick={(event) => {
         onClick?.(event);
@@ -272,7 +274,7 @@ const SidebarTrigger = React.forwardRef<
       {...props}
     >
       <PanelLeft />
-      <span className="sr-only">Toggle Sidebar</span>
+      <span className="sr-only">切换侧边栏</span>
     </Button>
   );
 });
@@ -285,10 +287,10 @@ const SidebarRail = React.forwardRef<HTMLButtonElement, React.ComponentProps<'bu
       <button
         ref={ref}
         data-sidebar="rail"
-        aria-label="Toggle Sidebar"
+        aria-label="切换侧边栏"
         tabIndex={-1}
         onClick={toggleSidebar}
-        title="Toggle Sidebar"
+        title="切换侧边栏"
         className={cn(
           'absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=left]:-right-4 group-data-[side=right]:left-0 sm:flex',
           '[[data-side=left]_&]:cursor-w-resize [[data-side=right]_&]:cursor-e-resize',

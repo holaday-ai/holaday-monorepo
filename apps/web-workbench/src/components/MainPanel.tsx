@@ -177,6 +177,7 @@ export function MainPanel({
           size="icon"
           onClick={onOpenSidebar}
           aria-label="打开任务列表"
+          title="打开任务列表"
           className="h-8 w-8 rounded-[8px] text-[#595757] hover:bg-[#EFEFEF]/70 hover:text-[#EA1F59] dark:text-foreground/75 dark:hover:bg-white/10"
         >
           <Menu className="h-4 w-4" />

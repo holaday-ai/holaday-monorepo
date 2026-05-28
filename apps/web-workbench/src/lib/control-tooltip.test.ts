@@ -11,9 +11,9 @@ function tsxFiles(dir: string): string[] {
   });
 }
 
-function openingButtonTags(source: string): string[] {
+function openingControlTags(source: string): string[] {
   const tags: string[] = [];
-  const pattern = /<button\b[\s\S]*?>/g;
+  const pattern = /<(?:button|Button)\b[\s\S]*?>/g;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(source))) {
     tags.push(match[0]);
@@ -25,7 +25,7 @@ describe('control tooltip affordances', () => {
   it('keeps labelled buttons hover-discoverable', () => {
     const missingTitles = tsxFiles(join(process.cwd(), 'src'))
       .flatMap((file) =>
-        openingButtonTags(readFileSync(file, 'utf8'))
+        openingControlTags(readFileSync(file, 'utf8'))
           .map((tag, index) => ({ file, tag, index }))
           .filter(({ tag }) => tag.includes('aria-label') && !tag.includes('title=')),
       )
