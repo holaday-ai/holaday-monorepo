@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import * as React from 'react';
+import { BrandWordmark } from '@/components/BrandLogo';
 import { InputArea } from '@/components/InputArea';
 import { LazyLoadBoundary } from '@/components/LazyLoadBoundary';
 import { RoleNudgeBanner } from '@/components/RoleNudgeBanner';
@@ -182,8 +183,12 @@ export function MainPanel({
         >
           <Menu className="h-4 w-4" />
         </Button>
-        <div className="ml-2 min-w-0 flex-1 truncate text-sm font-medium text-[#595757] dark:text-foreground/85">
-          {task ? task.intent : 'HOLA DAY'}
+        <div className="ml-2 min-w-0 flex-1 truncate pr-12 text-sm font-medium text-[#595757] dark:text-foreground/85">
+          {task ? (
+            task.intent
+          ) : (
+            <BrandWordmark className="h-3.5" />
+          )}
         </div>
       </div>
       {showEmptyHome ? (
