@@ -58,7 +58,6 @@ interface Props {
    * Caller (WorkbenchApp) computes both the target id + chip label.
    */
   followUpTarget?: { taskId: string; title: string } | null;
-  onCancelFollowUp?: () => void;
   /**
    * Phase 10 polish — when set, renders the quota-exhausted card
    * INSTEAD of the composer. The textarea + send button are gated

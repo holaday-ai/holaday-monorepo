@@ -41,7 +41,6 @@ describe('workbench state helpers', () => {
         selectedTask: task({ status: 'partial_success' }),
         selectedTaskId: 'tsk_test',
         selectedNeedsUser: false,
-        followUpDismissedTaskId: null,
       }),
     ).toEqual({
       taskId: 'tsk_test',
@@ -55,7 +54,6 @@ describe('workbench state helpers', () => {
         selectedTask: task({ status: 'executing' }),
         selectedTaskId: 'tsk_test',
         selectedNeedsUser: false,
-        followUpDismissedTaskId: null,
       }),
     ).toBeNull();
     expect(
@@ -63,7 +61,6 @@ describe('workbench state helpers', () => {
         selectedTask: task({ status: 'completed' }),
         selectedTaskId: 'tsk_test',
         selectedNeedsUser: true,
-        followUpDismissedTaskId: null,
       }),
     ).toBeNull();
   });

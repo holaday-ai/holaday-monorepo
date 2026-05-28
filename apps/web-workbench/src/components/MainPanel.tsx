@@ -52,7 +52,6 @@ interface Props {
   replyMode?: boolean;
   /** Phase 14 audit follow-up — passed straight through to InputArea. */
   followUpTarget?: { taskId: string; title: string } | null;
-  onCancelFollowUp?: () => void;
   /** Plan id from auth.me — drives the role-nudge banner visibility. */
   userPlan?: string;
   /** selected_roles list from auth.me — empty/null triggers the nudge. */
@@ -95,7 +94,6 @@ export function MainPanel({
   inputRef,
   replyMode,
   followUpTarget,
-  onCancelFollowUp,
   userPlan,
   userSelectedRoles,
   quotaExhausted,
@@ -205,7 +203,6 @@ export function MainPanel({
               inputRef={inputRef}
               replyMode={replyMode}
               followUpTarget={followUpTarget}
-              onCancelFollowUp={onCancelFollowUp}
               quotaExhausted={quotaExhausted}
               quotaPlan={userPlan}
               attachmentsAllowed={attachmentsAllowed}
@@ -264,7 +261,6 @@ export function MainPanel({
             inputRef={inputRef}
             replyMode={replyMode}
             followUpTarget={followUpTarget}
-            onCancelFollowUp={onCancelFollowUp}
             quotaExhausted={quotaExhausted}
             quotaPlan={userPlan}
             attachmentsAllowed={attachmentsAllowed}

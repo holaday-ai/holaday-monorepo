@@ -13,12 +13,10 @@ export function followUpTargetForTask(input: {
   selectedTask: UiTask | null;
   selectedTaskId: string | null;
   selectedNeedsUser: boolean;
-  followUpDismissedTaskId: string | null;
 }): { taskId: string; title: string } | null {
   const { selectedTask, selectedTaskId } = input;
   if (!selectedTask || !selectedTaskId) return null;
   if (input.selectedNeedsUser) return null;
-  if (input.followUpDismissedTaskId === selectedTaskId) return null;
   if (!isTerminalStatus(selectedTask.status)) return null;
 
   return {

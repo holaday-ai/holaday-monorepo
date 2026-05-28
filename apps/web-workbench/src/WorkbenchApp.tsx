@@ -148,8 +148,6 @@ export function WorkbenchApp(): JSX.Element {
   // showBrowserPanel) that were fighting each other.
   const [sidePanelOverride, setSidePanelOverride] =
     React.useState<SidePanelOverride>(null);
-  const [followUpDismissedTaskId, setFollowUpDismissedTaskId] =
-    React.useState<string | null>(null);
   const [confirmRebuildTask, setConfirmRebuildTask] = React.useState<{
     taskId: string;
     intent: string;
@@ -339,14 +337,13 @@ export function WorkbenchApp(): JSX.Element {
 
   const selectedTask = tasks.find((t) => t.taskId === selectedTaskId) ?? null;
 
-  // Follow-up chip — active on a terminal task that the user hasn't
-  // dismissed and isn't currently in awaiting-user reply mode.
+  // Follow-up context — active on a terminal task that isn't currently
+  // in awaiting-user reply mode.
   const isReplyMode = selectedNeedsUser;
   const followUpTarget = followUpTargetForTask({
     selectedTask,
     selectedTaskId,
     selectedNeedsUser: isReplyMode,
-    followUpDismissedTaskId,
   });
 
   // Side-panel state machine. Derives a single `sidePanelMode` from
@@ -379,11 +376,6 @@ export function WorkbenchApp(): JSX.Element {
           inputRef={inputRef}
           replyMode={isReplyMode}
           followUpTarget={followUpTarget}
-          onCancelFollowUp={() => {
-            if (selectedTaskId) setFollowUpDismissedTaskId(selectedTaskId);
-            enterNewTaskMode();
-            setTimeout(() => inputRef.current?.focus(), 50);
-          }}
           userPlan={me?.plan}
           userSelectedRoles={me?.selectedRoles ?? null}
           quotaExhausted={quotaExhausted}
