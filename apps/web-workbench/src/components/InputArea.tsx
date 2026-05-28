@@ -7,7 +7,6 @@ import {
   Puzzle,
   Sparkles,
   Target,
-  X,
 } from 'lucide-react';
 import * as React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -164,7 +163,6 @@ export function InputArea({
   inputRef,
   replyMode,
   followUpTarget,
-  onCancelFollowUp,
   quotaExhausted,
   quotaPlan,
   attachmentsAllowed,
@@ -533,32 +531,6 @@ export function InputArea({
             : '',
         )}
       >
-        {followUpTarget && !replyMode && (
-          // The selected terminal task becomes the context for the
-          // next message. Say that directly; "continue/send new"
-          // read like two competing send actions.
-          <div className={cn('flex items-center gap-2 border-b bg-[#EFEFEF]/35 px-3 py-2 text-xs text-muted-foreground', COMPOSER_DIVIDER)}>
-            <span className="shrink-0 font-medium text-foreground/80">
-              追问当前任务
-            </span>
-            <span
-              className="min-w-0 flex-1 truncate"
-              title={followUpTarget.title}
-            >
-              {followUpTarget.title}
-            </span>
-            <button
-              type="button"
-              onClick={onCancelFollowUp}
-              aria-label="清空当前任务上下文，改为新目标"
-              title="清空当前任务上下文，改为新目标"
-              className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-white hover:text-foreground dark:hover:bg-white/10"
-            >
-              <X className="h-3 w-3" aria-hidden />
-              改为新目标
-            </button>
-          </div>
-        )}
         {attachments.length > 0 && (
           <div className={cn('flex flex-wrap gap-1.5 border-b px-3 py-2', COMPOSER_DIVIDER)}>
             {attachments.map((a, i) => (

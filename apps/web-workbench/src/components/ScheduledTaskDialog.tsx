@@ -201,7 +201,7 @@ export function ScheduledTaskDialog({
               />
             </div>
             <div className="mt-2 text-[11px] text-[#595757]">
-              执行时间使用你当前时区，到点会自动新建任务并交给 agent 执行。
+              执行时间使用你当前时区，到点会自动新建任务并交给 HOLA DAY 执行。
             </div>
           </div>
           <div>

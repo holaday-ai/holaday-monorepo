@@ -308,7 +308,7 @@ function MemorySection(): JSX.Element {
       <div className="space-y-3">
         <div className="flex items-start justify-between gap-3 text-sm text-muted-foreground">
           <p className="leading-relaxed">
-            HOLA DAY 在任务结束后会自动记下值得保留的信息（你的偏好、网站经验、任务里程碑）。下次任务开始时，相关记忆会自动注入到 agent 的上下文里。
+            HOLA DAY 在任务结束后会自动记下值得保留的信息（你的偏好、网站经验、任务里程碑）。下次任务开始时，相关记忆会自动带入执行上下文。
           </p>
           {memories.length > 0 && (
             <button
@@ -393,7 +393,7 @@ function MemorySection(): JSX.Element {
           <ConfirmDialog
             open
             title="清空全部 AI 记忆？"
-            description="删除后 agent 不再记得你的偏好、网站经验等历史信息。无法撤销。"
+            description="删除后 HOLA DAY 不再记得你的偏好、网站经验等历史信息。无法撤销。"
             confirmLabel="清空全部"
             destructive
             onClose={() => setConfirming(false)}

@@ -1991,14 +1991,14 @@ function awaitingKindBannerBody(
 ): string {
   switch (kind) {
     case 'login':
-      return '交互模式已开启，直接在下方画面里完成登录 / 扫码。完成后 agent 会继续。';
+      return '交互模式已开启，直接在下方画面里完成登录 / 扫码。完成后 HOLA DAY 会继续。';
     case 'browser_action':
-      return '交互模式已开启，按提示在下方画面里点击 / 选择即可。完成后 agent 会继续。';
+      return '交互模式已开启，按提示在下方画面里点击 / 选择即可。完成后 HOLA DAY 会继续。';
     case 'permission':
       return '当前页面对未授权访问返回 403 / 拒绝。请确认你有权限，或换一个公开来源后回复继续。';
     case 'captcha':
     default:
-      return '交互模式已开启，直接在下方画面里点击验证码 / 滑动滑块即可。完成后 agent 会继续。';
+      return '交互模式已开启，直接在下方画面里点击验证码 / 滑动滑块即可。完成后 HOLA DAY 会继续。';
   }
 }
 
