@@ -58,27 +58,41 @@ async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
  * rather than polling so the wake doesn't burn the SW's CPU quota.
  * Returns once the target tab reaches 'complete' or we hit timeoutMs.
  */
-function waitForTabComplete(tabId: number, timeoutMs: number): Promise<void> {
+export function waitForTabComplete(tabId: number, timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
     let resolved = false;
-    const timer = setTimeout(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let listener: ((id: number, info: chrome.tabs.TabChangeInfo) => void) | null = null;
+    const cleanup = (): void => {
+      if (timer) clearTimeout(timer);
+      if (listener) chrome.tabs.onUpdated.removeListener(listener);
+    };
+    const finish = (fn: () => void): void => {
       if (resolved) return;
       resolved = true;
-      chrome.tabs.onUpdated.removeListener(listener);
-      reject(new Error('navigate_timeout'));
+      cleanup();
+      fn();
+    };
+    timer = setTimeout(() => {
+      finish(() => reject(new Error('navigate_timeout')));
     }, timeoutMs);
     timer && (timer as { unref?: () => void }).unref?.();
-    const listener = (id: number, info: chrome.tabs.TabChangeInfo): void => {
+    listener = (id: number, info: chrome.tabs.TabChangeInfo): void => {
       if (id !== tabId) return;
       if (info.status === 'complete') {
-        if (resolved) return;
-        resolved = true;
-        clearTimeout(timer);
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
+        finish(resolve);
       }
     };
     chrome.tabs.onUpdated.addListener(listener);
+    void chrome.tabs.get(tabId).then(
+      (tab) => {
+        if (tab.status === 'complete') finish(resolve);
+      },
+      () => {
+        // Keep listening. tabs.get can fail briefly while Chrome
+        // swaps the provisional navigation entry into the live tab.
+      },
+    );
   });
 }
 

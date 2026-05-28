@@ -167,6 +167,7 @@ type TaskStatus =
   | 'awaiting_user'
   | 'paused'
   | 'completed'
+  | 'partial_success'
   | 'failed'
   | 'cancelled';
 
@@ -316,17 +317,22 @@ onServerMessage((msg) => {
 function onTaskTerminal(msg: Extract<ServerMessage, { type: 'server.task.terminal' }>): void {
   const detail = msg.summary ?? msg.reason ?? '';
   const statusMap: Record<
-    'completed' | 'failed' | 'paused' | 'cancelled',
-    'completed' | 'failed' | 'paused' | 'cancelled'
+    'completed' | 'partial_success' | 'failed' | 'paused' | 'cancelled',
+    'completed' | 'partial_success' | 'failed' | 'paused' | 'cancelled'
   > = {
     completed: 'completed',
+    partial_success: 'partial_success',
     failed: 'failed',
     paused: 'paused',
     cancelled: 'cancelled',
   };
   const nextStatus = statusMap[msg.status];
   const phase: VisionPhase =
-    msg.status === 'completed' ? 'completed' : msg.status === 'failed' ? 'failed' : 'failed';
+    msg.status === 'completed' || msg.status === 'partial_success'
+      ? 'completed'
+      : msg.status === 'failed'
+        ? 'failed'
+        : 'failed';
 
   let task = state.tasks.get(msg.taskId);
   if (!task) {

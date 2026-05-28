@@ -379,7 +379,13 @@ export async function sendExtensionToolCall(
   return new Promise<ExtensionToolCallOutcome>((resolve) => {
     const timer = setTimeout(() => {
       pendingExtensionCalls.delete(requestId);
-      resolve({ ok: false, error: { message: '扩展工具调用超时', code: 'timeout' } });
+      resolve({
+        ok: false,
+        error: {
+          message: `扩展工具调用超时（已等待 ${Math.round(timeoutMs / 1000)} 秒，请确认浏览器标签页仍在加载或重试）`,
+          code: 'timeout',
+        },
+      });
     }, timeoutMs);
     timer.unref();
     pendingExtensionCalls.set(requestId, {

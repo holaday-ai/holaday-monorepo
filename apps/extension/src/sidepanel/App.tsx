@@ -35,6 +35,7 @@ type TaskStatus =
   | 'awaiting_user'
   | 'paused'
   | 'completed'
+  | 'partial_success'
   | 'failed'
   | 'cancelled';
 
@@ -448,6 +449,7 @@ function StatusBadge({ status }: { status: TaskStatus }) {
     awaiting_user: { bg: '#fef3c7', fg: '#92400e', label: '待确认' },
     paused: { bg: '#fde68a', fg: '#78350f', label: '已暂停' },
     completed: { bg: '#e5e7eb', fg: '#111827', label: '已完成' },
+    partial_success: { bg: '#fff7d6', fg: '#8a6a00', label: '部分完成' },
     failed: { bg: '#fee2e2', fg: '#991b1b', label: '失败' },
     cancelled: { bg: '#e5e7eb', fg: '#374151', label: '已取消' },
   };
