@@ -518,8 +518,16 @@ export function Sidebar({
                 </TaskGroup>
               ))}
               {tasks.length === 0 && hiddenTaskCount === 0 && (
-                <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-                  还没有任务，发一条试试看
+                <div className="mx-1.5 my-4 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-3 py-5 text-center shadow-[0_8px_24px_rgba(89,87,87,0.04)] dark:border-white/10 dark:bg-white/[0.03]">
+                  <div className="mx-auto flex h-7 w-7 items-center justify-center rounded-[8px] border border-[#EA1F59]/15 bg-[#EA1F59]/10 text-[#EA1F59]">
+                    <ListPlus className="h-3.5 w-3.5" />
+                  </div>
+                  <div className="mt-2 text-[12px] font-medium text-[#595757] dark:text-foreground/85">
+                    还没有任务
+                  </div>
+                  <div className="mt-1 text-[11px] leading-4 text-[#ADADAD]">
+                    新任务会出现在这里，方便继续、重命名或批量整理。
+                  </div>
                 </div>
               )}
               {/* Phase 24 RC follow-up — load-more pager so users can
@@ -544,13 +552,18 @@ export function Sidebar({
                   controls; otherwise show a small "批量管理" entry
                   button alongside the quota indicator. */}
               {batchMode ? (
-                <div className="mx-2 mb-2 flex items-center justify-between gap-2 rounded-md border border-[#57479C]/25 bg-[#57479C]/10 px-2 py-1.5 text-[11px] text-[#57479C] dark:border-[#57479C]/40 dark:text-[#DCDDDD]">
-                  <span className="font-medium">已选 {selectedBatchDeleteIds.length}</span>
+                <div className="mx-2 mb-2 flex items-center justify-between gap-2 rounded-[8px] border border-[#57479C]/18 bg-white/75 px-2 py-1.5 text-[11px] text-[#595757] shadow-[0_8px_22px_rgba(87,71,156,0.08)] dark:border-[#57479C]/35 dark:bg-white/[0.04] dark:text-[#DCDDDD]">
+                  <span className="inline-flex items-center gap-1.5 font-medium">
+                    <span className="flex h-4 min-w-4 items-center justify-center rounded-[5px] bg-[#57479C]/10 px-1 text-[10px] text-[#57479C] dark:bg-[#57479C]/25 dark:text-[#DCDDDD]">
+                      {selectedBatchDeleteIds.length}
+                    </span>
+                    已选
+                  </span>
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
                       onClick={selectAllVisible}
-                      className="rounded px-2 py-0.5 hover:bg-white/70 dark:hover:bg-white/10"
+                      className="rounded-[6px] px-2 py-0.5 text-[#595757] hover:bg-[#EFEFEF]/70 hover:text-[#57479C] dark:text-[#DCDDDD] dark:hover:bg-white/10"
                     >
                       全选
                     </button>
@@ -559,18 +572,18 @@ export function Sidebar({
                       onClick={deleteSelected}
                       disabled={selectedBatchDeleteIds.length === 0}
                       className={cn(
-                        'rounded px-2 py-0.5 font-medium',
+                        'rounded-[6px] px-2 py-0.5 font-medium transition-colors',
                         selectedBatchDeleteIds.length === 0
                           ? 'cursor-not-allowed opacity-50'
-                          : 'bg-[#EA1F59] text-white hover:bg-[#EA1F59]/90',
+                          : 'bg-[#EA1F59] text-white shadow-[0_3px_10px_rgba(234,31,89,0.12)] hover:bg-[#EA1F59]/90',
                       )}
                     >
-                      删除选中
+                      删除
                     </button>
                     <button
                       type="button"
                       onClick={exitBatchMode}
-                      className="rounded px-2 py-0.5 hover:bg-white/70 dark:hover:bg-white/10"
+                      className="rounded-[6px] px-2 py-0.5 text-[#ADADAD] hover:bg-[#EFEFEF]/70 hover:text-[#595757] dark:hover:bg-white/10"
                     >
                       取消
                     </button>
@@ -582,8 +595,9 @@ export function Sidebar({
                     <button
                       type="button"
                       onClick={() => setBatchMode(true)}
-                      className="rounded-md border border-transparent px-2 py-0.5 text-[11px] text-muted-foreground hover:border-[#DCDDDD] hover:bg-white hover:text-foreground dark:hover:border-white/10 dark:hover:bg-white/10"
+                      className="inline-flex items-center gap-1 rounded-[7px] border border-transparent px-2 py-1 text-[11px] text-[#ADADAD] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
                     >
+                      <Layers className="h-3 w-3" />
                       批量管理
                     </button>
                   </div>
