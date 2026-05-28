@@ -966,6 +966,7 @@ export function BrowserPanel({
           size="icon"
           onClick={toggleCollapsed}
           aria-label={collapsed ? '展开浏览器' : '收起浏览器'}
+          title={collapsed ? '展开浏览器' : '收起浏览器'}
           /* BOSS bug fix — was top-3 which sat right next to the
              toolbar's red stop / back / forward buttons (panel
              left-padding starts at the same x-band). Pushed down
@@ -986,6 +987,7 @@ export function BrowserPanel({
           type="button"
           onClick={onClose}
           aria-label="关闭浏览器抽屉"
+          title="关闭浏览器抽屉"
           className="absolute left-1/2 top-2 h-1.5 w-10 -translate-x-1/2 rounded-full bg-muted-foreground/30"
         />
       )}
@@ -1077,7 +1079,7 @@ export function BrowserPanel({
                   ? '退出接管 — 让 AI 继续操作'
                   : '接管浏览器 — 你的鼠标键盘直接控制 Brave'
               }
-              aria-label="toggle browser takeover"
+              aria-label={interactive ? '退出浏览器接管' : '接管浏览器'}
               aria-pressed={interactive}
               className={cn(
                 'inline-flex h-6 w-6 items-center justify-center rounded-md border transition-colors',
@@ -1101,7 +1103,7 @@ export function BrowserPanel({
                 type="button"
                 onClick={onToggleFullscreen}
                 title={fullscreen ? '退出全屏 (Esc)' : '全屏浏览器模式'}
-                aria-label="toggle fullscreen panel"
+                aria-label={fullscreen ? '退出全屏' : '全屏浏览器模式'}
                 aria-pressed={fullscreen}
                 className={cn(
                   'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors',
@@ -1429,6 +1431,7 @@ export function BrowserPanel({
           type="button"
           onClick={onClose}
           aria-label="关闭浏览器抽屉"
+          title="关闭浏览器抽屉"
           className="fixed inset-0 z-[70] bg-black/30 backdrop-blur-sm animate-fade-in"
         />
         {section}
@@ -1459,6 +1462,7 @@ function ActivityOverlay({
           onClick={onClose}
           className="rounded px-1 hover:bg-white/10"
           aria-label="收起操作日志"
+          title="收起操作日志"
         >
           收起
         </button>
@@ -2327,7 +2331,7 @@ function FullscreenFloatingToolbar({
         type="button"
         onClick={onExitFullscreen}
         title="退出全屏 (Cmd/Ctrl+Esc)"
-        aria-label="exit fullscreen"
+        aria-label="退出全屏"
         className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-white/85 transition-colors hover:bg-white/10"
       >
         <Minimize2 className="h-3.5 w-3.5" />
