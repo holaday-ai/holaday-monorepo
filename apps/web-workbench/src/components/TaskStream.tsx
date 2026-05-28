@@ -56,6 +56,11 @@ import {
   stepStatusText,
   type StepDetailSummary,
 } from '@/lib/step-card-state';
+import {
+  matchResultSourceBadgePrefix,
+  RESULT_SOURCE_BADGES,
+  type ResultSourceMarker,
+} from '@/lib/result-source-badges';
 import { verificationBannerCopy } from '@/lib/verification-banner-copy';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 import { PlanCard } from '@/components/PlanCard';
@@ -883,7 +888,7 @@ function LiveStatus({
         <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
       ) : (
         <Loader2
-          className="h-3.5 w-3.5 shrink-0 animate-spin text-primary"
+          className="h-3.5 w-3.5 shrink-0 animate-spin text-[#EA1F59]"
           aria-hidden
         />
       )}
@@ -1313,7 +1318,7 @@ function ExpertReportHeader({ workflowId }: { workflowId: string }): JSX.Element
   const meta = EXPERT_HEADER_META[workflowId];
   if (!meta) return null;
   return (
-    <div className="mb-3 flex items-center gap-2 border-b border-primary/30 pb-2 text-sm font-semibold text-primary dark:border-primary/40">
+    <div className="mb-3 flex items-center gap-2 border-b border-[#DCDDDD] pb-2 text-sm font-semibold text-[#57479C] dark:border-white/10 dark:text-foreground">
       <span>{meta.label}</span>
     </div>
   );
@@ -1373,7 +1378,7 @@ function FollowUpChips({
           onClick={() => onPick(a)}
           className="inline-flex items-center gap-1.5 rounded-full border border-[#EA1F59]/25 bg-[#EA1F59]/10 px-3 py-1 text-xs font-medium text-[#EA1F59] transition hover:border-[#EA1F59]/40 hover:bg-[#EA1F59]/15 dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10"
         >
-          <span aria-hidden>→</span>
+          <ChevronRight className="h-3 w-3" aria-hidden />
           <span className="max-w-[220px] truncate">{a}</span>
         </button>
       ))}
@@ -1394,52 +1399,6 @@ function FollowUpChips({
  * bracketed markers. Legacy markers are accepted via escaped code
  * points so old task history still renders cleanly.
  */
-const SOURCE_BADGES: Record<
-  string,
-  { label: string; tone: string }
-> = {
-  '[用户提供]': {
-    label: '用户提供',
-    tone: 'border-cyan-300 bg-cyan-50 text-cyan-800 dark:border-cyan-500/40 dark:bg-cyan-500/10 dark:text-cyan-200',
-  },
-  '[系统计算]': {
-    label: '系统计算',
-    tone: 'border-[#42C0EF]/60 bg-[#42C0EF]/10 text-cyan-800 dark:border-[#42C0EF]/40 dark:bg-[#42C0EF]/10 dark:text-cyan-200',
-  },
-  '[模型假设]': {
-    label: '模型假设',
-    tone: 'border-[#FFC910]/60 bg-[#FFC910]/10 text-[#595757] dark:border-[#FFC910]/40 dark:bg-[#FFC910]/10 dark:text-foreground',
-  },
-  '[外部来源]': {
-    label: '外部基准',
-    tone: 'border-[#EA1F59]/35 bg-[#EA1F59]/5 text-[#EA1F59] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10',
-  },
-};
-
-const LEGACY_SOURCE_BADGES: readonly { marker: string; replacement: keyof typeof SOURCE_BADGES }[] = [
-  { marker: '\u{1F7E2}', replacement: '[用户提供]' },
-  { marker: '\u{1F535}', replacement: '[系统计算]' },
-  { marker: '\u{1F7E1}', replacement: '[模型假设]' },
-  { marker: '\u{1F534}', replacement: '[外部来源]' },
-];
-
-function matchSourceBadgePrefix(text: string): { marker: string; rest: string } | null {
-  for (const marker of Object.keys(SOURCE_BADGES)) {
-    if (text.startsWith(marker)) {
-      return { marker, rest: text.slice(marker.length).replace(/^\s+/, '') };
-    }
-  }
-  for (const legacy of LEGACY_SOURCE_BADGES) {
-    if (text.startsWith(legacy.marker)) {
-      return {
-        marker: legacy.replacement,
-        rest: text.slice(legacy.marker.length).replace(/^\s+/, ''),
-      };
-    }
-  }
-  return null;
-}
-
 /**
  * Phase 4 R2 — screenshot thumbnail card. Replaces the generic
  * FileDownloadCard (icon + filename) for `kind === 'screenshot'`
@@ -1591,7 +1550,7 @@ function ScreenshotThumbnailCard({
               : `${formatFileSize(payload.size)} · 24h`}
         </div>
         {downloadState === 'loading' ? (
-          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#EA1F59]" />
         ) : (
           <Download
             className={cn(
@@ -1607,8 +1566,8 @@ function ScreenshotThumbnailCard({
   );
 }
 
-function SourceBadge({ marker }: { marker: string }): JSX.Element {
-  const meta = SOURCE_BADGES[marker] ?? null;
+function SourceBadge({ marker }: { marker: ResultSourceMarker }): JSX.Element {
+  const meta = RESULT_SOURCE_BADGES[marker] ?? null;
   if (!meta) {
     return <span className="sr-only">{marker}</span>;
   }
@@ -1616,7 +1575,7 @@ function SourceBadge({ marker }: { marker: string }): JSX.Element {
     <span
       title={meta.label}
       className={cn(
-        'mr-1.5 inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium align-middle',
+        'mr-1.5 inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium align-middle shadow-[0_1px_2px_rgba(17,24,39,0.03)]',
         meta.tone,
       )}
     >
@@ -2085,12 +2044,10 @@ function TerminalSummary({
               onClick={() => onSuggestionPick(s)}
               className="group flex w-full items-center gap-2 rounded px-1 py-1 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
             >
-              <span
+              <ChevronRight
                 aria-hidden
-                className="shrink-0 text-muted-foreground/70 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
-              >
-                →
-              </span>
+                className="h-3 w-3 shrink-0 text-muted-foreground/70 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
+              />
               <span className="min-w-0 flex-1 truncate group-hover:underline">{s}</span>
             </button>
           ))}
@@ -2290,7 +2247,7 @@ function makeMarkdownComponents(opts: {
                 }
               : undefined
           }
-          className="inline-flex items-center gap-1 text-primary underline decoration-primary/40 underline-offset-2 hover:text-primary/80 dark:text-primary dark:hover:text-primary/80"
+          className="inline-flex items-center gap-1 text-[#EA1F59] underline decoration-[#EA1F59]/35 underline-offset-2 hover:text-[#D91B51] dark:text-[#EA1F59] dark:hover:text-[#F15A85]"
           {...rest}
         >
           {children}
@@ -2419,7 +2376,7 @@ function makeMarkdownComponents(opts: {
         );
       }
       // SourceBadge prefix on the first text node.
-      const badge = matchSourceBadgePrefix(first);
+      const badge = matchResultSourceBadgePrefix(first);
       if (badge) {
         return (
           <p {...rest}>
