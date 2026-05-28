@@ -1,11 +1,13 @@
 import {
   ArrowUp,
   ChevronDown,
-  FileText,
-  Image as ImageIcon,
+  ListChecks,
   Loader2,
+  Paperclip,
   Plus,
+  Puzzle,
   Sparkles,
+  Target,
   X,
 } from 'lucide-react';
 import * as React from 'react';
@@ -18,6 +20,10 @@ import {
   DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Textarea } from '@/components/ui/textarea';
@@ -100,6 +106,7 @@ interface Props {
 
 const ACCEPT_FILES = '.csv,.xlsx,.xls,.pdf,.txt,.json,.md';
 const ACCEPT_IMAGES = '.png,.jpg,.jpeg,.webp,.gif,image/*';
+const ACCEPT_ATTACHMENTS = `${ACCEPT_FILES},${ACCEPT_IMAGES}`;
 const MAX_ATTACHMENTS = 5;
 const COMPOSER_SURFACE =
   'border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/90';
@@ -119,7 +126,7 @@ const ATTACHMENT_TRIGGER_CLASS =
 const ATTACHMENT_TRIGGER_ACTIVE =
   'border-[#EA1F59]/35 bg-[#EA1F59]/5 text-[#EA1F59] dark:border-[#EA1F59]/40 dark:bg-[#EA1F59]/10';
 const ATTACHMENT_MENU_ITEM_CLASS =
-  'items-start gap-2.5 rounded-[6px] px-2 py-2.5 text-[13px] focus:bg-[#EFEFEF]/70 dark:focus:bg-white/10';
+  'gap-2.5 rounded-[6px] px-2 py-2 text-[13px] focus:bg-[#EFEFEF]/70 dark:focus:bg-white/10';
 
 type ComposerExpertWorkflow = {
   id: 'douyin-livestream-review';
@@ -247,7 +254,6 @@ export function InputArea({
     navigate(location.pathname + location.search, { replace: true, state: null });
   }, [location, navigate]);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const imageInputRef = React.useRef<HTMLInputElement>(null);
   // Product polish #6 — + button menu state. Radix DropdownMenu
   // owns the outside-click / escape close, focus management, and
   // keyboard navigation. We only keep `open` state for the
@@ -633,7 +639,7 @@ export function InputArea({
                 side="top"
                 align="start"
                 sideOffset={8}
-                className={cn('w-60', MODE_MENU_CLASS)}
+                className={cn('w-[206px]', MODE_MENU_CLASS)}
               >
                 <DropdownMenuItem
                   className={ATTACHMENT_MENU_ITEM_CLASS}
@@ -642,33 +648,86 @@ export function InputArea({
                     fileInputRef.current?.click();
                   }}
                 >
-                  <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-[#57479C]/8 text-[#57479C]">
-                    <FileText className="h-4 w-4" />
+                  <Paperclip className="h-4 w-4 text-[#595757]" />
+                  <span className="font-medium text-foreground">添加照片和文件</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="my-1 bg-[#DCDDDD]/80 dark:bg-white/10" />
+                <DropdownMenuItem
+                  className={ATTACHMENT_MENU_ITEM_CLASS}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    setTaskMode('plan');
+                  }}
+                >
+                  <ListChecks className="h-4 w-4 text-[#595757]" />
+                  <span className="min-w-0 flex-1 font-medium text-foreground">
+                    计划模式
                   </span>
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="font-medium text-foreground">上传文件</span>
-                    <span className="whitespace-nowrap text-[11px] leading-snug text-muted-foreground">
-                      CSV、PDF、Markdown 或表格
-                    </span>
-                  </span>
+                  <MiniSwitch checked={taskMode === 'plan'} />
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className={ATTACHMENT_MENU_ITEM_CLASS}
-                  onSelect={() => {
-                    setPlusMenuOpen(false);
-                    imageInputRef.current?.click();
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    setTaskMode('auto');
                   }}
                 >
-                  <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-[#42C0EF]/10 text-[#208CB8] dark:text-[#42C0EF]">
-                    <ImageIcon className="h-4 w-4" />
+                  <Target className="h-4 w-4 text-[#595757]" />
+                  <span className="min-w-0 flex-1 font-medium text-foreground">
+                    追求目标
                   </span>
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="font-medium text-foreground">上传图片</span>
-                    <span className="whitespace-nowrap text-[11px] leading-snug text-muted-foreground">
-                      截图、PNG、JPG 或 WebP
-                    </span>
-                  </span>
+                  <MiniSwitch checked={taskMode === 'auto'} />
                 </DropdownMenuItem>
+                <DropdownMenuSeparator className="my-1 bg-[#DCDDDD]/80 dark:bg-white/10" />
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger className="gap-2.5 rounded-[6px] px-2 py-2 text-[13px] focus:bg-[#EFEFEF]/70 data-[state=open]:bg-[#EFEFEF]/70 dark:focus:bg-white/10 dark:data-[state=open]:bg-white/10">
+                    <Puzzle className="h-4 w-4 text-[#595757]" />
+                    <span className="min-w-0 flex-1 font-medium text-foreground">
+                      插件
+                    </span>
+                    <span className="mr-1 text-[11px] text-muted-foreground">
+                      {pluginModeLabel(expertMode)}
+                    </span>
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent
+                    sideOffset={8}
+                    className={cn('w-56', MODE_MENU_CLASS)}
+                  >
+                    <DropdownMenuRadioGroup
+                      value={expertMode}
+                      onValueChange={(v) => {
+                        if (v === 'normal' || v === 'expert' || v === 'auto') {
+                          setExpertMode(v);
+                        }
+                      }}
+                    >
+                      <DropdownMenuRadioItem value="auto" className={MODE_MENU_ITEM_CLASS}>
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className="text-[12px] font-medium text-foreground">自动</span>
+                          <span className="text-[11px] text-muted-foreground">
+                            需要时自动启用专家插件
+                          </span>
+                        </span>
+                      </DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="expert" className={MODE_MENU_ITEM_CLASS}>
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className="text-[12px] font-medium text-foreground">开启</span>
+                          <span className="text-[11px] text-muted-foreground">
+                            强制使用专家插件
+                          </span>
+                        </span>
+                      </DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="normal" className={MODE_MENU_ITEM_CLASS}>
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className="text-[12px] font-medium text-foreground">关闭</span>
+                          <span className="text-[11px] text-muted-foreground">
+                            跳过插件，优先速度
+                          </span>
+                        </span>
+                      </DropdownMenuRadioItem>
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
@@ -688,18 +747,7 @@ export function InputArea({
         <input
           ref={fileInputRef}
           type="file"
-          accept={ACCEPT_FILES}
-          multiple
-          className="hidden"
-          onChange={(e) => {
-            if (e.target.files) void ingestFiles(e.target.files);
-            e.target.value = '';
-          }}
-        />
-        <input
-          ref={imageInputRef}
-          type="file"
-          accept={ACCEPT_IMAGES}
+          accept={ACCEPT_ATTACHMENTS}
           multiple
           className="hidden"
           onChange={(e) => {
@@ -779,20 +827,19 @@ function ExpertModeSelector({
   onChange: (m: 'normal' | 'expert' | 'auto') => void;
 }): JSX.Element {
   const [open, setOpen] = React.useState(false);
-  const label =
-    mode === 'expert' ? '专家' : mode === 'normal' ? '普通' : '自动';
+  const label = pluginModeLabel(mode);
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          aria-label="选择专家模式"
+          aria-label="选择插件模式"
           className={cn(
             MODE_TRIGGER_BASE,
             (open || mode === 'expert') && MODE_TRIGGER_ACTIVE,
           )}
         >
-          <span>专家：{label}</span>
+          <span>插件：{label}</span>
           <ChevronDown className="h-3 w-3 opacity-70" />
         </button>
       </DropdownMenuTrigger>
@@ -812,23 +859,23 @@ function ExpertModeSelector({
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="text-[12px] font-medium text-foreground">自动</span>
               <span className="text-[11px] text-muted-foreground">
-                AI 根据意图决定是否启用专家技能
+                需要时自动启用专家插件
               </span>
             </span>
           </DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="expert" className={MODE_MENU_ITEM_CLASS}>
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="text-[12px] font-medium text-foreground">专家</span>
+              <span className="text-[12px] font-medium text-foreground">开启</span>
               <span className="text-[11px] text-muted-foreground">
-                强制加载专家技能，更长耗时，更深的报告
+                强制使用专家插件
               </span>
             </span>
           </DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="normal" className={MODE_MENU_ITEM_CLASS}>
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="text-[12px] font-medium text-foreground">普通</span>
+              <span className="text-[12px] font-medium text-foreground">关闭</span>
               <span className="text-[11px] text-muted-foreground">
-                跳过专家技能，走通用路径，速度更快
+                跳过插件，优先速度
               </span>
             </span>
           </DropdownMenuRadioItem>
@@ -853,7 +900,7 @@ function TaskModeSelector({
   onChange: (m: 'auto' | 'plan') => void;
 }): JSX.Element {
   const [open, setOpen] = React.useState(false);
-  const label = mode === 'auto' ? '自动执行' : '先出方案';
+  const label = taskModeLabel(mode);
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
@@ -883,15 +930,15 @@ function TaskModeSelector({
         >
           <DropdownMenuRadioItem value="auto" className={MODE_MENU_ITEM_CLASS}>
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="text-[12px] font-medium text-foreground">自动执行</span>
+              <span className="text-[12px] font-medium text-foreground">追求目标</span>
               <span className="text-[11px] text-muted-foreground">
-                AI 直接执行任务
+                直接向目标推进，需要时自主执行
               </span>
             </span>
           </DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="plan" className={MODE_MENU_ITEM_CLASS}>
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="text-[12px] font-medium text-foreground">先出方案</span>
+              <span className="text-[12px] font-medium text-foreground">计划模式</span>
               <span className="text-[11px] text-muted-foreground">
                 AI 先列计划，你确认后再执行
               </span>
@@ -900,6 +947,37 @@ function TaskModeSelector({
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+function taskModeLabel(mode: 'auto' | 'plan'): string {
+  return mode === 'plan' ? '计划模式' : '追求目标';
+}
+
+function pluginModeLabel(mode: 'normal' | 'expert' | 'auto'): string {
+  if (mode === 'expert') return '开启';
+  if (mode === 'normal') return '关闭';
+  return '自动';
+}
+
+function MiniSwitch({ checked }: { checked: boolean }): JSX.Element {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border transition-colors',
+        checked
+          ? 'border-[#EA1F59]/30 bg-[#EA1F59]'
+          : 'border-[#DCDDDD] bg-[#EFEFEF] dark:border-white/15 dark:bg-white/10',
+      )}
+    >
+      <span
+        className={cn(
+          'h-3 w-3 rounded-full bg-white shadow-[0_1px_2px_rgba(17,24,39,0.18)] transition-transform',
+          checked ? 'translate-x-[13px]' : 'translate-x-0.5',
+        )}
+      />
+    </span>
   );
 }
 
