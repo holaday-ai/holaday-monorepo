@@ -1,6 +1,5 @@
 import {
   ArrowUp,
-  ChevronDown,
   ListChecks,
   Loader2,
   Paperclip,
@@ -113,18 +112,14 @@ const COMPOSER_SURFACE =
 const COMPOSER_FIELD_FOCUS =
   'focus-within:border-[#EA1F59]/40 focus-within:shadow-[0_8px_24px_rgba(17,24,39,0.08)] focus-within:ring-2 focus-within:ring-[#EA1F59]/10';
 const COMPOSER_DIVIDER = 'border-[#DCDDDD]/80 dark:border-white/10';
-const MODE_TRIGGER_BASE =
-  'inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[6px] border border-[#DCDDDD] bg-white/70 px-2 text-[11px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/75 dark:hover:bg-white/10';
-const MODE_TRIGGER_ACTIVE =
-  'border-[#EA1F59]/35 bg-[#EA1F59]/5 text-[#EA1F59] dark:border-[#EA1F59]/40 dark:bg-[#EA1F59]/10 dark:text-foreground';
 const MODE_MENU_CLASS =
-  'rounded-[8px] border-[#DCDDDD] bg-white p-1.5 shadow-[0_12px_32px_rgba(17,24,39,0.12)] dark:border-white/10 dark:bg-card';
+  'z-[80] rounded-[8px] border-[#DCDDDD] bg-white p-1.5 shadow-[0_12px_32px_rgba(17,24,39,0.12)] dark:border-white/10 dark:bg-card';
 const MODE_MENU_ITEM_CLASS =
   'items-start rounded-[6px] py-2 text-[13px] focus:bg-[#EFEFEF]/70 data-[state=checked]:bg-[#EA1F59]/5 dark:focus:bg-white/10 dark:data-[state=checked]:bg-[#EA1F59]/10';
 const ATTACHMENT_TRIGGER_CLASS =
-  'inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#DCDDDD] bg-white/70 text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/75 dark:hover:bg-white/10';
+  'inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-transparent bg-transparent text-[#595757] transition-colors hover:bg-[#EFEFEF]/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:text-foreground/75 dark:hover:bg-white/10';
 const ATTACHMENT_TRIGGER_ACTIVE =
-  'border-[#EA1F59]/35 bg-[#EA1F59]/5 text-[#EA1F59] dark:border-[#EA1F59]/40 dark:bg-[#EA1F59]/10';
+  'bg-[#EA1F59]/5 text-[#EA1F59] dark:bg-[#EA1F59]/10';
 const ATTACHMENT_MENU_ITEM_CLASS =
   'gap-2.5 rounded-[6px] px-2 py-2 text-[13px] focus:bg-[#EFEFEF]/70 dark:focus:bg-white/10';
 
@@ -738,7 +733,7 @@ export function InputArea({
               }}
               aria-label="升级基础版可添加附件"
               title="升级基础版可添加附件"
-              className="inline-flex h-8 w-8 cursor-not-allowed items-center justify-center rounded-[8px] border border-[#DCDDDD]/70 bg-white/50 text-[#ADADAD] dark:border-white/10 dark:bg-white/5"
+              className="inline-flex h-8 w-8 cursor-not-allowed items-center justify-center rounded-[8px] border border-transparent bg-transparent text-[#ADADAD] dark:text-foreground/40"
             >
               <Plus className="h-4 w-4" />
             </button>
@@ -769,11 +764,7 @@ export function InputArea({
           )}
         </Button>
       </div>
-      <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[11px] text-muted-foreground/70">
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <TaskModeSelector mode={taskMode} onChange={setTaskMode} />
-          <ExpertModeSelector mode={expertMode} onChange={setExpertMode} />
-        </div>
+      <div className="mt-2 flex items-center justify-end px-1 text-[11px] text-muted-foreground/70">
         <span className="hidden shrink-0 rounded-[6px] px-1.5 py-0.5 text-[#ADADAD] sm:inline">
           Enter 发送
         </span>
@@ -803,155 +794,6 @@ export function InputArea({
         })()}
     </div>
   );
-}
-
-/**
- * Codex Pack C1 — expert-mode picker. Sits beside the task-mode
- * selector and lets the user steer whether expert workflow skills
- * (typed report tier, longer timeout, richer prompt) load for this
- * task. Three values:
- *   - normal: force the general-purpose lane (cheaper + faster)
- *   - expert: force the expert workflow tier on (use even when the
- *             intent classifier wouldn't auto-match)
- *   - auto:   default — let the orchestrator's workflow matcher
- *             decide based on intent + user-selected roles
- *
- * Sent to backend as `expertMode` on tasks.create. Resets to `auto`
- * on every submit (mirrors TaskModeSelector behaviour).
- */
-function ExpertModeSelector({
-  mode,
-  onChange,
-}: {
-  mode: 'normal' | 'expert' | 'auto';
-  onChange: (m: 'normal' | 'expert' | 'auto') => void;
-}): JSX.Element {
-  const [open, setOpen] = React.useState(false);
-  const label = pluginModeLabel(mode);
-  return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label="选择插件模式"
-          className={cn(
-            MODE_TRIGGER_BASE,
-            (open || mode === 'expert') && MODE_TRIGGER_ACTIVE,
-          )}
-        >
-          <span>插件：{label}</span>
-          <ChevronDown className="h-3 w-3 opacity-70" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        side="top"
-        align="start"
-        sideOffset={8}
-        className={cn('w-64', MODE_MENU_CLASS)}
-      >
-        <DropdownMenuRadioGroup
-          value={mode}
-          onValueChange={(v) => {
-            if (v === 'normal' || v === 'expert' || v === 'auto') onChange(v);
-          }}
-        >
-          <DropdownMenuRadioItem value="auto" className={MODE_MENU_ITEM_CLASS}>
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="text-[12px] font-medium text-foreground">自动</span>
-              <span className="text-[11px] text-muted-foreground">
-                需要时自动启用专家插件
-              </span>
-            </span>
-          </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="expert" className={MODE_MENU_ITEM_CLASS}>
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="text-[12px] font-medium text-foreground">开启</span>
-              <span className="text-[11px] text-muted-foreground">
-                强制使用专家插件
-              </span>
-            </span>
-          </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="normal" className={MODE_MENU_ITEM_CLASS}>
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="text-[12px] font-medium text-foreground">关闭</span>
-              <span className="text-[11px] text-muted-foreground">
-                跳过插件，优先速度
-              </span>
-            </span>
-          </DropdownMenuRadioItem>
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-/**
- * Task-mode picker. Radix DropdownMenuRadioGroup so the selection is
- * keyboard-navigable, escape/outside-click handled by Radix, and the
- * portal layering plays nicely with the composer's z-index stack.
- * The hand-rolled mousedown / keydown listeners (and the stale-closure
- * bugs they bred) are gone.
- */
-function TaskModeSelector({
-  mode,
-  onChange,
-}: {
-  mode: 'auto' | 'plan';
-  onChange: (m: 'auto' | 'plan') => void;
-}): JSX.Element {
-  const [open, setOpen] = React.useState(false);
-  const label = taskModeLabel(mode);
-  return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label="选择任务执行模式"
-          className={cn(
-            MODE_TRIGGER_BASE,
-            (open || mode === 'plan') && MODE_TRIGGER_ACTIVE,
-          )}
-        >
-          <span>{label}</span>
-          <ChevronDown className="h-3 w-3 opacity-70" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        side="top"
-        align="start"
-        sideOffset={8}
-        className={cn('w-60', MODE_MENU_CLASS)}
-      >
-        <DropdownMenuRadioGroup
-          value={mode}
-          onValueChange={(v) => {
-            if (v === 'auto' || v === 'plan') onChange(v);
-          }}
-        >
-          <DropdownMenuRadioItem value="auto" className={MODE_MENU_ITEM_CLASS}>
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="text-[12px] font-medium text-foreground">追求目标</span>
-              <span className="text-[11px] text-muted-foreground">
-                直接向目标推进，需要时自主执行
-              </span>
-            </span>
-          </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="plan" className={MODE_MENU_ITEM_CLASS}>
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="text-[12px] font-medium text-foreground">计划模式</span>
-              <span className="text-[11px] text-muted-foreground">
-                AI 先列计划，你确认后再执行
-              </span>
-            </span>
-          </DropdownMenuRadioItem>
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-function taskModeLabel(mode: 'auto' | 'plan'): string {
-  return mode === 'plan' ? '计划模式' : '追求目标';
 }
 
 function pluginModeLabel(mode: 'normal' | 'expert' | 'auto'): string {
