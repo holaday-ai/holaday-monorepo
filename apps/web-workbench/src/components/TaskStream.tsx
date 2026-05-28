@@ -48,6 +48,7 @@ import {
 } from '@/lib/external-link-copy';
 import { classifyFriendlyFailure } from '@/lib/failure-copy';
 import { formatFileSize } from '@/lib/file-size';
+import { downloadFileMetaLabel } from '@/lib/file-download-card-copy';
 import { downloadMarkdownFile } from '@/lib/markdown-download';
 import { terminalArtifactFallbackText } from '@/lib/terminal-artifact-copy';
 import { terminalEmptyCopy } from '@/lib/terminal-empty-copy';
@@ -1491,6 +1492,10 @@ function ScreenshotThumbnailCard({
       toast.show(downloadFailureMessage(result.status), 'error');
     }
   };
+  const metaLabel = downloadFileMetaLabel({
+    filename: payload.filename,
+    formattedSize: formatFileSize(payload.size),
+  });
   return (
     <button
       type="button"
@@ -1498,16 +1503,16 @@ function ScreenshotThumbnailCard({
       disabled={downloadState === 'loading'}
       aria-busy={downloadState === 'loading'}
       className={cn(
-        'group my-2 flex w-full max-w-md flex-col gap-2 overflow-hidden rounded-lg border bg-white p-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors dark:bg-card/85',
+        'group my-2 flex w-full max-w-md flex-col gap-2 overflow-hidden rounded-[8px] border bg-white p-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors dark:bg-card/85',
         downloadState === 'failed'
           ? 'border-[#EA1F59]/40 bg-[#EA1F59]/5'
           : downloadState === 'loading'
-            ? 'border-[#57479C]/40 opacity-85'
+            ? 'border-[#57479C]/40 bg-[#57479C]/5 opacity-90'
             : 'border-[#DCDDDD] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/35 dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/[0.04]',
       )}
-      aria-label={`下载截图 ${payload.filename}`}
+      aria-label={`下载图片文件 ${payload.filename}`}
     >
-      <div className="relative w-full overflow-hidden rounded-md bg-muted/40">
+      <div className="relative w-full overflow-hidden rounded-[6px] border border-[#DCDDDD]/70 bg-[#EFEFEF]/45 dark:border-white/10 dark:bg-white/5">
         {previewUrl ? (
           <img
             src={previewUrl}
@@ -1527,27 +1532,29 @@ function ScreenshotThumbnailCard({
         ) : (
           <div
             aria-hidden
-            className="hola-skel block h-48 w-full bg-muted/50"
+            className="hola-skel block h-48 w-full bg-[#EFEFEF]/70"
           />
         )}
       </div>
-      <div className="flex items-center gap-2 px-1 pb-0.5 text-xs">
-        <div className="min-w-0 flex-1 truncate font-medium" title={payload.filename}>
-          {payload.filename}
-        </div>
-        <div
-          className={cn(
-            'text-[11px]',
-            downloadState === 'failed'
-              ? 'text-[#EA1F59]'
-              : 'text-muted-foreground',
-          )}
-        >
-          {downloadState === 'loading'
-            ? '正在下载…'
-            : downloadState === 'failed'
-              ? '下载失败，点击重试'
-              : `${formatFileSize(payload.size)} · 24h`}
+      <div className="flex items-center gap-2 border-t border-[#DCDDDD]/70 px-1 pb-0.5 pt-2 text-xs dark:border-white/10">
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium text-foreground" title={payload.filename}>
+            {payload.filename}
+          </div>
+          <div
+            className={cn(
+              'mt-0.5 text-[11px]',
+              downloadState === 'failed'
+                ? 'text-[#EA1F59]'
+                : 'text-muted-foreground',
+            )}
+          >
+            {downloadState === 'loading'
+              ? '正在下载…'
+              : downloadState === 'failed'
+                ? '下载失败，点击重试'
+                : metaLabel}
+          </div>
         </div>
         {downloadState === 'loading' ? (
           <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#EA1F59]" />
