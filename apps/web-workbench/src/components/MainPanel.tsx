@@ -1,4 +1,16 @@
-import { Menu, X } from 'lucide-react';
+import {
+  CalendarClock,
+  Download,
+  Globe2,
+  Languages,
+  ListChecks,
+  Menu,
+  Radio,
+  Search,
+  TrendingUp,
+  X,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import * as React from 'react';
 import { InputArea } from '@/components/InputArea';
 import { LazyLoadBoundary } from '@/components/LazyLoadBoundary';
@@ -279,17 +291,21 @@ function SuggestionChips({
   onPick(intent: string): void;
 }): JSX.Element {
   return (
-    <div className="mt-5 flex flex-wrap items-center justify-center gap-1.5">
-      {SUGGESTIONS.map((s) => (
-        <button
-          key={s.label}
-          type="button"
-          onClick={() => onPick(s.intent)}
-          className="inline-flex h-7 items-center rounded-full border border-[#DCDDDD] bg-white px-3 text-[12px] text-muted-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 hover:text-foreground dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
-        >
-          {s.label}
-        </button>
-      ))}
+    <div className="mx-auto mt-5 flex max-w-[660px] flex-wrap items-center justify-center gap-2">
+      {SUGGESTIONS.map((s) => {
+        const Icon = s.icon;
+        return (
+          <button
+            key={s.label}
+            type="button"
+            onClick={() => onPick(s.intent)}
+            className="group inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[#DCDDDD] bg-white/75 px-3 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/75 dark:hover:bg-white/10"
+          >
+            <Icon className="h-3.5 w-3.5 text-[#ADADAD] transition-colors group-hover:text-[#EA1F59]" />
+            {s.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -356,13 +372,29 @@ function OnboardingHint(): JSX.Element | null {
   );
 }
 
-const SUGGESTIONS: ReadonlyArray<{ label: string; intent: string }> = [
-  { label: '直播复盘', intent: '帮我复盘昨天的抖音直播数据，做总结和优化策略' },
-  { label: '查资料', intent: '帮我查一下今天的科技新闻' },
-  { label: '打开网页', intent: '打开 GitHub 看看 trending 项目' },
-  { label: '行情查询', intent: '去东方财富查一下茅台最新股价' },
-  { label: '下载文件', intent: '把这页内容保存成 PDF：' },
-  { label: '定时任务', intent: '每天早上 9 点跑一次昨天的电商日报' },
-  { label: '批量执行', intent: '帮我对这些链接逐个执行抓取：\n' },
-  { label: '翻译内容', intent: '帮我翻译这段内容：' },
+const SUGGESTIONS: ReadonlyArray<{
+  label: string;
+  intent: string;
+  icon: LucideIcon;
+}> = [
+  {
+    label: '直播复盘',
+    intent: '帮我复盘昨天的抖音直播数据，做总结和优化策略',
+    icon: Radio,
+  },
+  { label: '查资料', intent: '帮我查一下今天的科技新闻', icon: Search },
+  { label: '打开网页', intent: '打开 GitHub 看看 trending 项目', icon: Globe2 },
+  { label: '行情查询', intent: '去东方财富查一下茅台最新股价', icon: TrendingUp },
+  { label: '下载文件', intent: '把这页内容保存成 PDF：', icon: Download },
+  {
+    label: '定时任务',
+    intent: '每天早上 9 点跑一次昨天的电商日报',
+    icon: CalendarClock,
+  },
+  {
+    label: '批量执行',
+    intent: '帮我对这些链接逐个执行抓取：\n',
+    icon: ListChecks,
+  },
+  { label: '翻译内容', intent: '帮我翻译这段内容：', icon: Languages },
 ];
