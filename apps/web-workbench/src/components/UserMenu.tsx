@@ -91,11 +91,11 @@ export function UserMenu({
         aria-label={compact ? `用户菜单：${displayName || email || ''}` : undefined}
         title={compact ? displayName || email || '用户' : undefined}
         className={cn(
-          'flex items-center rounded-[8px] border border-transparent transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
+          'flex items-center rounded-[8px] border border-[#DCDDDD]/60 bg-white/45 shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
           compact
             ? 'h-10 w-10 justify-center'
             : 'w-full gap-3 px-2 py-1.5 text-left',
-          open && 'border-[#EA1F59]/25 bg-[#EA1F59]/5 dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10',
+          open && 'border-[#EA1F59]/25 bg-[#EA1F59]/5 shadow-[0_10px_26px_rgba(234,31,89,0.08)] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10',
         )}
       >
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-[#EA1F59] text-sm font-semibold text-white shadow-[0_3px_10px_rgba(234,31,89,0.14)]">
@@ -103,8 +103,10 @@ export function UserMenu({
         </div>
         {!compact && (
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium">{displayName || email || '未命名'}</div>
-            <div className="truncate text-[11px] text-muted-foreground">{planLabel}</div>
+            <div className="truncate text-[13px] font-medium leading-4 text-[#595757] dark:text-foreground">
+              {displayName || email || '未命名'}
+            </div>
+            <div className="truncate text-[11px] leading-4 text-[#ADADAD]">{planLabel}</div>
           </div>
         )}
       </button>

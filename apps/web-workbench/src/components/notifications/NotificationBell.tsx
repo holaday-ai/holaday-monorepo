@@ -198,8 +198,8 @@ export function NotificationBell({
         aria-label="通知"
         aria-expanded={open}
         className={cn(
-          'relative flex h-9 w-9 items-center justify-center rounded-[8px] border border-transparent text-[#595757] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:text-foreground/70 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
-          open && 'border-[#EA1F59]/25 bg-[#EA1F59]/5 text-[#EA1F59] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10',
+          'relative flex h-9 w-9 items-center justify-center rounded-[8px] border border-[#DCDDDD]/60 bg-white/45 text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:border-white/10 dark:bg-white/[0.04] dark:text-foreground/70 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
+          open && 'border-[#EA1F59]/25 bg-[#EA1F59]/5 text-[#EA1F59] shadow-[0_10px_26px_rgba(234,31,89,0.08)] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10',
         )}
       >
         <Bell className="h-4 w-4" />
