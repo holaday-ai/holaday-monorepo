@@ -2,7 +2,10 @@ import { lazy, Suspense, type ComponentType, type LazyExoticComponent, type Reac
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AdminLayout } from '@/components/AdminLayout';
 import { AppShell } from '@/components/AppShell';
-import { LazyLoadBoundary } from '@/components/LazyLoadBoundary';
+import {
+  LazyLoadBoundary,
+  RouteLoadingFallback,
+} from '@/components/LazyLoadBoundary';
 import { ToastProvider } from '@/components/ui/toast';
 import { LoginPage } from '@/pages/LoginPage';
 import { RedirectIfAuthed } from '@/pages/RedirectIfAuthed';
@@ -145,15 +148,7 @@ function lazyRoute<T extends ComponentType<unknown>>(
 function lazyElement(children: ReactNode): JSX.Element {
   return (
     <LazyLoadBoundary surfaceLabel="页面">
-      <Suspense fallback={<RouteLoading />}>{children}</Suspense>
+      <Suspense fallback={<RouteLoadingFallback />}>{children}</Suspense>
     </LazyLoadBoundary>
-  );
-}
-
-function RouteLoading(): JSX.Element {
-  return (
-    <div className="flex min-h-[240px] items-center justify-center text-sm text-muted-foreground">
-      加载中…
-    </div>
   );
 }
