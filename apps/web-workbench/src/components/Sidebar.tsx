@@ -1081,9 +1081,9 @@ function ShareInviteRow(): JSX.Element {
     <button
       type="button"
       onClick={() => void onShare()}
-      className="flex w-full items-center gap-2.5 rounded-md border border-transparent px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:border-[#DCDDDD] hover:bg-white hover:text-foreground dark:hover:border-white/10 dark:hover:bg-white/10"
+      className="group flex w-full items-center gap-2.5 rounded-[8px] border border-transparent px-2.5 py-1.5 text-[13px] text-[#595757] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:text-foreground/70 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
     >
-      <Share2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      <Share2 className="h-3.5 w-3.5 shrink-0 text-[#ADADAD] transition-colors group-hover:text-[#EA1F59]" aria-hidden />
       <span>与好友分享 HOLA DAY</span>
     </button>
   );
