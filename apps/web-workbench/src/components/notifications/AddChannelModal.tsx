@@ -217,6 +217,7 @@ export function AddChannelModal({
             disabled={saving || testing}
             className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
             aria-label="关闭"
+            title="关闭"
           >
             <X className="h-4 w-4" />
           </button>

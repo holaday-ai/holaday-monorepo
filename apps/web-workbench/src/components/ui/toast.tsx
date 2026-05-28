@@ -58,6 +58,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
             type="button"
             key={t.id}
             aria-label={`关闭提示：${t.text}`}
+            title="关闭提示"
             onClick={() => dismiss(t.id)}
             className={cn(
               'pointer-events-auto group relative flex w-full items-start gap-3 overflow-hidden rounded-[8px] border bg-white/96 px-3.5 py-3 text-left text-sm text-foreground shadow-[0_14px_36px_rgba(15,23,42,0.13)] backdrop-blur-md transition-[border-color,box-shadow,transform] animate-fade-in hover:-translate-y-0.5 hover:shadow-[0_16px_42px_rgba(15,23,42,0.16)] motion-reduce:transition-none motion-reduce:hover:translate-y-0 dark:bg-card/95',

@@ -102,6 +102,7 @@ export function AttachmentChip({ attachment, onRemove }: Props): JSX.Element {
         type="button"
         onClick={onRemove}
         aria-label={copy.removeLabel}
+        title={copy.removeLabel}
         className="shrink-0 rounded-[6px] p-0.5 text-[#ADADAD] transition-colors hover:bg-[#EFEFEF]/70 hover:text-[#595757] dark:hover:bg-white/10"
       >
         <X className="h-3.5 w-3.5" />
