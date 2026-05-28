@@ -7,6 +7,7 @@ import {
   Menu,
   Radio,
   Search,
+  Sparkles,
   TrendingUp,
   X,
 } from 'lucide-react';
@@ -349,8 +350,11 @@ function OnboardingHint(): JSX.Element | null {
   if (dismissed) return null;
 
   return (
-    <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-[#DCDDDD] bg-white px-3.5 py-2.5 text-[13px] text-foreground shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/90">
-      <div className="min-w-0 flex-1">
+    <div className="mb-4 flex items-start gap-2.5 rounded-[8px] border border-[#DCDDDD]/90 bg-white/80 px-3 py-2.5 text-[13px] text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] dark:border-white/10 dark:bg-white/5 dark:text-foreground/75">
+      <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] bg-[#EA1F59]/8 text-[#EA1F59]">
+        <Sparkles className="h-3.5 w-3.5" />
+      </span>
+      <div className="min-w-0 flex-1 leading-relaxed">
         第一次来？点击下方的任务示例，或直接输入你想做的事情。
       </div>
       <button
@@ -363,7 +367,7 @@ function OnboardingHint(): JSX.Element | null {
           }
           setDismissed(true);
         }}
-        className="-mr-1 -mt-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
+        className="-mr-1 -mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px] text-[#ADADAD] transition-colors hover:bg-[#EFEFEF]/75 hover:text-[#595757] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:hover:bg-white/10 dark:hover:text-foreground"
         aria-label="关闭引导"
       >
         <X className="h-3.5 w-3.5" />
