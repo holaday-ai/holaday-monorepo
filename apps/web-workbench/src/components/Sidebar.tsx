@@ -433,6 +433,7 @@ export function Sidebar({
                   type="button"
                   onClick={() => onClearProjectFilter?.()}
                   aria-label="清除项目筛选"
+                  title="清除项目筛选"
                   className="mt-0.5 rounded p-0.5 text-muted-foreground hover:bg-white/70 hover:text-foreground dark:hover:bg-white/10"
                 >
                   <X className="h-3 w-3" />

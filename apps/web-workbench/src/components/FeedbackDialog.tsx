@@ -103,6 +103,7 @@ export function FeedbackDialog({ open, onClose, onSubmit }: Props): JSX.Element 
           onClick={onClose}
           disabled={pending}
           aria-label="关闭"
+          title="关闭"
           className="absolute right-3 top-3 rounded-md p-1 text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
         >
           <X className="h-4 w-4" />

@@ -178,6 +178,7 @@ export function TaskListItem({
         <button
           type="button"
           aria-label="任务菜单"
+          title="更多"
           onClick={(e) => {
           e.stopPropagation();
           onContextMenu(task.taskId, e);

@@ -726,6 +726,7 @@ export function ScheduledCalendarPage(): JSX.Element {
               className="hd-calendar-toolbar__arrow"
               onClick={handlePrev}
               aria-label="上一个"
+              title="上一个"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
@@ -734,6 +735,7 @@ export function ScheduledCalendarPage(): JSX.Element {
               className="hd-calendar-toolbar__arrow"
               onClick={handleNext}
               aria-label="下一个"
+              title="下一个"
             >
               <ChevronRight className="h-4 w-4" />
             </button>

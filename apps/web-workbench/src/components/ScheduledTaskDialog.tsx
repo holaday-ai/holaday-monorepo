@@ -165,6 +165,7 @@ export function ScheduledTaskDialog({
             onClick={requestClose}
             disabled={submitting}
             aria-label="关闭"
+            title="关闭"
             className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
           >
             <X className="h-4 w-4" />

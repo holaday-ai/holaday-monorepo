@@ -183,6 +183,7 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
             type="button"
             onClick={onClose}
             aria-label="关闭预览"
+            title="关闭"
             className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
           >
             <X className="h-4 w-4" />

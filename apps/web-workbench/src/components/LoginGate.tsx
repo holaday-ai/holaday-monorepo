@@ -705,6 +705,7 @@ function PasswordInput({
           type="button"
           onClick={() => setShow((v) => !v)}
           aria-label={show ? '隐藏密码' : '显示密码'}
+          title={show ? '隐藏密码' : '显示密码'}
           tabIndex={-1}
           className="absolute inset-y-0 right-0 flex w-9 items-center justify-center text-muted-foreground hover:text-foreground"
         >

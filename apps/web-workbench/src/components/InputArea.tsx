@@ -725,6 +725,7 @@ export function InputArea({
           disabled={disabled || value.trim().length === 0}
           className="absolute bottom-2.5 right-2.5 h-8 w-8 rounded-full bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.18)] hover:bg-[#EA1F59]/90 focus-visible:ring-[#EA1F59]/25"
           aria-label={submitting ? '发送中' : '发送'}
+          title={submitting ? '发送中' : '发送'}
         >
           {submitting ? (
             <Loader2 className="h-4 w-4 animate-spin" />

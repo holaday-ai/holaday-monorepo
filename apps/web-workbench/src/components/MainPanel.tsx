@@ -371,6 +371,7 @@ function OnboardingHint(): JSX.Element | null {
         }}
         className="-mr-1 -mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px] text-[#ADADAD] transition-colors hover:bg-[#EFEFEF]/70 hover:text-[#595757] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:hover:bg-white/10 dark:hover:text-foreground"
         aria-label="关闭引导"
+        title="关闭"
       >
         <X className="h-3.5 w-3.5" />
       </button>

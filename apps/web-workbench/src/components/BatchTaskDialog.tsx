@@ -203,6 +203,7 @@ export function BatchTaskDialog({
             onClick={requestClose}
             disabled={submitting}
             aria-label="关闭"
+            title="关闭"
             className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
           >
             <X className="h-4 w-4" />
@@ -326,6 +327,7 @@ export function BatchTaskDialog({
                           onClick={() => removeItem(index)}
                           disabled={submitting || items.length === 1}
                           aria-label={`删除任务 ${index + 1}`}
+                          title={`删除任务 ${index + 1}`}
                           className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:pointer-events-none disabled:opacity-40"
                         >
                           <Trash2 className="h-3.5 w-3.5" />

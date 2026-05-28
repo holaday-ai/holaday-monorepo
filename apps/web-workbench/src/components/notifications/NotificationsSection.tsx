@@ -258,6 +258,7 @@ export function NotificationsSection(): JSX.Element {
                     onClick={() => setConfirmDelete(row.channelId)}
                     className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-[#EA1F59]/10 hover:text-[#EA1F59]"
                     aria-label="删除渠道"
+                    title="删除"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>

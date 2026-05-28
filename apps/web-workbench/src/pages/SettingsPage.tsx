@@ -374,6 +374,7 @@ function MemorySection(): JSX.Element {
                       onClick={() => void handleDelete(m.externalId)}
                       disabled={deleting}
                       aria-label="删除记忆"
+                      title={deleting ? '删除中' : '删除'}
                       className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:text-red-400"
                     >
                       {deleting ? (
