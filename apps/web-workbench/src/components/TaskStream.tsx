@@ -1593,6 +1593,102 @@ function SourceBadge({ marker }: { marker: ResultSourceMarker }): JSX.Element {
   );
 }
 
+function MarkdownCodeBlock({
+  children,
+  languageClassName,
+  rest,
+}: {
+  children: React.ReactNode;
+  languageClassName?: string;
+  rest: Record<string, unknown>;
+}): JSX.Element {
+  const toast = useToast();
+  const [copied, setCopied] = React.useState(false);
+  const text = React.useMemo(() => reactNodeText(children).replace(/\n$/, ''), [children]);
+  const languageLabel = markdownLanguageLabel(languageClassName);
+  const handleCopy = async (): Promise<void> => {
+    if (!text) return;
+    if (await copyTextToClipboard(text)) {
+      setCopied(true);
+      toast.show('已复制代码');
+      window.setTimeout(() => setCopied(false), 1600);
+    } else {
+      toast.show('复制失败', 'error');
+    }
+  };
+  return (
+    <div className="my-3 overflow-hidden rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85">
+      <div className="flex items-center justify-between gap-3 border-b border-[#EFEFEF] bg-[#EFEFEF]/45 px-3 py-2 dark:border-white/10 dark:bg-white/[0.03]">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#57479C]" />
+          <span className="truncate text-[11px] font-medium text-muted-foreground">
+            {languageLabel}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => void handleCopy()}
+          disabled={!text}
+          className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-white hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/10"
+          aria-label="复制代码块"
+        >
+          {copied ? (
+            <>
+              <Check className="h-3.5 w-3.5 text-[#42C0EF]" aria-hidden />
+              已复制
+            </>
+          ) : (
+            <>
+              <Copy className="h-3.5 w-3.5" aria-hidden />
+              复制
+            </>
+          )}
+        </button>
+      </div>
+      <pre
+        className="max-w-full overflow-x-auto bg-[#EFEFEF]/20 px-3 py-3 text-[12px] leading-relaxed dark:bg-white/[0.02]"
+        {...rest}
+      >
+        <code className="block min-w-max whitespace-pre font-mono text-foreground/90">
+          {text || reactNodeText(children)}
+        </code>
+      </pre>
+    </div>
+  );
+}
+
+function markdownLanguageLabel(className?: string): string {
+  const raw = className?.replace(/^language-/, '').trim();
+  if (!raw) return '代码';
+  const known: Record<string, string> = {
+    bash: 'SHELL',
+    sh: 'SHELL',
+    shell: 'SHELL',
+    zsh: 'SHELL',
+    js: 'JavaScript',
+    javascript: 'JavaScript',
+    jsx: 'JSX',
+    ts: 'TypeScript',
+    typescript: 'TypeScript',
+    tsx: 'TSX',
+    json: 'JSON',
+    toml: 'TOML',
+    yaml: 'YAML',
+    yml: 'YAML',
+  };
+  return known[raw.toLowerCase()] ?? raw.toUpperCase();
+}
+
+function reactNodeText(node: React.ReactNode): string {
+  if (node == null || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(reactNodeText).join('');
+  if (React.isValidElement(node)) {
+    return reactNodeText((node.props as { children?: React.ReactNode }).children);
+  }
+  return '';
+}
+
 function TerminalSummary({
   status,
   text,
@@ -2352,11 +2448,7 @@ function makeMarkdownComponents(opts: {
       if (lang === 'language-holaday-file') {
         return <>{children}</>;
       }
-      return (
-        <pre className="my-2 overflow-x-auto rounded-md bg-muted/60 p-3 text-[12px]" {...rest}>
-          {children}
-        </pre>
-      );
+      return <MarkdownCodeBlock languageClassName={lang} rest={rest}>{children}</MarkdownCodeBlock>;
     },
     // Phase 4 R1 — paragraph override. Two transforms based on the
     // FIRST text node:
