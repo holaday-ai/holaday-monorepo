@@ -46,7 +46,7 @@ type Filter = FileFilter;
 
 /**
  * P2.8 — files library. Each row shows two always-visible primary
- * actions (filename = 预览, plus 用于新目标) and folds 下载 / 复制链接
+ * actions (filename = 预览, plus 用于新任务) and folds 下载 / 复制链接
  * / 删除 into a Radix More dropdown. The earlier hover-to-reveal row
  * action strip was unreachable on touch and easy to miss on desktop,
  * which made delete in particular feel like a hidden hazard.
@@ -147,7 +147,7 @@ export function FilesPage(): JSX.Element {
   // /api/files/:id/download endpoint requires an Authorization
   // header, so a raw link copied to clipboard 401s the moment the
   // user (or a tool they paste it into) navigates to it. Use 用于
-  // 新目标 or 下载 instead.
+  // 新任务 or 下载 instead.
 
   async function performDelete(f: UiFile): Promise<void> {
     try {
@@ -327,7 +327,7 @@ function FileRow({
           className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-xs font-medium text-[#595757] transition-colors hover:border-[#ADADAD] hover:text-[#EA1F59]"
         >
           <Plus className="h-3.5 w-3.5" />
-          用于新目标
+          用于新任务
         </button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

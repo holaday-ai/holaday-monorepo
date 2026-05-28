@@ -147,7 +147,7 @@ export function MainPanel({
   //
   // Triggers on transitions where the InputArea JSX position stays
   // the same — i.e. task → task (both render in the task-detail
-  // branch) AND task → null (the "新目标" click). The previous guard
+  // branch) AND task → null (the "新任务" click). The previous guard
   // skipped task → null on the assumption that the empty-home JSX
   // swap would unmount the InputArea naturally, but reports of
   // "occasionally doesn't clear old content" pointed at the typed-

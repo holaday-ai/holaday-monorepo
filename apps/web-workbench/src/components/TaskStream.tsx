@@ -2056,10 +2056,10 @@ function TerminalSummary({
             type="button"
             onClick={() => void copyTo(plainText, '纯文本')}
             aria-label="复制纯文本结果"
-            className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-[#DCDDDD] bg-white/75 px-2.5 font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.04)] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:border-[#EA1F59]/40 dark:hover:bg-[#EA1F59]/10 dark:hover:text-foreground"
+            title="复制"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-[#DCDDDD] bg-white/75 font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.04)] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:border-[#EA1F59]/40 dark:hover:bg-[#EA1F59]/10 dark:hover:text-foreground"
           >
             <Copy className="h-3.5 w-3.5" />
-            复制
           </button>
           {/* BOSS feedback — retry button on failed tasks. Re-fires
               the original intent as a brand-new task via the store
@@ -2084,10 +2084,9 @@ function TerminalSummary({
               type="button"
               aria-label="打开更多结果操作"
               title="更多"
-              className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-[6px] border border-[#DCDDDD] bg-white/60 px-2.5 font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 sm:w-auto dark:border-white/10 dark:bg-white/5 dark:text-foreground/75 dark:hover:bg-white/10"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-[#DCDDDD] bg-white/60 font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/75 dark:hover:bg-white/10"
             >
               <MoreHorizontal className="h-3.5 w-3.5" />
-              更多
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent

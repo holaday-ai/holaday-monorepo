@@ -749,7 +749,7 @@ export function BrowserPanel({
       // start a fresh task — that's the only way to get a live
       // browser back under per-task pool semantics.
       if (taskTerminal) {
-        toast.show('浏览器已关闭，请新建目标继续', 'info');
+        toast.show('浏览器已关闭，请新建任务继续', 'info');
         return;
       }
       userInteractedRef.current = true;
@@ -1390,7 +1390,7 @@ export function BrowserPanel({
                   </div>
                 </div>
                 <div className={cn('flex shrink-0 items-center justify-center gap-2 border-t bg-background/70 px-3 py-2 text-[12px]', BROWSER_DIVIDER)}>
-                  <span className="text-muted-foreground">想继续操作？新建目标或重新执行。</span>
+                  <span className="text-muted-foreground">想继续操作？新建任务或重新执行。</span>
                   {onReExecute && (
                     <button
                       type="button"

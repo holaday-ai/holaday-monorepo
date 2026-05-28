@@ -217,7 +217,7 @@ export function InputArea({
     onPrefillConsumed?.();
   }, [prefillIntent, onPrefillConsumed]);
 
-  // FilesPage → 用于新目标 hands off via location.state. WorkbenchApp's
+  // FilesPage → 用于新任务 hands off via location.state. WorkbenchApp's
   // bootstrap effect handles `newTask: true` (calls enterNewTaskMode);
   // here we only consume `attachFile` to pre-stage a DraftAttachment.
   // Single-shot: replaceState clears the state after pre-stage so a

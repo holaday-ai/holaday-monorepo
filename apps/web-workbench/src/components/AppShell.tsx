@@ -300,7 +300,7 @@ export function AppShell(): JSX.Element {
     if (selectedTaskId) lastSelectedRef.current = selectedTaskId;
   }, [selectedTaskId]);
 
-  // New-goal handoff. When a sub-page (e.g. Sidebar "新目标" from
+  // New-task handoff. When a sub-page (e.g. Sidebar "新任务" from
   // /scheduled) navigates back with `state.newTask`, the bootstrap
   // effect doesn't re-run — so the old selectedTask would linger.
   // Catch it here on every location change, drop the selection, and
@@ -881,7 +881,7 @@ export function AppShell(): JSX.Element {
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] bg-[#EA1F59]/10 text-[#EA1F59]">
               <WifiOff className="h-3 w-3" aria-hidden />
             </span>
-            <span className="truncate">当前离线，暂时无法创建新目标</span>
+            <span className="truncate">当前离线，暂时无法创建新任务</span>
           </div>
         </div>
       )}
