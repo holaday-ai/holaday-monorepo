@@ -106,6 +106,14 @@ const COMPOSER_SURFACE =
 const COMPOSER_FIELD_FOCUS =
   'focus-within:border-[#EA1F59]/40 focus-within:shadow-[0_8px_24px_rgba(17,24,39,0.08)] focus-within:ring-2 focus-within:ring-[#EA1F59]/10';
 const COMPOSER_DIVIDER = 'border-[#DCDDDD]/80 dark:border-white/10';
+const MODE_TRIGGER_BASE =
+  'inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[6px] border border-[#DCDDDD] bg-white/70 px-2 text-[11px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/75 dark:hover:bg-white/10';
+const MODE_TRIGGER_ACTIVE =
+  'border-[#EA1F59]/35 bg-[#EA1F59]/5 text-[#EA1F59] dark:border-[#EA1F59]/40 dark:bg-[#EA1F59]/10 dark:text-foreground';
+const MODE_MENU_CLASS =
+  'rounded-[8px] border-[#DCDDDD] bg-white p-1.5 shadow-[0_12px_32px_rgba(17,24,39,0.12)] dark:border-white/10 dark:bg-card';
+const MODE_MENU_ITEM_CLASS =
+  'items-start rounded-[6px] py-2 text-[13px] focus:bg-[#EFEFEF]/70 data-[state=checked]:bg-[#EA1F59]/5 dark:focus:bg-white/10 dark:data-[state=checked]:bg-[#EA1F59]/10';
 
 type ComposerExpertWorkflow = {
   id: 'douyin-livestream-review';
@@ -692,12 +700,13 @@ export function InputArea({
         </Button>
       </div>
       <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[11px] text-muted-foreground/70">
-        <div className="flex items-center gap-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <TaskModeSelector mode={taskMode} onChange={setTaskMode} />
-          <span className="text-muted-foreground/40">·</span>
           <ExpertModeSelector mode={expertMode} onChange={setExpertMode} />
         </div>
-        <span className="hidden sm:inline">Enter 发送</span>
+        <span className="hidden shrink-0 rounded-[6px] px-1.5 py-0.5 text-[#ADADAD] sm:inline">
+          Enter 发送
+        </span>
       </div>
       {/* Phase 5b — multi-line detect. When the composer holds 2+
           non-empty lines AND we're not in a reply / follow-up flow,
@@ -755,23 +764,29 @@ function ExpertModeSelector({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
+          aria-label="选择专家模式"
           className={cn(
-            'inline-flex items-center gap-1 rounded-md border border-transparent px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-[#DCDDDD] hover:bg-white hover:text-foreground dark:hover:border-white/10 dark:hover:bg-white/10',
-            open && 'border-[#DCDDDD] bg-white text-foreground dark:border-white/10 dark:bg-white/10',
+            MODE_TRIGGER_BASE,
+            (open || mode === 'expert') && MODE_TRIGGER_ACTIVE,
           )}
         >
           <span>专家：{label}</span>
           <ChevronDown className="h-3 w-3 opacity-70" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" sideOffset={6} className="w-64">
+      <DropdownMenuContent
+        side="top"
+        align="start"
+        sideOffset={8}
+        className={cn('w-64', MODE_MENU_CLASS)}
+      >
         <DropdownMenuRadioGroup
           value={mode}
           onValueChange={(v) => {
             if (v === 'normal' || v === 'expert' || v === 'auto') onChange(v);
           }}
         >
-          <DropdownMenuRadioItem value="auto" className="items-start py-2">
+          <DropdownMenuRadioItem value="auto" className={MODE_MENU_ITEM_CLASS}>
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="text-[12px] font-medium text-foreground">自动</span>
               <span className="text-[11px] text-muted-foreground">
@@ -779,7 +794,7 @@ function ExpertModeSelector({
               </span>
             </span>
           </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="expert" className="items-start py-2">
+          <DropdownMenuRadioItem value="expert" className={MODE_MENU_ITEM_CLASS}>
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="text-[12px] font-medium text-foreground">专家</span>
               <span className="text-[11px] text-muted-foreground">
@@ -787,7 +802,7 @@ function ExpertModeSelector({
               </span>
             </span>
           </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="normal" className="items-start py-2">
+          <DropdownMenuRadioItem value="normal" className={MODE_MENU_ITEM_CLASS}>
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="text-[12px] font-medium text-foreground">普通</span>
               <span className="text-[11px] text-muted-foreground">
@@ -822,23 +837,29 @@ function TaskModeSelector({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
+          aria-label="选择任务执行模式"
           className={cn(
-            'inline-flex items-center gap-1 rounded-md border border-transparent px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-[#DCDDDD] hover:bg-white hover:text-foreground dark:hover:border-white/10 dark:hover:bg-white/10',
-            open && 'border-[#DCDDDD] bg-white text-foreground dark:border-white/10 dark:bg-white/10',
+            MODE_TRIGGER_BASE,
+            (open || mode === 'plan') && MODE_TRIGGER_ACTIVE,
           )}
         >
           <span>{label}</span>
           <ChevronDown className="h-3 w-3 opacity-70" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" sideOffset={6} className="w-60">
+      <DropdownMenuContent
+        side="top"
+        align="start"
+        sideOffset={8}
+        className={cn('w-60', MODE_MENU_CLASS)}
+      >
         <DropdownMenuRadioGroup
           value={mode}
           onValueChange={(v) => {
             if (v === 'auto' || v === 'plan') onChange(v);
           }}
         >
-          <DropdownMenuRadioItem value="auto" className="items-start py-2">
+          <DropdownMenuRadioItem value="auto" className={MODE_MENU_ITEM_CLASS}>
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="text-[12px] font-medium text-foreground">自动执行</span>
               <span className="text-[11px] text-muted-foreground">
@@ -846,7 +867,7 @@ function TaskModeSelector({
               </span>
             </span>
           </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="plan" className="items-start py-2">
+          <DropdownMenuRadioItem value="plan" className={MODE_MENU_ITEM_CLASS}>
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="text-[12px] font-medium text-foreground">先出方案</span>
               <span className="text-[11px] text-muted-foreground">
