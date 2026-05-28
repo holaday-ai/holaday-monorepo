@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { WifiOff } from 'lucide-react';
 import {
   Outlet,
   useLocation,
@@ -874,9 +875,14 @@ export function AppShell(): JSX.Element {
       {!online && (
         <div
           aria-live="polite"
-          className="pointer-events-none fixed inset-x-0 bottom-0 z-[90] bg-red-600/95 px-3 py-1.5 text-center text-[11px] font-medium text-white"
+          className="pointer-events-none fixed inset-x-0 bottom-20 z-[90] flex justify-center px-3 sm:bottom-4"
         >
-          当前离线 — 暂时无法创建新任务
+          <div className="inline-flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-[8px] border border-[#EA1F59]/20 bg-white/90 px-3 py-2 text-[12px] font-medium text-[#595757] shadow-[0_12px_30px_rgba(89,87,87,0.12)] backdrop-blur dark:border-[#EA1F59]/35 dark:bg-card/90 dark:text-foreground/85">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] bg-[#EA1F59]/10 text-[#EA1F59]">
+              <WifiOff className="h-3 w-3" aria-hidden />
+            </span>
+            <span className="truncate">当前离线，暂时无法创建新任务</span>
+          </div>
         </div>
       )}
     </SidebarProvider>
