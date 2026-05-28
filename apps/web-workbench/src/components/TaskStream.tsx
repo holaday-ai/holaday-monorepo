@@ -2039,13 +2039,18 @@ function TerminalSummary({
           单一 Radix More menu so the row isn't a wall of text
           buttons. 查看证据 lives in the top-right of the card;
           打开最终页面 keeps its own URL row below. */}
-      <div className={cn('mt-3 flex items-center justify-between gap-3 border-t pt-3 text-xs text-muted-foreground', tone.divider)}>
-        <div className="flex items-center gap-3">
+      <div
+        className={cn(
+          'mt-3 flex flex-col gap-2 border-t pt-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between',
+          tone.divider,
+        )}
+      >
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => void copyTo(plainText, '纯文本')}
-            aria-label="复制纯文本"
-            className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground"
+            aria-label="复制纯文本结果"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-[#DCDDDD] bg-white/75 px-2.5 font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.04)] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/80 dark:hover:border-[#EA1F59]/40 dark:hover:bg-[#EA1F59]/10 dark:hover:text-foreground"
           >
             <Copy className="h-3.5 w-3.5" />
             复制
@@ -2060,7 +2065,7 @@ function TerminalSummary({
               type="button"
               onClick={() => void handleRetry(intent)}
               aria-label="重新执行任务"
-              className="inline-flex items-center gap-1.5 text-[#EA1F59] transition-colors hover:text-[#c80a5d]"
+              className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-[#EA1F59]/25 bg-[#EA1F59]/5 px-2.5 font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/10 hover:text-[#c80a5d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
             >
               <RotateCcw className="h-3.5 w-3.5" />
               重试
@@ -2071,19 +2076,25 @@ function TerminalSummary({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              aria-label="更多操作"
+              aria-label="打开更多结果操作"
               title="更多"
-              className="inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+              className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-[6px] border border-[#DCDDDD] bg-white/60 px-2.5 font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 sm:w-auto dark:border-white/10 dark:bg-white/5 dark:text-foreground/75 dark:hover:bg-white/10"
             >
-              <MoreHorizontal className="h-4 w-4" />
+              <MoreHorizontal className="h-3.5 w-3.5" />
               更多
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuContent
+            align="end"
+            side="top"
+            sideOffset={8}
+            className="w-52 rounded-[8px] border-[#DCDDDD] bg-white p-1.5 shadow-[0_12px_28px_rgba(17,24,39,0.12)] dark:border-white/10 dark:bg-card"
+          >
             <DropdownMenuItem
               onSelect={() => void copyTo(markdownText, 'Markdown')}
+              className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
             >
-              <FileText className="text-muted-foreground" />
+              <FileText className="text-[#ADADAD]" />
               <span>复制 Markdown</span>
             </DropdownMenuItem>
             <DropdownMenuItem
@@ -2094,8 +2105,9 @@ function TerminalSummary({
                   toast.show('下载失败，请复制 Markdown 后手动保存', 'error');
                 }
               }}
+              className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
             >
-              <Download className="text-muted-foreground" />
+              <Download className="text-[#ADADAD]" />
               <span>下载 .md</span>
             </DropdownMenuItem>
             {taskId && (
@@ -2108,14 +2120,18 @@ function TerminalSummary({
                     '任务链接',
                   );
                 }}
+                className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
               >
-                <Link2 className="text-muted-foreground" />
+                <Link2 className="text-[#ADADAD]" />
                 <span>分享任务</span>
               </DropdownMenuItem>
             )}
             {!isFailedLike && intent && (
-              <DropdownMenuItem onSelect={() => setScheduleDialogOpen(true)}>
-                <Clock className="text-muted-foreground" />
+              <DropdownMenuItem
+                onSelect={() => setScheduleDialogOpen(true)}
+                className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
+              >
+                <Clock className="text-[#ADADAD]" />
                 <span>设为定时</span>
               </DropdownMenuItem>
             )}
