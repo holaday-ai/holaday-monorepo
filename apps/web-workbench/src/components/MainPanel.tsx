@@ -172,17 +172,17 @@ export function MainPanel({
   const showEmptyHome = !task;
   return (
     <main className="flex h-full min-w-0 flex-[2] flex-col bg-background lg:min-w-[420px]">
-      <div className="flex h-11 items-center border-b border-border px-3 lg:hidden">
+      <div className="flex h-11 items-center border-b border-[#DCDDDD]/70 bg-white/70 px-3 backdrop-blur md:hidden dark:border-white/10 dark:bg-card/70">
         <Button
           variant="ghost"
           size="icon"
           onClick={onOpenSidebar}
           aria-label="打开任务列表"
-          className="md:hidden"
+          className="h-8 w-8 rounded-[8px] text-[#595757] hover:bg-[#EFEFEF]/70 hover:text-[#EA1F59] dark:text-foreground/75 dark:hover:bg-white/10"
         >
           <Menu className="h-4 w-4" />
         </Button>
-        <div className="ml-2 min-w-0 flex-1 truncate text-sm font-medium">
+        <div className="ml-2 min-w-0 flex-1 truncate text-sm font-medium text-[#595757] dark:text-foreground/85">
           {task ? task.intent : 'HOLA DAY'}
         </div>
       </div>
