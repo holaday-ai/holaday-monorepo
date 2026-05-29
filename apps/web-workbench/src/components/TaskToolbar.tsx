@@ -37,7 +37,9 @@ export function isBrowserLikely(task: UiTask): boolean {
 export function browserToolbarLabel(
   task: UiTask,
   sidePanelMode: SidePanelMode,
+  attentionNeeded = false,
 ): string {
+  if (attentionNeeded) return '需要你处理浏览器';
   if (sidePanelMode === 'browser-live') return '浏览器进行中';
   if (sidePanelMode !== 'closed') return '关闭浏览器面板';
   return isTerminalStatus(task.status) ? '查看浏览器证据' : '查看浏览器';
@@ -46,19 +48,21 @@ export function browserToolbarLabel(
 interface Props {
   task: UiTask | null;
   sidePanelMode: SidePanelMode;
+  attentionNeeded?: boolean;
   onToggleSidePanel: () => void;
 }
 
 export function TaskToolbar({
   task,
   sidePanelMode,
+  attentionNeeded = false,
   onToggleSidePanel,
 }: Props): JSX.Element | null {
   if (!task) return null;
   if (!isBrowserLikely(task)) return null;
   const live = sidePanelMode === 'browser-live';
   const open = sidePanelMode !== 'closed';
-  const label = browserToolbarLabel(task, sidePanelMode);
+  const label = browserToolbarLabel(task, sidePanelMode, attentionNeeded);
   return (
     <div className="flex items-center gap-1.5">
       <button
@@ -68,8 +72,10 @@ export function TaskToolbar({
         aria-pressed={open}
         title={label}
         className={cn(
-          'inline-flex h-7 w-7 items-center justify-center rounded-md border text-[11px] font-medium transition-colors',
-          live
+          'relative inline-flex h-7 w-7 items-center justify-center rounded-md border text-[11px] font-medium transition-colors',
+          attentionNeeded
+            ? 'border-[#EA1F59]/40 bg-[#EA1F59]/10 text-[#EA1F59] shadow-[0_1px_3px_rgba(234,31,89,0.10)] hover:bg-[#EA1F59]/15'
+            : live
             ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59] hover:bg-[#EA1F59]/15'
             : open
               ? 'border-[#DCDDDD] bg-white text-foreground shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/90'
@@ -77,6 +83,12 @@ export function TaskToolbar({
         )}
       >
         <Globe className="h-3.5 w-3.5" />
+        {attentionNeeded && (
+          <span
+            aria-hidden
+            className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[#EA1F59]"
+          />
+        )}
       </button>
     </div>
   );

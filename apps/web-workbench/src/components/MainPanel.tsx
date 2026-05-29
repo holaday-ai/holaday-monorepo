@@ -75,6 +75,7 @@ interface Props {
    * currently-selected task.
    */
   sidePanelMode?: SidePanelMode;
+  browserAttentionNeeded?: boolean;
   onToggleSidePanel?: () => void;
 }
 
@@ -100,6 +101,7 @@ export function MainPanel({
   attachmentsAllowed,
   attachmentByteCap,
   sidePanelMode = 'closed',
+  browserAttentionNeeded = false,
   onToggleSidePanel,
 }: Props): JSX.Element {
   // Suggestion-chip clicks (empty-state EmptyState picks + the
@@ -235,6 +237,7 @@ export function MainPanel({
               <TaskToolbar
                 task={task}
                 sidePanelMode={sidePanelMode}
+                attentionNeeded={browserAttentionNeeded}
                 onToggleSidePanel={onToggleSidePanel ?? (() => {})}
               />
             </div>

@@ -40,4 +40,10 @@ describe('TaskToolbar helpers', () => {
       '关闭浏览器面板',
     );
   });
+
+  it('prioritizes attention-needed browser labels', () => {
+    expect(browserToolbarLabel(task({ status: 'awaiting_user' }), 'browser-live', true)).toBe(
+      '需要你处理浏览器',
+    );
+  });
 });

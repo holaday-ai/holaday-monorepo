@@ -990,29 +990,49 @@ function LineBadge({
   status: UiStep['status'];
   glyph: string;
 }): JSX.Element {
+  const label =
+    status === 'done'
+      ? `${stepStatusText(status)} · ${glyph}`
+      : stepStatusText(status);
   if (status === 'running') {
     return (
-      <span className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#EA1F59]" aria-label={stepStatusText(status)}>
+      <span
+        className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#EA1F59]"
+        aria-label={label}
+        title={label}
+      >
         <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
       </span>
     );
   }
   if (status === 'failed') {
     return (
-      <span className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#EA1F59]" aria-label={stepStatusText(status)}>
+      <span
+        className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#EA1F59]"
+        aria-label={label}
+        title={label}
+      >
         <AlertCircle className="h-3.5 w-3.5" aria-hidden />
       </span>
     );
   }
   if (status === 'cancelled') {
     return (
-      <span className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-muted-foreground" aria-label={stepStatusText(status)}>
+      <span
+        className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-muted-foreground"
+        aria-label={label}
+        title={label}
+      >
         <CircleSlash className="h-3.5 w-3.5" aria-hidden />
       </span>
     );
   }
   return (
-    <span className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#42C0EF]" aria-label={`${stepStatusText(status)} · ${glyph}`}>
+    <span
+      className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-[#42C0EF]"
+      aria-label={label}
+      title={label}
+    >
       <Check className="h-3.5 w-3.5" strokeWidth={3} aria-hidden />
     </span>
   );
@@ -1502,6 +1522,7 @@ function ScreenshotThumbnailCard({
     filename: payload.filename,
     formattedSize: formatFileSize(payload.size),
   });
+  const actionLabel = `下载图片文件 ${payload.filename}`;
   return (
     <button
       type="button"
@@ -1516,7 +1537,8 @@ function ScreenshotThumbnailCard({
             ? 'border-[#57479C]/40 bg-[#57479C]/5 opacity-90'
             : 'border-[#DCDDDD] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/35 dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/[0.04]',
       )}
-      aria-label={`下载图片文件 ${payload.filename}`}
+      aria-label={actionLabel}
+      title={actionLabel}
     >
       <div className="relative w-full overflow-hidden rounded-[6px] border border-[#DCDDDD]/70 bg-[#EFEFEF]/45 dark:border-white/10 dark:bg-white/5">
         {previewUrl ? (

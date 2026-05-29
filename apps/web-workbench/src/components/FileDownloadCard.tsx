@@ -71,6 +71,7 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
       toast.show(downloadFailureMessage(result.status), 'error');
     }
   };
+  const actionLabel = `下载${kindLabel} ${payload.filename}`;
 
   return (
     <button
@@ -86,7 +87,8 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
             ? 'border-[#57479C]/40 bg-[#57479C]/5 opacity-90'
             : 'border-[#DCDDDD] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/35 dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/[0.04]',
       )}
-      aria-label={`下载${kindLabel} ${payload.filename}`}
+      aria-label={actionLabel}
+      title={actionLabel}
     >
       <span
         className={cn(

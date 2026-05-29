@@ -438,6 +438,7 @@ export function WorkbenchApp(): JSX.Element {
           }}
           onOpenSidebar={() => setOpenMobile(true)}
           sidePanelMode={sidePanelMode}
+          browserAttentionNeeded={selectedNeedsBrowser}
           onToggleSidePanel={() => {
             // BOSS bug fix — on mobile (lg:hidden inline panel)
             // the bottom sheet IS the only browser surface, so the
