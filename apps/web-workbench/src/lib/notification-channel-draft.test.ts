@@ -49,15 +49,15 @@ describe('buildNotificationChannelDraft', () => {
     });
   });
 
-  it('rejects invalid custom JSON with a friendly error prefix', () => {
+  it('rejects invalid custom JSON with a friendly repair hint', () => {
     const result = buildNotificationChannelDraft({
       platform: 'custom',
       webhookUrl: 'https://example.com/webhook',
       templateJson: '{"text":',
     });
 
-    expect('error' in result ? result.error : '').toContain(
-      '自定义模板不是合法 JSON：',
+    expect('error' in result ? result.error : '').toBe(
+      '自定义模板不是合法 JSON：请检查括号、逗号和引号是否完整',
     );
   });
 

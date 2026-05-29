@@ -45,7 +45,6 @@ export function buildNotificationChannelDraft({
   }
 }
 
-function jsonErrorMessage(err: unknown): string {
-  if (!(err instanceof Error)) return String(err);
-  return err.message.replace(/^JSON Parse error:\s*/i, '');
+function jsonErrorMessage(_err: unknown): string {
+  return '请检查括号、逗号和引号是否完整';
 }
