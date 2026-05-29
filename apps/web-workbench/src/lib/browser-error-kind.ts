@@ -6,6 +6,7 @@ export type BrowserErrorKind =
   | 'extension_timeout'
   | 'extension_missing'
   | 'extension_disconnected'
+  | 'extension_permission'
   | 'transport_closed'
   | 'page_switch'
   | 'hibernated'
@@ -22,11 +23,22 @@ export function classifyBrowserErrorKind(
   if (/扩展工具调用超时|浏览器扩展响应超时|extension tool.*timeout|browser tool.*timeout/.test(text)) {
     return 'extension_timeout';
   }
-  if (/扩展.*未连接|no_extension|extension.*not connected/.test(text)) {
+  if (
+    /扩展.*未连接|no_extension|extension.*not connected|receiving end does not exist|could not establish connection/.test(
+      text,
+    )
+  ) {
     return 'extension_missing';
   }
   if (
-    /浏览器扩展连接已断开|扩展.*断开|extension.*disconnect|extension.*closed|socket_closed/.test(
+    /cannot access contents of (the )?url|extension manifest must request permission|missing host permission|host permission|扩展.*权限|浏览器.*权限不足/.test(
+      text,
+    )
+  ) {
+    return 'extension_permission';
+  }
+  if (
+    /浏览器扩展连接已断开|扩展.*断开|extension.*disconnect|extension.*closed|socket_closed|message port closed before a response/.test(
       text,
     )
   ) {

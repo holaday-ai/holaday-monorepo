@@ -55,6 +55,15 @@ describe('browserNavFailureMessage', () => {
     expect(browserNavExceptionMessage(new Error('socket_closed: 浏览器扩展连接已断开'), 'reload')).toBe(
       '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试',
     );
+    expect(browserNavExceptionMessage(new Error('The message port closed before a response was received.'), 'reload')).toBe(
+      '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试',
+    );
+    expect(
+      browserNavExceptionMessage(
+        new Error('Cannot access contents of url. Extension manifest must request permission.'),
+        'goto',
+      ),
+    ).toBe('浏览器扩展缺少当前网站权限，请在扩展里允许访问该网站后重试');
     expect(browserNavExceptionMessage(new Error('Unexpected protocol error'), 'back')).toBe(
       '后退失败，请稍后重试',
     );

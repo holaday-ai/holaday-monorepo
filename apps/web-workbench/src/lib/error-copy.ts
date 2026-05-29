@@ -46,11 +46,15 @@ const RULES: Rule[] = [
     to: '浏览器服务暂时不可用，请稍后重试。',
   },
   {
-    match: /扩展.*未连接|no_extension|extension.*not connected/i,
+    match: /扩展.*未连接|no_extension|extension.*not connected|receiving end does not exist|could not establish connection/i,
     to: '浏览器扩展未连接，请打开 HOLA DAY 扩展后重试。',
   },
   {
-    match: /浏览器扩展连接已断开|扩展.*断开|extension.*disconnect|extension.*closed|socket_closed/i,
+    match: /cannot access contents of (the )?url|extension manifest must request permission|missing host permission|host permission|扩展.*权限|浏览器.*权限不足/i,
+    to: '浏览器扩展缺少当前网站权限，请在扩展里允许访问该网站后重试。',
+  },
+  {
+    match: /浏览器扩展连接已断开|扩展.*断开|extension.*disconnect|extension.*closed|socket_closed|message port closed before a response/i,
     to: '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试。',
   },
   {
@@ -91,6 +95,8 @@ export function humaniseTaskError(raw: string | null | undefined): string {
       return '浏览器扩展未连接，请打开 HOLA DAY 扩展后重试。';
     case 'extension_disconnected':
       return '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试。';
+    case 'extension_permission':
+      return '浏览器扩展缺少当前网站权限，请在扩展里允许访问该网站后重试。';
     case 'dns':
       return '无法访问该网址，请检查网址是否拼写正确。';
     case 'ssl':

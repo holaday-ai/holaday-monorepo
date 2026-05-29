@@ -72,11 +72,22 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
       nextStep: '等页面稳定后重新执行当前任务。',
     };
   }
-  if (/扩展.*未连接|no_extension|extension.*not connected/.test(haystack)) {
+  if (
+    /扩展.*未连接|no_extension|extension.*not connected|receiving end does not exist|could not establish connection/.test(
+      haystack,
+    )
+  ) {
     return {
       title: '浏览器扩展未连接',
       subtitle: '请打开 HOLA DAY 扩展后重试；如果不用扩展，也可以重新执行任务。',
       nextStep: '打开 HOLA DAY 扩展，再重新执行任务。',
+    };
+  }
+  if (browserKind === 'extension_permission') {
+    return {
+      title: '浏览器扩展缺少权限',
+      subtitle: '扩展没有当前网站的访问权限，因此无法继续操作页面。',
+      nextStep: '在扩展里允许访问该网站后重新执行当前任务。',
     };
   }
   if (browserKind === 'extension_disconnected') {

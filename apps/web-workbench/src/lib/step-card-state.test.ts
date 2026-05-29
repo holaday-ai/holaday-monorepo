@@ -69,6 +69,12 @@ describe('step-card-state', () => {
         message: '浏览器扩展未连接，请打开 HOLA DAY 扩展后重试',
       }),
     ).toBe('浏览器扩展未连接。请打开 HOLA DAY 扩展后重试。');
+    expect(
+      stepFailureMessage({
+        actionKind: 'navigate',
+        message: 'Could not establish connection. Receiving end does not exist.',
+      }),
+    ).toBe('浏览器扩展未连接。请打开 HOLA DAY 扩展后重试。');
   });
 
   it('explains disconnected extension clients separately from generic browser closures', () => {
@@ -78,6 +84,21 @@ describe('step-card-state', () => {
         message: 'socket_closed: 浏览器扩展连接已断开',
       }),
     ).toBe('浏览器扩展连接已断开。请重新打开 HOLA DAY 扩展后重试。');
+    expect(
+      stepFailureMessage({
+        actionKind: 'navigate',
+        message: 'The message port closed before a response was received.',
+      }),
+    ).toBe('浏览器扩展连接已断开。请重新打开 HOLA DAY 扩展后重试。');
+  });
+
+  it('explains extension host permission failures', () => {
+    expect(
+      stepFailureMessage({
+        actionKind: 'navigate',
+        message: 'Cannot access contents of url. Extension manifest must request permission.',
+      }),
+    ).toBe('浏览器扩展缺少当前网站权限。请在扩展里允许访问该网站后重试。');
   });
 
   it('explains browser transport closures without exposing protocol text', () => {

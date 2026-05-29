@@ -34,6 +34,11 @@ describe('classifyFriendlyFailure', () => {
       subtitle: '请打开 HOLA DAY 扩展后重试；如果不用扩展，也可以重新执行任务。',
       nextStep: '打开 HOLA DAY 扩展，再重新执行任务。',
     });
+    expect(classifyFriendlyFailure('Could not establish connection. Receiving end does not exist.')).toEqual({
+      title: '浏览器扩展未连接',
+      subtitle: '请打开 HOLA DAY 扩展后重试；如果不用扩展，也可以重新执行任务。',
+      nextStep: '打开 HOLA DAY 扩展，再重新执行任务。',
+    });
   });
 
   it('explains extension disconnects without making them look like generic timeouts', () => {
@@ -41,6 +46,23 @@ describe('classifyFriendlyFailure', () => {
       title: '浏览器扩展已断开',
       subtitle: '扩展连接在执行中断开。请重新打开 HOLA DAY 扩展后重试。',
       nextStep: '确认扩展在线，再重新执行当前任务。',
+    });
+    expect(classifyFriendlyFailure('The message port closed before a response was received.')).toEqual({
+      title: '浏览器扩展已断开',
+      subtitle: '扩展连接在执行中断开。请重新打开 HOLA DAY 扩展后重试。',
+      nextStep: '确认扩展在线，再重新执行当前任务。',
+    });
+  });
+
+  it('explains extension host permission failures', () => {
+    expect(
+      classifyFriendlyFailure(
+        'Cannot access contents of url "https://example.com/". Extension manifest must request permission.',
+      ),
+    ).toEqual({
+      title: '浏览器扩展缺少权限',
+      subtitle: '扩展没有当前网站的访问权限，因此无法继续操作页面。',
+      nextStep: '在扩展里允许访问该网站后重新执行当前任务。',
     });
   });
 

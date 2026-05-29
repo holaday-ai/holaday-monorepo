@@ -30,12 +30,26 @@ describe('error-copy', () => {
     expect(humaniseTaskError('扩展未连接，无法走 Mode B')).toBe(
       '浏览器扩展未连接，请打开 HOLA DAY 扩展后重试。',
     );
+    expect(humaniseTaskError('Could not establish connection. Receiving end does not exist.')).toBe(
+      '浏览器扩展未连接，请打开 HOLA DAY 扩展后重试。',
+    );
   });
 
   it('maps extension disconnects to reconnect guidance', () => {
     expect(humaniseTaskError('socket_closed: 浏览器扩展连接已断开')).toBe(
       '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试。',
     );
+    expect(humaniseTaskError('Unchecked runtime.lastError: The message port closed before a response was received.')).toBe(
+      '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试。',
+    );
+  });
+
+  it('maps extension host permission failures to permission guidance', () => {
+    expect(
+      humaniseTaskError(
+        'Cannot access contents of url "https://example.com/". Extension manifest must request permission.',
+      ),
+    ).toBe('浏览器扩展缺少当前网站权限，请在扩展里允许访问该网站后重试。');
   });
 
   it('maps raw Chromium navigation failures before the generic fallback', () => {

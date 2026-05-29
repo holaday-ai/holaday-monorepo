@@ -40,6 +40,8 @@ export function stepFailureMessage(step: Pick<UiStep, 'actionKind' | 'message'>)
       return '浏览器扩展未连接。请打开 HOLA DAY 扩展后重试。';
     case 'extension_disconnected':
       return '浏览器扩展连接已断开。请重新打开 HOLA DAY 扩展后重试。';
+    case 'extension_permission':
+      return '浏览器扩展缺少当前网站权限。请在扩展里允许访问该网站后重试。';
     case 'hibernated':
       return '浏览器会话已休眠。重新执行任务时会拉起新的浏览器。';
     case 'dns':
