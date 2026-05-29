@@ -12,6 +12,7 @@ import { z } from 'zod';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
 import { injectResolvedUrl, resolveIntentUrl } from '../../agent/url-resolver.js';
 import { env as appEnv } from '../../config/env.js';
+import { friendlyBrowserFailureReason } from '../../agent/browser-failure-copy.js';
 import { buildBaiduSmokePlan } from '../../agent/smoke-plans.js';
 import type { PlannedStep } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
@@ -6259,6 +6260,8 @@ function friendlyFailureReason(
   raw: string | undefined,
 ): string {
   const r = (raw ?? '').toLowerCase();
+  const browserFailure = friendlyBrowserFailureReason(raw);
+  if (browserFailure) return browserFailure;
   if (status === 'timeout' || /timeout|elapsed|time ?out|超时/.test(r)) {
     return '任务超时。可能原因：目标网站响应缓慢或被反爬拦截。建议：重试，或把任务描述简化后再试。';
   }
@@ -6276,9 +6279,6 @@ function friendlyFailureReason(
   }
   if (/captcha|recaptcha|人机验证|滑块|verify/.test(r)) {
     return '遇到验证码。建议：在右侧 Panel 中手动完成验证，登录态会保存，下次无需重复。';
-  }
-  if (/socket_closed|浏览器扩展连接已断开|extension.*disconnect|extension.*closed/.test(r)) {
-    return '浏览器扩展连接已断开。请重新打开 HOLA DAY 扩展后重试。';
   }
   if (/login|signin|sign ?in|passport|oauth|需要登录|登录墙/.test(r)) {
     return '该网站需要登录才能继续。建议：在右侧 Panel 中手动登录一次，登录态会保存，然后重试任务。';
