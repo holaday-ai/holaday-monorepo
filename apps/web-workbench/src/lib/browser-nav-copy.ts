@@ -26,7 +26,7 @@ export function browserNavFailureMessage(
   if (reason === 'no_executor') {
     return direction === 'goto'
       ? '当前没有可操作的浏览器，重新执行任务后再打开链接'
-      : '当前没有可操作的浏览器，请重新连接或重新执行任务';
+      : '当前没有可操作的浏览器，请重新执行任务';
   }
   if (reason === 'nav_failed') {
     return direction === 'goto'
@@ -57,7 +57,7 @@ export function browserNavExceptionMessage(
     case 'extension_disconnected':
       return '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试';
     case 'transport_closed':
-      return '浏览器连接中断，请重新连接或重新执行任务';
+      return '浏览器连接中断，请重新执行任务';
     case 'hibernated':
       return direction === 'goto'
         ? '当前浏览器已休眠，重新执行任务后再打开链接'

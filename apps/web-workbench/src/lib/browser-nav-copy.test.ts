@@ -13,7 +13,7 @@ describe('browserNavFailureMessage', () => {
 
   it('explains disconnected browser sessions', () => {
     expect(browserNavFailureMessage('no_executor', 'reload')).toBe(
-      '当前没有可操作的浏览器，请重新连接或重新执行任务',
+      '当前没有可操作的浏览器，请重新执行任务',
     );
     expect(browserNavFailureMessage('no_executor', 'goto')).toBe(
       '当前没有可操作的浏览器，重新执行任务后再打开链接',
@@ -50,7 +50,7 @@ describe('browserNavFailureMessage', () => {
       '页面跳转超时，可能仍在加载。请稍后重试或换一个网址',
     );
     expect(browserNavExceptionMessage(new Error('CDP session closed'), 'reload')).toBe(
-      '浏览器连接中断，请重新连接或重新执行任务',
+      '浏览器连接中断，请重新执行任务',
     );
     expect(browserNavExceptionMessage(new Error('socket_closed: 浏览器扩展连接已断开'), 'reload')).toBe(
       '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试',
