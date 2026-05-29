@@ -2067,10 +2067,10 @@ function TerminalSummary({
               type="button"
               onClick={() => void handleRetry(intent)}
               aria-label="重新执行任务"
-              className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-[#EA1F59]/25 bg-[#EA1F59]/5 px-2.5 font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/10 hover:text-[#c80a5d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+              title="重新执行任务"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-[#EA1F59]/25 bg-[#EA1F59]/5 font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/10 hover:text-[#c80a5d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
             >
-              <RotateCcw className="h-3.5 w-3.5" />
-              重试
+              <RotateCcw className="h-3.5 w-3.5" aria-hidden />
             </button>
           )}
         </div>

@@ -1103,16 +1103,15 @@ function ShareInviteRow(): JSX.Element {
     <button
       type="button"
       onClick={() => void onShare()}
+      aria-label="复制邀请链接"
+      title="复制邀请链接"
       className="group flex w-full items-center gap-2.5 rounded-[8px] border border-[#DCDDDD]/60 bg-white/45 px-2.5 py-2 text-left text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:border-white/10 dark:bg-white/[0.04] dark:text-foreground/70 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
     >
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border border-[#EA1F59]/15 bg-[#EA1F59]/10 text-[#EA1F59]">
         <Share2 className="h-3.5 w-3.5" aria-hidden />
       </span>
-      <span className="min-w-0">
-        <span className="block text-[12px] font-medium leading-4">邀请好友</span>
-        <span className="block truncate text-[10px] leading-4 text-[#ADADAD]">
-          复制 HOLA DAY 链接
-        </span>
+      <span className="min-w-0 truncate text-[12px] font-medium leading-4">
+        邀请好友
       </span>
     </button>
   );

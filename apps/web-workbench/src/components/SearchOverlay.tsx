@@ -223,10 +223,11 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                   <button
                     type="button"
                     onClick={retrySearch}
-                    className="inline-flex h-6 shrink-0 items-center gap-1 rounded-[8px] border border-[#EA1F59]/20 px-2 text-[11px] transition-colors hover:bg-[#EA1F59]/10"
+                    aria-label="重试搜索"
+                    title="重试搜索"
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[8px] border border-[#EA1F59]/20 text-[#EA1F59] transition-colors hover:bg-[#EA1F59]/10"
                   >
-                    <RotateCw className="h-3 w-3" />
-                    重试
+                    <RotateCw className="h-3 w-3" aria-hidden />
                   </button>
                 )}
               </div>
@@ -251,12 +252,13 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
+                  size="icon"
                   onClick={retrySearch}
-                  className="mt-3 h-8 rounded-[8px] border-[#DCDDDD] hover:border-[#EA1F59]/40 hover:text-[#EA1F59]"
+                  aria-label="重试搜索"
+                  title="重试搜索"
+                  className="mt-3 h-8 w-8 rounded-[8px] border-[#DCDDDD] hover:border-[#EA1F59]/40 hover:text-[#EA1F59]"
                 >
-                  <RotateCw className="mr-1.5 h-3.5 w-3.5" />
-                  重试搜索
+                  <RotateCw className="h-3.5 w-3.5" aria-hidden />
                 </Button>
               )}
             </li>

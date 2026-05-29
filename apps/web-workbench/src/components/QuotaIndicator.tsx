@@ -239,11 +239,12 @@ function QuotaRetryButton({
         onRetry();
       }}
       disabled={loading}
+      title={loading ? '正在刷新额度' : '重试额度刷新'}
       className={cn(
         'inline-flex shrink-0 items-center justify-center rounded transition-colors disabled:cursor-not-allowed disabled:opacity-60',
         compact
           ? 'h-5 w-5 hover:bg-[#EA1F59]/10'
-          : 'h-7 gap-1 rounded-[6px] border border-[#DCDDDD]/75 bg-white/65 px-2 text-[11px] text-[#595757] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10',
+          : 'h-7 w-7 rounded-[6px] border border-[#DCDDDD]/75 bg-white/65 text-[#595757] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10',
       )}
       aria-label={loading ? '正在重试额度刷新' : '重试额度刷新'}
     >
@@ -252,7 +253,6 @@ function QuotaRetryButton({
       ) : (
         <RotateCw className={compact ? 'h-3 w-3' : 'h-3.5 w-3.5'} />
       )}
-      {!compact && <span>{loading ? '重试中' : '重试'}</span>}
     </button>
   );
 }
