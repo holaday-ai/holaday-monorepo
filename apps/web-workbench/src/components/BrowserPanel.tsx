@@ -1061,14 +1061,13 @@ export function BrowserPanel({
                 title="停止当前任务"
                 aria-label="停止当前任务"
                 className={cn(
-                  'inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[11px] font-medium transition-colors',
+                  'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition-colors',
                   aborting
                     ? 'cursor-wait border-[#DCDDDD] bg-[#EFEFEF] text-muted-foreground dark:border-white/10 dark:bg-white/5'
                     : 'border-[#EA1F59]/35 bg-white text-[#EA1F59] hover:bg-[#EA1F59]/10 dark:border-[#EA1F59]/35 dark:bg-transparent dark:hover:bg-[#EA1F59]/10',
                 )}
               >
                 <Square className="h-3 w-3" strokeWidth={2.5} />
-                停止
               </button>
             )}
             <button
@@ -2305,14 +2304,13 @@ function FullscreenFloatingToolbar({
           title="停止当前任务"
           aria-label="停止当前任务"
           className={cn(
-            'inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[11px] font-medium transition-colors',
+            'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition-colors',
             aborting
               ? 'cursor-wait border-white/20 bg-white/10 text-white/60'
               : 'border-[#EA1F59]/35 bg-[#EA1F59]/15 text-white hover:bg-[#EA1F59]/25',
           )}
         >
           <Square className="h-3 w-3" strokeWidth={2.5} />
-          停止
         </button>
       )}
       <button

@@ -13,7 +13,7 @@
  *      "添加渠道" CTA that opens AddChannelModal.
  */
 
-import { Loader2, Plus, Trash2, MessageSquare } from 'lucide-react';
+import { Loader2, MessageSquare, Pencil, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
@@ -234,6 +234,7 @@ export function NotificationsSection(): JSX.Element {
                       type="checkbox"
                       className="sr-only"
                       checked={row.enabled}
+                      aria-label={`${row.enabled ? '禁用' : '启用'}${NOTIFICATION_PLATFORM_LABEL[row.platform]}通知渠道`}
                       onChange={() => void handleToggle(row)}
                     />
                     <span
@@ -249,9 +250,11 @@ export function NotificationsSection(): JSX.Element {
                       setEditingChannel(row);
                       setModalOpen(true);
                     }}
-                    className="text-xs text-muted-foreground hover:text-foreground"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
+                    aria-label={`编辑${NOTIFICATION_PLATFORM_LABEL[row.platform]}通知渠道`}
+                    title="编辑"
                   >
-                    编辑
+                    <Pencil className="h-3.5 w-3.5" />
                   </button>
                   <button
                     type="button"
