@@ -1847,16 +1847,23 @@ function TerminalSummary({
   // navigate to the new task automatically — no manual route push
   // needed here.
   const createTask = useTaskStore((s) => s.createTask);
+  const [retryingIntent, setRetryingIntent] = React.useState<string | null>(null);
   const handleRetry = React.useCallback(
     async (retryIntent: string): Promise<void> => {
-      const result = await createTask(retryIntent, []);
-      if ('error' in result) {
-        toast.show(taskActionError('重试失败', result.error), 'error');
-        return;
+      if (retryingIntent) return;
+      setRetryingIntent(retryIntent);
+      try {
+        const result = await createTask(retryIntent, []);
+        if ('error' in result) {
+          toast.show(taskActionError('重试失败', result.error), 'error');
+          return;
+        }
+        toast.show('已重新提交', 'info', 2000);
+      } finally {
+        setRetryingIntent(null);
       }
-      toast.show('已重新提交', 'info', 2000);
     },
-    [createTask, toast],
+    [createTask, retryingIntent, toast],
   );
   // Codex IA close-out — the result card no longer hosts the
   // browser-panel entry. That moved to TaskToolbar at the top of the
@@ -1933,10 +1940,12 @@ function TerminalSummary({
                   <button
                     type="button"
                     onClick={() => onSuggestionPick(intent)}
+                    aria-label="填入原描述"
+                    title="填入原描述后可编辑再发送"
                     className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#FFC910]/60 bg-white/70 px-2.5 text-[11px] font-medium text-[#57479C] transition-colors hover:bg-white dark:border-[#FFC910]/35 dark:bg-transparent dark:text-foreground dark:hover:bg-white/10"
                   >
                     <RotateCcw className="h-3 w-3" />
-                    重新执行
+                    填入原描述
                   </button>
                 )}
                 <button
@@ -2053,11 +2062,12 @@ function TerminalSummary({
             <button
               type="button"
               onClick={() => void handleRetry(intent)}
-              aria-label="重新执行任务"
-              title="重新执行任务"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-[#EA1F59]/25 bg-[#EA1F59]/5 font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/10 hover:text-[#c80a5d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
+              disabled={retryingIntent != null}
+              aria-label={retryingIntent ? '正在重新执行任务' : '重新执行任务'}
+              title={retryingIntent ? '正在重新执行' : '重新执行任务'}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-[#EA1F59]/25 bg-[#EA1F59]/5 font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/10 hover:text-[#c80a5d] disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20"
             >
-              <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+              <RotateCcw className={cn('h-3.5 w-3.5', retryingIntent && 'animate-spin')} aria-hidden />
             </button>
           )}
         </div>
