@@ -336,6 +336,23 @@ export function WorkbenchApp(): JSX.Element {
   }, []);
 
   const selectedTask = tasks.find((t) => t.taskId === selectedTaskId) ?? null;
+  const [browserReExecuting, setBrowserReExecuting] = React.useState(false);
+  const handleBrowserReExecute = React.useCallback(async (): Promise<void> => {
+    if (!selectedTask || browserReExecuting) return;
+    const intent = selectedTask.intent;
+    setBrowserReExecuting(true);
+    setSidePanelOverride('close');
+    setBrowserSheetOpen(false);
+    enterNewTaskMode();
+    try {
+      const res = await createTask(intent);
+      if ('error' in res) {
+        toast.show(taskActionError('重试失败', res.error), 'error');
+      }
+    } finally {
+      setBrowserReExecuting(false);
+    }
+  }, [browserReExecuting, createTask, enterNewTaskMode, selectedTask, toast]);
 
   // Follow-up context — active on a terminal task that isn't currently
   // in awaiting-user reply mode.
@@ -510,20 +527,8 @@ export function WorkbenchApp(): JSX.Element {
             onToggleFullscreen={() => setPanelFullscreen((v) => !v)}
             onToggleCollapse={() => setSidePanelOverride('close')}
             onClose={() => setSidePanelOverride('close')}
-            onReExecute={
-              selectedTask
-                ? () => {
-                    const intent = selectedTask.intent;
-                    setSidePanelOverride('close');
-                    enterNewTaskMode();
-                    void createTask(intent).then((res) => {
-                      if ('error' in res) {
-                        toast.show(taskActionError('重试失败', res.error), 'error');
-                      }
-                    });
-                  }
-                : undefined
-            }
+            onReExecute={selectedTask ? () => void handleBrowserReExecute() : undefined}
+            reExecuting={browserReExecuting}
           />
         </div>
       )}
@@ -567,20 +572,8 @@ export function WorkbenchApp(): JSX.Element {
               onToggleFullscreen={() => setPanelFullscreen((v) => !v)}
               onToggleCollapse={() => setSidePanelOverride('close')}
               onClose={() => setSidePanelOverride('close')}
-              onReExecute={
-                selectedTask
-                  ? () => {
-                      const intent = selectedTask.intent;
-                      setSidePanelOverride('close');
-                      enterNewTaskMode();
-                      void createTask(intent).then((res) => {
-                        if ('error' in res) {
-                          toast.show(taskActionError('重试失败', res.error), 'error');
-                        }
-                      });
-                    }
-                  : undefined
-              }
+              onReExecute={selectedTask ? () => void handleBrowserReExecute() : undefined}
+              reExecuting={browserReExecuting}
             />
           </div>
         </>
@@ -619,6 +612,8 @@ export function WorkbenchApp(): JSX.Element {
           }
           activeTaskId={selectedTaskId}
           poolUserId={me?.multiUser ? me.userId : null}
+          onReExecute={selectedTask ? () => void handleBrowserReExecute() : undefined}
+          reExecuting={browserReExecuting}
         />
         </div>
       )}

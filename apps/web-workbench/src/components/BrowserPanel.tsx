@@ -217,6 +217,8 @@ interface Props {
    * by WorkbenchApp; the panel only knows the click happened.
    */
   onReExecute?: () => void;
+  /** True while the parent is creating the fresh replacement task. */
+  reExecuting?: boolean;
 }
 
 /**
@@ -245,6 +247,7 @@ export function BrowserPanel({
   collapsed: collapsedProp,
   onToggleCollapse,
   onReExecute,
+  reExecuting = false,
 }: Props): JSX.Element | null {
   // P2-A — only the non-clarification kinds need browser takeover.
   // Treat missing kind as `clarification` so older WS events / legacy
@@ -1438,10 +1441,13 @@ export function BrowserPanel({
                     <button
                       type="button"
                       onClick={onReExecute}
-                      className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+                      disabled={reExecuting}
+                      aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
+                      title={reExecuting ? '正在重新执行' : '重新执行'}
+                      className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
                     >
-                      <RotateCw className="h-3 w-3" />
-                      重新执行
+                      <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
+                      {reExecuting ? '提交中…' : '重新执行'}
                     </button>
                   )}
                 </div>
@@ -1452,6 +1458,7 @@ export function BrowserPanel({
                 isBrowserTask={isBrowserTask}
                 finalUrl={persistedFinalUrl}
                 onReExecute={onReExecute}
+                reExecuting={reExecuting}
               />
             )}
           </div>
@@ -1772,6 +1779,7 @@ function EmptyBrowserState({
   isBrowserTask = true,
   finalUrl,
   onReExecute,
+  reExecuting = false,
 }: {
   taskStatus: UiTaskStatus | null | undefined;
   /**
@@ -1797,6 +1805,7 @@ function EmptyBrowserState({
    * is offer to re-run the same intent.
    */
   onReExecute?: () => void;
+  reExecuting?: boolean;
 }): JSX.Element {
   if (taskStatus === 'executing' && isBrowserTask) {
     return (
@@ -1855,9 +1864,13 @@ function EmptyBrowserState({
           <button
             type="button"
             onClick={onReExecute}
-            className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+            disabled={reExecuting}
+            aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
+            title={reExecuting ? '正在重新执行' : '重新执行'}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
           >
-            重新执行
+            <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
+            {reExecuting ? '提交中…' : '重新执行'}
           </button>
         )}
       </div>
