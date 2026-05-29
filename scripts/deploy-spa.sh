@@ -37,6 +37,7 @@ VULTR_SPA_PATH="/opt/holaday-monorepo/apps/web-workbench/dist"
 VULTR_BACKUP_PATH="/opt/holaday-monorepo/apps/web-workbench/dist.bak"
 VULTR_SMOKE_URL="https://holaday.ai/app"
 VULTR_SMOKE_RESOLVE="holaday.ai:443:207.148.70.106"
+VULTR_REMOTE_SMOKE_RESOLVE="holaday.ai:443:127.0.0.1"
 
 # sshpass + non-interactive password — pulled from env so the
 # password doesn't end up in shell history. Falls back to interactive
@@ -139,6 +140,30 @@ smoke_check() {
   return 1
 }
 
+vultr_remote_smoke_check() {
+  local result
+
+  if result=$(run_with_retry "Vultr remote smoke" "${VULTR_SSH[@]}" "$VULTR_HOST" \
+    "response=/tmp/vultr-smoke-remote.html; \
+     http_code=\$(curl -s --max-time 15 --resolve '$VULTR_REMOTE_SMOKE_RESOLVE' -o \"\$response\" -w '%{http_code}' '$VULTR_SMOKE_URL' 2>&1 || true); \
+     marker_count=\$(grep -F -c -- '$SMOKE_MARKER' \"\$response\" 2>/dev/null || true); \
+     bundle_count=\$(grep -F -c -- '$NEW_HASH' \"\$response\" 2>/dev/null || true); \
+     marker_count=\$(printf '%s\n' \"\${marker_count:-0}\" | head -1); \
+     bundle_count=\$(printf '%s\n' \"\${bundle_count:-0}\" | head -1); \
+     printf 'http=%s, marker=%s, bundle=%s\n' \"\$http_code\" \"\$marker_count\" \"\$bundle_count\"; \
+     [ \"\$http_code\" = \"200\" ] && [ \"\$marker_count\" -gt 0 ] && [ \"\$bundle_count\" -gt 0 ]"); then
+    echo "✅ Vultr remote smoke check passed"
+    echo "   remote: $result"
+    return 0
+  fi
+
+  echo "❌ Vultr remote smoke FAILED" >&2
+  if [[ -n "${result:-}" ]]; then
+    echo "   remote: $result" >&2
+  fi
+  return 1
+}
+
 if [[ ! -d "$DIST_DIR" ]]; then
   echo "❌ $DIST_DIR not found. Run: pnpm --filter @holaday/web-workbench build" >&2
   exit 1
@@ -217,11 +242,14 @@ run_with_retry_filtered "Vultr extract" "${VULTR_SSH[@]}" "$VULTR_HOST" \
 echo "→ Vultr smoke check ($VULTR_SMOKE_URL via $VULTR_SMOKE_RESOLVE must return '$SMOKE_MARKER' + $NEW_HASH)"
 sleep 2
 if ! smoke_check "Vultr" "$VULTR_SMOKE_URL" /tmp/vultr-smoke.html --resolve "$VULTR_SMOKE_RESOLVE"; then
-  echo "❌ Vultr smoke FAILED — rolling Vultr back"
-  run_with_retry "Vultr rollback" "${VULTR_SSH[@]}" "$VULTR_HOST" \
-    "rm -rf $VULTR_SPA_PATH && mv $VULTR_BACKUP_PATH $VULTR_SPA_PATH"
-  echo "🔄 Vultr rolled back. Aliyun deploy remains."
-  exit 1
+  echo "⚠️  Vultr local-origin smoke failed from deploy host; verifying from inside Vultr before rollback"
+  if ! vultr_remote_smoke_check; then
+    echo "❌ Vultr smoke FAILED — rolling Vultr back"
+    run_with_retry "Vultr rollback" "${VULTR_SSH[@]}" "$VULTR_HOST" \
+      "rm -rf $VULTR_SPA_PATH && mv $VULTR_BACKUP_PATH $VULTR_SPA_PATH"
+    echo "🔄 Vultr rolled back. Aliyun deploy remains."
+    exit 1
+  fi
 fi
 
 VULTR_DEPLOYED_HASH=$(run_with_retry "Vultr bundle hash" "${VULTR_SSH[@]}" "$VULTR_HOST" \
