@@ -16,10 +16,12 @@
 
 import { Bell, ChevronDown, ChevronUp, Clock, Loader2, Plus, Repeat2 } from 'lucide-react';
 import * as React from 'react';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   quickCreateCanSubmit,
+  quickCreateHasDraftChanges,
   quickCreateReminderLabel,
   quickCreateRepeatLabel,
   quickCreateSubmitLabel,
@@ -83,6 +85,7 @@ export function QuickCreatePopover({
 }: Props): JSX.Element {
   const [intent, setIntent] = React.useState('');
   const [timeStr, setTimeStr] = React.useState(() => formatLocalTime(date));
+  const initialTimeRef = React.useRef(formatLocalTime(date));
   const [repeatType, setRepeatType] = React.useState<QuickCreateRepeatType>('once');
   const [rrule, setRrule] = React.useState('');
   const [description, setDescription] = React.useState('');
@@ -91,12 +94,36 @@ export function QuickCreatePopover({
   const [submitting, setSubmitting] = React.useState(false);
   const [submitError, setSubmitError] = React.useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = React.useState(false);
+  const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
   const intentRef = React.useRef<HTMLInputElement | null>(null);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     intentRef.current?.focus();
   }, []);
+
+  const hasDraftChanges = React.useMemo(
+    () =>
+      quickCreateHasDraftChanges({
+        initialTime: initialTimeRef.current,
+        intent,
+        timeStr,
+        repeatType,
+        rrule,
+        description,
+        reminderMinutes,
+      }),
+    [description, intent, reminderMinutes, repeatType, rrule, timeStr],
+  );
+
+  const requestClose = React.useCallback(() => {
+    if (submitting) return;
+    if (hasDraftChanges) {
+      setConfirmDiscardOpen(true);
+      return;
+    }
+    onClose();
+  }, [hasDraftChanges, onClose, submitting]);
 
   // Esc + outside-click dismissal. The mousedown listener fires
   // BEFORE the click handler that FullCalendar binds for dateClick,
@@ -107,10 +134,12 @@ export function QuickCreatePopover({
   // libraries hook in.
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !submitting) onClose();
+      if (confirmDiscardOpen) return;
+      if (e.key === 'Escape') requestClose();
     };
     const onClickOutside = (e: MouseEvent) => {
-      if (!submitting && !rootRef.current?.contains(e.target as Node)) onClose();
+      if (confirmDiscardOpen) return;
+      if (!rootRef.current?.contains(e.target as Node)) requestClose();
     };
     document.addEventListener('keydown', onKey);
     document.addEventListener('mousedown', onClickOutside);
@@ -118,7 +147,7 @@ export function QuickCreatePopover({
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('mousedown', onClickOutside);
     };
-  }, [onClose, submitting]);
+  }, [confirmDiscardOpen, requestClose]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -167,20 +196,23 @@ export function QuickCreatePopover({
   const customRuleMissing = repeatType === 'custom' && !rrule.trim();
 
   return (
-    <div
-      ref={rootRef}
-      aria-busy={submitting}
-      className={cn(
-        'hd-popover-enter hd-quick-create fixed z-[85] max-h-[calc(100vh-1rem)] overflow-y-auto border border-[#DCDDDD] bg-white text-[#1f1f1f]',
-        mobile && 'left-2 right-2 bottom-2 mx-auto',
-      )}
-      style={{
-        ...(mobile ? {} : position),
-        borderRadius: 8,
-        boxShadow: '0 18px 54px rgba(15,23,42,0.14)',
-        padding: 16,
-      }}
-    >
+    <>
+      <div
+        ref={rootRef}
+        role="dialog"
+        aria-label="快速创建定时任务"
+        aria-busy={submitting}
+        className={cn(
+          'hd-popover-enter hd-quick-create fixed z-[85] max-h-[calc(100vh-1rem)] overflow-y-auto border border-[#DCDDDD] bg-white text-[#1f1f1f]',
+          mobile && 'left-2 right-2 bottom-2 mx-auto',
+        )}
+        style={{
+          ...(mobile ? {} : position),
+          borderRadius: 8,
+          boxShadow: '0 18px 54px rgba(15,23,42,0.14)',
+          padding: 16,
+        }}
+      >
       <form onSubmit={(e) => void handleSubmit(e)}>
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
@@ -357,7 +389,7 @@ export function QuickCreatePopover({
           <Button
             type="button"
             variant="ghost"
-            onClick={onClose}
+            onClick={requestClose}
             disabled={submitting}
             className="text-[#595757] hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
             style={{ borderRadius: 8 }}
@@ -380,7 +412,22 @@ export function QuickCreatePopover({
           </Button>
         </div>
       </form>
-    </div>
+      </div>
+      <ConfirmDialog
+        open={confirmDiscardOpen}
+        title="放弃这个定时任务？"
+        description="关闭后当前填写的任务内容、时间、重复规则和备注都会丢失。"
+        confirmLabel="放弃草稿"
+        cancelLabel="继续编辑"
+        destructive
+        overlayClassName="z-[110]"
+        onClose={() => setConfirmDiscardOpen(false)}
+        onConfirm={() => {
+          setConfirmDiscardOpen(false);
+          onClose();
+        }}
+      />
+    </>
   );
 }
 

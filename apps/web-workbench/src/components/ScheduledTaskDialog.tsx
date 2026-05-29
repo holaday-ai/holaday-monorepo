@@ -1,5 +1,6 @@
 import { Bell, Calendar, Clock, Loader2, Repeat2, X } from 'lucide-react';
 import * as React from 'react';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
@@ -11,6 +12,7 @@ import {
   buildScheduledCreatePayload,
   REMINDER_OPTIONS,
   REPEAT_OPTIONS,
+  scheduledDialogHasDraftChanges,
   scheduledCreateButtonLabel,
   scheduledReminderSummary,
   scheduledRepeatSummary,
@@ -53,7 +55,9 @@ export function ScheduledTaskDialog({
     defaultScheduledAtLocalInput(),
   );
   const [submitting, setSubmitting] = React.useState(false);
+  const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
   const intentRef = React.useRef<HTMLTextAreaElement>(null);
+  const initialScheduledAtRef = React.useRef(scheduledAt);
 
   // Reset whenever the dialog re-opens so a stale draft from a prior
   // open doesn't bleed into the new context (especially when the
@@ -65,16 +69,38 @@ export function ScheduledTaskDialog({
     setReminderValue('off');
     setDescription('');
     setRrule('');
-    setScheduledAt(defaultScheduledAtLocalInput());
+    const nextScheduledAt = defaultScheduledAtLocalInput();
+    initialScheduledAtRef.current = nextScheduledAt;
+    setScheduledAt(nextScheduledAt);
     setSubmitting(false);
+    setConfirmDiscardOpen(false);
     const id = requestAnimationFrame(() => intentRef.current?.focus());
     return () => cancelAnimationFrame(id);
   }, [open, initialIntent]);
 
+  const hasDraftChanges = React.useMemo(
+    () =>
+      scheduledDialogHasDraftChanges({
+        initialIntent: initialIntent ?? '',
+        initialScheduledAt: initialScheduledAtRef.current,
+        intent,
+        repeatType,
+        reminderValue,
+        description,
+        rrule,
+        scheduledAt,
+      }),
+    [description, initialIntent, intent, reminderValue, repeatType, rrule, scheduledAt],
+  );
+
   const requestClose = React.useCallback(() => {
     if (submitting) return;
+    if (hasDraftChanges) {
+      setConfirmDiscardOpen(true);
+      return;
+    }
     onClose();
-  }, [onClose, submitting]);
+  }, [hasDraftChanges, onClose, submitting]);
 
   // Esc closes when the dialog is open.
   React.useEffect(() => {
@@ -140,12 +166,14 @@ export function ScheduledTaskDialog({
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      onClick={requestClose}
-      className="fixed inset-0 z-[95] flex items-start justify-center overflow-y-auto bg-black/30 p-3 py-6 backdrop-blur-sm animate-fade-in sm:items-center sm:p-4"
-    >
+    <>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="新建定时任务"
+        onClick={requestClose}
+        className="fixed inset-0 z-[95] flex items-start justify-center overflow-y-auto bg-black/30 p-3 py-6 backdrop-blur-sm animate-fade-in sm:items-center sm:p-4"
+      >
       <div
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-2xl overflow-hidden rounded-[8px] border border-[#DCDDDD] bg-white text-[#1f1f1f] shadow-[0_18px_56px_rgba(15,23,42,0.14)]"
@@ -309,6 +337,21 @@ export function ScheduledTaskDialog({
           </button>
         </footer>
       </div>
-    </div>
+      </div>
+      <ConfirmDialog
+        open={confirmDiscardOpen}
+        title="放弃这个定时任务？"
+        description="关闭后当前填写的任务内容、时间、重复规则和备注都会丢失。"
+        confirmLabel="放弃草稿"
+        cancelLabel="继续编辑"
+        destructive
+        overlayClassName="z-[110]"
+        onClose={() => setConfirmDiscardOpen(false)}
+        onConfirm={() => {
+          setConfirmDiscardOpen(false);
+          onClose();
+        }}
+      />
+    </>
   );
 }

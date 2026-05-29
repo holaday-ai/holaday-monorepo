@@ -40,6 +40,25 @@ export function quickCreateValidationMessage(input: {
   return null;
 }
 
+export function quickCreateHasDraftChanges(input: {
+  readonly initialTime: string;
+  readonly intent: string;
+  readonly timeStr: string;
+  readonly repeatType: QuickCreateRepeatType;
+  readonly rrule: string;
+  readonly description: string;
+  readonly reminderMinutes: number | null;
+}): boolean {
+  return (
+    input.intent.trim().length > 0 ||
+    input.timeStr !== input.initialTime ||
+    input.repeatType !== 'once' ||
+    input.rrule.trim().length > 0 ||
+    input.description.trim().length > 0 ||
+    input.reminderMinutes !== null
+  );
+}
+
 export function quickCreateCanSubmit(input: {
   intent: string;
   repeatType: QuickCreateRepeatType;

@@ -38,6 +38,26 @@ export function scheduledCreateButtonLabel(submitting: boolean): string {
   return submitting ? '创建中…' : '创建';
 }
 
+export function scheduledDialogHasDraftChanges(input: {
+  readonly initialIntent: string;
+  readonly initialScheduledAt: string;
+  readonly intent: string;
+  readonly repeatType: DialogRepeatType;
+  readonly reminderValue: string;
+  readonly description: string;
+  readonly rrule: string;
+  readonly scheduledAt: string;
+}): boolean {
+  return (
+    input.intent.trim() !== input.initialIntent.trim() ||
+    input.scheduledAt !== input.initialScheduledAt ||
+    input.repeatType !== 'daily' ||
+    input.reminderValue !== 'off' ||
+    input.description.trim().length > 0 ||
+    input.rrule.trim().length > 0
+  );
+}
+
 export function scheduledRepeatSummary(repeatType: DialogRepeatType): string {
   switch (repeatType) {
     case 'once':

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   QUICK_CREATE_CUSTOM_RRULE_ERROR,
   quickCreateCanSubmit,
+  quickCreateHasDraftChanges,
   quickCreateReminderLabel,
   quickCreateRepeatLabel,
   quickCreateSubmitLabel,
@@ -75,5 +76,38 @@ describe('quick create state helpers', () => {
         submitting: false,
       }),
     ).toBe(true);
+  });
+
+  it('keeps an untouched quick-create popover clean', () => {
+    expect(
+      quickCreateHasDraftChanges({
+        initialTime: '09:00',
+        intent: '   ',
+        timeStr: '09:00',
+        repeatType: 'once',
+        rrule: '',
+        description: '',
+        reminderMinutes: null,
+      }),
+    ).toBe(false);
+  });
+
+  it('detects quick-create draft edits', () => {
+    const base = {
+      initialTime: '09:00',
+      intent: '',
+      timeStr: '09:00',
+      repeatType: 'once' as const,
+      rrule: '',
+      description: '',
+      reminderMinutes: null,
+    };
+
+    expect(quickCreateHasDraftChanges({ ...base, intent: '生成日报' })).toBe(true);
+    expect(quickCreateHasDraftChanges({ ...base, timeStr: '10:00' })).toBe(true);
+    expect(quickCreateHasDraftChanges({ ...base, repeatType: 'weekly' })).toBe(true);
+    expect(quickCreateHasDraftChanges({ ...base, rrule: 'FREQ=WEEKLY' })).toBe(true);
+    expect(quickCreateHasDraftChanges({ ...base, description: '发给产品群' })).toBe(true);
+    expect(quickCreateHasDraftChanges({ ...base, reminderMinutes: 15 })).toBe(true);
   });
 });
