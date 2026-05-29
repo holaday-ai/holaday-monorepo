@@ -56,6 +56,10 @@ export function browserNavExceptionMessage(
       return browserNavFailureMessage('nav_failed', direction) ?? '浏览器操作超时，请稍后重试';
     case 'transport_closed':
       return '浏览器连接中断，请重新连接或重新执行任务';
+    case 'hibernated':
+      return direction === 'goto'
+        ? '当前浏览器已休眠，重新执行任务后再打开链接'
+        : '当前浏览器已休眠，请重新执行任务';
     default:
       break;
   }

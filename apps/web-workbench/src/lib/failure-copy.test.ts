@@ -52,6 +52,14 @@ describe('classifyFriendlyFailure', () => {
     });
   });
 
+  it('explains hibernated browser sessions as requiring a fresh run', () => {
+    expect(classifyFriendlyFailure('browser not allocated: idle-timeout hibernated')).toEqual({
+      title: '浏览器已休眠',
+      subtitle: '这个浏览器会话已经释放。重新执行任务会打开新的浏览器。',
+      nextStep: '重新执行当前任务。',
+    });
+  });
+
   it('classifies SSL and connection browser failures with actionable recovery', () => {
     expect(classifyFriendlyFailure('net::ERR_CERT_DATE_INVALID')).toEqual({
       title: '网站证书异常',

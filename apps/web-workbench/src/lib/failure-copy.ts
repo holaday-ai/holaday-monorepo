@@ -43,6 +43,13 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
       nextStep: '重新执行时尽量从稳定页面开始。',
     };
   }
+  if (browserKind === 'hibernated') {
+    return {
+      title: '浏览器已休眠',
+      subtitle: '这个浏览器会话已经释放。重新执行任务会打开新的浏览器。',
+      nextStep: '重新执行当前任务。',
+    };
+  }
   if (
     /dns|enotfound|getaddrinfo|net::err_name|net::err_address|无法访问|网络错误|网络异常|解析失败/.test(
       haystack,

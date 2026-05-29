@@ -43,4 +43,10 @@ describe('error-copy', () => {
       '无法连接到该站点，请稍后重试或换一个站点。',
     );
   });
+
+  it('maps hibernated browser sessions before the generic fallback', () => {
+    expect(humaniseTaskError('browser not allocated: idle-timeout hibernated')).toBe(
+      '浏览器已休眠，重新执行任务会打开新的浏览器。',
+    );
+  });
 });

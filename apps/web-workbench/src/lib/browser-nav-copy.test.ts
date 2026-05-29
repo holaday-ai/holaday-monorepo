@@ -71,4 +71,13 @@ describe('browserNavFailureMessage', () => {
       '页面正在切换，请稍后再试',
     );
   });
+
+  it('maps hibernated browser sessions to fresh-run guidance', () => {
+    expect(browserNavExceptionMessage(new Error('browser not allocated: idle-timeout hibernated'), 'goto')).toBe(
+      '当前浏览器已休眠，重新执行任务后再打开链接',
+    );
+    expect(browserNavExceptionMessage(new Error('browser not allocated: idle-timeout hibernated'), 'reload')).toBe(
+      '当前浏览器已休眠，请重新执行任务',
+    );
+  });
 });

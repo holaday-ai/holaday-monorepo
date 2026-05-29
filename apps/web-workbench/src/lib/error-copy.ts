@@ -95,6 +95,8 @@ export function humaniseTaskError(raw: string | null | undefined): string {
       return '浏览器连接中断，请重新执行任务。';
     case 'page_switch':
       return '页面正在切换，本次浏览器步骤未能稳定完成。请重试。';
+    case 'hibernated':
+      return '浏览器已休眠，重新执行任务会打开新的浏览器。';
     case 'timeout':
       return '浏览器响应超时，页面可能仍在加载。请稍后重试。';
     default:
