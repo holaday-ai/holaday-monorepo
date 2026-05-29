@@ -117,23 +117,27 @@ describe('BrowserPanel state helpers', () => {
   it('keeps the released-browser card about the browser, not task outcome', () => {
     expect(browserReleasedCardCopy()).toEqual({
       title: '浏览器已释放',
-      detail: '新任务会自动打开新的浏览器。',
-      checkLabel: '检查连接',
+      detail: '当前没有正在运行的浏览器。新任务会自动打开新的浏览器。',
+      checkLabel: '检查状态',
       checkingLabel: '检查中',
     });
   });
 
   it('explains wake-browser results without promising a stale browser', () => {
     expect(browserWakeFeedback('ready')).toEqual({
-      message: '浏览器连接已恢复',
+      message: '已有任务浏览器可连接，正在刷新画面',
+      tone: 'info',
+    });
+    expect(browserWakeFeedback('spawning')).toEqual({
+      message: '浏览器正在启动，实时画面会自动连接',
       tone: 'info',
     });
     expect(browserWakeFeedback('unavailable')).toEqual({
-      message: '当前没有正在运行的浏览器。新建或重新执行任务会自动打开浏览器。',
+      message: '当前没有正在运行的浏览器。新任务会自动打开浏览器。',
       tone: 'info',
     });
     expect(browserWakeFeedback('weird')).toEqual({
-      message: '浏览器连接检查失败，请稍后重试',
+      message: '浏览器状态检查失败，请稍后重试',
       tone: 'error',
     });
   });

@@ -599,10 +599,14 @@ export function BrowserPanel({
         (res as { status?: unknown } | null)?.status?.toString(),
       );
       if (res.status === 'ready') {
-        // Reset counter; VncViewport's auto-reconnect timer will fire
-        // and the new connection should land on the freshly-allocated
-        // instance.
+        // Reset counter and remount the screencast viewport. In the
+        // per-task browser model this is a status check, not a wake-up;
+        // when a task-owned browser does exist, a remount is the
+        // clearest way to refresh the stale viewer.
         setVncAttemptFails(0);
+        setShowReconnect(false);
+        setVncStatus('idle');
+        setReconnectEpoch((n) => n + 1);
       }
       toast.show(feedback.message, feedback.tone);
     } catch {
