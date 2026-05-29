@@ -149,17 +149,18 @@ function BatchList(): JSX.Element {
             <Button
               type="button"
               variant="outline"
-              size="sm"
-              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+              size="icon"
+              className="h-8 w-8 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
               onClick={() => void reload()}
               disabled={loading}
+              aria-label={loading ? '正在刷新批量任务' : '刷新批量任务'}
+              title={loading ? '刷新中' : '刷新'}
             >
               {loading ? (
-                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
               ) : (
-                <RefreshCw className="mr-1 h-3.5 w-3.5" aria-hidden />
+                <RefreshCw className="h-3.5 w-3.5" aria-hidden />
               )}
-              刷新
             </Button>
             <Button type="button" onClick={() => setDialogOpen(true)} size="sm">
               <Plus className="mr-1 h-4 w-4" aria-hidden />
@@ -391,17 +392,18 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
               <Button
                 type="button"
                 variant="outline"
-                size="sm"
-                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                size="icon"
+                className="h-8 w-8 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
                 onClick={() => void reload()}
                 disabled={loading}
+                aria-label={loading ? '正在刷新批量详情' : '刷新批量详情'}
+                title={loading ? '刷新中' : '刷新'}
               >
                 {loading ? (
-                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
                 ) : (
-                  <RefreshCw className="mr-1 h-3.5 w-3.5" aria-hidden />
+                  <RefreshCw className="h-3.5 w-3.5" aria-hidden />
                 )}
-                刷新
               </Button>
             </div>
           }
@@ -467,17 +469,18 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
             <Button
               type="button"
               variant="outline"
-              size="sm"
-              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+              size="icon"
+              className="h-8 w-8 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
               onClick={() => void reload()}
               disabled={loading}
+              aria-label={loading ? '正在刷新批量详情' : '刷新批量详情'}
+              title={loading ? '刷新中' : '刷新'}
             >
               {loading ? (
-                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
               ) : (
-                <RefreshCw className="mr-1 h-3.5 w-3.5" aria-hidden />
+                <RefreshCw className="h-3.5 w-3.5" aria-hidden />
               )}
-              刷新
             </Button>
             {canCancel && (
               <Button

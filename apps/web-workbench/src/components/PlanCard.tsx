@@ -106,7 +106,6 @@ export function PlanCard({
           ) : (
             <ChevronRight className="h-3 w-3" />
           )}
-          {expanded ? '收起' : '展开'}
         </span>
       </button>
       {progress.total > 0 && (

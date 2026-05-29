@@ -74,17 +74,16 @@ export function SearchResultCard({ sources, initialVisible = 6 }: Props): JSX.El
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
-          className="mt-1.5 inline-flex items-center gap-1.5 self-start rounded-[8px] px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/15 dark:hover:bg-white/5"
+          className="mt-1.5 inline-flex h-7 items-center gap-1.5 self-start rounded-[8px] px-2 text-xs text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/15 dark:hover:bg-white/5"
+          aria-label={expanded ? '收起来源' : `展开 ${hidden} 条更多来源`}
+          title={expanded ? '收起来源' : `展开 ${hidden} 条更多来源`}
         >
           {expanded ? (
-            <>
-              <ChevronUp className="h-3 w-3" />
-              收起来源
-            </>
+            <ChevronUp className="h-3.5 w-3.5" aria-hidden />
           ) : (
             <>
-              <ChevronDown className="h-3 w-3" />
-              展开 {hidden} 条更多来源
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+              <span className="font-medium tabular-nums">+{hidden}</span>
             </>
           )}
         </button>
