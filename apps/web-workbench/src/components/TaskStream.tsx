@@ -155,7 +155,6 @@ export function TaskStream({
   const webSearch = useTaskStore((s) => s.webSearchByTask[task.taskId]);
   const thinkingEvent = useTaskStore((s) => s.thinkingByTask[task.taskId]);
   const serverSuggestions = useTaskStore((s) => s.suggestionsByTask[task.taskId]);
-  const setBrowserInteractive = useTaskStore((s) => s.setBrowserInteractive);
   const scrollAnchorRef = React.useRef<HTMLDivElement>(null);
 
   // Auto-scroll only follows the live tail when:
@@ -215,30 +214,6 @@ export function TaskStream({
         terminal={terminal}
         screencastUrl={screencast?.url ?? null}
         onSuggestionPick={onPickSuggestion}
-        onContinueInBrowser={() => {
-          // Two things on "continue in browser":
-          //   1. Force interactive mode on so the VNC canvas accepts
-          //      clicks / keyboard without a second toggle press.
-          //   2. Flash a focus ring on the VNC container so the
-          //      user's eye lands on the right area.
-          //
-          // We used to also call scrollIntoView on the Panel, but on
-          // some desktop layouts that scrolled the whole app shell
-          // horizontally and visibly shifted the sidebar — a regression
-          // BOSS flagged in Round 2 review. The Panel is already on
-          // screen at desktop widths; no scroll needed.
-          setBrowserInteractive(true);
-          setTimeout(() => {
-            if (typeof document === 'undefined') return;
-            const panel = document.querySelector<HTMLElement>(
-              '.vnc-viewport-host',
-            );
-            if (panel) {
-              panel.setAttribute('data-flash', '1');
-              window.setTimeout(() => panel.removeAttribute('data-flash'), 1500);
-            }
-          }, 50);
-        }}
         captchaWait={captchaWait}
         degrade={degrade}
         executorFallback={executorFallback}
@@ -290,7 +265,6 @@ function AgentBlock({
   thinking,
   terminal,
   screencastUrl,
-  onContinueInBrowser,
   onSuggestionPick,
   captchaWait,
   degrade,
@@ -305,7 +279,6 @@ function AgentBlock({
   thinking: string | null;
   terminal: boolean;
   screencastUrl: string | null;
-  onContinueInBrowser(): void;
   onSuggestionPick?: (intent: string) => void;
   captchaWait: UiCaptchaWait | undefined;
   degrade: UiDegradeEvent | undefined;
@@ -525,20 +498,6 @@ function AgentBlock({
             // Phase 5a — pass the original intent so the 设为定时
             // button can pre-fill the ScheduledTaskDialog.
             intent={task.intent}
-            onContinueInBrowser={
-              // 继续接管 only for live browser tasks. ANY terminal
-              // status (completed / partial_success / failed /
-              // cancelled) means the
-              // Brave session is gone — the button would 404 the
-              // user. Non-browser lanes never had a Brave to begin
-              // with.
-              (() => {
-                const isTerminal = isTerminalStatus(task.status) || hasPausedTerminalResult(task);
-                if (isTerminal) return undefined;
-                if (task.executionMode !== 'browser') return undefined;
-                return onContinueInBrowser;
-              })()
-            }
             onSuggestionPick={onSuggestionPick}
             serverSuggestions={serverSuggestions}
             // Phase 4 R1 — pass through metadata.attachments +
@@ -1718,7 +1677,6 @@ function TerminalSummary({
   currentUrl,
   taskId,
   intent,
-  onContinueInBrowser,
   onSuggestionPick,
   serverSuggestions,
   attachments,
@@ -1736,7 +1694,6 @@ function TerminalSummary({
    * exact thing the user just ran.
    */
   intent?: string;
-  onContinueInBrowser?: () => void;
   onSuggestionPick?: (intent: string) => void;
   /**
    * O5 — backend-generated suggestions arriving via
@@ -2196,51 +2153,30 @@ function TerminalSummary({
           ))}
         </div>
       )}
-      {(hasRealUrl || onContinueInBrowser) && (
+      {hasRealUrl && (
         <div
           className={cn(
-            'mt-4 grid gap-2 border-t pt-3 text-xs sm:grid-cols-2',
+            'mt-4 border-t pt-3 text-xs',
             tone.divider,
           )}
         >
-          {onContinueInBrowser && (
-            <button
-              type="button"
-              onClick={onContinueInBrowser}
-              className="group flex min-h-12 items-start gap-2 rounded-[8px] border border-[#EA1F59]/25 bg-white px-3 py-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors hover:border-[#EA1F59]/40 hover:bg-[#EA1F59]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 dark:border-[#EA1F59]/35 dark:bg-white/5 dark:hover:bg-[#EA1F59]/10"
-            >
-              <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-[#EA1F59]/10 text-[#EA1F59] transition-colors group-hover:bg-[#EA1F59]/15">
-                <MousePointerClick className="h-3.5 w-3.5" />
+          <button
+            type="button"
+            onClick={() => setPendingLink(safeCurrentUrl)}
+            className="group flex min-h-12 min-w-0 items-start gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+          >
+            <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-[#EFEFEF]/70 text-[#595757] transition-colors group-hover:bg-white dark:bg-white/10 dark:text-foreground/80">
+              <ExternalLink className="h-3.5 w-3.5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-medium text-foreground/85">
+                打开最终页面
               </span>
-              <span className="min-w-0 flex-1">
-                <span className="block font-medium text-[#EA1F59]">
-                  继续接管
-                </span>
-                <span className="mt-0.5 block leading-5 text-muted-foreground">
-                  回到当前浏览器会话继续操作
-                </span>
+              <span className="mt-0.5 block truncate leading-5 text-muted-foreground">
+                {safeCurrentUrl}
               </span>
-            </button>
-          )}
-          {hasRealUrl && (
-            <button
-              type="button"
-              onClick={() => setPendingLink(safeCurrentUrl)}
-              className="group flex min-h-12 min-w-0 items-start gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
-            >
-              <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-[#EFEFEF]/70 text-[#595757] transition-colors group-hover:bg-white dark:bg-white/10 dark:text-foreground/80">
-                <ExternalLink className="h-3.5 w-3.5" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block font-medium text-foreground/85">
-                  打开最终页面
-                </span>
-                <span className="mt-0.5 block truncate leading-5 text-muted-foreground">
-                  {safeCurrentUrl}
-                </span>
-              </span>
-            </button>
-          )}
+            </span>
+          </button>
         </div>
       )}
       <ExternalLinkConfirm
