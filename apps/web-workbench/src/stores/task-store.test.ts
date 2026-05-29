@@ -391,7 +391,6 @@ describe('selectTask detail hydration', () => {
       ],
       selectedTaskId: 'tsk_old',
       composerMode: 'task',
-      browserLiveRequested: true,
       browserInteractive: true,
     });
 
@@ -400,7 +399,6 @@ describe('selectTask detail hydration', () => {
     expect(useTaskStore.getState()).toMatchObject({
       selectedTaskId: 'tsk_new',
       composerMode: 'task',
-      browserLiveRequested: false,
       browserInteractive: false,
     });
   });
@@ -409,7 +407,6 @@ describe('selectTask detail hydration', () => {
     useTaskStore.setState({
       selectedTaskId: 'tsk_old',
       composerMode: 'task',
-      browserLiveRequested: true,
       browserInteractive: true,
     });
 
@@ -418,7 +415,6 @@ describe('selectTask detail hydration', () => {
     expect(useTaskStore.getState()).toMatchObject({
       selectedTaskId: null,
       composerMode: 'new',
-      browserLiveRequested: false,
       browserInteractive: false,
     });
   });
@@ -433,7 +429,6 @@ describe('selectTask detail hydration', () => {
     useTaskStore.setState({
       selectedTaskId: 'tsk_old',
       composerMode: 'task',
-      browserLiveRequested: true,
       browserInteractive: true,
     });
 
@@ -444,7 +439,6 @@ describe('selectTask detail hydration', () => {
     expect(useTaskStore.getState()).toMatchObject({
       selectedTaskId: 'tsk_new',
       composerMode: 'task',
-      browserLiveRequested: false,
       browserInteractive: false,
     });
   });
@@ -681,7 +675,6 @@ describe('deleteTask', () => {
       tasks: [task({ taskId: 'tsk_active', status: 'executing' })],
       selectedTaskId: 'tsk_active',
       composerMode: 'task',
-      browserLiveRequested: true,
       browserInteractive: true,
       stepsByTask: {
         tsk_active: [{ tickIndex: 1, status: 'running', startedAt: 1 }],
@@ -738,7 +731,6 @@ describe('deleteTask', () => {
     const state = useTaskStore.getState();
     expect(state.selectedTaskId).toBeNull();
     expect(state.composerMode).toBe('new');
-    expect(state.browserLiveRequested).toBe(false);
     expect(state.browserInteractive).toBe(false);
     expect(state.stepsByTask.tsk_active).toBeUndefined();
     expect(state.screencastByTask.tsk_active).toBeUndefined();

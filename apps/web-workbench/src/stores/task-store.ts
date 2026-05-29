@@ -41,20 +41,6 @@ export interface TaskStore {
    * `?task=` param to drop while `'new'`.
    */
   composerMode: 'new' | 'task';
-  /**
-   * `true` when the user explicitly clicked the sidebar 浏览器 entry
-   * (or other "show me the browser" surfaces) while no task is
-   * active. The BrowserPanel idle gate (`hasActiveTask`) blocks the
-   * URL build / token fetch by default, but this flag opts the panel
-   * back into the user-scoped pool stream — `/vnc-ws/<userId>` /
-   * `/screencast-ws/<userId>` — so the requester sees their Brave.
-   *
-   * Cleared on any path that re-binds the browser context to a task
-   * (selectTask, enterNewTaskMode, createTask via the same set), so
-   * the next selection / new-task / submit cycles the stream cleanly
-   * back to task-scoped or off.
-   */
-  browserLiveRequested: boolean;
   loading: boolean;
   error: string | null;
   /** Per-task step streams, keyed by taskId. */
@@ -182,13 +168,6 @@ export interface TaskStore {
    */
   selectTask(taskId: string, source?: 'url' | 'ui'): void;
   enterNewTaskMode(): void;
-  /**
-   * Opt the BrowserPanel out of its idle gate so the panel connects
-   * to the user-scoped pool stream even with no active task.
-   * Triggered from the sidebar 浏览器 entry. Cleared by selectTask /
-   * enterNewTaskMode below.
-   */
-  requestBrowserLive(): void;
   refreshTaskList(): Promise<void>;
   /** Legacy alias — routes through selectTask / enterNewTaskMode. */
   selectAndHydrateTask(taskId: string | null): void;
@@ -680,7 +659,6 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   tasks: [],
   selectedTaskId: null,
   composerMode: 'new',
-  browserLiveRequested: false,
   loading: false,
   error: null,
   // Phase 24 RC follow-up — pagination state.
@@ -730,14 +708,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     // entries) from running against the now-different selectedTaskId
     // and re-pulling the previous task's payload into the new view.
     // composerMode flips back to 'task' on any selection.
-    // Selecting a task re-binds the browser context to that task —
-    // browserLiveRequested clears so the panel switches off the
-    // user-scoped pool stream and onto the task-scoped path.
+    // Selecting a task also drops takeover mode so the browser
+    // context starts view-only for the newly selected task.
     abortInFlightHydrate();
     set({
       selectedTaskId: taskId,
       composerMode: 'task',
-      browserLiveRequested: false,
       browserInteractive: false,
     });
     void hydrateDetail(taskId);
@@ -763,7 +739,6 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     set({
       selectedTaskId: null,
       composerMode: 'new',
-      browserLiveRequested: false,
       browserInteractive: false,
     });
     // Cancel any in-flight hydrate so its post-set callback doesn't
@@ -773,10 +748,6 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     // the deleted outbound effect used to do this. Inbound effect
     // bails on composerMode==='new' so no loop.
     storeNavigate?.(null);
-  },
-
-  requestBrowserLive() {
-    set({ browserLiveRequested: true });
   },
 
   // Legacy alias retained for code that hasn't migrated yet.
@@ -955,7 +926,6 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           tasks: nextTasks,
           selectedTaskId: nextSelected,
           composerMode: nextComposerMode,
-          browserLiveRequested: wasActive ? false : prev.browserLiveRequested,
           browserInteractive: wasActive ? false : prev.browserInteractive,
           stepsByTask: omitRuntimeKey(prev.stepsByTask, taskId),
           screencastByTask: omitRuntimeKey(prev.screencastByTask, taskId),
@@ -1123,14 +1093,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       // up with selectedTaskId=res.taskId but composerMode still
       // pinned to 'new' — leaving the store in an inconsistent state
       // that any subsequent enterNewTaskMode() would clear.
-      // browserLiveRequested clears so the BrowserPanel switches from
-      // the user-scoped fallback (if it was on) onto the new task's
-      // CDP / VNC stream.
+      // browserInteractive clears so the new task starts view-only
+      // unless it explicitly needs user action.
       set((prev) => ({
         tasks: [optimistic, ...prev.tasks.filter((t) => t.taskId !== res.taskId)],
         selectedTaskId: res.taskId,
         composerMode: 'task' as const,
-        browserLiveRequested: false,
         browserInteractive: false,
       }));
       // Pin URL to the new task — same direct-navigate path as
@@ -1589,7 +1557,6 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     set({
       tasks: [],
       selectedTaskId: null,
-      browserLiveRequested: false,
       loading: false,
       error: null,
       tasksCursor: null,

@@ -431,16 +431,9 @@ export function BrowserPanel({
   // and bounce through the noVNC retry/error loop. Compute taskTerminal
   // up front so the URL memo can short-circuit cleanly.
   const taskTerminal = taskStatus ? isTerminalStatus(taskStatus) : false;
-  // Idle gate. Two paths can flip it on:
-  //   1. There's an active task — the panel shows that task's
-  //      screencast / VNC.
-  //   2. The user explicitly clicked the sidebar 浏览器 entry while
-  //      no task was active. `browserLiveRequested` opts the panel
-  //      into the per-user pool stream so the user sees their Brave.
-  // Selecting a task or starting a new one clears the request flag
-  // (handled in the store), so the stream binds back to task-scoped
-  // automatically once the user moves on.
-  const browserLiveRequested = useTaskStore((s) => s.browserLiveRequested);
+  // Idle gate. The browser panel only connects when a selected task
+  // actually owns a browser. The old no-active-task user-pool stream
+  // was removed when HOLA DAY moved to per-task browsers.
   const hasActiveTask = Boolean(activeTaskId);
   // RC follow-up audit fix — generate / scrape tasks have NO pool
   // slot (no Brave allocated), so /screencast-ws/<taskId> 409s in a
@@ -470,7 +463,7 @@ export function BrowserPanel({
     knownExecutionMode != null
       ? knownExecutionMode === 'browser'
       : hasActiveTask && !isNonPoolTask;
-  const shouldConnect = isBrowserTask || browserLiveRequested;
+  const shouldConnect = isBrowserTask;
   // Item 6 — short-lived stream token for screencast / VNC WS auth.
   // Refreshes every 45s; the WS URL gets rebuilt when token rotates,
   // which forces a benign reconnect (the connection itself doesn't
@@ -1783,7 +1776,7 @@ function EmptyBrowserState({
    * instead of "等待第一帧…". The latter implies a Brave is about
    * to show a frame, but for a non-browser task no frame will ever
    * arrive. Default true preserves prior behaviour for callers
-   * without active-task context (e.g. browserLiveRequested mode).
+   * without active-task context.
    */
   isBrowserTask?: boolean;
   /**
