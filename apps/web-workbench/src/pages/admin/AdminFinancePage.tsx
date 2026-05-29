@@ -249,7 +249,7 @@ function RevenueTab(): JSX.Element {
         setMonth(m);
         setFunnel(f);
       })
-      .catch((e) => !cancelled && setErr(e instanceof Error ? e.message : String(e)));
+      .catch((err) => !cancelled && setErr(pageErrorMessage(err)));
     return () => {
       cancelled = true;
     };
@@ -449,7 +449,7 @@ function CostTab(): JSX.Element {
         setByDay(d);
         setTopCostly(t);
       })
-      .catch((e) => !cancelled && setErr(e instanceof Error ? e.message : String(e)));
+      .catch((err) => !cancelled && setErr(pageErrorMessage(err)));
     return () => {
       cancelled = true;
     };
