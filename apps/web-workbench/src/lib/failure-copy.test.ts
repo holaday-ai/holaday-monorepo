@@ -51,4 +51,17 @@ describe('classifyFriendlyFailure', () => {
       nextStep: '重新执行时尽量从稳定页面开始。',
     });
   });
+
+  it('classifies SSL and connection browser failures with actionable recovery', () => {
+    expect(classifyFriendlyFailure('net::ERR_CERT_DATE_INVALID')).toEqual({
+      title: '网站证书异常',
+      subtitle: '这个网站无法安全连接。请确认网址是否正确，或换一个可信来源。',
+      nextStep: '确认网址安全后重新执行，或换一个站点。',
+    });
+    expect(classifyFriendlyFailure('net::ERR_CONNECTION_REFUSED')).toEqual({
+      title: '无法连接到这个网站',
+      subtitle: '服务器拒绝连接或网络不可达。请稍后重试，或换一个站点。',
+      nextStep: '稍后重新执行，或换一个能直接访问的网址。',
+    });
+  });
 });

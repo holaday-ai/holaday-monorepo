@@ -11,6 +11,8 @@
  * dropping unfamiliar errors on the floor.
  */
 
+import { classifyBrowserErrorKind } from './browser-error-kind';
+
 interface Rule {
   /** Regex tested against the raw error string. */
   match: RegExp;
@@ -77,6 +79,27 @@ export function humaniseTaskError(raw: string | null | undefined): string {
   if (!raw) return '';
   const trimmed = raw.trim();
   if (!trimmed) return '';
+  const browserKind = classifyBrowserErrorKind(trimmed);
+  switch (browserKind) {
+    case 'extension_timeout':
+      return '浏览器响应超时，页面可能仍在加载。请稍后重试。';
+    case 'extension_missing':
+      return '浏览器扩展未连接，请打开 HOLA DAY 扩展后重试。';
+    case 'dns':
+      return '无法访问该网址，请检查网址是否拼写正确。';
+    case 'ssl':
+      return '该网站证书有问题，无法安全连接。请确认网址是否正确或换一个站点。';
+    case 'connection':
+      return '无法连接到该站点，请稍后重试或换一个站点。';
+    case 'transport_closed':
+      return '浏览器连接中断，请重新执行任务。';
+    case 'page_switch':
+      return '页面正在切换，本次浏览器步骤未能稳定完成。请重试。';
+    case 'timeout':
+      return '浏览器响应超时，页面可能仍在加载。请稍后重试。';
+    default:
+      break;
+  }
   for (const rule of RULES) {
     const m = trimmed.match(rule.match);
     if (m) return typeof rule.to === 'function' ? rule.to(m) : rule.to;

@@ -89,6 +89,27 @@ describe('step-card-state', () => {
     ).toBe('页面正在切换，本次步骤未能稳定完成。可以重试当前任务。');
   });
 
+  it('explains raw Chromium navigation failures per step', () => {
+    expect(
+      stepFailureMessage({
+        actionKind: 'navigate',
+        message: 'net::ERR_NAME_NOT_RESOLVED at https://nope.example',
+      }),
+    ).toBe('无法访问该网址。请检查网址是否正确，或换一个能直接访问的页面。');
+    expect(
+      stepFailureMessage({
+        actionKind: 'navigate',
+        message: 'net::ERR_CERT_AUTHORITY_INVALID',
+      }),
+    ).toBe('网站证书异常，浏览器无法安全连接。请确认网址是否正确。');
+    expect(
+      stepFailureMessage({
+        actionKind: 'navigate',
+        message: 'net::ERR_CONNECTION_RESET',
+      }),
+    ).toBe('无法连接到该站点。请稍后重试，或换一个能直接访问的网址。');
+  });
+
   it('keeps unknown step failures visible', () => {
     expect(
       stepFailureMessage({

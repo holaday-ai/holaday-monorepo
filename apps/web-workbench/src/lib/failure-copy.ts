@@ -1,3 +1,5 @@
+import { classifyBrowserErrorKind } from './browser-error-kind';
+
 export interface FriendlyFailure {
   title: string;
   subtitle: string;
@@ -12,6 +14,35 @@ export interface FriendlyFailure {
  */
 export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
   const haystack = (errorText ?? '').toLowerCase();
+  const browserKind = classifyBrowserErrorKind(errorText);
+  if (browserKind === 'dns') {
+    return {
+      title: '无法打开这个网站',
+      subtitle: '请检查网址是否正确，或换一个能直接访问的页面。',
+      nextStep: '确认网址可以直接打开后重新执行。',
+    };
+  }
+  if (browserKind === 'ssl') {
+    return {
+      title: '网站证书异常',
+      subtitle: '这个网站无法安全连接。请确认网址是否正确，或换一个可信来源。',
+      nextStep: '确认网址安全后重新执行，或换一个站点。',
+    };
+  }
+  if (browserKind === 'connection') {
+    return {
+      title: '无法连接到这个网站',
+      subtitle: '服务器拒绝连接或网络不可达。请稍后重试，或换一个站点。',
+      nextStep: '稍后重新执行，或换一个能直接访问的网址。',
+    };
+  }
+  if (browserKind === 'page_switch') {
+    return {
+      title: '页面正在切换',
+      subtitle: '网站跳转太快导致本次步骤失效，请重试当前任务。',
+      nextStep: '重新执行时尽量从稳定页面开始。',
+    };
+  }
   if (
     /dns|enotfound|getaddrinfo|net::err_name|net::err_address|无法访问|网络错误|网络异常|解析失败/.test(
       haystack,

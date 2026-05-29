@@ -1,3 +1,5 @@
+import { classifyBrowserErrorKind } from './browser-error-kind';
+
 export type BrowserNavDirection = 'back' | 'forward' | 'reload' | 'goto';
 
 export type BrowserNavFailureReason =
@@ -40,11 +42,22 @@ export function browserNavExceptionMessage(
 ): string {
   const raw = error instanceof Error ? error.message : String(error ?? '');
   const text = raw.toLowerCase();
-  if (/timeout|timed out|超时/.test(text)) {
-    return browserNavFailureMessage('nav_failed', direction) ?? '浏览器操作超时，请稍后重试';
-  }
-  if (/websocket|socket|closed|disconnect|cdp|target closed|连接.*中断/.test(text)) {
-    return '浏览器连接中断，请重新连接或重新执行任务';
+  switch (classifyBrowserErrorKind(text)) {
+    case 'dns':
+      return '无法访问该网址，请检查是否拼写正确';
+    case 'ssl':
+      return '该网站证书有问题，无法安全连接';
+    case 'connection':
+      return '无法连接到该站点，请稍后重试或换一个站点';
+    case 'page_switch':
+      return '页面正在切换，请稍后再试';
+    case 'timeout':
+    case 'extension_timeout':
+      return browserNavFailureMessage('nav_failed', direction) ?? '浏览器操作超时，请稍后重试';
+    case 'transport_closed':
+      return '浏览器连接中断，请重新连接或重新执行任务';
+    default:
+      break;
   }
   return `${browserNavActionLabel(direction)}失败，请稍后重试`;
 }
