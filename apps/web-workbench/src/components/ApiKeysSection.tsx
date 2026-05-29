@@ -12,6 +12,7 @@ import {
 } from '@/lib/api-key-settings-state';
 import { copyTextToClipboard } from '@/lib/copy-text';
 import { trpc } from '@/lib/trpc';
+import { webhookCurlExample } from '@/lib/webhook-docs-copy';
 import { Section } from '@/pages/PageShell';
 
 /**
@@ -317,9 +318,17 @@ function WebhookDocs(): JSX.Element {
   // keeps strict-mode bundlers happy.
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const webhookUrl = `${origin}/api/webhooks/tasks`;
+  const curlExample = webhookCurlExample(webhookUrl);
   const copyUrl = async (): Promise<void> => {
     if (await copyTextToClipboard(webhookUrl)) {
       toast.show('已复制 Webhook URL');
+    } else {
+      toast.show('复制失败', 'error');
+    }
+  };
+  const copyCurl = async (): Promise<void> => {
+    if (await copyTextToClipboard(curlExample)) {
+      toast.show('已复制 curl 示例');
     } else {
       toast.show('复制失败', 'error');
     }
@@ -379,13 +388,20 @@ function WebhookDocs(): JSX.Element {
 
       {/* curl example with Idempotency-Key. */}
       <div className="rounded-md border border-dashed border-border bg-card/40 p-3 text-[11px] text-muted-foreground">
-        <div className="text-xs font-medium text-foreground/80">curl 示例</div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs font-medium text-foreground/80">curl 示例</div>
+          <button
+            type="button"
+            onClick={() => void copyCurl()}
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            aria-label="复制 curl 示例"
+            title="复制 curl"
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </button>
+        </div>
         <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all rounded bg-background p-2 font-mono text-[10px]">
-{`curl -X POST ${webhookUrl} \\
-  -H "Authorization: Bearer hd_live_xxxxxxxxxxxxxxxxxxxxxxxx" \\
-  -H "Idempotency-Key: my-unique-key-001" \\
-  -H "Content-Type: application/json" \\
-  -d '{"prompt":"帮我查一下今天的科技新闻"}'`}
+          {curlExample}
         </pre>
         <p className="mt-2">
           带 <span className="font-mono">Idempotency-Key</span> 的重复请求 24h 内会返回相同
