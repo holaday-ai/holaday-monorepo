@@ -5,6 +5,7 @@ export type BrowserErrorKind =
   | 'connection'
   | 'extension_timeout'
   | 'extension_missing'
+  | 'extension_disconnected'
   | 'transport_closed'
   | 'page_switch'
   | 'hibernated'
@@ -23,6 +24,13 @@ export function classifyBrowserErrorKind(
   }
   if (/扩展.*未连接|no_extension|extension.*not connected/.test(text)) {
     return 'extension_missing';
+  }
+  if (
+    /浏览器扩展连接已断开|扩展.*断开|extension.*disconnect|extension.*closed|socket_closed/.test(
+      text,
+    )
+  ) {
+    return 'extension_disconnected';
   }
   if (/browser not allocated|no browser allocated|409|hibernat|idle-timeout|休眠/.test(text)) {
     return 'hibernated';

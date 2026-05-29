@@ -36,6 +36,14 @@ describe('classifyFriendlyFailure', () => {
     });
   });
 
+  it('explains extension disconnects without making them look like generic timeouts', () => {
+    expect(classifyFriendlyFailure('浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试')).toEqual({
+      title: '浏览器扩展已断开',
+      subtitle: '扩展连接在执行中断开。请重新打开 HOLA DAY 扩展后重试。',
+      nextStep: '确认扩展在线，再重新执行当前任务。',
+    });
+  });
+
   it('classifies raw browser transport closures as disconnected sessions', () => {
     expect(classifyFriendlyFailure('Protocol error (Page.navigate): Target closed')).toEqual({
       title: '浏览器连接中断',

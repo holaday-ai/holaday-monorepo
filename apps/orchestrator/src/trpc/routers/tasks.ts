@@ -6277,6 +6277,9 @@ function friendlyFailureReason(
   if (/captcha|recaptcha|人机验证|滑块|verify/.test(r)) {
     return '遇到验证码。建议：在右侧 Panel 中手动完成验证，登录态会保存，下次无需重复。';
   }
+  if (/socket_closed|浏览器扩展连接已断开|extension.*disconnect|extension.*closed/.test(r)) {
+    return '浏览器扩展连接已断开。请重新打开 HOLA DAY 扩展后重试。';
+  }
   if (/login|signin|sign ?in|passport|oauth|需要登录|登录墙/.test(r)) {
     return '该网站需要登录才能继续。建议：在右侧 Panel 中手动登录一次，登录态会保存，然后重试任务。';
   }

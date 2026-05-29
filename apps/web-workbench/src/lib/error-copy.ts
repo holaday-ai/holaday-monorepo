@@ -50,6 +50,10 @@ const RULES: Rule[] = [
     to: '浏览器扩展未连接，请打开 HOLA DAY 扩展后重试。',
   },
   {
+    match: /浏览器扩展连接已断开|扩展.*断开|extension.*disconnect|extension.*closed|socket_closed/i,
+    to: '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试。',
+  },
+  {
     match: /扩展工具调用超时|浏览器扩展响应超时|extension tool.*timeout|browser tool.*timeout|navigation.*timeout|navigate.*timeout/i,
     to: '浏览器响应超时，页面可能仍在加载。请稍后重试。',
   },
@@ -85,6 +89,8 @@ export function humaniseTaskError(raw: string | null | undefined): string {
       return '浏览器响应超时，页面可能仍在加载。请稍后重试。';
     case 'extension_missing':
       return '浏览器扩展未连接，请打开 HOLA DAY 扩展后重试。';
+    case 'extension_disconnected':
+      return '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试。';
     case 'dns':
       return '无法访问该网址，请检查网址是否拼写正确。';
     case 'ssl':

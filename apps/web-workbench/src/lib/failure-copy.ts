@@ -79,6 +79,13 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
       nextStep: '打开 HOLA DAY 扩展，再重新执行任务。',
     };
   }
+  if (browserKind === 'extension_disconnected') {
+    return {
+      title: '浏览器扩展已断开',
+      subtitle: '扩展连接在执行中断开。请重新打开 HOLA DAY 扩展后重试。',
+      nextStep: '确认扩展在线，再重新执行当前任务。',
+    };
+  }
   if (
     /protocol error|target closed|session closed|socket_closed|websocket.*closed|browser.*disconnected|cdp.*closed|连接.*中断/.test(
       haystack,

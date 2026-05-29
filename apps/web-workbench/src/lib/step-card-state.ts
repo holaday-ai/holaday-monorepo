@@ -38,6 +38,8 @@ export function stepFailureMessage(step: Pick<UiStep, 'actionKind' | 'message'>)
       return '浏览器响应超时，可能是页面仍在加载或扩展连接短暂中断。可以重试当前任务。';
     case 'extension_missing':
       return '浏览器扩展未连接。请打开 HOLA DAY 扩展后重试。';
+    case 'extension_disconnected':
+      return '浏览器扩展连接已断开。请重新打开 HOLA DAY 扩展后重试。';
     case 'hibernated':
       return '浏览器会话已休眠。重新执行任务时会拉起新的浏览器。';
     case 'dns':

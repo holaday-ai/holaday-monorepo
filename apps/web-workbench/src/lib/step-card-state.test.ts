@@ -71,6 +71,15 @@ describe('step-card-state', () => {
     ).toBe('浏览器扩展未连接。请打开 HOLA DAY 扩展后重试。');
   });
 
+  it('explains disconnected extension clients separately from generic browser closures', () => {
+    expect(
+      stepFailureMessage({
+        actionKind: 'navigate',
+        message: 'socket_closed: 浏览器扩展连接已断开',
+      }),
+    ).toBe('浏览器扩展连接已断开。请重新打开 HOLA DAY 扩展后重试。');
+  });
+
   it('explains browser transport closures without exposing protocol text', () => {
     expect(
       stepFailureMessage({

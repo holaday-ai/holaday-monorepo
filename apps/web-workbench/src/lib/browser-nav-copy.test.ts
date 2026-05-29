@@ -52,6 +52,9 @@ describe('browserNavFailureMessage', () => {
     expect(browserNavExceptionMessage(new Error('CDP session closed'), 'reload')).toBe(
       '浏览器连接中断，请重新连接或重新执行任务',
     );
+    expect(browserNavExceptionMessage(new Error('socket_closed: 浏览器扩展连接已断开'), 'reload')).toBe(
+      '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试',
+    );
     expect(browserNavExceptionMessage(new Error('Unexpected protocol error'), 'back')).toBe(
       '后退失败，请稍后重试',
     );

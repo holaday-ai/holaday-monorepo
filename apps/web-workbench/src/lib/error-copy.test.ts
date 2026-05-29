@@ -32,6 +32,12 @@ describe('error-copy', () => {
     );
   });
 
+  it('maps extension disconnects to reconnect guidance', () => {
+    expect(humaniseTaskError('socket_closed: 浏览器扩展连接已断开')).toBe(
+      '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试。',
+    );
+  });
+
   it('maps raw Chromium navigation failures before the generic fallback', () => {
     expect(humaniseTaskError('net::ERR_NAME_NOT_RESOLVED at https://nope.example')).toBe(
       '无法访问该网址，请检查网址是否拼写正确。',

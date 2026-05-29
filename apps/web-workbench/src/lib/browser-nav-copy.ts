@@ -54,6 +54,8 @@ export function browserNavExceptionMessage(
     case 'timeout':
     case 'extension_timeout':
       return browserNavFailureMessage('nav_failed', direction) ?? '浏览器操作超时，请稍后重试';
+    case 'extension_disconnected':
+      return '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试';
     case 'transport_closed':
       return '浏览器连接中断，请重新连接或重新执行任务';
     case 'hibernated':
