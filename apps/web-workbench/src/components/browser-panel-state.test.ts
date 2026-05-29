@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   browserLiveOverlayCopy,
+  browserReleasedCardCopy,
   browserWakeFeedback,
   browserPanelDotLabel,
   browserLiveStatusLabel,
@@ -111,6 +112,15 @@ describe('BrowserPanel state helpers', () => {
     expect(terminalBrowserTakeoverMessage('failed')).toBe(
       '任务未完成，实时浏览器已关闭。重新执行任务可打开新浏览器。',
     );
+  });
+
+  it('keeps the released-browser card about the browser, not task outcome', () => {
+    expect(browserReleasedCardCopy()).toEqual({
+      title: '浏览器已释放',
+      detail: '新任务会自动打开新的浏览器。',
+      checkLabel: '检查连接',
+      checkingLabel: '检查中',
+    });
   });
 
   it('explains wake-browser results without promising a stale browser', () => {

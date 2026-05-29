@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import {
   browserLiveOverlayCopy,
   browserPanelDotLabel,
+  browserReleasedCardCopy,
   browserWakeFeedback,
   shouldShowBrowserHeader,
   terminalBrowserTakeoverMessage,
@@ -1713,6 +1714,7 @@ function HibernationCard({
   waking: boolean;
 }): JSX.Element {
   const showLastFrame = lastFrame && !isBlankUrl(lastFrame.url);
+  const releasedCopy = browserReleasedCardCopy();
   return (
     <div className="relative flex h-full w-full items-center justify-center">
       {showLastFrame && (
@@ -1739,16 +1741,18 @@ function HibernationCard({
         </div>
         <div className="text-center">
           <div className="text-sm font-semibold text-foreground">
-            任务已完成
+            {releasedCopy.title}
           </div>
           <div className="mt-0.5 text-xs text-muted-foreground">
-          新任务会自动打开浏览器
+            {releasedCopy.detail}
           </div>
         </div>
         <button
           type="button"
           onClick={onWake}
           disabled={waking}
+          aria-label={waking ? releasedCopy.checkingLabel : releasedCopy.checkLabel}
+          title={waking ? releasedCopy.checkingLabel : releasedCopy.checkLabel}
           className={cn(
             'inline-flex items-center gap-1 text-[11px] font-medium underline-offset-2 transition-colors',
             waking
@@ -1756,7 +1760,7 @@ function HibernationCard({
               : 'text-muted-foreground hover:text-foreground hover:underline',
           )}
         >
-          {waking ? '检查中…' : '检查连接'}
+          {waking ? `${releasedCopy.checkingLabel}…` : releasedCopy.checkLabel}
         </button>
       </div>
     </div>

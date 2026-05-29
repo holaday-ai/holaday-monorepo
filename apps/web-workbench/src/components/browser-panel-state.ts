@@ -118,6 +118,20 @@ export function terminalBrowserTakeoverMessage(status: UiTaskStatus | null | und
   return `${terminalEvidenceStatusLabel(status)}，实时浏览器已关闭。重新执行任务可打开新浏览器。`;
 }
 
+export function browserReleasedCardCopy(): {
+  title: string;
+  detail: string;
+  checkLabel: string;
+  checkingLabel: string;
+} {
+  return {
+    title: '浏览器已释放',
+    detail: '新任务会自动打开新的浏览器。',
+    checkLabel: '检查连接',
+    checkingLabel: '检查中',
+  };
+}
+
 export function browserWakeFeedback(
   status: string | null | undefined,
 ): { message: string; tone: 'info' | 'error' } {
