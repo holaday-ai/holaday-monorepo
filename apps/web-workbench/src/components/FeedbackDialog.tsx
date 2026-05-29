@@ -68,7 +68,7 @@ export function FeedbackDialog({ open, onClose, onSubmit }: Props): JSX.Element 
     try {
       const res = await onSubmit(messageState.trimmed);
       if ('error' in res) {
-        setError(res.error || '反馈发送失败，请稍后重试。');
+        setError(feedbackSubmitError(res.error));
       } else {
         setNotice('谢谢你的反馈，我们会认真看。');
         setValue('');

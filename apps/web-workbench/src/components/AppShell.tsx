@@ -676,7 +676,7 @@ export function AppShell(): JSX.Element {
         }}
         onRenameTask={async (taskId, title) => {
           const res = await renameTask(taskId, title);
-          if ('error' in res) toast.show(`重命名失败：${res.error}`, 'error');
+          if ('error' in res) toast.show(pageActionError('重命名失败', res.error), 'error');
         }}
         projects={projects}
         onMoveTaskToProject={async (taskId, projectId) => {
@@ -785,7 +785,7 @@ export function AppShell(): JSX.Element {
           setConfirmDelete(null);
           if (!taskId) return;
           const res = await deleteTask(taskId);
-          if ('error' in res) toast.show(`删除失败：${res.error}`, 'error');
+          if ('error' in res) toast.show(pageActionError('删除失败', res.error), 'error');
           else {
             setProjectTaskFilter((prev) =>
               projectTaskFilterAfterTaskDelete(prev, [taskId]),
