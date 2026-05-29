@@ -542,7 +542,7 @@ export function BrowserPanel({
   const [showReconnect, setShowReconnect] = React.useState(false);
   const [reconnectEpoch, setReconnectEpoch] = React.useState(0);
   React.useEffect(() => {
-    if (vncStatus !== 'connecting' && vncStatus !== 'idle') {
+    if (vncStatus === 'connected') {
       setShowReconnect(false);
       return;
     }
@@ -560,6 +560,10 @@ export function BrowserPanel({
     status: vncStatus,
     showReconnect,
   });
+  const showLiveOverlay =
+    vncStatus === 'idle' ||
+    vncStatus === 'connecting' ||
+    ((vncStatus === 'disconnected' || vncStatus === 'error') && showReconnect);
   // RC audit fix — banner grace period. The "实时画面断开，正在自动重连"
   // banner used to flip ON instantly when the WS closed, and stay on
   // for the entire backoff window (up to 5 s). For transient closes
@@ -1239,11 +1243,11 @@ export function BrowserPanel({
                     )}
                   />
                 )}
-                {(vncStatus === 'idle' || vncStatus === 'connecting') && (
+                {showLiveOverlay && (
                   <div
                     role="status"
                     aria-live="polite"
-                    className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/30 text-xs text-muted-foreground"
+                    className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/35 text-xs text-muted-foreground backdrop-blur-[1px]"
                   >
                     <div className="pointer-events-none max-w-[260px] text-center">
                       <div className="font-medium text-foreground/80">{liveOverlayCopy.title}</div>

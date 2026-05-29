@@ -66,6 +66,20 @@ export function browserLiveOverlayCopy(inputs: {
   showReconnect: boolean;
 }): { title: string; detail: string; reconnectLabel: string } {
   if (inputs.showReconnect) {
+    if (inputs.status === 'disconnected') {
+      return {
+        title: '实时画面已断开',
+        detail: '任务可能仍在执行。重新连接只刷新画面，不会重新提交任务。',
+        reconnectLabel: '重新连接实时画面',
+      };
+    }
+    if (inputs.status === 'error') {
+      return {
+        title: '实时画面连接失败',
+        detail: '连接没有建立成功。可以重新连接实时画面，任务本身会继续处理。',
+        reconnectLabel: '重新连接实时画面',
+      };
+    }
     return {
       title: '实时画面连接时间较久',
       detail: '浏览器可能还在启动，或连接刚刚断开。可以手动重新连接。',
@@ -76,6 +90,20 @@ export function browserLiveOverlayCopy(inputs: {
     return {
       title: '正在准备实时画面',
       detail: '任务开始后会自动连接到浏览器。',
+      reconnectLabel: '重新连接实时画面',
+    };
+  }
+  if (inputs.status === 'disconnected') {
+    return {
+      title: '实时画面正在恢复',
+      detail: '连接刚刚断开，HOLA DAY 正在自动重连。',
+      reconnectLabel: '重新连接实时画面',
+    };
+  }
+  if (inputs.status === 'error') {
+    return {
+      title: '实时画面暂时不可用',
+      detail: '浏览器画面连接失败，任务可能仍在后台继续。',
       reconnectLabel: '重新连接实时画面',
     };
   }

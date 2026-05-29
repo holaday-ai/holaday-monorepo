@@ -2649,7 +2649,11 @@ function FailureHeaderCard({
 }): JSX.Element {
   const cancelled = status === 'cancelled';
   const friendly = cancelled
-    ? { title: '已取消', subtitle: '任务已取消。下方保留了已生成的部分内容。' }
+    ? {
+        title: '已取消',
+        subtitle: '任务已取消。下方保留了已生成的部分内容。',
+        nextStep: '需要继续时可以重新执行这个任务。',
+      }
     : classifyFriendlyFailure(errorText);
   const hasTechnical = !cancelled && errorText.trim().length > 0;
   const [showTechnical, setShowTechnical] = React.useState(false);
@@ -2665,6 +2669,10 @@ function FailureHeaderCard({
     >
       <div className="font-medium">{friendly.title}</div>
       <div className="mt-0.5 text-xs opacity-80">{friendly.subtitle}</div>
+      <div className="mt-2 inline-flex items-center gap-1.5 rounded-[6px] border border-[#DCDDDD]/75 bg-white/70 px-2 py-1 text-[11px] text-[#595757] dark:border-white/10 dark:bg-white/10 dark:text-foreground/80">
+        <RotateCcw className="h-3 w-3 text-[#EA1F59]" aria-hidden />
+        <span>{friendly.nextStep}</span>
+      </div>
       {hasTechnical && (
         <div className="mt-2">
           <button

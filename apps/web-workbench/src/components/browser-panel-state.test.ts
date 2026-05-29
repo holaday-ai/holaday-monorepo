@@ -79,6 +79,33 @@ describe('BrowserPanel state helpers', () => {
     });
   });
 
+  it('keeps persistent disconnected live views recoverable without implying a rerun', () => {
+    expect(
+      browserLiveOverlayCopy({ status: 'disconnected', showReconnect: false }),
+    ).toEqual({
+      title: '实时画面正在恢复',
+      detail: '连接刚刚断开，HOLA DAY 正在自动重连。',
+      reconnectLabel: '重新连接实时画面',
+    });
+    expect(
+      browserLiveOverlayCopy({ status: 'disconnected', showReconnect: true }),
+    ).toEqual({
+      title: '实时画面已断开',
+      detail: '任务可能仍在执行。重新连接只刷新画面，不会重新提交任务。',
+      reconnectLabel: '重新连接实时画面',
+    });
+  });
+
+  it('explains persistent live-view errors as view-only recovery', () => {
+    expect(
+      browserLiveOverlayCopy({ status: 'error', showReconnect: true }),
+    ).toEqual({
+      title: '实时画面连接失败',
+      detail: '连接没有建立成功。可以重新连接实时画面，任务本身会继续处理。',
+      reconnectLabel: '重新连接实时画面',
+    });
+  });
+
   it('keeps terminal takeover refusal tied to task state', () => {
     expect(terminalBrowserTakeoverMessage('failed')).toBe(
       '任务未完成，实时浏览器已关闭。重新执行任务可打开新浏览器。',

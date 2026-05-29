@@ -1,6 +1,7 @@
 export interface FriendlyFailure {
   title: string;
   subtitle: string;
+  nextStep: string;
 }
 
 /**
@@ -19,6 +20,7 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
     return {
       title: '无法打开这个网站',
       subtitle: '请检查网址是否正确，或换一个能直接访问的页面。',
+      nextStep: '确认网址可以直接打开后重新执行。',
     };
   }
   if (
@@ -29,12 +31,14 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
     return {
       title: '浏览器响应超时',
       subtitle: '页面可能仍在加载，或浏览器扩展连接短暂中断。请重试当前任务。',
+      nextStep: '等页面稳定后重新执行当前任务。',
     };
   }
   if (/扩展.*未连接|no_extension|extension.*not connected/.test(haystack)) {
     return {
       title: '浏览器扩展未连接',
       subtitle: '请打开 HOLA DAY 扩展后重试；如果不用扩展，也可以重新执行任务。',
+      nextStep: '打开 HOLA DAY 扩展，再重新执行任务。',
     };
   }
   if (
@@ -45,18 +49,21 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
     return {
       title: '浏览器连接中断',
       subtitle: '浏览器会话已断开，请重新执行任务。',
+      nextStep: '重新执行任务会建立新的浏览器会话。',
     };
   }
   if (/execution context.*destroyed|frame detached|frame[^\w]not|页面.*切换/.test(haystack)) {
     return {
       title: '页面正在切换',
       subtitle: '网站跳转太快导致本次步骤失效，请重试当前任务。',
+      nextStep: '重新执行时尽量从稳定页面开始。',
     };
   }
   if (/timeout|timed.?out|超时/.test(haystack)) {
     return {
       title: '操作超时',
       subtitle: '目标网站响应太慢，请稍后再试。',
+      nextStep: '稍后重新执行，或换一个响应更稳定的网址。',
     };
   }
   if (
@@ -67,12 +74,14 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
     return {
       title: '网站要求验证身份',
       subtitle: '请重新执行；如果再次出现验证，请在浏览器里手动完成。',
+      nextStep: '重新执行后在浏览器里完成验证。',
     };
   }
   if (/login|sign[\s_-]?in|登录|401|未登录|unauthor|凭据|需要授权/.test(haystack)) {
     return {
       title: '需要先登录',
       subtitle: '请重新执行；如果再次停在登录页，请先完成登录。',
+      nextStep: '重新执行后在浏览器里完成登录。',
     };
   }
   if (
@@ -83,10 +92,12 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
     return {
       title: '浏览器遇到问题',
       subtitle: '请重新执行任务；如果反复出现，可以换一个更稳定的网址。',
+      nextStep: '重新执行任务，或换一个更稳定的网址。',
     };
   }
   return {
     title: '任务未能完成',
     subtitle: '请重试，或换一种描述方式（更具体的指令、提供示例数据）。',
+    nextStep: '换一种更具体的描述后重新执行。',
   };
 }
