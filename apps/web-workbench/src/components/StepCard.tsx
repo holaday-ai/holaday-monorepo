@@ -178,6 +178,8 @@ function AntiBotNotice({ step }: { step: UiStep }): JSX.Element {
 }
 
 function StatusBadge({ step }: { step: UiStep }): JSX.Element {
+  const label = stepStatusLabel(step.status, step.tickIndex);
+
   return (
     <div
       className={cn(
@@ -187,7 +189,8 @@ function StatusBadge({ step }: { step: UiStep }): JSX.Element {
         step.status === 'failed' && 'bg-[#EA1F59]',
         step.status === 'cancelled' && 'border border-[#DCDDDD] bg-[#EFEFEF] text-[#595757]',
       )}
-      aria-label={stepStatusLabel(step.status, step.tickIndex)}
+      aria-label={label}
+      title={label}
     >
       {step.status === 'done' ? (
         <Check className="h-3.5 w-3.5" strokeWidth={3} />

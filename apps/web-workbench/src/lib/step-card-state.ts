@@ -37,15 +37,21 @@ export function stepFailureMessage(step: Pick<UiStep, 'actionKind' | 'message'>)
   ) {
     return '浏览器响应超时，可能是页面仍在加载或扩展连接短暂中断。可以重试当前任务。';
   }
+  if (/扩展.*未连接|no_extension|extension.*not connected/.test(haystack)) {
+    return '浏览器扩展未连接。请打开 HOLA DAY 扩展后重试。';
+  }
   if (/browser not allocated|no browser allocated|409|hibernat|idle-timeout|休眠/.test(haystack)) {
     return '浏览器会话已休眠。重新执行任务时会拉起新的浏览器。';
   }
   if (
-    /target closed|session closed|websocket.*closed|cdp|frame.*detached|browser disconnected|连接.*中断/.test(
+    /protocol error|target closed|session closed|websocket.*closed|cdp|browser disconnected|连接.*中断/.test(
       haystack,
     )
   ) {
     return '浏览器连接中断，重试会重新建立会话。';
+  }
+  if (/execution context.*destroyed|frame.*detached|页面.*切换/.test(haystack)) {
+    return '页面正在切换，本次步骤未能稳定完成。可以重试当前任务。';
   }
   if (/captcha|recaptcha|hcaptcha|cloudflare|人机|验证码|滑块/.test(haystack)) {
     return '网站要求人机验证。请在浏览器里完成验证后继续，或重新执行任务。';

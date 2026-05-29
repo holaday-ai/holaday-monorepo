@@ -62,6 +62,33 @@ describe('step-card-state', () => {
     ).toBe('浏览器会话已休眠。重新执行任务时会拉起新的浏览器。');
   });
 
+  it('explains missing browser extension clients', () => {
+    expect(
+      stepFailureMessage({
+        actionKind: 'navigate',
+        message: '浏览器扩展未连接，请打开 HOLA DAY 扩展后重试',
+      }),
+    ).toBe('浏览器扩展未连接。请打开 HOLA DAY 扩展后重试。');
+  });
+
+  it('explains browser transport closures without exposing protocol text', () => {
+    expect(
+      stepFailureMessage({
+        actionKind: 'navigate',
+        message: 'Protocol error (Page.navigate): Target closed',
+      }),
+    ).toBe('浏览器连接中断，重试会重新建立会话。');
+  });
+
+  it('explains fast page switching as a retryable browser step', () => {
+    expect(
+      stepFailureMessage({
+        actionKind: 'click',
+        message: 'Execution context was destroyed, most likely because of a navigation',
+      }),
+    ).toBe('页面正在切换，本次步骤未能稳定完成。可以重试当前任务。');
+  });
+
   it('keeps unknown step failures visible', () => {
     expect(
       stepFailureMessage({
