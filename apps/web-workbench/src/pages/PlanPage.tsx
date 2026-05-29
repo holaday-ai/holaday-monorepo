@@ -1,5 +1,6 @@
 import { Check, Plus } from 'lucide-react';
 import * as React from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   ADDON_PACK_CATALOGUE,
   ADDON_PACK_IDS,
@@ -24,6 +25,7 @@ import {
   type CnPaymentOptions,
   type PaymentOptions,
 } from '@/lib/plan-payment-state';
+import { shouldScrollPlanAddons } from '@/lib/plan-page-hash';
 import { useToast } from '@/components/ui/toast';
 import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
@@ -61,6 +63,7 @@ const CARD_TAGLINE_EN: Record<PlanId, string> = {
 
 export function PlanPage(): JSX.Element {
   const toast = useToast();
+  const location = useLocation();
   const [currentPlan, setCurrentPlan] = React.useState<string>('free');
   const [paymentOpts, setPaymentOpts] = React.useState<PaymentOptions | null>(null);
   const [cnOpts, setCnOpts] = React.useState<CnPaymentOptions | null>(null);
@@ -99,12 +102,12 @@ export function PlanPage(): JSX.Element {
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (window.location.hash !== '#addons') return;
+    if (!shouldScrollPlanAddons(location.hash)) return;
     const id = requestAnimationFrame(() => {
       document.getElementById('addons')?.scrollIntoView({ block: 'start' });
     });
     return () => cancelAnimationFrame(id);
-  }, [currentPlan, paymentOpts?.paypal, paymentOpts?.paypalClientId]);
+  }, [currentPlan, location.hash, paymentOpts?.paypal, paymentOpts?.paypalClientId]);
 
   const isFirstMonthEligible = currentPlan === 'free';
 

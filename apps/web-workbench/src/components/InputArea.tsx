@@ -934,11 +934,8 @@ function guidanceActionsForWorkflow(
  *   basic → "购买加量包" + "升级专业版"
  *   pro   → "购买加量包" only (pro is the top tier; nothing to upgrade)
  *
- * Both buttons just navigate to /plan today. A future polish could
- * deep-link to the addon section via a hash anchor; for MVP a single
- * landing target is fine — the page already shows both plan tiers
- * and the addon block, and the user lands above whichever they
- * came for.
+ * Upgrade actions land at plan cards; add-on actions deep-link to
+ * the top-up block so paid users don't have to scan past subscriptions.
  */
 function QuotaExhaustedCard({
   plan,
