@@ -19,6 +19,7 @@ vi.mock('@/lib/trpc', () => ({
     tasks: {
       list: { query: vi.fn() },
       detail: { query: vi.fn() },
+      create: { mutate: vi.fn() },
       delete: { mutate: vi.fn() },
       moveToProject: { mutate: vi.fn() },
       star: { mutate: vi.fn() },
@@ -28,6 +29,7 @@ vi.mock('@/lib/trpc', () => ({
 
 const listQuery = vi.mocked(trpc.tasks.list.query);
 const detailQuery = vi.mocked(trpc.tasks.detail.query);
+const createMutate = vi.mocked(trpc.tasks.create.mutate);
 const deleteMutate = vi.mocked(trpc.tasks.delete.mutate);
 const moveToProjectMutate = vi.mocked(trpc.tasks.moveToProject.mutate);
 const starMutate = vi.mocked(trpc.tasks.star.mutate);
@@ -35,6 +37,7 @@ const starMutate = vi.mocked(trpc.tasks.star.mutate);
 beforeEach(() => {
   listQuery.mockReset();
   detailQuery.mockReset();
+  createMutate.mockReset();
   deleteMutate.mockReset();
   moveToProjectMutate.mockReset();
   starMutate.mockReset();
@@ -373,6 +376,79 @@ describe('refreshTaskList', () => {
 });
 
 describe('selectTask detail hydration', () => {
+  it('clears browser takeover state when switching tasks', () => {
+    detailQuery.mockResolvedValueOnce({
+      intent: '打开 https://example.com',
+      title: null,
+      status: 'executing',
+      createdAt: '2026-05-29T00:00:00.000Z',
+      steps: [],
+    } as never);
+    useTaskStore.setState({
+      tasks: [
+        task({ taskId: 'tsk_old', status: 'executing' }),
+        task({ taskId: 'tsk_new', status: 'executing' }),
+      ],
+      selectedTaskId: 'tsk_old',
+      composerMode: 'task',
+      browserLiveRequested: true,
+      browserInteractive: true,
+    });
+
+    useTaskStore.getState().selectTask('tsk_new', 'ui');
+
+    expect(useTaskStore.getState()).toMatchObject({
+      selectedTaskId: 'tsk_new',
+      composerMode: 'task',
+      browserLiveRequested: false,
+      browserInteractive: false,
+    });
+  });
+
+  it('clears browser takeover state when entering new-task mode', () => {
+    useTaskStore.setState({
+      selectedTaskId: 'tsk_old',
+      composerMode: 'task',
+      browserLiveRequested: true,
+      browserInteractive: true,
+    });
+
+    useTaskStore.getState().enterNewTaskMode();
+
+    expect(useTaskStore.getState()).toMatchObject({
+      selectedTaskId: null,
+      composerMode: 'new',
+      browserLiveRequested: false,
+      browserInteractive: false,
+    });
+  });
+
+  it('clears browser takeover state when creating a fresh task', async () => {
+    createMutate.mockResolvedValueOnce({
+      taskId: 'tsk_new',
+      status: 'executing',
+      executionMode: 'browser',
+    } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    useTaskStore.setState({
+      selectedTaskId: 'tsk_old',
+      composerMode: 'task',
+      browserLiveRequested: true,
+      browserInteractive: true,
+    });
+
+    await expect(
+      useTaskStore.getState().createTask('打开 https://example.com', []),
+    ).resolves.toEqual({ taskId: 'tsk_new' });
+
+    expect(useTaskStore.getState()).toMatchObject({
+      selectedTaskId: 'tsk_new',
+      composerMode: 'task',
+      browserLiveRequested: false,
+      browserInteractive: false,
+    });
+  });
+
   it('survives malformed detail rows and synthesizes a safe selected task', async () => {
     detailQuery.mockResolvedValueOnce({
       intent: { unsafe: true },
@@ -606,6 +682,7 @@ describe('deleteTask', () => {
       selectedTaskId: 'tsk_active',
       composerMode: 'task',
       browserLiveRequested: true,
+      browserInteractive: true,
       stepsByTask: {
         tsk_active: [{ tickIndex: 1, status: 'running', startedAt: 1 }],
       },
@@ -662,6 +739,7 @@ describe('deleteTask', () => {
     expect(state.selectedTaskId).toBeNull();
     expect(state.composerMode).toBe('new');
     expect(state.browserLiveRequested).toBe(false);
+    expect(state.browserInteractive).toBe(false);
     expect(state.stepsByTask.tsk_active).toBeUndefined();
     expect(state.screencastByTask.tsk_active).toBeUndefined();
     expect(state.captchaWaitByTask.tsk_active).toBeUndefined();

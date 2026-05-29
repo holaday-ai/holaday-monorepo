@@ -738,6 +738,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       selectedTaskId: taskId,
       composerMode: 'task',
       browserLiveRequested: false,
+      browserInteractive: false,
     });
     void hydrateDetail(taskId);
     // URL write — only when the call ORIGINATES from a UI action
@@ -763,6 +764,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       selectedTaskId: null,
       composerMode: 'new',
       browserLiveRequested: false,
+      browserInteractive: false,
     });
     // Cancel any in-flight hydrate so its post-set callback doesn't
     // re-stamp the just-cleared selection's tasks[] entry.
@@ -954,6 +956,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           selectedTaskId: nextSelected,
           composerMode: nextComposerMode,
           browserLiveRequested: wasActive ? false : prev.browserLiveRequested,
+          browserInteractive: wasActive ? false : prev.browserInteractive,
           stepsByTask: omitRuntimeKey(prev.stepsByTask, taskId),
           screencastByTask: omitRuntimeKey(prev.screencastByTask, taskId),
           captchaWaitByTask: omitRuntimeKey(prev.captchaWaitByTask, taskId),
@@ -1128,6 +1131,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         selectedTaskId: res.taskId,
         composerMode: 'task' as const,
         browserLiveRequested: false,
+        browserInteractive: false,
       }));
       // Pin URL to the new task — same direct-navigate path as
       // selectTask. The deleted outbound effect used to do this off

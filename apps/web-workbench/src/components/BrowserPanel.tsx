@@ -750,6 +750,12 @@ export function BrowserPanel({
   const userInteractedRef = React.useRef(false);
   const [showTakeoverBanner, setShowTakeoverBanner] = React.useState(false);
   React.useEffect(() => {
+    userInteractedRef.current = false;
+    setShowTakeoverBanner(false);
+    setActivityVisible(true);
+    setCjkFallbackOpen(false);
+  }, [activeTaskId]);
+  React.useEffect(() => {
     if (!interactive) {
       userInteractedRef.current = false;
       setShowTakeoverBanner(false);
