@@ -30,7 +30,10 @@ import {
 } from '@/components/CdpScreencastViewport';
 import { useToast } from '@/components/ui/toast';
 import { VncViewport, type VncStatus } from '@/components/VncViewport';
-import { browserNavFailureMessage } from '@/lib/browser-nav-copy';
+import {
+  browserNavExceptionMessage,
+  browserNavFailureMessage,
+} from '@/lib/browser-nav-copy';
 import {
   externalLinkConfirmDescription,
   safeExternalHttpHref,
@@ -2093,10 +2096,7 @@ function UrlBar({
         setDraft(displayUrl);
       }
     } catch (err) {
-      toast.show(
-        err instanceof Error ? `跳转失败：${err.message}` : '跳转失败，请稍后重试',
-        'error',
-      );
+      toast.show(browserNavExceptionMessage(err, 'goto'), 'error');
       setDraft(displayUrl);
     } finally {
       setPending(false);
@@ -2178,12 +2178,7 @@ function NavButton({
             if (message) toast.show(message, 'error');
           }
         } catch (err) {
-          toast.show(
-            err instanceof Error
-              ? `浏览器操作失败：${err.message}`
-              : '浏览器操作失败，请稍后重试',
-            'error',
-          );
+          toast.show(browserNavExceptionMessage(err, direction), 'error');
         } finally {
           setPending(false);
         }

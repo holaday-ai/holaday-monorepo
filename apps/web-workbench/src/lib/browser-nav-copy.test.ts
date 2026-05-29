@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { browserNavFailureMessage } from './browser-nav-copy';
+import {
+  browserNavExceptionMessage,
+  browserNavFailureMessage,
+} from './browser-nav-copy';
 
 describe('browserNavFailureMessage', () => {
   it('keeps unsupported URL schemes specific', () => {
@@ -9,8 +12,11 @@ describe('browserNavFailureMessage', () => {
   });
 
   it('explains disconnected browser sessions', () => {
-    expect(browserNavFailureMessage('no_executor', 'reload')).toContain(
-      '浏览器会话已断开',
+    expect(browserNavFailureMessage('no_executor', 'reload')).toBe(
+      '当前没有可操作的浏览器，请重新连接或重新执行任务',
+    );
+    expect(browserNavFailureMessage('no_executor', 'goto')).toBe(
+      '当前没有可操作的浏览器，重新执行任务后再打开链接',
     );
   });
 
@@ -27,6 +33,27 @@ describe('browserNavFailureMessage', () => {
   it('falls back for unknown browser navigation failures', () => {
     expect(browserNavFailureMessage('anything_else', 'goto')).toBe(
       '浏览器操作失败，请稍后重试',
+    );
+  });
+
+  it('explains navigation timeouts by direction', () => {
+    expect(browserNavFailureMessage('nav_failed', 'goto')).toBe(
+      '页面跳转超时，可能仍在加载。请稍后重试或换一个网址',
+    );
+    expect(browserNavFailureMessage('nav_failed', 'reload')).toBe(
+      '刷新超时，页面可能仍在加载。请稍后重试',
+    );
+  });
+
+  it('hides raw browser exception messages from navigation toasts', () => {
+    expect(browserNavExceptionMessage(new Error('Navigation timeout of 15000 ms exceeded'), 'goto')).toBe(
+      '页面跳转超时，可能仍在加载。请稍后重试或换一个网址',
+    );
+    expect(browserNavExceptionMessage(new Error('CDP session closed'), 'reload')).toBe(
+      '浏览器连接中断，请重新连接或重新执行任务',
+    );
+    expect(browserNavExceptionMessage(new Error('Unexpected protocol error'), 'back')).toBe(
+      '后退失败，请稍后重试',
     );
   });
 });

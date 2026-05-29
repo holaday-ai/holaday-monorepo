@@ -21,7 +21,43 @@ export function browserNavFailureMessage(
   }
   if (reason === 'bad_scheme') return '只支持打开 http(s) 链接';
   if (reason === 'missing_url') return '请输入要打开的网址';
-  if (reason === 'no_executor') return '浏览器会话已断开，请唤醒或重新执行任务';
-  if (reason === 'nav_failed') return '页面跳转超时或失败，请稍后重试';
+  if (reason === 'no_executor') {
+    return direction === 'goto'
+      ? '当前没有可操作的浏览器，重新执行任务后再打开链接'
+      : '当前没有可操作的浏览器，请重新连接或重新执行任务';
+  }
+  if (reason === 'nav_failed') {
+    return direction === 'goto'
+      ? '页面跳转超时，可能仍在加载。请稍后重试或换一个网址'
+      : `${browserNavActionLabel(direction)}超时，页面可能仍在加载。请稍后重试`;
+  }
   return '浏览器操作失败，请稍后重试';
+}
+
+export function browserNavExceptionMessage(
+  error: unknown,
+  direction: BrowserNavDirection,
+): string {
+  const raw = error instanceof Error ? error.message : String(error ?? '');
+  const text = raw.toLowerCase();
+  if (/timeout|timed out|超时/.test(text)) {
+    return browserNavFailureMessage('nav_failed', direction) ?? '浏览器操作超时，请稍后重试';
+  }
+  if (/websocket|socket|closed|disconnect|cdp|target closed|连接.*中断/.test(text)) {
+    return '浏览器连接中断，请重新连接或重新执行任务';
+  }
+  return `${browserNavActionLabel(direction)}失败，请稍后重试`;
+}
+
+function browserNavActionLabel(direction: BrowserNavDirection): string {
+  switch (direction) {
+    case 'back':
+      return '后退';
+    case 'forward':
+      return '前进';
+    case 'reload':
+      return '刷新';
+    case 'goto':
+      return '跳转';
+  }
 }
