@@ -324,10 +324,11 @@ function FileRow({
         <button
           type="button"
           onClick={onUseInNewTask}
-          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-xs font-medium text-[#595757] transition-colors hover:border-[#ADADAD] hover:text-[#EA1F59]"
+          aria-label={`把 ${file.filename} 用于新任务`}
+          title="用于新任务"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
         >
           <Plus className="h-3.5 w-3.5" />
-          用于新任务
         </button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
