@@ -5,10 +5,13 @@ import {
   batchCreateButtonLabel,
   batchCreateDisabled,
   batchPromptCountCopy,
+  normalizeBatchCreateResult,
 } from '@/components/batch-dialog-state';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import {
   batchTaskDraftHasReusableDetail,
+  batchTaskDialogHasDraftContent,
   batchTaskDraftIsEmpty,
   batchTaskDraftMissingGoal,
   batchTaskDraftFromPrompt,
@@ -58,6 +61,7 @@ export function BatchTaskDialog({
   ]);
   const [activeIndex, setActiveIndex] = React.useState(0);
   const [submitting, setSubmitting] = React.useState(false);
+  const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
   const goalRefs = React.useRef<Array<HTMLInputElement | null>>([]);
 
   React.useEffect(() => {
@@ -70,14 +74,24 @@ export function BatchTaskDialog({
     );
     setActiveIndex(0);
     setSubmitting(false);
+    setConfirmDiscardOpen(false);
     const id = window.setTimeout(() => goalRefs.current[0]?.focus(), 0);
     return () => window.clearTimeout(id);
   }, [open, initialPrompts]);
 
+  const hasDraftContent = React.useMemo(
+    () => batchTaskDialogHasDraftContent({ name, drafts: items }),
+    [items, name],
+  );
+
   const requestClose = React.useCallback(() => {
     if (submitting) return;
+    if (hasDraftContent) {
+      setConfirmDiscardOpen(true);
+      return;
+    }
     onClose();
-  }, [onClose, submitting]);
+  }, [hasDraftContent, onClose, submitting]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -169,10 +183,10 @@ export function BatchTaskDialog({
     setSubmitting(true);
     try {
       const trimmedName = name.trim();
-      const result = await trpc.batchTasks.create.mutate({
+      const result = normalizeBatchCreateResult(await trpc.batchTasks.create.mutate({
         ...(trimmedName ? { name: trimmedName } : {}),
         prompts,
-      });
+      }));
       toast.show(`已创建批量任务（${result.itemsTotal} 项 · 并发 ${result.concurrency}）`);
       onCreated(result.batchId);
     } catch (err) {
@@ -183,33 +197,35 @@ export function BatchTaskDialog({
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      onClick={requestClose}
-      className="fixed inset-0 z-[95] flex items-start justify-center overflow-hidden bg-black/35 p-3 backdrop-blur-sm animate-fade-in sm:items-center sm:p-4"
-    >
+    <>
       <div
-        onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-[#DCDDDD] bg-white shadow-[0_16px_48px_rgba(17,24,39,0.16)] dark:border-white/10 dark:bg-card sm:max-h-[calc(100dvh-2rem)]"
+        role="dialog"
+        aria-modal="true"
+        aria-label="新建批量任务"
+        onClick={requestClose}
+        className="fixed inset-0 z-[95] flex items-start justify-center overflow-hidden bg-black/35 p-3 backdrop-blur-sm animate-fade-in sm:items-center sm:p-4"
       >
-        <header className="flex shrink-0 items-center justify-between border-b border-[#DCDDDD]/80 px-5 py-3 dark:border-white/10">
-          <div className="flex items-center gap-2 text-sm font-semibold text-[#2F2F2F] dark:text-foreground">
-            <Layers className="h-4 w-4 text-[#EA1F59]" />
-            新建批量任务
-          </div>
-          <button
-            type="button"
-            onClick={requestClose}
-            disabled={submitting}
-            aria-label="关闭"
-            title="关闭"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </header>
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-5">
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-[#DCDDDD] bg-white shadow-[0_16px_48px_rgba(17,24,39,0.16)] dark:border-white/10 dark:bg-card sm:max-h-[calc(100dvh-2rem)]"
+        >
+          <header className="flex shrink-0 items-center justify-between border-b border-[#DCDDDD]/80 px-5 py-3 dark:border-white/10">
+            <div className="flex items-center gap-2 text-sm font-semibold text-[#2F2F2F] dark:text-foreground">
+              <Layers className="h-4 w-4 text-[#EA1F59]" />
+              新建批量任务
+            </div>
+            <button
+              type="button"
+              onClick={requestClose}
+              disabled={submitting}
+              aria-label="关闭"
+              title="关闭"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </header>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-5">
           <div>
             <label className="mb-1 block text-xs font-medium text-foreground/80">
               批量名称 <span className="text-muted-foreground">(可选)</span>
@@ -420,8 +436,8 @@ export function BatchTaskDialog({
             批量任务会按你的套餐并发执行：免费 1 个、基础 3 个、专业 5 个。
             每一项都是一个独立的任务，部分失败不会影响其他任务。
           </p>
-        </div>
-        <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-[#DCDDDD]/80 bg-white px-5 py-3 dark:border-white/10 dark:bg-card">
+          </div>
+          <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-[#DCDDDD]/80 bg-white px-5 py-3 dark:border-white/10 dark:bg-card">
           <button
             type="button"
             onClick={requestClose}
@@ -439,9 +455,24 @@ export function BatchTaskDialog({
             {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {batchCreateButtonLabel(submitting)}
           </button>
-        </footer>
+          </footer>
+        </div>
       </div>
-    </div>
+      <ConfirmDialog
+        open={confirmDiscardOpen}
+        title="放弃这组批量任务？"
+        description="关闭后当前填写的任务目标、步骤和输出要求都会丢失。"
+        confirmLabel="放弃草稿"
+        cancelLabel="继续编辑"
+        destructive
+        overlayClassName="z-[110]"
+        onClose={() => setConfirmDiscardOpen(false)}
+        onConfirm={() => {
+          setConfirmDiscardOpen(false);
+          onClose();
+        }}
+      />
+    </>
   );
 }
 

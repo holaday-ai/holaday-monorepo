@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   batchTaskDraftHasReusableDetail,
   batchTaskDraftHasContent,
+  batchTaskDialogHasDraftContent,
   batchTaskDraftFromPrompt,
   batchTaskDraftIsEmpty,
   batchTaskDraftMissingGoal,
@@ -69,6 +70,27 @@ describe('batch task draft helpers', () => {
     expect(batchTaskDraftIsEmpty(drafts[1])).toBe(false);
     expect(firstBatchTaskDraftMissingGoal(drafts)).toBe(1);
     expect(batchTaskDraftProgress(drafts[1]).missingGoal).toBe(true);
+  });
+
+  it('detects unsaved dialog content from the name or any task card', () => {
+    expect(
+      batchTaskDialogHasDraftContent({
+        name: '',
+        drafts: [{ goal: '', steps: '', output: '' }],
+      }),
+    ).toBe(false);
+    expect(
+      batchTaskDialogHasDraftContent({
+        name: '  Morning run  ',
+        drafts: [{ goal: '', steps: '', output: '' }],
+      }),
+    ).toBe(true);
+    expect(
+      batchTaskDialogHasDraftContent({
+        name: '',
+        drafts: [{ goal: '', steps: '1. Search', output: '' }],
+      }),
+    ).toBe(true);
   });
 
   it('detects cards with reusable steps or output details', () => {

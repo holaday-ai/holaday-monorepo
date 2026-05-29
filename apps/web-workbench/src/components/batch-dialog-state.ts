@@ -46,3 +46,32 @@ export function batchActiveIndexAfterRemove({
   if (activeIndex > removedIndex) return activeIndex - 1;
   return Math.min(activeIndex, nextLastIndex);
 }
+
+export interface NormalizedBatchCreateResult {
+  readonly batchId: string;
+  readonly itemsTotal: number;
+  readonly concurrency: number;
+}
+
+export function normalizeBatchCreateResult(
+  value: unknown,
+): NormalizedBatchCreateResult {
+  if (!isRecord(value)) throw new Error('批量任务创建结果异常，请刷新后查看任务列表。');
+  const batchId = typeof value.batchId === 'string' ? value.batchId.trim() : '';
+  const itemsTotal = normalizePositiveInteger(value.itemsTotal);
+  const concurrency = normalizePositiveInteger(value.concurrency);
+  if (!batchId || itemsTotal == null || concurrency == null) {
+    throw new Error('批量任务创建结果异常，请刷新后查看任务列表。');
+  }
+  return { batchId, itemsTotal, concurrency };
+}
+
+function normalizePositiveInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}

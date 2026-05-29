@@ -55,6 +55,16 @@ export function batchTaskDraftIsEmpty(draft: BatchTaskDraft): boolean {
   return !batchTaskDraftHasContent(draft);
 }
 
+export function batchTaskDialogHasDraftContent(input: {
+  readonly name: string;
+  readonly drafts: readonly BatchTaskDraft[];
+}): boolean {
+  return (
+    input.name.trim().length > 0 ||
+    input.drafts.some(batchTaskDraftHasContent)
+  );
+}
+
 export function batchTaskDraftMissingGoal(draft: BatchTaskDraft): boolean {
   return draft.goal.trim().length === 0 && batchTaskDraftHasContent(draft);
 }

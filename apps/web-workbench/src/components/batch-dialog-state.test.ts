@@ -4,6 +4,7 @@ import {
   batchCreateButtonLabel,
   batchCreateDisabled,
   batchPromptCountCopy,
+  normalizeBatchCreateResult,
 } from './batch-dialog-state';
 
 describe('batch dialog state helpers', () => {
@@ -51,5 +52,29 @@ describe('batch dialog state helpers', () => {
     expect(
       batchActiveIndexAfterRemove({ activeIndex: 0, removedIndex: 3, itemCount: 4 }),
     ).toBe(0);
+  });
+
+  it('normalizes successful batch creation results', () => {
+    expect(
+      normalizeBatchCreateResult({
+        batchId: ' batch_123 ',
+        itemsTotal: 3,
+        concurrency: 2,
+      }),
+    ).toEqual({
+      batchId: 'batch_123',
+      itemsTotal: 3,
+      concurrency: 2,
+    });
+  });
+
+  it('rejects malformed batch creation results before navigation', () => {
+    expect(() => normalizeBatchCreateResult(null)).toThrow('创建结果异常');
+    expect(() =>
+      normalizeBatchCreateResult({ batchId: '', itemsTotal: 3, concurrency: 2 }),
+    ).toThrow('创建结果异常');
+    expect(() =>
+      normalizeBatchCreateResult({ batchId: 'batch_123', itemsTotal: 0, concurrency: 2 }),
+    ).toThrow('创建结果异常');
   });
 });

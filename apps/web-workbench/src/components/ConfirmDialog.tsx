@@ -6,6 +6,8 @@ interface Props {
   open: boolean;
   title: string;
   description?: string;
+  /** Optional overlay override for nested dialogs that need to sit above another modal. */
+  overlayClassName?: string;
   /** Button label for the confirm action. Defaults to "确定". */
   confirmLabel?: string;
   /** Label for the cancel button. Defaults to "取消". */
@@ -29,6 +31,7 @@ export function ConfirmDialog({
   open,
   title,
   description,
+  overlayClassName,
   confirmLabel = '确定',
   cancelLabel = '取消',
   destructive = false,
@@ -67,7 +70,10 @@ export function ConfirmDialog({
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-dialog-title"
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/35 px-4 backdrop-blur-sm animate-fade-in"
+      className={cn(
+        'fixed inset-0 z-[80] flex items-center justify-center bg-black/35 px-4 backdrop-blur-sm animate-fade-in',
+        overlayClassName,
+      )}
       onMouseDown={(e) => {
         // Close on backdrop click (not on dialog body clicks).
         if (e.target === e.currentTarget && !busy) onClose();
