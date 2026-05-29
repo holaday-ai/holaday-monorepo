@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { stepDetailSummary, stepStatusLabel, stepStatusText } from './step-card-state';
+import {
+  stepDetailSummary,
+  stepFailureMessage,
+  stepStatusLabel,
+  stepStatusText,
+} from './step-card-state';
 
 describe('step-card-state', () => {
   it('summarizes mixed detail steps for the collapsed detail toggle', () => {
@@ -36,5 +41,33 @@ describe('step-card-state', () => {
   it('provides localized status labels for step badges', () => {
     expect(stepStatusText('running')).toBe('执行中');
     expect(stepStatusLabel('failed', 2)).toBe('步骤 3 · 失败');
+  });
+
+  it('explains browser tool timeouts without exposing driver jargon', () => {
+    expect(
+      stepFailureMessage({
+        actionKind: 'navigate',
+        message:
+          '扩展工具调用超时（已等待 30 秒，请确认浏览器标签页仍在加载或重试）',
+      }),
+    ).toBe('浏览器响应超时，可能是页面仍在加载或扩展连接短暂中断。可以重试当前任务。');
+  });
+
+  it('explains hibernated browser sessions', () => {
+    expect(
+      stepFailureMessage({
+        actionKind: 'screenshot',
+        message: 'browser not allocated',
+      }),
+    ).toBe('浏览器会话已休眠。重新执行任务时会拉起新的浏览器。');
+  });
+
+  it('keeps unknown step failures visible', () => {
+    expect(
+      stepFailureMessage({
+        actionKind: 'bash',
+        message: 'command failed with exit code 2',
+      }),
+    ).toBe('command failed with exit code 2');
   });
 });

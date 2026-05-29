@@ -21,6 +21,16 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
       subtitle: '请检查网址是否正确，或换一个能直接访问的页面。',
     };
   }
+  if (
+    /扩展工具调用超时|extension tool.*timeout|browser tool.*timeout|navigation.*timeout|navigate.*timeout/.test(
+      haystack,
+    )
+  ) {
+    return {
+      title: '浏览器响应超时',
+      subtitle: '页面可能仍在加载，或浏览器扩展连接短暂中断。请重试当前任务。',
+    };
+  }
   if (/timeout|timed.?out|超时/.test(haystack)) {
     return {
       title: '操作超时',

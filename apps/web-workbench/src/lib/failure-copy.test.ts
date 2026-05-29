@@ -17,4 +17,13 @@ describe('classifyFriendlyFailure', () => {
   it('keeps timeout copy concise', () => {
     expect(classifyFriendlyFailure('SUPERCAR_TIMEOUT').title).toBe('操作超时');
   });
+
+  it('explains browser extension timeouts as retryable browser stalls', () => {
+    const copy = classifyFriendlyFailure('扩展工具调用超时（已等待 30 秒）');
+
+    expect(copy).toEqual({
+      title: '浏览器响应超时',
+      subtitle: '页面可能仍在加载，或浏览器扩展连接短暂中断。请重试当前任务。',
+    });
+  });
 });

@@ -30,7 +30,7 @@ describe('verificationCheckLabel', () => {
         type: 'unknown',
         detail: 'Verifier timed out after 8000ms',
       }),
-    ).toBe('自动审核超时，已保留当前校验结论');
+    ).toBe('自动审核超时，未阻塞任务结果');
   });
 });
 
@@ -74,5 +74,18 @@ describe('verificationBannerCopy', () => {
 
     expect(copy.checks).toHaveLength(4);
     expect(copy.hiddenCount).toBe(1);
+  });
+
+  it('explains timeout-only review results as non-blocking', () => {
+    const copy = verificationBannerCopy({
+      level: 'needs_clarification',
+      status: 'partial_success',
+      failedChecks: [{ type: 'unknown', detail: 'llm verifier timed out after 15000ms' }],
+    });
+
+    expect(copy.checks).toEqual(['自动审核超时，未阻塞任务结果']);
+    expect(copy.body).toBe(
+      '答案已经生成，但自动审核等待过久。HOLA DAY 没有因此阻塞任务，请按关键数据和来源自行核对。',
+    );
   });
 });

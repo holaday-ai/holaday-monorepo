@@ -37,7 +37,7 @@ export function verificationCheckLabel(check: VerificationCheck): string {
     return '自动复核认为答案需要人工确认';
   }
   if (/timeout|timed out|超时/i.test(detail)) {
-    return '自动审核超时，已保留当前校验结论';
+    return '自动审核超时，未阻塞任务结果';
   }
   return CHECK_TYPE_LABELS[check.type] ?? (detail || '自动审核发现一项问题');
 }
@@ -58,6 +58,8 @@ export function verificationBannerCopy({
   );
   const checks = labels.slice(0, 4);
   const hiddenCount = Math.max(0, labels.length - checks.length);
+  const timeoutOnly =
+    labels.length > 0 && labels.every((label) => label.includes('自动审核超时'));
 
   if (isHard) {
     return {
@@ -79,7 +81,9 @@ export function verificationBannerCopy({
       eyebrow: '自动审核需要复核',
       title: '结果需要你确认后再使用',
       body:
-        labels.length > 0
+        timeoutOnly
+          ? '答案已经生成，但自动审核等待过久。HOLA DAY 没有因此阻塞任务，请按关键数据和来源自行核对。'
+          : labels.length > 0
           ? '答案已经生成，但审核认为仍有不确定点。请先核对下面的问题，再决定是否继续追问。'
           : '答案已经生成，但审核无法给出明确通过结论。请核对关键数据或补充更具体的约束。',
       checks,
@@ -92,7 +96,9 @@ export function verificationBannerCopy({
     eyebrow: '自动审核发现可修正问题',
     title: '结果可能不完整',
     body:
-      labels.length > 0
+      timeoutOnly
+        ? '答案已经生成，但自动审核等待过久。HOLA DAY 没有因此阻塞任务，请按关键数据和来源自行核对。'
+        : labels.length > 0
         ? '答案可先参考，但下面的结构性要求没有完全满足。建议核对来源后再行动。'
         : '答案可先参考，但旧任务没有保存具体检查项。建议核对来源、数量和排序后再行动。',
     checks,

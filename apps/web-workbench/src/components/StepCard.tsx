@@ -7,7 +7,7 @@ import {
   externalLinkConfirmDescription,
   safeExternalHttpHref,
 } from '@/lib/external-link-copy';
-import { stepStatusLabel } from '@/lib/step-card-state';
+import { stepFailureMessage, stepStatusLabel } from '@/lib/step-card-state';
 import { cn } from '@/lib/utils';
 import type { UiStep } from '@/types/task';
 
@@ -36,6 +36,7 @@ interface Props {
  */
 export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
   const title = stepTitle(step);
+  const failureMessage = stepFailureMessage(step);
   const antiBotHigh = step.antiBot?.confidence === 'high';
   const [pendingHref, setPendingHref] = React.useState<string | null>(null);
   const markdownComponents = React.useMemo(
@@ -104,8 +105,8 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
           </div>
         )}
         {step.antiBot && <AntiBotNotice step={step} />}
-        {step.status === 'failed' && step.message && !step.antiBot && (
-          <div className="mt-1.5 text-xs text-[#EA1F59]">{step.message}</div>
+        {step.status === 'failed' && failureMessage && !step.antiBot && (
+          <div className="mt-1.5 text-xs text-[#EA1F59]">{failureMessage}</div>
         )}
         <ConfirmDialog
           open={pendingHref !== null}
