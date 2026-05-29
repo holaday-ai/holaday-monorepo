@@ -14,6 +14,7 @@
 
 import * as React from 'react';
 import type { AddonPackId } from '@holaday/shared-types';
+import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 
 declare global {
@@ -106,11 +107,11 @@ export function AddonPackButton({
                   });
                   onSuccess();
                 } catch (err) {
-                  onError?.(err instanceof Error ? err.message : '支付确认失败');
+                  onError?.(pageErrorMessage(err, '支付确认失败'));
                 }
               },
               onError: (err) => {
-                onError?.(err instanceof Error ? err.message : 'PayPal SDK 错误');
+                onError?.(pageErrorMessage(err, 'PayPal SDK 错误'));
               },
               onCancel: () => {
                 /* user closed popup */
@@ -120,14 +121,14 @@ export function AddonPackButton({
         } catch (err) {
           if (!cancelled) {
             setStatus('error');
-            onError?.(err instanceof Error ? err.message : '加载 PayPal 按钮失败');
+            onError?.(pageErrorMessage(err, '加载 PayPal 按钮失败'));
           }
         }
       })
       .catch((err) => {
         if (!cancelled) {
           setStatus('error');
-          onError?.(err instanceof Error ? err.message : 'PayPal SDK 加载失败');
+          onError?.(pageErrorMessage(err, 'PayPal SDK 加载失败'));
         }
       });
     return () => {

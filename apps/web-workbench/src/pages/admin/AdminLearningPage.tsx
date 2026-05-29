@@ -15,6 +15,7 @@
 import { Loader2, Search } from 'lucide-react';
 import * as React from 'react';
 import { Link } from 'react-router-dom';
+import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { learningEmptyCopy } from './admin-learning-copy';
@@ -66,9 +67,7 @@ export function AdminLearningPage(): JSX.Element {
         limit: PAGE_SIZE,
       })
       .then((res) => !cancelled && setData(res))
-      .catch((err) =>
-        !cancelled && setError(err instanceof Error ? err.message : String(err)),
-      )
+      .catch((err) => !cancelled && setError(pageErrorMessage(err)))
       .finally(() => {
         if (!cancelled) setLoading(false);
       });

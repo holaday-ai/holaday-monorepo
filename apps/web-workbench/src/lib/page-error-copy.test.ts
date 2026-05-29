@@ -24,4 +24,10 @@ describe('page-error-copy', () => {
   it('falls back when the error is empty', () => {
     expect(pageActionError('保存失败', null)).toBe('保存失败：请稍后重试');
   });
+
+  it('maps PayPal SDK failures to payment-specific copy', () => {
+    expect(pageErrorMessage(new Error('PayPal SDK failed to load'))).toBe(
+      'PayPal 加载失败，请刷新页面后重试。',
+    );
+  });
 });

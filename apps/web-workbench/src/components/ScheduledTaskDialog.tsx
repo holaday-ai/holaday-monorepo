@@ -2,6 +2,7 @@ import { Bell, Calendar, Clock, Loader2, Repeat2, X } from 'lucide-react';
 import * as React from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
+import { pageActionError } from '@/lib/page-error-copy';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 import {
@@ -156,10 +157,7 @@ export function ScheduledTaskDialog({
       }
       onCreated();
     } catch (err) {
-      toast.show(
-        err instanceof Error ? err.message : '创建失败',
-        'error',
-      );
+      toast.show(pageActionError('创建失败', err), 'error');
     } finally {
       setSubmitting(false);
     }

@@ -15,6 +15,7 @@ import { ArrowLeft, Loader2 } from 'lucide-react';
 import * as React from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Cell, Pie, PieChart, Tooltip } from 'recharts';
+import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import {
@@ -62,7 +63,7 @@ export function AdminUserDetailPage(): JSX.Element {
         if (!cancelled) setData(res);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(pageErrorMessage(err));
       });
     return () => {
       cancelled = true;

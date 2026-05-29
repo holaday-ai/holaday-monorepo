@@ -23,6 +23,7 @@ import {
   type BatchTaskDraft,
 } from '@/lib/batch-task-draft';
 import { parseBatchPromptItems } from '@/lib/batch-prompts';
+import { pageActionError } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 
@@ -190,7 +191,7 @@ export function BatchTaskDialog({
       toast.show(`已创建批量任务（${result.itemsTotal} 项 · 并发 ${result.concurrency}）`);
       onCreated(result.batchId);
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : '创建失败', 'error');
+      toast.show(pageActionError('创建失败', err), 'error');
     } finally {
       setSubmitting(false);
     }

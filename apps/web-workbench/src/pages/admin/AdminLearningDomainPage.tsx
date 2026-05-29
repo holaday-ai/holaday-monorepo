@@ -17,6 +17,7 @@
 import { ArrowLeft, Brain, ChevronDown, ChevronRight, Globe, Loader2 } from 'lucide-react';
 import * as React from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import {
@@ -66,9 +67,7 @@ export function AdminLearningDomainPage(): JSX.Element {
     trpc.admin.learning.domainDetail
       .query({ domain })
       .then((r) => !cancelled && setData(r))
-      .catch((err) =>
-        !cancelled && setError(err instanceof Error ? err.message : String(err)),
-      );
+      .catch((err) => !cancelled && setError(pageErrorMessage(err)));
     return () => {
       cancelled = true;
     };

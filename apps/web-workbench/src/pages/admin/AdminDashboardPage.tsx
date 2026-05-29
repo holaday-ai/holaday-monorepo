@@ -23,6 +23,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import {
@@ -61,7 +62,7 @@ export function AdminDashboardPage(): JSX.Element {
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
+          setError(pageErrorMessage(err));
         }
       });
     return () => {

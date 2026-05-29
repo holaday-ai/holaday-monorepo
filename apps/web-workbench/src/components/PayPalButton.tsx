@@ -15,6 +15,7 @@
 
 import * as React from 'react';
 import type { BillingCycle, PlanId } from '@holaday/shared-types';
+import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 
 declare global {
@@ -108,11 +109,11 @@ export function PayPalButton({ plan, cycle, clientId, env, onSuccess, onError }:
                   });
                   onSuccess();
                 } catch (err) {
-                  onError?.(err instanceof Error ? err.message : '支付确认失败，请联系客服');
+                  onError?.(pageErrorMessage(err, '支付确认失败，请联系客服'));
                 }
               },
               onError: (err) => {
-                onError?.(err instanceof Error ? err.message : 'PayPal SDK 错误');
+                onError?.(pageErrorMessage(err, 'PayPal SDK 错误'));
               },
               onCancel: () => {
                 // No-op — user closed the popup. The pending payments
@@ -123,14 +124,14 @@ export function PayPalButton({ plan, cycle, clientId, env, onSuccess, onError }:
         } catch (err) {
           if (!cancelled) {
             setStatus('error');
-            onError?.(err instanceof Error ? err.message : '加载 PayPal 按钮失败');
+            onError?.(pageErrorMessage(err, '加载 PayPal 按钮失败'));
           }
         }
       })
       .catch((err) => {
         if (!cancelled) {
           setStatus('error');
-          onError?.(err instanceof Error ? err.message : 'PayPal SDK 加载失败');
+          onError?.(pageErrorMessage(err, 'PayPal SDK 加载失败'));
         }
       });
     return () => {

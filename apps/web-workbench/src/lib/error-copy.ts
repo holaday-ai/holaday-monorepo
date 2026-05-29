@@ -77,6 +77,10 @@ const RULES: Rule[] = [
     match: /SUPERCAR_TIMEOUT/i,
     to: '任务执行超时，请稍后重试。',
   },
+  {
+    match: /paypal sdk failed to load|paypal sdk/i,
+    to: 'PayPal 加载失败，请刷新页面后重试。',
+  },
 ];
 
 /**

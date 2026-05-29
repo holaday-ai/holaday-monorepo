@@ -24,6 +24,7 @@ import {
   compactOutTradeNo,
   formatCnyFromCents,
 } from '@/lib/cn-payment-copy';
+import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import type { AddonPackId, BillingCycle, PaidPlanId } from '@holaday/shared-types';
 
@@ -109,7 +110,7 @@ export function CnPaymentDialog({
         }
         setPhase('awaiting');
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = pageErrorMessage(err, '支付创建失败，请稍后重试');
         if (cancelled) return;
         setErrorText(msg);
         setPhase('failed');

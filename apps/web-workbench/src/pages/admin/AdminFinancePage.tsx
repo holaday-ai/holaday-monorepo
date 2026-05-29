@@ -31,6 +31,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import {
@@ -90,7 +91,7 @@ export function AdminFinancePage(): JSX.Element {
     trpc.admin.finance.summary
       .query()
       .then((r) => !cancelled && setSummary(r))
-      .catch((err) => !cancelled && setError(err instanceof Error ? err.message : String(err)));
+      .catch((err) => !cancelled && setError(pageErrorMessage(err)));
     return () => {
       cancelled = true;
     };
