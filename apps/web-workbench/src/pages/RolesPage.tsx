@@ -18,6 +18,7 @@ import {
   roleRemainingChanges,
   type RoleListSnapshot,
 } from '@/lib/roles-page-state';
+import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
 import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
@@ -55,13 +56,10 @@ export function RolesPage(): JSX.Element {
         setDraft([...res.selected]);
       } catch (err) {
         if (!mountedRef.current) return;
-        const message = err instanceof Error ? err.message : '请稍后重试';
+        const message = pageErrorMessage(err);
         setLoadError(message);
         if (!options.silent) {
-          toast.show(
-            err instanceof Error ? `角色加载失败：${err.message}` : '角色加载失败',
-            'error',
-          );
+          toast.show(pageActionError('角色加载失败', err), 'error');
         }
       } finally {
         if (mountedRef.current) setLoading(false);
@@ -142,8 +140,7 @@ export function RolesPage(): JSX.Element {
       );
       toast.show('已保存');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '保存失败';
-      toast.show(msg, 'error');
+      toast.show(pageActionError('保存失败', err), 'error');
     } finally {
       setSaving(false);
     }

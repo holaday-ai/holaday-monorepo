@@ -13,6 +13,7 @@ import {
   normalizeMemoryRows,
   type MemoryRowView,
 } from '@/lib/memory-settings-state';
+import { pageActionError } from '@/lib/page-error-copy';
 import {
   SETTINGS_SECTIONS,
   normaliseSettingsHash,
@@ -276,10 +277,7 @@ function MemorySection(): JSX.Element {
       setMemories((prev) => prev.filter((m) => m.externalId !== externalId));
       toast.show('已删除记忆', 'info');
     } catch (err) {
-      toast.show(
-        err instanceof Error ? `删除失败：${err.message}` : '删除失败',
-        'error',
-      );
+      toast.show(pageActionError('删除失败', err), 'error');
     } finally {
       setDeletingIds((prev) => {
         const next = new Set(prev);
@@ -296,10 +294,7 @@ function MemorySection(): JSX.Element {
       setConfirming(false);
       toast.show('已清空 AI 记忆', 'info');
     } catch (err) {
-      toast.show(
-        err instanceof Error ? `清空失败：${err.message}` : '清空失败',
-        'error',
-      );
+      toast.show(pageActionError('清空失败', err), 'error');
     }
   };
 

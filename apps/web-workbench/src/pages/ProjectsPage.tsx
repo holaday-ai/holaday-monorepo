@@ -15,6 +15,7 @@ import {
   projectCountSummary,
   projectNameState,
 } from '@/lib/project-page-state';
+import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
@@ -64,7 +65,7 @@ export function ProjectsPage(): JSX.Element {
     setLoadError(null);
     const res = await refreshProjects();
     if ('error' in res) {
-      const message = res.error || '请稍后重试';
+      const message = pageErrorMessage(res.error);
       setLoadError(message);
       toast.show(`项目加载失败：${message}`, 'error');
     } else {
@@ -92,10 +93,7 @@ export function ProjectsPage(): JSX.Element {
       setCreating(false);
       await refresh();
     } catch (err) {
-      toast.show(
-        err instanceof Error ? `创建失败：${err.message}` : '创建失败',
-        'error',
-      );
+      toast.show(pageActionError('创建失败', err), 'error');
     } finally {
       setCreatingNow(false);
     }
@@ -107,10 +105,7 @@ export function ProjectsPage(): JSX.Element {
       toast.show('项目已删除');
       await refresh();
     } catch (err) {
-      toast.show(
-        err instanceof Error ? `删除失败：${err.message}` : '删除失败',
-        'error',
-      );
+      toast.show(pageActionError('删除失败', err), 'error');
     }
   }
 

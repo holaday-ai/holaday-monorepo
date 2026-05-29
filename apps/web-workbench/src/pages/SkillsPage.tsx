@@ -47,6 +47,7 @@ import {
   skillLimitMessage,
   skillPageSummary,
 } from '@/lib/skills-page-state';
+import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
 import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
@@ -140,13 +141,10 @@ export function SkillsPage(): JSX.Element {
         setSkills(list);
       } catch (err) {
         if (!mountedRef.current) return;
-        const message = err instanceof Error ? err.message : '请稍后重试';
+        const message = pageErrorMessage(err);
         setLoadError(message);
         if (!options.silent) {
-          toast.show(
-            err instanceof Error ? `技能加载失败：${err.message}` : '技能加载失败',
-            'error',
-          );
+          toast.show(pageActionError('技能加载失败', err), 'error');
         }
       } finally {
         if (mountedRef.current) setLoading(false);
@@ -206,7 +204,7 @@ export function SkillsPage(): JSX.Element {
         prev.map((s) => (s.id === skill.id ? { ...s, enabled: skill.enabled } : s)),
       );
       toast.show(
-        err instanceof Error ? `切换失败：${err.message}` : '切换失败',
+        pageActionError('切换失败', err),
         'error',
       );
     } finally {

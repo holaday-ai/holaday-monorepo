@@ -35,6 +35,7 @@ import {
   type NormalizedFileRow,
 } from '@/lib/files-page-state';
 import { filesEmptyCopy, type FileFilter } from '@/lib/files-empty-copy';
+import { pageActionError } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { cn } from '@/lib/utils';
@@ -77,10 +78,7 @@ export function FilesPage(): JSX.Element {
       });
       setFiles(normalizeFileRows(list));
     } catch (err) {
-      toast.show(
-        err instanceof Error ? `加载失败：${err.message}` : '加载失败',
-        'error',
-      );
+      toast.show(pageActionError('加载失败', err), 'error');
     } finally {
       setLoading(false);
     }
@@ -155,10 +153,7 @@ export function FilesPage(): JSX.Element {
       toast.show('文件已删除');
       await refresh();
     } catch (err) {
-      toast.show(
-        err instanceof Error ? `删除失败：${err.message}` : '删除失败',
-        'error',
-      );
+      toast.show(pageActionError('删除失败', err), 'error');
     }
   }
 

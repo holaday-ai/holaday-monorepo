@@ -26,6 +26,7 @@ import {
   normalizeConnectionProviders,
   type ConnectionProviderView,
 } from '@/lib/connection-page-state';
+import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
 import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
@@ -66,13 +67,10 @@ export function ConnectionsPage(): JSX.Element {
         setProviders(list);
       } catch (err) {
         if (!mountedRef.current) return;
-        const message = err instanceof Error ? err.message : '请稍后重试';
+        const message = pageErrorMessage(err);
         setLoadError(message);
         if (!options.silent) {
-          toast.show(
-            err instanceof Error ? `连接器加载失败：${err.message}` : '连接器加载失败',
-            'error',
-          );
+          toast.show(pageActionError('连接器加载失败', err), 'error');
         }
       } finally {
         if (mountedRef.current) setLoading(false);

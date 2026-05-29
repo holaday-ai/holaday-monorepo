@@ -20,6 +20,7 @@ import {
   type NotificationPlatform,
 } from '@/lib/notification-channel-copy';
 import { buildNotificationChannelDraft } from '@/lib/notification-channel-draft';
+import { pageActionError } from '@/lib/page-error-copy';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 
@@ -175,7 +176,7 @@ export function AddChannelModal({
     } catch (err) {
       setTestResult({
         ok: false,
-        message: `测试请求失败：${err instanceof Error ? err.message : String(err)}`,
+        message: pageActionError('测试请求失败', err),
       });
     } finally {
       setTesting(false);

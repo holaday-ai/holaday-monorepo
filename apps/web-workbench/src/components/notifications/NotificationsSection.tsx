@@ -28,6 +28,7 @@ import {
   notificationChannelsLoadErrorMessage,
   type NotificationChannelRow,
 } from '@/lib/notification-channel-state';
+import { pageActionError } from '@/lib/page-error-copy';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 import { Row, Section } from '@/pages/PageShell';
@@ -83,10 +84,7 @@ export function NotificationsSection(): JSX.Element {
           c.channelId === row.channelId ? { ...c, enabled: row.enabled } : c,
         ),
       );
-      toast.show(
-        `操作失败：${err instanceof Error ? err.message : String(err)}`,
-        'error',
-      );
+      toast.show(pageActionError('操作失败', err), 'error');
     }
   };
 
@@ -116,10 +114,7 @@ export function NotificationsSection(): JSX.Element {
       setEditingChannel(null);
       await refresh();
     } catch (err) {
-      toast.show(
-        `保存失败：${err instanceof Error ? err.message : String(err)}`,
-        'error',
-      );
+      toast.show(pageActionError('保存失败', err), 'error');
     }
   };
 
@@ -130,10 +125,7 @@ export function NotificationsSection(): JSX.Element {
       setConfirmDelete(null);
       await refresh();
     } catch (err) {
-      toast.show(
-        `删除失败：${err instanceof Error ? err.message : String(err)}`,
-        'error',
-      );
+      toast.show(pageActionError('删除失败', err), 'error');
     }
   };
 
