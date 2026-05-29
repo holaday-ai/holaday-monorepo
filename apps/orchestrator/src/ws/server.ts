@@ -17,7 +17,11 @@ import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js
 import { verifyAccessToken } from '../auth/jwt.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
-import { extensionNoClientMessage, extensionToolTimeoutMessage } from './extension-tool-copy.js';
+import {
+  extensionNoClientMessage,
+  extensionSocketClosedMessage,
+  extensionToolTimeoutMessage,
+} from './extension-tool-copy.js';
 
 interface ClientState {
   id: string;
@@ -323,12 +327,31 @@ export function hasConnectedExtension(userId: string): boolean {
  * Timeouts clean the entry; the deadline lives on the request payload.
  */
 interface PendingExtensionToolCall {
-  resolve: (msg: ExtensionToolResultMsg) => void;
+  clientId: string;
+  taskId: string;
+  resolve: (outcome: ExtensionToolCallOutcome) => void;
   timer: NodeJS.Timeout;
 }
-type ExtensionToolResultMsg = Extract<ClientMessage, { type: 'client.extension.tool_result' }>;
 
 const pendingExtensionCalls = new Map<string, PendingExtensionToolCall>();
+
+function settlePendingExtensionCallsForClient(clientId: string): number {
+  let settled = 0;
+  for (const [requestId, pending] of pendingExtensionCalls) {
+    if (pending.clientId !== clientId) continue;
+    clearTimeout(pending.timer);
+    pendingExtensionCalls.delete(requestId);
+    pending.resolve({
+      ok: false,
+      error: {
+        message: extensionSocketClosedMessage(),
+        code: 'socket_closed',
+      },
+    });
+    settled += 1;
+  }
+  return settled;
+}
 
 export interface ExtensionToolCallOptions {
   taskId: string;
@@ -390,13 +413,9 @@ export async function sendExtensionToolCall(
     }, timeoutMs);
     timer.unref();
     pendingExtensionCalls.set(requestId, {
-      resolve: (msg) => {
-        resolve({
-          ok: msg.ok,
-          ...(msg.result !== undefined ? { result: msg.result } : {}),
-          ...(msg.error ? { error: msg.error } : {}),
-        });
-      },
+      clientId: target.id,
+      taskId: opts.taskId,
+      resolve,
       timer,
     });
     send(target.socket, {
@@ -538,8 +557,12 @@ async function handleConnection(socket: WebSocket, req: IncomingMessage) {
 
   socket.on('close', () => {
     clearTimeout(authTimer);
+    const settledExtensionCalls = settlePendingExtensionCallsForClient(state.id);
     if (state.userId) removeClientForUser(state.userId, state);
-    logger.info({ clientId: state.id, userId: state.userId }, 'ws client closed');
+    logger.info(
+      { clientId: state.id, userId: state.userId, settledExtensionCalls },
+      'ws client closed',
+    );
   });
 
   socket.on('error', (err) => {
@@ -698,7 +721,11 @@ async function handleClientMessage(
     }
     clearTimeout(pending.timer);
     pendingExtensionCalls.delete(msg.requestId);
-    pending.resolve(msg);
+    pending.resolve({
+      ok: msg.ok,
+      ...(msg.result !== undefined ? { result: msg.result } : {}),
+      ...(msg.error ? { error: msg.error } : {}),
+    });
     return;
   }
 }
