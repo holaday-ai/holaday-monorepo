@@ -110,6 +110,10 @@ export function PlanPage(): JSX.Element {
   }, [currentPlan, location.hash, paymentOpts?.paypal, paymentOpts?.paypalClientId]);
 
   const isFirstMonthEligible = currentPlan === 'free';
+  const isPaidPlan = currentPlan === 'basic' || currentPlan === 'pro';
+  const canBuyAddons = Boolean(
+    isPaidPlan && paymentOpts?.paypal && paymentOpts.paypalClientId,
+  );
 
   const handlePaymentSuccess = React.useCallback(
     (planId: PlanId) => {
@@ -443,12 +447,11 @@ export function PlanPage(): JSX.Element {
         })}
       </div>
 
-      {/* Add-on packs — only when the user is on a paid plan and PayPal */}
-      {/* is wired. Free users see the plan-tier upgrade UI above; the    */}
-      {/* add-on flow assumes they already pay and just need a top-up.    */}
-      {(currentPlan === 'basic' || currentPlan === 'pro') &&
-        paymentOpts?.paypal &&
-        paymentOpts.paypalClientId && (
+      {/* Add-on packs — paid plans only. If the payment channel is not */}
+      {/* wired, keep the #addons deep link meaningful with a contact panel. */}
+      {isPaidPlan &&
+        paymentOpts &&
+        (canBuyAddons ? (
           <div id="addons" className="mt-12 scroll-mt-6">
             <div className="mb-4 text-center">
               <h3 className="text-lg font-semibold tracking-tight">
@@ -537,7 +540,38 @@ export function PlanPage(): JSX.Element {
               })}
             </div>
           </div>
-        )}
+        ) : (
+          <div
+            id="addons"
+            className="mx-auto mt-12 max-w-xl scroll-mt-6 rounded-[8px] border border-[#DCDDDD] border-l-[#42C0EF] bg-white p-4 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]"
+          >
+            <h3 className="text-sm font-semibold text-foreground">
+              {zh ? '加量包暂未开通在线支付' : 'Add-ons are not available online yet'}
+            </h3>
+            <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
+              {zh
+                ? '你的套餐支持加量包。当前支付通道暂不可用，可以联系支持协助开通或手动加量。'
+                : 'Your plan supports top-ups. Online payment is unavailable right now; support can help enable or apply a pack manually.'}
+            </p>
+            <Button
+              asChild
+              size="sm"
+              variant="outline"
+              className="mt-3 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#42C0EF]/45 hover:bg-[#42C0EF]/10 hover:text-[#1688AA]"
+            >
+              <a
+                href={supportMailtoHref({
+                  subject: zh ? '开通 HOLA DAY 加量包' : 'Enable HOLA DAY add-ons',
+                  body: zh
+                    ? '我想开通或购买 HOLA DAY 加量包。\n\n注册邮箱：'
+                    : 'I would like to enable or purchase HOLA DAY add-ons.\n\nAccount email:',
+                })}
+              >
+                {zh ? '联系支持' : 'Contact support'}
+              </a>
+            </Button>
+          </div>
+        ))}
 
       {/* CN-locale note: PayPal still settles in USD */}
       {currency === 'cny' && (
