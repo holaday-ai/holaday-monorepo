@@ -49,7 +49,7 @@ export function stepFailureMessage(step: Pick<UiStep, 'actionKind' | 'message'>)
     case 'connection':
       return '无法连接到该站点。请稍后重试，或换一个能直接访问的网址。';
     case 'transport_closed':
-      return '浏览器连接中断，重试会重新建立会话。';
+      return '浏览器连接中断，请重新执行任务。';
     case 'page_switch':
       return '页面正在切换，本次步骤未能稳定完成。可以重试当前任务。';
     case 'captcha':

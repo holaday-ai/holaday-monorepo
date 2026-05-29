@@ -86,7 +86,7 @@ describe('step-card-state', () => {
         actionKind: 'navigate',
         message: 'Protocol error (Page.navigate): Target closed',
       }),
-    ).toBe('浏览器连接中断，重试会重新建立会话。');
+    ).toBe('浏览器连接中断，请重新执行任务。');
   });
 
   it('explains fast page switching as a retryable browser step', () => {
