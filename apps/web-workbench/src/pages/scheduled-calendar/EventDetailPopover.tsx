@@ -221,16 +221,17 @@ export function EventDetailPopover({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="icon"
           disabled={busy !== null}
+          aria-label="删除定时任务"
+          title="删除定时任务"
           onClick={() => {
             if (busy !== null) return;
             onDeleteRequest(row.scheduledTaskId);
           }}
-          className="text-[#EA1F59] hover:bg-[#EA1F59]/10 hover:text-[#D91B51] disabled:cursor-wait disabled:opacity-55"
+          className="h-8 w-8 text-[#EA1F59] hover:bg-[#EA1F59]/10 hover:text-[#D91B51] disabled:cursor-wait disabled:opacity-55"
         >
-          <Trash2 className="mr-1 h-3 w-3" />
-          删除
+          <Trash2 className="h-3.5 w-3.5" aria-hidden />
         </Button>
       </div>
     </div>

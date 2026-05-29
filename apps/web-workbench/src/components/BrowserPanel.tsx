@@ -7,12 +7,15 @@ import {
   ExternalLink,
   Globe,
   Hand,
+  Keyboard,
+  ListChecks,
   Maximize2,
   Minimize2,
   MousePointerClick,
   Power,
   RotateCw,
   Square,
+  X,
 } from 'lucide-react';
 import * as React from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -1255,9 +1258,11 @@ export function BrowserPanel({
                   <button
                     type="button"
                     onClick={() => setActivityVisible(true)}
-                    className="absolute bottom-2 right-2 rounded bg-black/40 px-2 py-1 text-[10px] text-white backdrop-blur hover:bg-black/60"
+                    className="absolute bottom-2 right-2 inline-flex h-7 w-7 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60"
+                    aria-label="显示操作日志"
+                    title="显示操作日志"
                   >
-                    显示操作日志
+                    <ListChecks className="h-3.5 w-3.5" aria-hidden />
                   </button>
                 )}
                 {interactiveActive && (
@@ -1318,9 +1323,11 @@ export function BrowserPanel({
                     <button
                       type="button"
                       onClick={() => setActivityVisible(true)}
-                      className="absolute bottom-2 right-2 rounded bg-black/40 px-2 py-1 text-[10px] text-white backdrop-blur hover:bg-black/60"
+                      className="absolute bottom-2 right-2 inline-flex h-7 w-7 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60"
+                      aria-label="显示操作日志"
+                      title="显示操作日志"
                     >
-                      显示操作日志
+                      <ListChecks className="h-3.5 w-3.5" aria-hidden />
                     </button>
                   )}
                   {/* Codex P2 — hidden CJK input is always-mounted in
@@ -1350,12 +1357,13 @@ export function BrowserPanel({
                         hiddenCjkInputRef.current?.blur();
                       }}
                       className={cn(
-                        'absolute left-2 z-30 rounded bg-black/40 px-2 py-1 text-[10px] text-white backdrop-blur hover:bg-black/60',
+                        'absolute left-2 z-30 inline-flex h-7 w-7 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60',
                         fullscreen ? 'bottom-4' : 'bottom-2',
                       )}
+                      aria-label="切换输入方式"
                       title="切换输入方式（当 IME 直打不工作时使用浮动输入框）"
                     >
-                      输入框
+                      <Keyboard className="h-3.5 w-3.5" aria-hidden />
                     </button>
                   )}
                   {interactiveActive && cjkFallbackOpen && (
@@ -1459,11 +1467,11 @@ function ActivityOverlay({
         <button
           type="button"
           onClick={onClose}
-          className="rounded px-1 hover:bg-white/10"
+          className="inline-flex h-5 w-5 items-center justify-center rounded hover:bg-white/10"
           aria-label="收起操作日志"
           title="收起操作日志"
         >
-          收起
+          <X className="h-3 w-3" aria-hidden />
         </button>
       </div>
       <ul className="space-y-0.5 font-mono leading-snug">
