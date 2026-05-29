@@ -36,5 +36,8 @@ describe('login gate validation helpers', () => {
       '稍后重试',
     );
     expect(authErrorMessage(new Error('验证码错误'), '稍后重试')).toBe('验证码错误');
+    expect(authErrorMessage({ message: 'database unavailable' }, '稍后重试')).toBe(
+      '稍后重试',
+    );
   });
 });

@@ -32,7 +32,12 @@ export function maskChinaPhone(value: string): string {
 }
 
 export function authErrorMessage(err: unknown, fallback: string): string {
-  const raw = err instanceof Error ? err.message : String(err);
+  const raw =
+    err instanceof Error
+      ? err.message
+      : typeof err === 'string'
+        ? err
+        : '';
   const trimmed = raw.trim();
   if (!trimmed) return fallback;
   if (
