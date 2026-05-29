@@ -44,6 +44,22 @@ const RULES: Rule[] = [
     to: '浏览器服务暂时不可用，请稍后重试。',
   },
   {
+    match: /扩展.*未连接|no_extension|extension.*not connected/i,
+    to: '浏览器扩展未连接，请打开 HOLA DAY 扩展后重试。',
+  },
+  {
+    match: /扩展工具调用超时|浏览器扩展响应超时|extension tool.*timeout|browser tool.*timeout|navigation.*timeout|navigate.*timeout/i,
+    to: '浏览器响应超时，页面可能仍在加载。请稍后重试。',
+  },
+  {
+    match: /protocol error|target closed|session closed|socket_closed|websocket.*closed|browser.*disconnected|cdp.*closed/i,
+    to: '浏览器连接中断，请重新执行任务。',
+  },
+  {
+    match: /execution context.*destroyed|frame detached|frame[^\w]not/i,
+    to: '页面正在切换，本次浏览器步骤未能稳定完成。请重试。',
+  },
+  {
     match: /missing\s+ANTHROPIC_API_KEY/i,
     to: '后端模型密钥未配置，请联系管理员。',
   },

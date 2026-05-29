@@ -31,6 +31,28 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
       subtitle: '页面可能仍在加载，或浏览器扩展连接短暂中断。请重试当前任务。',
     };
   }
+  if (/扩展.*未连接|no_extension|extension.*not connected/.test(haystack)) {
+    return {
+      title: '浏览器扩展未连接',
+      subtitle: '请打开 HOLA DAY 扩展后重试；如果不用扩展，也可以重新执行任务。',
+    };
+  }
+  if (
+    /protocol error|target closed|session closed|socket_closed|websocket.*closed|browser.*disconnected|cdp.*closed|连接.*中断/.test(
+      haystack,
+    )
+  ) {
+    return {
+      title: '浏览器连接中断',
+      subtitle: '浏览器会话已断开，请重新执行任务。',
+    };
+  }
+  if (/execution context.*destroyed|frame detached|frame[^\w]not|页面.*切换/.test(haystack)) {
+    return {
+      title: '页面正在切换',
+      subtitle: '网站跳转太快导致本次步骤失效，请重试当前任务。',
+    };
+  }
   if (/timeout|timed.?out|超时/.test(haystack)) {
     return {
       title: '操作超时',
@@ -60,7 +82,7 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
   ) {
     return {
       title: '浏览器遇到问题',
-      subtitle: '可以点重试再跑一次。',
+      subtitle: '请重新执行任务；如果反复出现，可以换一个更稳定的网址。',
     };
   }
   return {

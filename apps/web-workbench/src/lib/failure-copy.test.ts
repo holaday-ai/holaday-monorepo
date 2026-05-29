@@ -26,4 +26,25 @@ describe('classifyFriendlyFailure', () => {
       subtitle: '页面可能仍在加载，或浏览器扩展连接短暂中断。请重试当前任务。',
     });
   });
+
+  it('explains missing extension clients without Mode B jargon', () => {
+    expect(classifyFriendlyFailure('扩展未连接，无法走 Mode B')).toEqual({
+      title: '浏览器扩展未连接',
+      subtitle: '请打开 HOLA DAY 扩展后重试；如果不用扩展，也可以重新执行任务。',
+    });
+  });
+
+  it('classifies raw browser transport closures as disconnected sessions', () => {
+    expect(classifyFriendlyFailure('Protocol error (Page.navigate): Target closed')).toEqual({
+      title: '浏览器连接中断',
+      subtitle: '浏览器会话已断开，请重新执行任务。',
+    });
+  });
+
+  it('classifies fast page changes as transient page switching', () => {
+    expect(classifyFriendlyFailure('Execution context was destroyed, most likely because of a navigation')).toEqual({
+      title: '页面正在切换',
+      subtitle: '网站跳转太快导致本次步骤失效，请重试当前任务。',
+    });
+  });
 });

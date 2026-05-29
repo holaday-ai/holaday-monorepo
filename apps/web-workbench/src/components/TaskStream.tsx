@@ -1163,8 +1163,8 @@ function ExecutorFallbackBanner({
       <div className="min-w-0 flex-1 text-sm">
         <div className="font-semibold text-foreground">已切换到浏览器扩展模式执行</div>
         <div className="mt-1 text-xs text-muted-foreground">
-          连续检测到反爬拦截，HOLA DAY 切到 Chrome 扩展继续任务，后续步骤通过扩展内的 CDP 驱动
-          执行。
+          连续检测到反爬拦截，HOLA DAY 切到 Chrome 扩展继续任务，后续步骤会通过你已登录的
+          Chrome 环境执行。
         </div>
       </div>
     </div>

@@ -17,6 +17,7 @@ import { type RehydratedTask, TaskRepository } from '../agent/task-repository.js
 import { verifyAccessToken } from '../auth/jwt.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/client.js';
+import { extensionNoClientMessage, extensionToolTimeoutMessage } from './extension-tool-copy.js';
 
 interface ClientState {
   id: string;
@@ -373,7 +374,7 @@ export async function sendExtensionToolCall(
     }
   }
   if (!target) {
-    return { ok: false, error: { message: '扩展未连接，无法走 Mode B', code: 'no_extension' } };
+    return { ok: false, error: { message: extensionNoClientMessage(), code: 'no_extension' } };
   }
 
   return new Promise<ExtensionToolCallOutcome>((resolve) => {
@@ -382,7 +383,7 @@ export async function sendExtensionToolCall(
       resolve({
         ok: false,
         error: {
-          message: `扩展工具调用超时（已等待 ${Math.round(timeoutMs / 1000)} 秒，请确认浏览器标签页仍在加载或重试）`,
+          message: extensionToolTimeoutMessage(timeoutMs),
           code: 'timeout',
         },
       });
