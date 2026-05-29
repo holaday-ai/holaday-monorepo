@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   browserLiveOverlayCopy,
+  browserWakeFeedback,
   browserPanelDotLabel,
   browserLiveStatusLabel,
   shouldShowBrowserHeader,
@@ -110,5 +111,20 @@ describe('BrowserPanel state helpers', () => {
     expect(terminalBrowserTakeoverMessage('failed')).toBe(
       '任务未完成，实时浏览器已关闭。重新执行任务可打开新浏览器。',
     );
+  });
+
+  it('explains wake-browser results without promising a stale browser', () => {
+    expect(browserWakeFeedback('ready')).toEqual({
+      message: '浏览器连接已恢复',
+      tone: 'info',
+    });
+    expect(browserWakeFeedback('unavailable')).toEqual({
+      message: '当前没有正在运行的浏览器。新建或重新执行任务会自动打开浏览器。',
+      tone: 'info',
+    });
+    expect(browserWakeFeedback('weird')).toEqual({
+      message: '浏览器连接检查失败，请稍后重试',
+      tone: 'error',
+    });
   });
 });

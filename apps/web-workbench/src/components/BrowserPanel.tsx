@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import {
   browserLiveOverlayCopy,
   browserPanelDotLabel,
+  browserWakeFeedback,
   shouldShowBrowserHeader,
   terminalBrowserTakeoverMessage,
   terminalEvidenceStatusLabel,
@@ -587,28 +588,31 @@ export function BrowserPanel({
   // executing tasks (transient WS hiccups) and terminal tasks (Brave
   // released after task end).
   const hibernated = poolUserId != null && vncAttemptFails >= 3 && !activeTaskId;
-  // P3 wake call — fire-and-forget allocate, then reset the attempt
-  // counter so VncViewport's reconnect tries fresh. Server-side this
-  // takes ~3-5s (cold spawn); the user sees the spinner during that
-  // window before VNC reconnects.
+  // P3 wake/check call. Per-task browsers cannot be resurrected once
+  // released, so the endpoint may report "unavailable"; surface that
+  // clearly instead of silently returning to the same card.
   const [waking, setWaking] = React.useState(false);
   const onWake = React.useCallback(async () => {
     if (waking) return;
     setWaking(true);
     try {
       const res = await trpc.tasks.wakeBrowser.mutate();
+      const feedback = browserWakeFeedback(
+        (res as { status?: unknown } | null)?.status?.toString(),
+      );
       if (res.status === 'ready') {
         // Reset counter; VncViewport's auto-reconnect timer will fire
         // and the new connection should land on the freshly-allocated
         // instance.
         setVncAttemptFails(0);
       }
+      toast.show(feedback.message, feedback.tone);
     } catch {
-      // Non-fatal — user can click again.
+      toast.show(browserWakeFeedback(null).message, 'error');
     } finally {
       setWaking(false);
     }
-  }, [waking]);
+  }, [toast, waking]);
   // Round-3 #5 (legacy): completed / failed / cancelled tasks used
   // to switch to the static JPEG screencast — the rationale was
   // that the SHARED singleton Brave would have moved on to another
@@ -1701,12 +1705,10 @@ function CjkInputBar({
 }
 
 /**
- * P3 hibernation card. Shown when the user's pool browser has been
- * reaped by idle GC and VNC has failed to reconnect ≥3 times. The
- * last screencast frame fades into the background so users see what
- * was on screen ("oh yeah, that's the page I was on") and a single
- * 唤醒 button respawns Brave + reconnects VNC. Cookies persist in
- * the user-data-dir so logged-in sessions survive the hibernation.
+ * P3 hibernation card. In the older per-user browser model this
+ * could wake an idle Brave. Per-task browsers now only exist while a
+ * task is running, so the card frames this as a connection check
+ * instead of promising to resurrect a released browser.
  */
 function HibernationCard({
   lastFrame,
@@ -1747,7 +1749,7 @@ function HibernationCard({
             任务已完成
           </div>
           <div className="mt-0.5 text-xs text-muted-foreground">
-            浏览器已释放，登录状态已保留
+          新任务会自动打开浏览器
           </div>
         </div>
         <button
@@ -1761,7 +1763,7 @@ function HibernationCard({
               : 'text-muted-foreground hover:text-foreground hover:underline',
           )}
         >
-          {waking ? '唤醒中…' : '唤醒浏览器'}
+          {waking ? '检查中…' : '检查连接'}
         </button>
       </div>
     </div>

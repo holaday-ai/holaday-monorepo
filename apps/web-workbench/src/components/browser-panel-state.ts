@@ -117,3 +117,21 @@ export function browserLiveOverlayCopy(inputs: {
 export function terminalBrowserTakeoverMessage(status: UiTaskStatus | null | undefined): string {
   return `${terminalEvidenceStatusLabel(status)}，实时浏览器已关闭。重新执行任务可打开新浏览器。`;
 }
+
+export function browserWakeFeedback(
+  status: string | null | undefined,
+): { message: string; tone: 'info' | 'error' } {
+  switch (status) {
+    case 'ready':
+      return { message: '浏览器连接已恢复', tone: 'info' };
+    case 'spawning':
+      return { message: '浏览器正在启动，实时画面会自动重连', tone: 'info' };
+    case 'unavailable':
+      return {
+        message: '当前没有正在运行的浏览器。新建或重新执行任务会自动打开浏览器。',
+        tone: 'info',
+      };
+    default:
+      return { message: '浏览器连接检查失败，请稍后重试', tone: 'error' };
+  }
+}
