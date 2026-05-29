@@ -6,6 +6,7 @@ import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 import { humaniseTaskError, taskActionError } from '@/lib/error-copy';
+import { pageErrorMessage } from '@/lib/page-error-copy';
 
 /**
  * Phase 5a — scheduled tasks list page. Replaces the Phase 16b
@@ -289,7 +290,7 @@ function truncate(s: string, n: number): string {
 }
 
 function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return pageErrorMessage(err);
 }
 
 /**

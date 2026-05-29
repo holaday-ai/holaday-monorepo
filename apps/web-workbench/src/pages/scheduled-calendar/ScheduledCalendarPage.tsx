@@ -49,6 +49,7 @@ import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import { taskActionError } from '@/lib/error-copy';
+import { pageErrorMessage } from '@/lib/page-error-copy';
 import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
@@ -931,5 +932,5 @@ export function ScheduledCalendarPage(): JSX.Element {
 }
 
 function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return pageErrorMessage(err);
 }
