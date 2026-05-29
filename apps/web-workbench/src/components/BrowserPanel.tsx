@@ -21,7 +21,10 @@ import * as React from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import {
+  browserLiveOverlayCopy,
+  browserPanelDotLabel,
   shouldShowBrowserHeader,
+  terminalBrowserTakeoverMessage,
   terminalEvidenceStatusLabel,
 } from '@/components/browser-panel-state';
 import {
@@ -440,7 +443,7 @@ export function BrowserPanel({
   const hasActiveTask = Boolean(activeTaskId);
   // RC follow-up audit fix — generate / scrape tasks have NO pool
   // slot (no Brave allocated), so /screencast-ws/<taskId> 409s in a
-  // loop and the user sees "画面已断开，重连中" cycling every ~5s
+  // loop and the user sees "实时画面断开，正在自动重连" cycling every ~5s
   // forever. Detect non-pool tasks via the streaming/progress
   // buffers (those types only ever populate for generate/scrape
   // runners) and skip the WS entirely. Browser tasks never populate
@@ -551,8 +554,13 @@ export function BrowserPanel({
     setVncStatus('idle');
     setVncAttemptFails(0);
     setReconnectEpoch((n) => n + 1);
-  }, []);
-  // RC audit fix — banner grace period. The "画面已断开，重连中"
+    toast.show('正在重新连接实时画面', 'info');
+  }, [toast]);
+  const liveOverlayCopy = browserLiveOverlayCopy({
+    status: vncStatus,
+    showReconnect,
+  });
+  // RC audit fix — banner grace period. The "实时画面断开，正在自动重连"
   // banner used to flip ON instantly when the WS closed, and stay on
   // for the entire backoff window (up to 5 s). For transient closes
   // (network jitter, CDP frame stalls) the banner would flash on/off
@@ -755,7 +763,7 @@ export function BrowserPanel({
       // start a fresh task — that's the only way to get a live
       // browser back under per-task pool semantics.
       if (taskTerminal) {
-        toast.show('浏览器已关闭，请新建任务继续', 'info');
+        toast.show(terminalBrowserTakeoverMessage(taskStatus), 'info');
         return;
       }
       userInteractedRef.current = true;
@@ -765,7 +773,7 @@ export function BrowserPanel({
       setShowTakeoverBanner(false);
     }
     setInteractive(next);
-  }, [interactive, taskTerminal, setInteractive, toast]);
+  }, [interactive, taskStatus, taskTerminal, setInteractive, toast]);
 
   // Codex P2 — hide the address bar / nav / takeover chrome when
   // the panel is open on a terminal task with no viewable evidence
@@ -1232,12 +1240,23 @@ export function BrowserPanel({
                   />
                 )}
                 {(vncStatus === 'idle' || vncStatus === 'connecting') && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/30 text-xs text-muted-foreground">
-                    <span className="pointer-events-none">连接实时画面…</span>
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/30 text-xs text-muted-foreground"
+                  >
+                    <div className="pointer-events-none max-w-[260px] text-center">
+                      <div className="font-medium text-foreground/80">{liveOverlayCopy.title}</div>
+                      <div className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                        {liveOverlayCopy.detail}
+                      </div>
+                    </div>
                     {showReconnect && (
                       <button
                         type="button"
                         onClick={handleManualReconnect}
+                        aria-label={liveOverlayCopy.reconnectLabel}
+                        title={liveOverlayCopy.reconnectLabel}
                         className="pointer-events-auto inline-flex h-7 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
                       >
                         <RotateCw className="h-3 w-3" />
@@ -1247,8 +1266,12 @@ export function BrowserPanel({
                   </div>
                 )}
                 {vncStatus === 'disconnected' && showDisconnectBanner && (
-                  <div className="pointer-events-none absolute right-2 top-2 rounded bg-[#FFC910]/95 px-2 py-0.5 text-[10px] font-semibold text-[#595757] shadow-sm">
-                    画面已断开，重连中
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    className="pointer-events-none absolute right-2 top-2 rounded bg-[#FFC910]/95 px-2 py-0.5 text-[10px] font-semibold text-[#595757] shadow-sm"
+                  >
+                    实时画面断开，正在自动重连
                   </div>
                 )}
                 {activityVisible && recentSteps.length > 0 && (
@@ -2023,8 +2046,11 @@ function deriveDotStatus(status: UiTaskStatus | null | undefined, hasFrame: bool
 }
 
 function StatusDot({ status }: { status: DotStatus }): JSX.Element {
+  const label = browserPanelDotLabel(status);
   return (
     <span
+      aria-label={label}
+      title={label}
       className={cn(
         'inline-block h-2 w-2 rounded-full',
         status === 'idle' && 'bg-muted-foreground/40',
