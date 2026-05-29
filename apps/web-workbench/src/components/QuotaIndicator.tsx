@@ -3,6 +3,7 @@ import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   normalizeQuotaSnapshot,
+  quotaIndicatorHref,
   type QuotaSnapshot,
   quotaRefreshErrorMessage,
   quotaRefreshStatusCopy,
@@ -125,10 +126,11 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
   const refreshCopy = quotaRefreshStatusCopy({ error, hasSnapshot: true });
 
   if (compact) {
+    const href = quotaIndicatorHref(snap);
     return (
       <button
         type="button"
-        onClick={() => navigate('/plan')}
+        onClick={() => navigate(href)}
         title={`${periodLabel}剩余 ${remaining} / ${totalLimit}`}
         aria-label={`${periodLabel}剩余 ${remaining} / ${totalLimit}`}
         className={cn(
@@ -155,7 +157,7 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
       >
         <button
           type="button"
-          onClick={() => navigate('/plan')}
+          onClick={() => navigate(quotaIndicatorHref(snap))}
           className="group flex w-full flex-col gap-1.5 text-left outline-none focus-visible:ring-1 focus-visible:ring-[#EA1F59]/45"
         >
           <div className="flex items-start justify-between gap-2">

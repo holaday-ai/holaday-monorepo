@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   normalizeQuotaSnapshot,
+  quotaIndicatorHref,
   quotaRefreshErrorMessage,
   quotaRefreshStatusCopy,
   quotaTaskState,
@@ -56,6 +57,36 @@ describe('quota indicator state helpers', () => {
       lowOnTasks: false,
       outOfTasks: false,
     });
+  });
+
+  it('routes paid exhausted quotas directly to add-ons', () => {
+    expect(
+      quotaIndicatorHref({
+        plan: 'basic',
+        period: 'month',
+        tasksLimit: 100,
+        tasksRemaining: 0,
+        bonusTasks: 0,
+      }),
+    ).toBe('/plan#addons');
+    expect(
+      quotaIndicatorHref({
+        plan: 'pro',
+        period: 'month',
+        tasksLimit: 100,
+        tasksRemaining: 3,
+        bonusTasks: 0,
+      }),
+    ).toBe('/plan');
+    expect(
+      quotaIndicatorHref({
+        plan: 'free',
+        period: 'day',
+        tasksLimit: 3,
+        tasksRemaining: 0,
+        bonusTasks: 0,
+      }),
+    ).toBe('/plan');
   });
 
   it('normalizes valid quota snapshots and rejects malformed payloads', () => {

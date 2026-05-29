@@ -1,3 +1,5 @@
+import { PLAN_ADDONS_HASH } from './plan-page-hash';
+
 export interface QuotaIndicatorSnapshotLike {
   readonly plan: string;
   readonly period: 'day' | 'month';
@@ -47,6 +49,11 @@ export function quotaTaskState(snap: QuotaIndicatorSnapshotLike): QuotaTaskState
     lowOnTasks: totalLimit > 0 && remaining <= Math.max(1, Math.floor(totalLimit * 0.1)),
     outOfTasks: totalLimit > 0 && remaining === 0,
   };
+}
+
+export function quotaIndicatorHref(snap: QuotaIndicatorSnapshotLike): string {
+  const state = quotaTaskState(snap);
+  return state.outOfTasks && snap.plan !== 'free' ? `/plan${PLAN_ADDONS_HASH}` : '/plan';
 }
 
 export function normalizeQuotaSnapshot(value: unknown): QuotaSnapshot | null {
