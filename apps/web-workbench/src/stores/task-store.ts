@@ -1005,12 +1005,29 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         (res.ok ? 'resumed' : null);
       if (state === 'resumed') {
         // Optimistically clear the awaiting-user state so the composer
-        // flips back to the default mode. The agent's actual response
-        // will flow in through subsequent tick frames.
+        // flips back to the default mode. Also clear the mirrored
+        // task-row awaitingKind/status immediately; otherwise the
+        // selected-task derivations can keep showing browser handoff
+        // UI until the next WS frame lands.
         set((prev) => {
-          const next = { ...prev.awaitingUserByTask };
-          delete next[taskId];
-          return { awaitingUserByTask: next };
+          const nextAwaiting = { ...prev.awaitingUserByTask };
+          delete nextAwaiting[taskId];
+          const nextCaptcha = prev.captchaWaitByTask[taskId]
+            ? { ...prev.captchaWaitByTask }
+            : prev.captchaWaitByTask;
+          if (nextCaptcha !== prev.captchaWaitByTask) delete nextCaptcha[taskId];
+          return {
+            awaitingUserByTask: nextAwaiting,
+            captchaWaitByTask: nextCaptcha,
+            tasks: prev.tasks.map((t) => {
+              if (t.taskId !== taskId) return t;
+              const { awaitingKind: _awaitingKind, ...rest } = t;
+              return {
+                ...rest,
+                status: t.status === 'awaiting_user' ? 'executing' : t.status,
+              };
+            }),
+          };
         });
       }
       return { ok: res.ok };

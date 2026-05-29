@@ -20,6 +20,7 @@ vi.mock('@/lib/trpc', () => ({
       list: { query: vi.fn() },
       detail: { query: vi.fn() },
       create: { mutate: vi.fn() },
+      reply: { mutate: vi.fn() },
       delete: { mutate: vi.fn() },
       moveToProject: { mutate: vi.fn() },
       star: { mutate: vi.fn() },
@@ -30,6 +31,7 @@ vi.mock('@/lib/trpc', () => ({
 const listQuery = vi.mocked(trpc.tasks.list.query);
 const detailQuery = vi.mocked(trpc.tasks.detail.query);
 const createMutate = vi.mocked(trpc.tasks.create.mutate);
+const replyMutate = vi.mocked(trpc.tasks.reply.mutate);
 const deleteMutate = vi.mocked(trpc.tasks.delete.mutate);
 const moveToProjectMutate = vi.mocked(trpc.tasks.moveToProject.mutate);
 const starMutate = vi.mocked(trpc.tasks.star.mutate);
@@ -38,6 +40,7 @@ beforeEach(() => {
   listQuery.mockReset();
   detailQuery.mockReset();
   createMutate.mockReset();
+  replyMutate.mockReset();
   deleteMutate.mockReset();
   moveToProjectMutate.mockReset();
   starMutate.mockReset();
@@ -747,6 +750,78 @@ describe('deleteTask', () => {
     expect(state.subStatusByTask.tsk_active).toBeUndefined();
     expect([...state.terminalTaskIds]).toEqual(['tsk_keep']);
     expect([...state.animatedTaskIds]).toEqual(['tsk_keep']);
+  });
+});
+
+describe('replyToTask', () => {
+  it('optimistically clears awaiting browser handoff state when a reply resumes execution', async () => {
+    replyMutate.mockResolvedValueOnce({ ok: true, state: 'resumed' });
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_wait',
+          status: 'awaiting_user',
+          awaitingKind: 'login',
+          executionMode: 'browser',
+        }),
+      ],
+      awaitingUserByTask: {
+        tsk_wait: {
+          question: '登录完成后告诉我',
+          at: 1,
+          awaitingKind: 'login',
+        },
+      },
+      captchaWaitByTask: {
+        tsk_wait: {
+          antiBotType: 'captcha',
+          message: '验证',
+          startedAt: 1,
+          deadlineMs: 2,
+        },
+      },
+    });
+
+    await expect(
+      useTaskStore.getState().replyToTask('tsk_wait', '登录好了', []),
+    ).resolves.toEqual({ ok: true });
+
+    const state = useTaskStore.getState();
+    expect(state.awaitingUserByTask.tsk_wait).toBeUndefined();
+    expect(state.captchaWaitByTask.tsk_wait).toBeUndefined();
+    expect(state.tasks[0]?.status).toBe('executing');
+    expect(state.tasks[0]?.awaitingKind).toBeUndefined();
+    expect(state.userRepliesByTask.tsk_wait?.[0]?.text).toBe('登录好了');
+  });
+
+  it('preserves awaiting state when the reply says to keep waiting', async () => {
+    replyMutate.mockResolvedValueOnce({ ok: true, state: 'stillAwaiting' });
+    useTaskStore.setState({
+      tasks: [
+        task({
+          taskId: 'tsk_wait',
+          status: 'awaiting_user',
+          awaitingKind: 'browser_action',
+          executionMode: 'browser',
+        }),
+      ],
+      awaitingUserByTask: {
+        tsk_wait: {
+          question: '完成操作后告诉我',
+          at: 1,
+          awaitingKind: 'browser_action',
+        },
+      },
+    });
+
+    await expect(
+      useTaskStore.getState().replyToTask('tsk_wait', '等一下', []),
+    ).resolves.toEqual({ ok: true });
+
+    const state = useTaskStore.getState();
+    expect(state.awaitingUserByTask.tsk_wait?.awaitingKind).toBe('browser_action');
+    expect(state.tasks[0]?.status).toBe('awaiting_user');
+    expect(state.tasks[0]?.awaitingKind).toBe('browser_action');
   });
 });
 

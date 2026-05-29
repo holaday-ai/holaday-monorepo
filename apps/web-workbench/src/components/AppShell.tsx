@@ -48,7 +48,11 @@ import {
 import { normalizeProjectRows } from '@/lib/project-page-state';
 import { shouldKeepProjectFilterForPickedTask } from '@/lib/task-selection-url-state';
 import { trpc } from '@/lib/trpc';
-import { normalizeTaskActionCount } from '@/lib/workbench-state';
+import {
+  networkTransitionToast,
+  normalizeTaskActionCount,
+  realtimeConnectionTransition,
+} from '@/lib/workbench-state';
 import {
   connect,
   disconnect,
@@ -366,29 +370,34 @@ export function AppShell(): JSX.Element {
   React.useEffect(() => {
     const prev = prevWsRef.current;
     prevWsRef.current = wsStatus;
-    if (!authed) return;
-    if (
-      prev === 'open' &&
-      (wsStatus === 'closed' || wsStatus === 'connecting')
-    ) {
-      hadDisconnectRef.current = true;
-      toast.show('实时连接已断开，正在重连…', 'error');
-    }
-    if (wsStatus === 'open' && hadDisconnectRef.current) {
-      hadDisconnectRef.current = false;
-      toast.show('实时连接已恢复', 'info', 3000);
+    const next = realtimeConnectionTransition({
+      previousStatus: prev,
+      nextStatus: wsStatus,
+      hadDisconnect: hadDisconnectRef.current,
+      authed,
+    });
+    hadDisconnectRef.current = next.hadDisconnect;
+    if (next.toast) {
+      toast.show(next.toast.message, next.toast.tone, next.toast.durationMs);
     }
   }, [wsStatus, authed, toast]);
 
   // Online / offline toasts.
+  const onlineRef = React.useRef(online);
   React.useEffect(() => {
+    const applyOnline = (nextOnline: boolean): void => {
+      const toastCopy = networkTransitionToast(onlineRef.current, nextOnline);
+      onlineRef.current = nextOnline;
+      setOnline(nextOnline);
+      if (toastCopy) {
+        toast.show(toastCopy.message, toastCopy.tone);
+      }
+    };
     const onOffline = (): void => {
-      setOnline(false);
-      toast.show('网络连接已断开', 'error');
+      applyOnline(false);
     };
     const onOnline = (): void => {
-      setOnline(true);
-      toast.show('网络已恢复');
+      applyOnline(true);
     };
     window.addEventListener('offline', onOffline);
     window.addEventListener('online', onOnline);

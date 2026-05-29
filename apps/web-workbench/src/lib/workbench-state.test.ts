@@ -3,7 +3,9 @@ import type { UiTask } from '@/types/task';
 import {
   followUpTargetForTask,
   isLiveBrowserTaskForWorkbench,
+  networkTransitionToast,
   normalizeTaskActionCount,
+  realtimeConnectionTransition,
 } from './workbench-state';
 
 function task(overrides: Partial<UiTask> = {}): UiTask {
@@ -74,5 +76,66 @@ describe('workbench state helpers', () => {
     expect(normalizeTaskActionCount(Number.POSITIVE_INFINITY)).toBe(0);
     expect(normalizeTaskActionCount('4')).toBe(0);
     expect(normalizeTaskActionCount({ count: 4 })).toBe(0);
+  });
+
+  it('only toasts real browser network transitions', () => {
+    expect(networkTransitionToast(true, true)).toBeNull();
+    expect(networkTransitionToast(false, false)).toBeNull();
+    expect(networkTransitionToast(true, false)).toEqual({
+      message: '网络连接已断开',
+      tone: 'error',
+    });
+    expect(networkTransitionToast(false, true)).toEqual({
+      message: '网络已恢复，可以继续创建任务',
+      tone: 'info',
+    });
+  });
+
+  it('keeps realtime reconnect toasts gated on an actual disconnect', () => {
+    expect(
+      realtimeConnectionTransition({
+        previousStatus: 'idle',
+        nextStatus: 'open',
+        hadDisconnect: false,
+        authed: true,
+      }),
+    ).toEqual({ hadDisconnect: false, toast: null });
+    expect(
+      realtimeConnectionTransition({
+        previousStatus: 'open',
+        nextStatus: 'connecting',
+        hadDisconnect: false,
+        authed: true,
+      }),
+    ).toEqual({
+      hadDisconnect: true,
+      toast: { message: '实时连接已断开，正在重连…', tone: 'error' },
+    });
+    expect(
+      realtimeConnectionTransition({
+        previousStatus: 'connecting',
+        nextStatus: 'open',
+        hadDisconnect: true,
+        authed: true,
+      }),
+    ).toEqual({
+      hadDisconnect: false,
+      toast: {
+        message: '实时连接已恢复',
+        tone: 'info',
+        durationMs: 3000,
+      },
+    });
+  });
+
+  it('does not show realtime reconnect toasts while signed out', () => {
+    expect(
+      realtimeConnectionTransition({
+        previousStatus: 'open',
+        nextStatus: 'closed',
+        hadDisconnect: false,
+        authed: false,
+      }),
+    ).toEqual({ hadDisconnect: false, toast: null });
   });
 });
