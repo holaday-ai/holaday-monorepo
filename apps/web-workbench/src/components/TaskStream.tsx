@@ -1248,15 +1248,21 @@ function EmptyTerminalCard({
   const retryable = failed || partial;
   const toast = useToast();
   const createTask = useTaskStore((s) => s.createTask);
+  const [retrying, setRetrying] = React.useState(false);
   const handleRetry = React.useCallback(async (): Promise<void> => {
-    if (!intent) return;
-    const result = await createTask(intent, []);
-    if ('error' in result) {
-      toast.show(taskActionError('重试失败', result.error), 'error');
-      return;
+    if (!intent || retrying) return;
+    setRetrying(true);
+    try {
+      const result = await createTask(intent, []);
+      if ('error' in result) {
+        toast.show(taskActionError('重试失败', result.error), 'error');
+        return;
+      }
+      toast.show('已重新提交', 'info', 2000);
+    } finally {
+      setRetrying(false);
     }
-    toast.show('已重新提交', 'info', 2000);
-  }, [createTask, intent, toast]);
+  }, [createTask, intent, retrying, toast]);
 
   return (
     <div
@@ -1278,16 +1284,18 @@ function EmptyTerminalCard({
       {retryable && intent && (
         <button
           type="button"
+          aria-label="重新执行任务"
+          title="重新执行任务"
           onClick={() => void handleRetry()}
+          disabled={retrying}
           className={cn(
-            'mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border bg-white/70 px-2.5 text-[11px] font-medium transition-colors hover:bg-[#EFEFEF]/50 dark:bg-transparent dark:hover:bg-white/10',
+            'mt-3 inline-flex h-7 w-7 items-center justify-center rounded-md border bg-white/70 text-[11px] font-medium transition-colors hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:bg-transparent dark:hover:bg-white/10',
             partial
               ? 'border-[#FFC910]/60 text-[#57479C] dark:border-[#FFC910]/35 dark:text-foreground'
               : 'border-[#EA1F59]/40 text-[#EA1F59] dark:border-[#EA1F59]/35',
           )}
         >
-          <RotateCcw className="h-3 w-3" />
-          重试
+          <RotateCcw className={cn('h-3 w-3', retrying && 'animate-spin')} />
         </button>
       )}
     </div>
