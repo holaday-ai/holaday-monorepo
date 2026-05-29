@@ -1,3 +1,5 @@
+import { pageErrorMessage } from './page-error-copy';
+
 export type HistoryStatusFilter = 'all' | 'completed' | 'failed' | 'running';
 export type HistoryRangeFilter = '7d' | '30d' | 'all';
 
@@ -88,9 +90,7 @@ export function starredPageSummary({
 }
 
 export function taskHubErrorMessage(err: unknown, fallback = '请稍后重试'): string {
-  if (err instanceof Error && err.message.trim()) return err.message;
-  if (typeof err === 'string' && err.trim()) return err;
-  return fallback;
+  return pageErrorMessage(err, fallback);
 }
 
 export function mergeTaskHubRowsById<T extends { readonly taskId: string }>(

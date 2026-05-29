@@ -1,3 +1,5 @@
+import { pageErrorMessage } from '@/lib/page-error-copy';
+
 export function scheduledCalendarSummary({
   loading,
   error,
@@ -51,7 +53,5 @@ export function scheduledCalendarStatusCopy({
 }
 
 export function scheduledCalendarErrorMessage(err: unknown, fallback = '请稍后重试'): string {
-  if (err instanceof Error && err.message.trim()) return err.message;
-  if (typeof err === 'string' && err.trim()) return err;
-  return fallback;
+  return pageErrorMessage(err, fallback);
 }

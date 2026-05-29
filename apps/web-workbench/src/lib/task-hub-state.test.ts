@@ -132,8 +132,10 @@ describe('task hub state helpers', () => {
     expect(formatTaskHubTime('2026-05-24T01:05:00.000Z', now)).toBe('今天 10:05');
     expect(formatTaskHubTime('2026-05-20T01:05:00.000Z', now)).toBe('2026-05-20 10:05');
     expect(formatTaskHubTime('not-a-date', now)).toBe('—');
-    expect(taskHubErrorMessage(new Error('offline'))).toBe('offline');
-    expect(taskHubErrorMessage('bad')).toBe('bad');
+    expect(taskHubErrorMessage(new Error('offline'))).toBe(
+      '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
+    );
+    expect(taskHubErrorMessage('任务不存在')).toBe('任务不存在');
     expect(taskHubErrorMessage({})).toBe('请稍后重试');
   });
 

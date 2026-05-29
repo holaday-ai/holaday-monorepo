@@ -1,3 +1,5 @@
+import { pageErrorMessage } from './page-error-copy';
+
 export interface NormalizedBatchRow {
   readonly batchId: string;
   readonly name: string | null;
@@ -146,9 +148,7 @@ export function batchRemainingCount({
 }
 
 export function batchErrorMessage(err: unknown, fallback = '请稍后重试'): string {
-  if (err instanceof Error && err.message.trim()) return err.message;
-  if (typeof err === 'string' && err.trim()) return err;
-  return fallback;
+  return pageErrorMessage(err, fallback);
 }
 
 export function safeBatchCount(value: unknown): number {

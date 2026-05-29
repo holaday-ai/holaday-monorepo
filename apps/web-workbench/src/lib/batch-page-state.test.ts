@@ -100,8 +100,10 @@ describe('batch page state helpers', () => {
   });
 
   it('normalizes unknown errors', () => {
-    expect(batchErrorMessage(new Error('offline'))).toBe('offline');
-    expect(batchErrorMessage('bad gateway')).toBe('bad gateway');
+    expect(batchErrorMessage(new Error('offline'))).toBe(
+      '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
+    );
+    expect(batchErrorMessage('批量任务不存在')).toBe('批量任务不存在');
     expect(batchErrorMessage({})).toBe('请稍后重试');
   });
 

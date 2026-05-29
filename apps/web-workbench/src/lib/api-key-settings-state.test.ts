@@ -92,8 +92,10 @@ describe('api key settings state helpers', () => {
   });
 
   it('normalizes API key setting errors', () => {
-    expect(apiKeySettingsErrorMessage(new Error('offline'))).toBe('offline');
-    expect(apiKeySettingsErrorMessage('bad gateway')).toBe('bad gateway');
+    expect(apiKeySettingsErrorMessage(new Error('offline'))).toBe(
+      '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
+    );
+    expect(apiKeySettingsErrorMessage('Key 已撤销')).toBe('Key 已撤销');
     expect(apiKeySettingsErrorMessage({})).toBe('请稍后重试');
   });
 });

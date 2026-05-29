@@ -35,8 +35,10 @@ describe('notification bell state helpers', () => {
   });
 
   it('normalizes unknown notification errors', () => {
-    expect(notificationErrorMessage(new Error('offline'))).toBe('offline');
-    expect(notificationErrorMessage('bad gateway')).toBe('bad gateway');
+    expect(notificationErrorMessage(new Error('offline'))).toBe(
+      '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
+    );
+    expect(notificationErrorMessage('通知不存在')).toBe('通知不存在');
     expect(notificationErrorMessage({})).toBe('请稍后重试');
   });
 

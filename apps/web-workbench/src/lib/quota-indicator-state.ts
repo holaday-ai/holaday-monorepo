@@ -1,3 +1,4 @@
+import { pageErrorMessage } from './page-error-copy';
 import { PLAN_ADDONS_HASH } from './plan-page-hash';
 
 export interface QuotaIndicatorSnapshotLike {
@@ -103,9 +104,7 @@ export function quotaRefreshErrorMessage(
   err: unknown,
   fallback = '额度暂时无法刷新，请稍后重试。',
 ): string {
-  if (err instanceof Error && err.message.trim()) return err.message;
-  if (typeof err === 'string' && err.trim()) return err;
-  return fallback;
+  return pageErrorMessage(err, fallback);
 }
 
 function finiteNumber(value: unknown): number | null {

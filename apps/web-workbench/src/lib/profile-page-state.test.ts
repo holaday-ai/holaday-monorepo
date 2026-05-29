@@ -63,8 +63,10 @@ describe('profile page state helpers', () => {
   });
 
   it('normalizes profile loading errors', () => {
-    expect(profileLoadErrorMessage(new Error('offline'))).toBe('offline');
-    expect(profileLoadErrorMessage('bad gateway')).toBe('bad gateway');
+    expect(profileLoadErrorMessage(new Error('offline'))).toBe(
+      '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
+    );
+    expect(profileLoadErrorMessage('个人资料不存在')).toBe('个人资料不存在');
     expect(profileLoadErrorMessage({})).toBe('个人资料暂时无法加载，请稍后重试。');
   });
 });

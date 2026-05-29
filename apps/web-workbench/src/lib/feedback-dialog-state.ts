@@ -1,3 +1,5 @@
+import { pageErrorMessage } from './page-error-copy';
+
 export const MAX_FEEDBACK_MESSAGE_LENGTH = 4000;
 export const FEEDBACK_AUTOCLOSE_MS = 1200;
 
@@ -27,7 +29,5 @@ export function feedbackCounterLabel(value: string): string {
 }
 
 export function feedbackSubmitError(err: unknown): string {
-  if (err instanceof Error && err.message.trim()) return err.message.trim();
-  if (typeof err === 'string' && err.trim()) return err.trim();
-  return '反馈发送失败，请稍后重试。';
+  return pageErrorMessage(err, '反馈发送失败，请稍后重试。');
 }

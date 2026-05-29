@@ -40,8 +40,10 @@ describe('search overlay state helpers', () => {
   });
 
   it('normalizes unknown search errors', () => {
-    expect(searchOverlayErrorMessage(new Error('offline'))).toBe('offline');
-    expect(searchOverlayErrorMessage('bad gateway')).toBe('bad gateway');
+    expect(searchOverlayErrorMessage(new Error('offline'))).toBe(
+      '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
+    );
+    expect(searchOverlayErrorMessage('搜索词不能为空')).toBe('搜索词不能为空');
     expect(searchOverlayErrorMessage({})).toBe('搜索暂时不可用，请稍后重试。');
   });
 

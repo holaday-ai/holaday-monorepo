@@ -78,8 +78,10 @@ describe('memory settings state helpers', () => {
   });
 
   it('normalizes memory load errors', () => {
-    expect(memoryLoadErrorMessage(new Error('offline'))).toBe('offline');
-    expect(memoryLoadErrorMessage('bad gateway')).toBe('bad gateway');
+    expect(memoryLoadErrorMessage(new Error('offline'))).toBe(
+      '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
+    );
+    expect(memoryLoadErrorMessage('记忆不存在')).toBe('记忆不存在');
     expect(memoryLoadErrorMessage({})).toBe('AI 记忆暂时无法加载，请稍后重试。');
   });
 });

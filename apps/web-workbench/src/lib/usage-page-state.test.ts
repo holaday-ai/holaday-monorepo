@@ -142,8 +142,10 @@ describe('usage page state helpers', () => {
   });
 
   it('normalizes unknown usage errors', () => {
-    expect(usageErrorMessage(new Error('offline'))).toBe('offline');
-    expect(usageErrorMessage('bad gateway')).toBe('bad gateway');
+    expect(usageErrorMessage(new Error('offline'))).toBe(
+      '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
+    );
+    expect(usageErrorMessage('用量尚未生成')).toBe('用量尚未生成');
     expect(usageErrorMessage({})).toBe('请稍后重试');
   });
 });

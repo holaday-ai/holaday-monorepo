@@ -42,8 +42,10 @@ describe('scheduled calendar state helpers', () => {
   });
 
   it('normalizes unknown errors', () => {
-    expect(scheduledCalendarErrorMessage(new Error('offline'))).toBe('offline');
-    expect(scheduledCalendarErrorMessage('bad')).toBe('bad');
+    expect(scheduledCalendarErrorMessage(new Error('offline'))).toBe(
+      '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
+    );
+    expect(scheduledCalendarErrorMessage('计划不存在')).toBe('计划不存在');
     expect(scheduledCalendarErrorMessage({})).toBe('请稍后重试');
   });
 });

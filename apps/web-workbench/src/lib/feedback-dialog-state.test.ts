@@ -31,8 +31,10 @@ describe('feedback dialog state', () => {
   });
 
   it('formats thrown submit errors for inline display', () => {
-    expect(feedbackSubmitError(new Error('network down'))).toBe('network down');
-    expect(feedbackSubmitError('  rejected  ')).toBe('rejected');
+    expect(feedbackSubmitError(new Error('network down'))).toBe(
+      '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
+    );
+    expect(feedbackSubmitError('反馈内容过长')).toBe('反馈内容过长');
     expect(feedbackSubmitError(null)).toBe('反馈发送失败，请稍后重试。');
   });
 });

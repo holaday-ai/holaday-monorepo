@@ -68,8 +68,10 @@ describe('billing page state helpers', () => {
   });
 
   it('normalizes billing loading errors', () => {
-    expect(billingLoadErrorMessage(new Error('offline'))).toBe('offline');
-    expect(billingLoadErrorMessage('bad gateway')).toBe('bad gateway');
+    expect(billingLoadErrorMessage(new Error('offline'))).toBe(
+      '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
+    );
+    expect(billingLoadErrorMessage('订阅已取消')).toBe('订阅已取消');
     expect(billingLoadErrorMessage({})).toBe('订阅信息暂时无法加载，请稍后重试。');
   });
 });

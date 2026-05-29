@@ -1,3 +1,5 @@
+import { pageErrorMessage } from './page-error-copy';
+
 export interface ProfileSnapshot {
   readonly email: string;
   readonly displayName: string;
@@ -49,9 +51,7 @@ export function profileLoadErrorMessage(
   err: unknown,
   fallback = '个人资料暂时无法加载，请稍后重试。',
 ): string {
-  if (err instanceof Error && err.message.trim()) return err.message;
-  if (typeof err === 'string' && err.trim()) return err;
-  return fallback;
+  return pageErrorMessage(err, fallback);
 }
 
 function profileSafeText(value: unknown): string {

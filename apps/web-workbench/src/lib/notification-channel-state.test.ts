@@ -62,8 +62,10 @@ describe('normalizeNotificationChannels', () => {
 
 describe('notificationChannelsLoadErrorMessage', () => {
   it('normalizes notification channel load errors', () => {
-    expect(notificationChannelsLoadErrorMessage(new Error('offline'))).toBe('offline');
-    expect(notificationChannelsLoadErrorMessage('bad gateway')).toBe('bad gateway');
+    expect(notificationChannelsLoadErrorMessage(new Error('offline'))).toBe(
+      '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
+    );
+    expect(notificationChannelsLoadErrorMessage('Webhook 不可用')).toBe('Webhook 不可用');
     expect(notificationChannelsLoadErrorMessage({})).toBe(
       '通知渠道暂时无法加载，请稍后重试。',
     );

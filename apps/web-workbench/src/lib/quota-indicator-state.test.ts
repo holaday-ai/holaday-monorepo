@@ -146,8 +146,10 @@ describe('quota indicator state helpers', () => {
   });
 
   it('normalizes quota refresh errors', () => {
-    expect(quotaRefreshErrorMessage(new Error('offline'))).toBe('offline');
-    expect(quotaRefreshErrorMessage('bad gateway')).toBe('bad gateway');
+    expect(quotaRefreshErrorMessage(new Error('offline'))).toBe(
+      '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
+    );
+    expect(quotaRefreshErrorMessage('额度不足')).toBe('额度不足');
     expect(quotaRefreshErrorMessage({})).toBe('额度暂时无法刷新，请稍后重试。');
   });
 });
