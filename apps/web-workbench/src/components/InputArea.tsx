@@ -27,6 +27,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import {
+  composerSubmitErrorMessage,
   type ComposerSubmitResult,
   shouldClearComposerAfterSubmit,
 } from '@/components/composer-submit';
@@ -441,12 +442,12 @@ export function InputArea({
       // it and keep the input.
       if (typeof result === 'object' && result != null) {
         const r = result as { error?: string };
-        if (r.error) toast.show(r.error, 'error');
+        if (r.error) toast.show(composerSubmitErrorMessage(r.error), 'error');
       }
       submitOk = shouldClearComposerAfterSubmit(result);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      toast.show(`提交失败：${msg}`, 'error');
+      toast.show(composerSubmitErrorMessage(msg), 'error');
       submitOk = false;
     } finally {
       setSubmitting(false);
