@@ -43,6 +43,7 @@ import {
   fetchFileBlobAuthed,
 } from '@/lib/download-file';
 import { taskActionError } from '@/lib/error-copy';
+import { pageActionError } from '@/lib/page-error-copy';
 import {
   externalLinkConfirmDescription,
   safeExternalHttpHref,
@@ -657,10 +658,7 @@ function AwaitingUserBanner({
       }
       toast.show('已取消任务', 'info', 2000);
     } catch (err) {
-      toast.show(
-        taskActionError('取消失败', err instanceof Error ? err.message : String(err)),
-        'error',
-      );
+      toast.show(pageActionError('取消失败', err), 'error');
     } finally {
       setCancelling(false);
     }

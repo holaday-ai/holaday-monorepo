@@ -1,6 +1,7 @@
 import type { BrowserViewportProfile, ServerMessage } from '@holaday/shared-types';
 import { create } from 'zustand';
 import { humaniseTaskError } from '@/lib/error-copy';
+import { pageErrorMessage } from '@/lib/page-error-copy';
 import { hdDebug } from '@/lib/hd-debug';
 import { trpc } from '@/lib/trpc';
 import type {
@@ -1738,8 +1739,7 @@ function extractExecutionMode(
 }
 
 function taskStoreError(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err);
-  return humaniseTaskError(raw);
+  return pageErrorMessage(err);
 }
 
 export function normalizeTaskListRows(value: unknown): UiTask[] {

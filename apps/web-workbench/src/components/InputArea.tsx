@@ -31,6 +31,7 @@ import {
   type ComposerSubmitResult,
   shouldClearComposerAfterSubmit,
 } from '@/components/composer-submit';
+import { pageErrorMessage } from '@/lib/page-error-copy';
 import { quotaExhaustedCopy } from '@/lib/quota-exhausted-copy';
 import { isUploadError, uploadFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
@@ -392,7 +393,7 @@ export function InputArea({
           ),
         );
       } catch (err) {
-        const msg = isUploadError(err) ? err.message : err instanceof Error ? err.message : '上传失败';
+        const msg = isUploadError(err) ? err.message : pageErrorMessage(err, '上传失败');
         setAttachments((prev) =>
           prev.map((a) =>
             a.filename === draft.filename && a.fileId === ''
@@ -446,7 +447,7 @@ export function InputArea({
       }
       submitOk = shouldClearComposerAfterSubmit(result);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = pageErrorMessage(err);
       toast.show(composerSubmitErrorMessage(msg), 'error');
       submitOk = false;
     } finally {

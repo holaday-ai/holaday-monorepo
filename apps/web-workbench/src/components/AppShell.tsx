@@ -32,6 +32,7 @@ import {
 } from '@/lib/auth-me-state';
 import { authSessionExpiredMessage, isAuthSessionError } from '@/lib/auth-session';
 import { taskActionError } from '@/lib/error-copy';
+import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
 import {
   projectFilterChipState,
   projectTaskFilterAppendPage,
@@ -178,7 +179,7 @@ export function AppShell(): JSX.Element {
       return { ok: true, projects: nextProjects };
     } catch (err) {
       return {
-        error: err instanceof Error ? err.message : String(err),
+        error: pageErrorMessage(err),
       };
     }
   }, []);
@@ -529,7 +530,7 @@ export function AppShell(): JSX.Element {
       })
       .catch((err) => {
         if (cancelled) return;
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = pageErrorMessage(err);
         setProjectTaskFilter((prev) =>
           prev?.projectId === projectFilter
             ? { ...prev, loading: false, error: msg }
@@ -581,7 +582,7 @@ export function AppShell(): JSX.Element {
         );
       })
       .catch((err) => {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = pageErrorMessage(err);
         setProjectTaskFilter((prev) =>
           projectTaskFilterLoadMoreFailed(prev, {
             projectId: projectFilter,
@@ -765,8 +766,8 @@ export function AppShell(): JSX.Element {
             );
             return { ok: true as const };
           } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            toast.show(`反馈发送失败：${msg}`, 'error');
+            const msg = pageErrorMessage(err);
+            toast.show(pageActionError('反馈发送失败', err), 'error');
             return { error: msg };
           }
         }}
@@ -813,7 +814,7 @@ export function AppShell(): JSX.Element {
                 (err) => ({
                   id,
                   result: {
-                    error: err instanceof Error ? err.message : String(err),
+                    error: pageErrorMessage(err),
                   },
                 }),
               ),
@@ -870,13 +871,7 @@ export function AppShell(): JSX.Element {
             void refreshTaskList();
             refreshDeletionDependentMeta();
           } catch (err) {
-            toast.show(
-              taskActionError(
-                '清除失败',
-                err instanceof Error ? err.message : String(err),
-              ),
-              'error',
-            );
+            toast.show(pageActionError('清除失败', err), 'error');
           }
         }}
       />
