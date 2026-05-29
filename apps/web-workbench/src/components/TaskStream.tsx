@@ -35,6 +35,7 @@ import remarkGfm from 'remark-gfm';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
+import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
 import { copyTextToClipboard } from '@/lib/copy-text';
 import {
   downloadFailureMessage,
@@ -643,8 +644,8 @@ function AwaitingUserBanner({
   const toast = useToast();
   const [cancelling, setCancelling] = React.useState(false);
   const kind = wait.awaitingKind ?? 'clarification';
-  const meta = AWAITING_KIND_META[kind] ?? AWAITING_KIND_META.clarification;
-  const Icon = meta.icon;
+  const copy = awaitingUserCopy(kind);
+  const Icon = AWAITING_KIND_ICON[kind] ?? AWAITING_KIND_ICON.clarification;
   const handleCancel = React.useCallback(async () => {
     if (cancelling) return;
     setCancelling(true);
@@ -675,10 +676,10 @@ function AwaitingUserBanner({
         <Icon className="mt-0.5 h-4 w-4 shrink-0 text-[#57479C]" />
         <div className="min-w-0 flex-1">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-[#57479C]">
-            {meta.title}
+            {copy.title}
           </div>
           <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-            {showAgentQuestion ? wait.question : meta.body}
+            {showAgentQuestion ? wait.question : copy.streamBody}
           </p>
           {showAgentQuestion && (
             <p className="mt-2 text-[11px] text-muted-foreground">
@@ -692,7 +693,7 @@ function AwaitingUserBanner({
               </span>
             )}
             <span className="text-muted-foreground">
-              {meta.continueHint}
+              {copy.streamHint}
             </span>
             <button
               type="button"
@@ -709,45 +710,15 @@ function AwaitingUserBanner({
   );
 }
 
-const AWAITING_KIND_META: Record<
+const AWAITING_KIND_ICON: Record<
   NonNullable<UiAwaitingUser['awaitingKind']>,
-  {
-    icon: React.ComponentType<{ className?: string }>;
-    title: string;
-    body: string;
-    continueHint: string;
-  }
+  React.ComponentType<{ className?: string }>
 > = {
-  login: {
-    icon: LogIn,
-    title: '需要登录',
-    body: '请在右侧浏览器中完成登录或扫码，任务会自动继续。',
-    continueHint: '在浏览器面板里完成登录',
-  },
-  captcha: {
-    icon: ShieldAlert,
-    title: '需要验证',
-    body: '请在右侧浏览器中完成验证码，任务会自动继续。',
-    continueHint: '在浏览器面板里通过验证',
-  },
-  clarification: {
-    icon: MessageCircleQuestion,
-    title: 'HOLA DAY 想跟你确认',
-    body: '需要更多信息才能继续。',
-    continueHint: '在下方输入框回答',
-  },
-  permission: {
-    icon: KeyRound,
-    title: '需要授权',
-    body: '请在右侧浏览器中授权访问，任务会自动继续。',
-    continueHint: '在浏览器面板里完成授权',
-  },
-  browser_action: {
-    icon: MousePointerClick,
-    title: '需要你接管浏览器',
-    body: '请在右侧浏览器里完成下一步操作，任务会自动继续。',
-    continueHint: '在浏览器面板里完成操作',
-  },
+  login: LogIn,
+  captcha: ShieldAlert,
+  clarification: MessageCircleQuestion,
+  permission: KeyRound,
+  browser_action: MousePointerClick,
 };
 
 /**

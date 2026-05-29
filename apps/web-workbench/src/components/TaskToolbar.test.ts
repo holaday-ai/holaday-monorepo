@@ -42,8 +42,26 @@ describe('TaskToolbar helpers', () => {
   });
 
   it('prioritizes attention-needed browser labels', () => {
-    expect(browserToolbarLabel(task({ status: 'awaiting_user' }), 'browser-live', true)).toBe(
-      '需要你处理浏览器',
-    );
+    expect(
+      browserToolbarLabel(
+        task({ status: 'awaiting_user', awaitingKind: 'login' }),
+        'browser-live',
+        true,
+      ),
+    ).toBe('需要登录');
+    expect(
+      browserToolbarLabel(
+        task({ status: 'awaiting_user', awaitingKind: 'captcha' }),
+        'browser-live',
+        true,
+      ),
+    ).toBe('需要验证');
+    expect(
+      browserToolbarLabel(
+        task({ status: 'awaiting_user', awaitingKind: 'browser_action' }),
+        'browser-live',
+        true,
+      ),
+    ).toBe('需要操作浏览器');
   });
 });

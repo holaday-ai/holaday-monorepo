@@ -39,6 +39,7 @@ import {
   browserNavExceptionMessage,
   browserNavFailureMessage,
 } from '@/lib/browser-nav-copy';
+import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
 import {
   externalLinkConfirmDescription,
   safeExternalHttpHref,
@@ -1153,10 +1154,10 @@ export function BrowserPanel({
               </span>
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-semibold">
-                  {awaitingKindBannerTitle(awaitingKind)}
+                  {awaitingUserCopy(awaitingKind).panelTitle}
                 </div>
                 <div className="mt-0.5 text-xs text-muted-foreground">
-                  {awaitingKindBannerBody(awaitingKind)}
+                  {awaitingUserCopy(awaitingKind).panelBody}
                 </div>
                 {/* Phase 1 follow-up — login park resume affordance.
                     Surfaces ONLY when:
@@ -2013,53 +2014,6 @@ const NAMED_KEYS: Readonly<Record<string, string>> = {
 };
 
 type DotStatus = 'idle' | 'live' | 'error';
-
-function awaitingKindBannerTitle(
-  kind:
-    | 'clarification'
-    | 'login'
-    | 'captcha'
-    | 'permission'
-    | 'browser_action'
-    | undefined,
-): string {
-  switch (kind) {
-    case 'login':
-      return '需要您完成登录';
-    case 'browser_action':
-      return '需要您在浏览器中操作';
-    case 'permission':
-      // Phase 3 R1 — permission walls (HTTP 403, geo-restricted pages,
-      // chrome-error pages). Different from a login: there's nothing
-      // to log into, the page is just refusing access.
-      return '页面拒绝了访问';
-    case 'captcha':
-    default:
-      return '需要您手动完成验证';
-  }
-}
-
-function awaitingKindBannerBody(
-  kind:
-    | 'clarification'
-    | 'login'
-    | 'captcha'
-    | 'permission'
-    | 'browser_action'
-    | undefined,
-): string {
-  switch (kind) {
-    case 'login':
-      return '交互模式已开启，直接在下方画面里完成登录 / 扫码。完成后 HOLA DAY 会继续。';
-    case 'browser_action':
-      return '交互模式已开启，按提示在下方画面里点击 / 选择即可。完成后 HOLA DAY 会继续。';
-    case 'permission':
-      return '当前页面对未授权访问返回 403 / 拒绝。请确认你有权限，或换一个公开来源后回复继续。';
-    case 'captcha':
-    default:
-      return '交互模式已开启，直接在下方画面里点击验证码 / 滑动滑块即可。完成后 HOLA DAY 会继续。';
-  }
-}
 
 function deriveDotStatus(status: UiTaskStatus | null | undefined, hasFrame: boolean): DotStatus {
   if (status === 'failed') return 'error';
