@@ -1061,7 +1061,7 @@ function DetailToggle({
           ) : (
             <ChevronRight className="h-3 w-3" />
           )}
-          {open ? '收起' : `${count} 步`}
+          {!open && <span className="tabular-nums">{count}</span>}
         </span>
       </button>
       {open && children}
@@ -2670,9 +2670,17 @@ function FailureHeaderCard({
           <button
             type="button"
             onClick={() => setShowTechnical((v) => !v)}
-            className="inline-flex items-center gap-1 text-[11px] font-medium underline-offset-2 hover:underline"
+            aria-expanded={showTechnical}
+            aria-label={showTechnical ? '收起技术信息' : '查看技术信息'}
+            title={showTechnical ? '收起技术信息' : '查看技术信息'}
+            className="inline-flex h-6 items-center gap-1 rounded-[6px] px-1.5 text-[11px] font-medium text-[#595757] transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
           >
-            {showTechnical ? '收起技术信息 ▴' : '查看技术信息 ▾'}
+            {showTechnical ? (
+              <ChevronDown className="h-3 w-3" aria-hidden />
+            ) : (
+              <ChevronRight className="h-3 w-3" aria-hidden />
+            )}
+            <span>技术</span>
           </button>
           {showTechnical && (
             <pre className="mt-1.5 whitespace-pre-wrap break-words rounded bg-white/70 px-2 py-1.5 text-[11px] font-mono leading-relaxed text-[#595757] dark:bg-white/10 dark:text-foreground">

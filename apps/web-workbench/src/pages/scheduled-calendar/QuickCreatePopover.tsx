@@ -310,17 +310,19 @@ export function QuickCreatePopover({
               type="button"
               onClick={() => setShowAdvanced((v) => !v)}
               disabled={submitting}
-              className="inline-flex items-center gap-1 rounded-[8px] px-1 py-1 text-xs font-medium text-[#595757] hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-55"
+              aria-label={showAdvanced ? '收起 RRULE' : '展开 RRULE'}
+              title={showAdvanced ? '收起 RRULE' : '展开 RRULE'}
+              className="inline-flex h-7 items-center gap-1 rounded-[8px] px-2 text-xs font-medium text-[#595757] hover:bg-[#EFEFEF] hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-55"
             >
               {showAdvanced ? (
                 <>
-                  <ChevronUp className="h-3.5 w-3.5" />
-                  收起 RRULE
+                  <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+                  <span>RRULE</span>
                 </>
               ) : (
                 <>
-                  <ChevronDown className="h-3.5 w-3.5" />
-                  展开 RRULE
+                  <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                  <span>RRULE</span>
                 </>
               )}
             </button>

@@ -78,7 +78,12 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
       }
       const mime = res.mime ?? payload.mimetype ?? '';
       setResolvedMime(mime);
-      if (filePreviewKind({ mime, filename: payload.filename }) === 'text') {
+      const previewKind = filePreviewKind({ mime, filename: payload.filename });
+      if (previewKind === 'download') {
+        setLoading(false);
+        return;
+      }
+      if (previewKind === 'text') {
         // Decode small text payloads inline. Cap at ~1MB so a huge
         // log file doesn't lock up the renderer.
         if (res.blob.size <= 1_000_000) {
@@ -233,14 +238,15 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
                   type="button"
                   onClick={() => void handleDownload()}
                   disabled={downloading}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[12px] text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
+                  aria-label="下载到本地"
+                  title={downloading ? '下载中' : '下载'}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
                 >
                   {downloading ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   ) : (
                     <Download className="h-3.5 w-3.5" />
                   )}
-                  {downloading ? '下载中' : '下载到本地'}
                 </button>
               </div>
             )}

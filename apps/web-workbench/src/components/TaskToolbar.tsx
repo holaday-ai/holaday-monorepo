@@ -68,7 +68,7 @@ export function TaskToolbar({
         aria-pressed={open}
         title={label}
         className={cn(
-          'inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium transition-colors',
+          'inline-flex h-7 w-7 items-center justify-center rounded-md border text-[11px] font-medium transition-colors',
           live
             ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59] hover:bg-[#EA1F59]/15'
             : open
@@ -77,7 +77,6 @@ export function TaskToolbar({
         )}
       >
         <Globe className="h-3.5 w-3.5" />
-        <span>浏览器</span>
       </button>
     </div>
   );
