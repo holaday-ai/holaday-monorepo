@@ -100,7 +100,8 @@ function postToSw(token: string | null): void {
 function observe(): void {
   const current = readToken();
   const decision = decideAction(state.lastSent, current);
-  if (decision.kind === 'unchanged' && state.initialised) return;
+  const wasInitialised = state.initialised;
+  if (decision.kind === 'unchanged' && wasInitialised) return;
   state.initialised = true;
   if (decision.kind === 'set') {
     if (!looksLikeToken(decision.token)) {
@@ -124,8 +125,7 @@ function observe(): void {
   }
   // 'unchanged' but not yet initialised — first run, even null counts
   // as "tell the SW the current state so it can sync".
-  if (!state.initialised) {
-    state.initialised = true;
+  if (!wasInitialised) {
     if (current !== null) {
       state.lastSent = current;
       postToSw(current);
