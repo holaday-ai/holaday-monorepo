@@ -84,7 +84,16 @@ export function HistoryPage(): JSX.Element {
   const [range, setRange] = React.useState<RangeFilter>('30d');
   const [query, setQuery] = React.useState('');
   const [debouncedQuery, setDebouncedQuery] = React.useState('');
+  const mountedRef = React.useRef(false);
   const fetchToken = React.useRef(0);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      fetchToken.current += 1;
+    };
+  }, []);
 
   // Debounce the search input by 300 ms — keystrokes shouldn't each
   // trigger a fresh paged query.
@@ -130,6 +139,7 @@ export function HistoryPage(): JSX.Element {
         };
         const res = await trpc.tasks.list.query(input);
         if (
+          !mountedRef.current ||
           !shouldApplyHistoryResponse({
             requestKey,
             activeKey: activeFilterKeyRef.current,
@@ -147,6 +157,7 @@ export function HistoryPage(): JSX.Element {
         else setError(null);
       } catch (err) {
         if (
+          !mountedRef.current ||
           !shouldApplyHistoryResponse({
             requestKey,
             activeKey: activeFilterKeyRef.current,
@@ -160,6 +171,7 @@ export function HistoryPage(): JSX.Element {
         else setError(message);
       } finally {
         if (
+          mountedRef.current &&
           shouldApplyHistoryResponse({
             requestKey,
             activeKey: activeFilterKeyRef.current,
@@ -190,6 +202,7 @@ export function HistoryPage(): JSX.Element {
       .query(baseInput)
       .then((res) => {
         if (
+          !mountedRef.current ||
           myToken !== fetchToken.current ||
           !shouldApplyHistoryResponse({
             requestKey: filterRequestKey,
@@ -207,6 +220,7 @@ export function HistoryPage(): JSX.Element {
       })
       .catch((err) => {
         if (
+          !mountedRef.current ||
           myToken !== fetchToken.current ||
           !shouldApplyHistoryResponse({
             requestKey: filterRequestKey,
@@ -222,6 +236,7 @@ export function HistoryPage(): JSX.Element {
       })
       .finally(() => {
         if (
+          !mountedRef.current ||
           myToken !== fetchToken.current ||
           !shouldApplyHistoryResponse({
             requestKey: filterRequestKey,

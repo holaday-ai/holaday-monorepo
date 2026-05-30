@@ -33,6 +33,7 @@ export function ProjectsPage(): JSX.Element {
   const toast = useToast();
   const navigate = useNavigate();
   const { projects: shellProjects, refreshProjects } = useAppShellContext();
+  const mountedRef = React.useRef(false);
   const refreshRequestRef = React.useRef(0);
   const [searchParams] = useSearchParams();
   const [projects, setProjects] = React.useState<UiProject[]>(() => [
@@ -67,7 +68,7 @@ export function ProjectsPage(): JSX.Element {
     setLoading(true);
     setLoadError(null);
     const res = await refreshProjects();
-    if (refreshRequestRef.current !== requestId) return null;
+    if (!mountedRef.current || refreshRequestRef.current !== requestId) return null;
     if ('error' in res) {
       const message = pageErrorMessage(res.error);
       setLoadError(message);
@@ -82,8 +83,10 @@ export function ProjectsPage(): JSX.Element {
   }, [refreshProjects, toast]);
 
   React.useEffect(() => {
+    mountedRef.current = true;
     void refresh();
     return () => {
+      mountedRef.current = false;
       refreshRequestRef.current += 1;
     };
   }, [refresh]);
@@ -94,24 +97,28 @@ export function ProjectsPage(): JSX.Element {
     setCreatingNow(true);
     try {
       await trpc.projects.create.mutate({ name: createState.name });
+      if (!mountedRef.current) return;
       toast.show(`已创建项目「${createState.name}」`);
       setNewName('');
       setCreateTouched(false);
       setCreating(false);
       await refresh();
     } catch (err) {
+      if (!mountedRef.current) return;
       toast.show(pageActionError('创建失败', err), 'error');
     } finally {
-      setCreatingNow(false);
+      if (mountedRef.current) setCreatingNow(false);
     }
   }
 
   async function performDelete(p: UiProject): Promise<void> {
     try {
       await trpc.projects.delete.mutate({ projectId: p.projectId });
+      if (!mountedRef.current) return;
       toast.show('项目已删除');
       await refresh();
     } catch (err) {
+      if (!mountedRef.current) return;
       toast.show(pageActionError('删除失败', err), 'error');
     }
   }
@@ -358,7 +365,7 @@ export function ProjectsPage(): JSX.Element {
           const p = pendingDelete;
           if (!p) return;
           await performDelete(p);
-          setPendingDelete(null);
+          if (mountedRef.current) setPendingDelete(null);
         }}
       />
     </PageContainer>

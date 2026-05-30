@@ -59,6 +59,7 @@ type Filter = FileFilter;
 export function FilesPage(): JSX.Element {
   const toast = useToast();
   const navigate = useNavigate();
+  const mountedRef = React.useRef(false);
   const requestIdRef = React.useRef(0);
   const [filter, setFilter] = React.useState<Filter>('all');
   const [q, setQ] = React.useState('');
@@ -78,19 +79,21 @@ export function FilesPage(): JSX.Element {
         type: filter,
         q: debouncedQuery || undefined,
       });
-      if (requestId !== requestIdRef.current) return;
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setFiles(normalizeFileRows(list));
     } catch (err) {
-      if (requestId !== requestIdRef.current) return;
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
       toast.show(pageActionError('加载失败', err), 'error');
     } finally {
-      if (requestId === requestIdRef.current) setLoading(false);
+      if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
     }
   }, [debouncedQuery, filter, toast]);
 
   React.useEffect(() => {
+    mountedRef.current = true;
     void refresh();
     return () => {
+      mountedRef.current = false;
       requestIdRef.current += 1;
     };
   }, [refresh]);
@@ -120,6 +123,7 @@ export function FilesPage(): JSX.Element {
       url: downloadUrl(f.fileId),
       filename: f.filename,
     });
+    if (!mountedRef.current) return;
     if (!res.ok) {
       toast.show(downloadFailureMessage(res.status), 'error');
     }
@@ -157,9 +161,11 @@ export function FilesPage(): JSX.Element {
   async function performDelete(f: UiFile): Promise<void> {
     try {
       await trpc.files.delete.mutate({ fileId: f.fileId });
+      if (!mountedRef.current) return;
       toast.show('文件已删除');
       await refresh();
     } catch (err) {
+      if (!mountedRef.current) return;
       toast.show(pageActionError('删除失败', err), 'error');
     }
   }
@@ -250,7 +256,7 @@ export function FilesPage(): JSX.Element {
           const f = pendingDelete;
           if (!f) return;
           await performDelete(f);
-          setPendingDelete(null);
+          if (mountedRef.current) setPendingDelete(null);
         }}
       />
     </PageContainer>
