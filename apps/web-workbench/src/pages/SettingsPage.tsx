@@ -285,26 +285,32 @@ function MemorySection(): JSX.Element {
     setDeletingIds((prev) => new Set(prev).add(externalId));
     try {
       await trpc.memory.delete.mutate({ externalId });
+      if (!mountedRef.current) return;
       setMemories((prev) => prev.filter((m) => m.externalId !== externalId));
       toast.show('已删除记忆', 'info');
     } catch (err) {
+      if (!mountedRef.current) return;
       toast.show(pageActionError('删除失败', err), 'error');
     } finally {
-      setDeletingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(externalId);
-        return next;
-      });
+      if (mountedRef.current) {
+        setDeletingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(externalId);
+          return next;
+        });
+      }
     }
   };
 
   const handleClear = async (): Promise<void> => {
     try {
       await trpc.memory.clear.mutate();
+      if (!mountedRef.current) return;
       setMemories([]);
       setConfirming(false);
       toast.show('已清空 AI 记忆', 'info');
     } catch (err) {
+      if (!mountedRef.current) return;
       toast.show(pageActionError('清空失败', err), 'error');
     }
   };

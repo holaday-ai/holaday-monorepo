@@ -85,31 +85,37 @@ export function ApiKeysSection(): JSX.Element {
     setSubmitting(true);
     try {
       const result = await trpc.apiKeys.create.mutate({ name: trimmed });
+      if (!mountedRef.current) return;
       setFresh(normalizeFreshApiKey(result, trimmed));
       setReveal(false);
       setCreating(false);
       setNewName('');
       await reload();
     } catch (err) {
+      if (!mountedRef.current) return;
       toast.show(apiKeySettingsErrorMessage(err, '创建失败'), 'error');
     } finally {
-      setSubmitting(false);
+      if (mountedRef.current) setSubmitting(false);
     }
   };
 
   const performRevoke = async (key: ApiKeyRowView): Promise<void> => {
     try {
       await trpc.apiKeys.revoke.mutate({ apiKeyId: key.apiKeyId });
+      if (!mountedRef.current) return;
       toast.show('已撤销');
       await reload();
     } catch (err) {
+      if (!mountedRef.current) return;
       toast.show(apiKeySettingsErrorMessage(err, '撤销失败'), 'error');
     }
   };
 
   const copyPlaintext = async (): Promise<void> => {
     if (!fresh) return;
-    if (await copyTextToClipboard(fresh.plaintext)) {
+    const copied = await copyTextToClipboard(fresh.plaintext);
+    if (!mountedRef.current) return;
+    if (copied) {
       toast.show('已复制 API Key');
     } else {
       toast.show('复制失败', 'error');
@@ -283,7 +289,7 @@ export function ApiKeysSection(): JSX.Element {
           const k = pendingRevoke;
           if (!k) return;
           await performRevoke(k);
-          setPendingRevoke(null);
+          if (mountedRef.current) setPendingRevoke(null);
         }}
       />
     </Section>

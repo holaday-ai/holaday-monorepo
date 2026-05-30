@@ -83,6 +83,7 @@ export function AddChannelModal({
   onSave,
 }: Props): JSX.Element | null {
   const toast = useToast();
+  const mountedRef = React.useRef(false);
   const [platform, setPlatform] = React.useState<ChannelDraft['platform']>(
     initial?.platform ?? 'wecom',
   );
@@ -112,6 +113,13 @@ export function AddChannelModal({
     if (saving || testing) return;
     onClose();
   }, [onClose, saving, testing]);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Reset draft state every time the modal opens. Without this, a
   // user who cancels + reopens sees their previous unsaved edits.
@@ -164,6 +172,7 @@ export function AddChannelModal({
           ? { customTemplate: draft.customTemplate }
           : {}),
       });
+      if (!mountedRef.current) return;
       if (res.ok) {
         setTestResult({
           ok: true,
@@ -179,12 +188,13 @@ export function AddChannelModal({
         });
       }
     } catch (err) {
+      if (!mountedRef.current) return;
       setTestResult({
         ok: false,
         message: pageActionError('测试请求失败', err),
       });
     } finally {
-      setTesting(false);
+      if (mountedRef.current) setTesting(false);
     }
   };
 
@@ -200,7 +210,7 @@ export function AddChannelModal({
     try {
       await onSave(draft);
     } finally {
-      setSaving(false);
+      if (mountedRef.current) setSaving(false);
     }
   };
 

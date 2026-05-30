@@ -91,6 +91,7 @@ export function NotificationsSection(): JSX.Element {
         enabled: next,
       });
     } catch (err) {
+      if (!mountedRef.current) return;
       // Revert on failure
       setChannels((prev) =>
         prev.map((c) =>
@@ -99,7 +100,7 @@ export function NotificationsSection(): JSX.Element {
       );
       toast.show(pageActionError('操作失败', err), 'error');
     } finally {
-      setPendingChannelId(null);
+      if (mountedRef.current) setPendingChannelId(null);
     }
   };
 
@@ -114,6 +115,7 @@ export function NotificationsSection(): JSX.Element {
             ? { customTemplate: draft.customTemplate }
             : {}),
         });
+        if (!mountedRef.current) return;
         toast.show('已更新通知渠道', 'info');
       } else {
         await trpc.notificationChannels.create.mutate({
@@ -123,12 +125,14 @@ export function NotificationsSection(): JSX.Element {
             ? { customTemplate: draft.customTemplate }
             : {}),
         });
+        if (!mountedRef.current) return;
         toast.show('已添加通知渠道', 'info');
       }
       setModalOpen(false);
       setEditingChannel(null);
       await refresh();
     } catch (err) {
+      if (!mountedRef.current) return;
       toast.show(pageActionError('保存失败', err), 'error');
     }
   };
@@ -137,13 +141,15 @@ export function NotificationsSection(): JSX.Element {
     setPendingChannelId(channelId);
     try {
       await trpc.notificationChannels.delete.mutate({ channelId });
+      if (!mountedRef.current) return;
       toast.show('已删除通知渠道', 'info');
       setConfirmDelete(null);
       await refresh();
     } catch (err) {
+      if (!mountedRef.current) return;
       toast.show(pageActionError('删除失败', err), 'error');
     } finally {
-      setPendingChannelId(null);
+      if (mountedRef.current) setPendingChannelId(null);
     }
   };
 
