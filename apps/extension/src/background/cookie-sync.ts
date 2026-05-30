@@ -53,6 +53,11 @@ const SYNC_DOMAINS: readonly string[] = [
   '.amazon.co.jp',
 ];
 
+const MAX_COOKIE_VALUE_CHARS = 8192;
+const MAX_COOKIE_NAME_CHARS = 256;
+const MAX_COOKIE_DOMAIN_CHARS = 253;
+const MAX_COOKIE_PATH_CHARS = 1024;
+
 export interface SyncableCookie {
   domain: string;
   name: string;
@@ -62,6 +67,30 @@ export interface SyncableCookie {
   httpOnly: boolean;
   sameSite: string;
   expirationDate?: number;
+}
+
+function clip(value: string, maxChars: number): string {
+  return value.length > maxChars ? value.slice(0, maxChars) : value;
+}
+
+export function normalizeSyncableCookie(c: chrome.cookies.Cookie): SyncableCookie | null {
+  const domain = c.domain.trim();
+  const name = c.name.trim();
+  const path = c.path || '/';
+  if (!domain || !name || !path) return null;
+  if (c.value.length > MAX_COOKIE_VALUE_CHARS) return null;
+  return {
+    domain: clip(domain, MAX_COOKIE_DOMAIN_CHARS),
+    name: clip(name, MAX_COOKIE_NAME_CHARS),
+    value: c.value,
+    path: clip(path, MAX_COOKIE_PATH_CHARS),
+    secure: c.secure,
+    httpOnly: c.httpOnly,
+    sameSite: c.sameSite ?? 'unspecified',
+    ...(c.expirationDate && Number.isFinite(c.expirationDate)
+      ? { expirationDate: c.expirationDate }
+      : {}),
+  };
 }
 
 /**
@@ -81,16 +110,8 @@ export async function collectCookies(): Promise<SyncableCookie[]> {
       continue;
     }
     for (const c of cookies) {
-      out.push({
-        domain: c.domain,
-        name: c.name,
-        value: c.value,
-        path: c.path,
-        secure: c.secure,
-        httpOnly: c.httpOnly,
-        sameSite: c.sameSite ?? 'unspecified',
-        ...(c.expirationDate ? { expirationDate: c.expirationDate } : {}),
-      });
+      const normalized = normalizeSyncableCookie(c);
+      if (normalized) out.push(normalized);
     }
   }
   return out;
