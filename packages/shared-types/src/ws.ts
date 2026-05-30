@@ -21,9 +21,9 @@ export const HEARTBEAT_TIMEOUT_MS = 90_000;
 
 export const clientHelloSchema = z.object({
   type: z.literal('client.hello'),
-  token: z.string().min(1),
-  extensionVersion: z.string().optional(),
-  userAgent: z.string().optional(),
+  token: z.string().min(1).max(4096),
+  extensionVersion: z.string().max(128).optional(),
+  userAgent: z.string().max(512).optional(),
 });
 
 export const clientPongSchema = z.object({
@@ -33,31 +33,31 @@ export const clientPongSchema = z.object({
 
 export const clientTaskAckSchema = z.object({
   type: z.literal('client.task.ack'),
-  taskId: z.string(),
-  stepId: z.string().optional(),
+  taskId: z.string().min(1).max(128),
+  stepId: z.string().min(1).max(128).optional(),
 });
 
 export const clientStepResultSchema = z.object({
   type: z.literal('client.step.result'),
-  taskId: z.string(),
-  stepId: z.string(),
+  taskId: z.string().min(1).max(128),
+  stepId: z.string().min(1).max(128),
   status: z.enum(['ok', 'error', 'awaiting_user', 'skipped']),
   data: z.unknown().optional(),
   error: z
     .object({
-      code: z.string(),
-      message: z.string(),
+      code: z.string().max(64),
+      message: z.string().max(2000),
     })
     .optional(),
 });
 
 export const clientScreenshotSchema = z.object({
   type: z.literal('client.screenshot'),
-  taskId: z.string(),
-  stepId: z.string(),
-  key: z.string(), // S3 object key
-  width: z.number().int().positive(),
-  height: z.number().int().positive(),
+  taskId: z.string().min(1).max(128),
+  stepId: z.string().min(1).max(128),
+  key: z.string().min(1).max(1024), // S3 object key
+  width: z.number().int().positive().max(20_000),
+  height: z.number().int().positive().max(20_000),
 });
 
 // ---------- Vision-loop: SW ↔ orchestrator per-tick frames ----------

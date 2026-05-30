@@ -387,6 +387,44 @@ export interface VisionObservationCapture {
   error?: string;
 }
 
+const MAX_OBSERVATION_SCREENSHOT_BASE64_CHARS = 2_000_000;
+const MAX_OBSERVATION_VIEWPORT_PX = 20_000;
+const MAX_OBSERVATION_URL_CHARS = 2048;
+const MAX_OBSERVATION_TITLE_CHARS = 512;
+const MAX_OBSERVATION_ERROR_CHARS = 1000;
+
+function clipString(value: string, maxChars: number): string {
+  return value.length > maxChars ? value.slice(0, maxChars) : value;
+}
+
+function clampViewportSize(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(MAX_OBSERVATION_VIEWPORT_PX, Math.round(value)));
+}
+
+export function sanitizeVisionObservationCapture(
+  observation: VisionObservationCapture,
+): VisionObservationCapture {
+  let screenshotBase64 = observation.screenshotBase64;
+  let error = observation.error;
+
+  if (screenshotBase64.length > MAX_OBSERVATION_SCREENSHOT_BASE64_CHARS) {
+    screenshotBase64 = '';
+    error = error
+      ? `${error}; Page.captureScreenshot returned oversized image`
+      : 'Page.captureScreenshot returned oversized image';
+  }
+
+  return {
+    screenshotBase64,
+    viewportWidth: clampViewportSize(observation.viewportWidth),
+    viewportHeight: clampViewportSize(observation.viewportHeight),
+    url: clipString(observation.url, MAX_OBSERVATION_URL_CHARS),
+    title: clipString(observation.title, MAX_OBSERVATION_TITLE_CHARS),
+    ...(error ? { error: clipString(error, MAX_OBSERVATION_ERROR_CHARS) } : {}),
+  };
+}
+
 /**
  * Pick the currently-active tab in the foreground window — the tab the
  * user is looking at. The vision loop always operates on whatever's
@@ -417,14 +455,14 @@ export async function captureVisionObservation(tabId: number): Promise<VisionObs
   try {
     await ensureAttached(tabId);
   } catch (err) {
-    return {
+    return sanitizeVisionObservationCapture({
       screenshotBase64: '',
       viewportWidth: 0,
       viewportHeight: 0,
       url: '',
       title: '',
       error: `debugger attach failed: ${err instanceof Error ? err.message : String(err)}`,
-    };
+    });
   }
 
   // Read viewport + url + title FIRST so we still have metadata even
@@ -469,12 +507,12 @@ export async function captureVisionObservation(tabId: number): Promise<VisionObs
     error = `Page.captureScreenshot failed: ${err instanceof Error ? err.message : String(err)}`;
   }
 
-  return {
+  return sanitizeVisionObservationCapture({
     screenshotBase64,
     viewportWidth,
     viewportHeight,
     url,
     title,
     ...(error ? { error } : {}),
-  };
+  });
 }

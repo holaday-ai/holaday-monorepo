@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   extensionToolErrorPayload,
+  normalizeScreenshotCaptureDataUrl,
   normalizeNavigateUrl,
   waitForTabComplete,
 } from './extension-tools.js';
@@ -105,6 +106,10 @@ describe('extensionToolErrorPayload', () => {
       message: '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
       code: 'tab_closed',
     });
+    expect(extensionToolErrorPayload(new Error('screenshot_too_large'))).toEqual({
+      message: '截图过大，浏览器已停止发送该帧，请缩小窗口或重试',
+      code: 'screenshot_too_large',
+    });
   });
 
   it('bounds unknown error details', () => {
@@ -112,6 +117,22 @@ describe('extensionToolErrorPayload', () => {
 
     expect(payload.code).toBe('exec_error');
     expect(payload.message).toHaveLength('执行失败：'.length + 200);
+  });
+});
+
+describe('normalizeScreenshotCaptureDataUrl', () => {
+  it('strips data-url prefixes before returning base64 payloads', () => {
+    expect(normalizeScreenshotCaptureDataUrl('data:image/jpeg;base64,AA==')).toEqual({
+      imageBase64: 'AA==',
+      width: 0,
+      height: 0,
+    });
+  });
+
+  it('rejects oversized screenshot payloads before sending tool_result frames', () => {
+    expect(() => normalizeScreenshotCaptureDataUrl('x'.repeat(2_000_001))).toThrow(
+      'screenshot_too_large',
+    );
   });
 });
 

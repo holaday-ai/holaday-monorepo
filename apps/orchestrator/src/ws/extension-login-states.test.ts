@@ -64,6 +64,74 @@ describe('client.extension.login_states schema', () => {
   });
 });
 
+describe('classic client frame schemas', () => {
+  it('accepts bounded step results and screenshots', () => {
+    expect(
+      parseClientMessage(
+        JSON.stringify({
+          type: 'client.step.result',
+          taskId: 'tsk_schema',
+          stepId: 'stp_schema',
+          status: 'error',
+          error: { code: 'exec_error', message: 'failed cleanly' },
+        }),
+      ).success,
+    ).toBe(true);
+
+    expect(
+      parseClientMessage(
+        JSON.stringify({
+          type: 'client.screenshot',
+          taskId: 'tsk_schema',
+          stepId: 'stp_schema',
+          key: 'screenshots/tsk_schema/stp_schema.jpg',
+          width: 1280,
+          height: 720,
+        }),
+      ).success,
+    ).toBe(true);
+  });
+
+  it('rejects oversized classic client frame diagnostics and metadata', () => {
+    const cases = [
+      {
+        type: 'client.step.result',
+        taskId: 'tsk_schema',
+        stepId: 'stp_schema',
+        status: 'error',
+        error: { code: 'x'.repeat(65), message: 'failed cleanly' },
+      },
+      {
+        type: 'client.step.result',
+        taskId: 'tsk_schema',
+        stepId: 'stp_schema',
+        status: 'error',
+        error: { code: 'exec_error', message: 'x'.repeat(2001) },
+      },
+      {
+        type: 'client.screenshot',
+        taskId: 'tsk_schema',
+        stepId: 'stp_schema',
+        key: 'x'.repeat(1025),
+        width: 1280,
+        height: 720,
+      },
+      {
+        type: 'client.screenshot',
+        taskId: 'tsk_schema',
+        stepId: 'stp_schema',
+        key: 'screenshots/tsk_schema/stp_schema.jpg',
+        width: 20_001,
+        height: 720,
+      },
+    ];
+
+    for (const frame of cases) {
+      expect(parseClientMessage(JSON.stringify(frame)).success).toBe(false);
+    }
+  });
+});
+
 describe('client.vision.acted schema', () => {
   it('accepts bounded action diagnostics', () => {
     const result = parseClientMessage(

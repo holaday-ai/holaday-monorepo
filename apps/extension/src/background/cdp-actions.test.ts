@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { executeCdpAction, normalizeCdpNavigateUrl } from './cdp-actions.js';
+import {
+  executeCdpAction,
+  normalizeCdpNavigateUrl,
+  sanitizeVisionObservationCapture,
+} from './cdp-actions.js';
 
 describe('normalizeCdpNavigateUrl', () => {
   it('accepts http and https urls after trimming', () => {
@@ -27,5 +31,55 @@ describe('executeCdpAction', () => {
       ok: false,
       message: '导航地址无效，请检查后重试',
     });
+  });
+});
+
+describe('sanitizeVisionObservationCapture', () => {
+  it('keeps bounded observation metadata unchanged', () => {
+    expect(
+      sanitizeVisionObservationCapture({
+        screenshotBase64: 'AA==',
+        viewportWidth: 1280,
+        viewportHeight: 720,
+        url: 'https://example.com/',
+        title: 'Example',
+      }),
+    ).toEqual({
+      screenshotBase64: 'AA==',
+      viewportWidth: 1280,
+      viewportHeight: 720,
+      url: 'https://example.com/',
+      title: 'Example',
+    });
+  });
+
+  it('clips metadata to the shared observation schema limits', () => {
+    const result = sanitizeVisionObservationCapture({
+      screenshotBase64: 'AA==',
+      viewportWidth: 50_000,
+      viewportHeight: Number.NaN,
+      url: `https://example.com/${'a'.repeat(3000)}`,
+      title: 't'.repeat(800),
+      error: 'e'.repeat(1200),
+    });
+
+    expect(result.viewportWidth).toBe(20_000);
+    expect(result.viewportHeight).toBe(0);
+    expect(result.url).toHaveLength(2048);
+    expect(result.title).toHaveLength(512);
+    expect(result.error).toHaveLength(1000);
+  });
+
+  it('drops oversized screenshots instead of sending invalid partial base64', () => {
+    const result = sanitizeVisionObservationCapture({
+      screenshotBase64: 'x'.repeat(2_000_001),
+      viewportWidth: 1280,
+      viewportHeight: 720,
+      url: 'https://example.com/',
+      title: 'Example',
+    });
+
+    expect(result.screenshotBase64).toBe('');
+    expect(result.error).toContain('oversized image');
   });
 });

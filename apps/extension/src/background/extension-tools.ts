@@ -41,6 +41,7 @@ const BODY_TEXT_CHAR_CAP = 8_000;
 const DEFAULT_NAVIGATE_WAIT_MS = 1500;
 const MAX_NAVIGATE_WAIT_MS = 10_000;
 const MAX_NAVIGATE_URL_LENGTH = 2048;
+const MAX_SCREENSHOT_RESULT_BASE64_CHARS = 2_000_000;
 
 /**
  * Get the currently-focused tab. Returns null when no tab is available
@@ -198,13 +199,19 @@ interface ScreenshotResult {
   height: number;
 }
 
+export function normalizeScreenshotCaptureDataUrl(dataUrl: string): ScreenshotResult {
+  const idx = dataUrl.indexOf(',');
+  const base64 = idx >= 0 ? dataUrl.slice(idx + 1) : dataUrl;
+  if (base64.length > MAX_SCREENSHOT_RESULT_BASE64_CHARS) {
+    throw new Error('screenshot_too_large');
+  }
+  return { imageBase64: base64, width: 0, height: 0 };
+}
+
 async function executeScreenshot(): Promise<ScreenshotResult> {
   // captureVisibleTab needs no tabId — operates on the focused window.
   const dataUrl = await chrome.tabs.captureVisibleTab({ format: 'jpeg', quality: 50 });
-  // Strip "data:image/jpeg;base64," prefix.
-  const idx = dataUrl.indexOf(',');
-  const base64 = idx >= 0 ? dataUrl.slice(idx + 1) : dataUrl;
-  return { imageBase64: base64, width: 0, height: 0 };
+  return normalizeScreenshotCaptureDataUrl(dataUrl);
 }
 
 function withDeadline<T>(
@@ -243,6 +250,12 @@ export function extensionToolErrorPayload(
     return {
       message: '页面响应超时，请保持标签页打开后重试',
       code: 'timeout',
+    };
+  }
+  if (lower.includes('screenshot_too_large')) {
+    return {
+      message: '截图过大，浏览器已停止发送该帧，请缩小窗口或重试',
+      code: 'screenshot_too_large',
     };
   }
   if (
