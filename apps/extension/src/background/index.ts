@@ -61,6 +61,7 @@ import { decideAuthTokenAction } from './auth-token-handler.js';
 import {
   connect,
   disconnect,
+  getWsConnectionStatus,
   isConnected,
   isReconnectCapped,
   onServerMessage,
@@ -1237,7 +1238,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg?.type === 'holaday.status') {
-    sendResponse({ lastWelcomeAt: state.lastWelcomeAt });
+    void getWsConnectionStatus().then((ws) => {
+      sendResponse({ lastWelcomeAt: state.lastWelcomeAt, ws });
+    });
     return true;
   }
   if (msg?.type === 'holaday.tasks') {

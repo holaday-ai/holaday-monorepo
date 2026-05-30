@@ -54,6 +54,24 @@ interface HistorySyncSummary {
   at: number;
 }
 
+interface WsConnectionStatus {
+  connected: boolean;
+  readyState: number | null;
+  reconnectAttempt: number;
+  reconnectCapped: boolean;
+  lastOpenAt: number | null;
+  lastCloseAt: number | null;
+  lastCloseCode: number | null;
+  lastCloseReason: string | null;
+  lastErrorAt: number | null;
+  nextRetryAt: number | null;
+}
+
+interface ExtensionStatusResponse {
+  lastWelcomeAt: number | null;
+  ws?: WsConnectionStatus;
+}
+
 interface MeResponse {
   result: {
     data: {
@@ -285,6 +303,7 @@ export function App() {
   return (
     <div style={appShell(t)}>
       <UserCard user={user} theme={t} />
+      <ConnectionStatusBlock theme={t} />
       <BrowsingStatusBlock theme={t} />
       <BottomBar theme={t} onOpenWeb={openWebLogin} onReset={resetConnection} resetting={resetting} />
     </div>
@@ -409,6 +428,81 @@ function friendlyPlanLabel(plan: string): string {
     default:
       return plan.toUpperCase();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Connection status
+// ---------------------------------------------------------------------------
+
+function ConnectionStatusBlock({ theme }: { theme: ThemeTokens }) {
+  const [status, setStatus] = useState<ExtensionStatusResponse | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = (): void => {
+      chrome.runtime.sendMessage({ type: 'holaday.status' }, (response?: ExtensionStatusResponse) => {
+        if (cancelled || chrome.runtime.lastError) return;
+        setStatus(response ?? null);
+      });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const ws = status?.ws;
+  const copy = getConnectionStatusCopy(status);
+  const dotColor = ws?.connected ? '#16a34a' : ws?.reconnectCapped ? '#ef4444' : '#f59e0b';
+
+  return (
+    <div style={connectionStatus(theme)} title={copy.detail}>
+      <span aria-hidden="true" style={{ ...connectionDot, background: dotColor }} />
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ color: theme.textSecondary, fontSize: 12, fontWeight: 600 }}>{copy.title}</div>
+        <div style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>{copy.detail}</div>
+      </div>
+    </div>
+  );
+}
+
+function getConnectionStatusCopy(status: ExtensionStatusResponse | null): {
+  title: string;
+  detail: string;
+} {
+  if (!status?.ws) {
+    return { title: '浏览器代理状态同步中', detail: '正在读取扩展后台连接状态' };
+  }
+  if (status.ws.connected) {
+    return {
+      title: '浏览器代理已连接',
+      detail: status.lastWelcomeAt ? `最近确认：${formatRelativeTime(status.lastWelcomeAt)}` : 'WebSocket 已连接',
+    };
+  }
+  if (status.ws.reconnectCapped) {
+    return {
+      title: '浏览器代理连接已暂停',
+      detail: '多次重连失败，点击底部“重置连接”后会重新尝试',
+    };
+  }
+  if (status.ws.reconnectAttempt > 0) {
+    return {
+      title: `浏览器代理正在重连（${status.ws.reconnectAttempt}/3）`,
+      detail: status.ws.nextRetryAt ? `下次尝试：${formatRelativeTime(status.ws.nextRetryAt)}` : '等待下一次重连',
+    };
+  }
+  return { title: '浏览器代理等待连接', detail: '打开 HOLA DAY 网页后会自动同步登录态' };
+}
+
+function formatRelativeTime(at: number): string {
+  const deltaMs = at - Date.now();
+  const absSeconds = Math.max(0, Math.round(Math.abs(deltaMs) / 1000));
+  if (absSeconds < 5) return '刚刚';
+  if (absSeconds < 60) return deltaMs >= 0 ? `${absSeconds} 秒后` : `${absSeconds} 秒前`;
+  const minutes = Math.round(absSeconds / 60);
+  return deltaMs >= 0 ? `${minutes} 分钟后` : `${minutes} 分钟前`;
 }
 
 // ---------------------------------------------------------------------------
@@ -654,6 +748,23 @@ const tag = (t: ThemeTokens): React.CSSProperties => ({
   border: `1px solid ${t.cardBorder}`,
   lineHeight: 1.4,
 });
+
+const connectionStatus = (t: ThemeTokens): React.CSSProperties => ({
+  display: 'flex',
+  alignItems: 'center',
+  gap: 9,
+  padding: '9px 11px',
+  borderRadius: 8,
+  background: t.buttonSecondaryBg,
+  border: `1px solid ${t.cardBorder}`,
+});
+
+const connectionDot: React.CSSProperties = {
+  width: 8,
+  height: 8,
+  borderRadius: '50%',
+  flexShrink: 0,
+};
 
 const bottomBar = (t: ThemeTokens): React.CSSProperties => ({
   display: 'flex',

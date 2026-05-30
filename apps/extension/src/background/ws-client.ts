@@ -15,6 +15,12 @@ interface State {
   reconnectAttempt: number;
   pingTimer: ReturnType<typeof setInterval> | null;
   closedByUser: boolean;
+  lastOpenAt: number | null;
+  lastCloseAt: number | null;
+  lastCloseCode: number | null;
+  lastCloseReason: string | null;
+  lastErrorAt: number | null;
+  nextRetryAt: number | null;
   listeners: Set<Listener>;
   /**
    * Phase 14 — fires when the orchestrator closes us with code 4401
@@ -31,9 +37,28 @@ const state: State = {
   reconnectAttempt: 0,
   pingTimer: null,
   closedByUser: false,
+  lastOpenAt: null,
+  lastCloseAt: null,
+  lastCloseCode: null,
+  lastCloseReason: null,
+  lastErrorAt: null,
+  nextRetryAt: null,
   listeners: new Set(),
   unauthorizedListeners: new Set(),
 };
+
+export interface WsConnectionStatus {
+  connected: boolean;
+  readyState: number | null;
+  reconnectAttempt: number;
+  reconnectCapped: boolean;
+  lastOpenAt: number | null;
+  lastCloseAt: number | null;
+  lastCloseCode: number | null;
+  lastCloseReason: string | null;
+  lastErrorAt: number | null;
+  nextRetryAt: number | null;
+}
 
 export function onServerMessage(fn: Listener): () => void {
   state.listeners.add(fn);
@@ -127,6 +152,21 @@ export function isConnected(): boolean {
   return state.socket?.readyState === WebSocket.OPEN;
 }
 
+export async function getWsConnectionStatus(): Promise<WsConnectionStatus> {
+  return {
+    connected: isConnected(),
+    readyState: state.socket?.readyState ?? null,
+    reconnectAttempt: state.reconnectAttempt,
+    reconnectCapped: await isReconnectCapped(),
+    lastOpenAt: state.lastOpenAt,
+    lastCloseAt: state.lastCloseAt,
+    lastCloseCode: state.lastCloseCode,
+    lastCloseReason: state.lastCloseReason,
+    lastErrorAt: state.lastErrorAt,
+    nextRetryAt: state.nextRetryAt,
+  };
+}
+
 function openSocket(token: string): void {
   const protocols = [WS_SUBPROTOCOL, `jwt.${token}`];
   const ws = new WebSocket(ORCHESTRATOR_WS, protocols);
@@ -145,6 +185,12 @@ function openSocket(token: string): void {
   ws.addEventListener('open', () => {
     if (state.socket !== ws) return; // stale event after a token swap
     state.reconnectAttempt = 0;
+    state.lastOpenAt = Date.now();
+    state.lastCloseAt = null;
+    state.lastCloseCode = null;
+    state.lastCloseReason = null;
+    state.lastErrorAt = null;
+    state.nextRetryAt = null;
     // Clear the persistent cap so the next blip starts from 0 again.
     // Fire-and-forget: best-effort, and we don't want to delay 'hello'
     // on a chrome.storage write.
@@ -184,6 +230,9 @@ function openSocket(token: string): void {
     if (state.pingTimer) clearInterval(state.pingTimer);
     state.pingTimer = null;
     state.socket = null;
+    state.lastCloseAt = Date.now();
+    state.lastCloseCode = event.code;
+    state.lastCloseReason = event.reason || null;
     if (event.code === 4401) {
       // Orchestrator rejected our auth. Surface to the SW so it
       // clears the bad token; do NOT auto-reconnect — that would
@@ -196,6 +245,7 @@ function openSocket(token: string): void {
   });
 
   ws.addEventListener('error', () => {
+    state.lastErrorAt = Date.now();
     // 'close' will fire right after; reconnect handled there.
   });
 }
@@ -302,6 +352,7 @@ function scheduleReconnect(token: string): void {
   state.reconnectAttempt += 1;
   void persistReconnectAttempts(state.reconnectAttempt);
   if (state.reconnectAttempt > MAX_NETWORK_RECONNECTS) {
+    state.nextRetryAt = null;
     console.warn(
       `[holaday] ws: ${MAX_NETWORK_RECONNECTS} reconnects failed, pausing until user action (popup open or 重置连接)`,
     );
@@ -317,6 +368,7 @@ function scheduleReconnect(token: string): void {
   // future edit accidentally narrows the tuple.
   const backoff = BACKOFF_SCHEDULE_MS[idx] ?? 4_000;
   const jitter = Math.floor(Math.random() * 250);
+  state.nextRetryAt = Date.now() + backoff + jitter;
   setTimeout(() => {
     if (!state.closedByUser) openSocket(token);
   }, backoff + jitter);

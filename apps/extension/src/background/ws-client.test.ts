@@ -30,6 +30,10 @@ class FakeWebSocket {
   close(): void {
     this.readyState = FakeWebSocket.CLOSED;
   }
+
+  dispatch(type: string, event?: unknown): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
 }
 
 const sockets: FakeWebSocket[] = [];
@@ -98,5 +102,24 @@ describe('ws-client send', () => {
 
     expect(send({ type: 'client.pong', at: 123 })).toBe(true);
     expect(socket.sent).toEqual([JSON.stringify({ type: 'client.pong', at: 123 })]);
+  });
+
+  it('exposes websocket reconnect status for popup diagnostics', async () => {
+    vi.useFakeTimers();
+    const { connect, getWsConnectionStatus } = await import('./ws-client.js');
+    connect('token');
+    const [socket] = sockets;
+    if (!socket) throw new Error('expected websocket');
+
+    socket.readyState = FakeWebSocket.CLOSED;
+    socket.dispatch('close', { code: 1006, reason: '' });
+
+    const status = await getWsConnectionStatus();
+    expect(status.connected).toBe(false);
+    expect(status.reconnectAttempt).toBe(1);
+    expect(status.reconnectCapped).toBe(false);
+    expect(status.lastCloseCode).toBe(1006);
+    expect(status.lastCloseAt).toEqual(expect.any(Number));
+    expect(status.nextRetryAt).toEqual(expect.any(Number));
   });
 });
