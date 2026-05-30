@@ -10,6 +10,7 @@ class FakeWebSocket {
 
   readyState = FakeWebSocket.OPEN;
   sent: string[] = [];
+  closeCalls: Array<{ code?: number; reason?: string }> = [];
   listeners = new Map<string, Listener[]>();
 
   constructor(
@@ -27,7 +28,8 @@ class FakeWebSocket {
     this.sent.push(data);
   }
 
-  close(): void {
+  close(code?: number, reason?: string): void {
+    this.closeCalls.push({ code, reason });
     this.readyState = FakeWebSocket.CLOSED;
   }
 
@@ -121,5 +123,25 @@ describe('ws-client send', () => {
     expect(status.lastCloseCode).toBe(1006);
     expect(status.lastCloseAt).toEqual(expect.any(Number));
     expect(status.nextRetryAt).toEqual(expect.any(Number));
+  });
+
+  it('closes a stuck opening websocket so reconnect status advances', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { connect, getWsConnectionStatus } = await import('./ws-client.js');
+    connect('token');
+    const [socket] = sockets;
+    if (!socket) throw new Error('expected websocket');
+    socket.readyState = FakeWebSocket.CONNECTING;
+
+    vi.advanceTimersByTime(12_000);
+
+    expect(socket.closeCalls).toEqual([{ code: 4000, reason: 'open timeout' }]);
+    expect(warn).toHaveBeenCalledWith(
+      '[holaday] ws open timed out after 12000ms; reconnecting',
+    );
+    const status = await getWsConnectionStatus();
+    expect(status.lastErrorAt).toEqual(expect.any(Number));
+    expect(status.lastCloseReason).toBe('open timeout');
   });
 });

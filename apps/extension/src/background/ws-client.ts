@@ -10,6 +10,8 @@ import { ORCHESTRATOR_WS } from '../shared/config.js';
 type Listener = (msg: ServerMessage) => void;
 type UnauthorizedListener = () => void;
 
+const WS_OPEN_TIMEOUT_MS = 12_000;
+
 interface State {
   socket: WebSocket | null;
   reconnectAttempt: number;
@@ -171,6 +173,25 @@ function openSocket(token: string): void {
   const protocols = [WS_SUBPROTOCOL, `jwt.${token}`];
   const ws = new WebSocket(ORCHESTRATOR_WS, protocols);
   state.socket = ws;
+  let openTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearOpenTimer = (): void => {
+    if (openTimer) {
+      clearTimeout(openTimer);
+      openTimer = null;
+    }
+  };
+  openTimer = setTimeout(() => {
+    if (state.socket !== ws || ws.readyState !== WebSocket.CONNECTING) return;
+    state.lastErrorAt = Date.now();
+    state.lastCloseReason = 'open timeout';
+    console.warn(`[holaday] ws open timed out after ${WS_OPEN_TIMEOUT_MS}ms; reconnecting`);
+    try {
+      ws.close(4000, 'open timeout');
+    } catch {
+      /* close may throw on already-closing sockets; close handler handles the rest */
+    }
+  }, WS_OPEN_TIMEOUT_MS);
+  openTimer && (openTimer as { unref?: () => void }).unref?.();
   // Phase 14 — server may signal UNAUTHORIZED via BOTH a server.error
   // frame AND a 4401 close. Fire the listeners only once per socket,
   // otherwise the SW's auth-failure counter doubles and we hit the
@@ -184,6 +205,7 @@ function openSocket(token: string): void {
 
   ws.addEventListener('open', () => {
     if (state.socket !== ws) return; // stale event after a token swap
+    clearOpenTimer();
     state.reconnectAttempt = 0;
     state.lastOpenAt = Date.now();
     state.lastCloseAt = null;
@@ -223,6 +245,7 @@ function openSocket(token: string): void {
   });
 
   ws.addEventListener('close', (event) => {
+    clearOpenTimer();
     // Tag-by-socket: a delayed close from the OLD socket (after a
     // reconnect/token-swap) would otherwise clobber state.socket
     // (which now points at the NEW socket) and stop heartbeats.
