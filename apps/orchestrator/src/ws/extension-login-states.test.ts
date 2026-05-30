@@ -6,7 +6,7 @@
  * as a failing test rather than a runtime BAD_FRAME log.
  */
 
-import { parseClientMessage } from '@holaday/shared-types';
+import { parseClientMessage, parseServerMessage } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
 
 describe('client.extension.login_states schema', () => {
@@ -61,6 +61,40 @@ describe('client.extension.login_states schema', () => {
   it('rejects malformed json', () => {
     const result = parseClientMessage('{bad json');
     expect(result.success).toBe(false);
+  });
+});
+
+describe('server.extension.tool_call schema', () => {
+  it('accepts http(s) navigate urls', () => {
+    const result = parseServerMessage(
+      JSON.stringify({
+        type: 'server.extension.tool_call',
+        taskId: 'tsk_schema',
+        requestId: 'req_schema',
+        kind: 'navigate',
+        args: { url: 'https://example.com/path', waitMs: 500 },
+        timeoutMs: 30_000,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects non-web navigate urls before they reach the extension', () => {
+    for (const url of ['ftp://example.com/file.txt', 'chrome://extensions']) {
+      const result = parseServerMessage(
+        JSON.stringify({
+          type: 'server.extension.tool_call',
+          taskId: 'tsk_schema',
+          requestId: 'req_schema',
+          kind: 'navigate',
+          args: { url },
+          timeoutMs: 30_000,
+        }),
+      );
+
+      expect(result.success).toBe(false);
+    }
   });
 });
 

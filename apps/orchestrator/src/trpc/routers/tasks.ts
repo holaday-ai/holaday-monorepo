@@ -5734,7 +5734,7 @@ export const tasksRouter = router({
   modeBPing: protectedProcedure
     .input(
       z.object({
-        url: z.string().url(),
+        url: z.string().url().max(2048).refine(isSafeUrl, { message: 'expected http(s) URL' }),
         waitMs: z.number().int().nonnegative().max(10_000).optional(),
         timeoutMs: z.number().int().positive().max(60_000).optional(),
       }),

@@ -197,6 +197,15 @@ describe('normalizeModeBPingOutcome', () => {
       ok: false,
       error: { message: '浏览器扩展没有返回有效页面地址，请重试', code: 'malformed_result' },
     });
+    expect(
+      normalizeModeBPingOutcome({
+        ok: true,
+        result: { finalUrl: 'ftp://example.com/file.txt', title: 'FTP', bodyText: '' },
+      }),
+    ).toEqual({
+      ok: false,
+      error: { message: '浏览器扩展没有返回有效页面地址，请重试', code: 'malformed_result' },
+    });
   });
 
   it('bounds returned title, body, and url fields', () => {

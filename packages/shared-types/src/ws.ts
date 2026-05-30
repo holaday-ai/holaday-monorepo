@@ -1,6 +1,15 @@
 import { z } from 'zod';
 import { resilientSelectorSchema } from './selector.js';
 
+const httpUrlSchema = z
+  .string()
+  .url()
+  .max(2048)
+  .refine(
+    (raw) => /^https?:\/\//i.test(raw),
+    { message: 'expected http(s) URL' },
+  );
+
 // ---------- Protocol constants ----------
 
 export const WS_PROTOCOL_VERSION = 1 as const;
@@ -806,7 +815,7 @@ export const serverExtensionToolCallSchema = z.object({
   /** Per-kind args. `url` populated for navigate; ignored for screenshot. */
   args: z
     .object({
-      url: z.string().url().optional(),
+      url: httpUrlSchema.optional(),
       /**
        * Optional ms to wait after navigation before reading body text.
        * Default 1500 in the extension if omitted. Range guarded
