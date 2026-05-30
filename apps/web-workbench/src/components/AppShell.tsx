@@ -134,9 +134,12 @@ export function AppShell(): JSX.Element {
     string[] | null
   >(null);
   const [confirmClearFailed, setConfirmClearFailed] = React.useState(false);
+  const mountedRef = React.useRef(false);
   const authInvalidatedRef = React.useRef(false);
   const failedCountRequestRef = React.useRef(0);
   const projectRefreshRequestRef = React.useRef(0);
+  const projectFilterRequestRef = React.useRef(0);
+  const projectLoadMoreRequestRef = React.useRef(0);
   /**
    * BOSS bug fix — server-side failed-task count for the user
    * menu badge + clear-confirm dialog. The previous
@@ -146,12 +149,23 @@ export function AppShell(): JSX.Element {
    * bootstrap + after the clear-all action settles.
    */
   const [serverFailedCount, setServerFailedCount] = React.useState(0);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      failedCountRequestRef.current += 1;
+      projectRefreshRequestRef.current += 1;
+      projectFilterRequestRef.current += 1;
+      projectLoadMoreRequestRef.current += 1;
+    };
+  }, []);
+
   const refreshFailedCount = React.useCallback(async () => {
     const requestId = failedCountRequestRef.current + 1;
     failedCountRequestRef.current = requestId;
     try {
       const res = await trpc.tasks.failedCount.query();
-      if (failedCountRequestRef.current !== requestId) return;
+      if (!mountedRef.current || failedCountRequestRef.current !== requestId) return;
       setServerFailedCount(
         normalizeTaskActionCount((res as { count?: unknown } | null)?.count),
       );
@@ -182,12 +196,12 @@ export function AppShell(): JSX.Element {
     try {
       const list = await trpc.projects.list.query();
       const nextProjects = normalizeProjectRows(list);
-      if (projectRefreshRequestRef.current === requestId) {
+      if (mountedRef.current && projectRefreshRequestRef.current === requestId) {
         setProjects(nextProjects);
       }
       return { ok: true, projects: nextProjects };
     } catch (err) {
-      if (projectRefreshRequestRef.current !== requestId) {
+      if (!mountedRef.current || projectRefreshRequestRef.current !== requestId) {
         return { ok: true, projects: [] };
       }
       return {
@@ -210,7 +224,9 @@ export function AppShell(): JSX.Element {
     setMe(null);
     setAuthed(false);
     setBootstrapped(false);
-    toast.show(authSessionExpiredMessage(), 'error');
+    if (mountedRef.current) {
+      toast.show(authSessionExpiredMessage(), 'error');
+    }
   }, [reset, toast]);
 
   const handleAuthenticated = React.useCallback(() => {
@@ -239,7 +255,7 @@ export function AppShell(): JSX.Element {
     let done = false;
     let authInvalidated = false;
     const finish = (): void => {
-      if (authInvalidated) return;
+      if (!mountedRef.current || authInvalidated) return;
       if (!done) {
         done = true;
         setBootstrapped(true);
@@ -259,10 +275,11 @@ export function AppShell(): JSX.Element {
     const listFuture = refreshTaskList();
     const meFuture = trpc.auth.me.query().then(
       (res) => {
-        if (authInvalidated) return;
+        if (!mountedRef.current || authInvalidated) return;
         setMe(normalizeAuthMeProfile(res));
       },
       (err) => {
+        if (!mountedRef.current) return;
         if (isAuthSessionError(err)) {
           authInvalidated = true;
           invalidateAuthSession();
@@ -524,13 +541,21 @@ export function AppShell(): JSX.Element {
       return;
     }
     let cancelled = false;
+    const requestId = projectFilterRequestRef.current + 1;
+    projectFilterRequestRef.current = requestId;
     setProjectTaskFilter((prev) =>
       refreshProjectTaskFilterState(prev, projectFilter),
     );
     void trpc.tasks.list
       .query({ projectId: projectFilter, limit: 50 })
       .then((res) => {
-        if (cancelled) return;
+        if (
+          cancelled ||
+          !mountedRef.current ||
+          projectFilterRequestRef.current !== requestId
+        ) {
+          return;
+        }
         const fresh: UiTask[] = normalizeTaskListRows(res?.tasks);
         setProjectTaskFilter(projectTaskFilterFirstPage({
           projectId: projectFilter,
@@ -541,7 +566,13 @@ export function AppShell(): JSX.Element {
         }));
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (
+          cancelled ||
+          !mountedRef.current ||
+          projectFilterRequestRef.current !== requestId
+        ) {
+          return;
+        }
         const msg = pageErrorMessage(err);
         setProjectTaskFilter((prev) =>
           prev?.projectId === projectFilter
@@ -552,6 +583,7 @@ export function AppShell(): JSX.Element {
       });
     return () => {
       cancelled = true;
+      projectFilterRequestRef.current += 1;
     };
   }, [projectFilter, toast]);
 
@@ -578,10 +610,18 @@ export function AppShell(): JSX.Element {
       return;
     }
     const cursor = current.nextCursor;
+    const requestId = projectLoadMoreRequestRef.current + 1;
+    projectLoadMoreRequestRef.current = requestId;
     setProjectTaskFilter((prev) => projectTaskFilterStartLoadMore(prev, projectFilter));
     void trpc.tasks.list
       .query({ projectId: projectFilter, limit: 50, cursor })
       .then((res) => {
+        if (
+          !mountedRef.current ||
+          projectLoadMoreRequestRef.current !== requestId
+        ) {
+          return;
+        }
         const fresh = normalizeTaskListRows(res?.tasks);
         setProjectTaskFilter((prev) =>
           projectTaskFilterAppendPage(prev, {
@@ -594,6 +634,12 @@ export function AppShell(): JSX.Element {
         );
       })
       .catch((err) => {
+        if (
+          !mountedRef.current ||
+          projectLoadMoreRequestRef.current !== requestId
+        ) {
+          return;
+        }
         const msg = pageErrorMessage(err);
         setProjectTaskFilter((prev) =>
           projectTaskFilterLoadMoreFailed(prev, {
@@ -680,6 +726,7 @@ export function AppShell(): JSX.Element {
         }}
         onRetryTask={async (intent) => {
           const res = await createTask(intent);
+          if (!mountedRef.current) return;
           if ('error' in res) {
             toast.show(taskActionError('重试失败', res.error), 'error');
           } else if (location.pathname !== '/') {
@@ -688,11 +735,13 @@ export function AppShell(): JSX.Element {
         }}
         onRenameTask={async (taskId, title) => {
           const res = await renameTask(taskId, title);
+          if (!mountedRef.current) return;
           if ('error' in res) toast.show(pageActionError('重命名失败', res.error), 'error');
         }}
         projects={projects}
         onMoveTaskToProject={async (taskId, projectId) => {
           const res = await moveTaskToProject(taskId, projectId);
+          if (!mountedRef.current) return;
           if ('error' in res) {
             toast.show(taskActionError('移动失败', res.error), 'error');
             return;
@@ -797,6 +846,7 @@ export function AppShell(): JSX.Element {
           setConfirmDelete(null);
           if (!taskId) return;
           const res = await deleteTask(taskId);
+          if (!mountedRef.current) return;
           if ('error' in res) toast.show(pageActionError('删除失败', res.error), 'error');
           else {
             setProjectTaskFilter((prev) =>
@@ -832,6 +882,7 @@ export function AppShell(): JSX.Element {
               ),
             ),
           );
+          if (!mountedRef.current) return;
           const deletedIds = results
             .filter((entry) => !('error' in entry.result))
             .map((entry) => entry.id);
@@ -867,6 +918,7 @@ export function AppShell(): JSX.Element {
           setConfirmClearFailed(false);
           try {
             const res = await trpc.tasks.clearFailed.mutate();
+            if (!mountedRef.current) return;
             const deleted = normalizeTaskActionCount(
               (res as { deleted?: unknown } | null)?.deleted,
             );
@@ -883,6 +935,7 @@ export function AppShell(): JSX.Element {
             void refreshTaskList();
             refreshDeletionDependentMeta();
           } catch (err) {
+            if (!mountedRef.current) return;
             toast.show(pageActionError('清除失败', err), 'error');
           }
         }}
