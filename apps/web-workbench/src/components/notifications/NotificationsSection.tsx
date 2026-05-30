@@ -43,6 +43,7 @@ export function NotificationsSection(): JSX.Element {
   const [editingChannel, setEditingChannel] =
     React.useState<NotificationChannelRow | null>(null);
   const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
+  const [pendingChannelId, setPendingChannelId] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
     setLoading(true);
@@ -68,7 +69,9 @@ export function NotificationsSection(): JSX.Element {
   }, [refresh]);
 
   const handleToggle = async (row: NotificationChannelRow): Promise<void> => {
+    if (pendingChannelId === row.channelId) return;
     const next = !row.enabled;
+    setPendingChannelId(row.channelId);
     setChannels((prev) =>
       prev.map((c) => (c.channelId === row.channelId ? { ...c, enabled: next } : c)),
     );
@@ -85,6 +88,8 @@ export function NotificationsSection(): JSX.Element {
         ),
       );
       toast.show(pageActionError('操作失败', err), 'error');
+    } finally {
+      setPendingChannelId(null);
     }
   };
 
@@ -119,6 +124,7 @@ export function NotificationsSection(): JSX.Element {
   };
 
   const handleDelete = async (channelId: string): Promise<void> => {
+    setPendingChannelId(channelId);
     try {
       await trpc.notificationChannels.delete.mutate({ channelId });
       toast.show('已删除通知渠道', 'info');
@@ -126,6 +132,8 @@ export function NotificationsSection(): JSX.Element {
       await refresh();
     } catch (err) {
       toast.show(pageActionError('删除失败', err), 'error');
+    } finally {
+      setPendingChannelId(null);
     }
   };
 
@@ -189,7 +197,9 @@ export function NotificationsSection(): JSX.Element {
             </div>
           ) : (
             <ul className="space-y-2 px-4 pb-2">
-              {channels.map((row) => (
+              {channels.map((row) => {
+                const rowPending = pendingChannelId === row.channelId;
+                return (
                 <li
                   key={row.channelId}
                   className="flex items-center gap-3 rounded-md border border-[#DCDDDD] bg-white px-3 py-2 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85"
@@ -218,14 +228,16 @@ export function NotificationsSection(): JSX.Element {
                   <label
                     className={cn(
                       'flex h-5 w-9 cursor-pointer items-center rounded-full p-0.5 transition-colors',
+                      rowPending && 'cursor-wait opacity-70',
                       row.enabled ? 'bg-[#EA1F59]' : 'bg-muted-foreground/40',
                     )}
-                    title={row.enabled ? '禁用' : '启用'}
+                    title={rowPending ? '正在更新' : row.enabled ? '禁用' : '启用'}
                   >
                     <input
                       type="checkbox"
                       className="sr-only"
                       checked={row.enabled}
+                      disabled={rowPending}
                       aria-label={`${row.enabled ? '禁用' : '启用'}${NOTIFICATION_PLATFORM_LABEL[row.platform]}通知渠道`}
                       onChange={() => void handleToggle(row)}
                     />
@@ -242,23 +254,26 @@ export function NotificationsSection(): JSX.Element {
                       setEditingChannel(row);
                       setModalOpen(true);
                     }}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
+                    disabled={rowPending}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground disabled:pointer-events-none disabled:opacity-40 dark:hover:bg-white/10"
                     aria-label={`编辑${NOTIFICATION_PLATFORM_LABEL[row.platform]}通知渠道`}
-                    title="编辑"
+                    title={rowPending ? '正在更新' : '编辑'}
                   >
                     <Pencil className="h-3.5 w-3.5" />
                   </button>
                   <button
                     type="button"
                     onClick={() => setConfirmDelete(row.channelId)}
-                    className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-[#EA1F59]/10 hover:text-[#EA1F59]"
+                    disabled={rowPending}
+                    className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:pointer-events-none disabled:opacity-40"
                     aria-label="删除渠道"
-                    title="删除"
+                    title={rowPending ? '正在更新' : '删除'}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </div>
