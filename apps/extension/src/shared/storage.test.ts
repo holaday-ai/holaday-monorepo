@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeStoredUser } from './storage.js';
+import { normalizeAccessToken, normalizeStoredUser } from './storage.js';
+
+describe('normalizeAccessToken', () => {
+  it('trims valid token strings and rejects empty storage values', () => {
+    expect(normalizeAccessToken('  token.value  ')).toBe('token.value');
+    expect(normalizeAccessToken('   ')).toBeNull();
+    expect(normalizeAccessToken(null)).toBeNull();
+    expect(normalizeAccessToken(123)).toBeNull();
+  });
+});
 
 describe('normalizeStoredUser', () => {
   it('keeps valid stored user records', () => {

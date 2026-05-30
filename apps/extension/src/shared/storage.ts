@@ -17,6 +17,10 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+export function normalizeAccessToken(value: unknown): string | null {
+  return nonEmptyString(value) ? value.trim() : null;
+}
+
 export function normalizeStoredUser(value: unknown): StoredUser | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Partial<Record<keyof StoredUser, unknown>>;
@@ -35,8 +39,7 @@ export function normalizeStoredUser(value: unknown): StoredUser | null {
 
 export async function getAccessToken(): Promise<string | null> {
   const out = await chrome.storage.local.get(TOKEN_KEY);
-  const token = out[TOKEN_KEY];
-  return nonEmptyString(token) ? token : null;
+  return normalizeAccessToken(out[TOKEN_KEY]);
 }
 
 export async function setAccessToken(token: string): Promise<void> {
