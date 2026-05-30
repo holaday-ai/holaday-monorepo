@@ -45,6 +45,19 @@ const MAX_NAVIGATE_URL_LENGTH = 2048;
 /** Tabs we've already attached the debugger to this SW lifetime. */
 const attachedTabs = new Set<number>();
 
+function forgetAttachedTab(tabId: number): void {
+  attachedTabs.delete(tabId);
+}
+
+if (typeof chrome !== 'undefined') {
+  chrome.debugger?.onDetach?.addListener?.((source) => {
+    if (typeof source.tabId === 'number') forgetAttachedTab(source.tabId);
+  });
+  chrome.tabs?.onRemoved?.addListener?.((tabId) => {
+    forgetAttachedTab(tabId);
+  });
+}
+
 /**
  * Idempotently attach the debugger to the target tab. Returns quietly
  * if already attached; throws if the user denied the permission dialog
@@ -69,7 +82,7 @@ export async function detachFromTab(tabId: number): Promise<void> {
   } catch {
     // best-effort: tab may already be closed / debugger was released
   } finally {
-    attachedTabs.delete(tabId);
+    forgetAttachedTab(tabId);
   }
 }
 

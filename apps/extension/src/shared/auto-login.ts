@@ -20,6 +20,8 @@
  * only invokes this when chrome.storage has no token already.
  */
 
+import { normalizeAccessToken } from './storage.js';
+
 const TOKEN_KEY = 'holaday.access_token';
 
 /**
@@ -57,8 +59,9 @@ async function readTokenFromTab(tabId: number, url: string): Promise<string | nu
       },
     });
     const value = results[0]?.result;
-    if (typeof value === 'string' && value.length > 0) {
-      return value;
+    const token = normalizeAccessToken(value);
+    if (token) {
+      return token;
     }
     console.info(
       `[holaday] auto-login: tab ${tabId} (${url}) has no token in localStorage`,
