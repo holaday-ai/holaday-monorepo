@@ -38,6 +38,9 @@ const NAVIGATE_LOAD_TIMEOUT_MS = 25_000;
 
 /** Cap body-text extract size — typical page is < 50KB extracted plain text. */
 const BODY_TEXT_CHAR_CAP = 8_000;
+const DEFAULT_NAVIGATE_WAIT_MS = 1500;
+const MAX_NAVIGATE_WAIT_MS = 10_000;
+const MAX_NAVIGATE_URL_LENGTH = 2048;
 
 /**
  * Get the currently-focused tab. Returns null when no tab is available
@@ -165,6 +168,29 @@ async function executeNavigate(
   return { finalUrl, title, bodyText };
 }
 
+export function normalizeNavigateUrl(raw: unknown): string {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  if (!value || value.length > MAX_NAVIGATE_URL_LENGTH) {
+    throw new Error('bad_url');
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error('bad_url');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('bad_url');
+  }
+  return parsed.href;
+}
+
+function normalizeNavigateWaitMs(raw: unknown): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return DEFAULT_NAVIGATE_WAIT_MS;
+  return Math.max(0, Math.min(MAX_NAVIGATE_WAIT_MS, Math.trunc(raw)));
+}
+
 interface ScreenshotResult {
   /** base64 JPEG (no data: prefix). Cap ~200KB by using quality 50. */
   imageBase64: string;
@@ -209,6 +235,9 @@ export function extensionToolErrorPayload(
   const lower = msg.toLowerCase();
   if (msg.startsWith('no_active_tab')) {
     return { message: '浏览器当前没有活动标签页', code: 'no_active_tab' };
+  }
+  if (msg.startsWith('bad_url')) {
+    return { message: '导航地址无效，请检查后重试', code: 'bad_args' };
   }
   if (lower.includes('navigate_timeout') || lower.includes('extension_tool_timeout')) {
     return {
@@ -257,7 +286,7 @@ export function extensionToolErrorPayload(
  */
 export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<void> {
   const { taskId, requestId, kind, args } = call;
-  const waitMs = args?.waitMs ?? 1500;
+  const waitMs = normalizeNavigateWaitMs(args?.waitMs);
   const callTimeoutMs = Math.max(1000, Math.min(60_000, call.timeoutMs ?? 30_000));
   const operationBudgetMs = Math.max(500, callTimeoutMs - 500);
   const navigateLoadTimeoutMs = Math.max(
@@ -280,11 +309,7 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
 
   try {
     if (kind === 'navigate') {
-      const url = args?.url;
-      if (!url) {
-        finish({ ok: false, error: { message: 'navigate 缺少 url 参数', code: 'bad_args' } });
-        return;
-      }
+      const url = normalizeNavigateUrl(args?.url);
       const r = await withDeadline(
         executeNavigate(url, waitMs, navigateLoadTimeoutMs),
         operationBudgetMs,

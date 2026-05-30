@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { extensionToolErrorPayload, waitForTabComplete } from './extension-tools.js';
+import {
+  extensionToolErrorPayload,
+  normalizeNavigateUrl,
+  waitForTabComplete,
+} from './extension-tools.js';
 
 type TabListener = (id: number, info: chrome.tabs.TabChangeInfo) => void;
 type TabStatus = 'loading' | 'complete' | 'unloaded';
@@ -77,6 +81,10 @@ describe('waitForTabComplete', () => {
 
 describe('extensionToolErrorPayload', () => {
   it('keeps common extension failures actionable and classified', () => {
+    expect(extensionToolErrorPayload(new Error('bad_url'))).toEqual({
+      message: '导航地址无效，请检查后重试',
+      code: 'bad_args',
+    });
     expect(extensionToolErrorPayload(new Error('no_active_tab'))).toEqual({
       message: '浏览器当前没有活动标签页',
       code: 'no_active_tab',
@@ -104,5 +112,21 @@ describe('extensionToolErrorPayload', () => {
 
     expect(payload.code).toBe('exec_error');
     expect(payload.message).toHaveLength('执行失败：'.length + 200);
+  });
+});
+
+describe('normalizeNavigateUrl', () => {
+  it('accepts http and https urls after trimming', () => {
+    expect(normalizeNavigateUrl(' https://example.com/path ')).toBe('https://example.com/path');
+    expect(normalizeNavigateUrl('http://example.com/')).toBe('http://example.com/');
+  });
+
+  it('rejects empty, malformed, internal, and oversized urls', () => {
+    expect(() => normalizeNavigateUrl('')).toThrow('bad_url');
+    expect(() => normalizeNavigateUrl('not a url')).toThrow('bad_url');
+    expect(() => normalizeNavigateUrl('chrome://extensions')).toThrow('bad_url');
+    expect(() => normalizeNavigateUrl(`https://example.com/${'a'.repeat(2050)}`)).toThrow(
+      'bad_url',
+    );
   });
 });
