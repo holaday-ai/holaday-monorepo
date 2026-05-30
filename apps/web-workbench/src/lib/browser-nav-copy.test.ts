@@ -64,6 +64,9 @@ describe('browserNavFailureMessage', () => {
         'goto',
       ),
     ).toBe('浏览器扩展缺少当前网站权限，请在扩展里允许访问该网站后重试');
+    expect(browserNavExceptionMessage(new Error('bad_args: expected http(s) URL'), 'goto')).toBe(
+      '只支持打开 http(s) 链接',
+    );
     expect(browserNavExceptionMessage(new Error('浏览器当前没有活动标签页'), 'goto')).toBe(
       '浏览器当前没有活动标签页，请打开一个网页后重试',
     );
