@@ -4,6 +4,7 @@ import {
   cdpActionErrorMessage,
   captureVisionObservation,
   executeCdpAction,
+  getActiveTabId,
   normalizeCdpNavigateUrl,
   sanitizeVisionObservationCapture,
 } from './cdp-actions.js';
@@ -135,5 +136,35 @@ describe('captureVisionObservation', () => {
       title: '',
       error: 'debugger attach failed: 浏览器调试通道被占用，请关闭该标签页 DevTools 后重试',
     });
+  });
+});
+
+describe('getActiveTabId', () => {
+  it('falls back from currentWindow to lastFocusedWindow and normal windows', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 42 }]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabId()).resolves.toBe(42);
+    expect(query).toHaveBeenNthCalledWith(1, { active: true, currentWindow: true });
+    expect(query).toHaveBeenNthCalledWith(2, { active: true, lastFocusedWindow: true });
+    expect(query).toHaveBeenNthCalledWith(3, { active: true, windowType: 'normal' });
+  });
+
+  it('returns null when chrome tab lookup fails', async () => {
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => {
+          throw new Error('tabs unavailable');
+        }),
+      },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabId()).resolves.toBeNull();
   });
 });

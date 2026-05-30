@@ -477,10 +477,18 @@ export function sanitizeVisionObservationCapture(
  * a clean error instead of crashing.
  */
 export async function getActiveTabId(): Promise<number | null> {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  const tab = tabs[0];
-  if (!tab || typeof tab.id !== 'number') return null;
-  return tab.id;
+  try {
+    const [currentWindowTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (typeof currentWindowTab?.id === 'number') return currentWindowTab.id;
+
+    const [lastFocusedTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (typeof lastFocusedTab?.id === 'number') return lastFocusedTab.id;
+
+    const [normalWindowTab] = await chrome.tabs.query({ active: true, windowType: 'normal' });
+    return typeof normalWindowTab?.id === 'number' ? normalWindowTab.id : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
