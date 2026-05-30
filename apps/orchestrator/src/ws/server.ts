@@ -418,7 +418,7 @@ export async function sendExtensionToolCall(
       resolve,
       timer,
     });
-    send(target.socket, {
+    const sent = send(target.socket, {
       type: 'server.extension.tool_call',
       taskId: opts.taskId,
       requestId,
@@ -426,6 +426,17 @@ export async function sendExtensionToolCall(
       ...(opts.args ? { args: opts.args } : {}),
       timeoutMs,
     });
+    if (!sent) {
+      clearTimeout(timer);
+      pendingExtensionCalls.delete(requestId);
+      resolve({
+        ok: false,
+        error: {
+          message: extensionSocketClosedMessage(),
+          code: 'socket_closed',
+        },
+      });
+    }
   });
 }
 
@@ -1195,10 +1206,17 @@ async function verifyToken(token: string): Promise<string | null> {
   return claims?.sub ?? null;
 }
 
-function send(socket: WebSocket, msg: ServerMessage) {
+function send(socket: WebSocket, msg: ServerMessage): boolean {
   if (socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(msg));
+    try {
+      socket.send(JSON.stringify(msg));
+      return true;
+    } catch (err) {
+      logger.warn({ err, msgType: msg.type }, 'ws send failed');
+      return false;
+    }
   }
+  return false;
 }
 
 function sweep(wss: WebSocketServer) {
