@@ -357,6 +357,84 @@ function looksLikeCodeIntent(intent: string): boolean {
   return true;
 }
 
+type ModeBPingOutcome = {
+  ok: boolean;
+  result?: unknown;
+  error?: { message: string; code?: string };
+};
+
+export type NormalizedModeBPingResult =
+  | {
+      ok: true;
+      finalUrl: string;
+      title: string;
+      bodyText: string;
+    }
+  | {
+      ok: false;
+      error: { message: string; code: string };
+    };
+
+export function normalizeModeBPingOutcome(
+  outcome: ModeBPingOutcome,
+): NormalizedModeBPingResult {
+  if (!outcome.ok) {
+    return {
+      ok: false,
+      error: {
+        message: outcome.error?.message || '浏览器扩展执行失败，请稍后重试',
+        code: outcome.error?.code || 'unknown',
+      },
+    };
+  }
+
+  if (typeof outcome.result !== 'object' || outcome.result === null) {
+    return {
+      ok: false,
+      error: {
+        message: '浏览器扩展返回结果不完整，请重试',
+        code: 'malformed_result',
+      },
+    };
+  }
+
+  const result = outcome.result as {
+    finalUrl?: unknown;
+    title?: unknown;
+    bodyText?: unknown;
+  };
+  const finalUrl = typeof result.finalUrl === 'string' ? result.finalUrl.trim() : '';
+  if (!finalUrl || !isSafeUrl(finalUrl)) {
+    return {
+      ok: false,
+      error: {
+        message: '浏览器扩展没有返回有效页面地址，请重试',
+        code: 'malformed_result',
+      },
+    };
+  }
+
+  const title = typeof result.title === 'string' ? result.title.trim().slice(0, 300) : '';
+  const rawBodyText = typeof result.bodyText === 'string' ? result.bodyText.trim() : '';
+  const bodyText = rawBodyText.length > 12_000 ? rawBodyText.slice(0, 12_000) : rawBodyText;
+
+  return {
+    ok: true,
+    finalUrl: finalUrl.slice(0, 2048),
+    title,
+    bodyText,
+  };
+}
+
+function isSafeUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 export const tasksRouter = router({
   create: protectedProcedure.input(createInput).mutation(async ({ ctx, input }) => {
     // O15 — code-task refusal lands BEFORE user lookup so even an
@@ -5681,21 +5759,7 @@ export const tasksRouter = router({
         },
         ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
       });
-      if (!outcome.ok) {
-        return {
-          ok: false as const,
-          error: outcome.error ?? { message: '未知错误', code: 'unknown' },
-        };
-      }
-      const result = outcome.result as
-        | { finalUrl?: unknown; title?: unknown; bodyText?: unknown }
-        | undefined;
-      return {
-        ok: true as const,
-        finalUrl: typeof result?.finalUrl === 'string' ? result.finalUrl : '',
-        title: typeof result?.title === 'string' ? result.title : '',
-        bodyText: typeof result?.bodyText === 'string' ? result.bodyText : '',
-      };
+      return normalizeModeBPingOutcome(outcome);
     }),
 
   /**

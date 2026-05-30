@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { classifyReplyIntent } from './tasks.js';
+import { classifyReplyIntent, normalizeModeBPingOutcome } from './tasks.js';
 
 describe('classifyReplyIntent', () => {
   describe('manual_data', () => {
@@ -145,5 +145,75 @@ describe('classifyReplyIntent', () => {
       expect(classifyReplyIntent('')).toBe('default');
       expect(classifyReplyIntent('   ')).toBe('default');
     });
+  });
+});
+
+describe('normalizeModeBPingOutcome', () => {
+  it('accepts a complete extension navigate result', () => {
+    expect(
+      normalizeModeBPingOutcome({
+        ok: true,
+        result: {
+          finalUrl: ' https://example.com/path ',
+          title: ' Example Domain ',
+          bodyText: ' hello ',
+        },
+      }),
+    ).toEqual({
+      ok: true,
+      finalUrl: 'https://example.com/path',
+      title: 'Example Domain',
+      bodyText: 'hello',
+    });
+  });
+
+  it('preserves extension failures with stable fallback codes', () => {
+    expect(
+      normalizeModeBPingOutcome({
+        ok: false,
+        error: { message: '浏览器当前没有活动标签页', code: 'no_active_tab' },
+      }),
+    ).toEqual({
+      ok: false,
+      error: { message: '浏览器当前没有活动标签页', code: 'no_active_tab' },
+    });
+    expect(normalizeModeBPingOutcome({ ok: false })).toEqual({
+      ok: false,
+      error: { message: '浏览器扩展执行失败，请稍后重试', code: 'unknown' },
+    });
+  });
+
+  it('rejects malformed success payloads instead of reporting a false pass', () => {
+    expect(normalizeModeBPingOutcome({ ok: true, result: null })).toEqual({
+      ok: false,
+      error: { message: '浏览器扩展返回结果不完整，请重试', code: 'malformed_result' },
+    });
+    expect(
+      normalizeModeBPingOutcome({
+        ok: true,
+        result: { finalUrl: 'chrome://extensions', title: 'Extensions', bodyText: '' },
+      }),
+    ).toEqual({
+      ok: false,
+      error: { message: '浏览器扩展没有返回有效页面地址，请重试', code: 'malformed_result' },
+    });
+  });
+
+  it('bounds returned title, body, and url fields', () => {
+    const normalized = normalizeModeBPingOutcome({
+      ok: true,
+      result: {
+        finalUrl: `https://example.com/${'a'.repeat(3000)}`,
+        title: 't'.repeat(400),
+        bodyText: 'b'.repeat(13_000),
+      },
+    });
+
+    expect(normalized.ok).toBe(true);
+    if (normalized.ok) {
+      expect(normalized.finalUrl).toHaveLength(2048);
+      expect(normalized.title).toHaveLength(300);
+      expect(normalized.bodyText).toHaveLength(12_000);
+    }
   });
 });

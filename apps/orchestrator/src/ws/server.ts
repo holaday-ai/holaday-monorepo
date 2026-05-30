@@ -719,6 +719,19 @@ async function handleClientMessage(
       );
       return;
     }
+    if (pending.clientId !== state.id || pending.taskId !== msg.taskId) {
+      logger.warn(
+        {
+          requestId: msg.requestId,
+          taskId: msg.taskId,
+          pendingTaskId: pending.taskId,
+          clientId: state.id,
+          pendingClientId: pending.clientId,
+        },
+        'extension: tool_result did not match pending request owner',
+      );
+      return;
+    }
     clearTimeout(pending.timer);
     pendingExtensionCalls.delete(msg.requestId);
     pending.resolve({
