@@ -90,7 +90,13 @@ export function send(msg: ClientMessage): boolean {
 export function disconnect(): void {
   state.closedByUser = true;
   clearReconnectTimer();
-  state.socket?.close(1000, 'client requested disconnect');
+  const socket = state.socket;
+  state.socket = null;
+  if (state.pingTimer) {
+    clearInterval(state.pingTimer);
+    state.pingTimer = null;
+  }
+  socket?.close(1000, 'client requested disconnect');
 }
 
 /**

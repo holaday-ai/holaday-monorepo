@@ -1,3 +1,4 @@
+import { HEARTBEAT_INTERVAL_MS } from '@holaday/shared-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Listener = (event?: unknown) => void;
@@ -175,5 +176,25 @@ describe('ws-client send', () => {
 
     expect(sockets).toHaveLength(2);
     expect(sockets[1]?.protocols).toEqual(['holaday.v1', 'jwt.new-token']);
+  });
+
+  it('clears the ping timer when disconnecting before a fast reconnect', async () => {
+    vi.useFakeTimers();
+    const { connect, disconnect } = await import('./ws-client.js');
+    connect('old-token');
+    const [oldSocket] = sockets;
+    if (!oldSocket) throw new Error('expected websocket');
+    oldSocket.dispatch('open');
+
+    disconnect();
+    connect('new-token');
+    const newSocket = sockets[1];
+    if (!newSocket) throw new Error('expected second websocket');
+    newSocket.dispatch('open');
+
+    vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
+
+    expect(oldSocket.sent).toHaveLength(1); // only client.hello before disconnect
+    expect(newSocket.sent).toHaveLength(2); // client.hello + one pong
   });
 });
