@@ -96,11 +96,22 @@ export function CdpScreencastViewport({
    *  effect when canvas.width/height changes (a new source size). */
   const sourceDimsRecomputeRef = React.useRef<(() => void) | null>(null);
   const wsRef = React.useRef<WebSocket | null>(null);
-  // Cached <img> + the most-recent JPEG src so the decode pipeline
-  // doesn't re-allocate per frame. Image.decode() is async and
-  // returns a promise — chaining via .then keeps frames in order
-  // without blocking the WS receive loop.
+  // Cached <img> + frame sequence guard so async image loads cannot
+  // paint stale frames after a newer frame, wsUrl change, or unmount.
   const imgRef = React.useRef<HTMLImageElement | null>(null);
+  const frameSeqRef = React.useRef(0);
+  const mountedRef = React.useRef(false);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      frameSeqRef.current += 1;
+      if (imgRef.current) {
+        imgRef.current.onload = null;
+        imgRef.current.onerror = null;
+      }
+    };
+  }, []);
   // Throttled "viewOnly" reference so the keyDown handler reads
   // the latest value without re-attaching listeners on every flip.
   const viewOnlyRef = React.useRef(viewOnly);
@@ -272,6 +283,7 @@ export function CdpScreencastViewport({
 
     return () => {
       disposed = true;
+      frameSeqRef.current += 1;
       if (retryTimer) clearTimeout(retryTimer);
       try {
         activeWs?.close();
@@ -286,13 +298,15 @@ export function CdpScreencastViewport({
   // canvas are reused; canvas is resized to match the source so the
   // `object-contain` style on the host element handles letterboxing.
   function drawFrame(base64: string): void {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
     if (!imgRef.current) imgRef.current = new Image();
     const img = imgRef.current;
+    const frameSeq = ++frameSeqRef.current;
     img.onload = () => {
+      if (!mountedRef.current || frameSeq !== frameSeqRef.current) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
       const sizeChanged =
         canvas.width !== img.width || canvas.height !== img.height;
       if (canvas.width !== img.width) canvas.width = img.width;
