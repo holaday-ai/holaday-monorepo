@@ -40,6 +40,7 @@ const CDP_VERSION = '1.3';
 const CDP_COMMAND_TIMEOUT_MS = 5_000;
 /** How long to wait before reporting a wait() complete (honours upper bound). */
 const WAIT_CAP_MS = 10_000;
+const MAX_NAVIGATE_URL_LENGTH = 2048;
 
 /** Tabs we've already attached the debugger to this SW lifetime. */
 const attachedTabs = new Set<number>();
@@ -235,8 +236,27 @@ async function doNavigate(
   action: Extract<VisionAction, { kind: 'navigate' }>,
 ): Promise<ActionResult> {
   await ensureAttached(tabId);
-  await sendCdp(tabId, 'Page.navigate', { url: action.url });
-  return { ok: true, message: `navigated to ${action.url}` };
+  const url = normalizeCdpNavigateUrl(action.url);
+  await sendCdp(tabId, 'Page.navigate', { url });
+  return { ok: true, message: `navigated to ${url}` };
+}
+
+export function normalizeCdpNavigateUrl(raw: unknown): string {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  if (!value || value.length > MAX_NAVIGATE_URL_LENGTH) {
+    throw new Error('bad_url');
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error('bad_url');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('bad_url');
+  }
+  return parsed.href;
 }
 
 // ---------------------------------------------------------------------------
