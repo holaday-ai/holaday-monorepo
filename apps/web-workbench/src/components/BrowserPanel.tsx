@@ -261,6 +261,7 @@ export function BrowserPanel({
     awaitingKind != null &&
     awaitingKind !== 'clarification';
   const toast = useToast();
+  const mountedRef = React.useRef(false);
   const [collapsedLocal, setCollapsedLocal] = React.useState(false);
   const collapsed = collapsedProp ?? collapsedLocal;
   const toggleCollapsed = onToggleCollapse ?? (() => setCollapsedLocal((c) => !c));
@@ -275,6 +276,12 @@ export function BrowserPanel({
    */
   const panelRootRef = React.useRef<HTMLDivElement | null>(null);
   const [isNarrow, setIsNarrow] = React.useState(false);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   React.useEffect(() => {
     const el = panelRootRef.current;
     if (!el) return;
@@ -406,7 +413,9 @@ export function BrowserPanel({
     try {
       await abortTask(activeTaskId);
     } finally {
-      setAborting(false);
+      if (mountedRef.current) {
+        setAborting(false);
+      }
     }
   }, [activeTaskId, aborting, abortTask]);
 
@@ -598,6 +607,7 @@ export function BrowserPanel({
       const feedback = browserWakeFeedback(
         (res as { status?: unknown } | null)?.status?.toString(),
       );
+      if (!mountedRef.current) return;
       if (res.status === 'ready') {
         // Reset counter and remount the screencast viewport. In the
         // per-task browser model this is a status check, not a wake-up;
@@ -612,7 +622,9 @@ export function BrowserPanel({
     } catch {
       toast.show(browserWakeFeedback(null).message, 'error');
     } finally {
-      setWaking(false);
+      if (mountedRef.current) {
+        setWaking(false);
+      }
     }
   }, [toast, waking]);
   // Round-3 #5 (legacy): completed / failed / cancelled tasks used
@@ -2079,6 +2091,13 @@ function UrlBar({
   const [draft, setDraft] = React.useState(displayUrl);
   const [editing, setEditing] = React.useState(false);
   const [pending, setPending] = React.useState(false);
+  const mountedRef = React.useRef(false);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   React.useEffect(() => {
     if (!editing) setDraft(displayUrl);
   }, [displayUrl, editing]);
@@ -2097,6 +2116,7 @@ function UrlBar({
         url: target,
         ...(navTaskId ? { taskId: navTaskId } : {}),
       });
+      if (!mountedRef.current) return;
       if (!res.ok) {
         const message = browserNavFailureMessage(res.reason, 'goto');
         if (message) toast.show(message, 'error');
@@ -2104,10 +2124,14 @@ function UrlBar({
       }
     } catch (err) {
       toast.show(browserNavExceptionMessage(err, 'goto'), 'error');
-      setDraft(displayUrl);
+      if (mountedRef.current) {
+        setDraft(displayUrl);
+      }
     } finally {
-      setPending(false);
-      setEditing(false);
+      if (mountedRef.current) {
+        setPending(false);
+        setEditing(false);
+      }
     }
   };
 
@@ -2166,7 +2190,14 @@ function NavButton({
 }): JSX.Element {
   const toast = useToast();
   const [pending, setPending] = React.useState(false);
+  const mountedRef = React.useRef(false);
   const Icon = direction === 'back' ? ArrowLeft : direction === 'forward' ? ArrowRight : RotateCw;
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   return (
     <button
       type="button"
@@ -2188,7 +2219,9 @@ function NavButton({
         } catch (err) {
           toast.show(browserNavExceptionMessage(err, direction), 'error');
         } finally {
-          setPending(false);
+          if (mountedRef.current) {
+            setPending(false);
+          }
         }
       }}
       className={cn(
