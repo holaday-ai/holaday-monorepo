@@ -64,6 +64,9 @@ describe('browserNavFailureMessage', () => {
         'goto',
       ),
     ).toBe('浏览器扩展缺少当前网站权限，请在扩展里允许访问该网站后重试');
+    expect(browserNavExceptionMessage(new Error('浏览器当前没有活动标签页'), 'goto')).toBe(
+      '浏览器当前没有活动标签页，请打开一个网页后重试',
+    );
     expect(browserNavExceptionMessage(new Error('Unexpected protocol error'), 'back')).toBe(
       '后退失败，请稍后重试',
     );

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { waitForTabComplete } from './extension-tools.js';
+import { extensionToolErrorPayload, waitForTabComplete } from './extension-tools.js';
 
 type TabListener = (id: number, info: chrome.tabs.TabChangeInfo) => void;
 type TabStatus = 'loading' | 'complete' | 'unloaded';
@@ -72,5 +72,37 @@ describe('waitForTabComplete', () => {
     vi.advanceTimersByTime(25_000);
 
     await expect(pending).rejects.toThrow('navigate_timeout');
+  });
+});
+
+describe('extensionToolErrorPayload', () => {
+  it('keeps common extension failures actionable and classified', () => {
+    expect(extensionToolErrorPayload(new Error('no_active_tab'))).toEqual({
+      message: '浏览器当前没有活动标签页',
+      code: 'no_active_tab',
+    });
+    expect(extensionToolErrorPayload(new Error('navigate_timeout'))).toEqual({
+      message: '页面响应超时，请保持标签页打开后重试',
+      code: 'timeout',
+    });
+    expect(
+      extensionToolErrorPayload(
+        new Error('Cannot access contents of url "https://example.com/". Extension manifest must request permission.'),
+      ),
+    ).toEqual({
+      message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
+      code: 'host_permission',
+    });
+    expect(extensionToolErrorPayload(new Error('No tab with id: 123.'))).toEqual({
+      message: '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
+      code: 'tab_closed',
+    });
+  });
+
+  it('bounds unknown error details', () => {
+    const payload = extensionToolErrorPayload(new Error('x'.repeat(300)));
+
+    expect(payload.code).toBe('exec_error');
+    expect(payload.message).toHaveLength('执行失败：'.length + 200);
   });
 });

@@ -46,8 +46,23 @@ const BODY_TEXT_CHAR_CAP = 8_000;
  */
 async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    return tab ?? null;
+    const [currentWindowTab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
+    if (currentWindowTab) return currentWindowTab;
+
+    const [lastFocusedTab] = await chrome.tabs.query({
+      active: true,
+      lastFocusedWindow: true,
+    });
+    if (lastFocusedTab) return lastFocusedTab;
+
+    const [normalWindowTab] = await chrome.tabs.query({
+      active: true,
+      windowType: 'normal',
+    });
+    return normalWindowTab ?? null;
   } catch {
     return null;
   }
@@ -111,13 +126,17 @@ interface NavigateResult {
  * world). The injected function is intentionally trivial — anything
  * fancier (selectors, AI extraction) belongs server-side.
  */
-async function executeNavigate(url: string, waitMs: number): Promise<NavigateResult> {
+async function executeNavigate(
+  url: string,
+  waitMs: number,
+  loadTimeoutMs: number,
+): Promise<NavigateResult> {
   const tab = await getActiveTab();
   if (!tab?.id) {
     throw new Error('no_active_tab');
   }
   await chrome.tabs.update(tab.id, { url });
-  await waitForTabComplete(tab.id, NAVIGATE_LOAD_TIMEOUT_MS);
+  await waitForTabComplete(tab.id, loadTimeoutMs);
   // Post-load settle. Some pages defer the meaningful DOM until after
   // a microtask burst (React / Vue hydration). The default 1500ms
   // matches what the orchestrator's `defaultWait` uses too.
@@ -140,7 +159,9 @@ async function executeNavigate(url: string, waitMs: number): Promise<NavigateRes
   });
   const rawText = typeof first?.result === 'string' ? first.result : '';
   const bodyText =
-    rawText.length > 8000 ? `${rawText.slice(0, 8000)}\n…(已截断，原文 ${rawText.length} 字)` : rawText;
+    rawText.length > BODY_TEXT_CHAR_CAP
+      ? `${rawText.slice(0, BODY_TEXT_CHAR_CAP)}\n…(已截断，原文 ${rawText.length} 字)`
+      : rawText;
   return { finalUrl, title, bodyText };
 }
 
@@ -160,6 +181,70 @@ async function executeScreenshot(): Promise<ScreenshotResult> {
   return { imageBase64: base64, width: 0, height: 0 };
 }
 
+function withDeadline<T>(
+  work: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    timer && (timer as { unref?: () => void }).unref?.();
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+export function extensionToolErrorPayload(
+  err: unknown,
+): { message: string; code: string } {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+  if (msg.startsWith('no_active_tab')) {
+    return { message: '浏览器当前没有活动标签页', code: 'no_active_tab' };
+  }
+  if (lower.includes('navigate_timeout') || lower.includes('extension_tool_timeout')) {
+    return {
+      message: '页面响应超时，请保持标签页打开后重试',
+      code: 'timeout',
+    };
+  }
+  if (
+    lower.includes('cannot access contents of url') ||
+    lower.includes('missing host permission') ||
+    lower.includes('host permission') ||
+    lower.includes('cannot access a chrome:// url')
+  ) {
+    return {
+      message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
+      code: 'host_permission',
+    };
+  }
+  if (
+    lower.includes('receiving end does not exist') ||
+    lower.includes('message port closed') ||
+    lower.includes('tab closed') ||
+    lower.includes('no tab with id') ||
+    lower.includes('target closed')
+  ) {
+    return {
+      message: '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
+      code: 'tab_closed',
+    };
+  }
+  return {
+    message: `执行失败：${msg.slice(0, 200)}`,
+    code: 'exec_error',
+  };
+}
+
 /**
  * Top-level entry. Handles ONE server.extension.tool_call frame:
  *   1. Dispatch on `kind`
@@ -173,8 +258,17 @@ async function executeScreenshot(): Promise<ScreenshotResult> {
 export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<void> {
   const { taskId, requestId, kind, args } = call;
   const waitMs = args?.waitMs ?? 1500;
+  const callTimeoutMs = Math.max(1000, Math.min(60_000, call.timeoutMs ?? 30_000));
+  const operationBudgetMs = Math.max(500, callTimeoutMs - 500);
+  const navigateLoadTimeoutMs = Math.max(
+    1000,
+    Math.min(NAVIGATE_LOAD_TIMEOUT_MS, operationBudgetMs - waitMs - 250),
+  );
+  let settled = false;
 
   const finish = (payload: Omit<Extract<ClientMessage, { type: 'client.extension.tool_result' }>, 'type' | 'taskId' | 'requestId' | 'at'>): void => {
+    if (settled) return;
+    settled = true;
     send({
       type: 'client.extension.tool_result',
       taskId,
@@ -191,28 +285,28 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
         finish({ ok: false, error: { message: 'navigate 缺少 url 参数', code: 'bad_args' } });
         return;
       }
-      const r = await executeNavigate(url, waitMs);
+      const r = await withDeadline(
+        executeNavigate(url, waitMs, navigateLoadTimeoutMs),
+        operationBudgetMs,
+        'extension_tool_timeout',
+      );
       finish({ ok: true, result: r });
       return;
     }
     if (kind === 'screenshot') {
-      const r = await executeScreenshot();
+      const r = await withDeadline(
+        executeScreenshot(),
+        operationBudgetMs,
+        'extension_tool_timeout',
+      );
       finish({ ok: true, result: r });
       return;
     }
     finish({ ok: false, error: { message: `未知工具 kind: ${kind}`, code: 'bad_kind' } });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
     finish({
       ok: false,
-      error: {
-        message: msg.startsWith('no_active_tab')
-          ? '浏览器当前没有活动标签页'
-          : msg.includes('navigate_timeout')
-            ? '页面加载超时'
-            : `执行失败：${msg.slice(0, 200)}`,
-        code: msg === 'no_active_tab' ? 'no_active_tab' : msg.includes('timeout') ? 'timeout' : 'exec_error',
-      },
+      error: extensionToolErrorPayload(err),
     });
   }
 }

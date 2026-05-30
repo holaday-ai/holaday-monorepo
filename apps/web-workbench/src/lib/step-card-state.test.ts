@@ -101,6 +101,15 @@ describe('step-card-state', () => {
     ).toBe('浏览器扩展缺少当前网站权限。请在扩展里允许访问该网站后重试。');
   });
 
+  it('explains missing active tabs', () => {
+    expect(
+      stepFailureMessage({
+        actionKind: 'navigate',
+        message: '浏览器当前没有活动标签页',
+      }),
+    ).toBe('浏览器当前没有活动标签页。请打开一个网页后重试。');
+  });
+
   it('explains browser transport closures without exposing protocol text', () => {
     expect(
       stepFailureMessage({

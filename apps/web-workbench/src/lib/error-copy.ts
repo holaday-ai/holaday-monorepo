@@ -101,6 +101,8 @@ export function humaniseTaskError(raw: string | null | undefined): string {
       return '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试。';
     case 'extension_permission':
       return '浏览器扩展缺少当前网站权限，请在扩展里允许访问该网站后重试。';
+    case 'no_active_tab':
+      return '浏览器当前没有活动标签页，请打开一个网页后重试。';
     case 'dns':
       return '无法访问该网址，请检查网址是否拼写正确。';
     case 'ssl':

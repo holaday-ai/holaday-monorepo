@@ -52,6 +52,12 @@ describe('error-copy', () => {
     ).toBe('浏览器扩展缺少当前网站权限，请在扩展里允许访问该网站后重试。');
   });
 
+  it('maps missing active tab failures to an actionable browser hint', () => {
+    expect(humaniseTaskError('浏览器当前没有活动标签页')).toBe(
+      '浏览器当前没有活动标签页，请打开一个网页后重试。',
+    );
+  });
+
   it('maps raw Chromium navigation failures before the generic fallback', () => {
     expect(humaniseTaskError('net::ERR_NAME_NOT_RESOLVED at https://nope.example')).toBe(
       '无法访问该网址，请检查网址是否拼写正确。',

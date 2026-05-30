@@ -7,6 +7,7 @@ export type BrowserErrorKind =
   | 'extension_missing'
   | 'extension_disconnected'
   | 'extension_permission'
+  | 'no_active_tab'
   | 'transport_closed'
   | 'page_switch'
   | 'hibernated'
@@ -43,6 +44,9 @@ export function classifyBrowserErrorKind(
     )
   ) {
     return 'extension_disconnected';
+  }
+  if (/no_active_tab|没有活动标签页|当前没有活动标签页/.test(text)) {
+    return 'no_active_tab';
   }
   if (/browser not allocated|no browser allocated|409|hibernat|idle-timeout|休眠/.test(text)) {
     return 'hibernated';

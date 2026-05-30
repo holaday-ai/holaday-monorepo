@@ -58,6 +58,8 @@ export function browserNavExceptionMessage(
       return '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试';
     case 'extension_permission':
       return '浏览器扩展缺少当前网站权限，请在扩展里允许访问该网站后重试';
+    case 'no_active_tab':
+      return '浏览器当前没有活动标签页，请打开一个网页后重试';
     case 'transport_closed':
       return '浏览器连接中断，请重新执行任务';
     case 'hibernated':
