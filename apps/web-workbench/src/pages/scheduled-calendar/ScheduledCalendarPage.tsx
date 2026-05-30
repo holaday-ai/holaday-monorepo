@@ -157,6 +157,7 @@ export function ScheduledCalendarPage(): JSX.Element {
     new Set(),
   );
   const focusedScheduledTaskRef = React.useRef<number | null>(null);
+  const refreshRequestRef = React.useRef(0);
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return;
@@ -168,6 +169,8 @@ export function ScheduledCalendarPage(): JSX.Element {
 
   const refresh = React.useCallback(async () => {
     if (!currentRange) return;
+    const requestId = refreshRequestRef.current + 1;
+    refreshRequestRef.current = requestId;
     setLoading(true);
     try {
       const res = await trpc.scheduledTasks.list.query({
@@ -177,15 +180,19 @@ export function ScheduledCalendarPage(): JSX.Element {
           ? { focusScheduledTaskInternalId }
           : {}),
       });
+      if (refreshRequestRef.current !== requestId) return;
       setRows(normalizeScheduledTaskRows(res));
       setLastRefreshFocusId(focusScheduledTaskInternalId);
       setLoadError(null);
     } catch (err) {
+      if (refreshRequestRef.current !== requestId) return;
       const message = scheduledCalendarErrorMessage(err, '加载失败');
       setLoadError(message);
       toast.show(taskActionError('加载失败', message), 'error');
     } finally {
-      setLoading(false);
+      if (refreshRequestRef.current === requestId) {
+        setLoading(false);
+      }
     }
     // toast is stable; refresh re-runs only when currentRange changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -193,6 +200,9 @@ export function ScheduledCalendarPage(): JSX.Element {
 
   React.useEffect(() => {
     void refresh();
+    return () => {
+      refreshRequestRef.current += 1;
+    };
   }, [refresh]);
 
   const events = React.useMemo<EventInput[]>(() => {

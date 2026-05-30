@@ -80,6 +80,7 @@ function BatchList(): JSX.Element {
   const [rows, setRows] = React.useState<NormalizedBatchRow[] | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const reloadRequestRef = React.useRef(0);
   // Phase 5b — when InputArea routes here with `state.initialPrompts`
   // (multi-line composer detect), auto-open the create dialog with
   // those lines pre-filled. One-shot: we clear the state after using
@@ -100,22 +101,31 @@ function BatchList(): JSX.Element {
   }, [incomingPrompts]);
 
   const reload = React.useCallback(async () => {
+    const requestId = reloadRequestRef.current + 1;
+    reloadRequestRef.current = requestId;
     setLoading(true);
     try {
       const list = await trpc.batchTasks.list.query();
+      if (reloadRequestRef.current !== requestId) return;
       setRows(normalizeBatchRows(list));
       setLoadError(null);
     } catch (err) {
+      if (reloadRequestRef.current !== requestId) return;
       const message = batchErrorMessage(err);
       toast.show(taskActionError('加载失败', message), 'error');
       setLoadError(message);
     } finally {
-      setLoading(false);
+      if (reloadRequestRef.current === requestId) {
+        setLoading(false);
+      }
     }
   }, [toast]);
 
   React.useEffect(() => {
     void reload();
+    return () => {
+      reloadRequestRef.current += 1;
+    };
   }, [reload]);
 
   React.useEffect(() => {
@@ -312,19 +322,26 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = React.useState(false);
+  const reloadRequestRef = React.useRef(0);
 
   const reload = React.useCallback(async () => {
+    const requestId = reloadRequestRef.current + 1;
+    reloadRequestRef.current = requestId;
     setLoading(true);
     try {
       const data = await trpc.batchTasks.detail.query({ batchId });
+      if (reloadRequestRef.current !== requestId) return;
       setDetail(normalizeBatchDetail(data));
       setLoadError(null);
     } catch (err) {
+      if (reloadRequestRef.current !== requestId) return;
       const message = batchErrorMessage(err);
       toast.show(taskActionError('加载失败', message), 'error');
       setLoadError(message);
     } finally {
-      setLoading(false);
+      if (reloadRequestRef.current === requestId) {
+        setLoading(false);
+      }
     }
   }, [batchId, toast]);
 
@@ -335,7 +352,10 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
     const handle = setInterval(() => {
       void reload();
     }, 5_000);
-    return () => clearInterval(handle);
+    return () => {
+      clearInterval(handle);
+      reloadRequestRef.current += 1;
+    };
   }, [reload]);
 
   React.useEffect(() => {

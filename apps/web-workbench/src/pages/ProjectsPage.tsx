@@ -33,6 +33,7 @@ export function ProjectsPage(): JSX.Element {
   const toast = useToast();
   const navigate = useNavigate();
   const { projects: shellProjects, refreshProjects } = useAppShellContext();
+  const refreshRequestRef = React.useRef(0);
   const [searchParams] = useSearchParams();
   const [projects, setProjects] = React.useState<UiProject[]>(() => [
     ...shellProjects,
@@ -61,9 +62,12 @@ export function ProjectsPage(): JSX.Element {
   const fullPageError = loadError && !hasProjects;
 
   const refresh = React.useCallback(async () => {
+    const requestId = refreshRequestRef.current + 1;
+    refreshRequestRef.current = requestId;
     setLoading(true);
     setLoadError(null);
     const res = await refreshProjects();
+    if (refreshRequestRef.current !== requestId) return null;
     if ('error' in res) {
       const message = pageErrorMessage(res.error);
       setLoadError(message);
@@ -79,6 +83,9 @@ export function ProjectsPage(): JSX.Element {
 
   React.useEffect(() => {
     void refresh();
+    return () => {
+      refreshRequestRef.current += 1;
+    };
   }, [refresh]);
 
   async function onCreate(): Promise<void> {

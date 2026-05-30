@@ -135,6 +135,7 @@ export function AppShell(): JSX.Element {
   >(null);
   const [confirmClearFailed, setConfirmClearFailed] = React.useState(false);
   const authInvalidatedRef = React.useRef(false);
+  const projectRefreshRequestRef = React.useRef(0);
   /**
    * BOSS bug fix — server-side failed-task count for the user
    * menu badge + clear-confirm dialog. The previous
@@ -172,12 +173,19 @@ export function AppShell(): JSX.Element {
 
   // Refresh projects on demand (used after move-to-project).
   const refreshProjects = React.useCallback(async (): Promise<ProjectRefreshResult> => {
+    const requestId = projectRefreshRequestRef.current + 1;
+    projectRefreshRequestRef.current = requestId;
     try {
       const list = await trpc.projects.list.query();
       const nextProjects = normalizeProjectRows(list);
-      setProjects(nextProjects);
+      if (projectRefreshRequestRef.current === requestId) {
+        setProjects(nextProjects);
+      }
       return { ok: true, projects: nextProjects };
     } catch (err) {
+      if (projectRefreshRequestRef.current !== requestId) {
+        return { ok: true, projects: [] };
+      }
       return {
         error: pageErrorMessage(err),
       };
