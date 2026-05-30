@@ -148,6 +148,7 @@ export function AddChannelModal({
   };
 
   const handleTest = async (): Promise<void> => {
+    if (testing || saving) return;
     const draft = buildDraft();
     if ('error' in draft) {
       setTestResult({ ok: false, message: draft.error });
@@ -189,6 +190,7 @@ export function AddChannelModal({
 
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
+    if (saving || testing) return;
     const draft = buildDraft();
     if ('error' in draft) {
       toast.show(draft.error, 'error');

@@ -66,6 +66,7 @@ export function ApiKeysSection(): JSX.Element {
   }, [reload]);
 
   const submit = async (): Promise<void> => {
+    if (submitting) return;
     const trimmed = newName.trim();
     if (!trimmed) {
       toast.show('请填写名称', 'error');
