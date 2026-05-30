@@ -71,16 +71,30 @@ interface CreateTaskResponse {
 }
 
 const PAGE_CONTEXT_REFRESH_MS = 2_000;
+const RUNTIME_MESSAGE_TIMEOUT_MS = 5_000;
 
 function sendRuntimeMessage<T>(message: unknown): Promise<T | null> {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage(message, (response?: T) => {
-      if (chrome.runtime.lastError) {
-        resolve(null);
-        return;
-      }
-      resolve(response ?? null);
-    });
+    let settled = false;
+    let timer: number | null = null;
+    const finish = (value: T | null): void => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) window.clearTimeout(timer);
+      resolve(value);
+    };
+    timer = window.setTimeout(() => finish(null), RUNTIME_MESSAGE_TIMEOUT_MS);
+    try {
+      chrome.runtime.sendMessage(message, (response?: T) => {
+        if (chrome.runtime.lastError) {
+          finish(null);
+          return;
+        }
+        finish(response ?? null);
+      });
+    } catch {
+      finish(null);
+    }
   });
 }
 
