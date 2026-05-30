@@ -98,6 +98,36 @@ describe('server.extension.tool_call schema', () => {
   });
 });
 
+describe('server.vision.act schema', () => {
+  it('accepts http(s) navigate actions', () => {
+    const result = parseServerMessage(
+      JSON.stringify({
+        type: 'server.vision.act',
+        taskId: 'tsk_vision_schema',
+        tickIndex: 0,
+        action: { kind: 'navigate', url: 'https://example.com/path' },
+      }),
+    );
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects non-web navigate actions before they reach the extension', () => {
+    for (const url of ['ftp://example.com/file.txt', 'chrome://extensions']) {
+      const result = parseServerMessage(
+        JSON.stringify({
+          type: 'server.vision.act',
+          taskId: 'tsk_vision_schema',
+          tickIndex: 0,
+          action: { kind: 'navigate', url },
+        }),
+      );
+
+      expect(result.success).toBe(false);
+    }
+  });
+});
+
 describe('client.vision.user_input — kind=insert_text (CJK input bar)', () => {
   it('accepts insert_text with Chinese text', () => {
     const result = parseClientMessage(
