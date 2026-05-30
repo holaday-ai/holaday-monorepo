@@ -7,7 +7,7 @@
 # build doesn't silently leave clients hanging.
 #
 # Usage:   ./scripts/deploy-orchestrator.sh [BRANCH]
-#          BRANCH defaults to claude/chrome-extension-poc-biwr6
+#          BRANCH defaults to claude/musing-keller-ae1d05
 # Env:     VULTR_PASSWORD (sshpass)
 # Exits:   0 on success, 1 on health-check failure (no auto-rollback;
 #          PM2 keeps last-good binary running unless build broke,
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 VULTR_HOST="root@207.148.70.106"
-BRANCH="${1:-claude/chrome-extension-poc-biwr6}"
+BRANCH="${1:-claude/musing-keller-ae1d05}"
 HEALTH_URL="http://localhost:4001/healthz"
 HEALTH_MARKER='"status":"ok"'
 
@@ -29,7 +29,7 @@ SSH_OPTS=(-o StrictHostKeyChecking=no -o ConnectTimeout=20)
 echo "→ Fetching $BRANCH on Vultr"
 "${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
   cd /opt/holaday-monorepo && \
-  git fetch origin $BRANCH && \
+  git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' && \
   git reset --hard origin/$BRANCH && \
   git rev-parse HEAD" | tail -5
 
@@ -59,7 +59,7 @@ else
 fi
 
 RESTART=$("${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-  "pm2 list | grep holaday-orchestrator | awk '{print \$10}'" | head -1)
+  "node -e \"const list=JSON.parse(require('child_process').execFileSync('pm2',['jlist'],'utf8')); const app=list.find((p)=>p.name==='holaday-orchestrator'); process.stdout.write(String(app?.pm2_env?.restart_time ?? 'unknown'));\"")
 echo "✅ Orchestrator deployed — restart count: $RESTART"
 
 # Phase 1 follow-up — auto-run P0 smoke after every deploy. Failure
