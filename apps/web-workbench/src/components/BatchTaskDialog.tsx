@@ -84,7 +84,9 @@ export function BatchTaskDialog({
     setActiveIndex(0);
     setSubmitting(false);
     setConfirmDiscardOpen(false);
-    const id = window.setTimeout(() => goalRefs.current[0]?.focus(), 0);
+    const id = window.setTimeout(() => {
+      if (mountedRef.current) goalRefs.current[0]?.focus();
+    }, 0);
     return () => window.clearTimeout(id);
   }, [open, initialPrompts]);
 
@@ -141,7 +143,9 @@ export function BatchTaskDialog({
     const nextIndex = items.length;
     setItems((prev) => [...prev, { ...EMPTY_BATCH_TASK_DRAFT }]);
     setActiveIndex(nextIndex);
-    window.setTimeout(() => goalRefs.current[nextIndex]?.focus(), 0);
+    window.setTimeout(() => {
+      if (mountedRef.current) goalRefs.current[nextIndex]?.focus();
+    }, 0);
   };
 
   const removeItem = (index: number): void => {
@@ -170,7 +174,9 @@ export function BatchTaskDialog({
       ...prev.slice(nextIndex),
     ]);
     setActiveIndex(nextIndex);
-    window.setTimeout(() => goalRefs.current[nextIndex]?.focus(), 0);
+    window.setTimeout(() => {
+      if (mountedRef.current) goalRefs.current[nextIndex]?.focus();
+    }, 0);
   };
 
   const submit = async (): Promise<void> => {
@@ -178,7 +184,9 @@ export function BatchTaskDialog({
     if (invalidGoalIndex != null) {
       toast.show(`请先填写任务 ${invalidGoalIndex + 1} 的目标`, 'error');
       setActiveIndex(invalidGoalIndex);
-      window.setTimeout(() => goalRefs.current[invalidGoalIndex]?.focus(), 0);
+      window.setTimeout(() => {
+        if (mountedRef.current) goalRefs.current[invalidGoalIndex]?.focus();
+      }, 0);
       return;
     }
     if (prompts.length === 0) {
@@ -196,9 +204,11 @@ export function BatchTaskDialog({
         ...(trimmedName ? { name: trimmedName } : {}),
         prompts,
       }));
+      if (!mountedRef.current) return;
       toast.show(`已创建批量任务（${result.itemsTotal} 项 · 并发 ${result.concurrency}）`);
       onCreated(result.batchId);
     } catch (err) {
+      if (!mountedRef.current) return;
       toast.show(pageActionError('创建失败', err), 'error');
     } finally {
       if (mountedRef.current) {

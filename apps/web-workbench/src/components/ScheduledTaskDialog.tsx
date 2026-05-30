@@ -83,7 +83,9 @@ export function ScheduledTaskDialog({
     setScheduledAt(nextScheduledAt);
     setSubmitting(false);
     setConfirmDiscardOpen(false);
-    const id = requestAnimationFrame(() => intentRef.current?.focus());
+    const id = requestAnimationFrame(() => {
+      if (mountedRef.current) intentRef.current?.focus();
+    });
     return () => cancelAnimationFrame(id);
   }, [open, initialIntent]);
 
@@ -155,6 +157,7 @@ export function ScheduledTaskDialog({
         description,
       });
       const res = await trpc.scheduledTasks.create.mutate(payload);
+      if (!mountedRef.current) return;
       if (res.adjusted) {
         toast.show(
           `定时任务已创建，首次执行时间调整为 ${formatRollForward(new Date(res.nextRunAt))}`,
@@ -165,6 +168,7 @@ export function ScheduledTaskDialog({
       }
       onCreated();
     } catch (err) {
+      if (!mountedRef.current) return;
       toast.show(pageActionError('创建失败', err), 'error');
     } finally {
       if (mountedRef.current) {

@@ -158,6 +158,14 @@ export function ScheduledCalendarPage(): JSX.Element {
   );
   const focusedScheduledTaskRef = React.useRef<number | null>(null);
   const refreshRequestRef = React.useRef(0);
+  const mountedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return;
@@ -180,17 +188,17 @@ export function ScheduledCalendarPage(): JSX.Element {
           ? { focusScheduledTaskInternalId }
           : {}),
       });
-      if (refreshRequestRef.current !== requestId) return;
+      if (!mountedRef.current || refreshRequestRef.current !== requestId) return;
       setRows(normalizeScheduledTaskRows(res));
       setLastRefreshFocusId(focusScheduledTaskInternalId);
       setLoadError(null);
     } catch (err) {
-      if (refreshRequestRef.current !== requestId) return;
+      if (!mountedRef.current || refreshRequestRef.current !== requestId) return;
       const message = scheduledCalendarErrorMessage(err, '加载失败');
       setLoadError(message);
       toast.show(taskActionError('加载失败', message), 'error');
     } finally {
-      if (refreshRequestRef.current === requestId) {
+      if (mountedRef.current && refreshRequestRef.current === requestId) {
         setLoading(false);
       }
     }
@@ -492,6 +500,7 @@ export function ScheduledCalendarPage(): JSX.Element {
           scheduledTaskId: id,
           scheduledAt: newStart.toISOString(),
         });
+        if (!mountedRef.current) return;
         if ('adjusted' in res && res.adjusted) {
           toast.show(
             `已更新，执行时间调整为 ${formatRollForward(new Date(res.nextRunAt))}（所选时间已过）`,
@@ -502,6 +511,7 @@ export function ScheduledCalendarPage(): JSX.Element {
         }
         await refresh();
       } catch (err) {
+        if (!mountedRef.current) return;
         arg.revert();
         toast.show(taskActionError('更新失败', errorMessage(err)), 'error');
       }
@@ -527,9 +537,11 @@ export function ScheduledCalendarPage(): JSX.Element {
           scheduledTaskId: id,
           durationMinutes,
         });
+        if (!mountedRef.current) return;
         toast.show(`已更新持续时间：${durationMinutes} 分钟`, 'info');
         await refresh();
       } catch (err) {
+        if (!mountedRef.current) return;
         arg.revert();
         toast.show(taskActionError('更新失败', errorMessage(err)), 'error');
       }
@@ -609,6 +621,7 @@ export function ScheduledCalendarPage(): JSX.Element {
             ? { reminderMinutes: input.reminderMinutes }
             : {}),
         });
+        if (!mountedRef.current) return;
         // #1 — surface roll-forward when the server adjusted the
         // first-fire time (recurring task whose start was already
         // past at submit). Don't block the flow with a confirm; a
@@ -629,6 +642,7 @@ export function ScheduledCalendarPage(): JSX.Element {
         });
         // Drop the pulse class after the animation completes (~1.2 s)
         window.setTimeout(() => {
+          if (!mountedRef.current) return;
           setRecentlyCreatedIds((prev) => {
             const next = new Set(prev);
             next.delete(res.scheduledTaskId);
@@ -639,6 +653,7 @@ export function ScheduledCalendarPage(): JSX.Element {
         setFullModalOpen(false);
         await refresh();
       } catch (err) {
+        if (!mountedRef.current) return;
         toast.show(taskActionError('创建失败', errorMessage(err)), 'error');
       }
     },
@@ -652,6 +667,7 @@ export function ScheduledCalendarPage(): JSX.Element {
           (row) => row.scheduledTaskId === scheduledTaskId,
         )?.status;
         const result = await trpc.scheduledTasks.toggle.mutate({ scheduledTaskId });
+        if (!mountedRef.current) return;
         toast.show(
           scheduledEventToggleSuccessMessage({
             previousStatus,
@@ -662,6 +678,7 @@ export function ScheduledCalendarPage(): JSX.Element {
         setEventDetail(null);
         await refresh();
       } catch (err) {
+        if (!mountedRef.current) return;
         toast.show(taskActionError('操作失败', errorMessage(err)), 'error');
       }
     },
@@ -672,10 +689,12 @@ export function ScheduledCalendarPage(): JSX.Element {
     async (scheduledTaskId: string) => {
       try {
         await trpc.scheduledTasks.runNow.mutate({ scheduledTaskId });
+        if (!mountedRef.current) return;
         toast.show('已触发立即执行（最多 60 秒生效）', 'info');
         setEventDetail(null);
         await refresh();
       } catch (err) {
+        if (!mountedRef.current) return;
         toast.show(taskActionError('操作失败', errorMessage(err)), 'error');
       }
     },
@@ -686,11 +705,13 @@ export function ScheduledCalendarPage(): JSX.Element {
     async (scheduledTaskId: string) => {
       try {
         await trpc.scheduledTasks.delete.mutate({ scheduledTaskId });
+        if (!mountedRef.current) return;
         toast.show('已删除定时任务', 'info');
         setEventDetail(null);
         setConfirmDelete(null);
         await refresh();
       } catch (err) {
+        if (!mountedRef.current) return;
         toast.show(taskActionError('删除失败', errorMessage(err)), 'error');
       }
     },

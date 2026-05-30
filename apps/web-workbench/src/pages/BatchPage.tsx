@@ -93,6 +93,15 @@ function BatchList(): JSX.Element {
   const [initialPrompts] = React.useState<string[] | undefined>(
     Array.isArray(incomingPrompts) ? incomingPrompts : undefined,
   );
+  const mountedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   React.useEffect(() => {
     if (incomingPrompts) {
       // Clear the location.state so a re-mount doesn't re-trigger.
@@ -106,16 +115,16 @@ function BatchList(): JSX.Element {
     setLoading(true);
     try {
       const list = await trpc.batchTasks.list.query();
-      if (reloadRequestRef.current !== requestId) return;
+      if (!mountedRef.current || reloadRequestRef.current !== requestId) return;
       setRows(normalizeBatchRows(list));
       setLoadError(null);
     } catch (err) {
-      if (reloadRequestRef.current !== requestId) return;
+      if (!mountedRef.current || reloadRequestRef.current !== requestId) return;
       const message = batchErrorMessage(err);
       toast.show(taskActionError('加载失败', message), 'error');
       setLoadError(message);
     } finally {
-      if (reloadRequestRef.current === requestId) {
+      if (mountedRef.current && reloadRequestRef.current === requestId) {
         setLoading(false);
       }
     }
@@ -130,6 +139,7 @@ function BatchList(): JSX.Element {
 
   React.useEffect(() => {
     return onServerMessage((msg) => {
+      if (!mountedRef.current) return;
       if (!isBatchProgressFrame(msg)) return;
       setRows((current) =>
         current ? applyBatchProgressToRows(current, msg) : current,
@@ -323,6 +333,14 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = React.useState(false);
   const reloadRequestRef = React.useRef(0);
+  const mountedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const reload = React.useCallback(async () => {
     const requestId = reloadRequestRef.current + 1;
@@ -330,16 +348,16 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
     setLoading(true);
     try {
       const data = await trpc.batchTasks.detail.query({ batchId });
-      if (reloadRequestRef.current !== requestId) return;
+      if (!mountedRef.current || reloadRequestRef.current !== requestId) return;
       setDetail(normalizeBatchDetail(data));
       setLoadError(null);
     } catch (err) {
-      if (reloadRequestRef.current !== requestId) return;
+      if (!mountedRef.current || reloadRequestRef.current !== requestId) return;
       const message = batchErrorMessage(err);
       toast.show(taskActionError('加载失败', message), 'error');
       setLoadError(message);
     } finally {
-      if (reloadRequestRef.current === requestId) {
+      if (mountedRef.current && reloadRequestRef.current === requestId) {
         setLoading(false);
       }
     }
@@ -360,6 +378,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
 
   React.useEffect(() => {
     return onServerMessage((msg) => {
+      if (!mountedRef.current) return;
       if (!isBatchProgressFrame(msg)) return;
       setDetail((current) =>
         current ? applyBatchProgressToDetail(current, msg) : current,
@@ -370,9 +389,11 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
   const performCancel = async (): Promise<void> => {
     try {
       await trpc.batchTasks.cancel.mutate({ batchId });
+      if (!mountedRef.current) return;
       toast.show('已取消');
       await reload();
     } catch (err) {
+      if (!mountedRef.current) return;
       toast.show(taskActionError('取消失败', batchErrorMessage(err)), 'error');
     }
   };
@@ -591,7 +612,9 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
         onClose={() => setConfirmCancel(false)}
         onConfirm={async () => {
           await performCancel();
-          setConfirmCancel(false);
+          if (mountedRef.current) {
+            setConfirmCancel(false);
+          }
         }}
       />
     </PageContainer>
