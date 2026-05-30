@@ -153,6 +153,10 @@ describe('extensionToolErrorPayload', () => {
       message: '截图过大，浏览器已停止发送该帧，请缩小窗口或重试',
       code: 'screenshot_too_large',
     });
+    expect(extensionToolErrorPayload(new Error('screenshot_empty'))).toEqual({
+      message: '浏览器没有返回有效截图，请确认页面可见后重试',
+      code: 'screenshot_unavailable',
+    });
   });
 
   it('bounds unknown error details', () => {
@@ -175,6 +179,15 @@ describe('normalizeScreenshotCaptureDataUrl', () => {
   it('rejects oversized screenshot payloads before sending tool_result frames', () => {
     expect(() => normalizeScreenshotCaptureDataUrl('x'.repeat(2_000_001))).toThrow(
       'screenshot_too_large',
+    );
+  });
+
+  it('rejects empty or non-image screenshot payloads', () => {
+    expect(() => normalizeScreenshotCaptureDataUrl('data:image/jpeg;base64,')).toThrow(
+      'screenshot_empty',
+    );
+    expect(() => normalizeScreenshotCaptureDataUrl('data:text/plain;base64,AA==')).toThrow(
+      'screenshot_invalid',
     );
   });
 });

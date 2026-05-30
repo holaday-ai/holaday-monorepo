@@ -222,7 +222,13 @@ interface ScreenshotResult {
 
 export function normalizeScreenshotCaptureDataUrl(dataUrl: string): ScreenshotResult {
   const idx = dataUrl.indexOf(',');
+  if (idx >= 0 && !dataUrl.slice(0, idx).toLowerCase().startsWith('data:image/')) {
+    throw new Error('screenshot_invalid');
+  }
   const base64 = idx >= 0 ? dataUrl.slice(idx + 1) : dataUrl;
+  if (!base64.trim()) {
+    throw new Error('screenshot_empty');
+  }
   if (base64.length > MAX_SCREENSHOT_RESULT_BASE64_CHARS) {
     throw new Error('screenshot_too_large');
   }
@@ -280,6 +286,12 @@ export function extensionToolErrorPayload(
     return {
       message: '截图过大，浏览器已停止发送该帧，请缩小窗口或重试',
       code: 'screenshot_too_large',
+    };
+  }
+  if (lower.includes('screenshot_empty') || lower.includes('screenshot_invalid')) {
+    return {
+      message: '浏览器没有返回有效截图，请确认页面可见后重试',
+      code: 'screenshot_unavailable',
     };
   }
   if (
