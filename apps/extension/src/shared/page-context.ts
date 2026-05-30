@@ -61,14 +61,26 @@ function pageWorldExtractor(): PageContextSnippet {
   };
 }
 
-export async function getActivePageContext(): Promise<PageContext | null> {
-  let tab: chrome.tabs.Tab | undefined;
-  try {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    tab = tabs[0];
-  } catch {
-    return null;
+async function queryActivePageContextTab(): Promise<chrome.tabs.Tab | undefined> {
+  const queries: chrome.tabs.QueryInfo[] = [
+    { active: true, currentWindow: true },
+    { active: true, lastFocusedWindow: true },
+    { active: true, windowType: 'normal' },
+  ];
+  for (const query of queries) {
+    try {
+      const [tab] = await chrome.tabs.query(query);
+      if (tab) return tab;
+    } catch {
+      // Keep falling back; Chrome can reject transiently while focus
+      // moves between the popup, side panel, and page window.
+    }
   }
+  return undefined;
+}
+
+export async function getActivePageContext(): Promise<PageContext | null> {
+  const tab = await queryActivePageContextTab();
   if (!tab?.id) return null;
 
   // chrome:// / chrome-extension:// / file:// pages can't be scripted —
