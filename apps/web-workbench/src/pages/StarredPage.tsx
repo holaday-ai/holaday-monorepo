@@ -51,7 +51,15 @@ export function StarredPage(): JSX.Element {
   const [loadMoreError, setLoadMoreError] = React.useState<string | null>(null);
   const [unpinningIds, setUnpinningIds] = React.useState<ReadonlySet<string>>(() => new Set());
 
+  const mountedRef = React.useRef(false);
   const fetchToken = React.useRef(0);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      fetchToken.current += 1;
+    };
+  }, []);
   const fetchPage = React.useCallback(
     async (nextCursor: number | null, append: boolean): Promise<void> => {
       const myToken = ++fetchToken.current;
@@ -62,7 +70,7 @@ export function StarredPage(): JSX.Element {
           limit: 50,
           ...(nextCursor ? { cursor: nextCursor } : {}),
         });
-        if (myToken !== fetchToken.current) return;
+        if (!mountedRef.current || myToken !== fetchToken.current) return;
         const list = normalizeTaskHubRows(res?.tasks);
         setItems((prev) => (append ? mergeTaskHubRowsById(prev, list) : list));
         const responseCursor = normalizeTaskHubCursor(res?.nextCursor);
@@ -74,7 +82,7 @@ export function StarredPage(): JSX.Element {
           setLoadMoreError(null);
         }
       } catch (err) {
-        if (myToken !== fetchToken.current) return;
+        if (!mountedRef.current || myToken !== fetchToken.current) return;
         const message = taskHubErrorMessage(err, '加载失败');
         if (append) {
           setLoadMoreError(message);
@@ -85,7 +93,7 @@ export function StarredPage(): JSX.Element {
           setLoadError(message);
         }
       } finally {
-        if (myToken === fetchToken.current) {
+        if (mountedRef.current && myToken === fetchToken.current) {
           setLoading(false);
           setInitialLoad(false);
         }
@@ -114,16 +122,20 @@ export function StarredPage(): JSX.Element {
     setItems((prev) => prev.filter((t) => t.taskId !== taskId));
     try {
       await togglePin(taskId, false);
+      if (!mountedRef.current) return;
       toast.show('已取消置顶');
     } catch (err) {
+      if (!mountedRef.current) return;
       setItems((prev) => (prev.some((t) => t.taskId === taskId) ? prev : [removed, ...prev]));
       toast.show(`取消置顶失败：${taskHubErrorMessage(err)}`, 'error');
     } finally {
-      setUnpinningIds((prev) => {
-        const next = new Set(prev);
-        next.delete(taskId);
-        return next;
-      });
+      if (mountedRef.current) {
+        setUnpinningIds((prev) => {
+          const next = new Set(prev);
+          next.delete(taskId);
+          return next;
+        });
+      }
     }
   }
 
