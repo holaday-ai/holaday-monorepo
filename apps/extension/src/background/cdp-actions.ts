@@ -118,12 +118,41 @@ export async function executeCdpAction(tabId: number, action: VisionAction): Pro
         return { ok: true, message: `${action.kind} terminal; no driver work` };
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.startsWith('bad_url')) {
-      return { ok: false, message: '导航地址无效，请检查后重试' };
-    }
-    return { ok: false, message: `CDP error: ${message.slice(0, 400)}` };
+    return { ok: false, message: cdpActionErrorMessage(err) };
   }
+}
+
+export function cdpActionErrorMessage(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const lower = message.toLowerCase();
+  if (message.startsWith('bad_url')) {
+    return '导航地址无效，请检查后重试';
+  }
+  if (
+    lower.includes('no tab with id') ||
+    lower.includes('tab closed') ||
+    lower.includes('target closed')
+  ) {
+    return '浏览器标签页已关闭或连接中断，请重新打开页面后重试';
+  }
+  if (
+    lower.includes('another debugger') ||
+    lower.includes('debugger is already attached') ||
+    lower.includes('debugger already attached')
+  ) {
+    return '浏览器调试通道被占用，请关闭该标签页 DevTools 后重试';
+  }
+  if (
+    lower.includes('missing host permission') ||
+    lower.includes('cannot access contents of url') ||
+    lower.includes('cannot access a chrome:// url')
+  ) {
+    return '扩展没有这个页面的访问权限，请检查扩展权限后重试';
+  }
+  if (lower.includes('timeout')) {
+    return '浏览器操作超时，请保持标签页打开后重试';
+  }
+  return `浏览器操作失败：${message.slice(0, 200)}`;
 }
 
 // ---------------------------------------------------------------------------

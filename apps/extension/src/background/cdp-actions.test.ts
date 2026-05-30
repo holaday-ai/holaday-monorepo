@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  cdpActionErrorMessage,
   executeCdpAction,
   normalizeCdpNavigateUrl,
   sanitizeVisionObservationCapture,
@@ -31,6 +32,29 @@ describe('executeCdpAction', () => {
       ok: false,
       message: '导航地址无效，请检查后重试',
     });
+  });
+});
+
+describe('cdpActionErrorMessage', () => {
+  it('keeps common browser control failures actionable', () => {
+    expect(cdpActionErrorMessage(new Error('No tab with id: 1.'))).toBe(
+      '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
+    );
+    expect(cdpActionErrorMessage(new Error('Another debugger is already attached'))).toBe(
+      '浏览器调试通道被占用，请关闭该标签页 DevTools 后重试',
+    );
+    expect(cdpActionErrorMessage(new Error('Cannot access contents of url'))).toBe(
+      '扩展没有这个页面的访问权限，请检查扩展权限后重试',
+    );
+    expect(cdpActionErrorMessage(new Error('CDP Input.dispatchMouseEvent timeout 5000ms'))).toBe(
+      '浏览器操作超时，请保持标签页打开后重试',
+    );
+  });
+
+  it('bounds unknown browser control failures', () => {
+    const message = cdpActionErrorMessage(new Error('x'.repeat(300)));
+
+    expect(message).toHaveLength('浏览器操作失败：'.length + 200);
   });
 });
 
