@@ -271,6 +271,7 @@ function MemorySection(): JSX.Element {
   }, [refresh]);
 
   const handleDelete = async (externalId: string): Promise<void> => {
+    if (deletingIds.has(externalId)) return;
     setDeletingIds((prev) => new Set(prev).add(externalId));
     try {
       await trpc.memory.delete.mutate({ externalId });

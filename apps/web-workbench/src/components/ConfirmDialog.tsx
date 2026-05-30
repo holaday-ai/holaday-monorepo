@@ -57,6 +57,7 @@ export function ConfirmDialog({
   if (!open) return null;
 
   const handleConfirm = async (): Promise<void> => {
+    if (busy) return;
     setBusy(true);
     try {
       await onConfirm();

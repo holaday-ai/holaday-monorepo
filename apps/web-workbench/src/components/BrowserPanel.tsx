@@ -2084,6 +2084,7 @@ function UrlBar({
   }, [displayUrl, editing]);
 
   const submit = async (): Promise<void> => {
+    if (pending) return;
     const target = draft.trim();
     if (!target || target === displayUrl) {
       setEditing(false);
@@ -2173,6 +2174,7 @@ function NavButton({
       aria-label={title}
       disabled={pending}
       onClick={async () => {
+        if (pending) return;
         setPending(true);
         try {
           const res = await trpc.tasks.browserNav.mutate({

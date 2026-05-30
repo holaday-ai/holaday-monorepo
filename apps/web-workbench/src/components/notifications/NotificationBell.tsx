@@ -161,6 +161,7 @@ export function NotificationBell({
   );
 
   const handleMarkAll = React.useCallback(async () => {
+    if (markingAll || safeNotificationCount(unreadCount) <= 0) return;
     setActionError(null);
     setMarkingAll(true);
     setItems((prev) => prev.map((r) => ({ ...r, isRead: true })));
@@ -174,7 +175,7 @@ export function NotificationBell({
     } finally {
       setMarkingAll(false);
     }
-  }, [fetchList, refreshCount]);
+  }, [fetchList, markingAll, refreshCount, unreadCount]);
 
   const safeUnreadCount = safeNotificationCount(unreadCount);
   const badge = safeUnreadCount > 99 ? '99+' : String(safeUnreadCount);

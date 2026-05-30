@@ -1,4 +1,4 @@
-import { Clock, Pause, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { Clock, Loader2, Pause, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import * as React from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
@@ -61,6 +61,9 @@ export function ScheduledPage(): JSX.Element {
   const [recreateIntent, setRecreateIntent] = React.useState<string | null>(
     null,
   );
+  const [togglingIds, setTogglingIds] = React.useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
 
   const reload = React.useCallback(async (): Promise<void> => {
     try {
@@ -77,12 +80,20 @@ export function ScheduledPage(): JSX.Element {
   }, [reload]);
 
   const handleToggle = async (id: string): Promise<void> => {
+    if (togglingIds.has(id)) return;
+    setTogglingIds((prev) => new Set(prev).add(id));
     try {
       const result = await trpc.scheduledTasks.toggle.mutate({ scheduledTaskId: id });
       toast.show(result.status === 'active' ? '已恢复' : '已暂停');
       await reload();
     } catch (err) {
       toast.show(taskActionError('操作失败', errorMessage(err)), 'error');
+    } finally {
+      setTogglingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
@@ -205,19 +216,11 @@ export function ScheduledPage(): JSX.Element {
                       from a button (use 重新创建), failed surfaces a
                       reopen-with-intent affordance instead. */}
                   {(r.status === 'active' || r.status === 'paused') && (
-                    <button
-                      type="button"
-                      onClick={() => void handleToggle(r.scheduledTaskId)}
-                      aria-label={r.status === 'active' ? '暂停' : '恢复'}
-                      title={r.status === 'active' ? '暂停' : '恢复'}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-                    >
-                      {r.status === 'active' ? (
-                        <Pause className="h-4 w-4" />
-                      ) : (
-                        <Play className="h-4 w-4" />
-                      )}
-                    </button>
+                    <ScheduledToggleButton
+                      status={r.status}
+                      toggling={togglingIds.has(r.scheduledTaskId)}
+                      onToggle={() => void handleToggle(r.scheduledTaskId)}
+                    />
                   )}
                   {r.status === 'failed' && (
                     <button
@@ -281,6 +284,36 @@ export function ScheduledPage(): JSX.Element {
         }}
       />
     </PageContainer>
+  );
+}
+
+function ScheduledToggleButton({
+  status,
+  toggling,
+  onToggle,
+}: {
+  status: string;
+  toggling: boolean;
+  onToggle(): void;
+}): JSX.Element {
+  const actionLabel = status === 'active' ? '暂停' : '恢复';
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={actionLabel}
+      title={toggling ? '同步中…' : actionLabel}
+      disabled={toggling}
+      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:cursor-wait disabled:opacity-50"
+    >
+      {toggling ? (
+        <Loader2 className="h-4 w-4 animate-spin" />
+      ) : status === 'active' ? (
+        <Pause className="h-4 w-4" />
+      ) : (
+        <Play className="h-4 w-4" />
+      )}
+    </button>
   );
 }
 

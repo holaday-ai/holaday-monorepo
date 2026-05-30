@@ -114,7 +114,7 @@ export function RolesPage(): JSX.Element {
   }, [data, draft]);
 
   const save = React.useCallback(async () => {
-    if (!data) return;
+    if (!data || saving || !dirty || draft.length > currentPickLimit) return;
     setSaving(true);
     try {
       const res = normalizeRoleSelectResponse(
@@ -144,7 +144,7 @@ export function RolesPage(): JSX.Element {
     } finally {
       setSaving(false);
     }
-  }, [data, draft, toast]);
+  }, [currentPickLimit, data, dirty, draft, saving, toast]);
 
   const grouped = React.useMemo(
     () => (data ? groupRoleCatalogue(data.catalogue) : []),

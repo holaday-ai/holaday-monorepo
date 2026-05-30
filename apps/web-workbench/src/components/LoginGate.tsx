@@ -100,6 +100,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
   };
 
   function switchMode(m: Mode): void {
+    if (pending) return;
     setMode(m);
     resetTransient();
     setPassword('');
@@ -113,6 +114,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
 
   async function handleLogin(e: React.FormEvent): Promise<void> {
     e.preventDefault();
+    if (pending) return;
     resetTransient();
     const cleanEmail = normaliseEmailInput(email);
     if (!isValidEmail(cleanEmail)) {
@@ -137,6 +139,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
 
   async function handleRegister(e: React.FormEvent): Promise<void> {
     e.preventDefault();
+    if (pending) return;
     resetTransient();
     const cleanEmail = normaliseEmailInput(email);
     if (!isValidEmail(cleanEmail)) {
@@ -164,6 +167,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
   }
 
   async function handleSendCode(): Promise<void> {
+    if (pending || cooldown > 0) return;
     resetTransient();
     const cleanEmail = normaliseEmailInput(email);
     if (!isValidEmail(cleanEmail)) {
@@ -185,6 +189,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
 
   async function handleVerifyCode(e: React.FormEvent): Promise<void> {
     e.preventDefault();
+    if (pending) return;
     resetTransient();
     const cleanEmail = normaliseEmailInput(email);
     if (!isValidEmail(cleanEmail)) {
@@ -209,6 +214,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
 
   async function handleResetPassword(e: React.FormEvent): Promise<void> {
     e.preventDefault();
+    if (pending) return;
     resetTransient();
     const cleanEmail = normaliseEmailInput(email);
     if (!isValidEmail(cleanEmail)) {
@@ -248,6 +254,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
   // tab-switches mid-flow.
   // ---------------------------------------------------------------
   async function handleSendSms(): Promise<void> {
+    if (pending || cooldown > 0) return;
     resetTransient();
     if (!isValidChinaPhone(phone)) {
       setError('请输入 11 位中国大陆手机号');
@@ -269,6 +276,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
 
   async function handleVerifySms(e: React.FormEvent): Promise<void> {
     e.preventDefault();
+    if (pending) return;
     resetTransient();
     if (!isValidChinaPhone(phone)) {
       setError('请输入 11 位中国大陆手机号');
@@ -292,6 +300,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
   }
 
   const handleGoogle = (): void => {
+    if (pending) return;
     window.location.href = '/api/auth/google';
   };
 
@@ -478,6 +487,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
             <Button
               type="button"
               variant="outline"
+              disabled={pending}
               className="w-full border-[#DCDDDD] bg-white hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
               onClick={handleGoogle}
             >
