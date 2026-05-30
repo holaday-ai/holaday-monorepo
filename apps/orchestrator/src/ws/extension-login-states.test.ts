@@ -64,6 +64,36 @@ describe('client.extension.login_states schema', () => {
   });
 });
 
+describe('client.vision.acted schema', () => {
+  it('accepts bounded action diagnostics', () => {
+    const result = parseClientMessage(
+      JSON.stringify({
+        type: 'client.vision.acted',
+        taskId: 'tsk_vision_schema',
+        tickIndex: 0,
+        ok: false,
+        message: 'CDP error: target closed',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects oversized action diagnostics', () => {
+    const result = parseClientMessage(
+      JSON.stringify({
+        type: 'client.vision.acted',
+        taskId: 'tsk_vision_schema',
+        tickIndex: 0,
+        ok: false,
+        message: 'x'.repeat(1001),
+      }),
+    );
+
+    expect(result.success).toBe(false);
+  });
+});
+
 describe('server.extension.tool_call schema', () => {
   it('accepts http(s) navigate urls', () => {
     const result = parseServerMessage(

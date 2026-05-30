@@ -124,7 +124,7 @@ export const clientVisionActedSchema = z.object({
   taskId: z.string(),
   tickIndex: z.number().int().nonnegative(),
   ok: z.boolean(),
-  message: z.string().optional(),
+  message: z.string().max(1000).optional(),
 });
 
 /**
