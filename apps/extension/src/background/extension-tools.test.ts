@@ -13,14 +13,19 @@ type TabStatus = 'loading' | 'complete' | 'unloaded';
 function installChromeTabsMock(initialStatus: TabStatus = 'loading'): {
   listeners: Set<TabListener>;
   removedListeners: Set<TabRemovedListener>;
+  rejectGetWith: (err: unknown) => void;
   setStatus: (next: TabStatus) => void;
 } {
   const listeners = new Set<TabListener>();
   const removedListeners = new Set<TabRemovedListener>();
   let status = initialStatus;
+  let getError: unknown = null;
   globalThis.chrome = {
     tabs: {
-      get: vi.fn(async () => ({ id: 1, status }) as chrome.tabs.Tab),
+      get: vi.fn(async () => {
+        if (getError) throw getError;
+        return { id: 1, status } as chrome.tabs.Tab;
+      }),
       onUpdated: {
         addListener: vi.fn((listener: TabListener) => {
           listeners.add(listener);
@@ -42,6 +47,9 @@ function installChromeTabsMock(initialStatus: TabStatus = 'loading'): {
   return {
     listeners,
     removedListeners,
+    rejectGetWith(err) {
+      getError = err;
+    },
     setStatus(next) {
       status = next;
     },
@@ -90,6 +98,15 @@ describe('waitForTabComplete', () => {
     }
 
     await expect(pending).rejects.toThrow('tab_closed');
+    expect(mock.listeners.size).toBe(0);
+    expect(mock.removedListeners.size).toBe(0);
+  });
+
+  it('rejects when the tab lookup reports the tab is gone', async () => {
+    const mock = installChromeTabsMock('loading');
+    mock.rejectGetWith(new Error('No tab with id: 1.'));
+
+    await expect(waitForTabComplete(1, 25_000)).rejects.toThrow('tab_closed');
     expect(mock.listeners.size).toBe(0);
     expect(mock.removedListeners.size).toBe(0);
   });

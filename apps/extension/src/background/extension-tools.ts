@@ -114,12 +114,26 @@ export function waitForTabComplete(tabId: number, timeoutMs: number): Promise<vo
       (tab) => {
         if (tab.status === 'complete') finish(resolve);
       },
-      () => {
+      (err) => {
+        if (isTabClosedError(err)) {
+          finish(() => reject(new Error('tab_closed')));
+          return;
+        }
         // Keep listening. tabs.get can fail briefly while Chrome
         // swaps the provisional navigation entry into the live tab.
       },
     );
   });
+}
+
+function isTabClosedError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+  return (
+    lower.includes('tab closed') ||
+    lower.includes('no tab with id') ||
+    lower.includes('target closed')
+  );
 }
 
 interface NavigateResult {
