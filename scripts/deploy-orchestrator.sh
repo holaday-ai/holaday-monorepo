@@ -59,7 +59,7 @@ else
 fi
 
 RESTART=$("${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-  "node -e \"const list=JSON.parse(require('child_process').execFileSync('pm2',['jlist'],'utf8')); const app=list.find((p)=>p.name==='holaday-orchestrator'); process.stdout.write(String(app?.pm2_env?.restart_time ?? 'unknown'));\"")
+  "node -e \"const list=JSON.parse(require('child_process').execFileSync('pm2',['jlist'],{encoding:'utf8'})); const app=list.find((p)=>p.name==='holaday-orchestrator'); process.stdout.write(String(app?.pm2_env?.restart_time ?? 'unknown'));\"")
 echo "✅ Orchestrator deployed — restart count: $RESTART"
 
 # Phase 1 follow-up — auto-run P0 smoke after every deploy. Failure
