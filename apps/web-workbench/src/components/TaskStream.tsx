@@ -116,6 +116,17 @@ const TRUST_SURFACE =
   'rounded-lg border border-[#DCDDDD] bg-white/95 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85';
 const TRUST_DIVIDER = 'border-[#DCDDDD]/80 dark:border-white/10';
 
+function useMountedRef(): React.MutableRefObject<boolean> {
+  const mountedRef = React.useRef(false);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  return mountedRef;
+}
+
 function hasPausedTerminalResult(task: UiTask): boolean {
   return task.status === 'paused' && Boolean(task.resultText);
 }
@@ -643,6 +654,7 @@ function AwaitingUserBanner({
   taskTickCount: number;
 }): JSX.Element {
   const toast = useToast();
+  const mountedRef = useMountedRef();
   const [cancelling, setCancelling] = React.useState(false);
   const kind = wait.awaitingKind ?? 'clarification';
   const copy = awaitingUserCopy(kind);
@@ -652,17 +664,21 @@ function AwaitingUserBanner({
     setCancelling(true);
     try {
       const res = await trpc.tasks.abort.mutate({ taskId });
+      if (!mountedRef.current) return;
       if (!res.ok) {
         toast.show(taskActionError('取消失败', `当前状态：${res.state ?? 'unknown'}`), 'error');
         return;
       }
       toast.show('已取消任务', 'info', 2000);
     } catch (err) {
+      if (!mountedRef.current) return;
       toast.show(pageActionError('取消失败', err), 'error');
     } finally {
-      setCancelling(false);
+      if (mountedRef.current) {
+        setCancelling(false);
+      }
     }
-  }, [cancelling, taskId, toast]);
+  }, [cancelling, mountedRef, taskId, toast]);
   // Clarification questions have the agent's actual prompt in
   // wait.question; the auth/permission kinds use a static prompt
   // because the agent didn't compose a fresh sentence. Show the
@@ -1217,21 +1233,25 @@ function EmptyTerminalCard({
   const retryable = failed || partial;
   const toast = useToast();
   const createTask = useTaskStore((s) => s.createTask);
+  const mountedRef = useMountedRef();
   const [retrying, setRetrying] = React.useState(false);
   const handleRetry = React.useCallback(async (): Promise<void> => {
     if (!intent || retrying) return;
     setRetrying(true);
     try {
       const result = await createTask(intent, []);
+      if (!mountedRef.current) return;
       if ('error' in result) {
         toast.show(taskActionError('重试失败', result.error), 'error');
         return;
       }
       toast.show('已重新提交', 'info', 2000);
     } finally {
-      setRetrying(false);
+      if (mountedRef.current) {
+        setRetrying(false);
+      }
     }
-  }, [createTask, intent, retrying, toast]);
+  }, [createTask, intent, mountedRef, retrying, toast]);
 
   return (
     <div
@@ -1387,6 +1407,7 @@ function ScreenshotThumbnailCard({
   payload: import('./FileDownloadCard').FileDownloadPayload;
 }): JSX.Element {
   const toast = useToast();
+  const mountedRef = useMountedRef();
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
   const [failed, setFailed] = React.useState(false);
   const [downloadState, setDownloadState] = React.useState<
@@ -1447,6 +1468,7 @@ function ScreenshotThumbnailCard({
       url: payload.downloadUrl,
       filename: payload.filename,
     });
+    if (!mountedRef.current) return;
     if (result.ok) {
       setDownloadState('idle');
     } else {
@@ -1567,15 +1589,20 @@ function MarkdownCodeBlock({
   rest: Record<string, unknown>;
 }): JSX.Element {
   const toast = useToast();
+  const mountedRef = useMountedRef();
   const [copied, setCopied] = React.useState(false);
   const text = React.useMemo(() => reactNodeText(children).replace(/\n$/, ''), [children]);
   const languageLabel = markdownLanguageLabel(languageClassName);
   const handleCopy = async (): Promise<void> => {
     if (!text) return;
-    if (await copyTextToClipboard(text)) {
+    const copiedOk = await copyTextToClipboard(text);
+    if (!mountedRef.current) return;
+    if (copiedOk) {
       setCopied(true);
       toast.show('已复制代码');
-      window.setTimeout(() => setCopied(false), 1600);
+      window.setTimeout(() => {
+        if (mountedRef.current) setCopied(false);
+      }, 1600);
     } else {
       toast.show('复制失败', 'error');
     }
@@ -1702,6 +1729,7 @@ function TerminalSummary({
   animateReveal?: boolean;
 }): JSX.Element {
   const toast = useToast();
+  const mountedRef = useMountedRef();
   // Phase 4 R1 — extract HOLA_FOLLOW_UP_ACTIONS BEFORE the legacy
   // suggestions block scan so the marker doesn't survive into the
   // typewriter / markdown render.
@@ -1823,16 +1851,19 @@ function TerminalSummary({
       setRetryingIntent(retryIntent);
       try {
         const result = await createTask(retryIntent, []);
+        if (!mountedRef.current) return;
         if ('error' in result) {
           toast.show(taskActionError('重试失败', result.error), 'error');
           return;
         }
         toast.show('已重新提交', 'info', 2000);
       } finally {
-        setRetryingIntent(null);
+        if (mountedRef.current) {
+          setRetryingIntent(null);
+        }
       }
     },
-    [createTask, retryingIntent, toast],
+    [createTask, mountedRef, retryingIntent, toast],
   );
   // Codex IA close-out — the result card no longer hosts the
   // browser-panel entry. That moved to TaskToolbar at the top of the

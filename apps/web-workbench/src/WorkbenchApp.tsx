@@ -52,6 +52,14 @@ export function WorkbenchApp(): JSX.Element {
   const toast = useToast();
   const { me } = useAppShellContext();
   const { setOpenMobile } = useSidebar();
+  const mountedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Inner-workbench state.
   const [panelFullscreen, setPanelFullscreen] = React.useState(false);
@@ -346,11 +354,14 @@ export function WorkbenchApp(): JSX.Element {
     enterNewTaskMode();
     try {
       const res = await createTask(intent);
+      if (!mountedRef.current) return;
       if ('error' in res) {
         toast.show(taskActionError('重试失败', res.error), 'error');
       }
     } finally {
-      setBrowserReExecuting(false);
+      if (mountedRef.current) {
+        setBrowserReExecuting(false);
+      }
     }
   }, [browserReExecuting, createTask, enterNewTaskMode, selectedTask, toast]);
 
