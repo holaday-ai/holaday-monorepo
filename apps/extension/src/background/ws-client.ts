@@ -47,8 +47,13 @@ export function onUnauthorized(fn: UnauthorizedListener): () => void {
 
 export function send(msg: ClientMessage): boolean {
   if (state.socket?.readyState !== WebSocket.OPEN) return false;
-  state.socket.send(JSON.stringify(msg));
-  return true;
+  try {
+    state.socket.send(JSON.stringify(msg));
+    return true;
+  } catch (err) {
+    console.warn('[holaday] ws send failed', err);
+    return false;
+  }
 }
 
 export function disconnect(): void {
