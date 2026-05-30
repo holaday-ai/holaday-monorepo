@@ -1178,51 +1178,56 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return true;
     }
     void (async () => {
-      const incoming = typeof msg.token === 'string' ? msg.token : null;
-      const stored = await getAccessToken();
-      const knownBad = await getKnownBadToken();
-      const action = decideAuthTokenAction(incoming, stored, knownBad);
+      try {
+        const incoming = typeof msg.token === 'string' ? msg.token : null;
+        const stored = await getAccessToken();
+        const knownBad = await getKnownBadToken();
+        const action = decideAuthTokenAction(incoming, stored, knownBad);
 
-      if (action.kind === 'unchanged') {
-        sendResponse({ ok: true, action: 'unchanged' });
-        return;
+        if (action.kind === 'unchanged') {
+          sendResponse({ ok: true, action: 'unchanged' });
+          return;
+        }
+        if (action.kind === 'refuse') {
+          // Phase 25b fix — auth-bridge tried to revive the same token
+          // the orchestrator rejected via 4401. Refusing here prevents
+          // the cycle where every 3 s poll undoes onUnauthorized's
+          // cleanup; the user has to log in fresh on the SPA before
+          // this gate releases. See auth-token-handler.ts for the full
+          // rationale + regression tests.
+          console.warn(
+            '[holaday] auth-bridge: refusing to revive knownBad token (orchestrator already rejected it)',
+          );
+          sendResponse({ ok: false, reason: action.reason });
+          return;
+        }
+        if (action.kind === 'clear') {
+          // SPA logged out → mirror. clearStoredUser + clearAccessToken
+          // wipe both the token and the cached user shape; disconnect
+          // tears down the WS so the next ensureConnected starts fresh
+          // (and returns null because no token is stored).
+          await clearAccessToken();
+          await clearStoredUser();
+          disconnect();
+          state.tasks.clear();
+          pushTasksSnapshot();
+          sendResponse({ ok: true, action: 'cleared' });
+          return;
+        }
+        // action.kind === 'set' — fresh token (login OR account swap).
+        // Write to chrome.storage; ws-client's storage.onChanged listener
+        // sees the change and calls reconnect(newToken). Reset the
+        // auth-failure freeze too: the SPA just produced a NEW token
+        // (the cycle-breaker above already filtered the case where
+        // it's actually the same dead one).
+        await setAccessToken(action.token);
+        await resetAuthFailureState();
+        await resetWsReconnectAttempts();
+        sendResponse({ ok: true, action: 'set' });
+      } catch (err) {
+        console.warn('[holaday] auth-bridge: token message failed', err);
+        sendResponse({ ok: false, reason: 'internal_error' });
       }
-      if (action.kind === 'refuse') {
-        // Phase 25b fix — auth-bridge tried to revive the same token
-        // the orchestrator rejected via 4401. Refusing here prevents
-        // the cycle where every 3 s poll undoes onUnauthorized's
-        // cleanup; the user has to log in fresh on the SPA before
-        // this gate releases. See auth-token-handler.ts for the full
-        // rationale + regression tests.
-        console.warn(
-          '[holaday] auth-bridge: refusing to revive knownBad token (orchestrator already rejected it)',
-        );
-        sendResponse({ ok: false, reason: action.reason });
-        return;
-      }
-      if (action.kind === 'clear') {
-        // SPA logged out → mirror. clearStoredUser + clearAccessToken
-        // wipe both the token and the cached user shape; disconnect
-        // tears down the WS so the next ensureConnected starts fresh
-        // (and returns null because no token is stored).
-        await clearAccessToken();
-        await clearStoredUser();
-        disconnect();
-        state.tasks.clear();
-        pushTasksSnapshot();
-        sendResponse({ ok: true, action: 'cleared' });
-        return;
-      }
-      // action.kind === 'set' — fresh token (login OR account swap).
-      // Write to chrome.storage; ws-client's storage.onChanged listener
-      // sees the change and calls reconnect(newToken). Reset the
-      // auth-failure freeze too: the SPA just produced a NEW token
-      // (the cycle-breaker above already filtered the case where
-      // it's actually the same dead one).
-      await setAccessToken(action.token);
-      await resetAuthFailureState();
-      await resetWsReconnectAttempts();
-      sendResponse({ ok: true, action: 'set' });
     })();
     return true; // keep response channel open
   }
@@ -1257,14 +1262,19 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     // Phase 25 — also clears the persistent ws-reconnect cap so
     // a 3-attempt freeze unfreezes immediately.
     void (async () => {
-      await resetAllAuthState();
-      await resetWsReconnectAttempts();
-      const { token, frozen } = await ensureConnected();
-      sendResponse({
-        ok: Boolean(token),
-        token: token ?? null,
-        ...(frozen ? { frozen: true } : {}),
-      });
+      try {
+        await resetAllAuthState();
+        await resetWsReconnectAttempts();
+        const { token, frozen } = await ensureConnected();
+        sendResponse({
+          ok: Boolean(token),
+          token: token ?? null,
+          ...(frozen ? { frozen: true } : {}),
+        });
+      } catch (err) {
+        console.warn('[holaday] resetConnection failed', err);
+        sendResponse({ ok: false, reason: 'internal_error' });
+      }
     })();
     return true;
   }
@@ -1277,18 +1287,23 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     // known-bad token so the next ensureConnected runs fresh.
     // Phase 25 — same treatment for the ws-network cap.
     void (async () => {
-      if (pendingAuthRetry) {
-        clearTimeout(pendingAuthRetry);
-        pendingAuthRetry = null;
+      try {
+        if (pendingAuthRetry) {
+          clearTimeout(pendingAuthRetry);
+          pendingAuthRetry = null;
+        }
+        await resetAuthFailureState();
+        await resetWsReconnectAttempts();
+        const { token, frozen } = await ensureConnected();
+        sendResponse({
+          ok: Boolean(token),
+          token: token ?? null,
+          ...(frozen ? { frozen: true } : {}),
+        });
+      } catch (err) {
+        console.warn('[holaday] tryAutoLogin failed', err);
+        sendResponse({ ok: false, reason: 'internal_error' });
       }
-      await resetAuthFailureState();
-      await resetWsReconnectAttempts();
-      const { token, frozen } = await ensureConnected();
-      sendResponse({
-        ok: Boolean(token),
-        token: token ?? null,
-        ...(frozen ? { frozen: true } : {}),
-      });
     })();
     return true; // keep response channel open for async resolve
   }
