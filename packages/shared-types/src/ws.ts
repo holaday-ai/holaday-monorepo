@@ -106,12 +106,12 @@ export const clientVisionObservationSchema = z.object({
   type: z.literal('client.vision.observation'),
   taskId: z.string(),
   tickIndex: z.number().int().nonnegative(),
-  screenshotBase64: z.string(),
-  viewportWidth: z.number().int().nonnegative(),
-  viewportHeight: z.number().int().nonnegative(),
-  url: z.string(),
-  title: z.string(),
-  error: z.string().optional(),
+  screenshotBase64: z.string().max(2_000_000),
+  viewportWidth: z.number().int().nonnegative().max(20_000),
+  viewportHeight: z.number().int().nonnegative().max(20_000),
+  url: z.string().max(2048),
+  title: z.string().max(512),
+  error: z.string().max(1000).optional(),
 });
 
 /**

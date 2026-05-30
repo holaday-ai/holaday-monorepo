@@ -94,6 +94,47 @@ describe('client.vision.acted schema', () => {
   });
 });
 
+describe('client.vision.observation schema', () => {
+  const baseObservation = {
+    type: 'client.vision.observation',
+    taskId: 'tsk_vision_schema',
+    tickIndex: 0,
+    screenshotBase64: 'AA==',
+    viewportWidth: 1280,
+    viewportHeight: 800,
+    url: 'https://example.com/',
+    title: 'Example',
+  };
+
+  it('accepts bounded screenshots and metadata', () => {
+    const result = parseClientMessage(JSON.stringify(baseObservation));
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects oversized screenshots and metadata', () => {
+    const cases = [
+      { screenshotBase64: 'x'.repeat(2_000_001) },
+      { viewportWidth: 20_001 },
+      { viewportHeight: 20_001 },
+      { url: `https://example.com/${'a'.repeat(2050)}` },
+      { title: 'x'.repeat(513) },
+      { error: 'x'.repeat(1001) },
+    ];
+
+    for (const patch of cases) {
+      const result = parseClientMessage(
+        JSON.stringify({
+          ...baseObservation,
+          ...patch,
+        }),
+      );
+
+      expect(result.success).toBe(false);
+    }
+  });
+});
+
 describe('server.extension.tool_call schema', () => {
   it('accepts http(s) navigate urls', () => {
     const result = parseServerMessage(
