@@ -24,6 +24,8 @@ describe('classifyBrowserErrorKind', () => {
     expect(classifyBrowserErrorKind('Cannot access contents of url "https://example.com/". Extension manifest must request permission.')).toBe(
       'extension_permission',
     );
+    expect(classifyBrowserErrorKind('bad_args: expected http(s) URL')).toBe('invalid_url');
+    expect(classifyBrowserErrorKind('导航地址无效，请检查后重试')).toBe('invalid_url');
     expect(classifyBrowserErrorKind('浏览器当前没有活动标签页')).toBe('no_active_tab');
     expect(classifyBrowserErrorKind('Protocol error (Page.navigate): Target closed')).toBe('transport_closed');
     expect(classifyBrowserErrorKind('Navigation timeout of 15000 ms exceeded')).toBe('timeout');

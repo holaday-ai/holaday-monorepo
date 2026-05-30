@@ -90,6 +90,13 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
       nextStep: '在扩展里允许访问该网站后重新执行当前任务。',
     };
   }
+  if (browserKind === 'invalid_url') {
+    return {
+      title: '网址格式不支持',
+      subtitle: '浏览器只能打开 http(s) 网页链接。请检查网址后重试。',
+      nextStep: '改用 http:// 或 https:// 开头的网址后重新执行。',
+    };
+  }
   if (browserKind === 'extension_disconnected') {
     return {
       title: '浏览器扩展已断开',

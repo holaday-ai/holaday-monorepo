@@ -54,6 +54,10 @@ const RULES: Rule[] = [
     to: '浏览器扩展缺少当前网站权限，请在扩展里允许访问该网站后重试。',
   },
   {
+    match: /bad_args|bad_url|invalid url|expected http\(s\) url|只支持.*http|不支持.*网址|网址.*无效|导航地址无效/i,
+    to: '网址格式不支持，请使用 http(s) 开头的网页链接后重试。',
+  },
+  {
     match: /浏览器扩展连接已断开|扩展.*断开|extension.*disconnect|extension.*closed|socket_closed|message port closed before a response/i,
     to: '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试。',
   },
@@ -101,6 +105,8 @@ export function humaniseTaskError(raw: string | null | undefined): string {
       return '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试。';
     case 'extension_permission':
       return '浏览器扩展缺少当前网站权限，请在扩展里允许访问该网站后重试。';
+    case 'invalid_url':
+      return '网址格式不支持，请使用 http(s) 开头的网页链接后重试。';
     case 'no_active_tab':
       return '浏览器当前没有活动标签页，请打开一个网页后重试。';
     case 'dns':

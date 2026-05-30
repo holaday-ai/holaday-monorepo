@@ -7,6 +7,7 @@ export type BrowserErrorKind =
   | 'extension_missing'
   | 'extension_disconnected'
   | 'extension_permission'
+  | 'invalid_url'
   | 'no_active_tab'
   | 'transport_closed'
   | 'page_switch'
@@ -37,6 +38,9 @@ export function classifyBrowserErrorKind(
     )
   ) {
     return 'extension_permission';
+  }
+  if (/bad_args|bad_url|invalid url|expected http\(s\) url|只支持.*http|不支持.*网址|网址.*无效|导航地址无效/.test(text)) {
+    return 'invalid_url';
   }
   if (
     /浏览器扩展连接已断开|扩展.*断开|extension.*disconnect|extension.*closed|socket_closed|message port closed before a response/.test(
