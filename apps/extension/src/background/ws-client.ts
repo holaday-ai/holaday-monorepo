@@ -182,11 +182,46 @@ function openSocket(token: string): void {
   const ws = new WebSocket(ORCHESTRATOR_WS, protocols);
   state.socket = ws;
   let openTimer: ReturnType<typeof setTimeout> | null = null;
+  let socketSettled = false;
   const clearOpenTimer = (): void => {
     if (openTimer) {
       clearTimeout(openTimer);
       openTimer = null;
     }
+  };
+  // Phase 14 — server may signal UNAUTHORIZED via BOTH a server.error
+  // frame AND a 4401 close. Fire the listeners only once per socket,
+  // otherwise the SW's auth-failure counter doubles and we hit the
+  // freeze threshold with one real failure.
+  let unauthorizedFired = false;
+  const fireUnauthorized = (): void => {
+    if (unauthorizedFired) return;
+    unauthorizedFired = true;
+    for (const fn of state.unauthorizedListeners) fn();
+  };
+  const settleSocketClose = (code: number, reason: string | null): void => {
+    if (socketSettled) return;
+    socketSettled = true;
+    clearOpenTimer();
+    // Tag-by-socket: a delayed close from the OLD socket (after a
+    // reconnect/token-swap) would otherwise clobber state.socket
+    // (which now points at the NEW socket) and stop heartbeats.
+    if (state.socket !== ws) return;
+    if (state.pingTimer) clearInterval(state.pingTimer);
+    state.pingTimer = null;
+    state.socket = null;
+    state.lastCloseAt = Date.now();
+    state.lastCloseCode = code;
+    state.lastCloseReason = reason;
+    if (code === 4401) {
+      // Orchestrator rejected our auth. Surface to the SW so it
+      // clears the bad token; do NOT auto-reconnect — that would
+      // just loop on the same bad creds.
+      fireUnauthorized();
+      return;
+    }
+    if (state.closedByUser) return;
+    scheduleReconnect(token);
   };
   openTimer = setTimeout(() => {
     if (state.socket !== ws || ws.readyState !== WebSocket.CONNECTING) return;
@@ -198,18 +233,9 @@ function openSocket(token: string): void {
     } catch {
       /* close may throw on already-closing sockets; close handler handles the rest */
     }
+    settleSocketClose(4000, 'open timeout');
   }, WS_OPEN_TIMEOUT_MS);
   openTimer && (openTimer as { unref?: () => void }).unref?.();
-  // Phase 14 — server may signal UNAUTHORIZED via BOTH a server.error
-  // frame AND a 4401 close. Fire the listeners only once per socket,
-  // otherwise the SW's auth-failure counter doubles and we hit the
-  // freeze threshold with one real failure.
-  let unauthorizedFired = false;
-  const fireUnauthorized = (): void => {
-    if (unauthorizedFired) return;
-    unauthorizedFired = true;
-    for (const fn of state.unauthorizedListeners) fn();
-  };
 
   ws.addEventListener('open', () => {
     if (state.socket !== ws) return; // stale event after a token swap
@@ -253,26 +279,7 @@ function openSocket(token: string): void {
   });
 
   ws.addEventListener('close', (event) => {
-    clearOpenTimer();
-    // Tag-by-socket: a delayed close from the OLD socket (after a
-    // reconnect/token-swap) would otherwise clobber state.socket
-    // (which now points at the NEW socket) and stop heartbeats.
-    if (state.socket !== ws) return;
-    if (state.pingTimer) clearInterval(state.pingTimer);
-    state.pingTimer = null;
-    state.socket = null;
-    state.lastCloseAt = Date.now();
-    state.lastCloseCode = event.code;
-    state.lastCloseReason = event.reason || null;
-    if (event.code === 4401) {
-      // Orchestrator rejected our auth. Surface to the SW so it
-      // clears the bad token; do NOT auto-reconnect — that would
-      // just loop on the same bad creds.
-      fireUnauthorized();
-      return;
-    }
-    if (state.closedByUser) return;
-    scheduleReconnect(token);
+    settleSocketClose(event.code, event.reason || null);
   });
 
   ws.addEventListener('error', () => {

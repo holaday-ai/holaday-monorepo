@@ -72,6 +72,8 @@ describe('ws-client send', () => {
   });
 
   afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -127,6 +129,7 @@ describe('ws-client send', () => {
 
   it('closes a stuck opening websocket so reconnect status advances', async () => {
     vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { connect, getWsConnectionStatus } = await import('./ws-client.js');
     connect('token');
@@ -141,8 +144,17 @@ describe('ws-client send', () => {
       '[holaday] ws open timed out after 12000ms; reconnecting',
     );
     const status = await getWsConnectionStatus();
+    expect(status.connected).toBe(false);
+    expect(status.readyState).toBeNull();
+    expect(status.reconnectAttempt).toBe(1);
+    expect(status.lastCloseCode).toBe(4000);
     expect(status.lastErrorAt).toEqual(expect.any(Number));
     expect(status.lastCloseReason).toBe('open timeout');
+    expect(status.nextRetryAt).toEqual(expect.any(Number));
+
+    vi.advanceTimersByTime(1_000);
+
+    expect(sockets).toHaveLength(2);
   });
 
   it('cancels stale reconnect timers after a token swap opens a new socket', async () => {
