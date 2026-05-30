@@ -1,10 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  _resetAttachedTabsForTests,
   cdpActionErrorMessage,
+  captureVisionObservation,
   executeCdpAction,
   normalizeCdpNavigateUrl,
   sanitizeVisionObservationCapture,
 } from './cdp-actions.js';
+
+afterEach(() => {
+  _resetAttachedTabsForTests();
+  vi.restoreAllMocks();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  delete (globalThis as any).chrome;
+});
 
 describe('normalizeCdpNavigateUrl', () => {
   it('accepts http and https urls after trimming', () => {
@@ -105,5 +114,26 @@ describe('sanitizeVisionObservationCapture', () => {
 
     expect(result.screenshotBase64).toBe('');
     expect(result.error).toContain('oversized image');
+  });
+});
+
+describe('captureVisionObservation', () => {
+  it('humanizes debugger attach failures', async () => {
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => {
+          throw new Error('Another debugger is already attached');
+        }),
+      },
+    } as unknown as typeof chrome;
+
+    await expect(captureVisionObservation(1)).resolves.toMatchObject({
+      screenshotBase64: '',
+      viewportWidth: 0,
+      viewportHeight: 0,
+      url: '',
+      title: '',
+      error: 'debugger attach failed: 浏览器调试通道被占用，请关闭该标签页 DevTools 后重试',
+    });
   });
 });

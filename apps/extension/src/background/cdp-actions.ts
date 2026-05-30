@@ -490,7 +490,7 @@ export async function captureVisionObservation(tabId: number): Promise<VisionObs
       viewportHeight: 0,
       url: '',
       title: '',
-      error: `debugger attach failed: ${err instanceof Error ? err.message : String(err)}`,
+      error: `debugger attach failed: ${cdpActionErrorMessage(err)}`,
     });
   }
 
@@ -533,7 +533,7 @@ export async function captureVisionObservation(tabId: number): Promise<VisionObs
       error = `Page.captureScreenshot returned non-string data (${typeof shot?.data})`;
     }
   } catch (err) {
-    error = `Page.captureScreenshot failed: ${err instanceof Error ? err.message : String(err)}`;
+    error = `Page.captureScreenshot failed: ${cdpActionErrorMessage(err)}`;
   }
 
   return sanitizeVisionObservationCapture({
