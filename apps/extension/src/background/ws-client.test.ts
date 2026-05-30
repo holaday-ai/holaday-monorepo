@@ -197,4 +197,17 @@ describe('ws-client send', () => {
     expect(oldSocket.sent).toHaveLength(1); // only client.hello before disconnect
     expect(newSocket.sent).toHaveLength(2); // client.hello + one pong
   });
+
+  it('does not throw when disconnect races an already-closing socket', async () => {
+    const { connect, disconnect, send } = await import('./ws-client.js');
+    connect('token');
+    const [socket] = sockets;
+    if (!socket) throw new Error('expected websocket');
+    vi.spyOn(socket, 'close').mockImplementation(() => {
+      throw new Error('already closing');
+    });
+
+    expect(() => disconnect()).not.toThrow();
+    expect(send({ type: 'client.pong', at: 123 })).toBe(false);
+  });
 });

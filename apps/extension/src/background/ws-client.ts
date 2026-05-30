@@ -96,7 +96,11 @@ export function disconnect(): void {
     clearInterval(state.pingTimer);
     state.pingTimer = null;
   }
-  socket?.close(1000, 'client requested disconnect');
+  try {
+    socket?.close(1000, 'client requested disconnect');
+  } catch {
+    /* socket may already be closing; local state is already cleared */
+  }
 }
 
 /**
