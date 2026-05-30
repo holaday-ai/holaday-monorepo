@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  notificationChannelTestErrorMessage,
   normalizeNotificationChannels,
   notificationChannelsLoadErrorMessage,
 } from './notification-channel-state';
@@ -68,6 +69,32 @@ describe('notificationChannelsLoadErrorMessage', () => {
     expect(notificationChannelsLoadErrorMessage('Webhook 不可用')).toBe('Webhook 不可用');
     expect(notificationChannelsLoadErrorMessage({})).toBe(
       '通知渠道暂时无法加载，请稍后重试。',
+    );
+  });
+});
+
+describe('notificationChannelTestErrorMessage', () => {
+  it('keeps business webhook errors but hides technical English failures', () => {
+    expect(
+      notificationChannelTestErrorMessage({
+        error: 'Webhook 签名错误',
+        status: 400,
+      }),
+    ).toBe('Webhook 签名错误');
+    expect(
+      notificationChannelTestErrorMessage({
+        error: 'FetchError: socket hang up',
+        status: 502,
+      }),
+    ).toBe('任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。');
+  });
+
+  it('falls back to the HTTP status when the server gives no message', () => {
+    expect(notificationChannelTestErrorMessage({ status: 503 })).toBe(
+      '发送失败（HTTP 503）',
+    );
+    expect(notificationChannelTestErrorMessage({ status: 'bad' })).toBe(
+      '发送失败（HTTP 0）',
     );
   });
 });

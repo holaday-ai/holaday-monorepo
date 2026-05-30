@@ -25,6 +25,17 @@ export function notificationChannelsLoadErrorMessage(
   return pageErrorMessage(err, fallback);
 }
 
+export function notificationChannelTestErrorMessage({
+  error,
+  status,
+}: {
+  error?: unknown;
+  status?: unknown;
+}): string {
+  const fallback = `发送失败（HTTP ${safeStatus(status)}）`;
+  return pageErrorMessage(error, fallback);
+}
+
 function normalizeNotificationChannel(value: unknown): NotificationChannelRow | null {
   if (!isRecord(value)) return null;
   const channelId = safeText(value.channelId);
@@ -55,6 +66,10 @@ function normalizeCreatedAt(value: unknown): string | Date {
 
 function safeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function safeStatus(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

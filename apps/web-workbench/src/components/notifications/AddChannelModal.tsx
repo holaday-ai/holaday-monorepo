@@ -20,6 +20,7 @@ import {
   type NotificationPlatform,
 } from '@/lib/notification-channel-copy';
 import { buildNotificationChannelDraft } from '@/lib/notification-channel-draft';
+import { notificationChannelTestErrorMessage } from '@/lib/notification-channel-state';
 import { pageActionError } from '@/lib/page-error-copy';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
@@ -170,7 +171,10 @@ export function AddChannelModal({
       } else {
         setTestResult({
           ok: false,
-          message: res.error ?? `发送失败（HTTP ${res.status ?? 0}）`,
+          message: notificationChannelTestErrorMessage({
+            error: res.error,
+            status: res.status,
+          }),
         });
       }
     } catch (err) {
