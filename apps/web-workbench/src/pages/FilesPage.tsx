@@ -59,6 +59,7 @@ type Filter = FileFilter;
 export function FilesPage(): JSX.Element {
   const toast = useToast();
   const navigate = useNavigate();
+  const requestIdRef = React.useRef(0);
   const [filter, setFilter] = React.useState<Filter>('all');
   const [q, setQ] = React.useState('');
   const [files, setFiles] = React.useState<UiFile[]>([]);
@@ -70,22 +71,28 @@ export function FilesPage(): JSX.Element {
   const debouncedQuery = useDebouncedValue(q.trim(), 250);
 
   const refresh = React.useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     try {
       const list = await trpc.files.list.query({
         type: filter,
         q: debouncedQuery || undefined,
       });
+      if (requestId !== requestIdRef.current) return;
       setFiles(normalizeFileRows(list));
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       toast.show(pageActionError('加载失败', err), 'error');
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }, [debouncedQuery, filter, toast]);
 
   React.useEffect(() => {
     void refresh();
+    return () => {
+      requestIdRef.current += 1;
+    };
   }, [refresh]);
 
   function downloadUrl(fileId: string): string {

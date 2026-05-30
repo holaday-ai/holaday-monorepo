@@ -113,6 +113,7 @@ const ICONS: Record<string, LucideIcon> = {
 export function SkillsPage(): JSX.Element {
   const toast = useToast();
   const mountedRef = React.useRef(false);
+  const requestIdRef = React.useRef(0);
   // BOSS feedback — surface plan-bound cap. AppShell exposes `me`
   // via OutletContext; we only need .plan here. Default to 'free'
   // when the shell hasn't bootstrapped yet (e.g. cold deep link).
@@ -133,21 +134,22 @@ export function SkillsPage(): JSX.Element {
 
   const refresh = React.useCallback(
     async (options: { silent?: boolean } = {}) => {
+      const requestId = ++requestIdRef.current;
       setLoading(true);
       setLoadError(null);
       try {
         const list = normalizeSkillRows(await trpc.skills.list.query());
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || requestId !== requestIdRef.current) return;
         setSkills(list);
       } catch (err) {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || requestId !== requestIdRef.current) return;
         const message = pageErrorMessage(err);
         setLoadError(message);
         if (!options.silent) {
           toast.show(pageActionError('技能加载失败', err), 'error');
         }
       } finally {
-        if (mountedRef.current) setLoading(false);
+        if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
       }
     },
     [toast],
@@ -160,6 +162,7 @@ export function SkillsPage(): JSX.Element {
     })();
     return () => {
       mountedRef.current = false;
+      requestIdRef.current += 1;
     };
   }, [refresh]);
 

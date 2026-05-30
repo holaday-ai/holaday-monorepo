@@ -53,27 +53,29 @@ const ICONS: Record<string, LucideIcon> = {
 export function ConnectionsPage(): JSX.Element {
   const toast = useToast();
   const mountedRef = React.useRef(false);
+  const requestIdRef = React.useRef(0);
   const [providers, setProviders] = React.useState<ConnectionProviderView[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(
     async (options: { silent?: boolean } = {}) => {
+      const requestId = ++requestIdRef.current;
       setLoading(true);
       setLoadError(null);
       try {
         const list = normalizeConnectionProviders(await trpc.connections.list.query());
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || requestId !== requestIdRef.current) return;
         setProviders(list);
       } catch (err) {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || requestId !== requestIdRef.current) return;
         const message = pageErrorMessage(err);
         setLoadError(message);
         if (!options.silent) {
           toast.show(pageActionError('连接器加载失败', err), 'error');
         }
       } finally {
-        if (mountedRef.current) setLoading(false);
+        if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
       }
     },
     [toast],
@@ -86,6 +88,7 @@ export function ConnectionsPage(): JSX.Element {
     })();
     return () => {
       mountedRef.current = false;
+      requestIdRef.current += 1;
     };
   }, [refresh]);
 
