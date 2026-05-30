@@ -29,7 +29,15 @@ export function FeedbackDialog({ open, onClose, onSubmit }: Props): JSX.Element 
   const [error, setError] = React.useState<string | null>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const closeTimerRef = React.useRef<number | null>(null);
+  const mountedRef = React.useRef(false);
   const messageState = feedbackMessageState(value);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   React.useEffect(() => {
     if (!open) return;
@@ -80,7 +88,9 @@ export function FeedbackDialog({ open, onClose, onSubmit }: Props): JSX.Element 
     } catch (err) {
       setError(feedbackSubmitError(err));
     } finally {
-      setPending(false);
+      if (mountedRef.current) {
+        setPending(false);
+      }
     }
   }
 

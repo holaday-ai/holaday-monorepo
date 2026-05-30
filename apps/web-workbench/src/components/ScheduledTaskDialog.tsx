@@ -59,6 +59,14 @@ export function ScheduledTaskDialog({
   const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
   const intentRef = React.useRef<HTMLTextAreaElement>(null);
   const initialScheduledAtRef = React.useRef(scheduledAt);
+  const mountedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Reset whenever the dialog re-opens so a stale draft from a prior
   // open doesn't bleed into the new context (especially when the
@@ -159,7 +167,9 @@ export function ScheduledTaskDialog({
     } catch (err) {
       toast.show(pageActionError('创建失败', err), 'error');
     } finally {
-      setSubmitting(false);
+      if (mountedRef.current) {
+        setSubmitting(false);
+      }
     }
   };
 

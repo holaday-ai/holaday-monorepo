@@ -39,7 +39,15 @@ export function ConfirmDialog({
   onClose,
 }: Props): JSX.Element | null {
   const cancelRef = React.useRef<HTMLButtonElement>(null);
+  const mountedRef = React.useRef(false);
   const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   React.useEffect(() => {
     if (!open) return;
@@ -62,7 +70,9 @@ export function ConfirmDialog({
     try {
       await onConfirm();
     } finally {
-      setBusy(false);
+      if (mountedRef.current) {
+        setBusy(false);
+      }
     }
   };
 

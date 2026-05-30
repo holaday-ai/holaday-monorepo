@@ -64,6 +64,14 @@ export function BatchTaskDialog({
   const [submitting, setSubmitting] = React.useState(false);
   const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
   const goalRefs = React.useRef<Array<HTMLInputElement | null>>([]);
+  const mountedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   React.useEffect(() => {
     if (!open) return;
@@ -193,7 +201,9 @@ export function BatchTaskDialog({
     } catch (err) {
       toast.show(pageActionError('创建失败', err), 'error');
     } finally {
-      setSubmitting(false);
+      if (mountedRef.current) {
+        setSubmitting(false);
+      }
     }
   };
 
