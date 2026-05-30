@@ -119,6 +119,9 @@ export async function executeCdpAction(tabId: number, action: VisionAction): Pro
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    if (message.startsWith('bad_url')) {
+      return { ok: false, message: '导航地址无效，请检查后重试' };
+    }
     return { ok: false, message: `CDP error: ${message.slice(0, 400)}` };
   }
 }
@@ -235,8 +238,8 @@ async function doNavigate(
   tabId: number,
   action: Extract<VisionAction, { kind: 'navigate' }>,
 ): Promise<ActionResult> {
-  await ensureAttached(tabId);
   const url = normalizeCdpNavigateUrl(action.url);
+  await ensureAttached(tabId);
   await sendCdp(tabId, 'Page.navigate', { url });
   return { ok: true, message: `navigated to ${url}` };
 }
