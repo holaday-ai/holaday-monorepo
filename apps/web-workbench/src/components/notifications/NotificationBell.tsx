@@ -70,12 +70,18 @@ export function NotificationBell({
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [markingAll, setMarkingAll] = React.useState(false);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const mountedRef = React.useRef(false);
+  const countRequestRef = React.useRef(0);
+  const listRequestRef = React.useRef(0);
 
   // Poll the cheap COUNT query every 30s, plus an immediate fetch
   // on mount so the badge isn't stale on first render.
   const refreshCount = React.useCallback(async () => {
+    const requestId = countRequestRef.current + 1;
+    countRequestRef.current = requestId;
     try {
       const res = await trpc.notifications.unreadCount.query();
+      if (!mountedRef.current || countRequestRef.current !== requestId) return;
       setUnreadCount(safeNotificationCount((res as { count?: unknown }).count));
     } catch {
       // Network blip — keep last value, retry next tick.
@@ -83,9 +89,15 @@ export function NotificationBell({
   }, []);
 
   React.useEffect(() => {
+    mountedRef.current = true;
     void refreshCount();
     const id = window.setInterval(() => void refreshCount(), POLL_INTERVAL_MS);
-    return () => window.clearInterval(id);
+    return () => {
+      mountedRef.current = false;
+      countRequestRef.current += 1;
+      listRequestRef.current += 1;
+      window.clearInterval(id);
+    };
   }, [refreshCount]);
 
   // Outside-click + Esc dismissal when the dropdown is open.
@@ -106,15 +118,21 @@ export function NotificationBell({
   }, [open]);
 
   const fetchList = React.useCallback(async () => {
+    const requestId = listRequestRef.current + 1;
+    listRequestRef.current = requestId;
     setLoading(true);
     try {
       const res = await trpc.notifications.list.query({ limit: 50 });
+      if (!mountedRef.current || listRequestRef.current !== requestId) return;
       setItems(normalizeNotificationRows(res));
       setListError(null);
     } catch (err) {
+      if (!mountedRef.current || listRequestRef.current !== requestId) return;
       setListError(notificationErrorMessage(err, '通知暂时无法加载，请稍后重试。'));
     } finally {
-      setLoading(false);
+      if (mountedRef.current && listRequestRef.current === requestId) {
+        setLoading(false);
+      }
     }
   }, []);
 

@@ -64,12 +64,17 @@ export function ScheduledPage(): JSX.Element {
   const [togglingIds, setTogglingIds] = React.useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const reloadRequestRef = React.useRef(0);
 
   const reload = React.useCallback(async (): Promise<void> => {
+    const requestId = reloadRequestRef.current + 1;
+    reloadRequestRef.current = requestId;
     try {
       const list = await trpc.scheduledTasks.list.query();
+      if (reloadRequestRef.current !== requestId) return;
       setRows(list as UiScheduled[]);
     } catch (err) {
+      if (reloadRequestRef.current !== requestId) return;
       toast.show(taskActionError('加载失败', errorMessage(err)), 'error');
       setRows([]);
     }
@@ -77,6 +82,9 @@ export function ScheduledPage(): JSX.Element {
 
   React.useEffect(() => {
     void reload();
+    return () => {
+      reloadRequestRef.current += 1;
+    };
   }, [reload]);
 
   const handleToggle = async (id: string): Promise<void> => {

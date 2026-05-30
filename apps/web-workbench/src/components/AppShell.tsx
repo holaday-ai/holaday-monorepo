@@ -135,6 +135,7 @@ export function AppShell(): JSX.Element {
   >(null);
   const [confirmClearFailed, setConfirmClearFailed] = React.useState(false);
   const authInvalidatedRef = React.useRef(false);
+  const failedCountRequestRef = React.useRef(0);
   const projectRefreshRequestRef = React.useRef(0);
   /**
    * BOSS bug fix — server-side failed-task count for the user
@@ -146,8 +147,11 @@ export function AppShell(): JSX.Element {
    */
   const [serverFailedCount, setServerFailedCount] = React.useState(0);
   const refreshFailedCount = React.useCallback(async () => {
+    const requestId = failedCountRequestRef.current + 1;
+    failedCountRequestRef.current = requestId;
     try {
       const res = await trpc.tasks.failedCount.query();
+      if (failedCountRequestRef.current !== requestId) return;
       setServerFailedCount(
         normalizeTaskActionCount((res as { count?: unknown } | null)?.count),
       );
