@@ -39,12 +39,20 @@ interface Props {
  */
 export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | null {
   const toast = useToast();
+  const mountedRef = React.useRef(false);
   const [objectUrl, setObjectUrl] = React.useState<string | null>(null);
   const [textBody, setTextBody] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [downloading, setDownloading] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [resolvedMime, setResolvedMime] = React.useState<string>('');
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Reset / re-fetch when the payload changes. Skip cleanly when the
   // payload is null (modal closed).
@@ -139,11 +147,14 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
         url: payload.url,
         filename: payload.filename,
       });
+      if (!mountedRef.current) return;
       if (!res.ok) {
         toast.show(downloadFailureMessage(res.status), 'error');
       }
     } finally {
-      setDownloading(false);
+      if (mountedRef.current) {
+        setDownloading(false);
+      }
     }
   };
 

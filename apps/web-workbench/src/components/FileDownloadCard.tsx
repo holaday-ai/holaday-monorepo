@@ -42,6 +42,7 @@ export interface FileDownloadPayload {
  */
 export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }): JSX.Element {
   const toast = useToast();
+  const mountedRef = React.useRef(false);
   const [state, setState] = React.useState<'idle' | 'loading' | 'failed'>('idle');
   const kind = classifyDownloadFileKind(payload.filename);
   const kindLabel = downloadFileKindLabel(kind);
@@ -52,8 +53,16 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
   // Reset transient 'failed' state ~3s after firing so a retry click
   // looks fresh instead of stuck red.
   React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  React.useEffect(() => {
     if (state !== 'failed') return;
-    const t = setTimeout(() => setState('idle'), 3_000);
+    const t = setTimeout(() => {
+      if (mountedRef.current) setState('idle');
+    }, 3_000);
     return () => clearTimeout(t);
   }, [state]);
 
@@ -64,6 +73,7 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
       url: payload.downloadUrl,
       filename: payload.filename,
     });
+    if (!mountedRef.current) return;
     if (result.ok) {
       setState('idle');
     } else {
