@@ -71,13 +71,13 @@ export const clientScreenshotSchema = z.object({
 export const visionActionSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('click'),
-    x: z.number().int(),
-    y: z.number().int(),
+    x: z.number().int().nonnegative().max(20_000),
+    y: z.number().int().nonnegative().max(20_000),
     button: z.enum(['left', 'right', 'middle']).optional(),
   }),
-  z.object({ kind: z.literal('type'), text: z.string() }),
-  z.object({ kind: z.literal('key'), key: z.string().min(1) }),
-  z.object({ kind: z.literal('scroll'), dy: z.number().int() }),
+  z.object({ kind: z.literal('type'), text: z.string().max(4_000) }),
+  z.object({ kind: z.literal('key'), key: z.string().min(1).max(64) }),
+  z.object({ kind: z.literal('scroll'), dy: z.number().int().min(-5_000).max(5_000) }),
   z.object({ kind: z.literal('navigate'), url: httpUrlSchema }),
   z.object({ kind: z.literal('wait_for_human'), reason: z.string().min(1).max(512) }),
   z.object({
@@ -85,8 +85,8 @@ export const visionActionSchema = z.discriminatedUnion('kind', [
     ms: z.number().int().min(100).max(10_000),
   }),
   z.object({ kind: z.literal('screenshot') }),
-  z.object({ kind: z.literal('done'), summary: z.string() }),
-  z.object({ kind: z.literal('give_up'), reason: z.string() }),
+  z.object({ kind: z.literal('done'), summary: z.string().max(4_000) }),
+  z.object({ kind: z.literal('give_up'), reason: z.string().max(4_000) }),
 ]);
 
 export type VisionAction = z.infer<typeof visionActionSchema>;

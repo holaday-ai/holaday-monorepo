@@ -126,6 +126,29 @@ describe('server.vision.act schema', () => {
       expect(result.success).toBe(false);
     }
   });
+
+  it('rejects out-of-range driver actions before they reach Chrome CDP', () => {
+    const actions = [
+      { kind: 'click', x: -1, y: 10 },
+      { kind: 'click', x: 10, y: 20_001 },
+      { kind: 'scroll', dy: 10_000 },
+      { kind: 'type', text: 'x'.repeat(4_001) },
+      { kind: 'key', key: 'x'.repeat(65) },
+    ];
+
+    for (const action of actions) {
+      const result = parseServerMessage(
+        JSON.stringify({
+          type: 'server.vision.act',
+          taskId: 'tsk_vision_schema',
+          tickIndex: 0,
+          action,
+        }),
+      );
+
+      expect(result.success).toBe(false);
+    }
+  });
 });
 
 describe('client.vision.user_input — kind=insert_text (CJK input bar)', () => {
