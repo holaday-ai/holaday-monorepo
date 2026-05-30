@@ -36,6 +36,8 @@ import { AddChannelModal, type ChannelDraft } from './AddChannelModal';
 
 export function NotificationsSection(): JSX.Element {
   const toast = useToast();
+  const mountedRef = React.useRef(false);
+  const requestIdRef = React.useRef(0);
   const [channels, setChannels] = React.useState<NotificationChannelRow[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -46,12 +48,15 @@ export function NotificationsSection(): JSX.Element {
   const [pendingChannelId, setPendingChannelId] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setLoadError(null);
     try {
       const res = await trpc.notificationChannels.list.query();
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setChannels(normalizeNotificationChannels(res));
     } catch (err) {
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
       const message = notificationChannelsLoadErrorMessage(err);
       setLoadError(message);
       toast.show(
@@ -59,13 +64,18 @@ export function NotificationsSection(): JSX.Element {
         'error',
       );
     } finally {
-      setLoading(false);
+      if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   React.useEffect(() => {
+    mountedRef.current = true;
     void refresh();
+    return () => {
+      mountedRef.current = false;
+      requestIdRef.current += 1;
+    };
   }, [refresh]);
 
   const handleToggle = async (row: NotificationChannelRow): Promise<void> => {

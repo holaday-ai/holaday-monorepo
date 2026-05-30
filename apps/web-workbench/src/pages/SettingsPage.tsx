@@ -242,6 +242,8 @@ function ThemeOption({
  */
 function MemorySection(): JSX.Element {
   const toast = useToast();
+  const mountedRef = React.useRef(false);
+  const requestIdRef = React.useRef(0);
   const [memories, setMemories] = React.useState<MemoryRowView[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -251,23 +253,31 @@ function MemorySection(): JSX.Element {
   );
 
   const refresh = React.useCallback(async (options: { silent?: boolean } = {}) => {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     try {
       const res = await trpc.memory.list.query();
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setMemories(normalizeMemoryRows(res));
       setLoadError(null);
     } catch (err) {
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
       const message = memoryLoadErrorMessage(err);
       setLoadError(message);
       if (!options.silent) toast.show(`加载记忆失败：${message}`, 'error');
       setMemories([]);
     } finally {
-      setLoading(false);
+      if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
     }
   }, [toast]);
 
   React.useEffect(() => {
+    mountedRef.current = true;
     void refresh({ silent: true });
+    return () => {
+      mountedRef.current = false;
+      requestIdRef.current += 1;
+    };
   }, [refresh]);
 
   const handleDelete = async (externalId: string): Promise<void> => {

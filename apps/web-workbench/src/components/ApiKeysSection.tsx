@@ -32,6 +32,8 @@ import { Section } from '@/pages/PageShell';
 
 export function ApiKeysSection(): JSX.Element {
   const toast = useToast();
+  const mountedRef = React.useRef(false);
+  const requestIdRef = React.useRef(0);
   const [rows, setRows] = React.useState<ApiKeyRowView[] | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [creating, setCreating] = React.useState(false);
@@ -46,11 +48,14 @@ export function ApiKeysSection(): JSX.Element {
   const [pendingRevoke, setPendingRevoke] = React.useState<ApiKeyRowView | null>(null);
 
   const reload = React.useCallback(async (options: { silent?: boolean } = {}): Promise<void> => {
+    const requestId = ++requestIdRef.current;
     try {
       const list = await trpc.apiKeys.list.query();
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setRows(normalizeApiKeyRows(list));
       setLoadError(null);
     } catch (err) {
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
       const message = apiKeySettingsErrorMessage(
         err,
         'API Key 暂时无法加载，请稍后重试。',
@@ -62,7 +67,12 @@ export function ApiKeysSection(): JSX.Element {
   }, [toast]);
 
   React.useEffect(() => {
+    mountedRef.current = true;
     void reload({ silent: true });
+    return () => {
+      mountedRef.current = false;
+      requestIdRef.current += 1;
+    };
   }, [reload]);
 
   const submit = async (): Promise<void> => {
