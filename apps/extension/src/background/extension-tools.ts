@@ -230,8 +230,11 @@ export function normalizeScreenshotCaptureDataUrl(dataUrl: string): ScreenshotRe
 }
 
 async function executeScreenshot(): Promise<ScreenshotResult> {
-  // captureVisibleTab needs no tabId — operates on the focused window.
-  const dataUrl = await chrome.tabs.captureVisibleTab({ format: 'jpeg', quality: 50 });
+  const tab = await getActiveTab();
+  if (!tab?.id) {
+    throw new Error('no_active_tab');
+  }
+  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 50 });
   return normalizeScreenshotCaptureDataUrl(dataUrl);
 }
 
