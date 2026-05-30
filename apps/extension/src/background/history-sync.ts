@@ -75,6 +75,50 @@ export function extractHost(url: string): string | null {
   }
 }
 
+function normalizeVisitCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : 0;
+}
+
+function normalizeLastVisitTime(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : 0;
+}
+
+export function aggregateBrowsingHistoryItems(
+  items: readonly Pick<chrome.history.HistoryItem, 'url' | 'visitCount' | 'lastVisitTime'>[],
+): BrowsingHostEntry[] {
+  const acc = new Map<string, { visitCount: number; lastVisitAt: number }>();
+  for (const item of items) {
+    if (!item.url) continue;
+    const host = extractHost(item.url);
+    if (!host) continue;
+    const visit = normalizeVisitCount(item.visitCount);
+    const last = normalizeLastVisitTime(item.lastVisitTime);
+    if (visit <= 0 || last <= 0) continue;
+    const existing = acc.get(host);
+    if (!existing) {
+      acc.set(host, { visitCount: visit, lastVisitAt: last });
+    } else {
+      existing.visitCount += visit;
+      if (last > existing.lastVisitAt) existing.lastVisitAt = last;
+    }
+  }
+
+  const entries: BrowsingHostEntry[] = [];
+  for (const [domain, agg] of acc) {
+    entries.push({
+      domain,
+      visitCount: agg.visitCount,
+      lastVisitAt: new Date(agg.lastVisitAt).toISOString(),
+    });
+  }
+  entries.sort((a, b) => b.visitCount - a.visitCount);
+  return entries.slice(0, MAX_HOSTS);
+}
+
 /**
  * Read 30-day history and aggregate per host. Returns the top
  * MAX_HOSTS by visit count, sorted descending so consumers can take
@@ -97,35 +141,7 @@ export async function collectBrowsingHistory(): Promise<BrowsingHostEntry[]> {
     return [];
   }
 
-  // Aggregate per-host. chrome.history.HistoryItem.visitCount is
-  // lifetime-cumulative across all chrome.history entries for that
-  // URL — close enough to "weight" for site-config routing.
-  const acc = new Map<string, { visitCount: number; lastVisitAt: number }>();
-  for (const item of items) {
-    if (!item.url) continue;
-    const host = extractHost(item.url);
-    if (!host) continue;
-    const visit = item.visitCount ?? 0;
-    const last = item.lastVisitTime ?? 0;
-    const existing = acc.get(host);
-    if (!existing) {
-      acc.set(host, { visitCount: visit, lastVisitAt: last });
-    } else {
-      existing.visitCount += visit;
-      if (last > existing.lastVisitAt) existing.lastVisitAt = last;
-    }
-  }
-
-  const entries: BrowsingHostEntry[] = [];
-  for (const [domain, agg] of acc) {
-    entries.push({
-      domain,
-      visitCount: agg.visitCount,
-      lastVisitAt: new Date(agg.lastVisitAt).toISOString(),
-    });
-  }
-  entries.sort((a, b) => b.visitCount - a.visitCount);
-  return entries.slice(0, MAX_HOSTS);
+  return aggregateBrowsingHistoryItems(items);
 }
 
 export interface BrowsingSyncResponse {
