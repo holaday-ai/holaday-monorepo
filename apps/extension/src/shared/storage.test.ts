@@ -11,7 +11,9 @@ describe('normalizeAccessToken', () => {
 
   it('treats obvious placeholder strings as invalid tokens', () => {
     expect(normalizeAccessToken('undefined')).toBeNull();
+    expect(normalizeAccessToken(' Undefined ')).toBeNull();
     expect(normalizeAccessToken(' null ')).toBeNull();
+    expect(normalizeAccessToken(' NULL ')).toBeNull();
   });
 });
 

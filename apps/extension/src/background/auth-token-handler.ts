@@ -29,7 +29,8 @@ const MIN_TOKEN_LENGTH = 10;
 
 export function looksLikeAuthToken(value: string): boolean {
   if (value.length < MIN_TOKEN_LENGTH) return false;
-  if (value === 'undefined' || value === 'null') return false;
+  const lower = value.toLowerCase();
+  if (lower === 'undefined' || lower === 'null') return false;
   if (/\s/.test(value)) return false;
   return true;
 }

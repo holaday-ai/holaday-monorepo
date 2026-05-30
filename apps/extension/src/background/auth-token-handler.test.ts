@@ -87,6 +87,10 @@ describe('decideAuthTokenAction', () => {
       kind: 'refuse',
       reason: 'invalid_token',
     });
+    expect(decideAuthTokenAction(' Undefined ', null, null)).toEqual({
+      kind: 'refuse',
+      reason: 'invalid_token',
+    });
     expect(decideAuthTokenAction('short', null, null)).toEqual({
       kind: 'refuse',
       reason: 'invalid_token',
@@ -99,6 +103,7 @@ describe('looksLikeAuthToken', () => {
     expect(looksLikeAuthToken('hd_live_' + 'a'.repeat(24))).toBe(true);
     expect(looksLikeAuthToken('abc')).toBe(false);
     expect(looksLikeAuthToken('undefined')).toBe(false);
+    expect(looksLikeAuthToken('NULL')).toBe(false);
     expect(looksLikeAuthToken('null')).toBe(false);
     expect(looksLikeAuthToken('token with spaces')).toBe(false);
   });

@@ -20,7 +20,8 @@ function nonEmptyString(value: unknown): value is string {
 export function normalizeAccessToken(value: unknown): string | null {
   if (!nonEmptyString(value)) return null;
   const token = value.trim();
-  return token === 'undefined' || token === 'null' ? null : token;
+  const lower = token.toLowerCase();
+  return lower === 'undefined' || lower === 'null' ? null : token;
 }
 
 export function normalizeStoredUser(value: unknown): StoredUser | null {
