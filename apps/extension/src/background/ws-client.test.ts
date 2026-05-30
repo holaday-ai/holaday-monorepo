@@ -144,4 +144,24 @@ describe('ws-client send', () => {
     expect(status.lastErrorAt).toEqual(expect.any(Number));
     expect(status.lastCloseReason).toBe('open timeout');
   });
+
+  it('cancels stale reconnect timers after a token swap opens a new socket', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const { connect, reconnect } = await import('./ws-client.js');
+    connect('old-token');
+    const [oldSocket] = sockets;
+    if (!oldSocket) throw new Error('expected websocket');
+
+    oldSocket.readyState = FakeWebSocket.CLOSED;
+    oldSocket.dispatch('close', { code: 1006, reason: '' });
+    expect(sockets).toHaveLength(1);
+
+    reconnect('new-token');
+    expect(sockets).toHaveLength(2);
+    vi.advanceTimersByTime(1_000);
+
+    expect(sockets).toHaveLength(2);
+    expect(sockets[1]?.protocols).toEqual(['holaday.v1', 'jwt.new-token']);
+  });
 });

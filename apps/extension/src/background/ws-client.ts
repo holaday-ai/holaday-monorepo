@@ -14,7 +14,9 @@ const WS_OPEN_TIMEOUT_MS = 12_000;
 
 interface State {
   socket: WebSocket | null;
+  socketGeneration: number;
   reconnectAttempt: number;
+  reconnectTimer: ReturnType<typeof setTimeout> | null;
   pingTimer: ReturnType<typeof setInterval> | null;
   closedByUser: boolean;
   lastOpenAt: number | null;
@@ -36,7 +38,9 @@ interface State {
 
 const state: State = {
   socket: null,
+  socketGeneration: 0,
   reconnectAttempt: 0,
+  reconnectTimer: null,
   pingTimer: null,
   closedByUser: false,
   lastOpenAt: null,
@@ -85,6 +89,7 @@ export function send(msg: ClientMessage): boolean {
 
 export function disconnect(): void {
   state.closedByUser = true;
+  clearReconnectTimer();
   state.socket?.close(1000, 'client requested disconnect');
 }
 
@@ -131,6 +136,7 @@ export function connect(token: string): void {
  */
 export function reconnect(token: string): void {
   if (!token) throw new Error('reconnect() requires a token');
+  clearReconnectTimer();
   if (state.socket) {
     state.closedByUser = true;
     try {
@@ -170,6 +176,8 @@ export async function getWsConnectionStatus(): Promise<WsConnectionStatus> {
 }
 
 function openSocket(token: string): void {
+  clearReconnectTimer();
+  state.socketGeneration += 1;
   const protocols = [WS_SUBPROTOCOL, `jwt.${token}`];
   const ws = new WebSocket(ORCHESTRATOR_WS, protocols);
   state.socket = ws;
@@ -367,8 +375,17 @@ export async function isReconnectCapped(): Promise<boolean> {
  *     inherit a stale cap from a previous Chrome instance)
  */
 export async function resetWsReconnectAttempts(): Promise<void> {
+  clearReconnectTimer();
   state.reconnectAttempt = 0;
   await persistReconnectAttempts(0);
+}
+
+function clearReconnectTimer(): void {
+  if (state.reconnectTimer) {
+    clearTimeout(state.reconnectTimer);
+    state.reconnectTimer = null;
+  }
+  state.nextRetryAt = null;
 }
 
 function scheduleReconnect(token: string): void {
@@ -391,8 +408,14 @@ function scheduleReconnect(token: string): void {
   // future edit accidentally narrows the tuple.
   const backoff = BACKOFF_SCHEDULE_MS[idx] ?? 4_000;
   const jitter = Math.floor(Math.random() * 250);
-  state.nextRetryAt = Date.now() + backoff + jitter;
-  setTimeout(() => {
-    if (!state.closedByUser) openSocket(token);
-  }, backoff + jitter);
+  const delay = backoff + jitter;
+  const generation = state.socketGeneration;
+  clearReconnectTimer();
+  state.nextRetryAt = Date.now() + delay;
+  state.reconnectTimer = setTimeout(() => {
+    state.reconnectTimer = null;
+    state.nextRetryAt = null;
+    if (state.closedByUser || state.socket || state.socketGeneration !== generation) return;
+    openSocket(token);
+  }, delay);
 }
