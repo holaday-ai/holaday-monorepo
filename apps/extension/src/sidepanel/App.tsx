@@ -71,6 +71,18 @@ interface CreateTaskResponse {
 
 const PAGE_CONTEXT_REFRESH_MS = 2_000;
 
+function sendRuntimeMessage<T>(message: unknown): Promise<T | null> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(message, (response?: T) => {
+      if (chrome.runtime.lastError) {
+        resolve(null);
+        return;
+      }
+      resolve(response ?? null);
+    });
+  });
+}
+
 export function App() {
   const [user, setUser] = useState<StoredUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -98,14 +110,10 @@ export function App() {
         setStatus('connected');
         chrome.runtime.sendMessage({ type: 'holaday.connect', token: tok });
       } else if (!tok) {
-        const liftedToken = await new Promise<string | null>((resolve) => {
-          chrome.runtime.sendMessage(
-            { type: 'holaday.tryAutoLogin' },
-            (resp: { ok?: boolean; token?: string | null } | undefined) => {
-              resolve(resp?.token ?? null);
-            },
-          );
+        const resp = await sendRuntimeMessage<{ ok?: boolean; token?: string | null }>({
+          type: 'holaday.tryAutoLogin',
         });
+        const liftedToken = resp?.token ?? null;
         if (liftedToken) {
           tok = liftedToken;
           const fetchedUser = await fetchMe(liftedToken);
@@ -126,9 +134,8 @@ export function App() {
           }
         }
       }
-      chrome.runtime.sendMessage({ type: 'holaday.tasks' }, (resp) => {
-        if (resp?.tasks) setTasks(resp.tasks as TaskView[]);
-      });
+      const resp = await sendRuntimeMessage<{ tasks?: TaskView[] }>({ type: 'holaday.tasks' });
+      if (resp?.tasks) setTasks(resp.tasks);
     })();
   }, []);
 
@@ -243,14 +250,10 @@ export function App() {
     setStatus('loading');
     setError(null);
     try {
-      const liftedToken = await new Promise<string | null>((resolve) => {
-        chrome.runtime.sendMessage(
-          { type: 'holaday.tryAutoLogin' },
-          (resp: { ok?: boolean; token?: string | null } | undefined) => {
-            resolve(resp?.token ?? null);
-          },
-        );
+      const resp = await sendRuntimeMessage<{ ok?: boolean; token?: string | null }>({
+        type: 'holaday.tryAutoLogin',
       });
+      const liftedToken = resp?.token ?? null;
       if (!liftedToken) {
         setStatus('error');
         setError(
@@ -317,9 +320,8 @@ export function App() {
       setIntent('');
       // Nudge the SW to push the latest snapshot — the SW updates
       // arrive via the listener above as the WS frames flow in.
-      chrome.runtime.sendMessage({ type: 'holaday.tasks' }, (resp) => {
-        if (resp?.tasks) setTasks(resp.tasks as TaskView[]);
-      });
+      const resp = await sendRuntimeMessage<{ tasks?: TaskView[] }>({ type: 'holaday.tasks' });
+      if (resp?.tasks) setTasks(resp.tasks);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
