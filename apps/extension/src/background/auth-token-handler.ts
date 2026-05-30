@@ -23,24 +23,38 @@ export type AuthTokenAction =
   | { kind: 'unchanged' }
   | { kind: 'clear' }
   | { kind: 'set'; token: string }
-  | { kind: 'refuse'; reason: 'known_bad_token' };
+  | { kind: 'refuse'; reason: 'known_bad_token' | 'invalid_token' };
+
+const MIN_TOKEN_LENGTH = 10;
+
+export function looksLikeAuthToken(value: string): boolean {
+  if (value.length < MIN_TOKEN_LENGTH) return false;
+  if (value === 'undefined' || value === 'null') return false;
+  if (/\s/.test(value)) return false;
+  return true;
+}
 
 export function decideAuthTokenAction(
   incoming: string | null,
   stored: string | null,
   knownBad: string | null,
 ): AuthTokenAction {
+  const normalizedIncoming =
+    incoming !== null && incoming.trim().length > 0 ? incoming.trim() : null;
   // Identical to current storage: caller short-circuits, no chrome
   // storage writes, no WS churn.
-  if (incoming === stored) return { kind: 'unchanged' };
+  if (normalizedIncoming === stored) return { kind: 'unchanged' };
   // SPA cleared localStorage → mirror.
-  if (incoming === null) return { kind: 'clear' };
+  if (normalizedIncoming === null) return { kind: 'clear' };
+  if (!looksLikeAuthToken(normalizedIncoming)) {
+    return { kind: 'refuse', reason: 'invalid_token' };
+  }
   // Refuse to revive a token the orchestrator just rejected — this
   // prevents the auth-bridge poll from undoing onUnauthorized's
   // cleanup every 3 s. The user has to log in fresh on the SPA
   // (producing a different token value) before this gate releases.
-  if (knownBad !== null && incoming === knownBad) {
+  if (knownBad !== null && normalizedIncoming === knownBad) {
     return { kind: 'refuse', reason: 'known_bad_token' };
   }
-  return { kind: 'set', token: incoming };
+  return { kind: 'set', token: normalizedIncoming };
 }
