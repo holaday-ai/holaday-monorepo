@@ -30,6 +30,19 @@ export const WORKBENCH_TAB_MATCH_PATTERNS: readonly string[] = [
   '*://holaday.ai/*',
 ] as const;
 
+export function isWorkbenchTabUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      (parsed.hostname === 'hd-app.orangebench.tech' || parsed.hostname === 'holaday.ai')
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Find an existing workbench tab, activate it (and focus its window),
  * or create a new tab pointed at `fallbackUrl` when no match exists.
@@ -45,9 +58,14 @@ export async function openOrFocusWorkbench(fallbackUrl: string): Promise<void> {
   try {
     tabs = await chrome.tabs.query({ url: WORKBENCH_TAB_MATCH_PATTERNS as string[] });
   } catch {
-    // chrome.tabs.query rejects (e.g. invalid pattern in some Chrome
-    // builds, extension being torn down). Skip the focus path and
-    // create a fresh tab below.
+    // chrome.tabs.query can reject on URL match quirks in some Chrome
+    // builds. Fall back to querying all tabs and filtering in-process
+    // before deciding to open a duplicate tab.
+    try {
+      tabs = (await chrome.tabs.query({})).filter((tab) => isWorkbenchTabUrl(tab.url));
+    } catch {
+      tabs = [];
+    }
   }
 
   const target = pickBestTab(tabs);

@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { pickBestTab, WORKBENCH_TAB_MATCH_PATTERNS } from './open-workbench.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  isWorkbenchTabUrl,
+  openOrFocusWorkbench,
+  pickBestTab,
+  WORKBENCH_TAB_MATCH_PATTERNS,
+} from './open-workbench.js';
 
 /**
  * Helper to fabricate a chrome.tabs.Tab — the real type has ~30 fields,
@@ -24,12 +29,28 @@ function makeTab(over: Partial<chrome.tabs.Tab>): chrome.tabs.Tab {
   } as any;
 }
 
+afterEach(() => {
+  vi.restoreAllMocks();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  delete (globalThis as any).chrome;
+});
+
 describe('WORKBENCH_TAB_MATCH_PATTERNS', () => {
   it('targets the two prod surfaces only (China + intl apex)', () => {
     expect(WORKBENCH_TAB_MATCH_PATTERNS).toEqual([
       '*://hd-app.orangebench.tech/*',
       '*://holaday.ai/*',
     ]);
+  });
+});
+
+describe('isWorkbenchTabUrl', () => {
+  it('matches only the production workbench tab urls', () => {
+    expect(isWorkbenchTabUrl('https://holaday.ai/app')).toBe(true);
+    expect(isWorkbenchTabUrl('https://hd-app.orangebench.tech/app')).toBe(true);
+    expect(isWorkbenchTabUrl('https://staging.holaday.ai/app')).toBe(false);
+    expect(isWorkbenchTabUrl('chrome://extensions')).toBe(false);
+    expect(isWorkbenchTabUrl(undefined)).toBe(false);
   });
 });
 
@@ -67,5 +88,28 @@ describe('pickBestTab', () => {
     const a = makeTab({ id: 1, active: false });
     const b = makeTab({ id: 2, active: false });
     expect(pickBestTab([a, b])?.id).toBe(1);
+  });
+});
+
+describe('openOrFocusWorkbench', () => {
+  it('falls back to all-tab filtering when match-pattern query fails', async () => {
+    const query = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('bad pattern'))
+      .mockResolvedValueOnce([
+        makeTab({ id: 7, url: 'https://holaday.ai/app', active: false }),
+        makeTab({ id: 8, url: 'https://staging.holaday.ai/app', active: false }),
+      ]);
+    const update = vi.fn(async () => ({}));
+    const create = vi.fn(async () => ({}));
+    globalThis.chrome = {
+      tabs: { query, update, create },
+      windows: { update: vi.fn(async () => ({})) },
+    } as unknown as typeof chrome;
+
+    await openOrFocusWorkbench('https://hd-app.orangebench.tech/app');
+
+    expect(update).toHaveBeenCalledWith(7, { active: true });
+    expect(create).not.toHaveBeenCalled();
   });
 });
