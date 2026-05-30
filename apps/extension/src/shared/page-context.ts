@@ -28,6 +28,27 @@ interface PageContextSnippet {
   metaDescription: string;
 }
 
+const MAX_CONTEXT_TITLE_CHARS = 512;
+const MAX_CONTEXT_URL_CHARS = 2048;
+const MAX_CONTEXT_SELECTION_CHARS = 2_000;
+const MAX_CONTEXT_META_DESCRIPTION_CHARS = 512;
+
+function clip(value: unknown, maxChars: number): string {
+  const text = typeof value === 'string' ? value : '';
+  return text.length > maxChars ? text.slice(0, maxChars) : text;
+}
+
+export function sanitizePageContextSnippet(
+  snippet: Partial<PageContextSnippet> | null | undefined,
+): PageContextSnippet {
+  return {
+    title: clip(snippet?.title, MAX_CONTEXT_TITLE_CHARS),
+    url: clip(snippet?.url, MAX_CONTEXT_URL_CHARS),
+    selectedText: clip(snippet?.selectedText, MAX_CONTEXT_SELECTION_CHARS),
+    metaDescription: clip(snippet?.metaDescription, MAX_CONTEXT_META_DESCRIPTION_CHARS),
+  };
+}
+
 /** Scoped per-tab to read DOM-side state. Runs in page world. */
 function pageWorldExtractor(): PageContextSnippet {
   const meta = document.querySelector('meta[name="description"]');
@@ -55,12 +76,13 @@ export async function getActivePageContext(): Promise<PageContext | null> {
   // already gives us.
   const restrictedScheme = /^(chrome|chrome-extension|edge|about|file):/i.test(tab.url ?? '');
   if (restrictedScheme || !tab.url) {
-    return {
-      tabId: tab.id,
+    const snippet = sanitizePageContextSnippet({
       title: tab.title ?? '',
       url: tab.url ?? '',
-      selectedText: '',
-      metaDescription: '',
+    });
+    return {
+      tabId: tab.id,
+      ...snippet,
     };
   }
 
@@ -71,28 +93,28 @@ export async function getActivePageContext(): Promise<PageContext | null> {
     });
     const snippet = results[0]?.result as PageContextSnippet | undefined;
     if (!snippet) {
-      return {
-        tabId: tab.id,
+      const fallback = sanitizePageContextSnippet({
         title: tab.title ?? '',
         url: tab.url ?? '',
-        selectedText: '',
-        metaDescription: '',
+      });
+      return {
+        tabId: tab.id,
+        ...fallback,
       };
     }
+    const sanitized = sanitizePageContextSnippet(snippet);
     return {
       tabId: tab.id,
-      title: snippet.title,
-      url: snippet.url,
-      selectedText: snippet.selectedText,
-      metaDescription: snippet.metaDescription,
+      ...sanitized,
     };
   } catch {
-    return {
-      tabId: tab.id,
+    const fallback = sanitizePageContextSnippet({
       title: tab.title ?? '',
       url: tab.url ?? '',
-      selectedText: '',
-      metaDescription: '',
+    });
+    return {
+      tabId: tab.id,
+      ...fallback,
     };
   }
 }
@@ -110,8 +132,7 @@ export function composeContextTail(ctx: PageContext | null): string {
     lines.push(`[当前页面] ${label}`);
   }
   if (ctx.selectedText.trim()) {
-    // Cap at 2k chars — selection can be a whole article.
-    const sel = ctx.selectedText.trim().slice(0, 2_000);
+    const sel = clip(ctx.selectedText.trim(), MAX_CONTEXT_SELECTION_CHARS);
     lines.push(`[选中内容] ${sel}`);
   }
   return lines.length > 0 ? `\n\n${lines.join('\n')}` : '';
