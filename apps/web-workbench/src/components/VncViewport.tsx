@@ -85,6 +85,10 @@ export function VncViewport({
 }: Props): JSX.Element {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const rfbRef = React.useRef<RFBInstance | null>(null);
+  const onStatusChangeRef = React.useRef(onStatusChange);
+  React.useEffect(() => {
+    onStatusChangeRef.current = onStatusChange;
+  }, [onStatusChange]);
   // Ref mirror of viewOnly so the async RFB construction can read
   // the current value without caring about stale closures.
   const viewOnlyRef = React.useRef(viewOnly);
@@ -102,25 +106,28 @@ export function VncViewport({
   // include `viewOnly` in deps — flipping it should never rebuild the
   // WebSocket. The secondary effect below syncs viewOnly live.
   React.useEffect(() => {
+    const emitStatus = (status: VncStatus): void => {
+      onStatusChangeRef.current?.(status);
+    };
     if (!wsUrl) {
-      onStatusChange?.('idle');
+      emitStatus('idle');
       return;
     }
     const container = containerRef.current;
     if (!container) return;
 
-    onStatusChange?.('connecting');
+    emitStatus('connecting');
     let disposed = false;
 
     let rfb: RFBInstance | null = null;
     const onConnect = () => {
       if (disposed) return;
       attemptRef.current = 0;
-      onStatusChange?.('connected');
+      emitStatus('connected');
     };
     const onDisconnect = () => {
       if (disposed) return;
-      onStatusChange?.('disconnected');
+      emitStatus('disconnected');
       // Schedule an auto-reconnect with exponential backoff. Attempt
       // 1 → 500ms, 2 → 1s, 3 → 2s, ... capped at 30s. Keeps retrying
       // indefinitely; user tearing down the component disposes the
@@ -135,7 +142,7 @@ export function VncViewport({
     };
     const onError = () => {
       if (disposed) return;
-      onStatusChange?.('error');
+      emitStatus('error');
     };
 
     loadRFB()
@@ -149,7 +156,7 @@ export function VncViewport({
           );
         } catch (err) {
           console.warn('[VncViewport] RFB construct threw', err);
-          onStatusChange?.('error');
+          emitStatus('error');
           return;
         }
         // Panel UX tuning:
@@ -173,7 +180,7 @@ export function VncViewport({
       .catch((err) => {
         if (disposed) return;
         console.warn('[VncViewport] noVNC chunk load failed', err);
-        onStatusChange?.('error');
+        emitStatus('error');
       });
 
     return () => {
@@ -200,7 +207,7 @@ export function VncViewport({
     // `reconnectEpoch` IS — bumping it forces a fresh RFB with the
     // same wsUrl, which is how auto-reconnect lands.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsUrl, password, onStatusChange, reconnectEpoch]);
+  }, [wsUrl, password, reconnectEpoch]);
 
   React.useEffect(() => {
     viewOnlyRef.current = viewOnly;
