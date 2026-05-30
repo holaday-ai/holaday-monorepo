@@ -8,6 +8,11 @@ describe('normalizeAccessToken', () => {
     expect(normalizeAccessToken(null)).toBeNull();
     expect(normalizeAccessToken(123)).toBeNull();
   });
+
+  it('treats obvious placeholder strings as invalid tokens', () => {
+    expect(normalizeAccessToken('undefined')).toBeNull();
+    expect(normalizeAccessToken(' null ')).toBeNull();
+  });
 });
 
 describe('normalizeStoredUser', () => {

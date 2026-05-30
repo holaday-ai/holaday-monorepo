@@ -32,7 +32,7 @@
  *   - prefers-color-scheme dark mode via matchMedia + theme tokens
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ORCHESTRATOR_HTTP, WORKBENCH_URL } from '../shared/config.js';
 import { openOrFocusWorkbench } from '../shared/open-workbench.js';
 import {
@@ -41,6 +41,7 @@ import {
   clearStoredUser,
   getAccessToken,
   getStoredUser,
+  normalizeAccessToken,
   setStoredUser,
 } from '../shared/storage.js';
 
@@ -209,6 +210,7 @@ export function App() {
   const [user, setUser] = useState<StoredUser | null>(null);
   const [, setToken] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  const authSyncSeq = useRef(0);
   const dark = useDarkMode();
   const t = dark ? DARK_THEME : LIGHT_THEME;
 
@@ -258,9 +260,11 @@ export function App() {
       const tokenChange = changes['holaday.access_token'];
       if (!tokenChange) return;
       void (async () => {
-        const newToken = (tokenChange.newValue as string | undefined) ?? null;
+        const seq = ++authSyncSeq.current;
+        const newToken = normalizeAccessToken(tokenChange.newValue);
         if (newToken) {
           const result = await fetchMe(newToken);
+          if (seq !== authSyncSeq.current) return;
           if (result.kind === 'ok') {
             await setStoredUser(result.user);
             setUser(result.user);
@@ -272,6 +276,7 @@ export function App() {
             setToken(null);
           }
         } else {
+          authSyncSeq.current = seq;
           setUser(null);
           setToken(null);
         }

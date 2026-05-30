@@ -15,7 +15,7 @@
  * "在 popup 中查看任务" button at the bottom.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ORCHESTRATOR_HTTP } from '../shared/config.js';
 import { composeContextTail, getActivePageContext, type PageContext } from '../shared/page-context.js';
 import {
@@ -23,6 +23,7 @@ import {
   clearAccessToken,
   getAccessToken,
   getStoredUser,
+  normalizeAccessToken,
   setAccessToken,
   setStoredUser,
 } from '../shared/storage.js';
@@ -88,6 +89,7 @@ export function App() {
   const [token, setToken] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
+  const authSyncSeq = useRef(0);
 
   const [pageContext, setPageContext] = useState<PageContext | null>(null);
   const [intent, setIntent] = useState('');
@@ -152,9 +154,11 @@ export function App() {
       const tokenChange = changes['holaday.access_token'];
       if (!tokenChange) return;
       void (async () => {
-        const newToken = (tokenChange.newValue as string | undefined) ?? null;
+        const seq = ++authSyncSeq.current;
+        const newToken = normalizeAccessToken(tokenChange.newValue);
         if (newToken) {
           const fetchedUser = await fetchMe(newToken);
+          if (seq !== authSyncSeq.current) return;
           if (fetchedUser) {
             await setStoredUser(fetchedUser);
             setUser(fetchedUser);
@@ -162,6 +166,7 @@ export function App() {
             setStatus('connected');
           }
         } else {
+          authSyncSeq.current = seq;
           setUser(null);
           setToken(null);
           setStatus('idle');

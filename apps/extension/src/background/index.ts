@@ -49,6 +49,7 @@ import {
   clearAccessToken,
   clearStoredUser,
   getAccessToken,
+  normalizeAccessToken,
   setAccessToken,
 } from '../shared/storage.js';
 import { captureVisionObservation, executeCdpAction, getActiveTabId } from './cdp-actions.js';
@@ -1042,8 +1043,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   const change = changes[TOKEN_STORAGE_KEY];
   if (!change) return;
-  const oldVal = typeof change.oldValue === 'string' ? change.oldValue : null;
-  const newVal = typeof change.newValue === 'string' && change.newValue ? change.newValue : null;
+  const oldVal = normalizeAccessToken(change.oldValue);
+  const newVal = normalizeAccessToken(change.newValue);
   if (newVal && newVal !== oldVal) {
     // Token appeared OR replaced. Force a fresh socket.
     state.tasks.clear();

@@ -18,7 +18,9 @@ function nonEmptyString(value: unknown): value is string {
 }
 
 export function normalizeAccessToken(value: unknown): string | null {
-  return nonEmptyString(value) ? value.trim() : null;
+  if (!nonEmptyString(value)) return null;
+  const token = value.trim();
+  return token === 'undefined' || token === 'null' ? null : token;
 }
 
 export function normalizeStoredUser(value: unknown): StoredUser | null {
@@ -43,7 +45,12 @@ export async function getAccessToken(): Promise<string | null> {
 }
 
 export async function setAccessToken(token: string): Promise<void> {
-  await chrome.storage.local.set({ [TOKEN_KEY]: token });
+  const normalized = normalizeAccessToken(token);
+  if (!normalized) {
+    await clearAccessToken();
+    return;
+  }
+  await chrome.storage.local.set({ [TOKEN_KEY]: normalized });
 }
 
 export async function clearAccessToken(): Promise<void> {
