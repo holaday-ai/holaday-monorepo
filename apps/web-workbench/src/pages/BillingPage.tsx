@@ -19,22 +19,24 @@ import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
 
 export function BillingPage(): JSX.Element {
   const mountedRef = React.useRef(false);
+  const requestIdRef = React.useRef(0);
   const [snapshot, setSnapshot] = React.useState<BillingSnapshot | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setLoadError(null);
     try {
       const next = normalizeBillingSnapshot(await trpc.auth.me.query());
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setSnapshot(next);
     } catch (err) {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setLoadError(billingLoadErrorMessage(err));
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
     }
   }, []);
 
@@ -43,6 +45,7 @@ export function BillingPage(): JSX.Element {
     void refresh();
     return () => {
       mountedRef.current = false;
+      requestIdRef.current += 1;
     };
   }, [refresh]);
 

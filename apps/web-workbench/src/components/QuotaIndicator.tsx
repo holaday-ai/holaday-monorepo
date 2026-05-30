@@ -34,52 +34,37 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
   const [snap, setSnap] = React.useState<QuotaSnapshot | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const mountedRef = React.useRef(false);
+  const requestIdRef = React.useRef(0);
 
-  const refresh = React.useCallback(() => {
+  const refresh = React.useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
-    trpc.quota.status.query().then(
-      (res) => {
-        const nextSnap = normalizeQuotaSnapshot(res);
-        if (nextSnap) {
-          setSnap(nextSnap);
-          setError(null);
-        } else {
-          setError('额度数据格式异常，请稍后重试。');
-        }
-        setLoading(false);
-      },
-      (err) => {
-        setError(quotaRefreshErrorMessage(err));
-        setLoading(false);
-      },
-    );
+    try {
+      const nextSnap = normalizeQuotaSnapshot(await trpc.quota.status.query());
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
+      if (nextSnap) {
+        setSnap(nextSnap);
+        setError(null);
+      } else {
+        setError('额度数据格式异常，请稍后重试。');
+      }
+    } catch (err) {
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
+      setError(quotaRefreshErrorMessage(err));
+    } finally {
+      if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
+    }
   }, []);
 
   React.useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    trpc.quota.status.query().then(
-      (res) => {
-        if (cancelled) return;
-        const nextSnap = normalizeQuotaSnapshot(res);
-        if (nextSnap) {
-          setSnap(nextSnap);
-          setError(null);
-        } else {
-          setError('额度数据格式异常，请稍后重试。');
-        }
-        setLoading(false);
-      },
-      (err) => {
-        if (cancelled) return;
-        setError(quotaRefreshErrorMessage(err));
-        setLoading(false);
-      },
-    );
+    mountedRef.current = true;
+    void refresh();
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
+      requestIdRef.current += 1;
     };
-  }, [refreshKey]);
+  }, [refresh, refreshKey]);
 
   if (loading && !snap) {
     return compact ? null : (
@@ -106,7 +91,7 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
                 {copy?.body ?? '请稍后重试。'}
               </div>
             </div>
-            <QuotaRetryButton loading={loading} onRetry={refresh} />
+            <QuotaRetryButton loading={loading} onRetry={() => void refresh()} />
           </div>
         </div>
       </div>
@@ -214,7 +199,7 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
             <span className="min-w-0 truncate" title={refreshCopy.body}>
               {refreshCopy.title}
             </span>
-            <QuotaRetryButton loading={loading} onRetry={refresh} compact />
+            <QuotaRetryButton loading={loading} onRetry={() => void refresh()} compact />
           </div>
         )}
       </div>

@@ -30,22 +30,24 @@ import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
  */
 export function UsagePage(): JSX.Element {
   const mountedRef = React.useRef(false);
+  const requestIdRef = React.useRef(0);
   const [snap, setSnap] = React.useState<NormalizedUsageSnapshot | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     try {
       const res = await trpc.usage.summary.query();
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setSnap(normalizeUsageSnapshot(res));
       setError(null);
     } catch (err) {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setError(usageErrorMessage(err));
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
     }
   }, []);
 
@@ -54,6 +56,7 @@ export function UsagePage(): JSX.Element {
     void refresh();
     return () => {
       mountedRef.current = false;
+      requestIdRef.current += 1;
     };
   }, [refresh]);
 
