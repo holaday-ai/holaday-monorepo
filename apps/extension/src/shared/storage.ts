@@ -13,9 +13,30 @@ export interface StoredUser {
   displayName?: string | null;
 }
 
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+export function normalizeStoredUser(value: unknown): StoredUser | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<Record<keyof StoredUser, unknown>>;
+  if (!nonEmptyString(raw.externalId) || !nonEmptyString(raw.email) || !nonEmptyString(raw.plan)) {
+    return null;
+  }
+  return {
+    externalId: raw.externalId,
+    email: raw.email,
+    plan: raw.plan,
+    ...(typeof raw.displayName === 'string' || raw.displayName === null
+      ? { displayName: raw.displayName }
+      : {}),
+  };
+}
+
 export async function getAccessToken(): Promise<string | null> {
   const out = await chrome.storage.local.get(TOKEN_KEY);
-  return (out[TOKEN_KEY] as string | undefined) ?? null;
+  const token = out[TOKEN_KEY];
+  return nonEmptyString(token) ? token : null;
 }
 
 export async function setAccessToken(token: string): Promise<void> {
@@ -28,7 +49,7 @@ export async function clearAccessToken(): Promise<void> {
 
 export async function getStoredUser(): Promise<StoredUser | null> {
   const out = await chrome.storage.local.get(USER_KEY);
-  return (out[USER_KEY] as StoredUser | undefined) ?? null;
+  return normalizeStoredUser(out[USER_KEY]);
 }
 
 export async function setStoredUser(user: StoredUser): Promise<void> {
