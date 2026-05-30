@@ -82,9 +82,11 @@ export function waitForTabComplete(tabId: number, timeoutMs: number): Promise<vo
     let resolved = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let listener: ((id: number, info: chrome.tabs.TabChangeInfo) => void) | null = null;
+    let removeListener: ((id: number) => void) | null = null;
     const cleanup = (): void => {
       if (timer) clearTimeout(timer);
       if (listener) chrome.tabs.onUpdated.removeListener(listener);
+      if (removeListener) chrome.tabs.onRemoved.removeListener(removeListener);
     };
     const finish = (fn: () => void): void => {
       if (resolved) return;
@@ -102,7 +104,12 @@ export function waitForTabComplete(tabId: number, timeoutMs: number): Promise<vo
         finish(resolve);
       }
     };
+    removeListener = (id: number): void => {
+      if (id !== tabId) return;
+      finish(() => reject(new Error('tab_closed')));
+    };
     chrome.tabs.onUpdated.addListener(listener);
+    chrome.tabs.onRemoved.addListener(removeListener);
     void chrome.tabs.get(tabId).then(
       (tab) => {
         if (tab.status === 'complete') finish(resolve);

@@ -7,13 +7,16 @@ import {
 } from './extension-tools.js';
 
 type TabListener = (id: number, info: chrome.tabs.TabChangeInfo) => void;
+type TabRemovedListener = (id: number) => void;
 type TabStatus = 'loading' | 'complete' | 'unloaded';
 
 function installChromeTabsMock(initialStatus: TabStatus = 'loading'): {
   listeners: Set<TabListener>;
+  removedListeners: Set<TabRemovedListener>;
   setStatus: (next: TabStatus) => void;
 } {
   const listeners = new Set<TabListener>();
+  const removedListeners = new Set<TabRemovedListener>();
   let status = initialStatus;
   globalThis.chrome = {
     tabs: {
@@ -26,10 +29,19 @@ function installChromeTabsMock(initialStatus: TabStatus = 'loading'): {
           listeners.delete(listener);
         }),
       },
+      onRemoved: {
+        addListener: vi.fn((listener: TabRemovedListener) => {
+          removedListeners.add(listener);
+        }),
+        removeListener: vi.fn((listener: TabRemovedListener) => {
+          removedListeners.delete(listener);
+        }),
+      },
     },
   } as unknown as typeof chrome;
   return {
     listeners,
+    removedListeners,
     setStatus(next) {
       status = next;
     },
@@ -66,6 +78,20 @@ describe('waitForTabComplete', () => {
 
     await expect(pending).resolves.toBeUndefined();
     expect(mock.listeners.size).toBe(0);
+  });
+
+  it('rejects immediately when the tab is closed during navigation', async () => {
+    const mock = installChromeTabsMock('loading');
+    const pending = waitForTabComplete(1, 25_000);
+    await Promise.resolve();
+
+    for (const listener of mock.removedListeners) {
+      listener(1);
+    }
+
+    await expect(pending).rejects.toThrow('tab_closed');
+    expect(mock.listeners.size).toBe(0);
+    expect(mock.removedListeners.size).toBe(0);
   });
 
   it('rejects when the tab never reaches complete', async () => {
