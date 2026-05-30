@@ -38,6 +38,7 @@ import { openOrFocusWorkbench } from '../shared/open-workbench.js';
 import {
   type StoredUser,
   clearAccessToken,
+  clearStoredUser,
   getAccessToken,
   getStoredUser,
   setStoredUser,
@@ -81,6 +82,18 @@ interface MeResponse {
       displayName: string;
     };
   };
+}
+
+function sendRuntimeMessage<T>(message: unknown): Promise<T | null> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(message, (response?: T) => {
+      if (chrome.runtime.lastError) {
+        resolve(null);
+        return;
+      }
+      resolve(response ?? null);
+    });
+  });
 }
 
 type FetchMeResult =
@@ -272,9 +285,13 @@ export function App() {
     if (resetting) return;
     setResetting(true);
     try {
-      await new Promise<void>((resolve) => {
-        chrome.runtime.sendMessage({ type: 'holaday.resetConnection' }, () => resolve());
+      const response = await sendRuntimeMessage<{ ok?: boolean }>({
+        type: 'holaday.resetConnection',
       });
+      if (!response) {
+        await clearAccessToken();
+        await clearStoredUser();
+      }
       setUser(null);
       setToken(null);
     } finally {
