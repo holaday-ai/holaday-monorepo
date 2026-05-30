@@ -178,6 +178,7 @@ export function InputArea({
   const [value, setValue] = React.useState('');
   const [attachments, setAttachments] = React.useState<DraftAttachment[]>([]);
   const [dragActive, setDragActive] = React.useState(false);
+  const mountedRef = React.useRef(false);
   // Local ref for the textarea so we can focus it from inside on
   // suggestion-chip prefill. The forwarded `inputRef` is also kept
   // up-to-date via a callback ref so external callers (Cmd+N
@@ -194,6 +195,13 @@ export function InputArea({
     },
     [inputRef],
   );
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Suggestion chip → composer prefill. The chip click sets
   // prefillIntent in MainPanel; this effect copies it into the local
@@ -355,6 +363,10 @@ export function InputArea({
         continue;
       }
       const draft: DraftAttachment = {
+        clientId:
+          typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
         fileId: '',
         filename: file.name,
         mimetype: file.type || 'application/octet-stream',
@@ -370,11 +382,12 @@ export function InputArea({
       if (draft.mimetype.startsWith('image/') && file.size < 2_000_000) {
         const reader = new FileReader();
         reader.onload = () => {
+          if (!mountedRef.current) return;
           if (typeof reader.result !== 'string') return;
           const url = reader.result;
           setAttachments((prev) =>
             prev.map((a) =>
-              a.filename === draft.filename && a.size === draft.size && !a.previewDataUrl
+              a.clientId === draft.clientId && !a.previewDataUrl
                 ? { ...a, previewDataUrl: url }
                 : a,
             ),
@@ -385,18 +398,20 @@ export function InputArea({
       setAttachments((prev) => [...prev, draft]);
       try {
         const meta = await uploadFile(file);
+        if (!mountedRef.current) return;
         setAttachments((prev) =>
           prev.map((a) =>
-            a === draft || (a.filename === draft.filename && a.fileId === '')
+            a.clientId === draft.clientId
               ? { ...a, fileId: meta.fileId, status: 'ready' as const }
               : a,
           ),
         );
       } catch (err) {
+        if (!mountedRef.current) return;
         const msg = isUploadError(err) ? err.message : pageErrorMessage(err, '上传失败');
         setAttachments((prev) =>
           prev.map((a) =>
-            a.filename === draft.filename && a.fileId === ''
+            a.clientId === draft.clientId
               ? { ...a, status: 'error' as const, errorMessage: msg }
               : a,
           ),
@@ -451,9 +466,11 @@ export function InputArea({
       toast.show(composerSubmitErrorMessage(msg), 'error');
       submitOk = false;
     } finally {
-      setSubmitting(false);
+      if (mountedRef.current) {
+        setSubmitting(false);
+      }
     }
-    if (submitOk) {
+    if (submitOk && mountedRef.current) {
       setValue('');
       setAttachments([]);
       // Plan mode is per-message intent, not a sticky preference —

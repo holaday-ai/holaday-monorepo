@@ -3,6 +3,8 @@ import { attachmentChipCopy } from '@/lib/attachment-chip-copy';
 import { cn } from '@/lib/utils';
 
 export interface DraftAttachment {
+  /** Client-only id for matching async upload / preview callbacks. */
+  clientId?: string;
   /** Server-issued id once upload completes. Empty while uploading. */
   fileId: string;
   filename: string;
