@@ -24,6 +24,7 @@ import {
   safeArray,
   safeText,
   truncate,
+  useMountedRef,
 } from './admin-shared';
 
 type Sort = 'createdAt' | 'taskCount' | 'lastActive';
@@ -33,6 +34,8 @@ const PAGE_SIZE = 50;
 type UserListResult = Awaited<ReturnType<typeof trpc.admin.userList.query>>;
 
 export function AdminUsersPage(): JSX.Element {
+  const mountedRef = useMountedRef();
+  const requestIdRef = React.useRef(0);
   const [search, setSearch] = React.useState('');
   const [searchDebounced, setSearchDebounced] = React.useState('');
   const [sort, setSort] = React.useState<Sort>('createdAt');
@@ -54,7 +57,8 @@ export function AdminUsersPage(): JSX.Element {
   }, [search]);
 
   React.useEffect(() => {
-    let cancelled = false;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     setLoading(true);
     setError(null);
     trpc.admin.userList
@@ -66,18 +70,20 @@ export function AdminUsersPage(): JSX.Element {
         limit: PAGE_SIZE,
       })
       .then((res) => {
-        if (!cancelled) setData(res);
+        if (mountedRef.current && requestIdRef.current === requestId) setData(res);
       })
       .catch((err) => {
-        if (!cancelled) setError(pageErrorMessage(err));
+        if (mountedRef.current && requestIdRef.current === requestId) {
+          setError(pageErrorMessage(err));
+        }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (mountedRef.current && requestIdRef.current === requestId) setLoading(false);
       });
     return () => {
-      cancelled = true;
+      requestIdRef.current += 1;
     };
-  }, [searchDebounced, sort, order, offset]);
+  }, [mountedRef, searchDebounced, sort, order, offset]);
 
   const users = safeArray(data?.users).map(normalizeUserRow);
   const total = nullableFiniteNumber(data?.total) ?? users.length;

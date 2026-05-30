@@ -29,6 +29,7 @@ import {
   safeArray,
   safeText,
   truncate,
+  useMountedRef,
 } from './admin-shared';
 
 type OverviewData = Awaited<ReturnType<typeof trpc.admin.learning.overview.query>>;
@@ -38,6 +39,8 @@ type Filter = 'all' | 'highRisk' | 'recentFail';
 const PAGE_SIZE = 50;
 
 export function AdminLearningPage(): JSX.Element {
+  const mountedRef = useMountedRef();
+  const requestIdRef = React.useRef(0);
   const [search, setSearch] = React.useState('');
   const [searchDebounced, setSearchDebounced] = React.useState('');
   const [filter, setFilter] = React.useState<Filter>('all');
@@ -55,7 +58,8 @@ export function AdminLearningPage(): JSX.Element {
   }, [search]);
 
   React.useEffect(() => {
-    let cancelled = false;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     setLoading(true);
     setError(null);
     trpc.admin.learning.overview
@@ -66,15 +70,21 @@ export function AdminLearningPage(): JSX.Element {
         offset,
         limit: PAGE_SIZE,
       })
-      .then((res) => !cancelled && setData(res))
-      .catch((err) => !cancelled && setError(pageErrorMessage(err)))
+      .then((res) => {
+        if (mountedRef.current && requestIdRef.current === requestId) setData(res);
+      })
+      .catch((err) => {
+        if (mountedRef.current && requestIdRef.current === requestId) {
+          setError(pageErrorMessage(err));
+        }
+      })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (mountedRef.current && requestIdRef.current === requestId) setLoading(false);
       });
     return () => {
-      cancelled = true;
+      requestIdRef.current += 1;
     };
-  }, [searchDebounced, filter, offset]);
+  }, [mountedRef, searchDebounced, filter, offset]);
 
   const normalized = normalizeLearningOverview(data);
 

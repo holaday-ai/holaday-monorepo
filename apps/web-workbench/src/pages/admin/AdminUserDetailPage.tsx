@@ -34,6 +34,7 @@ import {
   safeText,
   statusToken,
   truncate,
+  useMountedRef,
 } from './admin-shared';
 
 type DetailData = Awaited<ReturnType<typeof trpc.admin.userDetail.query>>;
@@ -48,27 +49,32 @@ const PIE_COLORS = [
 ];
 
 export function AdminUserDetailPage(): JSX.Element {
+  const mountedRef = useMountedRef();
+  const requestIdRef = React.useRef(0);
   const { userId } = useParams<{ userId: string }>();
   const [data, setData] = React.useState<DetailData | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!userId) return;
-    let cancelled = false;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     setData(null);
     setError(null);
     trpc.admin.userDetail
       .query({ userId })
       .then((res) => {
-        if (!cancelled) setData(res);
+        if (mountedRef.current && requestIdRef.current === requestId) setData(res);
       })
       .catch((err) => {
-        if (!cancelled) setError(pageErrorMessage(err));
+        if (mountedRef.current && requestIdRef.current === requestId) {
+          setError(pageErrorMessage(err));
+        }
       });
     return () => {
-      cancelled = true;
+      requestIdRef.current += 1;
     };
-  }, [userId]);
+  }, [mountedRef, userId]);
 
   if (!userId) {
     return <div className="px-6 py-8 text-muted-foreground">缺少 userId 参数</div>;

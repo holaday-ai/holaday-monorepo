@@ -36,6 +36,7 @@ import {
   safeText,
   statusToken,
   truncate,
+  useMountedRef,
 } from './admin-shared';
 
 type DomainDetail = Awaited<ReturnType<typeof trpc.admin.learning.domainDetail.query>>;
@@ -52,6 +53,8 @@ const CAT_COLORS: Record<string, string> = {
 };
 
 export function AdminLearningDomainPage(): JSX.Element {
+  const mountedRef = useMountedRef();
+  const requestIdRef = React.useRef(0);
   const { domain: rawDomain } = useParams<{ domain: string }>();
   const domain = rawDomain ? decodeURIComponent(rawDomain) : '';
 
@@ -61,17 +64,24 @@ export function AdminLearningDomainPage(): JSX.Element {
 
   React.useEffect(() => {
     if (!domain) return;
-    let cancelled = false;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     setData(null);
     setError(null);
     trpc.admin.learning.domainDetail
       .query({ domain })
-      .then((r) => !cancelled && setData(r))
-      .catch((err) => !cancelled && setError(pageErrorMessage(err)));
+      .then((r) => {
+        if (mountedRef.current && requestIdRef.current === requestId) setData(r);
+      })
+      .catch((err) => {
+        if (mountedRef.current && requestIdRef.current === requestId) {
+          setError(pageErrorMessage(err));
+        }
+      });
     return () => {
-      cancelled = true;
+      requestIdRef.current += 1;
     };
-  }, [domain]);
+  }, [domain, mountedRef]);
 
   if (!domain) {
     return (

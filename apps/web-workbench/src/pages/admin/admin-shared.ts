@@ -6,6 +6,8 @@
  * color language they see on /scheduled.
  */
 
+import * as React from 'react';
+
 export const ADMIN_MAGENTA = '#EA1F59';
 export const ADMIN_MAGENTA_SOFT = 'rgba(234,31,89,0.12)';
 export const ADMIN_BORDER = '#DCDDDD';
@@ -183,4 +185,15 @@ export function dayDelta(value: number, prev: number | null | undefined): number
   const previous = nullableFiniteNumber(prev);
   if (previous == null || previous === 0) return null;
   return ((current - previous) / previous) * 100;
+}
+
+export function useMountedRef(): React.MutableRefObject<boolean> {
+  const mountedRef = React.useRef(false);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  return mountedRef;
 }

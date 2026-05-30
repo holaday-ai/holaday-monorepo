@@ -46,6 +46,7 @@ import {
   safeArray,
   safeText,
   truncate,
+  useMountedRef,
 } from './admin-shared';
 
 type SummaryData = Awaited<ReturnType<typeof trpc.admin.finance.summary.query>>;
@@ -82,20 +83,29 @@ function formatTokens(tokens: unknown): string {
 type Tab = 'revenue' | 'cost';
 
 export function AdminFinancePage(): JSX.Element {
+  const mountedRef = useMountedRef();
+  const requestIdRef = React.useRef(0);
   const [tab, setTab] = React.useState<Tab>('revenue');
   const [summary, setSummary] = React.useState<SummaryData | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    let cancelled = false;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     trpc.admin.finance.summary
       .query()
-      .then((r) => !cancelled && setSummary(r))
-      .catch((err) => !cancelled && setError(pageErrorMessage(err)));
+      .then((r) => {
+        if (mountedRef.current && requestIdRef.current === requestId) setSummary(r);
+      })
+      .catch((err) => {
+        if (mountedRef.current && requestIdRef.current === requestId) {
+          setError(pageErrorMessage(err));
+        }
+      });
     return () => {
-      cancelled = true;
+      requestIdRef.current += 1;
     };
-  }, []);
+  }, [mountedRef]);
 
   if (error) {
     return (
@@ -231,29 +241,36 @@ function TabButton({
 }
 
 function RevenueTab(): JSX.Element {
+  const mountedRef = useMountedRef();
+  const requestIdRef = React.useRef(0);
   const [plan, setPlan] = React.useState<PlanData | null>(null);
   const [month, setMonth] = React.useState<MonthData | null>(null);
   const [funnel, setFunnel] = React.useState<FunnelData | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    let cancelled = false;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     Promise.all([
       trpc.admin.finance.revenueByPlan.query(),
       trpc.admin.finance.revenueByMonth.query(),
       trpc.admin.finance.conversionFunnel.query(),
     ])
       .then(([p, m, f]) => {
-        if (cancelled) return;
+        if (!mountedRef.current || requestIdRef.current !== requestId) return;
         setPlan(p);
         setMonth(m);
         setFunnel(f);
       })
-      .catch((err) => !cancelled && setErr(pageErrorMessage(err)));
+      .catch((err) => {
+        if (mountedRef.current && requestIdRef.current === requestId) {
+          setErr(pageErrorMessage(err));
+        }
+      });
     return () => {
-      cancelled = true;
+      requestIdRef.current += 1;
     };
-  }, []);
+  }, [mountedRef]);
 
   if (err) {
     return <ErrorPane msg={err} />;
@@ -431,29 +448,36 @@ function RevenueTab(): JSX.Element {
 }
 
 function CostTab(): JSX.Element {
+  const mountedRef = useMountedRef();
+  const requestIdRef = React.useRef(0);
   const [breakdown, setBreakdown] = React.useState<CostBreakdownData | null>(null);
   const [byDay, setByDay] = React.useState<CostByDayData | null>(null);
   const [topCostly, setTopCostly] = React.useState<TopCostlyData | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    let cancelled = false;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     Promise.all([
       trpc.admin.finance.costBreakdown.query(),
       trpc.admin.finance.costByDay.query(),
       trpc.admin.finance.topCostlyTasks.query(),
     ])
       .then(([b, d, t]) => {
-        if (cancelled) return;
+        if (!mountedRef.current || requestIdRef.current !== requestId) return;
         setBreakdown(b);
         setByDay(d);
         setTopCostly(t);
       })
-      .catch((err) => !cancelled && setErr(pageErrorMessage(err)));
+      .catch((err) => {
+        if (mountedRef.current && requestIdRef.current === requestId) {
+          setErr(pageErrorMessage(err));
+        }
+      });
     return () => {
-      cancelled = true;
+      requestIdRef.current += 1;
     };
-  }, []);
+  }, [mountedRef]);
 
   if (err) return <ErrorPane msg={err} />;
   if (!breakdown || !byDay || !topCostly) return <LoadingPane />;
@@ -689,6 +713,7 @@ function MeasuredChartFrame({
   className: string;
   children: (size: { width: number; height: number }) => React.ReactNode;
 }): JSX.Element {
+  const mountedRef = useMountedRef();
   const ref = React.useRef<HTMLDivElement | null>(null);
   const [size, setSize] = React.useState({ width: 0, height: 0 });
 
@@ -697,6 +722,7 @@ function MeasuredChartFrame({
     if (!element) return undefined;
 
     const updateSize = () => {
+      if (!mountedRef.current) return;
       const rect = element.getBoundingClientRect();
       setSize({
         width: Math.max(0, Math.floor(rect.width)),
@@ -708,7 +734,7 @@ function MeasuredChartFrame({
     const observer = new ResizeObserver(updateSize);
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [mountedRef]);
 
   return (
     <div ref={ref} className={className}>

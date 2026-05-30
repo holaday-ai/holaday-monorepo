@@ -43,38 +43,43 @@ import {
   safeText,
   statusToken,
   truncate,
+  useMountedRef,
 } from './admin-shared';
 
 type DashboardData = Awaited<ReturnType<typeof trpc.admin.dashboard.query>>;
 
 export function AdminDashboardPage(): JSX.Element {
+  const mountedRef = useMountedRef();
+  const requestIdRef = React.useRef(0);
   const [data, setData] = React.useState<DashboardData | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const chartFrameRef = React.useRef<HTMLDivElement | null>(null);
   const [chartSize, setChartSize] = React.useState({ width: 0, height: 0 });
 
   React.useEffect(() => {
-    let cancelled = false;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     trpc.admin.dashboard
       .query()
       .then((res) => {
-        if (!cancelled) setData(res);
+        if (mountedRef.current && requestIdRef.current === requestId) setData(res);
       })
       .catch((err) => {
-        if (!cancelled) {
+        if (mountedRef.current && requestIdRef.current === requestId) {
           setError(pageErrorMessage(err));
         }
       });
     return () => {
-      cancelled = true;
+      requestIdRef.current += 1;
     };
-  }, []);
+  }, [mountedRef]);
 
   React.useEffect(() => {
     const element = chartFrameRef.current;
     if (!element) return undefined;
 
     const updateSize = () => {
+      if (!mountedRef.current) return;
       const rect = element.getBoundingClientRect();
       setChartSize({
         width: Math.max(0, Math.floor(rect.width)),
@@ -86,7 +91,7 @@ export function AdminDashboardPage(): JSX.Element {
     const observer = new ResizeObserver(updateSize);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [data]);
+  }, [data, mountedRef]);
 
   if (error) {
     return (
