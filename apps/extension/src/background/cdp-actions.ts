@@ -281,17 +281,42 @@ async function doScroll(
   action: Extract<VisionAction, { kind: 'scroll' }>,
 ): Promise<ActionResult> {
   await ensureAttached(tabId);
-  // Scroll via mouseWheel at viewport centre. CDP expects deltaY
-  // inverted from our convention: we pass positive=down, the API
-  // treats positive=down as well, so it's 1:1.
+  // Scroll via mouseWheel at viewport centre. Read the live viewport
+  // when possible so narrow windows / side panels do not receive
+  // off-screen wheel events.
+  const point = await getViewportCenterForInput(tabId);
   await sendCdp(tabId, 'Input.dispatchMouseEvent', {
     type: 'mouseWheel',
-    x: 400, // somewhere inside the viewport
-    y: 300,
+    x: point.x,
+    y: point.y,
     deltaX: 0,
     deltaY: action.dy,
   });
   return { ok: true, message: `scrolled ${action.dy}px` };
+}
+
+async function getViewportCenterForInput(tabId: number): Promise<{ x: number; y: number }> {
+  try {
+    const evalResp = (await sendCdp(tabId, 'Runtime.evaluate', {
+      expression: 'JSON.stringify({ w: innerWidth, h: innerHeight })',
+      returnByValue: true,
+    })) as { result?: { value?: unknown } };
+    const raw = evalResp?.result?.value;
+    if (typeof raw === 'string') {
+      const parsed = JSON.parse(raw) as { w?: number; h?: number };
+      const width = typeof parsed.w === 'number' && Number.isFinite(parsed.w) ? parsed.w : 0;
+      const height = typeof parsed.h === 'number' && Number.isFinite(parsed.h) ? parsed.h : 0;
+      if (width > 0 && height > 0) {
+        return {
+          x: Math.max(1, Math.floor(width / 2)),
+          y: Math.max(1, Math.floor(height / 2)),
+        };
+      }
+    }
+  } catch {
+    // Keep scroll robust on pages where Runtime.evaluate is blocked.
+  }
+  return { x: 400, y: 300 };
 }
 
 async function doWait(action: Extract<VisionAction, { kind: 'wait' }>): Promise<ActionResult> {

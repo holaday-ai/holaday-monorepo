@@ -212,6 +212,38 @@ describe('executeCdpAction', () => {
       }),
     );
   });
+
+  it('scrolls at the live viewport center', async () => {
+    const sendCommand = vi.fn(async (_target, method: string) => {
+      if (method === 'Runtime.evaluate') {
+        return { result: { value: JSON.stringify({ w: 360, h: 640 }) } };
+      }
+      return {};
+    });
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    await expect(executeCdpAction(12, { kind: 'scroll', dy: 500 })).resolves.toEqual({
+      ok: true,
+      message: 'scrolled 500px',
+    });
+
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      2,
+      { tabId: 12 },
+      'Input.dispatchMouseEvent',
+      expect.objectContaining({
+        type: 'mouseWheel',
+        x: 180,
+        y: 320,
+        deltaY: 500,
+      }),
+    );
+  });
 });
 
 describe('cdpActionErrorMessage', () => {
