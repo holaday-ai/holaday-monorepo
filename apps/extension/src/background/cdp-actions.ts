@@ -203,7 +203,11 @@ export function cdpActionErrorMessage(err: unknown): string {
   if (
     lower.includes('no tab with id') ||
     lower.includes('tab closed') ||
-    lower.includes('target closed')
+    lower.includes('target closed') ||
+    lower.includes('frame was detached') ||
+    lower.includes('target navigated or closed') ||
+    lower.includes('execution context was destroyed') ||
+    lower.includes('cannot find context with specified id')
   ) {
     return '浏览器标签页已关闭或连接中断，请重新打开页面后重试';
   }
@@ -506,7 +510,11 @@ function shouldResetCdpSession(err: unknown): boolean {
     lower.includes('tab closed') ||
     lower.includes('target closed') ||
     lower.includes('target detached') ||
-    lower.includes('not attached')
+    lower.includes('not attached') ||
+    lower.includes('frame was detached') ||
+    lower.includes('target navigated or closed') ||
+    lower.includes('execution context was destroyed') ||
+    lower.includes('cannot find context with specified id')
   );
 }
 

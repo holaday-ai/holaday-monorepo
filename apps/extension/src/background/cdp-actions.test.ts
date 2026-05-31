@@ -364,6 +364,34 @@ describe('executeCdpAction', () => {
     expect(attach).toHaveBeenCalledTimes(2);
   });
 
+  it('forgets detached-frame CDP sessions so the next action can reattach', async () => {
+    const attach = vi.fn(async () => undefined);
+    const detach = vi.fn(async () => undefined);
+    const sendCommand = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Execution context was destroyed'))
+      .mockResolvedValue({});
+    globalThis.chrome = {
+      debugger: {
+        attach,
+        detach,
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    await expect(executeCdpAction(13, { kind: 'type', text: 'retry' })).resolves.toEqual({
+      ok: false,
+      message: '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
+    });
+    expect(detach).toHaveBeenCalledWith({ tabId: 13 });
+
+    await expect(executeCdpAction(13, { kind: 'type', text: 'retry' })).resolves.toEqual({
+      ok: true,
+      message: 'typed 5 chars',
+    });
+    expect(attach).toHaveBeenCalledTimes(2);
+  });
+
   it('clamps wait actions to a safe non-negative window', async () => {
     vi.useFakeTimers();
 
@@ -427,6 +455,12 @@ describe('cdpActionErrorMessage', () => {
     );
     expect(cdpActionErrorMessage(new Error('Cannot access a file:// URL'))).toBe(
       '扩展没有这个页面的访问权限，请检查扩展权限后重试',
+    );
+    expect(cdpActionErrorMessage(new Error('Frame was detached'))).toBe(
+      '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
+    );
+    expect(cdpActionErrorMessage(new Error('Execution context was destroyed'))).toBe(
+      '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
     );
     expect(cdpActionErrorMessage(new Error('The extensions gallery cannot be scripted.'))).toBe(
       '扩展没有这个页面的访问权限，请检查扩展权限后重试',
