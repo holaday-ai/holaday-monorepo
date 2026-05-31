@@ -141,6 +141,35 @@ describe('executeCdpAction', () => {
     await detached;
     expect(detach).toHaveBeenCalledWith({ tabId: 9 });
   });
+
+  it('omits printable text for modifier key chords', async () => {
+    const sendCommand = vi.fn(async () => ({}));
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    await expect(executeCdpAction(10, { kind: 'key', key: 'cmd+c' })).resolves.toEqual({
+      ok: true,
+      message: 'key cmd+c',
+    });
+
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      1,
+      { tabId: 10 },
+      'Input.dispatchKeyEvent',
+      expect.objectContaining({
+        type: 'keyDown',
+        modifiers: 4,
+        key: 'c',
+        code: 'KeyC',
+      }),
+    );
+    const keyDownParams = (sendCommand.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
+    expect(keyDownParams).not.toHaveProperty('text');
+  });
 });
 
 describe('cdpActionErrorMessage', () => {

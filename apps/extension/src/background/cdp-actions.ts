@@ -259,7 +259,7 @@ async function doKey(
     modifiers: mods,
     key: info.key,
     code: info.code,
-    ...(info.text ? { text: info.text } : {}),
+    ...(mods === 0 && info.text ? { text: info.text } : {}),
     ...(info.windowsVirtualKeyCode !== undefined
       ? { windowsVirtualKeyCode: info.windowsVirtualKeyCode }
       : {}),
