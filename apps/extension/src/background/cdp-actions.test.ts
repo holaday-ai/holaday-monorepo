@@ -397,6 +397,15 @@ describe('executeCdpAction', () => {
       message: '页面导航失败：域名无法解析，请检查网址后重试',
     });
   });
+
+  it('clips action result messages to the vision acted schema limit', async () => {
+    await expect(
+      executeCdpAction(15, { kind: 'wait_for_human', reason: 'x'.repeat(2_000) }),
+    ).resolves.toEqual({
+      ok: true,
+      message: `wait_for_human: ${'x'.repeat(984)}`,
+    });
+  });
 });
 
 describe('cdpActionErrorMessage', () => {

@@ -47,6 +47,7 @@ const VIEWPORT_READ_TIMEOUT_MS = 500;
 const WAIT_CAP_MS = 10_000;
 const MAX_NAVIGATE_URL_LENGTH = 2048;
 const TYPE_TEXT_CHUNK_CHARS = 1_000;
+const MAX_ACTION_RESULT_MESSAGE_CHARS = 1_000;
 
 /** Tabs we've already attached the debugger to this SW lifetime. */
 const attachedTabs = new Set<number>();
@@ -139,37 +140,58 @@ export async function detachAll(): Promise<void> {
  */
 export async function executeCdpAction(tabId: number, action: VisionAction): Promise<ActionResult> {
   try {
+    let result: ActionResult;
     switch (action.kind) {
       case 'click':
-        return await doClick(tabId, action);
+        result = await doClick(tabId, action);
+        break;
       case 'type':
-        return await doType(tabId, action);
+        result = await doType(tabId, action);
+        break;
       case 'key':
-        return await doKey(tabId, action);
+        result = await doKey(tabId, action);
+        break;
       case 'scroll':
-        return await doScroll(tabId, action);
+        result = await doScroll(tabId, action);
+        break;
       case 'navigate':
-        return await doNavigate(tabId, action);
+        result = await doNavigate(tabId, action);
+        break;
       case 'wait_for_human':
         // Orchestrator does the polling + Layer 4 bookkeeping for this
         // action; the extension just acknowledges so the runner sees
         // ok:true and proceeds to the wait loop (triggered server-side
         // via the runner's turn subscription).
-        return { ok: true, message: `wait_for_human: ${action.reason}` };
+        result = { ok: true, message: `wait_for_human: ${action.reason}` };
+        break;
       case 'wait':
-        return await doWait(action);
+        result = await doWait(action);
+        break;
       case 'screenshot':
         // A `screenshot` action means "re-observe without acting";
         // the runner takes a fresh observation on the next tick, so
         // there's nothing to dispatch here.
-        return { ok: true, message: 'screenshot re-observation noop' };
+        result = { ok: true, message: 'screenshot re-observation noop' };
+        break;
       case 'done':
       case 'give_up':
-        return { ok: true, message: `${action.kind} terminal; no driver work` };
+        result = { ok: true, message: `${action.kind} terminal; no driver work` };
+        break;
     }
+    return sanitizeActionResult(result);
   } catch (err) {
-    return { ok: false, message: cdpActionErrorMessage(err) };
+    return sanitizeActionResult({ ok: false, message: cdpActionErrorMessage(err) });
   }
+}
+
+function sanitizeActionResult(result: ActionResult): ActionResult {
+  if (!result.message || result.message.length <= MAX_ACTION_RESULT_MESSAGE_CHARS) {
+    return result;
+  }
+  return {
+    ...result,
+    message: result.message.slice(0, MAX_ACTION_RESULT_MESSAGE_CHARS),
+  };
 }
 
 export function cdpActionErrorMessage(err: unknown): string {
