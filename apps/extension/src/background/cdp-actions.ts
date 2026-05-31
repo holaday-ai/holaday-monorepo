@@ -286,6 +286,7 @@ async function doScroll(
   // when possible so narrow windows / side panels do not receive
   // off-screen wheel events.
   const point = await getViewportCenterForInput(tabId);
+  await ensureAttached(tabId);
   await sendCdp(tabId, 'Input.dispatchMouseEvent', {
     type: 'mouseWheel',
     x: point.x,
@@ -386,9 +387,32 @@ async function sendCdp(
       chrome.debugger.sendCommand({ tabId }, method, params) as Promise<unknown>,
       cap,
     ]);
+  } catch (err) {
+    if (shouldResetCdpSession(err)) {
+      forgetAttachedTab(tabId);
+      try {
+        await chrome.debugger.detach({ tabId });
+      } catch {
+        // best-effort: the target may already be gone or detached
+      }
+    }
+    throw err;
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+function shouldResetCdpSession(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('timeout') ||
+    lower.includes('no tab with id') ||
+    lower.includes('tab closed') ||
+    lower.includes('target closed') ||
+    lower.includes('target detached') ||
+    lower.includes('not attached')
+  );
 }
 
 /**
@@ -614,6 +638,7 @@ export async function captureVisionObservation(tabId: number): Promise<VisionObs
   let screenshotBase64 = '';
   let error: string | undefined;
   try {
+    await ensureAttached(tabId);
     const shot = (await sendCdp(tabId, 'Page.captureScreenshot', {
       format: 'jpeg',
       quality: 80,

@@ -12,6 +12,7 @@ import {
 } from './cdp-actions.js';
 
 afterEach(() => {
+  vi.useRealTimers();
   _resetAttachedTabsForTests();
   vi.restoreAllMocks();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -244,6 +245,38 @@ describe('executeCdpAction', () => {
         deltaY: 500,
       }),
     );
+  });
+
+  it('forgets timed-out CDP sessions so the next action can reattach', async () => {
+    vi.useFakeTimers();
+    const attach = vi.fn(async () => undefined);
+    const detach = vi.fn(async () => undefined);
+    const sendCommand = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise(() => undefined))
+      .mockResolvedValueOnce({});
+    globalThis.chrome = {
+      debugger: {
+        attach,
+        detach,
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    const failed = executeCdpAction(13, { kind: 'click', x: 10, y: 20 });
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await expect(failed).resolves.toEqual({
+      ok: false,
+      message: '浏览器操作超时，请保持标签页打开后重试',
+    });
+    expect(detach).toHaveBeenCalledWith({ tabId: 13 });
+
+    await expect(executeCdpAction(13, { kind: 'type', text: 'retry' })).resolves.toEqual({
+      ok: true,
+      message: 'typed 5 chars',
+    });
+    expect(attach).toHaveBeenCalledTimes(2);
   });
 });
 
