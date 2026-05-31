@@ -13,6 +13,8 @@
  * box rather than showing a scary error.
  */
 
+import { withDeadline } from './deadline.js';
+
 export interface PageContext {
   tabId: number;
   title: string;
@@ -115,6 +117,7 @@ export async function getActivePageContext(): Promise<PageContext | null> {
         func: pageWorldExtractor,
       }),
       PAGE_CONTEXT_READ_TIMEOUT_MS,
+      'page_context_timeout',
     );
     const snippet = results[0]?.result as PageContextSnippet | undefined;
     if (!snippet) {
@@ -161,21 +164,4 @@ export function composeContextTail(ctx: PageContext | null): string {
     lines.push(`[选中内容] ${sel}`);
   }
   return lines.length > 0 ? `\n\n${lines.join('\n')}` : '';
-}
-
-function withDeadline<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('page_context_timeout')), timeoutMs);
-    timer && (timer as { unref?: () => void }).unref?.();
-    work.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
-      },
-    );
-  });
 }

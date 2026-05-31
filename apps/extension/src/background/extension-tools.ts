@@ -29,6 +29,7 @@
 
 import type { ClientMessage, ServerMessage } from '@holaday/shared-types';
 import { send } from './ws-client.js';
+import { withDeadline } from '../shared/deadline.js';
 
 type ExtensionToolCall = Extract<ServerMessage, { type: 'server.extension.tool_call' }>;
 
@@ -310,27 +311,6 @@ async function executeScreenshot(): Promise<ScreenshotResult> {
   }
   const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 50 });
   return normalizeScreenshotCaptureDataUrl(dataUrl);
-}
-
-function withDeadline<T>(
-  work: Promise<T>,
-  timeoutMs: number,
-  message: string,
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
-    timer && (timer as { unref?: () => void }).unref?.();
-    work.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
-      },
-    );
-  });
 }
 
 export function extensionToolErrorPayload(

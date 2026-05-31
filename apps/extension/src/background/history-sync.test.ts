@@ -1,5 +1,17 @@
-import { describe, expect, it } from 'vitest';
-import { aggregateBrowsingHistoryItems, extractHost } from './history-sync.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  aggregateBrowsingHistoryItems,
+  extractHost,
+  syncHistoryToServer,
+} from './history-sync.js';
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  delete (globalThis as any).chrome;
+});
 
 describe('extractHost', () => {
   it('keeps only useful http hosts', () => {
@@ -8,6 +20,31 @@ describe('extractHost', () => {
     expect(extractHost('chrome://extensions')).toBeNull();
     expect(extractHost('http://localhost:5173/')).toBeNull();
     expect(extractHost('not a url')).toBeNull();
+  });
+
+  it('times out a stuck history sync post', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
+    globalThis.chrome = {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({ 'holaday.access_token': 'token' })),
+        },
+      },
+    } as unknown as typeof chrome;
+
+    const assertion = expect(
+      syncHistoryToServer([
+        {
+          domain: 'example.com',
+          visitCount: 1,
+          lastVisitAt: '2026-05-02T00:00:00.000Z',
+        },
+      ]),
+    ).rejects.toThrow('history_sync_post_timeout');
+    await vi.advanceTimersByTimeAsync(8_000);
+
+    await assertion;
   });
 });
 

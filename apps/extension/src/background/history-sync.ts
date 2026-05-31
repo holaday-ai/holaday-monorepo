@@ -23,6 +23,7 @@
 
 import { getAccessToken } from '../shared/storage.js';
 import { ORCHESTRATOR_HTTP } from '../shared/config.js';
+import { withDeadline } from '../shared/deadline.js';
 
 /**
  * Hard upload cap matches the server's MAX_HOSTS_PER_SYNC (see
@@ -48,6 +49,7 @@ const LOOKBACK_MS = LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
  * read fast enough to run on SW boot.
  */
 const HISTORY_MAX_RESULTS = 5000;
+const HISTORY_SYNC_POST_TIMEOUT_MS = 8_000;
 
 export interface BrowsingHostEntry {
   domain: string;
@@ -202,14 +204,18 @@ export async function syncHistoryToServer(
 ): Promise<BrowsingSyncResponse | null> {
   const token = await getAccessToken();
   if (!token) return null;
-  const res = await fetch(`${ORCHESTRATOR_HTTP}/extension/browsing-history`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ domains: entries }),
-  });
+  const res = await withDeadline(
+    fetch(`${ORCHESTRATOR_HTTP}/extension/browsing-history`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ domains: entries }),
+    }),
+    HISTORY_SYNC_POST_TIMEOUT_MS,
+    'history_sync_post_timeout',
+  );
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`history-sync HTTP ${res.status}: ${text.slice(0, 200)}`);

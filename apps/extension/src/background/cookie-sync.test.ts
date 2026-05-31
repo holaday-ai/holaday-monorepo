@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { collectCookies, normalizeSyncableCookie } from './cookie-sync.js';
+import { collectCookies, normalizeSyncableCookie, syncCookiesToServer } from './cookie-sync.js';
 
 function cookie(overrides: Partial<chrome.cookies.Cookie> = {}): chrome.cookies.Cookie {
   return {
@@ -20,6 +20,7 @@ function cookie(overrides: Partial<chrome.cookies.Cookie> = {}): chrome.cookies.
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   delete (globalThis as any).chrome;
 });
@@ -85,5 +86,24 @@ describe('normalizeSyncableCookie', () => {
     ]);
     expect(getAll).toHaveBeenCalledWith({ domain: '.taobao.com' });
     expect(getAll).toHaveBeenCalledWith({ domain: '.github.com' });
+  });
+
+  it('times out a stuck cookie sync post', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
+    globalThis.chrome = {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({ 'holaday.access_token': 'token' })),
+        },
+      },
+    } as unknown as typeof chrome;
+
+    const assertion = expect(syncCookiesToServer([cookie()])).rejects.toThrow(
+      'cookie_sync_post_timeout',
+    );
+    await vi.advanceTimersByTimeAsync(8_000);
+
+    await assertion;
   });
 });

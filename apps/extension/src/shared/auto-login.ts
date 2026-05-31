@@ -21,6 +21,7 @@
  */
 
 import { normalizeAccessToken } from './storage.js';
+import { withDeadline } from './deadline.js';
 
 const TOKEN_KEY = 'holaday.access_token';
 const AUTO_LOGIN_TAB_READ_TIMEOUT_MS = 2_000;
@@ -80,23 +81,6 @@ async function readTokenFromTab(tabId: number, url: string): Promise<string | nu
     );
     return null;
   }
-}
-
-function withDeadline<T>(work: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
-    timer && (timer as { unref?: () => void }).unref?.();
-    work.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
-      },
-    );
-  });
 }
 
 export async function tryAutoLogin(): Promise<string | null> {

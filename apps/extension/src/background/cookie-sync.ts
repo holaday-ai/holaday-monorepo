@@ -16,6 +16,7 @@
 
 import { getAccessToken } from '../shared/storage.js';
 import { ORCHESTRATOR_HTTP } from '../shared/config.js';
+import { withDeadline } from '../shared/deadline.js';
 
 /**
  * Curated list of domains we care about. Leading dot matches both
@@ -58,6 +59,7 @@ const MAX_COOKIE_NAME_CHARS = 256;
 const MAX_COOKIE_DOMAIN_CHARS = 253;
 const MAX_COOKIE_PATH_CHARS = 1024;
 const COOKIE_DOMAIN_READ_TIMEOUT_MS = 1_000;
+const COOKIE_SYNC_POST_TIMEOUT_MS = 8_000;
 
 export interface SyncableCookie {
   domain: string;
@@ -125,23 +127,6 @@ async function readCookiesForDomain(domain: string): Promise<chrome.cookies.Cook
   }
 }
 
-function withDeadline<T>(work: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
-    timer && (timer as { unref?: () => void }).unref?.();
-    work.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
-      },
-    );
-  });
-}
-
 interface SyncResponse {
   synced: number;
   domains: string[];
@@ -160,14 +145,18 @@ export async function syncCookiesToServer(
   if (cookies.length === 0) return { synced: 0, domains: [], deferred: false };
   const token = await getAccessToken();
   if (!token) return null;
-  const res = await fetch(`${ORCHESTRATOR_HTTP}/cookies/sync`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ cookies }),
-  });
+  const res = await withDeadline(
+    fetch(`${ORCHESTRATOR_HTTP}/cookies/sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ cookies }),
+    }),
+    COOKIE_SYNC_POST_TIMEOUT_MS,
+    'cookie_sync_post_timeout',
+  );
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`cookie-sync HTTP ${res.status}: ${text.slice(0, 200)}`);
