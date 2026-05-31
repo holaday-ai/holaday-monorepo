@@ -311,12 +311,18 @@ function removeClientForUser(userId: string, client: ClientState): void {
  * for actually being able to drive the user's Chrome.
  */
 export function hasConnectedExtension(userId: string): boolean {
+  return pickExtensionClientForUser(userId) !== null;
+}
+
+function pickExtensionClientForUser(userId: string): ClientState | null {
   const set = clientsByUser.get(userId);
-  if (!set) return false;
+  if (!set) return null;
+  let target: ClientState | null = null;
   for (const client of set) {
-    if (client.isExtension && client.socket.readyState === WebSocket.OPEN) return true;
+    if (!client.isExtension || client.socket.readyState !== WebSocket.OPEN) continue;
+    if (!target || client.lastPongAt > target.lastPongAt) target = client;
   }
-  return false;
+  return target;
 }
 
 /**
@@ -369,7 +375,7 @@ export interface ExtensionToolCallOutcome {
 
 /**
  * Send a tool call to ONE of the user's connected extension sockets
- * (the first OPEN one we find) and await the matching tool_result.
+ * (the most recently responsive OPEN one) and await the matching tool_result.
  *
  * Returns `{ ok: false, error }` rather than throwing on:
  *   - No extension connected            (code: 'no_extension')
@@ -386,16 +392,7 @@ export async function sendExtensionToolCall(
   const requestId = randomUUID();
   const timeoutMs = Math.max(1000, Math.min(60_000, opts.timeoutMs ?? 30_000));
 
-  const set = clientsByUser.get(userId);
-  let target: ClientState | null = null;
-  if (set) {
-    for (const client of set) {
-      if (client.isExtension && client.socket.readyState === WebSocket.OPEN) {
-        target = client;
-        break;
-      }
-    }
-  }
+  const target = pickExtensionClientForUser(userId);
   if (!target) {
     return { ok: false, error: { message: extensionNoClientMessage(), code: 'no_extension' } };
   }

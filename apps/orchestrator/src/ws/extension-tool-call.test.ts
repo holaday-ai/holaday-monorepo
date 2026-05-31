@@ -148,6 +148,11 @@ describe('extension tool-call websocket lifecycle', () => {
     );
     await Promise.all([waitForWelcome(primary), waitForWelcome(secondary)]);
 
+    secondary.send(JSON.stringify({ type: 'client.pong', at: Date.now() }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    primary.send(JSON.stringify({ type: 'client.pong', at: Date.now() }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
     const toolCall = new Promise<{
       taskId: string;
       requestId: string;
@@ -208,6 +213,122 @@ describe('extension tool-call websocket lifecycle', () => {
     await expect(outcomePromise).resolves.toEqual({
       ok: true,
       result: { finalUrl: 'https://example.com/final' },
+    });
+
+    primary.close();
+    secondary.close();
+  });
+
+  it('routes tool calls to the most recently responsive extension socket', async () => {
+    const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
+    const { signAccessToken } = await import('../auth/jwt.js');
+    const { createWsServer, sendExtensionToolCall } = await import('./server.js');
+    const { default: WebSocket } = await import('ws');
+
+    const port = 38226;
+    const server = createWsServer(port);
+    close = async () => {
+      await server.close();
+    };
+
+    const userId = 'usr_extension_fresh_socket_test';
+    const token = await signAccessToken({ sub: userId, plan: 'free' });
+    const primary = new WebSocket(`ws://127.0.0.1:${port}`, WS_SUBPROTOCOL);
+    const secondary = new WebSocket(`ws://127.0.0.1:${port}`, WS_SUBPROTOCOL);
+
+    await Promise.all([
+      new Promise<void>((resolve, reject) => {
+        primary.once('open', resolve);
+        primary.once('error', reject);
+      }),
+      new Promise<void>((resolve, reject) => {
+        secondary.once('open', resolve);
+        secondary.once('error', reject);
+      }),
+    ]);
+
+    const waitForWelcome = (client: typeof primary): Promise<void> =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('no welcome')), 5_000);
+        client.on('message', (raw: RawData) => {
+          const parsed = parseServerMessage(raw.toString());
+          if (parsed.success && parsed.data.type === 'server.welcome') {
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+      });
+
+    primary.send(
+      JSON.stringify({
+        type: 'client.hello',
+        token,
+        extensionVersion: 'primary-test-extension',
+      }),
+    );
+    await waitForWelcome(primary);
+    secondary.send(
+      JSON.stringify({
+        type: 'client.hello',
+        token,
+        extensionVersion: 'secondary-test-extension',
+      }),
+    );
+    await waitForWelcome(secondary);
+
+    primary.send(JSON.stringify({ type: 'client.pong', at: Date.now() }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    secondary.send(JSON.stringify({ type: 'client.pong', at: Date.now() }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const primaryUnexpectedCall = new Promise<never>((_, reject) => {
+      primary.on('message', (raw) => {
+        const parsed = parseServerMessage(raw.toString());
+        if (parsed.success && parsed.data.type === 'server.extension.tool_call') {
+          reject(new Error('tool call was routed to stale primary extension socket'));
+        }
+      });
+    });
+
+    const secondaryToolCall = new Promise<{
+      taskId: string;
+      requestId: string;
+    }>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('no extension tool call')), 5_000);
+      secondary.on('message', (raw) => {
+        const parsed = parseServerMessage(raw.toString());
+        if (parsed.success && parsed.data.type === 'server.extension.tool_call') {
+          clearTimeout(timer);
+          resolve({
+            taskId: parsed.data.taskId,
+            requestId: parsed.data.requestId,
+          });
+        }
+      });
+    });
+
+    const outcomePromise = sendExtensionToolCall(userId, {
+      taskId: 'tsk_extension_fresh_socket_test',
+      kind: 'navigate',
+      args: { url: 'https://example.com/' },
+      timeoutMs: 30_000,
+    });
+
+    const call = await Promise.race([secondaryToolCall, primaryUnexpectedCall]);
+    secondary.send(
+      JSON.stringify({
+        type: 'client.extension.tool_result',
+        taskId: call.taskId,
+        requestId: call.requestId,
+        ok: true,
+        result: { finalUrl: 'https://example.com/fresh' },
+        at: Date.now(),
+      }),
+    );
+
+    await expect(outcomePromise).resolves.toEqual({
+      ok: true,
+      result: { finalUrl: 'https://example.com/fresh' },
     });
 
     primary.close();
