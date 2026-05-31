@@ -432,6 +432,8 @@ export function App() {
         'sidepanel_create_task_body_timeout',
       );
       if (!mountedRef.current) return;
+      const currentToken = normalizeAccessToken(await getAccessToken());
+      if (currentToken !== token) return;
       const newTaskId = body.result.data.taskId;
       setActiveTaskId(newTaskId);
       setIntent('');
