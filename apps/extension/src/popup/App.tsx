@@ -34,6 +34,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ORCHESTRATOR_HTTP, WORKBENCH_URL } from '../shared/config.js';
+import { withDeadline } from '../shared/deadline.js';
 import { fetchWithDeadline } from '../shared/http.js';
 import { openOrFocusWorkbench } from '../shared/open-workbench.js';
 import {
@@ -51,6 +52,7 @@ import {
 const HISTORY_SYNC_ENABLED_KEY = 'holaday.history.enabled';
 const HISTORY_SYNC_SUMMARY_KEY = 'holaday.history.lastSyncSummary';
 const AUTH_ME_TIMEOUT_MS = 8_000;
+const POPUP_STORAGE_TIMEOUT_MS = 1_500;
 
 interface HistorySyncSummary {
   ingested: number;
@@ -564,13 +566,28 @@ function BrowsingStatusBlock({ theme }: { theme: ThemeTokens }) {
   const [enabled, setEnabled] = useState<boolean>(true);
 
   useEffect(() => {
-    chrome.storage.local.get([HISTORY_SYNC_SUMMARY_KEY, HISTORY_SYNC_ENABLED_KEY], (r) => {
-      const s = r[HISTORY_SYNC_SUMMARY_KEY];
-      if (s && typeof s === 'object' && typeof (s as { ingested?: unknown }).ingested === 'number') {
-        setSummary(s as HistorySyncSummary);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await withDeadline(
+          chrome.storage.local.get([HISTORY_SYNC_SUMMARY_KEY, HISTORY_SYNC_ENABLED_KEY]),
+          POPUP_STORAGE_TIMEOUT_MS,
+          'popup_history_storage_read_timeout',
+        );
+        if (cancelled) return;
+        const s = r[HISTORY_SYNC_SUMMARY_KEY];
+        if (
+          s &&
+          typeof s === 'object' &&
+          typeof (s as { ingested?: unknown }).ingested === 'number'
+        ) {
+          setSummary(s as HistorySyncSummary);
+        }
+        setEnabled(r[HISTORY_SYNC_ENABLED_KEY] !== false);
+      } catch {
+        // Keep default ON + empty summary; storage changes will still refresh the card.
       }
-      setEnabled(r[HISTORY_SYNC_ENABLED_KEY] !== false);
-    });
+    })();
     const listener = (
       changes: Record<string, chrome.storage.StorageChange>,
       area: chrome.storage.AreaName,
@@ -585,14 +602,21 @@ function BrowsingStatusBlock({ theme }: { theme: ThemeTokens }) {
       }
     };
     chrome.storage.onChanged.addListener(listener);
-    return () => chrome.storage.onChanged.removeListener(listener);
+    return () => {
+      cancelled = true;
+      chrome.storage.onChanged.removeListener(listener);
+    };
   }, []);
 
   async function toggleEnabled(): Promise<void> {
     const next = !enabled;
     setEnabled(next);
     try {
-      await chrome.storage.local.set({ [HISTORY_SYNC_ENABLED_KEY]: next });
+      await withDeadline(
+        chrome.storage.local.set({ [HISTORY_SYNC_ENABLED_KEY]: next }),
+        POPUP_STORAGE_TIMEOUT_MS,
+        'popup_history_storage_write_timeout',
+      );
     } catch {
       setEnabled(enabled);
     }
