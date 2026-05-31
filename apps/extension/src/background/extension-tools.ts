@@ -468,9 +468,12 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
     return;
   }
   inFlightToolCallRequestIds.add(dedupeKey);
-  const waitMs = normalizeNavigateWaitMs(args?.waitMs);
   const callTimeoutMs = Math.max(1000, Math.min(60_000, call.timeoutMs ?? 30_000));
   const operationBudgetMs = Math.max(500, callTimeoutMs - 500);
+  const waitMs = Math.min(
+    normalizeNavigateWaitMs(args?.waitMs),
+    Math.max(0, operationBudgetMs - 1250),
+  );
   const navigateLoadTimeoutMs = Math.max(
     1000,
     Math.min(NAVIGATE_LOAD_TIMEOUT_MS, operationBudgetMs - waitMs - 250),

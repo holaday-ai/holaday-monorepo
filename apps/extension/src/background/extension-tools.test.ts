@@ -559,6 +559,57 @@ describe('handleExtensionToolCall', () => {
     );
   });
 
+  it('caps navigate settle wait to the tool call budget', async () => {
+    vi.useFakeTimers();
+    vi.mocked(send).mockClear();
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, url: 'https://holaday.ai/app' }]),
+        update: vi.fn(async () => ({ id: 2, url: 'https://example.com/' }) as chrome.tabs.Tab),
+        get: vi.fn(async () => ({
+          id: 2,
+          status: 'complete',
+          url: 'https://example.com/',
+          title: 'Example',
+        })),
+        onUpdated: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+        onRemoved: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+      },
+      scripting: {
+        executeScript: vi.fn(async () => [{ result: 'hello' }]),
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_wait_budget',
+      requestId: 'req_wait_budget',
+      kind: 'navigate',
+      args: { url: 'https://example.com/', waitMs: 10_000 },
+      timeoutMs: 2_000,
+    };
+
+    const pending = handleExtensionToolCall(call);
+    await vi.advanceTimersByTimeAsync(250);
+    await pending;
+
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'client.extension.tool_result',
+        taskId: 'tsk_wait_budget',
+        requestId: 'req_wait_budget',
+        ok: true,
+        result: expect.objectContaining({ bodyText: 'hello' }),
+      }),
+    );
+  });
+
   it('clips body text inside the page before sending the tool result', async () => {
     vi.mocked(send).mockClear();
     let bodyTextCap = 0;
