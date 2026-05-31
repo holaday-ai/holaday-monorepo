@@ -91,6 +91,14 @@ async function ensureAttached(tabId: number): Promise<void> {
  * when the tab closes or the SW is torn down.
  */
 export async function detachFromTab(tabId: number): Promise<void> {
+  const pending = pendingAttachByTab.get(tabId);
+  if (pending && !attachedTabs.has(tabId)) {
+    try {
+      await pending;
+    } catch {
+      return;
+    }
+  }
   if (!attachedTabs.has(tabId)) return;
   try {
     await chrome.debugger.detach({ tabId });

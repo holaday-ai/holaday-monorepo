@@ -3,6 +3,7 @@ import {
   _resetAttachedTabsForTests,
   cdpActionErrorMessage,
   captureVisionObservation,
+  detachFromTab,
   executeCdpAction,
   getActiveTabId,
   normalizeCdpNavigateUrl,
@@ -74,6 +75,38 @@ describe('executeCdpAction', () => {
       { ok: true, message: 'typed 5 chars' },
     ]);
     expect(sendCommand).toHaveBeenCalled();
+  });
+
+  it('waits for an in-flight debugger attach before detaching during teardown', async () => {
+    let resolveAttach: () => void = () => {
+      throw new Error('attach promise was not created');
+    };
+    const attach = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveAttach = resolve;
+        }),
+    );
+    const detach = vi.fn(async () => undefined);
+    globalThis.chrome = {
+      debugger: {
+        attach,
+        detach,
+        sendCommand: vi.fn(async () => ({})),
+      },
+    } as unknown as typeof chrome;
+
+    const action = executeCdpAction(8, { kind: 'type', text: 'cleanup' });
+    await Promise.resolve();
+    const detached = detachFromTab(8);
+    await Promise.resolve();
+
+    expect(detach).not.toHaveBeenCalled();
+    resolveAttach();
+
+    await expect(action).resolves.toMatchObject({ ok: true });
+    await detached;
+    expect(detach).toHaveBeenCalledWith({ tabId: 8 });
   });
 });
 
