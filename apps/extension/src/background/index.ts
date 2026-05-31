@@ -59,6 +59,7 @@ import { runHistorySync } from './history-sync.js';
 import { handleExtensionToolCall } from './extension-tools.js';
 import { isTrustedAuthBridgeSender } from './auth-bridge-trust.js';
 import { decideAuthTokenAction } from './auth-token-handler.js';
+import { sendCriticalClientMessage } from './critical-send.js';
 import { withDeadline } from '../shared/deadline.js';
 import {
   connect,
@@ -383,31 +384,37 @@ async function onVisionObserve(
   trackVisionTask(msg.taskId, 'observing', { tickIndex: msg.tickIndex });
   const tabId = await getActiveTabId();
   if (tabId === null) {
-    send({
-      type: 'client.vision.observation',
-      taskId: msg.taskId,
-      tickIndex: msg.tickIndex,
-      screenshotBase64: '',
-      viewportWidth: 0,
-      viewportHeight: 0,
-      url: '',
-      title: '',
-      error: 'no active tab (window may have been backgrounded before task started)',
-    });
+    sendCriticalClientMessage(
+      {
+        type: 'client.vision.observation',
+        taskId: msg.taskId,
+        tickIndex: msg.tickIndex,
+        screenshotBase64: '',
+        viewportWidth: 0,
+        viewportHeight: 0,
+        url: '',
+        title: '',
+        error: 'no active tab (window may have been backgrounded before task started)',
+      },
+      'vision observation',
+    );
     return;
   }
   const obs = await captureVisionObservation(tabId);
-  send({
-    type: 'client.vision.observation',
-    taskId: msg.taskId,
-    tickIndex: msg.tickIndex,
-    screenshotBase64: obs.screenshotBase64,
-    viewportWidth: obs.viewportWidth,
-    viewportHeight: obs.viewportHeight,
-    url: obs.url,
-    title: obs.title,
-    ...(obs.error ? { error: obs.error } : {}),
-  });
+  sendCriticalClientMessage(
+    {
+      type: 'client.vision.observation',
+      taskId: msg.taskId,
+      tickIndex: msg.tickIndex,
+      screenshotBase64: obs.screenshotBase64,
+      viewportWidth: obs.viewportWidth,
+      viewportHeight: obs.viewportHeight,
+      url: obs.url,
+      title: obs.title,
+      ...(obs.error ? { error: obs.error } : {}),
+    },
+    'vision observation',
+  );
   // After sending observation → orchestrator is calling Claude next.
   trackVisionTask(msg.taskId, 'deciding', { tickIndex: msg.tickIndex });
 }
@@ -488,12 +495,15 @@ function sendVisionActed(
   msg: Extract<ServerMessage, { type: 'server.vision.act' }>,
   payload: VisionActResultPayload,
 ): void {
-  send({
-    type: 'client.vision.acted',
-    taskId: msg.taskId,
-    tickIndex: msg.tickIndex,
-    ...payload,
-  });
+  sendCriticalClientMessage(
+    {
+      type: 'client.vision.acted',
+      taskId: msg.taskId,
+      tickIndex: msg.tickIndex,
+      ...payload,
+    },
+    'vision action',
+  );
 }
 
 function visionActDedupeKey(taskId: string, tickIndex: number): string {
@@ -662,14 +672,17 @@ async function runStep(
     });
     // Always ship the driver's raw data over WS — the orchestrator
     // needs the unmodified payload for task_steps.output persistence.
-    send({
-      type: 'client.step.result',
-      taskId: msg.taskId,
-      stepId: msg.stepId,
-      status: result.status,
-      ...(result.data !== undefined ? { data: result.data } : {}),
-      ...(result.error ? { error: result.error } : {}),
-    });
+    sendCriticalClientMessage(
+      {
+        type: 'client.step.result',
+        taskId: msg.taskId,
+        stepId: msg.stepId,
+        status: result.status,
+        ...(result.data !== undefined ? { data: result.data } : {}),
+        ...(result.error ? { error: result.error } : {}),
+      },
+      'step result',
+    );
 
     // Thumbnail comes in `result.data.thumbnail` directly from the
     // driver now (commit landing this change). We used to re-capture
@@ -697,16 +710,19 @@ async function runStep(
     }
   } catch (err) {
     console.error('[holaday] step crash', err);
-    send({
-      type: 'client.step.result',
-      taskId: msg.taskId,
-      stepId: msg.stepId,
-      status: 'error',
-      error: {
-        code: 'DRIVER_CRASH',
-        message: err instanceof Error ? err.message : String(err),
+    sendCriticalClientMessage(
+      {
+        type: 'client.step.result',
+        taskId: msg.taskId,
+        stepId: msg.stepId,
+        status: 'error',
+        error: {
+          code: 'DRIVER_CRASH',
+          message: err instanceof Error ? err.message : String(err),
+        },
       },
-    });
+      'step result',
+    );
   }
 }
 
