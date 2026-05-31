@@ -261,6 +261,12 @@ function openSocket(token: string): void {
       fireUnauthorized();
       return;
     }
+    if (unauthorizedFired) {
+      // Some servers/proxies send a server.error frame before closing
+      // with a generic code. Once auth has been rejected, never schedule
+      // a network reconnect with the same stale bearer.
+      return;
+    }
     if (state.closedByUser) return;
     scheduleReconnect(token);
   };

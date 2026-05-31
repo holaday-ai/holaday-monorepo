@@ -368,4 +368,36 @@ describe('ws-client send', () => {
       expect.any(Error),
     );
   });
+
+  it('does not reconnect after an unauthorized frame followed by a generic close', async () => {
+    vi.useFakeTimers();
+    const { connect, onUnauthorized, getWsConnectionStatus } = await import('./ws-client.js');
+    let cleanupCalls = 0;
+    onUnauthorized(() => {
+      cleanupCalls += 1;
+    });
+    connect('stale-token');
+    const [socket] = sockets;
+    if (!socket) throw new Error('expected websocket');
+
+    socket.dispatch('message', {
+      data: JSON.stringify({
+        type: 'server.error',
+        code: 'UNAUTHORIZED',
+        message: 'bad token',
+      }),
+    });
+    socket.readyState = FakeWebSocket.CLOSED;
+    socket.dispatch('close', { code: 1008, reason: 'policy violation' });
+
+    expect(cleanupCalls).toBe(1);
+    await expect(getWsConnectionStatus()).resolves.toMatchObject({
+      connected: false,
+      reconnectAttempt: 0,
+      nextRetryAt: null,
+      lastCloseCode: 1008,
+    });
+    vi.advanceTimersByTime(5_000);
+    expect(sockets).toHaveLength(1);
+  });
 });
