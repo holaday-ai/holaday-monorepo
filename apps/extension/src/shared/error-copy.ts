@@ -15,6 +15,10 @@ const RULES: ReadonlyArray<{ match: RegExp; message: string }> = [
     message: '浏览器连接中断，请重新打开 HOLA DAY 扩展后重试。',
   },
   {
+    match: /502|bad gateway|websocket.*handshake|unexpected response code/i,
+    message: '浏览器代理服务暂时不可用，请稍后重试；如果刚更新扩展，请重新加载 HOLA DAY。',
+  },
+  {
     match: /timeout|timed.?out|超时/i,
     message: '请求超时，页面或服务可能仍在加载，请稍后重试。',
   },
