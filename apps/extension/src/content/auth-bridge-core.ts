@@ -71,7 +71,8 @@ export function decideObservedTokenAction(
 ): SyncAction {
   const decision = decideAction(prev, curr);
   if (decision.kind !== 'set') return decision;
-  return looksLikeToken(decision.token) ? decision : { kind: 'clear' };
+  if (looksLikeToken(decision.token)) return decision;
+  return prev === null ? { kind: 'unchanged' } : { kind: 'clear' };
 }
 
 /**
