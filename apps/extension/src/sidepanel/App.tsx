@@ -116,13 +116,20 @@ export function App() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [tasks, setTasks] = useState<TaskView[]>([]);
   const tasksRefreshInFlight = useRef(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   async function refreshTasksSnapshot(): Promise<void> {
     if (tasksRefreshInFlight.current) return;
     tasksRefreshInFlight.current = true;
     try {
       const resp = await sendRuntimeMessage<{ tasks?: TaskView[] }>({ type: 'holaday.tasks' });
-      if (resp?.tasks) setTasks(resp.tasks);
+      if (resp?.tasks && mountedRef.current) setTasks(resp.tasks);
     } finally {
       tasksRefreshInFlight.current = false;
     }
@@ -134,9 +141,11 @@ export function App() {
   // it succeeds, hydrate the user via auth.me so the header shows
   // the real account instead of the login form.
   useEffect(() => {
+    let cancelled = false;
     void (async () => {
       const stored = await getStoredUser();
       let tok = await getAccessToken();
+      if (cancelled) return;
       if (stored && tok) {
         setUser(stored);
         setToken(tok);
@@ -150,8 +159,10 @@ export function App() {
         if (liftedToken) {
           tok = liftedToken;
           const fetchedUser = await fetchMe(liftedToken);
+          if (cancelled) return;
           if (fetchedUser) {
             await setStoredUser(fetchedUser);
+            if (cancelled) return;
             setUser(fetchedUser);
             setToken(liftedToken);
             setStatus('connected');
@@ -167,8 +178,12 @@ export function App() {
           }
         }
       }
+      if (cancelled) return;
       await refreshTasksSnapshot();
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Cross-context sync: if the popup logs in / out in another window,
@@ -176,6 +191,7 @@ export function App() {
   // change fires here and the panel reflects the new session
   // without a refresh.
   useEffect(() => {
+    let cancelled = false;
     const listener = (
       changes: Record<string, chrome.storage.StorageChange>,
       area: chrome.storage.AreaName,
@@ -188,9 +204,10 @@ export function App() {
         const newToken = normalizeAccessToken(tokenChange.newValue);
         if (newToken) {
           const fetchedUser = await fetchMe(newToken);
-          if (seq !== authSyncSeq.current) return;
+          if (cancelled || seq !== authSyncSeq.current) return;
           if (fetchedUser) {
             await setStoredUser(fetchedUser);
+            if (cancelled || seq !== authSyncSeq.current) return;
             setUser(fetchedUser);
             setToken(newToken);
             setStatus('connected');
@@ -204,7 +221,10 @@ export function App() {
       })();
     };
     chrome.storage.onChanged.addListener(listener);
-    return () => chrome.storage.onChanged.removeListener(listener);
+    return () => {
+      cancelled = true;
+      chrome.storage.onChanged.removeListener(listener);
+    };
   }, []);
 
   useEffect(() => {
