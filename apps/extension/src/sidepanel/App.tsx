@@ -20,6 +20,7 @@ import { ORCHESTRATOR_HTTP } from '../shared/config.js';
 import { humanizeExtensionError } from '../shared/error-copy.js';
 import { fetchWithDeadline, responseJsonWithDeadline } from '../shared/http.js';
 import { composeContextTail, getActivePageContext, type PageContext } from '../shared/page-context.js';
+import { sendRuntimeMessageWithRetry } from '../shared/runtime-message.js';
 import {
   type StoredUser,
   clearAccessToken,
@@ -79,36 +80,10 @@ interface CreateTaskResponse {
 }
 
 const PAGE_CONTEXT_REFRESH_MS = 2_000;
-const RUNTIME_MESSAGE_TIMEOUT_MS = 5_000;
 const AUTH_ME_TIMEOUT_MS = 8_000;
 const AUTH_ME_BODY_TIMEOUT_MS = 2_000;
 const CREATE_TASK_TIMEOUT_MS = 10_000;
 const CREATE_TASK_BODY_TIMEOUT_MS = 2_000;
-
-function sendRuntimeMessage<T>(message: unknown): Promise<T | null> {
-  return new Promise((resolve) => {
-    let settled = false;
-    let timer: number | null = null;
-    const finish = (value: T | null): void => {
-      if (settled) return;
-      settled = true;
-      if (timer !== null) window.clearTimeout(timer);
-      resolve(value);
-    };
-    timer = window.setTimeout(() => finish(null), RUNTIME_MESSAGE_TIMEOUT_MS);
-    try {
-      chrome.runtime.sendMessage(message, (response?: T) => {
-        if (chrome.runtime.lastError) {
-          finish(null);
-          return;
-        }
-        finish(response ?? null);
-      });
-    } catch {
-      finish(null);
-    }
-  });
-}
 
 export function App() {
   const [user, setUser] = useState<StoredUser | null>(null);
@@ -145,7 +120,7 @@ export function App() {
     if (tasksRefreshInFlight.current) return;
     tasksRefreshInFlight.current = true;
     try {
-      const resp = await sendRuntimeMessage<{ tasks?: TaskView[] }>({ type: 'holaday.tasks' });
+      const resp = await sendRuntimeMessageWithRetry<{ tasks?: TaskView[] }>({ type: 'holaday.tasks' });
       if (resp?.tasks && mountedRef.current) setTasks(resp.tasks);
     } finally {
       tasksRefreshInFlight.current = false;
@@ -167,9 +142,9 @@ export function App() {
         setUser(stored);
         setToken(tok);
         setStatus('connected');
-        void sendRuntimeMessage({ type: 'holaday.connect', token: tok });
+        void sendRuntimeMessageWithRetry({ type: 'holaday.connect', token: tok });
       } else if (!tok) {
-        const resp = await sendRuntimeMessage<{ ok?: boolean; token?: string | null }>({
+        const resp = await sendRuntimeMessageWithRetry<{ ok?: boolean; token?: string | null }>({
           type: 'holaday.tryAutoLogin',
         });
         const liftedToken = resp?.token ?? null;
@@ -346,7 +321,7 @@ export function App() {
     setStatus('loading');
     setError(null);
     try {
-      const resp = await sendRuntimeMessage<{ ok?: boolean; token?: string | null }>({
+      const resp = await sendRuntimeMessageWithRetry<{ ok?: boolean; token?: string | null }>({
         type: 'holaday.tryAutoLogin',
       });
       if (!mountedRef.current) return;
@@ -390,7 +365,7 @@ export function App() {
   async function logout(): Promise<void> {
     await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
     if (!mountedRef.current) return;
-    void sendRuntimeMessage({ type: 'holaday.disconnect' });
+    void sendRuntimeMessageWithRetry({ type: 'holaday.disconnect' });
     clearLocalSessionState();
   }
 

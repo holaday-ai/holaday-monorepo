@@ -37,6 +37,7 @@ import { ORCHESTRATOR_HTTP, WORKBENCH_URL } from '../shared/config.js';
 import { withDeadline } from '../shared/deadline.js';
 import { fetchWithDeadline, responseJsonWithDeadline } from '../shared/http.js';
 import { openOrFocusWorkbench } from '../shared/open-workbench.js';
+import { sendRuntimeMessageWithRetry } from '../shared/runtime-message.js';
 import {
   type StoredUser,
   clearAccessToken,
@@ -88,33 +89,6 @@ interface MeResponse {
       displayName: string;
     };
   };
-}
-
-const RUNTIME_MESSAGE_TIMEOUT_MS = 5_000;
-
-function sendRuntimeMessage<T>(message: unknown): Promise<T | null> {
-  return new Promise((resolve) => {
-    let settled = false;
-    let timer: number | null = null;
-    const finish = (value: T | null): void => {
-      if (settled) return;
-      settled = true;
-      if (timer !== null) window.clearTimeout(timer);
-      resolve(value);
-    };
-    timer = window.setTimeout(() => finish(null), RUNTIME_MESSAGE_TIMEOUT_MS);
-    try {
-      chrome.runtime.sendMessage(message, (response?: T) => {
-        if (chrome.runtime.lastError) {
-          finish(null);
-          return;
-        }
-        finish(response ?? null);
-      });
-    } catch {
-      finish(null);
-    }
-  });
 }
 
 type FetchMeResult =
@@ -263,7 +237,7 @@ export function App() {
       if (stored && tok) {
         setUser(stored);
         setToken(tok);
-        void sendRuntimeMessage({ type: 'holaday.connect', token: tok });
+        void sendRuntimeMessageWithRetry({ type: 'holaday.connect', token: tok });
       } else if (tok && !stored) {
         const result = await fetchMe(tok);
         if (cancelled) return;
@@ -272,7 +246,7 @@ export function App() {
           if (cancelled || !mountedRef.current) return;
           setUser(result.user);
           setToken(tok);
-          void sendRuntimeMessage({ type: 'holaday.connect', token: tok });
+          void sendRuntimeMessageWithRetry({ type: 'holaday.connect', token: tok });
         } else if (result.kind === 'unauthorized') {
           await clearAccessToken();
         }
@@ -336,7 +310,7 @@ export function App() {
     if (resetting) return;
     setResetting(true);
     try {
-      const response = await sendRuntimeMessage<{ ok?: boolean; token?: string | null }>({
+      const response = await sendRuntimeMessageWithRetry<{ ok?: boolean; token?: string | null }>({
         type: 'holaday.resetConnection',
       });
       const resetToken = response?.token ?? null;
@@ -528,7 +502,7 @@ function ConnectionStatusBlock({ theme }: { theme: ThemeTokens }) {
     const refresh = (): void => {
       if (inFlight) return;
       inFlight = true;
-      void sendRuntimeMessage<ExtensionStatusResponse>({ type: 'holaday.status' }).then(
+      void sendRuntimeMessageWithRetry<ExtensionStatusResponse>({ type: 'holaday.status' }).then(
         (response) => {
           inFlight = false;
           if (cancelled) return;
