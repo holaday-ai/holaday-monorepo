@@ -224,4 +224,62 @@ describe('ws-client send', () => {
     expect(() => disconnect()).not.toThrow();
     expect(send({ type: 'client.pong', at: 123 })).toBe(false);
   });
+
+  it('keeps dispatching server messages when one listener throws', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { connect, onServerMessage } = await import('./ws-client.js');
+    const received: string[] = [];
+    onServerMessage(() => {
+      throw new Error('listener exploded');
+    });
+    onServerMessage((msg) => {
+      received.push(msg.type);
+    });
+    connect('token');
+    const [socket] = sockets;
+    if (!socket) throw new Error('expected websocket');
+
+    socket.dispatch('message', {
+      data: JSON.stringify({
+        type: 'server.welcome',
+        clientId: 'client-1',
+        heartbeatMs: 30_000,
+      }),
+    });
+
+    expect(received).toEqual(['server.welcome']);
+    expect(warn).toHaveBeenCalledWith(
+      '[holaday] server message listener failed',
+      expect.any(Error),
+    );
+  });
+
+  it('keeps dispatching unauthorized callbacks when one listener throws', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { connect, onUnauthorized } = await import('./ws-client.js');
+    let cleanupCalls = 0;
+    onUnauthorized(() => {
+      throw new Error('auth cleanup exploded');
+    });
+    onUnauthorized(() => {
+      cleanupCalls += 1;
+    });
+    connect('token');
+    const [socket] = sockets;
+    if (!socket) throw new Error('expected websocket');
+
+    socket.dispatch('message', {
+      data: JSON.stringify({
+        type: 'server.error',
+        code: 'UNAUTHORIZED',
+        message: 'bad token',
+      }),
+    });
+
+    expect(cleanupCalls).toBe(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[holaday] unauthorized listener failed',
+      expect.any(Error),
+    );
+  });
 });

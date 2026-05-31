@@ -207,7 +207,13 @@ function openSocket(token: string): void {
   const fireUnauthorized = (): void => {
     if (unauthorizedFired) return;
     unauthorizedFired = true;
-    for (const fn of state.unauthorizedListeners) fn();
+    for (const fn of state.unauthorizedListeners) {
+      try {
+        fn();
+      } catch (err) {
+        console.warn('[holaday] unauthorized listener failed', err);
+      }
+    }
   };
   const settleSocketClose = (code: number, reason: string | null): void => {
     if (socketSettled) return;
@@ -285,7 +291,13 @@ function openSocket(token: string): void {
     ) {
       fireUnauthorized();
     }
-    for (const fn of state.listeners) fn(result.data);
+    for (const fn of state.listeners) {
+      try {
+        fn(result.data);
+      } catch (err) {
+        console.warn('[holaday] server message listener failed', err);
+      }
+    }
   });
 
   ws.addEventListener('close', (event) => {
