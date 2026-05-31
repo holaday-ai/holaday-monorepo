@@ -44,9 +44,11 @@ const MAX_NAVIGATE_URL_LENGTH = 2048;
 
 /** Tabs we've already attached the debugger to this SW lifetime. */
 const attachedTabs = new Set<number>();
+const pendingAttachByTab = new Map<number, Promise<void>>();
 
 function forgetAttachedTab(tabId: number): void {
   attachedTabs.delete(tabId);
+  pendingAttachByTab.delete(tabId);
 }
 
 if (typeof chrome !== 'undefined') {
@@ -65,8 +67,21 @@ if (typeof chrome !== 'undefined') {
  */
 async function ensureAttached(tabId: number): Promise<void> {
   if (attachedTabs.has(tabId)) return;
-  await chrome.debugger.attach({ tabId }, CDP_VERSION);
-  attachedTabs.add(tabId);
+  const pending = pendingAttachByTab.get(tabId);
+  if (pending) {
+    await pending;
+    return;
+  }
+  const attachPromise = chrome.debugger
+    .attach({ tabId }, CDP_VERSION)
+    .then(() => {
+      attachedTabs.add(tabId);
+    })
+    .finally(() => {
+      pendingAttachByTab.delete(tabId);
+    });
+  pendingAttachByTab.set(tabId, attachPromise);
+  await attachPromise;
 }
 
 /**
@@ -409,6 +424,7 @@ function resolveKey(name: string): KeyInfo {
  */
 export function _resetAttachedTabsForTests(): void {
   attachedTabs.clear();
+  pendingAttachByTab.clear();
 }
 
 // ---------------------------------------------------------------------------

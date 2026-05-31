@@ -43,6 +43,38 @@ describe('executeCdpAction', () => {
       message: '导航地址无效，请检查后重试',
     });
   });
+
+  it('coalesces concurrent debugger attaches for the same tab', async () => {
+    let resolveAttach: () => void = () => {
+      throw new Error('attach promise was not created');
+    };
+    const attach = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveAttach = resolve;
+        }),
+    );
+    const sendCommand = vi.fn(async () => ({}));
+    globalThis.chrome = {
+      debugger: {
+        attach,
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    const click = executeCdpAction(7, { kind: 'click', x: 10, y: 20 });
+    const type = executeCdpAction(7, { kind: 'type', text: 'hello' });
+    await Promise.resolve();
+
+    expect(attach).toHaveBeenCalledTimes(1);
+    resolveAttach?.();
+
+    await expect(Promise.all([click, type])).resolves.toEqual([
+      { ok: true, message: 'clicked left @ (10,20)' },
+      { ok: true, message: 'typed 5 chars' },
+    ]);
+    expect(sendCommand).toHaveBeenCalled();
+  });
 });
 
 describe('cdpActionErrorMessage', () => {
