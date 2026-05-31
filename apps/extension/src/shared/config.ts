@@ -4,8 +4,8 @@
  *   1. Explicit env override (VITE_ORCHESTRATOR_*) — set in a build
  *      .env file or on the `vite build` command line.
  *   2. Vite-mode-aware default:
- *        production build → prod endpoints (hd-app.orangebench.tech,
- *        with holaday.ai as a WS fallback)
+ *        production build → prod endpoints (holaday.ai primary WS,
+ *        with hd-app.orangebench.tech as the China-route fallback)
  *        development build → localhost endpoints (PoC dev setup)
  *
  * Phase 25b fix: the previous default was UNCONDITIONALLY localhost,
@@ -23,13 +23,13 @@
  * / `${ORCHESTRATOR_HTTP}/extension/browsing-history` call sites — no
  * changes needed at the fetch site.
  *
- * Why hd-app instead of direct Vultr (207.148.70.106 / holaday.ai):
- *   - hd-app.orangebench.tech is reachable from mainland China (the
- *     primary user base); Vultr Singapore is not always.
- *   - The Aliyun nginx terminates TLS + proxies / api / ws cleanly,
- *     so the extension's chrome-extension:// origin doesn't need a
- *     CORS exception entry on Vultr (Aliyun's vhost handles same-
- *     origin via SPA-served headers).
+ * Why HTTP still defaults to hd-app while WS prefers holaday.ai:
+ *   - hd-app.orangebench.tech remains the China-route HTTP/API entry.
+ *   - holaday.ai is the steadier WebSocket entry for the extension.
+ *     When hd-app has a transient WS proxy 502, Chrome records a noisy
+ *     extension error even if the fallback connects immediately after.
+ *   - hd-app stays in the WS list as a fallback for networks where the
+ *     China route is the only reliable path.
  *
  * Nginx behaviour (verified by curl 2026-05-16):
  *   /api/trpc/auth.me       → 401 JSON (proxied)
@@ -42,8 +42,8 @@ const IS_PROD = import.meta.env.PROD;
 
 const PROD_HTTP = 'https://hd-app.orangebench.tech/api';
 const PROD_WS_ENDPOINTS = [
-  'wss://hd-app.orangebench.tech/ws',
   'wss://holaday.ai/ws',
+  'wss://hd-app.orangebench.tech/ws',
 ] as const;
 const DEV_HTTP = 'http://127.0.0.1:3001';
 const DEV_WS = 'ws://127.0.0.1:3002';
