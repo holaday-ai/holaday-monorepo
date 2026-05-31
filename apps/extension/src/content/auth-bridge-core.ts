@@ -65,6 +65,15 @@ export function decideAction(prev: string | null, curr: string | null): SyncActi
   return { kind: 'set', token: normalised };
 }
 
+export function decideObservedTokenAction(
+  prev: string | null,
+  curr: string | null,
+): SyncAction {
+  const decision = decideAction(prev, curr);
+  if (decision.kind !== 'set') return decision;
+  return looksLikeToken(decision.token) ? decision : { kind: 'clear' };
+}
+
 /**
  * Minimum number of characters a JWT can be and still pass our
  * sanity check. Real JWTs are ~120+ chars; this floor catches a

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decideAction, looksLikeToken } from './auth-bridge-core.js';
+import { decideAction, decideObservedTokenAction, looksLikeToken } from './auth-bridge-core.js';
 
 describe('decideAction', () => {
   it('null → null is unchanged', () => {
@@ -59,5 +59,21 @@ describe('looksLikeToken', () => {
 
   it('accepts long opaque token (not strictly JWT format)', () => {
     expect(looksLikeToken('hd_live_' + 'a'.repeat(24))).toBe(true);
+  });
+});
+
+describe('decideObservedTokenAction', () => {
+  it('treats malformed observed tokens as a clear action', () => {
+    expect(decideObservedTokenAction(null, 'Undefined')).toEqual({ kind: 'clear' });
+    expect(decideObservedTokenAction('hd_live_' + 'a'.repeat(24), 'token with spaces')).toEqual({
+      kind: 'clear',
+    });
+  });
+
+  it('keeps valid observed tokens on the set path', () => {
+    expect(decideObservedTokenAction(null, 'hd_live_' + 'a'.repeat(24))).toEqual({
+      kind: 'set',
+      token: 'hd_live_' + 'a'.repeat(24),
+    });
   });
 });

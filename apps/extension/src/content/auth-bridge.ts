@@ -29,7 +29,7 @@
  * the helper means redundant fires only cost a string compare.
  */
 
-import { decideAction, looksLikeToken, TOKEN_KEY } from './auth-bridge-core.js';
+import { decideObservedTokenAction, TOKEN_KEY } from './auth-bridge-core.js';
 
 /**
  * Poll cadence. Chosen so:
@@ -99,21 +99,11 @@ function postToSw(token: string | null): void {
 
 function observe(): void {
   const current = readToken();
-  const decision = decideAction(state.lastSent, current);
+  const decision = decideObservedTokenAction(state.lastSent, current);
   const wasInitialised = state.initialised;
   if (decision.kind === 'unchanged' && wasInitialised) return;
   state.initialised = true;
   if (decision.kind === 'set') {
-    if (!looksLikeToken(decision.token)) {
-      // The SPA wrote something that doesn't look like a real token.
-      // Treat as a clear (forces the SW to disconnect if it was
-      // mid-flight on the previous value) but don't ship the garbage.
-      if (state.lastSent !== null) {
-        state.lastSent = null;
-        postToSw(null);
-      }
-      return;
-    }
     state.lastSent = decision.token;
     postToSw(decision.token);
     return;
@@ -126,12 +116,7 @@ function observe(): void {
   // 'unchanged' but not yet initialised — first run, even null counts
   // as "tell the SW the current state so it can sync".
   if (!wasInitialised) {
-    if (current !== null) {
-      state.lastSent = current;
-      postToSw(current);
-    } else {
-      postToSw(null);
-    }
+    postToSw(null);
   }
 }
 
