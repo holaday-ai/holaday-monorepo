@@ -228,11 +228,13 @@ describe('extensionToolErrorPayload', () => {
     });
   });
 
-  it('bounds unknown error details', () => {
+  it('hides unknown raw error details', () => {
     const payload = extensionToolErrorPayload(new Error('x'.repeat(300)));
 
-    expect(payload.code).toBe('exec_error');
-    expect(payload.message).toHaveLength('执行失败：'.length + 200);
+    expect(payload).toEqual({
+      message: '浏览器操作失败，请稍后重试',
+      code: 'exec_error',
+    });
   });
 });
 

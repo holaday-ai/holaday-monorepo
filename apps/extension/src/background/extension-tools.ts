@@ -408,7 +408,7 @@ export function extensionToolErrorPayload(
     };
   }
   return {
-    message: `执行失败：${msg.slice(0, 200)}`,
+    message: '浏览器操作失败，请稍后重试',
     code: 'exec_error',
   };
 }
