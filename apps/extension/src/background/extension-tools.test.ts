@@ -719,4 +719,44 @@ describe('handleExtensionToolCall', () => {
       result: { imageBase64: 'AA==', width: 0, height: 0 },
     });
   });
+
+  it('keeps retrying tool results through a longer websocket reconnect', async () => {
+    vi.useFakeTimers();
+    vi.mocked(send).mockReset();
+    vi.mocked(send)
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, windowId: 1, url: 'https://holaday.ai/app' }]),
+        captureVisibleTab: vi.fn(async () => 'data:image/jpeg;base64,AA=='),
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_result_long_retry',
+      requestId: 'req_result_long_retry',
+      kind: 'screenshot',
+      args: {},
+      timeoutMs: 30_000,
+    };
+
+    await handleExtensionToolCall(call);
+    expect(send).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(250 + 1_000 + 3_000 + 7_000);
+
+    expect(send).toHaveBeenCalledTimes(5);
+    expect(vi.mocked(send).mock.calls[4]?.[0]).toMatchObject({
+      type: 'client.extension.tool_result',
+      taskId: 'tsk_result_long_retry',
+      requestId: 'req_result_long_retry',
+      ok: true,
+      result: { imageBase64: 'AA==', width: 0, height: 0 },
+    });
+  });
 });

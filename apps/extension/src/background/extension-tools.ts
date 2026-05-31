@@ -51,7 +51,7 @@ const MAX_NAVIGATE_URL_LENGTH = 2048;
 const MAX_SCREENSHOT_RESULT_BASE64_CHARS = 2_000_000;
 const RECENT_TOOL_RESULT_TTL_MS = 60_000;
 const MAX_RECENT_TOOL_RESULTS = 100;
-const TOOL_RESULT_RETRY_DELAYS_MS = [250, 1_000, 3_000] as const;
+const TOOL_RESULT_RETRY_DELAYS_MS = [250, 1_000, 3_000, 7_000, 15_000] as const;
 const inFlightToolCallRequestIds = new Set<string>();
 
 type ExtensionToolResultPayload = Omit<
