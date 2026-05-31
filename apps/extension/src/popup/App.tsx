@@ -592,6 +592,8 @@ function formatRelativeTime(at: number): string {
 function BrowsingStatusBlock({ theme }: { theme: ThemeTokens }) {
   const [summary, setSummary] = useState<HistorySyncSummary | null>(null);
   const [enabled, setEnabled] = useState<boolean>(true);
+  const mountedRef = useRef(true);
+  const toggleSeq = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -602,7 +604,7 @@ function BrowsingStatusBlock({ theme }: { theme: ThemeTokens }) {
           POPUP_STORAGE_TIMEOUT_MS,
           'popup_history_storage_read_timeout',
         );
-        if (cancelled) return;
+        if (cancelled || !mountedRef.current) return;
         const s = r[HISTORY_SYNC_SUMMARY_KEY];
         if (
           s &&
@@ -620,6 +622,7 @@ function BrowsingStatusBlock({ theme }: { theme: ThemeTokens }) {
       changes: Record<string, chrome.storage.StorageChange>,
       area: chrome.storage.AreaName,
     ): void => {
+      if (!mountedRef.current) return;
       if (area !== 'local') return;
       if (HISTORY_SYNC_SUMMARY_KEY in changes) {
         const next = changes[HISTORY_SYNC_SUMMARY_KEY]?.newValue;
@@ -632,11 +635,15 @@ function BrowsingStatusBlock({ theme }: { theme: ThemeTokens }) {
     chrome.storage.onChanged.addListener(listener);
     return () => {
       cancelled = true;
+      mountedRef.current = false;
       chrome.storage.onChanged.removeListener(listener);
     };
   }, []);
 
   async function toggleEnabled(): Promise<void> {
+    const seq = toggleSeq.current + 1;
+    toggleSeq.current = seq;
+    const previous = enabled;
     const next = !enabled;
     setEnabled(next);
     try {
@@ -646,7 +653,9 @@ function BrowsingStatusBlock({ theme }: { theme: ThemeTokens }) {
         'popup_history_storage_write_timeout',
       );
     } catch {
-      setEnabled(enabled);
+      if (mountedRef.current && seq === toggleSeq.current) {
+        setEnabled(previous);
+      }
     }
   }
 
