@@ -4,8 +4,7 @@
  *   1. Explicit env override (VITE_ORCHESTRATOR_*) — set in a build
  *      .env file or on the `vite build` command line.
  *   2. Vite-mode-aware default:
- *        production build → prod endpoints (holaday.ai primary WS,
- *        with hd-app.orangebench.tech as the China-route fallback)
+ *        production build → prod endpoint (holaday.ai)
  *        development build → localhost endpoints (PoC dev setup)
  *
  * Phase 25b fix: the previous default was UNCONDITIONALLY localhost,
@@ -23,13 +22,14 @@
  * / `${ORCHESTRATOR_HTTP}/extension/browsing-history` call sites — no
  * changes needed at the fetch site.
  *
- * Why HTTP still defaults to hd-app while WS prefers holaday.ai:
+ * Why HTTP still defaults to hd-app while WS uses holaday.ai only:
  *   - hd-app.orangebench.tech remains the China-route HTTP/API entry.
  *   - holaday.ai is the steadier WebSocket entry for the extension.
  *     When hd-app has a transient WS proxy 502, Chrome records a noisy
- *     extension error even if the fallback connects immediately after.
- *   - hd-app stays in the WS list as a fallback for networks where the
- *     China route is the only reliable path.
+ *     extension error.
+ *   - Teams that need a different WS route can still ship an explicit
+ *     VITE_ORCHESTRATOR_WS override; the production default avoids an
+ *     automatic fallback to an endpoint that is known to emit 502s.
  *
  * Nginx behaviour (verified by curl 2026-05-16):
  *   /api/trpc/auth.me       → 401 JSON (proxied)
@@ -43,7 +43,6 @@ const IS_PROD = import.meta.env.PROD;
 const PROD_HTTP = 'https://hd-app.orangebench.tech/api';
 const PROD_WS_ENDPOINTS = [
   'wss://holaday.ai/ws',
-  'wss://hd-app.orangebench.tech/ws',
 ] as const;
 const DEV_HTTP = 'http://127.0.0.1:3001';
 const DEV_WS = 'ws://127.0.0.1:3002';
