@@ -17,6 +17,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ORCHESTRATOR_HTTP } from '../shared/config.js';
+import { fetchWithDeadline } from '../shared/http.js';
 import { composeContextTail, getActivePageContext, type PageContext } from '../shared/page-context.js';
 import {
   type StoredUser,
@@ -72,6 +73,8 @@ interface CreateTaskResponse {
 
 const PAGE_CONTEXT_REFRESH_MS = 2_000;
 const RUNTIME_MESSAGE_TIMEOUT_MS = 5_000;
+const AUTH_ME_TIMEOUT_MS = 8_000;
+const CREATE_TASK_TIMEOUT_MS = 10_000;
 
 function sendRuntimeMessage<T>(message: unknown): Promise<T | null> {
   return new Promise((resolve) => {
@@ -258,10 +261,15 @@ export function App() {
    */
   async function fetchMe(authToken: string): Promise<StoredUser | null> {
     try {
-      const res = await fetch(`${ORCHESTRATOR_HTTP}/trpc/auth.me`, {
-        method: 'GET',
-        headers: { authorization: `Bearer ${authToken}` },
-      });
+      const res = await fetchWithDeadline(
+        `${ORCHESTRATOR_HTTP}/trpc/auth.me`,
+        {
+          method: 'GET',
+          headers: { authorization: `Bearer ${authToken}` },
+        },
+        AUTH_ME_TIMEOUT_MS,
+        'sidepanel_auth_me_timeout',
+      );
       if (!res.ok) return null;
       const body = (await res.json()) as MeResponse;
       const u = body.result.data;
@@ -339,14 +347,19 @@ export function App() {
     try {
       const tail = composeContextTail(pageContext);
       const fullIntent = tail ? `${intent.trim()}${tail}` : intent.trim();
-      const res = await fetch(`${ORCHESTRATOR_HTTP}/trpc/tasks.create`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${token}`,
+      const res = await fetchWithDeadline(
+        `${ORCHESTRATOR_HTTP}/trpc/tasks.create`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ intent: fullIntent }),
         },
-        body: JSON.stringify({ intent: fullIntent }),
-      });
+        CREATE_TASK_TIMEOUT_MS,
+        'sidepanel_create_task_timeout',
+      );
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
         throw new Error(body?.error?.message ?? `HTTP ${res.status}`);

@@ -34,6 +34,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ORCHESTRATOR_HTTP, WORKBENCH_URL } from '../shared/config.js';
+import { fetchWithDeadline } from '../shared/http.js';
 import { openOrFocusWorkbench } from '../shared/open-workbench.js';
 import {
   type StoredUser,
@@ -49,6 +50,7 @@ import {
 // directly avoids a SW round-trip on every popup render.
 const HISTORY_SYNC_ENABLED_KEY = 'holaday.history.enabled';
 const HISTORY_SYNC_SUMMARY_KEY = 'holaday.history.lastSyncSummary';
+const AUTH_ME_TIMEOUT_MS = 8_000;
 
 interface HistorySyncSummary {
   ingested: number;
@@ -199,10 +201,15 @@ function useDarkMode(): boolean {
 
 async function fetchMe(authToken: string): Promise<FetchMeResult> {
   try {
-    const res = await fetch(`${ORCHESTRATOR_HTTP}/trpc/auth.me`, {
-      method: 'GET',
-      headers: { authorization: `Bearer ${authToken}` },
-    });
+    const res = await fetchWithDeadline(
+      `${ORCHESTRATOR_HTTP}/trpc/auth.me`,
+      {
+        method: 'GET',
+        headers: { authorization: `Bearer ${authToken}` },
+      },
+      AUTH_ME_TIMEOUT_MS,
+      'popup_auth_me_timeout',
+    );
     if (res.status === 401) return { kind: 'unauthorized' };
     if (!res.ok) return { kind: 'network' };
     const body = (await res.json()) as MeResponse;
