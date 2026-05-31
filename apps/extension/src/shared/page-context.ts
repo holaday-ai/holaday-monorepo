@@ -184,6 +184,9 @@ export function composeContextTail(ctx: PageContext | null): string {
   if (ctx.selectedText.trim()) {
     const sel = clip(ctx.selectedText.trim(), MAX_CONTEXT_SELECTION_CHARS);
     lines.push(`[选中内容] ${sel}`);
+  } else if (ctx.metaDescription.trim()) {
+    const desc = clip(ctx.metaDescription.trim(), MAX_CONTEXT_META_DESCRIPTION_CHARS);
+    lines.push(`[页面摘要] ${desc}`);
   }
   return lines.length > 0 ? `\n\n${lines.join('\n')}` : '';
 }

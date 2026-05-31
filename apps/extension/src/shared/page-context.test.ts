@@ -71,6 +71,21 @@ describe('composeContextTail', () => {
     expect(tail).toContain('[选中内容]');
     expect(tail.length).toBeLessThan(2200);
   });
+
+  it('includes page summaries when no text is selected', () => {
+    const ctx: PageContext = {
+      tabId: 1,
+      title: 'Example',
+      url: 'https://example.com/',
+      selectedText: '',
+      metaDescription: 'A concise page summary for the browser task.',
+    };
+
+    const tail = composeContextTail(ctx);
+
+    expect(tail).toContain('[当前页面] Example (https://example.com/)');
+    expect(tail).toContain('[页面摘要] A concise page summary for the browser task.');
+  });
 });
 
 describe('getActivePageContext', () => {
