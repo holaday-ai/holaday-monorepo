@@ -32,6 +32,7 @@ const AUTO_LOGIN_TAB_READ_TIMEOUT_MS = 2_000;
  * page that merely LINKS to holaday.ai doesn't qualify.
  */
 const WORKBENCH_URL_PATTERNS: readonly RegExp[] = [
+  /^https:\/\/hd-app\.orangebench\.tech(?:[/:]|$)/i,
   /^https:\/\/holaday\.ai(?:[/:]|$)/i,
   /^https:\/\/[a-z0-9-]+\.holaday\.ai(?:[/:]|$)/i,
   /^http:\/\/localhost(?::\d+)?\//i,

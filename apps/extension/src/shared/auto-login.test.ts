@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { tryAutoLogin } from './auto-login.js';
+import { _internals, tryAutoLogin } from './auto-login.js';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -9,6 +9,13 @@ afterEach(() => {
 });
 
 describe('tryAutoLogin', () => {
+  it('recognizes every production workbench host used by the extension UI', () => {
+    expect(_internals.isWorkbenchUrl('https://hd-app.orangebench.tech/app')).toBe(true);
+    expect(_internals.isWorkbenchUrl('https://holaday.ai/app')).toBe(true);
+    expect(_internals.isWorkbenchUrl('https://app.holaday.ai/app')).toBe(true);
+    expect(_internals.isWorkbenchUrl('https://example.com/holaday.ai')).toBe(false);
+  });
+
   it('skips malformed localStorage tokens while scanning workbench tabs', async () => {
     const executeScript = vi
       .fn()
