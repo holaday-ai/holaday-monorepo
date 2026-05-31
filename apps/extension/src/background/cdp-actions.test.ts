@@ -278,6 +278,18 @@ describe('executeCdpAction', () => {
     });
     expect(attach).toHaveBeenCalledTimes(2);
   });
+
+  it('clamps wait actions to a safe non-negative window', async () => {
+    vi.useFakeTimers();
+
+    const negative = executeCdpAction(14, { kind: 'wait', ms: -50 });
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(negative).resolves.toEqual({ ok: true, message: 'waited 0ms' });
+
+    const oversized = executeCdpAction(14, { kind: 'wait', ms: 30_000 });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(oversized).resolves.toEqual({ ok: true, message: 'waited 10000ms' });
+  });
 });
 
 describe('cdpActionErrorMessage', () => {

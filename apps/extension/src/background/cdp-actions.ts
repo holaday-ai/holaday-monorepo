@@ -327,7 +327,8 @@ async function getViewportCenterForInput(tabId: number): Promise<{ x: number; y:
 }
 
 async function doWait(action: Extract<VisionAction, { kind: 'wait' }>): Promise<ActionResult> {
-  const ms = Math.min(action.ms, WAIT_CAP_MS);
+  const requested = Number.isFinite(action.ms) ? action.ms : 0;
+  const ms = Math.max(0, Math.min(requested, WAIT_CAP_MS));
   await new Promise<void>((resolve) => setTimeout(resolve, ms));
   return { ok: true, message: `waited ${ms}ms` };
 }
