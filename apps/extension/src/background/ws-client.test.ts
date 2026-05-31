@@ -215,6 +215,20 @@ describe('ws-client send', () => {
     });
   });
 
+  it('treats a stuck reconnect-cap storage read as not capped', async () => {
+    vi.useFakeTimers();
+    const get = chrome.storage.local.get as unknown as ReturnType<typeof vi.fn>;
+    get.mockReturnValue(
+      new Promise(() => undefined) as Promise<Record<string, unknown>>,
+    );
+    const { isReconnectCapped } = await import('./ws-client.js');
+
+    const pending = isReconnectCapped();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    await expect(pending).resolves.toBe(false);
+  });
+
   it('ignores late error events from a stale socket after token swap', async () => {
     const { connect, reconnect, getWsConnectionStatus } = await import('./ws-client.js');
     connect('old-token');

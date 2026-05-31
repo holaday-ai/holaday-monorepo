@@ -6,6 +6,7 @@ import {
   parseServerMessage,
 } from '@holaday/shared-types';
 import { ORCHESTRATOR_WS, ORCHESTRATOR_WS_ENDPOINTS } from '../shared/config.js';
+import { withDeadline } from '../shared/deadline.js';
 
 type Listener = (msg: ServerMessage) => void;
 type UnauthorizedListener = () => void;
@@ -359,6 +360,7 @@ const MAX_NETWORK_RECONNECTS = 3;
 const BACKOFF_SCHEDULE_MS = [1_000, 2_000, 4_000] as const;
 const WS_RECONNECT_KEY = 'holaday.ws.reconnectAttempts';
 const WS_PREFERRED_ENDPOINT_KEY = 'holaday.ws.preferredEndpoint';
+const WS_STORAGE_TIMEOUT_MS = 1_500;
 
 /**
  * Hydrate `state.reconnectAttempt` from chrome.storage on module load
@@ -368,7 +370,12 @@ const WS_PREFERRED_ENDPOINT_KEY = 'holaday.ws.preferredEndpoint';
  */
 async function hydrateReconnectAttempts(): Promise<void> {
   try {
-    const v = (await chrome.storage.local.get(WS_RECONNECT_KEY))[WS_RECONNECT_KEY];
+    const out = await withDeadline(
+      chrome.storage.local.get(WS_RECONNECT_KEY),
+      WS_STORAGE_TIMEOUT_MS,
+      'ws_reconnect_read_timeout',
+    );
+    const v = out[WS_RECONNECT_KEY];
     if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
       state.reconnectAttempt = Math.floor(v);
     }
@@ -380,9 +387,17 @@ async function hydrateReconnectAttempts(): Promise<void> {
 async function persistReconnectAttempts(n: number): Promise<void> {
   try {
     if (n <= 0) {
-      await chrome.storage.local.remove(WS_RECONNECT_KEY);
+      await withDeadline(
+        chrome.storage.local.remove(WS_RECONNECT_KEY),
+        WS_STORAGE_TIMEOUT_MS,
+        'ws_reconnect_remove_timeout',
+      );
     } else {
-      await chrome.storage.local.set({ [WS_RECONNECT_KEY]: n });
+      await withDeadline(
+        chrome.storage.local.set({ [WS_RECONNECT_KEY]: n }),
+        WS_STORAGE_TIMEOUT_MS,
+        'ws_reconnect_write_timeout',
+      );
     }
   } catch {
     /* see hydrate — non-fatal */
@@ -391,9 +406,12 @@ async function persistReconnectAttempts(n: number): Promise<void> {
 
 async function hydratePreferredWsEndpoint(): Promise<void> {
   try {
-    const stored = (await chrome.storage.local.get(WS_PREFERRED_ENDPOINT_KEY))[
-      WS_PREFERRED_ENDPOINT_KEY
-    ];
+    const out = await withDeadline(
+      chrome.storage.local.get(WS_PREFERRED_ENDPOINT_KEY),
+      WS_STORAGE_TIMEOUT_MS,
+      'ws_endpoint_read_timeout',
+    );
+    const stored = out[WS_PREFERRED_ENDPOINT_KEY];
     if (typeof stored !== 'string') return;
     const index = ORCHESTRATOR_WS_ENDPOINTS.indexOf(stored);
     if (index < 0 || state.socket) return;
@@ -406,7 +424,11 @@ async function hydratePreferredWsEndpoint(): Promise<void> {
 async function persistPreferredWsEndpoint(endpoint: string): Promise<void> {
   if (!ORCHESTRATOR_WS_ENDPOINTS.includes(endpoint)) return;
   try {
-    await chrome.storage.local.set({ [WS_PREFERRED_ENDPOINT_KEY]: endpoint });
+    await withDeadline(
+      chrome.storage.local.set({ [WS_PREFERRED_ENDPOINT_KEY]: endpoint }),
+      WS_STORAGE_TIMEOUT_MS,
+      'ws_endpoint_write_timeout',
+    );
   } catch {
     /* non-fatal; the next boot can still use the default order */
   }
@@ -434,7 +456,12 @@ void hydratePreferredWsEndpoint();
  */
 export async function isReconnectCapped(): Promise<boolean> {
   try {
-    const v = (await chrome.storage.local.get(WS_RECONNECT_KEY))[WS_RECONNECT_KEY];
+    const out = await withDeadline(
+      chrome.storage.local.get(WS_RECONNECT_KEY),
+      WS_STORAGE_TIMEOUT_MS,
+      'ws_reconnect_cap_read_timeout',
+    );
+    const v = out[WS_RECONNECT_KEY];
     return typeof v === 'number' && v >= MAX_NETWORK_RECONNECTS;
   } catch {
     return false;
