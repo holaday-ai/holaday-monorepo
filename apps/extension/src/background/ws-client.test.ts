@@ -190,6 +190,19 @@ describe('ws-client send', () => {
     expect(sockets[1]?.protocols).toEqual(['holaday.v1', 'jwt.new-token']);
   });
 
+  it('swaps sockets when connect receives a different token', async () => {
+    const { connect } = await import('./ws-client.js');
+    connect('old-token');
+    const [oldSocket] = sockets;
+    if (!oldSocket) throw new Error('expected websocket');
+
+    connect('new-token');
+
+    expect(oldSocket.closeCalls).toEqual([{ code: 1000, reason: 'token swap' }]);
+    expect(sockets).toHaveLength(2);
+    expect(sockets[1]?.protocols).toEqual(['holaday.v1', 'jwt.new-token']);
+  });
+
   it('rotates websocket endpoints after a network reconnect failure', async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);

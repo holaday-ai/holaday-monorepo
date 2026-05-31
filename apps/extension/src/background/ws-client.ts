@@ -15,6 +15,7 @@ const WS_OPEN_TIMEOUT_MS = 12_000;
 
 interface State {
   socket: WebSocket | null;
+  token: string | null;
   socketGeneration: number;
   reconnectAttempt: number;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
@@ -41,6 +42,7 @@ interface State {
 
 const state: State = {
   socket: null,
+  token: null,
   socketGeneration: 0,
   reconnectAttempt: 0,
   reconnectTimer: null,
@@ -99,6 +101,7 @@ export function disconnect(): void {
   clearReconnectTimer();
   const socket = state.socket;
   state.socket = null;
+  state.token = null;
   if (state.pingTimer) {
     clearInterval(state.pingTimer);
     state.pingTimer = null;
@@ -131,6 +134,9 @@ export function connect(token: string): void {
     state.socket &&
     (state.socket.readyState === WebSocket.OPEN || state.socket.readyState === WebSocket.CONNECTING)
   ) {
+    if (state.token !== token) {
+      reconnect(token);
+    }
     return;
   }
   state.closedByUser = false;
@@ -162,6 +168,7 @@ export function reconnect(token: string): void {
       /* socket may already be closing */
     }
     state.socket = null;
+    state.token = null;
     if (state.pingTimer) {
       clearInterval(state.pingTimer);
       state.pingTimer = null;
@@ -216,6 +223,7 @@ function openSocket(token: string): void {
     return;
   }
   state.socket = ws;
+  state.token = token;
   let openTimer: ReturnType<typeof setTimeout> | null = null;
   let socketSettled = false;
   const clearOpenTimer = (): void => {
@@ -251,6 +259,7 @@ function openSocket(token: string): void {
     if (state.pingTimer) clearInterval(state.pingTimer);
     state.pingTimer = null;
     state.socket = null;
+    state.token = null;
     state.lastCloseAt = Date.now();
     state.lastCloseCode = code;
     state.lastCloseReason = reason;
