@@ -84,8 +84,14 @@ function markPostFailed(token: string | null): void {
   // non-null tokens, rolling lastSent back to null makes decideAction
   // return `set`. For null-token clears, initialised=false makes the
   // first-run branch post the clear again.
-  state.initialised = false;
-  if (token !== null && state.lastSent === token) {
+  if (token === null) {
+    if (state.lastSent === null) {
+      state.initialised = false;
+    }
+    return;
+  }
+  if (state.lastSent === token) {
+    state.initialised = false;
     state.lastSent = null;
   }
 }

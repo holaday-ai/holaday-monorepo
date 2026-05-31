@@ -48,4 +48,52 @@ describe('auth bridge content script', () => {
       expect.any(Function),
     );
   });
+
+  it('does not let an old send failure roll back a newer token', async () => {
+    vi.useFakeTimers();
+    const oldToken = 'hd_old_' + 'a'.repeat(24);
+    const newToken = 'hd_new_' + 'b'.repeat(24);
+    let currentToken = oldToken;
+    const storageListeners: Array<(event: StorageEvent) => void> = [];
+    const callbacks: Array<() => void> = [];
+    const getItem = vi.fn((key: string) => (key === TOKEN_KEY ? currentToken : null));
+    const sendMessage = vi.fn((_message: unknown, callback: () => void) => {
+      callbacks.push(callback);
+    });
+
+    globalThis.window = {
+      localStorage: { getItem },
+      addEventListener: vi.fn((event: string, listener: (event: StorageEvent) => void) => {
+        if (event === 'storage') storageListeners.push(listener);
+      }),
+    } as unknown as Window & typeof globalThis;
+    globalThis.chrome = {
+      runtime: {
+        sendMessage,
+      },
+    } as unknown as typeof chrome;
+
+    await import('./auth-bridge.js');
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+
+    currentToken = newToken;
+    const [fireStorage] = storageListeners;
+    if (!fireStorage) throw new Error('expected storage listener');
+    fireStorage({ key: TOKEN_KEY } as StorageEvent);
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+
+    callbacks[1]?.();
+    chrome.runtime.lastError = { message: 'old worker callback arrived late' };
+    callbacks[0]?.();
+    delete chrome.runtime.lastError;
+
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage).toHaveBeenNthCalledWith(
+      2,
+      { type: 'holaday.auth.token', token: newToken },
+      expect.any(Function),
+    );
+  });
 });
