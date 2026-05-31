@@ -119,9 +119,15 @@ export async function tryAutoLogin(): Promise<string | null> {
     return bScore - aScore;
   });
 
-  for (const tab of sorted) {
-    if (typeof tab.id !== 'number') continue;
-    const token = await readTokenFromTab(tab.id, tab.url ?? '');
+  const reads = await Promise.all(
+    sorted.map(async (tab) => {
+      if (typeof tab.id !== 'number') return { tab, token: null };
+      const token = await readTokenFromTab(tab.id, tab.url ?? '');
+      return { tab, token };
+    }),
+  );
+
+  for (const { tab, token } of reads) {
     if (token) {
       console.info(
         `[holaday] auto-login: lifted token from tab ${tab.id} (${tab.url}) — ${token.length} chars`,

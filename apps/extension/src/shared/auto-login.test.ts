@@ -58,7 +58,7 @@ describe('tryAutoLogin', () => {
     expect(executeScript).toHaveBeenCalledTimes(3);
   });
 
-  it('skips a workbench tab when reading localStorage hangs', async () => {
+  it('reads candidate tabs in parallel when one localStorage read hangs', async () => {
     vi.useFakeTimers();
     const executeScript = vi
       .fn()
@@ -85,6 +85,8 @@ describe('tryAutoLogin', () => {
     } as unknown as typeof chrome;
 
     const pending = tryAutoLogin();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(executeScript).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(2_000);
 
     await expect(pending).resolves.toBe('hd_live_valid_token');
