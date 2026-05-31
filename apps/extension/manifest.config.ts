@@ -59,12 +59,6 @@ export default defineManifest({
   },
 
   content_scripts: [
-    {
-      matches: ['<all_urls>'],
-      js: ['src/content/index.ts'],
-      run_at: 'document_idle',
-      all_frames: false,
-    },
     // Phase 25b — auth-bridge content script. Runs ONLY on workbench
     // origins, watches localStorage['holaday.access_token'] for
     // changes, and pushes them to the SW via chrome.runtime.sendMessage.
