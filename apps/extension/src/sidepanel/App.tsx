@@ -22,6 +22,7 @@ import { composeContextTail, getActivePageContext, type PageContext } from '../s
 import {
   type StoredUser,
   clearAccessToken,
+  clearStoredUser,
   getAccessToken,
   getStoredUser,
   normalizeAccessToken,
@@ -361,12 +362,14 @@ export function App() {
   }
 
   async function logout(): Promise<void> {
-    await clearAccessToken();
+    await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
+    if (!mountedRef.current) return;
     void sendRuntimeMessage({ type: 'holaday.disconnect' });
     setUser(null);
     setToken(null);
     setActiveTaskId(null);
     setTasks([]);
+    setError(null);
     setStatus('idle');
   }
 
