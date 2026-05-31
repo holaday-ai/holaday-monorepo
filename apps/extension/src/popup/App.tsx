@@ -307,12 +307,19 @@ export function App() {
             if (seq !== authSyncSeq.current || !mountedRef.current) return;
             setUser(result.user);
             setToken(newToken);
-          } else {
-            // 401 or network — leave popup in logged-out view; SW
-            // is the authority on token validity.
+          } else if (result.kind === 'unauthorized') {
+            const current = normalizeAccessToken(await getAccessToken());
+            if (current === newToken) {
+              await clearAccessToken();
+              await clearStoredUser();
+            }
+            if (seq !== authSyncSeq.current || !mountedRef.current) return;
             setUser(null);
             setToken(null);
           }
+          // 'network' → keep the current popup session. The SW remains
+          // the connection authority and will retry; a transient auth.me
+          // miss should not make the popup look logged out.
         } else {
           authSyncSeq.current = seq;
           if (!mountedRef.current) return;
