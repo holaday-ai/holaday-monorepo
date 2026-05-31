@@ -79,6 +79,17 @@ function readToken(): string | null {
   }
 }
 
+function markPostFailed(token: string | null): void {
+  // The next poll/storage tick must retry this exact observation. For
+  // non-null tokens, rolling lastSent back to null makes decideAction
+  // return `set`. For null-token clears, initialised=false makes the
+  // first-run branch post the clear again.
+  state.initialised = false;
+  if (token !== null && state.lastSent === token) {
+    state.lastSent = null;
+  }
+}
+
 function postToSw(token: string | null): void {
   try {
     chrome.runtime.sendMessage({ type: SW_MESSAGE_TYPE, token }, () => {
@@ -87,13 +98,13 @@ function postToSw(token: string | null): void {
       // suppresses the harmless "Unchecked runtime.lastError" warning
       // some Chromes emit when the SW respawns mid-frame.
       if (chrome.runtime.lastError) {
-        // Don't log every transient SW-respawn race; only persistent
-        // failures (the SW is unreachable) would matter.
+        markPostFailed(token);
       }
     });
   } catch {
     // Extension reloaded under us, page is mid-unload, etc. Either
-    // way the next poll tick will retry — no recovery needed.
+    // way the next poll tick will retry.
+    markPostFailed(token);
   }
 }
 
