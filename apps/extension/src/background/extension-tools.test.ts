@@ -190,6 +190,16 @@ describe('extensionToolErrorPayload', () => {
       message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
       code: 'host_permission',
     });
+    expect(
+      extensionToolErrorPayload(new Error('Cannot access a chrome-extension:// URL')),
+    ).toEqual({
+      message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
+      code: 'host_permission',
+    });
+    expect(extensionToolErrorPayload(new Error('Requires activeTab permission'))).toEqual({
+      message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
+      code: 'host_permission',
+    });
     expect(extensionToolErrorPayload(new Error('No tab with id: 123.'))).toEqual({
       message: '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
       code: 'tab_closed',
