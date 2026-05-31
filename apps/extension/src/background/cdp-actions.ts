@@ -454,7 +454,15 @@ function resolveKey(name: string): KeyInfo {
   // Single printable char — emit as `text` so CDP inserts it.
   if (name.length === 1) {
     const code = /^[a-z]$/i.test(name) ? `Key${name.toUpperCase()}` : name;
-    return { key: name, code, text: name };
+    const windowsVirtualKeyCode = /^[a-z0-9]$/i.test(name)
+      ? name.toUpperCase().charCodeAt(0)
+      : undefined;
+    return {
+      key: name,
+      code,
+      text: name,
+      ...(windowsVirtualKeyCode !== undefined ? { windowsVirtualKeyCode } : {}),
+    };
   }
   // Unknown multi-char name — let CDP try it raw and fail diagnostically.
   return { key: name, code: name };

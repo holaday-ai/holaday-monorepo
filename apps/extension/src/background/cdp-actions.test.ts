@@ -165,6 +165,7 @@ describe('executeCdpAction', () => {
         modifiers: 4,
         key: 'c',
         code: 'KeyC',
+        windowsVirtualKeyCode: 67,
       }),
     );
     const keyDownParams = (sendCommand.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
