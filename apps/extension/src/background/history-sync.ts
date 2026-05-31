@@ -24,6 +24,7 @@
 import { getAccessToken } from '../shared/storage.js';
 import { ORCHESTRATOR_HTTP } from '../shared/config.js';
 import { withDeadline } from '../shared/deadline.js';
+import { fetchWithDeadline } from '../shared/http.js';
 
 /**
  * Hard upload cap matches the server's MAX_HOSTS_PER_SYNC (see
@@ -209,15 +210,16 @@ export async function syncHistoryToServer(
 ): Promise<BrowsingSyncResponse | null> {
   const token = await getAccessToken();
   if (!token) return null;
-  const res = await withDeadline(
-    fetch(`${ORCHESTRATOR_HTTP}/extension/browsing-history`, {
+  const res = await fetchWithDeadline(
+    `${ORCHESTRATOR_HTTP}/extension/browsing-history`,
+    {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ domains: entries }),
-    }),
+    },
     HISTORY_SYNC_POST_TIMEOUT_MS,
     'history_sync_post_timeout',
   );

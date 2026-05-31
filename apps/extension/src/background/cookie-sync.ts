@@ -17,6 +17,7 @@
 import { getAccessToken } from '../shared/storage.js';
 import { ORCHESTRATOR_HTTP } from '../shared/config.js';
 import { withDeadline } from '../shared/deadline.js';
+import { fetchWithDeadline } from '../shared/http.js';
 
 /**
  * Curated list of domains we care about. Leading dot matches both
@@ -145,15 +146,16 @@ export async function syncCookiesToServer(
   if (cookies.length === 0) return { synced: 0, domains: [], deferred: false };
   const token = await getAccessToken();
   if (!token) return null;
-  const res = await withDeadline(
-    fetch(`${ORCHESTRATOR_HTTP}/cookies/sync`, {
+  const res = await fetchWithDeadline(
+    `${ORCHESTRATOR_HTTP}/cookies/sync`,
+    {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ cookies }),
-    }),
+    },
     COOKIE_SYNC_POST_TIMEOUT_MS,
     'cookie_sync_post_timeout',
   );
