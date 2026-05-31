@@ -38,6 +38,7 @@ export interface ActionResult {
 const CDP_VERSION = '1.3';
 /** Per-command hard cap; CDP should answer sub-second for input events. */
 const CDP_COMMAND_TIMEOUT_MS = 5_000;
+const VIEWPORT_READ_TIMEOUT_MS = 500;
 /** How long to wait before reporting a wait() complete (honours upper bound). */
 const WAIT_CAP_MS = 10_000;
 const MAX_NAVIGATE_URL_LENGTH = 2048;
@@ -297,10 +298,15 @@ async function doScroll(
 
 async function getViewportCenterForInput(tabId: number): Promise<{ x: number; y: number }> {
   try {
-    const evalResp = (await sendCdp(tabId, 'Runtime.evaluate', {
-      expression: 'JSON.stringify({ w: innerWidth, h: innerHeight })',
-      returnByValue: true,
-    })) as { result?: { value?: unknown } };
+    const evalResp = (await sendCdp(
+      tabId,
+      'Runtime.evaluate',
+      {
+        expression: 'JSON.stringify({ w: innerWidth, h: innerHeight })',
+        returnByValue: true,
+      },
+      VIEWPORT_READ_TIMEOUT_MS,
+    )) as { result?: { value?: unknown } };
     const raw = evalResp?.result?.value;
     if (typeof raw === 'string') {
       const parsed = JSON.parse(raw) as { w?: number; h?: number };
@@ -366,12 +372,13 @@ async function sendCdp(
   tabId: number,
   method: string,
   params: Record<string, unknown>,
+  timeoutMs = CDP_COMMAND_TIMEOUT_MS,
 ): Promise<unknown> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const cap = new Promise<never>((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error(`CDP ${method} timeout ${CDP_COMMAND_TIMEOUT_MS}ms`)),
-      CDP_COMMAND_TIMEOUT_MS,
+      () => reject(new Error(`CDP ${method} timeout ${timeoutMs}ms`)),
+      timeoutMs,
     );
   });
   try {
