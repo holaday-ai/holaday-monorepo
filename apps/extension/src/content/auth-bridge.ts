@@ -69,13 +69,14 @@ const state: AuthBridgeState = {
   initialised: false,
 };
 
-function readToken(): string | null {
+function readToken(): string | null | undefined {
   try {
     return window.localStorage.getItem(TOKEN_KEY);
   } catch {
-    // Some sites disable localStorage (cookie-blocker extensions,
-    // private mode mods); pretend we saw null so we don't crash.
-    return null;
+    // Some privacy modes/extensions can make localStorage temporarily
+    // unreadable. Do not interpret that as logout; just retry on the
+    // next poll tick so we don't clear a still-valid SW session.
+    return undefined;
   }
 }
 
@@ -126,6 +127,7 @@ function isRetryableSwFailure(response: unknown): boolean {
 
 function observe(): void {
   const current = readToken();
+  if (current === undefined) return;
   const decision = decideObservedTokenAction(state.lastSent, current);
   const wasInitialised = state.initialised;
   if (decision.kind === 'unchanged' && wasInitialised) return;
