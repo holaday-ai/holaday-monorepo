@@ -271,6 +271,27 @@ describe('getActiveTabForExtensionTool', () => {
     expect(query).toHaveBeenNthCalledWith(2, { active: true, lastFocusedWindow: true });
   });
 
+  it('continues to fallback tab queries after a stuck query times out', async () => {
+    vi.useFakeTimers();
+    const query = vi
+      .fn()
+      .mockReturnValueOnce(new Promise<chrome.tabs.Tab[]>(() => undefined))
+      .mockResolvedValueOnce([{ id: 12, url: 'https://holaday.ai/app' }]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    const pending = getActiveTabForExtensionTool();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    await expect(pending).resolves.toMatchObject({
+      id: 12,
+      url: 'https://holaday.ai/app',
+    });
+    expect(query).toHaveBeenNthCalledWith(1, { active: true, currentWindow: true });
+    expect(query).toHaveBeenNthCalledWith(2, { active: true, lastFocusedWindow: true });
+  });
+
   it('prefers a normal web page over an internal Chrome page when both are visible', async () => {
     const query = vi
       .fn()
@@ -443,6 +464,43 @@ describe('handleExtensionToolCall', () => {
           finalUrl: 'https://example.com/',
           title: 'Example',
           bodyText: '',
+        },
+      }),
+    );
+  });
+
+  it('returns a timeout when screenshot capture hangs', async () => {
+    vi.useFakeTimers();
+    vi.mocked(send).mockClear();
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, windowId: 1, url: 'https://holaday.ai/app' }]),
+        captureVisibleTab: vi.fn(() => new Promise<string>(() => undefined)),
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_screenshot_timeout',
+      requestId: 'req_screenshot_timeout',
+      kind: 'screenshot',
+      args: {},
+      timeoutMs: 30_000,
+    };
+
+    const pending = handleExtensionToolCall(call);
+    await vi.advanceTimersByTimeAsync(8_000);
+    await pending;
+
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'client.extension.tool_result',
+        taskId: 'tsk_screenshot_timeout',
+        requestId: 'req_screenshot_timeout',
+        ok: false,
+        error: {
+          message: '页面响应超时，请保持标签页打开后重试',
+          code: 'timeout',
         },
       }),
     );

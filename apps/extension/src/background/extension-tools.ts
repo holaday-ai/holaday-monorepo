@@ -42,6 +42,10 @@ const BODY_TEXT_CHAR_CAP = 8_000;
 const DEFAULT_NAVIGATE_WAIT_MS = 1500;
 const MAX_NAVIGATE_WAIT_MS = 10_000;
 const BODY_TEXT_READ_TIMEOUT_MS = 5_000;
+const TAB_QUERY_TIMEOUT_MS = 1_500;
+const TAB_UPDATE_TIMEOUT_MS = 5_000;
+const TAB_GET_TIMEOUT_MS = 2_000;
+const SCREENSHOT_CAPTURE_TIMEOUT_MS = 8_000;
 const MAX_NAVIGATE_URL_LENGTH = 2048;
 const MAX_SCREENSHOT_RESULT_BASE64_CHARS = 2_000_000;
 const RECENT_TOOL_RESULT_TTL_MS = 60_000;
@@ -73,7 +77,11 @@ export async function getActiveTabForExtensionTool(): Promise<chrome.tabs.Tab | 
 
   for (const query of queries) {
     try {
-      const [tab] = await chrome.tabs.query(query);
+      const [tab] = await withDeadline(
+        chrome.tabs.query(query),
+        TAB_QUERY_TIMEOUT_MS,
+        'tab_query_timeout',
+      );
       if (tab) candidates.push(tab);
     } catch {
       // Keep the browser-tool fallback chain alive. currentWindow can
@@ -208,7 +216,11 @@ async function executeNavigate(
     throw new Error('no_active_tab');
   }
   const previousUrl = tab.url;
-  await chrome.tabs.update(tab.id, { url });
+  await withDeadline(
+    chrome.tabs.update(tab.id, { url }),
+    TAB_UPDATE_TIMEOUT_MS,
+    'extension_tool_timeout',
+  );
   await waitForTabComplete(tab.id, loadTimeoutMs, { previousUrl, targetUrl: url });
   // Post-load settle. Some pages defer the meaningful DOM until after
   // a microtask burst (React / Vue hydration). The default 1500ms
@@ -217,7 +229,11 @@ async function executeNavigate(
     await new Promise<void>((r) => setTimeout(r, waitMs));
   }
   // Re-read the tab to get the final URL after redirects.
-  const reloaded = await chrome.tabs.get(tab.id);
+  const reloaded = await withDeadline(
+    chrome.tabs.get(tab.id),
+    TAB_GET_TIMEOUT_MS,
+    'extension_tool_timeout',
+  );
   const finalUrl = reloaded.url ?? url;
   const title = reloaded.title ?? '';
   let rawText = '';
@@ -309,7 +325,11 @@ async function executeScreenshot(): Promise<ScreenshotResult> {
   if (!tab?.id) {
     throw new Error('no_active_tab');
   }
-  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 50 });
+  const dataUrl = await withDeadline(
+    chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 50 }),
+    SCREENSHOT_CAPTURE_TIMEOUT_MS,
+    'extension_tool_timeout',
+  );
   return normalizeScreenshotCaptureDataUrl(dataUrl);
 }
 
