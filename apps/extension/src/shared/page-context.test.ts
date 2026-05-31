@@ -214,4 +214,23 @@ describe('getActivePageContext', () => {
       expect.objectContaining({ target: { tabId: 10 } }),
     );
   });
+
+  it('returns null instead of task context for internal Chrome pages', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { id: 9, title: 'Extensions', url: 'chrome://extensions/' } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    globalThis.chrome = {
+      tabs: { query },
+      scripting: {
+        executeScript: vi.fn(),
+      },
+    } as unknown as typeof chrome;
+
+    await expect(getActivePageContext()).resolves.toBeNull();
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+  });
 });

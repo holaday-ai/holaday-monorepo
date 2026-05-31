@@ -87,7 +87,7 @@ async function queryActivePageContextTab(): Promise<chrome.tabs.Tab | undefined>
     }
   }
 
-  return candidates.find(isWebPageTab) ?? candidates[0];
+  return candidates.find(isWebPageTab);
 }
 
 function isWebPageTab(tab: chrome.tabs.Tab): boolean {
