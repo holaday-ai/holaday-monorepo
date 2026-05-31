@@ -193,9 +193,16 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
+    let inFlight = false;
     async function refresh() {
-      const ctx = await getActivePageContext();
-      if (!cancelled) setPageContext(ctx);
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const ctx = await getActivePageContext();
+        if (!cancelled) setPageContext(ctx);
+      } finally {
+        inFlight = false;
+      }
     }
     void refresh();
     const tabsListener = () => {
