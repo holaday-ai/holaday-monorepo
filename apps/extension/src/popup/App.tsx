@@ -329,10 +329,22 @@ export function App() {
     if (resetting) return;
     setResetting(true);
     try {
-      const response = await sendRuntimeMessage<{ ok?: boolean }>({
+      const response = await sendRuntimeMessage<{ ok?: boolean; token?: string | null }>({
         type: 'holaday.resetConnection',
       });
-      if (!response) {
+      const resetToken = response?.token ?? null;
+      if (resetToken) {
+        const result = await fetchMe(resetToken);
+        if (!mountedRef.current) return;
+        if (result.kind === 'ok') {
+          await setStoredUser(result.user);
+          if (!mountedRef.current) return;
+          setUser(result.user);
+          setToken(resetToken);
+          return;
+        }
+      }
+      if (!response?.ok) {
         await clearAccessToken();
         await clearStoredUser();
       }
