@@ -32,6 +32,7 @@ function criticalMessageLogMeta(message: ClientMessage): Record<string, unknown>
   return {
     type: message.type,
     ...('taskId' in message ? { taskId: message.taskId } : {}),
+    ...('requestId' in message ? { requestId: message.requestId } : {}),
     ...('stepId' in message ? { stepId: message.stepId } : {}),
     ...('tickIndex' in message ? { tickIndex: message.tickIndex } : {}),
   };
