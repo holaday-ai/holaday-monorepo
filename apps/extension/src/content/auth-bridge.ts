@@ -44,6 +44,7 @@ import { decideObservedTokenAction, TOKEN_KEY } from './auth-bridge-core.js';
  */
 const POLL_INTERVAL_MS = 3000;
 const POST_ACK_TIMEOUT_MS = 1_500;
+const POST_RETRY_DELAYS_MS = [250, 1000, 3000] as const;
 
 /**
  * SW message type. Mirrored by the handler in background/index.ts —
@@ -63,11 +64,18 @@ interface AuthBridgeState {
   lastSent: string | null;
   /** Has the initial observation been performed? */
   initialised: boolean;
+  /** Short backoff retry after a failed SW post; poll remains the steady fallback. */
+  retryTimer: ReturnType<typeof setTimeout> | null;
+  retryAttempt: number;
+  retryToken: string | null | undefined;
 }
 
 const state: AuthBridgeState = {
   lastSent: null,
   initialised: false,
+  retryTimer: null,
+  retryAttempt: 0,
+  retryToken: undefined,
 };
 
 function readToken(): string | null | undefined {
@@ -89,13 +97,39 @@ function markPostFailed(token: string | null): void {
   if (token === null) {
     if (state.lastSent === null) {
       state.initialised = false;
+      scheduleRetryObservation(token);
     }
     return;
   }
   if (state.lastSent === token) {
     state.initialised = false;
     state.lastSent = null;
+    scheduleRetryObservation(token);
   }
+}
+
+function clearRetryObservation(): void {
+  if (state.retryTimer) {
+    clearTimeout(state.retryTimer);
+    state.retryTimer = null;
+  }
+  state.retryAttempt = 0;
+  state.retryToken = undefined;
+}
+
+function scheduleRetryObservation(token: string | null): void {
+  if (state.retryTimer && state.retryToken === token) return;
+  if (state.retryTimer) clearTimeout(state.retryTimer);
+  if (state.retryToken !== token) {
+    state.retryAttempt = 0;
+    state.retryToken = token;
+  }
+  const delay = POST_RETRY_DELAYS_MS[Math.min(state.retryAttempt, POST_RETRY_DELAYS_MS.length - 1)];
+  state.retryAttempt += 1;
+  state.retryTimer = setTimeout(() => {
+    state.retryTimer = null;
+    observe();
+  }, delay);
 }
 
 function postToSw(token: string | null): void {
@@ -120,6 +154,10 @@ function postToSw(token: string | null): void {
       }
       if (isRetryableSwFailure(response)) {
         markPostFailed(token);
+        return;
+      }
+      if (state.lastSent === token) {
+        clearRetryObservation();
       }
     });
   } catch {
