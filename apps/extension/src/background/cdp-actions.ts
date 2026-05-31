@@ -217,7 +217,20 @@ async function doClick(
   tabId: number,
   action: Extract<VisionAction, { kind: 'click' }>,
 ): Promise<ActionResult> {
+  if (!Number.isFinite(action.x) || !Number.isFinite(action.y)) {
+    return { ok: false, message: '点击坐标无效，请重新定位后再试' };
+  }
   await ensureAttached(tabId);
+  const viewport = await getViewportSizeForInput(tabId);
+  if (
+    viewport &&
+    (action.x < 0 || action.y < 0 || action.x >= viewport.width || action.y >= viewport.height)
+  ) {
+    return {
+      ok: false,
+      message: `点击坐标超出可视区域 (${Math.round(action.x)},${Math.round(action.y)}) / ${viewport.width}x${viewport.height}，请重新定位`,
+    };
+  }
   const button = action.button ?? 'left';
   // Press then release. CDP's mouseMoved first is unnecessary for a
   // single click — Input.dispatchMouseEvent with `type: 'mousePressed'`
@@ -314,6 +327,19 @@ async function doScroll(
 }
 
 async function getViewportCenterForInput(tabId: number): Promise<{ x: number; y: number }> {
+  const viewport = await getViewportSizeForInput(tabId);
+  if (viewport) {
+    return {
+      x: Math.max(1, Math.floor(viewport.width / 2)),
+      y: Math.max(1, Math.floor(viewport.height / 2)),
+    };
+  }
+  return { x: 400, y: 300 };
+}
+
+async function getViewportSizeForInput(
+  tabId: number,
+): Promise<{ width: number; height: number } | null> {
   try {
     const evalResp = (await sendCdp(
       tabId,
@@ -330,16 +356,13 @@ async function getViewportCenterForInput(tabId: number): Promise<{ x: number; y:
       const width = typeof parsed.w === 'number' && Number.isFinite(parsed.w) ? parsed.w : 0;
       const height = typeof parsed.h === 'number' && Number.isFinite(parsed.h) ? parsed.h : 0;
       if (width > 0 && height > 0) {
-        return {
-          x: Math.max(1, Math.floor(width / 2)),
-          y: Math.max(1, Math.floor(height / 2)),
-        };
+        return { width: Math.floor(width), height: Math.floor(height) };
       }
     }
   } catch {
-    // Keep scroll robust on pages where Runtime.evaluate is blocked.
+    // Keep input robust on pages where Runtime.evaluate is blocked.
   }
-  return { x: 400, y: 300 };
+  return null;
 }
 
 async function doWait(action: Extract<VisionAction, { kind: 'wait' }>): Promise<ActionResult> {

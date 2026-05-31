@@ -97,6 +97,39 @@ describe('executeCdpAction', () => {
     });
   });
 
+  it('rejects invalid click coordinates before attaching the debugger', async () => {
+    await expect(executeCdpAction(7, { kind: 'click', x: Number.NaN, y: 20 })).resolves.toEqual({
+      ok: false,
+      message: '点击坐标无效，请重新定位后再试',
+    });
+  });
+
+  it('reports off-screen click coordinates without dispatching the click', async () => {
+    const sendCommand = vi.fn(async (_target, method: string) => {
+      if (method === 'Runtime.evaluate') {
+        return { result: { value: JSON.stringify({ w: 360, h: 640 }) } };
+      }
+      return {};
+    });
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    await expect(executeCdpAction(7, { kind: 'click', x: 420, y: 20 })).resolves.toEqual({
+      ok: false,
+      message: '点击坐标超出可视区域 (420,20) / 360x640，请重新定位',
+    });
+    expect(sendCommand).toHaveBeenCalledTimes(1);
+    expect(sendCommand).toHaveBeenCalledWith(
+      { tabId: 7 },
+      'Runtime.evaluate',
+      expect.any(Object),
+    );
+  });
+
   it('waits for an in-flight debugger attach before detaching during teardown', async () => {
     let resolveAttach: () => void = () => {
       throw new Error('attach promise was not created');
@@ -271,8 +304,15 @@ describe('executeCdpAction', () => {
     const detach = vi.fn(async () => undefined);
     const sendCommand = vi
       .fn()
-      .mockImplementationOnce(() => new Promise(() => undefined))
-      .mockResolvedValueOnce({});
+      .mockImplementation((_target, method: string) => {
+        if (method === 'Runtime.evaluate') {
+          return Promise.resolve({ result: { value: JSON.stringify({ w: 360, h: 640 }) } });
+        }
+        if (method === 'Input.dispatchMouseEvent') {
+          return new Promise(() => undefined);
+        }
+        return Promise.resolve({});
+      });
     globalThis.chrome = {
       debugger: {
         attach,
