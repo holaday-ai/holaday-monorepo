@@ -36,10 +36,27 @@ const MAX_CONTEXT_SELECTION_CHARS = 2_000;
 const MAX_CONTEXT_META_DESCRIPTION_CHARS = 512;
 const PAGE_CONTEXT_READ_TIMEOUT_MS = 1_500;
 const PAGE_CONTEXT_TAB_QUERY_TIMEOUT_MS = 1_500;
+const SENSITIVE_QUERY_PARAM_RE =
+  /(^|[_-])(access|auth|code|email|key|pass|password|refresh|secret|session|sid|token)([_-]|$)/i;
 
 function clip(value: unknown, maxChars: number): string {
   const text = typeof value === 'string' ? value : '';
   return text.length > maxChars ? text.slice(0, maxChars) : text;
+}
+
+export function sanitizePageContextUrl(value: unknown): string {
+  const text = clip(value, MAX_CONTEXT_URL_CHARS).trim();
+  if (!text) return '';
+  try {
+    const url = new URL(text);
+    url.hash = '';
+    for (const key of Array.from(url.searchParams.keys())) {
+      if (SENSITIVE_QUERY_PARAM_RE.test(key)) url.searchParams.delete(key);
+    }
+    return clip(url.toString(), MAX_CONTEXT_URL_CHARS);
+  } catch {
+    return text;
+  }
 }
 
 export function sanitizePageContextSnippet(
@@ -47,7 +64,7 @@ export function sanitizePageContextSnippet(
 ): PageContextSnippet {
   return {
     title: clip(snippet?.title, MAX_CONTEXT_TITLE_CHARS),
-    url: clip(snippet?.url, MAX_CONTEXT_URL_CHARS),
+    url: sanitizePageContextUrl(snippet?.url),
     selectedText: clip(snippet?.selectedText, MAX_CONTEXT_SELECTION_CHARS),
     metaDescription: clip(snippet?.metaDescription, MAX_CONTEXT_META_DESCRIPTION_CHARS),
   };

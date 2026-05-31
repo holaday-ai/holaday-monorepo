@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   composeContextTail,
   getActivePageContext,
+  sanitizePageContextUrl,
   sanitizePageContextSnippet,
   type PageContext,
 } from './page-context.js';
@@ -35,6 +36,22 @@ describe('sanitizePageContextSnippet', () => {
       selectedText: '',
       metaDescription: '',
     });
+  });
+});
+
+describe('sanitizePageContextUrl', () => {
+  it('drops sensitive query params and fragments from sidepanel context', () => {
+    expect(
+      sanitizePageContextUrl(
+        'https://example.com/callback?code=abc&state=keep&access_token=secret#frag',
+      ),
+    ).toBe('https://example.com/callback?state=keep');
+  });
+
+  it('keeps ordinary query params that help page context', () => {
+    expect(sanitizePageContextUrl('https://shop.example/search?q=laptop&page=2')).toBe(
+      'https://shop.example/search?q=laptop&page=2',
+    );
   });
 });
 
