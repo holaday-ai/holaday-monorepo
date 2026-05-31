@@ -1299,6 +1299,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === 'holaday.disconnect') {
     disconnect();
     state.tasks.clear();
+    pushTasksSnapshot();
     sendResponse({ ok: true });
     return true;
   }
