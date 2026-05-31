@@ -481,6 +481,57 @@ describe('captureVisionObservation', () => {
       error: 'debugger attach failed: 浏览器调试通道被占用，请关闭该标签页 DevTools 后重试',
     });
   });
+
+  it('retries observation screenshots with lower quality when the first frame is too large', async () => {
+    const sendCommand = vi
+      .fn()
+      .mockResolvedValueOnce({
+        result: {
+          value: JSON.stringify({
+            w: 1280,
+            h: 720,
+            u: 'https://holaday.ai/app',
+            t: 'HOLA DAY',
+          }),
+        },
+      })
+      .mockResolvedValueOnce({ data: 'x'.repeat(2_000_001) })
+      .mockResolvedValueOnce({ data: 'AA==' });
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    await expect(captureVisionObservation(1)).resolves.toEqual({
+      screenshotBase64: 'AA==',
+      viewportWidth: 1280,
+      viewportHeight: 720,
+      url: 'https://holaday.ai/app',
+      title: 'HOLA DAY',
+    });
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      2,
+      { tabId: 1 },
+      'Page.captureScreenshot',
+      {
+        format: 'jpeg',
+        quality: 80,
+        captureBeyondViewport: false,
+      },
+    );
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      3,
+      { tabId: 1 },
+      'Page.captureScreenshot',
+      {
+        format: 'jpeg',
+        quality: 60,
+        captureBeyondViewport: false,
+      },
+    );
+  });
 });
 
 describe('getActiveTabId', () => {

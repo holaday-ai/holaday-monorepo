@@ -579,6 +579,7 @@ export interface VisionObservationCapture {
 }
 
 const MAX_OBSERVATION_SCREENSHOT_BASE64_CHARS = 2_000_000;
+const OBSERVATION_SCREENSHOT_QUALITIES = [80, 60, 40] as const;
 const MAX_OBSERVATION_VIEWPORT_PX = 20_000;
 const MAX_OBSERVATION_URL_CHARS = 2048;
 const MAX_OBSERVATION_TITLE_CHARS = 512;
@@ -719,15 +720,22 @@ export async function captureVisionObservation(tabId: number): Promise<VisionObs
   let error: string | undefined;
   try {
     await ensureAttached(tabId);
-    const shot = (await sendCdp(tabId, 'Page.captureScreenshot', {
-      format: 'jpeg',
-      quality: 80,
-      captureBeyondViewport: false,
-    })) as { data?: unknown };
-    if (typeof shot?.data === 'string' && shot.data.length > 0) {
-      screenshotBase64 = shot.data;
-    } else {
-      error = `Page.captureScreenshot returned non-string data (${typeof shot?.data})`;
+    for (const quality of OBSERVATION_SCREENSHOT_QUALITIES) {
+      const shot = (await sendCdp(tabId, 'Page.captureScreenshot', {
+        format: 'jpeg',
+        quality,
+        captureBeyondViewport: false,
+      })) as { data?: unknown };
+      if (typeof shot?.data !== 'string' || shot.data.length === 0) {
+        error = `Page.captureScreenshot returned non-string data (${typeof shot?.data})`;
+        break;
+      }
+      if (shot.data.length <= MAX_OBSERVATION_SCREENSHOT_BASE64_CHARS) {
+        screenshotBase64 = shot.data;
+        error = undefined;
+        break;
+      }
+      error = 'Page.captureScreenshot returned oversized image';
     }
   } catch (err) {
     error = `Page.captureScreenshot failed: ${cdpActionErrorMessage(err)}`;
