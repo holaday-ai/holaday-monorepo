@@ -59,6 +59,7 @@ import { runHistorySync } from './history-sync.js';
 import { handleExtensionToolCall } from './extension-tools.js';
 import { isTrustedAuthBridgeSender } from './auth-bridge-trust.js';
 import { decideAuthTokenAction } from './auth-token-handler.js';
+import { withDeadline } from '../shared/deadline.js';
 import {
   connect,
   disconnect,
@@ -738,6 +739,7 @@ const AUTH_FAILURES_KEY = 'holaday.auth.consecutive_failures';
 const KNOWN_BAD_TOKEN_KEY = 'holaday.auth.known_bad_token';
 const MAX_AUTH_FAILURES = 3;
 const RETRY_BACKOFF_MS = [1_000, 2_000, 4_000];
+const AUTH_STATE_STORAGE_TIMEOUT_MS = 1_500;
 /**
  * Phase 17b — known-bad-token expiry. Storing a forever-marker
  * caused a stuck state: the user re-logs in on holaday.ai, the
@@ -755,8 +757,17 @@ const KNOWN_BAD_TOKEN_TTL_MS = 5 * 60 * 1000;
 let pendingAuthRetry: ReturnType<typeof setTimeout> | null = null;
 
 async function getAuthFailures(): Promise<number> {
-  const v = (await chrome.storage.local.get(AUTH_FAILURES_KEY))[AUTH_FAILURES_KEY];
-  return typeof v === 'number' ? v : 0;
+  try {
+    const out = await withDeadline(
+      chrome.storage.local.get(AUTH_FAILURES_KEY),
+      AUTH_STATE_STORAGE_TIMEOUT_MS,
+      'auth_failures_read_timeout',
+    );
+    const v = out[AUTH_FAILURES_KEY];
+    return typeof v === 'number' ? v : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -769,28 +780,45 @@ async function getAuthFailures(): Promise<number> {
  * background so subsequent reads short-circuit on the absent key.
  */
 async function getKnownBadToken(): Promise<string | null> {
-  const v = (await chrome.storage.local.get(KNOWN_BAD_TOKEN_KEY))[KNOWN_BAD_TOKEN_KEY];
-  // Legacy: bare string from before this commit. Drop it — treating
-  // it as expired matches the new TTL semantics and unsticks any
-  // user who upgraded the extension while in the freeze state.
-  if (typeof v === 'string') {
-    void chrome.storage.local.remove(KNOWN_BAD_TOKEN_KEY);
-    return null;
-  }
-  if (!v || typeof v !== 'object') return null;
-  const obj = v as { token?: unknown; ts?: unknown };
-  if (typeof obj.token !== 'string' || obj.token.length === 0) return null;
-  if (typeof obj.ts !== 'number') return null;
-  const ageMs = Date.now() - obj.ts;
-  if (ageMs > KNOWN_BAD_TOKEN_TTL_MS) {
-    // Expired — wipe so the next read doesn't pay this branch.
-    void chrome.storage.local.remove(KNOWN_BAD_TOKEN_KEY);
-    console.info(
-      `[holaday] auth: known-bad-token expired (${Math.round(ageMs / 1000)}s old); will retry`,
+  try {
+    const out = await withDeadline(
+      chrome.storage.local.get(KNOWN_BAD_TOKEN_KEY),
+      AUTH_STATE_STORAGE_TIMEOUT_MS,
+      'known_bad_token_read_timeout',
     );
+    const v = out[KNOWN_BAD_TOKEN_KEY];
+    // Legacy: bare string from before this commit. Drop it — treating
+    // it as expired matches the new TTL semantics and unsticks any
+    // user who upgraded the extension while in the freeze state.
+    if (typeof v === 'string') {
+      void withDeadline(
+        chrome.storage.local.remove(KNOWN_BAD_TOKEN_KEY),
+        AUTH_STATE_STORAGE_TIMEOUT_MS,
+        'known_bad_token_remove_timeout',
+      ).catch(() => undefined);
+      return null;
+    }
+    if (!v || typeof v !== 'object') return null;
+    const obj = v as { token?: unknown; ts?: unknown };
+    if (typeof obj.token !== 'string' || obj.token.length === 0) return null;
+    if (typeof obj.ts !== 'number') return null;
+    const ageMs = Date.now() - obj.ts;
+    if (ageMs > KNOWN_BAD_TOKEN_TTL_MS) {
+      // Expired — wipe so the next read doesn't pay this branch.
+      void withDeadline(
+        chrome.storage.local.remove(KNOWN_BAD_TOKEN_KEY),
+        AUTH_STATE_STORAGE_TIMEOUT_MS,
+        'known_bad_token_expired_remove_timeout',
+      ).catch(() => undefined);
+      console.info(
+        `[holaday] auth: known-bad-token expired (${Math.round(ageMs / 1000)}s old); will retry`,
+      );
+      return null;
+    }
+    return obj.token;
+  } catch {
     return null;
   }
-  return obj.token;
 }
 
 /**
@@ -799,13 +827,21 @@ async function getKnownBadToken(): Promise<string | null> {
  * KNOWN_BAD_TOKEN_TTL_MS.
  */
 async function setKnownBadToken(token: string): Promise<void> {
-  await chrome.storage.local.set({
-    [KNOWN_BAD_TOKEN_KEY]: { token, ts: Date.now() },
-  });
+  await withDeadline(
+    chrome.storage.local.set({
+      [KNOWN_BAD_TOKEN_KEY]: { token, ts: Date.now() },
+    }),
+    AUTH_STATE_STORAGE_TIMEOUT_MS,
+    'known_bad_token_write_timeout',
+  );
 }
 
 async function resetAuthFailureState(): Promise<void> {
-  await chrome.storage.local.remove([AUTH_FAILURES_KEY, KNOWN_BAD_TOKEN_KEY]);
+  await withDeadline(
+    chrome.storage.local.remove([AUTH_FAILURES_KEY, KNOWN_BAD_TOKEN_KEY]),
+    AUTH_STATE_STORAGE_TIMEOUT_MS,
+    'auth_failure_state_remove_timeout',
+  );
 }
 
 /**
@@ -826,12 +862,16 @@ async function resetAllAuthState(): Promise<void> {
     clearTimeout(pendingAuthRetry);
     pendingAuthRetry = null;
   }
-  await chrome.storage.local.remove([
-    TOKEN_STORAGE_KEY,
-    'holaday.user',
-    AUTH_FAILURES_KEY,
-    KNOWN_BAD_TOKEN_KEY,
-  ]);
+  await withDeadline(
+    chrome.storage.local.remove([
+      TOKEN_STORAGE_KEY,
+      'holaday.user',
+      AUTH_FAILURES_KEY,
+      KNOWN_BAD_TOKEN_KEY,
+    ]),
+    AUTH_STATE_STORAGE_TIMEOUT_MS,
+    'all_auth_state_remove_timeout',
+  );
   // Ensure no live socket is left holding the cleared token.
   disconnect();
   state.tasks.clear();
@@ -938,10 +978,16 @@ async function maybeRunCookieSync(reason: 'welcome' | 'alarm' | 'manual'): Promi
 const HISTORY_SYNC_PERIOD_MS = 24 * 60 * 60 * 1000;
 const HISTORY_SYNC_LAST_AT_KEY = 'holaday.history.lastSyncAt';
 const HISTORY_SYNC_ENABLED_KEY = 'holaday.history.enabled';
+const HISTORY_SYNC_STORAGE_TIMEOUT_MS = 1_500;
 
 async function isHistorySyncEnabled(): Promise<boolean> {
   try {
-    const v = (await chrome.storage.local.get(HISTORY_SYNC_ENABLED_KEY))[HISTORY_SYNC_ENABLED_KEY];
+    const out = await withDeadline(
+      chrome.storage.local.get(HISTORY_SYNC_ENABLED_KEY),
+      HISTORY_SYNC_STORAGE_TIMEOUT_MS,
+      'history_sync_enabled_read_timeout',
+    );
+    const v = out[HISTORY_SYNC_ENABLED_KEY];
     // Default ON when key missing — explicit `false` disables.
     return v !== false;
   } catch {
@@ -951,7 +997,12 @@ async function isHistorySyncEnabled(): Promise<boolean> {
 
 async function getLastHistorySyncAt(): Promise<number> {
   try {
-    const v = (await chrome.storage.local.get(HISTORY_SYNC_LAST_AT_KEY))[HISTORY_SYNC_LAST_AT_KEY];
+    const out = await withDeadline(
+      chrome.storage.local.get(HISTORY_SYNC_LAST_AT_KEY),
+      HISTORY_SYNC_STORAGE_TIMEOUT_MS,
+      'history_sync_last_at_read_timeout',
+    );
+    const v = out[HISTORY_SYNC_LAST_AT_KEY];
     return typeof v === 'number' ? v : 0;
   } catch {
     return 0;
@@ -960,7 +1011,11 @@ async function getLastHistorySyncAt(): Promise<number> {
 
 async function setLastHistorySyncAt(t: number): Promise<void> {
   try {
-    await chrome.storage.local.set({ [HISTORY_SYNC_LAST_AT_KEY]: t });
+    await withDeadline(
+      chrome.storage.local.set({ [HISTORY_SYNC_LAST_AT_KEY]: t }),
+      HISTORY_SYNC_STORAGE_TIMEOUT_MS,
+      'history_sync_last_at_write_timeout',
+    );
   } catch {
     /* non-fatal */
   }
@@ -1072,7 +1127,11 @@ onUnauthorized(() => {
       // Persist BEFORE clearing the token, otherwise getAccessToken
       // returns null on the next ensureConnected and we lose the
       // "this token is bad" signal.
-      await chrome.storage.local.set({ [AUTH_FAILURES_KEY]: next });
+      await withDeadline(
+        chrome.storage.local.set({ [AUTH_FAILURES_KEY]: next }),
+        AUTH_STATE_STORAGE_TIMEOUT_MS,
+        'auth_failures_write_timeout',
+      );
       if (rejected) {
         // Phase 17b — write via the helper so the value carries a
         // timestamp that getKnownBadToken can age out after the TTL.
