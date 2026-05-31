@@ -80,7 +80,7 @@ const LOGIN_COOKIE_MAP: Record<string, readonly string[]> = {
 const FALLBACK_COOKIE_COUNT_THRESHOLD = 6;
 const COOKIE_BRIDGE_DOMAIN_TIMEOUT_MS = 1_000;
 
-async function isLoggedIn(domain: string): Promise<boolean> {
+async function readLoginState(domain: string): Promise<boolean | null> {
   let cookies: chrome.cookies.Cookie[];
   try {
     cookies = await withDeadline(
@@ -89,9 +89,11 @@ async function isLoggedIn(domain: string): Promise<boolean> {
       `cookie_bridge_domain_timeout:${domain}`,
     );
   } catch {
-    // Permission revoked or storage error — treat as unknown/false
-    // rather than throwing; the orchestrator never sees this site.
-    return false;
+    // Permission revoked or storage error — treat as unknown
+    // rather than throwing. The orchestrator treats missing domains
+    // as unknown, which is more accurate than overwriting a prior
+    // "logged in" signal with a transient read failure.
+    return null;
   }
   if (cookies.length === 0) return false;
 
@@ -113,7 +115,8 @@ export async function readLoginStates(): Promise<Record<string, boolean>> {
   const out: Record<string, boolean> = {};
   await Promise.all(
     TRACKED_DOMAINS.map(async (d) => {
-      out[d] = await isLoggedIn(d);
+      const state = await readLoginState(d);
+      if (state !== null) out[d] = state;
     }),
   );
   return out;

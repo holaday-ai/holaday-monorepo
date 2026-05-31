@@ -39,7 +39,7 @@ describe('readLoginStates', () => {
     expect(states['taobao.com']).toBe(false);
   });
 
-  it('does not block the snapshot when one cookie domain hangs', async () => {
+  it('does not mark a hanging cookie domain as logged out', async () => {
     vi.useFakeTimers();
     globalThis.chrome = {
       cookies: {
@@ -54,10 +54,9 @@ describe('readLoginStates', () => {
     const pending = readLoginStates();
     await vi.advanceTimersByTimeAsync(1_000);
 
-    await expect(pending).resolves.toMatchObject({
-      'taobao.com': false,
-      'github.com': true,
-    });
+    const states = await pending;
+    expect(states).not.toHaveProperty('taobao.com');
+    expect(states['github.com']).toBe(true);
   });
 });
 
