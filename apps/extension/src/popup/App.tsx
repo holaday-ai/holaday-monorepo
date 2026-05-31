@@ -343,6 +343,10 @@ export function App() {
           setToken(resetToken);
           return;
         }
+        if (result.kind === 'unauthorized') {
+          await clearAccessToken();
+          await clearStoredUser();
+        }
       }
       if (!response?.ok) {
         await clearAccessToken();
