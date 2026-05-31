@@ -43,6 +43,7 @@ import { decideObservedTokenAction, TOKEN_KEY } from './auth-bridge-core.js';
  * "I just logged in" / "I just logged out" feel laggy.
  */
 const POLL_INTERVAL_MS = 3000;
+const POST_ACK_TIMEOUT_MS = 1_500;
 
 /**
  * SW message type. Mirrored by the handler in background/index.ts —
@@ -99,7 +100,16 @@ function markPostFailed(token: string | null): void {
 
 function postToSw(token: string | null): void {
   try {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      markPostFailed(token);
+    }, POST_ACK_TIMEOUT_MS);
     chrome.runtime.sendMessage({ type: SW_MESSAGE_TYPE, token }, (response?: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       // sendResponse intentionally ignored — SW does the work, no
       // ack required. Reading `chrome.runtime.lastError` here
       // suppresses the harmless "Unchecked runtime.lastError" warning

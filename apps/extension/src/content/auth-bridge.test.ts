@@ -13,6 +13,37 @@ afterEach(() => {
 });
 
 describe('auth bridge content script', () => {
+  it('retries an observed token when the service worker ack never arrives', async () => {
+    vi.useFakeTimers();
+    const token = 'hd_live_' + 'a'.repeat(24);
+    const getItem = vi.fn((key: string) => (key === TOKEN_KEY ? token : null));
+    const sendMessage = vi.fn((_message: unknown, callback: () => void) => {
+      if (sendMessage.mock.calls.length > 1) callback();
+    });
+
+    globalThis.window = {
+      localStorage: { getItem },
+      addEventListener: vi.fn(),
+    } as unknown as Window & typeof globalThis;
+    globalThis.chrome = {
+      runtime: {
+        sendMessage,
+      },
+    } as unknown as typeof chrome;
+
+    await import('./auth-bridge.js');
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_500);
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage).toHaveBeenLastCalledWith(
+      { type: 'holaday.auth.token', token },
+      expect.any(Function),
+    );
+  });
+
   it('does not clear the service worker token when localStorage is temporarily unreadable', async () => {
     vi.useFakeTimers();
     const getItem = vi.fn(() => {
