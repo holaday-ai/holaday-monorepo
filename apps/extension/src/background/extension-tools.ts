@@ -28,8 +28,8 @@
  */
 
 import type { ClientMessage, ServerMessage } from '@holaday/shared-types';
-import { send } from './ws-client.js';
 import { withDeadline } from '../shared/deadline.js';
+import { sendCriticalClientMessage } from './critical-send.js';
 
 type ExtensionToolCall = Extract<ServerMessage, { type: 'server.extension.tool_call' }>;
 
@@ -51,7 +51,6 @@ const MAX_NAVIGATE_URL_LENGTH = 2048;
 const MAX_SCREENSHOT_RESULT_BASE64_CHARS = 2_000_000;
 const RECENT_TOOL_RESULT_TTL_MS = 60_000;
 const MAX_RECENT_TOOL_RESULTS = 100;
-const TOOL_RESULT_RETRY_DELAYS_MS = [250, 1_000, 3_000, 7_000, 15_000] as const;
 const inFlightToolCallRequestIds = new Set<string>();
 
 type ExtensionToolResultPayload = Omit<
@@ -529,30 +528,7 @@ function sendExtensionToolResult(
     at: Date.now(),
     ...payload,
   };
-  const sent = send(message);
-  if (!sent) {
-    console.warn('[holaday] extension tool result send failed', { taskId, requestId });
-    scheduleExtensionToolResultRetry(message, 0);
-  }
-  return sent;
-}
-
-function scheduleExtensionToolResultRetry(
-  message: ExtensionToolResultMessage,
-  attemptIndex: number,
-): void {
-  const delay = TOOL_RESULT_RETRY_DELAYS_MS[attemptIndex];
-  if (delay === undefined) {
-    console.warn('[holaday] extension tool result retry exhausted', {
-      taskId: message.taskId,
-      requestId: message.requestId,
-    });
-    return;
-  }
-  setTimeout(() => {
-    if (send(message)) return;
-    scheduleExtensionToolResultRetry(message, attemptIndex + 1);
-  }, delay);
+  return sendCriticalClientMessage(message, 'extension tool result');
 }
 
 function rememberRecentToolCallResult(
