@@ -250,6 +250,24 @@ describe('ws-client send', () => {
     });
   });
 
+  it('forgets stale preferred endpoint values that are no longer configured', async () => {
+    const get = chrome.storage.local.get as unknown as ReturnType<typeof vi.fn>;
+    get.mockImplementation(async (key: string) => {
+      if (key === 'holaday.ws.preferredEndpoint') {
+        return { [key]: 'wss://hd-app.orangebench.tech/ws' };
+      }
+      return {};
+    });
+
+    await import('./ws-client.js');
+
+    await vi.waitFor(() => {
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith(
+        'holaday.ws.preferredEndpoint',
+      );
+    });
+  });
+
   it('treats a stuck reconnect-cap storage read as not capped', async () => {
     vi.useFakeTimers();
     const get = chrome.storage.local.get as unknown as ReturnType<typeof vi.fn>;

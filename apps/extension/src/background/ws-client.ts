@@ -434,10 +434,26 @@ async function hydratePreferredWsEndpoint(): Promise<void> {
     const stored = out[WS_PREFERRED_ENDPOINT_KEY];
     if (typeof stored !== 'string') return;
     const index = ORCHESTRATOR_WS_ENDPOINTS.indexOf(stored);
-    if (index < 0 || state.socket) return;
+    if (index < 0) {
+      await clearPreferredWsEndpoint();
+      return;
+    }
+    if (state.socket) return;
     state.endpointIndex = index;
   } catch {
     /* defensive — endpoint preference is only an optimization */
+  }
+}
+
+async function clearPreferredWsEndpoint(): Promise<void> {
+  try {
+    await withDeadline(
+      chrome.storage.local.remove(WS_PREFERRED_ENDPOINT_KEY),
+      WS_STORAGE_TIMEOUT_MS,
+      'ws_endpoint_remove_timeout',
+    );
+  } catch {
+    /* non-fatal; stale endpoint cleanup should never block connect */
   }
 }
 
