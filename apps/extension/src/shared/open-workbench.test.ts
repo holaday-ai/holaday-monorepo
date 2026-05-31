@@ -40,6 +40,7 @@ describe('WORKBENCH_TAB_MATCH_PATTERNS', () => {
     expect(WORKBENCH_TAB_MATCH_PATTERNS).toEqual([
       '*://hd-app.orangebench.tech/*',
       '*://holaday.ai/*',
+      '*://app.holaday.ai/*',
     ]);
   });
 });
@@ -47,6 +48,7 @@ describe('WORKBENCH_TAB_MATCH_PATTERNS', () => {
 describe('isWorkbenchTabUrl', () => {
   it('matches only the production workbench tab urls', () => {
     expect(isWorkbenchTabUrl('https://holaday.ai/app')).toBe(true);
+    expect(isWorkbenchTabUrl('https://app.holaday.ai/app')).toBe(true);
     expect(isWorkbenchTabUrl('https://hd-app.orangebench.tech/app')).toBe(true);
     expect(isWorkbenchTabUrl('https://staging.holaday.ai/app')).toBe(false);
     expect(isWorkbenchTabUrl('chrome://extensions')).toBe(false);
@@ -97,7 +99,7 @@ describe('openOrFocusWorkbench', () => {
       .fn()
       .mockRejectedValueOnce(new Error('bad pattern'))
       .mockResolvedValueOnce([
-        makeTab({ id: 7, url: 'https://holaday.ai/app', active: false }),
+        makeTab({ id: 7, url: 'https://app.holaday.ai/app', active: false }),
         makeTab({ id: 8, url: 'https://staging.holaday.ai/app', active: false }),
       ]);
     const update = vi.fn(async () => ({}));

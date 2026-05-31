@@ -12,12 +12,13 @@
  * popup CTA points at:
  *   - hd-app.orangebench.tech  (Aliyun, China route)
  *   - holaday.ai               (international apex)
+ *   - app.holaday.ai           (app subdomain, public route)
  *
  * Subdomains of holaday.ai (staging.holaday.ai, etc.) are
- * intentionally NOT matched — staging tabs shouldn't catch the
- * primary "login" intent. If the user needs the broader scope later
- * we can switch to `*://*.holaday.ai/*` (which also covers the apex
- * per Chrome's match-pattern semantics).
+ * otherwise NOT matched — staging tabs shouldn't catch the primary
+ * "login" intent. If the user needs the broader scope later we can
+ * switch to `*://*.holaday.ai/*` (which also covers the apex per
+ * Chrome's match-pattern semantics).
  *
  * All chrome.* calls are wrapped in defensive try/catch — a transient
  * failure (e.g. extension unloading mid-call) should still resolve
@@ -28,6 +29,7 @@
 export const WORKBENCH_TAB_MATCH_PATTERNS: readonly string[] = [
   '*://hd-app.orangebench.tech/*',
   '*://holaday.ai/*',
+  '*://app.holaday.ai/*',
 ] as const;
 
 export function isWorkbenchTabUrl(url: string | undefined): boolean {
@@ -36,7 +38,9 @@ export function isWorkbenchTabUrl(url: string | undefined): boolean {
     const parsed = new URL(url);
     return (
       (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
-      (parsed.hostname === 'hd-app.orangebench.tech' || parsed.hostname === 'holaday.ai')
+      (parsed.hostname === 'hd-app.orangebench.tech' ||
+        parsed.hostname === 'holaday.ai' ||
+        parsed.hostname === 'app.holaday.ai')
     );
   } catch {
     return false;
