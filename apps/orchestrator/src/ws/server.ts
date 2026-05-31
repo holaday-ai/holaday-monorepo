@@ -606,6 +606,10 @@ async function handleClientMessage(
       state.socket.close(4401, 'unauthorized');
       return;
     }
+    const previousUserId = state.userId;
+    if (previousUserId && previousUserId !== userId) {
+      removeClientForUser(previousUserId, state);
+    }
     state.userId = userId;
     state.authed = true;
     // Phase 25 — flag this socket as a Chrome extension only when the

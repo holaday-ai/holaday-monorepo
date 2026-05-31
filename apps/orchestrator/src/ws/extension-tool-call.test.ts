@@ -132,6 +132,68 @@ describe('extension tool-call websocket lifecycle', () => {
     client.close();
   });
 
+  it('moves a subprotocol-authenticated socket when hello uses a newer user token', async () => {
+    const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
+    const { signAccessToken } = await import('../auth/jwt.js');
+    const { createWsServer, hasConnectedExtension } = await import('./server.js');
+    const { default: WebSocket } = await import('ws');
+
+    const port = 38230;
+    const server = createWsServer(port);
+    close = async () => {
+      await server.close();
+    };
+
+    const oldUserId = 'usr_extension_old_token_test';
+    const newUserId = 'usr_extension_new_token_test';
+    const oldToken = await signAccessToken({ sub: oldUserId, plan: 'free' });
+    const newToken = await signAccessToken({ sub: newUserId, plan: 'free' });
+    const client = new WebSocket(`ws://127.0.0.1:${port}`, [
+      WS_SUBPROTOCOL,
+      `jwt.${oldToken}`,
+    ]);
+
+    let welcomeCount = 0;
+    const nextWelcome = (): Promise<void> =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('no welcome')), 5_000);
+        const onMessage = (raw: RawData) => {
+          const parsed = parseServerMessage(raw.toString());
+          if (parsed.success && parsed.data.type === 'server.welcome') {
+            welcomeCount += 1;
+            clearTimeout(timer);
+            client.off('message', onMessage);
+            resolve();
+          }
+        };
+        client.on('message', onMessage);
+      });
+
+    const initialWelcome = nextWelcome();
+    await new Promise<void>((resolve, reject) => {
+      client.once('open', resolve);
+      client.once('error', reject);
+    });
+    await initialWelcome;
+    expect(hasConnectedExtension(oldUserId)).toBe(false);
+
+    const helloWelcome = nextWelcome();
+    client.send(
+      JSON.stringify({
+        type: 'client.hello',
+        token: newToken,
+        extensionVersion: 'fresh-token-test-extension',
+      }),
+    );
+    await helloWelcome;
+
+    expect(welcomeCount).toBe(2);
+    expect(hasConnectedExtension(oldUserId)).toBe(false);
+    expect(hasConnectedExtension(newUserId)).toBe(true);
+
+    client.close();
+  });
+
   it('ignores tool results from the wrong extension socket or task', async () => {
     const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
     const { signAccessToken } = await import('../auth/jwt.js');
