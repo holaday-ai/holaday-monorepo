@@ -401,23 +401,24 @@ interface KeyInfo {
  */
 function resolveKey(name: string): KeyInfo {
   const named: Record<string, KeyInfo> = {
-    Enter: { key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13 },
-    Escape: { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 },
-    Esc: { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 },
-    Tab: { key: 'Tab', code: 'Tab', text: '\t', windowsVirtualKeyCode: 9 },
-    Backspace: { key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 },
-    Delete: { key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46 },
-    Space: { key: ' ', code: 'Space', text: ' ', windowsVirtualKeyCode: 32 },
-    ArrowUp: { key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38 },
-    ArrowDown: { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 },
-    ArrowLeft: { key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 },
-    ArrowRight: { key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 },
-    Home: { key: 'Home', code: 'Home', windowsVirtualKeyCode: 36 },
-    End: { key: 'End', code: 'End', windowsVirtualKeyCode: 35 },
-    PageUp: { key: 'PageUp', code: 'PageUp', windowsVirtualKeyCode: 33 },
-    PageDown: { key: 'PageDown', code: 'PageDown', windowsVirtualKeyCode: 34 },
+    enter: { key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13 },
+    escape: { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 },
+    esc: { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 },
+    tab: { key: 'Tab', code: 'Tab', text: '\t', windowsVirtualKeyCode: 9 },
+    backspace: { key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 },
+    delete: { key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46 },
+    space: { key: ' ', code: 'Space', text: ' ', windowsVirtualKeyCode: 32 },
+    arrowup: { key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38 },
+    arrowdown: { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 },
+    arrowleft: { key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 },
+    arrowright: { key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 },
+    home: { key: 'Home', code: 'Home', windowsVirtualKeyCode: 36 },
+    end: { key: 'End', code: 'End', windowsVirtualKeyCode: 35 },
+    pageup: { key: 'PageUp', code: 'PageUp', windowsVirtualKeyCode: 33 },
+    pagedown: { key: 'PageDown', code: 'PageDown', windowsVirtualKeyCode: 34 },
   };
-  if (named[name]) return named[name];
+  const special = named[name.toLowerCase()];
+  if (special) return special;
   // Single printable char — emit as `text` so CDP inserts it.
   if (name.length === 1) {
     const code = /^[a-z]$/i.test(name) ? `Key${name.toUpperCase()}` : name;

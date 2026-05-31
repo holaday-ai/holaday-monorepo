@@ -170,6 +170,48 @@ describe('executeCdpAction', () => {
     const keyDownParams = (sendCommand.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
     expect(keyDownParams).not.toHaveProperty('text');
   });
+
+  it('normalizes special key names case-insensitively', async () => {
+    const sendCommand = vi.fn(async () => ({}));
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    await expect(executeCdpAction(11, { kind: 'key', key: 'enter' })).resolves.toEqual({
+      ok: true,
+      message: 'key enter',
+    });
+    await expect(executeCdpAction(11, { kind: 'key', key: 'ARROWDOWN' })).resolves.toEqual({
+      ok: true,
+      message: 'key ARROWDOWN',
+    });
+
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      1,
+      { tabId: 11 },
+      'Input.dispatchKeyEvent',
+      expect.objectContaining({
+        type: 'keyDown',
+        key: 'Enter',
+        code: 'Enter',
+        windowsVirtualKeyCode: 13,
+      }),
+    );
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      3,
+      { tabId: 11 },
+      'Input.dispatchKeyEvent',
+      expect.objectContaining({
+        type: 'keyDown',
+        key: 'ArrowDown',
+        code: 'ArrowDown',
+        windowsVirtualKeyCode: 40,
+      }),
+    );
+  });
 });
 
 describe('cdpActionErrorMessage', () => {
