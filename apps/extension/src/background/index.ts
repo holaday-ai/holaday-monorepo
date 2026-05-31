@@ -43,7 +43,7 @@ import type { DriverAction, HolaDayBrowserDriver } from '@holaday/browser-driver
 // 3MB playwright-crx dependency doesn't come along for the ride.
 import { PlaywrightCrxAdapter } from '@holaday/browser-driver/crx';
 import { MockDriver } from '@holaday/browser-driver/mock';
-import type { ServerMessage } from '@holaday/shared-types';
+import type { ClientMessage, ServerMessage } from '@holaday/shared-types';
 import { tryAutoLogin } from '../shared/auto-login.js';
 import {
   clearAccessToken,
@@ -234,6 +234,19 @@ const state: State = {
   tasks: new Map(),
 };
 
+type VisionActResultPayload = Omit<
+  Extract<ClientMessage, { type: 'client.vision.acted' }>,
+  'type' | 'taskId' | 'tickIndex'
+>;
+
+const VISION_ACT_RESULT_TTL_MS = 60_000;
+const MAX_RECENT_VISION_ACT_RESULTS = 100;
+const inFlightVisionActResults = new Map<string, Promise<VisionActResultPayload>>();
+const recentVisionActResults = new Map<
+  string,
+  { at: number; payload: VisionActResultPayload }
+>();
+
 // ---------- WS → SW state updates ----------
 
 onServerMessage((msg) => {
@@ -407,6 +420,37 @@ async function onVisionObserve(
 async function onVisionAct(
   msg: Extract<ServerMessage, { type: 'server.vision.act' }>,
 ): Promise<void> {
+  const dedupeKey = visionActDedupeKey(msg.taskId, msg.tickIndex);
+  const cached = recentVisionActResults.get(dedupeKey);
+  if (cached && Date.now() - cached.at <= VISION_ACT_RESULT_TTL_MS) {
+    sendVisionActed(msg, cached.payload);
+    return;
+  }
+  if (cached) recentVisionActResults.delete(dedupeKey);
+  const pending = inFlightVisionActResults.get(dedupeKey);
+  if (pending) {
+    sendVisionActed(msg, await pending);
+    return;
+  }
+  const next = computeVisionActResult(msg)
+    .catch((err): VisionActResultPayload => {
+      console.warn('[holaday] vision act failed unexpectedly', err);
+      return { ok: false, message: '浏览器操作失败，请稍后重试' };
+    })
+    .then((payload) => {
+      rememberVisionActResult(dedupeKey, payload);
+      return payload;
+    })
+    .finally(() => {
+      inFlightVisionActResults.delete(dedupeKey);
+    });
+  inFlightVisionActResults.set(dedupeKey, next);
+  sendVisionActed(msg, await next);
+}
+
+async function computeVisionActResult(
+  msg: Extract<ServerMessage, { type: 'server.vision.act' }>,
+): Promise<VisionActResultPayload> {
   trackVisionTask(msg.taskId, 'acting', {
     tickIndex: msg.tickIndex,
     actionKind: msg.action.kind,
@@ -418,37 +462,57 @@ async function onVisionAct(
     const finalStatus: 'completed' | 'failed' = msg.action.kind === 'done' ? 'completed' : 'failed';
     const detail = msg.action.kind === 'done' ? msg.action.summary : msg.action.reason;
     finaliseVisionTask(msg.taskId, finalStatus, detail);
-    send({
-      type: 'client.vision.acted',
-      taskId: msg.taskId,
-      tickIndex: msg.tickIndex,
+    return {
       ok: true,
       message: `${msg.action.kind} terminal; no driver work`,
-    });
-    return;
+    };
   }
   const tabId = await getActiveTabId();
   if (tabId === null) {
-    send({
-      type: 'client.vision.acted',
-      taskId: msg.taskId,
-      tickIndex: msg.tickIndex,
+    return {
       ok: false,
       message: 'no active tab',
-    });
-    return;
+    };
   }
   const result = await executeCdpAction(tabId, msg.action);
+  // After action executed → orchestrator takes another observation
+  // next. Signal "deciding" so the popup doesn't look frozen.
+  trackVisionTask(msg.taskId, 'deciding', { tickIndex: msg.tickIndex });
+  return {
+    ok: result.ok,
+    ...(result.message ? { message: result.message } : {}),
+  };
+}
+
+function sendVisionActed(
+  msg: Extract<ServerMessage, { type: 'server.vision.act' }>,
+  payload: VisionActResultPayload,
+): void {
   send({
     type: 'client.vision.acted',
     taskId: msg.taskId,
     tickIndex: msg.tickIndex,
-    ok: result.ok,
-    ...(result.message ? { message: result.message } : {}),
+    ...payload,
   });
-  // After action executed → orchestrator takes another observation
-  // next. Signal "deciding" so the popup doesn't look frozen.
-  trackVisionTask(msg.taskId, 'deciding', { tickIndex: msg.tickIndex });
+}
+
+function visionActDedupeKey(taskId: string, tickIndex: number): string {
+  return `${taskId}\u0000${tickIndex}`;
+}
+
+function rememberVisionActResult(key: string, payload: VisionActResultPayload): void {
+  const now = Date.now();
+  recentVisionActResults.set(key, { at: now, payload });
+  for (const [recentKey, value] of recentVisionActResults) {
+    if (now - value.at > VISION_ACT_RESULT_TTL_MS) {
+      recentVisionActResults.delete(recentKey);
+    }
+  }
+  while (recentVisionActResults.size > MAX_RECENT_VISION_ACT_RESULTS) {
+    const oldest = recentVisionActResults.keys().next().value;
+    if (!oldest) break;
+    recentVisionActResults.delete(oldest);
+  }
 }
 
 // ---------- Vision-loop task tracking for the popup ----------
