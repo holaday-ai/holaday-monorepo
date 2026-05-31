@@ -92,6 +92,46 @@ describe('extension tool-call websocket lifecycle', () => {
     });
   });
 
+  it('does not treat web-workbench hello frames as extension sockets', async () => {
+    const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
+    const { signAccessToken } = await import('../auth/jwt.js');
+    const { createWsServer, hasConnectedExtension } = await import('./server.js');
+    const { default: WebSocket } = await import('ws');
+
+    const port = 38229;
+    const server = createWsServer(port);
+    close = async () => {
+      await server.close();
+    };
+
+    const userId = 'usr_web_workbench_not_extension_test';
+    const token = await signAccessToken({ sub: userId, plan: 'free' });
+    const client = new WebSocket(`ws://127.0.0.1:${port}`, [WS_SUBPROTOCOL, `jwt.${token}`]);
+
+    await new Promise<void>((resolve, reject) => {
+      client.once('open', resolve);
+      client.once('error', reject);
+    });
+
+    const welcome = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('no welcome')), 5_000);
+      client.on('message', (raw) => {
+        const parsed = parseServerMessage(raw.toString());
+        if (parsed.success && parsed.data.type === 'server.welcome') {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+    });
+
+    client.send(JSON.stringify({ type: 'client.hello', token, extensionVersion: 'web-workbench' }));
+    await welcome;
+
+    expect(hasConnectedExtension(userId)).toBe(false);
+
+    client.close();
+  });
+
   it('ignores tool results from the wrong extension socket or task', async () => {
     const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
     const { signAccessToken } = await import('../auth/jwt.js');

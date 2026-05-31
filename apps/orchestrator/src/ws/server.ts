@@ -43,8 +43,9 @@ interface ClientState {
   healedStepIds: Set<string>;
   /**
    * Phase 25 — true when this client is the Chrome extension (set
-   * from `client.hello.extensionVersion`). SPA / sidepanel clients
-   * leave it false. Read by `hasConnectedExtension(userId)` so the
+   * from `client.hello.extensionVersion`). Web clients may also send
+   * a source marker for logs, so `web-workbench` is explicitly not
+   * treated as an extension. Read by `hasConnectedExtension(userId)` so the
    * ExecutionRouter can decide whether Mode B (extension-driven) is
    * available without sending discovery probes.
    */
@@ -146,8 +147,24 @@ export function createWsServer(port: number, opts: WsServerOpts = {}) {
  * normally persist past a restart; if they do, we log and move on — a
  * re-plan would need to call the commander again which is out of scope.
  */
+function isExtensionHello(msg: ClientMessage): boolean {
+  if (msg.type !== 'client.hello') return false;
+  return (
+    typeof msg.extensionVersion === 'string' &&
+    msg.extensionVersion.length > 0 &&
+    msg.extensionVersion !== 'web-workbench'
+  );
+}
+
 function applyRehydrationForUser(state: ClientState): void {
   if (!state.userId) return;
+  if (state.isExtension) {
+    logger.debug(
+      { userId: state.userId, clientId: state.id },
+      'skipping task rehydration for extension client',
+    );
+    return;
+  }
   const bucket = rehydratedByUser.get(state.userId);
   if (!bucket || bucket.length === 0) return;
 
@@ -533,7 +550,6 @@ async function handleConnection(socket: WebSocket, req: IncomingMessage) {
         clientId: state.id,
         heartbeatMs: HEARTBEAT_INTERVAL_MS,
       });
-      applyRehydrationForUser(state);
     }
   }
 
@@ -592,13 +608,11 @@ async function handleClientMessage(
     }
     state.userId = userId;
     state.authed = true;
-    // Phase 25 — flag this socket as an extension client when the
-    // hello frame carries `extensionVersion`. SPA / sidepanel clients
-    // omit the field. Read by `hasConnectedExtension(userId)` for the
-    // Mode B routing check in tasks.create.
-    if (typeof msg.extensionVersion === 'string' && msg.extensionVersion.length > 0) {
-      state.isExtension = true;
-    }
+    // Phase 25 — flag this socket as a Chrome extension only when the
+    // hello frame carries a real extension version. The web app sends a
+    // legacy source marker (`web-workbench`) in the same field, so keep
+    // that socket on the normal SPA path.
+    state.isExtension = isExtensionHello(msg);
     addClientForUser(userId, state);
     clearTimeout(authTimer);
     send(state.socket, {

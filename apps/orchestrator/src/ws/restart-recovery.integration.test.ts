@@ -24,7 +24,7 @@ describe('restart recovery: awaiting_user re-emits server.user.confirm', () => {
     await close();
   });
 
-  it('reconnecting client immediately receives the persisted confirm prompt', async () => {
+  it('reconnecting web client receives the persisted confirm prompt after hello', async () => {
     const { newExternalId, WS_SUBPROTOCOL, parseServerMessage } = await import(
       '@holaday/shared-types'
     );
@@ -110,6 +110,7 @@ describe('restart recovery: awaiting_user re-emits server.user.confirm', () => {
       client.once('open', () => resolve());
       client.once('error', reject);
     });
+    client.send(JSON.stringify({ type: 'client.hello', token, extensionVersion: 'web-workbench' }));
 
     const confirm = await confirmPromise;
     expect(confirm.taskId).toBe(s0.taskId);
