@@ -183,16 +183,12 @@ export function App() {
             setToken(liftedToken);
             setError(null);
             setStatus('connected');
-          } else if (result.kind === 'unauthorized') {
-            // Token was rejected (expired, signed with a different
-            // secret, or pointing at a deleted user). Drop it so the
-            // panel falls back to the manual login form.
-            try {
-              await clearAccessToken();
-            } catch {
-              /* best-effort */
-            }
-          }
+        } else if (result.kind === 'unauthorized') {
+          // Token was rejected (expired, signed with a different
+          // secret, or pointing at a deleted user). Drop it so the
+          // panel falls back to the manual login form.
+          await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
+        }
         }
       }
       if (cancelled) return;
@@ -367,11 +363,7 @@ export function App() {
         // Token was lifted but rejected by auth.me — likely expired
         // or signed with a different secret. Drop it so the next
         // retry doesn't keep looping with bad creds.
-        try {
-          await clearAccessToken();
-        } catch {
-          /* best-effort */
-        }
+        await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
         setStatus('error');
         setError('从 holaday.ai 取到的 token 已失效，请到 holaday.ai 重新登录。');
         return;
@@ -422,6 +414,11 @@ export function App() {
         'sidepanel_create_task_timeout',
       );
       if (!res.ok) {
+        if (res.status === 401) {
+          await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
+          if (mountedRef.current) clearLocalSessionState();
+          throw new Error('登录已失效，请到 holaday.ai 重新登录后再发送任务。');
+        }
         const body = await responseJsonWithDeadline<{ error?: { message?: string } } | null>(
           res,
           CREATE_TASK_BODY_TIMEOUT_MS,
