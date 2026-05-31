@@ -324,6 +324,7 @@ export function App() {
       const resp = await sendRuntimeMessage<{ ok?: boolean; token?: string | null }>({
         type: 'holaday.tryAutoLogin',
       });
+      if (!mountedRef.current) return;
       const liftedToken = resp?.token ?? null;
       if (!liftedToken) {
         setStatus('error');
@@ -333,6 +334,7 @@ export function App() {
         return;
       }
       const fetchedUser = await fetchMe(liftedToken);
+      if (!mountedRef.current) return;
       if (!fetchedUser) {
         // Token was lifted but rejected by auth.me — likely expired
         // or signed with a different secret. Drop it so the next
@@ -347,10 +349,12 @@ export function App() {
         return;
       }
       await setStoredUser(fetchedUser);
+      if (!mountedRef.current) return;
       setUser(fetchedUser);
       setToken(liftedToken);
       setStatus('connected');
     } catch (err) {
+      if (!mountedRef.current) return;
       setStatus('error');
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -399,6 +403,7 @@ export function App() {
         CREATE_TASK_BODY_TIMEOUT_MS,
         'sidepanel_create_task_body_timeout',
       );
+      if (!mountedRef.current) return;
       const newTaskId = body.result.data.taskId;
       setActiveTaskId(newTaskId);
       setIntent('');
@@ -406,9 +411,10 @@ export function App() {
       // arrive via the listener above as the WS frames flow in.
       await refreshTasksSnapshot();
     } catch (err) {
+      if (!mountedRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setSubmitting(false);
+      if (mountedRef.current) setSubmitting(false);
     }
   }
 
