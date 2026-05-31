@@ -20,6 +20,7 @@ describe('tryAutoLogin', () => {
     const executeScript = vi
       .fn()
       .mockResolvedValueOnce([{ result: 'undefined' }])
+      .mockResolvedValueOnce([{ result: 'short' }])
       .mockResolvedValueOnce([{ result: '  hd_live_valid_token  ' }]);
     globalThis.chrome = {
       tabs: {
@@ -38,6 +39,12 @@ describe('tryAutoLogin', () => {
           },
           {
             id: 3,
+            url: 'https://hd-app.orangebench.tech/app',
+            active: false,
+            lastAccessed: 0,
+          },
+          {
+            id: 4,
             url: 'https://example.com/',
             active: false,
             lastAccessed: 3,
@@ -48,7 +55,7 @@ describe('tryAutoLogin', () => {
     } as unknown as typeof chrome;
 
     await expect(tryAutoLogin()).resolves.toBe('hd_live_valid_token');
-    expect(executeScript).toHaveBeenCalledTimes(2);
+    expect(executeScript).toHaveBeenCalledTimes(3);
   });
 
   it('skips a workbench tab when reading localStorage hangs', async () => {

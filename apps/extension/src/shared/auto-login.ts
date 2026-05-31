@@ -40,10 +40,15 @@ const WORKBENCH_URL_PATTERNS: readonly RegExp[] = [
   /^http:\/\/localhost(?::\d+)?\//i,
   /^http:\/\/127\.0\.0\.1(?::\d+)?\//i,
 ] as const;
+const MIN_TOKEN_LENGTH = 10;
 
 function isWorkbenchUrl(url: string | undefined): boolean {
   if (!url) return false;
   return WORKBENCH_URL_PATTERNS.some((re) => re.test(url));
+}
+
+function looksLikeAutoLoginToken(token: string): boolean {
+  return token.length >= MIN_TOKEN_LENGTH && !/\s/.test(token);
 }
 
 async function readTokenFromTab(tabId: number, url: string): Promise<string | null> {
@@ -68,7 +73,7 @@ async function readTokenFromTab(tabId: number, url: string): Promise<string | nu
     );
     const value = results[0]?.result;
     const token = normalizeAccessToken(value);
-    if (token) {
+    if (token && looksLikeAutoLoginToken(token)) {
       return token;
     }
     console.info(
