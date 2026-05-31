@@ -588,6 +588,7 @@ export async function getActiveTabId(): Promise<number | null> {
     { active: true, lastFocusedWindow: true },
     { active: true, windowType: 'normal' },
   ];
+  const candidates: chrome.tabs.Tab[] = [];
 
   for (const query of queries) {
     try {
@@ -596,14 +597,18 @@ export async function getActiveTabId(): Promise<number | null> {
         ACTIVE_TAB_QUERY_TIMEOUT_MS,
         'active_tab_query_timeout',
       );
-      if (typeof tab?.id === 'number') return tab.id;
+      if (typeof tab?.id === 'number') candidates.push(tab);
     } catch {
       // Keep walking the fallback chain; Chrome can transiently reject
       // currentWindow lookups while another normal window is still usable.
     }
   }
 
-  return null;
+  const webTab = candidates.find((tab) => {
+    const url = tab.url ?? '';
+    return url.startsWith('http://') || url.startsWith('https://');
+  });
+  return webTab?.id ?? candidates[0]?.id ?? null;
 }
 
 /**

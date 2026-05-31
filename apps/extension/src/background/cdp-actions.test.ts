@@ -447,6 +447,22 @@ describe('getActiveTabId', () => {
     expect(query).toHaveBeenNthCalledWith(2, { active: true, lastFocusedWindow: true });
   });
 
+  it('prefers a web page over an internal Chrome page', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 10, url: 'chrome://extensions/' }])
+      .mockResolvedValueOnce([{ id: 11, url: 'https://holaday.ai/app' }])
+      .mockResolvedValueOnce([]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabId()).resolves.toBe(11);
+    expect(query).toHaveBeenNthCalledWith(1, { active: true, currentWindow: true });
+    expect(query).toHaveBeenNthCalledWith(2, { active: true, lastFocusedWindow: true });
+    expect(query).toHaveBeenNthCalledWith(3, { active: true, windowType: 'normal' });
+  });
+
   it('continues the fallback chain when a tab query hangs', async () => {
     vi.useFakeTimers();
     const query = vi
