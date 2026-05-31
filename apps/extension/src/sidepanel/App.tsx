@@ -110,6 +110,18 @@ export function App() {
   const [submitting, setSubmitting] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [tasks, setTasks] = useState<TaskView[]>([]);
+  const tasksRefreshInFlight = useRef(false);
+
+  async function refreshTasksSnapshot(): Promise<void> {
+    if (tasksRefreshInFlight.current) return;
+    tasksRefreshInFlight.current = true;
+    try {
+      const resp = await sendRuntimeMessage<{ tasks?: TaskView[] }>({ type: 'holaday.tasks' });
+      if (resp?.tasks) setTasks(resp.tasks);
+    } finally {
+      tasksRefreshInFlight.current = false;
+    }
+  }
 
   // Mount: restore session, hydrate task snapshot from SW, refresh
   // page context. When no stored token, nudge the SW to try the
@@ -150,8 +162,7 @@ export function App() {
           }
         }
       }
-      const resp = await sendRuntimeMessage<{ tasks?: TaskView[] }>({ type: 'holaday.tasks' });
-      if (resp?.tasks) setTasks(resp.tasks);
+      await refreshTasksSnapshot();
     })();
   }, []);
 
@@ -346,8 +357,7 @@ export function App() {
       setIntent('');
       // Nudge the SW to push the latest snapshot — the SW updates
       // arrive via the listener above as the WS frames flow in.
-      const resp = await sendRuntimeMessage<{ tasks?: TaskView[] }>({ type: 'holaday.tasks' });
-      if (resp?.tasks) setTasks(resp.tasks);
+      await refreshTasksSnapshot();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
