@@ -1,6 +1,11 @@
 import { HEARTBEAT_INTERVAL_MS } from '@holaday/shared-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../shared/config.js', () => ({
+  ORCHESTRATOR_WS: 'wss://primary.test/ws',
+  ORCHESTRATOR_WS_ENDPOINTS: ['wss://primary.test/ws', 'wss://backup.test/ws'],
+}));
+
 type Listener = (event?: unknown) => void;
 
 class FakeWebSocket {
@@ -176,6 +181,23 @@ describe('ws-client send', () => {
 
     expect(sockets).toHaveLength(2);
     expect(sockets[1]?.protocols).toEqual(['holaday.v1', 'jwt.new-token']);
+  });
+
+  it('rotates websocket endpoints after a network reconnect failure', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const { connect } = await import('./ws-client.js');
+    connect('token');
+    const [primarySocket] = sockets;
+    if (!primarySocket) throw new Error('expected websocket');
+
+    expect(primarySocket.url).toBe('wss://primary.test/ws');
+    primarySocket.readyState = FakeWebSocket.CLOSED;
+    primarySocket.dispatch('close', { code: 1006, reason: '' });
+    vi.advanceTimersByTime(1_000);
+
+    expect(sockets).toHaveLength(2);
+    expect(sockets[1]?.url).toBe('wss://backup.test/ws');
   });
 
   it('ignores late error events from a stale socket after token swap', async () => {

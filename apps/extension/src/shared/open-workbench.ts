@@ -31,6 +31,8 @@ export const WORKBENCH_TAB_MATCH_PATTERNS: readonly string[] = [
   '*://holaday.ai/*',
   '*://app.holaday.ai/*',
 ] as const;
+const WORKBENCH_TAB_QUERY_TIMEOUT_MS = 1_500;
+const WORKBENCH_TAB_ACTION_TIMEOUT_MS = 1_500;
 
 export function isWorkbenchTabUrl(url: string | undefined): boolean {
   if (!url) return false;
@@ -60,13 +62,18 @@ export function isWorkbenchTabUrl(url: string | undefined): boolean {
 export async function openOrFocusWorkbench(fallbackUrl: string): Promise<void> {
   let tabs: chrome.tabs.Tab[] = [];
   try {
-    tabs = await chrome.tabs.query({ url: WORKBENCH_TAB_MATCH_PATTERNS as string[] });
+    tabs = await withDeadline(
+      chrome.tabs.query({ url: WORKBENCH_TAB_MATCH_PATTERNS as string[] }),
+      WORKBENCH_TAB_QUERY_TIMEOUT_MS,
+    );
   } catch {
     // chrome.tabs.query can reject on URL match quirks in some Chrome
     // builds. Fall back to querying all tabs and filtering in-process
     // before deciding to open a duplicate tab.
     try {
-      tabs = (await chrome.tabs.query({})).filter((tab) => isWorkbenchTabUrl(tab.url));
+      tabs = (
+        await withDeadline(chrome.tabs.query({}), WORKBENCH_TAB_QUERY_TIMEOUT_MS)
+      ).filter((tab) => isWorkbenchTabUrl(tab.url));
     } catch {
       tabs = [];
     }
@@ -76,14 +83,20 @@ export async function openOrFocusWorkbench(fallbackUrl: string): Promise<void> {
   if (target && typeof target.id === 'number') {
     let activated = false;
     try {
-      await chrome.tabs.update(target.id, { active: true });
+      await withDeadline(
+        chrome.tabs.update(target.id, { active: true }),
+        WORKBENCH_TAB_ACTION_TIMEOUT_MS,
+      );
       activated = true;
     } catch {
       /* see windows.update below */
     }
     if (typeof target.windowId === 'number') {
       try {
-        await chrome.windows.update(target.windowId, { focused: true });
+        await withDeadline(
+          chrome.windows.update(target.windowId, { focused: true }),
+          WORKBENCH_TAB_ACTION_TIMEOUT_MS,
+        );
       } catch {
         /* non-fatal */
       }
@@ -93,7 +106,7 @@ export async function openOrFocusWorkbench(fallbackUrl: string): Promise<void> {
 
   // No existing workbench tab found OR activating failed — open fresh.
   try {
-    await chrome.tabs.create({ url: fallbackUrl });
+    await withDeadline(chrome.tabs.create({ url: fallbackUrl }), WORKBENCH_TAB_ACTION_TIMEOUT_MS);
   } catch {
     /* nothing else to do — user-facing button is non-blocking */
   }
@@ -132,4 +145,21 @@ export function pickBestTab(tabs: readonly chrome.tabs.Tab[]): chrome.tabs.Tab |
     (a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0),
   );
   return byRecent[0] ?? tabs[0] ?? null;
+}
+
+function withDeadline<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('workbench_tab_timeout')), timeoutMs);
+    timer && (timer as { unref?: () => void }).unref?.();
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
 }

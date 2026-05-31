@@ -30,6 +30,7 @@ function makeTab(over: Partial<chrome.tabs.Tab>): chrome.tabs.Tab {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   delete (globalThis as any).chrome;
@@ -113,5 +114,42 @@ describe('openOrFocusWorkbench', () => {
 
     expect(update).toHaveBeenCalledWith(7, { active: true });
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it('opens a fresh tab when existing-tab activation hangs', async () => {
+    vi.useFakeTimers();
+    const query = vi.fn(async () => [
+      makeTab({ id: 9, url: 'https://holaday.ai/app', active: false }),
+    ]);
+    const update = vi.fn(() => new Promise(() => undefined));
+    const create = vi.fn(async () => ({}));
+    globalThis.chrome = {
+      tabs: { query, update, create },
+      windows: { update: vi.fn(async () => ({})) },
+    } as unknown as typeof chrome;
+
+    const pending = openOrFocusWorkbench('https://hd-app.orangebench.tech/app');
+    await vi.advanceTimersByTimeAsync(1_500);
+    await pending;
+
+    expect(update).toHaveBeenCalledWith(9, { active: true });
+    expect(create).toHaveBeenCalledWith({ url: 'https://hd-app.orangebench.tech/app' });
+  });
+
+  it('falls back to creating a tab when tab queries hang', async () => {
+    vi.useFakeTimers();
+    const query = vi.fn(() => new Promise(() => undefined));
+    const create = vi.fn(async () => ({}));
+    globalThis.chrome = {
+      tabs: { query, create },
+      windows: { update: vi.fn(async () => ({})) },
+    } as unknown as typeof chrome;
+
+    const pending = openOrFocusWorkbench('https://hd-app.orangebench.tech/app');
+    await vi.advanceTimersByTimeAsync(3_000);
+    await pending;
+
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(create).toHaveBeenCalledWith({ url: 'https://hd-app.orangebench.tech/app' });
   });
 });

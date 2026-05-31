@@ -5,7 +5,7 @@ import {
   WS_SUBPROTOCOL,
   parseServerMessage,
 } from '@holaday/shared-types';
-import { ORCHESTRATOR_WS } from '../shared/config.js';
+import { ORCHESTRATOR_WS, ORCHESTRATOR_WS_ENDPOINTS } from '../shared/config.js';
 
 type Listener = (msg: ServerMessage) => void;
 type UnauthorizedListener = () => void;
@@ -25,6 +25,8 @@ interface State {
   lastCloseReason: string | null;
   lastErrorAt: number | null;
   nextRetryAt: number | null;
+  endpointIndex: number;
+  endpointUrl: string | null;
   listeners: Set<Listener>;
   /**
    * Phase 14 — fires when the orchestrator closes us with code 4401
@@ -49,6 +51,8 @@ const state: State = {
   lastCloseReason: null,
   lastErrorAt: null,
   nextRetryAt: null,
+  endpointIndex: 0,
+  endpointUrl: null,
   listeners: new Set(),
   unauthorizedListeners: new Set(),
 };
@@ -64,6 +68,8 @@ export interface WsConnectionStatus {
   lastCloseReason: string | null;
   lastErrorAt: number | null;
   nextRetryAt: number | null;
+  endpointIndex: number;
+  endpointUrl: string | null;
 }
 
 export function onServerMessage(fn: Listener): () => void {
@@ -182,6 +188,8 @@ export async function getWsConnectionStatus(): Promise<WsConnectionStatus> {
     lastCloseReason: state.lastCloseReason,
     lastErrorAt: state.lastErrorAt,
     nextRetryAt: state.nextRetryAt,
+    endpointIndex: state.endpointIndex,
+    endpointUrl: state.endpointUrl,
   };
 }
 
@@ -189,7 +197,9 @@ function openSocket(token: string): void {
   clearReconnectTimer();
   state.socketGeneration += 1;
   const protocols = [WS_SUBPROTOCOL, `jwt.${token}`];
-  const ws = new WebSocket(ORCHESTRATOR_WS, protocols);
+  const endpoint = getCurrentWsEndpoint();
+  state.endpointUrl = endpoint;
+  const ws = new WebSocket(endpoint, protocols);
   state.socket = ws;
   let openTimer: ReturnType<typeof setTimeout> | null = null;
   let socketSettled = false;
@@ -309,6 +319,15 @@ function openSocket(token: string): void {
     state.lastErrorAt = Date.now();
     // 'close' will fire right after; reconnect handled there.
   });
+}
+
+function getCurrentWsEndpoint(): string {
+  return ORCHESTRATOR_WS_ENDPOINTS[state.endpointIndex] ?? ORCHESTRATOR_WS;
+}
+
+function getNextWsEndpointIndex(): number {
+  if (ORCHESTRATOR_WS_ENDPOINTS.length <= 1) return 0;
+  return (state.endpointIndex + 1) % ORCHESTRATOR_WS_ENDPOINTS.length;
 }
 
 /**
@@ -440,12 +459,14 @@ function scheduleReconnect(token: string): void {
   const jitter = Math.floor(Math.random() * 250);
   const delay = backoff + jitter;
   const generation = state.socketGeneration;
+  const nextEndpointIndex = getNextWsEndpointIndex();
   clearReconnectTimer();
   state.nextRetryAt = Date.now() + delay;
   state.reconnectTimer = setTimeout(() => {
     state.reconnectTimer = null;
     state.nextRetryAt = null;
     if (state.closedByUser || state.socket || state.socketGeneration !== generation) return;
+    state.endpointIndex = nextEndpointIndex;
     openSocket(token);
   }, delay);
 }
