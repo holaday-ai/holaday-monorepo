@@ -307,6 +307,19 @@ describe('getActiveTabForExtensionTool', () => {
       url: 'https://holaday.ai/app',
     });
   });
+
+  it('does not return an internal Chrome page as an actionable tab', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 1, url: 'chrome://extensions/' }])
+      .mockResolvedValueOnce([{ id: 2, url: 'chrome-extension://abc/popup.html' }])
+      .mockResolvedValueOnce([]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabForExtensionTool()).resolves.toBeNull();
+  });
 });
 
 describe('handleExtensionToolCall', () => {

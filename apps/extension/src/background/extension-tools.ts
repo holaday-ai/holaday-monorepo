@@ -89,13 +89,24 @@ export async function getActiveTabForExtensionTool(): Promise<chrome.tabs.Tab | 
     }
   }
 
-  return candidates.find(isWebPageTab) ?? candidates[0] ?? null;
+  return candidates.find(isWebPageTab) ?? candidates.find(isNonInternalTab) ?? null;
 }
 
 function isWebPageTab(tab: chrome.tabs.Tab): boolean {
   if (typeof tab.id !== 'number') return false;
   if (!tab.url) return false;
   return tab.url.startsWith('http://') || tab.url.startsWith('https://');
+}
+
+function isNonInternalTab(tab: chrome.tabs.Tab): boolean {
+  if (typeof tab.id !== 'number') return false;
+  if (!tab.url) return true;
+  return !(
+    tab.url.startsWith('chrome://') ||
+    tab.url.startsWith('chrome-extension://') ||
+    tab.url.startsWith('edge://') ||
+    tab.url.startsWith('about:')
+  );
 }
 
 /**

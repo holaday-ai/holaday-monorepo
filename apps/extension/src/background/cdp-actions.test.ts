@@ -463,6 +463,19 @@ describe('getActiveTabId', () => {
     expect(query).toHaveBeenNthCalledWith(3, { active: true, windowType: 'normal' });
   });
 
+  it('does not return an internal Chrome page when no web tab is active', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 10, url: 'chrome://extensions/' }])
+      .mockResolvedValueOnce([{ id: 11, url: 'chrome-extension://abc/sidepanel.html' }])
+      .mockResolvedValueOnce([]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabId()).resolves.toBeNull();
+  });
+
   it('continues the fallback chain when a tab query hangs', async () => {
     vi.useFakeTimers();
     const query = vi

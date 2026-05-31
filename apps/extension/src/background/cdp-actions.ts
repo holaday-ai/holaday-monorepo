@@ -608,7 +608,19 @@ export async function getActiveTabId(): Promise<number | null> {
     const url = tab.url ?? '';
     return url.startsWith('http://') || url.startsWith('https://');
   });
-  return webTab?.id ?? candidates[0]?.id ?? null;
+  const nonInternalTab = candidates.find((tab) => {
+    const url = tab.url ?? '';
+    return (
+      !url ||
+      !(
+        url.startsWith('chrome://') ||
+        url.startsWith('chrome-extension://') ||
+        url.startsWith('edge://') ||
+        url.startsWith('about:')
+      )
+    );
+  });
+  return webTab?.id ?? nonInternalTab?.id ?? null;
 }
 
 /**
