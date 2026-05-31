@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { normalizeSyncableCookie } from './cookie-sync.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { collectCookies, normalizeSyncableCookie } from './cookie-sync.js';
 
 function cookie(overrides: Partial<chrome.cookies.Cookie> = {}): chrome.cookies.Cookie {
   return {
@@ -16,6 +16,13 @@ function cookie(overrides: Partial<chrome.cookies.Cookie> = {}): chrome.cookies.
     ...overrides,
   } as chrome.cookies.Cookie;
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  delete (globalThis as any).chrome;
+});
 
 describe('normalizeSyncableCookie', () => {
   it('keeps normal cookies intact for server sync', () => {
@@ -57,5 +64,26 @@ describe('normalizeSyncableCookie', () => {
     expect(normalized?.path).toHaveLength(1024);
     expect(normalized?.value).toBe('secret');
     expect(normalized).not.toHaveProperty('expirationDate');
+  });
+
+  it('skips a stuck cookie domain without blocking the whole sync', async () => {
+    vi.useFakeTimers();
+    const getAll = vi.fn(({ domain }: chrome.cookies.GetAllDetails) => {
+      if (domain === '.taobao.com') return new Promise<chrome.cookies.Cookie[]>(() => undefined);
+      if (domain === '.github.com') return Promise.resolve([cookie({ domain: '.github.com' })]);
+      return Promise.resolve([]);
+    });
+    globalThis.chrome = {
+      cookies: { getAll },
+    } as unknown as typeof chrome;
+
+    const pending = collectCookies();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(pending).resolves.toEqual([
+      expect.objectContaining({ domain: '.github.com', name: 'sid' }),
+    ]);
+    expect(getAll).toHaveBeenCalledWith({ domain: '.taobao.com' });
+    expect(getAll).toHaveBeenCalledWith({ domain: '.github.com' });
   });
 });

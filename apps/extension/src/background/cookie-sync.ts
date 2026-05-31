@@ -57,6 +57,7 @@ const MAX_COOKIE_VALUE_CHARS = 8192;
 const MAX_COOKIE_NAME_CHARS = 256;
 const MAX_COOKIE_DOMAIN_CHARS = 253;
 const MAX_COOKIE_PATH_CHARS = 1024;
+const COOKIE_DOMAIN_READ_TIMEOUT_MS = 1_000;
 
 export interface SyncableCookie {
   domain: string;
@@ -100,21 +101,45 @@ export function normalizeSyncableCookie(c: chrome.cookies.Cookie): SyncableCooki
  * whole sync.
  */
 export async function collectCookies(): Promise<SyncableCookie[]> {
+  const byDomain = await Promise.all(SYNC_DOMAINS.map(readCookiesForDomain));
   const out: SyncableCookie[] = [];
-  for (const domain of SYNC_DOMAINS) {
-    let cookies: chrome.cookies.Cookie[];
-    try {
-      cookies = await chrome.cookies.getAll({ domain });
-    } catch (err) {
-      console.warn(`[holaday] cookie-sync: getAll failed for ${domain}`, err);
-      continue;
-    }
+  for (const cookies of byDomain) {
     for (const c of cookies) {
       const normalized = normalizeSyncableCookie(c);
       if (normalized) out.push(normalized);
     }
   }
   return out;
+}
+
+async function readCookiesForDomain(domain: string): Promise<chrome.cookies.Cookie[]> {
+  try {
+    return await withDeadline(
+      chrome.cookies.getAll({ domain }),
+      COOKIE_DOMAIN_READ_TIMEOUT_MS,
+      `cookie_domain_timeout:${domain}`,
+    );
+  } catch (err) {
+    console.warn(`[holaday] cookie-sync: getAll failed for ${domain}`, err);
+    return [];
+  }
+}
+
+function withDeadline<T>(work: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    timer && (timer as { unref?: () => void }).unref?.();
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
 }
 
 interface SyncResponse {
