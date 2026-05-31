@@ -648,6 +648,8 @@ describe('getActiveTabId', () => {
     } as unknown as typeof chrome;
 
     const pending = getActiveTabId();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(query).toHaveBeenCalledTimes(3);
     await vi.advanceTimersByTimeAsync(1_500);
 
     await expect(pending).resolves.toBe(78);

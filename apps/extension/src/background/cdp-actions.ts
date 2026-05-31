@@ -677,28 +677,30 @@ export async function getActiveTabId(): Promise<number | null> {
     { active: true, lastFocusedWindow: true },
     { active: true, windowType: 'normal' },
   ];
-  const candidates: chrome.tabs.Tab[] = [];
-
-  for (const query of queries) {
-    try {
-      const [tab] = await withDeadline(
-        chrome.tabs.query(query),
-        ACTIVE_TAB_QUERY_TIMEOUT_MS,
-        'active_tab_query_timeout',
-      );
-      if (typeof tab?.id === 'number') candidates.push(tab);
-    } catch {
-      // Keep walking the fallback chain; Chrome can transiently reject
-      // currentWindow lookups while another normal window is still usable.
-    }
-  }
+  const candidates = await Promise.all(
+    queries.map(async (query) => {
+      try {
+        const [tab] = await withDeadline(
+          chrome.tabs.query(query),
+          ACTIVE_TAB_QUERY_TIMEOUT_MS,
+          'active_tab_query_timeout',
+        );
+        return typeof tab?.id === 'number' ? tab : undefined;
+      } catch {
+        // Keep walking the fallback chain; Chrome can transiently reject
+        // currentWindow lookups while another normal window is still usable.
+        return undefined;
+      }
+    }),
+  );
 
   const webTab = candidates.find((tab) => {
-    const url = tab.url ?? '';
+    const url = tab?.url ?? '';
     return url.startsWith('http://') || url.startsWith('https://');
   });
   const nonInternalTab = candidates.find((tab) => {
-    const url = tab.url ?? '';
+    if (!tab) return false;
+    const url = tab?.url ?? '';
     return (
       !url ||
       !(
