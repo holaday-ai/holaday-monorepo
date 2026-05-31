@@ -1304,6 +1304,14 @@ chrome.runtime.onInstalled.addListener(() => {
 
 // ---------- Popup ⇄ SW messaging ----------
 
+function safeSendResponse(sendResponse: (response?: unknown) => void, response?: unknown): void {
+  try {
+    sendResponse(response);
+  } catch (err) {
+    console.warn('[holaday] runtime response dropped', err);
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === 'holaday.auth.token' && (msg.token === null || typeof msg.token === 'string')) {
     // Phase 25b — push from the auth-bridge content script on a
@@ -1315,7 +1323,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         '[holaday] auth-bridge: ignoring message from untrusted sender',
         _sender.url,
       );
-      sendResponse({ ok: false, reason: 'untrusted_sender' });
+      safeSendResponse(sendResponse, { ok: false, reason: 'untrusted_sender' });
       return true;
     }
     void (async () => {
@@ -1326,7 +1334,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const action = decideAuthTokenAction(incoming, stored, knownBad);
 
         if (action.kind === 'unchanged') {
-          sendResponse({ ok: true, action: 'unchanged' });
+          safeSendResponse(sendResponse, { ok: true, action: 'unchanged' });
           return;
         }
         if (action.kind === 'refuse') {
@@ -1350,7 +1358,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             state.tasks.clear();
             pushTasksSnapshot();
           }
-          sendResponse({ ok: false, reason: action.reason });
+          safeSendResponse(sendResponse, { ok: false, reason: action.reason });
           return;
         }
         if (action.kind === 'clear') {
@@ -1363,7 +1371,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           disconnect();
           state.tasks.clear();
           pushTasksSnapshot();
-          sendResponse({ ok: true, action: 'cleared' });
+          safeSendResponse(sendResponse, { ok: true, action: 'cleared' });
           return;
         }
         // action.kind === 'set' — fresh token (login OR account swap).
@@ -1375,10 +1383,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         await setAccessToken(action.token);
         await resetAuthFailureState();
         await resetWsReconnectAttempts();
-        sendResponse({ ok: true, action: 'set' });
+        safeSendResponse(sendResponse, { ok: true, action: 'set' });
       } catch (err) {
         console.warn('[holaday] auth-bridge: token message failed', err);
-        sendResponse({ ok: false, reason: 'internal_error' });
+        safeSendResponse(sendResponse, { ok: false, reason: 'internal_error' });
       }
     })();
     return true; // keep response channel open
@@ -1386,24 +1394,24 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
   if (msg?.type === 'holaday.connect' && typeof msg.token === 'string') {
     connect(msg.token);
-    sendResponse({ ok: true });
+    safeSendResponse(sendResponse, { ok: true });
     return true;
   }
   if (msg?.type === 'holaday.disconnect') {
     disconnect();
     state.tasks.clear();
     pushTasksSnapshot();
-    sendResponse({ ok: true });
+    safeSendResponse(sendResponse, { ok: true });
     return true;
   }
   if (msg?.type === 'holaday.status') {
     void getWsConnectionStatus().then((ws) => {
-      sendResponse({ lastWelcomeAt: state.lastWelcomeAt, ws });
+      safeSendResponse(sendResponse, { lastWelcomeAt: state.lastWelcomeAt, ws });
     });
     return true;
   }
   if (msg?.type === 'holaday.tasks') {
-    sendResponse({ tasks: tasksSnapshot() });
+    safeSendResponse(sendResponse, { tasks: tasksSnapshot() });
     return true;
   }
   if (msg?.type === 'holaday.resetConnection') {
@@ -1419,14 +1427,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         await resetAllAuthState();
         await resetWsReconnectAttempts();
         const { token, frozen } = await ensureConnected();
-        sendResponse({
+        safeSendResponse(sendResponse, {
           ok: Boolean(token),
           token: token ?? null,
           ...(frozen ? { frozen: true } : {}),
         });
       } catch (err) {
         console.warn('[holaday] resetConnection failed', err);
-        sendResponse({ ok: false, reason: 'internal_error' });
+        safeSendResponse(sendResponse, { ok: false, reason: 'internal_error' });
       }
     })();
     return true;
@@ -1448,14 +1456,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         await resetAuthFailureState();
         await resetWsReconnectAttempts();
         const { token, frozen } = await ensureConnected();
-        sendResponse({
+        safeSendResponse(sendResponse, {
           ok: Boolean(token),
           token: token ?? null,
           ...(frozen ? { frozen: true } : {}),
         });
       } catch (err) {
         console.warn('[holaday] tryAutoLogin failed', err);
-        sendResponse({ ok: false, reason: 'internal_error' });
+        safeSendResponse(sendResponse, { ok: false, reason: 'internal_error' });
       }
     })();
     return true; // keep response channel open for async resolve
