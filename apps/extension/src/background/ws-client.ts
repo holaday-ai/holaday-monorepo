@@ -293,6 +293,7 @@ function openSocket(token: string): void {
   });
 
   ws.addEventListener('error', () => {
+    if (state.socket !== ws) return;
     state.lastErrorAt = Date.now();
     // 'close' will fire right after; reconnect handled there.
   });

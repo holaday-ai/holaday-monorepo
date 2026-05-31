@@ -178,6 +178,20 @@ describe('ws-client send', () => {
     expect(sockets[1]?.protocols).toEqual(['holaday.v1', 'jwt.new-token']);
   });
 
+  it('ignores late error events from a stale socket after token swap', async () => {
+    const { connect, reconnect, getWsConnectionStatus } = await import('./ws-client.js');
+    connect('old-token');
+    const [oldSocket] = sockets;
+    if (!oldSocket) throw new Error('expected websocket');
+
+    reconnect('new-token');
+    oldSocket.dispatch('error');
+
+    await expect(getWsConnectionStatus()).resolves.toMatchObject({
+      lastErrorAt: null,
+    });
+  });
+
   it('clears the ping timer when disconnecting before a fast reconnect', async () => {
     vi.useFakeTimers();
     const { connect, disconnect } = await import('./ws-client.js');

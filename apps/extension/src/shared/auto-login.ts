@@ -23,6 +23,7 @@
 import { normalizeAccessToken } from './storage.js';
 
 const TOKEN_KEY = 'holaday.access_token';
+const AUTO_LOGIN_TAB_READ_TIMEOUT_MS = 2_000;
 
 /**
  * URLs we'll consider "the workbench". Same rule as a chrome.tabs
@@ -48,16 +49,20 @@ async function readTokenFromTab(tabId: number, url: string): Promise<string | nu
     // bundler-injected helpers or imported symbols, so the
     // function source serializes cleanly when chrome.scripting
     // calls .toString() to ship it to the page world.
-    const results = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => {
-        try {
-          return window.localStorage.getItem('holaday.access_token');
-        } catch {
-          return null;
-        }
-      },
-    });
+    const results = await withDeadline(
+      chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          try {
+            return window.localStorage.getItem('holaday.access_token');
+          } catch {
+            return null;
+          }
+        },
+      }),
+      AUTO_LOGIN_TAB_READ_TIMEOUT_MS,
+      'auto_login_tab_timeout',
+    );
     const value = results[0]?.result;
     const token = normalizeAccessToken(value);
     if (token) {
@@ -74,6 +79,23 @@ async function readTokenFromTab(tabId: number, url: string): Promise<string | nu
     );
     return null;
   }
+}
+
+function withDeadline<T>(work: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    timer && (timer as { unref?: () => void }).unref?.();
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
 }
 
 export async function tryAutoLogin(): Promise<string | null> {
