@@ -88,26 +88,28 @@ async function queryActivePageContextTab(): Promise<chrome.tabs.Tab | undefined>
     { active: true, lastFocusedWindow: true },
     { active: true, windowType: 'normal' },
   ];
-  const candidates: chrome.tabs.Tab[] = [];
-
-  for (const query of queries) {
-    try {
-      const [tab] = await withDeadline(
-        chrome.tabs.query(query),
-        PAGE_CONTEXT_TAB_QUERY_TIMEOUT_MS,
-        'page_context_tab_query_timeout',
-      );
-      if (tab) candidates.push(tab);
-    } catch {
-      // Keep falling back; Chrome can reject transiently while focus
-      // moves between the popup, side panel, and page window.
-    }
-  }
+  const candidates = await Promise.all(
+    queries.map(async (query) => {
+      try {
+        const [tab] = await withDeadline(
+          chrome.tabs.query(query),
+          PAGE_CONTEXT_TAB_QUERY_TIMEOUT_MS,
+          'page_context_tab_query_timeout',
+        );
+        return tab;
+      } catch {
+        // Keep falling back; Chrome can reject transiently while focus
+        // moves between the popup, side panel, and page window.
+        return undefined;
+      }
+    }),
+  );
 
   return candidates.find(isWebPageTab);
 }
 
-function isWebPageTab(tab: chrome.tabs.Tab): boolean {
+function isWebPageTab(tab: chrome.tabs.Tab | undefined): tab is chrome.tabs.Tab {
+  if (!tab) return false;
   if (typeof tab.id !== 'number') return false;
   if (!tab.url) return false;
   return tab.url.startsWith('http://') || tab.url.startsWith('https://');

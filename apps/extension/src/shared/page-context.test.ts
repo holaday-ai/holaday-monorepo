@@ -171,6 +171,8 @@ describe('getActivePageContext', () => {
     } as unknown as typeof chrome;
 
     const pending = getActivePageContext();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(query).toHaveBeenCalledTimes(3);
     await vi.advanceTimersByTimeAsync(1_500);
 
     await expect(pending).resolves.toEqual({
