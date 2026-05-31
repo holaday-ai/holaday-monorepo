@@ -255,6 +255,7 @@ describe('getActiveTabForExtensionTool', () => {
 
 describe('handleExtensionToolCall', () => {
   it('ignores duplicate in-flight request ids instead of executing twice', async () => {
+    vi.mocked(send).mockClear();
     let resolveUpdate: () => void = () => {
       throw new Error('update promise was not created');
     };
@@ -301,5 +302,56 @@ describe('handleExtensionToolCall', () => {
     await first;
 
     expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays completed duplicate request ids without executing twice', async () => {
+    vi.mocked(send).mockClear();
+    const update = vi.fn(async () => ({ id: 2, url: 'https://example.com/' }) as chrome.tabs.Tab);
+    const executeScript = vi.fn(async () => [{ result: 'hello' }]);
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, url: 'https://holaday.ai/app' }]),
+        update,
+        get: vi.fn(async () => ({ id: 2, status: 'complete', url: 'https://example.com/' })),
+        onUpdated: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+        onRemoved: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+      },
+      scripting: {
+        executeScript,
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_replay_tool_call',
+      requestId: 'req_replay_tool_call',
+      kind: 'navigate',
+      args: { url: 'https://example.com/', waitMs: 0 },
+      timeoutMs: 30_000,
+    };
+
+    await handleExtensionToolCall(call);
+    await handleExtensionToolCall(call);
+
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(executeScript).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(send).mock.calls[1]?.[0]).toMatchObject({
+      type: 'client.extension.tool_result',
+      taskId: 'tsk_replay_tool_call',
+      requestId: 'req_replay_tool_call',
+      ok: true,
+      result: {
+        finalUrl: 'https://example.com/',
+        title: '',
+        bodyText: 'hello',
+      },
+    });
   });
 });

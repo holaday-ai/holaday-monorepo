@@ -42,7 +42,19 @@ const DEFAULT_NAVIGATE_WAIT_MS = 1500;
 const MAX_NAVIGATE_WAIT_MS = 10_000;
 const MAX_NAVIGATE_URL_LENGTH = 2048;
 const MAX_SCREENSHOT_RESULT_BASE64_CHARS = 2_000_000;
+const RECENT_TOOL_RESULT_TTL_MS = 60_000;
+const MAX_RECENT_TOOL_RESULTS = 100;
 const inFlightToolCallRequestIds = new Set<string>();
+
+type ExtensionToolResultPayload = Omit<
+  Extract<ClientMessage, { type: 'client.extension.tool_result' }>,
+  'type' | 'taskId' | 'requestId' | 'at'
+>;
+
+const recentToolCallResults = new Map<
+  string,
+  { at: number; payload: ExtensionToolResultPayload }
+>();
 
 /**
  * Get the currently-focused tab. Returns null when no tab is available
@@ -339,6 +351,17 @@ export function extensionToolErrorPayload(
  */
 export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<void> {
   const { taskId, requestId, kind, args } = call;
+  const cached = recentToolCallResults.get(requestId);
+  if (cached && Date.now() - cached.at <= RECENT_TOOL_RESULT_TTL_MS) {
+    console.warn('[holaday] duplicate completed extension tool call replayed', {
+      taskId,
+      requestId,
+      kind,
+    });
+    sendExtensionToolResult(taskId, requestId, cached.payload);
+    return;
+  }
+  if (cached) recentToolCallResults.delete(requestId);
   if (inFlightToolCallRequestIds.has(requestId)) {
     console.warn('[holaday] duplicate extension tool call ignored', {
       taskId,
@@ -357,16 +380,11 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
   );
   let settled = false;
 
-  const finish = (payload: Omit<Extract<ClientMessage, { type: 'client.extension.tool_result' }>, 'type' | 'taskId' | 'requestId' | 'at'>): void => {
+  const finish = (payload: ExtensionToolResultPayload): void => {
     if (settled) return;
     settled = true;
-    send({
-      type: 'client.extension.tool_result',
-      taskId,
-      requestId,
-      at: Date.now(),
-      ...payload,
-    });
+    rememberRecentToolCallResult(requestId, payload);
+    sendExtensionToolResult(taskId, requestId, payload);
   };
 
   try {
@@ -402,4 +420,39 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
 
 export function _resetExtensionToolInFlightForTests(): void {
   inFlightToolCallRequestIds.clear();
+  recentToolCallResults.clear();
+}
+
+function sendExtensionToolResult(
+  taskId: string,
+  requestId: string,
+  payload: ExtensionToolResultPayload,
+): boolean {
+  const sent = send({
+    type: 'client.extension.tool_result',
+    taskId,
+    requestId,
+    at: Date.now(),
+    ...payload,
+  });
+  if (!sent) {
+    console.warn('[holaday] extension tool result send failed', { taskId, requestId });
+  }
+  return sent;
+}
+
+function rememberRecentToolCallResult(
+  requestId: string,
+  payload: ExtensionToolResultPayload,
+): void {
+  const now = Date.now();
+  recentToolCallResults.set(requestId, { at: now, payload });
+  for (const [key, value] of recentToolCallResults) {
+    if (now - value.at > RECENT_TOOL_RESULT_TTL_MS) recentToolCallResults.delete(key);
+  }
+  while (recentToolCallResults.size > MAX_RECENT_TOOL_RESULTS) {
+    const oldest = recentToolCallResults.keys().next().value;
+    if (!oldest) break;
+    recentToolCallResults.delete(oldest);
+  }
 }
