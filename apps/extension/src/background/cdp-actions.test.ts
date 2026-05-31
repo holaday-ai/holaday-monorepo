@@ -266,6 +266,33 @@ describe('executeCdpAction', () => {
     );
   });
 
+  it('chunks long inserted text to keep CDP payloads small', async () => {
+    const sendCommand = vi.fn(async () => ({}));
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    const text = `${'a'.repeat(1000)}${'b'.repeat(1000)}c`;
+    await expect(executeCdpAction(12, { kind: 'type', text })).resolves.toEqual({
+      ok: true,
+      message: 'typed 2001 chars',
+    });
+
+    expect(sendCommand).toHaveBeenCalledTimes(3);
+    expect(sendCommand).toHaveBeenNthCalledWith(1, { tabId: 12 }, 'Input.insertText', {
+      text: 'a'.repeat(1000),
+    });
+    expect(sendCommand).toHaveBeenNthCalledWith(2, { tabId: 12 }, 'Input.insertText', {
+      text: 'b'.repeat(1000),
+    });
+    expect(sendCommand).toHaveBeenNthCalledWith(3, { tabId: 12 }, 'Input.insertText', {
+      text: 'c',
+    });
+  });
+
   it('scrolls at the live viewport center', async () => {
     const sendCommand = vi.fn(async (_target, method: string) => {
       if (method === 'Runtime.evaluate') {

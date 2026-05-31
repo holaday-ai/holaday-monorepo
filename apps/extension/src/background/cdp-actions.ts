@@ -46,6 +46,7 @@ const VIEWPORT_READ_TIMEOUT_MS = 500;
 /** How long to wait before reporting a wait() complete (honours upper bound). */
 const WAIT_CAP_MS = 10_000;
 const MAX_NAVIGATE_URL_LENGTH = 2048;
+const TYPE_TEXT_CHUNK_CHARS = 1_000;
 
 /** Tabs we've already attached the debugger to this SW lifetime. */
 const attachedTabs = new Set<number>();
@@ -261,7 +262,12 @@ async function doType(
   // Input.insertText dispatches a real `input` event on the focused
   // element and handles IME / composing glyphs. Works in all input
   // surfaces (text inputs, contenteditable, textareas).
-  await sendCdp(tabId, 'Input.insertText', { text: action.text });
+  if (action.text.length === 0) {
+    return { ok: true, message: 'typed 0 chars' };
+  }
+  for (const chunk of chunkString(action.text, TYPE_TEXT_CHUNK_CHARS)) {
+    await sendCdp(tabId, 'Input.insertText', { text: chunk });
+  }
   return { ok: true, message: `typed ${action.text.length} chars` };
 }
 
@@ -457,6 +463,15 @@ function shouldResetCdpSession(err: unknown): boolean {
     lower.includes('target detached') ||
     lower.includes('not attached')
   );
+}
+
+function chunkString(value: string, chunkChars: number): string[] {
+  if (value.length <= chunkChars) return [value];
+  const chunks: string[] = [];
+  for (let i = 0; i < value.length; i += chunkChars) {
+    chunks.push(value.slice(i, i + chunkChars));
+  }
+  return chunks;
 }
 
 /**
