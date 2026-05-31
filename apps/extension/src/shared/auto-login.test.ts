@@ -83,4 +83,19 @@ describe('tryAutoLogin', () => {
     await expect(pending).resolves.toBe('hd_live_valid_token');
     expect(executeScript).toHaveBeenCalledTimes(2);
   });
+
+  it('returns null when the tab query hangs', async () => {
+    vi.useFakeTimers();
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(() => new Promise<chrome.tabs.Tab[]>(() => undefined)),
+      },
+    } as unknown as typeof chrome;
+
+    const pending = tryAutoLogin();
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    await expect(pending).resolves.toBeNull();
+    expect(chrome.tabs.query).toHaveBeenCalledWith({});
+  });
 });

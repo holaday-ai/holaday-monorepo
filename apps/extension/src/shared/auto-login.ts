@@ -25,6 +25,7 @@ import { withDeadline } from './deadline.js';
 
 const TOKEN_KEY = 'holaday.access_token';
 const AUTO_LOGIN_TAB_READ_TIMEOUT_MS = 2_000;
+const AUTO_LOGIN_TAB_QUERY_TIMEOUT_MS = 2_000;
 
 /**
  * URLs we'll consider "the workbench". Same rule as a chrome.tabs
@@ -86,7 +87,11 @@ async function readTokenFromTab(tabId: number, url: string): Promise<string | nu
 export async function tryAutoLogin(): Promise<string | null> {
   let allTabs: chrome.tabs.Tab[];
   try {
-    allTabs = await chrome.tabs.query({});
+    allTabs = await withDeadline(
+      chrome.tabs.query({}),
+      AUTO_LOGIN_TAB_QUERY_TIMEOUT_MS,
+      'auto_login_tab_query_timeout',
+    );
   } catch (err) {
     console.warn(
       '[holaday] auto-login: tabs.query({}) failed',
