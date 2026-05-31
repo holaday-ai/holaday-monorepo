@@ -7,6 +7,7 @@ import {
 } from './page-context.js';
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   delete (globalThis as any).chrome;
@@ -111,6 +112,44 @@ describe('getActivePageContext', () => {
       selectedText: '',
       metaDescription: '',
     });
+  });
+
+  it('falls back when the first active-tab query hangs', async () => {
+    vi.useFakeTimers();
+    const query = vi
+      .fn()
+      .mockReturnValueOnce(new Promise<chrome.tabs.Tab[]>(() => undefined))
+      .mockResolvedValueOnce([
+        { id: 12, title: 'Fallback page', url: 'https://example.com/fallback' } as chrome.tabs.Tab,
+      ]);
+    globalThis.chrome = {
+      tabs: { query },
+      scripting: {
+        executeScript: vi.fn(async () => [
+          {
+            result: {
+              title: 'Fallback extracted',
+              url: 'https://example.com/fallback',
+              selectedText: '',
+              metaDescription: '',
+            },
+          },
+        ]),
+      },
+    } as unknown as typeof chrome;
+
+    const pending = getActivePageContext();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    await expect(pending).resolves.toEqual({
+      tabId: 12,
+      title: 'Fallback extracted',
+      url: 'https://example.com/fallback',
+      selectedText: '',
+      metaDescription: '',
+    });
+    expect(query).toHaveBeenNthCalledWith(1, { active: true, currentWindow: true });
+    expect(query).toHaveBeenNthCalledWith(2, { active: true, lastFocusedWindow: true });
   });
 
   it('returns tab metadata when page injection hangs', async () => {

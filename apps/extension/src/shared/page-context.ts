@@ -35,6 +35,7 @@ const MAX_CONTEXT_URL_CHARS = 2048;
 const MAX_CONTEXT_SELECTION_CHARS = 2_000;
 const MAX_CONTEXT_META_DESCRIPTION_CHARS = 512;
 const PAGE_CONTEXT_READ_TIMEOUT_MS = 1_500;
+const PAGE_CONTEXT_TAB_QUERY_TIMEOUT_MS = 1_500;
 
 function clip(value: unknown, maxChars: number): string {
   const text = typeof value === 'string' ? value : '';
@@ -74,7 +75,11 @@ async function queryActivePageContextTab(): Promise<chrome.tabs.Tab | undefined>
 
   for (const query of queries) {
     try {
-      const [tab] = await chrome.tabs.query(query);
+      const [tab] = await withDeadline(
+        chrome.tabs.query(query),
+        PAGE_CONTEXT_TAB_QUERY_TIMEOUT_MS,
+        'page_context_tab_query_timeout',
+      );
       if (tab) candidates.push(tab);
     } catch {
       // Keep falling back; Chrome can reject transiently while focus
