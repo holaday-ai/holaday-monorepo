@@ -116,6 +116,25 @@ describe('openOrFocusWorkbench', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it('reloads a discarded workbench tab after focusing it', async () => {
+    const query = vi.fn(async () => [
+      makeTab({ id: 11, url: 'https://holaday.ai/app', active: false, discarded: true }),
+    ]);
+    const update = vi.fn(async () => ({}));
+    const reload = vi.fn(async () => undefined);
+    const create = vi.fn(async () => ({}));
+    globalThis.chrome = {
+      tabs: { query, update, reload, create },
+      windows: { update: vi.fn(async () => ({})) },
+    } as unknown as typeof chrome;
+
+    await openOrFocusWorkbench('https://hd-app.orangebench.tech/app');
+
+    expect(update).toHaveBeenCalledWith(11, { active: true });
+    expect(reload).toHaveBeenCalledWith(11);
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it('opens a fresh tab when existing-tab activation hangs', async () => {
     vi.useFakeTimers();
     const query = vi.fn(async () => [

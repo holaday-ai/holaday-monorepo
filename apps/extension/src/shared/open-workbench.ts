@@ -110,7 +110,20 @@ export async function openOrFocusWorkbench(fallbackUrl: string): Promise<void> {
         /* non-fatal */
       }
     }
-    if (activated) return;
+    if (activated) {
+      if (target.discarded) {
+        try {
+          await withDeadline(
+            chrome.tabs.reload(target.id),
+            WORKBENCH_TAB_ACTION_TIMEOUT_MS,
+            'workbench_tab_action_timeout',
+          );
+        } catch {
+          /* active tab is still a better target than opening a duplicate */
+        }
+      }
+      return;
+    }
   }
 
   // No existing workbench tab found OR activating failed — open fresh.
