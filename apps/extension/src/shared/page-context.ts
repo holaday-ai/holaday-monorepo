@@ -32,6 +32,7 @@ const MAX_CONTEXT_TITLE_CHARS = 512;
 const MAX_CONTEXT_URL_CHARS = 2048;
 const MAX_CONTEXT_SELECTION_CHARS = 2_000;
 const MAX_CONTEXT_META_DESCRIPTION_CHARS = 512;
+const PAGE_CONTEXT_READ_TIMEOUT_MS = 1_500;
 
 function clip(value: unknown, maxChars: number): string {
   const text = typeof value === 'string' ? value : '';
@@ -108,10 +109,13 @@ export async function getActivePageContext(): Promise<PageContext | null> {
   }
 
   try {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: pageWorldExtractor,
-    });
+    const results = await withDeadline(
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: pageWorldExtractor,
+      }),
+      PAGE_CONTEXT_READ_TIMEOUT_MS,
+    );
     const snippet = results[0]?.result as PageContextSnippet | undefined;
     if (!snippet) {
       const fallback = sanitizePageContextSnippet({
@@ -157,4 +161,21 @@ export function composeContextTail(ctx: PageContext | null): string {
     lines.push(`[选中内容] ${sel}`);
   }
   return lines.length > 0 ? `\n\n${lines.join('\n')}` : '';
+}
+
+function withDeadline<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('page_context_timeout')), timeoutMs);
+    timer && (timer as { unref?: () => void }).unref?.();
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
 }

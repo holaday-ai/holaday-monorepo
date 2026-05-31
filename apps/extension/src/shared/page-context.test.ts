@@ -113,6 +113,31 @@ describe('getActivePageContext', () => {
     });
   });
 
+  it('returns tab metadata when page injection hangs', async () => {
+    vi.useFakeTimers();
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [
+          { id: 11, title: 'Slow page', url: 'https://example.com/slow' } as chrome.tabs.Tab,
+        ]),
+      },
+      scripting: {
+        executeScript: vi.fn(() => new Promise(() => undefined)),
+      },
+    } as unknown as typeof chrome;
+
+    const pending = getActivePageContext();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    await expect(pending).resolves.toEqual({
+      tabId: 11,
+      title: 'Slow page',
+      url: 'https://example.com/slow',
+      selectedText: '',
+      metaDescription: '',
+    });
+  });
+
   it('prefers a web page over an internal Chrome page for task context', async () => {
     const query = vi
       .fn()
