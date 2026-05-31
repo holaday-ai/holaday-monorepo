@@ -47,7 +47,9 @@ describe('looksLikeToken', () => {
 
   it('rejects the literal strings "undefined" / "null"', () => {
     expect(looksLikeToken('undefined')).toBe(false);
+    expect(looksLikeToken('Undefined')).toBe(false);
     expect(looksLikeToken('null')).toBe(false);
+    expect(looksLikeToken('NULL')).toBe(false);
   });
 
   it('rejects values with whitespace', () => {
