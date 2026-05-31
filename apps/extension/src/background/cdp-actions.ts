@@ -477,18 +477,23 @@ export function sanitizeVisionObservationCapture(
  * a clean error instead of crashing.
  */
 export async function getActiveTabId(): Promise<number | null> {
-  try {
-    const [currentWindowTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (typeof currentWindowTab?.id === 'number') return currentWindowTab.id;
+  const queries: chrome.tabs.QueryInfo[] = [
+    { active: true, currentWindow: true },
+    { active: true, lastFocusedWindow: true },
+    { active: true, windowType: 'normal' },
+  ];
 
-    const [lastFocusedTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    if (typeof lastFocusedTab?.id === 'number') return lastFocusedTab.id;
-
-    const [normalWindowTab] = await chrome.tabs.query({ active: true, windowType: 'normal' });
-    return typeof normalWindowTab?.id === 'number' ? normalWindowTab.id : null;
-  } catch {
-    return null;
+  for (const query of queries) {
+    try {
+      const [tab] = await chrome.tabs.query(query);
+      if (typeof tab?.id === 'number') return tab.id;
+    } catch {
+      // Keep walking the fallback chain; Chrome can transiently reject
+      // currentWindow lookups while another normal window is still usable.
+    }
   }
+
+  return null;
 }
 
 /**

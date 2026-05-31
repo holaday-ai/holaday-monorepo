@@ -112,4 +112,42 @@ describe('getActivePageContext', () => {
       metaDescription: '',
     });
   });
+
+  it('prefers a web page over an internal Chrome page for task context', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { id: 9, title: 'Extensions', url: 'chrome://extensions/' } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([
+        { id: 10, title: 'Holaday', url: 'https://holaday.ai/app' } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([]);
+    globalThis.chrome = {
+      tabs: { query },
+      scripting: {
+        executeScript: vi.fn(async () => [
+          {
+            result: {
+              title: 'Holaday app',
+              url: 'https://holaday.ai/app',
+              selectedText: '',
+              metaDescription: '',
+            },
+          },
+        ]),
+      },
+    } as unknown as typeof chrome;
+
+    await expect(getActivePageContext()).resolves.toEqual({
+      tabId: 10,
+      title: 'Holaday app',
+      url: 'https://holaday.ai/app',
+      selectedText: '',
+      metaDescription: '',
+    });
+    expect(chrome.scripting.executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({ target: { tabId: 10 } }),
+    );
+  });
 });

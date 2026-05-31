@@ -48,28 +48,31 @@ const MAX_SCREENSHOT_RESULT_BASE64_CHARS = 2_000_000;
  * (e.g. the only window is the extension popup itself, or a service-
  * worker-only Chrome profile).
  */
-async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
-  try {
-    const [currentWindowTab] = await chrome.tabs.query({
-      active: true,
-      currentWindow: true,
-    });
-    if (currentWindowTab) return currentWindowTab;
+export async function getActiveTabForExtensionTool(): Promise<chrome.tabs.Tab | null> {
+  const queries: chrome.tabs.QueryInfo[] = [
+    { active: true, currentWindow: true },
+    { active: true, lastFocusedWindow: true },
+    { active: true, windowType: 'normal' },
+  ];
+  const candidates: chrome.tabs.Tab[] = [];
 
-    const [lastFocusedTab] = await chrome.tabs.query({
-      active: true,
-      lastFocusedWindow: true,
-    });
-    if (lastFocusedTab) return lastFocusedTab;
-
-    const [normalWindowTab] = await chrome.tabs.query({
-      active: true,
-      windowType: 'normal',
-    });
-    return normalWindowTab ?? null;
-  } catch {
-    return null;
+  for (const query of queries) {
+    try {
+      const [tab] = await chrome.tabs.query(query);
+      if (tab) candidates.push(tab);
+    } catch {
+      // Keep the browser-tool fallback chain alive. currentWindow can
+      // reject while lastFocused/normal window lookup still succeeds.
+    }
   }
+
+  return candidates.find(isWebPageTab) ?? candidates[0] ?? null;
+}
+
+function isWebPageTab(tab: chrome.tabs.Tab): boolean {
+  if (typeof tab.id !== 'number') return false;
+  if (!tab.url) return false;
+  return tab.url.startsWith('http://') || tab.url.startsWith('https://');
 }
 
 /**
@@ -156,7 +159,7 @@ async function executeNavigate(
   waitMs: number,
   loadTimeoutMs: number,
 ): Promise<NavigateResult> {
-  const tab = await getActiveTab();
+  const tab = await getActiveTabForExtensionTool();
   if (!tab?.id) {
     throw new Error('no_active_tab');
   }
@@ -236,7 +239,7 @@ export function normalizeScreenshotCaptureDataUrl(dataUrl: string): ScreenshotRe
 }
 
 async function executeScreenshot(): Promise<ScreenshotResult> {
-  const tab = await getActiveTab();
+  const tab = await getActiveTabForExtensionTool();
   if (!tab?.id) {
     throw new Error('no_active_tab');
   }

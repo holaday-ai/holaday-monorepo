@@ -67,16 +67,25 @@ async function queryActivePageContextTab(): Promise<chrome.tabs.Tab | undefined>
     { active: true, lastFocusedWindow: true },
     { active: true, windowType: 'normal' },
   ];
+  const candidates: chrome.tabs.Tab[] = [];
+
   for (const query of queries) {
     try {
       const [tab] = await chrome.tabs.query(query);
-      if (tab) return tab;
+      if (tab) candidates.push(tab);
     } catch {
       // Keep falling back; Chrome can reject transiently while focus
       // moves between the popup, side panel, and page window.
     }
   }
-  return undefined;
+
+  return candidates.find(isWebPageTab) ?? candidates[0];
+}
+
+function isWebPageTab(tab: chrome.tabs.Tab): boolean {
+  if (typeof tab.id !== 'number') return false;
+  if (!tab.url) return false;
+  return tab.url.startsWith('http://') || tab.url.startsWith('https://');
 }
 
 export async function getActivePageContext(): Promise<PageContext | null> {

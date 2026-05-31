@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   extensionToolErrorPayload,
+  getActiveTabForExtensionTool,
   normalizeScreenshotCaptureDataUrl,
   normalizeNavigateUrl,
   waitForTabComplete,
@@ -205,5 +206,40 @@ describe('normalizeNavigateUrl', () => {
     expect(() => normalizeNavigateUrl(`https://example.com/${'a'.repeat(2050)}`)).toThrow(
       'bad_url',
     );
+  });
+});
+
+describe('getActiveTabForExtensionTool', () => {
+  it('continues to fallback tab queries after a transient rejection', async () => {
+    const query = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('current window unavailable'))
+      .mockResolvedValueOnce([{ id: 12, url: 'https://holaday.ai/app' }]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabForExtensionTool()).resolves.toMatchObject({
+      id: 12,
+      url: 'https://holaday.ai/app',
+    });
+    expect(query).toHaveBeenNthCalledWith(1, { active: true, currentWindow: true });
+    expect(query).toHaveBeenNthCalledWith(2, { active: true, lastFocusedWindow: true });
+  });
+
+  it('prefers a normal web page over an internal Chrome page when both are visible', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 1, url: 'chrome://extensions/' }])
+      .mockResolvedValueOnce([{ id: 2, url: 'https://holaday.ai/app' }])
+      .mockResolvedValueOnce([]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabForExtensionTool()).resolves.toMatchObject({
+      id: 2,
+      url: 'https://holaday.ai/app',
+    });
   });
 });

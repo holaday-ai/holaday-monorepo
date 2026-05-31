@@ -167,4 +167,18 @@ describe('getActiveTabId', () => {
 
     await expect(getActiveTabId()).resolves.toBeNull();
   });
+
+  it('continues the fallback chain when a tab query rejects', async () => {
+    const query = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('current window unavailable'))
+      .mockResolvedValueOnce([{ id: 77 }]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabId()).resolves.toBe(77);
+    expect(query).toHaveBeenNthCalledWith(1, { active: true, currentWindow: true });
+    expect(query).toHaveBeenNthCalledWith(2, { active: true, lastFocusedWindow: true });
+  });
 });
