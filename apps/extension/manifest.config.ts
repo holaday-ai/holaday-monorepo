@@ -80,6 +80,8 @@ export default defineManifest({
         'https://hd-app.orangebench.tech/*',
         'http://localhost/*',
         'http://localhost:*/*',
+        'http://127.0.0.1/*',
+        'http://127.0.0.1:*/*',
       ],
       js: ['src/content/auth-bridge.ts'],
       run_at: 'document_start',
