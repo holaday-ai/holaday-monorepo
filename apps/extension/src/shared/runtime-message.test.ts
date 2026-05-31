@@ -31,6 +31,23 @@ describe('sendRuntimeMessageWithRetry', () => {
     expect(sendMessage).toHaveBeenCalledTimes(2);
   });
 
+  it('uses three default attempts for service worker cold starts', async () => {
+    const sendMessage = vi.fn((_message: unknown, callback: (response?: unknown) => void) => {
+      if (sendMessage.mock.calls.length < 3) {
+        callback({ ok: false, reason: 'internal_error' });
+        return;
+      }
+      callback({ ok: true });
+    });
+    setRuntimeSendMessage(sendMessage);
+
+    const pending = sendRuntimeMessageWithRetry<{ ok: boolean }>({ type: 'holaday.tasks' });
+    await vi.advanceTimersByTimeAsync(500);
+
+    await expect(pending).resolves.toEqual({ ok: true });
+    expect(sendMessage).toHaveBeenCalledTimes(3);
+  });
+
   it('retries once when the runtime message callback times out', async () => {
     const sendMessage = vi.fn((_message: unknown, callback: (response?: unknown) => void) => {
       if (sendMessage.mock.calls.length > 1) callback({ ok: true });

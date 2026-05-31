@@ -1,5 +1,5 @@
 const DEFAULT_RUNTIME_MESSAGE_TIMEOUT_MS = 5_000;
-const DEFAULT_ATTEMPTS = 2;
+const DEFAULT_ATTEMPTS = 3;
 const DEFAULT_RETRY_DELAY_MS = 250;
 
 interface RuntimeMessageOptions {
