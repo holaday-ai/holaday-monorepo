@@ -375,6 +375,28 @@ describe('executeCdpAction', () => {
     await vi.advanceTimersByTimeAsync(10_000);
     await expect(oversized).resolves.toEqual({ ok: true, message: 'waited 10000ms' });
   });
+
+  it('reports CDP navigation failures instead of treating them as success', async () => {
+    const sendCommand = vi.fn(async (_target, method: string) => {
+      if (method === 'Page.navigate') {
+        return { errorText: 'net::ERR_NAME_NOT_RESOLVED' };
+      }
+      return {};
+    });
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    await expect(
+      executeCdpAction(15, { kind: 'navigate', url: 'https://bad.invalid/' }),
+    ).resolves.toEqual({
+      ok: false,
+      message: '页面导航失败：域名无法解析，请检查网址后重试',
+    });
+  });
 });
 
 describe('cdpActionErrorMessage', () => {

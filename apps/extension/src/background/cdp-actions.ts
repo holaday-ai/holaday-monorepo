@@ -384,8 +384,31 @@ async function doNavigate(
 ): Promise<ActionResult> {
   const url = normalizeCdpNavigateUrl(action.url);
   await ensureAttached(tabId);
-  await sendCdp(tabId, 'Page.navigate', { url });
+  const resp = (await sendCdp(tabId, 'Page.navigate', { url })) as { errorText?: unknown };
+  if (typeof resp?.errorText === 'string' && resp.errorText.trim()) {
+    return {
+      ok: false,
+      message: cdpNavigateErrorMessage(resp.errorText),
+    };
+  }
   return { ok: true, message: `navigated to ${url}` };
+}
+
+function cdpNavigateErrorMessage(errorText: string): string {
+  const lower = errorText.toLowerCase();
+  if (lower.includes('err_name_not_resolved')) {
+    return '页面导航失败：域名无法解析，请检查网址后重试';
+  }
+  if (lower.includes('err_internet_disconnected')) {
+    return '页面导航失败：浏览器网络已断开，请恢复网络后重试';
+  }
+  if (lower.includes('err_timed_out') || lower.includes('timeout')) {
+    return '页面导航超时，请稍后重试';
+  }
+  if (lower.includes('err_aborted')) {
+    return '页面导航被中断，请确认页面没有被手动关闭后重试';
+  }
+  return '页面导航失败，请检查地址后重试';
 }
 
 export function normalizeCdpNavigateUrl(raw: unknown): string {
