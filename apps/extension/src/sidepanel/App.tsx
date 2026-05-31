@@ -68,6 +68,11 @@ interface MeResponse {
   };
 }
 
+type FetchMeResult =
+  | { kind: 'ok'; user: StoredUser }
+  | { kind: 'unauthorized' }
+  | { kind: 'network' };
+
 interface CreateTaskResponse {
   result: { data: { taskId: string; status: TaskStatus } };
 }
@@ -169,15 +174,16 @@ export function App() {
         const liftedToken = resp?.token ?? null;
         if (liftedToken) {
           tok = liftedToken;
-          const fetchedUser = await fetchMe(liftedToken);
+          const result = await fetchMe(liftedToken);
           if (cancelled) return;
-          if (fetchedUser) {
-            await setStoredUser(fetchedUser);
+          if (result.kind === 'ok') {
+            await setStoredUser(result.user);
             if (cancelled) return;
-            setUser(fetchedUser);
+            setUser(result.user);
             setToken(liftedToken);
+            setError(null);
             setStatus('connected');
-          } else {
+          } else if (result.kind === 'unauthorized') {
             // Token was rejected (expired, signed with a different
             // secret, or pointing at a deleted user). Drop it so the
             // panel falls back to the manual login form.
@@ -214,14 +220,23 @@ export function App() {
         const seq = ++authSyncSeq.current;
         const newToken = normalizeAccessToken(tokenChange.newValue);
         if (newToken) {
-          const fetchedUser = await fetchMe(newToken);
+          const result = await fetchMe(newToken);
           if (cancelled || seq !== authSyncSeq.current) return;
-          if (fetchedUser) {
-            await setStoredUser(fetchedUser);
+          if (result.kind === 'ok') {
+            await setStoredUser(result.user);
             if (cancelled || seq !== authSyncSeq.current) return;
-            setUser(fetchedUser);
+            setUser(result.user);
             setToken(newToken);
+            setError(null);
             setStatus('connected');
+          } else if (result.kind === 'unauthorized') {
+            await clearAccessToken();
+            await clearStoredUser();
+            if (cancelled || seq !== authSyncSeq.current) return;
+            clearLocalSessionState();
+          } else {
+            setStatus('error');
+            setError('暂时无法读取账户信息，浏览器代理会继续保持连接并重试。');
           }
         } else {
           authSyncSeq.current = seq;
@@ -286,11 +301,11 @@ export function App() {
 
   /**
    * Pull the authenticated user record so we can show real name +
-   * plan in the header after auto-login. Returns null on any error
-   * so the caller treats it as "auto-login failed, fall back to
-   * manual login form".
+   * plan in the header after auto-login. Keep 401 separate from
+   * transient network failures so a flaky auth.me request doesn't
+   * accidentally erase a still-valid extension session.
    */
-  async function fetchMe(authToken: string): Promise<StoredUser | null> {
+  async function fetchMe(authToken: string): Promise<FetchMeResult> {
     try {
       const res = await fetchWithDeadline(
         `${ORCHESTRATOR_HTTP}/trpc/auth.me`,
@@ -301,7 +316,8 @@ export function App() {
         AUTH_ME_TIMEOUT_MS,
         'sidepanel_auth_me_timeout',
       );
-      if (!res.ok) return null;
+      if (res.status === 401) return { kind: 'unauthorized' };
+      if (!res.ok) return { kind: 'network' };
       const body = await responseJsonWithDeadline<MeResponse>(
         res,
         AUTH_ME_BODY_TIMEOUT_MS,
@@ -309,13 +325,16 @@ export function App() {
       );
       const u = body.result.data;
       return {
-        externalId: u.userId,
-        email: u.email,
-        plan: u.plan,
-        displayName: u.displayName,
+        kind: 'ok',
+        user: {
+          externalId: u.userId,
+          email: u.email,
+          plan: u.plan,
+          displayName: u.displayName,
+        },
       };
     } catch {
-      return null;
+      return { kind: 'network' };
     }
   }
 
@@ -342,9 +361,9 @@ export function App() {
         );
         return;
       }
-      const fetchedUser = await fetchMe(liftedToken);
+      const result = await fetchMe(liftedToken);
       if (!mountedRef.current) return;
-      if (!fetchedUser) {
+      if (result.kind === 'unauthorized') {
         // Token was lifted but rejected by auth.me — likely expired
         // or signed with a different secret. Drop it so the next
         // retry doesn't keep looping with bad creds.
@@ -357,10 +376,16 @@ export function App() {
         setError('从 holaday.ai 取到的 token 已失效，请到 holaday.ai 重新登录。');
         return;
       }
-      await setStoredUser(fetchedUser);
+      if (result.kind === 'network') {
+        setStatus('error');
+        setError('暂时无法读取账户信息，浏览器代理会继续保持连接并重试。');
+        return;
+      }
+      await setStoredUser(result.user);
       if (!mountedRef.current) return;
-      setUser(fetchedUser);
+      setUser(result.user);
       setToken(liftedToken);
+      setError(null);
       setStatus('connected');
     } catch (err) {
       if (!mountedRef.current) return;
