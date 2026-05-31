@@ -207,7 +207,7 @@ export function cdpActionErrorMessage(err: unknown): string {
   if (lower.includes('timeout')) {
     return '浏览器操作超时，请保持标签页打开后重试';
   }
-  return `浏览器操作失败：${message.slice(0, 200)}`;
+  return '浏览器操作失败，请稍后重试';
 }
 
 // ---------------------------------------------------------------------------

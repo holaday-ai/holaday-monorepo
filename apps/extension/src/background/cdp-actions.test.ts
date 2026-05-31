@@ -405,10 +405,10 @@ describe('cdpActionErrorMessage', () => {
     );
   });
 
-  it('bounds unknown browser control failures', () => {
+  it('hides unknown raw browser control failures', () => {
     const message = cdpActionErrorMessage(new Error('x'.repeat(300)));
 
-    expect(message).toHaveLength('浏览器操作失败：'.length + 200);
+    expect(message).toBe('浏览器操作失败，请稍后重试');
   });
 });
 
