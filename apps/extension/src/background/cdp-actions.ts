@@ -25,6 +25,7 @@
  */
 
 import type { VisionAction } from '@holaday/shared-types';
+import { withDeadline } from '../shared/deadline.js';
 
 export interface ActionResult {
   ok: boolean;
@@ -38,6 +39,9 @@ export interface ActionResult {
 const CDP_VERSION = '1.3';
 /** Per-command hard cap; CDP should answer sub-second for input events. */
 const CDP_COMMAND_TIMEOUT_MS = 5_000;
+const CDP_ATTACH_TIMEOUT_MS = 5_000;
+const CDP_DETACH_TIMEOUT_MS = 2_000;
+const ACTIVE_TAB_QUERY_TIMEOUT_MS = 1_500;
 const VIEWPORT_READ_TIMEOUT_MS = 500;
 /** How long to wait before reporting a wait() complete (honours upper bound). */
 const WAIT_CAP_MS = 10_000;
@@ -73,8 +77,11 @@ async function ensureAttached(tabId: number): Promise<void> {
     await pending;
     return;
   }
-  const attachPromise = chrome.debugger
-    .attach({ tabId }, CDP_VERSION)
+  const attachPromise = withDeadline(
+    chrome.debugger.attach({ tabId }, CDP_VERSION),
+    CDP_ATTACH_TIMEOUT_MS,
+    'debugger_attach_timeout',
+  )
     .then(() => {
       attachedTabs.add(tabId);
     })
@@ -102,7 +109,11 @@ export async function detachFromTab(tabId: number): Promise<void> {
   }
   if (!attachedTabs.has(tabId)) return;
   try {
-    await chrome.debugger.detach({ tabId });
+    await withDeadline(
+      chrome.debugger.detach({ tabId }),
+      CDP_DETACH_TIMEOUT_MS,
+      'debugger_detach_timeout',
+    );
   } catch {
     // best-effort: tab may already be closed / debugger was released
   } finally {
@@ -392,7 +403,11 @@ async function sendCdp(
     if (shouldResetCdpSession(err)) {
       forgetAttachedTab(tabId);
       try {
-        await chrome.debugger.detach({ tabId });
+        await withDeadline(
+          chrome.debugger.detach({ tabId }),
+          CDP_DETACH_TIMEOUT_MS,
+          'debugger_detach_timeout',
+        );
       } catch {
         // best-effort: the target may already be gone or detached
       }
@@ -576,7 +591,11 @@ export async function getActiveTabId(): Promise<number | null> {
 
   for (const query of queries) {
     try {
-      const [tab] = await chrome.tabs.query(query);
+      const [tab] = await withDeadline(
+        chrome.tabs.query(query),
+        ACTIVE_TAB_QUERY_TIMEOUT_MS,
+        'active_tab_query_timeout',
+      );
       if (typeof tab?.id === 'number') return tab.id;
     } catch {
       // Keep walking the fallback chain; Chrome can transiently reject

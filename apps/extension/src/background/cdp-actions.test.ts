@@ -79,6 +79,24 @@ describe('executeCdpAction', () => {
     expect(sendCommand).toHaveBeenCalled();
   });
 
+  it('returns a timeout when debugger attach hangs', async () => {
+    vi.useFakeTimers();
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(() => new Promise<void>(() => undefined)),
+        sendCommand: vi.fn(async () => ({})),
+      },
+    } as unknown as typeof chrome;
+
+    const pending = executeCdpAction(7, { kind: 'click', x: 10, y: 20 });
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await expect(pending).resolves.toEqual({
+      ok: false,
+      message: '浏览器操作超时，请保持标签页打开后重试',
+    });
+  });
+
   it('waits for an in-flight debugger attach before detaching during teardown', async () => {
     let resolveAttach: () => void = () => {
       throw new Error('attach promise was not created');
@@ -425,6 +443,24 @@ describe('getActiveTabId', () => {
     } as unknown as typeof chrome;
 
     await expect(getActiveTabId()).resolves.toBe(77);
+    expect(query).toHaveBeenNthCalledWith(1, { active: true, currentWindow: true });
+    expect(query).toHaveBeenNthCalledWith(2, { active: true, lastFocusedWindow: true });
+  });
+
+  it('continues the fallback chain when a tab query hangs', async () => {
+    vi.useFakeTimers();
+    const query = vi
+      .fn()
+      .mockReturnValueOnce(new Promise<chrome.tabs.Tab[]>(() => undefined))
+      .mockResolvedValueOnce([{ id: 78 }]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    const pending = getActiveTabId();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    await expect(pending).resolves.toBe(78);
     expect(query).toHaveBeenNthCalledWith(1, { active: true, currentWindow: true });
     expect(query).toHaveBeenNthCalledWith(2, { active: true, lastFocusedWindow: true });
   });
