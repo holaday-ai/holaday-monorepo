@@ -45,13 +45,20 @@ class FakeWebSocket {
 }
 
 const sockets: FakeWebSocket[] = [];
+let nextWebSocketConstructorError: Error | null = null;
 
 function installGlobals(): void {
   sockets.length = 0;
+  nextWebSocketConstructorError = null;
   vi.stubGlobal(
     'WebSocket',
     class extends FakeWebSocket {
       constructor(url: string, protocols: string[]) {
+        if (nextWebSocketConstructorError) {
+          const err = nextWebSocketConstructorError;
+          nextWebSocketConstructorError = null;
+          throw err;
+        }
         super(url, protocols);
         sockets.push(this);
       }
@@ -198,6 +205,34 @@ describe('ws-client send', () => {
 
     expect(sockets).toHaveLength(2);
     expect(sockets[1]?.url).toBe('wss://backup.test/ws');
+  });
+
+  it('reconnects instead of throwing when websocket construction fails', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    nextWebSocketConstructorError = new Error('constructor boom');
+    const { connect, getWsConnectionStatus } = await import('./ws-client.js');
+
+    expect(() => connect('token')).not.toThrow();
+    expect(sockets).toHaveLength(0);
+    await expect(getWsConnectionStatus()).resolves.toMatchObject({
+      connected: false,
+      readyState: null,
+      reconnectAttempt: 1,
+      lastCloseCode: null,
+      lastCloseReason: 'open failed: constructor boom',
+      nextRetryAt: expect.any(Number),
+    });
+    expect(warn).toHaveBeenCalledWith(
+      '[holaday] ws open failed',
+      expect.any(Error),
+    );
+
+    vi.advanceTimersByTime(1_000);
+
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]?.url).toBe('wss://backup.test/ws');
   });
 
   it('remembers the endpoint that successfully opened', async () => {

@@ -200,7 +200,21 @@ function openSocket(token: string): void {
   const protocols = [WS_SUBPROTOCOL, `jwt.${token}`];
   const endpoint = getCurrentWsEndpoint();
   state.endpointUrl = endpoint;
-  const ws = new WebSocket(endpoint, protocols);
+  let ws: WebSocket;
+  try {
+    ws = new WebSocket(endpoint, protocols);
+  } catch (err) {
+    state.lastErrorAt = Date.now();
+    state.lastCloseAt = Date.now();
+    state.lastCloseCode = null;
+    state.lastCloseReason =
+      err instanceof Error ? `open failed: ${err.message}` : 'open failed';
+    console.warn('[holaday] ws open failed', err);
+    if (!state.closedByUser) {
+      scheduleReconnect(token);
+    }
+    return;
+  }
   state.socket = ws;
   let openTimer: ReturnType<typeof setTimeout> | null = null;
   let socketSettled = false;
