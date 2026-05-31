@@ -124,7 +124,7 @@ export function App() {
         setUser(stored);
         setToken(tok);
         setStatus('connected');
-        chrome.runtime.sendMessage({ type: 'holaday.connect', token: tok });
+        void sendRuntimeMessage({ type: 'holaday.connect', token: tok });
       } else if (!tok) {
         const resp = await sendRuntimeMessage<{ ok?: boolean; token?: string | null }>({
           type: 'holaday.tryAutoLogin',
@@ -306,7 +306,7 @@ export function App() {
 
   async function logout(): Promise<void> {
     await clearAccessToken();
-    chrome.runtime.sendMessage({ type: 'holaday.disconnect' });
+    void sendRuntimeMessage({ type: 'holaday.disconnect' });
     setUser(null);
     setToken(null);
     setActiveTaskId(null);

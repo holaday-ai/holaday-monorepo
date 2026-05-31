@@ -242,7 +242,7 @@ export function App() {
       if (stored && tok) {
         setUser(stored);
         setToken(tok);
-        chrome.runtime.sendMessage({ type: 'holaday.connect', token: tok });
+        void sendRuntimeMessage({ type: 'holaday.connect', token: tok });
       } else if (tok && !stored) {
         const result = await fetchMe(tok);
         if (cancelled) return;
@@ -250,7 +250,7 @@ export function App() {
           await setStoredUser(result.user);
           setUser(result.user);
           setToken(tok);
-          chrome.runtime.sendMessage({ type: 'holaday.connect', token: tok });
+          void sendRuntimeMessage({ type: 'holaday.connect', token: tok });
         } else if (result.kind === 'unauthorized') {
           await clearAccessToken();
         }
