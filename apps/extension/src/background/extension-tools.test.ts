@@ -98,6 +98,41 @@ describe('waitForTabComplete', () => {
     expect(mock.listeners.size).toBe(0);
   });
 
+  it('does not accept the old complete page before a new navigation starts', async () => {
+    vi.useFakeTimers();
+    const mock = installChromeTabsMock('complete');
+    const pending = waitForTabComplete(1, 25_000, {
+      previousUrl: 'https://old.example/page',
+      targetUrl: 'https://new.example/page',
+    });
+    await Promise.resolve();
+
+    let settled = false;
+    pending.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    for (const listener of mock.listeners) {
+      listener(1, { status: 'loading', url: 'https://new.example/page' });
+      listener(1, { status: 'complete', url: 'https://new.example/page' });
+    }
+
+    await expect(pending).resolves.toBeUndefined();
+  });
+
+  it('still accepts already-complete tabs when navigating to the same url', async () => {
+    installChromeTabsMock('complete');
+
+    await expect(
+      waitForTabComplete(1, 25_000, {
+        previousUrl: 'https://example.com/page#old',
+        targetUrl: 'https://example.com/page#new',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('rejects immediately when the tab is closed during navigation', async () => {
     const mock = installChromeTabsMock('loading');
     const pending = waitForTabComplete(1, 25_000);

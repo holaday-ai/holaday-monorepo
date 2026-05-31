@@ -93,12 +93,24 @@ function isWebPageTab(tab: chrome.tabs.Tab): boolean {
  * rather than polling so the wake doesn't burn the SW's CPU quota.
  * Returns once the target tab reaches 'complete' or we hit timeoutMs.
  */
-export function waitForTabComplete(tabId: number, timeoutMs: number): Promise<void> {
+export function waitForTabComplete(
+  tabId: number,
+  timeoutMs: number,
+  opts: { previousUrl?: string; targetUrl?: string } = {},
+): Promise<void> {
   return new Promise((resolve, reject) => {
     let resolved = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let listener: ((id: number, info: chrome.tabs.TabChangeInfo) => void) | null = null;
     let removeListener: ((id: number) => void) | null = null;
+    const previousUrl = opts.previousUrl ?? '';
+    const targetUrl = opts.targetUrl ?? '';
+    const requireNavigationSignal = Boolean(
+      previousUrl &&
+        targetUrl &&
+        stripHash(previousUrl) !== stripHash(targetUrl),
+    );
+    let sawNavigationSignal = !requireNavigationSignal;
     const cleanup = (): void => {
       if (timer) clearTimeout(timer);
       if (listener) chrome.tabs.onUpdated.removeListener(listener);
@@ -114,11 +126,20 @@ export function waitForTabComplete(tabId: number, timeoutMs: number): Promise<vo
       finish(() => reject(new Error('navigate_timeout')));
     }, timeoutMs);
     timer && (timer as { unref?: () => void }).unref?.();
-    listener = (id: number, info: chrome.tabs.TabChangeInfo): void => {
-      if (id !== tabId) return;
-      if (info.status === 'complete') {
+    const maybeComplete = (tab: Pick<chrome.tabs.Tab, 'status' | 'url'>): void => {
+      if (tab.url && previousUrl && stripHash(tab.url) !== stripHash(previousUrl)) {
+        sawNavigationSignal = true;
+      }
+      if (tab.status === 'complete' && sawNavigationSignal) {
         finish(resolve);
       }
+    };
+    listener = (id: number, info: chrome.tabs.TabChangeInfo): void => {
+      if (id !== tabId) return;
+      if (info.status === 'loading' || (info.url && stripHash(info.url) !== stripHash(previousUrl))) {
+        sawNavigationSignal = true;
+      }
+      maybeComplete(info);
     };
     removeListener = (id: number): void => {
       if (id !== tabId) return;
@@ -127,9 +148,7 @@ export function waitForTabComplete(tabId: number, timeoutMs: number): Promise<vo
     chrome.tabs.onUpdated.addListener(listener);
     chrome.tabs.onRemoved.addListener(removeListener);
     void chrome.tabs.get(tabId).then(
-      (tab) => {
-        if (tab.status === 'complete') finish(resolve);
-      },
+      (tab) => maybeComplete(tab),
       (err) => {
         if (isTabClosedError(err)) {
           finish(() => reject(new Error('tab_closed')));
@@ -140,6 +159,16 @@ export function waitForTabComplete(tabId: number, timeoutMs: number): Promise<vo
       },
     );
   });
+}
+
+function stripHash(raw: string): string {
+  try {
+    const url = new URL(raw);
+    url.hash = '';
+    return url.href;
+  } catch {
+    return raw.split('#')[0] ?? raw;
+  }
 }
 
 function isTabClosedError(err: unknown): boolean {
@@ -176,8 +205,9 @@ async function executeNavigate(
   if (!tab?.id) {
     throw new Error('no_active_tab');
   }
+  const previousUrl = tab.url;
   await chrome.tabs.update(tab.id, { url });
-  await waitForTabComplete(tab.id, loadTimeoutMs);
+  await waitForTabComplete(tab.id, loadTimeoutMs, { previousUrl, targetUrl: url });
   // Post-load settle. Some pages defer the meaningful DOM until after
   // a microtask burst (React / Vue hydration). The default 1500ms
   // matches what the orchestrator's `defaultWait` uses too.
