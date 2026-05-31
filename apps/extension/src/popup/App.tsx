@@ -476,11 +476,17 @@ function ConnectionStatusBlock({ theme }: { theme: ThemeTokens }) {
 
   useEffect(() => {
     let cancelled = false;
+    let inFlight = false;
     const refresh = (): void => {
-      chrome.runtime.sendMessage({ type: 'holaday.status' }, (response?: ExtensionStatusResponse) => {
-        if (cancelled || chrome.runtime.lastError) return;
-        setStatus(response ?? null);
-      });
+      if (inFlight) return;
+      inFlight = true;
+      void sendRuntimeMessage<ExtensionStatusResponse>({ type: 'holaday.status' }).then(
+        (response) => {
+          inFlight = false;
+          if (cancelled) return;
+          setStatus(response ?? null);
+        },
+      );
     };
     refresh();
     const timer = window.setInterval(refresh, 3000);
