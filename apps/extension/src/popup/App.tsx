@@ -35,7 +35,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ORCHESTRATOR_HTTP, WORKBENCH_URL } from '../shared/config.js';
 import { withDeadline } from '../shared/deadline.js';
-import { fetchWithDeadline } from '../shared/http.js';
+import { fetchWithDeadline, responseJsonWithDeadline } from '../shared/http.js';
 import { openOrFocusWorkbench } from '../shared/open-workbench.js';
 import {
   type StoredUser,
@@ -52,6 +52,7 @@ import {
 const HISTORY_SYNC_ENABLED_KEY = 'holaday.history.enabled';
 const HISTORY_SYNC_SUMMARY_KEY = 'holaday.history.lastSyncSummary';
 const AUTH_ME_TIMEOUT_MS = 8_000;
+const AUTH_ME_BODY_TIMEOUT_MS = 2_000;
 const POPUP_STORAGE_TIMEOUT_MS = 1_500;
 
 interface HistorySyncSummary {
@@ -214,7 +215,11 @@ async function fetchMe(authToken: string): Promise<FetchMeResult> {
     );
     if (res.status === 401) return { kind: 'unauthorized' };
     if (!res.ok) return { kind: 'network' };
-    const body = (await res.json()) as MeResponse;
+    const body = await responseJsonWithDeadline<MeResponse>(
+      res,
+      AUTH_ME_BODY_TIMEOUT_MS,
+      'popup_auth_me_body_timeout',
+    );
     const u = body.result.data;
     return {
       kind: 'ok',

@@ -17,7 +17,11 @@
 import { getAccessToken } from '../shared/storage.js';
 import { ORCHESTRATOR_HTTP } from '../shared/config.js';
 import { withDeadline } from '../shared/deadline.js';
-import { fetchWithDeadline } from '../shared/http.js';
+import {
+  fetchWithDeadline,
+  responseJsonWithDeadline,
+  responseTextWithDeadline,
+} from '../shared/http.js';
 
 /**
  * Curated list of domains we care about. Leading dot matches both
@@ -61,6 +65,7 @@ const MAX_COOKIE_DOMAIN_CHARS = 253;
 const MAX_COOKIE_PATH_CHARS = 1024;
 const COOKIE_DOMAIN_READ_TIMEOUT_MS = 1_000;
 const COOKIE_SYNC_POST_TIMEOUT_MS = 8_000;
+const COOKIE_SYNC_BODY_TIMEOUT_MS = 2_000;
 
 export interface SyncableCookie {
   domain: string;
@@ -160,10 +165,18 @@ export async function syncCookiesToServer(
     'cookie_sync_post_timeout',
   );
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
+    const text = await responseTextWithDeadline(
+      res,
+      COOKIE_SYNC_BODY_TIMEOUT_MS,
+      'cookie_sync_error_body_timeout',
+    ).catch(() => '');
     throw new Error(`cookie-sync HTTP ${res.status}: ${text.slice(0, 200)}`);
   }
-  return (await res.json()) as SyncResponse;
+  return responseJsonWithDeadline<SyncResponse>(
+    res,
+    COOKIE_SYNC_BODY_TIMEOUT_MS,
+    'cookie_sync_body_timeout',
+  );
 }
 
 /**

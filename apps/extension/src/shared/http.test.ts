@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchWithDeadline } from './http.js';
+import { fetchWithDeadline, responseJsonWithDeadline } from './http.js';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -38,6 +38,21 @@ describe('fetchWithDeadline', () => {
     await vi.advanceTimersByTimeAsync(1_000);
 
     expect(signal?.aborted).toBe(true);
+    await assertion;
+  });
+});
+
+describe('responseJsonWithDeadline', () => {
+  it('bounds response json reads that never settle', async () => {
+    vi.useFakeTimers();
+    const response = {
+      json: vi.fn(() => new Promise(() => undefined)),
+    } as unknown as Response;
+
+    const pending = responseJsonWithDeadline(response, 1_000, 'json_timeout');
+    const assertion = expect(pending).rejects.toThrow('json_timeout');
+    await vi.advanceTimersByTimeAsync(1_000);
+
     await assertion;
   });
 });

@@ -17,7 +17,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ORCHESTRATOR_HTTP } from '../shared/config.js';
-import { fetchWithDeadline } from '../shared/http.js';
+import { fetchWithDeadline, responseJsonWithDeadline } from '../shared/http.js';
 import { composeContextTail, getActivePageContext, type PageContext } from '../shared/page-context.js';
 import {
   type StoredUser,
@@ -74,7 +74,9 @@ interface CreateTaskResponse {
 const PAGE_CONTEXT_REFRESH_MS = 2_000;
 const RUNTIME_MESSAGE_TIMEOUT_MS = 5_000;
 const AUTH_ME_TIMEOUT_MS = 8_000;
+const AUTH_ME_BODY_TIMEOUT_MS = 2_000;
 const CREATE_TASK_TIMEOUT_MS = 10_000;
+const CREATE_TASK_BODY_TIMEOUT_MS = 2_000;
 
 function sendRuntimeMessage<T>(message: unknown): Promise<T | null> {
   return new Promise((resolve) => {
@@ -271,7 +273,11 @@ export function App() {
         'sidepanel_auth_me_timeout',
       );
       if (!res.ok) return null;
-      const body = (await res.json()) as MeResponse;
+      const body = await responseJsonWithDeadline<MeResponse>(
+        res,
+        AUTH_ME_BODY_TIMEOUT_MS,
+        'sidepanel_auth_me_body_timeout',
+      );
       const u = body.result.data;
       return {
         externalId: u.userId,
@@ -361,10 +367,18 @@ export function App() {
         'sidepanel_create_task_timeout',
       );
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+        const body = await responseJsonWithDeadline<{ error?: { message?: string } } | null>(
+          res,
+          CREATE_TASK_BODY_TIMEOUT_MS,
+          'sidepanel_create_task_error_body_timeout',
+        ).catch(() => null);
         throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
       }
-      const body = (await res.json()) as CreateTaskResponse;
+      const body = await responseJsonWithDeadline<CreateTaskResponse>(
+        res,
+        CREATE_TASK_BODY_TIMEOUT_MS,
+        'sidepanel_create_task_body_timeout',
+      );
       const newTaskId = body.result.data.taskId;
       setActiveTaskId(newTaskId);
       setIntent('');

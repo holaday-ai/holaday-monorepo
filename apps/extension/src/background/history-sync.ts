@@ -24,7 +24,11 @@
 import { getAccessToken } from '../shared/storage.js';
 import { ORCHESTRATOR_HTTP } from '../shared/config.js';
 import { withDeadline } from '../shared/deadline.js';
-import { fetchWithDeadline } from '../shared/http.js';
+import {
+  fetchWithDeadline,
+  responseJsonWithDeadline,
+  responseTextWithDeadline,
+} from '../shared/http.js';
 
 /**
  * Hard upload cap matches the server's MAX_HOSTS_PER_SYNC (see
@@ -52,6 +56,7 @@ const LOOKBACK_MS = LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
 const HISTORY_MAX_RESULTS = 5000;
 const HISTORY_SEARCH_TIMEOUT_MS = 2_000;
 const HISTORY_SYNC_POST_TIMEOUT_MS = 8_000;
+const HISTORY_SYNC_BODY_TIMEOUT_MS = 2_000;
 const HISTORY_SUMMARY_STORAGE_TIMEOUT_MS = 1_500;
 
 export interface BrowsingHostEntry {
@@ -234,10 +239,18 @@ export async function syncHistoryToServer(
     'history_sync_post_timeout',
   );
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
+    const text = await responseTextWithDeadline(
+      res,
+      HISTORY_SYNC_BODY_TIMEOUT_MS,
+      'history_sync_error_body_timeout',
+    ).catch(() => '');
     throw new Error(`history-sync HTTP ${res.status}: ${text.slice(0, 200)}`);
   }
-  return (await res.json()) as BrowsingSyncResponse;
+  return responseJsonWithDeadline<BrowsingSyncResponse>(
+    res,
+    HISTORY_SYNC_BODY_TIMEOUT_MS,
+    'history_sync_body_timeout',
+  );
 }
 
 /**
