@@ -1124,24 +1124,33 @@ onUnauthorized(() => {
     const prev = await getAuthFailures();
     const next = prev + 1;
     try {
-      // Persist BEFORE clearing the token, otherwise getAccessToken
-      // returns null on the next ensureConnected and we lose the
-      // "this token is bad" signal.
       await withDeadline(
         chrome.storage.local.set({ [AUTH_FAILURES_KEY]: next }),
         AUTH_STATE_STORAGE_TIMEOUT_MS,
         'auth_failures_write_timeout',
       );
-      if (rejected) {
-        // Phase 17b — write via the helper so the value carries a
-        // timestamp that getKnownBadToken can age out after the TTL.
-        await setKnownBadToken(rejected);
-      }
-      await clearAccessToken();
-      await clearStoredUser();
     } catch (err) {
-      console.warn('[holaday] auth: failed to persist failure state', err);
+      console.warn('[holaday] auth: failed to persist failure count', err);
     }
+    if (rejected) {
+      try {
+        // Persist BEFORE clearing the token, otherwise getAccessToken
+        // returns null on the next ensureConnected and we lose the
+        // "this token is bad" signal.
+        await setKnownBadToken(rejected);
+      } catch (err) {
+        console.warn('[holaday] auth: failed to persist known-bad token', err);
+      }
+    }
+    const cleanup = await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
+    for (const result of cleanup) {
+      if (result.status === 'rejected') {
+        console.warn('[holaday] auth: failed to clear rejected session state', result.reason);
+      }
+    }
+    disconnect();
+    state.tasks.clear();
+    pushTasksSnapshot();
     if (next >= MAX_AUTH_FAILURES) {
       console.warn(
         `[holaday] auth: frozen after ${next}/${MAX_AUTH_FAILURES} failures; manual retry required`,
