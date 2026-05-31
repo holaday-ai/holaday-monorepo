@@ -200,6 +200,21 @@ describe('ws-client send', () => {
     expect(sockets[1]?.url).toBe('wss://backup.test/ws');
   });
 
+  it('remembers the endpoint that successfully opened', async () => {
+    const { connect } = await import('./ws-client.js');
+    connect('token');
+    const [socket] = sockets;
+    if (!socket) throw new Error('expected websocket');
+
+    socket.dispatch('open');
+
+    await vi.waitFor(() => {
+      expect(chrome.storage.local.set).toHaveBeenCalledWith({
+        'holaday.ws.preferredEndpoint': 'wss://primary.test/ws',
+      });
+    });
+  });
+
   it('ignores late error events from a stale socket after token swap', async () => {
     const { connect, reconnect, getWsConnectionStatus } = await import('./ws-client.js');
     connect('old-token');

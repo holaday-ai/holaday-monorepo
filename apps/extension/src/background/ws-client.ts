@@ -273,6 +273,7 @@ function openSocket(token: string): void {
     state.lastCloseReason = null;
     state.lastErrorAt = null;
     state.nextRetryAt = null;
+    void persistPreferredWsEndpoint(endpoint);
     // Clear the persistent cap so the next blip starts from 0 again.
     // Fire-and-forget: best-effort, and we don't want to delay 'hello'
     // on a chrome.storage write.
@@ -357,6 +358,7 @@ function getNextWsEndpointIndex(): number {
 const MAX_NETWORK_RECONNECTS = 3;
 const BACKOFF_SCHEDULE_MS = [1_000, 2_000, 4_000] as const;
 const WS_RECONNECT_KEY = 'holaday.ws.reconnectAttempts';
+const WS_PREFERRED_ENDPOINT_KEY = 'holaday.ws.preferredEndpoint';
 
 /**
  * Hydrate `state.reconnectAttempt` from chrome.storage on module load
@@ -387,12 +389,36 @@ async function persistReconnectAttempts(n: number): Promise<void> {
   }
 }
 
+async function hydratePreferredWsEndpoint(): Promise<void> {
+  try {
+    const stored = (await chrome.storage.local.get(WS_PREFERRED_ENDPOINT_KEY))[
+      WS_PREFERRED_ENDPOINT_KEY
+    ];
+    if (typeof stored !== 'string') return;
+    const index = ORCHESTRATOR_WS_ENDPOINTS.indexOf(stored);
+    if (index < 0 || state.socket) return;
+    state.endpointIndex = index;
+  } catch {
+    /* defensive — endpoint preference is only an optimization */
+  }
+}
+
+async function persistPreferredWsEndpoint(endpoint: string): Promise<void> {
+  if (!ORCHESTRATOR_WS_ENDPOINTS.includes(endpoint)) return;
+  try {
+    await chrome.storage.local.set({ [WS_PREFERRED_ENDPOINT_KEY]: endpoint });
+  } catch {
+    /* non-fatal; the next boot can still use the default order */
+  }
+}
+
 // Fire-and-forget hydration on module load. Subsequent connect/openSocket
 // calls don't wait for it; the in-memory state.reconnectAttempt either
 // reflects the persisted count (if hydration finished) or starts at 0
 // (if not), and the FIRST scheduleReconnect picks up wherever
 // state.reconnectAttempt currently sits.
 void hydrateReconnectAttempts();
+void hydratePreferredWsEndpoint();
 
 /**
  * Cap-aware reconnect check, exported for the background SW's alarm
