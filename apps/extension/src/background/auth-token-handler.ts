@@ -42,13 +42,9 @@ export function decideAuthTokenAction(
 ): AuthTokenAction {
   const normalizedIncoming =
     incoming !== null && incoming.trim().length > 0 ? incoming.trim() : null;
-  // Identical to current storage: caller short-circuits, no chrome
-  // storage writes, no WS churn.
-  if (normalizedIncoming === stored) return { kind: 'unchanged' };
   // SPA cleared localStorage → mirror.
-  if (normalizedIncoming === null) return { kind: 'clear' };
-  if (!looksLikeAuthToken(normalizedIncoming)) {
-    return { kind: 'refuse', reason: 'invalid_token' };
+  if (normalizedIncoming === null) {
+    return stored === null ? { kind: 'unchanged' } : { kind: 'clear' };
   }
   // Refuse to revive a token the orchestrator just rejected — this
   // prevents the auth-bridge poll from undoing onUnauthorized's
@@ -56,6 +52,14 @@ export function decideAuthTokenAction(
   // (producing a different token value) before this gate releases.
   if (knownBad !== null && normalizedIncoming === knownBad) {
     return { kind: 'refuse', reason: 'known_bad_token' };
+  }
+  // Identical to current storage: caller short-circuits, no chrome
+  // storage writes, no WS churn. This intentionally comes after the
+  // knownBad check so a failed storage clear cannot keep a rejected
+  // token alive as "unchanged".
+  if (normalizedIncoming === stored) return { kind: 'unchanged' };
+  if (!looksLikeAuthToken(normalizedIncoming)) {
+    return { kind: 'refuse', reason: 'invalid_token' };
   }
   return { kind: 'set', token: normalizedIncoming };
 }

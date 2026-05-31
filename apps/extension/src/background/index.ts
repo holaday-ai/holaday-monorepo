@@ -1257,6 +1257,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           console.warn(
             '[holaday] auth-bridge: refusing to revive knownBad token (orchestrator already rejected it)',
           );
+          if (
+            action.reason === 'known_bad_token' &&
+            incoming !== null &&
+            normalizeAccessToken(stored) === normalizeAccessToken(incoming)
+          ) {
+            await clearAccessToken();
+            await clearStoredUser();
+            disconnect();
+            state.tasks.clear();
+            pushTasksSnapshot();
+          }
           sendResponse({ ok: false, reason: action.reason });
           return;
         }

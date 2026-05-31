@@ -58,6 +58,23 @@ describe('decideAuthTokenAction', () => {
     });
   });
 
+  it('incoming matches knownBad + stored matches → refuse rather than unchanged', () => {
+    // If clearAccessToken failed after the orchestrator rejected the
+    // token, storage can still contain the known-bad value. Refusing
+    // here lets the caller clear that stale stored token instead of
+    // treating it as a harmless unchanged echo.
+    expect(
+      decideAuthTokenAction(
+        'eyJrejected.token.value',
+        'eyJrejected.token.value',
+        'eyJrejected.token.value',
+      ),
+    ).toEqual({
+      kind: 'refuse',
+      reason: 'known_bad_token',
+    });
+  });
+
   it('stored matches knownBad but incoming differs → set (token rotated)', () => {
     // The user logged in fresh on the SPA; localStorage has a NEW
     // token. Even though chrome.storage still has the dead token
