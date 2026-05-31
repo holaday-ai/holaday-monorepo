@@ -15,6 +15,7 @@
  */
 
 import type { ClientMessage } from '@holaday/shared-types';
+import { withDeadline } from '../shared/deadline.js';
 
 /**
  * Curated list. Each entry is the BARE root domain (no scheme, no
@@ -77,11 +78,16 @@ const LOGIN_COOKIE_MAP: Record<string, readonly string[]> = {
 
 /** Conservative fallback for sites without an explicit auth-cookie list. */
 const FALLBACK_COOKIE_COUNT_THRESHOLD = 6;
+const COOKIE_BRIDGE_DOMAIN_TIMEOUT_MS = 1_000;
 
 async function isLoggedIn(domain: string): Promise<boolean> {
   let cookies: chrome.cookies.Cookie[];
   try {
-    cookies = await chrome.cookies.getAll({ domain });
+    cookies = await withDeadline(
+      chrome.cookies.getAll({ domain }),
+      COOKIE_BRIDGE_DOMAIN_TIMEOUT_MS,
+      `cookie_bridge_domain_timeout:${domain}`,
+    );
   } catch {
     // Permission revoked or storage error — treat as unknown/false
     // rather than throwing; the orchestrator never sees this site.
