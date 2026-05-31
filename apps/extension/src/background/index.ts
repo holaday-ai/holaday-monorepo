@@ -1293,6 +1293,15 @@ chrome.runtime.onStartup.addListener(() => {
   });
 });
 
+// Extension reload/update is an explicit user recovery action in developer
+// mode. Treat it like a fresh browser launch for the network cap, otherwise a
+// previously capped WS can stay silent even after the user clicks reload.
+chrome.runtime.onInstalled.addListener(() => {
+  void resetWsReconnectAttempts().then(() => {
+    void ensureConnected();
+  });
+});
+
 // ---------- Popup ⇄ SW messaging ----------
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
