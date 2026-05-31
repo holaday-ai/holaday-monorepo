@@ -42,6 +42,7 @@ const DEFAULT_NAVIGATE_WAIT_MS = 1500;
 const MAX_NAVIGATE_WAIT_MS = 10_000;
 const MAX_NAVIGATE_URL_LENGTH = 2048;
 const MAX_SCREENSHOT_RESULT_BASE64_CHARS = 2_000_000;
+const inFlightToolCallRequestIds = new Set<string>();
 
 /**
  * Get the currently-focused tab. Returns null when no tab is available
@@ -338,6 +339,15 @@ export function extensionToolErrorPayload(
  */
 export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<void> {
   const { taskId, requestId, kind, args } = call;
+  if (inFlightToolCallRequestIds.has(requestId)) {
+    console.warn('[holaday] duplicate extension tool call ignored', {
+      taskId,
+      requestId,
+      kind,
+    });
+    return;
+  }
+  inFlightToolCallRequestIds.add(requestId);
   const waitMs = normalizeNavigateWaitMs(args?.waitMs);
   const callTimeoutMs = Math.max(1000, Math.min(60_000, call.timeoutMs ?? 30_000));
   const operationBudgetMs = Math.max(500, callTimeoutMs - 500);
@@ -385,5 +395,11 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
       ok: false,
       error: extensionToolErrorPayload(err),
     });
+  } finally {
+    inFlightToolCallRequestIds.delete(requestId);
   }
+}
+
+export function _resetExtensionToolInFlightForTests(): void {
+  inFlightToolCallRequestIds.clear();
 }

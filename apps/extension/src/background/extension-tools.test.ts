@@ -1,11 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ServerMessage } from '@holaday/shared-types';
 import {
+  _resetExtensionToolInFlightForTests,
   extensionToolErrorPayload,
   getActiveTabForExtensionTool,
+  handleExtensionToolCall,
   normalizeScreenshotCaptureDataUrl,
   normalizeNavigateUrl,
   waitForTabComplete,
 } from './extension-tools.js';
+import { send } from './ws-client.js';
+
+vi.mock('./ws-client.js', () => ({
+  send: vi.fn(() => true),
+}));
 
 type TabListener = (id: number, info: chrome.tabs.TabChangeInfo) => void;
 type TabRemovedListener = (id: number) => void;
@@ -58,6 +66,7 @@ function installChromeTabsMock(initialStatus: TabStatus = 'loading'): {
 }
 
 afterEach(() => {
+  _resetExtensionToolInFlightForTests();
   vi.useRealTimers();
   vi.restoreAllMocks();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -241,5 +250,56 @@ describe('getActiveTabForExtensionTool', () => {
       id: 2,
       url: 'https://holaday.ai/app',
     });
+  });
+});
+
+describe('handleExtensionToolCall', () => {
+  it('ignores duplicate in-flight request ids instead of executing twice', async () => {
+    let resolveUpdate: () => void = () => {
+      throw new Error('update promise was not created');
+    };
+    const update = vi.fn(
+      () =>
+        new Promise<chrome.tabs.Tab>((resolve) => {
+          resolveUpdate = () => resolve({ id: 2, url: 'https://example.com/' } as chrome.tabs.Tab);
+        }),
+    );
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, url: 'https://holaday.ai/app' }]),
+        update,
+        get: vi.fn(async () => ({ id: 2, status: 'complete', url: 'https://example.com/' })),
+        onUpdated: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+        onRemoved: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+      },
+      scripting: {
+        executeScript: vi.fn(async () => [{ result: 'hello' }]),
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_duplicate_tool_call',
+      requestId: 'req_duplicate_tool_call',
+      kind: 'navigate',
+      args: { url: 'https://example.com/', waitMs: 0 },
+      timeoutMs: 30_000,
+    };
+
+    const first = handleExtensionToolCall(call);
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    await handleExtensionToolCall(call);
+
+    expect(update).toHaveBeenCalledTimes(1);
+    resolveUpdate();
+    await first;
+
+    expect(send).toHaveBeenCalledTimes(1);
   });
 });
