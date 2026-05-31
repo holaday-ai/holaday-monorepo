@@ -389,7 +389,9 @@ export function extensionToolErrorPayload(
     lower.includes('message port closed') ||
     lower.includes('tab closed') ||
     lower.includes('no tab with id') ||
-    lower.includes('target closed')
+    lower.includes('target closed') ||
+    lower.includes('no frame with id') ||
+    (lower.includes('frame with id') && lower.includes('removed'))
   ) {
     return {
       message: '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
