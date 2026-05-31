@@ -194,7 +194,9 @@ export function cdpActionErrorMessage(err: unknown): string {
   if (
     lower.includes('missing host permission') ||
     lower.includes('cannot access contents of url') ||
-    lower.includes('cannot access a chrome:// url')
+    lower.includes('activetab permission') ||
+    lower.includes('cannot access a chrome:// url') ||
+    lower.includes('cannot access a chrome-extension:// url')
   ) {
     return '扩展没有这个页面的访问权限，请检查扩展权限后重试';
   }
