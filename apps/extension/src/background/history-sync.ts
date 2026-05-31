@@ -65,6 +65,24 @@ export interface BrowsingHostEntry {
   lastVisitAt: string; // ISO 8601
 }
 
+const LOCAL_HOST_SUFFIXES = ['.local', '.lan', '.home', '.internal', '.localhost'];
+
+function isIPv4Host(host: string): boolean {
+  const parts = host.split('.');
+  return (
+    parts.length === 4 &&
+    parts.every((part) => {
+      if (!/^\d{1,3}$/.test(part)) return false;
+      const n = Number(part);
+      return n >= 0 && n <= 255;
+    })
+  );
+}
+
+function isLocalHostName(host: string): boolean {
+  return LOCAL_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix));
+}
+
 /**
  * Extract the bare host from a chrome history URL. Returns null when
  * the URL is unusable (chrome://, malformed, javascript:, etc.) so
@@ -76,9 +94,10 @@ export function extractHost(url: string): string | null {
   try {
     const u = new URL(url);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
-    let host = u.hostname.toLowerCase();
+    let host = u.hostname.toLowerCase().replace(/\.+$/, '');
     if (host.startsWith('www.')) host = host.slice(4);
     if (!host.includes('.')) return null; // single-label / localhost
+    if (isIPv4Host(host) || isLocalHostName(host)) return null;
     return host;
   } catch {
     return null;

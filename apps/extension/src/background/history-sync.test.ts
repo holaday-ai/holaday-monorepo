@@ -19,8 +19,12 @@ describe('extractHost', () => {
   it('keeps only useful http hosts', () => {
     expect(extractHost('https://www.example.com/path?q=1')).toBe('example.com');
     expect(extractHost('http://sub.example.com/')).toBe('sub.example.com');
+    expect(extractHost('https://example.com./path')).toBe('example.com');
     expect(extractHost('chrome://extensions')).toBeNull();
     expect(extractHost('http://localhost:5173/')).toBeNull();
+    expect(extractHost('http://192.168.1.2/admin')).toBeNull();
+    expect(extractHost('http://printer.local/status')).toBeNull();
+    expect(extractHost('https://router.lan/')).toBeNull();
     expect(extractHost('not a url')).toBeNull();
   });
 
