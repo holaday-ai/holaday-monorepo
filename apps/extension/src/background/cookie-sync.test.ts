@@ -88,6 +88,27 @@ describe('normalizeSyncableCookie', () => {
     expect(getAll).toHaveBeenCalledWith({ domain: '.github.com' });
   });
 
+  it('dedupes cookies returned by overlapping domain reads', async () => {
+    const getAll = vi.fn(({ domain }: chrome.cookies.GetAllDetails) => {
+      if (domain === '.github.com') {
+        return Promise.resolve([
+          cookie({ domain: '.github.com', name: 'sid', path: '/' }),
+          cookie({ domain: '.github.com', name: 'sid', path: '/' }),
+          cookie({ domain: '.github.com', name: 'sid', path: '/org' }),
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+    globalThis.chrome = {
+      cookies: { getAll },
+    } as unknown as typeof chrome;
+
+    await expect(collectCookies()).resolves.toEqual([
+      expect.objectContaining({ domain: '.github.com', name: 'sid', path: '/' }),
+      expect.objectContaining({ domain: '.github.com', name: 'sid', path: '/org' }),
+    ]);
+  });
+
   it('times out a stuck cookie sync post', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));

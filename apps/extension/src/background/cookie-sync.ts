@@ -102,6 +102,10 @@ export function normalizeSyncableCookie(c: chrome.cookies.Cookie): SyncableCooki
   };
 }
 
+function cookieIdentity(c: SyncableCookie): string {
+  return `${c.domain}\u0000${c.path}\u0000${c.name}`;
+}
+
 /**
  * Read every cookie chrome.cookies will hand us for the SYNC_DOMAINS
  * list. Per-domain failures (rare — usually permission revocation
@@ -110,14 +114,14 @@ export function normalizeSyncableCookie(c: chrome.cookies.Cookie): SyncableCooki
  */
 export async function collectCookies(): Promise<SyncableCookie[]> {
   const byDomain = await Promise.all(SYNC_DOMAINS.map(readCookiesForDomain));
-  const out: SyncableCookie[] = [];
+  const out = new Map<string, SyncableCookie>();
   for (const cookies of byDomain) {
     for (const c of cookies) {
       const normalized = normalizeSyncableCookie(c);
-      if (normalized) out.push(normalized);
+      if (normalized) out.set(cookieIdentity(normalized), normalized);
     }
   }
-  return out;
+  return [...out.values()];
 }
 
 async function readCookiesForDomain(domain: string): Promise<chrome.cookies.Cookie[]> {
