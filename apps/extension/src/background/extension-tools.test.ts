@@ -639,4 +639,47 @@ describe('handleExtensionToolCall', () => {
       }),
     );
   });
+
+  it('retries screenshots with lower quality when the first capture is too large', async () => {
+    vi.mocked(send).mockClear();
+    const captureVisibleTab = vi
+      .fn()
+      .mockResolvedValueOnce(`data:image/jpeg;base64,${'x'.repeat(2_000_001)}`)
+      .mockResolvedValueOnce('data:image/jpeg;base64,AA==');
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, windowId: 1, url: 'https://holaday.ai/app' }]),
+        captureVisibleTab,
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_screenshot_retry',
+      requestId: 'req_screenshot_retry',
+      kind: 'screenshot',
+      args: {},
+      timeoutMs: 30_000,
+    };
+
+    await handleExtensionToolCall(call);
+
+    expect(captureVisibleTab).toHaveBeenNthCalledWith(1, 1, {
+      format: 'jpeg',
+      quality: 50,
+    });
+    expect(captureVisibleTab).toHaveBeenNthCalledWith(2, 1, {
+      format: 'jpeg',
+      quality: 35,
+    });
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'client.extension.tool_result',
+        taskId: 'tsk_screenshot_retry',
+        requestId: 'req_screenshot_retry',
+        ok: true,
+        result: { imageBase64: 'AA==', width: 0, height: 0 },
+      }),
+    );
+  });
 });

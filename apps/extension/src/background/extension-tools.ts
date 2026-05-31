@@ -46,6 +46,7 @@ const TAB_QUERY_TIMEOUT_MS = 1_500;
 const TAB_UPDATE_TIMEOUT_MS = 5_000;
 const TAB_GET_TIMEOUT_MS = 2_000;
 const SCREENSHOT_CAPTURE_TIMEOUT_MS = 8_000;
+const SCREENSHOT_CAPTURE_QUALITIES = [50, 35, 25] as const;
 const MAX_NAVIGATE_URL_LENGTH = 2048;
 const MAX_SCREENSHOT_RESULT_BASE64_CHARS = 2_000_000;
 const RECENT_TOOL_RESULT_TTL_MS = 60_000;
@@ -339,12 +340,26 @@ async function executeScreenshot(): Promise<ScreenshotResult> {
   if (!tab?.id) {
     throw new Error('no_active_tab');
   }
-  const dataUrl = await withDeadline(
-    chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 50 }),
-    SCREENSHOT_CAPTURE_TIMEOUT_MS,
-    'extension_tool_timeout',
-  );
-  return normalizeScreenshotCaptureDataUrl(dataUrl);
+  let lastError: unknown = null;
+  for (const quality of SCREENSHOT_CAPTURE_QUALITIES) {
+    const dataUrl = await withDeadline(
+      chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality }),
+      SCREENSHOT_CAPTURE_TIMEOUT_MS,
+      'extension_tool_timeout',
+    );
+    try {
+      return normalizeScreenshotCaptureDataUrl(dataUrl);
+    } catch (err) {
+      lastError = err;
+      if (!isScreenshotTooLargeError(err)) throw err;
+    }
+  }
+  throw lastError ?? new Error('screenshot_too_large');
+}
+
+function isScreenshotTooLargeError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.toLowerCase().includes('screenshot_too_large');
 }
 
 export function extensionToolErrorPayload(
