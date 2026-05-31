@@ -119,6 +119,16 @@ export function App() {
   const tasksRefreshInFlight = useRef(false);
   const mountedRef = useRef(true);
 
+  function clearLocalSessionState(): void {
+    setUser(null);
+    setToken(null);
+    setActiveTaskId(null);
+    setTasks([]);
+    setError(null);
+    setSubmitting(false);
+    setStatus('idle');
+  }
+
   useEffect(() => {
     return () => {
       mountedRef.current = false;
@@ -215,9 +225,7 @@ export function App() {
           }
         } else {
           authSyncSeq.current = seq;
-          setUser(null);
-          setToken(null);
-          setStatus('idle');
+          clearLocalSessionState();
         }
       })();
     };
@@ -365,12 +373,7 @@ export function App() {
     await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
     if (!mountedRef.current) return;
     void sendRuntimeMessage({ type: 'holaday.disconnect' });
-    setUser(null);
-    setToken(null);
-    setActiveTaskId(null);
-    setTasks([]);
-    setError(null);
-    setStatus('idle');
+    clearLocalSessionState();
   }
 
   async function createTask(): Promise<void> {
