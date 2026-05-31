@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  clearAccessToken,
+  clearStoredUser,
   getAccessToken,
   getStoredUser,
   normalizeAccessToken,
   normalizeStoredUser,
+  setAccessToken,
+  setStoredUser,
 } from './storage.js';
 
 afterEach(() => {
@@ -104,5 +108,79 @@ describe('storage reads', () => {
     await vi.advanceTimersByTimeAsync(1_500);
 
     await expect(pending).resolves.toBeNull();
+  });
+});
+
+describe('storage writes', () => {
+  it('bounds token writes that hang', async () => {
+    vi.useFakeTimers();
+    globalThis.chrome = {
+      storage: {
+        local: {
+          set: vi.fn(() => new Promise(() => undefined)),
+        },
+      },
+    } as unknown as typeof chrome;
+
+    const pending = setAccessToken('token.value');
+    const assertion = expect(pending).rejects.toThrow('storage_token_write_timeout');
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    await assertion;
+  });
+
+  it('bounds token removals that hang', async () => {
+    vi.useFakeTimers();
+    globalThis.chrome = {
+      storage: {
+        local: {
+          remove: vi.fn(() => new Promise(() => undefined)),
+        },
+      },
+    } as unknown as typeof chrome;
+
+    const pending = clearAccessToken();
+    const assertion = expect(pending).rejects.toThrow('storage_token_remove_timeout');
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    await assertion;
+  });
+
+  it('bounds user writes that hang', async () => {
+    vi.useFakeTimers();
+    globalThis.chrome = {
+      storage: {
+        local: {
+          set: vi.fn(() => new Promise(() => undefined)),
+        },
+      },
+    } as unknown as typeof chrome;
+
+    const pending = setStoredUser({
+      externalId: 'user_1',
+      email: 'person@example.com',
+      plan: 'basic',
+    });
+    const assertion = expect(pending).rejects.toThrow('storage_user_write_timeout');
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    await assertion;
+  });
+
+  it('bounds user removals that hang', async () => {
+    vi.useFakeTimers();
+    globalThis.chrome = {
+      storage: {
+        local: {
+          remove: vi.fn(() => new Promise(() => undefined)),
+        },
+      },
+    } as unknown as typeof chrome;
+
+    const pending = clearStoredUser();
+    const assertion = expect(pending).rejects.toThrow('storage_user_remove_timeout');
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    await assertion;
   });
 });

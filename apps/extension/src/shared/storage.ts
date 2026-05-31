@@ -8,6 +8,7 @@ import { withDeadline } from './deadline.js';
 const TOKEN_KEY = 'holaday.access_token';
 const USER_KEY = 'holaday.user';
 const STORAGE_READ_TIMEOUT_MS = 1_500;
+const STORAGE_WRITE_TIMEOUT_MS = 1_500;
 
 export interface StoredUser {
   externalId: string;
@@ -62,11 +63,19 @@ export async function setAccessToken(token: string): Promise<void> {
     await clearAccessToken();
     return;
   }
-  await chrome.storage.local.set({ [TOKEN_KEY]: normalized });
+  await withDeadline(
+    chrome.storage.local.set({ [TOKEN_KEY]: normalized }),
+    STORAGE_WRITE_TIMEOUT_MS,
+    'storage_token_write_timeout',
+  );
 }
 
 export async function clearAccessToken(): Promise<void> {
-  await chrome.storage.local.remove(TOKEN_KEY);
+  await withDeadline(
+    chrome.storage.local.remove(TOKEN_KEY),
+    STORAGE_WRITE_TIMEOUT_MS,
+    'storage_token_remove_timeout',
+  );
 }
 
 export async function getStoredUser(): Promise<StoredUser | null> {
@@ -83,9 +92,17 @@ export async function getStoredUser(): Promise<StoredUser | null> {
 }
 
 export async function setStoredUser(user: StoredUser): Promise<void> {
-  await chrome.storage.local.set({ [USER_KEY]: user });
+  await withDeadline(
+    chrome.storage.local.set({ [USER_KEY]: user }),
+    STORAGE_WRITE_TIMEOUT_MS,
+    'storage_user_write_timeout',
+  );
 }
 
 export async function clearStoredUser(): Promise<void> {
-  await chrome.storage.local.remove(USER_KEY);
+  await withDeadline(
+    chrome.storage.local.remove(USER_KEY),
+    STORAGE_WRITE_TIMEOUT_MS,
+    'storage_user_remove_timeout',
+  );
 }
