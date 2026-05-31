@@ -80,32 +80,35 @@ export async function getActiveTabForExtensionTool(): Promise<chrome.tabs.Tab | 
     { active: true, lastFocusedWindow: true },
     { active: true, windowType: 'normal' },
   ];
-  const candidates: chrome.tabs.Tab[] = [];
-
-  for (const query of queries) {
-    try {
-      const [tab] = await withDeadline(
-        chrome.tabs.query(query),
-        TAB_QUERY_TIMEOUT_MS,
-        'tab_query_timeout',
-      );
-      if (tab) candidates.push(tab);
-    } catch {
-      // Keep the browser-tool fallback chain alive. currentWindow can
-      // reject while lastFocused/normal window lookup still succeeds.
-    }
-  }
+  const candidates = await Promise.all(
+    queries.map(async (query) => {
+      try {
+        const [tab] = await withDeadline(
+          chrome.tabs.query(query),
+          TAB_QUERY_TIMEOUT_MS,
+          'tab_query_timeout',
+        );
+        return tab;
+      } catch {
+        // Keep the browser-tool fallback chain alive. currentWindow can
+        // reject while lastFocused/normal window lookup still succeeds.
+        return undefined;
+      }
+    }),
+  );
 
   return candidates.find(isWebPageTab) ?? candidates.find(isNonInternalTab) ?? null;
 }
 
-function isWebPageTab(tab: chrome.tabs.Tab): boolean {
+function isWebPageTab(tab: chrome.tabs.Tab | undefined): tab is chrome.tabs.Tab {
+  if (!tab) return false;
   if (typeof tab.id !== 'number') return false;
   if (!tab.url) return false;
   return tab.url.startsWith('http://') || tab.url.startsWith('https://');
 }
 
-function isNonInternalTab(tab: chrome.tabs.Tab): boolean {
+function isNonInternalTab(tab: chrome.tabs.Tab | undefined): tab is chrome.tabs.Tab {
+  if (!tab) return false;
   if (typeof tab.id !== 'number') return false;
   if (!tab.url) return true;
   return !(

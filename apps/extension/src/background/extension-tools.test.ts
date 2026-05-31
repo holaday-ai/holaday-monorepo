@@ -308,6 +308,8 @@ describe('getActiveTabForExtensionTool', () => {
     } as unknown as typeof chrome;
 
     const pending = getActiveTabForExtensionTool();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(query).toHaveBeenCalledTimes(3);
     await vi.advanceTimersByTimeAsync(1_500);
 
     await expect(pending).resolves.toMatchObject({
