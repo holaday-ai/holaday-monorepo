@@ -49,6 +49,7 @@ const LOOKBACK_MS = LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
  * read fast enough to run on SW boot.
  */
 const HISTORY_MAX_RESULTS = 5000;
+const HISTORY_SEARCH_TIMEOUT_MS = 2_000;
 const HISTORY_SYNC_POST_TIMEOUT_MS = 8_000;
 
 export interface BrowsingHostEntry {
@@ -133,11 +134,15 @@ export async function collectBrowsingHistory(): Promise<BrowsingHostEntry[]> {
   const startTime = Date.now() - LOOKBACK_MS;
   let items: chrome.history.HistoryItem[] = [];
   try {
-    items = await chrome.history.search({
-      text: '', // empty = all URLs in the window
-      startTime,
-      maxResults: HISTORY_MAX_RESULTS,
-    });
+    items = await withDeadline(
+      chrome.history.search({
+        text: '', // empty = all URLs in the window
+        startTime,
+        maxResults: HISTORY_MAX_RESULTS,
+      }),
+      HISTORY_SEARCH_TIMEOUT_MS,
+      'history_search_timeout',
+    );
   } catch (err) {
     console.warn('[holaday] history-sync: chrome.history.search failed', err);
     return [];

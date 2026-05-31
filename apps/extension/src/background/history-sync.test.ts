@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   aggregateBrowsingHistoryItems,
+  collectBrowsingHistory,
   extractHost,
   syncHistoryToServer,
 } from './history-sync.js';
@@ -85,5 +86,21 @@ describe('aggregateBrowsingHistoryItems', () => {
         lastVisitAt: '2026-05-02T00:00:00.000Z',
       },
     ]);
+  });
+});
+
+describe('collectBrowsingHistory', () => {
+  it('returns an empty list when chrome history search hangs', async () => {
+    vi.useFakeTimers();
+    globalThis.chrome = {
+      history: {
+        search: vi.fn(() => new Promise(() => undefined)),
+      },
+    } as unknown as typeof chrome;
+
+    const assertion = expect(collectBrowsingHistory()).resolves.toEqual([]);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    await assertion;
   });
 });
