@@ -438,6 +438,47 @@ describe('handleExtensionToolCall', () => {
     });
   });
 
+  it('does not treat the same request id on another task as a duplicate', async () => {
+    vi.mocked(send).mockClear();
+    const captureVisibleTab = vi
+      .fn()
+      .mockResolvedValueOnce('data:image/jpeg;base64,AA==')
+      .mockResolvedValueOnce('data:image/jpeg;base64,BB==');
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, windowId: 1, url: 'https://holaday.ai/app' }]),
+        captureVisibleTab,
+      },
+    } as unknown as typeof chrome;
+
+    const baseCall: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_a',
+      requestId: 'req_shared',
+      kind: 'screenshot',
+      args: {},
+      timeoutMs: 30_000,
+    };
+
+    await handleExtensionToolCall(baseCall);
+    await handleExtensionToolCall({ ...baseCall, taskId: 'tsk_b' });
+
+    expect(captureVisibleTab).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(send).mock.calls[0]?.[0]).toMatchObject({
+      taskId: 'tsk_a',
+      requestId: 'req_shared',
+      ok: true,
+      result: { imageBase64: 'AA==' },
+    });
+    expect(vi.mocked(send).mock.calls[1]?.[0]).toMatchObject({
+      taskId: 'tsk_b',
+      requestId: 'req_shared',
+      ok: true,
+      result: { imageBase64: 'BB==' },
+    });
+  });
+
   it('returns the navigated page metadata when body text extraction hangs', async () => {
     vi.useFakeTimers();
     vi.mocked(send).mockClear();
