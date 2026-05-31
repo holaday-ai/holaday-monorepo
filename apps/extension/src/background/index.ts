@@ -966,7 +966,17 @@ async function resetAllAuthState(): Promise<void> {
  * has to click the Side Panel "我已登录，重试" button (which calls
  * resetAuthFailureState) to give it another shot.
  */
+let pendingEnsureConnected: Promise<{ token: string | null; frozen?: boolean }> | null = null;
+
 async function ensureConnected(): Promise<{ token: string | null; frozen?: boolean }> {
+  if (pendingEnsureConnected) return pendingEnsureConnected;
+  pendingEnsureConnected = ensureConnectedInner().finally(() => {
+    pendingEnsureConnected = null;
+  });
+  return pendingEnsureConnected;
+}
+
+async function ensureConnectedInner(): Promise<{ token: string | null; frozen?: boolean }> {
   if (isConnected()) return { token: await getAccessToken() };
   const failures = await getAuthFailures();
   if (failures >= MAX_AUTH_FAILURES) {
