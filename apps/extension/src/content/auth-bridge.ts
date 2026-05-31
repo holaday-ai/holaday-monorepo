@@ -98,12 +98,16 @@ function markPostFailed(token: string | null): void {
 
 function postToSw(token: string | null): void {
   try {
-    chrome.runtime.sendMessage({ type: SW_MESSAGE_TYPE, token }, () => {
+    chrome.runtime.sendMessage({ type: SW_MESSAGE_TYPE, token }, (response?: unknown) => {
       // sendResponse intentionally ignored — SW does the work, no
       // ack required. Reading `chrome.runtime.lastError` here
       // suppresses the harmless "Unchecked runtime.lastError" warning
       // some Chromes emit when the SW respawns mid-frame.
       if (chrome.runtime.lastError) {
+        markPostFailed(token);
+        return;
+      }
+      if (isRetryableSwFailure(response)) {
         markPostFailed(token);
       }
     });
@@ -112,6 +116,12 @@ function postToSw(token: string | null): void {
     // way the next poll tick will retry.
     markPostFailed(token);
   }
+}
+
+function isRetryableSwFailure(response: unknown): boolean {
+  if (!response || typeof response !== 'object') return false;
+  const raw = response as { ok?: unknown; reason?: unknown };
+  return raw.ok === false && raw.reason === 'internal_error';
 }
 
 function observe(): void {
