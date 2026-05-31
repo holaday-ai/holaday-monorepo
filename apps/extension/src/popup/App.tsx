@@ -240,8 +240,15 @@ export function App() {
   const [, setToken] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
   const authSyncSeq = useRef(0);
+  const mountedRef = useRef(true);
   const dark = useDarkMode();
   const t = dark ? DARK_THEME : LIGHT_THEME;
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Mount: hydrate user + token from chrome.storage. If we have a
   // token but no cached user record (fresh install / cleared cache),
@@ -262,6 +269,7 @@ export function App() {
         if (cancelled) return;
         if (result.kind === 'ok') {
           await setStoredUser(result.user);
+          if (cancelled || !mountedRef.current) return;
           setUser(result.user);
           setToken(tok);
           void sendRuntimeMessage({ type: 'holaday.connect', token: tok });
@@ -293,9 +301,10 @@ export function App() {
         const newToken = normalizeAccessToken(tokenChange.newValue);
         if (newToken) {
           const result = await fetchMe(newToken);
-          if (seq !== authSyncSeq.current) return;
+          if (seq !== authSyncSeq.current || !mountedRef.current) return;
           if (result.kind === 'ok') {
             await setStoredUser(result.user);
+            if (seq !== authSyncSeq.current || !mountedRef.current) return;
             setUser(result.user);
             setToken(newToken);
           } else {
@@ -306,6 +315,7 @@ export function App() {
           }
         } else {
           authSyncSeq.current = seq;
+          if (!mountedRef.current) return;
           setUser(null);
           setToken(null);
         }
@@ -326,10 +336,11 @@ export function App() {
         await clearAccessToken();
         await clearStoredUser();
       }
+      if (!mountedRef.current) return;
       setUser(null);
       setToken(null);
     } finally {
-      setResetting(false);
+      if (mountedRef.current) setResetting(false);
     }
   }
 
