@@ -196,7 +196,10 @@ export function cdpActionErrorMessage(err: unknown): string {
     lower.includes('cannot access contents of url') ||
     lower.includes('activetab permission') ||
     lower.includes('cannot access a chrome:// url') ||
-    lower.includes('cannot access a chrome-extension:// url')
+    lower.includes('cannot access a chrome-extension:// url') ||
+    lower.includes('cannot access a file:// url') ||
+    lower.includes('extensions gallery cannot be scripted') ||
+    lower.includes('cannot be scripted')
   ) {
     return '扩展没有这个页面的访问权限，请检查扩展权限后重试';
   }

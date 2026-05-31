@@ -383,7 +383,10 @@ export function extensionToolErrorPayload(
     lower.includes('host permission') ||
     lower.includes('activetab permission') ||
     lower.includes('cannot access a chrome:// url') ||
-    lower.includes('cannot access a chrome-extension:// url')
+    lower.includes('cannot access a chrome-extension:// url') ||
+    lower.includes('cannot access a file:// url') ||
+    lower.includes('extensions gallery cannot be scripted') ||
+    lower.includes('cannot be scripted')
   ) {
     return {
       message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
