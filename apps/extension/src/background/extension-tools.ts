@@ -261,11 +261,7 @@ async function executeNavigate(
       throw err;
     }
   }
-  const bodyText =
-    rawText.length > BODY_TEXT_CHAR_CAP
-      ? `${rawText.slice(0, BODY_TEXT_CHAR_CAP)}\n…(已截断，原文 ${rawText.length} 字)`
-      : rawText;
-  return { finalUrl, title, bodyText };
+  return { finalUrl, title, bodyText: rawText };
 }
 
 async function readBodyText(tabId: number): Promise<string> {
@@ -273,11 +269,14 @@ async function readBodyText(tabId: number): Promise<string> {
     chrome.scripting.executeScript({
       target: { tabId },
       world: 'MAIN',
-      func: () => {
+      func: (maxChars: number) => {
         // Runs in page context — no closure over outer scope.
         const t = document.body?.innerText ?? '';
-        return t;
+        return t.length > maxChars
+          ? `${t.slice(0, maxChars)}\n…(已截断，原文 ${t.length} 字)`
+          : t;
       },
+      args: [BODY_TEXT_CHAR_CAP],
     }),
     BODY_TEXT_READ_TIMEOUT_MS,
     'body_text_timeout',

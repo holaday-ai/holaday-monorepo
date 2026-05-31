@@ -549,6 +549,60 @@ describe('handleExtensionToolCall', () => {
     );
   });
 
+  it('clips body text inside the page before sending the tool result', async () => {
+    vi.mocked(send).mockClear();
+    let bodyTextCap = 0;
+    const update = vi.fn(async () => ({ id: 2, url: 'https://example.com/' }) as chrome.tabs.Tab);
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, url: 'https://holaday.ai/app' }]),
+        update,
+        get: vi.fn(async () => ({
+          id: 2,
+          status: 'complete',
+          url: 'https://example.com/',
+          title: 'Example',
+        })),
+        onUpdated: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+        onRemoved: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+      },
+      scripting: {
+        executeScript: vi.fn(async ({ args }) => {
+          bodyTextCap = args?.[0] as number;
+          return [{ result: `${'x'.repeat(bodyTextCap)}\n…(已截断，原文 9000 字)` }];
+        }),
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_body_text_cap',
+      requestId: 'req_body_text_cap',
+      kind: 'navigate',
+      args: { url: 'https://example.com/', waitMs: 0 },
+      timeoutMs: 30_000,
+    };
+
+    await handleExtensionToolCall(call);
+
+    expect(bodyTextCap).toBe(8000);
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'client.extension.tool_result',
+        ok: true,
+        result: expect.objectContaining({
+          bodyText: `${'x'.repeat(8000)}\n…(已截断，原文 9000 字)`,
+        }),
+      }),
+    );
+  });
+
   it('returns a timeout when screenshot capture hangs', async () => {
     vi.useFakeTimers();
     vi.mocked(send).mockClear();
