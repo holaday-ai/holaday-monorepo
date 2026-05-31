@@ -682,4 +682,39 @@ describe('handleExtensionToolCall', () => {
       }),
     );
   });
+
+  it('retries sending a tool result when the websocket is briefly disconnected', async () => {
+    vi.useFakeTimers();
+    vi.mocked(send).mockReset();
+    vi.mocked(send).mockReturnValueOnce(false).mockReturnValueOnce(true);
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, windowId: 1, url: 'https://holaday.ai/app' }]),
+        captureVisibleTab: vi.fn(async () => 'data:image/jpeg;base64,AA=='),
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_result_retry',
+      requestId: 'req_result_retry',
+      kind: 'screenshot',
+      args: {},
+      timeoutMs: 30_000,
+    };
+
+    await handleExtensionToolCall(call);
+    expect(send).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(send).mock.calls[1]?.[0]).toMatchObject({
+      type: 'client.extension.tool_result',
+      taskId: 'tsk_result_retry',
+      requestId: 'req_result_retry',
+      ok: true,
+      result: { imageBase64: 'AA==', width: 0, height: 0 },
+    });
+  });
 });
