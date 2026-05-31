@@ -52,6 +52,7 @@ const LOOKBACK_MS = LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
 const HISTORY_MAX_RESULTS = 5000;
 const HISTORY_SEARCH_TIMEOUT_MS = 2_000;
 const HISTORY_SYNC_POST_TIMEOUT_MS = 8_000;
+const HISTORY_SUMMARY_STORAGE_TIMEOUT_MS = 1_500;
 
 export interface BrowsingHostEntry {
   domain: string;
@@ -173,7 +174,11 @@ export interface HistorySyncSummary {
 
 async function persistSummary(summary: HistorySyncSummary): Promise<void> {
   try {
-    await chrome.storage.local.set({ [HISTORY_SYNC_SUMMARY_KEY]: summary });
+    await withDeadline(
+      chrome.storage.local.set({ [HISTORY_SYNC_SUMMARY_KEY]: summary }),
+      HISTORY_SUMMARY_STORAGE_TIMEOUT_MS,
+      'history_summary_write_timeout',
+    );
   } catch {
     /* non-fatal */
   }
@@ -186,7 +191,12 @@ async function persistSummary(summary: HistorySyncSummary): Promise<void> {
  */
 export async function readHistorySyncSummary(): Promise<HistorySyncSummary | null> {
   try {
-    const v = (await chrome.storage.local.get(HISTORY_SYNC_SUMMARY_KEY))[HISTORY_SYNC_SUMMARY_KEY];
+    const out = await withDeadline(
+      chrome.storage.local.get(HISTORY_SYNC_SUMMARY_KEY),
+      HISTORY_SUMMARY_STORAGE_TIMEOUT_MS,
+      'history_summary_read_timeout',
+    );
+    const v = out[HISTORY_SYNC_SUMMARY_KEY];
     if (
       v &&
       typeof v === 'object' &&

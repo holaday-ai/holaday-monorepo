@@ -3,6 +3,7 @@ import {
   aggregateBrowsingHistoryItems,
   collectBrowsingHistory,
   extractHost,
+  readHistorySyncSummary,
   syncHistoryToServer,
 } from './history-sync.js';
 
@@ -100,6 +101,24 @@ describe('collectBrowsingHistory', () => {
 
     const assertion = expect(collectBrowsingHistory()).resolves.toEqual([]);
     await vi.advanceTimersByTimeAsync(2_000);
+
+    await assertion;
+  });
+});
+
+describe('readHistorySyncSummary', () => {
+  it('returns null when summary storage read hangs', async () => {
+    vi.useFakeTimers();
+    globalThis.chrome = {
+      storage: {
+        local: {
+          get: vi.fn(() => new Promise(() => undefined)),
+        },
+      },
+    } as unknown as typeof chrome;
+
+    const assertion = expect(readHistorySyncSummary()).resolves.toBeNull();
+    await vi.advanceTimersByTimeAsync(1_500);
 
     await assertion;
   });
