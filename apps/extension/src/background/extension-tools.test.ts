@@ -389,4 +389,62 @@ describe('handleExtensionToolCall', () => {
       },
     });
   });
+
+  it('returns the navigated page metadata when body text extraction hangs', async () => {
+    vi.useFakeTimers();
+    vi.mocked(send).mockClear();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const update = vi.fn(async () => ({ id: 2, url: 'https://example.com/' }) as chrome.tabs.Tab);
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, url: 'https://holaday.ai/app' }]),
+        update,
+        get: vi.fn(async () => ({
+          id: 2,
+          status: 'complete',
+          url: 'https://example.com/',
+          title: 'Example',
+        })),
+        onUpdated: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+        onRemoved: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+      },
+      scripting: {
+        executeScript: vi.fn(() => new Promise(() => undefined)),
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_body_text_timeout',
+      requestId: 'req_body_text_timeout',
+      kind: 'navigate',
+      args: { url: 'https://example.com/', waitMs: 0 },
+      timeoutMs: 30_000,
+    };
+
+    const pending = handleExtensionToolCall(call);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await pending;
+
+    expect(warn).toHaveBeenCalledWith('[holaday] extension navigate body text read timed out');
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'client.extension.tool_result',
+        taskId: 'tsk_body_text_timeout',
+        requestId: 'req_body_text_timeout',
+        ok: true,
+        result: {
+          finalUrl: 'https://example.com/',
+          title: 'Example',
+          bodyText: '',
+        },
+      }),
+    );
+  });
 });

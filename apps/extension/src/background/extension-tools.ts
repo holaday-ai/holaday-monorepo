@@ -40,6 +40,7 @@ const NAVIGATE_LOAD_TIMEOUT_MS = 25_000;
 const BODY_TEXT_CHAR_CAP = 8_000;
 const DEFAULT_NAVIGATE_WAIT_MS = 1500;
 const MAX_NAVIGATE_WAIT_MS = 10_000;
+const BODY_TEXT_READ_TIMEOUT_MS = 5_000;
 const MAX_NAVIGATE_URL_LENGTH = 2048;
 const MAX_SCREENSHOT_RESULT_BASE64_CHARS = 2_000_000;
 const RECENT_TOOL_RESULT_TTL_MS = 60_000;
@@ -218,22 +219,43 @@ async function executeNavigate(
   const reloaded = await chrome.tabs.get(tab.id);
   const finalUrl = reloaded.url ?? url;
   const title = reloaded.title ?? '';
-  // Read body text via injected script.
-  const [first] = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    world: 'MAIN',
-    func: () => {
-      // Runs in page context — no closure over outer scope.
-      const t = document.body?.innerText ?? '';
-      return t;
-    },
-  });
-  const rawText = typeof first?.result === 'string' ? first.result : '';
+  let rawText = '';
+  try {
+    rawText = await readBodyText(tab.id);
+  } catch (err) {
+    if (isBodyTextTimeout(err)) {
+      console.warn('[holaday] extension navigate body text read timed out');
+    } else {
+      throw err;
+    }
+  }
   const bodyText =
     rawText.length > BODY_TEXT_CHAR_CAP
       ? `${rawText.slice(0, BODY_TEXT_CHAR_CAP)}\n…(已截断，原文 ${rawText.length} 字)`
       : rawText;
   return { finalUrl, title, bodyText };
+}
+
+async function readBodyText(tabId: number): Promise<string> {
+  const [first] = await withDeadline(
+    chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: () => {
+        // Runs in page context — no closure over outer scope.
+        const t = document.body?.innerText ?? '';
+        return t;
+      },
+    }),
+    BODY_TEXT_READ_TIMEOUT_MS,
+    'body_text_timeout',
+  );
+  return typeof first?.result === 'string' ? first.result : '';
+}
+
+function isBodyTextTimeout(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.toLowerCase().includes('body_text_timeout');
 }
 
 export function normalizeNavigateUrl(raw: unknown): string {
