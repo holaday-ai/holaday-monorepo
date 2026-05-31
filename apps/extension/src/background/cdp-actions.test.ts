@@ -3,6 +3,7 @@ import {
   _resetAttachedTabsForTests,
   cdpActionErrorMessage,
   captureVisionObservation,
+  detachAll,
   detachFromTab,
   executeCdpAction,
   getActiveTabId,
@@ -107,6 +108,38 @@ describe('executeCdpAction', () => {
     await expect(action).resolves.toMatchObject({ ok: true });
     await detached;
     expect(detach).toHaveBeenCalledWith({ tabId: 8 });
+  });
+
+  it('includes in-flight debugger attaches when detaching all tabs', async () => {
+    let resolveAttach: () => void = () => {
+      throw new Error('attach promise was not created');
+    };
+    const attach = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveAttach = resolve;
+        }),
+    );
+    const detach = vi.fn(async () => undefined);
+    globalThis.chrome = {
+      debugger: {
+        attach,
+        detach,
+        sendCommand: vi.fn(async () => ({})),
+      },
+    } as unknown as typeof chrome;
+
+    const action = executeCdpAction(9, { kind: 'type', text: 'all' });
+    await Promise.resolve();
+    const detached = detachAll();
+    await Promise.resolve();
+
+    expect(detach).not.toHaveBeenCalled();
+    resolveAttach();
+
+    await expect(action).resolves.toMatchObject({ ok: true });
+    await detached;
+    expect(detach).toHaveBeenCalledWith({ tabId: 9 });
   });
 });
 

@@ -110,7 +110,8 @@ export async function detachFromTab(tabId: number): Promise<void> {
 }
 
 export async function detachAll(): Promise<void> {
-  await Promise.allSettled([...attachedTabs].map((id) => detachFromTab(id)));
+  const ids = new Set([...attachedTabs, ...pendingAttachByTab.keys()]);
+  await Promise.allSettled([...ids].map((id) => detachFromTab(id)));
 }
 
 /**
