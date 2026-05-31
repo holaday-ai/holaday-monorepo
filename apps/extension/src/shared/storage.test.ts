@@ -1,5 +1,17 @@
-import { describe, expect, it } from 'vitest';
-import { normalizeAccessToken, normalizeStoredUser } from './storage.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  getAccessToken,
+  getStoredUser,
+  normalizeAccessToken,
+  normalizeStoredUser,
+} from './storage.js';
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  delete (globalThis as any).chrome;
+});
 
 describe('normalizeAccessToken', () => {
   it('trims valid token strings and rejects empty storage values', () => {
@@ -58,5 +70,39 @@ describe('normalizeStoredUser', () => {
       email: 'person@example.com',
       plan: 'basic',
     });
+  });
+});
+
+describe('storage reads', () => {
+  it('returns null when token storage read hangs', async () => {
+    vi.useFakeTimers();
+    globalThis.chrome = {
+      storage: {
+        local: {
+          get: vi.fn(() => new Promise(() => undefined)),
+        },
+      },
+    } as unknown as typeof chrome;
+
+    const pending = getAccessToken();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    await expect(pending).resolves.toBeNull();
+  });
+
+  it('returns null when user storage read hangs', async () => {
+    vi.useFakeTimers();
+    globalThis.chrome = {
+      storage: {
+        local: {
+          get: vi.fn(() => new Promise(() => undefined)),
+        },
+      },
+    } as unknown as typeof chrome;
+
+    const pending = getStoredUser();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    await expect(pending).resolves.toBeNull();
   });
 });

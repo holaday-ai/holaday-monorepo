@@ -3,8 +3,11 @@
  * Persists the JWT issued by the orchestrator and basic user metadata.
  */
 
+import { withDeadline } from './deadline.js';
+
 const TOKEN_KEY = 'holaday.access_token';
 const USER_KEY = 'holaday.user';
+const STORAGE_READ_TIMEOUT_MS = 1_500;
 
 export interface StoredUser {
   externalId: string;
@@ -41,8 +44,16 @@ export function normalizeStoredUser(value: unknown): StoredUser | null {
 }
 
 export async function getAccessToken(): Promise<string | null> {
-  const out = await chrome.storage.local.get(TOKEN_KEY);
-  return normalizeAccessToken(out[TOKEN_KEY]);
+  try {
+    const out = await withDeadline(
+      chrome.storage.local.get(TOKEN_KEY),
+      STORAGE_READ_TIMEOUT_MS,
+      'storage_token_read_timeout',
+    );
+    return normalizeAccessToken(out[TOKEN_KEY]);
+  } catch {
+    return null;
+  }
 }
 
 export async function setAccessToken(token: string): Promise<void> {
@@ -59,8 +70,16 @@ export async function clearAccessToken(): Promise<void> {
 }
 
 export async function getStoredUser(): Promise<StoredUser | null> {
-  const out = await chrome.storage.local.get(USER_KEY);
-  return normalizeStoredUser(out[USER_KEY]);
+  try {
+    const out = await withDeadline(
+      chrome.storage.local.get(USER_KEY),
+      STORAGE_READ_TIMEOUT_MS,
+      'storage_user_read_timeout',
+    );
+    return normalizeStoredUser(out[USER_KEY]);
+  } catch {
+    return null;
+  }
 }
 
 export async function setStoredUser(user: StoredUser): Promise<void> {
