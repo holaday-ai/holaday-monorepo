@@ -17,6 +17,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ORCHESTRATOR_HTTP } from '../shared/config.js';
+import { humanizeExtensionError } from '../shared/error-copy.js';
 import { fetchWithDeadline, responseJsonWithDeadline } from '../shared/http.js';
 import { composeContextTail, getActivePageContext, type PageContext } from '../shared/page-context.js';
 import {
@@ -382,7 +383,7 @@ export function App() {
     } catch (err) {
       if (!mountedRef.current) return;
       setStatus('error');
-      setError(err instanceof Error ? err.message : String(err));
+      setError(humanizeExtensionError(err));
     }
   }
 
@@ -424,7 +425,7 @@ export function App() {
           CREATE_TASK_BODY_TIMEOUT_MS,
           'sidepanel_create_task_error_body_timeout',
         ).catch(() => null);
-        throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+        throw new Error(humanizeExtensionError(body?.error?.message ?? `HTTP ${res.status}`));
       }
       const body = await responseJsonWithDeadline<CreateTaskResponse>(
         res,
@@ -442,7 +443,7 @@ export function App() {
       await refreshTasksSnapshot();
     } catch (err) {
       if (!mountedRef.current) return;
-      setError(err instanceof Error ? err.message : String(err));
+      setError(humanizeExtensionError(err));
     } finally {
       if (mountedRef.current) setSubmitting(false);
     }
