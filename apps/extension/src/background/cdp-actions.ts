@@ -550,6 +550,7 @@ function chunkString(value: string, chunkChars: number): string[] {
 function modifierBit(name: string): number {
   switch (name.toLowerCase()) {
     case 'alt':
+    case 'option':
       return 1;
     case 'ctrl':
     case 'control':
@@ -558,6 +559,8 @@ function modifierBit(name: string): number {
     case 'cmd':
     case 'command':
     case 'super':
+    case 'win':
+    case 'windows':
       return 4;
     case 'shift':
       return 8;
@@ -585,6 +588,7 @@ interface KeyInfo {
 function resolveKey(name: string): KeyInfo {
   const named: Record<string, KeyInfo> = {
     enter: { key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13 },
+    return: { key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13 },
     escape: { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 },
     esc: { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 },
     tab: { key: 'Tab', code: 'Tab', text: '\t', windowsVirtualKeyCode: 9 },

@@ -304,6 +304,50 @@ describe('executeCdpAction', () => {
     );
   });
 
+  it('accepts common modifier and return-key aliases', async () => {
+    const sendCommand = vi.fn(async () => ({}));
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    await expect(executeCdpAction(11, { kind: 'key', key: 'option+return' })).resolves.toEqual({
+      ok: true,
+      message: 'key option+return',
+    });
+    await expect(executeCdpAction(11, { kind: 'key', key: 'windows+v' })).resolves.toEqual({
+      ok: true,
+      message: 'key windows+v',
+    });
+
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      1,
+      { tabId: 11 },
+      'Input.dispatchKeyEvent',
+      expect.objectContaining({
+        type: 'keyDown',
+        modifiers: 1,
+        key: 'Enter',
+        code: 'Enter',
+        windowsVirtualKeyCode: 13,
+      }),
+    );
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      3,
+      { tabId: 11 },
+      'Input.dispatchKeyEvent',
+      expect.objectContaining({
+        type: 'keyDown',
+        modifiers: 4,
+        key: 'v',
+        code: 'KeyV',
+        windowsVirtualKeyCode: 86,
+      }),
+    );
+  });
+
   it('chunks long inserted text to keep CDP payloads small', async () => {
     const sendCommand = vi.fn(async () => ({}));
     globalThis.chrome = {
