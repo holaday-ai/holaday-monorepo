@@ -888,6 +888,46 @@ describe('handleExtensionToolCall', () => {
     );
   });
 
+  it('captures the current Chrome error page instead of falling back to an older web tab', async () => {
+    vi.mocked(send).mockClear();
+    const captureVisibleTab = vi.fn(async () => 'data:image/jpeg;base64,AA==');
+    globalThis.chrome = {
+      tabs: {
+        query: vi
+          .fn()
+          .mockResolvedValueOnce([{ id: 2, windowId: 1, url: 'chrome-error://chromewebdata/' }])
+          .mockResolvedValueOnce([{ id: 3, windowId: 2, url: 'https://holaday.ai/app' }])
+          .mockResolvedValueOnce([]),
+        captureVisibleTab,
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_screenshot_error_page',
+      requestId: 'req_screenshot_error_page',
+      kind: 'screenshot',
+      args: {},
+      timeoutMs: 30_000,
+    };
+
+    await handleExtensionToolCall(call);
+
+    expect(captureVisibleTab).toHaveBeenCalledWith(1, {
+      format: 'jpeg',
+      quality: 50,
+    });
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'client.extension.tool_result',
+        taskId: 'tsk_screenshot_error_page',
+        requestId: 'req_screenshot_error_page',
+        ok: true,
+        result: { imageBase64: 'AA==', width: 0, height: 0 },
+      }),
+    );
+  });
+
   it('retries sending a tool result when the websocket is briefly disconnected', async () => {
     vi.useFakeTimers();
     vi.mocked(send).mockReset();

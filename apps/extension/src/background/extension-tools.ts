@@ -388,7 +388,7 @@ export function normalizeScreenshotCaptureDataUrl(dataUrl: string): ScreenshotRe
 }
 
 async function executeScreenshot(): Promise<ScreenshotResult> {
-  const tab = await getActiveTabForExtensionTool();
+  const tab = await getActiveTabForExtensionTool({ allowErrorPage: true });
   if (!tab?.id) {
     throw new Error('no_active_tab');
   }
