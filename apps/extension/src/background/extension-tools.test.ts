@@ -9,7 +9,7 @@ import {
   normalizeNavigateUrl,
   waitForTabComplete,
 } from './extension-tools.js';
-import { send } from './ws-client.js';
+import { getCurrentWsToken, send } from './ws-client.js';
 
 vi.mock('./ws-client.js', () => ({
   getCurrentWsToken: vi.fn(() => null),
@@ -68,6 +68,9 @@ function installChromeTabsMock(initialStatus: TabStatus = 'loading'): {
 
 afterEach(() => {
   _resetExtensionToolInFlightForTests();
+  vi.mocked(getCurrentWsToken).mockReturnValue(null);
+  vi.mocked(send).mockReset();
+  vi.mocked(send).mockReturnValue(true);
   vi.useRealTimers();
   vi.restoreAllMocks();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -786,6 +789,45 @@ describe('handleExtensionToolCall', () => {
       ok: true,
       result: { imageBase64: 'AA==', width: 0, height: 0 },
     });
+  });
+
+  it('does not retry a completed tool result after the websocket token switches', async () => {
+    vi.useFakeTimers();
+    vi.mocked(send).mockReset();
+    vi.mocked(send).mockReturnValue(false);
+    vi.mocked(getCurrentWsToken).mockReturnValue('token-a');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, windowId: 1, url: 'https://holaday.ai/app' }]),
+        captureVisibleTab: vi.fn(async () => 'data:image/jpeg;base64,AA=='),
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_result_token_switch',
+      requestId: 'req_result_token_switch',
+      kind: 'screenshot',
+      args: {},
+      timeoutMs: 30_000,
+    };
+
+    await handleExtensionToolCall(call);
+    expect(send).toHaveBeenCalledTimes(1);
+
+    vi.mocked(getCurrentWsToken).mockReturnValue('token-b');
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[holaday] extension tool result retry cancelled after token change',
+      expect.objectContaining({
+        taskId: 'tsk_result_token_switch',
+        requestId: 'req_result_token_switch',
+        attempt: 1,
+      }),
+    );
   });
 
   it('keeps retrying tool results through a longer websocket reconnect', async () => {

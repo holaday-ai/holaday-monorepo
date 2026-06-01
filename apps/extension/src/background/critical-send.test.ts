@@ -109,4 +109,36 @@ describe('sendCriticalClientMessage', () => {
       }),
     );
   });
+
+  it('uses an explicit owner token when the websocket is already disconnected', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    wsMock.currentToken = null;
+    vi.mocked(send).mockReturnValue(false);
+
+    const message = {
+      type: 'client.extension.tool_result',
+      taskId: 'tsk_owner_token',
+      requestId: 'req_owner_token',
+      at: 123,
+      ok: true,
+      result: { finalUrl: 'https://example.com/', title: 'Example', bodyText: '' },
+    } as const;
+
+    expect(
+      sendCriticalClientMessage(message, 'extension tool result', { ownerToken: 'token-a' }),
+    ).toBe(false);
+    wsMock.currentToken = 'token-b';
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[holaday] extension tool result retry cancelled after token change',
+      expect.objectContaining({
+        taskId: 'tsk_owner_token',
+        requestId: 'req_owner_token',
+        attempt: 1,
+      }),
+    );
+  });
 });

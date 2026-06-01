@@ -3,8 +3,12 @@ import { getCurrentWsToken, send } from './ws-client.js';
 
 const CRITICAL_SEND_RETRY_DELAYS_MS = [250, 1_000, 3_000, 7_000, 15_000] as const;
 
-export function sendCriticalClientMessage(message: ClientMessage, label: string): boolean {
-  const ownerToken = getCurrentWsToken();
+export function sendCriticalClientMessage(
+  message: ClientMessage,
+  label: string,
+  options: { ownerToken?: string | null } = {},
+): boolean {
+  const ownerToken = options.ownerToken ?? getCurrentWsToken();
   const sent = send(message);
   if (!sent) {
     console.warn(`[holaday] ${label} send failed`, criticalMessageLogMeta(message));

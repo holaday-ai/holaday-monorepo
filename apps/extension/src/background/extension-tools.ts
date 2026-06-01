@@ -30,6 +30,7 @@
 import type { ClientMessage, ServerMessage } from '@holaday/shared-types';
 import { withDeadline } from '../shared/deadline.js';
 import { sendCriticalClientMessage } from './critical-send.js';
+import { getCurrentWsToken } from './ws-client.js';
 
 type ExtensionToolCall = Extract<ServerMessage, { type: 'server.extension.tool_call' }>;
 
@@ -449,6 +450,7 @@ export function extensionToolErrorPayload(
  */
 export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<void> {
   const { taskId, requestId, kind, args } = call;
+  const ownerToken = getCurrentWsToken();
   const dedupeKey = toolCallDedupeKey(taskId, requestId);
   const cached = recentToolCallResults.get(dedupeKey);
   if (cached && Date.now() - cached.at <= RECENT_TOOL_RESULT_TTL_MS) {
@@ -457,7 +459,7 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
       requestId,
       kind,
     });
-    sendExtensionToolResult(taskId, requestId, cached.payload);
+    sendExtensionToolResult(taskId, requestId, cached.payload, ownerToken);
     return;
   }
   if (cached) recentToolCallResults.delete(dedupeKey);
@@ -486,7 +488,7 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
     if (settled) return;
     settled = true;
     rememberRecentToolCallResult(dedupeKey, payload);
-    sendExtensionToolResult(taskId, requestId, payload);
+    sendExtensionToolResult(taskId, requestId, payload, ownerToken);
   };
 
   try {
@@ -529,6 +531,7 @@ function sendExtensionToolResult(
   taskId: string,
   requestId: string,
   payload: ExtensionToolResultPayload,
+  ownerToken: string | null,
 ): boolean {
   const message: ExtensionToolResultMessage = {
     type: 'client.extension.tool_result',
@@ -537,7 +540,7 @@ function sendExtensionToolResult(
     at: Date.now(),
     ...payload,
   };
-  return sendCriticalClientMessage(message, 'extension tool result');
+  return sendCriticalClientMessage(message, 'extension tool result', { ownerToken });
 }
 
 function rememberRecentToolCallResult(
