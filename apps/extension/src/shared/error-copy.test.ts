@@ -31,4 +31,12 @@ describe('humanizeExtensionError', () => {
       ),
     ).toBe('浏览器代理服务暂时不可用，请稍后重试；如果刚更新扩展，请重新加载 HOLA DAY。');
   });
+
+  it('maps websocket connection closed errors to a recovery hint', () => {
+    expect(
+      humanizeExtensionError(
+        "WebSocket connection to 'wss://holaday.ai/ws' failed: Error in connection establishment: net::ERR_CONNECTION_CLOSED",
+      ),
+    ).toBe('浏览器连接中断，请重新打开 HOLA DAY 扩展后重试。');
+  });
 });
