@@ -249,6 +249,37 @@ describe('getActivePageContext', () => {
     );
   });
 
+  it('keeps the current Chrome error page as task context', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([
+        {
+          id: 9,
+          title: 'This site cannot be reached',
+          url: 'chrome-error://chromewebdata/',
+        } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([
+        { id: 10, title: 'Holaday', url: 'https://holaday.ai/app' } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([]);
+    globalThis.chrome = {
+      tabs: { query },
+      scripting: {
+        executeScript: vi.fn(),
+      },
+    } as unknown as typeof chrome;
+
+    await expect(getActivePageContext()).resolves.toEqual({
+      tabId: 9,
+      title: 'This site cannot be reached',
+      url: 'chrome-error://chromewebdata/',
+      selectedText: '',
+      metaDescription: '',
+    });
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
   it('inspects every fallback tab candidate before hiding task context', async () => {
     const query = vi
       .fn()

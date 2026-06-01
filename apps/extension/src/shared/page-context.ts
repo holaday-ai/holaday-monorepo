@@ -106,7 +106,7 @@ async function queryActivePageContextTab(): Promise<chrome.tabs.Tab | undefined>
   );
   const [best] = candidateGroups
     .flat()
-    .filter(({ tab }) => isWebPageTab(tab))
+    .filter(({ tab }) => isPageContextTab(tab))
     .sort(compareTabCandidates);
 
   return best?.tab;
@@ -123,11 +123,12 @@ function compareTabCandidates(
   return a.tabIndex - b.tabIndex;
 }
 
-function isWebPageTab(tab: chrome.tabs.Tab | undefined): tab is chrome.tabs.Tab {
+function isPageContextTab(tab: chrome.tabs.Tab | undefined): tab is chrome.tabs.Tab {
   if (!tab) return false;
   if (typeof tab.id !== 'number') return false;
   if (!tab.url) return false;
-  return tab.url.startsWith('http://') || tab.url.startsWith('https://');
+  const url = tab.url.toLowerCase();
+  return url.startsWith('http://') || url.startsWith('https://') || url.startsWith('chrome-error://');
 }
 
 export async function getActivePageContext(): Promise<PageContext | null> {
@@ -137,7 +138,7 @@ export async function getActivePageContext(): Promise<PageContext | null> {
   // chrome:// / chrome-extension:// / file:// pages can't be scripted —
   // skip the executeScript call and surface what the tab metadata
   // already gives us.
-  const restrictedScheme = /^(chrome|chrome-extension|edge|about|file):/i.test(tab.url ?? '');
+  const restrictedScheme = /^(chrome|chrome-extension|chrome-error|edge|about|file):/i.test(tab.url ?? '');
   if (restrictedScheme || !tab.url) {
     const snippet = sanitizePageContextSnippet({
       title: tab.title ?? '',
