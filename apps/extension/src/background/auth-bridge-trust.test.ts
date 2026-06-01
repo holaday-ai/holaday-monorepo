@@ -12,6 +12,11 @@ describe('isTrustedAuthBridgeSender', () => {
     expect(isTrustedAuthBridgeSender('javascript:void(0)')).toBe(false);
   });
 
+  it('rejects non-http protocols even on trusted hosts', () => {
+    expect(isTrustedAuthBridgeSender('chrome-extension://holaday.ai/page')).toBe(false);
+    expect(isTrustedAuthBridgeSender('file://holaday.ai/token.html')).toBe(false);
+  });
+
   it('accepts holaday.ai apex', () => {
     expect(isTrustedAuthBridgeSender('https://holaday.ai/dashboard')).toBe(true);
     expect(isTrustedAuthBridgeSender('https://holaday.ai/')).toBe(true);

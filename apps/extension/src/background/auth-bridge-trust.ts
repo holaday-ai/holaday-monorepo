@@ -22,12 +22,14 @@
  */
 export function isTrustedAuthBridgeSender(senderUrl: string | undefined): boolean {
   if (!senderUrl) return false;
-  let host: string;
+  let parsed: URL;
   try {
-    host = new URL(senderUrl).hostname.toLowerCase();
+    parsed = new URL(senderUrl);
   } catch {
     return false;
   }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+  const host = parsed.hostname.toLowerCase();
   if (host === 'holaday.ai' || host.endsWith('.holaday.ai')) return true;
   if (host === 'hd-app.orangebench.tech') return true;
   if (host === 'localhost' || host === '127.0.0.1') return true;
