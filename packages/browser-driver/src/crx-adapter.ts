@@ -767,7 +767,11 @@ async function captureViaCdpPageScreenshot(
       .then((buf) => ({
         base64: Buffer.from(buf).toString('base64'),
         error: null,
-      }));
+      }))
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        return { base64: null, error: message.slice(0, 500) };
+      });
     // Outer cap in case the inner `timeout` option isn't forwarded
     // to the CDP call on this playwright-crx version (this has bit
     // us before). Resolve rather than reject — the caller decides
@@ -835,6 +839,9 @@ async function captureViaRawCdp(tabId: number | null): Promise<ScreenshotResult>
         };
       }
       return { base64: data, error: null };
+    }).catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      return { base64: null, error: message.slice(0, 500) };
     });
     const hardCap = new Promise<ScreenshotResult>((resolve) => {
       hardTimer = setTimeout(
@@ -873,47 +880,65 @@ async function captureViaVisibleTabFallback(tabId: number | null): Promise<Scree
   if (tabId === null) {
     return { base64: null, error: 'visibleTab: tabId unknown' };
   }
+  let hardTimer: ReturnType<typeof setTimeout> | null = null;
+  const capture = (async (): Promise<ScreenshotResult> => {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      const windowId = tab.windowId;
+      if (typeof windowId !== 'number') {
+        return { base64: null, error: 'visibleTab: windowId missing on chrome.tabs.get result' };
+      }
+      // Pull the window to the foreground and make sure our tab is the
+      // active one in it, otherwise captureVisibleTab grabs whatever
+      // OTHER tab the user had focused in that window.
+      try {
+        await chrome.windows.update(windowId, { focused: true });
+      } catch (err) {
+        // Non-fatal; some OSes block focus-steal silently, the capture
+        // may still succeed if the window happened to be visible.
+        console.warn('[holaday][screenshot] windows.update(focused) failed', {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+      try {
+        await chrome.tabs.update(tabId, { active: true });
+      } catch (err) {
+        console.warn('[holaday][screenshot] tabs.update(active) failed', {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+      const dataUrl = (await chrome.tabs.captureVisibleTab(windowId, {
+        format: 'jpeg',
+        quality: 40,
+      })) as string;
+      // captureVisibleTab returns a `data:image/jpeg;base64,…` URL; we
+      // want the bare base64 payload so the downstream thumbnail path
+      // matches the other capture helpers.
+      const comma = dataUrl.indexOf(',');
+      const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+      if (!base64) {
+        return { base64: null, error: 'visibleTab: empty data URL' };
+      }
+      return { base64, error: null };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { base64: null, error: message.slice(0, 500) };
+    }
+  })();
+  const hardCap = new Promise<ScreenshotResult>((resolve) => {
+    hardTimer = setTimeout(
+      () =>
+        resolve({
+          base64: null,
+          error: `visibleTab hardcap timeout ${SCREENSHOT_HARDCAP_MS}ms`,
+        }),
+      SCREENSHOT_HARDCAP_MS,
+    );
+  });
   try {
-    const tab = await chrome.tabs.get(tabId);
-    const windowId = tab.windowId;
-    if (typeof windowId !== 'number') {
-      return { base64: null, error: 'visibleTab: windowId missing on chrome.tabs.get result' };
-    }
-    // Pull the window to the foreground and make sure our tab is the
-    // active one in it, otherwise captureVisibleTab grabs whatever
-    // OTHER tab the user had focused in that window.
-    try {
-      await chrome.windows.update(windowId, { focused: true });
-    } catch (err) {
-      // Non-fatal; some OSes block focus-steal silently, the capture
-      // may still succeed if the window happened to be visible.
-      console.warn('[holaday][screenshot] windows.update(focused) failed', {
-        err: err instanceof Error ? err.message : String(err),
-      });
-    }
-    try {
-      await chrome.tabs.update(tabId, { active: true });
-    } catch (err) {
-      console.warn('[holaday][screenshot] tabs.update(active) failed', {
-        err: err instanceof Error ? err.message : String(err),
-      });
-    }
-    const dataUrl = (await chrome.tabs.captureVisibleTab(windowId, {
-      format: 'jpeg',
-      quality: 40,
-    })) as string;
-    // captureVisibleTab returns a `data:image/jpeg;base64,…` URL; we
-    // want the bare base64 payload so the downstream thumbnail path
-    // matches the other capture helpers.
-    const comma = dataUrl.indexOf(',');
-    const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
-    if (!base64) {
-      return { base64: null, error: 'visibleTab: empty data URL' };
-    }
-    return { base64, error: null };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { base64: null, error: message.slice(0, 500) };
+    return await Promise.race([capture, hardCap]);
+  } finally {
+    if (hardTimer) clearTimeout(hardTimer);
   }
 }
 
