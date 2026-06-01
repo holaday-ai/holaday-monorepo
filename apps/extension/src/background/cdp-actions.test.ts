@@ -890,6 +890,24 @@ describe('getActiveTabId', () => {
     expect(update).toHaveBeenCalledWith(13, { active: true });
   });
 
+  it('focuses the selected tab window for fallback browser control', async () => {
+    const updateWindow = vi.fn(async () => ({ id: 9, focused: true }) as chrome.windows.Window);
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 21, url: 'https://newer.example/', active: true, windowId: 9, lastAccessed: 5000 },
+      ]);
+    globalThis.chrome = {
+      tabs: { query },
+      windows: { update: updateWindow },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabId()).resolves.toBe(21);
+    expect(updateWindow).toHaveBeenCalledWith(9, { focused: true });
+  });
+
   it('does not return an internal Chrome page when no web tab is active', async () => {
     const query = vi
       .fn()

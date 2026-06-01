@@ -773,16 +773,28 @@ function pickBestActiveTabCandidate(
 }
 
 async function activateTabForCdpIfNeeded(tab: chrome.tabs.Tab): Promise<void> {
-  if (tab.active !== false || typeof tab.id !== 'number') return;
-  try {
-    await withDeadline(
-      chrome.tabs.update(tab.id, { active: true }),
-      TAB_METADATA_TIMEOUT_MS,
-      'active_tab_update_timeout',
-    );
-  } catch {
-    // Best effort only: CDP can still operate on the selected tab, but
-    // foregrounding it keeps the user's visible page aligned when possible.
+  if (typeof tab.id === 'number' && tab.active === false) {
+    try {
+      await withDeadline(
+        chrome.tabs.update(tab.id, { active: true }),
+        TAB_METADATA_TIMEOUT_MS,
+        'active_tab_update_timeout',
+      );
+    } catch {
+      // Best effort only: CDP can still operate on the selected tab, but
+      // foregrounding it keeps the user's visible page aligned when possible.
+    }
+  }
+  if (typeof tab.windowId === 'number' && chrome.windows?.update) {
+    try {
+      await withDeadline(
+        chrome.windows.update(tab.windowId, { focused: true }),
+        TAB_METADATA_TIMEOUT_MS,
+        'active_window_update_timeout',
+      );
+    } catch {
+      // Best effort only: window focus may be unavailable on some Chrome surfaces.
+    }
   }
 }
 
