@@ -88,24 +88,39 @@ async function queryActivePageContextTab(): Promise<chrome.tabs.Tab | undefined>
     { active: true, lastFocusedWindow: true },
     { active: true, windowType: 'normal' },
   ];
-  const candidates = await Promise.all(
-    queries.map(async (query) => {
+  const candidateGroups = await Promise.all(
+    queries.map(async (query, queryIndex) => {
       try {
-        const [tab] = await withDeadline(
+        const tabs = await withDeadline(
           chrome.tabs.query(query),
           PAGE_CONTEXT_TAB_QUERY_TIMEOUT_MS,
           'page_context_tab_query_timeout',
         );
-        return tab;
+        return tabs.map((tab, tabIndex) => ({ tab, queryIndex, tabIndex }));
       } catch {
         // Keep falling back; Chrome can reject transiently while focus
         // moves between the popup, side panel, and page window.
-        return undefined;
+        return [];
       }
     }),
   );
+  const [best] = candidateGroups
+    .flat()
+    .filter(({ tab }) => isWebPageTab(tab))
+    .sort(compareTabCandidates);
 
-  return candidates.find(isWebPageTab);
+  return best?.tab;
+}
+
+function compareTabCandidates(
+  a: { tab: chrome.tabs.Tab; queryIndex: number; tabIndex: number },
+  b: { tab: chrome.tabs.Tab; queryIndex: number; tabIndex: number },
+): number {
+  if (a.queryIndex !== b.queryIndex) return a.queryIndex - b.queryIndex;
+  const aLastAccessed = typeof a.tab.lastAccessed === 'number' ? a.tab.lastAccessed : 0;
+  const bLastAccessed = typeof b.tab.lastAccessed === 'number' ? b.tab.lastAccessed : 0;
+  if (aLastAccessed !== bLastAccessed) return bLastAccessed - aLastAccessed;
+  return a.tabIndex - b.tabIndex;
 }
 
 function isWebPageTab(tab: chrome.tabs.Tab | undefined): tab is chrome.tabs.Tab {

@@ -249,6 +249,40 @@ describe('getActivePageContext', () => {
     );
   });
 
+  it('inspects every fallback tab candidate before hiding task context', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 9, title: 'Extensions', url: 'chrome://extensions/', lastAccessed: 5000 } as chrome.tabs.Tab,
+        { id: 10, title: 'Holaday', url: 'https://holaday.ai/app', lastAccessed: 1000 } as chrome.tabs.Tab,
+      ]);
+    globalThis.chrome = {
+      tabs: { query },
+      scripting: {
+        executeScript: vi.fn(async () => [
+          {
+            result: {
+              title: 'Holaday app',
+              url: 'https://holaday.ai/app',
+              selectedText: '',
+              metaDescription: '',
+            },
+          },
+        ]),
+      },
+    } as unknown as typeof chrome;
+
+    await expect(getActivePageContext()).resolves.toEqual({
+      tabId: 10,
+      title: 'Holaday app',
+      url: 'https://holaday.ai/app',
+      selectedText: '',
+      metaDescription: '',
+    });
+  });
+
   it('returns null instead of task context for internal Chrome pages', async () => {
     const query = vi
       .fn()
