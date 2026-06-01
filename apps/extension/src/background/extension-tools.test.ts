@@ -298,6 +298,10 @@ describe('normalizeNavigateUrl', () => {
     expect(normalizeNavigateUrl('http://example.com/')).toBe('http://example.com/');
   });
 
+  it('normalizes bare host urls like the browser address bar', () => {
+    expect(normalizeNavigateUrl('example.com/path?q=1')).toBe('https://example.com/path?q=1');
+  });
+
   it('rejects empty, malformed, internal, and oversized urls', () => {
     expect(() => normalizeNavigateUrl('')).toThrow('bad_url');
     expect(() => normalizeNavigateUrl('not a url')).toThrow('bad_url');

@@ -362,7 +362,7 @@ export function normalizeNavigateUrl(raw: unknown): string {
 
   let parsed: URL;
   try {
-    parsed = new URL(value);
+    parsed = new URL(hasExplicitUrlScheme(value) ? value : `https://${value}`);
   } catch {
     throw new Error('bad_url');
   }
@@ -370,6 +370,10 @@ export function normalizeNavigateUrl(raw: unknown): string {
     throw new Error('bad_url');
   }
   return parsed.href;
+}
+
+function hasExplicitUrlScheme(value: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:/i.test(value);
 }
 
 function normalizeNavigateWaitMs(raw: unknown): number {
