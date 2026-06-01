@@ -240,12 +240,26 @@ type VisionActResultPayload = Omit<
   Extract<ClientMessage, { type: 'client.vision.acted' }>,
   'type' | 'taskId' | 'tickIndex'
 >;
+type VisionObservationPayload = Omit<
+  Extract<ClientMessage, { type: 'client.vision.observation' }>,
+  'type' | 'taskId' | 'tickIndex'
+>;
 
+const VISION_OBSERVATION_RESULT_TTL_MS = 60_000;
 const VISION_ACT_RESULT_TTL_MS = 60_000;
+const MAX_RECENT_VISION_OBSERVATION_RESULTS = 50;
 const MAX_RECENT_VISION_ACT_RESULTS = 100;
+const inFlightVisionObservations = new Map<
+  string,
+  { ownerToken: string | null; promise: Promise<VisionObservationPayload> }
+>();
 const inFlightVisionActResults = new Map<
   string,
   { ownerToken: string | null; promise: Promise<VisionActResultPayload> }
+>();
+const recentVisionObservations = new Map<
+  string,
+  { at: number; ownerToken: string | null; payload: VisionObservationPayload }
 >();
 const recentVisionActResults = new Map<
   string,
@@ -386,44 +400,84 @@ async function onVisionObserve(
   msg: Extract<ServerMessage, { type: 'server.vision.observe' }>,
 ): Promise<void> {
   const ownerToken = getCurrentWsToken();
-  trackVisionTask(msg.taskId, 'observing', { tickIndex: msg.tickIndex });
-  const tabId = await getActiveTabId();
-  if (tabId === null) {
-    sendCriticalClientMessage(
-      {
-        type: 'client.vision.observation',
-        taskId: msg.taskId,
-        tickIndex: msg.tickIndex,
+  const dedupeKey = visionTickDedupeKey(msg.taskId, msg.tickIndex);
+  const cached = recentVisionObservations.get(dedupeKey);
+  if (cached && Date.now() - cached.at <= VISION_OBSERVATION_RESULT_TTL_MS) {
+    sendVisionObservation(msg, cached.payload, cached.ownerToken);
+    return;
+  }
+  if (cached) recentVisionObservations.delete(dedupeKey);
+  const pending = inFlightVisionObservations.get(dedupeKey);
+  if (pending) {
+    sendVisionObservation(msg, await pending.promise, pending.ownerToken);
+    return;
+  }
+  const next = computeVisionObservationPayload(msg)
+    .catch((err): VisionObservationPayload => {
+      console.warn('[holaday] vision observation failed unexpectedly', err);
+      return {
         screenshotBase64: '',
         viewportWidth: 0,
         viewportHeight: 0,
         url: '',
         title: '',
-        error: 'no active tab (window may have been backgrounded before task started)',
-      },
-      'vision observation',
-      { ownerToken },
-    );
-    return;
+        error: '浏览器观察失败，请稍后重试',
+      };
+    })
+    .then((payload) => {
+      rememberVisionObservation(dedupeKey, payload, ownerToken);
+      return payload;
+    })
+    .finally(() => {
+      inFlightVisionObservations.delete(dedupeKey);
+    });
+  inFlightVisionObservations.set(dedupeKey, { ownerToken, promise: next });
+  sendVisionObservation(msg, await next, ownerToken);
+}
+
+async function computeVisionObservationPayload(
+  msg: Extract<ServerMessage, { type: 'server.vision.observe' }>,
+): Promise<VisionObservationPayload> {
+  trackVisionTask(msg.taskId, 'observing', { tickIndex: msg.tickIndex });
+  const tabId = await getActiveTabId();
+  if (tabId === null) {
+    return {
+      screenshotBase64: '',
+      viewportWidth: 0,
+      viewportHeight: 0,
+      url: '',
+      title: '',
+      error: 'no active tab (window may have been backgrounded before task started)',
+    };
   }
   const obs = await captureVisionObservation(tabId);
+  // After sending observation → orchestrator is calling Claude next.
+  trackVisionTask(msg.taskId, 'deciding', { tickIndex: msg.tickIndex });
+  return {
+    screenshotBase64: obs.screenshotBase64,
+    viewportWidth: obs.viewportWidth,
+    viewportHeight: obs.viewportHeight,
+    url: obs.url,
+    title: obs.title,
+    ...(obs.error ? { error: obs.error } : {}),
+  };
+}
+
+function sendVisionObservation(
+  msg: Extract<ServerMessage, { type: 'server.vision.observe' }>,
+  payload: VisionObservationPayload,
+  ownerToken: string | null,
+): void {
   sendCriticalClientMessage(
     {
       type: 'client.vision.observation',
       taskId: msg.taskId,
       tickIndex: msg.tickIndex,
-      screenshotBase64: obs.screenshotBase64,
-      viewportWidth: obs.viewportWidth,
-      viewportHeight: obs.viewportHeight,
-      url: obs.url,
-      title: obs.title,
-      ...(obs.error ? { error: obs.error } : {}),
+      ...payload,
     },
     'vision observation',
     { ownerToken },
   );
-  // After sending observation → orchestrator is calling Claude next.
-  trackVisionTask(msg.taskId, 'deciding', { tickIndex: msg.tickIndex });
 }
 
 /**
@@ -517,7 +571,30 @@ function sendVisionActed(
 }
 
 function visionActDedupeKey(taskId: string, tickIndex: number): string {
+  return visionTickDedupeKey(taskId, tickIndex);
+}
+
+function visionTickDedupeKey(taskId: string, tickIndex: number): string {
   return `${taskId}\u0000${tickIndex}`;
+}
+
+function rememberVisionObservation(
+  key: string,
+  payload: VisionObservationPayload,
+  ownerToken: string | null,
+): void {
+  const now = Date.now();
+  recentVisionObservations.set(key, { at: now, ownerToken, payload });
+  for (const [recentKey, value] of recentVisionObservations) {
+    if (now - value.at > VISION_OBSERVATION_RESULT_TTL_MS) {
+      recentVisionObservations.delete(recentKey);
+    }
+  }
+  while (recentVisionObservations.size > MAX_RECENT_VISION_OBSERVATION_RESULTS) {
+    const oldest = recentVisionObservations.keys().next().value;
+    if (!oldest) break;
+    recentVisionObservations.delete(oldest);
+  }
 }
 
 function rememberVisionActResult(
