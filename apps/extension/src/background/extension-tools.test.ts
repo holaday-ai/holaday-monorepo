@@ -338,7 +338,7 @@ describe('getActiveTabForExtensionTool', () => {
 
     const pending = getActiveTabForExtensionTool();
     await vi.advanceTimersByTimeAsync(0);
-    expect(query).toHaveBeenCalledTimes(3);
+    expect(query).toHaveBeenCalledTimes(4);
     await vi.advanceTimersByTimeAsync(1_500);
 
     await expect(pending).resolves.toMatchObject({
@@ -347,6 +347,28 @@ describe('getActiveTabForExtensionTool', () => {
     });
     expect(query).toHaveBeenNthCalledWith(1, { active: true, currentWindow: true });
     expect(query).toHaveBeenNthCalledWith(2, { active: true, lastFocusedWindow: true });
+  });
+
+  it('falls back to a recent web tab when extension chrome owns the active tab', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 1, url: 'chrome://extensions/', lastAccessed: 5000 }])
+      .mockResolvedValueOnce([{ id: 1, url: 'chrome://extensions/', lastAccessed: 5000 }])
+      .mockResolvedValueOnce([{ id: 1, url: 'chrome://extensions/', lastAccessed: 5000 }])
+      .mockResolvedValueOnce([
+        { id: 1, url: 'chrome://extensions/', lastAccessed: 5000 },
+        { id: 2, url: 'https://older.example/', lastAccessed: 1000 },
+        { id: 3, url: 'https://newer.example/', lastAccessed: 4000 },
+      ]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabForExtensionTool()).resolves.toMatchObject({
+      id: 3,
+      url: 'https://newer.example/',
+    });
+    expect(query).toHaveBeenNthCalledWith(4, { windowType: 'normal' });
   });
 
   it('prefers a normal web page over an internal Chrome page when both are visible', async () => {
