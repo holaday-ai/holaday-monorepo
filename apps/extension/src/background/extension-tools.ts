@@ -286,7 +286,7 @@ async function executeNavigate(
   }
   const previousUrl = tab.url;
   await withDeadline(
-    chrome.tabs.update(tab.id, { url }),
+    chrome.tabs.update(tab.id, { active: true, url }),
     TAB_UPDATE_TIMEOUT_MS,
     'extension_tool_timeout',
   );
@@ -403,6 +403,13 @@ async function executeScreenshot(): Promise<ScreenshotResult> {
   const tab = await getActiveTabForExtensionTool({ allowErrorPage: true });
   if (!tab?.id) {
     throw new Error('no_active_tab');
+  }
+  if (tab.active === false) {
+    await withDeadline(
+      chrome.tabs.update(tab.id, { active: true }),
+      TAB_UPDATE_TIMEOUT_MS,
+      'extension_tool_timeout',
+    );
   }
   let lastError: unknown = null;
   for (const quality of SCREENSHOT_CAPTURE_QUALITIES) {

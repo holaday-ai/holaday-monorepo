@@ -667,6 +667,47 @@ describe('handleExtensionToolCall', () => {
     });
   });
 
+  it('activates the selected tab before navigating a fallback page', async () => {
+    vi.mocked(send).mockClear();
+    const update = vi.fn(async () => ({ id: 2, url: 'https://example.com/' }) as chrome.tabs.Tab);
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, active: false, url: 'https://holaday.ai/app' }]),
+        update,
+        get: vi.fn(async () => ({
+          id: 2,
+          status: 'complete',
+          url: 'https://example.com/',
+          title: 'Example',
+        })),
+        onUpdated: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+        onRemoved: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+      },
+      scripting: {
+        executeScript: vi.fn(async () => [{ result: 'hello' }]),
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_activate_nav',
+      requestId: 'req_activate_nav',
+      kind: 'navigate',
+      args: { url: 'https://example.com/', waitMs: 0 },
+      timeoutMs: 30_000,
+    };
+
+    await handleExtensionToolCall(call);
+
+    expect(update).toHaveBeenCalledWith(2, { active: true, url: 'https://example.com/' });
+  });
+
   it('returns the navigated page metadata when body text extraction hangs', async () => {
     vi.useFakeTimers();
     vi.mocked(send).mockClear();
@@ -1022,6 +1063,38 @@ describe('handleExtensionToolCall', () => {
         result: { imageBase64: 'AA==', width: 0, height: 0 },
       }),
     );
+  });
+
+  it('activates a fallback tab before capturing its screenshot', async () => {
+    vi.mocked(send).mockClear();
+    const update = vi.fn(async () => ({ id: 2, active: true }) as chrome.tabs.Tab);
+    const captureVisibleTab = vi.fn(async () => 'data:image/jpeg;base64,AA==');
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [
+          { id: 2, active: false, windowId: 1, url: 'https://holaday.ai/app' },
+        ]),
+        update,
+        captureVisibleTab,
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_screenshot_activate',
+      requestId: 'req_screenshot_activate',
+      kind: 'screenshot',
+      args: {},
+      timeoutMs: 30_000,
+    };
+
+    await handleExtensionToolCall(call);
+
+    expect(update).toHaveBeenCalledWith(2, { active: true });
+    expect(captureVisibleTab).toHaveBeenCalledWith(1, {
+      format: 'jpeg',
+      quality: 50,
+    });
   });
 
   it('captures the current Chrome error page instead of falling back to an older web tab', async () => {
