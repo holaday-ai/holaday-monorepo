@@ -357,6 +357,25 @@ interface PendingExtensionToolCall {
 }
 
 const pendingExtensionCalls = new Map<string, PendingExtensionToolCall>();
+const RECENT_SETTLED_EXTENSION_CALL_TTL_MS = 60_000;
+const MAX_RECENT_SETTLED_EXTENSION_CALLS = 200;
+const recentSettledExtensionCalls = new Map<
+  string,
+  { at: number; clientId: string; taskId: string }
+>();
+
+function rememberSettledExtensionCall(requestId: string, clientId: string, taskId: string): void {
+  const now = Date.now();
+  for (const [key, value] of recentSettledExtensionCalls) {
+    if (
+      now - value.at > RECENT_SETTLED_EXTENSION_CALL_TTL_MS ||
+      recentSettledExtensionCalls.size >= MAX_RECENT_SETTLED_EXTENSION_CALLS
+    ) {
+      recentSettledExtensionCalls.delete(key);
+    }
+  }
+  recentSettledExtensionCalls.set(requestId, { at: now, clientId, taskId });
+}
 
 function settlePendingExtensionCallsForClient(clientId: string): number {
   let settled = 0;
@@ -364,6 +383,7 @@ function settlePendingExtensionCallsForClient(clientId: string): number {
     if (pending.clientId !== clientId) continue;
     clearTimeout(pending.timer);
     pendingExtensionCalls.delete(requestId);
+    rememberSettledExtensionCall(requestId, pending.clientId, pending.taskId);
     pending.resolve({
       ok: false,
       error: {
@@ -417,6 +437,7 @@ export async function sendExtensionToolCall(
   return new Promise<ExtensionToolCallOutcome>((resolve) => {
     const timer = setTimeout(() => {
       pendingExtensionCalls.delete(requestId);
+      rememberSettledExtensionCall(requestId, target.id, opts.taskId);
       resolve({
         ok: false,
         error: {
@@ -443,6 +464,7 @@ export async function sendExtensionToolCall(
     if (!sent) {
       clearTimeout(timer);
       pendingExtensionCalls.delete(requestId);
+      rememberSettledExtensionCall(requestId, target.id, opts.taskId);
       resolve({
         ok: false,
         error: {
@@ -746,6 +768,14 @@ async function handleClientMessage(
     // socket sent a stale result); ignore.
     const pending = pendingExtensionCalls.get(msg.requestId);
     if (!pending) {
+      const recent = recentSettledExtensionCalls.get(msg.requestId);
+      if (recent && recent.clientId === state.id && recent.taskId === msg.taskId) {
+        logger.debug(
+          { requestId: msg.requestId, taskId: msg.taskId, clientId: state.id },
+          'extension: duplicate tool_result ignored after request settled',
+        );
+        return;
+      }
       logger.warn(
         { requestId: msg.requestId, taskId: msg.taskId, clientId: state.id },
         'extension: tool_result arrived without pending request (late / duplicate?)',
@@ -767,6 +797,7 @@ async function handleClientMessage(
     }
     clearTimeout(pending.timer);
     pendingExtensionCalls.delete(msg.requestId);
+    rememberSettledExtensionCall(msg.requestId, pending.clientId, pending.taskId);
     pending.resolve({
       ok: msg.ok,
       ...(msg.result !== undefined ? { result: msg.result } : {}),

@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { RawData } from 'ws';
 
 beforeAll(() => {
@@ -411,6 +411,104 @@ describe('extension tool-call websocket lifecycle', () => {
 
     primary.close();
     secondary.close();
+  });
+
+  it('quietly ignores duplicate tool results after a request has settled', async () => {
+    const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
+    const { signAccessToken } = await import('../auth/jwt.js');
+    const { logger } = await import('../config/logger.js');
+    const { createWsServer, sendExtensionToolCall } = await import('./server.js');
+    const { default: WebSocket } = await import('ws');
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const debug = vi.spyOn(logger, 'debug').mockImplementation(() => undefined);
+
+    const port = 38232;
+    const server = createWsServer(port);
+    close = async () => {
+      await server.close();
+    };
+
+    const userId = 'usr_extension_duplicate_result_test';
+    const token = await signAccessToken({ sub: userId, plan: 'free' });
+    const client = new WebSocket(`ws://127.0.0.1:${port}`, WS_SUBPROTOCOL);
+
+    await new Promise<void>((resolve, reject) => {
+      client.once('open', resolve);
+      client.once('error', reject);
+    });
+
+    const waitForWelcome = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('no welcome')), 5_000);
+      client.on('message', (raw: RawData) => {
+        const parsed = parseServerMessage(raw.toString());
+        if (parsed.success && parsed.data.type === 'server.welcome') {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+    });
+    client.send(
+      JSON.stringify({
+        type: 'client.hello',
+        token,
+        extensionVersion: 'duplicate-result-test-extension',
+      }),
+    );
+    await waitForWelcome;
+
+    const toolCall = new Promise<{
+      taskId: string;
+      requestId: string;
+    }>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('no extension tool call')), 5_000);
+      client.on('message', (raw) => {
+        const parsed = parseServerMessage(raw.toString());
+        if (parsed.success && parsed.data.type === 'server.extension.tool_call') {
+          clearTimeout(timer);
+          resolve({
+            taskId: parsed.data.taskId,
+            requestId: parsed.data.requestId,
+          });
+        }
+      });
+    });
+
+    const outcomePromise = sendExtensionToolCall(userId, {
+      taskId: 'tsk_extension_duplicate_result_test',
+      kind: 'navigate',
+      args: { url: 'https://example.com/' },
+      timeoutMs: 30_000,
+    });
+    const call = await toolCall;
+    const result = {
+      type: 'client.extension.tool_result',
+      taskId: call.taskId,
+      requestId: call.requestId,
+      ok: true,
+      result: { finalUrl: 'https://example.com/final' },
+      at: Date.now(),
+    } as const;
+
+    client.send(JSON.stringify(result));
+    await expect(outcomePromise).resolves.toEqual({
+      ok: true,
+      result: { finalUrl: 'https://example.com/final' },
+    });
+
+    warn.mockClear();
+    client.send(JSON.stringify(result));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(warn).not.toHaveBeenCalledWith(
+      expect.any(Object),
+      'extension: tool_result arrived without pending request (late / duplicate?)',
+    );
+    expect(debug).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: call.requestId, taskId: call.taskId }),
+      'extension: duplicate tool_result ignored after request settled',
+    );
+
+    client.close();
   });
 
   it('routes tool calls to the most recently responsive extension socket', async () => {
