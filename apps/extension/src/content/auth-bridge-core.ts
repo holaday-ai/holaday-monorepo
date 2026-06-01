@@ -59,7 +59,8 @@ export type SyncAction =
  * against a buggy build that does so).
  */
 export function decideAction(prev: string | null, curr: string | null): SyncAction {
-  const normalised = curr && curr.trim().length > 0 ? curr : null;
+  const trimmed = curr?.trim();
+  const normalised = trimmed ? trimmed : null;
   if (normalised === prev) return { kind: 'unchanged' };
   if (normalised === null) return { kind: 'clear' };
   return { kind: 'set', token: normalised };

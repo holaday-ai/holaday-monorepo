@@ -25,6 +25,14 @@ describe('decideAction', () => {
     expect(decideAction('eyJold', 'eyJnew')).toEqual({ kind: 'set', token: 'eyJnew' });
   });
 
+  it('trims observed token values before comparing or setting', () => {
+    expect(decideAction(null, '  eyJabc.def.ghi-jwt-long-enough  ')).toEqual({
+      kind: 'set',
+      token: 'eyJabc.def.ghi-jwt-long-enough',
+    });
+    expect(decideAction('eyJfoo', '  eyJfoo  ')).toEqual({ kind: 'unchanged' });
+  });
+
   it('empty string is treated as null', () => {
     expect(decideAction('eyJfoo', '')).toEqual({ kind: 'clear' });
     expect(decideAction(null, '')).toEqual({ kind: 'unchanged' });
