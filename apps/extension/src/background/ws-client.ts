@@ -86,14 +86,37 @@ export function onUnauthorized(fn: UnauthorizedListener): () => void {
 }
 
 export function send(msg: ClientMessage): boolean {
-  if (state.socket?.readyState !== WebSocket.OPEN) return false;
+  const socket = state.socket;
+  if (socket?.readyState !== WebSocket.OPEN) return false;
   try {
-    state.socket.send(JSON.stringify(msg));
+    socket.send(JSON.stringify(msg));
     return true;
   } catch (err) {
     console.warn('[holaday] ws send failed', err);
+    recoverFromCurrentSocketSendFailure(socket);
     return false;
   }
+}
+
+function recoverFromCurrentSocketSendFailure(socket: WebSocket): void {
+  if (state.socket !== socket) return;
+  const token = state.token;
+  if (state.pingTimer) {
+    clearInterval(state.pingTimer);
+    state.pingTimer = null;
+  }
+  state.socket = null;
+  state.token = null;
+  state.lastErrorAt = Date.now();
+  state.lastCloseAt = Date.now();
+  state.lastCloseCode = 4000;
+  state.lastCloseReason = 'send failed';
+  try {
+    socket.close(4000, 'send failed');
+  } catch {
+    /* socket may already be closing */
+  }
+  if (token && !state.closedByUser) scheduleReconnect(token);
 }
 
 export function disconnect(): void {

@@ -98,8 +98,9 @@ describe('ws-client send', () => {
   });
 
   it('returns false instead of throwing when the socket send races closed', async () => {
+    vi.useFakeTimers();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const { connect, send } = await import('./ws-client.js');
+    const { connect, getWsConnectionStatus, send } = await import('./ws-client.js');
     connect('token');
     const [socket] = sockets;
     if (!socket) throw new Error('expected websocket');
@@ -109,6 +110,17 @@ describe('ws-client send', () => {
 
     expect(send({ type: 'client.pong', at: Date.now() })).toBe(false);
     expect(warn).toHaveBeenCalledWith('[holaday] ws send failed', expect.any(Error));
+    await expect(getWsConnectionStatus()).resolves.toMatchObject({
+      connected: false,
+      reconnectAttempt: 1,
+      lastCloseCode: 4000,
+      lastCloseReason: 'send failed',
+    });
+    expect(socket.closeCalls).toEqual([{ code: 4000, reason: 'send failed' }]);
+
+    await vi.advanceTimersByTimeAsync(1_250);
+    expect(sockets).toHaveLength(2);
+    expect(sockets[1]?.url).toBe('wss://backup.test/ws');
   });
 
   it('serializes client messages when the socket is open', async () => {
