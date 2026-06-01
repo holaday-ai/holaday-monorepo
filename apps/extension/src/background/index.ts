@@ -1193,7 +1193,7 @@ chrome.runtime.onInstalled.addListener((details) => {
     // circuit-breaker bookkeeping so reload remains a recovery action.
     if (details.reason === 'install') {
       await resetAllAuthState();
-    } else if (details.reason === 'update') {
+    } else {
       await resetAuthFailureState();
     }
 
