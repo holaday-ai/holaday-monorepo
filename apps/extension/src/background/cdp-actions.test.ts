@@ -28,11 +28,9 @@ describe('normalizeCdpNavigateUrl', () => {
     expect(normalizeCdpNavigateUrl('example.com/path?q=1')).toBe(
       'https://example.com/path?q=1',
     );
-    expect(normalizeCdpNavigateUrl('localhost:3000/app')).toBe(
-      'https://localhost:3000/app',
-    );
+    expect(normalizeCdpNavigateUrl('localhost:3000/app')).toBe('http://localhost:3000/app');
     expect(normalizeCdpNavigateUrl('127.0.0.1:4173/app')).toBe(
-      'https://127.0.0.1:4173/app',
+      'http://127.0.0.1:4173/app',
     );
   });
 

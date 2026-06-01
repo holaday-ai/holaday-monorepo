@@ -300,8 +300,8 @@ describe('normalizeNavigateUrl', () => {
 
   it('normalizes bare host urls like the browser address bar', () => {
     expect(normalizeNavigateUrl('example.com/path?q=1')).toBe('https://example.com/path?q=1');
-    expect(normalizeNavigateUrl('localhost:3000/app')).toBe('https://localhost:3000/app');
-    expect(normalizeNavigateUrl('127.0.0.1:4173/app')).toBe('https://127.0.0.1:4173/app');
+    expect(normalizeNavigateUrl('localhost:3000/app')).toBe('http://localhost:3000/app');
+    expect(normalizeNavigateUrl('127.0.0.1:4173/app')).toBe('http://127.0.0.1:4173/app');
   });
 
   it('rejects empty, malformed, internal, and oversized urls', () => {

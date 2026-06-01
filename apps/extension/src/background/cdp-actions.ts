@@ -447,7 +447,7 @@ export function normalizeCdpNavigateUrl(raw: unknown): string {
     throw new Error('bad_url');
   }
 
-  const normalized = hasHierarchicalUrlScheme(value) ? value : `https://${value}`;
+  const normalized = hasHierarchicalUrlScheme(value) ? value : normalizeBareNavigateUrl(value);
 
   let parsed: URL;
   try {
@@ -463,6 +463,11 @@ export function normalizeCdpNavigateUrl(raw: unknown): string {
 
 function hasHierarchicalUrlScheme(value: string): boolean {
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
+}
+
+function normalizeBareNavigateUrl(value: string): string {
+  const localHost = /^(localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::|\/|$)/i.test(value);
+  return `${localHost ? 'http' : 'https'}://${value}`;
 }
 
 // ---------------------------------------------------------------------------
