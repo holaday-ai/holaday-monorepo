@@ -634,6 +634,36 @@ describe('captureVisionObservation', () => {
       },
     );
   });
+
+  it('falls back to chrome tab metadata when page evaluation is unavailable', async () => {
+    const sendCommand = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Cannot find context with specified id'))
+      .mockResolvedValueOnce({ data: 'AA==' });
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        detach: vi.fn(async () => undefined),
+        sendCommand,
+      },
+      tabs: {
+        get: vi.fn(async () => ({
+          id: 1,
+          url: 'chrome-error://chromewebdata/',
+          title: 'This site cannot be reached',
+        })),
+      },
+    } as unknown as typeof chrome;
+
+    await expect(captureVisionObservation(1)).resolves.toEqual({
+      screenshotBase64: 'AA==',
+      viewportWidth: 0,
+      viewportHeight: 0,
+      url: 'chrome-error://chromewebdata/',
+      title: 'This site cannot be reached',
+    });
+    expect(chrome.tabs.get).toHaveBeenCalledWith(1);
+  });
 });
 
 describe('getActiveTabId', () => {

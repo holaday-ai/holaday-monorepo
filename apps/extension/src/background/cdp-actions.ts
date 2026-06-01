@@ -42,6 +42,7 @@ const CDP_COMMAND_TIMEOUT_MS = 5_000;
 const CDP_ATTACH_TIMEOUT_MS = 5_000;
 const CDP_DETACH_TIMEOUT_MS = 2_000;
 const ACTIVE_TAB_QUERY_TIMEOUT_MS = 1_500;
+const TAB_METADATA_TIMEOUT_MS = 1_000;
 const VIEWPORT_READ_TIMEOUT_MS = 500;
 /** How long to wait before reporting a wait() complete (honours upper bound). */
 const WAIT_CAP_MS = 10_000;
@@ -798,6 +799,11 @@ export async function captureVisionObservation(tabId: number): Promise<VisionObs
     // Tab may be an extension page, chrome://, or otherwise not
     // evaluable. Fall through with zeros; screenshot may still succeed.
   }
+  if (!url || !title) {
+    const tabMeta = await readTabMetadata(tabId);
+    url ||= tabMeta.url;
+    title ||= tabMeta.title;
+  }
 
   let screenshotBase64 = '';
   let error: string | undefined;
@@ -832,4 +838,20 @@ export async function captureVisionObservation(tabId: number): Promise<VisionObs
     title,
     ...(error ? { error } : {}),
   });
+}
+
+async function readTabMetadata(tabId: number): Promise<{ url: string; title: string }> {
+  try {
+    const tab = await withDeadline(
+      chrome.tabs.get(tabId),
+      TAB_METADATA_TIMEOUT_MS,
+      'tab_metadata_timeout',
+    );
+    return {
+      url: typeof tab?.url === 'string' ? tab.url : '',
+      title: typeof tab?.title === 'string' ? tab.title : '',
+    };
+  } catch {
+    return { url: '', title: '' };
+  }
 }
