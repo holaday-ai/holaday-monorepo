@@ -52,7 +52,6 @@ const MAX_NAVIGATE_URL_LENGTH = 2048;
 const MAX_SCREENSHOT_RESULT_BASE64_CHARS = 2_000_000;
 const RECENT_TOOL_RESULT_TTL_MS = 60_000;
 const MAX_RECENT_TOOL_RESULTS = 100;
-const inFlightToolCallRequestIds = new Set<string>();
 
 type ExtensionToolResultPayload = Omit<
   Extract<ClientMessage, { type: 'client.extension.tool_result' }>,
@@ -63,6 +62,10 @@ type ExtensionToolResultMessage = Extract<ClientMessage, { type: 'client.extensi
 const recentToolCallResults = new Map<
   string,
   { at: number; ownerToken: string | null; payload: ExtensionToolResultPayload }
+>();
+const inFlightToolCallResults = new Map<
+  string,
+  { ownerToken: string | null; promise: Promise<ExtensionToolResultPayload> }
 >();
 
 function toolCallDedupeKey(taskId: string, requestId: string): string {
@@ -491,15 +494,16 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
     return;
   }
   if (cached) recentToolCallResults.delete(dedupeKey);
-  if (inFlightToolCallRequestIds.has(dedupeKey)) {
-    console.warn('[holaday] duplicate extension tool call ignored', {
+  const pending = inFlightToolCallResults.get(dedupeKey);
+  if (pending) {
+    console.warn('[holaday] duplicate in-flight extension tool call replayed', {
       taskId,
       requestId,
       kind,
     });
+    sendExtensionToolResult(taskId, requestId, await pending.promise, pending.ownerToken);
     return;
   }
-  inFlightToolCallRequestIds.add(dedupeKey);
   const callTimeoutMs = Math.max(1000, Math.min(60_000, call.timeoutMs ?? 30_000));
   const operationBudgetMs = Math.max(500, callTimeoutMs - 500);
   const waitMs = Math.min(
@@ -510,48 +514,58 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
     1000,
     Math.min(NAVIGATE_LOAD_TIMEOUT_MS, operationBudgetMs - waitMs - 250),
   );
-  let settled = false;
 
-  const finish = (payload: ExtensionToolResultPayload): void => {
-    if (settled) return;
-    settled = true;
-    rememberRecentToolCallResult(dedupeKey, payload, ownerToken);
-    sendExtensionToolResult(taskId, requestId, payload, ownerToken);
-  };
+  const promise = computeExtensionToolResult(
+    kind,
+    args,
+    waitMs,
+    navigateLoadTimeoutMs,
+    operationBudgetMs,
+  ).finally(() => {
+    inFlightToolCallResults.delete(dedupeKey);
+  });
+  inFlightToolCallResults.set(dedupeKey, { ownerToken, promise });
+  const payload = await promise;
+  rememberRecentToolCallResult(dedupeKey, payload, ownerToken);
+  sendExtensionToolResult(taskId, requestId, payload, ownerToken);
+}
 
+async function computeExtensionToolResult(
+  kind: ExtensionToolCall['kind'],
+  args: ExtensionToolCall['args'],
+  waitMs: number,
+  navigateLoadTimeoutMs: number,
+  operationBudgetMs: number,
+): Promise<ExtensionToolResultPayload> {
   try {
     if (kind === 'navigate') {
       const url = normalizeNavigateUrl(args?.url);
-      const r = await withDeadline(
+      const result = await withDeadline(
         executeNavigate(url, waitMs, navigateLoadTimeoutMs),
         operationBudgetMs,
         'extension_tool_timeout',
       );
-      finish({ ok: true, result: r });
-      return;
+      return { ok: true, result };
     }
     if (kind === 'screenshot') {
-      const r = await withDeadline(
+      const result = await withDeadline(
         executeScreenshot(),
         operationBudgetMs,
         'extension_tool_timeout',
       );
-      finish({ ok: true, result: r });
-      return;
+      return { ok: true, result };
     }
-    finish({ ok: false, error: { message: `未知工具 kind: ${kind}`, code: 'bad_kind' } });
+    return { ok: false, error: { message: `未知工具 kind: ${kind}`, code: 'bad_kind' } };
   } catch (err) {
-    finish({
+    return {
       ok: false,
       error: extensionToolErrorPayload(err),
-    });
-  } finally {
-    inFlightToolCallRequestIds.delete(dedupeKey);
+    };
   }
 }
 
 export function _resetExtensionToolInFlightForTests(): void {
-  inFlightToolCallRequestIds.clear();
+  inFlightToolCallResults.clear();
   recentToolCallResults.clear();
 }
 
