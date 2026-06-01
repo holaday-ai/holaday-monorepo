@@ -943,8 +943,9 @@ async function resetAuthFailureState(): Promise<void> {
  * key (token + user + failure counter + bad-token marker) and
  * pulls down any live socket. Called from:
  *   - the popup "重置连接" button (user-initiated, frozen state)
- *   - `chrome.runtime.onInstalled` (auto, on install/update so an
- *     extension upgrade can't inherit a stuck state from before)
+ *   - `chrome.runtime.onInstalled` on a clean install. Developer
+ *     reloads and extension updates should keep the token/user cache;
+ *     they only clear the auth failure bookkeeping.
  *
  * Different from `resetAuthFailureState` which only clears the
  * circuit-breaker bookkeeping — that's the right scope for the
@@ -1182,14 +1183,15 @@ chrome.runtime.onInstalled.addListener((details) => {
     // even after the user clicks reload.
     await resetWsReconnectAttempts();
 
-    // Phase 18b — install / upgrade clears any persisted auth state
-    // so a stuck "frozen 3/3" or stale known-bad-token from a prior
-    // version can't keep blocking the new build. The auto-login path
-    // re-imports a fresh token from any open holaday.ai tab on the
-    // very next ensureConnected tick, so a clean install never
-    // requires a manual login.
-    if (details.reason === 'install' || details.reason === 'update') {
+    // Clean install starts without trustworthy extension auth state.
+    // Updates/developer reloads are different: clearing token + user
+    // makes the popup briefly look logged out until a workbench tab
+    // re-publishes its token. Keep the session and only clear the
+    // circuit-breaker bookkeeping so reload remains a recovery action.
+    if (details.reason === 'install') {
       await resetAllAuthState();
+    } else if (details.reason === 'update') {
+      await resetAuthFailureState();
     }
 
     await ensureConnected();

@@ -251,6 +251,24 @@ export function App() {
           await clearAccessToken();
         }
         // 'network' → leave token, render logged-out view this render
+      } else {
+        const response = await sendRuntimeMessageWithRetry<{ ok?: boolean; token?: string | null }>({
+          type: 'holaday.tryAutoLogin',
+        });
+        if (cancelled || !mountedRef.current) return;
+        const liftedToken = normalizeAccessToken(response?.token);
+        if (!liftedToken) return;
+        const result = await fetchMe(liftedToken);
+        if (cancelled || !mountedRef.current) return;
+        if (result.kind === 'ok') {
+          await setStoredUser(result.user);
+          if (cancelled || !mountedRef.current) return;
+          setUser(result.user);
+          setToken(liftedToken);
+        } else if (result.kind === 'unauthorized') {
+          const current = normalizeAccessToken(await getAccessToken());
+          if (current === liftedToken) await clearAccessToken();
+        }
       }
     })();
     return () => {
