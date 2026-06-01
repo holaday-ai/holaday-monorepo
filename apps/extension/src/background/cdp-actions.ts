@@ -690,6 +690,7 @@ export async function getActiveTabId(
     { active: true, currentWindow: true },
     { active: true, lastFocusedWindow: true },
     { active: true, windowType: 'normal' },
+    { windowType: 'normal' },
   ];
   const candidateGroups = await Promise.all(
     queries.map(async (query, queryIndex) => {
