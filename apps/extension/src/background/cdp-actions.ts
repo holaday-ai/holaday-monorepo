@@ -447,9 +447,11 @@ export function normalizeCdpNavigateUrl(raw: unknown): string {
     throw new Error('bad_url');
   }
 
+  const normalized = /^[a-z][a-z0-9+.-]*:/i.test(value) ? value : `https://${value}`;
+
   let parsed: URL;
   try {
-    parsed = new URL(value);
+    parsed = new URL(normalized);
   } catch {
     throw new Error('bad_url');
   }

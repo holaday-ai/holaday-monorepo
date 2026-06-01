@@ -25,6 +25,9 @@ describe('normalizeCdpNavigateUrl', () => {
       'https://example.com/path',
     );
     expect(normalizeCdpNavigateUrl('http://example.com/')).toBe('http://example.com/');
+    expect(normalizeCdpNavigateUrl('example.com/path?q=1')).toBe(
+      'https://example.com/path?q=1',
+    );
   });
 
   it('rejects empty, malformed, internal, and oversized urls', () => {
