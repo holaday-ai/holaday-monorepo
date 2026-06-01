@@ -758,6 +758,65 @@ describe('handleExtensionToolCall', () => {
     );
   });
 
+  it('returns navigated page metadata when body text injection is blocked', async () => {
+    vi.mocked(send).mockClear();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, url: 'https://holaday.ai/app' }]),
+        update: vi.fn(async () => ({ id: 2, url: 'https://example.com/' }) as chrome.tabs.Tab),
+        get: vi.fn(async () => ({
+          id: 2,
+          status: 'complete',
+          url: 'https://example.com/',
+          title: 'Example',
+        })),
+        onUpdated: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+        onRemoved: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+      },
+      scripting: {
+        executeScript: vi.fn(async () => {
+          throw new Error('Cannot access contents of url "https://example.com/".');
+        }),
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_body_text_blocked',
+      requestId: 'req_body_text_blocked',
+      kind: 'navigate',
+      args: { url: 'https://example.com/', waitMs: 0 },
+      timeoutMs: 30_000,
+    };
+
+    await handleExtensionToolCall(call);
+
+    expect(warn).toHaveBeenCalledWith(
+      '[holaday] extension navigate body text read unavailable',
+      expect.any(Error),
+    );
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'client.extension.tool_result',
+        taskId: 'tsk_body_text_blocked',
+        requestId: 'req_body_text_blocked',
+        ok: true,
+        result: {
+          finalUrl: 'https://example.com/',
+          title: 'Example',
+          bodyText: '',
+        },
+      }),
+    );
+  });
+
   it('caps navigate settle wait to the tool call budget', async () => {
     vi.useFakeTimers();
     vi.mocked(send).mockClear();

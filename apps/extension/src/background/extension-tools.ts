@@ -318,7 +318,7 @@ async function executeNavigate(
     if (isBodyTextTimeout(err)) {
       console.warn('[holaday] extension navigate body text read timed out');
     } else {
-      throw err;
+      console.warn('[holaday] extension navigate body text read unavailable', err);
     }
   }
   return { finalUrl, title, bodyText: rawText };
