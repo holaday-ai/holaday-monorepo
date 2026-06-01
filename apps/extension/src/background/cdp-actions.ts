@@ -688,30 +688,32 @@ export async function getActiveTabId(): Promise<number | null> {
     { active: true, lastFocusedWindow: true },
     { active: true, windowType: 'normal' },
   ];
-  const candidates = await Promise.all(
-    queries.map(async (query) => {
+  const candidateGroups = await Promise.all(
+    queries.map(async (query, queryIndex) => {
       try {
-        const [tab] = await withDeadline(
+        const tabs = await withDeadline(
           chrome.tabs.query(query),
           ACTIVE_TAB_QUERY_TIMEOUT_MS,
           'active_tab_query_timeout',
         );
-        return typeof tab?.id === 'number' ? tab : undefined;
+        return tabs
+          .filter((tab) => typeof tab?.id === 'number')
+          .map((tab, tabIndex) => ({ tab, queryIndex, tabIndex }));
       } catch {
         // Keep walking the fallback chain; Chrome can transiently reject
         // currentWindow lookups while another normal window is still usable.
-        return undefined;
+        return [];
       }
     }),
   );
+  const candidates = candidateGroups.flat();
 
-  const webTab = candidates.find((tab) => {
-    const url = tab?.url ?? '';
+  const webTab = pickBestActiveTabCandidate(candidates, (tab) => {
+    const url = tab.url ?? '';
     return url.startsWith('http://') || url.startsWith('https://');
   });
-  const nonInternalTab = candidates.find((tab) => {
-    if (!tab) return false;
-    const url = tab?.url ?? '';
+  const nonInternalTab = pickBestActiveTabCandidate(candidates, (tab) => {
+    const url = tab.url ?? '';
     return (
       !url ||
       !(
@@ -723,6 +725,27 @@ export async function getActiveTabId(): Promise<number | null> {
     );
   });
   return webTab?.id ?? nonInternalTab?.id ?? null;
+}
+
+function pickBestActiveTabCandidate(
+  candidates: Array<{ tab: chrome.tabs.Tab; queryIndex: number; tabIndex: number }>,
+  predicate: (tab: chrome.tabs.Tab) => boolean,
+): chrome.tabs.Tab | null {
+  const [best] = candidates
+    .filter(({ tab }) => predicate(tab))
+    .sort(compareActiveTabCandidates);
+  return best?.tab ?? null;
+}
+
+function compareActiveTabCandidates(
+  a: { tab: chrome.tabs.Tab; queryIndex: number; tabIndex: number },
+  b: { tab: chrome.tabs.Tab; queryIndex: number; tabIndex: number },
+): number {
+  if (a.queryIndex !== b.queryIndex) return a.queryIndex - b.queryIndex;
+  const aLastAccessed = typeof a.tab.lastAccessed === 'number' ? a.tab.lastAccessed : 0;
+  const bLastAccessed = typeof b.tab.lastAccessed === 'number' ? b.tab.lastAccessed : 0;
+  if (aLastAccessed !== bLastAccessed) return bLastAccessed - aLastAccessed;
+  return a.tabIndex - b.tabIndex;
 }
 
 /**

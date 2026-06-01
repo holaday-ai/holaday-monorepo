@@ -695,6 +695,38 @@ describe('getActiveTabId', () => {
     expect(query).toHaveBeenNthCalledWith(3, { active: true, windowType: 'normal' });
   });
 
+  it('inspects every returned tab before giving up on the active web page', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 10, url: 'chrome://extensions/', lastAccessed: 5000 },
+        { id: 11, url: 'https://holaday.ai/app', lastAccessed: 1000 },
+      ]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabId()).resolves.toBe(11);
+  });
+
+  it('prefers the most recently accessed active web tab within a fallback query', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 10, url: 'https://older.example/', lastAccessed: 1000 },
+        { id: 11, url: 'https://newer.example/', lastAccessed: 5000 },
+      ]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabId()).resolves.toBe(11);
+  });
+
   it('does not return an internal Chrome page when no web tab is active', async () => {
     const query = vi
       .fn()
