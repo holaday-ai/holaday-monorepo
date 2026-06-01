@@ -244,11 +244,21 @@ type VisionObservationPayload = Omit<
   Extract<ClientMessage, { type: 'client.vision.observation' }>,
   'type' | 'taskId' | 'tickIndex'
 >;
+type StepResultPayload = Omit<
+  Extract<ClientMessage, { type: 'client.step.result' }>,
+  'type' | 'taskId' | 'stepId'
+>;
 
+const STEP_RESULT_TTL_MS = 60_000;
 const VISION_OBSERVATION_RESULT_TTL_MS = 60_000;
 const VISION_ACT_RESULT_TTL_MS = 60_000;
+const MAX_RECENT_STEP_RESULTS = 100;
 const MAX_RECENT_VISION_OBSERVATION_RESULTS = 50;
 const MAX_RECENT_VISION_ACT_RESULTS = 100;
+const inFlightStepResults = new Map<
+  string,
+  { ownerToken: string | null; promise: Promise<StepResultPayload> }
+>();
 const inFlightVisionObservations = new Map<
   string,
   { ownerToken: string | null; promise: Promise<VisionObservationPayload> }
@@ -264,6 +274,10 @@ const recentVisionObservations = new Map<
 const recentVisionActResults = new Map<
   string,
   { at: number; ownerToken: string | null; payload: VisionActResultPayload }
+>();
+const recentStepResults = new Map<
+  string,
+  { at: number; ownerToken: string | null; payload: StepResultPayload }
 >();
 
 // ---------- WS → SW state updates ----------
@@ -737,6 +751,33 @@ async function runStep(
   msg: Extract<ServerMessage, { type: 'server.task.dispatch' }>,
 ): Promise<void> {
   const ownerToken = getCurrentWsToken();
+  const dedupeKey = stepResultDedupeKey(msg.taskId, msg.stepId);
+  const cached = recentStepResults.get(dedupeKey);
+  if (cached && Date.now() - cached.at <= STEP_RESULT_TTL_MS) {
+    sendStepResult(msg, cached.payload, cached.ownerToken);
+    return;
+  }
+  if (cached) recentStepResults.delete(dedupeKey);
+  const pending = inFlightStepResults.get(dedupeKey);
+  if (pending) {
+    sendStepResult(msg, await pending.promise, pending.ownerToken);
+    return;
+  }
+  const next = computeStepResult(msg)
+    .then((payload) => {
+      rememberStepResult(dedupeKey, payload, ownerToken);
+      return payload;
+    })
+    .finally(() => {
+      inFlightStepResults.delete(dedupeKey);
+    });
+  inFlightStepResults.set(dedupeKey, { ownerToken, promise: next });
+  sendStepResult(msg, await next, ownerToken);
+}
+
+async function computeStepResult(
+  msg: Extract<ServerMessage, { type: 'server.task.dispatch' }>,
+): Promise<StepResultPayload> {
   const action: DriverAction = {
     kind: msg.action.kind,
     ...(msg.action.selector ? { selector: msg.action.selector } : {}),
@@ -762,20 +803,6 @@ async function runStep(
       status: result.status,
       elapsed,
     });
-    // Always ship the driver's raw data over WS — the orchestrator
-    // needs the unmodified payload for task_steps.output persistence.
-    sendCriticalClientMessage(
-      {
-        type: 'client.step.result',
-        taskId: msg.taskId,
-        stepId: msg.stepId,
-        status: result.status,
-        ...(result.data !== undefined ? { data: result.data } : {}),
-        ...(result.error ? { error: result.error } : {}),
-      },
-      'step result',
-      { ownerToken },
-    );
 
     // Thumbnail comes in `result.data.thumbnail` directly from the
     // driver now (commit landing this change). We used to re-capture
@@ -801,22 +828,62 @@ async function runStep(
       t.lastUpdated = Date.now();
       pushTasksSnapshot();
     }
+    return {
+      status: result.status,
+      ...(result.data !== undefined ? { data: result.data } : {}),
+      ...(result.error ? { error: result.error } : {}),
+    };
   } catch (err) {
     console.error('[holaday] step crash', err);
-    sendCriticalClientMessage(
-      {
-        type: 'client.step.result',
-        taskId: msg.taskId,
-        stepId: msg.stepId,
-        status: 'error',
-        error: {
-          code: 'DRIVER_CRASH',
-          message: err instanceof Error ? err.message : String(err),
-        },
+    return {
+      status: 'error',
+      error: {
+        code: 'DRIVER_CRASH',
+        message: err instanceof Error ? err.message : String(err),
       },
-      'step result',
-      { ownerToken },
-    );
+    };
+  }
+}
+
+function sendStepResult(
+  msg: Extract<ServerMessage, { type: 'server.task.dispatch' }>,
+  payload: StepResultPayload,
+  ownerToken: string | null,
+): void {
+  // Always ship the driver's raw data over WS — the orchestrator
+  // needs the unmodified payload for task_steps.output persistence.
+  sendCriticalClientMessage(
+    {
+      type: 'client.step.result',
+      taskId: msg.taskId,
+      stepId: msg.stepId,
+      ...payload,
+    },
+    'step result',
+    { ownerToken },
+  );
+}
+
+function stepResultDedupeKey(taskId: string, stepId: string): string {
+  return `${taskId}\u0000${stepId}`;
+}
+
+function rememberStepResult(
+  key: string,
+  payload: StepResultPayload,
+  ownerToken: string | null,
+): void {
+  const now = Date.now();
+  recentStepResults.set(key, { at: now, ownerToken, payload });
+  for (const [recentKey, value] of recentStepResults) {
+    if (now - value.at > STEP_RESULT_TTL_MS) {
+      recentStepResults.delete(recentKey);
+    }
+  }
+  while (recentStepResults.size > MAX_RECENT_STEP_RESULTS) {
+    const oldest = recentStepResults.keys().next().value;
+    if (!oldest) break;
+    recentStepResults.delete(oldest);
   }
 }
 
