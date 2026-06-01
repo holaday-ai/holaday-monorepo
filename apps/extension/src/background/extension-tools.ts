@@ -103,7 +103,7 @@ export async function getActiveTabForExtensionTool(
   );
   const candidates = candidateGroups.flat();
 
-  return pickBestTabCandidate(candidates, isWebPageTab)
+  return pickBestTabCandidate(candidates, (tab) => isNavigablePageTab(tab, opts))
     ?? pickBestTabCandidate(candidates, (tab) => isNonInternalTab(tab, opts));
 }
 
@@ -133,6 +133,18 @@ function isWebPageTab(tab: chrome.tabs.Tab | undefined): tab is chrome.tabs.Tab 
   if (typeof tab.id !== 'number') return false;
   if (!tab.url) return false;
   return tab.url.startsWith('http://') || tab.url.startsWith('https://');
+}
+
+function isNavigablePageTab(
+  tab: chrome.tabs.Tab | undefined,
+  opts: { allowErrorPage?: boolean } = {},
+): tab is chrome.tabs.Tab {
+  if (!tab) return false;
+  if (typeof tab.id !== 'number') return false;
+  if (!tab.url) return false;
+  if (tab.url.startsWith('http://') || tab.url.startsWith('https://')) return true;
+  if (!opts.allowErrorPage) return false;
+  return tab.url.toLowerCase().startsWith('chrome-error://');
 }
 
 function isNonInternalTab(

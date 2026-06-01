@@ -712,7 +712,11 @@ export async function getActiveTabId(
 
   const webTab = pickBestActiveTabCandidate(candidates, (tab) => {
     const url = tab.url ?? '';
-    return url.startsWith('http://') || url.startsWith('https://');
+    return (
+      url.startsWith('http://') ||
+      url.startsWith('https://') ||
+      Boolean(opts.allowErrorPage && url.toLowerCase().startsWith('chrome-error://'))
+    );
   });
   const nonInternalTab = pickBestActiveTabCandidate(candidates, (tab) => {
     const url = tab.url ?? '';

@@ -436,6 +436,22 @@ describe('getActiveTabForExtensionTool', () => {
       url: 'chrome-error://chromewebdata/',
     });
   });
+
+  it('prefers the current Chrome error tab over an older web tab when recovering navigation', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 1, url: 'chrome-error://chromewebdata/' }])
+      .mockResolvedValueOnce([{ id: 2, url: 'https://holaday.ai/app' }])
+      .mockResolvedValueOnce([]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabForExtensionTool({ allowErrorPage: true })).resolves.toMatchObject({
+      id: 1,
+      url: 'chrome-error://chromewebdata/',
+    });
+  });
 });
 
 describe('handleExtensionToolCall', () => {

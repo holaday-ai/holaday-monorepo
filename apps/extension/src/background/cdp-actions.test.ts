@@ -757,6 +757,19 @@ describe('getActiveTabId', () => {
     await expect(getActiveTabId({ allowErrorPage: true })).resolves.toBe(10);
   });
 
+  it('prefers the current Chrome error tab over an older web tab for navigation recovery', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 10, url: 'chrome-error://chromewebdata/' }])
+      .mockResolvedValueOnce([{ id: 11, url: 'https://holaday.ai/app' }])
+      .mockResolvedValueOnce([]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabId({ allowErrorPage: true })).resolves.toBe(10);
+  });
+
   it('continues the fallback chain when a tab query hangs', async () => {
     vi.useFakeTimers();
     const query = vi
