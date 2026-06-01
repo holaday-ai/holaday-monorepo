@@ -490,6 +490,12 @@ describe('cdpActionErrorMessage', () => {
     expect(cdpActionErrorMessage(new Error('Frame was detached'))).toBe(
       '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
     );
+    expect(cdpActionErrorMessage(new Error('Debugger is not attached to the tab'))).toBe(
+      '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
+    );
+    expect(cdpActionErrorMessage(new Error('Target detached'))).toBe(
+      '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
+    );
     expect(cdpActionErrorMessage(new Error('Execution context was destroyed'))).toBe(
       '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
     );

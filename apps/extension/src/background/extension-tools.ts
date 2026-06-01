@@ -417,6 +417,8 @@ export function extensionToolErrorPayload(
     lower.includes('tab closed') ||
     lower.includes('no tab with id') ||
     lower.includes('target closed') ||
+    lower.includes('target detached') ||
+    lower.includes('not attached') ||
     lower.includes('frame was detached') ||
     lower.includes('target navigated or closed') ||
     lower.includes('execution context was destroyed') ||
