@@ -557,7 +557,7 @@ async function computeVisionActResult(
       message: `${msg.action.kind} terminal; no driver work`,
     };
   }
-  const tabId = await getActiveTabId();
+  const tabId = await getActiveTabId({ allowErrorPage: msg.action.kind === 'navigate' });
   if (tabId === null) {
     return {
       ok: false,

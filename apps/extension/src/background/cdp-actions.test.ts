@@ -732,12 +732,29 @@ describe('getActiveTabId', () => {
       .fn()
       .mockResolvedValueOnce([{ id: 10, url: 'chrome://extensions/' }])
       .mockResolvedValueOnce([{ id: 11, url: 'chrome-extension://abc/sidepanel.html' }])
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce([
+        { id: 12, url: 'chrome-error://chromewebdata/' },
+        { id: 13, url: 'devtools://devtools/bundled/devtools_app.html' },
+        { id: 14, url: 'view-source:https://example.com/' },
+      ]);
     globalThis.chrome = {
       tabs: { query },
     } as unknown as typeof chrome;
 
     await expect(getActiveTabId()).resolves.toBeNull();
+  });
+
+  it('can return a Chrome error page when navigation needs to recover the tab', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 10, url: 'chrome-error://chromewebdata/' }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabId({ allowErrorPage: true })).resolves.toBe(10);
   });
 
   it('continues the fallback chain when a tab query hangs', async () => {

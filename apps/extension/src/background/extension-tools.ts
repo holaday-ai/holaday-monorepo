@@ -77,7 +77,9 @@ function toolCallDedupeKey(taskId: string, requestId: string): string {
  * (e.g. the only window is the extension popup itself, or a service-
  * worker-only Chrome profile).
  */
-export async function getActiveTabForExtensionTool(): Promise<chrome.tabs.Tab | null> {
+export async function getActiveTabForExtensionTool(
+  opts: { allowErrorPage?: boolean } = {},
+): Promise<chrome.tabs.Tab | null> {
   const queries: chrome.tabs.QueryInfo[] = [
     { active: true, currentWindow: true },
     { active: true, lastFocusedWindow: true },
@@ -102,7 +104,7 @@ export async function getActiveTabForExtensionTool(): Promise<chrome.tabs.Tab | 
   const candidates = candidateGroups.flat();
 
   return pickBestTabCandidate(candidates, isWebPageTab)
-    ?? pickBestTabCandidate(candidates, isNonInternalTab);
+    ?? pickBestTabCandidate(candidates, (tab) => isNonInternalTab(tab, opts));
 }
 
 function pickBestTabCandidate(
@@ -133,15 +135,17 @@ function isWebPageTab(tab: chrome.tabs.Tab | undefined): tab is chrome.tabs.Tab 
   return tab.url.startsWith('http://') || tab.url.startsWith('https://');
 }
 
-function isNonInternalTab(tab: chrome.tabs.Tab | undefined): tab is chrome.tabs.Tab {
+function isNonInternalTab(
+  tab: chrome.tabs.Tab | undefined,
+  opts: { allowErrorPage?: boolean } = {},
+): tab is chrome.tabs.Tab {
   if (!tab) return false;
   if (typeof tab.id !== 'number') return false;
   if (!tab.url) return true;
-  return !(
-    tab.url.startsWith('chrome://') ||
-    tab.url.startsWith('chrome-extension://') ||
-    tab.url.startsWith('edge://') ||
-    tab.url.startsWith('about:')
+  const url = tab.url.toLowerCase();
+  if (opts.allowErrorPage && url.startsWith('chrome-error://')) return true;
+  return !/^(chrome|chrome-extension|chrome-error|edge|about|devtools|view-source|file):/i.test(
+    tab.url,
   );
 }
 
@@ -263,7 +267,7 @@ async function executeNavigate(
   waitMs: number,
   loadTimeoutMs: number,
 ): Promise<NavigateResult> {
-  const tab = await getActiveTabForExtensionTool();
+  const tab = await getActiveTabForExtensionTool({ allowErrorPage: true });
   if (!tab?.id) {
     throw new Error('no_active_tab');
   }

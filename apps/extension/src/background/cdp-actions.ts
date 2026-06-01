@@ -682,7 +682,9 @@ export function sanitizeVisionObservationCapture(
  * Chrome startup before any window has focus) so callers can surface
  * a clean error instead of crashing.
  */
-export async function getActiveTabId(): Promise<number | null> {
+export async function getActiveTabId(
+  opts: { allowErrorPage?: boolean } = {},
+): Promise<number | null> {
   const queries: chrome.tabs.QueryInfo[] = [
     { active: true, currentWindow: true },
     { active: true, lastFocusedWindow: true },
@@ -714,14 +716,10 @@ export async function getActiveTabId(): Promise<number | null> {
   });
   const nonInternalTab = pickBestActiveTabCandidate(candidates, (tab) => {
     const url = tab.url ?? '';
+    if (opts.allowErrorPage && url.toLowerCase().startsWith('chrome-error://')) return true;
     return (
       !url ||
-      !(
-        url.startsWith('chrome://') ||
-        url.startsWith('chrome-extension://') ||
-        url.startsWith('edge://') ||
-        url.startsWith('about:')
-      )
+      !/^(chrome|chrome-extension|chrome-error|edge|about|devtools|view-source|file):/i.test(url)
     );
   });
   return webTab?.id ?? nonInternalTab?.id ?? null;

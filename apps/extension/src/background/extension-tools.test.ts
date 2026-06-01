@@ -408,12 +408,33 @@ describe('getActiveTabForExtensionTool', () => {
       .fn()
       .mockResolvedValueOnce([{ id: 1, url: 'chrome://extensions/' }])
       .mockResolvedValueOnce([{ id: 2, url: 'chrome-extension://abc/popup.html' }])
+      .mockResolvedValueOnce([
+        { id: 3, url: 'chrome-error://chromewebdata/' },
+        { id: 4, url: 'devtools://devtools/bundled/devtools_app.html' },
+        { id: 5, url: 'view-source:https://example.com/' },
+      ])
       .mockResolvedValueOnce([]);
     globalThis.chrome = {
       tabs: { query },
     } as unknown as typeof chrome;
 
     await expect(getActiveTabForExtensionTool()).resolves.toBeNull();
+  });
+
+  it('can use a Chrome error page as the source tab for navigation recovery', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 1, url: 'chrome-error://chromewebdata/' }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabForExtensionTool({ allowErrorPage: true })).resolves.toMatchObject({
+      id: 1,
+      url: 'chrome-error://chromewebdata/',
+    });
   });
 });
 
