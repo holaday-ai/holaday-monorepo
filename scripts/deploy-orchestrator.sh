@@ -25,27 +25,60 @@ if [[ -n "${VULTR_PASSWORD:-}" ]]; then
   SSHPASS_ARGS=(sshpass -p "$VULTR_PASSWORD")
 fi
 SSH_OPTS=(-o StrictHostKeyChecking=no -o ConnectTimeout=20)
+REMOTE_RETRIES="${DEPLOY_REMOTE_RETRIES:-3}"
+REMOTE_RETRY_SLEEP="${DEPLOY_REMOTE_RETRY_SLEEP:-5}"
+
+if ! [[ "$REMOTE_RETRIES" =~ ^[1-9][0-9]*$ ]]; then
+  echo "❌ DEPLOY_REMOTE_RETRIES must be a positive integer" >&2
+  exit 1
+fi
+if ! [[ "$REMOTE_RETRY_SLEEP" =~ ^[0-9]+$ ]]; then
+  echo "❌ DEPLOY_REMOTE_RETRY_SLEEP must be a non-negative integer" >&2
+  exit 1
+fi
+
+run_with_retry() {
+  local label="$1"
+  shift
+  local attempt rc
+
+  for ((attempt = 1; attempt <= REMOTE_RETRIES; attempt++)); do
+    set +e
+    "$@"
+    rc=$?
+    set -e
+    if ((rc == 0)); then
+      return 0
+    fi
+    if ((attempt == REMOTE_RETRIES)); then
+      echo "❌ $label failed after $attempt attempt(s) (exit $rc)" >&2
+      return "$rc"
+    fi
+    echo "⚠️  $label failed (exit $rc); retrying in ${REMOTE_RETRY_SLEEP}s ($attempt/$REMOTE_RETRIES)" >&2
+    sleep "$REMOTE_RETRY_SLEEP"
+  done
+}
 
 echo "→ Fetching $BRANCH on Vultr"
-"${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+run_with_retry "Vultr fetch" "${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
   cd /opt/holaday-monorepo && \
   git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' && \
   git reset --hard origin/$BRANCH && \
   git rev-parse HEAD" | tail -5
 
 echo "→ Installing + building"
-"${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+run_with_retry "Vultr install/build" "${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
   cd /opt/holaday-monorepo && \
   pnpm install && \
   pnpm --filter @holaday/orchestrator build" 2>&1 | tail -5
 
 echo "→ pm2 restart"
-"${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+run_with_retry "Vultr pm2 restart" "${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
   "pm2 restart holaday-orchestrator"
 
 echo "→ Health check ($HEALTH_URL must return '$HEALTH_MARKER')"
 sleep 3
-HEALTH_OUT=$("${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+HEALTH_OUT=$(run_with_retry "Vultr healthz" "${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
   "curl -sf --max-time 10 $HEALTH_URL || echo 'FAIL'")
 if echo "$HEALTH_OUT" | grep -q "$HEALTH_MARKER"; then
   echo "✅ Health check passed"
@@ -53,12 +86,12 @@ else
   echo "❌ Health check FAILED"
   echo "Response: $HEALTH_OUT" >&2
   echo "→ Last 10 error log lines:"
-  "${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+  run_with_retry "Vultr pm2 error logs" "${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
     "pm2 logs holaday-orchestrator --lines 10 --nostream --err 2>&1 | tail -15" >&2
   exit 1
 fi
 
-RESTART=$("${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+RESTART=$(run_with_retry "Vultr restart count" "${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
   "node -e \"const list=JSON.parse(require('child_process').execFileSync('pm2',['jlist'],{encoding:'utf8'})); const app=list.find((p)=>p.name==='holaday-orchestrator'); process.stdout.write(String(app?.pm2_env?.restart_time ?? 'unknown'));\"")
 echo "✅ Orchestrator deployed — restart count: $RESTART"
 
@@ -72,7 +105,7 @@ if [[ "${SKIP_AUTO_SMOKE:-0}" == "1" ]]; then
   echo "→ Auto-smoke skipped (SKIP_AUTO_SMOKE=1)"
 else
   echo "→ Running P0 smoke (informational; failure does NOT block deploy)"
-  SMOKE_OUT=$("${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+  SMOKE_OUT=$(run_with_retry "Vultr auto-smoke" "${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
     "cd /opt/holaday-monorepo && \
      set -a && . apps/orchestrator/.env && set +a && \
      EVAL_BASE_URL=http://127.0.0.1:4001 \
