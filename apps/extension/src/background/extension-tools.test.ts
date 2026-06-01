@@ -12,6 +12,7 @@ import {
 import { send } from './ws-client.js';
 
 vi.mock('./ws-client.js', () => ({
+  getCurrentWsToken: vi.fn(() => null),
   send: vi.fn(() => true),
 }));
 

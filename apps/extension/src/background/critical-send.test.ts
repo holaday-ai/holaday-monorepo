@@ -2,13 +2,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { sendCriticalClientMessage } from './critical-send.js';
 import { send } from './ws-client.js';
 
+const wsMock = vi.hoisted(() => ({
+  currentToken: null as string | null,
+}));
+
 vi.mock('./ws-client.js', () => ({
+  getCurrentWsToken: vi.fn(() => wsMock.currentToken),
   send: vi.fn(),
 }));
 
 describe('sendCriticalClientMessage', () => {
   afterEach(() => {
     vi.useRealTimers();
+    wsMock.currentToken = null;
     vi.mocked(send).mockReset();
     vi.restoreAllMocks();
   });
@@ -46,5 +52,61 @@ describe('sendCriticalClientMessage', () => {
 
     expect(send).toHaveBeenCalledTimes(3);
     expect(vi.mocked(send).mock.calls[2]?.[0]).toBe(message);
+  });
+
+  it('keeps retrying while the websocket token is temporarily unavailable', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    wsMock.currentToken = 'token-a';
+    vi.mocked(send)
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+
+    const message = {
+      type: 'client.step.result',
+      taskId: 'tsk_gap',
+      stepId: 'step_gap',
+      status: 'ok',
+    } as const;
+
+    expect(sendCriticalClientMessage(message, 'step result')).toBe(false);
+    wsMock.currentToken = null;
+    await vi.advanceTimersByTimeAsync(250);
+    wsMock.currentToken = 'token-a';
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(send).mock.calls[2]?.[0]).toBe(message);
+  });
+
+  it('stops retrying critical messages after the websocket token changes', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    wsMock.currentToken = 'token-a';
+    vi.mocked(send).mockReturnValue(false);
+
+    const message = {
+      type: 'client.extension.tool_result',
+      taskId: 'tsk_old_user',
+      requestId: 'req_old_user',
+      at: 123,
+      ok: false,
+      error: { message: 'old result', code: 'exec_error' },
+    } as const;
+
+    expect(sendCriticalClientMessage(message, 'extension tool result')).toBe(false);
+    wsMock.currentToken = 'token-b';
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[holaday] extension tool result retry cancelled after token change',
+      expect.objectContaining({
+        taskId: 'tsk_old_user',
+        requestId: 'req_old_user',
+        attempt: 1,
+      }),
+    );
   });
 });

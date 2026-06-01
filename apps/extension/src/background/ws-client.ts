@@ -184,6 +184,10 @@ export function isConnected(): boolean {
   return state.socket?.readyState === WebSocket.OPEN;
 }
 
+export function getCurrentWsToken(): string | null {
+  return state.token;
+}
+
 export async function getWsConnectionStatus(): Promise<WsConnectionStatus> {
   return {
     connected: isConnected(),
