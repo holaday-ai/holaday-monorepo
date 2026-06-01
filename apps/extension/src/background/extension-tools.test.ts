@@ -160,6 +160,15 @@ describe('waitForTabComplete', () => {
     expect(mock.removedListeners.size).toBe(0);
   });
 
+  it('rejects when Chrome reports the navigation target detached', async () => {
+    const mock = installChromeTabsMock('loading');
+    mock.rejectGetWith(new Error('Frame with ID 0 was removed.'));
+
+    await expect(waitForTabComplete(1, 25_000)).rejects.toThrow('tab_closed');
+    expect(mock.listeners.size).toBe(0);
+    expect(mock.removedListeners.size).toBe(0);
+  });
+
   it('rejects when the tab never reaches complete', async () => {
     vi.useFakeTimers();
     installChromeTabsMock('loading');

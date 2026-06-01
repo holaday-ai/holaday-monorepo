@@ -231,7 +231,12 @@ function isTabClosedError(err: unknown): boolean {
   return (
     lower.includes('tab closed') ||
     lower.includes('no tab with id') ||
-    lower.includes('target closed')
+    lower.includes('target closed') ||
+    lower.includes('target detached') ||
+    lower.includes('not attached') ||
+    lower.includes('frame was detached') ||
+    lower.includes('no frame with id') ||
+    (lower.includes('frame with id') && lower.includes('removed'))
   );
 }
 
