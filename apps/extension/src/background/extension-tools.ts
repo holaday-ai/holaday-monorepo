@@ -80,24 +80,47 @@ export async function getActiveTabForExtensionTool(): Promise<chrome.tabs.Tab | 
     { active: true, lastFocusedWindow: true },
     { active: true, windowType: 'normal' },
   ];
-  const candidates = await Promise.all(
-    queries.map(async (query) => {
+  const candidateGroups = await Promise.all(
+    queries.map(async (query, queryIndex) => {
       try {
-        const [tab] = await withDeadline(
+        const tabs = await withDeadline(
           chrome.tabs.query(query),
           TAB_QUERY_TIMEOUT_MS,
           'tab_query_timeout',
         );
-        return tab;
+        return tabs.map((tab, tabIndex) => ({ tab, queryIndex, tabIndex }));
       } catch {
         // Keep the browser-tool fallback chain alive. currentWindow can
         // reject while lastFocused/normal window lookup still succeeds.
-        return undefined;
+        return [];
       }
     }),
   );
+  const candidates = candidateGroups.flat();
 
-  return candidates.find(isWebPageTab) ?? candidates.find(isNonInternalTab) ?? null;
+  return pickBestTabCandidate(candidates, isWebPageTab)
+    ?? pickBestTabCandidate(candidates, isNonInternalTab);
+}
+
+function pickBestTabCandidate(
+  candidates: Array<{ tab: chrome.tabs.Tab; queryIndex: number; tabIndex: number }>,
+  predicate: (tab: chrome.tabs.Tab | undefined) => tab is chrome.tabs.Tab,
+): chrome.tabs.Tab | null {
+  const [best] = candidates
+    .filter(({ tab }) => predicate(tab))
+    .sort(compareTabCandidates);
+  return best?.tab ?? null;
+}
+
+function compareTabCandidates(
+  a: { tab: chrome.tabs.Tab; queryIndex: number; tabIndex: number },
+  b: { tab: chrome.tabs.Tab; queryIndex: number; tabIndex: number },
+): number {
+  if (a.queryIndex !== b.queryIndex) return a.queryIndex - b.queryIndex;
+  const aLastAccessed = typeof a.tab.lastAccessed === 'number' ? a.tab.lastAccessed : 0;
+  const bLastAccessed = typeof b.tab.lastAccessed === 'number' ? b.tab.lastAccessed : 0;
+  if (aLastAccessed !== bLastAccessed) return bLastAccessed - aLastAccessed;
+  return a.tabIndex - b.tabIndex;
 }
 
 function isWebPageTab(tab: chrome.tabs.Tab | undefined): tab is chrome.tabs.Tab {

@@ -356,6 +356,44 @@ describe('getActiveTabForExtensionTool', () => {
     });
   });
 
+  it('inspects every returned tab when a fallback query returns mixed candidates', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 1, url: 'chrome://extensions/', active: true, lastAccessed: 5000 },
+        { id: 2, url: 'https://holaday.ai/app', active: true, lastAccessed: 1000 },
+      ]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabForExtensionTool()).resolves.toMatchObject({
+      id: 2,
+      url: 'https://holaday.ai/app',
+    });
+  });
+
+  it('prefers the most recently accessed web tab within the same query tier', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 1, url: 'https://older.example/', active: true, lastAccessed: 1000 },
+        { id: 2, url: 'https://newer.example/', active: true, lastAccessed: 5000 },
+      ]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabForExtensionTool()).resolves.toMatchObject({
+      id: 2,
+      url: 'https://newer.example/',
+    });
+  });
+
   it('does not return an internal Chrome page as an actionable tab', async () => {
     const query = vi
       .fn()
