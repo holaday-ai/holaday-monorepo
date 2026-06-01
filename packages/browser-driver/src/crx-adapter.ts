@@ -95,10 +95,11 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
       // (or an in-page JS redirect) walked us off the Skill's origin
       // boundary and a subsequent click/extract would run on an
       // unrelated site. Empty list / no page attached = no-op.
-      if (action.kind !== 'goto' && this.page) {
+      const currentPage = this.getLivePage();
+      if (action.kind !== 'goto' && currentPage) {
         const allowlist = action.allowedOrigins ?? this.opts.allowedOrigins;
         if (allowlist.length > 0) {
-          const currentUrl = this.page.url();
+          const currentUrl = currentPage.url();
           if (!isOriginAllowed(currentUrl, allowlist)) {
             return driverError(
               DRIVER_ERRORS.ORIGIN_BLOCKED,
@@ -179,7 +180,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   }
 
   private async doWait(action: DriverAction): Promise<DriverResult> {
-    const page = this.page;
+    const page = this.getLivePage();
     if (!page) return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'wait before any goto');
 
     if (action.selector) {
@@ -199,7 +200,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   }
 
   private async doClick(action: DriverAction): Promise<DriverResult> {
-    const page = this.page;
+    const page = this.getLivePage();
     if (!page) return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'click before any goto');
     if (!action.selector) {
       return driverError(DRIVER_ERRORS.SELECTOR_MISSING, 'click requires selector');
@@ -248,7 +249,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   }
 
   private async doType(action: DriverAction): Promise<DriverResult> {
-    const page = this.page;
+    const page = this.getLivePage();
     if (!page) return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'type before any goto');
     if (!action.selector) {
       return driverError(DRIVER_ERRORS.SELECTOR_MISSING, 'type requires selector');
@@ -294,7 +295,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
    * selector problem and matches how a human submits the form.
    */
   private async doKey(action: DriverAction): Promise<DriverResult> {
-    const page = this.page;
+    const page = this.getLivePage();
     if (!page) return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'key before any goto');
     const key = typeof action.payload?.key === 'string' ? action.payload.key : null;
     if (!key) return driverError(DRIVER_ERRORS.PAYLOAD_MISSING, 'key requires payload.key');
@@ -326,7 +327,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   }
 
   private async doExtract(action: DriverAction): Promise<DriverResult> {
-    const page = this.page;
+    const page = this.getLivePage();
     if (!page) return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'extract before any goto');
 
     // Mode: selector-scoped innerText vs page-wide title/URL.
@@ -371,7 +372,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   }
 
   private async doEval(action: DriverAction): Promise<DriverResult> {
-    const page = this.page;
+    const page = this.getLivePage();
     if (!page) return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'eval before any goto');
     const expression =
       typeof action.payload?.expression === 'string' ? action.payload.expression : null;
@@ -393,7 +394,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   }
 
   private async doScreenshot(_action: DriverAction): Promise<DriverResult> {
-    const page = this.page;
+    const page = this.getLivePage();
     if (!page) return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'screenshot before any goto');
     // Capture via CDP. CDP is focus-independent — works when the user
     // has switched to another window, minimized Chrome, or locked the
@@ -529,7 +530,8 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   }
 
   private async ensurePage(initialUrl?: string): Promise<Page> {
-    if (this.page) return this.page;
+    const livePage = this.getLivePage();
+    if (livePage) return livePage;
     const app = await this.ensureApp();
     if (this.opts.attachToTabId !== null) {
       this.page = await app.attach(this.opts.attachToTabId);
@@ -539,6 +541,22 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
       this.tabId = this.opts.attachToTabId;
     } else {
       this.page = await app.newPage({ url: initialUrl ?? 'about:blank', active: true });
+    }
+    return this.page;
+  }
+
+  private getLivePage(): Page | null {
+    if (!this.page) return null;
+    try {
+      if (this.page.isClosed()) {
+        this.page = null;
+        this.tabId = null;
+        return null;
+      }
+    } catch {
+      this.page = null;
+      this.tabId = null;
+      return null;
     }
     return this.page;
   }
