@@ -1102,7 +1102,7 @@ async function resetAuthFailureState(): Promise<void> {
  * Phase 18b — full auth reset. Wipes EVERY auth-related storage
  * key (token + user + failure counter + bad-token marker) and
  * pulls down any live socket. Called from:
- *   - the popup "重置连接" button (user-initiated, frozen state)
+ *   - the popup hard-reset fallback (user-initiated, frozen state)
  *   - `chrome.runtime.onInstalled` on a clean install. Developer
  *     reloads and extension updates should keep the token/user cache;
  *     they only clear the auth failure bookkeeping.
@@ -1585,8 +1585,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg?.type === 'holaday.connect' && typeof msg.token === 'string') {
-    connect(msg.token);
-    safeSendResponse(sendResponse, { ok: true });
+    // Popup mount is an explicit user-visible recovery surface. Clear
+    // only the network reconnect cap here: auth-failure bookkeeping is
+    // left intact unless the user presses "重试连接", so a known bad token
+    // does not get an endless retry loop.
+    void (async () => {
+      try {
+        await resetWsReconnectAttempts();
+        connect(msg.token);
+        safeSendResponse(sendResponse, { ok: true });
+      } catch (err) {
+        console.warn('[holaday] connect message failed', err);
+        safeSendResponse(sendResponse, { ok: false, reason: 'internal_error' });
+      }
+    })();
     return true;
   }
   if (msg?.type === 'holaday.disconnect') {
@@ -1607,7 +1619,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg?.type === 'holaday.resetConnection') {
-    // Phase 18b — popup "重置连接" button. Hard reset of every
+    // Phase 18b — popup hard-reset fallback. Hard reset of every
     // auth-related storage key + live socket, then immediately
     // tries auto-login from the current holaday.ai tab. Unlike
     // tryAutoLogin (which is the soft thaw — keep the token,

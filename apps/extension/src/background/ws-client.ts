@@ -402,9 +402,8 @@ function getNextWsEndpointIndex(): number {
  *
  * Fix: persist the attempt count to `chrome.storage.local` so the cap
  * survives SW recycles. After 3 consecutive failures the SW stops
- * trying entirely; the user has to either open the popup (which
- * clears the counter via `resetWsReconnectAttempts`) or wait for an
- * explicit "重置连接" action to nudge it back to life.
+ * trying entirely; the user has to open the popup or click its
+ * explicit "重试连接" action to nudge it back to life.
  *
  * Layered ON TOP of the auth-failure circuit breaker in
  * background/index.ts. The auth path covers 4401-loop scenarios;
@@ -544,7 +543,7 @@ export async function isReconnectCapped(): Promise<boolean> {
  * Clear the persistent + in-memory reconnect counter so the next
  * connect attempt starts fresh. Called by:
  *   - Successful open (in-line — the WS handshake just worked)
- *   - The popup "重置连接" / "重试" buttons via background/index.ts
+ *   - Popup mount / "重试连接" via background/index.ts
  *   - chrome.runtime.onStartup (a fresh browser session shouldn't
  *     inherit a stale cap from a previous Chrome instance)
  */
