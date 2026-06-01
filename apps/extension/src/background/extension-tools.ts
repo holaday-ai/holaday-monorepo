@@ -62,7 +62,7 @@ type ExtensionToolResultMessage = Extract<ClientMessage, { type: 'client.extensi
 
 const recentToolCallResults = new Map<
   string,
-  { at: number; payload: ExtensionToolResultPayload }
+  { at: number; ownerToken: string | null; payload: ExtensionToolResultPayload }
 >();
 
 function toolCallDedupeKey(taskId: string, requestId: string): string {
@@ -487,7 +487,7 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
       requestId,
       kind,
     });
-    sendExtensionToolResult(taskId, requestId, cached.payload, ownerToken);
+    sendExtensionToolResult(taskId, requestId, cached.payload, cached.ownerToken);
     return;
   }
   if (cached) recentToolCallResults.delete(dedupeKey);
@@ -515,7 +515,7 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
   const finish = (payload: ExtensionToolResultPayload): void => {
     if (settled) return;
     settled = true;
-    rememberRecentToolCallResult(dedupeKey, payload);
+    rememberRecentToolCallResult(dedupeKey, payload, ownerToken);
     sendExtensionToolResult(taskId, requestId, payload, ownerToken);
   };
 
@@ -574,9 +574,10 @@ function sendExtensionToolResult(
 function rememberRecentToolCallResult(
   dedupeKey: string,
   payload: ExtensionToolResultPayload,
+  ownerToken: string | null,
 ): void {
   const now = Date.now();
-  recentToolCallResults.set(dedupeKey, { at: now, payload });
+  recentToolCallResults.set(dedupeKey, { at: now, ownerToken, payload });
   for (const [key, value] of recentToolCallResults) {
     if (now - value.at > RECENT_TOOL_RESULT_TTL_MS) recentToolCallResults.delete(key);
   }

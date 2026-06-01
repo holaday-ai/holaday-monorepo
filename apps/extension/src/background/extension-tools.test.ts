@@ -519,6 +519,43 @@ describe('handleExtensionToolCall', () => {
     });
   });
 
+  it('does not replay a cached tool result after the websocket token switches', async () => {
+    vi.mocked(send).mockClear();
+    vi.mocked(getCurrentWsToken).mockReturnValue('token-a');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const captureVisibleTab = vi.fn(async () => 'data:image/jpeg;base64,AA==');
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, windowId: 1, url: 'https://holaday.ai/app' }]),
+        captureVisibleTab,
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_replay_token_switch',
+      requestId: 'req_replay_token_switch',
+      kind: 'screenshot',
+      args: {},
+      timeoutMs: 30_000,
+    };
+
+    await handleExtensionToolCall(call);
+    vi.mocked(getCurrentWsToken).mockReturnValue('token-b');
+    await handleExtensionToolCall(call);
+
+    expect(captureVisibleTab).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[holaday] extension tool result send cancelled after token change',
+      expect.objectContaining({
+        taskId: 'tsk_replay_token_switch',
+        requestId: 'req_replay_token_switch',
+        attempt: 0,
+      }),
+    );
+  });
+
   it('does not treat the same request id on another task as a duplicate', async () => {
     vi.mocked(send).mockClear();
     const captureVisibleTab = vi
