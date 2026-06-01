@@ -130,6 +130,37 @@ describe('executeCdpAction', () => {
     );
   });
 
+  it('reattaches before clicking when viewport probing resets the debugger session', async () => {
+    const attach = vi.fn(async () => undefined);
+    const detach = vi.fn(async () => undefined);
+    const sendCommand = vi.fn(async (_target, method: string) => {
+      if (method === 'Runtime.evaluate') {
+        throw new Error('CDP Runtime.evaluate timeout 500ms');
+      }
+      return {};
+    });
+    globalThis.chrome = {
+      debugger: {
+        attach,
+        detach,
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    await expect(executeCdpAction(7, { kind: 'click', x: 10, y: 20 })).resolves.toEqual({
+      ok: true,
+      message: 'clicked left @ (10,20)',
+    });
+    expect(detach).toHaveBeenCalledWith({ tabId: 7 });
+    expect(attach).toHaveBeenCalledTimes(2);
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      2,
+      { tabId: 7 },
+      'Input.dispatchMouseEvent',
+      expect.objectContaining({ type: 'mousePressed' }),
+    );
+  });
+
   it('waits for an in-flight debugger attach before detaching during teardown', async () => {
     let resolveAttach: () => void = () => {
       throw new Error('attach promise was not created');

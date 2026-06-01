@@ -258,6 +258,7 @@ async function doClick(
       message: `点击坐标超出可视区域 (${Math.round(action.x)},${Math.round(action.y)}) / ${viewport.width}x${viewport.height}，请重新定位`,
     };
   }
+  await ensureAttached(tabId);
   const button = action.button ?? 'left';
   // Press then release. CDP's mouseMoved first is unnecessary for a
   // single click — Input.dispatchMouseEvent with `type: 'mousePressed'`
