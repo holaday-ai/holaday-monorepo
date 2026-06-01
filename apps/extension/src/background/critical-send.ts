@@ -9,6 +9,13 @@ export function sendCriticalClientMessage(
   options: { ownerToken?: string | null } = {},
 ): boolean {
   const ownerToken = options.ownerToken ?? getCurrentWsToken();
+  if (isOwnerTokenChanged(ownerToken)) {
+    console.warn(`[holaday] ${label} send cancelled after token change`, {
+      ...criticalMessageLogMeta(message),
+      attempt: 0,
+    });
+    return false;
+  }
   const sent = send(message);
   if (!sent) {
     console.warn(`[holaday] ${label} send failed`, criticalMessageLogMeta(message));
@@ -29,8 +36,7 @@ function scheduleCriticalClientMessageRetry(
     return;
   }
   setTimeout(() => {
-    const currentToken = getCurrentWsToken();
-    if (ownerToken && currentToken && currentToken !== ownerToken) {
+    if (isOwnerTokenChanged(ownerToken)) {
       console.warn(`[holaday] ${label} retry cancelled after token change`, {
         ...criticalMessageLogMeta(message),
         attempt: attemptIndex + 1,
@@ -40,6 +46,11 @@ function scheduleCriticalClientMessageRetry(
     if (send(message)) return;
     scheduleCriticalClientMessageRetry(message, label, attemptIndex + 1, ownerToken);
   }, delay);
+}
+
+function isOwnerTokenChanged(ownerToken: string | null): boolean {
+  const currentToken = getCurrentWsToken();
+  return Boolean(ownerToken && currentToken && currentToken !== ownerToken);
 }
 
 function criticalMessageLogMeta(message: ClientMessage): Record<string, unknown> {

@@ -110,6 +110,33 @@ describe('sendCriticalClientMessage', () => {
     );
   });
 
+  it('does not send the first critical message when an explicit owner token is already stale', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    wsMock.currentToken = 'token-b';
+    vi.mocked(send).mockReturnValue(true);
+
+    const message = {
+      type: 'client.vision.acted',
+      taskId: 'tsk_stale_vision',
+      tickIndex: 4,
+      ok: true,
+    } as const;
+
+    expect(
+      sendCriticalClientMessage(message, 'vision action', { ownerToken: 'token-a' }),
+    ).toBe(false);
+
+    expect(send).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      '[holaday] vision action send cancelled after token change',
+      expect.objectContaining({
+        taskId: 'tsk_stale_vision',
+        tickIndex: 4,
+        attempt: 0,
+      }),
+    );
+  });
+
   it('uses an explicit owner token when the websocket is already disconnected', async () => {
     vi.useFakeTimers();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
