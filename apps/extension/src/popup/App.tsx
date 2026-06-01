@@ -313,6 +313,7 @@ export function App() {
       const response = await sendRuntimeMessageWithRetry<{ ok?: boolean; token?: string | null }>({
         type: 'holaday.resetConnection',
       });
+      if (response === null) return;
       const resetToken = response?.token ?? null;
       if (resetToken) {
         const result = await fetchMe(resetToken);
