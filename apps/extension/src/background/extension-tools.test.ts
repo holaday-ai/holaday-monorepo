@@ -719,6 +719,60 @@ describe('handleExtensionToolCall', () => {
     expect(focusWindow).toHaveBeenCalledWith(9, { focused: true });
   });
 
+  it('restores a minimized target window before navigating', async () => {
+    vi.mocked(send).mockClear();
+    const update = vi.fn(async () => ({ id: 2, url: 'https://example.com/' }) as chrome.tabs.Tab);
+    const focusWindow = vi.fn(async () => ({}));
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [
+          { id: 2, active: true, windowId: 9, url: 'https://holaday.ai/app' },
+        ]),
+        update,
+        get: vi.fn(async () => ({
+          id: 2,
+          status: 'complete',
+          url: 'https://example.com/',
+          title: 'Example',
+        })),
+        onUpdated: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+        onRemoved: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+      },
+      scripting: {
+        executeScript: vi.fn(async () => [{ result: 'hello' }]),
+      },
+      windows: {
+        get: vi.fn(async () => ({ id: 9, state: 'minimized' }) as chrome.windows.Window),
+        update: focusWindow,
+      },
+    } as unknown as typeof chrome;
+
+    await handleExtensionToolCall({
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_minimized_nav',
+      requestId: 'req_minimized_nav',
+      kind: 'navigate',
+      args: { url: 'https://example.com/', waitMs: 0 },
+      timeoutMs: 30_000,
+    });
+
+    expect(focusWindow).toHaveBeenCalledWith(9, { focused: true, state: 'normal' });
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'client.extension.tool_result',
+        taskId: 'tsk_minimized_nav',
+        requestId: 'req_minimized_nav',
+        ok: true,
+      }),
+    );
+  });
+
   it('returns the navigated page metadata when body text extraction hangs', async () => {
     vi.useFakeTimers();
     vi.mocked(send).mockClear();

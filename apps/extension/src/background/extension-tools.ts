@@ -442,8 +442,23 @@ async function executeScreenshot(): Promise<ScreenshotResult> {
 async function focusTabWindow(tab: chrome.tabs.Tab): Promise<void> {
   if (typeof tab.windowId !== 'number' || !chrome.windows?.update) return;
   try {
+    const updateInfo: chrome.windows.UpdateInfo = { focused: true };
+    if (chrome.windows.get) {
+      try {
+        const win = await withDeadline(
+          chrome.windows.get(tab.windowId),
+          TAB_UPDATE_TIMEOUT_MS,
+          'extension_tool_timeout',
+        );
+        if (win?.state === 'minimized') {
+          updateInfo.state = 'normal';
+        }
+      } catch {
+        // Focus is still useful if Chrome can't report window state.
+      }
+    }
     await withDeadline(
-      chrome.windows.update(tab.windowId, { focused: true }),
+      chrome.windows.update(tab.windowId, updateInfo),
       TAB_UPDATE_TIMEOUT_MS,
       'extension_tool_timeout',
     );

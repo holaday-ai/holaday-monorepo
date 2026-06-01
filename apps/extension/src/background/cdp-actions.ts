@@ -787,8 +787,23 @@ async function activateTabForCdpIfNeeded(tab: chrome.tabs.Tab): Promise<void> {
   }
   if (typeof tab.windowId === 'number' && chrome.windows?.update) {
     try {
+      const updateInfo: chrome.windows.UpdateInfo = { focused: true };
+      if (chrome.windows.get) {
+        try {
+          const win = await withDeadline(
+            chrome.windows.get(tab.windowId),
+            TAB_METADATA_TIMEOUT_MS,
+            'active_window_get_timeout',
+          );
+          if (win?.state === 'minimized') {
+            updateInfo.state = 'normal';
+          }
+        } catch {
+          // Focus below is still the useful best-effort action.
+        }
+      }
       await withDeadline(
-        chrome.windows.update(tab.windowId, { focused: true }),
+        chrome.windows.update(tab.windowId, updateInfo),
         TAB_METADATA_TIMEOUT_MS,
         'active_window_update_timeout',
       );
