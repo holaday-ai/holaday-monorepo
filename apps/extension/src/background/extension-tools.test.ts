@@ -703,6 +703,61 @@ describe('handleExtensionToolCall', () => {
     );
   });
 
+  it('returns Chrome error page metadata without misclassifying it as a permission error', async () => {
+    vi.mocked(send).mockClear();
+    const update = vi.fn(async () => ({ id: 2, url: 'https://missing.example/' }) as chrome.tabs.Tab);
+    const executeScript = vi.fn(async () => {
+      throw new Error('Cannot access contents of url "chrome-error://chromewebdata/".');
+    });
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, url: 'https://holaday.ai/app' }]),
+        update,
+        get: vi.fn(async () => ({
+          id: 2,
+          status: 'complete',
+          url: 'chrome-error://chromewebdata/',
+          title: 'This site cannot be reached',
+        })),
+        onUpdated: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+        onRemoved: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+      },
+      scripting: { executeScript },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_chrome_error_nav',
+      requestId: 'req_chrome_error_nav',
+      kind: 'navigate',
+      args: { url: 'https://missing.example/', waitMs: 0 },
+      timeoutMs: 30_000,
+    };
+
+    await handleExtensionToolCall(call);
+
+    expect(executeScript).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'client.extension.tool_result',
+        taskId: 'tsk_chrome_error_nav',
+        requestId: 'req_chrome_error_nav',
+        ok: true,
+        result: {
+          finalUrl: 'chrome-error://chromewebdata/',
+          title: 'This site cannot be reached',
+          bodyText: 'Chrome error page: This site cannot be reached',
+        },
+      }),
+    );
+  });
+
   it('caps navigate settle wait to the tool call budget', async () => {
     vi.useFakeTimers();
     vi.mocked(send).mockClear();

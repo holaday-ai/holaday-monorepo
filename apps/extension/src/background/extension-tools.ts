@@ -304,6 +304,13 @@ async function executeNavigate(
   );
   const finalUrl = reloaded.url ?? url;
   const title = reloaded.title ?? '';
+  if (isChromeErrorPageUrl(finalUrl)) {
+    return {
+      finalUrl,
+      title,
+      bodyText: title ? `Chrome error page: ${title}` : 'Chrome error page',
+    };
+  }
   let rawText = '';
   try {
     rawText = await readBodyText(tab.id);
@@ -315,6 +322,10 @@ async function executeNavigate(
     }
   }
   return { finalUrl, title, bodyText: rawText };
+}
+
+function isChromeErrorPageUrl(url: string): boolean {
+  return url.toLowerCase().startsWith('chrome-error://');
 }
 
 async function readBodyText(tabId: number): Promise<string> {
