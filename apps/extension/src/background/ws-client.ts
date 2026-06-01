@@ -567,7 +567,7 @@ function scheduleReconnect(token: string): void {
   if (state.reconnectAttempt > MAX_NETWORK_RECONNECTS) {
     state.nextRetryAt = null;
     console.warn(
-      `[holaday] ws: ${MAX_NETWORK_RECONNECTS} reconnects failed, pausing until user action (popup open or 重置连接)`,
+      `[holaday] ws: ${MAX_NETWORK_RECONNECTS} reconnects failed, pausing until user action (popup open or 重试连接)`,
     );
     return;
   }

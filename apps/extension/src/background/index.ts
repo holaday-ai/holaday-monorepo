@@ -1487,7 +1487,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // Phase 25 — same cap-aware gate as the alarm. If the persistent
 // counter says 3 attempts already failed in earlier SW lives, this
 // boot stays silent too. chrome.runtime.onStartup clears the cap on
-// a fresh browser launch (handler below), and the popup's "重置连接"
+// a fresh browser launch (handler below), and the popup's "重试连接"
 // nudge clears it for an already-running browser.
 void (async () => {
   if (await isReconnectCapped()) return;
