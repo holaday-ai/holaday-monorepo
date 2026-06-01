@@ -16,6 +16,13 @@ describe('tryAutoLogin', () => {
     expect(_internals.isWorkbenchUrl('https://example.com/holaday.ai')).toBe(false);
   });
 
+  it('recognizes local dev workbench urls without requiring a path slash', () => {
+    expect(_internals.isWorkbenchUrl('http://localhost:5173')).toBe(true);
+    expect(_internals.isWorkbenchUrl('http://127.0.0.1:4173?dev=1')).toBe(true);
+    expect(_internals.isWorkbenchUrl('http://[::1]:5173/#/app')).toBe(true);
+    expect(_internals.isWorkbenchUrl('http://127.evil.com/')).toBe(false);
+  });
+
   it('skips malformed localStorage tokens while scanning workbench tabs', async () => {
     const executeScript = vi
       .fn()
