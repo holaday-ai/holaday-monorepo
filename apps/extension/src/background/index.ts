@@ -243,7 +243,10 @@ type VisionActResultPayload = Omit<
 
 const VISION_ACT_RESULT_TTL_MS = 60_000;
 const MAX_RECENT_VISION_ACT_RESULTS = 100;
-const inFlightVisionActResults = new Map<string, Promise<VisionActResultPayload>>();
+const inFlightVisionActResults = new Map<
+  string,
+  { ownerToken: string | null; promise: Promise<VisionActResultPayload> }
+>();
 const recentVisionActResults = new Map<
   string,
   { at: number; ownerToken: string | null; payload: VisionActResultPayload }
@@ -441,7 +444,7 @@ async function onVisionAct(
   if (cached) recentVisionActResults.delete(dedupeKey);
   const pending = inFlightVisionActResults.get(dedupeKey);
   if (pending) {
-    sendVisionActed(msg, await pending, ownerToken);
+    sendVisionActed(msg, await pending.promise, pending.ownerToken);
     return;
   }
   const next = computeVisionActResult(msg)
@@ -456,7 +459,7 @@ async function onVisionAct(
     .finally(() => {
       inFlightVisionActResults.delete(dedupeKey);
     });
-  inFlightVisionActResults.set(dedupeKey, next);
+  inFlightVisionActResults.set(dedupeKey, { ownerToken, promise: next });
   sendVisionActed(msg, await next, ownerToken);
 }
 
