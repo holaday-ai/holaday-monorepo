@@ -511,7 +511,7 @@ export async function isReconnectCapped(): Promise<boolean> {
       'ws_reconnect_cap_read_timeout',
     );
     const v = out[WS_RECONNECT_KEY];
-    return typeof v === 'number' && v >= MAX_NETWORK_RECONNECTS;
+    return typeof v === 'number' && v > MAX_NETWORK_RECONNECTS;
   } catch {
     return false;
   }

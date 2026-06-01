@@ -295,6 +295,28 @@ describe('ws-client send', () => {
     await expect(pending).resolves.toBe(false);
   });
 
+  it('reports capped only after the final scheduled retry fails', async () => {
+    const get = chrome.storage.local.get as unknown as ReturnType<typeof vi.fn>;
+    get.mockImplementation(async (key: string) => {
+      if (key === 'holaday.ws.reconnectAttempts') {
+        return { [key]: 3 };
+      }
+      return {};
+    });
+    const { isReconnectCapped } = await import('./ws-client.js');
+
+    await expect(isReconnectCapped()).resolves.toBe(false);
+
+    get.mockImplementation(async (key: string) => {
+      if (key === 'holaday.ws.reconnectAttempts') {
+        return { [key]: 4 };
+      }
+      return {};
+    });
+
+    await expect(isReconnectCapped()).resolves.toBe(true);
+  });
+
   it('ignores late error events from a stale socket after token swap', async () => {
     const { connect, reconnect, getWsConnectionStatus } = await import('./ws-client.js');
     connect('old-token');
