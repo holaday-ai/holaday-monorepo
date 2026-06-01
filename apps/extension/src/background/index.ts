@@ -52,7 +52,12 @@ import {
   normalizeAccessToken,
   setAccessToken,
 } from '../shared/storage.js';
-import { captureVisionObservation, executeCdpAction, getActiveTabId } from './cdp-actions.js';
+import {
+  captureVisionObservation,
+  detachAll,
+  executeCdpAction,
+  getActiveTabId,
+} from './cdp-actions.js';
 import { buildLoginStatesMessage, readLoginStates } from './cookie-bridge.js';
 import { runCookieSync } from './cookie-sync.js';
 import { runHistorySync } from './history-sync.js';
@@ -403,6 +408,7 @@ function onTaskTerminal(msg: Extract<ServerMessage, { type: 'server.task.termina
   // Also fire a vision.progress event so the popup's existing
   // listener (which un-sticks the Run button) sees the final state.
   pushVisionProgress(msg.taskId, phase, { detail });
+  releaseVisionDebugger(msg.taskId);
 }
 
 /**
@@ -545,6 +551,7 @@ async function computeVisionActResult(
     const finalStatus: 'completed' | 'failed' = msg.action.kind === 'done' ? 'completed' : 'failed';
     const detail = msg.action.kind === 'done' ? msg.action.summary : msg.action.reason;
     finaliseVisionTask(msg.taskId, finalStatus, detail);
+    releaseVisionDebugger(msg.taskId);
     return {
       ok: true,
       message: `${msg.action.kind} terminal; no driver work`,
@@ -688,6 +695,12 @@ function finaliseVisionTask(taskId: string, status: 'completed' | 'failed', deta
   pushTasksSnapshot();
   pushVisionProgress(taskId, status === 'completed' ? 'completed' : 'failed', {
     detail,
+  });
+}
+
+function releaseVisionDebugger(taskId: string): void {
+  void detachAll().catch((err) => {
+    console.warn('[holaday] vision debugger release failed', { taskId, err });
   });
 }
 
