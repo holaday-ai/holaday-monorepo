@@ -172,7 +172,7 @@ describe('getActivePageContext', () => {
 
     const pending = getActivePageContext();
     await vi.advanceTimersByTimeAsync(0);
-    expect(query).toHaveBeenCalledTimes(3);
+    expect(query).toHaveBeenCalledTimes(4);
     await vi.advanceTimersByTimeAsync(1_500);
 
     await expect(pending).resolves.toEqual({
@@ -184,6 +184,49 @@ describe('getActivePageContext', () => {
     });
     expect(query).toHaveBeenNthCalledWith(1, { active: true, currentWindow: true });
     expect(query).toHaveBeenNthCalledWith(2, { active: true, lastFocusedWindow: true });
+  });
+
+  it('falls back to a recent web page when extension chrome owns the active tab', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { id: 9, title: 'Extensions', url: 'chrome://extensions/', lastAccessed: 5000 } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([
+        { id: 9, title: 'Extensions', url: 'chrome://extensions/', lastAccessed: 5000 } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([
+        { id: 9, title: 'Extensions', url: 'chrome://extensions/', lastAccessed: 5000 } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([
+        { id: 9, title: 'Extensions', url: 'chrome://extensions/', lastAccessed: 5000 } as chrome.tabs.Tab,
+        { id: 10, title: 'Older', url: 'https://older.example/', lastAccessed: 1000 } as chrome.tabs.Tab,
+        { id: 11, title: 'Newer', url: 'https://newer.example/', lastAccessed: 4000 } as chrome.tabs.Tab,
+      ]);
+    globalThis.chrome = {
+      tabs: { query },
+      scripting: {
+        executeScript: vi.fn(async () => [
+          {
+            result: {
+              title: 'Newer extracted',
+              url: 'https://newer.example/',
+              selectedText: '',
+              metaDescription: '',
+            },
+          },
+        ]),
+      },
+    } as unknown as typeof chrome;
+
+    await expect(getActivePageContext()).resolves.toEqual({
+      tabId: 11,
+      title: 'Newer extracted',
+      url: 'https://newer.example/',
+      selectedText: '',
+      metaDescription: '',
+    });
+    expect(query).toHaveBeenNthCalledWith(4, { windowType: 'normal' });
   });
 
   it('returns tab metadata when page injection hangs', async () => {
