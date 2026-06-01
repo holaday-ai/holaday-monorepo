@@ -285,6 +285,7 @@ async function executeNavigate(
     throw new Error('no_active_tab');
   }
   const previousUrl = tab.url;
+  await focusTabWindow(tab);
   await withDeadline(
     chrome.tabs.update(tab.id, { active: true, url }),
     TAB_UPDATE_TIMEOUT_MS,
@@ -420,6 +421,7 @@ async function executeScreenshot(): Promise<ScreenshotResult> {
       'extension_tool_timeout',
     );
   }
+  await focusTabWindow(tab);
   let lastError: unknown = null;
   for (const quality of SCREENSHOT_CAPTURE_QUALITIES) {
     const dataUrl = await withDeadline(
@@ -435,6 +437,19 @@ async function executeScreenshot(): Promise<ScreenshotResult> {
     }
   }
   throw lastError ?? new Error('screenshot_too_large');
+}
+
+async function focusTabWindow(tab: chrome.tabs.Tab): Promise<void> {
+  if (typeof tab.windowId !== 'number' || !chrome.windows?.update) return;
+  try {
+    await withDeadline(
+      chrome.windows.update(tab.windowId, { focused: true }),
+      TAB_UPDATE_TIMEOUT_MS,
+      'extension_tool_timeout',
+    );
+  } catch (err) {
+    console.warn('[holaday] extension tool window focus unavailable', err);
+  }
 }
 
 function isScreenshotTooLargeError(err: unknown): boolean {

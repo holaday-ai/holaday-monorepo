@@ -676,9 +676,12 @@ describe('handleExtensionToolCall', () => {
   it('activates the selected tab before navigating a fallback page', async () => {
     vi.mocked(send).mockClear();
     const update = vi.fn(async () => ({ id: 2, url: 'https://example.com/' }) as chrome.tabs.Tab);
+    const focusWindow = vi.fn(async () => ({}));
     globalThis.chrome = {
       tabs: {
-        query: vi.fn(async () => [{ id: 2, active: false, url: 'https://holaday.ai/app' }]),
+        query: vi.fn(async () => [
+          { id: 2, active: false, windowId: 9, url: 'https://holaday.ai/app' },
+        ]),
         update,
         get: vi.fn(async () => ({
           id: 2,
@@ -698,6 +701,7 @@ describe('handleExtensionToolCall', () => {
       scripting: {
         executeScript: vi.fn(async () => [{ result: 'hello' }]),
       },
+      windows: { update: focusWindow },
     } as unknown as typeof chrome;
 
     const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
@@ -712,6 +716,7 @@ describe('handleExtensionToolCall', () => {
     await handleExtensionToolCall(call);
 
     expect(update).toHaveBeenCalledWith(2, { active: true, url: 'https://example.com/' });
+    expect(focusWindow).toHaveBeenCalledWith(9, { focused: true });
   });
 
   it('returns the navigated page metadata when body text extraction hangs', async () => {
@@ -1074,6 +1079,7 @@ describe('handleExtensionToolCall', () => {
   it('activates a fallback tab before capturing its screenshot', async () => {
     vi.mocked(send).mockClear();
     const update = vi.fn(async () => ({ id: 2, active: true }) as chrome.tabs.Tab);
+    const focusWindow = vi.fn(async () => ({}));
     const captureVisibleTab = vi.fn(async () => 'data:image/jpeg;base64,AA==');
     globalThis.chrome = {
       tabs: {
@@ -1083,6 +1089,7 @@ describe('handleExtensionToolCall', () => {
         update,
         captureVisibleTab,
       },
+      windows: { update: focusWindow },
     } as unknown as typeof chrome;
 
     const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
@@ -1097,6 +1104,7 @@ describe('handleExtensionToolCall', () => {
     await handleExtensionToolCall(call);
 
     expect(update).toHaveBeenCalledWith(2, { active: true });
+    expect(focusWindow).toHaveBeenCalledWith(1, { focused: true });
     expect(captureVisibleTab).toHaveBeenCalledWith(1, {
       format: 'jpeg',
       quality: 50,
