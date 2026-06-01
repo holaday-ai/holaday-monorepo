@@ -24,7 +24,7 @@
  *     network errors — see Phase 25b commit 1b56faa).
  *   - storage.onChanged listener: re-renders when the auth-bridge
  *     content script (on a workbench tab) pushes a token change.
- *   - resetConnection escape hatch retained (popup's "重置连接" link).
+ *   - retryConnection escape hatch retained (popup's "重试连接" link).
  *
  * Visual:
  *   - HOLA DAY magenta #E50B6B for plan badge + toggle accent + CTA
@@ -324,12 +324,12 @@ export function App() {
     return () => chrome.storage.onChanged.removeListener(listener);
   }, []);
 
-  async function resetConnection(): Promise<void> {
+  async function retryConnection(): Promise<void> {
     if (resetting) return;
     setResetting(true);
     try {
       const response = await sendRuntimeMessageWithRetry<{ ok?: boolean; token?: string | null }>({
-        type: 'holaday.resetConnection',
+        type: user ? 'holaday.tryAutoLogin' : 'holaday.resetConnection',
       });
       if (response === null) return;
       const resetToken = response?.token ?? null;
@@ -346,15 +346,19 @@ export function App() {
         if (result.kind === 'unauthorized') {
           await clearAccessToken();
           await clearStoredUser();
+          if (!mountedRef.current) return;
+          setUser(null);
+          setToken(null);
         }
+        return;
       }
-      if (!response?.ok) {
+      if (!response?.ok && !user) {
         await clearAccessToken();
         await clearStoredUser();
+        if (!mountedRef.current) return;
+        setUser(null);
+        setToken(null);
       }
-      if (!mountedRef.current) return;
-      setUser(null);
-      setToken(null);
     } finally {
       if (mountedRef.current) setResetting(false);
     }
@@ -375,7 +379,7 @@ export function App() {
   }
 
   if (!user) {
-    return <LoggedOutView theme={t} onLogin={openWebLogin} onReset={resetConnection} resetting={resetting} />;
+    return <LoggedOutView theme={t} onLogin={openWebLogin} onReset={retryConnection} resetting={resetting} />;
   }
 
   return (
@@ -383,7 +387,7 @@ export function App() {
       <UserCard user={user} theme={t} />
       <ConnectionStatusBlock theme={t} />
       <BrowsingStatusBlock theme={t} />
-      <BottomBar theme={t} onOpenWeb={openWebLogin} onReset={resetConnection} resetting={resetting} />
+      <BottomBar theme={t} onOpenWeb={openWebLogin} onReset={retryConnection} resetting={resetting} />
     </div>
   );
 }
@@ -568,7 +572,7 @@ function getConnectionStatusCopy(status: ExtensionStatusResponse | null): {
   if (status.ws.reconnectCapped) {
     return {
       title: '浏览器代理连接已暂停',
-      detail: '多次重连失败，点击底部“重置连接”后会重新尝试',
+      detail: '多次重连失败，点击底部“重试连接”后会重新尝试',
     };
   }
   if (status.ws.reconnectAttempt > 0) {
@@ -793,9 +797,9 @@ function BottomBar({
           onClick={onReset}
           disabled={resetting}
           style={secondaryBtn(theme)}
-          title="清除扩展存储的登录态，重新同步网页 token"
+          title="重新尝试连接并同步网页登录态"
         >
-          {resetting ? '重置中…' : '重置连接'}
+          {resetting ? '重试中…' : '重试连接'}
         </button>
       </div>
       <span style={{ fontSize: 11, color: theme.textMuted }}>v{version}</span>
