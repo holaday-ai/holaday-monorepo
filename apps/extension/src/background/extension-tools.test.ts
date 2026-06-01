@@ -483,7 +483,7 @@ describe('getActiveTabForExtensionTool', () => {
 });
 
 describe('handleExtensionToolCall', () => {
-  it('replays duplicate in-flight request ids without executing twice', async () => {
+  it('joins duplicate in-flight request ids without executing or sending twice', async () => {
     vi.mocked(send).mockClear();
     let resolveUpdate: () => void = () => {
       throw new Error('update promise was not created');
@@ -530,8 +530,8 @@ describe('handleExtensionToolCall', () => {
     resolveUpdate();
     await Promise.all([first, duplicate]);
 
-    expect(send).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(send).mock.calls[1]?.[0]).toMatchObject({
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(send).mock.calls[0]?.[0]).toMatchObject({
       type: 'client.extension.tool_result',
       taskId: 'tsk_duplicate_tool_call',
       requestId: 'req_duplicate_tool_call',

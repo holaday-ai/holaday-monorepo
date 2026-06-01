@@ -560,7 +560,7 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
       requestId,
       kind,
     });
-    sendExtensionToolResult(taskId, requestId, await pending.promise, pending.ownerToken);
+    await pending.promise;
     return;
   }
   const callTimeoutMs = Math.max(1000, Math.min(60_000, call.timeoutMs ?? 30_000));
