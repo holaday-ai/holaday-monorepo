@@ -728,7 +728,10 @@ export async function getActiveTabId(
       !/^(chrome|chrome-extension|chrome-error|edge|about|devtools|view-source|file):/i.test(url)
     );
   });
-  return webTab?.id ?? nonInternalTab?.id ?? null;
+  const tab = webTab ?? nonInternalTab;
+  if (!tab || typeof tab.id !== 'number') return null;
+  await activateTabForCdpIfNeeded(tab);
+  return tab.id;
 }
 
 function pickBestActiveTabCandidate(
@@ -739,6 +742,20 @@ function pickBestActiveTabCandidate(
     .filter(({ tab }) => predicate(tab))
     .sort(compareActiveTabCandidates);
   return best?.tab ?? null;
+}
+
+async function activateTabForCdpIfNeeded(tab: chrome.tabs.Tab): Promise<void> {
+  if (tab.active !== false || typeof tab.id !== 'number') return;
+  try {
+    await withDeadline(
+      chrome.tabs.update(tab.id, { active: true }),
+      TAB_METADATA_TIMEOUT_MS,
+      'active_tab_update_timeout',
+    );
+  } catch {
+    // Best effort only: CDP can still operate on the selected tab, but
+    // foregrounding it keeps the user's visible page aligned when possible.
+  }
 }
 
 function compareActiveTabCandidates(

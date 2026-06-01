@@ -759,21 +759,23 @@ describe('getActiveTabId', () => {
   });
 
   it('recovers the most recently accessed web tab when an extension page is active', async () => {
+    const update = vi.fn(async () => ({ id: 13, active: true }) as chrome.tabs.Tab);
     const query = vi
       .fn()
       .mockResolvedValueOnce([{ id: 10, url: 'chrome://extensions/', lastAccessed: 7000 }])
       .mockResolvedValueOnce([{ id: 11, url: 'chrome-extension://abc/src/popup/index.html', lastAccessed: 8000 }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
-        { id: 12, url: 'https://older.example/', lastAccessed: 1000 },
-        { id: 13, url: 'https://newer.example/', lastAccessed: 5000 },
+        { id: 12, url: 'https://older.example/', active: false, lastAccessed: 1000 },
+        { id: 13, url: 'https://newer.example/', active: false, lastAccessed: 5000 },
       ]);
     globalThis.chrome = {
-      tabs: { query },
+      tabs: { query, update },
     } as unknown as typeof chrome;
 
     await expect(getActiveTabId()).resolves.toBe(13);
     expect(query).toHaveBeenNthCalledWith(4, { windowType: 'normal' });
+    expect(update).toHaveBeenCalledWith(13, { active: true });
   });
 
   it('does not return an internal Chrome page when no web tab is active', async () => {
