@@ -182,6 +182,13 @@ export function connect(token: string): void {
  */
 export function reconnect(token: string): void {
   if (!token) throw new Error('reconnect() requires a token');
+  if (
+    state.socket &&
+    state.token === token &&
+    (state.socket.readyState === WebSocket.OPEN || state.socket.readyState === WebSocket.CONNECTING)
+  ) {
+    return;
+  }
   clearReconnectTimer();
   if (state.socket) {
     state.closedByUser = true;

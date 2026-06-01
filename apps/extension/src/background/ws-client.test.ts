@@ -215,6 +215,20 @@ describe('ws-client send', () => {
     expect(sockets[1]?.protocols).toEqual(['holaday.v1', 'jwt.new-token']);
   });
 
+  it('keeps the current socket when reconnect repeats the same token', async () => {
+    const { connect, reconnect } = await import('./ws-client.js');
+    connect('token');
+    const [socket] = sockets;
+    if (!socket) throw new Error('expected websocket');
+    socket.readyState = FakeWebSocket.CONNECTING;
+
+    reconnect('token');
+
+    expect(socket.closeCalls).toEqual([]);
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]?.protocols).toEqual(['holaday.v1', 'jwt.token']);
+  });
+
   it('rotates websocket endpoints after a network reconnect failure', async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);
