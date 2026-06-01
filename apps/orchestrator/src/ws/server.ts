@@ -608,7 +608,14 @@ async function handleClientMessage(
     }
     const previousUserId = state.userId;
     if (previousUserId && previousUserId !== userId) {
+      const settledExtensionCalls = settlePendingExtensionCallsForClient(state.id);
       removeClientForUser(previousUserId, state);
+      if (settledExtensionCalls > 0) {
+        logger.info(
+          { clientId: state.id, previousUserId, userId, settledExtensionCalls },
+          'ws client user changed; settled pending extension calls',
+        );
+      }
     }
     state.userId = userId;
     state.authed = true;

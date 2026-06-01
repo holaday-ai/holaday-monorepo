@@ -194,6 +194,98 @@ describe('extension tool-call websocket lifecycle', () => {
     client.close();
   });
 
+  it('settles old-user tool calls when the extension socket changes token owner', async () => {
+    const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
+    const { signAccessToken } = await import('../auth/jwt.js');
+    const { createWsServer, hasConnectedExtension, sendExtensionToolCall } = await import(
+      './server.js'
+    );
+    const { default: WebSocket } = await import('ws');
+
+    const port = 38231;
+    const server = createWsServer(port);
+    close = async () => {
+      await server.close();
+    };
+
+    const oldUserId = 'usr_extension_old_pending_test';
+    const newUserId = 'usr_extension_new_pending_test';
+    const oldToken = await signAccessToken({ sub: oldUserId, plan: 'free' });
+    const newToken = await signAccessToken({ sub: newUserId, plan: 'free' });
+    const client = new WebSocket(`ws://127.0.0.1:${port}`, WS_SUBPROTOCOL);
+
+    await new Promise<void>((resolve, reject) => {
+      client.once('open', resolve);
+      client.once('error', reject);
+    });
+
+    const nextWelcome = (): Promise<void> =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('no welcome')), 5_000);
+        const onMessage = (raw: RawData) => {
+          const parsed = parseServerMessage(raw.toString());
+          if (parsed.success && parsed.data.type === 'server.welcome') {
+            clearTimeout(timer);
+            client.off('message', onMessage);
+            resolve();
+          }
+        };
+        client.on('message', onMessage);
+      });
+
+    const firstWelcome = nextWelcome();
+    client.send(
+      JSON.stringify({
+        type: 'client.hello',
+        token: oldToken,
+        extensionVersion: 'old-token-test-extension',
+      }),
+    );
+    await firstWelcome;
+    expect(hasConnectedExtension(oldUserId)).toBe(true);
+
+    const toolCallSeen = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('no extension tool call')), 5_000);
+      client.on('message', (raw) => {
+        const parsed = parseServerMessage(raw.toString());
+        if (parsed.success && parsed.data.type === 'server.extension.tool_call') {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+    });
+
+    const outcomePromise = sendExtensionToolCall(oldUserId, {
+      taskId: 'tsk_extension_old_pending_test',
+      kind: 'navigate',
+      args: { url: 'https://example.com/old-user' },
+      timeoutMs: 30_000,
+    });
+    await toolCallSeen;
+
+    const secondWelcome = nextWelcome();
+    client.send(
+      JSON.stringify({
+        type: 'client.hello',
+        token: newToken,
+        extensionVersion: 'new-token-test-extension',
+      }),
+    );
+    await secondWelcome;
+
+    await expect(outcomePromise).resolves.toEqual({
+      ok: false,
+      error: {
+        message: '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试',
+        code: 'socket_closed',
+      },
+    });
+    expect(hasConnectedExtension(oldUserId)).toBe(false);
+    expect(hasConnectedExtension(newUserId)).toBe(true);
+
+    client.close();
+  });
+
   it('ignores tool results from the wrong extension socket or task', async () => {
     const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
     const { signAccessToken } = await import('../auth/jwt.js');
