@@ -459,7 +459,7 @@ async function computeVisionObservationPayload(
   msg: Extract<ServerMessage, { type: 'server.vision.observe' }>,
 ): Promise<VisionObservationPayload> {
   trackVisionTask(msg.taskId, 'observing', { tickIndex: msg.tickIndex });
-  const tabId = await getActiveTabId();
+  const tabId = await getActiveTabId({ allowErrorPage: true });
   if (tabId === null) {
     return {
       screenshotBase64: '',
