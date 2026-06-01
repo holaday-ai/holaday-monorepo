@@ -65,6 +65,7 @@ import {
   connect,
   disconnect,
   getWsConnectionStatus,
+  getCurrentWsToken,
   isConnected,
   isReconnectCapped,
   onServerMessage,
@@ -381,6 +382,7 @@ function onTaskTerminal(msg: Extract<ServerMessage, { type: 'server.task.termina
 async function onVisionObserve(
   msg: Extract<ServerMessage, { type: 'server.vision.observe' }>,
 ): Promise<void> {
+  const ownerToken = getCurrentWsToken();
   trackVisionTask(msg.taskId, 'observing', { tickIndex: msg.tickIndex });
   const tabId = await getActiveTabId();
   if (tabId === null) {
@@ -397,6 +399,7 @@ async function onVisionObserve(
         error: 'no active tab (window may have been backgrounded before task started)',
       },
       'vision observation',
+      { ownerToken },
     );
     return;
   }
@@ -414,6 +417,7 @@ async function onVisionObserve(
       ...(obs.error ? { error: obs.error } : {}),
     },
     'vision observation',
+    { ownerToken },
   );
   // After sending observation → orchestrator is calling Claude next.
   trackVisionTask(msg.taskId, 'deciding', { tickIndex: msg.tickIndex });
@@ -427,16 +431,17 @@ async function onVisionObserve(
 async function onVisionAct(
   msg: Extract<ServerMessage, { type: 'server.vision.act' }>,
 ): Promise<void> {
+  const ownerToken = getCurrentWsToken();
   const dedupeKey = visionActDedupeKey(msg.taskId, msg.tickIndex);
   const cached = recentVisionActResults.get(dedupeKey);
   if (cached && Date.now() - cached.at <= VISION_ACT_RESULT_TTL_MS) {
-    sendVisionActed(msg, cached.payload);
+    sendVisionActed(msg, cached.payload, ownerToken);
     return;
   }
   if (cached) recentVisionActResults.delete(dedupeKey);
   const pending = inFlightVisionActResults.get(dedupeKey);
   if (pending) {
-    sendVisionActed(msg, await pending);
+    sendVisionActed(msg, await pending, ownerToken);
     return;
   }
   const next = computeVisionActResult(msg)
@@ -452,7 +457,7 @@ async function onVisionAct(
       inFlightVisionActResults.delete(dedupeKey);
     });
   inFlightVisionActResults.set(dedupeKey, next);
-  sendVisionActed(msg, await next);
+  sendVisionActed(msg, await next, ownerToken);
 }
 
 async function computeVisionActResult(
@@ -494,6 +499,7 @@ async function computeVisionActResult(
 function sendVisionActed(
   msg: Extract<ServerMessage, { type: 'server.vision.act' }>,
   payload: VisionActResultPayload,
+  ownerToken: string | null,
 ): void {
   sendCriticalClientMessage(
     {
@@ -503,6 +509,7 @@ function sendVisionActed(
       ...payload,
     },
     'vision action',
+    { ownerToken },
   );
 }
 
@@ -645,6 +652,7 @@ function onDispatch(msg: Extract<ServerMessage, { type: 'server.task.dispatch' }
 async function runStep(
   msg: Extract<ServerMessage, { type: 'server.task.dispatch' }>,
 ): Promise<void> {
+  const ownerToken = getCurrentWsToken();
   const action: DriverAction = {
     kind: msg.action.kind,
     ...(msg.action.selector ? { selector: msg.action.selector } : {}),
@@ -682,6 +690,7 @@ async function runStep(
         ...(result.error ? { error: result.error } : {}),
       },
       'step result',
+      { ownerToken },
     );
 
     // Thumbnail comes in `result.data.thumbnail` directly from the
@@ -722,6 +731,7 @@ async function runStep(
         },
       },
       'step result',
+      { ownerToken },
     );
   }
 }
