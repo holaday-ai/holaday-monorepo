@@ -246,7 +246,7 @@ const MAX_RECENT_VISION_ACT_RESULTS = 100;
 const inFlightVisionActResults = new Map<string, Promise<VisionActResultPayload>>();
 const recentVisionActResults = new Map<
   string,
-  { at: number; payload: VisionActResultPayload }
+  { at: number; ownerToken: string | null; payload: VisionActResultPayload }
 >();
 
 // ---------- WS → SW state updates ----------
@@ -435,7 +435,7 @@ async function onVisionAct(
   const dedupeKey = visionActDedupeKey(msg.taskId, msg.tickIndex);
   const cached = recentVisionActResults.get(dedupeKey);
   if (cached && Date.now() - cached.at <= VISION_ACT_RESULT_TTL_MS) {
-    sendVisionActed(msg, cached.payload, ownerToken);
+    sendVisionActed(msg, cached.payload, cached.ownerToken);
     return;
   }
   if (cached) recentVisionActResults.delete(dedupeKey);
@@ -450,7 +450,7 @@ async function onVisionAct(
       return { ok: false, message: '浏览器操作失败，请稍后重试' };
     })
     .then((payload) => {
-      rememberVisionActResult(dedupeKey, payload);
+      rememberVisionActResult(dedupeKey, payload, ownerToken);
       return payload;
     })
     .finally(() => {
@@ -517,9 +517,13 @@ function visionActDedupeKey(taskId: string, tickIndex: number): string {
   return `${taskId}\u0000${tickIndex}`;
 }
 
-function rememberVisionActResult(key: string, payload: VisionActResultPayload): void {
+function rememberVisionActResult(
+  key: string,
+  payload: VisionActResultPayload,
+  ownerToken: string | null,
+): void {
   const now = Date.now();
-  recentVisionActResults.set(key, { at: now, payload });
+  recentVisionActResults.set(key, { at: now, ownerToken, payload });
   for (const [recentKey, value] of recentVisionActResults) {
     if (now - value.at > VISION_ACT_RESULT_TTL_MS) {
       recentVisionActResults.delete(recentKey);
