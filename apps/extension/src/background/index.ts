@@ -1158,23 +1158,34 @@ async function maybeReportLoginStates(): Promise<void> {
 // install/update or browser launch — the SW also dies and respawns
 // many times during a session, and neither event fires for those.
 // That's why ensureConnected ALSO runs on the keepalive alarm and on
-// every storage write below.
+// every storage write below. Keep each lifecycle event on a single
+// chain so reload/update doesn't race two ensureConnected calls.
 chrome.runtime.onInstalled.addListener((details) => {
-  // Phase 18b — install / upgrade clears any persisted auth state
-  // so a stuck "frozen 3/3" or stale known-bad-token from a prior
-  // version can't keep blocking the new build. The auto-login path
-  // re-imports a fresh token from any open holaday.ai tab on the
-  // very next ensureConnected tick, so a clean install never
-  // requires a manual login.
-  if (details.reason === 'install' || details.reason === 'update') {
-    void resetAllAuthState().then(() => ensureConnected());
-  } else {
-    void ensureConnected();
-  }
+  void (async () => {
+    // Extension reload/update is an explicit recovery action in
+    // developer mode. Treat it like a fresh browser launch for the
+    // network cap, otherwise a previously capped WS can stay silent
+    // even after the user clicks reload.
+    await resetWsReconnectAttempts();
+
+    // Phase 18b — install / upgrade clears any persisted auth state
+    // so a stuck "frozen 3/3" or stale known-bad-token from a prior
+    // version can't keep blocking the new build. The auto-login path
+    // re-imports a fresh token from any open holaday.ai tab on the
+    // very next ensureConnected tick, so a clean install never
+    // requires a manual login.
+    if (details.reason === 'install' || details.reason === 'update') {
+      await resetAllAuthState();
+    }
+
+    await ensureConnected();
+  })();
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  void ensureConnected();
+  void resetWsReconnectAttempts().then(() => {
+    void ensureConnected();
+  });
 });
 
 // Auto-reconnect on token changes. Phase 14 fix: detect VALUE
@@ -1306,27 +1317,6 @@ void (async () => {
   if (await isReconnectCapped()) return;
   await ensureConnected();
 })();
-
-// Fresh browser session → forget any cap from a previous Chrome
-// instance. Without this, a user who hit the cap, quit Chrome, and
-// restarted would silently stay disconnected until they noticed and
-// opened the popup. onStartup only fires on actual browser launch
-// (not on SW respawn), so the persistent cap inside one session is
-// untouched.
-chrome.runtime.onStartup.addListener(() => {
-  void resetWsReconnectAttempts().then(() => {
-    void ensureConnected();
-  });
-});
-
-// Extension reload/update is an explicit user recovery action in developer
-// mode. Treat it like a fresh browser launch for the network cap, otherwise a
-// previously capped WS can stay silent even after the user clicks reload.
-chrome.runtime.onInstalled.addListener(() => {
-  void resetWsReconnectAttempts().then(() => {
-    void ensureConnected();
-  });
-});
 
 // ---------- Popup ⇄ SW messaging ----------
 
