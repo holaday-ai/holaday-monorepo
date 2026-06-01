@@ -348,6 +348,67 @@ describe('executeCdpAction', () => {
     );
   });
 
+  it('preserves plus and minus keys in shortcut descriptors', async () => {
+    const sendCommand = vi.fn(async () => ({}));
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    await expect(executeCdpAction(11, { kind: 'key', key: 'cmd++' })).resolves.toEqual({
+      ok: true,
+      message: 'key cmd++',
+    });
+    await expect(executeCdpAction(11, { kind: 'key', key: '+' })).resolves.toEqual({
+      ok: true,
+      message: 'key +',
+    });
+    await expect(executeCdpAction(11, { kind: 'key', key: 'ctrl+minus' })).resolves.toEqual({
+      ok: true,
+      message: 'key ctrl+minus',
+    });
+
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      1,
+      { tabId: 11 },
+      'Input.dispatchKeyEvent',
+      expect.objectContaining({
+        type: 'keyDown',
+        modifiers: 4,
+        key: '+',
+        code: 'Equal',
+        windowsVirtualKeyCode: 187,
+      }),
+    );
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      3,
+      { tabId: 11 },
+      'Input.dispatchKeyEvent',
+      expect.objectContaining({
+        type: 'keyDown',
+        modifiers: 0,
+        key: '+',
+        code: 'Equal',
+        text: '+',
+        windowsVirtualKeyCode: 187,
+      }),
+    );
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      5,
+      { tabId: 11 },
+      'Input.dispatchKeyEvent',
+      expect.objectContaining({
+        type: 'keyDown',
+        modifiers: 2,
+        key: '-',
+        code: 'Minus',
+        windowsVirtualKeyCode: 189,
+      }),
+    );
+  });
+
   it('chunks long inserted text to keep CDP payloads small', async () => {
     const sendCommand = vi.fn(async () => ({}));
     globalThis.chrome = {

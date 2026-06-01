@@ -309,10 +309,7 @@ async function doKey(
   // Support simple chords ("ctrl+a", "cmd+c") by splitting on '+' and
   // folding lowered modifiers into the CDP modifiers bitmask. The
   // terminal key is the last segment.
-  const parts = action.key
-    .split('+')
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
+  const parts = parseKeyDescriptor(action.key);
   if (parts.length === 0) {
     return { ok: false, message: `empty key descriptor: ${action.key}` };
   }
@@ -340,6 +337,16 @@ async function doKey(
       : {}),
   });
   return { ok: true, message: `key ${action.key}` };
+}
+
+function parseKeyDescriptor(value: string): string[] {
+  if (value.trim() === '+') return ['+'];
+  const rawParts = value.split('+').map((p) => p.trim());
+  const parts = rawParts.filter((p) => p.length > 0);
+  if (parts.length > 0 && rawParts.length > 1 && rawParts[rawParts.length - 1] === '') {
+    parts.push('+');
+  }
+  return parts;
 }
 
 async function doScroll(
@@ -595,6 +602,12 @@ function resolveKey(name: string): KeyInfo {
     backspace: { key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 },
     delete: { key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46 },
     space: { key: ' ', code: 'Space', text: ' ', windowsVirtualKeyCode: 32 },
+    '+': { key: '+', code: 'Equal', text: '+', windowsVirtualKeyCode: 187 },
+    plus: { key: '+', code: 'Equal', text: '+', windowsVirtualKeyCode: 187 },
+    '=': { key: '=', code: 'Equal', text: '=', windowsVirtualKeyCode: 187 },
+    equal: { key: '=', code: 'Equal', text: '=', windowsVirtualKeyCode: 187 },
+    '-': { key: '-', code: 'Minus', text: '-', windowsVirtualKeyCode: 189 },
+    minus: { key: '-', code: 'Minus', text: '-', windowsVirtualKeyCode: 189 },
     arrowup: { key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38 },
     arrowdown: { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 },
     arrowleft: { key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 },
