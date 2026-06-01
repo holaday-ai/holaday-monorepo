@@ -343,6 +343,39 @@ describe('ws-client send', () => {
     await expect(isReconnectCapped()).resolves.toBe(true);
   });
 
+  it('ignores stale reconnect hydration after a socket opens', async () => {
+    let resolveReconnectRead:
+      | ((value: Record<string, unknown>) => void)
+      | undefined;
+    const get = chrome.storage.local.get as unknown as ReturnType<typeof vi.fn>;
+    get.mockImplementation((key: string) => {
+      if (key === 'holaday.ws.reconnectAttempts') {
+        return new Promise<Record<string, unknown>>((resolve) => {
+          resolveReconnectRead = resolve;
+        });
+      }
+      return Promise.resolve({});
+    });
+
+    const { connect, getWsConnectionStatus } = await import('./ws-client.js');
+    connect('token');
+    const [socket] = sockets;
+    if (!socket) throw new Error('expected websocket');
+    socket.dispatch('open');
+
+    resolveReconnectRead?.({ 'holaday.ws.reconnectAttempts': 3 });
+    await vi.waitFor(() => {
+      expect(chrome.storage.local.remove).toHaveBeenCalledWith(
+        'holaday.ws.reconnectAttempts',
+      );
+    });
+
+    await expect(getWsConnectionStatus()).resolves.toMatchObject({
+      connected: true,
+      reconnectAttempt: 0,
+    });
+  });
+
   it('ignores late error events from a stale socket after token swap', async () => {
     const { connect, reconnect, getWsConnectionStatus } = await import('./ws-client.js');
     connect('old-token');

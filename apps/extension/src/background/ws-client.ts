@@ -431,12 +431,14 @@ const WS_STORAGE_TIMEOUT_MS = 1_500;
  * still trips after 3 fresh attempts in the new SW.
  */
 async function hydrateReconnectAttempts(): Promise<void> {
+  const generation = state.socketGeneration;
   try {
     const out = await withDeadline(
       chrome.storage.local.get(WS_RECONNECT_KEY),
       WS_STORAGE_TIMEOUT_MS,
       'ws_reconnect_read_timeout',
     );
+    if (state.socketGeneration !== generation || state.socket) return;
     const v = out[WS_RECONNECT_KEY];
     if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
       state.reconnectAttempt = Math.floor(v);
