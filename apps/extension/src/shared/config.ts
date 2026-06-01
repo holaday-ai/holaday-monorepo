@@ -66,8 +66,8 @@ export const ORCHESTRATOR_WS_ENDPOINTS = import.meta.env.VITE_ORCHESTRATOR_WS
  * any one of them lets the user log in and have the token auto-sync
  * back to the extension.
  *
- * Default: hd-app.orangebench.tech (Aliyun route, works in China).
+ * Default: hd-app.orangebench.tech/app (Aliyun route, works in China).
  * Override via env when shipping a public-build to holaday.ai.
  */
 export const WORKBENCH_URL =
-  import.meta.env.VITE_WORKBENCH_URL ?? 'https://hd-app.orangebench.tech/';
+  import.meta.env.VITE_WORKBENCH_URL ?? 'https://hd-app.orangebench.tech/app';
