@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   isWorkbenchTabUrl,
+  normalizeWorkbenchOpenUrl,
   openOrFocusWorkbench,
   pickBestTab,
   WORKBENCH_TAB_MATCH_PATTERNS,
@@ -57,6 +58,29 @@ describe('isWorkbenchTabUrl', () => {
   });
 });
 
+describe('normalizeWorkbenchOpenUrl', () => {
+  it('keeps full http urls and accepts bare production hosts', () => {
+    expect(normalizeWorkbenchOpenUrl(' https://hd-app.orangebench.tech/app ')).toBe(
+      'https://hd-app.orangebench.tech/app',
+    );
+    expect(normalizeWorkbenchOpenUrl('holaday.ai/app')).toBe('https://holaday.ai/app');
+  });
+
+  it('uses http for local development hosts', () => {
+    expect(normalizeWorkbenchOpenUrl('localhost:5173/app')).toBe('http://localhost:5173/app');
+    expect(normalizeWorkbenchOpenUrl('127.0.0.1:4173/app')).toBe(
+      'http://127.0.0.1:4173/app',
+    );
+  });
+
+  it('rejects unsupported or malformed values', () => {
+    expect(normalizeWorkbenchOpenUrl('')).toBeNull();
+    expect(normalizeWorkbenchOpenUrl('not a url')).toBeNull();
+    expect(normalizeWorkbenchOpenUrl('chrome://extensions')).toBeNull();
+    expect(normalizeWorkbenchOpenUrl(`https://example.com/${'a'.repeat(2050)}`)).toBeNull();
+  });
+});
+
 describe('pickBestTab', () => {
   it('returns null on empty input', () => {
     expect(pickBestTab([])).toBeNull();
@@ -110,7 +134,7 @@ describe('openOrFocusWorkbench', () => {
       windows: { update: vi.fn(async () => ({})) },
     } as unknown as typeof chrome;
 
-    await openOrFocusWorkbench('https://hd-app.orangebench.tech/app');
+    await openOrFocusWorkbench('hd-app.orangebench.tech/app');
 
     expect(update).toHaveBeenCalledWith(7, { active: true });
     expect(create).not.toHaveBeenCalled();
@@ -164,11 +188,24 @@ describe('openOrFocusWorkbench', () => {
       windows: { update: vi.fn(async () => ({})) },
     } as unknown as typeof chrome;
 
-    const pending = openOrFocusWorkbench('https://hd-app.orangebench.tech/app');
+    const pending = openOrFocusWorkbench('localhost:5173/app');
     await vi.advanceTimersByTimeAsync(3_000);
     await pending;
 
     expect(query).toHaveBeenCalledTimes(2);
-    expect(create).toHaveBeenCalledWith({ url: 'https://hd-app.orangebench.tech/app' });
+    expect(create).toHaveBeenCalledWith({ url: 'http://localhost:5173/app' });
+  });
+
+  it('does not create a tab for an invalid fallback url', async () => {
+    const query = vi.fn(async () => []);
+    const create = vi.fn(async () => ({}));
+    globalThis.chrome = {
+      tabs: { query, create },
+      windows: { update: vi.fn(async () => ({})) },
+    } as unknown as typeof chrome;
+
+    await openOrFocusWorkbench('chrome://extensions');
+
+    expect(create).not.toHaveBeenCalled();
   });
 });

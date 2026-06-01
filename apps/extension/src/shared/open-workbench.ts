@@ -35,6 +35,7 @@ export const WORKBENCH_TAB_MATCH_PATTERNS: readonly string[] = [
 ] as const;
 const WORKBENCH_TAB_QUERY_TIMEOUT_MS = 1_500;
 const WORKBENCH_TAB_ACTION_TIMEOUT_MS = 1_500;
+const MAX_WORKBENCH_URL_LENGTH = 2_048;
 
 export function isWorkbenchTabUrl(url: string | undefined): boolean {
   if (!url) return false;
@@ -62,6 +63,7 @@ export function isWorkbenchTabUrl(url: string | undefined): boolean {
  * chrome.tabs.query when no active/recent signal differentiates.
  */
 export async function openOrFocusWorkbench(fallbackUrl: string): Promise<void> {
+  const createUrl = normalizeWorkbenchOpenUrl(fallbackUrl);
   let tabs: chrome.tabs.Tab[] = [];
   try {
     tabs = await withDeadline(
@@ -127,15 +129,39 @@ export async function openOrFocusWorkbench(fallbackUrl: string): Promise<void> {
   }
 
   // No existing workbench tab found OR activating failed — open fresh.
+  if (!createUrl) return;
   try {
     await withDeadline(
-      chrome.tabs.create({ url: fallbackUrl }),
+      chrome.tabs.create({ url: createUrl }),
       WORKBENCH_TAB_ACTION_TIMEOUT_MS,
       'workbench_tab_action_timeout',
     );
   } catch {
     /* nothing else to do — user-facing button is non-blocking */
   }
+}
+
+export function normalizeWorkbenchOpenUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const value = raw.trim();
+  if (!value || value.length > MAX_WORKBENCH_URL_LENGTH) return null;
+  const normalized = hasHierarchicalUrlScheme(value) ? value : normalizeBareWorkbenchUrl(value);
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+function hasHierarchicalUrlScheme(value: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
+}
+
+function normalizeBareWorkbenchUrl(value: string): string {
+  const localHost = /^(localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::|\/|$)/i;
+  return `${localHost.test(value) ? 'http' : 'https'}://${value}`;
 }
 
 /**
