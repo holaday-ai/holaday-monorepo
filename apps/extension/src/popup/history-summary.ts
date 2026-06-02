@@ -22,11 +22,12 @@ export function normalizeHistorySummary(value: unknown): HistorySyncSummary | nu
     return null;
   }
   const topDomains = Array.isArray(raw.topDomains)
-    ? raw.topDomains
-        .filter((domain): domain is string => typeof domain === 'string')
-        .map((domain) => domain.trim().slice(0, MAX_HISTORY_SUMMARY_DOMAIN_CHARS))
-        .filter(Boolean)
-        .slice(0, MAX_HISTORY_SUMMARY_TOP_DOMAINS)
+    ? uniqueStrings(
+        raw.topDomains
+          .filter((domain): domain is string => typeof domain === 'string')
+          .map((domain) => domain.trim().slice(0, MAX_HISTORY_SUMMARY_DOMAIN_CHARS))
+          .filter(Boolean),
+      ).slice(0, MAX_HISTORY_SUMMARY_TOP_DOMAINS)
     : [];
   const at =
     typeof raw.at === 'number' && Number.isFinite(raw.at) && raw.at > 0
@@ -37,4 +38,8 @@ export function normalizeHistorySummary(value: unknown): HistorySyncSummary | nu
     topDomains,
     at,
   };
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values));
 }

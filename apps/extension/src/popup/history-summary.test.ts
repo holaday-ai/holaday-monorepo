@@ -8,6 +8,7 @@ describe('normalizeHistorySummary', () => {
       ingested: 2.9,
       topDomains: [
         ' example.com ',
+        'example.com',
         42,
         '',
         'a.com',
