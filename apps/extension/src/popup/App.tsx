@@ -51,6 +51,7 @@ import {
   type ExtensionStatusResponse,
   type WsConnectionStatus,
   getConnectionStatusCopy,
+  mergeConnectionStatusPoll,
 } from './connection-copy.js';
 
 // chrome.storage keys mirrored from background/history-sync.ts. Reading
@@ -567,7 +568,7 @@ function ConnectionStatusBlock({
         (response) => {
           inFlight = false;
           if (cancelled) return;
-          setStatus(response ?? null);
+          setStatus((previous) => mergeConnectionStatusPoll(previous, response ?? null));
         },
       );
     };

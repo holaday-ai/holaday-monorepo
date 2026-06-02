@@ -3,6 +3,7 @@ import {
   type ExtensionStatusResponse,
   formatWsCloseReason,
   getConnectionStatusCopy,
+  mergeConnectionStatusPoll,
 } from './connection-copy.js';
 
 function status(ws: Partial<ExtensionStatusResponse['ws']>): ExtensionStatusResponse {
@@ -121,6 +122,21 @@ describe('getConnectionStatusCopy', () => {
       title: '浏览器代理连接已暂停',
       detail: '多次重连失败：连接握手超时。点击底部“重试连接”后会重新尝试',
     });
+  });
+});
+
+describe('mergeConnectionStatusPoll', () => {
+  it('keeps the last known status when a transient poll returns empty', () => {
+    const previous = status({ connected: true, readyState: 1 });
+
+    expect(mergeConnectionStatusPoll(previous, null)).toBe(previous);
+  });
+
+  it('uses a fresh status response when one is available', () => {
+    const previous = status({ connected: true, readyState: 1 });
+    const next = status({ connected: false, readyState: 0 });
+
+    expect(mergeConnectionStatusPoll(previous, next)).toBe(next);
   });
 });
 

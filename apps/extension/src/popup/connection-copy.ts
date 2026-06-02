@@ -24,6 +24,13 @@ export interface ConnectionStatusCopy {
 const WS_CONNECTING = 0;
 const MAX_NETWORK_RECONNECTS = 3;
 
+export function mergeConnectionStatusPoll(
+  previous: ExtensionStatusResponse | null,
+  next: ExtensionStatusResponse | null,
+): ExtensionStatusResponse | null {
+  return next ?? previous;
+}
+
 export function getConnectionStatusCopy(
   status: ExtensionStatusResponse | null,
 ): ConnectionStatusCopy {
