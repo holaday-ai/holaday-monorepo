@@ -261,6 +261,14 @@ describe('extensionToolErrorPayload', () => {
       message: '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
       code: 'tab_closed',
     });
+    expect(extensionToolErrorPayload(new Error('Detached from target'))).toEqual({
+      message: '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
+      code: 'tab_closed',
+    });
+    expect(extensionToolErrorPayload(new Error('No session with given id'))).toEqual({
+      message: '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
+      code: 'tab_closed',
+    });
     expect(extensionToolErrorPayload(new Error('Another debugger is already attached'))).toEqual({
       message: '浏览器调试通道被占用，请关闭该标签页 DevTools 后重试',
       code: 'debugger_busy',

@@ -289,7 +289,9 @@ function isTabClosedError(err: unknown): boolean {
     lower.includes('no tab with id') ||
     lower.includes('target closed') ||
     lower.includes('target detached') ||
+    lower.includes('detached from target') ||
     lower.includes('not attached') ||
+    lower.includes('no session with given id') ||
     lower.includes('frame was detached') ||
     lower.includes('no frame with id') ||
     (lower.includes('frame with id') && lower.includes('removed'))
@@ -590,7 +592,9 @@ export function extensionToolErrorPayload(
     lower.includes('no tab with id') ||
     lower.includes('target closed') ||
     lower.includes('target detached') ||
+    lower.includes('detached from target') ||
     lower.includes('not attached') ||
+    lower.includes('no session with given id') ||
     lower.includes('frame was detached') ||
     lower.includes('target navigated or closed') ||
     lower.includes('execution context was destroyed') ||
