@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { extractCreatedTaskId } from './create-task-response.js';
+import {
+  didTokenSwitchDuringTaskCreate,
+  extractCreatedTaskId,
+} from './create-task-response.js';
 
 describe('extractCreatedTaskId', () => {
   it('returns a trimmed created task id', () => {
@@ -22,5 +25,11 @@ describe('extractCreatedTaskId', () => {
         result: { data: { taskId: `tsk_${'x'.repeat(300)}` } },
       }),
     ).toHaveLength(128);
+  });
+
+  it('detects token switches while a sidepanel task create is in flight', () => {
+    expect(didTokenSwitchDuringTaskCreate('new-token', 'old-token')).toBe(true);
+    expect(didTokenSwitchDuringTaskCreate(null, 'old-token')).toBe(true);
+    expect(didTokenSwitchDuringTaskCreate('old-token', 'old-token')).toBe(false);
   });
 });

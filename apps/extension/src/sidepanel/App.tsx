@@ -37,7 +37,11 @@ import {
   type TaskView,
   type VisionProgressView,
 } from './task-snapshot.js';
-import { extractCreatedTaskId, type CreateTaskResponse } from './create-task-response.js';
+import {
+  didTokenSwitchDuringTaskCreate,
+  extractCreatedTaskId,
+  type CreateTaskResponse,
+} from './create-task-response.js';
 
 type Status = 'idle' | 'loading' | 'connected' | 'error';
 
@@ -402,7 +406,11 @@ export function App() {
       );
       if (!mountedRef.current) return;
       const currentToken = normalizeAccessToken(await getAccessToken());
-      if (currentToken !== token) return;
+      if (didTokenSwitchDuringTaskCreate(currentToken, token)) {
+        setIntent('');
+        await refreshTasksSnapshot();
+        throw new Error('登录态刚刚切换；任务可能已发送，请打开 HOLA DAY 网页确认最新任务。');
+      }
       const newTaskId = extractCreatedTaskId(body);
       if (!newTaskId) {
         setIntent('');

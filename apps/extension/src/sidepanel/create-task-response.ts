@@ -15,3 +15,10 @@ export function extractCreatedTaskId(response: CreateTaskResponse | null | undef
   if (!id) return null;
   return id.length > MAX_TASK_ID_CHARS ? id.slice(0, MAX_TASK_ID_CHARS) : id;
 }
+
+export function didTokenSwitchDuringTaskCreate(
+  currentToken: string | null,
+  submittedToken: string,
+): boolean {
+  return currentToken !== submittedToken;
+}
