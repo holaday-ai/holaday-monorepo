@@ -69,6 +69,7 @@ import {
 } from './auth-token-handler.js';
 import { sendCriticalClientMessage } from './critical-send.js';
 import { withDeadline } from '../shared/deadline.js';
+import { compactLogErrorReason } from '../shared/log-error.js';
 import {
   connect,
   disconnect,
@@ -449,7 +450,7 @@ async function onVisionObserve(
   }
   const next = computeVisionObservationPayload(msg)
     .catch((err): VisionObservationPayload => {
-      console.warn('[holaday] vision observation failed unexpectedly', err);
+      console.warn('[holaday] vision observation failed unexpectedly', compactLogErrorReason(err));
       return {
         screenshotBase64: '',
         viewportWidth: 0,
@@ -557,7 +558,7 @@ async function onVisionAct(
   }
   const next = computeVisionActResult(msg)
     .catch((err): VisionActResultPayload => {
-      console.warn('[holaday] vision act failed unexpectedly', err);
+      console.warn('[holaday] vision act failed unexpectedly', compactLogErrorReason(err));
       return { ok: false, message: '浏览器操作失败，请稍后重试' };
     })
     .then((payload) => {
@@ -741,7 +742,10 @@ function finaliseVisionTask(taskId: string, status: 'completed' | 'failed', deta
 
 function releaseVisionDebugger(taskId: string): void {
   void detachAll().catch((err) => {
-    console.warn('[holaday] vision debugger release failed', { taskId, err });
+    console.warn('[holaday] vision debugger release failed', {
+      taskId,
+      reason: compactLogErrorReason(err),
+    });
   });
 }
 
@@ -911,7 +915,7 @@ async function computeStepResult(
       ...(result.error ? { error: result.error } : {}),
     };
   } catch (err) {
-    console.error('[holaday] step crash', err);
+    console.error('[holaday] step crash', compactLogErrorReason(err));
     return {
       status: 'error',
       error: {
@@ -1179,7 +1183,10 @@ async function resetAuthFailureState(): Promise<void> {
       'auth_failure_state_remove_timeout',
     );
   } catch (err) {
-    console.warn('[holaday] auth: failed to reset failure bookkeeping', err);
+    console.warn(
+      '[holaday] auth: failed to reset failure bookkeeping',
+      compactLogErrorReason(err),
+    );
   }
 }
 
@@ -1214,7 +1221,7 @@ async function resetAllAuthState(): Promise<void> {
       'all_auth_state_remove_timeout',
     );
   } catch (err) {
-    console.warn('[holaday] auth: failed to clear all session state', err);
+    console.warn('[holaday] auth: failed to clear all session state', compactLogErrorReason(err));
   }
   // Ensure no live socket is left holding the cleared token.
   disconnect();
@@ -1280,7 +1287,7 @@ async function ensureConnectedInner(): Promise<{ token: string | null; frozen?: 
         token = lifted;
         console.info('[holaday] auto-login: imported token from workbench tab');
       } catch (err) {
-        console.warn('[holaday] auto-login: setAccessToken failed', err);
+        console.warn('[holaday] auto-login: setAccessToken failed', compactLogErrorReason(err));
       }
     }
   }
@@ -1326,7 +1333,7 @@ async function maybeRunCookieSync(reason: 'welcome' | 'alarm' | 'manual'): Promi
       }`,
     );
   } catch (err) {
-    console.warn('[holaday] cookie-sync failed', err);
+    console.warn('[holaday] cookie-sync failed', compactLogErrorReason(err));
     // Reset throttle so the next attempt isn't gated by the failed run.
     lastCookieSyncAt = 0;
   }
@@ -1408,7 +1415,7 @@ async function maybeRunHistorySync(reason: 'welcome' | 'alarm' | 'manual'): Prom
       `[holaday] history-sync (${reason}): ingested ${res.ingested} domains, rejected ${res.rejected}`,
     );
   } catch (err) {
-    console.warn('[holaday] history-sync failed', err);
+    console.warn('[holaday] history-sync failed', compactLogErrorReason(err));
     // Do NOT advance the timestamp on failure — next cadence retries.
   }
 }
@@ -1428,7 +1435,7 @@ async function maybeReportLoginStates(): Promise<void> {
       lastLoginStatesAt = 0;
     }
   } catch (err) {
-    console.warn('[holaday] cookie-bridge: report failed', err);
+    console.warn('[holaday] cookie-bridge: report failed', compactLogErrorReason(err));
     lastLoginStatesAt = 0;
   }
 }
@@ -1511,7 +1518,10 @@ onUnauthorized(() => {
         'auth_failures_write_timeout',
       );
     } catch (err) {
-      console.warn('[holaday] auth: failed to persist failure count', err);
+      console.warn(
+        '[holaday] auth: failed to persist failure count',
+        compactLogErrorReason(err),
+      );
     }
     if (rejected) {
       try {
@@ -1520,13 +1530,19 @@ onUnauthorized(() => {
         // "this token is bad" signal.
         await setKnownBadToken(rejected);
       } catch (err) {
-        console.warn('[holaday] auth: failed to persist known-bad token', err);
+        console.warn(
+          '[holaday] auth: failed to persist known-bad token',
+          compactLogErrorReason(err),
+        );
       }
     }
     const cleanup = await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
     for (const result of cleanup) {
       if (result.status === 'rejected') {
-        console.warn('[holaday] auth: failed to clear rejected session state', result.reason);
+        console.warn(
+          '[holaday] auth: failed to clear rejected session state',
+          compactLogErrorReason(result.reason),
+        );
       }
     }
     disconnect();
@@ -1604,7 +1620,7 @@ function safeSendResponse(sendResponse: (response?: unknown) => void, response?:
   try {
     sendResponse(response);
   } catch (err) {
-    console.warn('[holaday] runtime response dropped', err);
+    console.warn('[holaday] runtime response dropped', compactLogErrorReason(err));
   }
 }
 
@@ -1681,7 +1697,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         await resetWsReconnectAttempts();
         safeSendResponse(sendResponse, { ok: true, action: 'set' });
       } catch (err) {
-        console.warn('[holaday] auth-bridge: token message failed', err);
+        console.warn('[holaday] auth-bridge: token message failed', compactLogErrorReason(err));
         safeSendResponse(sendResponse, { ok: false, reason: 'internal_error' });
       }
     })();
@@ -1699,7 +1715,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         connect(msg.token);
         safeSendResponse(sendResponse, { ok: true });
       } catch (err) {
-        console.warn('[holaday] connect message failed', err);
+        console.warn('[holaday] connect message failed', compactLogErrorReason(err));
         safeSendResponse(sendResponse, { ok: false, reason: 'internal_error' });
       }
     })();
@@ -1741,7 +1757,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           ...(frozen ? { frozen: true } : {}),
         });
       } catch (err) {
-        console.warn('[holaday] resetConnection failed', err);
+        console.warn('[holaday] resetConnection failed', compactLogErrorReason(err));
         safeSendResponse(sendResponse, { ok: false, reason: 'internal_error' });
       }
     })();
@@ -1781,7 +1797,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           ...(frozen ? { frozen: true } : {}),
         });
       } catch (err) {
-        console.warn('[holaday] tryAutoLogin failed', err);
+        console.warn('[holaday] tryAutoLogin failed', compactLogErrorReason(err));
         safeSendResponse(sendResponse, { ok: false, reason: 'internal_error' });
       }
     })();
