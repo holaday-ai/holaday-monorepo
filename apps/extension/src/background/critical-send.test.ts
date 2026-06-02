@@ -80,6 +80,66 @@ describe('sendCriticalClientMessage', () => {
     expect(vi.mocked(send).mock.calls[2]?.[0]).toBe(message);
   });
 
+  it('cancels older retries when the same critical result is sent again', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const olderMessage = {
+      type: 'client.extension.tool_result',
+      taskId: 'tsk_duplicate_result',
+      requestId: 'req_duplicate_result',
+      at: 100,
+      ok: false,
+      error: { message: 'older result', code: 'exec_error' },
+    } as const;
+    const newerMessage = {
+      type: 'client.extension.tool_result',
+      taskId: 'tsk_duplicate_result',
+      requestId: 'req_duplicate_result',
+      at: 200,
+      ok: true,
+      result: { finalUrl: 'https://example.com/', title: 'Example', bodyText: '' },
+    } as const;
+    vi.mocked(send).mockReturnValueOnce(false).mockReturnValueOnce(true);
+
+    expect(sendCriticalClientMessage(olderMessage, 'extension tool result')).toBe(false);
+    expect(sendCriticalClientMessage(newerMessage, 'extension tool result')).toBe(true);
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(send).mock.calls[0]?.[0]).toBe(olderMessage);
+    expect(vi.mocked(send).mock.calls[1]?.[0]).toBe(newerMessage);
+  });
+
+  it('lets different critical result keys retry independently', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const firstMessage = {
+      type: 'client.step.result',
+      taskId: 'tsk_parallel',
+      stepId: 'step_a',
+      status: 'ok',
+    } as const;
+    const secondMessage = {
+      type: 'client.step.result',
+      taskId: 'tsk_parallel',
+      stepId: 'step_b',
+      status: 'ok',
+    } as const;
+    vi.mocked(send)
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true);
+
+    expect(sendCriticalClientMessage(firstMessage, 'step result')).toBe(false);
+    expect(sendCriticalClientMessage(secondMessage, 'step result')).toBe(false);
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(send).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(send).mock.calls[2]?.[0]).toBe(firstMessage);
+    expect(vi.mocked(send).mock.calls[3]?.[0]).toBe(secondMessage);
+  });
+
   it('stops retrying critical messages after the websocket token changes', async () => {
     vi.useFakeTimers();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
