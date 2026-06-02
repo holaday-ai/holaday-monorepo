@@ -64,6 +64,29 @@ describe('sendRuntimeMessageWithRetry', () => {
     expect(sendMessage).toHaveBeenCalledTimes(2);
   });
 
+  it('falls back to safe defaults for invalid retry options', async () => {
+    const sendMessage = vi.fn((_message: unknown, callback: (response?: unknown) => void) => {
+      if (sendMessage.mock.calls.length > 1) callback({ ok: true });
+    });
+    setRuntimeSendMessage(sendMessage);
+
+    const pending = sendRuntimeMessageWithRetry<{ ok: boolean }>(
+      { type: 'holaday.status' },
+      {
+        attempts: Number.NaN,
+        timeoutMs: Number.NaN,
+        retryDelayMs: Number.NaN,
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(251);
+
+    await expect(pending).resolves.toEqual({ ok: true });
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+  });
+
   it('returns null after retryable failures are exhausted', async () => {
     setRuntimeSendMessage(vi.fn((_message: unknown, callback: (response?: unknown) => void) => {
       callback({ ok: false, reason: 'internal_error' });

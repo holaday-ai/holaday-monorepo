@@ -16,9 +16,17 @@ export async function sendRuntimeMessageWithRetry<T>(
   message: unknown,
   options: RuntimeMessageOptions = {},
 ): Promise<T | null> {
-  const attempts = Math.max(1, Math.floor(options.attempts ?? DEFAULT_ATTEMPTS));
-  const timeoutMs = options.timeoutMs ?? DEFAULT_RUNTIME_MESSAGE_TIMEOUT_MS;
-  const retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+  const attempts = normalizeRuntimeMessageOption(options.attempts, DEFAULT_ATTEMPTS, 1);
+  const timeoutMs = normalizeRuntimeMessageOption(
+    options.timeoutMs,
+    DEFAULT_RUNTIME_MESSAGE_TIMEOUT_MS,
+    1,
+  );
+  const retryDelayMs = normalizeRuntimeMessageOption(
+    options.retryDelayMs,
+    DEFAULT_RETRY_DELAY_MS,
+    0,
+  );
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const result = await sendRuntimeMessageOnce<T>(message, timeoutMs);
@@ -62,6 +70,11 @@ function isRetryableRuntimeFailure(response: unknown): boolean {
   if (!response || typeof response !== 'object') return false;
   const raw = response as { ok?: unknown; reason?: unknown };
   return raw.ok === false && raw.reason === 'internal_error';
+}
+
+function normalizeRuntimeMessageOption(raw: unknown, fallback: number, min: number): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return fallback;
+  return Math.max(min, Math.floor(raw));
 }
 
 function sleep(ms: number): Promise<void> {
