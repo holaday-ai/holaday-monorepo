@@ -9,6 +9,7 @@ const TOKEN_KEY = 'holaday.access_token';
 const USER_KEY = 'holaday.user';
 const STORAGE_READ_TIMEOUT_MS = 1_500;
 const STORAGE_WRITE_TIMEOUT_MS = 1_500;
+const MAX_TOKEN_CHARS = 8192;
 const MAX_USER_ID_CHARS = 128;
 const MAX_USER_EMAIL_CHARS = 320;
 const MAX_USER_PLAN_CHARS = 64;
@@ -29,6 +30,7 @@ export function normalizeAccessToken(value: unknown): string | null {
   if (!nonEmptyString(value)) return null;
   const token = value.trim();
   const lower = token.toLowerCase();
+  if (token.length > MAX_TOKEN_CHARS) return null;
   return lower === 'undefined' || lower === 'null' ? null : token;
 }
 

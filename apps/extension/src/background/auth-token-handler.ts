@@ -31,9 +31,11 @@ export type StoredAuthTokenAction =
   | { kind: 'refuse'; reason: 'known_bad_token' | 'invalid_token' };
 
 const MIN_TOKEN_LENGTH = 10;
+const MAX_TOKEN_LENGTH = 8192;
 
 export function looksLikeAuthToken(value: string): boolean {
   if (value.length < MIN_TOKEN_LENGTH) return false;
+  if (value.length > MAX_TOKEN_LENGTH) return false;
   const lower = value.toLowerCase();
   if (lower === 'undefined' || lower === 'null') return false;
   if (/\s/.test(value)) return false;

@@ -128,6 +128,11 @@ describe('looksLikeAuthToken', () => {
     expect(looksLikeAuthToken('null')).toBe(false);
     expect(looksLikeAuthToken('token with spaces')).toBe(false);
   });
+
+  it('rejects oversized auth tokens', () => {
+    expect(looksLikeAuthToken('x'.repeat(8192))).toBe(true);
+    expect(looksLikeAuthToken('x'.repeat(8193))).toBe(false);
+  });
 });
 
 describe('decideStoredAuthTokenAction', () => {

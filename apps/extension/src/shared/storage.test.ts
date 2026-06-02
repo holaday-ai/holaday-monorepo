@@ -31,6 +31,11 @@ describe('normalizeAccessToken', () => {
     expect(normalizeAccessToken(' null ')).toBeNull();
     expect(normalizeAccessToken(' NULL ')).toBeNull();
   });
+
+  it('rejects oversized token strings before storage use', () => {
+    expect(normalizeAccessToken('x'.repeat(8192))).toBe('x'.repeat(8192));
+    expect(normalizeAccessToken('x'.repeat(8193))).toBeNull();
+  });
 });
 
 describe('normalizeStoredUser', () => {

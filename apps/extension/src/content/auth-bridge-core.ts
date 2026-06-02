@@ -83,6 +83,7 @@ export function decideObservedTokenAction(
  * being so strict that a legit short token gets dropped.
  */
 const MIN_TOKEN_LENGTH = 10;
+const MAX_TOKEN_LENGTH = 8192;
 
 /**
  * Filter for the SET path. Returns true when the value looks like
@@ -96,6 +97,7 @@ const MIN_TOKEN_LENGTH = 10;
  */
 export function looksLikeToken(value: string): boolean {
   if (value.length < MIN_TOKEN_LENGTH) return false;
+  if (value.length > MAX_TOKEN_LENGTH) return false;
   const lower = value.toLowerCase();
   if (lower === 'undefined' || lower === 'null') return false;
   // Any whitespace anywhere is suspect (real JWTs are URL-safe).

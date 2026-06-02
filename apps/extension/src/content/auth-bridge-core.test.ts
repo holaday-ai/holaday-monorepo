@@ -68,6 +68,11 @@ describe('looksLikeToken', () => {
   it('accepts long opaque token (not strictly JWT format)', () => {
     expect(looksLikeToken('hd_live_' + 'a'.repeat(24))).toBe(true);
   });
+
+  it('rejects oversized observed tokens', () => {
+    expect(looksLikeToken('x'.repeat(8192))).toBe(true);
+    expect(looksLikeToken('x'.repeat(8193))).toBe(false);
+  });
 });
 
 describe('decideObservedTokenAction', () => {
