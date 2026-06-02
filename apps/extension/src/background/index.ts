@@ -766,6 +766,10 @@ function pushVisionProgress(
 
 function onDispatch(msg: Extract<ServerMessage, { type: 'server.task.dispatch' }>): void {
   let task = state.tasks.get(msg.taskId);
+  if (task && isControlledTaskStopped(msg.taskId)) {
+    logDroppedControlledTaskResult('step dispatch', msg.taskId);
+    return;
+  }
   if (!task) {
     task = {
       taskId: msg.taskId,
