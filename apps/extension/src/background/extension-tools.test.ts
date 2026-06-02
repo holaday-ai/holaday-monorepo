@@ -788,6 +788,94 @@ describe('handleExtensionToolCall', () => {
     });
   });
 
+  it('does not reuse an in-flight duplicate after task control changes', async () => {
+    vi.mocked(send).mockClear();
+    let resolveFirstCapture: (value: string) => void = () => {
+      throw new Error('first capture promise was not created');
+    };
+    const captureVisibleTab = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveFirstCapture = resolve;
+          }),
+      )
+      .mockResolvedValueOnce('data:image/jpeg;base64,BB==');
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, windowId: 1, url: 'https://holaday.ai/app' }]),
+        captureVisibleTab,
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_controlled_same_request',
+      requestId: 'req_same_generation_boundary',
+      kind: 'screenshot',
+      args: {},
+      timeoutMs: 30_000,
+    };
+
+    const stale = handleExtensionToolCall(call);
+    await vi.waitFor(() => expect(captureVisibleTab).toHaveBeenCalledTimes(1));
+    setExtensionToolTaskStopped(call.taskId, true);
+    setExtensionToolTaskStopped(call.taskId, false);
+
+    await handleExtensionToolCall(call);
+    resolveFirstCapture('data:image/jpeg;base64,AA==');
+    await stale;
+
+    expect(captureVisibleTab).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(send).mock.calls[0]?.[0]).toMatchObject({
+      type: 'client.extension.tool_result',
+      taskId: 'tsk_controlled_same_request',
+      requestId: 'req_same_generation_boundary',
+      ok: true,
+      result: { imageBase64: 'BB==', width: 0, height: 0 },
+    });
+  });
+
+  it('does not replay cached tool results after task control changes', async () => {
+    vi.mocked(send).mockClear();
+    const captureVisibleTab = vi
+      .fn()
+      .mockResolvedValueOnce('data:image/jpeg;base64,AA==')
+      .mockResolvedValueOnce('data:image/jpeg;base64,BB==');
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, windowId: 1, url: 'https://holaday.ai/app' }]),
+        captureVisibleTab,
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_cached_generation_boundary',
+      requestId: 'req_cached_generation_boundary',
+      kind: 'screenshot',
+      args: {},
+      timeoutMs: 30_000,
+    };
+
+    await handleExtensionToolCall(call);
+    setExtensionToolTaskStopped(call.taskId, true);
+    setExtensionToolTaskStopped(call.taskId, false);
+    await handleExtensionToolCall(call);
+
+    expect(captureVisibleTab).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(send).mock.calls[1]?.[0]).toMatchObject({
+      type: 'client.extension.tool_result',
+      taskId: 'tsk_cached_generation_boundary',
+      requestId: 'req_cached_generation_boundary',
+      ok: true,
+      result: { imageBase64: 'BB==', width: 0, height: 0 },
+    });
+  });
+
   it('does not treat the same request id on another task as a duplicate', async () => {
     vi.mocked(send).mockClear();
     const captureVisibleTab = vi

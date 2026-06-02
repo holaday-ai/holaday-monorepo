@@ -65,11 +65,11 @@ type ExtensionToolResultMessage = Extract<ClientMessage, { type: 'client.extensi
 
 const recentToolCallResults = new Map<
   string,
-  { at: number; ownerToken: string | null; payload: ExtensionToolResultPayload }
+  { at: number; generation: number; ownerToken: string | null; payload: ExtensionToolResultPayload }
 >();
 const inFlightToolCallResults = new Map<
   string,
-  { ownerToken: string | null; promise: Promise<ExtensionToolResultPayload> }
+  { generation: number; ownerToken: string | null; promise: Promise<ExtensionToolResultPayload> }
 >();
 const controlledTaskState = new Map<string, { generation: number; stopped: boolean }>();
 
@@ -642,7 +642,11 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
     return;
   }
   const cached = recentToolCallResults.get(dedupeKey);
-  if (cached && Date.now() - cached.at <= RECENT_TOOL_RESULT_TTL_MS) {
+  if (
+    cached
+    && cached.generation === controlGeneration
+    && Date.now() - cached.at <= RECENT_TOOL_RESULT_TTL_MS
+  ) {
     if (isControlledTaskResultStale(taskId, controlGeneration)) {
       logDroppedControlledToolResult(taskId, requestId);
       return;
@@ -657,7 +661,7 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
   }
   if (cached) recentToolCallResults.delete(dedupeKey);
   const pending = inFlightToolCallResults.get(dedupeKey);
-  if (pending) {
+  if (pending && pending.generation === controlGeneration) {
     console.warn('[holaday] duplicate in-flight extension tool call replayed', {
       taskId,
       requestId,
@@ -682,6 +686,7 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
     Math.min(NAVIGATE_LOAD_TIMEOUT_MS, operationBudgetMs - waitMs - 250),
   );
 
+  let trackedPromise: Promise<ExtensionToolResultPayload>;
   const promise = computeExtensionToolResult(
     kind,
     args,
@@ -689,15 +694,18 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
     navigateLoadTimeoutMs,
     operationBudgetMs,
   ).finally(() => {
-    inFlightToolCallResults.delete(dedupeKey);
+    if (inFlightToolCallResults.get(dedupeKey)?.promise === trackedPromise) {
+      inFlightToolCallResults.delete(dedupeKey);
+    }
   });
-  inFlightToolCallResults.set(dedupeKey, { ownerToken, promise });
+  trackedPromise = promise;
+  inFlightToolCallResults.set(dedupeKey, { generation: controlGeneration, ownerToken, promise });
   const payload = await promise;
   if (isControlledTaskResultStale(taskId, controlGeneration)) {
     logDroppedControlledToolResult(taskId, requestId);
     return;
   }
-  rememberRecentToolCallResult(dedupeKey, payload, ownerToken);
+  rememberRecentToolCallResult(dedupeKey, payload, controlGeneration, ownerToken);
   sendExtensionToolResult(taskId, requestId, payload, ownerToken);
 }
 
@@ -763,10 +771,11 @@ function sendExtensionToolResult(
 function rememberRecentToolCallResult(
   dedupeKey: string,
   payload: ExtensionToolResultPayload,
+  generation: number,
   ownerToken: string | null,
 ): void {
   const now = Date.now();
-  recentToolCallResults.set(dedupeKey, { at: now, ownerToken, payload });
+  recentToolCallResults.set(dedupeKey, { at: now, generation, ownerToken, payload });
   for (const [key, value] of recentToolCallResults) {
     if (now - value.at > RECENT_TOOL_RESULT_TTL_MS) recentToolCallResults.delete(key);
   }
