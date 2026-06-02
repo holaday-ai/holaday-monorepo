@@ -76,6 +76,8 @@ describe('normalizeWorkbenchOpenUrl', () => {
   it('rejects unsupported or malformed values', () => {
     expect(normalizeWorkbenchOpenUrl('')).toBeNull();
     expect(normalizeWorkbenchOpenUrl('not a url')).toBeNull();
+    expect(normalizeWorkbenchOpenUrl('https://example.com/app')).toBeNull();
+    expect(normalizeWorkbenchOpenUrl('https://staging.holaday.ai/app')).toBeNull();
     expect(normalizeWorkbenchOpenUrl('chrome://extensions')).toBeNull();
     expect(normalizeWorkbenchOpenUrl(`https://example.com/${'a'.repeat(2050)}`)).toBeNull();
   });

@@ -43,9 +43,7 @@ export function isWorkbenchTabUrl(url: string | undefined): boolean {
     const parsed = new URL(url);
     return (
       (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
-      (parsed.hostname === 'hd-app.orangebench.tech' ||
-        parsed.hostname === 'holaday.ai' ||
-        parsed.hostname === 'app.holaday.ai')
+      isProductionWorkbenchHost(parsed.hostname)
     );
   } catch {
     return false;
@@ -175,6 +173,9 @@ export function normalizeWorkbenchOpenUrl(raw: unknown): string | null {
   try {
     const parsed = new URL(normalized);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (!isProductionWorkbenchHost(parsed.hostname) && !isLocalWorkbenchHost(parsed.hostname)) {
+      return null;
+    }
     return parsed.href;
   } catch {
     return null;
@@ -188,6 +189,18 @@ function hasHierarchicalUrlScheme(value: string): boolean {
 function normalizeBareWorkbenchUrl(value: string): string {
   const localHost = /^(localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::|\/|$)/i;
   return `${localHost.test(value) ? 'http' : 'https'}://${value}`;
+}
+
+function isProductionWorkbenchHost(hostname: string): boolean {
+  return (
+    hostname === 'hd-app.orangebench.tech' ||
+    hostname === 'holaday.ai' ||
+    hostname === 'app.holaday.ai'
+  );
+}
+
+function isLocalWorkbenchHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
 }
 
 /**
