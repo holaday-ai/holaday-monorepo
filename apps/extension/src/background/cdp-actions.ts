@@ -473,7 +473,7 @@ async function doNavigate(
       message: cdpNavigateErrorMessage(resp.errorText),
     };
   }
-  return { ok: true, message: `navigated to ${url}` };
+  return { ok: true, message: `navigated to ${sanitizePageContextUrl(url)}` };
 }
 
 function cdpNavigateErrorMessage(errorText: string): string {

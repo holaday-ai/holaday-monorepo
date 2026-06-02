@@ -833,6 +833,33 @@ describe('executeCdpAction', () => {
     });
   });
 
+  it('scrubs sensitive urls from successful navigation messages', async () => {
+    const sendCommand = vi.fn(async () => ({}));
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    await expect(
+      executeCdpAction(15, {
+        kind: 'navigate',
+        url: 'https://example.com/callback?accessToken=secret&state=keep#token=hash',
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      message: 'navigated to https://example.com/callback?state=keep',
+    });
+    expect(sendCommand).toHaveBeenCalledWith(
+      { tabId: 15 },
+      'Page.navigate',
+      {
+        url: 'https://example.com/callback?accessToken=secret&state=keep#token=hash',
+      },
+    );
+  });
+
   it('clips action result messages to the vision acted schema limit', async () => {
     await expect(
       executeCdpAction(15, { kind: 'wait_for_human', reason: 'x'.repeat(2_000) }),
