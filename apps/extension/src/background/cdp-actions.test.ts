@@ -786,6 +786,18 @@ describe('executeCdpAction', () => {
     await expect(oversized).resolves.toEqual({ ok: true, message: 'waited 10000ms' });
   });
 
+  it('rejects invalid wait durations instead of reporting a fake success', async () => {
+    const invalidWait = {
+      kind: 'wait',
+      ms: 'soon',
+    } as unknown as Extract<VisionAction, { kind: 'wait' }>;
+
+    await expect(executeCdpAction(14, invalidWait)).resolves.toEqual({
+      ok: false,
+      message: '等待时间无效，请重新生成等待操作',
+    });
+  });
+
   it('reports CDP navigation failures instead of treating them as success', async () => {
     const sendCommand = vi.fn(async (_target, method: string) => {
       if (method === 'Page.navigate') {
