@@ -8,7 +8,7 @@ import {
 import {
   ORCHESTRATOR_WS,
   ORCHESTRATOR_WS_ENDPOINTS,
-  ORCHESTRATOR_WS_HEALTH_URL,
+  getOrchestratorWsHealthUrl,
 } from '../shared/config.js';
 import { withDeadline } from '../shared/deadline.js';
 
@@ -262,10 +262,11 @@ function openSocket(token: string): void {
   const protocols = [WS_SUBPROTOCOL, `jwt.${token}`];
   const endpoint = getCurrentWsEndpoint();
   state.endpointUrl = endpoint;
-  if (ORCHESTRATOR_WS_HEALTH_URL) {
+  const healthUrl = getOrchestratorWsHealthUrl(endpoint);
+  if (healthUrl) {
     const generation = state.socketGeneration;
     state.openingToken = token;
-    void openSocketAfterHealthCheck(token, protocols, endpoint, generation);
+    void openSocketAfterHealthCheck(token, protocols, endpoint, healthUrl, generation);
     return;
   }
   openWebSocket(token, protocols, endpoint);
@@ -275,9 +276,10 @@ async function openSocketAfterHealthCheck(
   token: string,
   protocols: string[],
   endpoint: string,
+  healthUrl: string,
   generation: number,
 ): Promise<void> {
-  const ok = await checkWsOriginHealth();
+  const ok = await checkWsOriginHealth(healthUrl);
   if (state.socketGeneration !== generation || state.closedByUser) return;
   state.openingToken = null;
   if (!ok) {
@@ -291,11 +293,10 @@ async function openSocketAfterHealthCheck(
   openWebSocket(token, protocols, endpoint);
 }
 
-async function checkWsOriginHealth(): Promise<boolean> {
-  if (!ORCHESTRATOR_WS_HEALTH_URL) return true;
+async function checkWsOriginHealth(healthUrl: string): Promise<boolean> {
   try {
     const response = await withDeadline(
-      fetch(ORCHESTRATOR_WS_HEALTH_URL, {
+      fetch(healthUrl, {
         cache: 'no-store',
         credentials: 'omit',
       }),

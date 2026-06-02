@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const configMock = vi.hoisted(() => ({
   wsHealthUrl: null as string | null,
+  deriveHealthUrl: false,
 }));
 
 vi.mock('../shared/config.js', () => ({
@@ -10,6 +11,16 @@ vi.mock('../shared/config.js', () => ({
   ORCHESTRATOR_WS_ENDPOINTS: ['wss://primary.test/ws', 'wss://backup.test/ws'],
   get ORCHESTRATOR_WS_HEALTH_URL() {
     return configMock.wsHealthUrl;
+  },
+  getOrchestratorWsHealthUrl(endpoint: string) {
+    if (configMock.wsHealthUrl) return configMock.wsHealthUrl;
+    if (!configMock.deriveHealthUrl) return null;
+    const url = new URL(endpoint);
+    url.protocol = 'https:';
+    url.pathname = '/api/healthz';
+    url.search = '';
+    url.hash = '';
+    return url.href;
   },
 }));
 
@@ -96,6 +107,7 @@ describe('ws-client send', () => {
   beforeEach(() => {
     vi.resetModules();
     configMock.wsHealthUrl = null;
+    configMock.deriveHealthUrl = false;
     installGlobals();
   });
 
@@ -351,6 +363,38 @@ describe('ws-client send', () => {
       });
     });
     expect(sockets).toHaveLength(0);
+  });
+
+  it('preflights the endpoint selected for a network reconnect', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    configMock.deriveHealthUrl = true;
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false } as Response)
+      .mockResolvedValueOnce({ ok: true } as Response);
+    vi.stubGlobal('fetch', fetch);
+    const { connect } = await import('./ws-client.js');
+
+    connect('token');
+    await vi.waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith('https://primary.test/api/healthz', {
+        cache: 'no-store',
+        credentials: 'omit',
+      });
+    });
+    expect(sockets).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await vi.waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith('https://backup.test/api/healthz', {
+        cache: 'no-store',
+        credentials: 'omit',
+      });
+      expect(sockets).toHaveLength(1);
+    });
+    expect(sockets[0]?.url).toBe('wss://backup.test/ws');
   });
 
   it('remembers the endpoint that successfully opened', async () => {

@@ -59,9 +59,14 @@ export const ORCHESTRATOR_WS_ENDPOINTS = import.meta.env.VITE_ORCHESTRATOR_WS
     ? [...PROD_WS_ENDPOINTS]
     : [DEV_WS];
 
+const ORCHESTRATOR_WS_HEALTH_URL_OVERRIDE = import.meta.env.VITE_ORCHESTRATOR_WS_HEALTH_URL;
+
 export const ORCHESTRATOR_WS_HEALTH_URL =
-  import.meta.env.VITE_ORCHESTRATOR_WS_HEALTH_URL ??
-  (IS_PROD ? wsEndpointToHealthUrl(ORCHESTRATOR_WS) : null);
+  ORCHESTRATOR_WS_HEALTH_URL_OVERRIDE ?? (IS_PROD ? wsEndpointToHealthUrl(ORCHESTRATOR_WS) : null);
+
+export function getOrchestratorWsHealthUrl(endpoint: string): string | null {
+  return ORCHESTRATOR_WS_HEALTH_URL_OVERRIDE ?? (IS_PROD ? wsEndpointToHealthUrl(endpoint) : null);
+}
 
 function wsEndpointToHealthUrl(endpoint: string): string | null {
   try {
