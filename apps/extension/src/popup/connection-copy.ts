@@ -133,7 +133,7 @@ function looksLikeEnglishTech(text: string): boolean {
 export function formatRelativeTime(at: number): string {
   const deltaMs = at - Date.now();
   const absSeconds = Math.max(0, Math.round(Math.abs(deltaMs) / 1000));
-  if (absSeconds < 5) return '刚刚';
+  if (absSeconds < 5) return deltaMs >= 0 ? '几秒后' : '刚刚';
   if (absSeconds < 60) return deltaMs >= 0 ? `${absSeconds} 秒后` : `${absSeconds} 秒前`;
   const minutes = Math.round(absSeconds / 60);
   return deltaMs >= 0 ? `${minutes} 分钟后` : `${minutes} 分钟前`;

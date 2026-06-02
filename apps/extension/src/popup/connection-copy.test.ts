@@ -109,6 +109,26 @@ describe('getConnectionStatusCopy', () => {
     vi.useRealTimers();
   });
 
+  it('does not describe a near-future retry as just now', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-31T00:00:00Z'));
+
+    expect(
+      getConnectionStatusCopy(
+        status({
+          reconnectAttempt: 1,
+          lastCloseReason: 'network error',
+          nextRetryAt: new Date('2026-05-31T00:00:03Z').getTime(),
+        }),
+      ),
+    ).toEqual({
+      title: '浏览器代理正在重连（1/3）',
+      detail: '最近错误：网络连接被关闭；下次尝试：几秒后',
+    });
+
+    vi.useRealTimers();
+  });
+
   it('keeps capped reconnects actionable', () => {
     expect(
       getConnectionStatusCopy(
