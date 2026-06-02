@@ -382,6 +382,7 @@ function openSocket(token: string): void {
   ws.addEventListener('error', () => {
     if (state.socket !== ws) return;
     state.lastErrorAt = Date.now();
+    state.lastCloseReason = 'network error';
     // 'close' will fire right after; reconnect handled there.
   });
 }

@@ -390,6 +390,21 @@ describe('ws-client send', () => {
     });
   });
 
+  it('records a network error reason before the close event arrives', async () => {
+    const { connect, getWsConnectionStatus } = await import('./ws-client.js');
+    connect('token');
+    const [socket] = sockets;
+    if (!socket) throw new Error('expected websocket');
+
+    socket.dispatch('error');
+
+    await expect(getWsConnectionStatus()).resolves.toMatchObject({
+      connected: true,
+      lastErrorAt: expect.any(Number),
+      lastCloseReason: 'network error',
+    });
+  });
+
   it('clears the ping timer when disconnecting before a fast reconnect', async () => {
     vi.useFakeTimers();
     const { connect, disconnect } = await import('./ws-client.js');
