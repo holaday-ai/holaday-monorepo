@@ -106,7 +106,7 @@ export async function tryAutoLogin(): Promise<string | null> {
     return null;
   }
 
-  const candidates = allTabs.filter((t) => isWorkbenchUrl(t.url));
+  const candidates = allTabs.filter((t) => isWorkbenchUrl(getTabAutoLoginUrl(t)));
   console.info(
     `[holaday] auto-login: scanning ${candidates.length} workbench tab(s) of ${allTabs.length} total`,
   );
@@ -123,7 +123,7 @@ export async function tryAutoLogin(): Promise<string | null> {
   const reads = await Promise.all(
     sorted.map(async (tab) => {
       if (typeof tab.id !== 'number') return { tab, token: null };
-      const token = await readTokenFromTab(tab.id, tab.url ?? '');
+      const token = await readTokenFromTab(tab.id, getTabAutoLoginUrl(tab));
       return { tab, token };
     }),
   );
@@ -131,13 +131,17 @@ export async function tryAutoLogin(): Promise<string | null> {
   for (const { tab, token } of reads) {
     if (token) {
       console.info(
-        `[holaday] auto-login: lifted token from tab ${tab.id} (${tab.url}) — ${token.length} chars`,
+        `[holaday] auto-login: lifted token from tab ${tab.id} (${getTabAutoLoginUrl(tab)}) — ${token.length} chars`,
       );
       return token;
     }
   }
   console.info('[holaday] auto-login: no token found in any candidate tab');
   return null;
+}
+
+function getTabAutoLoginUrl(tab: chrome.tabs.Tab): string {
+  return tab.url || tab.pendingUrl || '';
 }
 
 /** Exposed for the diagnostics pages / unit tests; safe to call. */

@@ -66,6 +66,35 @@ describe('tryAutoLogin', () => {
     expect(executeScript).toHaveBeenCalledTimes(3);
   });
 
+  it('scans a loading workbench tab using pendingUrl', async () => {
+    const executeScript = vi.fn(async () => [{ result: 'hd_live_pending_token' }]);
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [
+          {
+            id: 5,
+            url: undefined,
+            pendingUrl: 'https://holaday.ai/app',
+            active: true,
+            lastAccessed: 4,
+          } as chrome.tabs.Tab,
+          {
+            id: 6,
+            url: 'https://example.com/',
+            active: false,
+            lastAccessed: 5,
+          } as chrome.tabs.Tab,
+        ]),
+      },
+      scripting: { executeScript },
+    } as unknown as typeof chrome;
+
+    await expect(tryAutoLogin()).resolves.toBe('hd_live_pending_token');
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({ target: { tabId: 5 } }),
+    );
+  });
+
   it('reads candidate tabs in parallel when one localStorage read hangs', async () => {
     vi.useFakeTimers();
     const executeScript = vi
