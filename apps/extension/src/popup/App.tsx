@@ -317,28 +317,33 @@ export function App() {
 
   async function retryConnection(): Promise<void> {
     if (resetting) return;
+    const seq = ++authSyncSeq.current;
     setResetting(true);
     setStatusRefreshSignal((value) => value + 1);
     try {
       const response = await sendRuntimeMessageWithRetry<{ ok?: boolean; token?: string | null }>({
         type: user ? 'holaday.tryAutoLogin' : 'holaday.resetConnection',
       });
+      if (seq !== authSyncSeq.current || !mountedRef.current) return;
       if (response === null) return;
-      const resetToken = response?.token ?? null;
+      const resetToken = normalizeAccessToken(response?.token);
       if (resetToken) {
         const result = await fetchMe(resetToken);
-        if (!mountedRef.current) return;
+        if (seq !== authSyncSeq.current || !mountedRef.current) return;
         if (result.kind === 'ok') {
           await cacheStoredUserBestEffort(result.user);
-          if (!mountedRef.current) return;
+          if (seq !== authSyncSeq.current || !mountedRef.current) return;
           setUser(result.user);
           setToken(resetToken);
           return;
         }
         if (result.kind === 'unauthorized') {
-          await clearAccessToken();
-          await clearStoredUser();
-          if (!mountedRef.current) return;
+          const current = normalizeAccessToken(await getAccessToken());
+          if (current === resetToken) {
+            await clearAccessToken();
+            await clearStoredUser();
+          }
+          if (seq !== authSyncSeq.current || !mountedRef.current) return;
           setUser(null);
           setToken(null);
         }
@@ -347,7 +352,7 @@ export function App() {
       if (!response?.ok && !user) {
         await clearAccessToken();
         await clearStoredUser();
-        if (!mountedRef.current) return;
+        if (seq !== authSyncSeq.current || !mountedRef.current) return;
         setUser(null);
         setToken(null);
       }

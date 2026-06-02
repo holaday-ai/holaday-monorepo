@@ -139,14 +139,15 @@ export function App() {
         const resp = await sendRuntimeMessageWithRetry<{ ok?: boolean; token?: string | null }>({
           type: 'holaday.tryAutoLogin',
         });
-        const liftedToken = resp?.token ?? null;
+        const seq = authSyncSeq.current;
+        const liftedToken = normalizeAccessToken(resp?.token);
         if (liftedToken) {
           tok = liftedToken;
           const result = await fetchMe(liftedToken);
-          if (cancelled) return;
+          if (cancelled || seq !== authSyncSeq.current) return;
           if (result.kind === 'ok') {
             await cacheStoredUserBestEffort(result.user);
-            if (cancelled) return;
+            if (cancelled || seq !== authSyncSeq.current) return;
             setUser(result.user);
             setToken(liftedToken);
             setError(null);
@@ -155,11 +156,14 @@ export function App() {
             // Token was rejected (expired, signed with a different
             // secret, or pointing at a deleted user). Drop it so the
             // panel falls back to the manual login form.
-            await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
-            if (cancelled) return;
-            clearLocalSessionState();
+            const current = normalizeAccessToken(await getAccessToken());
+            if (current === liftedToken) {
+              await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
+              if (cancelled || seq !== authSyncSeq.current) return;
+              clearLocalSessionState();
+            }
           } else if (result.kind === 'network') {
-            if (cancelled) return;
+            if (cancelled || seq !== authSyncSeq.current) return;
             setStatus('error');
             setError('暂时无法读取账户信息，浏览器代理会继续保持连接并重试。');
           }
@@ -319,14 +323,15 @@ export function App() {
   async function retryAutoLogin(): Promise<void> {
     if (authRetryInFlight.current) return;
     authRetryInFlight.current = true;
+    const seq = ++authSyncSeq.current;
     setStatus('loading');
     setError(null);
     try {
       const resp = await sendRuntimeMessageWithRetry<{ ok?: boolean; token?: string | null }>({
         type: 'holaday.tryAutoLogin',
       });
-      if (!mountedRef.current) return;
-      const liftedToken = resp?.token ?? null;
+      if (!mountedRef.current || seq !== authSyncSeq.current) return;
+      const liftedToken = normalizeAccessToken(resp?.token);
       if (!liftedToken) {
         setStatus('error');
         setError(
@@ -335,12 +340,16 @@ export function App() {
         return;
       }
       const result = await fetchMe(liftedToken);
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || seq !== authSyncSeq.current) return;
       if (result.kind === 'unauthorized') {
         // Token was lifted but rejected by auth.me — likely expired
         // or signed with a different secret. Drop it so the next
         // retry doesn't keep looping with bad creds.
-        await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
+        const current = normalizeAccessToken(await getAccessToken());
+        if (current === liftedToken) {
+          await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
+        }
+        if (!mountedRef.current || seq !== authSyncSeq.current) return;
         setStatus('error');
         setError('从 holaday.ai 取到的 token 已失效，请到 holaday.ai 重新登录。');
         return;
@@ -351,7 +360,7 @@ export function App() {
         return;
       }
       await cacheStoredUserBestEffort(result.user);
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || seq !== authSyncSeq.current) return;
       setUser(result.user);
       setToken(liftedToken);
       setError(null);
