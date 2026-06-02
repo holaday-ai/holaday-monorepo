@@ -19,6 +19,12 @@ describe('humanizeExtensionError', () => {
     expect(humanizeExtensionError('Could not establish connection. Receiving end does not exist.')).toBe(
       '浏览器扩展未连接，请重新加载 HOLA DAY 扩展后重试。',
     );
+    expect(humanizeExtensionError('service worker restarting')).toBe(
+      '浏览器扩展后台正在重启，请稍等几秒后重试。',
+    );
+    expect(humanizeExtensionError('Extension context invalidated')).toBe(
+      '浏览器扩展后台正在重启，请稍等几秒后重试。',
+    );
     expect(humanizeExtensionError('sidepanel_create_task_timeout')).toBe(
       '请求超时，页面或服务可能仍在加载，请稍后重试。',
     );
