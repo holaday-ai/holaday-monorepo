@@ -15,6 +15,10 @@ describe('humanizeExtensionError', () => {
     expect(humanizeExtensionError('请先输入任务内容')).toBe('请先输入任务内容');
   });
 
+  it('clips long friendly errors before rendering extension UI', () => {
+    expect(humanizeExtensionError('请'.repeat(300))).toBe(`${'请'.repeat(240)}…`);
+  });
+
   it('maps extension connection failures to actionable copy', () => {
     expect(humanizeExtensionError('Could not establish connection. Receiving end does not exist.')).toBe(
       '浏览器扩展未连接，请重新加载 HOLA DAY 扩展后重试。',

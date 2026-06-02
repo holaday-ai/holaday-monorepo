@@ -1,5 +1,6 @@
 const GENERIC_EXTENSION_ERROR =
   '操作没有完成，请稍后重试。如果反复出现，可以重新加载 HOLA DAY 扩展。';
+const MAX_FRIENDLY_ERROR_CHARS = 240;
 
 const RULES: ReadonlyArray<{ match: RegExp; message: string }> = [
   {
@@ -57,7 +58,7 @@ export function humanizeExtensionError(
     if (rule.match.test(text)) return rule.message;
   }
   if (looksLikeEnglishTech(text)) return fallback;
-  return text;
+  return clipErrorText(text);
 }
 
 function looksLikeEnglishTech(text: string): boolean {
@@ -66,4 +67,10 @@ function looksLikeEnglishTech(text: string): boolean {
     if (ch.codePointAt(0)! < 128) ascii += 1;
   }
   return ascii / text.length > 0.85;
+}
+
+function clipErrorText(text: string): string {
+  return text.length > MAX_FRIENDLY_ERROR_CHARS
+    ? `${text.slice(0, MAX_FRIENDLY_ERROR_CHARS)}…`
+    : text;
 }
