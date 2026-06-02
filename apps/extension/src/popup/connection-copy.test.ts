@@ -53,6 +53,34 @@ describe('getConnectionStatusCopy', () => {
     vi.useRealTimers();
   });
 
+  it('does not reuse an old welcome timestamp after a newer socket opens', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-31T00:01:00Z'));
+
+    expect(
+      getConnectionStatusCopy({
+        lastWelcomeAt: new Date('2026-05-31T00:00:00Z').getTime(),
+        ws: {
+          connected: true,
+          readyState: 1,
+          reconnectAttempt: 0,
+          reconnectCapped: false,
+          lastOpenAt: new Date('2026-05-31T00:00:30Z').getTime(),
+          lastCloseAt: null,
+          lastCloseCode: null,
+          lastCloseReason: null,
+          lastErrorAt: null,
+          nextRetryAt: null,
+        },
+      }),
+    ).toEqual({
+      title: '浏览器代理正在确认连接',
+      detail: '连接已建立，正在等待服务确认',
+    });
+
+    vi.useRealTimers();
+  });
+
   it('shows a clear connecting state before the websocket is open', () => {
     expect(getConnectionStatusCopy(status({ readyState: 0 }))).toEqual({
       title: '浏览器代理正在连接',

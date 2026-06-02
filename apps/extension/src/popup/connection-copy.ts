@@ -31,11 +31,14 @@ export function getConnectionStatusCopy(
     return { title: '浏览器代理状态同步中', detail: '正在读取扩展后台连接状态' };
   }
   if (status.ws.connected) {
+    const currentSocketConfirmed =
+      typeof status.lastWelcomeAt === 'number' &&
+      (!status.ws.lastOpenAt || status.lastWelcomeAt >= status.ws.lastOpenAt);
     return {
-      title: '浏览器代理已连接',
-      detail: status.lastWelcomeAt
+      title: currentSocketConfirmed ? '浏览器代理已连接' : '浏览器代理正在确认连接',
+      detail: currentSocketConfirmed && status.lastWelcomeAt
         ? `最近确认：${formatRelativeTime(status.lastWelcomeAt)}`
-        : 'WebSocket 已连接',
+        : '连接已建立，正在等待服务确认',
     };
   }
 
