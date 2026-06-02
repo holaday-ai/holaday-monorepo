@@ -158,6 +158,10 @@ export function App() {
             await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
             if (cancelled) return;
             clearLocalSessionState();
+          } else if (result.kind === 'network') {
+            if (cancelled) return;
+            setStatus('error');
+            setError('暂时无法读取账户信息，浏览器代理会继续保持连接并重试。');
           }
         }
       }
