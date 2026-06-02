@@ -38,5 +38,10 @@ describe('humanizeExtensionError', () => {
         "WebSocket connection to 'wss://holaday.ai/ws' failed: Error in connection establishment: net::ERR_CONNECTION_CLOSED",
       ),
     ).toBe('浏览器连接中断，请重新打开 HOLA DAY 扩展后重试。');
+    expect(
+      humanizeExtensionError(
+        "WebSocket connection to 'wss://holaday.ai/ws' failed: Error in connection establishment: net::ERR_CONNECTION_RESET",
+      ),
+    ).toBe('浏览器连接中断，请重新打开 HOLA DAY 扩展后重试。');
   });
 });

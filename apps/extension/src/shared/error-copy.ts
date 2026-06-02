@@ -11,7 +11,8 @@ const RULES: ReadonlyArray<{ match: RegExp; message: string }> = [
     message: '浏览器扩展未连接，请重新加载 HOLA DAY 扩展后重试。',
   },
   {
-    match: /message port closed|extension.*disconnect|socket_closed|websocket.*closed|连接.*中断/i,
+    match:
+      /message port closed|extension.*disconnect|socket_closed|websocket.*closed|err_connection_(?:closed|reset)|连接.*中断/i,
     message: '浏览器连接中断，请重新打开 HOLA DAY 扩展后重试。',
   },
   {
