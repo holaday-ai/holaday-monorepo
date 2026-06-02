@@ -346,7 +346,7 @@ async function executeNavigate(
   const title = reloaded.title ?? '';
   if (isChromeErrorPageUrl(finalUrl)) {
     return sanitizeNavigateResult({
-      finalUrl,
+      finalUrl: url,
       title,
       bodyText: title ? `Chrome error page: ${title}` : 'Chrome error page',
     });

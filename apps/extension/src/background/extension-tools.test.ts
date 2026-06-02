@@ -1033,7 +1033,7 @@ describe('handleExtensionToolCall', () => {
     );
   });
 
-  it('returns Chrome error page metadata without misclassifying it as a permission error', async () => {
+  it('returns the target URL when navigation lands on a Chrome error page', async () => {
     vi.mocked(send).mockClear();
     const update = vi.fn(async () => ({ id: 2, url: 'https://missing.example/' }) as chrome.tabs.Tab);
     const executeScript = vi.fn(async () => {
@@ -1080,7 +1080,7 @@ describe('handleExtensionToolCall', () => {
         requestId: 'req_chrome_error_nav',
         ok: true,
         result: {
-          finalUrl: 'chrome-error://chromewebdata/',
+          finalUrl: 'https://missing.example/',
           title: 'This site cannot be reached',
           bodyText: 'Chrome error page: This site cannot be reached',
         },
