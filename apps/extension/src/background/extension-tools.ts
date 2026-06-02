@@ -390,6 +390,11 @@ function normalizeNavigateWaitMs(raw: unknown): number {
   return Math.max(0, Math.min(MAX_NAVIGATE_WAIT_MS, Math.trunc(raw)));
 }
 
+function normalizeToolCallTimeoutMs(raw: unknown): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return 30_000;
+  return Math.max(1000, Math.min(60_000, Math.trunc(raw)));
+}
+
 interface ScreenshotResult {
   /** base64 JPEG (no data: prefix). Cap ~200KB by using quality 50. */
   imageBase64: string;
@@ -581,7 +586,7 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
     await pending.promise;
     return;
   }
-  const callTimeoutMs = Math.max(1000, Math.min(60_000, call.timeoutMs ?? 30_000));
+  const callTimeoutMs = normalizeToolCallTimeoutMs(call.timeoutMs);
   const operationBudgetMs = Math.max(500, callTimeoutMs - 500);
   const waitMs = Math.min(
     normalizeNavigateWaitMs(args?.waitMs),

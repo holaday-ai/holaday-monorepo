@@ -686,6 +686,37 @@ describe('handleExtensionToolCall', () => {
     });
   });
 
+  it('uses the default budget when the server sends an invalid timeout', async () => {
+    vi.mocked(send).mockClear();
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, windowId: 1, url: 'https://holaday.ai/app' }]),
+        captureVisibleTab: vi.fn(async () => 'data:image/jpeg;base64,AA=='),
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_invalid_timeout',
+      requestId: 'req_invalid_timeout',
+      kind: 'screenshot',
+      args: {},
+      timeoutMs: Number.NaN,
+    };
+
+    await handleExtensionToolCall(call);
+
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'client.extension.tool_result',
+        taskId: 'tsk_invalid_timeout',
+        requestId: 'req_invalid_timeout',
+        ok: true,
+        result: { imageBase64: 'AA==', width: 0, height: 0 },
+      }),
+    );
+  });
+
   it('activates the selected tab before navigating a fallback page', async () => {
     vi.mocked(send).mockClear();
     const update = vi.fn(async () => ({ id: 2, url: 'https://example.com/' }) as chrome.tabs.Tab);
