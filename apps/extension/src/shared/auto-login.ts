@@ -36,7 +36,7 @@ const AUTO_LOGIN_TAB_QUERY_TIMEOUT_MS = 2_000;
 const WORKBENCH_URL_PATTERNS: readonly RegExp[] = [
   /^https:\/\/hd-app\.orangebench\.tech(?:[/:]|$)/i,
   /^https:\/\/holaday\.ai(?:[/:]|$)/i,
-  /^https:\/\/[a-z0-9-]+\.holaday\.ai(?:[/:]|$)/i,
+  /^https:\/\/app\.holaday\.ai(?:[/:]|$)/i,
   /^http:\/\/localhost(?::\d+)?(?:[/?#]|$)/i,
   /^http:\/\/127(?:\.\d{1,3}){3}(?::\d+)?(?:[/?#]|$)/i,
   /^http:\/\/\[::1\](?::\d+)?(?:[/?#]|$)/i,

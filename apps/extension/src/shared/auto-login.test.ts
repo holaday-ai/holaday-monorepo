@@ -13,6 +13,7 @@ describe('tryAutoLogin', () => {
     expect(_internals.isWorkbenchUrl('https://hd-app.orangebench.tech/app')).toBe(true);
     expect(_internals.isWorkbenchUrl('https://holaday.ai/app')).toBe(true);
     expect(_internals.isWorkbenchUrl('https://app.holaday.ai/app')).toBe(true);
+    expect(_internals.isWorkbenchUrl('https://staging.holaday.ai/app')).toBe(false);
     expect(_internals.isWorkbenchUrl('https://example.com/holaday.ai')).toBe(false);
   });
 
