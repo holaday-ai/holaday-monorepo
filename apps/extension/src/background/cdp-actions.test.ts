@@ -603,6 +603,33 @@ describe('executeCdpAction', () => {
     expect(attach).toHaveBeenCalledTimes(2);
   });
 
+  it('reattaches and retries once when a CDP command loses its debugger session', async () => {
+    const attach = vi.fn(async () => undefined);
+    const detach = vi.fn(async () => undefined);
+    const sendCommand = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Debugger is not attached to the tab'))
+      .mockResolvedValueOnce({});
+    globalThis.chrome = {
+      debugger: {
+        attach,
+        detach,
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    await expect(executeCdpAction(13, { kind: 'type', text: 'retry' })).resolves.toEqual({
+      ok: true,
+      message: 'typed 5 chars',
+    });
+    expect(detach).toHaveBeenCalledWith({ tabId: 13 });
+    expect(attach).toHaveBeenCalledTimes(2);
+    expect(sendCommand).toHaveBeenCalledTimes(2);
+    expect(sendCommand).toHaveBeenNthCalledWith(2, { tabId: 13 }, 'Input.insertText', {
+      text: 'retry',
+    });
+  });
+
   it('clamps wait actions to a safe non-negative window', async () => {
     vi.useFakeTimers();
 

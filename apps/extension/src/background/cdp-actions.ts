@@ -511,6 +511,21 @@ async function sendCdp(
   params: Record<string, unknown>,
   timeoutMs = CDP_COMMAND_TIMEOUT_MS,
 ): Promise<unknown> {
+  try {
+    return await sendCdpOnce(tabId, method, params, timeoutMs);
+  } catch (err) {
+    if (!shouldRetryCdpAfterReattach(err)) throw err;
+    await ensureAttached(tabId);
+    return sendCdpOnce(tabId, method, params, timeoutMs);
+  }
+}
+
+async function sendCdpOnce(
+  tabId: number,
+  method: string,
+  params: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<unknown> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const cap = new Promise<never>((_, reject) => {
     timer = setTimeout(
@@ -540,6 +555,17 @@ async function sendCdp(
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+function shouldRetryCdpAfterReattach(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('not attached') ||
+    lower.includes('target detached') ||
+    lower.includes('detached from target') ||
+    lower.includes('no session with given id')
+  );
 }
 
 function shouldResetCdpSession(err: unknown): boolean {
