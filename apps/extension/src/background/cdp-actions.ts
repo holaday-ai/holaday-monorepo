@@ -254,7 +254,9 @@ export function cdpActionErrorMessage(err: unknown): string {
     lower.includes('cannot access contents of url') ||
     lower.includes('cannot access contents of the page') ||
     lower.includes('extension manifest must request permission') ||
+    lower.includes('<all_urls>') ||
     lower.includes('activetab permission') ||
+    (lower.includes('activetab') && lower.includes('permission')) ||
     lower.includes('cannot access a chrome:// url') ||
     lower.includes('cannot access a chrome-extension:// url') ||
     lower.includes('cannot access a file:// url') ||

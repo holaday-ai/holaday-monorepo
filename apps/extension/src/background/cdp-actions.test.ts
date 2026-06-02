@@ -971,6 +971,9 @@ describe('cdpActionErrorMessage', () => {
     expect(cdpActionErrorMessage(new Error('Requires activeTab permission'))).toBe(
       '扩展没有这个页面的访问权限，请检查扩展权限后重试',
     );
+    expect(cdpActionErrorMessage(new Error("Either the '<all_urls>' or 'activeTab' permission is required."))).toBe(
+      '扩展没有这个页面的访问权限，请检查扩展权限后重试',
+    );
     expect(cdpActionErrorMessage(new Error('Cannot access a file:// URL'))).toBe(
       '扩展没有这个页面的访问权限，请检查扩展权限后重试',
     );
