@@ -681,6 +681,14 @@ function resolveKey(name: string): KeyInfo {
     end: { key: 'End', code: 'End', windowsVirtualKeyCode: 35 },
     pageup: { key: 'PageUp', code: 'PageUp', windowsVirtualKeyCode: 33 },
     pagedown: { key: 'PageDown', code: 'PageDown', windowsVirtualKeyCode: 34 },
+    '/': { key: '/', code: 'Slash', text: '/', windowsVirtualKeyCode: 191 },
+    slash: { key: '/', code: 'Slash', text: '/', windowsVirtualKeyCode: 191 },
+    '\\': { key: '\\', code: 'Backslash', text: '\\', windowsVirtualKeyCode: 220 },
+    backslash: { key: '\\', code: 'Backslash', text: '\\', windowsVirtualKeyCode: 220 },
+    ',': { key: ',', code: 'Comma', text: ',', windowsVirtualKeyCode: 188 },
+    comma: { key: ',', code: 'Comma', text: ',', windowsVirtualKeyCode: 188 },
+    '.': { key: '.', code: 'Period', text: '.', windowsVirtualKeyCode: 190 },
+    period: { key: '.', code: 'Period', text: '.', windowsVirtualKeyCode: 190 },
   };
   const special = named[name.toLowerCase()];
   if (special) return special;
@@ -695,7 +703,11 @@ function resolveKey(name: string): KeyInfo {
   }
   // Single printable char — emit as `text` so CDP inserts it.
   if (name.length === 1) {
-    const code = /^[a-z]$/i.test(name) ? `Key${name.toUpperCase()}` : name;
+    const code = /^[a-z]$/i.test(name)
+      ? `Key${name.toUpperCase()}`
+      : /^[0-9]$/.test(name)
+        ? `Digit${name}`
+        : name;
     const windowsVirtualKeyCode = /^[a-z0-9]$/i.test(name)
       ? name.toUpperCase().charCodeAt(0)
       : undefined;
