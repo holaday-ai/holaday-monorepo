@@ -1018,22 +1018,24 @@ function onBatchConfirm(
 }
 
 function onTaskControl(msg: Extract<ServerMessage, { type: 'server.task.control' }>): void {
+  const isStopped = msg.command === 'pause' || msg.command === 'cancel';
+  setExtensionToolTaskStopped(msg.taskId, isStopped);
   const task = state.tasks.get(msg.taskId);
-  if (!task) return;
+  if (!task) {
+    if (isStopped) releaseVisionDebugger(msg.taskId);
+    return;
+  }
   task.pendingConfirm = null;
   if (msg.command === 'pause') {
     task.status = 'paused';
     task.pauseReason = (msg.reason as PauseReason | undefined) ?? 'user';
-    setExtensionToolTaskStopped(msg.taskId, true);
     releaseVisionDebugger(msg.taskId);
   } else if (msg.command === 'resume') {
     task.status = 'executing';
     task.pauseReason = null;
-    setExtensionToolTaskStopped(msg.taskId, false);
   } else if (msg.command === 'cancel') {
     task.status = 'cancelled';
     task.pauseReason = null;
-    setExtensionToolTaskStopped(msg.taskId, true);
     releaseVisionDebugger(msg.taskId);
   }
   task.lastUpdated = Date.now();
