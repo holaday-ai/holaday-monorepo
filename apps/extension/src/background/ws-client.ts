@@ -138,6 +138,10 @@ export function disconnect(): void {
   const socket = state.socket;
   state.socket = null;
   state.token = null;
+  state.lastCloseAt = Date.now();
+  state.lastCloseCode = 1000;
+  state.lastCloseReason = 'client requested disconnect';
+  state.lastErrorAt = null;
   if (state.pingTimer) {
     clearInterval(state.pingTimer);
     state.pingTimer = null;
@@ -220,6 +224,10 @@ export function reconnect(token: string, options: { force?: boolean } = {}): voi
   clearReconnectTimer();
   if (state.socket) {
     state.closedByUser = true;
+    state.lastCloseAt = Date.now();
+    state.lastCloseCode = 1000;
+    state.lastCloseReason = 'token swap';
+    state.lastErrorAt = null;
     try {
       state.socket.close(1000, 'token swap');
     } catch {

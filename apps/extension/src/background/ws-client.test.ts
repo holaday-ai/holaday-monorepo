@@ -450,6 +450,8 @@ describe('ws-client send', () => {
     await expect(getWsConnectionStatus()).resolves.toMatchObject({
       connected: false,
       readyState: null,
+      lastCloseCode: 1000,
+      lastCloseReason: 'client requested disconnect',
       nextRetryAt: null,
     });
   });
@@ -765,6 +767,8 @@ describe('ws-client send', () => {
       connected: false,
       readyState: null,
       reconnectAttempt: 0,
+      lastCloseCode: 1000,
+      lastCloseReason: 'client requested disconnect',
       nextRetryAt: null,
     });
   });
