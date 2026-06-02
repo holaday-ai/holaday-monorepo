@@ -29,6 +29,7 @@
 
 import type { ClientMessage, ServerMessage } from '@holaday/shared-types';
 import { withDeadline } from '../shared/deadline.js';
+import { sanitizePageContextUrl } from '../shared/page-context.js';
 import { sendCriticalClientMessage } from './critical-send.js';
 import { getCurrentWsToken } from './ws-client.js';
 
@@ -40,6 +41,8 @@ const NAVIGATE_LOAD_TIMEOUT_MS = 25_000;
 
 /** Cap body-text extract size — typical page is < 50KB extracted plain text. */
 const BODY_TEXT_CHAR_CAP = 8_000;
+const BODY_TEXT_RESULT_SUFFIX_CAP = 128;
+const NAVIGATE_TITLE_CHAR_CAP = 512;
 const DEFAULT_NAVIGATE_WAIT_MS = 1500;
 const MAX_NAVIGATE_WAIT_MS = 10_000;
 const BODY_TEXT_READ_TIMEOUT_MS = 5_000;
@@ -339,11 +342,11 @@ async function executeNavigate(
   const finalUrl = reloaded.url ?? url;
   const title = reloaded.title ?? '';
   if (isChromeErrorPageUrl(finalUrl)) {
-    return {
+    return sanitizeNavigateResult({
       finalUrl,
       title,
       bodyText: title ? `Chrome error page: ${title}` : 'Chrome error page',
-    };
+    });
   }
   let rawText = '';
   try {
@@ -355,7 +358,7 @@ async function executeNavigate(
       console.warn('[holaday] extension navigate body text read unavailable', err);
     }
   }
-  return { finalUrl, title, bodyText: rawText };
+  return sanitizeNavigateResult({ finalUrl, title, bodyText: rawText });
 }
 
 function isChromeErrorPageUrl(url: string): boolean {
@@ -380,6 +383,25 @@ async function readBodyText(tabId: number): Promise<string> {
     'body_text_timeout',
   );
   return typeof first?.result === 'string' ? first.result : '';
+}
+
+function clipText(value: unknown, maxChars: number): string {
+  const text = typeof value === 'string' ? value : '';
+  return text.length > maxChars ? text.slice(0, maxChars) : text;
+}
+
+function clipBodyText(value: unknown): string {
+  const text = typeof value === 'string' ? value : '';
+  if (text.length <= BODY_TEXT_CHAR_CAP + BODY_TEXT_RESULT_SUFFIX_CAP) return text;
+  return `${text.slice(0, BODY_TEXT_CHAR_CAP)}\n…(已截断，原文 ${text.length} 字)`;
+}
+
+function sanitizeNavigateResult(result: NavigateResult): NavigateResult {
+  return {
+    finalUrl: sanitizePageContextUrl(result.finalUrl),
+    title: clipText(result.title, NAVIGATE_TITLE_CHAR_CAP),
+    bodyText: clipBodyText(result.bodyText),
+  };
 }
 
 function isBodyTextTimeout(err: unknown): boolean {

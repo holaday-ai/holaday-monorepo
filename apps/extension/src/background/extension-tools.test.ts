@@ -1135,6 +1135,56 @@ describe('handleExtensionToolCall', () => {
     );
   });
 
+  it('scrubs and bounds navigate results before sending them to the server', async () => {
+    vi.mocked(send).mockClear();
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, url: 'https://holaday.ai/app' }]),
+        update: vi.fn(async () => ({ id: 2, url: 'https://example.com/' }) as chrome.tabs.Tab),
+        get: vi.fn(async () => ({
+          id: 2,
+          status: 'complete',
+          url: 'https://example.com/callback?accessToken=secret&state=keep#token=hash',
+          title: 'T'.repeat(700),
+        })),
+        onUpdated: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+        onRemoved: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+      },
+      scripting: {
+        executeScript: vi.fn(async () => [{ result: 'B'.repeat(9000) }]),
+      },
+    } as unknown as typeof chrome;
+
+    await handleExtensionToolCall({
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_scrub_nav_result',
+      requestId: 'req_scrub_nav_result',
+      kind: 'navigate',
+      args: { url: 'https://example.com/', waitMs: 0 },
+      timeoutMs: 30_000,
+    });
+
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'client.extension.tool_result',
+        taskId: 'tsk_scrub_nav_result',
+        requestId: 'req_scrub_nav_result',
+        ok: true,
+        result: {
+          finalUrl: 'https://example.com/callback?state=keep',
+          title: 'T'.repeat(512),
+          bodyText: `${'B'.repeat(8000)}\n…(已截断，原文 9000 字)`,
+        },
+      }),
+    );
+  });
+
   it('caps navigate settle wait to the tool call budget', async () => {
     vi.useFakeTimers();
     vi.mocked(send).mockClear();
