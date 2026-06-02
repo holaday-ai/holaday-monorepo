@@ -971,15 +971,18 @@ function onBatchConfirm(
 function onTaskControl(msg: Extract<ServerMessage, { type: 'server.task.control' }>): void {
   const task = state.tasks.get(msg.taskId);
   if (!task) return;
+  task.pendingConfirm = null;
   if (msg.command === 'pause') {
     task.status = 'paused';
     task.pauseReason = (msg.reason as PauseReason | undefined) ?? 'user';
+    releaseVisionDebugger(msg.taskId);
   } else if (msg.command === 'resume') {
     task.status = 'executing';
     task.pauseReason = null;
   } else if (msg.command === 'cancel') {
     task.status = 'cancelled';
     task.pauseReason = null;
+    releaseVisionDebugger(msg.taskId);
   }
   task.lastUpdated = Date.now();
   pushTasksSnapshot();
