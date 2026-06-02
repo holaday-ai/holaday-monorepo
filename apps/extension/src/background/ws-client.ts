@@ -302,7 +302,7 @@ function openSocket(token: string): void {
     state.token = null;
     state.lastCloseAt = Date.now();
     state.lastCloseCode = code;
-    state.lastCloseReason = reason;
+    state.lastCloseReason = reason ?? state.lastCloseReason;
     if (code === 4401) {
       // Orchestrator rejected our auth. Surface to the SW so it
       // clears the bad token; do NOT auto-reconnect — that would
