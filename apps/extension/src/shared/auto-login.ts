@@ -28,6 +28,7 @@ import { sanitizePageContextUrl } from './page-context.js';
 const TOKEN_KEY = 'holaday.access_token';
 const AUTO_LOGIN_TAB_READ_TIMEOUT_MS = 2_000;
 const AUTO_LOGIN_TAB_QUERY_TIMEOUT_MS = 2_000;
+const MAX_AUTO_LOGIN_CANDIDATE_TABS = 8;
 
 /**
  * URLs we'll consider "the workbench". Same rule as a chrome.tabs
@@ -124,7 +125,7 @@ export async function tryAutoLogin(): Promise<string | null> {
   });
 
   const reads = await Promise.all(
-    sorted.map(async (tab) => {
+    sorted.slice(0, MAX_AUTO_LOGIN_CANDIDATE_TABS).map(async (tab) => {
       if (typeof tab.id !== 'number') return { tab, token: null };
       const token = await readTokenFromTab(tab.id, getTabAutoLoginUrl(tab));
       return { tab, token };
@@ -153,4 +154,5 @@ export const _internals = {
   TOKEN_KEY,
   WORKBENCH_URL_PATTERNS,
   isWorkbenchUrl,
+  MAX_AUTO_LOGIN_CANDIDATE_TABS,
 };

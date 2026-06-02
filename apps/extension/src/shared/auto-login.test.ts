@@ -184,6 +184,33 @@ describe('tryAutoLogin', () => {
     expect(executeScript).toHaveBeenCalledTimes(2);
   });
 
+  it('only reads the highest-priority candidate tabs', async () => {
+    const executeScript = vi.fn(async () => [{ result: null }]);
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () =>
+          Array.from({ length: _internals.MAX_AUTO_LOGIN_CANDIDATE_TABS + 3 }, (_value, index) => ({
+            id: index + 1,
+            url: 'https://holaday.ai/app',
+            active: false,
+            lastAccessed: index,
+          })),
+        ),
+      },
+      scripting: { executeScript },
+    } as unknown as typeof chrome;
+
+    await expect(tryAutoLogin()).resolves.toBeNull();
+
+    expect(executeScript).toHaveBeenCalledTimes(_internals.MAX_AUTO_LOGIN_CANDIDATE_TABS);
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({ target: { tabId: _internals.MAX_AUTO_LOGIN_CANDIDATE_TABS + 3 } }),
+    );
+    expect(executeScript).not.toHaveBeenCalledWith(
+      expect.objectContaining({ target: { tabId: 1 } }),
+    );
+  });
+
   it('returns null when the tab query hangs', async () => {
     vi.useFakeTimers();
     globalThis.chrome = {
