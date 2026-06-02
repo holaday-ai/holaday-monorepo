@@ -533,6 +533,9 @@ function ConnectionStatusBlock({
           if (cancelled) return;
           setStatus((previous) => mergeConnectionStatusPoll(previous, response ?? null));
         },
+        () => {
+          inFlight = false;
+        },
       );
     };
     refreshRef.current = refresh;
