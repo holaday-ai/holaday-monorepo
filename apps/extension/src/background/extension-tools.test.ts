@@ -572,6 +572,53 @@ describe('handleExtensionToolCall', () => {
     });
   });
 
+  it('replays an in-flight request result onto a newer websocket token', async () => {
+    vi.mocked(send).mockClear();
+    vi.mocked(getCurrentWsToken).mockReturnValue('token-a');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    let resolveCapture: (value: string) => void = () => {
+      throw new Error('capture promise was not created');
+    };
+    const captureVisibleTab = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveCapture = resolve;
+        }),
+    );
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, windowId: 1, url: 'https://holaday.ai/app' }]),
+        captureVisibleTab,
+      },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_duplicate_token_switch',
+      requestId: 'req_duplicate_token_switch',
+      kind: 'screenshot',
+      args: {},
+      timeoutMs: 30_000,
+    };
+
+    const first = handleExtensionToolCall(call);
+    await vi.waitFor(() => expect(captureVisibleTab).toHaveBeenCalledTimes(1));
+    vi.mocked(getCurrentWsToken).mockReturnValue('token-b');
+    const duplicate = handleExtensionToolCall(call);
+    resolveCapture('data:image/jpeg;base64,AA==');
+    await Promise.all([first, duplicate]);
+
+    expect(captureVisibleTab).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(send).mock.calls[0]?.[0]).toMatchObject({
+      type: 'client.extension.tool_result',
+      taskId: 'tsk_duplicate_token_switch',
+      requestId: 'req_duplicate_token_switch',
+      ok: true,
+      result: { imageBase64: 'AA==', width: 0, height: 0 },
+    });
+  });
+
   it('replays completed duplicate request ids without executing twice', async () => {
     vi.mocked(send).mockClear();
     const update = vi.fn(async () => ({ id: 2, url: 'https://example.com/' }) as chrome.tabs.Tab);

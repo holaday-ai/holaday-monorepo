@@ -590,7 +590,10 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
       requestId,
       kind,
     });
-    await pending.promise;
+    const payload = await pending.promise;
+    if (pending.ownerToken !== ownerToken) {
+      sendExtensionToolResult(taskId, requestId, payload, ownerToken);
+    }
     return;
   }
   const callTimeoutMs = normalizeToolCallTimeoutMs(call.timeoutMs);
