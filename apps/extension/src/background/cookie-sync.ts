@@ -21,6 +21,7 @@ import {
   fetchWithDeadline,
   responseJsonWithDeadline,
 } from '../shared/http.js';
+import { compactLogErrorReason } from '../shared/log-error.js';
 import { isPublicDomain, normalizePublicDomain } from '../shared/public-domain.js';
 
 /**
@@ -135,7 +136,10 @@ async function readCookiesForDomain(domain: string): Promise<chrome.cookies.Cook
       `cookie_domain_timeout:${domain}`,
     );
   } catch (err) {
-    console.warn(`[holaday] cookie-sync: getAll failed for ${domain}`, err);
+    console.warn(
+      `[holaday] cookie-sync: getAll failed for ${domain}`,
+      compactLogErrorReason(err),
+    );
     return [];
   }
 }

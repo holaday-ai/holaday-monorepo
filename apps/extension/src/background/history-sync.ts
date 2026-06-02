@@ -28,6 +28,7 @@ import {
   fetchWithDeadline,
   responseJsonWithDeadline,
 } from '../shared/http.js';
+import { compactLogErrorReason } from '../shared/log-error.js';
 import { isPublicDomain, normalizePublicDomain } from '../shared/public-domain.js';
 
 /**
@@ -148,7 +149,10 @@ export async function collectBrowsingHistory(): Promise<BrowsingHostEntry[]> {
       'history_search_timeout',
     );
   } catch (err) {
-    console.warn('[holaday] history-sync: chrome.history.search failed', err);
+    console.warn(
+      '[holaday] history-sync: chrome.history.search failed',
+      compactLogErrorReason(err),
+    );
     return [];
   }
 
