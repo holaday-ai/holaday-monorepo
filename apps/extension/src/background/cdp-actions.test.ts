@@ -787,6 +787,30 @@ describe('executeCdpAction', () => {
     });
   });
 
+  it('forgets missing CDP sessions before the retry attach', async () => {
+    const attach = vi.fn(async () => undefined);
+    const detach = vi.fn(async () => undefined);
+    const sendCommand = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('No session with given id'))
+      .mockResolvedValueOnce({});
+    globalThis.chrome = {
+      debugger: {
+        attach,
+        detach,
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    await expect(executeCdpAction(13, { kind: 'type', text: 'retry' })).resolves.toEqual({
+      ok: true,
+      message: 'typed 5 chars',
+    });
+    expect(detach).toHaveBeenCalledWith({ tabId: 13 });
+    expect(attach).toHaveBeenCalledTimes(2);
+    expect(sendCommand).toHaveBeenCalledTimes(2);
+  });
+
   it('clamps wait actions to a safe non-negative window', async () => {
     vi.useFakeTimers();
 
