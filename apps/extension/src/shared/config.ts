@@ -59,6 +59,29 @@ export const ORCHESTRATOR_WS_ENDPOINTS = import.meta.env.VITE_ORCHESTRATOR_WS
     ? [...PROD_WS_ENDPOINTS]
     : [DEV_WS];
 
+export const ORCHESTRATOR_WS_HEALTH_URL =
+  import.meta.env.VITE_ORCHESTRATOR_WS_HEALTH_URL ??
+  (IS_PROD ? wsEndpointToHealthUrl(ORCHESTRATOR_WS) : null);
+
+function wsEndpointToHealthUrl(endpoint: string): string | null {
+  try {
+    const url = new URL(endpoint);
+    if (url.protocol === 'wss:') {
+      url.protocol = 'https:';
+    } else if (url.protocol === 'ws:') {
+      url.protocol = 'http:';
+    } else {
+      return null;
+    }
+    url.pathname = '/api/healthz';
+    url.search = '';
+    url.hash = '';
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Phase 25b — the canonical web URL the extension's popup directs
  * users to when they need to log in. The auth-bridge content script

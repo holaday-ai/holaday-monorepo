@@ -5,17 +5,23 @@ import {
   WS_SUBPROTOCOL,
   parseServerMessage,
 } from '@holaday/shared-types';
-import { ORCHESTRATOR_WS, ORCHESTRATOR_WS_ENDPOINTS } from '../shared/config.js';
+import {
+  ORCHESTRATOR_WS,
+  ORCHESTRATOR_WS_ENDPOINTS,
+  ORCHESTRATOR_WS_HEALTH_URL,
+} from '../shared/config.js';
 import { withDeadline } from '../shared/deadline.js';
 
 type Listener = (msg: ServerMessage) => void;
 type UnauthorizedListener = () => void;
 
 const WS_OPEN_TIMEOUT_MS = 12_000;
+const WS_HEALTH_TIMEOUT_MS = 2_500;
 
 interface State {
   socket: WebSocket | null;
   token: string | null;
+  openingToken: string | null;
   socketGeneration: number;
   reconnectAttempt: number;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
@@ -43,6 +49,7 @@ interface State {
 const state: State = {
   socket: null,
   token: null,
+  openingToken: null,
   socketGeneration: 0,
   reconnectAttempt: 0,
   reconnectTimer: null,
@@ -168,6 +175,12 @@ export function connect(token: string): void {
     }
     return;
   }
+  if (state.openingToken) {
+    if (state.openingToken !== token) {
+      reconnect(token);
+    }
+    return;
+  }
   state.closedByUser = false;
   openSocket(token);
 }
@@ -210,6 +223,7 @@ export function reconnect(token: string): void {
       state.pingTimer = null;
     }
   }
+  state.openingToken = null;
   state.reconnectAttempt = 0;
   void persistReconnectAttempts(0);
   state.closedByUser = false;
@@ -227,7 +241,7 @@ export function getCurrentWsToken(): string | null {
 export async function getWsConnectionStatus(): Promise<WsConnectionStatus> {
   return {
     connected: isConnected(),
-    readyState: state.socket?.readyState ?? null,
+    readyState: state.socket?.readyState ?? (state.openingToken ? WebSocket.CONNECTING : null),
     reconnectAttempt: state.reconnectAttempt,
     reconnectCapped: await isReconnectCapped(),
     lastOpenAt: state.lastOpenAt,
@@ -247,10 +261,58 @@ function openSocket(token: string): void {
   const protocols = [WS_SUBPROTOCOL, `jwt.${token}`];
   const endpoint = getCurrentWsEndpoint();
   state.endpointUrl = endpoint;
+  if (ORCHESTRATOR_WS_HEALTH_URL) {
+    const generation = state.socketGeneration;
+    state.openingToken = token;
+    void openSocketAfterHealthCheck(token, protocols, endpoint, generation);
+    return;
+  }
+  openWebSocket(token, protocols, endpoint);
+}
+
+async function openSocketAfterHealthCheck(
+  token: string,
+  protocols: string[],
+  endpoint: string,
+  generation: number,
+): Promise<void> {
+  const ok = await checkWsOriginHealth();
+  if (state.socketGeneration !== generation || state.closedByUser) return;
+  state.openingToken = null;
+  if (!ok) {
+    state.lastErrorAt = Date.now();
+    state.lastCloseAt = Date.now();
+    state.lastCloseCode = null;
+    state.lastCloseReason = 'health check failed';
+    if (!state.closedByUser) scheduleReconnect(token);
+    return;
+  }
+  openWebSocket(token, protocols, endpoint);
+}
+
+async function checkWsOriginHealth(): Promise<boolean> {
+  if (!ORCHESTRATOR_WS_HEALTH_URL) return true;
+  try {
+    const response = await withDeadline(
+      fetch(ORCHESTRATOR_WS_HEALTH_URL, {
+        cache: 'no-store',
+        credentials: 'omit',
+      }),
+      WS_HEALTH_TIMEOUT_MS,
+      'ws_health_timeout',
+    );
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function openWebSocket(token: string, protocols: string[], endpoint: string): void {
   let ws: WebSocket;
   try {
     ws = new WebSocket(endpoint, protocols);
   } catch (err) {
+    state.openingToken = null;
     state.lastErrorAt = Date.now();
     state.lastCloseAt = Date.now();
     state.lastCloseCode = null;
@@ -262,6 +324,7 @@ function openSocket(token: string): void {
     }
     return;
   }
+  state.openingToken = null;
   state.socket = ws;
   state.token = token;
   let openTimer: ReturnType<typeof setTimeout> | null = null;

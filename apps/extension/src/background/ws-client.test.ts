@@ -1,9 +1,16 @@
 import { HEARTBEAT_INTERVAL_MS } from '@holaday/shared-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const configMock = vi.hoisted(() => ({
+  wsHealthUrl: null as string | null,
+}));
+
 vi.mock('../shared/config.js', () => ({
   ORCHESTRATOR_WS: 'wss://primary.test/ws',
   ORCHESTRATOR_WS_ENDPOINTS: ['wss://primary.test/ws', 'wss://backup.test/ws'],
+  get ORCHESTRATOR_WS_HEALTH_URL() {
+    return configMock.wsHealthUrl;
+  },
 }));
 
 type Listener = (event?: unknown) => void;
@@ -88,6 +95,7 @@ function installGlobals(): void {
 describe('ws-client send', () => {
   beforeEach(() => {
     vi.resetModules();
+    configMock.wsHealthUrl = null;
     installGlobals();
   });
 
@@ -279,6 +287,57 @@ describe('ws-client send', () => {
 
     expect(sockets).toHaveLength(1);
     expect(sockets[0]?.url).toBe('wss://backup.test/ws');
+  });
+
+  it('preflights the websocket origin before constructing a websocket', async () => {
+    configMock.wsHealthUrl = 'https://primary.test/api/healthz';
+    const fetch = vi.fn(async () => ({ ok: true }) as Response);
+    vi.stubGlobal('fetch', fetch);
+    const { connect, getWsConnectionStatus } = await import('./ws-client.js');
+
+    connect('token');
+
+    expect(sockets).toHaveLength(0);
+    await vi.waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    expect(fetch).toHaveBeenCalledWith('https://primary.test/api/healthz', {
+      cache: 'no-store',
+      credentials: 'omit',
+    });
+    await expect(getWsConnectionStatus()).resolves.toMatchObject({
+      readyState: FakeWebSocket.OPEN,
+    });
+  });
+
+  it('backs off without constructing a websocket when the origin is unhealthy', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    configMock.wsHealthUrl = 'https://primary.test/api/healthz';
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false }) as Response));
+    const { connect, getWsConnectionStatus } = await import('./ws-client.js');
+
+    connect('token');
+    await vi.waitFor(async () => {
+      await expect(getWsConnectionStatus()).resolves.toMatchObject({
+        connected: false,
+        readyState: null,
+        reconnectAttempt: 1,
+        lastCloseCode: null,
+        lastCloseReason: 'health check failed',
+        nextRetryAt: expect.any(Number),
+      });
+    });
+    expect(sockets).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await vi.waitFor(async () => {
+      await expect(getWsConnectionStatus()).resolves.toMatchObject({
+        reconnectAttempt: 2,
+      });
+    });
+    expect(sockets).toHaveLength(0);
   });
 
   it('remembers the endpoint that successfully opened', async () => {

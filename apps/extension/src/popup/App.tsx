@@ -634,6 +634,7 @@ function formatWsCloseReason(reason: string | null | undefined): string | null {
   if (!reason) return null;
   const lower = reason.toLowerCase();
   if (lower.includes('network error')) return '网络连接被关闭';
+  if (lower.includes('health check failed')) return '服务健康检查未通过';
   if (lower.includes('open timeout')) return '握手超时';
   if (lower.includes('send failed')) return '消息发送失败';
   if (lower.includes('constructor') || lower.includes('open failed')) return '连接初始化失败';
