@@ -1697,6 +1697,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         }
         await resetAuthFailureState();
         await resetWsReconnectAttempts();
+        const storedToken = normalizeAccessToken(await getAccessToken());
+        if (storedToken) {
+          // This message is only fired from explicit user-visible retry
+          // surfaces. Make it a real reconnect even when ws-client still
+          // reports OPEN; a half-stale socket can otherwise make the
+          // button appear to do nothing because ensureConnected()
+          // short-circuits on isConnected().
+          reconnect(storedToken);
+          safeSendResponse(sendResponse, { ok: true, token: storedToken, reconnected: true });
+          return;
+        }
         const { token, frozen } = await ensureConnected();
         safeSendResponse(sendResponse, {
           ok: Boolean(token),
