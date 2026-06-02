@@ -167,24 +167,25 @@ if (typeof chrome !== 'undefined') {
  * intentionally never tears down a live socket.
  */
 export function connect(token: string): void {
-  if (!token) throw new Error('connect() requires a token');
+  const normalizedToken = normalizeWsToken(token);
+  if (!normalizedToken) throw new Error('connect() requires a token');
   if (
     state.socket &&
     (state.socket.readyState === WebSocket.OPEN || state.socket.readyState === WebSocket.CONNECTING)
   ) {
-    if (state.token !== token) {
-      reconnect(token);
+    if (state.token !== normalizedToken) {
+      reconnect(normalizedToken);
     }
     return;
   }
   if (state.openingToken) {
-    if (state.openingToken !== token) {
-      reconnect(token);
+    if (state.openingToken !== normalizedToken) {
+      reconnect(normalizedToken);
     }
     return;
   }
   state.closedByUser = false;
-  openSocket(token);
+  openSocket(normalizedToken);
 }
 
 /**
@@ -202,11 +203,12 @@ export function connect(token: string): void {
  * delayed close event without clobbering the new state.
  */
 export function reconnect(token: string, options: { force?: boolean } = {}): void {
-  if (!token) throw new Error('reconnect() requires a token');
+  const normalizedToken = normalizeWsToken(token);
+  if (!normalizedToken) throw new Error('reconnect() requires a token');
   if (
     !options.force &&
     state.socket &&
-    state.token === token &&
+    state.token === normalizedToken &&
     (state.socket.readyState === WebSocket.OPEN || state.socket.readyState === WebSocket.CONNECTING)
   ) {
     return;
@@ -230,7 +232,7 @@ export function reconnect(token: string, options: { force?: boolean } = {}): voi
   state.reconnectAttempt = 0;
   void persistReconnectAttempts(0);
   state.closedByUser = false;
-  openSocket(token);
+  openSocket(normalizedToken);
 }
 
 export function isConnected(): boolean {
@@ -272,6 +274,10 @@ function openSocket(token: string): void {
     return;
   }
   openWebSocket(token, protocols, endpoint);
+}
+
+function normalizeWsToken(token: string): string {
+  return typeof token === 'string' ? token.trim() : '';
 }
 
 async function openSocketAfterHealthCheck(

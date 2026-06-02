@@ -160,6 +160,22 @@ describe('ws-client send', () => {
     expect(socket.sent).toEqual([JSON.stringify({ type: 'client.pong', at: 123 })]);
   });
 
+  it('trims websocket bearer tokens before opening a socket', async () => {
+    const { connect } = await import('./ws-client.js');
+
+    connect('  token-with-spaces  ');
+
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]?.protocols).toEqual(['holaday.v1', 'jwt.token-with-spaces']);
+  });
+
+  it('rejects blank websocket bearer tokens before constructing a socket', async () => {
+    const { connect } = await import('./ws-client.js');
+
+    expect(() => connect('   ')).toThrow('connect() requires a token');
+    expect(sockets).toHaveLength(0);
+  });
+
   it('exposes websocket reconnect status for popup diagnostics', async () => {
     vi.useFakeTimers();
     const { connect, getWsConnectionStatus } = await import('./ws-client.js');
