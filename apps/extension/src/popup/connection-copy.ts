@@ -52,11 +52,15 @@ export function getConnectionStatusCopy(
 
   const reason = formatWsCloseReason(status.ws.lastCloseReason);
   if (status.ws.readyState === WS_CONNECTING) {
+    const retryCopy = status.ws.nextRetryAt ? `下次尝试：${formatRelativeTime(status.ws.nextRetryAt)}` : null;
     return {
       title: '浏览器代理正在连接',
-      detail: reason
-        ? `正在恢复连接；最近错误：${reason}`
-        : '正在检查服务并建立安全连接',
+      detail: [
+        reason ? `最近错误：${reason}` : '正在检查服务并建立安全连接',
+        retryCopy,
+      ]
+        .filter(Boolean)
+        .join('；'),
     };
   }
   if (status.ws.reconnectCapped) {

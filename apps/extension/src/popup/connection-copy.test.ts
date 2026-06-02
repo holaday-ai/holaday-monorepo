@@ -89,6 +89,26 @@ describe('getConnectionStatusCopy', () => {
     });
   });
 
+  it('keeps connecting recovery timing visible after a recent failure', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-31T00:00:00Z'));
+
+    expect(
+      getConnectionStatusCopy(
+        status({
+          readyState: 0,
+          lastCloseReason: 'ws route check failed',
+          nextRetryAt: new Date('2026-05-31T00:00:03Z').getTime(),
+        }),
+      ),
+    ).toEqual({
+      title: '浏览器代理正在连接',
+      detail: '最近错误：代理服务暂时不可用；下次尝试：几秒后',
+    });
+
+    vi.useRealTimers();
+  });
+
   it('humanizes health-check failures during reconnect', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-05-31T00:00:00Z'));
