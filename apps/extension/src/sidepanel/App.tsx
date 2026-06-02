@@ -146,12 +146,14 @@ export function App() {
             setToken(liftedToken);
             setError(null);
             setStatus('connected');
-        } else if (result.kind === 'unauthorized') {
-          // Token was rejected (expired, signed with a different
-          // secret, or pointing at a deleted user). Drop it so the
-          // panel falls back to the manual login form.
-          await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
-        }
+          } else if (result.kind === 'unauthorized') {
+            // Token was rejected (expired, signed with a different
+            // secret, or pointing at a deleted user). Drop it so the
+            // panel falls back to the manual login form.
+            await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
+            if (cancelled) return;
+            clearLocalSessionState();
+          }
         }
       }
       if (cancelled) return;
