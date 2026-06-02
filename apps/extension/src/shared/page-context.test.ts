@@ -48,6 +48,14 @@ describe('sanitizePageContextUrl', () => {
     ).toBe('https://example.com/callback?state=keep');
   });
 
+  it('drops camelCase sensitive query params from sidepanel context', () => {
+    expect(
+      sanitizePageContextUrl(
+        'https://example.com/callback?accessToken=secret&sessionId=sid&authCode=abc&state=keep',
+      ),
+    ).toBe('https://example.com/callback?state=keep');
+  });
+
   it('keeps ordinary query params that help page context', () => {
     expect(sanitizePageContextUrl('https://shop.example/search?q=laptop&page=2')).toBe(
       'https://shop.example/search?q=laptop&page=2',
