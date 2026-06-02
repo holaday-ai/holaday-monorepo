@@ -42,6 +42,11 @@ const VISION_PHASES = new Set<VisionProgressView['phase']>([
   'failed',
 ]);
 
+const MAX_TASK_ID_CHARS = 128;
+const MAX_STEP_FIELD_CHARS = 80;
+const MAX_VISION_ACTION_KIND_CHARS = 80;
+const MAX_VISION_DETAIL_CHARS = 1_000;
+
 export function normalizeTaskSnapshot(raw: unknown): TaskView[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((item) => {
@@ -52,7 +57,7 @@ export function normalizeTaskSnapshot(raw: unknown): TaskView[] {
 
 function normalizeTaskView(raw: unknown): TaskView | null {
   if (!isRecord(raw)) return null;
-  const taskId = typeof raw.taskId === 'string' ? raw.taskId.trim() : '';
+  const taskId = clipString(raw.taskId, MAX_TASK_ID_CHARS).trim();
   const status = normalizeTaskStatus(raw.status);
   if (!taskId || !status) return null;
   const steps = Array.isArray(raw.steps) ? raw.steps.flatMap(normalizeTaskStep) : [];
@@ -78,9 +83,9 @@ function normalizeTaskStatus(raw: unknown): TaskStatus | null {
 
 function normalizeTaskStep(raw: unknown): { id: string; kind: string; status: string }[] {
   if (!isRecord(raw)) return [];
-  const id = typeof raw.id === 'string' ? raw.id : '';
-  const kind = typeof raw.kind === 'string' ? raw.kind : '';
-  const status = typeof raw.status === 'string' ? raw.status : '';
+  const id = clipString(raw.id, MAX_STEP_FIELD_CHARS).trim();
+  const kind = clipString(raw.kind, MAX_STEP_FIELD_CHARS).trim();
+  const status = clipString(raw.status, MAX_STEP_FIELD_CHARS).trim();
   if (!id || !kind || !status) return [];
   return [{ id, kind, status }];
 }
@@ -96,8 +101,8 @@ function normalizeVisionProgress(raw: unknown): VisionProgressView | null {
     typeof raw.tickIndex === 'number' && Number.isFinite(raw.tickIndex) && raw.tickIndex >= 0
       ? Math.floor(raw.tickIndex)
       : undefined;
-  const actionKind = typeof raw.actionKind === 'string' ? raw.actionKind : undefined;
-  const detail = typeof raw.detail === 'string' ? raw.detail : undefined;
+  const actionKind = clipString(raw.actionKind, MAX_VISION_ACTION_KIND_CHARS).trim();
+  const detail = clipString(raw.detail, MAX_VISION_DETAIL_CHARS).trim();
   return {
     phase,
     ...(typeof tickIndex === 'number' ? { tickIndex } : {}),
@@ -108,4 +113,9 @@ function normalizeVisionProgress(raw: unknown): VisionProgressView | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function clipString(value: unknown, maxChars: number): string {
+  if (typeof value !== 'string') return '';
+  return value.length > maxChars ? value.slice(0, maxChars) : value;
 }
