@@ -20,7 +20,6 @@ import { withDeadline } from '../shared/deadline.js';
 import {
   fetchWithDeadline,
   responseJsonWithDeadline,
-  responseTextWithDeadline,
 } from '../shared/http.js';
 
 /**
@@ -169,12 +168,7 @@ export async function syncCookiesToServer(
     'cookie_sync_post_timeout',
   );
   if (!res.ok) {
-    const text = await responseTextWithDeadline(
-      res,
-      COOKIE_SYNC_BODY_TIMEOUT_MS,
-      'cookie_sync_error_body_timeout',
-    ).catch(() => '');
-    throw new Error(`cookie-sync HTTP ${res.status}: ${text.slice(0, 200)}`);
+    throw new Error(`cookie_sync_http_${res.status}`);
   }
   return responseJsonWithDeadline<SyncResponse>(
     res,

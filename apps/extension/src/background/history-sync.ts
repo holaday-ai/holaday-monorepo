@@ -27,7 +27,6 @@ import { withDeadline } from '../shared/deadline.js';
 import {
   fetchWithDeadline,
   responseJsonWithDeadline,
-  responseTextWithDeadline,
 } from '../shared/http.js';
 
 /**
@@ -285,12 +284,7 @@ export async function syncHistoryToServer(
     'history_sync_post_timeout',
   );
   if (!res.ok) {
-    const text = await responseTextWithDeadline(
-      res,
-      HISTORY_SYNC_BODY_TIMEOUT_MS,
-      'history_sync_error_body_timeout',
-    ).catch(() => '');
-    throw new Error(`history-sync HTTP ${res.status}: ${text.slice(0, 200)}`);
+    throw new Error(`history_sync_http_${res.status}`);
   }
   return responseJsonWithDeadline<BrowsingSyncResponse>(
     res,

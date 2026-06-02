@@ -127,4 +127,20 @@ describe('normalizeSyncableCookie', () => {
 
     await assertion;
   });
+
+  it('does not leak raw server error bodies in sync failures', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('secret backend trace', { status: 503 })),
+    );
+    globalThis.chrome = {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({ 'holaday.access_token': 'token' })),
+        },
+      },
+    } as unknown as typeof chrome;
+
+    await expect(syncCookiesToServer([cookie()])).rejects.toThrow('cookie_sync_http_503');
+  });
 });

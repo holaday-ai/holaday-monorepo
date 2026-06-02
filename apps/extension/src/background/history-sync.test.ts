@@ -52,6 +52,30 @@ describe('extractHost', () => {
 
     await assertion;
   });
+
+  it('does not leak raw server error bodies in sync failures', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('secret backend trace', { status: 502 })),
+    );
+    globalThis.chrome = {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({ 'holaday.access_token': 'token' })),
+        },
+      },
+    } as unknown as typeof chrome;
+
+    await expect(
+      syncHistoryToServer([
+        {
+          domain: 'example.com',
+          visitCount: 1,
+          lastVisitAt: '2026-05-02T00:00:00.000Z',
+        },
+      ]),
+    ).rejects.toThrow('history_sync_http_502');
+  });
 });
 
 describe('aggregateBrowsingHistoryItems', () => {
