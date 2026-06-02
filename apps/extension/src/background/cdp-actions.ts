@@ -224,6 +224,8 @@ export function cdpActionErrorMessage(err: unknown): string {
   if (
     lower.includes('missing host permission') ||
     lower.includes('cannot access contents of url') ||
+    lower.includes('cannot access contents of the page') ||
+    lower.includes('extension manifest must request permission') ||
     lower.includes('activetab permission') ||
     lower.includes('cannot access a chrome:// url') ||
     lower.includes('cannot access a chrome-extension:// url') ||

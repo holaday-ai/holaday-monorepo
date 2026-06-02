@@ -614,6 +614,11 @@ describe('cdpActionErrorMessage', () => {
     expect(cdpActionErrorMessage(new Error('The extensions gallery cannot be scripted.'))).toBe(
       '扩展没有这个页面的访问权限，请检查扩展权限后重试',
     );
+    expect(
+      cdpActionErrorMessage(
+        new Error('Cannot access contents of the page. Extension manifest must request permission.'),
+      ),
+    ).toBe('扩展没有这个页面的访问权限，请检查扩展权限后重试');
     expect(cdpActionErrorMessage(new Error('CDP Input.dispatchMouseEvent timeout 5000ms'))).toBe(
       '浏览器操作超时，请保持标签页打开后重试',
     );
