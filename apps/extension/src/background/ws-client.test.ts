@@ -335,6 +335,50 @@ describe('ws-client send', () => {
     });
   });
 
+  it('disconnects a websocket health preflight without leaving a connecting status', async () => {
+    configMock.wsHealthUrl = 'https://primary.test/api/healthz';
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
+    const { connect, disconnect, getWsConnectionStatus } = await import('./ws-client.js');
+
+    connect('token');
+    await expect(getWsConnectionStatus()).resolves.toMatchObject({
+      readyState: FakeWebSocket.CONNECTING,
+    });
+
+    disconnect();
+
+    await expect(getWsConnectionStatus()).resolves.toMatchObject({
+      connected: false,
+      readyState: null,
+      nextRetryAt: null,
+    });
+  });
+
+  it('ignores a stale websocket health check after disconnect and reconnect', async () => {
+    let resolveHealth!: (value: Response) => void;
+    const health = new Promise<Response>((resolve) => {
+      resolveHealth = resolve;
+    });
+    configMock.wsHealthUrl = 'https://primary.test/api/healthz';
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockReturnValueOnce(health)
+        .mockReturnValueOnce(new Promise(() => undefined)),
+    );
+    const { connect, disconnect } = await import('./ws-client.js');
+
+    connect('old-token');
+    disconnect();
+    connect('new-token');
+    resolveHealth({ ok: true } as Response);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(sockets).toHaveLength(0);
+  });
+
   it('backs off without constructing a websocket when the origin is unhealthy', async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);

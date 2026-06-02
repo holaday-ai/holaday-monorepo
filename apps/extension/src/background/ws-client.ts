@@ -128,6 +128,8 @@ function recoverFromCurrentSocketSendFailure(socket: WebSocket): void {
 
 export function disconnect(): void {
   state.closedByUser = true;
+  state.socketGeneration += 1;
+  state.openingToken = null;
   clearReconnectTimer();
   const socket = state.socket;
   state.socket = null;
