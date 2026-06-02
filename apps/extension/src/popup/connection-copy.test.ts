@@ -195,6 +195,10 @@ describe('formatWsCloseReason', () => {
     expect(formatWsCloseReason('ws route check failed')).toBe('代理服务暂时不可用');
     expect(formatWsCloseReason('net::ERR_CONNECTION_CLOSED')).toBe('网络连接被关闭');
     expect(formatWsCloseReason('net::ERR_CONNECTION_RESET')).toBe('网络连接已重置');
+    expect(formatWsCloseReason('net::ERR_CONNECTION_REFUSED')).toBe('代理服务暂时不可达');
+    expect(formatWsCloseReason('net::ERR_INTERNET_DISCONNECTED')).toBe('本机网络已断开');
+    expect(formatWsCloseReason('net::ERR_NAME_NOT_RESOLVED')).toBe('域名解析失败');
+    expect(formatWsCloseReason('net::ERR_NETWORK_CHANGED')).toBe('网络环境刚变化');
   });
 
   it('hides unknown raw websocket and technical close reasons', () => {

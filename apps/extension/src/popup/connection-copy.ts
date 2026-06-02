@@ -103,6 +103,18 @@ export function formatWsCloseReason(reason: string | null | undefined): string |
   if (lower.includes('err_connection_reset') || lower.includes('connection_reset')) {
     return '网络连接已重置';
   }
+  if (lower.includes('err_connection_refused') || lower.includes('connection_refused')) {
+    return '代理服务暂时不可达';
+  }
+  if (lower.includes('err_internet_disconnected') || lower.includes('internet_disconnected')) {
+    return '本机网络已断开';
+  }
+  if (lower.includes('err_name_not_resolved') || lower.includes('name_not_resolved')) {
+    return '域名解析失败';
+  }
+  if (lower.includes('err_network_changed') || lower.includes('network_changed')) {
+    return '网络环境刚变化';
+  }
   if (lower.includes('websocket') && lower.includes('handshake')) return '连接握手失败';
   if (lower.includes('ws route check failed')) return '代理服务暂时不可用';
   if (lower.includes('health check failed')) return '服务暂时不可用';
