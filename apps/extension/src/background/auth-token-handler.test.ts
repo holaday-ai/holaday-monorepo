@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { decideAuthTokenAction, looksLikeAuthToken } from './auth-token-handler.js';
+import {
+  decideAuthTokenAction,
+  decideStoredAuthTokenAction,
+  looksLikeAuthToken,
+} from './auth-token-handler.js';
 
 describe('decideAuthTokenAction', () => {
   it('incoming === stored → unchanged (no storage write, no WS churn)', () => {
@@ -123,5 +127,44 @@ describe('looksLikeAuthToken', () => {
     expect(looksLikeAuthToken('NULL')).toBe(false);
     expect(looksLikeAuthToken('null')).toBe(false);
     expect(looksLikeAuthToken('token with spaces')).toBe(false);
+  });
+});
+
+describe('decideStoredAuthTokenAction', () => {
+  it('uses a valid stored token when no rejection marker matches', () => {
+    expect(decideStoredAuthTokenAction(' eyJstored.token.value ', null)).toEqual({
+      kind: 'use',
+      token: 'eyJstored.token.value',
+    });
+    expect(
+      decideStoredAuthTokenAction('eyJstored.token.value', 'eyJother.token.value'),
+    ).toEqual({
+      kind: 'use',
+      token: 'eyJstored.token.value',
+    });
+  });
+
+  it('refuses a stored token that still matches the known-bad marker', () => {
+    expect(
+      decideStoredAuthTokenAction(
+        'eyJrejected.token.value',
+        'eyJrejected.token.value',
+      ),
+    ).toEqual({
+      kind: 'refuse',
+      reason: 'known_bad_token',
+    });
+  });
+
+  it('returns none for absent storage and refuses obvious garbage', () => {
+    expect(decideStoredAuthTokenAction(null, null)).toEqual({ kind: 'none' });
+    expect(decideStoredAuthTokenAction('undefined', null)).toEqual({
+      kind: 'refuse',
+      reason: 'invalid_token',
+    });
+    expect(decideStoredAuthTokenAction('short', null)).toEqual({
+      kind: 'refuse',
+      reason: 'invalid_token',
+    });
   });
 });

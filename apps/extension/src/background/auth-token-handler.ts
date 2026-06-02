@@ -25,6 +25,11 @@ export type AuthTokenAction =
   | { kind: 'set'; token: string }
   | { kind: 'refuse'; reason: 'known_bad_token' | 'invalid_token' };
 
+export type StoredAuthTokenAction =
+  | { kind: 'none' }
+  | { kind: 'use'; token: string }
+  | { kind: 'refuse'; reason: 'known_bad_token' | 'invalid_token' };
+
 const MIN_TOKEN_LENGTH = 10;
 
 export function looksLikeAuthToken(value: string): boolean {
@@ -62,4 +67,20 @@ export function decideAuthTokenAction(
     return { kind: 'refuse', reason: 'invalid_token' };
   }
   return { kind: 'set', token: normalizedIncoming };
+}
+
+export function decideStoredAuthTokenAction(
+  stored: string | null,
+  knownBad: string | null,
+): StoredAuthTokenAction {
+  const normalizedStored =
+    stored !== null && stored.trim().length > 0 ? stored.trim() : null;
+  if (normalizedStored === null) return { kind: 'none' };
+  if (knownBad !== null && normalizedStored === knownBad) {
+    return { kind: 'refuse', reason: 'known_bad_token' };
+  }
+  if (!looksLikeAuthToken(normalizedStored)) {
+    return { kind: 'refuse', reason: 'invalid_token' };
+  }
+  return { kind: 'use', token: normalizedStored };
 }

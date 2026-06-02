@@ -63,7 +63,10 @@ import { runCookieSync } from './cookie-sync.js';
 import { runHistorySync } from './history-sync.js';
 import { handleExtensionToolCall } from './extension-tools.js';
 import { isTrustedAuthBridgeSender } from './auth-bridge-trust.js';
-import { decideAuthTokenAction } from './auth-token-handler.js';
+import {
+  decideAuthTokenAction,
+  decideStoredAuthTokenAction,
+} from './auth-token-handler.js';
 import { sendCriticalClientMessage } from './critical-send.js';
 import { withDeadline } from '../shared/deadline.js';
 import {
@@ -1161,6 +1164,21 @@ async function ensureConnectedInner(): Promise<{ token: string | null; frozen?: 
     return { token: null, frozen: true };
   }
   let token = await getAccessToken();
+  if (token) {
+    const knownBad = await getKnownBadToken();
+    const storedAction = decideStoredAuthTokenAction(token, knownBad);
+    if (storedAction.kind === 'refuse') {
+      console.warn(
+        `[holaday] ensureConnected: refusing stored ${storedAction.reason} token`,
+      );
+      await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
+      disconnect();
+      state.tasks.clear();
+      pushTasksSnapshot();
+      return { token: null };
+    }
+    token = storedAction.kind === 'use' ? storedAction.token : null;
+  }
   if (!token) {
     const lifted = await tryAutoLogin();
     if (lifted) {
