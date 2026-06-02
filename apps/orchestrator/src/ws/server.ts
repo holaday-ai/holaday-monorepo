@@ -331,11 +331,15 @@ export function hasConnectedExtension(userId: string): boolean {
   return pickExtensionClientForUser(userId) !== null;
 }
 
-function pickExtensionClientForUser(userId: string): ClientState | null {
+function pickExtensionClientForUser(
+  userId: string,
+  excludedClientIds: ReadonlySet<string> = new Set(),
+): ClientState | null {
   const set = clientsByUser.get(userId);
   if (!set) return null;
   let target: ClientState | null = null;
   for (const client of set) {
+    if (excludedClientIds.has(client.id)) continue;
     if (!client.isExtension || client.socket.readyState !== WebSocket.OPEN) continue;
     if (!target || client.lastPongAt > target.lastPongAt) target = client;
   }
@@ -435,44 +439,58 @@ export async function sendExtensionToolCall(
   }
 
   return new Promise<ExtensionToolCallOutcome>((resolve) => {
-    const timer = setTimeout(() => {
-      pendingExtensionCalls.delete(requestId);
-      rememberSettledExtensionCall(requestId, target.id, opts.taskId);
-      resolve({
-        ok: false,
-        error: {
-          message: extensionToolTimeoutMessage(timeoutMs),
-          code: 'timeout',
-        },
+    const excludedClientIds = new Set<string>();
+    const trySend = (): void => {
+      const target = pickExtensionClientForUser(userId, excludedClientIds);
+      if (!target) {
+        resolve({
+          ok: false,
+          error: {
+            message:
+              excludedClientIds.size > 0
+                ? extensionSocketClosedMessage()
+                : extensionNoClientMessage(),
+            code: excludedClientIds.size > 0 ? 'socket_closed' : 'no_extension',
+          },
+        });
+        return;
+      }
+
+      const timer = setTimeout(() => {
+        pendingExtensionCalls.delete(requestId);
+        rememberSettledExtensionCall(requestId, target.id, opts.taskId);
+        resolve({
+          ok: false,
+          error: {
+            message: extensionToolTimeoutMessage(timeoutMs),
+            code: 'timeout',
+          },
+        });
+      }, timeoutMs);
+      timer.unref();
+      pendingExtensionCalls.set(requestId, {
+        clientId: target.id,
+        taskId: opts.taskId,
+        resolve,
+        timer,
       });
-    }, timeoutMs);
-    timer.unref();
-    pendingExtensionCalls.set(requestId, {
-      clientId: target.id,
-      taskId: opts.taskId,
-      resolve,
-      timer,
-    });
-    const sent = send(target.socket, {
-      type: 'server.extension.tool_call',
-      taskId: opts.taskId,
-      requestId,
-      kind: opts.kind,
-      ...(opts.args ? { args: opts.args } : {}),
-      timeoutMs,
-    });
-    if (!sent) {
+      const sent = send(target.socket, {
+        type: 'server.extension.tool_call',
+        taskId: opts.taskId,
+        requestId,
+        kind: opts.kind,
+        ...(opts.args ? { args: opts.args } : {}),
+        timeoutMs,
+      });
+      if (sent) return;
+
       clearTimeout(timer);
       pendingExtensionCalls.delete(requestId);
-      rememberSettledExtensionCall(requestId, target.id, opts.taskId);
-      resolve({
-        ok: false,
-        error: {
-          message: extensionSocketClosedMessage(),
-          code: 'socket_closed',
-        },
-      });
-    }
+      excludedClientIds.add(target.id);
+      trySend();
+    };
+
+    trySend();
   });
 }
 

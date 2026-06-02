@@ -416,6 +416,131 @@ describe('extension tool-call websocket lifecycle', () => {
     secondary.close();
   });
 
+  it('falls back to another extension socket when the newest socket send races closed', async () => {
+    const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
+    const { signAccessToken } = await import('../auth/jwt.js');
+    const { createWsServer, sendExtensionToolCall } = await import('./server.js');
+    const { default: WebSocket } = await import('ws');
+
+    const originalSend = WebSocket.prototype.send;
+    const sendSpy = vi.spyOn(WebSocket.prototype, 'send');
+
+    const port = 38233;
+    const server = createWsServer(port);
+    close = async () => {
+      sendSpy.mockRestore();
+      await server.close();
+    };
+
+    const userId = 'usr_extension_socket_fallback_test';
+    const token = await signAccessToken({ sub: userId, plan: 'free' });
+    const primary = new WebSocket(`ws://127.0.0.1:${port}`, WS_SUBPROTOCOL);
+    const secondary = new WebSocket(`ws://127.0.0.1:${port}`, WS_SUBPROTOCOL);
+
+    await Promise.all([
+      new Promise<void>((resolve, reject) => {
+        primary.once('open', resolve);
+        primary.once('error', reject);
+      }),
+      new Promise<void>((resolve, reject) => {
+        secondary.once('open', resolve);
+        secondary.once('error', reject);
+      }),
+    ]);
+
+    const waitForWelcome = (client: typeof primary): Promise<void> =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('no welcome')), 5_000);
+        client.on('message', (raw: RawData) => {
+          const parsed = parseServerMessage(raw.toString());
+          if (parsed.success && parsed.data.type === 'server.welcome') {
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+      });
+
+    primary.send(
+      JSON.stringify({
+        type: 'client.hello',
+        token,
+        extensionVersion: 'primary-fallback-test-extension',
+      }),
+    );
+    secondary.send(
+      JSON.stringify({
+        type: 'client.hello',
+        token,
+        extensionVersion: 'secondary-fallback-test-extension',
+      }),
+    );
+    await Promise.all([waitForWelcome(primary), waitForWelcome(secondary)]);
+
+    secondary.send(JSON.stringify({ type: 'client.pong', at: Date.now() }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    primary.send(JSON.stringify({ type: 'client.pong', at: Date.now() }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    let failedToolSend = false;
+    sendSpy.mockImplementation(function (
+      this: WebSocket,
+      data: Parameters<typeof originalSend>[0],
+      ...args: Parameters<typeof originalSend> extends [unknown, ...infer Rest] ? Rest : never
+    ) {
+      const text = typeof data === 'string' ? data : data.toString();
+      if (!failedToolSend && text.includes('"server.extension.tool_call"')) {
+        failedToolSend = true;
+        throw new Error('simulated send race');
+      }
+      return originalSend.call(this, data, ...args);
+    });
+
+    const fallbackToolCall = new Promise<{
+      taskId: string;
+      requestId: string;
+    }>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('no fallback extension tool call')), 5_000);
+      secondary.on('message', (raw) => {
+        const parsed = parseServerMessage(raw.toString());
+        if (parsed.success && parsed.data.type === 'server.extension.tool_call') {
+          clearTimeout(timer);
+          resolve({
+            taskId: parsed.data.taskId,
+            requestId: parsed.data.requestId,
+          });
+        }
+      });
+    });
+
+    const outcomePromise = sendExtensionToolCall(userId, {
+      taskId: 'tsk_extension_socket_fallback_test',
+      kind: 'navigate',
+      args: { url: 'https://example.com/fallback' },
+      timeoutMs: 30_000,
+    });
+    const call = await fallbackToolCall;
+
+    secondary.send(
+      JSON.stringify({
+        type: 'client.extension.tool_result',
+        taskId: call.taskId,
+        requestId: call.requestId,
+        ok: true,
+        result: { finalUrl: 'https://example.com/fallback' },
+        at: Date.now(),
+      }),
+    );
+
+    await expect(outcomePromise).resolves.toEqual({
+      ok: true,
+      result: { finalUrl: 'https://example.com/fallback' },
+    });
+    expect(failedToolSend).toBe(true);
+
+    primary.close();
+    secondary.close();
+  });
+
   it('quietly ignores duplicate tool results after a request has settled', async () => {
     const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
     const { signAccessToken } = await import('../auth/jwt.js');
