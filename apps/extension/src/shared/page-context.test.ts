@@ -146,6 +146,34 @@ describe('getActivePageContext', () => {
     });
   });
 
+  it('uses pendingUrl for a loading active page when injection is unavailable', async () => {
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [
+          {
+            id: 18,
+            title: 'Loading page',
+            url: undefined,
+            pendingUrl: 'https://example.com/loading',
+          } as chrome.tabs.Tab,
+        ]),
+      },
+      scripting: {
+        executeScript: vi.fn(async () => {
+          throw new Error('Frame is still loading');
+        }),
+      },
+    } as unknown as typeof chrome;
+
+    await expect(getActivePageContext()).resolves.toEqual({
+      tabId: 18,
+      title: 'Loading page',
+      url: 'https://example.com/loading',
+      selectedText: '',
+      metaDescription: '',
+    });
+  });
+
   it('falls back when the first active-tab query hangs', async () => {
     vi.useFakeTimers();
     const query = vi

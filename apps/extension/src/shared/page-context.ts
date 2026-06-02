@@ -127,9 +127,13 @@ function compareTabCandidates(
 function isPageContextTab(tab: chrome.tabs.Tab | undefined): tab is chrome.tabs.Tab {
   if (!tab) return false;
   if (typeof tab.id !== 'number') return false;
-  if (!tab.url) return false;
-  const url = tab.url.toLowerCase();
+  const url = getTabContextUrl(tab)?.toLowerCase();
+  if (!url) return false;
   return url.startsWith('http://') || url.startsWith('https://') || url.startsWith('chrome-error://');
+}
+
+function getTabContextUrl(tab: chrome.tabs.Tab): string {
+  return tab.url || tab.pendingUrl || '';
 }
 
 export async function getActivePageContext(): Promise<PageContext | null> {
@@ -139,11 +143,12 @@ export async function getActivePageContext(): Promise<PageContext | null> {
   // chrome:// / chrome-extension:// / file:// pages can't be scripted —
   // skip the executeScript call and surface what the tab metadata
   // already gives us.
-  const restrictedScheme = /^(chrome|chrome-extension|chrome-error|edge|about|file):/i.test(tab.url ?? '');
-  if (restrictedScheme || !tab.url) {
+  const tabUrl = getTabContextUrl(tab);
+  const restrictedScheme = /^(chrome|chrome-extension|chrome-error|edge|about|file):/i.test(tabUrl);
+  if (restrictedScheme || !tabUrl) {
     const snippet = sanitizePageContextSnippet({
       title: tab.title ?? '',
-      url: tab.url ?? '',
+      url: tabUrl,
     });
     return {
       tabId: tab.id,
@@ -164,7 +169,7 @@ export async function getActivePageContext(): Promise<PageContext | null> {
     if (!snippet) {
       const fallback = sanitizePageContextSnippet({
         title: tab.title ?? '',
-        url: tab.url ?? '',
+        url: tabUrl,
       });
       return {
         tabId: tab.id,
@@ -179,7 +184,7 @@ export async function getActivePageContext(): Promise<PageContext | null> {
   } catch {
     const fallback = sanitizePageContextSnippet({
       title: tab.title ?? '',
-      url: tab.url ?? '',
+      url: tabUrl,
     });
     return {
       tabId: tab.id,
