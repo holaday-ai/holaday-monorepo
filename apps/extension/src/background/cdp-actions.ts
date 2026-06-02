@@ -26,6 +26,7 @@
 
 import type { VisionAction } from '@holaday/shared-types';
 import { withDeadline } from '../shared/deadline.js';
+import { sanitizePageContextUrl } from '../shared/page-context.js';
 
 export interface ActionResult {
   ok: boolean;
@@ -787,7 +788,7 @@ export function sanitizeVisionObservationCapture(
     screenshotBase64,
     viewportWidth: clampViewportSize(observation.viewportWidth),
     viewportHeight: clampViewportSize(observation.viewportHeight),
-    url: clipString(observation.url, MAX_OBSERVATION_URL_CHARS),
+    url: clipString(sanitizePageContextUrl(observation.url), MAX_OBSERVATION_URL_CHARS),
     title: clipString(observation.title, MAX_OBSERVATION_TITLE_CHARS),
     ...(error ? { error: clipString(error, MAX_OBSERVATION_ERROR_CHARS) } : {}),
   };

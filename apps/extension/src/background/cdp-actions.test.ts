@@ -931,6 +931,18 @@ describe('sanitizeVisionObservationCapture', () => {
     expect(result.error).toHaveLength(1000);
   });
 
+  it('scrubs sensitive urls from observation metadata', () => {
+    const result = sanitizeVisionObservationCapture({
+      screenshotBase64: 'AA==',
+      viewportWidth: 1280,
+      viewportHeight: 720,
+      url: 'https://example.com/callback?accessToken=secret&sessionId=sid&state=keep#token=hash',
+      title: 'Example',
+    });
+
+    expect(result.url).toBe('https://example.com/callback?state=keep');
+  });
+
   it('drops oversized screenshots instead of sending invalid partial base64', () => {
     const result = sanitizeVisionObservationCapture({
       screenshotBase64: 'x'.repeat(2_000_001),
