@@ -152,6 +152,7 @@ describe('formatWsCloseReason', () => {
     expect(formatWsCloseReason('Error during WebSocket handshake: Unexpected response code: 502')).toBe(
       '代理服务暂时不可用',
     );
+    expect(formatWsCloseReason('ws route check failed')).toBe('代理服务暂时不可用');
     expect(formatWsCloseReason('net::ERR_CONNECTION_CLOSED')).toBe('网络连接被关闭');
     expect(formatWsCloseReason('net::ERR_CONNECTION_RESET')).toBe('网络连接已重置');
   });

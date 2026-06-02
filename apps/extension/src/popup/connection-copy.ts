@@ -100,6 +100,7 @@ export function formatWsCloseReason(reason: string | null | undefined): string |
     return '网络连接已重置';
   }
   if (lower.includes('websocket') && lower.includes('handshake')) return '连接握手失败';
+  if (lower.includes('ws route check failed')) return '代理服务暂时不可用';
   if (lower.includes('health check failed')) return '服务暂时不可用';
   if (lower.includes('network error')) return '网络连接被关闭';
   if (lower.includes('open timeout')) return '连接握手超时';
