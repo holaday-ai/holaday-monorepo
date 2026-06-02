@@ -4,11 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const configMock = vi.hoisted(() => ({
   wsHealthUrl: null as string | null,
   deriveHealthUrl: false,
+  endpoints: ['wss://primary.test/ws', 'wss://backup.test/ws'],
 }));
 
 vi.mock('../shared/config.js', () => ({
-  ORCHESTRATOR_WS: 'wss://primary.test/ws',
-  ORCHESTRATOR_WS_ENDPOINTS: ['wss://primary.test/ws', 'wss://backup.test/ws'],
+  get ORCHESTRATOR_WS() {
+    return configMock.endpoints[0] ?? 'wss://primary.test/ws';
+  },
+  get ORCHESTRATOR_WS_ENDPOINTS() {
+    return configMock.endpoints;
+  },
   get ORCHESTRATOR_WS_HEALTH_URL() {
     return configMock.wsHealthUrl;
   },
@@ -108,6 +113,7 @@ describe('ws-client send', () => {
     vi.resetModules();
     configMock.wsHealthUrl = null;
     configMock.deriveHealthUrl = false;
+    configMock.endpoints = ['wss://primary.test/ws', 'wss://backup.test/ws'];
     installGlobals();
   });
 
@@ -300,6 +306,31 @@ describe('ws-client send', () => {
 
     expect(sockets).toHaveLength(2);
     expect(sockets[1]?.url).toBe('wss://backup.test/ws');
+  });
+
+  it('cools down a failed single websocket endpoint before reconnecting', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    configMock.endpoints = ['wss://primary.test/ws'];
+    const { connect, getWsConnectionStatus } = await import('./ws-client.js');
+    connect('token');
+    const [socket] = sockets;
+    if (!socket) throw new Error('expected websocket');
+
+    socket.readyState = FakeWebSocket.CLOSED;
+    socket.dispatch('error');
+    socket.dispatch('close', { code: 1006, reason: '' });
+
+    await expect(getWsConnectionStatus()).resolves.toMatchObject({
+      reconnectAttempt: 1,
+      nextRetryAt: expect.any(Number),
+    });
+    vi.advanceTimersByTime(14_999);
+    expect(sockets).toHaveLength(1);
+
+    vi.advanceTimersByTime(1);
+    expect(sockets).toHaveLength(2);
+    expect(sockets[1]?.url).toBe('wss://primary.test/ws');
   });
 
   it('reconnects instead of throwing when websocket construction fails', async () => {

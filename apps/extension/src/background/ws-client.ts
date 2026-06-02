@@ -18,6 +18,7 @@ type UnauthorizedListener = () => void;
 
 const WS_OPEN_TIMEOUT_MS = 12_000;
 const WS_HEALTH_TIMEOUT_MS = 2_500;
+const WS_ENDPOINT_FAILURE_COOLDOWN_MS = 15_000;
 
 interface State {
   socket: WebSocket | null;
@@ -67,6 +68,7 @@ const state: State = {
   listeners: new Set(),
   unauthorizedListeners: new Set(),
 };
+const endpointCooldownUntil = new Map<string, number>();
 
 export interface WsConnectionStatus {
   connected: boolean;
@@ -323,6 +325,7 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
   try {
     ws = new WebSocket(endpoint, protocols);
   } catch (err) {
+    markEndpointFailed(endpoint);
     state.openingToken = null;
     state.lastErrorAt = Date.now();
     state.lastCloseAt = Date.now();
@@ -376,6 +379,7 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
     state.lastCloseAt = Date.now();
     state.lastCloseCode = code;
     state.lastCloseReason = reason ?? state.lastCloseReason;
+    if (code !== 1000) markEndpointFailed(endpoint);
     if (code === 4401) {
       // Orchestrator rejected our auth. Surface to the SW so it
       // clears the bad token; do NOT auto-reconnect — that would
@@ -416,6 +420,7 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
     state.lastCloseReason = null;
     state.lastErrorAt = null;
     state.nextRetryAt = null;
+    endpointCooldownUntil.delete(endpoint);
     void persistPreferredWsEndpoint(endpoint);
     // Clear the persistent cap so the next blip starts from 0 again.
     // Fire-and-forget: best-effort, and we don't want to delay 'hello'
@@ -640,6 +645,7 @@ export async function isReconnectCapped(): Promise<boolean> {
 export async function resetWsReconnectAttempts(): Promise<void> {
   clearReconnectTimer();
   state.reconnectAttempt = 0;
+  endpointCooldownUntil.clear();
   await persistReconnectAttempts(0);
 }
 
@@ -671,9 +677,12 @@ function scheduleReconnect(token: string): void {
   // future edit accidentally narrows the tuple.
   const backoff = BACKOFF_SCHEDULE_MS[idx] ?? 4_000;
   const jitter = Math.floor(Math.random() * 250);
-  const delay = backoff + jitter;
-  const generation = state.socketGeneration;
   const nextEndpointIndex = getNextWsEndpointIndex();
+  const nextEndpoint = ORCHESTRATOR_WS_ENDPOINTS[nextEndpointIndex] ?? ORCHESTRATOR_WS;
+  const cooldownUntil = endpointCooldownUntil.get(nextEndpoint) ?? 0;
+  const cooldownDelay = Math.max(0, cooldownUntil - Date.now());
+  const delay = Math.max(backoff + jitter, cooldownDelay);
+  const generation = state.socketGeneration;
   clearReconnectTimer();
   state.nextRetryAt = Date.now() + delay;
   state.reconnectTimer = setTimeout(() => {
@@ -683,4 +692,8 @@ function scheduleReconnect(token: string): void {
     state.endpointIndex = nextEndpointIndex;
     openSocket(token);
   }, delay);
+}
+
+function markEndpointFailed(endpoint: string): void {
+  endpointCooldownUntil.set(endpoint, Date.now() + WS_ENDPOINT_FAILURE_COOLDOWN_MS);
 }
