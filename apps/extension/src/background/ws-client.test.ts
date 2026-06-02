@@ -435,6 +435,25 @@ describe('ws-client send', () => {
     expect(sockets[0]?.url).toBe('wss://primary.test/ws');
   });
 
+  it('treats a websocket upgrade response as a reachable route', async () => {
+    configMock.wsHealthUrl = 'https://primary.test/api/healthz';
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, status: 200 } as Response)
+        .mockResolvedValueOnce({ ok: false, status: 426 } as Response),
+    );
+    const { connect } = await import('./ws-client.js');
+
+    connect('token');
+
+    await vi.waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    expect(sockets[0]?.url).toBe('wss://primary.test/ws');
+  });
+
   it('disconnects a websocket health preflight without leaving a connecting status', async () => {
     configMock.wsHealthUrl = 'https://primary.test/api/healthz';
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
