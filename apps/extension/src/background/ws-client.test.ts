@@ -244,6 +244,19 @@ describe('ws-client send', () => {
     expect(sockets[0]?.protocols).toEqual(['holaday.v1', 'jwt.token']);
   });
 
+  it('force-reconnects when an explicit retry repeats the same token', async () => {
+    const { connect, reconnect } = await import('./ws-client.js');
+    connect('token');
+    const [oldSocket] = sockets;
+    if (!oldSocket) throw new Error('expected websocket');
+
+    reconnect('token', { force: true });
+
+    expect(oldSocket.closeCalls).toEqual([{ code: 1000, reason: 'token swap' }]);
+    expect(sockets).toHaveLength(2);
+    expect(sockets[1]?.protocols).toEqual(['holaday.v1', 'jwt.token']);
+  });
+
   it('rotates websocket endpoints after a network reconnect failure', async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);

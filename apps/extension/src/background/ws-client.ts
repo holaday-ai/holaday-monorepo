@@ -199,9 +199,10 @@ export function connect(token: string): void {
  * tagged (see openSocket) so it can ignore the OLD socket's
  * delayed close event without clobbering the new state.
  */
-export function reconnect(token: string): void {
+export function reconnect(token: string, options: { force?: boolean } = {}): void {
   if (!token) throw new Error('reconnect() requires a token');
   if (
+    !options.force &&
     state.socket &&
     state.token === token &&
     (state.socket.readyState === WebSocket.OPEN || state.socket.readyState === WebSocket.CONNECTING)

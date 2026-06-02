@@ -1704,7 +1704,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           // reports OPEN; a half-stale socket can otherwise make the
           // button appear to do nothing because ensureConnected()
           // short-circuits on isConnected().
-          reconnect(storedToken);
+          reconnect(storedToken, { force: true });
           safeSendResponse(sendResponse, { ok: true, token: storedToken, reconnected: true });
           return;
         }
