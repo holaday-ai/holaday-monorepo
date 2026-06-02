@@ -868,6 +868,18 @@ describe('executeCdpAction', () => {
       message: `wait_for_human: ${'x'.repeat(984)}`,
     });
   });
+
+  it('redacts sensitive key-value pairs from action result messages', async () => {
+    await expect(
+      executeCdpAction(15, {
+        kind: 'wait_for_human',
+        reason: '需要用户确认 accessToken=secret state=keep sessionId=sid',
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      message: 'wait_for_human: 需要用户确认 accessToken=redacted state=keep sessionId=redacted',
+    });
+  });
 });
 
 describe('cdpActionErrorMessage', () => {

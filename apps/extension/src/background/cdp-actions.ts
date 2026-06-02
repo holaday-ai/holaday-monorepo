@@ -194,13 +194,27 @@ export async function executeCdpAction(tabId: number, action: VisionAction): Pro
 }
 
 function sanitizeActionResult(result: ActionResult): ActionResult {
-  if (!result.message || result.message.length <= MAX_ACTION_RESULT_MESSAGE_CHARS) {
-    return result;
-  }
+  if (!result.message) return result;
+  const message = redactSensitiveKeyValueText(result.message);
+  if (message.length <= MAX_ACTION_RESULT_MESSAGE_CHARS) return { ...result, message };
   return {
     ...result,
-    message: result.message.slice(0, MAX_ACTION_RESULT_MESSAGE_CHARS),
+    message: message.slice(0, MAX_ACTION_RESULT_MESSAGE_CHARS),
   };
+}
+
+function redactSensitiveKeyValueText(text: string): string {
+  return text.replace(
+    /(^|[?&#\s])([A-Za-z0-9_.-]+)=([^?&#\s]+)/g,
+    (match, prefix: string, key: string) =>
+      isSensitiveKey(key) ? `${prefix}${key}=redacted` : match,
+  );
+}
+
+function isSensitiveKey(key: string): boolean {
+  return /^(?:access[_-]?token|auth[_-]?token|session[_-]?id|session|sid|token|secret|password)$/i.test(
+    key,
+  );
 }
 
 export function cdpActionErrorMessage(err: unknown): string {
