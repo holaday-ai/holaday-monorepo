@@ -1729,9 +1729,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg?.type === 'holaday.status') {
-    void getWsConnectionStatus().then((ws) => {
-      safeSendResponse(sendResponse, { lastWelcomeAt: state.lastWelcomeAt, ws });
-    });
+    void getWsConnectionStatus().then(
+      (ws) => {
+        safeSendResponse(sendResponse, { lastWelcomeAt: state.lastWelcomeAt, ws });
+      },
+      (err) => {
+        console.warn('[holaday] status message failed', compactLogErrorReason(err));
+        safeSendResponse(sendResponse, { lastWelcomeAt: state.lastWelcomeAt, ws: null });
+      },
+    );
     return true;
   }
   if (msg?.type === 'holaday.tasks') {
