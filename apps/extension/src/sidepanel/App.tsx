@@ -43,6 +43,7 @@ import {
   extractCreatedTaskId,
   type CreateTaskResponse,
 } from './create-task-response.js';
+import { MAX_SIDE_PANEL_INTENT_CHARS, normalizeSidePanelIntent } from './task-intent.js';
 
 type Status = 'idle' | 'loading' | 'connected' | 'error';
 
@@ -368,14 +369,15 @@ export function App() {
   }
 
   async function createTask(): Promise<void> {
-    if (!intent.trim() || !token) return;
+    const submittedIntent = normalizeSidePanelIntent(intent);
+    if (!submittedIntent || !token) return;
     if (taskSubmitInFlight.current) return;
     taskSubmitInFlight.current = true;
     setSubmitting(true);
     setError(null);
     try {
       const tail = composeContextTail(pageContext);
-      const fullIntent = tail ? `${intent.trim()}${tail}` : intent.trim();
+      const fullIntent = tail ? `${submittedIntent}${tail}` : submittedIntent;
       const res = await fetchWithDeadline(
         `${ORCHESTRATOR_HTTP}/trpc/tasks.create`,
         {
@@ -490,7 +492,8 @@ export function App() {
           rows={3}
           placeholder="想让 HOLA DAY 在这页面上做什么？"
           value={intent}
-          onChange={(e) => setIntent(e.currentTarget.value)}
+          maxLength={MAX_SIDE_PANEL_INTENT_CHARS}
+          onChange={(e) => setIntent(e.currentTarget.value.slice(0, MAX_SIDE_PANEL_INTENT_CHARS))}
           style={textareaStyle}
         />
         <button
