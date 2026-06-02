@@ -430,6 +430,42 @@ describe('ws-client send', () => {
     });
   });
 
+  it('ignores late preferred endpoint hydration after a connection starts opening', async () => {
+    vi.useFakeTimers();
+    configMock.deriveHealthUrl = true;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
+    let resolvePreferred!: (value: Record<string, unknown>) => void;
+    const preferredRead = new Promise<Record<string, unknown>>((resolve) => {
+      resolvePreferred = resolve;
+    });
+    const get = chrome.storage.local.get as unknown as ReturnType<typeof vi.fn>;
+    get.mockImplementation((key: string) => {
+      if (key === 'holaday.ws.preferredEndpoint') {
+        return preferredRead;
+      }
+      return Promise.resolve({});
+    });
+    const { connect, getWsConnectionStatus } = await import('./ws-client.js');
+
+    connect('token');
+    await vi.waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith('https://primary.test/api/healthz', {
+        cache: 'no-store',
+        credentials: 'omit',
+      });
+    });
+
+    resolvePreferred({ 'holaday.ws.preferredEndpoint': 'wss://backup.test/ws' });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await expect(getWsConnectionStatus()).resolves.toMatchObject({
+      endpointIndex: 0,
+      endpointUrl: 'wss://primary.test/ws',
+      readyState: WebSocket.CONNECTING,
+    });
+  });
+
   it('treats a stuck reconnect-cap storage read as not capped', async () => {
     vi.useFakeTimers();
     const get = chrome.storage.local.get as unknown as ReturnType<typeof vi.fn>;

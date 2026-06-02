@@ -541,6 +541,7 @@ async function persistReconnectAttempts(n: number): Promise<void> {
 }
 
 async function hydratePreferredWsEndpoint(): Promise<void> {
+  const generation = state.socketGeneration;
   try {
     const out = await withDeadline(
       chrome.storage.local.get(WS_PREFERRED_ENDPOINT_KEY),
@@ -554,7 +555,7 @@ async function hydratePreferredWsEndpoint(): Promise<void> {
       await clearPreferredWsEndpoint();
       return;
     }
-    if (state.socket) return;
+    if (state.socketGeneration !== generation || state.socket || state.openingToken) return;
     state.endpointIndex = index;
   } catch {
     /* defensive — endpoint preference is only an optimization */
