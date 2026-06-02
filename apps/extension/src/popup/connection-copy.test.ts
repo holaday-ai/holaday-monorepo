@@ -160,6 +160,7 @@ describe('formatWsCloseReason', () => {
     expect(
       formatWsCloseReason("WebSocket connection to 'wss://holaday.ai/ws?token=secret' failed"),
     ).toBe('连接异常，正在恢复');
+    expect(formatWsCloseReason('连接失败 token=secret sessionId=sid')).toBe('连接异常，正在恢复');
     expect(formatWsCloseReason('Internal socket state machine failed at frame 42')).toBe(
       '连接异常，正在恢复',
     );

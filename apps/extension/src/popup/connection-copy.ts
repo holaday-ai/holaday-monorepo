@@ -108,10 +108,17 @@ export function formatWsCloseReason(reason: string | null | undefined): string |
   if (lower.includes('token swap')) return '登录态已切换，正在确认';
   if (lower.includes('policy violation')) return '服务拒绝了当前连接';
   if (lower.includes('constructor') || lower.includes('open failed')) return '连接初始化失败';
+  if (containsSensitiveKeyValue(reason)) return '连接异常，正在恢复';
   if (lower.includes('websocket') || looksLikeEnglishTech(reason)) return '连接异常，正在恢复';
   return reason.length > MAX_CLOSE_REASON_CHARS
     ? `${reason.slice(0, MAX_CLOSE_REASON_CHARS)}...`
     : reason;
+}
+
+function containsSensitiveKeyValue(text: string): boolean {
+  return /(^|[?&#\s])(?:access[_-]?token|auth[_-]?token|session[_-]?id|session|token|secret|password)=/i.test(
+    text,
+  );
 }
 
 function looksLikeEnglishTech(text: string): boolean {
