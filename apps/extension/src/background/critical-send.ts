@@ -8,7 +8,7 @@ const activeCriticalSendGenerations = new Map<string, number>();
 export function sendCriticalClientMessage(
   message: ClientMessage,
   label: string,
-  options: { ownerToken?: string | null } = {},
+  options: { ownerToken?: string | null; requireOwnerToken?: boolean } = {},
 ): boolean {
   const ownerToken = options.ownerToken ?? getCurrentWsToken();
   const messageKey = criticalMessageKey(message);
@@ -24,6 +24,14 @@ export function sendCriticalClientMessage(
   const sent = send(message);
   if (sent && messageKey) activeCriticalSendGenerations.delete(messageKey);
   if (!sent) {
+    if (options.requireOwnerToken && !ownerToken) {
+      console.warn(`[holaday] ${label} retry skipped without owner token`, {
+        ...criticalMessageLogMeta(message),
+        attempt: 0,
+      });
+      if (messageKey) activeCriticalSendGenerations.delete(messageKey);
+      return false;
+    }
     console.warn(`[holaday] ${label} send failed`, criticalMessageLogMeta(message));
     scheduleCriticalClientMessageRetry(message, label, 0, ownerToken, messageKey, generation);
   }

@@ -519,7 +519,7 @@ function sendVisionObservation(
       ...payload,
     },
     'vision observation',
-    { ownerToken },
+    { ownerToken, requireOwnerToken: true },
   );
 }
 
@@ -629,7 +629,7 @@ function sendVisionActed(
       ...payload,
     },
     'vision action',
-    { ownerToken },
+    { ownerToken, requireOwnerToken: true },
   );
 }
 
@@ -941,7 +941,7 @@ function sendStepResult(
       ...payload,
     },
     'step result',
-    { ownerToken },
+    { ownerToken, requireOwnerToken: true },
   );
 }
 

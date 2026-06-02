@@ -1494,6 +1494,7 @@ describe('handleExtensionToolCall', () => {
     vi.useFakeTimers();
     vi.mocked(send).mockReset();
     vi.mocked(send).mockReturnValueOnce(false).mockReturnValueOnce(true);
+    vi.mocked(getCurrentWsToken).mockReturnValue('token-a');
     globalThis.chrome = {
       tabs: {
         query: vi.fn(async () => [{ id: 2, windowId: 1, url: 'https://holaday.ai/app' }]),
@@ -1573,6 +1574,7 @@ describe('handleExtensionToolCall', () => {
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(true);
+    vi.mocked(getCurrentWsToken).mockReturnValue('token-a');
     globalThis.chrome = {
       tabs: {
         query: vi.fn(async () => [{ id: 2, windowId: 1, url: 'https://holaday.ai/app' }]),

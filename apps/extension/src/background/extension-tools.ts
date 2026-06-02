@@ -741,7 +741,10 @@ function sendExtensionToolResult(
     at: Date.now(),
     ...payload,
   };
-  return sendCriticalClientMessage(message, 'extension tool result', { ownerToken });
+  return sendCriticalClientMessage(message, 'extension tool result', {
+    ownerToken,
+    requireOwnerToken: true,
+  });
 }
 
 function rememberRecentToolCallResult(

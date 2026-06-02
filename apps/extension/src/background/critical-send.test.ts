@@ -224,6 +224,41 @@ describe('sendCriticalClientMessage', () => {
     );
   });
 
+  it('does not queue required-owner retries without a websocket token', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    wsMock.currentToken = null;
+    vi.mocked(send).mockReturnValue(false);
+
+    const message = {
+      type: 'client.extension.tool_result',
+      taskId: 'tsk_missing_owner_token',
+      requestId: 'req_missing_owner_token',
+      at: 123,
+      ok: false,
+      error: { message: 'tool failed', code: 'exec_error' },
+    } as const;
+
+    expect(
+      sendCriticalClientMessage(message, 'extension tool result', {
+        ownerToken: null,
+        requireOwnerToken: true,
+      }),
+    ).toBe(false);
+    wsMock.currentToken = 'token-b';
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[holaday] extension tool result retry skipped without owner token',
+      expect.objectContaining({
+        taskId: 'tsk_missing_owner_token',
+        requestId: 'req_missing_owner_token',
+        attempt: 0,
+      }),
+    );
+  });
+
   it('uses an explicit owner token when the websocket is already disconnected', async () => {
     vi.useFakeTimers();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
