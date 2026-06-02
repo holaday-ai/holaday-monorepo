@@ -233,9 +233,9 @@ export function App() {
       _tabId: number,
       info: chrome.tabs.TabChangeInfo,
     ) => {
-      // Re-read on URL change too — clicking a link inside the same
-      // tab still warrants a fresh title/selection snapshot.
-      if (info.url) void refresh();
+      // Re-read on URL changes and completed loads. Many SPA
+      // transitions update title/content without a new tab URL.
+      if (info.url || info.status === 'complete') void refresh();
     };
     chrome.tabs.onActivated.addListener(tabsListener);
     chrome.tabs.onUpdated.addListener(updatedListener);
