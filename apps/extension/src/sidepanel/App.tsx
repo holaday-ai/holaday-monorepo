@@ -28,6 +28,7 @@ import {
   getAccessToken,
   getStoredUser,
   normalizeAccessToken,
+  normalizeStoredUser,
   setAccessToken,
   setStoredUser,
 } from '../shared/storage.js';
@@ -287,14 +288,16 @@ export function App() {
         'sidepanel_auth_me_body_timeout',
       );
       const u = body.result.data;
+      const user = normalizeStoredUser({
+        externalId: u.userId,
+        email: u.email,
+        plan: u.plan,
+        displayName: u.displayName,
+      });
+      if (!user) return { kind: 'network' };
       return {
         kind: 'ok',
-        user: {
-          externalId: u.userId,
-          email: u.email,
-          plan: u.plan,
-          displayName: u.displayName,
-        },
+        user,
       };
     } catch {
       return { kind: 'network' };

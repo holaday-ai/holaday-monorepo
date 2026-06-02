@@ -75,6 +75,21 @@ describe('normalizeStoredUser', () => {
       plan: 'basic',
     });
   });
+
+  it('trims and bounds stored user text fields', () => {
+    const normalized = normalizeStoredUser({
+      externalId: ` user_${'x'.repeat(200)} `,
+      email: ` ${'e'.repeat(400)}@example.com `,
+      plan: ` ${'p'.repeat(100)} `,
+      displayName: ` ${'n'.repeat(220)} `,
+    });
+
+    expect(normalized?.externalId).toHaveLength(128);
+    expect(normalized?.email).toHaveLength(320);
+    expect(normalized?.plan).toHaveLength(64);
+    expect(normalized?.displayName).toHaveLength(160);
+    expect(normalized?.externalId.startsWith('user_')).toBe(true);
+  });
 });
 
 describe('storage reads', () => {
@@ -165,6 +180,33 @@ describe('storage writes', () => {
     await vi.advanceTimersByTimeAsync(1_500);
 
     await assertion;
+  });
+
+  it('normalizes user records before writing them', async () => {
+    const set = vi.fn(async () => undefined);
+    globalThis.chrome = {
+      storage: {
+        local: {
+          set,
+        },
+      },
+    } as unknown as typeof chrome;
+
+    await setStoredUser({
+      externalId: ' user_1 ',
+      email: ' person@example.com ',
+      plan: ' basic ',
+      displayName: ' Person ',
+    });
+
+    expect(set).toHaveBeenCalledWith({
+      'holaday.user': {
+        externalId: 'user_1',
+        email: 'person@example.com',
+        plan: 'basic',
+        displayName: 'Person',
+      },
+    });
   });
 
   it('bounds user removals that hang', async () => {

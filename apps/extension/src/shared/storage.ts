@@ -9,6 +9,10 @@ const TOKEN_KEY = 'holaday.access_token';
 const USER_KEY = 'holaday.user';
 const STORAGE_READ_TIMEOUT_MS = 1_500;
 const STORAGE_WRITE_TIMEOUT_MS = 1_500;
+const MAX_USER_ID_CHARS = 128;
+const MAX_USER_EMAIL_CHARS = 320;
+const MAX_USER_PLAN_CHARS = 64;
+const MAX_USER_DISPLAY_NAME_CHARS = 160;
 
 export interface StoredUser {
   externalId: string;
@@ -34,12 +38,23 @@ export function normalizeStoredUser(value: unknown): StoredUser | null {
   if (!nonEmptyString(raw.externalId) || !nonEmptyString(raw.email) || !nonEmptyString(raw.plan)) {
     return null;
   }
+  const displayName =
+    typeof raw.displayName === 'string'
+      ? raw.displayName.trim()
+      : raw.displayName === null
+        ? null
+        : undefined;
   return {
-    externalId: raw.externalId,
-    email: raw.email,
-    plan: raw.plan,
-    ...(typeof raw.displayName === 'string' || raw.displayName === null
-      ? { displayName: raw.displayName }
+    externalId: raw.externalId.trim().slice(0, MAX_USER_ID_CHARS),
+    email: raw.email.trim().slice(0, MAX_USER_EMAIL_CHARS),
+    plan: raw.plan.trim().slice(0, MAX_USER_PLAN_CHARS),
+    ...(displayName !== undefined
+      ? {
+          displayName:
+            displayName === null
+              ? null
+              : displayName.slice(0, MAX_USER_DISPLAY_NAME_CHARS),
+        }
       : {}),
   };
 }
@@ -92,8 +107,13 @@ export async function getStoredUser(): Promise<StoredUser | null> {
 }
 
 export async function setStoredUser(user: StoredUser): Promise<void> {
+  const normalized = normalizeStoredUser(user);
+  if (!normalized) {
+    await clearStoredUser();
+    return;
+  }
   await withDeadline(
-    chrome.storage.local.set({ [USER_KEY]: user }),
+    chrome.storage.local.set({ [USER_KEY]: normalized }),
     STORAGE_WRITE_TIMEOUT_MS,
     'storage_user_write_timeout',
   );
