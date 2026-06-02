@@ -67,6 +67,7 @@ const COOKIE_SYNC_POST_TIMEOUT_MS = 8_000;
 const COOKIE_SYNC_BODY_TIMEOUT_MS = 2_000;
 const MAX_SYNC_RESPONSE_DOMAINS = 500;
 const MAX_SYNC_RESPONSE_DOMAIN_CHARS = 253;
+const MAX_SYNC_COOKIES = 500;
 
 export interface SyncableCookie {
   domain: string;
@@ -122,7 +123,7 @@ export async function collectCookies(): Promise<SyncableCookie[]> {
       if (normalized) out.set(cookieIdentity(normalized), normalized);
     }
   }
-  return [...out.values()];
+  return [...out.values()].slice(0, MAX_SYNC_COOKIES);
 }
 
 async function readCookiesForDomain(domain: string): Promise<chrome.cookies.Cookie[]> {

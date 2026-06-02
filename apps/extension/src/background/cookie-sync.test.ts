@@ -109,6 +109,25 @@ describe('normalizeSyncableCookie', () => {
     ]);
   });
 
+  it('caps the collected cookie payload size', async () => {
+    const manyCookies = Array.from({ length: 600 }, (_value, index) =>
+      cookie({ domain: '.github.com', name: `sid_${index}` }),
+    );
+    const getAll = vi.fn(({ domain }: chrome.cookies.GetAllDetails) => {
+      if (domain === '.github.com') return Promise.resolve(manyCookies);
+      return Promise.resolve([]);
+    });
+    globalThis.chrome = {
+      cookies: { getAll },
+    } as unknown as typeof chrome;
+
+    const cookies = await collectCookies();
+
+    expect(cookies).toHaveLength(500);
+    expect(cookies[0]?.name).toBe('sid_0');
+    expect(cookies.at(-1)?.name).toBe('sid_499');
+  });
+
   it('times out a stuck cookie sync post', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
