@@ -31,33 +31,14 @@ import {
   setAccessToken,
   setStoredUser,
 } from '../shared/storage.js';
+import {
+  normalizeTaskSnapshot,
+  type TaskStatus,
+  type TaskView,
+  type VisionProgressView,
+} from './task-snapshot.js';
 
 type Status = 'idle' | 'loading' | 'connected' | 'error';
-
-type TaskStatus =
-  | 'planning'
-  | 'executing'
-  | 'awaiting_user'
-  | 'paused'
-  | 'completed'
-  | 'partial_success'
-  | 'failed'
-  | 'cancelled';
-
-interface VisionProgressView {
-  phase: 'observing' | 'deciding' | 'acting' | 'completed' | 'failed';
-  tickIndex?: number;
-  actionKind?: string;
-  detail?: string;
-}
-
-interface TaskView {
-  taskId: string;
-  status: TaskStatus;
-  steps: { id: string; kind: string; status: string }[];
-  lastUpdated: number;
-  visionProgress?: VisionProgressView;
-}
 
 interface MeResponse {
   result: {
@@ -124,8 +105,8 @@ export function App() {
     if (tasksRefreshInFlight.current) return;
     tasksRefreshInFlight.current = true;
     try {
-      const resp = await sendRuntimeMessageWithRetry<{ tasks?: TaskView[] }>({ type: 'holaday.tasks' });
-      if (resp?.tasks && mountedRef.current) setTasks(resp.tasks);
+      const resp = await sendRuntimeMessageWithRetry<{ tasks?: unknown }>({ type: 'holaday.tasks' });
+      if (mountedRef.current) setTasks(normalizeTaskSnapshot(resp?.tasks));
     } finally {
       tasksRefreshInFlight.current = false;
     }
@@ -267,8 +248,8 @@ export function App() {
   // Subscribe to SW snapshots so the result section reflects the
   // task's progress in real time without polling.
   useEffect(() => {
-    const listener = (msg: { type?: string; tasks?: TaskView[]; taskId?: string }) => {
-      if (msg?.type === 'holaday.tasks.update' && msg.tasks) setTasks(msg.tasks);
+    const listener = (msg: { type?: string; tasks?: unknown; taskId?: string }) => {
+      if (msg?.type === 'holaday.tasks.update') setTasks(normalizeTaskSnapshot(msg.tasks));
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
