@@ -162,6 +162,42 @@ describe('auth bridge content script', () => {
     );
   });
 
+  it('caps repeated retry cadence at the longest configured delay', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('setInterval', vi.fn(() => 0 as unknown as ReturnType<typeof setInterval>));
+    const token = 'hd_live_' + 'a'.repeat(24);
+    const getItem = vi.fn((key: string) => (key === TOKEN_KEY ? token : null));
+    const sendMessage = vi.fn((_message: unknown, callback: () => void) => {
+      chrome.runtime.lastError = { message: 'service worker restarting' };
+      callback();
+      delete chrome.runtime.lastError;
+    });
+
+    globalThis.window = {
+      localStorage: { getItem },
+      addEventListener: vi.fn(),
+    } as unknown as Window & typeof globalThis;
+    globalThis.chrome = {
+      runtime: {
+        sendMessage,
+      },
+    } as unknown as typeof chrome;
+
+    await import('./auth-bridge.js');
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sendMessage).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(sendMessage).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sendMessage).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(sendMessage).toHaveBeenCalledTimes(5);
+  });
+
   it('retries an observed token when the service worker reports an internal failure', async () => {
     vi.useFakeTimers();
     const token = 'hd_live_' + 'a'.repeat(24);

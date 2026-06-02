@@ -125,7 +125,7 @@ function scheduleRetryObservation(token: string | null): void {
     state.retryToken = token;
   }
   const delay = POST_RETRY_DELAYS_MS[Math.min(state.retryAttempt, POST_RETRY_DELAYS_MS.length - 1)];
-  state.retryAttempt += 1;
+  state.retryAttempt = Math.min(state.retryAttempt + 1, POST_RETRY_DELAYS_MS.length - 1);
   state.retryTimer = setTimeout(() => {
     state.retryTimer = null;
     observe();
