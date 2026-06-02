@@ -47,6 +47,11 @@ import {
   normalizeAccessToken,
   setStoredUser,
 } from '../shared/storage.js';
+import {
+  type ExtensionStatusResponse,
+  type WsConnectionStatus,
+  getConnectionStatusCopy,
+} from './connection-copy.js';
 
 // chrome.storage keys mirrored from background/history-sync.ts. Reading
 // directly avoids a SW round-trip on every popup render.
@@ -95,24 +100,6 @@ function normalizeHistorySummary(value: unknown): HistorySyncSummary | null {
     topDomains,
     at,
   };
-}
-
-interface WsConnectionStatus {
-  connected: boolean;
-  readyState: number | null;
-  reconnectAttempt: number;
-  reconnectCapped: boolean;
-  lastOpenAt: number | null;
-  lastCloseAt: number | null;
-  lastCloseCode: number | null;
-  lastCloseReason: string | null;
-  lastErrorAt: number | null;
-  nextRetryAt: number | null;
-}
-
-interface ExtensionStatusResponse {
-  lastWelcomeAt: number | null;
-  ws?: WsConnectionStatus;
 }
 
 interface MeResponse {
@@ -593,61 +580,6 @@ function ConnectionStatusBlock({ theme }: { theme: ThemeTokens }) {
       </div>
     </div>
   );
-}
-
-function getConnectionStatusCopy(status: ExtensionStatusResponse | null): {
-  title: string;
-  detail: string;
-} {
-  if (!status?.ws) {
-    return { title: '浏览器代理状态同步中', detail: '正在读取扩展后台连接状态' };
-  }
-  if (status.ws.connected) {
-    return {
-      title: '浏览器代理已连接',
-      detail: status.lastWelcomeAt ? `最近确认：${formatRelativeTime(status.lastWelcomeAt)}` : 'WebSocket 已连接',
-    };
-  }
-  if (status.ws.reconnectCapped) {
-    const reason = formatWsCloseReason(status.ws.lastCloseReason);
-    return {
-      title: '浏览器代理连接已暂停',
-      detail: reason
-        ? `多次重连失败：${reason}。点击底部“重试连接”后会重新尝试`
-        : '多次重连失败，点击底部“重试连接”后会重新尝试',
-    };
-  }
-  if (status.ws.reconnectAttempt > 0) {
-    const reason = formatWsCloseReason(status.ws.lastCloseReason);
-    return {
-      title: `浏览器代理正在重连（${status.ws.reconnectAttempt}/3）`,
-      detail: [
-        reason ? `最近错误：${reason}` : null,
-        status.ws.nextRetryAt ? `下次尝试：${formatRelativeTime(status.ws.nextRetryAt)}` : '等待下一次重连',
-      ].filter(Boolean).join('；'),
-    };
-  }
-  return { title: '浏览器代理等待连接', detail: '打开 HOLA DAY 网页后会自动同步登录态' };
-}
-
-function formatWsCloseReason(reason: string | null | undefined): string | null {
-  if (!reason) return null;
-  const lower = reason.toLowerCase();
-  if (lower.includes('network error')) return '网络连接被关闭';
-  if (lower.includes('health check failed')) return '服务健康检查未通过';
-  if (lower.includes('open timeout')) return '握手超时';
-  if (lower.includes('send failed')) return '消息发送失败';
-  if (lower.includes('constructor') || lower.includes('open failed')) return '连接初始化失败';
-  return reason.length > 40 ? `${reason.slice(0, 40)}...` : reason;
-}
-
-function formatRelativeTime(at: number): string {
-  const deltaMs = at - Date.now();
-  const absSeconds = Math.max(0, Math.round(Math.abs(deltaMs) / 1000));
-  if (absSeconds < 5) return '刚刚';
-  if (absSeconds < 60) return deltaMs >= 0 ? `${absSeconds} 秒后` : `${absSeconds} 秒前`;
-  const minutes = Math.round(absSeconds / 60);
-  return deltaMs >= 0 ? `${minutes} 分钟后` : `${minutes} 分钟前`;
 }
 
 // ---------------------------------------------------------------------------

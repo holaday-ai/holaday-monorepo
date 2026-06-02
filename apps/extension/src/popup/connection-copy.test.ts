@@ -1,0 +1,106 @@
+import { describe, expect, it, vi } from 'vitest';
+import {
+  type ExtensionStatusResponse,
+  formatWsCloseReason,
+  getConnectionStatusCopy,
+} from './connection-copy.js';
+
+function status(ws: Partial<ExtensionStatusResponse['ws']>): ExtensionStatusResponse {
+  return {
+    lastWelcomeAt: null,
+    ws: {
+      connected: false,
+      readyState: null,
+      reconnectAttempt: 0,
+      reconnectCapped: false,
+      lastOpenAt: null,
+      lastCloseAt: null,
+      lastCloseCode: null,
+      lastCloseReason: null,
+      lastErrorAt: null,
+      nextRetryAt: null,
+      ...ws,
+    },
+  };
+}
+
+describe('getConnectionStatusCopy', () => {
+  it('describes a healthy websocket with the last welcome time', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-31T00:00:10Z'));
+
+    expect(
+      getConnectionStatusCopy({
+        lastWelcomeAt: new Date('2026-05-31T00:00:00Z').getTime(),
+        ws: {
+          connected: true,
+          readyState: 1,
+          reconnectAttempt: 0,
+          reconnectCapped: false,
+          lastOpenAt: null,
+          lastCloseAt: null,
+          lastCloseCode: null,
+          lastCloseReason: null,
+          lastErrorAt: null,
+          nextRetryAt: null,
+        },
+      }),
+    ).toEqual({
+      title: '浏览器代理已连接',
+      detail: '最近确认：10 秒前',
+    });
+
+    vi.useRealTimers();
+  });
+
+  it('shows a clear connecting state before the websocket is open', () => {
+    expect(getConnectionStatusCopy(status({ readyState: 0 }))).toEqual({
+      title: '浏览器代理正在连接',
+      detail: '正在检查服务并建立安全连接',
+    });
+  });
+
+  it('humanizes health-check failures during reconnect', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-31T00:00:00Z'));
+
+    expect(
+      getConnectionStatusCopy(
+        status({
+          reconnectAttempt: 2,
+          lastCloseReason: 'health check failed',
+          nextRetryAt: new Date('2026-05-31T00:00:06Z').getTime(),
+        }),
+      ),
+    ).toEqual({
+      title: '浏览器代理正在重连（2/3）',
+      detail: '最近错误：服务暂时不可用；下次尝试：6 秒后',
+    });
+
+    vi.useRealTimers();
+  });
+
+  it('keeps capped reconnects actionable', () => {
+    expect(
+      getConnectionStatusCopy(
+        status({
+          reconnectAttempt: 4,
+          reconnectCapped: true,
+          lastCloseReason: 'open timeout',
+        }),
+      ),
+    ).toEqual({
+      title: '浏览器代理连接已暂停',
+      detail: '多次重连失败：连接握手超时。点击底部“重试连接”后会重新尝试',
+    });
+  });
+});
+
+describe('formatWsCloseReason', () => {
+  it('maps technical websocket reasons to user-facing copy', () => {
+    expect(formatWsCloseReason('network error')).toBe('网络连接被关闭');
+    expect(formatWsCloseReason('health check failed')).toBe('服务暂时不可用');
+    expect(formatWsCloseReason('open timeout')).toBe('连接握手超时');
+    expect(formatWsCloseReason('send failed')).toBe('消息发送失败');
+  });
+});
