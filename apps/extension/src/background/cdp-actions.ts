@@ -52,6 +52,7 @@ const MAX_TYPE_TEXT_CHARS = 4_000;
 const MAX_KEY_DESCRIPTOR_CHARS = 64;
 const MAX_ACTION_RESULT_MESSAGE_CHARS = 1_000;
 const MAX_SCROLL_DELTA_PX = 5_000;
+const MOUSE_BUTTONS = new Set(['left', 'right', 'middle']);
 
 /** Tabs we've already attached the debugger to this SW lifetime. */
 const attachedTabs = new Set<number>();
@@ -255,6 +256,10 @@ async function doClick(
   if (!Number.isFinite(action.x) || !Number.isFinite(action.y)) {
     return { ok: false, message: '点击坐标无效，请重新定位后再试' };
   }
+  const button = normalizeMouseButton(action.button);
+  if (!button) {
+    return { ok: false, message: '点击按钮类型无效，请重新生成点击操作' };
+  }
   await ensureAttached(tabId);
   const viewport = await getViewportSizeForInput(tabId);
   if (
@@ -267,7 +272,6 @@ async function doClick(
     };
   }
   await ensureAttached(tabId);
-  const button = action.button ?? 'left';
   // Press then release. CDP's mouseMoved first is unnecessary for a
   // single click — Input.dispatchMouseEvent with `type: 'mousePressed'`
   // implicitly moves. Keep clickCount=1; double-click would be two
@@ -287,6 +291,13 @@ async function doClick(
     clickCount: 1,
   });
   return { ok: true, message: `clicked ${button} @ (${action.x},${action.y})` };
+}
+
+function normalizeMouseButton(raw: unknown): 'left' | 'right' | 'middle' | null {
+  const button = raw ?? 'left';
+  return typeof button === 'string' && MOUSE_BUTTONS.has(button)
+    ? (button as 'left' | 'right' | 'middle')
+    : null;
 }
 
 async function doType(

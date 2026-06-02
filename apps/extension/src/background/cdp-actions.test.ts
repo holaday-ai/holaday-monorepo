@@ -112,6 +112,29 @@ describe('executeCdpAction', () => {
     });
   });
 
+  it('rejects invalid click buttons before attaching the debugger', async () => {
+    const attach = vi.fn(async () => undefined);
+    globalThis.chrome = {
+      debugger: {
+        attach,
+        sendCommand: vi.fn(async () => ({})),
+      },
+    } as unknown as typeof chrome;
+    const badButtonClick = {
+      kind: 'click',
+      x: 10,
+      y: 20,
+      button: 'primary',
+    } as unknown as Extract<VisionAction, { kind: 'click' }>;
+
+    await expect(executeCdpAction(7, badButtonClick)).resolves.toEqual({
+      ok: false,
+      message: '点击按钮类型无效，请重新生成点击操作',
+    });
+
+    expect(attach).not.toHaveBeenCalled();
+  });
+
   it('reports off-screen click coordinates without dispatching the click', async () => {
     const sendCommand = vi.fn(async (_target, method: string) => {
       if (method === 'Runtime.evaluate') {
