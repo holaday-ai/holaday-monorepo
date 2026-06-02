@@ -982,6 +982,21 @@ describe('sanitizeVisionObservationCapture', () => {
     expect(result.url).toBe('https://example.com/callback?state=keep');
   });
 
+  it('redacts sensitive key-value pairs from observation errors', () => {
+    const result = sanitizeVisionObservationCapture({
+      screenshotBase64: '',
+      viewportWidth: 1280,
+      viewportHeight: 720,
+      url: 'https://example.com/',
+      title: 'Example',
+      error: 'Page.captureScreenshot failed accessToken=secret state=keep sessionId=sid',
+    });
+
+    expect(result.error).toBe(
+      'Page.captureScreenshot failed accessToken=redacted state=keep sessionId=redacted',
+    );
+  });
+
   it('drops oversized screenshots instead of sending invalid partial base64', () => {
     const result = sanitizeVisionObservationCapture({
       screenshotBase64: 'x'.repeat(2_000_001),

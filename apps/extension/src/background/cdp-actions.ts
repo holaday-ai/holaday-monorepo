@@ -804,7 +804,9 @@ export function sanitizeVisionObservationCapture(
     viewportHeight: clampViewportSize(observation.viewportHeight),
     url: clipString(sanitizePageContextUrl(observation.url), MAX_OBSERVATION_URL_CHARS),
     title: clipString(observation.title, MAX_OBSERVATION_TITLE_CHARS),
-    ...(error ? { error: clipString(error, MAX_OBSERVATION_ERROR_CHARS) } : {}),
+    ...(error
+      ? { error: clipString(redactSensitiveKeyValueText(error), MAX_OBSERVATION_ERROR_CHARS) }
+      : {}),
   };
 }
 
