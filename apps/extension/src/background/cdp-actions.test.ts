@@ -887,6 +887,12 @@ describe('cdpActionErrorMessage', () => {
     expect(cdpActionErrorMessage(new Error('No tab with id: 1.'))).toBe(
       '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
     );
+    expect(cdpActionErrorMessage(new Error('Could not establish connection. Receiving end does not exist.'))).toBe(
+      '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
+    );
+    expect(cdpActionErrorMessage(new Error('The message port closed before a response was received.'))).toBe(
+      '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
+    );
     expect(cdpActionErrorMessage(new Error('Another debugger is already attached'))).toBe(
       '浏览器调试通道被占用，请关闭该标签页 DevTools 后重试',
     );
@@ -903,6 +909,12 @@ describe('cdpActionErrorMessage', () => {
       '扩展没有这个页面的访问权限，请检查扩展权限后重试',
     );
     expect(cdpActionErrorMessage(new Error('Frame was detached'))).toBe(
+      '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
+    );
+    expect(cdpActionErrorMessage(new Error('No frame with id 123'))).toBe(
+      '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
+    );
+    expect(cdpActionErrorMessage(new Error('Frame with ID 0 was removed.'))).toBe(
       '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
     );
     expect(cdpActionErrorMessage(new Error('Debugger is not attached to the tab'))).toBe(

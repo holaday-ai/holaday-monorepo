@@ -225,6 +225,8 @@ export function cdpActionErrorMessage(err: unknown): string {
   }
   if (
     lower.includes('no tab with id') ||
+    lower.includes('receiving end does not exist') ||
+    lower.includes('message port closed') ||
     lower.includes('tab closed') ||
     lower.includes('target closed') ||
     lower.includes('target detached') ||
@@ -232,7 +234,9 @@ export function cdpActionErrorMessage(err: unknown): string {
     lower.includes('frame was detached') ||
     lower.includes('target navigated or closed') ||
     lower.includes('execution context was destroyed') ||
-    lower.includes('cannot find context with specified id')
+    lower.includes('cannot find context with specified id') ||
+    lower.includes('no frame with id') ||
+    (lower.includes('frame with id') && lower.includes('removed'))
   ) {
     return '浏览器标签页已关闭或连接中断，请重新打开页面后重试';
   }
