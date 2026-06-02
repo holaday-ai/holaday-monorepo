@@ -355,6 +355,9 @@ async function doScroll(
   tabId: number,
   action: Extract<VisionAction, { kind: 'scroll' }>,
 ): Promise<ActionResult> {
+  if (!Number.isFinite(action.dy)) {
+    return { ok: false, message: '滚动距离无效，请重新判断后再试' };
+  }
   await ensureAttached(tabId);
   // Scroll via mouseWheel at viewport centre. Read the live viewport
   // when possible so narrow windows / side panels do not receive

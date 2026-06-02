@@ -468,6 +468,23 @@ describe('executeCdpAction', () => {
     );
   });
 
+  it('rejects non-finite scroll distances before touching CDP', async () => {
+    const attach = vi.fn(async () => undefined);
+    globalThis.chrome = {
+      debugger: {
+        attach,
+        sendCommand: vi.fn(async () => ({})),
+      },
+    } as unknown as typeof chrome;
+
+    await expect(executeCdpAction(12, { kind: 'scroll', dy: Number.NaN })).resolves.toEqual({
+      ok: false,
+      message: '滚动距离无效，请重新判断后再试',
+    });
+
+    expect(attach).not.toHaveBeenCalled();
+  });
+
   it('forgets timed-out CDP sessions so the next action can reattach', async () => {
     vi.useFakeTimers();
     const attach = vi.fn(async () => undefined);
