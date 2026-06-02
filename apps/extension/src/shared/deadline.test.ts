@@ -17,4 +17,22 @@ describe('withDeadline', () => {
       vi.useRealTimers();
     }
   });
+
+  it('falls back to the default deadline for invalid timeouts', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = withDeadline(
+        new Promise(() => undefined),
+        Number.NaN,
+        'too_late',
+      );
+      const assertion = expect(pending).rejects.toThrow('too_late');
+      await vi.advanceTimersByTimeAsync(29_999);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
