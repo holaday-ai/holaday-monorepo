@@ -75,6 +75,10 @@ type FetchMeResult =
   | { kind: 'unauthorized' }
   | { kind: 'network' };
 
+async function cacheStoredUserBestEffort(user: StoredUser): Promise<void> {
+  await setStoredUser(user).catch(() => undefined);
+}
+
 interface CreateTaskResponse {
   result: { data: { taskId: string; status: TaskStatus } };
 }
@@ -153,7 +157,7 @@ export function App() {
           const result = await fetchMe(liftedToken);
           if (cancelled) return;
           if (result.kind === 'ok') {
-            await setStoredUser(result.user);
+            await cacheStoredUserBestEffort(result.user);
             if (cancelled) return;
             setUser(result.user);
             setToken(liftedToken);
@@ -195,7 +199,7 @@ export function App() {
           const result = await fetchMe(newToken);
           if (cancelled || seq !== authSyncSeq.current) return;
           if (result.kind === 'ok') {
-            await setStoredUser(result.user);
+            await cacheStoredUserBestEffort(result.user);
             if (cancelled || seq !== authSyncSeq.current) return;
             setUser(result.user);
             setToken(newToken);
@@ -206,10 +210,9 @@ export function App() {
             await clearStoredUser();
             if (cancelled || seq !== authSyncSeq.current) return;
             clearLocalSessionState();
-          } else {
-            setStatus('error');
-            setError('暂时无法读取账户信息，浏览器代理会继续保持连接并重试。');
           }
+          // 'network' → keep the current side panel session. The SW is
+          // still the connection authority and will retry the websocket.
         } else {
           authSyncSeq.current = seq;
           clearLocalSessionState();
@@ -349,7 +352,7 @@ export function App() {
         setError('暂时无法读取账户信息，浏览器代理会继续保持连接并重试。');
         return;
       }
-      await setStoredUser(result.user);
+      await cacheStoredUserBestEffort(result.user);
       if (!mountedRef.current) return;
       setUser(result.user);
       setToken(liftedToken);

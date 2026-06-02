@@ -133,6 +133,10 @@ type FetchMeResult =
 
 const BRAND_MAGENTA = '#E50B6B';
 
+async function cacheStoredUserBestEffort(user: StoredUser): Promise<void> {
+  await setStoredUser(user).catch(() => undefined);
+}
+
 interface ThemeTokens {
   bg: string;
   cardBg: string;
@@ -277,7 +281,7 @@ export function App() {
         const result = await fetchMe(tok);
         if (cancelled) return;
         if (result.kind === 'ok') {
-          await setStoredUser(result.user);
+          await cacheStoredUserBestEffort(result.user);
           if (cancelled || !mountedRef.current) return;
           setUser(result.user);
           setToken(tok);
@@ -296,7 +300,7 @@ export function App() {
         const result = await fetchMe(liftedToken);
         if (cancelled || !mountedRef.current) return;
         if (result.kind === 'ok') {
-          await setStoredUser(result.user);
+          await cacheStoredUserBestEffort(result.user);
           if (cancelled || !mountedRef.current) return;
           setUser(result.user);
           setToken(liftedToken);
@@ -330,7 +334,7 @@ export function App() {
           const result = await fetchMe(newToken);
           if (seq !== authSyncSeq.current || !mountedRef.current) return;
           if (result.kind === 'ok') {
-            await setStoredUser(result.user);
+            await cacheStoredUserBestEffort(result.user);
             if (seq !== authSyncSeq.current || !mountedRef.current) return;
             setUser(result.user);
             setToken(newToken);
@@ -372,7 +376,7 @@ export function App() {
         const result = await fetchMe(resetToken);
         if (!mountedRef.current) return;
         if (result.kind === 'ok') {
-          await setStoredUser(result.user);
+          await cacheStoredUserBestEffort(result.user);
           if (!mountedRef.current) return;
           setUser(result.user);
           setToken(resetToken);
