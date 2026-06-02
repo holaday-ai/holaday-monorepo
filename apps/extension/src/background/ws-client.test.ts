@@ -46,10 +46,12 @@ class FakeWebSocket {
 
 const sockets: FakeWebSocket[] = [];
 let nextWebSocketConstructorError: Error | null = null;
+let runtimeOnSuspendListener: (() => void) | null = null;
 
 function installGlobals(): void {
   sockets.length = 0;
   nextWebSocketConstructorError = null;
+  runtimeOnSuspendListener = null;
   vi.stubGlobal(
     'WebSocket',
     class extends FakeWebSocket {
@@ -74,6 +76,11 @@ function installGlobals(): void {
     },
     runtime: {
       getManifest: vi.fn(() => ({ version: 'test-extension' })),
+      onSuspend: {
+        addListener: vi.fn((listener: () => void) => {
+          runtimeOnSuspendListener = listener;
+        }),
+      },
     },
   });
 }
@@ -423,6 +430,24 @@ describe('ws-client send', () => {
 
     expect(oldSocket.sent).toHaveLength(1); // only client.hello before disconnect
     expect(newSocket.sent).toHaveLength(2); // client.hello + one pong
+  });
+
+  it('closes the websocket cleanly when Chrome suspends the service worker', async () => {
+    const { connect, getWsConnectionStatus, send } = await import('./ws-client.js');
+    connect('token');
+    const [socket] = sockets;
+    if (!socket) throw new Error('expected websocket');
+
+    runtimeOnSuspendListener?.();
+
+    expect(socket.closeCalls).toEqual([{ code: 1000, reason: 'client requested disconnect' }]);
+    expect(send({ type: 'client.pong', at: Date.now() })).toBe(false);
+    await expect(getWsConnectionStatus()).resolves.toMatchObject({
+      connected: false,
+      readyState: null,
+      reconnectAttempt: 0,
+      nextRetryAt: null,
+    });
   });
 
   it('does not throw when disconnect races an already-closing socket', async () => {

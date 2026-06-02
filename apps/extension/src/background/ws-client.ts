@@ -136,6 +136,12 @@ export function disconnect(): void {
   }
 }
 
+if (typeof chrome !== 'undefined') {
+  chrome.runtime?.onSuspend?.addListener?.(() => {
+    disconnect();
+  });
+}
+
 /**
  * Connect to the orchestrator. Auth path:
  *   sec-websocket-protocol = "holaday.v1, jwt.<token>"
