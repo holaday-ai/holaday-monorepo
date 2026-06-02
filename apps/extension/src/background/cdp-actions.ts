@@ -333,7 +333,6 @@ async function doKey(
   if (action.key.length > MAX_KEY_DESCRIPTOR_CHARS) {
     return { ok: false, message: '按键指令过长，请拆成更短步骤后重试' };
   }
-  await ensureAttached(tabId);
   // Support simple chords ("ctrl+a", "cmd+c") by splitting on '+' and
   // folding lowered modifiers into the CDP modifiers bitmask. The
   // terminal key is the last segment.
@@ -343,8 +342,16 @@ async function doKey(
   }
   const last = parts[parts.length - 1];
   if (!last) return { ok: false, message: `empty key descriptor: ${action.key}` };
-  const mods = parts.slice(0, -1).reduce((acc, m) => acc | modifierBit(m), 0);
+  let mods = 0;
+  for (const modifier of parts.slice(0, -1)) {
+    const bit = modifierBit(modifier);
+    if (bit === null) {
+      return { ok: false, message: '按键组合包含未知修饰键，请重新生成按键操作' };
+    }
+    mods |= bit;
+  }
   const info = resolveKey(last);
+  await ensureAttached(tabId);
   await sendCdp(tabId, 'Input.dispatchKeyEvent', {
     type: 'keyDown',
     modifiers: mods,
@@ -612,7 +619,7 @@ function chunkString(value: string, chunkChars: number): string[] {
  *   1 = alt, 2 = ctrl, 4 = meta/cmd, 8 = shift
  * We lowercase the name so "Ctrl"/"ctrl"/"Cmd"/"cmd" all work.
  */
-function modifierBit(name: string): number {
+function modifierBit(name: string): number | null {
   switch (name.toLowerCase()) {
     case 'alt':
     case 'option':
@@ -630,7 +637,7 @@ function modifierBit(name: string): number {
     case 'shift':
       return 8;
     default:
-      return 0;
+      return null;
   }
 }
 

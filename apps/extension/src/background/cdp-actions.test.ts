@@ -452,6 +452,10 @@ describe('executeCdpAction', () => {
       ok: false,
       message: '按键指令过长，请拆成更短步骤后重试',
     });
+    await expect(executeCdpAction(11, { kind: 'key', key: 'hyper+c' })).resolves.toEqual({
+      ok: false,
+      message: '按键组合包含未知修饰键，请重新生成按键操作',
+    });
 
     expect(attach).not.toHaveBeenCalled();
   });
