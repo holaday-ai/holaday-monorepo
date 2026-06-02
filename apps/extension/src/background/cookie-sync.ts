@@ -21,6 +21,7 @@ import {
   fetchWithDeadline,
   responseJsonWithDeadline,
 } from '../shared/http.js';
+import { isPublicDomain, normalizePublicDomain } from '../shared/public-domain.js';
 
 /**
  * Curated list of domains we care about. Leading dot matches both
@@ -210,8 +211,10 @@ function normalizeSyncResponse(raw: unknown): SyncResponse | null {
   const domains = Array.isArray(value.domains)
     ? value.domains
         .filter((domain): domain is string => typeof domain === 'string')
-        .map((domain) => domain.trim().slice(0, MAX_SYNC_RESPONSE_DOMAIN_CHARS))
-        .filter(Boolean)
+        .map((domain) =>
+          normalizePublicDomain(domain.slice(0, MAX_SYNC_RESPONSE_DOMAIN_CHARS)),
+        )
+        .filter(isPublicDomain)
         .slice(0, MAX_SYNC_RESPONSE_DOMAINS)
     : [];
   return {

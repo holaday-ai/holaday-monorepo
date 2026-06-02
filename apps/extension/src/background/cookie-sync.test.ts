@@ -169,7 +169,7 @@ describe('normalizeSyncableCookie', () => {
       vi.fn(async () =>
         Response.json({
           synced: 2.9,
-          domains: [' example.com ', 42, '', 'x'.repeat(300)],
+          domains: [' example.com ', 42, '', 'x'.repeat(300), 'token=secret.example.com'],
           deferred: true,
         }),
       ),
@@ -184,7 +184,7 @@ describe('normalizeSyncableCookie', () => {
 
     await expect(syncCookiesToServer([cookie()])).resolves.toEqual({
       synced: 2,
-      domains: ['example.com', 'x'.repeat(253)],
+      domains: ['example.com'],
       deferred: true,
     });
   });

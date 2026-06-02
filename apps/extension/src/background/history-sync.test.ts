@@ -84,7 +84,7 @@ describe('extractHost', () => {
         Response.json({
           ingested: 2.9,
           rejected: 1.8,
-          topDomains: [' example.com ', 42, '', 'x'.repeat(300)],
+          topDomains: [' example.com ', 42, '', 'x'.repeat(300), 'token=secret.example.com'],
         }),
       ),
     );
@@ -107,7 +107,7 @@ describe('extractHost', () => {
     ).resolves.toEqual({
       ingested: 2,
       rejected: 1,
-      topDomains: ['example.com', 'x'.repeat(253)],
+      topDomains: ['example.com'],
     });
   });
 
@@ -206,7 +206,7 @@ describe('readHistorySyncSummary', () => {
           get: vi.fn(async () => ({
             'holaday.history.lastSyncSummary': {
               ingested: 2.9,
-              topDomains: [' example.com ', 42, '', 'x'.repeat(300)],
+              topDomains: [' example.com ', 42, '', 'x'.repeat(300), 'token=secret.example.com'],
               at: Number.NaN,
             },
           })),
@@ -219,7 +219,7 @@ describe('readHistorySyncSummary', () => {
 
     expect(summary).toEqual({
       ingested: 2,
-      topDomains: ['example.com', 'x'.repeat(253)],
+      topDomains: ['example.com'],
       at: expect.any(Number),
     });
     expect(summary?.at).toBeGreaterThanOrEqual(before);
