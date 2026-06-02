@@ -1338,6 +1338,10 @@ async function ensureConnectedInner(): Promise<{ token: string | null; frozen?: 
         );
         return { token: null };
       }
+      const currentBeforeImport = normalizeAccessToken(await getAccessToken());
+      if (currentBeforeImport && currentBeforeImport !== lifted) {
+        return { token: currentBeforeImport };
+      }
       try {
         await setAccessToken(lifted);
         token = lifted;
@@ -1347,7 +1351,13 @@ async function ensureConnectedInner(): Promise<{ token: string | null; frozen?: 
       }
     }
   }
-  if (token) connect(token);
+  if (token) {
+    const current = normalizeAccessToken(await getAccessToken());
+    if (current !== token) {
+      return { token: current };
+    }
+    connect(token);
+  }
   return { token };
 }
 
