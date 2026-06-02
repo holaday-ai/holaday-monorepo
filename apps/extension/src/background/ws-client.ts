@@ -18,6 +18,7 @@ type UnauthorizedListener = () => void;
 
 const WS_OPEN_TIMEOUT_MS = 12_000;
 const WS_HEALTH_TIMEOUT_MS = 2_500;
+const WS_ROUTE_PROBE_TIMEOUT_MS = 2_500;
 const WS_ENDPOINT_FAILURE_COOLDOWN_MS = 15_000;
 
 interface State {
@@ -292,12 +293,24 @@ async function openSocketAfterHealthCheck(
 ): Promise<void> {
   const ok = await checkWsOriginHealth(healthUrl);
   if (state.socketGeneration !== generation || state.closedByUser) return;
-  state.openingToken = null;
   if (!ok) {
+    state.openingToken = null;
     state.lastErrorAt = Date.now();
     state.lastCloseAt = Date.now();
     state.lastCloseCode = null;
     state.lastCloseReason = 'health check failed';
+    if (!state.closedByUser) scheduleReconnect(token);
+    return;
+  }
+  const routeOk = await checkWsRouteReachable(endpoint);
+  if (state.socketGeneration !== generation || state.closedByUser) return;
+  state.openingToken = null;
+  if (!routeOk) {
+    markEndpointFailed(endpoint);
+    state.lastErrorAt = Date.now();
+    state.lastCloseAt = Date.now();
+    state.lastCloseCode = null;
+    state.lastCloseReason = 'ws route check failed';
     if (!state.closedByUser) scheduleReconnect(token);
     return;
   }
@@ -317,6 +330,45 @@ async function checkWsOriginHealth(healthUrl: string): Promise<boolean> {
     return response.ok;
   } catch {
     return false;
+  }
+}
+
+async function checkWsRouteReachable(endpoint: string): Promise<boolean> {
+  const probeUrl = wsEndpointToHttpProbeUrl(endpoint);
+  if (!probeUrl) return true;
+  try {
+    const response = await withDeadline(
+      fetch(probeUrl, {
+        cache: 'no-store',
+        credentials: 'omit',
+      }),
+      WS_ROUTE_PROBE_TIMEOUT_MS,
+      'ws_route_probe_timeout',
+    );
+    // A plain HTTP GET to a WebSocket route commonly returns 400/401/426
+    // because no Upgrade header is present; those still prove the route
+    // reached the WS proxy. 502/503/504 mean the proxy/origin path is not
+    // healthy enough to attempt a real WebSocket without polluting Chrome's
+    // extension error page.
+    return response.ok || response.status < 500 || response.status > 504;
+  } catch {
+    return false;
+  }
+}
+
+function wsEndpointToHttpProbeUrl(endpoint: string): string | null {
+  try {
+    const url = new URL(endpoint);
+    if (url.protocol === 'wss:') {
+      url.protocol = 'https:';
+    } else if (url.protocol === 'ws:') {
+      url.protocol = 'http:';
+    } else {
+      return null;
+    }
+    return url.href;
+  } catch {
+    return null;
   }
 }
 

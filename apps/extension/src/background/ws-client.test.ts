@@ -377,9 +377,62 @@ describe('ws-client send', () => {
       cache: 'no-store',
       credentials: 'omit',
     });
+    expect(fetch).toHaveBeenCalledWith('https://primary.test/ws', {
+      cache: 'no-store',
+      credentials: 'omit',
+    });
     await expect(getWsConnectionStatus()).resolves.toMatchObject({
       readyState: FakeWebSocket.OPEN,
     });
+  });
+
+  it('skips websocket construction when the websocket route probe is unavailable', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    configMock.wsHealthUrl = 'https://primary.test/api/healthz';
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200 } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 502 } as Response);
+    vi.stubGlobal('fetch', fetch);
+    const { connect, getWsConnectionStatus } = await import('./ws-client.js');
+
+    connect('token');
+
+    await vi.waitFor(async () => {
+      await expect(getWsConnectionStatus()).resolves.toMatchObject({
+        connected: false,
+        readyState: null,
+        reconnectAttempt: 1,
+        lastCloseCode: null,
+        lastCloseReason: 'ws route check failed',
+        nextRetryAt: expect.any(Number),
+      });
+    });
+    expect(sockets).toHaveLength(0);
+    expect(fetch).toHaveBeenCalledWith('https://primary.test/ws', {
+      cache: 'no-store',
+      credentials: 'omit',
+    });
+  });
+
+  it('allows websocket construction when the route rejects a plain HTTP probe', async () => {
+    configMock.wsHealthUrl = 'https://primary.test/api/healthz';
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, status: 200 } as Response)
+        .mockResolvedValueOnce({ ok: false, status: 400 } as Response),
+    );
+    const { connect } = await import('./ws-client.js');
+
+    connect('token');
+
+    await vi.waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    expect(sockets[0]?.url).toBe('wss://primary.test/ws');
   });
 
   it('disconnects a websocket health preflight without leaving a connecting status', async () => {
@@ -463,7 +516,8 @@ describe('ws-client send', () => {
     const fetch = vi
       .fn()
       .mockResolvedValueOnce({ ok: false } as Response)
-      .mockResolvedValueOnce({ ok: true } as Response);
+      .mockResolvedValueOnce({ ok: true } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 400 } as Response);
     vi.stubGlobal('fetch', fetch);
     const { connect } = await import('./ws-client.js');
 
@@ -480,6 +534,10 @@ describe('ws-client send', () => {
 
     await vi.waitFor(() => {
       expect(fetch).toHaveBeenCalledWith('https://backup.test/api/healthz', {
+        cache: 'no-store',
+        credentials: 'omit',
+      });
+      expect(fetch).toHaveBeenCalledWith('https://backup.test/ws', {
         cache: 'no-store',
         credentials: 'omit',
       });
