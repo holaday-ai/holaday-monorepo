@@ -836,6 +836,33 @@ describe('handleExtensionToolCall', () => {
     );
   });
 
+  it('returns safe copy for unknown extension tool kinds', async () => {
+    vi.mocked(send).mockClear();
+    const call = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_unknown_tool',
+      requestId: 'req_unknown_tool',
+      kind: 'raw-browser-debug-output-'.repeat(20),
+      args: {},
+      timeoutMs: 30_000,
+    } as unknown as Extract<ServerMessage, { type: 'server.extension.tool_call' }>;
+
+    await handleExtensionToolCall(call);
+
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'client.extension.tool_result',
+        taskId: 'tsk_unknown_tool',
+        requestId: 'req_unknown_tool',
+        ok: false,
+        error: {
+          message: '浏览器工具类型无效，请重新生成操作',
+          code: 'bad_kind',
+        },
+      }),
+    );
+  });
+
   it('activates the selected tab before navigating a fallback page', async () => {
     vi.mocked(send).mockClear();
     const update = vi.fn(async () => ({ id: 2, url: 'https://example.com/' }) as chrome.tabs.Tab);

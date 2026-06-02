@@ -687,7 +687,7 @@ async function computeExtensionToolResult(
       );
       return { ok: true, result };
     }
-    return { ok: false, error: { message: `未知工具 kind: ${kind}`, code: 'bad_kind' } };
+    return { ok: false, error: { message: '浏览器工具类型无效，请重新生成操作', code: 'bad_kind' } };
   } catch (err) {
     return {
       ok: false,
