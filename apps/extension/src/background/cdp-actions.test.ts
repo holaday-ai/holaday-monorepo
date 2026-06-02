@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { VisionAction } from '@holaday/shared-types';
 import {
   _resetAttachedTabsForTests,
   cdpActionErrorMessage,
@@ -409,6 +410,29 @@ describe('executeCdpAction', () => {
     );
   });
 
+  it('rejects invalid key descriptors before touching CDP', async () => {
+    const attach = vi.fn(async () => undefined);
+    globalThis.chrome = {
+      debugger: {
+        attach,
+        sendCommand: vi.fn(async () => ({})),
+      },
+    } as unknown as typeof chrome;
+
+    await expect(executeCdpAction(11, { kind: 'key', key: '   ' })).resolves.toEqual({
+      ok: false,
+      message: '按键指令无效，请重新生成按键操作',
+    });
+    await expect(
+      executeCdpAction(11, { kind: 'key', key: 'x'.repeat(65) }),
+    ).resolves.toEqual({
+      ok: false,
+      message: '按键指令过长，请拆成更短步骤后重试',
+    });
+
+    expect(attach).not.toHaveBeenCalled();
+  });
+
   it('chunks long inserted text to keep CDP payloads small', async () => {
     const sendCommand = vi.fn(async () => ({}));
     globalThis.chrome = {
@@ -434,6 +458,33 @@ describe('executeCdpAction', () => {
     expect(sendCommand).toHaveBeenNthCalledWith(3, { tabId: 12 }, 'Input.insertText', {
       text: 'c',
     });
+  });
+
+  it('rejects invalid inserted text before touching CDP', async () => {
+    const attach = vi.fn(async () => undefined);
+    globalThis.chrome = {
+      debugger: {
+        attach,
+        sendCommand: vi.fn(async () => ({})),
+      },
+    } as unknown as typeof chrome;
+    const nonStringText = {
+      kind: 'type',
+      text: 123,
+    } as unknown as Extract<VisionAction, { kind: 'type' }>;
+
+    await expect(executeCdpAction(12, nonStringText)).resolves.toEqual({
+      ok: false,
+      message: '输入文本无效，请重新生成输入内容',
+    });
+    await expect(
+      executeCdpAction(12, { kind: 'type', text: 'x'.repeat(4001) }),
+    ).resolves.toEqual({
+      ok: false,
+      message: '输入文本过长，请拆成更短步骤后重试',
+    });
+
+    expect(attach).not.toHaveBeenCalled();
   });
 
   it('scrolls at the live viewport center', async () => {

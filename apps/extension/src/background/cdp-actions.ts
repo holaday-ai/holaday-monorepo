@@ -48,6 +48,8 @@ const VIEWPORT_READ_TIMEOUT_MS = 500;
 const WAIT_CAP_MS = 10_000;
 const MAX_NAVIGATE_URL_LENGTH = 2048;
 const TYPE_TEXT_CHUNK_CHARS = 1_000;
+const MAX_TYPE_TEXT_CHARS = 4_000;
+const MAX_KEY_DESCRIPTOR_CHARS = 64;
 const MAX_ACTION_RESULT_MESSAGE_CHARS = 1_000;
 
 /** Tabs we've already attached the debugger to this SW lifetime. */
@@ -290,6 +292,12 @@ async function doType(
   tabId: number,
   action: Extract<VisionAction, { kind: 'type' }>,
 ): Promise<ActionResult> {
+  if (typeof action.text !== 'string') {
+    return { ok: false, message: '输入文本无效，请重新生成输入内容' };
+  }
+  if (action.text.length > MAX_TYPE_TEXT_CHARS) {
+    return { ok: false, message: '输入文本过长，请拆成更短步骤后重试' };
+  }
   await ensureAttached(tabId);
   // Input.insertText dispatches a real `input` event on the focused
   // element and handles IME / composing glyphs. Works in all input
@@ -307,6 +315,12 @@ async function doKey(
   tabId: number,
   action: Extract<VisionAction, { kind: 'key' }>,
 ): Promise<ActionResult> {
+  if (typeof action.key !== 'string' || action.key.trim().length === 0) {
+    return { ok: false, message: '按键指令无效，请重新生成按键操作' };
+  }
+  if (action.key.length > MAX_KEY_DESCRIPTOR_CHARS) {
+    return { ok: false, message: '按键指令过长，请拆成更短步骤后重试' };
+  }
   await ensureAttached(tabId);
   // Support simple chords ("ctrl+a", "cmd+c") by splitting on '+' and
   // folding lowered modifiers into the CDP modifiers bitmask. The
