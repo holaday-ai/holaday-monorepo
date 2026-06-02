@@ -334,7 +334,7 @@ describe('getActivePageContext', () => {
     );
   });
 
-  it('keeps the current Chrome error page as task context', async () => {
+  it('uses the pending page URL instead of chrome-error internals', async () => {
     const query = vi
       .fn()
       .mockResolvedValueOnce([
@@ -342,6 +342,7 @@ describe('getActivePageContext', () => {
           id: 9,
           title: 'This site cannot be reached',
           url: 'chrome-error://chromewebdata/',
+          pendingUrl: 'https://down.example/login?token=secret&state=keep',
         } as chrome.tabs.Tab,
       ])
       .mockResolvedValueOnce([
@@ -358,11 +359,54 @@ describe('getActivePageContext', () => {
     await expect(getActivePageContext()).resolves.toEqual({
       tabId: 9,
       title: 'This site cannot be reached',
-      url: 'chrome-error://chromewebdata/',
+      url: 'https://down.example/login?state=keep',
       selectedText: '',
       metaDescription: '',
     });
     expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
+  it('skips Chrome error pages that have no useful target URL', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([
+        {
+          id: 9,
+          title: 'This site cannot be reached',
+          url: 'chrome-error://chromewebdata/',
+          lastAccessed: 5000,
+        } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([
+        { id: 10, title: 'Holaday', url: 'https://holaday.ai/app', lastAccessed: 4000 } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([]);
+    globalThis.chrome = {
+      tabs: { query },
+      scripting: {
+        executeScript: vi.fn(async () => [
+          {
+            result: {
+              title: 'Holaday app',
+              url: 'https://holaday.ai/app',
+              selectedText: '',
+              metaDescription: '',
+            },
+          },
+        ]),
+      },
+    } as unknown as typeof chrome;
+
+    await expect(getActivePageContext()).resolves.toEqual({
+      tabId: 10,
+      title: 'Holaday app',
+      url: 'https://holaday.ai/app',
+      selectedText: '',
+      metaDescription: '',
+    });
+    expect(chrome.scripting.executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({ target: { tabId: 10 } }),
+    );
   });
 
   it('inspects every fallback tab candidate before hiding task context', async () => {

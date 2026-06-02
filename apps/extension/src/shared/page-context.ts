@@ -162,7 +162,12 @@ function isPageContextTab(tab: chrome.tabs.Tab | undefined): tab is chrome.tabs.
 }
 
 function getTabContextUrl(tab: chrome.tabs.Tab): string {
-  return tab.url || tab.pendingUrl || '';
+  const url = tab.url || '';
+  const pendingUrl = tab.pendingUrl || '';
+  if (/^chrome-error:/i.test(url)) {
+    return /^https?:\/\//i.test(pendingUrl) ? pendingUrl : '';
+  }
+  return url || pendingUrl;
 }
 
 export async function getActivePageContext(): Promise<PageContext | null> {
@@ -172,8 +177,9 @@ export async function getActivePageContext(): Promise<PageContext | null> {
   // chrome:// / chrome-extension:// / file:// pages can't be scripted —
   // skip the executeScript call and surface what the tab metadata
   // already gives us.
+  const rawTabUrl = tab.url || tab.pendingUrl || '';
   const tabUrl = getTabContextUrl(tab);
-  const restrictedScheme = /^(chrome|chrome-extension|chrome-error|edge|about|file):/i.test(tabUrl);
+  const restrictedScheme = /^(chrome|chrome-extension|chrome-error|edge|about|file):/i.test(rawTabUrl);
   if (restrictedScheme || !tabUrl) {
     const snippet = sanitizePageContextSnippet({
       title: tab.title ?? '',
