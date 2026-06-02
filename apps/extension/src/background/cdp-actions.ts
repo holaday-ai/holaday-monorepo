@@ -182,6 +182,9 @@ export async function executeCdpAction(tabId: number, action: VisionAction): Pro
       case 'give_up':
         result = { ok: true, message: `${action.kind} terminal; no driver work` };
         break;
+      default:
+        result = { ok: false, message: '浏览器操作类型无效，请重新生成操作' };
+        break;
     }
     return sanitizeActionResult(result);
   } catch (err) {

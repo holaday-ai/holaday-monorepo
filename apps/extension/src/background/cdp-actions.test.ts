@@ -55,6 +55,19 @@ describe('executeCdpAction', () => {
     });
   });
 
+  it('returns friendly copy for unknown action kinds', async () => {
+    const unknownAction = {
+      kind: 'drag',
+      x: 10,
+      y: 20,
+    } as unknown as VisionAction;
+
+    await expect(executeCdpAction(1, unknownAction)).resolves.toEqual({
+      ok: false,
+      message: '浏览器操作类型无效，请重新生成操作',
+    });
+  });
+
   it('coalesces concurrent debugger attaches for the same tab', async () => {
     let resolveAttach: () => void = () => {
       throw new Error('attach promise was not created');
