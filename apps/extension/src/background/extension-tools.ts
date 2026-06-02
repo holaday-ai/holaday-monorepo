@@ -132,8 +132,9 @@ function compareTabCandidates(
 function isWebPageTab(tab: chrome.tabs.Tab | undefined): tab is chrome.tabs.Tab {
   if (!tab) return false;
   if (typeof tab.id !== 'number') return false;
-  if (!tab.url) return false;
-  return tab.url.startsWith('http://') || tab.url.startsWith('https://');
+  const url = getCandidateTabUrl(tab);
+  if (!url) return false;
+  return url.startsWith('http://') || url.startsWith('https://');
 }
 
 function isNavigablePageTab(
@@ -142,10 +143,11 @@ function isNavigablePageTab(
 ): tab is chrome.tabs.Tab {
   if (!tab) return false;
   if (typeof tab.id !== 'number') return false;
-  if (!tab.url) return false;
-  if (tab.url.startsWith('http://') || tab.url.startsWith('https://')) return true;
+  const url = getCandidateTabUrl(tab);
+  if (!url) return false;
+  if (url.startsWith('http://') || url.startsWith('https://')) return true;
   if (!opts.allowErrorPage) return false;
-  return tab.url.toLowerCase().startsWith('chrome-error://');
+  return url.toLowerCase().startsWith('chrome-error://');
 }
 
 function isNonInternalTab(
@@ -154,12 +156,17 @@ function isNonInternalTab(
 ): tab is chrome.tabs.Tab {
   if (!tab) return false;
   if (typeof tab.id !== 'number') return false;
-  if (!tab.url) return true;
-  const url = tab.url.toLowerCase();
+  const candidateUrl = getCandidateTabUrl(tab);
+  if (!candidateUrl) return true;
+  const url = candidateUrl.toLowerCase();
   if (opts.allowErrorPage && url.startsWith('chrome-error://')) return true;
   return !/^(chrome|chrome-extension|chrome-error|edge|about|devtools|view-source|file):/i.test(
-    tab.url,
+    candidateUrl,
   );
+}
+
+function getCandidateTabUrl(tab: chrome.tabs.Tab): string | undefined {
+  return tab.url || tab.pendingUrl;
 }
 
 /**
@@ -287,7 +294,7 @@ async function executeNavigate(
   if (!tab?.id) {
     throw new Error('no_active_tab');
   }
-  const previousUrl = tab.url;
+  const previousUrl = getCandidateTabUrl(tab);
   await focusTabWindow(tab);
   await withDeadline(
     chrome.tabs.update(tab.id, { active: true, url }),

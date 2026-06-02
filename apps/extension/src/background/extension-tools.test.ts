@@ -406,6 +406,21 @@ describe('getActiveTabForExtensionTool', () => {
     });
   });
 
+  it('uses pendingUrl while the active tab is still loading', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 8, pendingUrl: 'https://holaday.ai/app' }])
+      .mockResolvedValueOnce([{ id: 9, url: 'https://older.example/' }]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabForExtensionTool()).resolves.toMatchObject({
+      id: 8,
+      pendingUrl: 'https://holaday.ai/app',
+    });
+  });
+
   it('inspects every returned tab when a fallback query returns mixed candidates', async () => {
     const query = vi
       .fn()
