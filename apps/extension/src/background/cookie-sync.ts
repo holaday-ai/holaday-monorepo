@@ -65,6 +65,8 @@ const MAX_COOKIE_PATH_CHARS = 1024;
 const COOKIE_DOMAIN_READ_TIMEOUT_MS = 1_000;
 const COOKIE_SYNC_POST_TIMEOUT_MS = 8_000;
 const COOKIE_SYNC_BODY_TIMEOUT_MS = 2_000;
+const MAX_SYNC_RESPONSE_DOMAINS = 500;
+const MAX_SYNC_RESPONSE_DOMAIN_CHARS = 253;
 
 export interface SyncableCookie {
   domain: string;
@@ -170,11 +172,14 @@ export async function syncCookiesToServer(
   if (!res.ok) {
     throw new Error(`cookie_sync_http_${res.status}`);
   }
-  return responseJsonWithDeadline<SyncResponse>(
+  const body = await responseJsonWithDeadline<unknown>(
     res,
     COOKIE_SYNC_BODY_TIMEOUT_MS,
     'cookie_sync_body_timeout',
   );
+  const normalized = normalizeSyncResponse(body);
+  if (!normalized) throw new Error('cookie_sync_response_invalid');
+  return normalized;
 }
 
 /**
@@ -184,4 +189,33 @@ export async function syncCookiesToServer(
 export async function runCookieSync(): Promise<SyncResponse | null> {
   const cookies = await collectCookies();
   return syncCookiesToServer(cookies);
+}
+
+function normalizeSyncResponse(raw: unknown): SyncResponse | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as {
+    synced?: unknown;
+    domains?: unknown;
+    deferred?: unknown;
+  };
+  if (
+    typeof value.synced !== 'number' ||
+    !Number.isFinite(value.synced) ||
+    value.synced < 0 ||
+    typeof value.deferred !== 'boolean'
+  ) {
+    return null;
+  }
+  const domains = Array.isArray(value.domains)
+    ? value.domains
+        .filter((domain): domain is string => typeof domain === 'string')
+        .map((domain) => domain.trim().slice(0, MAX_SYNC_RESPONSE_DOMAIN_CHARS))
+        .filter(Boolean)
+        .slice(0, MAX_SYNC_RESPONSE_DOMAINS)
+    : [];
+  return {
+    synced: Math.floor(value.synced),
+    domains,
+    deferred: value.deferred,
+  };
 }

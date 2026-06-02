@@ -143,4 +143,54 @@ describe('normalizeSyncableCookie', () => {
 
     await expect(syncCookiesToServer([cookie()])).rejects.toThrow('cookie_sync_http_503');
   });
+
+  it('normalizes successful cookie sync responses from the server', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          synced: 2.9,
+          domains: [' example.com ', 42, '', 'x'.repeat(300)],
+          deferred: true,
+        }),
+      ),
+    );
+    globalThis.chrome = {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({ 'holaday.access_token': 'token' })),
+        },
+      },
+    } as unknown as typeof chrome;
+
+    await expect(syncCookiesToServer([cookie()])).resolves.toEqual({
+      synced: 2,
+      domains: ['example.com', 'x'.repeat(253)],
+      deferred: true,
+    });
+  });
+
+  it('rejects malformed successful cookie sync responses', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          synced: Number.NaN,
+          domains: ['example.com'],
+          deferred: false,
+        }),
+      ),
+    );
+    globalThis.chrome = {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({ 'holaday.access_token': 'token' })),
+        },
+      },
+    } as unknown as typeof chrome;
+
+    await expect(syncCookiesToServer([cookie()])).rejects.toThrow(
+      'cookie_sync_response_invalid',
+    );
+  });
 });
