@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { sendCriticalClientMessage } from './critical-send.js';
+import {
+  _resetCriticalSendStateForTests,
+  sendCriticalClientMessage,
+} from './critical-send.js';
 import { send } from './ws-client.js';
 
 const wsMock = vi.hoisted(() => ({
@@ -15,6 +18,7 @@ describe('sendCriticalClientMessage', () => {
   afterEach(() => {
     vi.useRealTimers();
     wsMock.currentToken = null;
+    _resetCriticalSendStateForTests();
     vi.mocked(send).mockReset();
     vi.restoreAllMocks();
   });
@@ -138,6 +142,29 @@ describe('sendCriticalClientMessage', () => {
     expect(send).toHaveBeenCalledTimes(4);
     expect(vi.mocked(send).mock.calls[2]?.[0]).toBe(firstMessage);
     expect(vi.mocked(send).mock.calls[3]?.[0]).toBe(secondMessage);
+  });
+
+  it('bounds queued critical retries by dropping the oldest unique keys', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.mocked(send).mockReturnValue(false);
+
+    const messages = Array.from({ length: 101 }, (_, index) => ({
+      type: 'client.step.result',
+      taskId: 'tsk_bounded_retry',
+      stepId: `step_${index}`,
+      status: 'ok',
+    }) as const);
+
+    for (const message of messages) {
+      expect(sendCriticalClientMessage(message, 'step result')).toBe(false);
+    }
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(send).toHaveBeenCalledTimes(201);
+    expect(vi.mocked(send).mock.calls.slice(101).map(([message]) => message)).toEqual(
+      messages.slice(1),
+    );
   });
 
   it('stops retrying critical messages after the websocket token changes', async () => {

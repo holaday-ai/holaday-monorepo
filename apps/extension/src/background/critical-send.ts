@@ -2,6 +2,7 @@ import type { ClientMessage } from '@holaday/shared-types';
 import { getCurrentWsToken, send } from './ws-client.js';
 
 const CRITICAL_SEND_RETRY_DELAYS_MS = [250, 1_000, 3_000, 7_000, 15_000] as const;
+const MAX_ACTIVE_CRITICAL_SEND_KEYS = 100;
 const activeCriticalSendGenerations = new Map<string, number>();
 
 export function sendCriticalClientMessage(
@@ -76,7 +77,16 @@ function isOwnerTokenChanged(ownerToken: string | null): boolean {
 function bumpCriticalSendGeneration(messageKey: string): number {
   const next = (activeCriticalSendGenerations.get(messageKey) ?? 0) + 1;
   activeCriticalSendGenerations.set(messageKey, next);
+  pruneActiveCriticalSendGenerations();
   return next;
+}
+
+function pruneActiveCriticalSendGenerations(): void {
+  while (activeCriticalSendGenerations.size > MAX_ACTIVE_CRITICAL_SEND_KEYS) {
+    const oldestKey = activeCriticalSendGenerations.keys().next().value;
+    if (typeof oldestKey !== 'string') return;
+    activeCriticalSendGenerations.delete(oldestKey);
+  }
 }
 
 function isCriticalSendGenerationStale(messageKey: string | null, generation: number): boolean {
@@ -104,4 +114,8 @@ function criticalMessageLogMeta(message: ClientMessage): Record<string, unknown>
     ...('stepId' in message ? { stepId: message.stepId } : {}),
     ...('tickIndex' in message ? { tickIndex: message.tickIndex } : {}),
   };
+}
+
+export function _resetCriticalSendStateForTests(): void {
+  activeCriticalSendGenerations.clear();
 }
