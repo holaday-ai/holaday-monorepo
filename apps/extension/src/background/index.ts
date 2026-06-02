@@ -61,7 +61,7 @@ import {
 import { buildLoginStatesMessage, readLoginStates } from './cookie-bridge.js';
 import { runCookieSync } from './cookie-sync.js';
 import { runHistorySync } from './history-sync.js';
-import { handleExtensionToolCall } from './extension-tools.js';
+import { handleExtensionToolCall, setExtensionToolTaskStopped } from './extension-tools.js';
 import { isTrustedAuthBridgeSender } from './auth-bridge-trust.js';
 import {
   decideAuthTokenAction,
@@ -1024,13 +1024,16 @@ function onTaskControl(msg: Extract<ServerMessage, { type: 'server.task.control'
   if (msg.command === 'pause') {
     task.status = 'paused';
     task.pauseReason = (msg.reason as PauseReason | undefined) ?? 'user';
+    setExtensionToolTaskStopped(msg.taskId, true);
     releaseVisionDebugger(msg.taskId);
   } else if (msg.command === 'resume') {
     task.status = 'executing';
     task.pauseReason = null;
+    setExtensionToolTaskStopped(msg.taskId, false);
   } else if (msg.command === 'cancel') {
     task.status = 'cancelled';
     task.pauseReason = null;
+    setExtensionToolTaskStopped(msg.taskId, true);
     releaseVisionDebugger(msg.taskId);
   }
   task.lastUpdated = Date.now();

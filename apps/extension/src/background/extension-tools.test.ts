@@ -7,6 +7,7 @@ import {
   handleExtensionToolCall,
   normalizeScreenshotCaptureDataUrl,
   normalizeNavigateUrl,
+  setExtensionToolTaskStopped,
   waitForTabComplete,
 } from './extension-tools.js';
 import { getCurrentWsToken, send } from './ws-client.js';
@@ -705,6 +706,61 @@ describe('handleExtensionToolCall', () => {
         attempt: 0,
       }),
     );
+  });
+
+  it('drops in-flight tool results after task control changes', async () => {
+    vi.mocked(send).mockClear();
+    let resolveFirstCapture: (value: string) => void = () => {
+      throw new Error('first capture promise was not created');
+    };
+    const captureVisibleTab = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveFirstCapture = resolve;
+          }),
+      )
+      .mockResolvedValueOnce('data:image/jpeg;base64,BB==');
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, windowId: 1, url: 'https://holaday.ai/app' }]),
+        captureVisibleTab,
+      },
+    } as unknown as typeof chrome;
+
+    const staleCall: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_controlled_tool',
+      requestId: 'req_stale',
+      kind: 'screenshot',
+      args: {},
+      timeoutMs: 30_000,
+    };
+
+    const stale = handleExtensionToolCall(staleCall);
+    await vi.waitFor(() => expect(captureVisibleTab).toHaveBeenCalledTimes(1));
+    setExtensionToolTaskStopped(staleCall.taskId, true);
+    setExtensionToolTaskStopped(staleCall.taskId, false);
+    resolveFirstCapture('data:image/jpeg;base64,AA==');
+    await stale;
+
+    expect(send).not.toHaveBeenCalled();
+
+    await handleExtensionToolCall({
+      ...staleCall,
+      requestId: 'req_fresh',
+    });
+
+    expect(captureVisibleTab).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(send).mock.calls[0]?.[0]).toMatchObject({
+      type: 'client.extension.tool_result',
+      taskId: 'tsk_controlled_tool',
+      requestId: 'req_fresh',
+      ok: true,
+      result: { imageBase64: 'BB==', width: 0, height: 0 },
+    });
   });
 
   it('does not treat the same request id on another task as a duplicate', async () => {
