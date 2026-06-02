@@ -54,4 +54,19 @@ describe('humanizeExtensionError', () => {
       ),
     ).toBe('浏览器连接中断，请重新打开 HOLA DAY 扩展后重试。');
   });
+
+  it('keeps common browser network errors specific', () => {
+    expect(humanizeExtensionError('net::ERR_CONNECTION_REFUSED')).toBe(
+      '浏览器代理服务暂时不可达，请稍后重试。',
+    );
+    expect(humanizeExtensionError('net::ERR_INTERNET_DISCONNECTED')).toBe(
+      '本机网络已断开，请恢复网络后重试。',
+    );
+    expect(humanizeExtensionError('net::ERR_NAME_NOT_RESOLVED')).toBe(
+      '域名解析失败，请稍后重试。',
+    );
+    expect(humanizeExtensionError('net::ERR_NETWORK_CHANGED')).toBe(
+      '网络环境刚变化，请重试。',
+    );
+  });
 });

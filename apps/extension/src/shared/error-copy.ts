@@ -21,6 +21,22 @@ const RULES: ReadonlyArray<{ match: RegExp; message: string }> = [
     message: '浏览器连接中断，请重新打开 HOLA DAY 扩展后重试。',
   },
   {
+    match: /err_connection_refused|connection_refused/i,
+    message: '浏览器代理服务暂时不可达，请稍后重试。',
+  },
+  {
+    match: /err_internet_disconnected|internet_disconnected/i,
+    message: '本机网络已断开，请恢复网络后重试。',
+  },
+  {
+    match: /err_name_not_resolved|name_not_resolved|dns/i,
+    message: '域名解析失败，请稍后重试。',
+  },
+  {
+    match: /err_network_changed|network_changed/i,
+    message: '网络环境刚变化，请重试。',
+  },
+  {
     match: /502|bad gateway|websocket.*handshake|unexpected response code/i,
     message: '浏览器代理服务暂时不可用，请稍后重试；如果刚更新扩展，请重新加载 HOLA DAY。',
   },
