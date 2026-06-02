@@ -106,7 +106,9 @@ export function App() {
     tasksRefreshInFlight.current = true;
     try {
       const resp = await sendRuntimeMessageWithRetry<{ tasks?: unknown }>({ type: 'holaday.tasks' });
-      if (mountedRef.current) setTasks(normalizeTaskSnapshot(resp?.tasks));
+      if (mountedRef.current && resp && 'tasks' in resp) {
+        setTasks(normalizeTaskSnapshot(resp.tasks));
+      }
     } finally {
       tasksRefreshInFlight.current = false;
     }
