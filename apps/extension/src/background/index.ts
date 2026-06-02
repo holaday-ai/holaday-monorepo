@@ -432,7 +432,11 @@ async function onVisionObserve(
   if (cached) recentVisionObservations.delete(dedupeKey);
   const pending = inFlightVisionObservations.get(dedupeKey);
   if (pending) {
-    sendVisionObservation(msg, await pending.promise, pending.ownerToken);
+    console.warn('[holaday] duplicate in-flight vision observation replayed', {
+      taskId: msg.taskId,
+      tickIndex: msg.tickIndex,
+    });
+    await pending.promise;
     return;
   }
   const next = computeVisionObservationPayload(msg)
@@ -521,7 +525,11 @@ async function onVisionAct(
   if (cached) recentVisionActResults.delete(dedupeKey);
   const pending = inFlightVisionActResults.get(dedupeKey);
   if (pending) {
-    sendVisionActed(msg, await pending.promise, pending.ownerToken);
+    console.warn('[holaday] duplicate in-flight vision action replayed', {
+      taskId: msg.taskId,
+      tickIndex: msg.tickIndex,
+    });
+    await pending.promise;
     return;
   }
   const next = computeVisionActResult(msg)
@@ -776,7 +784,11 @@ async function runStep(
   if (cached) recentStepResults.delete(dedupeKey);
   const pending = inFlightStepResults.get(dedupeKey);
   if (pending) {
-    sendStepResult(msg, await pending.promise, pending.ownerToken);
+    console.warn('[holaday] duplicate in-flight step dispatch replayed', {
+      taskId: msg.taskId,
+      stepId: msg.stepId,
+    });
+    await pending.promise;
     return;
   }
   const next = computeStepResult(msg)
