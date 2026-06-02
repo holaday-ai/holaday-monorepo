@@ -176,7 +176,7 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   //    eventual autoFix step (or the user retrying via 重试) gets
   //    surfaced cleanly instead of presenting a near-blank card
   //    as a "success".
-  const emptyCheck = checkEmptyResult(answerText);
+  const emptyCheck = checkEmptyResult(answerText, contract);
   if (emptyCheck) checks.push(emptyCheck);
 
   const passed = checks.every((c) => c.passed);
@@ -838,7 +838,10 @@ function checkCustom(
  * Returns null when the answer is long enough — the check is a
  * floor, not a ceiling.
  */
-function checkEmptyResult(answerText: string): CheckResult | null {
+function checkEmptyResult(
+  answerText: string,
+  contract: ExecutionContract,
+): CheckResult | null {
   // BUG-A2 fix (2026-05-20): bypass the empty-result check when the
   // original (un-sanitized) answer is substantial (>200 non-whitespace
   // chars). The sanitization regex strips full header lines, ordinals,
@@ -867,6 +870,13 @@ function checkEmptyResult(answerText: string): CheckResult | null {
   // call the task completed.
   const hasContentChars =
     /[A-Za-z0-9一-鿿぀-ゟ゠-ヿ]/.test(meaningful);
+  if (
+    allowsConciseFactAnswer(contract) &&
+    meaningful.length >= 3 &&
+    hasContentChars
+  ) {
+    return null;
+  }
   if (meaningful.length >= 20 && hasContentChars) return null;
   return {
     criterionId: 'generic.empty_result',
@@ -875,6 +885,24 @@ function checkEmptyResult(answerText: string): CheckResult | null {
     detail: `meaningful answer length ${meaningful.length}, hasContentChars=${hasContentChars} — output looks empty after sanitization`,
     severity: 'fixable',
   };
+}
+
+function allowsConciseFactAnswer(contract: ExecutionContract): boolean {
+  if (contract.tier !== 'light') return false;
+  const goal = contract.goal.toLowerCase();
+  const asksForConciseAnswer =
+    /只(回复|回答|输出)|仅(回复|回答|输出)|直接(回复|回答|输出)|only\s+(reply|answer|return|output)|just\s+(reply|answer|return|output)/i.test(
+      goal,
+    );
+  const asksForSingleFact =
+    /标题|title|是什么|what\s+is|页面名|名称|name|读取.*(标题|title|文本|text)|提取.*(标题|title|文本|text|名称|name)/i.test(
+      goal,
+    );
+  const asksForLongForm =
+    /报告|总结|分析|对比|列表|清单|多(个|条)|前\s*\d+|top\s*\d+|report|summary|analysis|compare|list/i.test(
+      goal,
+    );
+  return (asksForConciseAnswer || asksForSingleFact) && !asksForLongForm;
 }
 
 function checkUrlGrounding(

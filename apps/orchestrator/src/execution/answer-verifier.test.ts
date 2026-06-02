@@ -108,6 +108,68 @@ describe('verifyDeterministic — empty-result guard (product polish #2)', () =>
     expect(emptyCheck).toBeUndefined();
   });
 
+  it('allows concise single-fact browser answers such as page titles', () => {
+    const contract = buildContract({
+      taskId: 'tsk_title',
+      intent:
+        '请打开 https://example.com，读取页面标题，并只回复标题是什么。',
+      executionMode: 'browser',
+      targetDomain: 'example.com',
+    });
+    const ledger = ledgerWith(
+      'tsk_title',
+      {
+        fact: 'navigated to https://example.com/',
+        sourceType: 'browser_state',
+        sourceDetail: 'page.goto',
+        confidence: 'observed',
+      },
+      {
+        fact: 'page title = "Example Domain"',
+        sourceType: 'tool_result',
+        sourceDetail: 'extract',
+        confidence: 'extracted',
+      },
+    );
+    const result = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: 'Example Domain',
+      finalUrl: 'https://example.com/',
+    });
+    expect(result.passed).toBe(true);
+    const emptyCheck = result.checks.find(
+      (c) => c.criterionId === 'generic.empty_result',
+    );
+    expect(emptyCheck).toBeUndefined();
+  });
+
+  it('still flags generic short browser stubs that are not single facts', () => {
+    const contract = buildContract({
+      taskId: 'tsk_stub',
+      intent: '请打开 https://example.com 并查看页面。',
+      executionMode: 'browser',
+      targetDomain: 'example.com',
+    });
+    const ledger = ledgerWith('tsk_stub', {
+      fact: 'navigated to https://example.com/',
+      sourceType: 'browser_state',
+      sourceDetail: 'page.goto',
+      confidence: 'observed',
+    });
+    const result = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: '搜索完成',
+      finalUrl: 'https://example.com/',
+    });
+    expect(result.passed).toBe(false);
+    const emptyCheck = result.checks.find(
+      (c) => c.criterionId === 'generic.empty_result',
+    );
+    expect(emptyCheck?.passed).toBe(false);
+  });
+
   it('strips table pipes + code markers before measuring (truly empty table)', () => {
     // A pipe-table with NO content cells — just structure + dashes.
     // After sanitization meaningful body collapses below the floor.
