@@ -83,6 +83,7 @@ export function App() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [tasks, setTasks] = useState<TaskView[]>([]);
   const tasksRefreshInFlight = useRef(false);
+  const taskSubmitInFlight = useRef(false);
   const mountedRef = useRef(true);
 
   function clearLocalSessionState(): void {
@@ -359,6 +360,8 @@ export function App() {
 
   async function createTask(): Promise<void> {
     if (!intent.trim() || !token) return;
+    if (taskSubmitInFlight.current) return;
+    taskSubmitInFlight.current = true;
     setSubmitting(true);
     setError(null);
     try {
@@ -408,6 +411,7 @@ export function App() {
       if (!mountedRef.current) return;
       setError(humanizeExtensionError(err));
     } finally {
+      taskSubmitInFlight.current = false;
       if (mountedRef.current) setSubmitting(false);
     }
   }
