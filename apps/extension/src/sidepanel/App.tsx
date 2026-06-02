@@ -37,6 +37,7 @@ import {
   type TaskView,
   type VisionProgressView,
 } from './task-snapshot.js';
+import { extractCreatedTaskId, type CreateTaskResponse } from './create-task-response.js';
 
 type Status = 'idle' | 'loading' | 'connected' | 'error';
 
@@ -58,10 +59,6 @@ type FetchMeResult =
 
 async function cacheStoredUserBestEffort(user: StoredUser): Promise<void> {
   await setStoredUser(user).catch(() => undefined);
-}
-
-interface CreateTaskResponse {
-  result: { data: { taskId: string; status: TaskStatus } };
 }
 
 const PAGE_CONTEXT_REFRESH_MS = 2_000;
@@ -401,7 +398,12 @@ export function App() {
       if (!mountedRef.current) return;
       const currentToken = normalizeAccessToken(await getAccessToken());
       if (currentToken !== token) return;
-      const newTaskId = body.result.data.taskId;
+      const newTaskId = extractCreatedTaskId(body);
+      if (!newTaskId) {
+        setIntent('');
+        await refreshTasksSnapshot();
+        throw new Error('任务已发送，但返回信息不完整；请打开 HOLA DAY 网页查看最新任务。');
+      }
       setActiveTaskId(newTaskId);
       setIntent('');
       // Nudge the SW to push the latest snapshot — the SW updates
