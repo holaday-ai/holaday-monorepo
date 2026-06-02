@@ -51,6 +51,7 @@ const TYPE_TEXT_CHUNK_CHARS = 1_000;
 const MAX_TYPE_TEXT_CHARS = 4_000;
 const MAX_KEY_DESCRIPTOR_CHARS = 64;
 const MAX_ACTION_RESULT_MESSAGE_CHARS = 1_000;
+const MAX_SCROLL_DELTA_PX = 5_000;
 
 /** Tabs we've already attached the debugger to this SW lifetime. */
 const attachedTabs = new Set<number>();
@@ -372,6 +373,7 @@ async function doScroll(
   if (!Number.isFinite(action.dy)) {
     return { ok: false, message: '滚动距离无效，请重新判断后再试' };
   }
+  const deltaY = Math.max(-MAX_SCROLL_DELTA_PX, Math.min(MAX_SCROLL_DELTA_PX, action.dy));
   await ensureAttached(tabId);
   // Scroll via mouseWheel at viewport centre. Read the live viewport
   // when possible so narrow windows / side panels do not receive
@@ -383,9 +385,9 @@ async function doScroll(
     x: point.x,
     y: point.y,
     deltaX: 0,
-    deltaY: action.dy,
+    deltaY,
   });
-  return { ok: true, message: `scrolled ${action.dy}px` };
+  return { ok: true, message: `scrolled ${deltaY}px` };
 }
 
 async function getViewportCenterForInput(tabId: number): Promise<{ x: number; y: number }> {

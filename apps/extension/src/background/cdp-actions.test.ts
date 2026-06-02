@@ -536,6 +536,35 @@ describe('executeCdpAction', () => {
     expect(attach).not.toHaveBeenCalled();
   });
 
+  it('caps oversized scroll distances before dispatching the wheel event', async () => {
+    const sendCommand = vi.fn(async (_target, method: string) => {
+      if (method === 'Runtime.evaluate') {
+        return { result: { value: JSON.stringify({ w: 360, h: 640 }) } };
+      }
+      return {};
+    });
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    await expect(executeCdpAction(12, { kind: 'scroll', dy: 50_000 })).resolves.toEqual({
+      ok: true,
+      message: 'scrolled 5000px',
+    });
+
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      2,
+      { tabId: 12 },
+      'Input.dispatchMouseEvent',
+      expect.objectContaining({
+        deltaY: 5_000,
+      }),
+    );
+  });
+
   it('forgets timed-out CDP sessions so the next action can reattach', async () => {
     vi.useFakeTimers();
     const attach = vi.fn(async () => undefined);
