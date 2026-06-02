@@ -239,6 +239,7 @@ export function App() {
   const [user, setUser] = useState<StoredUser | null>(null);
   const [, setToken] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [statusRefreshSignal, setStatusRefreshSignal] = useState(0);
   const authSyncSeq = useRef(0);
   const mountedRef = useRef(true);
   const dark = useDarkMode();
@@ -386,7 +387,10 @@ export function App() {
         setToken(null);
       }
     } finally {
-      if (mountedRef.current) setResetting(false);
+      if (mountedRef.current) {
+        setResetting(false);
+        setStatusRefreshSignal((value) => value + 1);
+      }
     }
   }
 
@@ -411,7 +415,7 @@ export function App() {
   return (
     <div style={appShell(t)}>
       <UserCard user={user} theme={t} />
-      <ConnectionStatusBlock theme={t} />
+      <ConnectionStatusBlock theme={t} refreshSignal={statusRefreshSignal} />
       <BrowsingStatusBlock theme={t} />
       <BottomBar theme={t} onOpenWeb={openWebLogin} onReset={retryConnection} resetting={resetting} />
     </div>
@@ -542,8 +546,15 @@ function friendlyPlanLabel(plan: string): string {
 // Connection status
 // ---------------------------------------------------------------------------
 
-function ConnectionStatusBlock({ theme }: { theme: ThemeTokens }) {
+function ConnectionStatusBlock({
+  theme,
+  refreshSignal,
+}: {
+  theme: ThemeTokens;
+  refreshSignal: number;
+}) {
   const [status, setStatus] = useState<ExtensionStatusResponse | null>(null);
+  const refreshRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -559,13 +570,22 @@ function ConnectionStatusBlock({ theme }: { theme: ThemeTokens }) {
         },
       );
     };
+    refreshRef.current = refresh;
     refresh();
     const timer = window.setInterval(refresh, 3000);
     return () => {
       cancelled = true;
+      refreshRef.current = null;
       window.clearInterval(timer);
     };
   }, []);
+
+  useEffect(() => {
+    if (refreshSignal === 0) return;
+    refreshRef.current?.();
+    const timer = window.setTimeout(() => refreshRef.current?.(), 1200);
+    return () => window.clearTimeout(timer);
+  }, [refreshSignal]);
 
   const ws = status?.ws;
   const copy = getConnectionStatusCopy(status);
