@@ -67,7 +67,7 @@ export function sanitizePageContextUrl(value: unknown): string {
     }
     return clip(url.toString(), MAX_CONTEXT_URL_CHARS);
   } catch {
-    return text;
+    return redactSensitiveKeyValueText(text);
   }
 }
 
@@ -78,6 +78,14 @@ function isSensitiveQueryParam(key: string): boolean {
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
   return words.some((word) => SENSITIVE_QUERY_PARAM_WORDS.has(word));
+}
+
+function redactSensitiveKeyValueText(text: string): string {
+  return text.replace(
+    /(^|[?&#\s])([A-Za-z0-9_.-]+)=([^?&#\s]+)/g,
+    (match, prefix: string, key: string) =>
+      isSensitiveQueryParam(key) ? `${prefix}${key}=redacted` : match,
+  );
 }
 
 export function sanitizePageContextSnippet(

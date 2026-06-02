@@ -61,6 +61,12 @@ describe('sanitizePageContextUrl', () => {
       'https://shop.example/search?q=laptop&page=2',
     );
   });
+
+  it('redacts sensitive key-value pairs from malformed page URLs', () => {
+    expect(
+      sanitizePageContextUrl('not a url token=secret state=keep sessionId=sid'),
+    ).toBe('not a url token=redacted state=keep sessionId=redacted');
+  });
 });
 
 describe('composeContextTail', () => {
