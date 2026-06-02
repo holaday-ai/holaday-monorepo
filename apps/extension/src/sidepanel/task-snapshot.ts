@@ -43,16 +43,21 @@ const VISION_PHASES = new Set<VisionProgressView['phase']>([
 ]);
 
 const MAX_TASK_ID_CHARS = 128;
+const MAX_TASK_SNAPSHOT_ITEMS = 100;
+const MAX_TASK_STEPS = 80;
 const MAX_STEP_FIELD_CHARS = 80;
 const MAX_VISION_ACTION_KIND_CHARS = 80;
 const MAX_VISION_DETAIL_CHARS = 1_000;
 
 export function normalizeTaskSnapshot(raw: unknown): TaskView[] {
   if (!Array.isArray(raw)) return [];
-  return raw.flatMap((item) => {
+  const tasks: TaskView[] = [];
+  for (const item of raw) {
+    if (tasks.length >= MAX_TASK_SNAPSHOT_ITEMS) break;
     const task = normalizeTaskView(item);
-    return task ? [task] : [];
-  });
+    if (task) tasks.push(task);
+  }
+  return tasks;
 }
 
 function normalizeTaskView(raw: unknown): TaskView | null {
@@ -60,7 +65,9 @@ function normalizeTaskView(raw: unknown): TaskView | null {
   const taskId = clipString(raw.taskId, MAX_TASK_ID_CHARS).trim();
   const status = normalizeTaskStatus(raw.status);
   if (!taskId || !status) return null;
-  const steps = Array.isArray(raw.steps) ? raw.steps.flatMap(normalizeTaskStep) : [];
+  const steps = Array.isArray(raw.steps)
+    ? raw.steps.flatMap(normalizeTaskStep).slice(0, MAX_TASK_STEPS)
+    : [];
   const lastUpdated =
     typeof raw.lastUpdated === 'number' && Number.isFinite(raw.lastUpdated)
       ? raw.lastUpdated

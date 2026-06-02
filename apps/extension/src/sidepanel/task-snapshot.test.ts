@@ -76,6 +76,24 @@ describe('normalizeTaskSnapshot', () => {
     expect(task?.visionProgress?.detail).toHaveLength(1_000);
   });
 
+  it('bounds task and step counts before rendering side panel snapshots', () => {
+    const tasks = normalizeTaskSnapshot(
+      Array.from({ length: 120 }, (_, index) => ({
+        taskId: `task-${index}`,
+        status: 'executing',
+        steps: Array.from({ length: 120 }, (_step, stepIndex) => ({
+          id: `step-${stepIndex}`,
+          kind: 'browser',
+          status: 'running',
+        })),
+      })),
+    );
+
+    expect(tasks).toHaveLength(100);
+    expect(tasks[0]?.steps).toHaveLength(80);
+    expect(tasks.at(-1)?.taskId).toBe('task-99');
+  });
+
   it('falls back to an empty list for non-array snapshots', () => {
     expect(normalizeTaskSnapshot({ tasks: [] })).toEqual([]);
     expect(normalizeTaskSnapshot(undefined)).toEqual([]);
