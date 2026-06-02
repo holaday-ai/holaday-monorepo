@@ -424,8 +424,16 @@ async function onVisionObserve(
 ): Promise<void> {
   const ownerToken = getCurrentWsToken();
   const dedupeKey = visionTickDedupeKey(msg.taskId, msg.tickIndex);
+  if (isControlledTaskStopped(msg.taskId)) {
+    logDroppedControlledTaskResult('vision observation', msg.taskId);
+    return;
+  }
   const cached = recentVisionObservations.get(dedupeKey);
   if (cached && Date.now() - cached.at <= VISION_OBSERVATION_RESULT_TTL_MS) {
+    if (isControlledTaskStopped(msg.taskId)) {
+      logDroppedControlledTaskResult('vision observation', msg.taskId);
+      return;
+    }
     sendVisionObservation(msg, cached.payload, cached.ownerToken);
     return;
   }
@@ -459,7 +467,12 @@ async function onVisionObserve(
       inFlightVisionObservations.delete(dedupeKey);
     });
   inFlightVisionObservations.set(dedupeKey, { ownerToken, promise: next });
-  sendVisionObservation(msg, await next, ownerToken);
+  const payload = await next;
+  if (isControlledTaskStopped(msg.taskId)) {
+    logDroppedControlledTaskResult('vision observation', msg.taskId);
+    return;
+  }
+  sendVisionObservation(msg, payload, ownerToken);
 }
 
 async function computeVisionObservationPayload(
@@ -479,7 +492,9 @@ async function computeVisionObservationPayload(
   }
   const obs = await captureVisionObservation(tabId);
   // After sending observation → orchestrator is calling Claude next.
-  trackVisionTask(msg.taskId, 'deciding', { tickIndex: msg.tickIndex });
+  if (!isControlledTaskStopped(msg.taskId)) {
+    trackVisionTask(msg.taskId, 'deciding', { tickIndex: msg.tickIndex });
+  }
   return {
     screenshotBase64: obs.screenshotBase64,
     viewportWidth: obs.viewportWidth,
@@ -517,8 +532,16 @@ async function onVisionAct(
 ): Promise<void> {
   const ownerToken = getCurrentWsToken();
   const dedupeKey = visionActDedupeKey(msg.taskId, msg.tickIndex);
+  if (isControlledTaskStopped(msg.taskId)) {
+    logDroppedControlledTaskResult('vision action', msg.taskId);
+    return;
+  }
   const cached = recentVisionActResults.get(dedupeKey);
   if (cached && Date.now() - cached.at <= VISION_ACT_RESULT_TTL_MS) {
+    if (isControlledTaskStopped(msg.taskId)) {
+      logDroppedControlledTaskResult('vision action', msg.taskId);
+      return;
+    }
     sendVisionActed(msg, cached.payload, cached.ownerToken);
     return;
   }
@@ -545,7 +568,12 @@ async function onVisionAct(
       inFlightVisionActResults.delete(dedupeKey);
     });
   inFlightVisionActResults.set(dedupeKey, { ownerToken, promise: next });
-  sendVisionActed(msg, await next, ownerToken);
+  const payload = await next;
+  if (isControlledTaskStopped(msg.taskId)) {
+    logDroppedControlledTaskResult('vision action', msg.taskId);
+    return;
+  }
+  sendVisionActed(msg, payload, ownerToken);
 }
 
 async function computeVisionActResult(
@@ -578,7 +606,9 @@ async function computeVisionActResult(
   const result = await executeCdpAction(tabId, msg.action);
   // After action executed → orchestrator takes another observation
   // next. Signal "deciding" so the popup doesn't look frozen.
-  trackVisionTask(msg.taskId, 'deciding', { tickIndex: msg.tickIndex });
+  if (!isControlledTaskStopped(msg.taskId)) {
+    trackVisionTask(msg.taskId, 'deciding', { tickIndex: msg.tickIndex });
+  }
   return {
     ok: result.ok,
     ...(result.message ? { message: result.message } : {}),
@@ -776,8 +806,16 @@ async function runStep(
 ): Promise<void> {
   const ownerToken = getCurrentWsToken();
   const dedupeKey = stepResultDedupeKey(msg.taskId, msg.stepId);
+  if (isControlledTaskStopped(msg.taskId)) {
+    logDroppedControlledTaskResult('step result', msg.taskId);
+    return;
+  }
   const cached = recentStepResults.get(dedupeKey);
   if (cached && Date.now() - cached.at <= STEP_RESULT_TTL_MS) {
+    if (isControlledTaskStopped(msg.taskId)) {
+      logDroppedControlledTaskResult('step result', msg.taskId);
+      return;
+    }
     sendStepResult(msg, cached.payload, cached.ownerToken);
     return;
   }
@@ -800,7 +838,12 @@ async function runStep(
       inFlightStepResults.delete(dedupeKey);
     });
   inFlightStepResults.set(dedupeKey, { ownerToken, promise: next });
-  sendStepResult(msg, await next, ownerToken);
+  const payload = await next;
+  if (isControlledTaskStopped(msg.taskId)) {
+    logDroppedControlledTaskResult('step result', msg.taskId);
+    return;
+  }
+  sendStepResult(msg, payload, ownerToken);
 }
 
 async function computeStepResult(
@@ -841,20 +884,22 @@ async function computeStepResult(
     // driver's output through.
     const t = state.tasks.get(msg.taskId);
     if (t) {
-      const step = t.steps.find((s) => s.id === msg.stepId);
-      if (step) {
-        step.status =
-          result.status === 'ok'
-            ? 'completed'
-            : result.status === 'awaiting_user'
-              ? 'awaiting_user'
-              : result.status === 'skipped'
-                ? 'skipped'
-                : 'failed';
-        step.output = result.data;
+      if (!isControlledTaskStopped(msg.taskId)) {
+        const step = t.steps.find((s) => s.id === msg.stepId);
+        if (step) {
+          step.status =
+            result.status === 'ok'
+              ? 'completed'
+              : result.status === 'awaiting_user'
+                ? 'awaiting_user'
+                : result.status === 'skipped'
+                  ? 'skipped'
+                  : 'failed';
+          step.output = result.data;
+        }
+        t.lastUpdated = Date.now();
+        pushTasksSnapshot();
       }
-      t.lastUpdated = Date.now();
-      pushTasksSnapshot();
     }
     return {
       status: result.status,
@@ -986,6 +1031,15 @@ function onTaskControl(msg: Extract<ServerMessage, { type: 'server.task.control'
   }
   task.lastUpdated = Date.now();
   pushTasksSnapshot();
+}
+
+function isControlledTaskStopped(taskId: string): boolean {
+  const task = state.tasks.get(taskId);
+  return task?.status === 'paused' || task?.status === 'cancelled';
+}
+
+function logDroppedControlledTaskResult(kind: string, taskId: string): void {
+  console.info('[holaday] dropped controlled task result', { kind, taskId });
 }
 
 // ---------- WS lifecycle ↔ MV3 SW lifecycle ----------
