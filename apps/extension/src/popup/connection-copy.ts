@@ -96,6 +96,9 @@ export function formatWsCloseReason(reason: string | null | undefined): string |
   if (lower.includes('network error')) return '网络连接被关闭';
   if (lower.includes('open timeout')) return '连接握手超时';
   if (lower.includes('send failed')) return '消息发送失败';
+  if (lower.includes('client requested disconnect')) return '后台刚重载，正在恢复';
+  if (lower.includes('token swap')) return '登录态已切换，正在确认';
+  if (lower.includes('policy violation')) return '服务拒绝了当前连接';
   if (lower.includes('constructor') || lower.includes('open failed')) return '连接初始化失败';
   return reason.length > 40 ? `${reason.slice(0, 40)}...` : reason;
 }
