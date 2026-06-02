@@ -80,6 +80,7 @@ export function App() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [tasks, setTasks] = useState<TaskView[]>([]);
   const tasksRefreshInFlight = useRef(false);
+  const authRetryInFlight = useRef(false);
   const taskSubmitInFlight = useRef(false);
   const mountedRef = useRef(true);
 
@@ -304,6 +305,8 @@ export function App() {
    * round trip). On failure, surfaces a hint about what to check.
    */
   async function retryAutoLogin(): Promise<void> {
+    if (authRetryInFlight.current) return;
+    authRetryInFlight.current = true;
     setStatus('loading');
     setError(null);
     try {
@@ -345,6 +348,8 @@ export function App() {
       if (!mountedRef.current) return;
       setStatus('error');
       setError(humanizeExtensionError(err));
+    } finally {
+      authRetryInFlight.current = false;
     }
   }
 
