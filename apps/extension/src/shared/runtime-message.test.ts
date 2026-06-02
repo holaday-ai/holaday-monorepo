@@ -87,6 +87,43 @@ describe('sendRuntimeMessageWithRetry', () => {
     expect(sendMessage).toHaveBeenCalledTimes(2);
   });
 
+  it('caps oversized retry attempts', async () => {
+    const sendMessage = vi.fn((_message: unknown, callback: (response?: unknown) => void) => {
+      callback({ ok: false, reason: 'internal_error' });
+    });
+    setRuntimeSendMessage(sendMessage);
+
+    const pending = sendRuntimeMessageWithRetry<{ ok: boolean }>(
+      { type: 'holaday.status' },
+      { attempts: 999, retryDelayMs: 0 },
+    );
+    await vi.runAllTimersAsync();
+
+    await expect(pending).resolves.toBeNull();
+    expect(sendMessage).toHaveBeenCalledTimes(5);
+  });
+
+  it('caps oversized callback timeouts', async () => {
+    const sendMessage = vi.fn();
+    setRuntimeSendMessage(sendMessage);
+
+    const pending = sendRuntimeMessageWithRetry<{ ok: boolean }>(
+      { type: 'holaday.status' },
+      { attempts: 1, timeoutMs: 1_000_000 },
+    );
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(pending).resolves.toBeNull();
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
   it('returns null after retryable failures are exhausted', async () => {
     setRuntimeSendMessage(vi.fn((_message: unknown, callback: (response?: unknown) => void) => {
       callback({ ok: false, reason: 'internal_error' });
