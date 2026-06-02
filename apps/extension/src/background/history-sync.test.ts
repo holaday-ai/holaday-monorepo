@@ -111,6 +111,50 @@ describe('collectBrowsingHistory', () => {
 });
 
 describe('readHistorySyncSummary', () => {
+  it('normalizes stored summary rows before the popup reads them', async () => {
+    globalThis.chrome = {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({
+            'holaday.history.lastSyncSummary': {
+              ingested: 2.9,
+              topDomains: [' example.com ', 42, '', 'x'.repeat(300)],
+              at: Number.NaN,
+            },
+          })),
+        },
+      },
+    } as unknown as typeof chrome;
+
+    const before = Date.now();
+    const summary = await readHistorySyncSummary();
+
+    expect(summary).toEqual({
+      ingested: 2,
+      topDomains: ['example.com', 'x'.repeat(253)],
+      at: expect.any(Number),
+    });
+    expect(summary?.at).toBeGreaterThanOrEqual(before);
+  });
+
+  it('returns null for malformed stored summaries', async () => {
+    globalThis.chrome = {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({
+            'holaday.history.lastSyncSummary': {
+              ingested: Number.NaN,
+              topDomains: ['example.com'],
+              at: Date.now(),
+            },
+          })),
+        },
+      },
+    } as unknown as typeof chrome;
+
+    await expect(readHistorySyncSummary()).resolves.toBeNull();
+  });
+
   it('returns null when summary storage read hangs', async () => {
     vi.useFakeTimers();
     globalThis.chrome = {

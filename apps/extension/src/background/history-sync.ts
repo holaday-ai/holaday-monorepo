@@ -196,6 +196,41 @@ export interface HistorySyncSummary {
   at: number; // ms epoch
 }
 
+const MAX_SUMMARY_TOP_DOMAINS = 500;
+const MAX_SUMMARY_DOMAIN_CHARS = 253;
+
+function normalizeHistorySyncSummary(value: unknown): HistorySyncSummary | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as {
+    ingested?: unknown;
+    topDomains?: unknown;
+    at?: unknown;
+  };
+  if (
+    typeof raw.ingested !== 'number' ||
+    !Number.isFinite(raw.ingested) ||
+    raw.ingested < 0
+  ) {
+    return null;
+  }
+  const topDomains = Array.isArray(raw.topDomains)
+    ? raw.topDomains
+        .filter((domain): domain is string => typeof domain === 'string')
+        .map((domain) => domain.trim().slice(0, MAX_SUMMARY_DOMAIN_CHARS))
+        .filter(Boolean)
+        .slice(0, MAX_SUMMARY_TOP_DOMAINS)
+    : [];
+  const at =
+    typeof raw.at === 'number' && Number.isFinite(raw.at) && raw.at > 0
+      ? raw.at
+      : Date.now();
+  return {
+    ingested: Math.floor(raw.ingested),
+    topDomains,
+    at,
+  };
+}
+
 async function persistSummary(summary: HistorySyncSummary): Promise<void> {
   try {
     await withDeadline(
@@ -220,15 +255,7 @@ export async function readHistorySyncSummary(): Promise<HistorySyncSummary | nul
       HISTORY_SUMMARY_STORAGE_TIMEOUT_MS,
       'history_summary_read_timeout',
     );
-    const v = out[HISTORY_SYNC_SUMMARY_KEY];
-    if (
-      v &&
-      typeof v === 'object' &&
-      typeof (v as { ingested?: unknown }).ingested === 'number'
-    ) {
-      return v as HistorySyncSummary;
-    }
-    return null;
+    return normalizeHistorySyncSummary(out[HISTORY_SYNC_SUMMARY_KEY]);
   } catch {
     return null;
   }

@@ -62,6 +62,41 @@ interface HistorySyncSummary {
   at: number;
 }
 
+const MAX_HISTORY_SUMMARY_TOP_DOMAINS = 500;
+const MAX_HISTORY_SUMMARY_DOMAIN_CHARS = 253;
+
+function normalizeHistorySummary(value: unknown): HistorySyncSummary | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as {
+    ingested?: unknown;
+    topDomains?: unknown;
+    at?: unknown;
+  };
+  if (
+    typeof raw.ingested !== 'number' ||
+    !Number.isFinite(raw.ingested) ||
+    raw.ingested < 0
+  ) {
+    return null;
+  }
+  const topDomains = Array.isArray(raw.topDomains)
+    ? raw.topDomains
+        .filter((domain): domain is string => typeof domain === 'string')
+        .map((domain) => domain.trim().slice(0, MAX_HISTORY_SUMMARY_DOMAIN_CHARS))
+        .filter(Boolean)
+        .slice(0, MAX_HISTORY_SUMMARY_TOP_DOMAINS)
+    : [];
+  const at =
+    typeof raw.at === 'number' && Number.isFinite(raw.at) && raw.at > 0
+      ? raw.at
+      : Date.now();
+  return {
+    ingested: Math.floor(raw.ingested),
+    topDomains,
+    at,
+  };
+}
+
 interface WsConnectionStatus {
   connected: boolean;
   readyState: number | null;
@@ -630,14 +665,7 @@ function BrowsingStatusBlock({ theme }: { theme: ThemeTokens }) {
           'popup_history_storage_read_timeout',
         );
         if (cancelled || !mountedRef.current) return;
-        const s = r[HISTORY_SYNC_SUMMARY_KEY];
-        if (
-          s &&
-          typeof s === 'object' &&
-          typeof (s as { ingested?: unknown }).ingested === 'number'
-        ) {
-          setSummary(s as HistorySyncSummary);
-        }
+        setSummary(normalizeHistorySummary(r[HISTORY_SYNC_SUMMARY_KEY]));
         setEnabled(r[HISTORY_SYNC_ENABLED_KEY] !== false);
       } catch {
         // Keep default ON + empty summary; storage changes will still refresh the card.
@@ -651,7 +679,7 @@ function BrowsingStatusBlock({ theme }: { theme: ThemeTokens }) {
       if (area !== 'local') return;
       if (HISTORY_SYNC_SUMMARY_KEY in changes) {
         const next = changes[HISTORY_SYNC_SUMMARY_KEY]?.newValue;
-        if (next && typeof next === 'object') setSummary(next as HistorySyncSummary);
+        setSummary(normalizeHistorySummary(next));
       }
       if (HISTORY_SYNC_ENABLED_KEY in changes) {
         setEnabled(changes[HISTORY_SYNC_ENABLED_KEY]?.newValue !== false);
