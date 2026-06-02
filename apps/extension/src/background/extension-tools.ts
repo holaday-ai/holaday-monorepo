@@ -573,7 +573,10 @@ export function extensionToolErrorPayload(
     lower.includes('cannot access contents of url') ||
     lower.includes('missing host permission') ||
     lower.includes('host permission') ||
+    lower.includes('manifest must request permission') ||
+    lower.includes('<all_urls>') ||
     lower.includes('activetab permission') ||
+    (lower.includes('activetab') && lower.includes('permission')) ||
     lower.includes('cannot access a chrome:// url') ||
     lower.includes('cannot access a chrome-extension:// url') ||
     lower.includes('cannot access a file:// url') ||

@@ -227,6 +227,18 @@ describe('extensionToolErrorPayload', () => {
       message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
       code: 'host_permission',
     });
+    expect(
+      extensionToolErrorPayload(new Error('Cannot access contents of the page. Extension manifest must request permission.')),
+    ).toEqual({
+      message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
+      code: 'host_permission',
+    });
+    expect(
+      extensionToolErrorPayload(new Error("Either the '<all_urls>' or 'activeTab' permission is required.")),
+    ).toEqual({
+      message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
+      code: 'host_permission',
+    });
     expect(extensionToolErrorPayload(new Error('Cannot access a file:// URL'))).toEqual({
       message: '扩展没有这个网站的访问权限，请检查浏览器扩展权限后重试',
       code: 'host_permission',
