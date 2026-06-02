@@ -172,6 +172,9 @@ export function waitForTabComplete(
   timeoutMs: number,
   opts: { previousUrl?: string; targetUrl?: string } = {},
 ): Promise<void> {
+  const safeTimeoutMs = Number.isFinite(timeoutMs)
+    ? Math.max(0, Math.trunc(timeoutMs))
+    : NAVIGATE_LOAD_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
     let resolved = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -198,7 +201,7 @@ export function waitForTabComplete(
     };
     timer = setTimeout(() => {
       finish(() => reject(new Error('navigate_timeout')));
-    }, timeoutMs);
+    }, safeTimeoutMs);
     timer && (timer as { unref?: () => void }).unref?.();
     const maybeComplete = (tab: Pick<chrome.tabs.Tab, 'status' | 'url'>): void => {
       if (tab.url && previousUrl && stripHash(tab.url) !== stripHash(previousUrl)) {

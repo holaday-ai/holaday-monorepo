@@ -179,6 +179,19 @@ describe('waitForTabComplete', () => {
 
     await expect(pending).rejects.toThrow('navigate_timeout');
   });
+
+  it('normalizes invalid navigation timeouts to the default cap', async () => {
+    vi.useFakeTimers();
+    installChromeTabsMock('loading');
+    const pending = waitForTabComplete(1, Number.NaN);
+    await Promise.resolve();
+
+    vi.advanceTimersByTime(24_999);
+    await Promise.resolve();
+
+    vi.advanceTimersByTime(1);
+    await expect(pending).rejects.toThrow('navigate_timeout');
+  });
 });
 
 describe('extensionToolErrorPayload', () => {
