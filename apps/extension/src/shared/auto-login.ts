@@ -22,6 +22,7 @@
 
 import { normalizeAccessToken } from './storage.js';
 import { withDeadline } from './deadline.js';
+import { sanitizePageContextUrl } from './page-context.js';
 
 const TOKEN_KEY = 'holaday.access_token';
 const AUTO_LOGIN_TAB_READ_TIMEOUT_MS = 2_000;
@@ -53,6 +54,7 @@ function looksLikeAutoLoginToken(token: string): boolean {
 }
 
 async function readTokenFromTab(tabId: number, url: string): Promise<string | null> {
+  const logUrl = sanitizePageContextUrl(url);
   try {
     // Inline closure-free arrow function. Doesn't reference any
     // bundler-injected helpers or imported symbols, so the
@@ -78,12 +80,12 @@ async function readTokenFromTab(tabId: number, url: string): Promise<string | nu
       return token;
     }
     console.info(
-      `[holaday] auto-login: tab ${tabId} (${url}) has no token in localStorage`,
+      `[holaday] auto-login: tab ${tabId} (${logUrl}) has no token in localStorage`,
     );
     return null;
   } catch (err) {
     console.warn(
-      `[holaday] auto-login: executeScript on tab ${tabId} (${url}) failed`,
+      `[holaday] auto-login: executeScript on tab ${tabId} (${logUrl}) failed`,
       err instanceof Error ? err.message : err,
     );
     return null;
@@ -130,8 +132,9 @@ export async function tryAutoLogin(): Promise<string | null> {
 
   for (const { tab, token } of reads) {
     if (token) {
+      const logUrl = sanitizePageContextUrl(getTabAutoLoginUrl(tab));
       console.info(
-        `[holaday] auto-login: lifted token from tab ${tab.id} (${getTabAutoLoginUrl(tab)}) — ${token.length} chars`,
+        `[holaday] auto-login: lifted token from tab ${tab.id} (${logUrl}) — ${token.length} chars`,
       );
       return token;
     }
