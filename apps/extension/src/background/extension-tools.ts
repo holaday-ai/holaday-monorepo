@@ -29,6 +29,7 @@
 
 import type { ClientMessage, ServerMessage } from '@holaday/shared-types';
 import { withDeadline } from '../shared/deadline.js';
+import { compactLogErrorReason } from '../shared/log-error.js';
 import { sanitizePageContextUrl } from '../shared/page-context.js';
 import { sendCriticalClientMessage } from './critical-send.js';
 import { getCurrentWsToken } from './ws-client.js';
@@ -355,7 +356,10 @@ async function executeNavigate(
     if (isBodyTextTimeout(err)) {
       console.warn('[holaday] extension navigate body text read timed out');
     } else {
-      console.warn('[holaday] extension navigate body text read unavailable', err);
+      console.warn(
+        '[holaday] extension navigate body text read unavailable',
+        compactLogErrorReason(err),
+      );
     }
   }
   return sanitizeNavigateResult({ finalUrl, title, bodyText: rawText });
@@ -525,7 +529,7 @@ async function focusTabWindow(tab: chrome.tabs.Tab): Promise<void> {
       'extension_tool_timeout',
     );
   } catch (err) {
-    console.warn('[holaday] extension tool window focus unavailable', err);
+    console.warn('[holaday] extension tool window focus unavailable', compactLogErrorReason(err));
   }
 }
 

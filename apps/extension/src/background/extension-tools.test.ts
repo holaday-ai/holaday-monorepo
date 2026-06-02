@@ -1118,7 +1118,7 @@ describe('handleExtensionToolCall', () => {
 
     expect(warn).toHaveBeenCalledWith(
       '[holaday] extension navigate body text read unavailable',
-      expect.any(Error),
+      'Cannot access contents of url "https://example.com/".',
     );
     expect(send).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1403,6 +1403,51 @@ describe('handleExtensionToolCall', () => {
       format: 'jpeg',
       quality: 50,
     });
+  });
+
+  it('continues screenshot capture when window focus fails', async () => {
+    vi.mocked(send).mockClear();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const captureVisibleTab = vi.fn(async () => 'data:image/jpeg;base64,AA==');
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [
+          { id: 2, active: true, windowId: 1, url: 'https://holaday.ai/app' },
+        ]),
+        captureVisibleTab,
+      },
+      windows: {
+        update: vi.fn(async () => {
+          throw new Error('focus failed accessToken=secret');
+        }),
+      },
+    } as unknown as typeof chrome;
+
+    await handleExtensionToolCall({
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_screenshot_focus_fail',
+      requestId: 'req_screenshot_focus_fail',
+      kind: 'screenshot',
+      args: {},
+      timeoutMs: 30_000,
+    });
+
+    expect(warn).toHaveBeenCalledWith(
+      '[holaday] extension tool window focus unavailable',
+      'focus failed accessToken=redacted',
+    );
+    expect(captureVisibleTab).toHaveBeenCalledWith(1, {
+      format: 'jpeg',
+      quality: 50,
+    });
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'client.extension.tool_result',
+        taskId: 'tsk_screenshot_focus_fail',
+        requestId: 'req_screenshot_focus_fail',
+        ok: true,
+      }),
+    );
   });
 
   it('captures the current Chrome error page instead of falling back to an older web tab', async () => {
