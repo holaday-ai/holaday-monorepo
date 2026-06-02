@@ -91,10 +91,14 @@ async function ensureAttached(tabId: number): Promise<void> {
     'debugger_attach_timeout',
   )
     .then(() => {
-      attachedTabs.add(tabId);
+      if (pendingAttachByTab.get(tabId) === attachPromise) {
+        attachedTabs.add(tabId);
+      }
     })
     .finally(() => {
-      pendingAttachByTab.delete(tabId);
+      if (pendingAttachByTab.get(tabId) === attachPromise) {
+        pendingAttachByTab.delete(tabId);
+      }
     });
   pendingAttachByTab.set(tabId, attachPromise);
   await attachPromise;

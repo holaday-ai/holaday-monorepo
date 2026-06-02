@@ -237,6 +237,58 @@ describe('executeCdpAction', () => {
     expect(detach).toHaveBeenCalledWith({ tabId: 8 });
   });
 
+  it('does not let a stale attach clear a newer pending attach', async () => {
+    let rejectStaleAttach: (error: Error) => void = () => {
+      throw new Error('stale attach promise was not created');
+    };
+    let resolveFreshAttach: () => void = () => {
+      throw new Error('fresh attach promise was not created');
+    };
+    const attach = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectStaleAttach = reject;
+          }),
+      )
+      .mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveFreshAttach = resolve;
+          }),
+      );
+    const sendCommand = vi.fn(async () => ({}));
+    globalThis.chrome = {
+      debugger: {
+        attach,
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    const staleAction = executeCdpAction(10, { kind: 'type', text: 'stale' });
+    await Promise.resolve();
+    expect(attach).toHaveBeenCalledTimes(1);
+
+    _resetAttachedTabsForTests();
+    const freshAction = executeCdpAction(10, { kind: 'type', text: 'fresh' });
+    await Promise.resolve();
+    expect(attach).toHaveBeenCalledTimes(2);
+
+    rejectStaleAttach(new Error('tab closed before attach settled'));
+    await expect(staleAction).resolves.toMatchObject({ ok: false });
+
+    const joinedFreshAction = executeCdpAction(10, { kind: 'type', text: 'joined' });
+    await Promise.resolve();
+    expect(attach).toHaveBeenCalledTimes(2);
+
+    resolveFreshAttach();
+    await expect(Promise.all([freshAction, joinedFreshAction])).resolves.toEqual([
+      { ok: true, message: 'typed 5 chars' },
+      { ok: true, message: 'typed 6 chars' },
+    ]);
+  });
+
   it('includes in-flight debugger attaches when detaching all tabs', async () => {
     let resolveAttach: () => void = () => {
       throw new Error('attach promise was not created');
