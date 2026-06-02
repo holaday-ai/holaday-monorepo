@@ -1094,11 +1094,15 @@ async function setKnownBadToken(token: string): Promise<void> {
 }
 
 async function resetAuthFailureState(): Promise<void> {
-  await withDeadline(
-    chrome.storage.local.remove([AUTH_FAILURES_KEY, KNOWN_BAD_TOKEN_KEY]),
-    AUTH_STATE_STORAGE_TIMEOUT_MS,
-    'auth_failure_state_remove_timeout',
-  );
+  try {
+    await withDeadline(
+      chrome.storage.local.remove([AUTH_FAILURES_KEY, KNOWN_BAD_TOKEN_KEY]),
+      AUTH_STATE_STORAGE_TIMEOUT_MS,
+      'auth_failure_state_remove_timeout',
+    );
+  } catch (err) {
+    console.warn('[holaday] auth: failed to reset failure bookkeeping', err);
+  }
 }
 
 /**
@@ -1120,16 +1124,20 @@ async function resetAllAuthState(): Promise<void> {
     clearTimeout(pendingAuthRetry);
     pendingAuthRetry = null;
   }
-  await withDeadline(
-    chrome.storage.local.remove([
-      TOKEN_STORAGE_KEY,
-      'holaday.user',
-      AUTH_FAILURES_KEY,
-      KNOWN_BAD_TOKEN_KEY,
-    ]),
-    AUTH_STATE_STORAGE_TIMEOUT_MS,
-    'all_auth_state_remove_timeout',
-  );
+  try {
+    await withDeadline(
+      chrome.storage.local.remove([
+        TOKEN_STORAGE_KEY,
+        'holaday.user',
+        AUTH_FAILURES_KEY,
+        KNOWN_BAD_TOKEN_KEY,
+      ]),
+      AUTH_STATE_STORAGE_TIMEOUT_MS,
+      'all_auth_state_remove_timeout',
+    );
+  } catch (err) {
+    console.warn('[holaday] auth: failed to clear all session state', err);
+  }
   // Ensure no live socket is left holding the cleared token.
   disconnect();
   state.tasks.clear();
