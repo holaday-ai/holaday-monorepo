@@ -69,6 +69,7 @@ import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 import { PlanCard } from '@/components/PlanCard';
 import { SearchResultCard } from '@/components/SearchResultCard';
 import { StepCard } from '@/components/StepCard';
+import { terminalResultContentInsufficient } from '@/components/terminal-result-state';
 import { hdDebug } from '@/lib/hd-debug';
 import { trpc } from '@/lib/trpc';
 import { useTaskStore } from '@/stores/task-store';
@@ -1910,24 +1911,13 @@ function TerminalSummary({
         const sanitized = sanitizeMarkdownTrailingPunctuation(
           sanitizeForRender(revealed),
         );
-        const originalContentLen = displayText.replace(/\s/g, '').length;
-        // Strip markdown headers / list ordinals / table pipes /
-        // collapsed whitespace before measuring — "## 报告\n1. \n"
-        // is structurally non-empty but carries zero content.
-        const meaningful = sanitized
-          .replace(/^#{1,6}\s+.*$/gm, '')
-          .replace(/^[-*]\s+/gm, '')
-          .replace(/^\d+\.\s+/gm, '')
-          .replace(/[|`*_>]/g, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-        const hasContentChars = /[A-Za-z0-9一-鿿぀-ゟ゠-ヿ]/.test(meaningful);
-        if (
-          !isFailedLike &&
-          !attachments?.length &&
-          originalContentLen < 200 &&
-          (meaningful.length < 20 || !hasContentChars)
-        ) {
+        if (terminalResultContentInsufficient({
+          status,
+          displayText,
+          revealedText: sanitized,
+          intent,
+          attachmentCount: attachments?.length ?? 0,
+        })) {
           return (
             <div className="rounded-md border border-[#FFC910]/55 bg-[#FFC910]/10 px-3 py-2.5 text-sm text-[#595757] dark:border-[#FFC910]/35 dark:text-foreground">
               <div className="font-medium">结果内容不足</div>
