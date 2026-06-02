@@ -102,15 +102,7 @@ export async function openOrFocusWorkbench(fallbackUrl: string): Promise<void> {
       /* see windows.update below */
     }
     if (typeof target.windowId === 'number') {
-      try {
-        await withDeadline(
-          chrome.windows.update(target.windowId, { focused: true }),
-          WORKBENCH_TAB_ACTION_TIMEOUT_MS,
-          'workbench_tab_action_timeout',
-        );
-      } catch {
-        /* non-fatal */
-      }
+      await focusWorkbenchWindow(target.windowId);
     }
     if (activated) {
       if (target.discarded) {
@@ -138,6 +130,34 @@ export async function openOrFocusWorkbench(fallbackUrl: string): Promise<void> {
     );
   } catch {
     /* nothing else to do — user-facing button is non-blocking */
+  }
+}
+
+async function focusWorkbenchWindow(windowId: number): Promise<void> {
+  if (!chrome.windows?.update) return;
+  try {
+    const updateInfo: chrome.windows.UpdateInfo = { focused: true };
+    if (chrome.windows.get) {
+      try {
+        const win = await withDeadline(
+          chrome.windows.get(windowId),
+          WORKBENCH_TAB_ACTION_TIMEOUT_MS,
+          'workbench_tab_action_timeout',
+        );
+        if (win?.state === 'minimized') {
+          updateInfo.state = 'normal';
+        }
+      } catch {
+        // Focusing the window is still useful when Chrome cannot report state.
+      }
+    }
+    await withDeadline(
+      chrome.windows.update(windowId, updateInfo),
+      WORKBENCH_TAB_ACTION_TIMEOUT_MS,
+      'workbench_tab_action_timeout',
+    );
+  } catch {
+    /* non-fatal */
   }
 }
 
