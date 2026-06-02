@@ -266,28 +266,29 @@ const MAX_RECENT_VISION_OBSERVATION_RESULTS = 50;
 const MAX_RECENT_VISION_ACT_RESULTS = 100;
 const inFlightStepResults = new Map<
   string,
-  { ownerToken: string | null; promise: Promise<StepResultPayload> }
+  { generation: number; ownerToken: string | null; promise: Promise<StepResultPayload> }
 >();
 const inFlightVisionObservations = new Map<
   string,
-  { ownerToken: string | null; promise: Promise<VisionObservationPayload> }
+  { generation: number; ownerToken: string | null; promise: Promise<VisionObservationPayload> }
 >();
 const inFlightVisionActResults = new Map<
   string,
-  { ownerToken: string | null; promise: Promise<VisionActResultPayload> }
+  { generation: number; ownerToken: string | null; promise: Promise<VisionActResultPayload> }
 >();
 const recentVisionObservations = new Map<
   string,
-  { at: number; ownerToken: string | null; payload: VisionObservationPayload }
+  { at: number; generation: number; ownerToken: string | null; payload: VisionObservationPayload }
 >();
 const recentVisionActResults = new Map<
   string,
-  { at: number; ownerToken: string | null; payload: VisionActResultPayload }
+  { at: number; generation: number; ownerToken: string | null; payload: VisionActResultPayload }
 >();
 const recentStepResults = new Map<
   string,
-  { at: number; ownerToken: string | null; payload: StepResultPayload }
+  { at: number; generation: number; ownerToken: string | null; payload: StepResultPayload }
 >();
+const controlledTaskGenerations = new Map<string, number>();
 
 // ---------- WS → SW state updates ----------
 
@@ -425,13 +426,18 @@ async function onVisionObserve(
 ): Promise<void> {
   const ownerToken = getCurrentWsToken();
   const dedupeKey = visionTickDedupeKey(msg.taskId, msg.tickIndex);
-  if (isControlledTaskStopped(msg.taskId)) {
+  const controlGeneration = getControlledTaskGeneration(msg.taskId);
+  if (isControlledTaskResultStale(msg.taskId, controlGeneration)) {
     logDroppedControlledTaskResult('vision observation', msg.taskId);
     return;
   }
   const cached = recentVisionObservations.get(dedupeKey);
-  if (cached && Date.now() - cached.at <= VISION_OBSERVATION_RESULT_TTL_MS) {
-    if (isControlledTaskStopped(msg.taskId)) {
+  if (
+    cached
+    && cached.generation === controlGeneration
+    && Date.now() - cached.at <= VISION_OBSERVATION_RESULT_TTL_MS
+  ) {
+    if (isControlledTaskResultStale(msg.taskId, controlGeneration)) {
       logDroppedControlledTaskResult('vision observation', msg.taskId);
       return;
     }
@@ -440,7 +446,7 @@ async function onVisionObserve(
   }
   if (cached) recentVisionObservations.delete(dedupeKey);
   const pending = inFlightVisionObservations.get(dedupeKey);
-  if (pending) {
+  if (pending && pending.generation === controlGeneration) {
     console.warn('[holaday] duplicate in-flight vision observation replayed', {
       taskId: msg.taskId,
       tickIndex: msg.tickIndex,
@@ -448,6 +454,7 @@ async function onVisionObserve(
     await pending.promise;
     return;
   }
+  let trackedPromise: Promise<VisionObservationPayload>;
   const next = computeVisionObservationPayload(msg)
     .catch((err): VisionObservationPayload => {
       console.warn('[holaday] vision observation failed unexpectedly', compactLogErrorReason(err));
@@ -461,15 +468,22 @@ async function onVisionObserve(
       };
     })
     .then((payload) => {
-      rememberVisionObservation(dedupeKey, payload, ownerToken);
+      rememberVisionObservation(dedupeKey, payload, controlGeneration, ownerToken);
       return payload;
     })
     .finally(() => {
-      inFlightVisionObservations.delete(dedupeKey);
+      if (inFlightVisionObservations.get(dedupeKey)?.promise === trackedPromise) {
+        inFlightVisionObservations.delete(dedupeKey);
+      }
     });
-  inFlightVisionObservations.set(dedupeKey, { ownerToken, promise: next });
+  trackedPromise = next;
+  inFlightVisionObservations.set(dedupeKey, {
+    generation: controlGeneration,
+    ownerToken,
+    promise: next,
+  });
   const payload = await next;
-  if (isControlledTaskStopped(msg.taskId)) {
+  if (isControlledTaskResultStale(msg.taskId, controlGeneration)) {
     logDroppedControlledTaskResult('vision observation', msg.taskId);
     return;
   }
@@ -533,13 +547,18 @@ async function onVisionAct(
 ): Promise<void> {
   const ownerToken = getCurrentWsToken();
   const dedupeKey = visionActDedupeKey(msg.taskId, msg.tickIndex);
-  if (isControlledTaskStopped(msg.taskId)) {
+  const controlGeneration = getControlledTaskGeneration(msg.taskId);
+  if (isControlledTaskResultStale(msg.taskId, controlGeneration)) {
     logDroppedControlledTaskResult('vision action', msg.taskId);
     return;
   }
   const cached = recentVisionActResults.get(dedupeKey);
-  if (cached && Date.now() - cached.at <= VISION_ACT_RESULT_TTL_MS) {
-    if (isControlledTaskStopped(msg.taskId)) {
+  if (
+    cached
+    && cached.generation === controlGeneration
+    && Date.now() - cached.at <= VISION_ACT_RESULT_TTL_MS
+  ) {
+    if (isControlledTaskResultStale(msg.taskId, controlGeneration)) {
       logDroppedControlledTaskResult('vision action', msg.taskId);
       return;
     }
@@ -548,7 +567,7 @@ async function onVisionAct(
   }
   if (cached) recentVisionActResults.delete(dedupeKey);
   const pending = inFlightVisionActResults.get(dedupeKey);
-  if (pending) {
+  if (pending && pending.generation === controlGeneration) {
     console.warn('[holaday] duplicate in-flight vision action replayed', {
       taskId: msg.taskId,
       tickIndex: msg.tickIndex,
@@ -556,21 +575,29 @@ async function onVisionAct(
     await pending.promise;
     return;
   }
+  let trackedPromise: Promise<VisionActResultPayload>;
   const next = computeVisionActResult(msg)
     .catch((err): VisionActResultPayload => {
       console.warn('[holaday] vision act failed unexpectedly', compactLogErrorReason(err));
       return { ok: false, message: '浏览器操作失败，请稍后重试' };
     })
     .then((payload) => {
-      rememberVisionActResult(dedupeKey, payload, ownerToken);
+      rememberVisionActResult(dedupeKey, payload, controlGeneration, ownerToken);
       return payload;
     })
     .finally(() => {
-      inFlightVisionActResults.delete(dedupeKey);
+      if (inFlightVisionActResults.get(dedupeKey)?.promise === trackedPromise) {
+        inFlightVisionActResults.delete(dedupeKey);
+      }
     });
-  inFlightVisionActResults.set(dedupeKey, { ownerToken, promise: next });
+  trackedPromise = next;
+  inFlightVisionActResults.set(dedupeKey, {
+    generation: controlGeneration,
+    ownerToken,
+    promise: next,
+  });
   const payload = await next;
-  if (isControlledTaskStopped(msg.taskId)) {
+  if (isControlledTaskResultStale(msg.taskId, controlGeneration)) {
     logDroppedControlledTaskResult('vision action', msg.taskId);
     return;
   }
@@ -644,10 +671,11 @@ function visionTickDedupeKey(taskId: string, tickIndex: number): string {
 function rememberVisionObservation(
   key: string,
   payload: VisionObservationPayload,
+  generation: number,
   ownerToken: string | null,
 ): void {
   const now = Date.now();
-  recentVisionObservations.set(key, { at: now, ownerToken, payload });
+  recentVisionObservations.set(key, { at: now, generation, ownerToken, payload });
   for (const [recentKey, value] of recentVisionObservations) {
     if (now - value.at > VISION_OBSERVATION_RESULT_TTL_MS) {
       recentVisionObservations.delete(recentKey);
@@ -663,10 +691,11 @@ function rememberVisionObservation(
 function rememberVisionActResult(
   key: string,
   payload: VisionActResultPayload,
+  generation: number,
   ownerToken: string | null,
 ): void {
   const now = Date.now();
-  recentVisionActResults.set(key, { at: now, ownerToken, payload });
+  recentVisionActResults.set(key, { at: now, generation, ownerToken, payload });
   for (const [recentKey, value] of recentVisionActResults) {
     if (now - value.at > VISION_ACT_RESULT_TTL_MS) {
       recentVisionActResults.delete(recentKey);
@@ -814,13 +843,18 @@ async function runStep(
 ): Promise<void> {
   const ownerToken = getCurrentWsToken();
   const dedupeKey = stepResultDedupeKey(msg.taskId, msg.stepId);
-  if (isControlledTaskStopped(msg.taskId)) {
+  const controlGeneration = getControlledTaskGeneration(msg.taskId);
+  if (isControlledTaskResultStale(msg.taskId, controlGeneration)) {
     logDroppedControlledTaskResult('step result', msg.taskId);
     return;
   }
   const cached = recentStepResults.get(dedupeKey);
-  if (cached && Date.now() - cached.at <= STEP_RESULT_TTL_MS) {
-    if (isControlledTaskStopped(msg.taskId)) {
+  if (
+    cached
+    && cached.generation === controlGeneration
+    && Date.now() - cached.at <= STEP_RESULT_TTL_MS
+  ) {
+    if (isControlledTaskResultStale(msg.taskId, controlGeneration)) {
       logDroppedControlledTaskResult('step result', msg.taskId);
       return;
     }
@@ -829,7 +863,7 @@ async function runStep(
   }
   if (cached) recentStepResults.delete(dedupeKey);
   const pending = inFlightStepResults.get(dedupeKey);
-  if (pending) {
+  if (pending && pending.generation === controlGeneration) {
     console.warn('[holaday] duplicate in-flight step dispatch replayed', {
       taskId: msg.taskId,
       stepId: msg.stepId,
@@ -837,17 +871,25 @@ async function runStep(
     await pending.promise;
     return;
   }
+  let trackedPromise: Promise<StepResultPayload>;
   const next = computeStepResult(msg)
     .then((payload) => {
-      rememberStepResult(dedupeKey, payload, ownerToken);
+      rememberStepResult(dedupeKey, payload, controlGeneration, ownerToken);
       return payload;
     })
     .finally(() => {
-      inFlightStepResults.delete(dedupeKey);
+      if (inFlightStepResults.get(dedupeKey)?.promise === trackedPromise) {
+        inFlightStepResults.delete(dedupeKey);
+      }
     });
-  inFlightStepResults.set(dedupeKey, { ownerToken, promise: next });
+  trackedPromise = next;
+  inFlightStepResults.set(dedupeKey, {
+    generation: controlGeneration,
+    ownerToken,
+    promise: next,
+  });
   const payload = await next;
-  if (isControlledTaskStopped(msg.taskId)) {
+  if (isControlledTaskResultStale(msg.taskId, controlGeneration)) {
     logDroppedControlledTaskResult('step result', msg.taskId);
     return;
   }
@@ -952,10 +994,11 @@ function stepResultDedupeKey(taskId: string, stepId: string): string {
 function rememberStepResult(
   key: string,
   payload: StepResultPayload,
+  generation: number,
   ownerToken: string | null,
 ): void {
   const now = Date.now();
-  recentStepResults.set(key, { at: now, ownerToken, payload });
+  recentStepResults.set(key, { at: now, generation, ownerToken, payload });
   for (const [recentKey, value] of recentStepResults) {
     if (now - value.at > STEP_RESULT_TTL_MS) {
       recentStepResults.delete(recentKey);
@@ -1022,6 +1065,7 @@ function onBatchConfirm(
 }
 
 function onTaskControl(msg: Extract<ServerMessage, { type: 'server.task.control' }>): void {
+  bumpControlledTaskGeneration(msg.taskId);
   const isStopped = msg.command === 'pause' || msg.command === 'cancel';
   setExtensionToolTaskStopped(msg.taskId, isStopped);
   const task = state.tasks.get(msg.taskId);
@@ -1049,6 +1093,18 @@ function onTaskControl(msg: Extract<ServerMessage, { type: 'server.task.control'
 function isControlledTaskStopped(taskId: string): boolean {
   const task = state.tasks.get(taskId);
   return task?.status === 'paused' || task?.status === 'cancelled';
+}
+
+function getControlledTaskGeneration(taskId: string): number {
+  return controlledTaskGenerations.get(taskId) ?? 0;
+}
+
+function bumpControlledTaskGeneration(taskId: string): void {
+  controlledTaskGenerations.set(taskId, getControlledTaskGeneration(taskId) + 1);
+}
+
+function isControlledTaskResultStale(taskId: string, generation: number): boolean {
+  return isControlledTaskStopped(taskId) || getControlledTaskGeneration(taskId) !== generation;
 }
 
 function logDroppedControlledTaskResult(kind: string, taskId: string): void {
