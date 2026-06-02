@@ -1030,12 +1030,7 @@ export async function dispatchVisionActionToSW(
  * would actually get the task executed.
  */
 export function hasConnectedSwClient(userId: string): boolean {
-  const set = clientsByUser.get(userId);
-  if (!set) return false;
-  for (const c of set) {
-    if (c.authed && c.socket.readyState === WebSocket.OPEN) return true;
-  }
-  return false;
+  return hasConnectedExtension(userId);
 }
 
 async function runStepResult(

@@ -95,7 +95,9 @@ describe('extension tool-call websocket lifecycle', () => {
   it('does not treat web-workbench hello frames as extension sockets', async () => {
     const { WS_SUBPROTOCOL, parseServerMessage } = await import('@holaday/shared-types');
     const { signAccessToken } = await import('../auth/jwt.js');
-    const { createWsServer, hasConnectedExtension } = await import('./server.js');
+    const { createWsServer, hasConnectedExtension, hasConnectedSwClient } = await import(
+      './server.js'
+    );
     const { default: WebSocket } = await import('ws');
 
     const port = 38229;
@@ -128,6 +130,7 @@ describe('extension tool-call websocket lifecycle', () => {
     await welcome;
 
     expect(hasConnectedExtension(userId)).toBe(false);
+    expect(hasConnectedSwClient(userId)).toBe(false);
 
     client.close();
   });
