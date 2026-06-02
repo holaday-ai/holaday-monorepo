@@ -849,6 +849,33 @@ describe('captureVisionObservation', () => {
     });
     expect(chrome.tabs.get).toHaveBeenCalledWith(1);
   });
+
+  it('uses pendingUrl when tab metadata is still loading', async () => {
+    const sendCommand = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Cannot find context with specified id'))
+      .mockResolvedValueOnce({ data: 'AA==' });
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        detach: vi.fn(async () => undefined),
+        sendCommand,
+      },
+      tabs: {
+        get: vi.fn(async () => ({
+          id: 1,
+          pendingUrl: 'https://holaday.ai/app',
+          title: 'Loading HOLA DAY',
+        })),
+      },
+    } as unknown as typeof chrome;
+
+    await expect(captureVisionObservation(1)).resolves.toMatchObject({
+      screenshotBase64: 'AA==',
+      url: 'https://holaday.ai/app',
+      title: 'Loading HOLA DAY',
+    });
+  });
 });
 
 describe('getActiveTabId', () => {
@@ -909,6 +936,18 @@ describe('getActiveTabId', () => {
     expect(query).toHaveBeenNthCalledWith(1, { active: true, currentWindow: true });
     expect(query).toHaveBeenNthCalledWith(2, { active: true, lastFocusedWindow: true });
     expect(query).toHaveBeenNthCalledWith(3, { active: true, windowType: 'normal' });
+  });
+
+  it('uses pendingUrl for active tabs that are still loading', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 10, pendingUrl: 'https://holaday.ai/app' }])
+      .mockResolvedValueOnce([{ id: 11, url: 'https://older.example/' }]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabId()).resolves.toBe(10);
   });
 
   it('inspects every returned tab before giving up on the active web page', async () => {

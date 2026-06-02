@@ -760,7 +760,7 @@ export async function getActiveTabId(
   const candidates = candidateGroups.flat();
 
   const webTab = pickBestActiveTabCandidate(candidates, (tab) => {
-    const url = tab.url ?? '';
+    const url = getTabUrlForCdp(tab);
     return (
       url.startsWith('http://') ||
       url.startsWith('https://') ||
@@ -768,7 +768,7 @@ export async function getActiveTabId(
     );
   });
   const nonInternalTab = pickBestActiveTabCandidate(candidates, (tab) => {
-    const url = tab.url ?? '';
+    const url = getTabUrlForCdp(tab);
     if (opts.allowErrorPage && url.toLowerCase().startsWith('chrome-error://')) return true;
     return (
       !url ||
@@ -779,6 +779,10 @@ export async function getActiveTabId(
   if (!tab || typeof tab.id !== 'number') return null;
   await activateTabForCdpIfNeeded(tab);
   return tab.id;
+}
+
+function getTabUrlForCdp(tab: chrome.tabs.Tab): string {
+  return tab.url || tab.pendingUrl || '';
 }
 
 function pickBestActiveTabCandidate(
@@ -940,7 +944,7 @@ async function readTabMetadata(tabId: number): Promise<{ url: string; title: str
       'tab_metadata_timeout',
     );
     return {
-      url: typeof tab?.url === 'string' ? tab.url : '',
+      url: getTabUrlForCdp(tab),
       title: typeof tab?.title === 'string' ? tab.title : '',
     };
   } catch {
