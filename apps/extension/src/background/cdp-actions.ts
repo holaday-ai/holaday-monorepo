@@ -502,6 +502,15 @@ function cdpNavigateErrorMessage(errorText: string): string {
   if (lower.includes('err_internet_disconnected')) {
     return '页面导航失败：浏览器网络已断开，请恢复网络后重试';
   }
+  if (lower.includes('err_connection_refused')) {
+    return '页面导航失败：目标服务暂时不可达，请稍后重试';
+  }
+  if (lower.includes('err_connection_reset') || lower.includes('err_connection_closed')) {
+    return '页面导航失败：网络连接被中断，请稍后重试';
+  }
+  if (lower.includes('err_network_changed')) {
+    return '页面导航失败：网络环境刚变化，请重试';
+  }
   if (lower.includes('err_timed_out') || lower.includes('timeout')) {
     return '页面导航超时，请稍后重试';
   }

@@ -833,6 +833,48 @@ describe('executeCdpAction', () => {
     });
   });
 
+  it('keeps common CDP navigation network failures actionable', async () => {
+    const attach = vi.fn(async () => undefined);
+    const sendCommand = vi
+      .fn()
+      .mockResolvedValueOnce({ errorText: 'net::ERR_CONNECTION_REFUSED' })
+      .mockResolvedValueOnce({ errorText: 'net::ERR_CONNECTION_RESET' })
+      .mockResolvedValueOnce({ errorText: 'net::ERR_CONNECTION_CLOSED' })
+      .mockResolvedValueOnce({ errorText: 'net::ERR_NETWORK_CHANGED' });
+    globalThis.chrome = {
+      debugger: {
+        attach,
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    await expect(
+      executeCdpAction(15, { kind: 'navigate', url: 'https://refused.example/' }),
+    ).resolves.toEqual({
+      ok: false,
+      message: '页面导航失败：目标服务暂时不可达，请稍后重试',
+    });
+    await expect(
+      executeCdpAction(15, { kind: 'navigate', url: 'https://reset.example/' }),
+    ).resolves.toEqual({
+      ok: false,
+      message: '页面导航失败：网络连接被中断，请稍后重试',
+    });
+    await expect(
+      executeCdpAction(15, { kind: 'navigate', url: 'https://closed.example/' }),
+    ).resolves.toEqual({
+      ok: false,
+      message: '页面导航失败：网络连接被中断，请稍后重试',
+    });
+    await expect(
+      executeCdpAction(15, { kind: 'navigate', url: 'https://changed.example/' }),
+    ).resolves.toEqual({
+      ok: false,
+      message: '页面导航失败：网络环境刚变化，请重试',
+    });
+    expect(attach).toHaveBeenCalledTimes(1);
+  });
+
   it('scrubs sensitive urls from successful navigation messages', async () => {
     const sendCommand = vi.fn(async () => ({}));
     globalThis.chrome = {
