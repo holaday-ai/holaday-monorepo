@@ -303,6 +303,7 @@ describe('normalizeScreenshotCaptureDataUrl', () => {
     expect(() => normalizeScreenshotCaptureDataUrl('data:text/plain;base64,AA==')).toThrow(
       'screenshot_invalid',
     );
+    expect(() => normalizeScreenshotCaptureDataUrl(undefined)).toThrow('screenshot_invalid');
   });
 });
 

@@ -431,7 +431,10 @@ interface ScreenshotResult {
   height: number;
 }
 
-export function normalizeScreenshotCaptureDataUrl(dataUrl: string): ScreenshotResult {
+export function normalizeScreenshotCaptureDataUrl(dataUrl: unknown): ScreenshotResult {
+  if (typeof dataUrl !== 'string') {
+    throw new Error('screenshot_invalid');
+  }
   const idx = dataUrl.indexOf(',');
   if (idx >= 0 && !dataUrl.slice(0, idx).toLowerCase().startsWith('data:image/')) {
     throw new Error('screenshot_invalid');
