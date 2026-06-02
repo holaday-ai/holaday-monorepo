@@ -140,6 +140,41 @@ describe('openOrFocusWorkbench', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it('uses pendingUrl while a workbench tab is still loading', async () => {
+    const query = vi.fn(async () => [
+      makeTab({ id: 13, url: undefined, pendingUrl: 'https://holaday.ai/app', active: false }),
+    ]);
+    const update = vi.fn(async () => ({}));
+    const create = vi.fn(async () => ({}));
+    globalThis.chrome = {
+      tabs: { query, update, create },
+      windows: { update: vi.fn(async () => ({})) },
+    } as unknown as typeof chrome;
+
+    await openOrFocusWorkbench('https://hd-app.orangebench.tech/app');
+
+    expect(update).toHaveBeenCalledWith(13, { active: true });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('filters match-pattern query results before choosing a target tab', async () => {
+    const query = vi.fn(async () => [
+      makeTab({ id: 14, url: 'https://staging.holaday.ai/app', active: true }),
+      makeTab({ id: 15, url: 'https://hd-app.orangebench.tech/app', active: false }),
+    ]);
+    const update = vi.fn(async () => ({}));
+    const create = vi.fn(async () => ({}));
+    globalThis.chrome = {
+      tabs: { query, update, create },
+      windows: { update: vi.fn(async () => ({})) },
+    } as unknown as typeof chrome;
+
+    await openOrFocusWorkbench('https://hd-app.orangebench.tech/app');
+
+    expect(update).toHaveBeenCalledWith(15, { active: true });
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it('reloads a discarded workbench tab after focusing it', async () => {
     const query = vi.fn(async () => [
       makeTab({ id: 11, url: 'https://holaday.ai/app', active: false, discarded: true }),

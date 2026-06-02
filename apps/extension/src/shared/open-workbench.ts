@@ -66,23 +66,25 @@ export async function openOrFocusWorkbench(fallbackUrl: string): Promise<void> {
   const createUrl = normalizeWorkbenchOpenUrl(fallbackUrl);
   let tabs: chrome.tabs.Tab[] = [];
   try {
-    tabs = await withDeadline(
-      chrome.tabs.query({ url: WORKBENCH_TAB_MATCH_PATTERNS as string[] }),
-      WORKBENCH_TAB_QUERY_TIMEOUT_MS,
-      'workbench_tab_query_timeout',
+    tabs = filterWorkbenchTabs(
+      await withDeadline(
+        chrome.tabs.query({ url: WORKBENCH_TAB_MATCH_PATTERNS as string[] }),
+        WORKBENCH_TAB_QUERY_TIMEOUT_MS,
+        'workbench_tab_query_timeout',
+      ),
     );
   } catch {
     // chrome.tabs.query can reject on URL match quirks in some Chrome
     // builds. Fall back to querying all tabs and filtering in-process
     // before deciding to open a duplicate tab.
     try {
-      tabs = (
+      tabs = filterWorkbenchTabs(
         await withDeadline(
           chrome.tabs.query({}),
           WORKBENCH_TAB_QUERY_TIMEOUT_MS,
           'workbench_tab_query_timeout',
-        )
-      ).filter((tab) => isWorkbenchTabUrl(tab.url));
+        ),
+      );
     } catch {
       tabs = [];
     }
@@ -131,6 +133,10 @@ export async function openOrFocusWorkbench(fallbackUrl: string): Promise<void> {
   } catch {
     /* nothing else to do — user-facing button is non-blocking */
   }
+}
+
+function filterWorkbenchTabs(tabs: readonly chrome.tabs.Tab[]): chrome.tabs.Tab[] {
+  return tabs.filter((tab) => isWorkbenchTabUrl(tab.url) || isWorkbenchTabUrl(tab.pendingUrl));
 }
 
 async function focusWorkbenchWindow(windowId: number): Promise<void> {
