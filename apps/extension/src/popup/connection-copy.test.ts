@@ -102,5 +102,10 @@ describe('formatWsCloseReason', () => {
     expect(formatWsCloseReason('health check failed')).toBe('服务暂时不可用');
     expect(formatWsCloseReason('open timeout')).toBe('连接握手超时');
     expect(formatWsCloseReason('send failed')).toBe('消息发送失败');
+    expect(formatWsCloseReason('Error during WebSocket handshake: Unexpected response code: 502')).toBe(
+      '代理服务暂时不可用',
+    );
+    expect(formatWsCloseReason('net::ERR_CONNECTION_CLOSED')).toBe('网络连接被关闭');
+    expect(formatWsCloseReason('net::ERR_CONNECTION_RESET')).toBe('网络连接已重置');
   });
 });

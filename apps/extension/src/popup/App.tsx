@@ -354,6 +354,7 @@ export function App() {
   async function retryConnection(): Promise<void> {
     if (resetting) return;
     setResetting(true);
+    setStatusRefreshSignal((value) => value + 1);
     try {
       const response = await sendRuntimeMessageWithRetry<{ ok?: boolean; token?: string | null }>({
         type: user ? 'holaday.tryAutoLogin' : 'holaday.resetConnection',
