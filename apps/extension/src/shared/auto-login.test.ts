@@ -120,6 +120,35 @@ describe('tryAutoLogin', () => {
     expect(logs).toContain('https://holaday.ai/app?view=tasks');
   });
 
+  it('scrubs sensitive values from auto-login warning reasons', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const executeScript = vi.fn(async () => {
+      throw new Error('failed accessToken=secret-token sessionId=sid');
+    });
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [
+          {
+            id: 9,
+            url: 'https://holaday.ai/app?accessToken=query-secret&view=tasks',
+            active: true,
+            lastAccessed: 1,
+          } as chrome.tabs.Tab,
+        ]),
+      },
+      scripting: { executeScript },
+    } as unknown as typeof chrome;
+
+    await expect(tryAutoLogin()).resolves.toBeNull();
+
+    const logs = warn.mock.calls.flat().join('\n');
+    expect(logs).not.toContain('secret-token');
+    expect(logs).not.toContain('query-secret');
+    expect(logs).not.toContain('sid');
+    expect(logs).toContain('accessToken=redacted');
+    expect(logs).toContain('sessionId=redacted');
+  });
+
   it('reads candidate tabs in parallel when one localStorage read hangs', async () => {
     vi.useFakeTimers();
     const executeScript = vi

@@ -22,6 +22,7 @@
 
 import { normalizeAccessToken } from './storage.js';
 import { withDeadline } from './deadline.js';
+import { compactLogErrorReason } from './log-error.js';
 import { sanitizePageContextUrl } from './page-context.js';
 
 const TOKEN_KEY = 'holaday.access_token';
@@ -86,7 +87,7 @@ async function readTokenFromTab(tabId: number, url: string): Promise<string | nu
   } catch (err) {
     console.warn(
       `[holaday] auto-login: executeScript on tab ${tabId} (${logUrl}) failed`,
-      err instanceof Error ? err.message : err,
+      compactLogErrorReason(err),
     );
     return null;
   }
@@ -103,7 +104,7 @@ export async function tryAutoLogin(): Promise<string | null> {
   } catch (err) {
     console.warn(
       '[holaday] auto-login: tabs.query({}) failed',
-      err instanceof Error ? err.message : err,
+      compactLogErrorReason(err),
     );
     return null;
   }
