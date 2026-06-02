@@ -11,6 +11,7 @@ import {
   getOrchestratorWsHealthUrl,
 } from '../shared/config.js';
 import { withDeadline } from '../shared/deadline.js';
+import { compactLogErrorReason } from '../shared/log-error.js';
 
 type Listener = (msg: ServerMessage) => void;
 type UnauthorizedListener = () => void;
@@ -99,7 +100,7 @@ export function send(msg: ClientMessage): boolean {
     socket.send(JSON.stringify(msg));
     return true;
   } catch (err) {
-    console.warn('[holaday] ws send failed', err);
+    console.warn('[holaday] ws send failed', compactLogErrorReason(err));
     recoverFromCurrentSocketSendFailure(socket);
     return false;
   }
@@ -326,9 +327,8 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
     state.lastErrorAt = Date.now();
     state.lastCloseAt = Date.now();
     state.lastCloseCode = null;
-    state.lastCloseReason =
-      err instanceof Error ? `open failed: ${err.message}` : 'open failed';
-    console.warn('[holaday] ws open failed', err);
+    state.lastCloseReason = `open failed: ${compactLogErrorReason(err)}`;
+    console.warn('[holaday] ws open failed', compactLogErrorReason(err));
     if (!state.closedByUser) {
       scheduleReconnect(token);
     }
@@ -357,7 +357,7 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
       try {
         fn();
       } catch (err) {
-        console.warn('[holaday] unauthorized listener failed', err);
+        console.warn('[holaday] unauthorized listener failed', compactLogErrorReason(err));
       }
     }
   };
@@ -449,7 +449,7 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
       try {
         fn(result.data);
       } catch (err) {
-        console.warn('[holaday] server message listener failed', err);
+        console.warn('[holaday] server message listener failed', compactLogErrorReason(err));
       }
     }
   });

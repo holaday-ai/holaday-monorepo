@@ -136,7 +136,7 @@ describe('ws-client send', () => {
     });
 
     expect(send({ type: 'client.pong', at: Date.now() })).toBe(false);
-    expect(warn).toHaveBeenCalledWith('[holaday] ws send failed', expect.any(Error));
+    expect(warn).toHaveBeenCalledWith('[holaday] ws send failed', 'socket closed during send');
     await expect(getWsConnectionStatus()).resolves.toMatchObject({
       connected: false,
       reconnectAttempt: 1,
@@ -321,7 +321,7 @@ describe('ws-client send', () => {
     });
     expect(warn).toHaveBeenCalledWith(
       '[holaday] ws open failed',
-      expect.any(Error),
+      'constructor boom',
     );
 
     vi.advanceTimersByTime(1_000);
@@ -718,7 +718,7 @@ describe('ws-client send', () => {
     expect(received).toEqual(['server.welcome']);
     expect(warn).toHaveBeenCalledWith(
       '[holaday] server message listener failed',
-      expect.any(Error),
+      'listener exploded',
     );
   });
 
@@ -747,7 +747,7 @@ describe('ws-client send', () => {
     expect(cleanupCalls).toBe(1);
     expect(warn).toHaveBeenCalledWith(
       '[holaday] unauthorized listener failed',
-      expect.any(Error),
+      'auth cleanup exploded',
     );
   });
 
