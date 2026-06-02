@@ -372,6 +372,50 @@ describe('executeCdpAction', () => {
     );
   });
 
+  it('maps function keys to CDP key metadata', async () => {
+    const sendCommand = vi.fn(async () => ({}));
+    globalThis.chrome = {
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        sendCommand,
+      },
+    } as unknown as typeof chrome;
+
+    await expect(executeCdpAction(11, { kind: 'key', key: 'f5' })).resolves.toEqual({
+      ok: true,
+      message: 'key f5',
+    });
+    await expect(executeCdpAction(11, { kind: 'key', key: 'cmd+F12' })).resolves.toEqual({
+      ok: true,
+      message: 'key cmd+F12',
+    });
+
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      1,
+      { tabId: 11 },
+      'Input.dispatchKeyEvent',
+      expect.objectContaining({
+        type: 'keyDown',
+        modifiers: 0,
+        key: 'F5',
+        code: 'F5',
+        windowsVirtualKeyCode: 116,
+      }),
+    );
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      3,
+      { tabId: 11 },
+      'Input.dispatchKeyEvent',
+      expect.objectContaining({
+        type: 'keyDown',
+        modifiers: 4,
+        key: 'F12',
+        code: 'F12',
+        windowsVirtualKeyCode: 123,
+      }),
+    );
+  });
+
   it('preserves plus and minus keys in shortcut descriptors', async () => {
     const sendCommand = vi.fn(async () => ({}));
     globalThis.chrome = {

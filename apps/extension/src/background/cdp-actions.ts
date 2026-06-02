@@ -684,6 +684,15 @@ function resolveKey(name: string): KeyInfo {
   };
   const special = named[name.toLowerCase()];
   if (special) return special;
+  const functionKey = name.match(/^f([1-9]|1[0-2])$/i);
+  if (functionKey?.[1]) {
+    const index = Number(functionKey[1]);
+    return {
+      key: `F${index}`,
+      code: `F${index}`,
+      windowsVirtualKeyCode: 111 + index,
+    };
+  }
   // Single printable char — emit as `text` so CDP inserts it.
   if (name.length === 1) {
     const code = /^[a-z]$/i.test(name) ? `Key${name.toUpperCase()}` : name;
