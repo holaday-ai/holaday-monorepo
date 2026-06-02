@@ -76,6 +76,70 @@ describe('extractHost', () => {
       ]),
     ).rejects.toThrow('history_sync_http_502');
   });
+
+  it('normalizes successful sync responses from the server', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          ingested: 2.9,
+          rejected: 1.8,
+          topDomains: [' example.com ', 42, '', 'x'.repeat(300)],
+        }),
+      ),
+    );
+    globalThis.chrome = {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({ 'holaday.access_token': 'token' })),
+        },
+      },
+    } as unknown as typeof chrome;
+
+    await expect(
+      syncHistoryToServer([
+        {
+          domain: 'example.com',
+          visitCount: 1,
+          lastVisitAt: '2026-05-02T00:00:00.000Z',
+        },
+      ]),
+    ).resolves.toEqual({
+      ingested: 2,
+      rejected: 1,
+      topDomains: ['example.com', 'x'.repeat(253)],
+    });
+  });
+
+  it('rejects malformed successful sync responses', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          ingested: Number.NaN,
+          rejected: 0,
+          topDomains: ['example.com'],
+        }),
+      ),
+    );
+    globalThis.chrome = {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({ 'holaday.access_token': 'token' })),
+        },
+      },
+    } as unknown as typeof chrome;
+
+    await expect(
+      syncHistoryToServer([
+        {
+          domain: 'example.com',
+          visitCount: 1,
+          lastVisitAt: '2026-05-02T00:00:00.000Z',
+        },
+      ]),
+    ).rejects.toThrow('history_sync_response_invalid');
+  });
 });
 
 describe('aggregateBrowsingHistoryItems', () => {

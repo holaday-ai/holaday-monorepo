@@ -197,6 +197,8 @@ export interface HistorySyncSummary {
 
 const MAX_SUMMARY_TOP_DOMAINS = 500;
 const MAX_SUMMARY_DOMAIN_CHARS = 253;
+const MAX_SYNC_RESPONSE_TOP_DOMAINS = 500;
+const MAX_SYNC_RESPONSE_DOMAIN_CHARS = 253;
 
 function normalizeHistorySyncSummary(value: unknown): HistorySyncSummary | null {
   if (!value || typeof value !== 'object') return null;
@@ -286,11 +288,14 @@ export async function syncHistoryToServer(
   if (!res.ok) {
     throw new Error(`history_sync_http_${res.status}`);
   }
-  return responseJsonWithDeadline<BrowsingSyncResponse>(
+  const body = await responseJsonWithDeadline<unknown>(
     res,
     HISTORY_SYNC_BODY_TIMEOUT_MS,
     'history_sync_body_timeout',
   );
+  const normalized = normalizeBrowsingSyncResponse(body);
+  if (!normalized) throw new Error('history_sync_response_invalid');
+  return normalized;
 }
 
 /**
@@ -314,4 +319,35 @@ export async function runHistorySync(): Promise<BrowsingSyncResponse | null> {
     });
   }
   return res;
+}
+
+function normalizeBrowsingSyncResponse(raw: unknown): BrowsingSyncResponse | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as {
+    ingested?: unknown;
+    rejected?: unknown;
+    topDomains?: unknown;
+  };
+  if (
+    typeof value.ingested !== 'number' ||
+    !Number.isFinite(value.ingested) ||
+    value.ingested < 0 ||
+    typeof value.rejected !== 'number' ||
+    !Number.isFinite(value.rejected) ||
+    value.rejected < 0
+  ) {
+    return null;
+  }
+  const topDomains = Array.isArray(value.topDomains)
+    ? value.topDomains
+        .filter((domain): domain is string => typeof domain === 'string')
+        .map((domain) => domain.trim().slice(0, MAX_SYNC_RESPONSE_DOMAIN_CHARS))
+        .filter(Boolean)
+        .slice(0, MAX_SYNC_RESPONSE_TOP_DOMAINS)
+    : [];
+  return {
+    ingested: Math.floor(value.ingested),
+    rejected: Math.floor(value.rejected),
+    topDomains,
+  };
 }
