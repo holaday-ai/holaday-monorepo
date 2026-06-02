@@ -23,6 +23,7 @@ export interface ConnectionStatusCopy {
 
 const WS_CONNECTING = 0;
 const MAX_NETWORK_RECONNECTS = 3;
+const MAX_CLOSE_REASON_CHARS = 40;
 
 export function mergeConnectionStatusPoll(
   previous: ExtensionStatusResponse | null,
@@ -107,7 +108,18 @@ export function formatWsCloseReason(reason: string | null | undefined): string |
   if (lower.includes('token swap')) return '登录态已切换，正在确认';
   if (lower.includes('policy violation')) return '服务拒绝了当前连接';
   if (lower.includes('constructor') || lower.includes('open failed')) return '连接初始化失败';
-  return reason.length > 40 ? `${reason.slice(0, 40)}...` : reason;
+  if (lower.includes('websocket') || looksLikeEnglishTech(reason)) return '连接异常，正在恢复';
+  return reason.length > MAX_CLOSE_REASON_CHARS
+    ? `${reason.slice(0, MAX_CLOSE_REASON_CHARS)}...`
+    : reason;
+}
+
+function looksLikeEnglishTech(text: string): boolean {
+  let ascii = 0;
+  for (const ch of text) {
+    if (ch.codePointAt(0)! < 128) ascii += 1;
+  }
+  return ascii / text.length > 0.85;
 }
 
 export function formatRelativeTime(at: number): string {

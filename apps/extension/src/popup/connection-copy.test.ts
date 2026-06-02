@@ -155,4 +155,13 @@ describe('formatWsCloseReason', () => {
     expect(formatWsCloseReason('net::ERR_CONNECTION_CLOSED')).toBe('网络连接被关闭');
     expect(formatWsCloseReason('net::ERR_CONNECTION_RESET')).toBe('网络连接已重置');
   });
+
+  it('hides unknown raw websocket and technical close reasons', () => {
+    expect(
+      formatWsCloseReason("WebSocket connection to 'wss://holaday.ai/ws?token=secret' failed"),
+    ).toBe('连接异常，正在恢复');
+    expect(formatWsCloseReason('Internal socket state machine failed at frame 42')).toBe(
+      '连接异常，正在恢复',
+    );
+  });
 });
