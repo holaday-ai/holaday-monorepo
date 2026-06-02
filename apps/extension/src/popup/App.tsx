@@ -38,6 +38,7 @@ import { withDeadline } from '../shared/deadline.js';
 import { fetchWithDeadline, responseJsonWithDeadline } from '../shared/http.js';
 import { openOrFocusWorkbench } from '../shared/open-workbench.js';
 import { sendRuntimeMessageWithRetry } from '../shared/runtime-message.js';
+import { normalizeHistorySummary, type HistorySyncSummary } from './history-summary.js';
 import {
   type StoredUser,
   clearAccessToken,
@@ -62,47 +63,6 @@ const HISTORY_SYNC_SUMMARY_KEY = 'holaday.history.lastSyncSummary';
 const AUTH_ME_TIMEOUT_MS = 8_000;
 const AUTH_ME_BODY_TIMEOUT_MS = 2_000;
 const POPUP_STORAGE_TIMEOUT_MS = 1_500;
-
-interface HistorySyncSummary {
-  ingested: number;
-  topDomains: string[];
-  at: number;
-}
-
-const MAX_HISTORY_SUMMARY_TOP_DOMAINS = 500;
-const MAX_HISTORY_SUMMARY_DOMAIN_CHARS = 253;
-
-function normalizeHistorySummary(value: unknown): HistorySyncSummary | null {
-  if (!value || typeof value !== 'object') return null;
-  const raw = value as {
-    ingested?: unknown;
-    topDomains?: unknown;
-    at?: unknown;
-  };
-  if (
-    typeof raw.ingested !== 'number' ||
-    !Number.isFinite(raw.ingested) ||
-    raw.ingested < 0
-  ) {
-    return null;
-  }
-  const topDomains = Array.isArray(raw.topDomains)
-    ? raw.topDomains
-        .filter((domain): domain is string => typeof domain === 'string')
-        .map((domain) => domain.trim().slice(0, MAX_HISTORY_SUMMARY_DOMAIN_CHARS))
-        .filter(Boolean)
-        .slice(0, MAX_HISTORY_SUMMARY_TOP_DOMAINS)
-    : [];
-  const at =
-    typeof raw.at === 'number' && Number.isFinite(raw.at) && raw.at > 0
-      ? raw.at
-      : Date.now();
-  return {
-    ingested: Math.floor(raw.ingested),
-    topDomains,
-    at,
-  };
-}
 
 interface MeResponse {
   result: {
