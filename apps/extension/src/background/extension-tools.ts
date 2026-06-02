@@ -603,6 +603,12 @@ export function extensionToolErrorPayload(
       code: 'tab_closed',
     };
   }
+  if (lower.includes('another debugger') || lower.includes('debugger is already attached')) {
+    return {
+      message: '浏览器调试通道被占用，请关闭该标签页 DevTools 后重试',
+      code: 'debugger_busy',
+    };
+  }
   return {
     message: '浏览器操作失败，请稍后重试',
     code: 'exec_error',

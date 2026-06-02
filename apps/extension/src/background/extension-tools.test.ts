@@ -261,6 +261,10 @@ describe('extensionToolErrorPayload', () => {
       message: '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
       code: 'tab_closed',
     });
+    expect(extensionToolErrorPayload(new Error('Another debugger is already attached'))).toEqual({
+      message: '浏览器调试通道被占用，请关闭该标签页 DevTools 后重试',
+      code: 'debugger_busy',
+    });
     expect(extensionToolErrorPayload(new Error('screenshot_too_large'))).toEqual({
       message: '截图过大，浏览器已停止发送该帧，请缩小窗口或重试',
       code: 'screenshot_too_large',
