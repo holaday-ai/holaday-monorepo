@@ -67,6 +67,27 @@ describe('auth bridge content script', () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
+  it('does not mirror malformed non-empty localStorage values as logout on first load', async () => {
+    vi.useFakeTimers();
+    const getItem = vi.fn((key: string) => (key === TOKEN_KEY ? 'Undefined' : null));
+    const sendMessage = vi.fn();
+
+    globalThis.window = {
+      localStorage: { getItem },
+      addEventListener: vi.fn(),
+    } as unknown as Window & typeof globalThis;
+    globalThis.chrome = {
+      runtime: {
+        sendMessage,
+      },
+    } as unknown as typeof chrome;
+
+    await import('./auth-bridge.js');
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   it('retries an observed token when the service worker send fails', async () => {
     vi.useFakeTimers();
     const token = 'hd_live_' + 'a'.repeat(24);

@@ -191,10 +191,16 @@ function observe(): void {
     return;
   }
   // 'unchanged' but not yet initialised — first run, even null counts
-  // as "tell the SW the current state so it can sync".
-  if (!wasInitialised) {
+  // as "tell the SW the current state so it can sync". A non-empty
+  // malformed value is different: the pure decision layer returns
+  // unchanged to mean "ignore it", not "mirror logout".
+  if (!wasInitialised && isEmptyObservedTokenValue(current)) {
     postToSw(null);
   }
+}
+
+function isEmptyObservedTokenValue(value: string | null): boolean {
+  return value === null || value.trim().length === 0;
 }
 
 // Initial observation immediately on script load (not deferred to the
