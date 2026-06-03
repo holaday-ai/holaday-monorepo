@@ -86,7 +86,7 @@ export function autoFix(inputs: AutoFixInputs): AutoFixOutput {
     (c) =>
       !c.passed &&
       (c.criterionType === 'ecommerce_rows' || c.criterionType === 'url_count') &&
-      /缺少链接|URL|url|链接/i.test(c.detail),
+      /缺少链接|URL|url|链接|唯一商品链接|复用同一个/i.test(c.detail),
   );
   if (missingEcommerceUrlOp) {
     const out = fillEmptyJsonUrls(text, inputs.ledger);

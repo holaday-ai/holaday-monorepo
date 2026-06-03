@@ -1179,4 +1179,33 @@ describe('price_sort — only consults parsed items (no prose poisoning)', () =>
     expect(rowCheck!.detail).toContain('第 1 行缺少链接');
     expect(rowCheck!.detail).not.toContain('未能从回复中解析');
   });
+
+  it('flags ecommerce rows that reuse too few unique product links', () => {
+    const contract = buildContract({
+      taskId: 'tsk_ecom_duplicate_urls',
+      intent: '去电商站搜 iPhone 16，按价格排序，给前5结果（名称/价格/链接）',
+      executionMode: 'generate',
+    });
+    const answer = [
+      '| # | 商品名称 | 价格 | 链接 |',
+      '|---|---|---|---|',
+      '| 1 | iPhone 16 128GB | ¥4599 | https://example.com/list |',
+      '| 2 | iPhone 16 256GB | ¥4999 | https://example.com/list |',
+      '| 3 | iPhone 16 Plus | ¥5299 | https://example.com/list |',
+      '| 4 | iPhone 16 Pro | ¥6999 | https://example.com/item-4 |',
+      '| 5 | iPhone 16 Pro Max | ¥7999 | https://example.com/item-5 |',
+    ].join('\n');
+
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_ecom_duplicate_urls'),
+      answerText: answer,
+    });
+
+    const rowCheck = result.checks.find((c) => c.criterionType === 'ecommerce_rows');
+    expect(rowCheck).toBeDefined();
+    expect(rowCheck!.passed).toBe(false);
+    expect(rowCheck!.detail).toContain('唯一商品链接');
+    expect(rowCheck!.severity).toBe('fixable');
+  });
 });

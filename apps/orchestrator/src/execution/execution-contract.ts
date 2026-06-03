@@ -457,8 +457,8 @@ function criteriaForRequirement(req: OutputRequirement): SuccessCriterion[] {
         {
           id: newCriterionId(),
           type: 'ecommerce_rows',
-          description: `每行商品必须同时包含名称、价格、链接（至少 ${req.minItems} 条）`,
-          data: { minItems: req.minItems },
+          description: `每行商品必须同时包含名称、价格、链接（至少 ${req.minItems} 条，尽量每行独立商品链接）`,
+          data: { minItems: req.minItems, minUniqueUrls: req.minItems },
         },
       ];
       if (req.sortOrder) {

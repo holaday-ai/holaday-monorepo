@@ -816,6 +816,7 @@ function checkEcommerceRows(
   answerText: string,
 ): CheckResult {
   const minItems = Number(criterion.data?.minItems ?? 0);
+  const minUniqueUrls = Number(criterion.data?.minUniqueUrls ?? 0);
   const allItems = extractStructuredItems(answerText);
   const rows = allItems.filter((it) => it.source !== 'bullet');
   if (rows.length === 0) {
@@ -839,9 +840,21 @@ function checkEcommerceRows(
     }
   });
   const tooFew = rows.length < minItems;
-  const passed = incomplete.length === 0 && !tooFew;
+  const uniqueUrls = new Set(
+    rows
+      .map((row) => row.url)
+      .filter((url): url is string => Boolean(url)),
+  );
+  const tooFewUniqueUrls =
+    minUniqueUrls > 0 && rows.length >= minItems && uniqueUrls.size < minUniqueUrls;
+  const passed = incomplete.length === 0 && !tooFew && !tooFewUniqueUrls;
   const detailParts: string[] = [];
   if (tooFew) detailParts.push(`只解析到 ${rows.length} 行，要求至少 ${minItems} 条`);
+  if (tooFewUniqueUrls) {
+    detailParts.push(
+      `只解析到 ${uniqueUrls.size} 个唯一商品链接，要求至少 ${minUniqueUrls} 个；不要让多行复用同一个列表页或聚合页链接`,
+    );
+  }
   if (incomplete.length > 0) detailParts.push(incomplete.join('；'));
   return {
     criterionId: criterion.id,
@@ -849,7 +862,7 @@ function checkEcommerceRows(
     passed,
     checker: 'deterministic',
     detail: passed
-      ? `已解析 ${rows.length} 条商品（${rows[0]!.source}），均包含名称、价格、链接`
+      ? `已解析 ${rows.length} 条商品（${rows[0]!.source}），均包含名称、价格、链接，唯一链接 ${uniqueUrls.size} 个`
       : detailParts.join('；'),
     severity: passed ? undefined : 'fixable',
   };
