@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   browserLiveOverlayCopy,
+  browserPanelHeaderStatus,
   browserReleasedCardCopy,
   browserWakeFeedback,
   browserPanelDotLabel,
@@ -64,19 +65,93 @@ describe('BrowserPanel state helpers', () => {
     expect(browserPanelDotLabel('error')).toBe('需要处理');
   });
 
+  it('derives compact header labels from the browser live state', () => {
+    expect(
+      browserPanelHeaderStatus({
+        dotStatus: 'live',
+        liveStatus: 'connecting',
+        browserAwaiting: false,
+        interactiveActive: false,
+        showReconnect: false,
+      }),
+    ).toMatchObject({
+      label: '连接中',
+      tone: 'live',
+      dotStatus: 'live',
+      showLabel: true,
+    });
+    expect(
+      browserPanelHeaderStatus({
+        dotStatus: 'live',
+        liveStatus: 'disconnected',
+        browserAwaiting: false,
+        interactiveActive: false,
+        showReconnect: false,
+      }),
+    ).toMatchObject({
+      label: '恢复中',
+      tone: 'recovering',
+      dotStatus: 'live',
+      showLabel: true,
+    });
+    expect(
+      browserPanelHeaderStatus({
+        dotStatus: 'live',
+        liveStatus: 'disconnected',
+        browserAwaiting: false,
+        interactiveActive: false,
+        showReconnect: true,
+      }),
+    ).toMatchObject({
+      label: '已断开',
+      tone: 'recovering',
+      dotStatus: 'error',
+      showLabel: true,
+    });
+  });
+
+  it('prioritises awaiting-user and takeover states over transport labels', () => {
+    expect(
+      browserPanelHeaderStatus({
+        dotStatus: 'live',
+        liveStatus: 'connected',
+        browserAwaiting: true,
+        interactiveActive: true,
+        showReconnect: false,
+      }),
+    ).toMatchObject({
+      label: '待操作',
+      tone: 'attention',
+      dotStatus: 'error',
+    });
+    expect(
+      browserPanelHeaderStatus({
+        dotStatus: 'live',
+        liveStatus: 'connected',
+        browserAwaiting: false,
+        interactiveActive: true,
+        showReconnect: false,
+      }),
+    ).toMatchObject({
+      label: '接管中',
+      tone: 'takeover',
+      dotStatus: 'live',
+    });
+  });
+
   it('explains slow browser live-view connections before offering reconnect', () => {
     expect(
       browserLiveOverlayCopy({ status: 'connecting', showReconnect: false }),
     ).toEqual({
       title: '正在连接实时画面',
-      detail: '通常几秒内恢复；任务仍会继续执行。',
+      detail: '浏览器正在启动或恢复连接，任务会继续执行。',
       reconnectLabel: '重新连接实时画面',
     });
     expect(
       browserLiveOverlayCopy({ status: 'connecting', showReconnect: true }),
     ).toEqual({
       title: '实时画面连接时间较久',
-      detail: '浏览器可能还在启动，或连接刚刚断开。可以手动重新连接。',
+      detail: '浏览器可能还在启动。可以继续等待，或手动重连画面。',
       reconnectLabel: '重新连接实时画面',
     });
   });
@@ -86,14 +161,14 @@ describe('BrowserPanel state helpers', () => {
       browserLiveOverlayCopy({ status: 'disconnected', showReconnect: false }),
     ).toEqual({
       title: '实时画面正在恢复',
-      detail: '连接刚刚断开，HOLA DAY 正在自动重连。',
+      detail: 'HOLA DAY 正在自动重连。你可以继续等待，任务不会重新提交。',
       reconnectLabel: '重新连接实时画面',
     });
     expect(
       browserLiveOverlayCopy({ status: 'disconnected', showReconnect: true }),
     ).toEqual({
       title: '实时画面已断开',
-      detail: '任务可能仍在执行。重新连接只刷新画面，不会重新提交任务。',
+      detail: '任务可能仍在执行。点击重新连接只刷新画面，不会重新提交任务。',
       reconnectLabel: '重新连接实时画面',
     });
   });
@@ -103,7 +178,7 @@ describe('BrowserPanel state helpers', () => {
       browserLiveOverlayCopy({ status: 'error', showReconnect: true }),
     ).toEqual({
       title: '实时画面连接失败',
-      detail: '连接没有建立成功。可以重新连接实时画面，任务本身会继续处理。',
+      detail: '连接没有建立成功。点击重新连接会刷新画面，任务本身会继续处理。',
       reconnectLabel: '重新连接实时画面',
     });
   });

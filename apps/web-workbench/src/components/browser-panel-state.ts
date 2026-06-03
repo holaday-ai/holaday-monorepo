@@ -1,6 +1,21 @@
 import type { UiTaskStatus } from '@/types/task';
 
 export type BrowserLiveStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
+export type BrowserPanelHeaderTone =
+  | 'idle'
+  | 'live'
+  | 'recovering'
+  | 'attention'
+  | 'takeover'
+  | 'error';
+
+export interface BrowserPanelHeaderStatus {
+  label: string;
+  tooltip: string;
+  tone: BrowserPanelHeaderTone;
+  dotStatus: 'idle' | 'live' | 'error';
+  showLabel: boolean;
+}
 
 export function shouldShowBrowserHeader(inputs: {
   taskIsTerminal: boolean;
@@ -61,6 +76,81 @@ export function browserPanelDotLabel(status: 'idle' | 'live' | 'error'): string 
   }
 }
 
+export function browserPanelHeaderStatus(inputs: {
+  dotStatus: 'idle' | 'live' | 'error';
+  liveStatus: BrowserLiveStatus;
+  browserAwaiting: boolean;
+  interactiveActive: boolean;
+  showReconnect: boolean;
+}): BrowserPanelHeaderStatus {
+  if (inputs.browserAwaiting) {
+    return {
+      label: '待操作',
+      tooltip: '等待你在浏览器里完成登录、验证或授权',
+      tone: 'attention',
+      dotStatus: 'error',
+      showLabel: true,
+    };
+  }
+  if (inputs.interactiveActive) {
+    return {
+      label: '接管中',
+      tooltip: '你正在直接操作浏览器，点接管按钮可交还给 AI',
+      tone: 'takeover',
+      dotStatus: 'live',
+      showLabel: true,
+    };
+  }
+  if (inputs.liveStatus === 'connected') {
+    return {
+      label: '已连接',
+      tooltip: browserLiveStatusLabel('connected'),
+      tone: 'live',
+      dotStatus: 'live',
+      showLabel: false,
+    };
+  }
+  if (inputs.liveStatus === 'connecting') {
+    return {
+      label: '连接中',
+      tooltip: '正在连接实时浏览器画面',
+      tone: 'live',
+      dotStatus: 'live',
+      showLabel: true,
+    };
+  }
+  if (inputs.liveStatus === 'disconnected') {
+    return {
+      label: inputs.showReconnect ? '已断开' : '恢复中',
+      tooltip: inputs.showReconnect
+        ? '实时画面已断开，可手动重新连接'
+        : '实时画面短暂断开，正在自动恢复',
+      tone: 'recovering',
+      dotStatus: inputs.showReconnect ? 'error' : 'live',
+      showLabel: true,
+    };
+  }
+  if (inputs.liveStatus === 'error') {
+    return {
+      label: '连接失败',
+      tooltip: '实时画面连接失败，可重新连接画面',
+      tone: 'error',
+      dotStatus: 'error',
+      showLabel: true,
+    };
+  }
+  return {
+    label: inputs.dotStatus === 'live' ? '准备中' : '待启动',
+    tooltip:
+      inputs.dotStatus === 'live'
+        ? '浏览器正在启动，画面准备好后会自动出现'
+        : browserPanelDotLabel(inputs.dotStatus),
+    tone: inputs.dotStatus === 'live' ? 'live' : 'idle',
+    dotStatus: inputs.dotStatus,
+    showLabel: inputs.dotStatus === 'live',
+  };
+}
+
 export function browserLiveOverlayCopy(inputs: {
   status: BrowserLiveStatus;
   showReconnect: boolean;
@@ -69,20 +159,20 @@ export function browserLiveOverlayCopy(inputs: {
     if (inputs.status === 'disconnected') {
       return {
         title: '实时画面已断开',
-        detail: '任务可能仍在执行。重新连接只刷新画面，不会重新提交任务。',
+        detail: '任务可能仍在执行。点击重新连接只刷新画面，不会重新提交任务。',
         reconnectLabel: '重新连接实时画面',
       };
     }
     if (inputs.status === 'error') {
       return {
         title: '实时画面连接失败',
-        detail: '连接没有建立成功。可以重新连接实时画面，任务本身会继续处理。',
+        detail: '连接没有建立成功。点击重新连接会刷新画面，任务本身会继续处理。',
         reconnectLabel: '重新连接实时画面',
       };
     }
     return {
       title: '实时画面连接时间较久',
-      detail: '浏览器可能还在启动，或连接刚刚断开。可以手动重新连接。',
+      detail: '浏览器可能还在启动。可以继续等待，或手动重连画面。',
       reconnectLabel: '重新连接实时画面',
     };
   }
@@ -96,7 +186,7 @@ export function browserLiveOverlayCopy(inputs: {
   if (inputs.status === 'disconnected') {
     return {
       title: '实时画面正在恢复',
-      detail: '连接刚刚断开，HOLA DAY 正在自动重连。',
+      detail: 'HOLA DAY 正在自动重连。你可以继续等待，任务不会重新提交。',
       reconnectLabel: '重新连接实时画面',
     };
   }
@@ -109,7 +199,7 @@ export function browserLiveOverlayCopy(inputs: {
   }
   return {
     title: '正在连接实时画面',
-    detail: '通常几秒内恢复；任务仍会继续执行。',
+    detail: '浏览器正在启动或恢复连接，任务会继续执行。',
     reconnectLabel: '重新连接实时画面',
   };
 }

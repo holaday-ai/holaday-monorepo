@@ -22,6 +22,8 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import {
   browserLiveOverlayCopy,
+  browserPanelHeaderStatus,
+  type BrowserPanelHeaderStatus,
   browserPanelDotLabel,
   browserReleasedCardCopy,
   browserWakeFeedback,
@@ -758,6 +760,13 @@ export function BrowserPanel({
   const interactiveActive = useVnc
     ? interactive && (vncStatus === 'connected' || vncStatus === 'connecting')
     : interactive && Boolean(frame) && !isBlankUrl(frame?.url);
+  const headerStatus = browserPanelHeaderStatus({
+    dotStatus: status,
+    liveStatus: vncStatus,
+    browserAwaiting,
+    interactiveActive,
+    showReconnect,
+  });
 
   // BOSS-feedback follow-up — the blue "你正在直接操作浏览器" banner
   // was confusing average users because it appeared whenever the
@@ -1063,7 +1072,7 @@ export function BrowserPanel({
             // bottom of most sites.
             <FullscreenFloatingToolbar
               displayUrl={displayUrl}
-              status={status}
+              status={headerStatus}
               interactiveActive={interactiveActive}
               interactive={interactive}
               onToggleInteractive={handleUserTakeoverClick}
@@ -1076,7 +1085,8 @@ export function BrowserPanel({
           )}
           {!fullscreen && shouldConnect && showHeader && (
           <header className={cn('flex h-11 items-center gap-2 border-b px-3 pt-2', BROWSER_DIVIDER)}>
-            <StatusDot status={status} />
+            <StatusDot status={headerStatus.dotStatus} />
+            <BrowserConnectionChip state={headerStatus} compact={isNarrow} />
             {/* BOSS bug fix — when the panel is narrow (< 500px),
                 hide back/forward to keep the URL bar legible. The
                 agent rarely needs them, and the user can take over
@@ -2053,6 +2063,40 @@ function StatusDot({ status }: { status: DotStatus }): JSX.Element {
   );
 }
 
+function BrowserConnectionChip({
+  state,
+  compact,
+}: {
+  state: BrowserPanelHeaderStatus;
+  compact: boolean;
+}): JSX.Element | null {
+  if (!state.showLabel) return null;
+  return (
+    <span
+      title={state.tooltip}
+      aria-label={state.tooltip}
+      className={cn(
+        'inline-flex h-6 shrink-0 items-center rounded-md border px-2 text-[11px] font-medium leading-none transition-colors',
+        compact && state.tone === 'live' ? 'hidden' : null,
+        state.tone === 'idle' &&
+          'border-[#DCDDDD] bg-white/70 text-muted-foreground dark:border-white/10 dark:bg-white/5',
+        state.tone === 'live' &&
+          'border-[#42C0EF]/35 bg-[#42C0EF]/10 text-[#256D85] dark:border-[#42C0EF]/35 dark:text-[#9BDDF2]',
+        state.tone === 'recovering' &&
+          'border-[#FFC910]/55 bg-[#FFC910]/10 text-[#6A5B19] dark:border-[#FFC910]/35 dark:text-[#FFE17A]',
+        state.tone === 'attention' &&
+          'border-[#FFC910]/60 bg-[#FFC910]/15 text-[#57479C] dark:border-[#FFC910]/35 dark:text-foreground',
+        state.tone === 'takeover' &&
+          'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]',
+        state.tone === 'error' &&
+          'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]',
+      )}
+    >
+      {state.label}
+    </span>
+  );
+}
+
 /**
  * Editable URL bar in the panel header. Mirrors a real browser's
  * address bar:
@@ -2273,7 +2317,7 @@ function FullscreenFloatingToolbar({
   onExitFullscreen,
 }: {
   displayUrl: string;
-  status: DotStatus;
+  status: BrowserPanelHeaderStatus;
   interactiveActive: boolean;
   interactive: boolean;
   onToggleInteractive: () => void;
@@ -2331,7 +2375,8 @@ function FullscreenFloatingToolbar({
       )}
       style={{ minWidth: 'min(640px, 90%)', maxWidth: '90%' }}
     >
-      <StatusDot status={status} />
+      <StatusDot status={status.dotStatus} />
+      <BrowserConnectionChip state={status} compact={false} />
       <NavButton direction="back" title="后退" navTaskId={navTaskId} />
       <NavButton direction="forward" title="前进" navTaskId={navTaskId} />
       <NavButton direction="reload" title="刷新" navTaskId={navTaskId} />
