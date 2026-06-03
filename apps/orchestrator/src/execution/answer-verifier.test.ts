@@ -957,6 +957,42 @@ describe('extractStructuredItems — JSON code block path', () => {
     });
   });
 
+  it('parses item rows from malformed JSON-like result blocks', () => {
+    const answer = [
+      '基于最新搜索结果，整理京东/天猫平台 iPhone 16 系列当前价格如下： JSON',
+      '{',
+      '  "query": "iPhone 16",',
+      '  "sort_by": "price_asc",',
+      '  "items": [',
+      '    {',
+      '      "rank": 1,',
+      '      "name": "Apple iPhone 16 128GB（全网通 5G，国行）",',
+      '      "price": 4599,',
+      '      "url": "",',
+      '      "platform": "京东"',
+      '    },',
+      '    {',
+      '      "rank": 2,',
+      '      "name": "Apple iPhone 16 256GB（全网通 5G，国行）",',
+      '      "price": 5469,',
+      '      "url": "",',
+      '      "platform": "京东"',
+      '    },',
+      '    {',
+      '      "rank": 4 几个说明：',
+      '- 价格来自618大促期间京东 + 新浪财经的最新报价。',
+    ].join('\n');
+    const items = extractStructuredItems(answer);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      name: 'Apple iPhone 16 128GB（全网通 5G，国行）',
+      price: 4599,
+      url: null,
+      source: 'json',
+    });
+    expect(items[1]!.price).toBe(5469);
+  });
+
   it('parses ¥-prefixed string price via parsePriceText', () => {
     const answer = '```json\n{"items":[{"name":"X","price":"¥1,299.99","url":"https://x.com/x"}]}\n```';
     const items = extractStructuredItems(answer);

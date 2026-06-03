@@ -398,6 +398,8 @@ export interface ParsedItem {
 export function extractStructuredItems(answerText: string): ParsedItem[] {
   const jsonItems = tryExtractJsonItems(answerText);
   if (jsonItems.length > 0) return jsonItems;
+  const jsonLikeItems = tryExtractJsonLikeItems(answerText);
+  if (jsonLikeItems.length > 0) return jsonLikeItems;
   const tableItems = tryExtractTableItems(answerText);
   if (tableItems.length > 0) return tableItems;
   const listItems = tryExtractNumberedListItems(answerText);
@@ -500,6 +502,39 @@ function extractBalancedJson(text: string): string | null {
     }
   }
   return null;
+}
+
+function tryExtractJsonLikeItems(answerText: string): ParsedItem[] {
+  const matches = [...answerText.matchAll(/"name"\s*:\s*"([^"]+)"/g)];
+  if (matches.length === 0) return [];
+  const items: ParsedItem[] = [];
+  for (let i = 0; i < matches.length && items.length < 200; i++) {
+    const match = matches[i]!;
+    const next = matches[i + 1];
+    const start = match.index ?? 0;
+    const end = next?.index ?? Math.min(answerText.length, start + 900);
+    const segment = answerText.slice(start, end);
+    const priceMatch = /"price"\s*:\s*(?:"([^"]+)"|([0-9][0-9.,]*))/i.exec(segment);
+    const urlMatch = /"url"\s*:\s*"([^"]*)"/i.exec(segment);
+    const priceText = priceMatch?.[1] ?? priceMatch?.[2] ?? '';
+    items.push({
+      name: match[1]?.trim() || null,
+      price: pickJsonLikePrice(priceText),
+      url: urlMatch?.[1] && /^https?:\/\//i.test(urlMatch[1])
+        ? urlMatch[1].trim()
+        : null,
+      raw: segment.trim(),
+      source: 'json',
+    });
+  }
+  return items.filter((item) => item.name || item.price != null || item.url);
+}
+
+function pickJsonLikePrice(priceText: string): number | null {
+  const parsed = pickNumber(priceText);
+  if (parsed != null) return parsed;
+  const n = Number(priceText.replace(/,/g, '').trim());
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 function tryExtractTableItems(answerText: string): ParsedItem[] {
