@@ -73,6 +73,7 @@ export interface OutputRequirementEcommerce {
 export interface OutputRequirementComparison {
   kind: 'comparison';
   minCandidates: number;
+  minUrls: number;
 }
 
 export interface OutputRequirementGeneralLinks {
@@ -243,6 +244,7 @@ export function classifyIntentForOutputRequirement(intent: string): {
   requirement: OutputRequirement | null;
 } {
   const text = intent;
+  const explicitLinkRequest = /链接|来源|引用|参考链接|参考资料|出处|reference|source\s+url|cite|引用链接/i.test(text);
 
   // Stock — explicit market-data phrasing. "价格" alone is too broad
   // (matches ecommerce too), so require co-occurrence with "股".
@@ -252,18 +254,16 @@ export function classifyIntentForOutputRequirement(intent: string): {
 
   // E-commerce listing — at least one product-list cue AND either a
   // count signal or a price/sort signal.
-  const ecomCue = /商品|榜单|排行|淘宝|京东|拼多多|amazon|亚马逊|sku|商城|网购/i.test(
+  const ecomCue = /商品|榜单|排行|淘宝|天猫|京东|拼多多|电商|平台|amazon|亚马逊|sku|商城|网购/i.test(
     text,
   );
-  const countMatch = text.match(/前\s*(\d+)|top\s*(\d+)|(\d+)\s*个|(\d+)\s*款/i);
-  const minItems = countMatch
-    ? Number(countMatch[1] ?? countMatch[2] ?? countMatch[3] ?? countMatch[4])
-    : NaN;
-  const sortAsc = /价格\s*(升序|从低到高|低到高)|便宜.*前|按价格升序|最便宜/i.test(
+  const minItems = inferRequestedItemCount(text);
+  const sortAsc = /价格\s*(升序|从低到高|低到高|排序|排列)|按价格(排序|排列|升序)|便宜.*前|最便宜/i.test(
     text,
   );
   const sortDesc = /价格\s*(降序|从高到低|高到低)|按价格降序|最贵/i.test(text);
-  if (ecomCue && (Number.isFinite(minItems) || sortAsc || sortDesc)) {
+  const priceCue = /价格|价钱|报价|售价|price/i.test(text);
+  if (ecomCue && (Number.isFinite(minItems) || sortAsc || sortDesc || priceCue)) {
     return {
       kind: 'ecommerce_listing',
       requirement: {
@@ -276,15 +276,24 @@ export function classifyIntentForOutputRequirement(intent: string): {
 
   // Comparison — explicit comparison cue. "vs" / "对比" / "哪个好".
   if (/对比|比较|对照|\bvs\.?\b|哪个(更)?(好|强|划算)|二选一|怎么选/i.test(text)) {
+    const minCandidates = inferRequestedItemCount(text);
     return {
       kind: 'comparison',
-      requirement: { kind: 'comparison', minCandidates: 2 },
+      requirement: {
+        kind: 'comparison',
+        minCandidates: Number.isFinite(minCandidates) && minCandidates >= 2 ? minCandidates : 2,
+        minUrls: explicitLinkRequest
+          ? Number.isFinite(minCandidates) && minCandidates >= 2
+            ? minCandidates
+            : 1
+          : 1,
+      },
     };
   }
 
   // General-with-links — the user explicitly asked for sources /
   // citations / reference URLs.
-  if (/来源|引用|参考链接|参考资料|出处|reference|source\s+url|cite|引用链接/i.test(text)) {
+  if (explicitLinkRequest) {
     return {
       kind: 'general_with_links',
       requirement: { kind: 'general_with_links', minUrls: 1 },
@@ -292,6 +301,41 @@ export function classifyIntentForOutputRequirement(intent: string): {
   }
 
   return { kind: 'general', requirement: null };
+}
+
+function inferRequestedItemCount(text: string): number {
+  const numeric = text.match(
+    /前\s*(\d+)|top\s*(\d+)|(\d+)\s*(?:个平台|个方案|个|款|条|家|项|种|平台|方案)/i,
+  );
+  if (numeric) {
+    const value = Number(numeric[1] ?? numeric[2] ?? numeric[3]);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  const chinese = text.match(
+    /([一二两三四五六七八九十])\s*(?:个平台|个方案|个|款|条|家|项|种|平台|方案)/,
+  );
+  if (chinese?.[1]) {
+    const value = parseChineseSmallNumber(chinese[1]);
+    if (value > 0) return value;
+  }
+  return NaN;
+}
+
+function parseChineseSmallNumber(raw: string): number {
+  const map: Record<string, number> = {
+    一: 1,
+    二: 2,
+    两: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+    十: 10,
+  };
+  return map[raw] ?? NaN;
 }
 
 /**
@@ -438,8 +482,8 @@ function criteriaForRequirement(req: OutputRequirement): SuccessCriterion[] {
         {
           id: newCriterionId(),
           type: 'url_count',
-          description: '对比结论必须附带至少 1 个来源 URL',
-          data: { min: 1 },
+          description: `对比结论必须附带至少 ${req.minUrls} 个来源 URL`,
+          data: { min: req.minUrls },
         },
       ];
     case 'general_with_links':

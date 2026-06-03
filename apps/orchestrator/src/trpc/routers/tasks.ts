@@ -1154,8 +1154,14 @@ export const tasksRouter = router({
           outcome.status === 'completed' &&
           generateRl.summary !== outcome.summary
         ) {
-          generatePostFormatDowngrade = recheckPostFormat(outcome.summary, generateRl.summary);
-          outcome = { ...outcome, summary: generateRl.summary };
+          const preFormatSummary = outcome.summary;
+          generatePostFormatDowngrade = recheckPostFormat(preFormatSummary, generateRl.summary);
+          outcome = {
+            ...outcome,
+            summary: generatePostFormatDowngrade.downgrade
+              ? preFormatSummary
+              : generateRl.summary,
+          };
         }
         let generateTerminalStatus = terminalStatus;
         const generateExtraFailedChecks: Array<{ type: string; detail: string }> = [];
@@ -1171,7 +1177,7 @@ export const tasksRouter = router({
           });
           ctx.logger.warn(
             { taskId, reason: generatePostFormatDowngrade.reason },
-            'generate: post-format recheck flagged regression — downgrading to partial_success',
+            'generate: post-format recheck flagged regression — keeping pre-format summary',
           );
         }
         // Compute before persistence so refresh/history/detail views
@@ -1686,8 +1692,14 @@ export const tasksRouter = router({
           outcome.status === 'completed' &&
           scrapeRl.summary !== outcome.summary
         ) {
-          scrapePostFormatDowngrade = recheckPostFormat(outcome.summary, scrapeRl.summary);
-          outcome = { ...outcome, summary: scrapeRl.summary };
+          const preFormatSummary = outcome.summary;
+          scrapePostFormatDowngrade = recheckPostFormat(preFormatSummary, scrapeRl.summary);
+          outcome = {
+            ...outcome,
+            summary: scrapePostFormatDowngrade.downgrade
+              ? preFormatSummary
+              : scrapeRl.summary,
+          };
         }
         let scrapeTerminalStatus = terminalStatus;
         const scrapeExtraFailedChecks: Array<{ type: string; detail: string }> = [];
@@ -1702,7 +1714,7 @@ export const tasksRouter = router({
           });
           ctx.logger.warn(
             { taskId, reason: scrapePostFormatDowngrade.reason },
-            'scrape: post-format recheck flagged regression — downgrading to partial_success',
+            'scrape: post-format recheck flagged regression — keeping pre-format summary',
           );
         }
         const scrapeFailedChecks = [

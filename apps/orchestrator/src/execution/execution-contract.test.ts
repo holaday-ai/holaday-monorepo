@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildContract } from './execution-contract.js';
+import { buildContract, classifyIntentForOutputRequirement } from './execution-contract.js';
 
 describe('buildContract — tier selection', () => {
   it('expertWorkflowId set → full tier (overrides executionMode)', () => {
@@ -303,6 +303,50 @@ describe('buildContract — full tier (expert workflow)', () => {
     const fullMin = (fullContract.successCriteria.find((s) => s.type === 'word_count')!.data as { min: number }).min;
     const checklistMin = (checklistContract.successCriteria.find((s) => s.type === 'word_count')!.data as { min: number }).min;
     expect(fullMin).toBeGreaterThan(checklistMin);
+  });
+});
+
+describe('classifyIntentForOutputRequirement — real QA prompts', () => {
+  it('keeps explicit stock source-link requests under the stock verifier', () => {
+    const out = classifyIntentForOutputRequirement('帮我查今天特斯拉股价并给出来源链接');
+    expect(out.kind).toBe('stock_quote');
+    expect(out.requirement).toEqual({ kind: 'stock' });
+  });
+
+  it('treats 电商站 + 前 N + 按价格排序 as an ecommerce listing', () => {
+    const out = classifyIntentForOutputRequirement(
+      '去电商站搜 iPhone 16，按价格排序，给前5结果（名称/价格/链接）',
+    );
+    expect(out.kind).toBe('ecommerce_listing');
+    expect(out.requirement).toEqual({
+      kind: 'ecommerce',
+      minItems: 5,
+      sortOrder: 'asc',
+    });
+  });
+
+  it('uses platform counts for marketplace price comparisons', () => {
+    const out = classifyIntentForOutputRequirement(
+      '对比京东、天猫、拼多多三家平台 iPhone 16 128GB 的当前价格，并总结最优选。请给出每个平台的商品名、价格、链接和判断依据。',
+    );
+    expect(out.kind).toBe('ecommerce_listing');
+    expect(out.requirement).toEqual({
+      kind: 'ecommerce',
+      minItems: 3,
+      sortOrder: null,
+    });
+  });
+
+  it('tightens comparison URL requirements when the user asks for links', () => {
+    const out = classifyIntentForOutputRequirement(
+      '对比 Notion 和 Coda 的优缺点，并给出来源链接',
+    );
+    expect(out.kind).toBe('comparison');
+    expect(out.requirement).toEqual({
+      kind: 'comparison',
+      minCandidates: 2,
+      minUrls: 1,
+    });
   });
 });
 
