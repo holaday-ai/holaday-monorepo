@@ -23,9 +23,16 @@ export function didTokenSwitchDuringTaskCreate(
   return currentToken !== submittedToken;
 }
 
+export function shouldClearAuthAfterUnauthorized(
+  currentToken: string | null,
+  rejectedToken: string,
+): boolean {
+  return currentToken === rejectedToken;
+}
+
 export function shouldClearAuthAfterCreateUnauthorized(
   currentToken: string | null,
   submittedToken: string,
 ): boolean {
-  return currentToken === submittedToken;
+  return shouldClearAuthAfterUnauthorized(currentToken, submittedToken);
 }

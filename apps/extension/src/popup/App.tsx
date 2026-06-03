@@ -305,9 +305,11 @@ export function App() {
             setToken(newToken);
           } else if (result.kind === 'unauthorized') {
             const current = normalizeAccessToken(await getAccessToken());
-            if (current === newToken) {
+            if (shouldClearRejectedPopupToken(current, newToken)) {
               await clearAccessToken();
               await clearStoredUser();
+            } else if (current) {
+              return;
             }
             if (seq !== authSyncSeq.current || !mountedRef.current) return;
             setUser(null);
@@ -352,9 +354,11 @@ export function App() {
         }
         if (result.kind === 'unauthorized') {
           const current = normalizeAccessToken(await getAccessToken());
-          if (current === resetToken) {
+          if (shouldClearRejectedPopupToken(current, resetToken)) {
             await clearAccessToken();
             await clearStoredUser();
+          } else if (current) {
+            return;
           }
           if (seq !== authSyncSeq.current || !mountedRef.current) return;
           setUser(null);

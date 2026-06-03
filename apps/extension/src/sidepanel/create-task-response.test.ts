@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   didTokenSwitchDuringTaskCreate,
   extractCreatedTaskId,
+  shouldClearAuthAfterUnauthorized,
   shouldClearAuthAfterCreateUnauthorized,
 } from './create-task-response.js';
 
@@ -38,5 +39,11 @@ describe('extractCreatedTaskId', () => {
     expect(shouldClearAuthAfterCreateUnauthorized('old-token', 'old-token')).toBe(true);
     expect(shouldClearAuthAfterCreateUnauthorized('new-token', 'old-token')).toBe(false);
     expect(shouldClearAuthAfterCreateUnauthorized(null, 'old-token')).toBe(false);
+  });
+
+  it('only clears auth when a rejected token still matches current storage', () => {
+    expect(shouldClearAuthAfterUnauthorized('old-token', 'old-token')).toBe(true);
+    expect(shouldClearAuthAfterUnauthorized('new-token', 'old-token')).toBe(false);
+    expect(shouldClearAuthAfterUnauthorized(null, 'old-token')).toBe(false);
   });
 });

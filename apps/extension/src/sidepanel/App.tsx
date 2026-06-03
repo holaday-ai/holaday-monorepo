@@ -41,6 +41,7 @@ import {
 import {
   didTokenSwitchDuringTaskCreate,
   extractCreatedTaskId,
+  shouldClearAuthAfterUnauthorized,
   shouldClearAuthAfterCreateUnauthorized,
   type CreateTaskResponse,
 } from './create-task-response.js';
@@ -213,8 +214,12 @@ export function App() {
             setError(null);
             setStatus('connected');
           } else if (result.kind === 'unauthorized') {
-            await clearAccessToken();
-            await clearStoredUser();
+            const current = normalizeAccessToken(await getAccessToken());
+            if (shouldClearAuthAfterUnauthorized(current, newToken)) {
+              await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
+            } else if (current) {
+              return;
+            }
             if (cancelled || seq !== authSyncSeq.current) return;
             clearLocalSessionState();
           }
@@ -363,8 +368,11 @@ export function App() {
         // or signed with a different secret. Drop it so the next
         // retry doesn't keep looping with bad creds.
         const current = normalizeAccessToken(await getAccessToken());
-        if (current === liftedToken) {
+        if (shouldClearAuthAfterUnauthorized(current, liftedToken)) {
           await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
+        } else if (current) {
+          if (mountedRef.current && seq === authSyncSeq.current) setStatus(user ? 'connected' : 'idle');
+          return;
         }
         if (!mountedRef.current || seq !== authSyncSeq.current) return;
         setStatus('error');
