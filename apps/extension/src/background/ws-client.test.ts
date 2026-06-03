@@ -390,11 +390,32 @@ describe('ws-client send', () => {
     });
   });
 
+  it('retries a transient websocket health preflight before reconnecting', async () => {
+    configMock.wsHealthUrl = 'https://primary.test/api/healthz';
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce({ ok: false, status: 503 } as Response)
+        .mockResolvedValueOnce({ ok: true, status: 200 } as Response)
+        .mockResolvedValueOnce({ ok: false, status: 426 } as Response),
+    );
+    const { connect } = await import('./ws-client.js');
+
+    connect('token');
+
+    await vi.waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    expect(sockets[0]?.url).toBe('wss://primary.test/ws');
+  });
+
   it('skips websocket construction when the websocket route probe is unavailable', async () => {
     configMock.wsHealthUrl = 'https://primary.test/api/healthz';
     const fetch = vi
       .fn()
       .mockResolvedValueOnce({ ok: true, status: 200 } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 502 } as Response)
       .mockResolvedValueOnce({ ok: false, status: 502 } as Response);
     vi.stubGlobal('fetch', fetch);
     const { connect, disconnect, getWsConnectionStatus } = await import('./ws-client.js');
@@ -420,6 +441,26 @@ describe('ws-client send', () => {
     disconnect();
   });
 
+  it('retries a transient websocket route probe before reconnecting', async () => {
+    configMock.wsHealthUrl = 'https://primary.test/api/healthz';
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, status: 200 } as Response)
+        .mockResolvedValueOnce({ ok: false, status: 502 } as Response)
+        .mockResolvedValueOnce({ ok: false, status: 426 } as Response),
+    );
+    const { connect } = await import('./ws-client.js');
+
+    connect('token');
+
+    await vi.waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    expect(sockets[0]?.url).toBe('wss://primary.test/ws');
+  });
+
   it('skips websocket construction for Cloudflare 5xx route probes', async () => {
     configMock.wsHealthUrl = 'https://primary.test/api/healthz';
     vi.stubGlobal(
@@ -427,6 +468,7 @@ describe('ws-client send', () => {
       vi
         .fn()
         .mockResolvedValueOnce({ ok: true, status: 200 } as Response)
+        .mockResolvedValueOnce({ ok: false, status: 521 } as Response)
         .mockResolvedValueOnce({ ok: false, status: 521 } as Response),
     );
     const { connect, disconnect, getWsConnectionStatus } = await import('./ws-client.js');

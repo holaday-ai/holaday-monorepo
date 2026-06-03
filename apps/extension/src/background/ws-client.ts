@@ -19,6 +19,7 @@ type UnauthorizedListener = () => void;
 const WS_OPEN_TIMEOUT_MS = 12_000;
 const WS_HEALTH_TIMEOUT_MS = 2_500;
 const WS_ROUTE_PROBE_TIMEOUT_MS = 2_500;
+const WS_PRECONNECT_PROBE_ATTEMPTS = 2;
 const WS_ENDPOINT_FAILURE_COOLDOWN_MS = 15_000;
 
 interface State {
@@ -326,46 +327,67 @@ async function openSocketAfterHealthCheck(
 }
 
 async function checkWsOriginHealth(healthUrl: string): Promise<boolean> {
-  try {
-    const response = await withDeadline(
-      fetch(healthUrl, {
-        cache: 'no-store',
-        credentials: 'omit',
-      }),
-      WS_HEALTH_TIMEOUT_MS,
-      'ws_health_timeout',
-    );
-    return response.ok;
-  } catch {
-    return false;
-  }
+  const response = await fetchPreconnectProbe(
+    healthUrl,
+    {
+      cache: 'no-store',
+      credentials: 'omit',
+    },
+    WS_HEALTH_TIMEOUT_MS,
+    'ws_health_timeout',
+  );
+  return response?.ok ?? false;
 }
 
 async function checkWsRouteReachable(endpoint: string): Promise<boolean> {
   const probeUrl = wsEndpointToHttpProbeUrl(endpoint);
   if (!probeUrl) return true;
-  try {
-    const response = await withDeadline(
-      fetch(probeUrl, {
-        cache: 'no-store',
-        credentials: 'omit',
-        redirect: 'manual',
-      }),
-      WS_ROUTE_PROBE_TIMEOUT_MS,
-      'ws_route_probe_timeout',
-    );
-    // A plain HTTP GET to a WebSocket route commonly returns 400/401/426
-    // because no Upgrade header is present; those still prove the route
-    // reached the WS proxy. A 2xx can be a SPA fallback or static error page,
-    // so do not let it trigger a real WebSocket handshake.
-    return isReachableWsRouteProbeStatus(response.status);
-  } catch {
-    return false;
+  const response = await fetchPreconnectProbe(
+    probeUrl,
+    {
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'manual',
+    },
+    WS_ROUTE_PROBE_TIMEOUT_MS,
+    'ws_route_probe_timeout',
+  );
+  // A plain HTTP GET to a WebSocket route commonly returns 400/401/426
+  // because no Upgrade header is present; those still prove the route
+  // reached the WS proxy. A 2xx can be a SPA fallback or static error page,
+  // so do not let it trigger a real WebSocket handshake.
+  return response ? isReachableWsRouteProbeStatus(response.status) : false;
+}
+
+async function fetchPreconnectProbe(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<Response | null> {
+  for (let attempt = 1; attempt <= WS_PRECONNECT_PROBE_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await withDeadline(
+        fetch(url, init),
+        timeoutMs,
+        timeoutMessage,
+      );
+      if (!isRetryablePreconnectProbeStatus(response.status) || attempt === WS_PRECONNECT_PROBE_ATTEMPTS) {
+        return response;
+      }
+    } catch {
+      if (attempt === WS_PRECONNECT_PROBE_ATTEMPTS) return null;
+    }
   }
+  return null;
 }
 
 function isReachableWsRouteProbeStatus(status: number): boolean {
   return status === 400 || status === 401 || status === 403 || status === 426;
+}
+
+function isRetryablePreconnectProbeStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
 function wsEndpointToHttpProbeUrl(endpoint: string): string | null {
