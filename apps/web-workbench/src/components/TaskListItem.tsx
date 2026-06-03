@@ -7,6 +7,7 @@ import { summariseIntent } from '@/utils/summarise-intent';
 interface Props {
   task: UiTask;
   selected: boolean;
+  liveSubStatus?: TaskLiveSubStatus | null;
   /**
    * Inline-edit mode: when this matches task.taskId the row replaces
    * its label with a text input seeded from the current display title.
@@ -33,6 +34,16 @@ interface Props {
    */
   batchDisabled?: boolean;
 }
+
+type TaskLiveSubStatus = 'planning' | 'browsing' | 'extracting' | 'verifying' | 'generating';
+
+const LIVE_SUB_STATUS_LABELS: Record<TaskLiveSubStatus, string> = {
+  planning: '正在规划任务',
+  browsing: '正在操作浏览器',
+  extracting: '正在提取数据',
+  verifying: '正在验证结果',
+  generating: '正在生成回答',
+};
 
 /**
  * Resolves the display label for a task row. Priority:
@@ -69,6 +80,7 @@ export function taskDisplayTitle(task: UiTask, maxLen = 24): string {
 export function TaskListItem({
   task,
   selected,
+  liveSubStatus,
   renaming,
   onSelect,
   onContextMenu,
@@ -96,7 +108,7 @@ export function TaskListItem({
     ? undefined
     : batchMode && batchDisabled
       ? '进行中的任务无法批量删除'
-      : `${task.intent}\n${subtitleFor(task)}`;
+      : `${task.intent}\n${taskListItemSubtitle(task, liveSubStatus)}`;
   return (
     <div
       onContextMenu={
@@ -188,7 +200,9 @@ export function TaskListItem({
           <MoreHorizontal className="h-3.5 w-3.5" />
         </button>
       )}
-      {active && !renaming && <span className="sr-only">进行中 · {subtitleFor(task)}</span>}
+      {active && !renaming && (
+        <span className="sr-only">进行中 · {taskListItemSubtitle(task, liveSubStatus)}</span>
+      )}
     </div>
   );
 }
@@ -265,7 +279,10 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
   );
 }
 
-function subtitleFor(task: UiTask): string {
+export function taskListItemSubtitle(
+  task: Pick<UiTask, 'queuePosition' | 'status' | 'tickCount'>,
+  liveSubStatus?: TaskLiveSubStatus | null,
+): string {
   if (task.queuePosition && task.queuePosition > 1 && task.tickCount === 0) {
     return `排队中 · 第 ${task.queuePosition} 位`;
   }
@@ -273,6 +290,9 @@ function subtitleFor(task: UiTask): string {
     case 'queued':
       return '排队中 · 等待空闲槽位';
     case 'executing':
+      if (liveSubStatus) {
+        return LIVE_SUB_STATUS_LABELS[liveSubStatus];
+      }
       return task.tickCount === 0 ? '正在启动…' : `执行中 · 第 ${task.tickCount} 步`;
     case 'awaiting_user':
       // F3 — explicit awaiting-user copy. Previously this fell through

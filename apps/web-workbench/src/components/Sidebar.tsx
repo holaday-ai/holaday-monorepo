@@ -201,6 +201,7 @@ export function Sidebar({
   pagerOverride,
 }: Props): JSX.Element {
   const togglePin = useTaskStore((s) => s.togglePin);
+  const liveSubStatusByTask = useTaskStore((s) => s.subStatusByTask);
   // Belt-and-braces: collapse any duplicate taskId rows the store may
   // hand us before partitioning. A single row can otherwise appear in
   // 置顶 AND a time bucket if a refresh / load-more merge let two
@@ -449,6 +450,7 @@ export function Sidebar({
                       key={t.taskId}
                       task={t}
                       selected={t.taskId === selectedTaskId}
+                      liveSubStatus={liveSubStatusByTask[t.taskId]?.subStatus ?? null}
                       renaming={renamingId === t.taskId}
                       onSelect={(id) => {
                         onSelectTask(id);
@@ -487,6 +489,7 @@ export function Sidebar({
                       key={t.taskId}
                       task={t}
                       selected={t.taskId === selectedTaskId}
+                      liveSubStatus={liveSubStatusByTask[t.taskId]?.subStatus ?? null}
                       renaming={renamingId === t.taskId}
                       onSelect={(id) => {
                         onSelectTask(id);
