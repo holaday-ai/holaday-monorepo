@@ -149,6 +149,20 @@ describe('getConnectionStatusCopy', () => {
     vi.useRealTimers();
   });
 
+  it('uses websocket close codes when Chrome omits a close reason', () => {
+    expect(
+      getConnectionStatusCopy(
+        status({
+          reconnectAttempt: 1,
+          lastCloseCode: 1006,
+        }),
+      ),
+    ).toEqual({
+      title: '浏览器代理正在重连（1/3）',
+      detail: '最近错误：网络连接被关闭；等待下一次重连',
+    });
+  });
+
   it('keeps capped reconnects actionable', () => {
     expect(
       getConnectionStatusCopy(

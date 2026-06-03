@@ -50,7 +50,9 @@ export function getConnectionStatusCopy(
     };
   }
 
-  const reason = formatWsCloseReason(status.ws.lastCloseReason);
+  const reason =
+    formatWsCloseReason(status.ws.lastCloseReason) ??
+    formatWsCloseCode(status.ws.lastCloseCode);
   if (status.ws.readyState === WS_CONNECTING) {
     const retryCopy = status.ws.nextRetryAt ? `下次尝试：${formatRelativeTime(status.ws.nextRetryAt)}` : null;
     return {
@@ -130,6 +132,15 @@ export function formatWsCloseReason(reason: string | null | undefined): string |
   return reason.length > MAX_CLOSE_REASON_CHARS
     ? `${reason.slice(0, MAX_CLOSE_REASON_CHARS)}...`
     : reason;
+}
+
+function formatWsCloseCode(code: number | null | undefined): string | null {
+  if (code === null || code === undefined) return null;
+  if (code === 1006) return '网络连接被关闭';
+  if (code === 1008 || code === 4401) return '服务拒绝了当前连接';
+  if (code >= 5000 || (code >= 1011 && code <= 1014)) return '服务暂时不可用';
+  if (code !== 1000) return '连接异常，正在恢复';
+  return null;
 }
 
 function containsSensitiveKeyValue(text: string): boolean {
