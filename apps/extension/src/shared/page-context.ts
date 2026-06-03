@@ -164,8 +164,9 @@ function isPageContextTab(tab: chrome.tabs.Tab | undefined): tab is chrome.tabs.
 function getTabContextUrl(tab: chrome.tabs.Tab): string {
   const url = tab.url || '';
   const pendingUrl = tab.pendingUrl || '';
+  if (/^https?:\/\//i.test(pendingUrl)) return pendingUrl;
   if (/^chrome-error:/i.test(url)) {
-    return /^https?:\/\//i.test(pendingUrl) ? pendingUrl : '';
+    return '';
   }
   return url || pendingUrl;
 }

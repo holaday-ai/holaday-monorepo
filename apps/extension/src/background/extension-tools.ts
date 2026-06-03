@@ -192,7 +192,7 @@ function isNonInternalTab(
 }
 
 function getCandidateTabUrl(tab: chrome.tabs.Tab): string | undefined {
-  return tab.url || tab.pendingUrl;
+  return tab.pendingUrl || tab.url;
 }
 
 /**
