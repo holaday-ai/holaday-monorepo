@@ -52,6 +52,7 @@ const TAB_UPDATE_TIMEOUT_MS = 5_000;
 const TAB_GET_TIMEOUT_MS = 2_000;
 const SCREENSHOT_CAPTURE_TIMEOUT_MS = 8_000;
 const SCREENSHOT_CAPTURE_QUALITIES = [50, 35, 25] as const;
+const SCREENSHOT_TRANSIENT_RETRY_DELAY_MS = 125;
 const MAX_NAVIGATE_URL_LENGTH = 2048;
 const MAX_SCREENSHOT_RESULT_BASE64_CHARS = 2_000_000;
 const RECENT_TOOL_RESULT_TTL_MS = 60_000;
@@ -492,11 +493,7 @@ async function executeScreenshot(): Promise<ScreenshotResult> {
   await focusTabWindow(tab);
   let lastError: unknown = null;
   for (const quality of SCREENSHOT_CAPTURE_QUALITIES) {
-    const dataUrl = await withDeadline(
-      chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality }),
-      SCREENSHOT_CAPTURE_TIMEOUT_MS,
-      'extension_tool_timeout',
-    );
+    const dataUrl = await captureVisibleTabWithTransientRetry(tab.windowId, quality);
     try {
       return normalizeScreenshotCaptureDataUrl(dataUrl);
     } catch (err) {
@@ -505,6 +502,35 @@ async function executeScreenshot(): Promise<ScreenshotResult> {
     }
   }
   throw lastError ?? new Error('screenshot_too_large');
+}
+
+async function captureVisibleTabWithTransientRetry(
+  windowId: number | undefined,
+  quality: number,
+): Promise<string> {
+  try {
+    return await captureVisibleTabOnce(windowId, quality);
+  } catch (err) {
+    if (!isTransientScreenshotCaptureError(err)) throw err;
+    await sleep(SCREENSHOT_TRANSIENT_RETRY_DELAY_MS);
+    return captureVisibleTabOnce(windowId, quality);
+  }
+}
+
+function captureVisibleTabOnce(windowId: number | undefined, quality: number): Promise<string> {
+  const options: chrome.tabs.CaptureVisibleTabOptions = { format: 'jpeg', quality };
+  const capture = typeof windowId === 'number'
+    ? chrome.tabs.captureVisibleTab(windowId, options)
+    : chrome.tabs.captureVisibleTab(options);
+  return withDeadline(
+    capture,
+    SCREENSHOT_CAPTURE_TIMEOUT_MS,
+    'extension_tool_timeout',
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function focusTabWindow(tab: chrome.tabs.Tab): Promise<void> {
@@ -538,6 +564,32 @@ async function focusTabWindow(tab: chrome.tabs.Tab): Promise<void> {
 function isScreenshotTooLargeError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return msg.toLowerCase().includes('screenshot_too_large');
+}
+
+function isTransientScreenshotCaptureError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes('permission') ||
+    lower.includes('cannot access') ||
+    lower.includes('chrome://') ||
+    lower.includes('chrome-extension://') ||
+    lower.includes('file://') ||
+    lower.includes('tab closed') ||
+    lower.includes('no tab with id') ||
+    lower.includes('no window with id') ||
+    lower.includes('extension_tool_timeout')
+  ) {
+    return false;
+  }
+  return (
+    lower.includes('cannot be captured right now') ||
+    lower.includes('capture failed') ||
+    lower.includes('not focused') ||
+    lower.includes('not visible') ||
+    lower.includes('temporarily') ||
+    lower.includes('try again')
+  );
 }
 
 export function extensionToolErrorPayload(
