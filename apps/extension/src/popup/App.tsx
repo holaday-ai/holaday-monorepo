@@ -542,19 +542,29 @@ function ConnectionStatusBlock({
   useEffect(() => {
     let cancelled = false;
     let inFlight = false;
+    let queued = false;
     const refresh = (): void => {
-      if (inFlight) return;
+      if (inFlight) {
+        queued = true;
+        return;
+      }
       inFlight = true;
-      void sendRuntimeMessageWithRetry<ExtensionStatusResponse>({ type: 'holaday.status' }).then(
-        (response) => {
+      void (async () => {
+        try {
+          do {
+            queued = false;
+            const response = await sendRuntimeMessageWithRetry<ExtensionStatusResponse>({
+              type: 'holaday.status',
+            });
+            if (!cancelled) {
+              setStatus((previous) => mergeConnectionStatusPoll(previous, response ?? null));
+            }
+          } while (!cancelled && queued);
+        } finally {
           inFlight = false;
-          if (cancelled) return;
-          setStatus((previous) => mergeConnectionStatusPoll(previous, response ?? null));
-        },
-        () => {
-          inFlight = false;
-        },
-      );
+          queued = false;
+        }
+      })();
     };
     refreshRef.current = refresh;
     refresh();
