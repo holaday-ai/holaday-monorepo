@@ -34,6 +34,7 @@ const fs = require('fs');
 const path = require('path');
 
 const staging = path.resolve(process.cwd(), 'apps/extension/release/chrome-extension');
+const promoSmallPath = path.resolve(process.cwd(), 'apps/extension/store-assets/promo-small.png');
 const manifestPath = path.join(staging, 'manifest.json');
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 const requiredIcons = ['16', '32', '48', '128'];
@@ -50,6 +51,21 @@ for (const size of requiredIcons) {
   if (!fs.existsSync(path.join(staging, iconPath))) {
     throw new Error(`icon file missing from package: ${iconPath}`);
   }
+}
+
+function readPngSize(filePath) {
+  const body = fs.readFileSync(filePath);
+  if (body.length < 24 || body.toString('ascii', 1, 4) !== 'PNG') {
+    throw new Error(`not a PNG file: ${filePath}`);
+  }
+  return { width: body.readUInt32BE(16), height: body.readUInt32BE(20) };
+}
+
+const promoSize = readPngSize(promoSmallPath);
+if (promoSize.width !== 440 || promoSize.height !== 280) {
+  throw new Error(
+    `small promotional image must be 440x280, got ${promoSize.width}x${promoSize.height}`,
+  );
 }
 
 function walk(dir) {
