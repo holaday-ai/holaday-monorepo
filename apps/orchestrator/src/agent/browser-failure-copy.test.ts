@@ -8,6 +8,9 @@ describe('friendlyBrowserFailureReason', () => {
         'Could not establish connection. Receiving end does not exist.',
       ),
     ).toBe('浏览器扩展未连接。请打开 HOLA DAY 扩展后重试。');
+    expect(friendlyBrowserFailureReason('浏览器扩展未连接，请打开 HOLA DAY 扩展后重试')).toBe(
+      '浏览器扩展未连接。请打开 HOLA DAY 扩展后重试。',
+    );
   });
 
   it('normalizes extension host permission errors', () => {

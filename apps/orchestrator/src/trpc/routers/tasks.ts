@@ -89,6 +89,7 @@ import {
   sendExtensionToolCall,
   updateTaskStateForUser,
 } from '../../ws/server.js';
+import { extensionNoClientMessage } from '../../ws/extension-tool-copy.js';
 import { protectedProcedure, router } from '../trpc.js';
 // Phase 1 Day 5 — execution-pipeline glue. All four entry points are
 // no-ops when the corresponding feature flag is off (default), so
@@ -5744,7 +5745,7 @@ export const tasksRouter = router({
       if (!hasConnectedExtension(userId)) {
         return {
           ok: false as const,
-          error: { message: '扩展未连接，请确认 HOLA DAY 扩展已安装并登录', code: 'no_extension' },
+          error: { message: extensionNoClientMessage(), code: 'no_extension' },
         };
       }
       const outcome = await sendExtensionToolCall(userId, {
