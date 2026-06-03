@@ -236,14 +236,22 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     let inFlight = false;
+    let queued = false;
     async function refresh() {
-      if (inFlight) return;
+      if (inFlight) {
+        queued = true;
+        return;
+      }
       inFlight = true;
       try {
-        const ctx = await getActivePageContext();
-        if (!cancelled) setPageContext(ctx);
+        do {
+          queued = false;
+          const ctx = await getActivePageContext();
+          if (!cancelled) setPageContext(ctx);
+        } while (!cancelled && queued);
       } finally {
         inFlight = false;
+        queued = false;
       }
     }
     void refresh();
