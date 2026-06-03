@@ -196,16 +196,21 @@ export function formatFirecrawlSearchEcommerceResult(
 ): string {
   const limited = results.slice(0, Math.max(1, maxResults));
   const head = `# search_ecommerce 结果 (${platform}, query="${query}", ${results.length} pages)\n\n`;
+  const productLinkCandidates = extractEcommerceProductLinks(limited, platform).slice(
+    0,
+    Math.max(1, maxResults * 3),
+  );
   const sourceCandidates = limited.map((res, i) => ({
     rank: i + 1,
     title: res.title ?? res.url,
     url: res.url,
+    product_links: extractEcommerceProductLinks([res], platform).slice(0, 8),
     snippet: res.markdown.replace(/\s+/g, ' ').slice(0, 500),
   }));
   const sourceBlock =
-    '## 可引用来源清单（最终答案必须优先引用这里的 URL；不要输出空 url）\n\n' +
+    '## 可引用来源清单（最终答案必须优先引用这里的 URL；不要输出空 url；每行商品尽量使用不同的商品详情链接）\n\n' +
     '```json\n' +
-    JSON.stringify({ source_candidates: sourceCandidates }, null, 2) +
+    JSON.stringify({ product_link_candidates: productLinkCandidates, source_candidates: sourceCandidates }, null, 2) +
     '\n```\n\n';
   const blocks = limited
     .map((res) => {
@@ -216,8 +221,77 @@ export function formatFirecrawlSearchEcommerceResult(
     })
     .join('\n\n---\n\n');
   const tail =
-    '\n\n---\n**记得回到浏览器中整理 / 呈现这些信息（产品名/价格/链接）。最终答案每行商品必须带一个可点击来源链接；如果只拿到平台搜索页，也要引用对应搜索结果页 URL，不要写空 URL。**';
+    '\n\n---\n**记得回到浏览器中整理 / 呈现这些信息（产品名/价格/链接）。最终答案每行商品必须带一个可点击来源链接；优先使用 product_link_candidates 里的不同商品链接。若无法找到足够多的独立商品链接，不要把同一个列表页复用于多行，改为只列可验证行并说明限制。**';
   return head + sourceBlock + blocks + tail;
+}
+
+export function extractEcommerceProductLinks(
+  results: readonly { url: string; markdown: string; title?: string }[],
+  platform: string,
+): Array<{ title: string; url: string }> {
+  const out: Array<{ title: string; url: string }> = [];
+  const seen = new Set<string>();
+  for (const res of results) {
+    for (const candidate of extractLinksFromMarkdown(res.markdown)) {
+      if (!isLikelyEcommerceProductUrl(candidate.url, platform)) continue;
+      const clean = stripLinkTrailingPunct(candidate.url);
+      if (seen.has(clean)) continue;
+      seen.add(clean);
+      out.push({
+        title: candidate.title || res.title || clean,
+        url: clean,
+      });
+    }
+    if (isLikelyEcommerceProductUrl(res.url, platform)) {
+      const clean = stripLinkTrailingPunct(res.url);
+      if (!seen.has(clean)) {
+        seen.add(clean);
+        out.push({ title: res.title ?? clean, url: clean });
+      }
+    }
+  }
+  return out;
+}
+
+function extractLinksFromMarkdown(markdown: string): Array<{ title: string; url: string }> {
+  const links: Array<{ title: string; url: string }> = [];
+  for (const m of markdown.matchAll(/\[([^\]\n]{1,160})\]\((https?:\/\/[^)\s]+)\)/g)) {
+    const title = (m[1] ?? '').trim();
+    const url = stripLinkTrailingPunct(m[2] ?? '');
+    if (url) links.push({ title, url });
+  }
+  for (const m of markdown.matchAll(/https?:\/\/[^\s)\]"'<>，。]+/g)) {
+    const url = stripLinkTrailingPunct(m[0]);
+    if (url) links.push({ title: '', url });
+  }
+  return links;
+}
+
+function isLikelyEcommerceProductUrl(url: string, platform: string): boolean {
+  try {
+    const u = new URL(stripLinkTrailingPunct(url));
+    const host = u.hostname.toLowerCase();
+    const path = u.pathname.toLowerCase();
+    if (platform === 'jd') {
+      return host === 'item.jd.com' && /\/\d+\.html$/.test(path);
+    }
+    if (platform === 'taobao') {
+      if (host === 'item.taobao.com' || host === 'detail.tmall.com') return true;
+      if (host === 'pcdetail.taobao.com') return path.length > 1;
+      if (host === 'www.taobao.com' && /\/list\/item\//.test(path)) return true;
+      return false;
+    }
+    if (platform === 'amazon') {
+      return /(^|\.)amazon\./.test(host) && /\/(?:dp|gp\/product)\//.test(path);
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function stripLinkTrailingPunct(url: string): string {
+  return url.replace(/[)\].,;:，。]+$/g, '');
 }
 
 /**
@@ -2901,12 +2975,21 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                 continue;
               }
               toolsUsed.add('search_ecommerce');
-              for (const res of r.results.slice(0, maxResults)) {
+              const ecommerceResults = r.results.slice(0, maxResults);
+              for (const res of ecommerceResults) {
                 if (!res.url) continue;
                 await opts.onEvidence?.({
                   fact: `search_ecommerce_source platform=${platform} query="${query}" url=${res.url}`,
                   sourceType: 'tool_result',
                   sourceDetail: 'search_ecommerce.firecrawl',
+                  confidence: 'extracted',
+                });
+              }
+              for (const link of extractEcommerceProductLinks(ecommerceResults, platform)) {
+                await opts.onEvidence?.({
+                  fact: `search_ecommerce_product_link platform=${platform} query="${query}" url=${link.url}`,
+                  sourceType: 'tool_result',
+                  sourceDetail: 'search_ecommerce.firecrawl.product_link',
                   confidence: 'extracted',
                 });
               }

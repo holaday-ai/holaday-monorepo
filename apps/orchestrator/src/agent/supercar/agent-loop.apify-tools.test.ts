@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import {
   APIFY_ECOMMERCE_ACTORS,
   APIFY_SCRAPE_WEBSITE_ACTOR,
+  extractEcommerceProductLinks,
   formatFirecrawlSearchEcommerceResult,
   formatScrapeWebsiteResult,
   formatSearchEcommerceResult,
@@ -156,9 +157,12 @@ describe('formatFirecrawlSearchEcommerceResult', () => {
       5,
     );
     expect(out).toContain('可引用来源清单');
+    expect(out).toContain('"product_link_candidates"');
+    expect(out).toContain('"product_links"');
     expect(out).toContain('"source_candidates"');
     expect(out).toContain('"url": "https://item.jd.com/100123.html"');
     expect(out).toContain('不要输出空 url');
+    expect(out).toContain('优先使用 product_link_candidates 里的不同商品链接');
     expect(out).toContain('最终答案每行商品必须带一个可点击来源链接');
     expect(out).toContain('Apple iPhone 16 128GB 到手价 4599 元');
   });
@@ -179,5 +183,52 @@ describe('formatFirecrawlSearchEcommerceResult', () => {
     expect(out).toContain('https://example.com/1');
     expect(out).not.toContain('https://example.com/2');
     expect(out).not.toContain('body 2');
+  });
+});
+
+describe('extractEcommerceProductLinks', () => {
+  it('keeps Taobao/Tmall product detail links and drops broad catalogue pages', () => {
+    const links = extractEcommerceProductLinks(
+      [
+        {
+          title: 'iPhone 16 搜索结果',
+          url: 'https://mobile-phone.taobao.com/chanpin/iPhone16.html',
+          markdown:
+            '[iPhone 16 A](https://pcdetail.taobao.com/abc123) ' +
+            '[品牌频道](https://mobile-phone.taobao.com/chanpin/iPhone16.html) ' +
+            '[天猫商品](https://detail.tmall.com/item.htm?id=123)',
+        },
+      ],
+      'taobao',
+    );
+    expect(links).toEqual([
+      { title: 'iPhone 16 A', url: 'https://pcdetail.taobao.com/abc123' },
+      { title: '天猫商品', url: 'https://detail.tmall.com/item.htm?id=123' },
+    ]);
+  });
+
+  it('extracts JD item pages from markdown and source URLs', () => {
+    const links = extractEcommerceProductLinks(
+      [
+        {
+          title: 'JD search',
+          url: 'https://search.jd.com/Search?keyword=iPhone16',
+          markdown:
+            '[iPhone 16](https://item.jd.com/100123.html) ' +
+            'https://item.jd.com/100456.html。',
+        },
+        {
+          title: 'iPhone 16 Plus',
+          url: 'https://item.jd.com/100789.html',
+          markdown: 'detail page',
+        },
+      ],
+      'jd',
+    );
+    expect(links).toEqual([
+      { title: 'iPhone 16', url: 'https://item.jd.com/100123.html' },
+      { title: 'JD search', url: 'https://item.jd.com/100456.html' },
+      { title: 'iPhone 16 Plus', url: 'https://item.jd.com/100789.html' },
+    ]);
   });
 });
