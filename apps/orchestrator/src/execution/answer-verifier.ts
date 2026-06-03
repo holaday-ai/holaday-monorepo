@@ -407,33 +407,81 @@ export function extractStructuredItems(answerText: string): ParsedItem[] {
   return [];
 }
 
-const JSON_BLOCK_RE = /```(?:json)?\s*([\s\S]*?)```/i;
+const JSON_BLOCK_RE = /```(?:json)?\s*([\s\S]*?)```/gi;
+const LOOSE_JSON_LABEL_RE = /(?:^|\n)\s*JSON\s*\n/gi;
 
 function tryExtractJsonItems(answerText: string): ParsedItem[] {
-  const m = answerText.match(JSON_BLOCK_RE);
-  if (!m || !m[1]) return [];
-  try {
-    const parsed = JSON.parse(m[1].trim()) as unknown;
-    const items = pickItemsArray(parsed);
-    if (!items) return [];
-    return items
-      .slice(0, 200) // safety cap
-      .map((raw): ParsedItem => {
-        const obj = (raw ?? {}) as Record<string, unknown>;
-        return {
-          name: pickString(obj.name),
-          price: pickNumber(obj.price),
-          url:
-            typeof obj.url === 'string' && /^https?:\/\//i.test(obj.url)
-              ? obj.url.trim()
-              : null,
-          raw: JSON.stringify(obj),
-          source: 'json',
-        };
-      });
-  } catch {
-    return [];
+  for (const candidate of extractJsonCandidates(answerText)) {
+    try {
+      const parsed = JSON.parse(candidate.trim()) as unknown;
+      const items = pickItemsArray(parsed);
+      if (!items) continue;
+      return items
+        .slice(0, 200) // safety cap
+        .map((raw): ParsedItem => {
+          const obj = (raw ?? {}) as Record<string, unknown>;
+          return {
+            name: pickString(obj.name),
+            price: pickNumber(obj.price),
+            url:
+              typeof obj.url === 'string' && /^https?:\/\//i.test(obj.url)
+                ? obj.url.trim()
+                : null,
+            raw: JSON.stringify(obj),
+            source: 'json',
+          };
+        });
+    } catch {
+      continue;
+    }
   }
+  return [];
+}
+
+function extractJsonCandidates(answerText: string): string[] {
+  const candidates: string[] = [];
+  for (const m of answerText.matchAll(JSON_BLOCK_RE)) {
+    if (m[1]) candidates.push(m[1]);
+  }
+  for (const m of answerText.matchAll(LOOSE_JSON_LABEL_RE)) {
+    const start = m.index == null ? -1 : m.index + m[0].length;
+    if (start < 0) continue;
+    const balanced = extractBalancedJson(answerText.slice(start));
+    if (balanced) candidates.push(balanced);
+  }
+  return candidates;
+}
+
+function extractBalancedJson(text: string): string | null {
+  const start = text.search(/[\[{]/);
+  if (start < 0) return null;
+  const opener = text[start]!;
+  const closer = opener === '{' ? '}' : ']';
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!;
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') {
+      escaped = inString;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === opener) depth++;
+    if (ch === closer) {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
 }
 
 function tryExtractTableItems(answerText: string): ParsedItem[] {

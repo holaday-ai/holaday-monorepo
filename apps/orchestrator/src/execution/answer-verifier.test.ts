@@ -890,6 +890,34 @@ describe('extractStructuredItems — JSON code block path', () => {
     expect(items[0]).toMatchObject({ name: 'A', price: 100, source: 'json' });
   });
 
+  it('parses loose JSON labels emitted by the response renderer', () => {
+    const answer = [
+      '根据多个近期来源，以下是结果：',
+      'JSON',
+      JSON.stringify(
+        {
+          query: 'iPhone 16',
+          sort_by: 'price_asc',
+          items: [
+            { rank: 1, name: 'Apple iPhone 16 128GB', price: 3899, url: '', platform: '京东' },
+            { rank: 2, name: 'Apple iPhone 16 256GB', price: 4299, url: '', platform: '京东' },
+          ],
+        },
+        null,
+        2,
+      ),
+      '数据说明：价格随库存和活动动态变化。',
+    ].join('\n');
+    const items = extractStructuredItems(answer);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      name: 'Apple iPhone 16 128GB',
+      price: 3899,
+      url: null,
+      source: 'json',
+    });
+  });
+
   it('parses ¥-prefixed string price via parsePriceText', () => {
     const answer = '```json\n{"items":[{"name":"X","price":"¥1,299.99","url":"https://x.com/x"}]}\n```';
     const items = extractStructuredItems(answer);
@@ -1048,5 +1076,32 @@ describe('price_sort — only consults parsed items (no prose poisoning)', () =>
     const sortCheck = result.checks.find((c) => c.criterionType === 'price_sort');
     expect(sortCheck!.passed).toBe(false);
     expect(sortCheck!.detail).toContain('order broken');
+  });
+
+  it('surfaces missing ecommerce links from loose JSON instead of reporting unparsed output', () => {
+    const contract = buildContract({
+      taskId: 'tsk_ecom_loose_json',
+      intent: '去电商站搜 iPhone 16，按价格排序，给前2结果（名称/价格/链接）',
+      executionMode: 'generate',
+    });
+    const answer = [
+      'JSON',
+      JSON.stringify({
+        items: [
+          { name: 'Apple iPhone 16 128GB', price: 3899, url: '', platform: '京东' },
+          { name: 'Apple iPhone 16 256GB', price: 4299, url: '', platform: '京东' },
+        ],
+      }),
+    ].join('\n');
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_ecom_loose_json'),
+      answerText: answer,
+    });
+    const rowCheck = result.checks.find((c) => c.criterionType === 'ecommerce_rows');
+    expect(rowCheck).toBeDefined();
+    expect(rowCheck!.passed).toBe(false);
+    expect(rowCheck!.detail).toContain('第 1 行缺少链接');
+    expect(rowCheck!.detail).not.toContain('未能从回复中解析');
   });
 });
