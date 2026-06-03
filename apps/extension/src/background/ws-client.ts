@@ -349,19 +349,25 @@ async function checkWsRouteReachable(endpoint: string): Promise<boolean> {
       fetch(probeUrl, {
         cache: 'no-store',
         credentials: 'omit',
+        redirect: 'manual',
       }),
       WS_ROUTE_PROBE_TIMEOUT_MS,
       'ws_route_probe_timeout',
     );
     // A plain HTTP GET to a WebSocket route commonly returns 400/401/426
     // because no Upgrade header is present; those still prove the route
-    // reached the WS proxy. Any 5xx means the proxy/origin path is not
-    // healthy enough to attempt a real WebSocket without polluting Chrome's
-    // extension error page.
-    return response.ok || response.status < 500;
+    // reached the WS proxy. Redirects, 404s, and 5xx responses do not prove
+    // the route is live and can otherwise pollute Chrome's extension error
+    // page with a failed real WebSocket handshake.
+    return isReachableWsRouteProbeStatus(response.status);
   } catch {
     return false;
   }
+}
+
+function isReachableWsRouteProbeStatus(status: number): boolean {
+  if (status >= 200 && status < 300) return true;
+  return status === 400 || status === 401 || status === 403 || status === 426;
 }
 
 function wsEndpointToHttpProbeUrl(endpoint: string): string | null {
