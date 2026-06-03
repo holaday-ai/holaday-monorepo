@@ -39,6 +39,7 @@ import { fetchWithDeadline, responseJsonWithDeadline } from '../shared/http.js';
 import { openOrFocusWorkbench } from '../shared/open-workbench.js';
 import { sendRuntimeMessageWithRetry } from '../shared/runtime-message.js';
 import { normalizeHistorySummary, type HistorySyncSummary } from './history-summary.js';
+import { shouldClearRejectedPopupToken } from './auth-sync.js';
 import {
   type StoredUser,
   clearAccessToken,
@@ -222,43 +223,55 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      const seq = authSyncSeq.current;
       const stored = await getStoredUser();
       const tok = await getAccessToken();
-      if (cancelled) return;
+      if (cancelled || seq !== authSyncSeq.current) return;
       if (stored && tok) {
         setUser(stored);
         setToken(tok);
         void sendRuntimeMessageWithRetry({ type: 'holaday.connect', token: tok });
       } else if (tok && !stored) {
         const result = await fetchMe(tok);
-        if (cancelled) return;
+        if (cancelled || seq !== authSyncSeq.current) return;
         if (result.kind === 'ok') {
           await cacheStoredUserBestEffort(result.user);
-          if (cancelled || !mountedRef.current) return;
+          if (cancelled || seq !== authSyncSeq.current || !mountedRef.current) return;
           setUser(result.user);
           setToken(tok);
           void sendRuntimeMessageWithRetry({ type: 'holaday.connect', token: tok });
         } else if (result.kind === 'unauthorized') {
-          await clearAccessToken();
+          const current = normalizeAccessToken(await getAccessToken());
+          if (
+            shouldClearRejectedPopupToken(current, tok) &&
+            seq === authSyncSeq.current
+          ) {
+            await clearAccessToken();
+          }
         }
         // 'network' → leave token, render logged-out view this render
       } else {
         const response = await sendRuntimeMessageWithRetry<{ ok?: boolean; token?: string | null }>({
           type: 'holaday.tryAutoLogin',
         });
-        if (cancelled || !mountedRef.current) return;
+        if (cancelled || seq !== authSyncSeq.current || !mountedRef.current) return;
         const liftedToken = normalizeAccessToken(response?.token);
         if (!liftedToken) return;
         const result = await fetchMe(liftedToken);
-        if (cancelled || !mountedRef.current) return;
+        if (cancelled || seq !== authSyncSeq.current || !mountedRef.current) return;
         if (result.kind === 'ok') {
           await cacheStoredUserBestEffort(result.user);
-          if (cancelled || !mountedRef.current) return;
+          if (cancelled || seq !== authSyncSeq.current || !mountedRef.current) return;
           setUser(result.user);
           setToken(liftedToken);
         } else if (result.kind === 'unauthorized') {
           const current = normalizeAccessToken(await getAccessToken());
-          if (current === liftedToken) await clearAccessToken();
+          if (
+            shouldClearRejectedPopupToken(current, liftedToken) &&
+            seq === authSyncSeq.current
+          ) {
+            await clearAccessToken();
+          }
         }
       }
     })();
