@@ -207,6 +207,33 @@ describe('tryAutoLogin', () => {
     expect(executeScript).toHaveBeenCalledTimes(2);
   });
 
+  it('retries transient localStorage read failures while auto-login scans', async () => {
+    vi.useFakeTimers();
+    const executeScript = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Execution context was destroyed.'))
+      .mockResolvedValueOnce([{ result: 'hd_live_recovered_token' }]);
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [
+          {
+            id: 10,
+            url: 'https://holaday.ai/app',
+            active: true,
+            lastAccessed: 1,
+          } as chrome.tabs.Tab,
+        ]),
+      },
+      scripting: { executeScript },
+    } as unknown as typeof chrome;
+
+    const pending = tryAutoLogin();
+    await vi.advanceTimersByTimeAsync(150);
+
+    await expect(pending).resolves.toBe('hd_live_recovered_token');
+    expect(executeScript).toHaveBeenCalledTimes(2);
+  });
+
   it('only reads the highest-priority candidate tabs', async () => {
     const executeScript = vi.fn(async () => [{ result: null }]);
     globalThis.chrome = {

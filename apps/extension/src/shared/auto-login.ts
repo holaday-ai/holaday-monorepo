@@ -27,6 +27,7 @@ import { sanitizePageContextUrl } from './page-context.js';
 
 const TOKEN_KEY = 'holaday.access_token';
 const AUTO_LOGIN_TAB_READ_TIMEOUT_MS = 2_000;
+const AUTO_LOGIN_TRANSIENT_RETRY_DELAY_MS = 150;
 const AUTO_LOGIN_TAB_QUERY_TIMEOUT_MS = 2_000;
 const MAX_AUTO_LOGIN_CANDIDATE_TABS = 8;
 
@@ -58,24 +59,7 @@ function looksLikeAutoLoginToken(token: string): boolean {
 async function readTokenFromTab(tabId: number, url: string): Promise<string | null> {
   const logUrl = sanitizePageContextUrl(url);
   try {
-    // Inline closure-free arrow function. Doesn't reference any
-    // bundler-injected helpers or imported symbols, so the
-    // function source serializes cleanly when chrome.scripting
-    // calls .toString() to ship it to the page world.
-    const results = await withDeadline(
-      chrome.scripting.executeScript({
-        target: { tabId },
-        func: () => {
-          try {
-            return window.localStorage.getItem('holaday.access_token');
-          } catch {
-            return null;
-          }
-        },
-      }),
-      AUTO_LOGIN_TAB_READ_TIMEOUT_MS,
-      'auto_login_tab_timeout',
-    );
+    const results = await readTokenResultFromTab(tabId);
     const value = results[0]?.result;
     const token = normalizeAccessToken(value);
     if (token && looksLikeAutoLoginToken(token)) {
@@ -92,6 +76,64 @@ async function readTokenFromTab(tabId: number, url: string): Promise<string | nu
     );
     return null;
   }
+}
+
+async function readTokenResultFromTab(
+  tabId: number,
+): Promise<chrome.scripting.InjectionResult<string | null>[]> {
+  try {
+    return await readTokenResultFromTabOnce(tabId);
+  } catch (err) {
+    if (!isTransientAutoLoginReadError(err)) throw err;
+    await new Promise<void>((resolve) => setTimeout(resolve, AUTO_LOGIN_TRANSIENT_RETRY_DELAY_MS));
+    return readTokenResultFromTabOnce(tabId);
+  }
+}
+
+function readTokenResultFromTabOnce(
+  tabId: number,
+): Promise<chrome.scripting.InjectionResult<string | null>[]> {
+  // Inline closure-free arrow function. Doesn't reference any
+  // bundler-injected helpers or imported symbols, so the
+  // function source serializes cleanly when chrome.scripting
+  // calls .toString() to ship it to the page world.
+  return withDeadline(
+    chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        try {
+          return window.localStorage.getItem('holaday.access_token');
+        } catch {
+          return null;
+        }
+      },
+    }),
+    AUTO_LOGIN_TAB_READ_TIMEOUT_MS,
+    'auto_login_tab_timeout',
+  );
+}
+
+function isTransientAutoLoginReadError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes('permission') ||
+    lower.includes('cannot access') ||
+    lower.includes('chrome://') ||
+    lower.includes('chrome-extension://') ||
+    lower.includes('file://') ||
+    lower.includes('auto_login_tab_timeout')
+  ) {
+    return false;
+  }
+  return (
+    lower.includes('execution context was destroyed') ||
+    lower.includes('receiving end does not exist') ||
+    lower.includes('message port closed') ||
+    lower.includes('frame was detached') ||
+    lower.includes('frame with id') ||
+    lower.includes('context invalidated')
+  );
 }
 
 export async function tryAutoLogin(): Promise<string | null> {
