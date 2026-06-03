@@ -70,6 +70,8 @@ const BROWSER_TOOLS: readonly string[] = [
   'a11y_task_give_up',
   // Custom tools
   'navigate',
+  'scrape_website',
+  'search_ecommerce',
   'create_file',
   // Terminal tools (always allowed)
   'task_done',
