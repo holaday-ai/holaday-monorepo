@@ -262,6 +262,66 @@ export interface StuckNudgeResult {
   text: string;
 }
 
+function isEcommerceListingIntent(intent: string): boolean {
+  const lower = intent.toLowerCase();
+  const hasEcommerceHint = [
+    '电商站',
+    '电商平台',
+    '购物平台',
+    '商品',
+    '商品页',
+    '商品链接',
+    '京东',
+    '淘宝',
+    '天猫',
+    '拼多多',
+    '抖音商城',
+    '小红书商城',
+    'jd',
+    'taobao',
+    'tmall',
+    'pdd',
+    'amazon',
+  ].some((hint) => lower.includes(hint));
+  if (!hasEcommerceHint) return false;
+
+  const hasPrice = /价格|多少钱|最低价|最便宜|price/.test(lower);
+  const asksForLinks = /链接|url|link/.test(lower);
+  const asksForRows =
+    /前\s*\d+|top\s*\d+|\d+\s*(?:个|条|款)?(?:结果|商品|products?)/i.test(intent) ||
+    ['结果', '列表', '名称', '价格', '链接', '按价格', '排序'].filter((hint) =>
+      lower.includes(hint),
+    ).length >= 3;
+  return hasPrice && asksForLinks && asksForRows;
+}
+
+export function shouldUseScraperAfterAuthWall(input: {
+  intent: string;
+  kind: 'login' | 'captcha' | 'permission';
+  hasScraperTools: boolean;
+}): boolean {
+  if (!input.hasScraperTools) return false;
+  if (input.kind !== 'login') return false;
+  return isEcommerceListingIntent(input.intent);
+}
+
+export function buildAuthWallScraperRescueText(input: {
+  intent: string;
+  url: string | null;
+}): string {
+  const urlLine = input.url ? `当前浏览器停在登录页：${input.url}\n` : '';
+  return (
+    `${urlLine}这是一个公开商品列表/比价查询，不要要求用户登录，也不要停在 awaiting_user。\n\n` +
+    `请立刻改用 \`search_ecommerce\` 获取数据：\n` +
+    `- 如果用户提到京东或通用中文电商，优先 platform="jd"\n` +
+    `- 如果京东无结果，再试 platform="taobao"\n` +
+    `- query 保留核心商品词，例如 "iPhone 16 128GB"\n` +
+    `- 最终答案必须给出前 5 个结果的名称、价格、可点击链接，并按价格从低到高排序\n` +
+    `- 如果某个平台只返回搜索页，也要引用对应搜索结果页 URL，不要输出空链接\n\n` +
+    `用户原始需求：${input.intent}`
+  );
+}
+
 export function buildStuckNudge(input: StuckNudgeInput): StuckNudgeResult | null {
   if (input.stuckCount >= STUCK_EXIT_THRESHOLD && !input.alreadyForcedExit) {
     return {
@@ -2336,6 +2396,37 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           );
           const authWall = await probeCurrentAuthWall(executor, navUrl, true);
           if (authWall) {
+            if (
+              shouldUseScraperAfterAuthWall({
+                intent: opts.intent,
+                kind: authWall.kind,
+                hasScraperTools: Boolean(opts.firecrawl || opts.apifyAdapter),
+              })
+            ) {
+              logger.info(
+                {
+                  taskId: opts.taskId,
+                  iteration,
+                  kind: authWall.kind,
+                  url: authWall.url,
+                },
+                'supercar: auth wall detected after navigate — handing ecommerce query back to scraper tools',
+              );
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolUse.id,
+                content: [
+                  {
+                    type: 'text',
+                    text: buildAuthWallScraperRescueText({
+                      intent: opts.intent,
+                      url: authWall.url,
+                    }),
+                  },
+                ],
+              });
+              continue;
+            }
             logger.info(
               {
                 taskId: opts.taskId,

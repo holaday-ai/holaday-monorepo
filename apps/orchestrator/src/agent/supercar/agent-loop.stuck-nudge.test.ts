@@ -25,7 +25,9 @@ import { describe, expect, it } from 'vitest';
 import {
   STUCK_EXIT_THRESHOLD,
   STUCK_WARN_THRESHOLD,
+  buildAuthWallScraperRescueText,
   buildStuckNudge,
+  shouldUseScraperAfterAuthWall,
 } from './agent-loop.js';
 
 describe('buildStuckNudge', () => {
@@ -124,5 +126,60 @@ describe('buildStuckNudge', () => {
     // this, the model often calls scrape_website with vague queries
     // and gets nothing useful back.
     expect(out?.text).toMatch(/url|URL|当前.*页面|当前.*网址/);
+  });
+});
+
+describe('shouldUseScraperAfterAuthWall', () => {
+  it('routes ecommerce listing login walls back to scraper tools', () => {
+    expect(
+      shouldUseScraperAfterAuthWall({
+        intent: '去电商站搜 iPhone 16，按价格排序，给前5结果（名称/价格/链接）',
+        kind: 'login',
+        hasScraperTools: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('does not bypass login walls when scraper tools are unavailable', () => {
+    expect(
+      shouldUseScraperAfterAuthWall({
+        intent: '去电商站搜 iPhone 16，按价格排序，给前5结果（名称/价格/链接）',
+        kind: 'login',
+        hasScraperTools: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('keeps true account-operation login walls parked for user help', () => {
+    expect(
+      shouldUseScraperAfterAuthWall({
+        intent: '登录淘宝查看我的订单物流',
+        kind: 'login',
+        hasScraperTools: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('does not bypass captcha or permission walls', () => {
+    for (const kind of ['captcha', 'permission'] as const) {
+      expect(
+        shouldUseScraperAfterAuthWall({
+          intent: '去电商站搜 iPhone 16，按价格排序，给前5结果（名称/价格/链接）',
+          kind,
+          hasScraperTools: true,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it('rescue text explicitly tells the agent to use search_ecommerce with links', () => {
+    const text = buildAuthWallScraperRescueText({
+      intent: '去电商站搜 iPhone 16，按价格排序，给前5结果（名称/价格/链接）',
+      url: 'https://login.taobao.com/',
+    });
+    expect(text).toMatch(/search_ecommerce/);
+    expect(text).toMatch(/不要要求用户登录/);
+    expect(text).toMatch(/名称、价格、可点击链接/);
+    expect(text).toMatch(/从低到高排序/);
   });
 });
