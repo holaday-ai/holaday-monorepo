@@ -918,6 +918,45 @@ describe('extractStructuredItems — JSON code block path', () => {
     });
   });
 
+  it('parses embedded JSON objects without a code fence or label', () => {
+    const answer = [
+      '综合搜索结果，以下是当前各电商平台 iPhone 16 系列按价格从低到高排序的前5款：',
+      JSON.stringify(
+        {
+          query: 'iPhone 16',
+          sort_by: 'price_asc',
+          items: [
+            {
+              rank: 1,
+              name: 'Apple iPhone 16 128GB',
+              price: 4299,
+              url: '',
+              platform: '京东 / 天猫（叠加国补618到手价）',
+            },
+            {
+              rank: 2,
+              name: 'Apple iPhone 16 Plus 128GB',
+              price: 5499,
+              url: '',
+              platform: '天猫苹果官旗（券后起售）',
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      '补充说明：实时价格以京东 / 天猫苹果官旗页面为准。',
+    ].join('\n');
+    const items = extractStructuredItems(answer);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      name: 'Apple iPhone 16 128GB',
+      price: 4299,
+      url: null,
+      source: 'json',
+    });
+  });
+
   it('parses ¥-prefixed string price via parsePriceText', () => {
     const answer = '```json\n{"items":[{"name":"X","price":"¥1,299.99","url":"https://x.com/x"}]}\n```';
     const items = extractStructuredItems(answer);

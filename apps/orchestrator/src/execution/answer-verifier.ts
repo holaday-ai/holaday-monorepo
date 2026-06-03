@@ -449,6 +449,24 @@ function extractJsonCandidates(answerText: string): string[] {
     const balanced = extractBalancedJson(answerText.slice(start));
     if (balanced) candidates.push(balanced);
   }
+  for (const balanced of extractEmbeddedJsonCandidates(answerText)) {
+    candidates.push(balanced);
+  }
+  return candidates;
+}
+
+function extractEmbeddedJsonCandidates(answerText: string): string[] {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < answerText.length && candidates.length < 50; i++) {
+    const ch = answerText[i];
+    if (ch !== '{' && ch !== '[') continue;
+    const balanced = extractBalancedJson(answerText.slice(i));
+    if (!balanced || seen.has(balanced)) continue;
+    seen.add(balanced);
+    if (!/"items"\s*:|^\s*\[\s*\{/.test(balanced)) continue;
+    candidates.push(balanced);
+  }
   return candidates;
 }
 
