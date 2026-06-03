@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { formatFileRelativeDate, normalizeFileRows } from './files-page-state';
+import {
+  fileReferenceText,
+  formatFileRelativeDate,
+  normalizeFileRows,
+} from './files-page-state';
 
 describe('normalizeFileRows', () => {
   it('returns an empty list for malformed payloads', () => {
@@ -87,5 +91,39 @@ describe('formatFileRelativeDate', () => {
     expect(formatFileRelativeDate(Date.parse('2026-05-16T12:00:00Z'), now)).toBe(
       '昨天',
     );
+  });
+});
+
+describe('fileReferenceText', () => {
+  it('builds a pasteable task reference without exposing an authed download URL', () => {
+    expect(
+      fileReferenceText({
+        fileId: 'file_abc',
+        filename: ' Report.pdf ',
+        mimetype: ' APPLICATION/PDF ',
+        sizeBytes: 2048,
+      }),
+    ).toBe(
+      '请在任务中使用文件「Report.pdf」（fileId: file_abc，类型: application/pdf，大小: 2048 bytes）。',
+    );
+  });
+
+  it('normalizes malformed optional fields in the copied reference', () => {
+    expect(
+      fileReferenceText({
+        fileId: 'file_abc',
+        filename: '',
+        mimetype: '',
+        sizeBytes: -1,
+      }),
+    ).toContain('未命名文件');
+    expect(
+      fileReferenceText({
+        fileId: 'file_abc',
+        filename: '',
+        mimetype: '',
+        sizeBytes: -1,
+      }),
+    ).toContain('application/octet-stream');
   });
 });

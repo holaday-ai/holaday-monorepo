@@ -1,5 +1,6 @@
 import {
   Download,
+  Copy,
   Eye,
   File as FileIcon,
   FileSpreadsheet,
@@ -23,6 +24,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { copyTextToClipboard } from '@/lib/copy-text';
 import { useToast } from '@/components/ui/toast';
 import {
   downloadFailureMessage,
@@ -30,6 +38,7 @@ import {
 } from '@/lib/download-file';
 import { formatFileSize } from '@/lib/file-size';
 import {
+  fileReferenceText,
   formatFileRelativeDate,
   normalizeFileRows,
   type NormalizedFileRow,
@@ -129,6 +138,12 @@ export function FilesPage(): JSX.Element {
     }
   }
 
+  async function onCopyReference(f: UiFile): Promise<void> {
+    const ok = await copyTextToClipboard(fileReferenceText(f));
+    if (!mountedRef.current) return;
+    toast.show(ok ? '文件引用已复制' : '复制失败，请稍后重试', ok ? 'info' : 'error');
+  }
+
   function onUseInNewTask(f: UiFile): void {
     navigate('/', {
       state: {
@@ -171,95 +186,98 @@ export function FilesPage(): JSX.Element {
   }
 
   return (
-    <PageContainer width="wide">
-      <PageHeader
-        title="文件库"
-        description="管理你上传的文件和资料"
-        action={
-          <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-            {summary}
+    <TooltipProvider delayDuration={120}>
+      <PageContainer width="wide">
+        <PageHeader
+          title="文件库"
+          description="管理你上传的文件和资料"
+          action={
+            <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+              {summary}
+            </div>
+          }
+        />
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="inline-flex w-fit items-center gap-0.5 rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/55 p-0.5">
+            <FilterTab label="全部" active={filter === 'all'} onClick={() => setFilter('all')} />
+            <FilterTab
+              label="图片"
+              active={filter === 'images'}
+              onClick={() => setFilter('images')}
+            />
+            <FilterTab
+              label="文件"
+              active={filter === 'documents'}
+              onClick={() => setFilter('documents')}
+            />
           </div>
-        }
-      />
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="inline-flex w-fit items-center gap-0.5 rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/55 p-0.5">
-          <FilterTab label="全部" active={filter === 'all'} onClick={() => setFilter('all')} />
-          <FilterTab
-            label="图片"
-            active={filter === 'images'}
-            onClick={() => setFilter('images')}
-          />
-          <FilterTab
-            label="文件"
-            active={filter === 'documents'}
-            onClick={() => setFilter('documents')}
-          />
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="搜索文件名…"
+              className="w-full rounded-[8px] border border-[#DCDDDD] bg-white py-1.5 pl-8 pr-3 text-sm shadow-[0_1px_2px_rgba(15,23,42,0.03)] focus-visible:border-[#ADADAD] focus-visible:outline-none sm:w-64"
+            />
+          </div>
         </div>
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="搜索文件名…"
-            className="w-full rounded-[8px] border border-[#DCDDDD] bg-white py-1.5 pl-8 pr-3 text-sm shadow-[0_1px_2px_rgba(15,23,42,0.03)] focus-visible:border-[#ADADAD] focus-visible:outline-none sm:w-64"
-          />
-        </div>
-      </div>
 
-      {loading ? (
-        <PageLoadingPanel label="文件加载中" description="正在整理文件库" />
-      ) : files.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-          <FileIcon className="h-8 w-8 text-muted-foreground/40" />
-          <div className="text-sm font-medium text-foreground/80">
-            {emptyCopy.title}
+        {loading ? (
+          <PageLoadingPanel label="文件加载中" description="正在整理文件库" />
+        ) : files.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+            <FileIcon className="h-8 w-8 text-muted-foreground/40" />
+            <div className="text-sm font-medium text-foreground/80">
+              {emptyCopy.title}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {emptyCopy.body}
+            </div>
           </div>
-          <div className="text-xs text-muted-foreground">
-            {emptyCopy.body}
+        ) : (
+          <div className="overflow-hidden rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+            <div className="hidden grid-cols-[1fr_auto_auto_auto] items-center gap-3 border-b border-[#EFEFEF] bg-white px-4 py-2 text-[11px] font-medium tracking-wider text-[#595757] sm:grid">
+              <div>名称</div>
+              <div>已修改</div>
+              <div>大小</div>
+              <div />
+            </div>
+            <div className="divide-y divide-[#EFEFEF]">
+              {files.map((f) => (
+                <FileRow
+                  key={f.fileId}
+                  file={f}
+                  onPreview={() => onPreview(f)}
+                  onUseInNewTask={() => onUseInNewTask(f)}
+                  onDownload={() => void onDownload(f)}
+                  onCopyReference={() => void onCopyReference(f)}
+                  onDelete={() => setPendingDelete(f)}
+                />
+              ))}
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-          <div className="hidden grid-cols-[1fr_auto_auto_auto] items-center gap-3 border-b border-[#EFEFEF] bg-white px-4 py-2 text-[11px] font-medium tracking-wider text-[#595757] sm:grid">
-            <div>名称</div>
-            <div>已修改</div>
-            <div>大小</div>
-            <div />
-          </div>
-          <div className="divide-y divide-[#EFEFEF]">
-            {files.map((f) => (
-              <FileRow
-                key={f.fileId}
-                file={f}
-                onPreview={() => onPreview(f)}
-                onUseInNewTask={() => onUseInNewTask(f)}
-                onDownload={() => void onDownload(f)}
-                onDelete={() => setPendingDelete(f)}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-      <FilePreviewModal payload={previewing} onClose={() => setPreviewing(null)} />
-      <ConfirmDialog
-        open={pendingDelete !== null}
-        title="删除这个文件？"
-        description={
-          pendingDelete
-            ? `${pendingDelete.filename} · ${formatFileSize(pendingDelete.sizeBytes)}\n已完成任务的结果文本不会受影响，但文件的下载链接会失效。`
-            : ''
-        }
-        confirmLabel="删除"
-        destructive
-        onClose={() => setPendingDelete(null)}
-        onConfirm={async () => {
-          const f = pendingDelete;
-          if (!f) return;
-          await performDelete(f);
-          if (mountedRef.current) setPendingDelete(null);
-        }}
-      />
-    </PageContainer>
+        )}
+        <FilePreviewModal payload={previewing} onClose={() => setPreviewing(null)} />
+        <ConfirmDialog
+          open={pendingDelete !== null}
+          title="删除这个文件？"
+          description={
+            pendingDelete
+              ? `${pendingDelete.filename} · ${formatFileSize(pendingDelete.sizeBytes)}\n已完成任务的结果文本不会受影响，但文件的下载链接会失效。`
+              : ''
+          }
+          confirmLabel="删除"
+          destructive
+          onClose={() => setPendingDelete(null)}
+          onConfirm={async () => {
+            const f = pendingDelete;
+            if (!f) return;
+            await performDelete(f);
+            if (mountedRef.current) setPendingDelete(null);
+          }}
+        />
+      </PageContainer>
+    </TooltipProvider>
   );
 }
 
@@ -293,12 +311,14 @@ function FileRow({
   onPreview,
   onUseInNewTask,
   onDownload,
+  onCopyReference,
   onDelete,
 }: {
   file: UiFile;
   onPreview: () => void;
   onUseInNewTask: () => void;
   onDownload: () => void;
+  onCopyReference: () => void;
   onDelete: () => void;
 }): JSX.Element {
   const Icon = iconForMime(file.mimetype);
@@ -329,26 +349,30 @@ function FileRow({
       {/* Always-visible primary action + More menu. No hover-only
           opacity tricks — every action is reachable on touch. */}
       <div className="flex shrink-0 items-center gap-1">
-        <button
-          type="button"
-          onClick={onUseInNewTask}
-          aria-label={`把 ${file.filename} 用于新任务`}
-          title="用于新任务"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
+        <IconTooltip label="用于新任务">
+          <button
+            type="button"
+            onClick={onUseInNewTask}
+            aria-label={`把 ${file.filename} 用于新任务`}
+            title={`把 ${file.filename} 用于新任务`}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </IconTooltip>
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label="更多操作"
-              title="更多"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/60 hover:text-foreground"
-            >
-              <MoreHorizontal className="h-4 w-4" />
-            </button>
-          </DropdownMenuTrigger>
+          <IconTooltip label="更多操作">
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="更多操作"
+                title="更多操作"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/60 hover:text-foreground"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+            </DropdownMenuTrigger>
+          </IconTooltip>
           <DropdownMenuContent align="end" className="w-44">
             <DropdownMenuItem onSelect={onPreview}>
               <Eye className="text-muted-foreground" />
@@ -357,6 +381,10 @@ function FileRow({
             <DropdownMenuItem onSelect={onDownload}>
               <Download className="text-muted-foreground" />
               <span>下载</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onCopyReference}>
+              <Copy className="text-muted-foreground" />
+              <span>复制引用</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={onDelete}
@@ -369,6 +397,21 @@ function FileRow({
         </DropdownMenu>
       </div>
     </div>
+  );
+}
+
+function IconTooltip({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }
 

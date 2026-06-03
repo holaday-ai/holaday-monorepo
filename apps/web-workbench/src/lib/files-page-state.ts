@@ -36,6 +36,15 @@ export function formatFileRelativeDate(
   return `${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
+export function fileReferenceText(
+  file: Pick<NormalizedFileRow, 'fileId' | 'filename' | 'mimetype' | 'sizeBytes'>,
+): string {
+  const filename = safeFileText(file.filename) || '未命名文件';
+  const mimetype = safeFileMime(file.mimetype);
+  const sizeBytes = safeFileSizeBytes(file.sizeBytes);
+  return `请在任务中使用文件「${filename}」（fileId: ${file.fileId}，类型: ${mimetype}，大小: ${sizeBytes} bytes）。`;
+}
+
 function normalizeFileRow(value: unknown): NormalizedFileRow | null {
   if (!isRecord(value)) return null;
   const fileId = safeFileText(value.fileId);

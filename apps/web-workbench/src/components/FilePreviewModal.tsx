@@ -8,6 +8,12 @@ import {
 import { formatFileSize } from '@/lib/file-size';
 import { filePreviewKind } from '@/lib/file-preview-kind';
 import { useToast } from '@/components/ui/toast';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 export interface FilePreviewPayload {
   fileId: string;
@@ -162,107 +168,130 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
   const kind = filePreviewKind({ mime, filename: payload.filename });
 
   return (
-    <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm"
-      role="dialog"
-      aria-modal
-      onClick={onClose}
-    >
+    <TooltipProvider delayDuration={120}>
       <div
-        className="flex h-[min(90vh,820px)] w-[min(92vw,960px)] flex-col overflow-hidden rounded-lg border border-[#DCDDDD] bg-white shadow-[0_16px_48px_rgba(17,24,39,0.16)] dark:border-white/10 dark:bg-card"
-        onClick={(e) => e.stopPropagation()}
+        className="fixed inset-0 z-[80] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm"
+        role="dialog"
+        aria-modal
+        onClick={onClose}
       >
-        <header className="flex items-center justify-between gap-3 border-b border-[#DCDDDD]/80 px-4 py-2.5 dark:border-white/10">
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium text-foreground" title={payload.filename}>
-              {payload.filename}
+        <div
+          className="flex h-[min(90vh,820px)] w-[min(92vw,960px)] flex-col overflow-hidden rounded-lg border border-[#DCDDDD] bg-white shadow-[0_16px_48px_rgba(17,24,39,0.16)] dark:border-white/10 dark:bg-card"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <header className="flex items-center justify-between gap-3 border-b border-[#DCDDDD]/80 px-4 py-2.5 dark:border-white/10">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium text-foreground" title={payload.filename}>
+                {payload.filename}
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                {formatFileSize(payload.sizeBytes)} · {mime || '未知类型'}
+              </div>
             </div>
-            <div className="text-[11px] text-muted-foreground">
-              {formatFileSize(payload.sizeBytes)} · {mime || '未知类型'}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => void handleDownload()}
-            disabled={downloading}
-            aria-label="下载到本地"
-            title={downloading ? '下载中' : '下载'}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-muted-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
-          >
-            {downloading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Download className="h-3.5 w-3.5" />
+            <IconTooltip label={downloading ? '下载中' : '下载'}>
+              <button
+                type="button"
+                onClick={() => void handleDownload()}
+                disabled={downloading}
+                aria-label="下载到本地"
+                title={downloading ? '下载中' : '下载'}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-muted-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
+              >
+                {downloading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Download className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </IconTooltip>
+            <IconTooltip label="关闭">
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="关闭预览"
+                title="关闭"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </IconTooltip>
+          </header>
+          <div className="relative flex flex-1 items-center justify-center overflow-auto bg-[#EFEFEF]/45 dark:bg-background/40">
+            {loading && (
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             )}
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="关闭预览"
-            title="关闭"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </header>
-        <div className="relative flex flex-1 items-center justify-center overflow-auto bg-[#EFEFEF]/45 dark:bg-background/40">
-          {loading && (
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          )}
-          {!loading && errorMessage && (
-            <div className="flex flex-col items-center gap-2 px-6 text-center text-sm text-muted-foreground">
-              <ExternalLink className="h-8 w-8 text-[#EA1F59]" />
-              <div className="font-medium text-foreground/85">无法加载预览</div>
-              <div className="text-xs">{errorMessage}</div>
-            </div>
-          )}
-          {!loading && !errorMessage && objectUrl && kind === 'image' && (
-            <img
-              src={objectUrl}
-              alt={payload.filename}
-              className="max-h-full max-w-full object-contain"
-            />
-          )}
-          {!loading && !errorMessage && objectUrl && kind === 'pdf' && (
-            <iframe
-              src={objectUrl}
-              title={payload.filename}
-              className="h-full w-full border-0"
-            />
-          )}
-          {!loading && !errorMessage && textBody !== null && (
-            <pre className="m-0 max-h-full w-full overflow-auto whitespace-pre-wrap break-words bg-white px-6 py-4 font-mono text-[12px] text-[#2F2F2F] dark:bg-card dark:text-foreground">
-              {textBody}
-            </pre>
-          )}
-          {!loading &&
-            !errorMessage &&
-            !objectUrl &&
-            textBody === null &&
-            kind === 'download' && (
+            {!loading && errorMessage && (
               <div className="flex flex-col items-center gap-2 px-6 text-center text-sm text-muted-foreground">
-                <FileText className="h-8 w-8 text-[#595757]" />
-                <div className="font-medium text-foreground/85">
-                  无法预览此文件类型
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void handleDownload()}
-                  disabled={downloading}
-                  aria-label="下载到本地"
-                  title={downloading ? '下载中' : '下载'}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
-                >
-                  {downloading ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Download className="h-3.5 w-3.5" />
-                  )}
-                </button>
+                <ExternalLink className="h-8 w-8 text-[#EA1F59]" />
+                <div className="font-medium text-foreground/85">无法加载预览</div>
+                <div className="text-xs">{errorMessage}</div>
               </div>
             )}
+            {!loading && !errorMessage && objectUrl && kind === 'image' && (
+              <img
+                src={objectUrl}
+                alt={payload.filename}
+                className="max-h-full max-w-full object-contain"
+              />
+            )}
+            {!loading && !errorMessage && objectUrl && kind === 'pdf' && (
+              <iframe
+                src={objectUrl}
+                title={payload.filename}
+                className="h-full w-full border-0"
+              />
+            )}
+            {!loading && !errorMessage && textBody !== null && (
+              <pre className="m-0 max-h-full w-full overflow-auto whitespace-pre-wrap break-words bg-white px-6 py-4 font-mono text-[12px] text-[#2F2F2F] dark:bg-card dark:text-foreground">
+                {textBody}
+              </pre>
+            )}
+            {!loading &&
+              !errorMessage &&
+              !objectUrl &&
+              textBody === null &&
+              kind === 'download' && (
+                <div className="flex flex-col items-center gap-2 px-6 text-center text-sm text-muted-foreground">
+                  <FileText className="h-8 w-8 text-[#595757]" />
+                  <div className="font-medium text-foreground/85">
+                    无法预览此文件类型
+                  </div>
+                  <IconTooltip label={downloading ? '下载中' : '下载'}>
+                    <button
+                      type="button"
+                      onClick={() => void handleDownload()}
+                      disabled={downloading}
+                      aria-label="下载到本地"
+                      title={downloading ? '下载中' : '下载'}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
+                    >
+                      {downloading ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Download className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </IconTooltip>
+                </div>
+              )}
+          </div>
         </div>
       </div>
-    </div>
+    </TooltipProvider>
+  );
+}
+
+function IconTooltip({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }
