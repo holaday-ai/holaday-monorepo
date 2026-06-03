@@ -363,7 +363,10 @@ describe('ws-client send', () => {
 
   it('preflights the websocket origin before constructing a websocket', async () => {
     configMock.wsHealthUrl = 'https://primary.test/api/healthz';
-    const fetch = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200 } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 426 } as Response);
     vi.stubGlobal('fetch', fetch);
     const { connect, getWsConnectionStatus } = await import('./ws-client.js');
 
@@ -494,6 +497,31 @@ describe('ws-client send', () => {
         .fn()
         .mockResolvedValueOnce({ ok: true, status: 200 } as Response)
         .mockResolvedValueOnce({ ok: false, status: 404 } as Response),
+    );
+    const { connect, disconnect, getWsConnectionStatus } = await import('./ws-client.js');
+
+    connect('token');
+
+    await vi.waitFor(async () => {
+      await expect(getWsConnectionStatus()).resolves.toMatchObject({
+        connected: false,
+        readyState: null,
+        reconnectAttempt: 1,
+        lastCloseReason: 'ws route check failed',
+      });
+    });
+    expect(sockets).toHaveLength(0);
+    disconnect();
+  });
+
+  it('skips websocket construction when the route probe returns a static success page', async () => {
+    configMock.wsHealthUrl = 'https://primary.test/api/healthz';
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, status: 200 } as Response)
+        .mockResolvedValueOnce({ ok: true, status: 200 } as Response),
     );
     const { connect, disconnect, getWsConnectionStatus } = await import('./ws-client.js');
 
