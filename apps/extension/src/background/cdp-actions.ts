@@ -894,7 +894,7 @@ export async function getActiveTabId(
 }
 
 function getTabUrlForCdp(tab: chrome.tabs.Tab): string {
-  return tab.url || tab.pendingUrl || '';
+  return tab.pendingUrl || tab.url || '';
 }
 
 function pickBestActiveTabCandidate(

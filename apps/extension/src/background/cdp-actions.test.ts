@@ -1345,6 +1345,24 @@ describe('getActiveTabId', () => {
     await expect(getActiveTabId()).resolves.toBe(10);
   });
 
+  it('prefers pendingUrl over a stale chrome-error URL while loading', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([
+        {
+          id: 10,
+          url: 'chrome-error://chromewebdata/',
+          pendingUrl: 'https://holaday.ai/scheduled',
+        },
+      ])
+      .mockResolvedValueOnce([{ id: 11, url: 'https://older.example/' }]);
+    globalThis.chrome = {
+      tabs: { query },
+    } as unknown as typeof chrome;
+
+    await expect(getActiveTabId()).resolves.toBe(10);
+  });
+
   it('inspects every returned tab before giving up on the active web page', async () => {
     const query = vi
       .fn()
