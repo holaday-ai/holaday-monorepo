@@ -784,7 +784,7 @@ describe('executeCdpAction', () => {
     expect(attach).toHaveBeenCalledTimes(2);
   });
 
-  it('forgets detached-frame CDP sessions so the next action can reattach', async () => {
+  it('reattaches and retries when the page swaps execution contexts', async () => {
     const attach = vi.fn(async () => undefined);
     const detach = vi.fn(async () => undefined);
     const sendCommand = vi
@@ -800,16 +800,12 @@ describe('executeCdpAction', () => {
     } as unknown as typeof chrome;
 
     await expect(executeCdpAction(13, { kind: 'type', text: 'retry' })).resolves.toEqual({
-      ok: false,
-      message: '浏览器标签页已关闭或连接中断，请重新打开页面后重试',
-    });
-    expect(detach).toHaveBeenCalledWith({ tabId: 13 });
-
-    await expect(executeCdpAction(13, { kind: 'type', text: 'retry' })).resolves.toEqual({
       ok: true,
       message: 'typed 5 chars',
     });
+    expect(detach).toHaveBeenCalledWith({ tabId: 13 });
     expect(attach).toHaveBeenCalledTimes(2);
+    expect(sendCommand).toHaveBeenCalledTimes(2);
   });
 
   it('reattaches and retries once when a CDP command loses its debugger session', async () => {

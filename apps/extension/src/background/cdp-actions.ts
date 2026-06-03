@@ -625,7 +625,8 @@ function shouldRetryCdpAfterReattach(err: unknown): boolean {
     lower.includes('not attached') ||
     lower.includes('target detached') ||
     lower.includes('detached from target') ||
-    lower.includes('no session with given id')
+    lower.includes('no session with given id') ||
+    lower.includes('execution context was destroyed')
   );
 }
 
