@@ -87,6 +87,7 @@ export function App() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [tasks, setTasks] = useState<TaskView[]>([]);
   const tasksRefreshInFlight = useRef(false);
+  const tasksRefreshQueued = useRef(false);
   const authRetryInFlight = useRef(false);
   const taskSubmitInFlight = useRef(false);
   const mountedRef = useRef(true);
@@ -108,15 +109,22 @@ export function App() {
   }, []);
 
   async function refreshTasksSnapshot(): Promise<void> {
-    if (tasksRefreshInFlight.current) return;
+    if (tasksRefreshInFlight.current) {
+      tasksRefreshQueued.current = true;
+      return;
+    }
     tasksRefreshInFlight.current = true;
     try {
-      const resp = await sendRuntimeMessageWithRetry<{ tasks?: unknown }>({ type: 'holaday.tasks' });
-      if (mountedRef.current && resp && 'tasks' in resp) {
-        setTasks(normalizeTaskSnapshot(resp.tasks));
-      }
+      do {
+        tasksRefreshQueued.current = false;
+        const resp = await sendRuntimeMessageWithRetry<{ tasks?: unknown }>({ type: 'holaday.tasks' });
+        if (mountedRef.current && resp && 'tasks' in resp) {
+          setTasks(normalizeTaskSnapshot(resp.tasks));
+        }
+      } while (mountedRef.current && tasksRefreshQueued.current);
     } finally {
       tasksRefreshInFlight.current = false;
+      tasksRefreshQueued.current = false;
     }
   }
 
