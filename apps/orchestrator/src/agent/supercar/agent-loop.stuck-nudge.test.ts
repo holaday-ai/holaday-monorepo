@@ -140,6 +140,16 @@ describe('shouldUseScraperAfterAuthWall', () => {
     ).toBe(true);
   });
 
+  it('routes ecommerce listing permission walls back to scraper tools', () => {
+    expect(
+      shouldUseScraperAfterAuthWall({
+        intent: '去电商站搜 iPhone 16，按价格排序，给前5结果（名称/价格/链接）',
+        kind: 'permission',
+        hasScraperTools: true,
+      }),
+    ).toBe(true);
+  });
+
   it('does not bypass login walls when scraper tools are unavailable', () => {
     expect(
       shouldUseScraperAfterAuthWall({
@@ -160,25 +170,25 @@ describe('shouldUseScraperAfterAuthWall', () => {
     ).toBe(false);
   });
 
-  it('does not bypass captcha or permission walls', () => {
-    for (const kind of ['captcha', 'permission'] as const) {
-      expect(
-        shouldUseScraperAfterAuthWall({
-          intent: '去电商站搜 iPhone 16，按价格排序，给前5结果（名称/价格/链接）',
-          kind,
-          hasScraperTools: true,
-        }),
-      ).toBe(false);
-    }
+  it('does not bypass captcha walls', () => {
+    expect(
+      shouldUseScraperAfterAuthWall({
+        intent: '去电商站搜 iPhone 16，按价格排序，给前5结果（名称/价格/链接）',
+        kind: 'captcha',
+        hasScraperTools: true,
+      }),
+    ).toBe(false);
   });
 
   it('rescue text explicitly tells the agent to use search_ecommerce with links', () => {
     const text = buildAuthWallScraperRescueText({
       intent: '去电商站搜 iPhone 16，按价格排序，给前5结果（名称/价格/链接）',
+      kind: 'permission',
       url: 'https://login.taobao.com/',
     });
     expect(text).toMatch(/search_ecommerce/);
     expect(text).toMatch(/不要要求用户登录/);
+    expect(text).toMatch(/不要继续用 `web_search`/);
     expect(text).toMatch(/名称、价格、可点击链接/);
     expect(text).toMatch(/从低到高排序/);
   });

@@ -301,18 +301,20 @@ export function shouldUseScraperAfterAuthWall(input: {
   hasScraperTools: boolean;
 }): boolean {
   if (!input.hasScraperTools) return false;
-  if (input.kind !== 'login') return false;
+  if (input.kind === 'captcha') return false;
   return isEcommerceListingIntent(input.intent);
 }
 
 export function buildAuthWallScraperRescueText(input: {
   intent: string;
+  kind?: 'login' | 'captcha' | 'permission';
   url: string | null;
 }): string {
-  const urlLine = input.url ? `当前浏览器停在登录页：${input.url}\n` : '';
+  const wallLabel = input.kind === 'permission' ? '权限页' : '登录页';
+  const urlLine = input.url ? `当前浏览器停在${wallLabel}：${input.url}\n` : '';
   return (
     `${urlLine}这是一个公开商品列表/比价查询，不要要求用户登录，也不要停在 awaiting_user。\n\n` +
-    `请立刻改用 \`search_ecommerce\` 获取数据：\n` +
+    `请立刻改用 \`search_ecommerce\` 获取数据，不要继续用 \`web_search\` 拼结果：\n` +
     `- 如果用户提到京东或通用中文电商，优先 platform="jd"\n` +
     `- 如果京东无结果，再试 platform="taobao"\n` +
     `- query 保留核心商品词，例如 "iPhone 16 128GB"\n` +
@@ -2007,6 +2009,33 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
           else if (loginTextHit) forcedAuthKind = 'login';
         }
         const forcedAuthPark = forcedAuthKind !== null;
+        if (forcedAuthPark) {
+          const authKind = forcedAuthKind!;
+          if (
+            shouldUseScraperAfterAuthWall({
+              intent: opts.intent,
+              kind: authKind,
+              hasScraperTools: Boolean(opts.firecrawl || opts.apifyAdapter),
+            })
+          ) {
+            const rescueText = buildAuthWallScraperRescueText({
+              intent: opts.intent,
+              kind: authKind,
+              url: preParkUrl,
+            });
+            logger.info(
+              {
+                taskId: opts.taskId,
+                iteration,
+                kind: authKind,
+                url: preParkUrl,
+              },
+              'supercar: auth wall detected on no-tool turn — continuing ecommerce query with scraper tools',
+            );
+            messages.push({ role: 'user', content: rescueText });
+            continue;
+          }
+        }
         if (forcedAuthPark || looksLikePendingQuestion(finalText)) {
           // Park on a user reply. `supercarReply` resolves the promise;
           // `supercarAbort` rejects with a sentinel we swap to
@@ -2420,6 +2449,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                     type: 'text',
                     text: buildAuthWallScraperRescueText({
                       intent: opts.intent,
+                      kind: authWall.kind,
                       url: authWall.url,
                     }),
                   },
