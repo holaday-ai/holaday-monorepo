@@ -35,6 +35,7 @@ const MAX_CONTEXT_URL_CHARS = 2048;
 const MAX_CONTEXT_SELECTION_CHARS = 2_000;
 const MAX_CONTEXT_META_DESCRIPTION_CHARS = 512;
 const PAGE_CONTEXT_READ_TIMEOUT_MS = 1_500;
+const PAGE_CONTEXT_TRANSIENT_RETRY_DELAY_MS = 120;
 const PAGE_CONTEXT_TAB_QUERY_TIMEOUT_MS = 1_500;
 const SENSITIVE_QUERY_PARAM_WORDS = new Set([
   'access',
@@ -193,14 +194,7 @@ export async function getActivePageContext(): Promise<PageContext | null> {
   }
 
   try {
-    const results = await withDeadline(
-      chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: pageWorldExtractor,
-      }),
-      PAGE_CONTEXT_READ_TIMEOUT_MS,
-      'page_context_timeout',
-    );
+    const results = await readPageContextSnippet(tab.id);
     const snippet = results[0]?.result as PageContextSnippet | undefined;
     if (!snippet) {
       const fallback = sanitizePageContextSnippet({
@@ -227,6 +221,52 @@ export async function getActivePageContext(): Promise<PageContext | null> {
       ...fallback,
     };
   }
+}
+
+async function readPageContextSnippet(tabId: number): Promise<chrome.scripting.InjectionResult<PageContextSnippet>[]> {
+  try {
+    return await readPageContextSnippetOnce(tabId);
+  } catch (err) {
+    if (!isTransientPageContextReadError(err)) throw err;
+    await new Promise<void>((resolve) => setTimeout(resolve, PAGE_CONTEXT_TRANSIENT_RETRY_DELAY_MS));
+    return readPageContextSnippetOnce(tabId);
+  }
+}
+
+function readPageContextSnippetOnce(
+  tabId: number,
+): Promise<chrome.scripting.InjectionResult<PageContextSnippet>[]> {
+  return withDeadline(
+    chrome.scripting.executeScript({
+      target: { tabId },
+      func: pageWorldExtractor,
+    }),
+    PAGE_CONTEXT_READ_TIMEOUT_MS,
+    'page_context_timeout',
+  );
+}
+
+function isTransientPageContextReadError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes('permission') ||
+    lower.includes('cannot access') ||
+    lower.includes('chrome://') ||
+    lower.includes('chrome-extension://') ||
+    lower.includes('file://') ||
+    lower.includes('page_context_timeout')
+  ) {
+    return false;
+  }
+  return (
+    lower.includes('execution context was destroyed') ||
+    lower.includes('receiving end does not exist') ||
+    lower.includes('message port closed') ||
+    lower.includes('frame was detached') ||
+    lower.includes('frame with id') ||
+    lower.includes('context invalidated')
+  );
 }
 
 /**

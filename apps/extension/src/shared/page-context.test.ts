@@ -160,6 +160,45 @@ describe('getActivePageContext', () => {
     });
   });
 
+  it('retries transient page context injection failures', async () => {
+    vi.useFakeTimers();
+    const executeScript = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Execution context was destroyed.'))
+      .mockResolvedValueOnce([
+        {
+          result: {
+            title: 'Recovered title',
+            url: 'https://example.com/recovered',
+            selectedText: 'selected',
+            metaDescription: 'meta',
+          },
+        },
+      ]);
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [
+          { id: 8, title: 'Fallback title', url: 'https://example.com/loading' } as chrome.tabs.Tab,
+        ]),
+      },
+      scripting: {
+        executeScript,
+      },
+    } as unknown as typeof chrome;
+
+    const pending = getActivePageContext();
+    await vi.advanceTimersByTimeAsync(120);
+
+    await expect(pending).resolves.toEqual({
+      tabId: 8,
+      title: 'Recovered title',
+      url: 'https://example.com/recovered',
+      selectedText: 'selected',
+      metaDescription: 'meta',
+    });
+    expect(executeScript).toHaveBeenCalledTimes(2);
+  });
+
   it('uses pendingUrl for a loading active page when injection is unavailable', async () => {
     globalThis.chrome = {
       tabs: {
