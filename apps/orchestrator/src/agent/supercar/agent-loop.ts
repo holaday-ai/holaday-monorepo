@@ -188,6 +188,38 @@ export function formatSearchEcommerceResult(
   );
 }
 
+export function formatFirecrawlSearchEcommerceResult(
+  results: readonly { title?: string; url: string; markdown: string }[],
+  platform: string,
+  query: string,
+  maxResults: number,
+): string {
+  const limited = results.slice(0, Math.max(1, maxResults));
+  const head = `# search_ecommerce 结果 (${platform}, query="${query}", ${results.length} pages)\n\n`;
+  const sourceCandidates = limited.map((res, i) => ({
+    rank: i + 1,
+    title: res.title ?? res.url,
+    url: res.url,
+    snippet: res.markdown.replace(/\s+/g, ' ').slice(0, 500),
+  }));
+  const sourceBlock =
+    '## 可引用来源清单（最终答案必须优先引用这里的 URL；不要输出空 url）\n\n' +
+    '```json\n' +
+    JSON.stringify({ source_candidates: sourceCandidates }, null, 2) +
+    '\n```\n\n';
+  const blocks = limited
+    .map((res) => {
+      const md = res.markdown.length > 6_000
+        ? `${res.markdown.slice(0, 5_988)}\n\n…(truncated)`
+        : res.markdown;
+      return `## ${res.title ?? res.url}\n来源: ${res.url}\n\n${md}`;
+    })
+    .join('\n\n---\n\n');
+  const tail =
+    '\n\n---\n**记得回到浏览器中整理 / 呈现这些信息（产品名/价格/链接）。最终答案每行商品必须带一个可点击来源链接；如果只拿到平台搜索页，也要引用对应搜索结果页 URL，不要写空 URL。**';
+  return head + sourceBlock + blocks + tail;
+}
+
 /**
  * Phase 24 fix #1 — stuck-tier nudge text builder.
  *
@@ -2739,21 +2771,20 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                 continue;
               }
               toolsUsed.add('search_ecommerce');
-              const head = `# search_ecommerce 结果 (${platform}, query="${query}", ${r.results.length} pages)\n\n`;
-              const blocks = r.results
-                .slice(0, maxResults)
-                .map((res) => {
-                  const md = res.markdown.length > 6_000
-                    ? `${res.markdown.slice(0, 5_988)}\n\n…(truncated)`
-                    : res.markdown;
-                  return `## ${res.title ?? res.url}\n来源: ${res.url}\n\n${md}`;
-                })
-                .join('\n\n---\n\n');
-              const tail = '\n\n---\n**记得回到浏览器中整理 / 呈现这些信息（产品名/价格/链接），让用户看到执行过程**';
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: toolUse.id,
-                content: [{ type: 'text', text: head + blocks + tail }],
+                content: [
+                  {
+                    type: 'text',
+                    text: formatFirecrawlSearchEcommerceResult(
+                      r.results,
+                      platform,
+                      query,
+                      maxResults,
+                    ),
+                  },
+                ],
               });
             } else if (opts.apifyAdapter) {
               const actorId = APIFY_ECOMMERCE_ACTORS[platform];

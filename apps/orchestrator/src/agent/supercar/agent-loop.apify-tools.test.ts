@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import {
   APIFY_ECOMMERCE_ACTORS,
   APIFY_SCRAPE_WEBSITE_ACTOR,
+  formatFirecrawlSearchEcommerceResult,
   formatScrapeWebsiteResult,
   formatSearchEcommerceResult,
 } from './agent-loop.js';
@@ -132,5 +133,51 @@ describe('formatSearchEcommerceResult', () => {
     expect(out).toContain('"name": ""');
     expect(out).toContain('"price": ""');
     expect(out).toContain('"url": ""');
+  });
+});
+
+describe('formatFirecrawlSearchEcommerceResult', () => {
+  it('front-loads source candidates so final answers can preserve URLs', () => {
+    const out = formatFirecrawlSearchEcommerceResult(
+      [
+        {
+          title: 'Apple iPhone 16 京东自营',
+          url: 'https://item.jd.com/100123.html',
+          markdown: 'Apple iPhone 16 128GB 到手价 4599 元',
+        },
+        {
+          title: 'iPhone 16 搜索结果',
+          url: 'https://search.jd.com/Search?keyword=iPhone%2016',
+          markdown: '搜索页包含多款 iPhone 16',
+        },
+      ],
+      'jd',
+      'iPhone 16',
+      5,
+    );
+    expect(out).toContain('可引用来源清单');
+    expect(out).toContain('"source_candidates"');
+    expect(out).toContain('"url": "https://item.jd.com/100123.html"');
+    expect(out).toContain('不要输出空 url');
+    expect(out).toContain('最终答案每行商品必须带一个可点击来源链接');
+    expect(out).toContain('Apple iPhone 16 128GB 到手价 4599 元');
+  });
+
+  it('caps the source candidate list and markdown blocks at maxResults', () => {
+    const out = formatFirecrawlSearchEcommerceResult(
+      Array.from({ length: 4 }, (_, i) => ({
+        title: `Result ${i}`,
+        url: `https://example.com/${i}`,
+        markdown: `body ${i}`,
+      })),
+      'jd',
+      'phone',
+      2,
+    );
+    expect(out).toContain('4 pages');
+    expect(out).toContain('https://example.com/0');
+    expect(out).toContain('https://example.com/1');
+    expect(out).not.toContain('https://example.com/2');
+    expect(out).not.toContain('body 2');
   });
 });
