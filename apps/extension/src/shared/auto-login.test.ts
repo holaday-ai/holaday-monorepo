@@ -95,6 +95,29 @@ describe('tryAutoLogin', () => {
     );
   });
 
+  it('prefers pendingUrl over a stale previous url while a workbench tab loads', async () => {
+    const executeScript = vi.fn(async () => [{ result: 'hd_live_loading_token' }]);
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [
+          {
+            id: 7,
+            url: 'https://example.com/previous',
+            pendingUrl: 'https://holaday.ai/app',
+            active: true,
+            lastAccessed: 4,
+          } as chrome.tabs.Tab,
+        ]),
+      },
+      scripting: { executeScript },
+    } as unknown as typeof chrome;
+
+    await expect(tryAutoLogin()).resolves.toBe('hd_live_loading_token');
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({ target: { tabId: 7 } }),
+    );
+  });
+
   it('scrubs sensitive query params from auto-login logs', async () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     const executeScript = vi.fn(async () => [{ result: null }]);

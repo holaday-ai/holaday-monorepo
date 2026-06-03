@@ -146,7 +146,7 @@ export async function tryAutoLogin(): Promise<string | null> {
 }
 
 function getTabAutoLoginUrl(tab: chrome.tabs.Tab): string {
-  return tab.url || tab.pendingUrl || '';
+  return tab.pendingUrl || tab.url || '';
 }
 
 /** Exposed for the diagnostics pages / unit tests; safe to call. */
