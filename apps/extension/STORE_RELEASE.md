@@ -16,6 +16,10 @@ The package script rebuilds `dist/`, stages a clean Chrome Web Store payload,
 checks that all manifest icons exist, removes source maps, and fails if a
 `sourceMappingURL` reference leaks into the release package.
 
+Release builds intentionally exclude localhost/127.0.0.1 content-script
+matches. Use `pnpm --filter @holaday/extension dev` for local workbench
+development.
+
 Use this debug build only when local source maps are needed:
 
 ```bash

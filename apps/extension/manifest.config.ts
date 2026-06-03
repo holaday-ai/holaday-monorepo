@@ -1,5 +1,20 @@
 import { defineManifest } from '@crxjs/vite-plugin';
 
+const includeDevWorkbenchHosts = process.env.VITE_EXTENSION_INCLUDE_DEV_HOSTS === '1';
+const workbenchMatches = [
+  'https://holaday.ai/*',
+  'https://*.holaday.ai/*',
+  'https://hd-app.orangebench.tech/*',
+  ...(includeDevWorkbenchHosts
+    ? [
+        'http://localhost/*',
+        'http://localhost:*/*',
+        'http://127.0.0.1/*',
+        'http://127.0.0.1:*/*',
+      ]
+    : []),
+];
+
 // MV3 manifest for the HOLA DAY extension:
 // - service worker = src/background/index.ts (TS, ESM)
 // - default popup = src/popup/index.html (React shell)
@@ -73,18 +88,11 @@ export default defineManifest({
     // Replaces the popup's email/password form: the source of truth for
     // login now lives on the web side, the extension just mirrors it.
     //
-    // Wildcards include subdomain forms so dev / staging / prod all
-    // hit the same content script without per-environment patches.
+    // Dev localhost hosts are enabled only by the dev script via
+    // VITE_EXTENSION_INCLUDE_DEV_HOSTS=1. Public release packages keep
+    // the content-script surface to HOLA DAY-owned origins.
     {
-      matches: [
-        'https://holaday.ai/*',
-        'https://*.holaday.ai/*',
-        'https://hd-app.orangebench.tech/*',
-        'http://localhost/*',
-        'http://localhost:*/*',
-        'http://127.0.0.1/*',
-        'http://127.0.0.1:*/*',
-      ],
+      matches: workbenchMatches,
       js: ['src/content/auth-bridge.ts'],
       run_at: 'document_start',
       all_frames: false,

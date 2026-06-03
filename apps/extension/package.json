@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite build --watch --mode development",
+    "dev": "VITE_EXTENSION_INCLUDE_DEV_HOSTS=1 vite build --watch --mode development",
     "build": "vite build",
     "build:debug": "VITE_EXTENSION_SOURCEMAP=1 vite build",
     "package:chrome": "../../scripts/package-extension.sh",
