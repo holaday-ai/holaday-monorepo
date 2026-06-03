@@ -80,9 +80,9 @@ describe('decideObservedTokenAction', () => {
     expect(decideObservedTokenAction(null, 'Undefined')).toEqual({ kind: 'unchanged' });
   });
 
-  it('treats malformed observed tokens as a clear action after a valid token', () => {
+  it('ignores malformed observed tokens after a valid token', () => {
     expect(decideObservedTokenAction('hd_live_' + 'a'.repeat(24), 'token with spaces')).toEqual({
-      kind: 'clear',
+      kind: 'unchanged',
     });
   });
 

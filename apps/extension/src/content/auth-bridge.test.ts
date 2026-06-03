@@ -88,6 +88,42 @@ describe('auth bridge content script', () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
+  it('does not mirror malformed non-empty localStorage values as logout after a valid token', async () => {
+    vi.useFakeTimers();
+    let observedToken: string | null = 'hd_live_' + 'a'.repeat(24);
+    const storageListeners: Array<(event: StorageEvent) => void> = [];
+    const getItem = vi.fn((key: string) => (key === TOKEN_KEY ? observedToken : null));
+    const sendMessage = vi.fn((_message: unknown, callback: () => void) => {
+      callback();
+    });
+
+    globalThis.window = {
+      localStorage: { getItem },
+      addEventListener: vi.fn((event: string, listener: (event: StorageEvent) => void) => {
+        if (event === 'storage') storageListeners.push(listener);
+      }),
+    } as unknown as Window & typeof globalThis;
+    globalThis.chrome = {
+      runtime: {
+        sendMessage,
+      },
+    } as unknown as typeof chrome;
+
+    await import('./auth-bridge.js');
+    expect(sendMessage).toHaveBeenCalledWith(
+      { type: 'holaday.auth.token', token: observedToken },
+      expect.any(Function),
+    );
+
+    observedToken = 'token with spaces';
+    const [fireStorage] = storageListeners;
+    if (!fireStorage) throw new Error('expected storage listener');
+    fireStorage({ key: TOKEN_KEY } as StorageEvent);
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
   it('retries an observed token when the service worker send fails', async () => {
     vi.useFakeTimers();
     const token = 'hd_live_' + 'a'.repeat(24);

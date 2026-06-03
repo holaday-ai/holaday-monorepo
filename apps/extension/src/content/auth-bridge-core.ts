@@ -73,7 +73,7 @@ export function decideObservedTokenAction(
   const decision = decideAction(prev, curr);
   if (decision.kind !== 'set') return decision;
   if (looksLikeToken(decision.token)) return decision;
-  return prev === null ? { kind: 'unchanged' } : { kind: 'clear' };
+  return { kind: 'unchanged' };
 }
 
 /**
@@ -90,7 +90,8 @@ const MAX_TOKEN_LENGTH = 8192;
  * a plausible JWT (or any opaque token long enough to be worth
  * sending). The motivation: a corrupted localStorage write that
  * lands "undefined" as a string shouldn't trigger a WS reconnect
- * with that as the bearer.
+ * with that as the bearer, and also shouldn't clear a still-valid
+ * extension session. Real logout is represented by null / empty.
  *
  * Intentionally loose — token format may change. We refuse only
  * obvious garbage.
