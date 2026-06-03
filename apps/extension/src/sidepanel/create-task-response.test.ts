@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   didTokenSwitchDuringTaskCreate,
   extractCreatedTaskId,
+  shouldClearAuthAfterCreateUnauthorized,
 } from './create-task-response.js';
 
 describe('extractCreatedTaskId', () => {
@@ -31,5 +32,11 @@ describe('extractCreatedTaskId', () => {
     expect(didTokenSwitchDuringTaskCreate('new-token', 'old-token')).toBe(true);
     expect(didTokenSwitchDuringTaskCreate(null, 'old-token')).toBe(true);
     expect(didTokenSwitchDuringTaskCreate('old-token', 'old-token')).toBe(false);
+  });
+
+  it('only clears auth when a 401 belongs to the submitted token', () => {
+    expect(shouldClearAuthAfterCreateUnauthorized('old-token', 'old-token')).toBe(true);
+    expect(shouldClearAuthAfterCreateUnauthorized('new-token', 'old-token')).toBe(false);
+    expect(shouldClearAuthAfterCreateUnauthorized(null, 'old-token')).toBe(false);
   });
 });

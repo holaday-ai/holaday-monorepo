@@ -41,6 +41,7 @@ import {
 import {
   didTokenSwitchDuringTaskCreate,
   extractCreatedTaskId,
+  shouldClearAuthAfterCreateUnauthorized,
   type CreateTaskResponse,
 } from './create-task-response.js';
 import { MAX_SIDE_PANEL_INTENT_CHARS, normalizeSidePanelIntent } from './task-intent.js';
@@ -406,9 +407,18 @@ export function App() {
       );
       if (!res.ok) {
         if (res.status === 401) {
-          await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
+          const current = normalizeAccessToken(await getAccessToken());
+          if (shouldClearAuthAfterCreateUnauthorized(current, token)) {
+            await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
+            if (mountedRef.current) clearLocalSessionState();
+            throw new Error('登录已失效，请到 holaday.ai 重新登录后再发送任务。');
+          }
+          if (current) {
+            if (mountedRef.current) setToken(current);
+            throw new Error('登录态刚刚切换，请重新发送任务。');
+          }
           if (mountedRef.current) clearLocalSessionState();
-          throw new Error('登录已失效，请到 holaday.ai 重新登录后再发送任务。');
+          throw new Error('登录态已清除，请到 holaday.ai 登录后再发送任务。');
         }
         const body = await responseJsonWithDeadline<{ error?: { message?: string } } | null>(
           res,
