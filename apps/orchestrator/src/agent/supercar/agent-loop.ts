@@ -529,6 +529,13 @@ export interface SupercarAntiBotResolvedEvent {
   reason: 'auto';
 }
 
+export interface SupercarEvidenceEvent {
+  fact: string;
+  sourceType: 'browser_state' | 'tool_result' | 'inference';
+  sourceDetail: string;
+  confidence: 'observed' | 'extracted' | 'inferred';
+}
+
 export interface RunSupercarOptions {
   /** External task id (task_…). Correlates hooks and WS frames. */
   taskId: string;
@@ -573,6 +580,8 @@ export interface RunSupercarOptions {
    * `server.vision.captcha_resolved`.
    */
   onAntiBotResolved?: (ev: SupercarAntiBotResolvedEvent) => void | Promise<void>;
+  /** Fired for compact, verifier-safe facts observed inside the loop. */
+  onEvidence?: (ev: SupercarEvidenceEvent) => void | Promise<void>;
 
   // --- Phase 6-2: 5-lane router inputs ---
   /**
@@ -2771,6 +2780,15 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                 continue;
               }
               toolsUsed.add('search_ecommerce');
+              for (const res of r.results.slice(0, maxResults)) {
+                if (!res.url) continue;
+                await opts.onEvidence?.({
+                  fact: `search_ecommerce_source platform=${platform} query="${query}" url=${res.url}`,
+                  sourceType: 'tool_result',
+                  sourceDetail: 'search_ecommerce.firecrawl',
+                  confidence: 'extracted',
+                });
+              }
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: toolUse.id,
@@ -2804,6 +2822,17 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                 continue;
               }
               toolsUsed.add('search_ecommerce');
+              for (const item of result.items.slice(0, maxResults)) {
+                const r = item as Record<string, unknown>;
+                const url = r.url ?? r.productUrl ?? r.link ?? r.itemUrl;
+                if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) continue;
+                await opts.onEvidence?.({
+                  fact: `search_ecommerce_source platform=${platform} query="${query}" url=${url}`,
+                  sourceType: 'tool_result',
+                  sourceDetail: 'search_ecommerce.apify',
+                  confidence: 'extracted',
+                });
+              }
               const summary = formatSearchEcommerceResult(result.items, platform, query);
               toolResults.push({
                 type: 'tool_result',

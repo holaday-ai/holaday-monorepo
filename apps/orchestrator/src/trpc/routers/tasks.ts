@@ -2278,6 +2278,16 @@ export const tasksRouter = router({
               errorType,
             });
           },
+          onEvidence: (ev) => {
+            try {
+              recordEvidence(taskId, ev);
+            } catch (err) {
+              ctx.logger.warn(
+                { err: err instanceof Error ? err.message : String(err), taskId },
+                'supercar: record evidence callback failed',
+              );
+            }
+          },
           executor: primaryExecutor,
           domain: classification.domain,
           // Swap target: the NON-primary browser. When headed was

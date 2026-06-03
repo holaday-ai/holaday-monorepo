@@ -226,6 +226,54 @@ describe('autoFix — passes verification through unchanged', () => {
   });
 });
 
+describe('autoFix — ecommerce empty URLs', () => {
+  it('fills empty JSON url fields from grounded search_ecommerce source URLs', () => {
+    const contract = buildContract({
+      taskId: 'tsk_ecom_fill',
+      intent: '去电商站搜 iPhone 16，按价格排序，给前2结果（名称/价格/链接）',
+      executionMode: 'generate',
+    });
+    const ledger = new EvidenceLedger('tsk_ecom_fill');
+    ledger.add({
+      fact: 'search_ecommerce_source platform=jd query="iPhone 16" url=https://item.jd.com/100123.html',
+      sourceType: 'tool_result',
+      sourceDetail: 'search_ecommerce.firecrawl',
+      confidence: 'extracted',
+    });
+    ledger.add({
+      fact: 'search_ecommerce_source platform=jd query="iPhone 16" url=https://item.jd.com/100456.html',
+      sourceType: 'tool_result',
+      sourceDetail: 'search_ecommerce.firecrawl',
+      confidence: 'extracted',
+    });
+    const answer = [
+      'JSON',
+      JSON.stringify(
+        {
+          items: [
+            { name: 'Apple iPhone 16 128GB', price: 4599, url: '', platform: '京东' },
+            { name: 'Apple iPhone 16 256GB', price: 5469, url: '', platform: '京东' },
+          ],
+        },
+        null,
+        2,
+      ),
+    ].join('\n');
+    const v1 = verifyDeterministic({ contract, ledger, answerText: answer });
+    expect(v1.passed).toBe(false);
+    expect(v1.failureLevel).toBe('fixable');
+    const out = autoFix({ contract, ledger, verification: v1, answerText: answer });
+    expect(out.fixed).toContain('"url": "https://item.jd.com/100123.html"');
+    expect(out.fixed).toContain('"url": "https://item.jd.com/100456.html"');
+    expect(out.applied.map((op) => op.kind)).toEqual([
+      'empty_url_fill',
+      'empty_url_fill',
+    ]);
+    const v2 = verifyDeterministic({ contract, ledger, answerText: out.fixed });
+    expect(v2.passed).toBe(true);
+  });
+});
+
 describe('autoFix — missing fields note', () => {
   it('appends a 补充字段 line when provided inputs missing from answer', () => {
     const contract = buildContract({

@@ -34,7 +34,11 @@ const URL_RE = /https?:\/\/[^\s,;'")\]>]+/g;
  */
 const MARKDOWN_LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
 
-export type AutoFixKind = 'url_substitute' | 'url_drop' | 'missing_fields_note';
+export type AutoFixKind =
+  | 'url_substitute'
+  | 'url_drop'
+  | 'missing_fields_note'
+  | 'empty_url_fill';
 
 export interface AutoFixOp {
   kind: AutoFixKind;
@@ -69,6 +73,23 @@ export function autoFix(inputs: AutoFixInputs): AutoFixOutput {
   );
   if (urlOp) {
     const out = fixFabricatedUrls(text, inputs.ledger);
+    text = out.text;
+    ops.push(...out.ops);
+  }
+
+  // 1b. Ecommerce rows with empty JSON url fields — fill only from
+  // grounded URLs the agent actually visited / fetched. This is a
+  // conservative structural fix for model output like
+  // `{ "name": "...", "price": 4599, "url": "" }` after
+  // search_ecommerce supplied source candidates.
+  const missingEcommerceUrlOp = inputs.verification.checks.find(
+    (c) =>
+      !c.passed &&
+      (c.criterionType === 'ecommerce_rows' || c.criterionType === 'url_count') &&
+      /缺少链接|URL|url|链接/i.test(c.detail),
+  );
+  if (missingEcommerceUrlOp) {
+    const out = fillEmptyJsonUrls(text, inputs.ledger);
     text = out.text;
     ops.push(...out.ops);
   }
@@ -222,6 +243,43 @@ function pathOverlap(a: string, b: string): number {
 
 function stripTrailingPunct(url: string): string {
   return url.replace(/[)\].,;:]+$/, '');
+}
+
+function fillEmptyJsonUrls(
+  text: string,
+  ledger: EvidenceLedger,
+): { text: string; ops: AutoFixOp[] } {
+  const grounded = uniqueUrls(ledger.getGroundedUrls());
+  if (grounded.length === 0 || !/"url"\s*:\s*""/.test(text)) {
+    return { text, ops: [] };
+  }
+  const used = new Set(uniqueUrls(text.match(URL_RE) ?? []));
+  const candidates = grounded.filter((url) => !used.has(stripTrailingPunct(url)));
+  if (candidates.length === 0) return { text, ops: [] };
+  const ops: AutoFixOp[] = [];
+  let i = 0;
+  const fixed = text.replace(/"url"\s*:\s*""/g, (raw) => {
+    const url = candidates[i++];
+    if (!url) return raw;
+    ops.push({
+      kind: 'empty_url_fill',
+      detail: `filled empty ecommerce url with ${url}`,
+    });
+    return `"url": "${url}"`;
+  });
+  return { text: fixed, ops };
+}
+
+function uniqueUrls(urls: readonly string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of urls) {
+    const clean = stripTrailingPunct(raw);
+    if (!/^https?:\/\//i.test(clean) || seen.has(clean)) continue;
+    seen.add(clean);
+    out.push(clean);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
