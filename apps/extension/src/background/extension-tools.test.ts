@@ -1154,6 +1154,64 @@ describe('handleExtensionToolCall', () => {
     );
   });
 
+  it('retries transient body text injection failures after navigation', async () => {
+    vi.useFakeTimers();
+    vi.mocked(send).mockClear();
+    const executeScript = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Execution context was destroyed.'))
+      .mockResolvedValueOnce([{ result: 'hydrated body' }]);
+    globalThis.chrome = {
+      tabs: {
+        query: vi.fn(async () => [{ id: 2, url: 'https://holaday.ai/app' }]),
+        update: vi.fn(async () => ({ id: 2, url: 'https://example.com/' }) as chrome.tabs.Tab),
+        get: vi.fn(async () => ({
+          id: 2,
+          status: 'complete',
+          url: 'https://example.com/',
+          title: 'Example',
+        })),
+        onUpdated: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+        onRemoved: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+      },
+      scripting: { executeScript },
+    } as unknown as typeof chrome;
+
+    const call: Extract<ServerMessage, { type: 'server.extension.tool_call' }> = {
+      type: 'server.extension.tool_call',
+      taskId: 'tsk_body_text_retry',
+      requestId: 'req_body_text_retry',
+      kind: 'navigate',
+      args: { url: 'https://example.com/', waitMs: 0 },
+      timeoutMs: 30_000,
+    };
+
+    const pending = handleExtensionToolCall(call);
+    await vi.advanceTimersByTimeAsync(150);
+    await pending;
+
+    expect(executeScript).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'client.extension.tool_result',
+        taskId: 'tsk_body_text_retry',
+        requestId: 'req_body_text_retry',
+        ok: true,
+        result: {
+          finalUrl: 'https://example.com/',
+          title: 'Example',
+          bodyText: 'hydrated body',
+        },
+      }),
+    );
+  });
+
   it('returns the target URL when navigation lands on a Chrome error page', async () => {
     vi.mocked(send).mockClear();
     const update = vi.fn(async () => ({ id: 2, url: 'https://missing.example/' }) as chrome.tabs.Tab);

@@ -47,6 +47,7 @@ const NAVIGATE_TITLE_CHAR_CAP = 512;
 const DEFAULT_NAVIGATE_WAIT_MS = 1500;
 const MAX_NAVIGATE_WAIT_MS = 10_000;
 const BODY_TEXT_READ_TIMEOUT_MS = 5_000;
+const BODY_TEXT_TRANSIENT_RETRY_DELAY_MS = 150;
 const TAB_QUERY_TIMEOUT_MS = 1_500;
 const TAB_UPDATE_TIMEOUT_MS = 5_000;
 const TAB_GET_TIMEOUT_MS = 2_000;
@@ -354,7 +355,7 @@ async function executeNavigate(
   }
   let rawText = '';
   try {
-    rawText = await readBodyText(tab.id);
+    rawText = await readBodyTextWithTransientRetry(tab.id);
   } catch (err) {
     if (isBodyTextTimeout(err)) {
       console.warn('[holaday] extension navigate body text read timed out');
@@ -392,6 +393,16 @@ async function readBodyText(tabId: number): Promise<string> {
   return typeof first?.result === 'string' ? first.result : '';
 }
 
+async function readBodyTextWithTransientRetry(tabId: number): Promise<string> {
+  try {
+    return await readBodyText(tabId);
+  } catch (err) {
+    if (!isTransientBodyTextReadError(err)) throw err;
+    await new Promise<void>((resolve) => setTimeout(resolve, BODY_TEXT_TRANSIENT_RETRY_DELAY_MS));
+    return readBodyText(tabId);
+  }
+}
+
 function clipText(value: unknown, maxChars: number): string {
   const text = typeof value === 'string' ? value : '';
   return text.length > maxChars ? text.slice(0, maxChars) : text;
@@ -414,6 +425,29 @@ function sanitizeNavigateResult(result: NavigateResult): NavigateResult {
 function isBodyTextTimeout(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return msg.toLowerCase().includes('body_text_timeout');
+}
+
+function isTransientBodyTextReadError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes('permission') ||
+    lower.includes('cannot access') ||
+    lower.includes('chrome://') ||
+    lower.includes('chrome-extension://') ||
+    lower.includes('file://') ||
+    lower.includes('body_text_timeout')
+  ) {
+    return false;
+  }
+  return (
+    lower.includes('execution context was destroyed') ||
+    lower.includes('receiving end does not exist') ||
+    lower.includes('message port closed') ||
+    lower.includes('frame was detached') ||
+    lower.includes('frame with id') ||
+    lower.includes('context invalidated')
+  );
 }
 
 export function normalizeNavigateUrl(raw: unknown): string {
