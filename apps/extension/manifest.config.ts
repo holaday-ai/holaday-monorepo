@@ -1,18 +1,26 @@
 import { defineManifest } from '@crxjs/vite-plugin';
 
-// MV3 manifest for the HOLA DAY extension. Phase 0 / PoC A1:
+// MV3 manifest for the HOLA DAY extension:
 // - service worker = src/background/index.ts (TS, ESM)
 // - default popup = src/popup/index.html (React shell)
 // - host permissions intentionally broad: the agent operates across the
 //   user's existing logged-in tabs (千牛, 生意参谋, 券商网页 ...).
-//   We will narrow this once Phase 0 dogfood shows the real list.
+//   Keep this permission tied to the browser-agent feature and review it
+//   again before every public release.
 
 export default defineManifest({
   manifest_version: 3,
   name: 'HOLA DAY',
   version: '0.0.1',
-  description: 'HOLA DAY browser agent — Phase 0 PoC',
+  description: 'Connect HOLA DAY to your browser so tasks can use the pages you choose.',
   minimum_chrome_version: '120',
+
+  icons: {
+    16: 'icons/icon-16.png',
+    32: 'icons/icon-32.png',
+    48: 'icons/icon-48.png',
+    128: 'icons/icon-128.png',
+  },
 
   action: {
     default_title: 'HOLA DAY',

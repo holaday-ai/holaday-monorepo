@@ -1,11 +1,13 @@
 {
   "name": "@holaday/extension",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite build --watch --mode development",
     "build": "vite build",
+    "build:debug": "VITE_EXTENSION_SOURCEMAP=1 vite build",
+    "package:chrome": "../../scripts/package-extension.sh",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

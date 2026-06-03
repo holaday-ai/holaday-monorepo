@@ -10,6 +10,7 @@ import manifest from './manifest.config.js';
 // in the 3MB playwright-crx bundle we don't need. Swap the package
 // subpath for a stub in mock builds so the mock bundle stays lean.
 const driverMode = process.env.VITE_BROWSER_DRIVER;
+const includeSourceMaps = process.env.VITE_EXTENSION_SOURCEMAP === '1';
 const aliasCrxToStub: Record<string, string> =
   driverMode === 'mock'
     ? {
@@ -31,7 +32,7 @@ export default defineConfig({
     target: 'chrome120',
     outDir: 'dist',
     emptyOutDir: true,
-    sourcemap: true,
+    sourcemap: includeSourceMaps,
     // Disable Vite's modulePreload helper. It's useless for an extension
     // (chunks load from chrome-extension:// local disk, zero preload win)
     // and actively harmful in a Service Worker context: the helper's
