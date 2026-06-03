@@ -416,6 +416,32 @@ describe('ws-client send', () => {
     });
   });
 
+  it('skips websocket construction for Cloudflare 5xx route probes', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    configMock.wsHealthUrl = 'https://primary.test/api/healthz';
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, status: 200 } as Response)
+        .mockResolvedValueOnce({ ok: false, status: 521 } as Response),
+    );
+    const { connect, getWsConnectionStatus } = await import('./ws-client.js');
+
+    connect('token');
+
+    await vi.waitFor(async () => {
+      await expect(getWsConnectionStatus()).resolves.toMatchObject({
+        connected: false,
+        readyState: null,
+        reconnectAttempt: 1,
+        lastCloseReason: 'ws route check failed',
+      });
+    });
+    expect(sockets).toHaveLength(0);
+  });
+
   it('allows websocket construction when the route rejects a plain HTTP probe', async () => {
     configMock.wsHealthUrl = 'https://primary.test/api/healthz';
     vi.stubGlobal(

@@ -355,10 +355,10 @@ async function checkWsRouteReachable(endpoint: string): Promise<boolean> {
     );
     // A plain HTTP GET to a WebSocket route commonly returns 400/401/426
     // because no Upgrade header is present; those still prove the route
-    // reached the WS proxy. 502/503/504 mean the proxy/origin path is not
+    // reached the WS proxy. Any 5xx means the proxy/origin path is not
     // healthy enough to attempt a real WebSocket without polluting Chrome's
     // extension error page.
-    return response.ok || response.status < 500 || response.status > 504;
+    return response.ok || response.status < 500;
   } catch {
     return false;
   }
