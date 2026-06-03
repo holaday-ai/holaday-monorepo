@@ -35,6 +35,10 @@ const path = require('path');
 
 const staging = path.resolve(process.cwd(), 'apps/extension/release/chrome-extension');
 const promoSmallPath = path.resolve(process.cwd(), 'apps/extension/store-assets/promo-small.png');
+const screenshotPath = path.resolve(
+  process.cwd(),
+  'apps/extension/store-assets/screenshot-browser-connection.png',
+);
 const manifestPath = path.join(staging, 'manifest.json');
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 const requiredIcons = ['16', '32', '48', '128'];
@@ -65,6 +69,16 @@ const promoSize = readPngSize(promoSmallPath);
 if (promoSize.width !== 440 || promoSize.height !== 280) {
   throw new Error(
     `small promotional image must be 440x280, got ${promoSize.width}x${promoSize.height}`,
+  );
+}
+
+const screenshotSize = readPngSize(screenshotPath);
+const validScreenshot =
+  (screenshotSize.width === 1280 && screenshotSize.height === 800) ||
+  (screenshotSize.width === 640 && screenshotSize.height === 400);
+if (!validScreenshot) {
+  throw new Error(
+    `store screenshot must be 1280x800 or 640x400, got ${screenshotSize.width}x${screenshotSize.height}`,
   );
 }
 
