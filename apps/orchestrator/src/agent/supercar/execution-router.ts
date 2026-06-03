@@ -152,6 +152,28 @@ export function classifyAsSimpleSearch(intent: string): boolean {
   if (!t) return false;
   const lower = t.toLowerCase();
 
+  // Ecommerce listing tasks are not "just one fact". They need row-
+  // level source preservation (name / price / link per item). Let the
+  // supercar loop plan and use search_ecommerce instead of collapsing
+  // them into the generic web_search shortcut, which has historically
+  // returned price rows with empty URLs.
+  const ecommerceHints = [
+    '电商站', '电商平台', '购物平台', '商品', '商品页', '商品链接',
+    '京东', '淘宝', '天猫', '拼多多', '抖音商城', '小红书商城',
+    'jd', 'taobao', 'tmall', 'pdd', 'amazon',
+  ];
+  const hasEcommerceHint = ecommerceHints.some((hint) => lower.includes(hint));
+  const hasPrice = /价格|多少钱|最低价|最便宜|price/.test(lower);
+  const asksForLinks = /链接|url|link/.test(lower);
+  const asksForRows =
+    /前\s*\d+|top\s*\d+|\d+\s*(?:个|条|款)?(?:结果|商品|products?)/i.test(t) ||
+    ['结果', '列表', '名称', '价格', '链接', '按价格', '排序'].filter((hint) =>
+      lower.includes(hint),
+    ).length >= 3;
+  if (hasEcommerceHint && hasPrice && asksForLinks && asksForRows) {
+    return false;
+  }
+
   // Phase 22a follow-up — explicit-navigation disqualifier MUST run
   // before the PRICE_HINTS / FACT_NOUNS positive checks below. The
   // 22a regression: "打开 amazon.com 搜键盘 找销量最高的 3 个产品

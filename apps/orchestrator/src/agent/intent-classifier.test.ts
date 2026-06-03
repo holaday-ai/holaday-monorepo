@@ -278,6 +278,14 @@ describe('classifyExecutionMode — scrape route (Firecrawl path)', () => {
 });
 
 describe('classifyExecutionMode — browser overrides scrape (interaction verbs)', () => {
+  it('ecommerce listing with required links → browser', async () => {
+    const out = await classifyExecutionMode({
+      intent: '去电商站搜 iPhone 16，按价格排序，给前5结果（名称/价格/链接）',
+      logger: fakeLogger(),
+    });
+    expect(out).toBe('browser');
+  });
+
   it('打开 + site → browser', async () => {
     const out = await classifyExecutionMode({
       intent: '打开京东帮我搜蓝牙耳机',

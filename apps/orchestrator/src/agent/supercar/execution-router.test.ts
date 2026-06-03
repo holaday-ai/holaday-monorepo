@@ -25,6 +25,16 @@ describe('classifyAsSimpleSearch', () => {
     });
   });
 
+  describe('should NOT classify as simple search — ecommerce listings need source-preserving tools', () => {
+    it.each([
+      '去电商站搜 iPhone 16，按价格排序，给前5结果（名称/价格/链接）',
+      '在京东/天猫找 iPhone 16，给 5 个商品的名称、价格、链接',
+      'amazon search mechanical keyboard top 5 products with price and link',
+    ])('false: %s', (intent) => {
+      expect(classifyAsSimpleSearch(intent)).toBe(false);
+    });
+  });
+
   describe('should NOT classify as simple search — "打开/访问/前往 X" navigation intents', () => {
     // Phase 14 audit — these should fall through to the agent loop
     // so the model can call the `navigate` tool. If they ever start

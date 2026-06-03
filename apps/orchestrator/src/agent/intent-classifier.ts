@@ -131,6 +131,17 @@ const SITE_NAMES: readonly string[] = [
   'youtube', 'instagram', 'tiktok', 'gmail', 'producthunt',
 ];
 
+const ECOMMERCE_SITE_HINTS: readonly string[] = [
+  '电商站', '电商平台', '购物平台', '商品', '商品页', '商品链接',
+  '京东', '淘宝', '天猫', '拼多多', '抖音商城', '小红书商城',
+  'jd', 'taobao', 'tmall', 'pdd', 'amazon',
+];
+
+const ECOMMERCE_LIST_HINTS: readonly string[] = [
+  '前', 'top', '结果', '列表', '名称', '价格', '链接', '按价格', '排序',
+  '从低到高', '从高到低', 'price', 'link', 'url', 'sort',
+];
+
 const SKILL_HINTS: ReadonlyMap<string, ExecutionMode> = new Map([
   ['content-creator', 'generate'],
   ['brand-guardian', 'generate'],
@@ -163,6 +174,18 @@ function hasAny(haystack: string, needles: readonly string[]): string | null {
   return null;
 }
 
+function isEcommerceListingIntent(intent: string): boolean {
+  const lower = intent.toLowerCase();
+  const hasEcommerce = ECOMMERCE_SITE_HINTS.some((hint) => lower.includes(hint));
+  if (!hasEcommerce) return false;
+  const hasPrice = /价格|多少钱|最低价|最便宜|price/.test(lower);
+  const asksForLinks = /链接|url|link/.test(lower);
+  const asksForRows =
+    /前\s*\d+|top\s*\d+|\d+\s*(?:个|条|款)?(?:结果|商品|products?)/i.test(intent) ||
+    ECOMMERCE_LIST_HINTS.filter((hint) => lower.includes(hint)).length >= 3;
+  return hasPrice && asksForLinks && asksForRows;
+}
+
 interface RouteDecision {
   mode: ExecutionMode;
   source: string;
@@ -170,6 +193,14 @@ interface RouteDecision {
 }
 
 function decide(intent: string): RouteDecision {
+  // 0. Product-listing / comparison shopping tasks need the supercar
+  // loop so it can use search_ecommerce and preserve source URLs.
+  // Firecrawl/generate lanes repeatedly produced price rows with
+  // empty URLs for "前5结果（名称/价格/链接）" style prompts.
+  if (isEcommerceListingIntent(intent)) {
+    return { mode: 'browser', source: 'kw:ecommerce-listing' };
+  }
+
   // 1. Interaction verb wins outright — agent must drive a live page.
   const interaction = hasAny(intent, INTERACTION_VERBS);
   if (interaction) {
@@ -244,6 +275,7 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
     'kw:interaction',
     'kw:url',
     'kw:search-verb',
+    'kw:ecommerce-listing',
   ]);
   if (STRONG_SIGNAL_SOURCES.has(d.source)) {
     cacheSet(key, d.mode, d.source);
