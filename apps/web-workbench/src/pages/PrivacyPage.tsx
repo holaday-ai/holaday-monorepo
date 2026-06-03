@@ -10,7 +10,7 @@ import { PageContainer, PageHeader } from '@/pages/PageShell';
 export function PrivacyPage(): JSX.Element {
   return (
     <PageContainer width="prose">
-      <PageHeader title="隐私政策" description="最后更新：2026-04-24" />
+      <PageHeader title="隐私政策" description="最后更新：2026-06-03" />
       <article className="prose prose-sm max-w-none dark:prose-invert prose-headings:tracking-tight">
         <p>
           HOLA DAY（下称"我们"）非常重视您的隐私。本隐私政策说明我们如何收集、使用、
@@ -29,6 +29,15 @@ export function PrivacyPage(): JSX.Element {
             <strong>任务数据</strong>：您提交的任务指令、执行过程截图、结果文本。
           </li>
           <li>
+            <strong>浏览器扩展数据</strong>：扩展连接状态、任务执行时的页面上下文/截图/操作结果；
+            最近 30 天常用网站只上传域名、访问次数和最近访问时间等聚合信息，不上传完整 URL、
+            查询参数、网页标题或浏览历史页面内容。
+          </li>
+          <li>
+            <strong>浏览器 Cookie</strong>：在您安装并授权 HOLA DAY 浏览器扩展后，
+            我们会同步部分受支持网站的登录态 Cookie，用于让云端浏览器继承您已授权的网站登录状态。
+          </li>
+          <li>
             <strong>使用日志</strong>：IP 地址、User-Agent、访问时间、操作路径等技术日志。
           </li>
           <li>
@@ -40,6 +49,7 @@ export function PrivacyPage(): JSX.Element {
         <h2>2. 我们如何使用信息</h2>
         <ul>
           <li>为您执行提交的任务并反馈结果；</li>
+          <li>在您授权的浏览器页面中执行任务、同步执行状态、恢复异常中断的浏览器操作；</li>
           <li>维护账号安全、防止滥用和欺诈；</li>
           <li>改进产品体验、定位故障；</li>
           <li>在您授权的情况下，向您发送产品更新或服务通知。</li>
@@ -89,6 +99,10 @@ export function PrivacyPage(): JSX.Element {
         <p>
           我们使用 Cookie 和 localStorage 维持登录状态和保存界面偏好。您可以在浏览器中
           禁用这些技术，但部分功能将无法使用。
+        </p>
+        <p>
+          HOLA DAY 浏览器扩展不会上传完整浏览历史 URL、网页标题或页面内容用于常用网站分析；
+          该能力只上传域名级聚合。扩展同步 Cookie 仅用于您授权的任务执行和云端浏览器登录状态迁移。
         </p>
 
         <h2>9. 政策更新</h2>

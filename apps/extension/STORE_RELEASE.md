@@ -28,13 +28,14 @@ pnpm --filter @holaday/extension build:debug
 - Short description: `Connect HOLA DAY to your browser so tasks can use the pages you choose.`
 - Category suggestion: Productivity
 - Minimum Chrome: 120
+- Privacy Policy URL: `https://holaday.ai/privacy`
 
 ## Permission Justifications
 
 - `storage`: keeps the mirrored HOLA DAY session, reconnect counters, and local UI state.
 - `tabs`, `activeTab`, `webNavigation`: finds and follows the user-selected browser tab while a task runs.
 - `scripting`: reads page context and the workbench login token from pages the extension can access.
-- `cookies`: syncs domain-level login availability for supported sites without uploading full cookie values.
+- `cookies`: syncs selected supported-site cookie values so the cloud browser can inherit authorized logins, and separately sends domain-level login availability for task routing.
 - `history`: syncs 30-day domain aggregates so HOLA DAY can prioritize site-specific browser skills.
 - `alarms`: schedules reconnect and daily history refresh work while the service worker sleeps.
 - `sidePanel`: provides the task creation and status panel.
@@ -48,3 +49,11 @@ pnpm --filter @holaday/extension build:debug
 3. Fill the permission justifications using the notes above.
 4. After approval, verify a clean install and the already-installed update path.
 5. For local dogfood only, reload the unpacked extension from `chrome://extensions`.
+
+## Data Handling Notes
+
+- Browsing-history sync uploads only domain aggregates: `domain`, `visitCount`, and `lastVisitAt`.
+- Browsing-history sync does not upload full URLs, query strings, page titles, or page content.
+- Cookie sync is limited to curated supported domains and is used only to transfer authorized login state to the cloud browser that executes the user's task.
+- Login-state routing sends boolean domain availability where possible instead of raw cookie values.
+- Task-time screenshots and page context are treated as task data and are covered by the privacy policy.
