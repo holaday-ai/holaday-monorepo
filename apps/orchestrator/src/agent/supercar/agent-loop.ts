@@ -398,6 +398,24 @@ export function buildAuthWallScraperRescueText(input: {
   );
 }
 
+export function buildEcommerceAuthWallFallbackSummary(input: {
+  intent: string;
+  authWallUrl: string | null;
+  searchResultText: string;
+}): string {
+  const urlLine = input.authWallUrl
+    ? `浏览器商品页被登录/权限页拦截：${input.authWallUrl}\n\n`
+    : '';
+  return (
+    `我没有继续要求登录，也没有在登录墙里反复重试。\n\n` +
+    urlLine +
+    `下面是后台商品抓取返回的候选结果。只保留能关联到商品详情页或明确来源页的内容；如果可验证商品详情链接不足 5 个，应明确说明不足，不要用搜索页/品类页硬凑。\n\n` +
+    `用户原始需求：${input.intent}\n\n` +
+    `---\n\n` +
+    truncateText(input.searchResultText, 18_000)
+  );
+}
+
 export function buildStuckNudge(input: StuckNudgeInput): StuckNudgeResult | null {
   if (input.stuckCount >= STUCK_EXIT_THRESHOLD && !input.alreadyForcedExit) {
     return {
@@ -1162,6 +1180,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   const timeoutMs =
     opts.timeoutMs ?? Number.parseInt(process.env.SUPERCAR_TIMEOUT_MS ?? '600000', 10);
   const deadline = Date.now() + timeoutMs;
+  let lastSearchEcommerceResultText: string | null = null;
 
   // Browser executor is LET, not const — Phase 6-2 swaps it to the
   // headed lane on anti-bot strikes. Every subsequent screenshot /
@@ -2993,18 +3012,20 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                   confidence: 'extracted',
                 });
               }
+              const summary = formatFirecrawlSearchEcommerceResult(
+                r.results,
+                platform,
+                query,
+                maxResults,
+              );
+              lastSearchEcommerceResultText = summary;
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: toolUse.id,
                 content: [
                   {
                     type: 'text',
-                    text: formatFirecrawlSearchEcommerceResult(
-                      r.results,
-                      platform,
-                      query,
-                      maxResults,
-                    ),
+                    text: summary,
                   },
                 ],
               });
@@ -3038,6 +3059,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                 });
               }
               const summary = formatSearchEcommerceResult(result.items, platform, query);
+              lastSearchEcommerceResultText = summary;
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: toolUse.id,
@@ -3386,13 +3408,45 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         toolsUsed: Array.from(toolsUsed),
       };
     }
+    const exhaustedAuthWall = await probeTimeoutAuthWall(executor);
+    if (
+      exhaustedAuthWall &&
+      shouldUseScraperAfterAuthWall({
+        intent: opts.intent,
+        kind: exhaustedAuthWall.kind,
+        hasScraperTools: Boolean(opts.firecrawl || opts.apifyAdapter),
+      }) &&
+      toolsUsed.has('search_ecommerce') &&
+      lastSearchEcommerceResultText
+    ) {
+      logger.info(
+        {
+          taskId: opts.taskId,
+          kind: exhaustedAuthWall.kind,
+          url: exhaustedAuthWall.url,
+          iterations: iteration,
+        },
+        'supercar: exhausted on ecommerce auth wall — completing from scraper evidence',
+      );
+      convergePlanOnSuccess();
+      return {
+        status: 'completed',
+        summary: buildEcommerceAuthWallFallbackSummary({
+          intent: opts.intent,
+          authWallUrl: exhaustedAuthWall.url,
+          searchResultText: lastSearchEcommerceResultText,
+        }),
+        iterations: iteration,
+        toolsUsed: Array.from(toolsUsed),
+      };
+    }
     if (Date.now() >= deadline) {
       // Codex Round 2 P0-3 — auth-wall probe before reporting timeout.
       // If the agent ran out of clock on a login / captcha / permission
       // page, the right verdict is awaiting_user (so the user can
       // complete the wall and the task can be resumed) rather than a
       // dead-end "操作超时" failure.
-      const probed = await probeTimeoutAuthWall(executor);
+      const probed = exhaustedAuthWall;
       if (probed) {
         const question = buildAuthParkQuestion(probed.kind, probed.url);
         await safeCall(opts.onAwaitingUser, {

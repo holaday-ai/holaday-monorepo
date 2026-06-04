@@ -25,6 +25,7 @@ import { describe, expect, it } from 'vitest';
 import {
   STUCK_EXIT_THRESHOLD,
   STUCK_WARN_THRESHOLD,
+  buildEcommerceAuthWallFallbackSummary,
   buildAuthWallScraperRescueText,
   buildStuckNudge,
   shouldUseScraperAfterAuthWall,
@@ -191,5 +192,21 @@ describe('shouldUseScraperAfterAuthWall', () => {
     expect(text).toMatch(/不要继续用 `web_search`/);
     expect(text).toMatch(/名称、价格、可点击链接/);
     expect(text).toMatch(/从低到高排序/);
+  });
+});
+
+describe('buildEcommerceAuthWallFallbackSummary', () => {
+  it('completes from scraper evidence instead of encouraging login-wall retries', () => {
+    const text = buildEcommerceAuthWallFallbackSummary({
+      intent: '去电商站搜 iPhone 16，按价格排序，给前5结果（名称/价格/链接）',
+      authWallUrl: 'https://login.taobao.com/',
+      searchResultText:
+        '# search_ecommerce 结果\n\n| 商品 | 价格 | 链接 |\n|---|---:|---|\n| iPhone 16 | ¥2798 | https://pcdetail.taobao.com/WWNW.html |',
+    });
+
+    expect(text).toMatch(/没有继续要求登录/);
+    expect(text).toMatch(/登录\/权限页拦截/);
+    expect(text).toMatch(/可验证商品详情链接不足 5 个/);
+    expect(text).toMatch(/pcdetail\.taobao\.com/);
   });
 });
