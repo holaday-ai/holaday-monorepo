@@ -125,6 +125,9 @@ export function CdpScreencastViewport({
   React.useEffect(() => {
     viewOnlyRef.current = viewOnly;
   }, [viewOnly]);
+  React.useEffect(() => {
+    hostRef.current?.scrollTo({ left: 0, top: 0 });
+  }, [fitMode, wsUrl]);
 
   const [status, setStatus] = React.useState<CdpScreencastStatus>('idle');
   const onStatusChangeRef = React.useRef(onStatusChange);

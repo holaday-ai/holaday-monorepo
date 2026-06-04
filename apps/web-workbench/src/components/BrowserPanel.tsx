@@ -694,6 +694,7 @@ export function BrowserPanel({
   const [ripple, setRipple] = React.useState<{ x: number; y: number; id: number } | null>(null);
   const rippleIdRef = React.useRef(0);
   const imgRef = React.useRef<HTMLImageElement | null>(null);
+  const finalEvidenceScrollRef = React.useRef<HTMLDivElement | null>(null);
   /**
    * BUG-11 — pure-JS sizing for the JPEG-fallback img.
    *
@@ -746,6 +747,9 @@ export function BrowserPanel({
       window.removeEventListener('resize', onWin);
     };
   }, [fitScreencastImg]);
+  React.useEffect(() => {
+    finalEvidenceScrollRef.current?.scrollTo({ left: 0, top: 0 });
+  }, [activeTaskId, finalEvidenceFrame?.imageBase64]);
   // Codex P2 follow-up — hidden input for direct CJK typing on the
   // JPEG screencast path (CDP mode). Browser-native IME composition
   // events fire on this focused-but-invisible element; on
@@ -1478,6 +1482,7 @@ export function BrowserPanel({
               // misleading live takeover.
               <div className="relative flex h-full w-full flex-col">
                 <div
+                  ref={finalEvidenceScrollRef}
                   className={cn(
                     'relative flex min-h-0 min-w-0 flex-1 items-start',
                     isSheet ? 'justify-start overflow-auto' : 'justify-center overflow-hidden',
