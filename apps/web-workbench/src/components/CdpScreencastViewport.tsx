@@ -1,6 +1,9 @@
 import * as React from 'react';
 import { hdDebug } from '@/lib/hd-debug';
-import { mapClientPointToScreencast } from '@/lib/screencast-fit';
+import {
+  mapClientPointToScreencast,
+  placeScreencastContainTop,
+} from '@/lib/screencast-fit';
 import { cn } from '@/lib/utils';
 
 /**
@@ -149,17 +152,19 @@ export function CdpScreencastViewport({
       if (srcW <= 0 || srcH <= 0) return;
       const rect = host.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
-      const scale = Math.min(rect.width / srcW, rect.height / srcH);
-      // Centre the scaled canvas inside the host (letterboxing in
-      // whichever axis isn't the binding constraint). origin-top-left
-      // makes scaling predictable; translate moves the box.
-      const renderedW = srcW * scale;
-      const renderedH = srcH * scale;
-      const offsetX = (rect.width - renderedW) / 2;
-      const offsetY = (rect.height - renderedH) / 2;
-      canvas.style.setProperty('--hd-scale', String(scale));
-      canvas.style.setProperty('--hd-offset-x', `${offsetX}px`);
-      canvas.style.setProperty('--hd-offset-y', `${offsetY}px`);
+      const placement = placeScreencastContainTop({
+        hostWidth: rect.width,
+        hostHeight: rect.height,
+        sourceWidth: srcW,
+        sourceHeight: srcH,
+      });
+      if (!placement) return;
+      // Keep the remote page horizontally centred but pinned to the
+      // top. A portrait panel should not spend half its height on
+      // blank letterbox above the page.
+      canvas.style.setProperty('--hd-scale', String(placement.scale));
+      canvas.style.setProperty('--hd-offset-x', `${placement.offsetX}px`);
+      canvas.style.setProperty('--hd-offset-y', `${placement.offsetY}px`);
     };
     recompute();
     let ro: ResizeObserver | null = null;

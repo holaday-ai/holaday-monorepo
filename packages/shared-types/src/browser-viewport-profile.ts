@@ -8,9 +8,12 @@
  *
  * The four flavours map to real UX surfaces the user inhabits:
  *
- *   sidepanel  — desktop right-rail panel (the "second pane"
- *                next to TaskStream). 900×900 keeps Chinese site
- *                text legible without horizontal squish.
+ *   sidepanel  — portrait right-rail panel (the "second pane"
+ *                next to TaskStream). This intentionally uses a
+ *                phone-plus CSS viewport so responsive sites switch
+ *                to their narrow layout instead of rendering a
+ *                desktop page that the SPA later shrinks into
+ *                illegibility.
  *   desktop    — pre-Phase-19 default + the legacy 1280×800
  *                Xvfb size. Keep as DEFAULT_BROWSER_VIEWPORT_PROFILE
  *                so existing callers + back-compat code paths keep
@@ -43,14 +46,10 @@ export interface ViewportDimensions {
 export const VIEWPORT_PROFILES: Readonly<
   Record<BrowserViewportProfile, ViewportDimensions>
 > = Object.freeze({
-  // BUG-11 — narrowed from 900x900 to 768x1024 (iPad-portrait).
-  // The CSS-scale-to-fit-panel approach is fundamentally bounded by
-  // the spawn-time viewport; at 900 wide, scaling to a 560-px panel
-  // crops the rightmost ~150 px worth of content (e.g. baidu hot-
-  // search column). 768 hits most sites' tablet breakpoint so the
-  // layout pre-compresses, AND the scale ratio improves from
-  // 560/900≈0.62 to 560/768≈0.73 (more readable).
-  sidepanel: { width: 768, height: 1024 },
+  // Keep the side panel narrow enough to trigger mobile/narrow-site
+  // layouts. 768px still leaves many sites in tablet/desktop mode,
+  // which only produces a tiny desktop page inside a portrait rail.
+  sidepanel: { width: 430, height: 760 },
   desktop: { width: 1280, height: 800 },
   fullscreen: { width: 1440, height: 960 },
   mobile: { width: 390, height: 844 },

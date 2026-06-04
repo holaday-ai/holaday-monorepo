@@ -1242,7 +1242,7 @@ export function BrowserPanel({
           <div
             ref={screencastHostRef}
             className={cn(
-              'flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden',
+              'flex min-h-0 min-w-0 flex-1 items-start justify-center overflow-hidden',
               fullscreen ? 'p-0' : 'p-3',
               interactiveActive
                 ? 'bg-[#EA1F59]/5'

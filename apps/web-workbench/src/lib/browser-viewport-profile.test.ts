@@ -41,7 +41,7 @@ describe('pickBrowserViewportProfile', () => {
     ).toBe('sidepanel');
   });
 
-  it('switches short wide panels to desktop so the browser fills the width', () => {
+  it('keeps short narrow panels on the portrait profile instead of shrinking desktop', () => {
     expect(
       pickBrowserViewportProfile({
         viewportWidth: 1280,
@@ -49,7 +49,7 @@ describe('pickBrowserViewportProfile', () => {
         panelWidth: 560,
         panelHeight: 520,
       }),
-    ).toBe('desktop');
+    ).toBe('sidepanel');
   });
 
   it('uses desktop geometry for explicitly wide browser panels', () => {
@@ -63,7 +63,7 @@ describe('pickBrowserViewportProfile', () => {
     ).toBe('desktop');
   });
 
-  it('falls back to the overlay panel size when concrete panel metrics are unavailable', () => {
+  it('falls back to portrait overlay geometry when concrete panel metrics are unavailable', () => {
     expect(
       pickBrowserViewportProfile({
         viewportWidth: 1180,
@@ -71,7 +71,7 @@ describe('pickBrowserViewportProfile', () => {
         panelWidth: null,
         panelHeight: null,
       }),
-    ).toBe('desktop');
+    ).toBe('sidepanel');
   });
 });
 
@@ -140,7 +140,7 @@ describe('pickWorkbenchBrowserViewportProfile', () => {
     ).toBe('sidepanel');
   });
 
-  it('switches short tablet overlays to desktop geometry', () => {
+  it('keeps short tablet overlays on portrait-friendly geometry', () => {
     expect(
       pickWorkbenchBrowserViewportProfile({
         viewportWidth: 1280,
@@ -150,6 +150,6 @@ describe('pickWorkbenchBrowserViewportProfile', () => {
         explicitPanelWidth: null,
         isTablet: true,
       }),
-    ).toBe('desktop');
+    ).toBe('sidepanel');
   });
 });

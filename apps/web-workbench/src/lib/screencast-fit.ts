@@ -11,6 +11,11 @@ export interface ScreencastFitSize {
   scale: number;
 }
 
+export interface ScreencastContainPlacement extends ScreencastFitSize {
+  offsetX: number;
+  offsetY: number;
+}
+
 export interface ScreencastPointInput {
   clientX: number;
   clientY: number;
@@ -47,6 +52,27 @@ export function fitScreencastContain({
     width: Math.max(1, Math.floor(sourceWidth * scale)),
     height: Math.max(1, Math.floor(sourceHeight * scale)),
     scale,
+  };
+}
+
+export function placeScreencastContainTop({
+  hostWidth,
+  hostHeight,
+  sourceWidth,
+  sourceHeight,
+}: ScreencastFitInput): ScreencastContainPlacement | null {
+  const fit = fitScreencastContain({
+    hostWidth,
+    hostHeight,
+    sourceWidth,
+    sourceHeight,
+  });
+  if (!fit) return null;
+
+  return {
+    ...fit,
+    offsetX: Math.max(0, (hostWidth - fit.width) / 2),
+    offsetY: 0,
   };
 }
 

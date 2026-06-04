@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   fitScreencastContain,
   mapClientPointToScreencast,
+  placeScreencastContainTop,
 } from './screencast-fit';
 
 describe('fitScreencastContain', () => {
@@ -10,10 +11,10 @@ describe('fitScreencastContain', () => {
       fitScreencastContain({
         hostWidth: 560,
         hostHeight: 480,
-        sourceWidth: 768,
-        sourceHeight: 1024,
+        sourceWidth: 430,
+        sourceHeight: 760,
       }),
-    ).toEqual({ width: 360, height: 480, scale: 0.46875 });
+    ).toEqual({ width: 271, height: 480, scale: 0.631578947368421 });
   });
 
   it('fits wide desktop frames into narrow side panels by width', () => {
@@ -39,6 +40,42 @@ describe('fitScreencastContain', () => {
   });
 });
 
+describe('placeScreencastContainTop', () => {
+  it('centres narrow frames horizontally but keeps them pinned to the top', () => {
+    expect(
+      placeScreencastContainTop({
+        hostWidth: 560,
+        hostHeight: 720,
+        sourceWidth: 430,
+        sourceHeight: 760,
+      }),
+    ).toEqual({
+      width: 407,
+      height: 720,
+      scale: 0.9473684210526315,
+      offsetX: 76.5,
+      offsetY: 0,
+    });
+  });
+
+  it('does not add vertical letterbox above wide desktop frames', () => {
+    expect(
+      placeScreencastContainTop({
+        hostWidth: 560,
+        hostHeight: 720,
+        sourceWidth: 1280,
+        sourceHeight: 800,
+      }),
+    ).toEqual({
+      width: 560,
+      height: 350,
+      scale: 0.4375,
+      offsetX: 0,
+      offsetY: 0,
+    });
+  });
+});
+
 describe('mapClientPointToScreencast', () => {
   it('maps clicks from a scaled side-panel canvas back to source pixels', () => {
     expect(
@@ -47,12 +84,12 @@ describe('mapClientPointToScreencast', () => {
         clientY: 300,
         rectLeft: 100,
         rectTop: 60,
-        rectWidth: 360,
+        rectWidth: 271,
         rectHeight: 480,
-        sourceWidth: 768,
-        sourceHeight: 1024,
+        sourceWidth: 430,
+        sourceHeight: 760,
       }),
-    ).toEqual({ x: 384, y: 512 });
+    ).toEqual({ x: 286, y: 380 });
   });
 
   it('accounts for letterbox offsets in the transformed canvas rect', () => {
@@ -79,8 +116,8 @@ describe('mapClientPointToScreencast', () => {
         rectTop: 0,
         rectWidth: 0,
         rectHeight: 480,
-        sourceWidth: 768,
-        sourceHeight: 1024,
+        sourceWidth: 430,
+        sourceHeight: 760,
       }),
     ).toEqual({ x: 0, y: 0 });
   });

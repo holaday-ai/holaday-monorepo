@@ -11,6 +11,8 @@ export interface BrowserViewportProfileInput {
 
 const LANDSCAPE_PANEL_ASPECT = 0.9;
 const WIDE_DESKTOP_PANEL_PX = 1040;
+const NARROW_PORTRAIT_PANEL_PX = 720;
+const NARROW_PORTRAIT_ASPECT = 0.86;
 const INLINE_PANEL_FLEX_SHARE = 0.6;
 const DEFAULT_INLINE_MAIN_MIN_PX = 420;
 const DEFAULT_PANEL_MIN_PX = 300;
@@ -57,6 +59,17 @@ export function pickBrowserViewportProfile({
   const effectivePanelHeight =
     safePanelHeight ?? Math.max(480, Math.round(viewportHeight * 0.72));
   const aspect = effectivePanelWidth / effectivePanelHeight;
+
+  if (effectivePanelWidth <= 640) {
+    return 'sidepanel';
+  }
+
+  if (
+    effectivePanelWidth <= NARROW_PORTRAIT_PANEL_PX &&
+    aspect < NARROW_PORTRAIT_ASPECT
+  ) {
+    return 'sidepanel';
+  }
 
   return aspect >= LANDSCAPE_PANEL_ASPECT ? 'desktop' : 'sidepanel';
 }
