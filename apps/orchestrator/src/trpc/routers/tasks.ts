@@ -2584,7 +2584,7 @@ export const tasksRouter = router({
                 // executor / page closed / capture timeout).
                 const captured = perUserExec
                   ? await captureFinalState(perUserExec, ctx.logger, taskId)
-                  : ({} as { finalScreenshot?: string; finalUrl?: string });
+                  : {};
                 const [row] = await ctx.db
                   .select({ result: tasksTable.result })
                   .from(tasksTable)
@@ -2602,6 +2602,9 @@ export const tasksRouter = router({
                 if (finalUrl) next.finalUrl = finalUrl;
                 if (captured.finalScreenshot) {
                   next.finalScreenshot = captured.finalScreenshot;
+                }
+                if (captured.finalViewport) {
+                  next.finalViewport = captured.finalViewport;
                 }
                 await ctx.db
                   .update(tasksTable)
@@ -3042,6 +3045,7 @@ export const tasksRouter = router({
                   ? (outcome.summary ?? '').slice(0, 200)
                   : null,
               ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+              ...(finalState.finalViewport ? { finalViewport: finalState.finalViewport } : {}),
               hasFinalScreenshot: Boolean(finalState.finalScreenshot),
             };
             // Phase 3 R3 — L1 auto-save final screenshot as a
@@ -5988,7 +5992,7 @@ async function persistSupercarOutcome(
   repo: TaskRepository,
   taskId: string,
   outcome: SupercarOutcome,
-  finalState: { finalScreenshot?: string; finalUrl?: string } = {},
+  finalState: CapturedFinalState = {},
   metadata?: Record<string, unknown>,
   /**
    * Codex Pack A3 — verifier-derived overrides. When `verdict` is
@@ -6007,14 +6011,14 @@ async function persistSupercarOutcome(
   // still in awaiting_user). See task-repository.ts atomic guard for
   // the rationale.
   try {
+    const finalFields = finalStatePersistFields(finalState);
     // Codex Pack A3 — verifier verdict overrides on a completed run.
     if (outcome.status === 'completed' && verdict === 'partial_success') {
       return await repo.persistVisionOutcome(taskId, {
         status: 'partial_success',
         summary: outcome.summary ?? '',
         tickCount: outcome.iterations,
-        ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
-        ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+        ...finalFields,
         ...(metadata ? { metadata } : {}),
         ...(failedChecks && failedChecks.length > 0 ? { failedChecks } : {}),
       });
@@ -6024,8 +6028,7 @@ async function persistSupercarOutcome(
         status: 'failed',
         reason: verificationReason ?? '质量校验未通过',
         tickCount: outcome.iterations,
-        ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
-        ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+        ...finalFields,
         ...(metadata ? { metadata } : {}),
         ...(failedChecks && failedChecks.length > 0 ? { failedChecks } : {}),
       });
@@ -6035,8 +6038,7 @@ async function persistSupercarOutcome(
         status: 'completed',
         summary: outcome.summary ?? '',
         tickCount: outcome.iterations,
-        ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
-        ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+        ...finalFields,
         ...(metadata ? { metadata } : {}),
       });
     } else if (outcome.status === 'awaiting_user') {
@@ -6049,8 +6051,7 @@ async function persistSupercarOutcome(
         status: 'paused',
         reason: outcome.question ?? 'awaiting user reply',
         tickCount: outcome.iterations,
-        ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
-        ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+        ...finalFields,
         ...(metadata ? { metadata } : {}),
       });
     } else if (outcome.status === 'cancelled') {
@@ -6060,8 +6061,7 @@ async function persistSupercarOutcome(
       return await repo.persistVisionOutcome(taskId, {
         status: 'cancelled',
         tickCount: outcome.iterations,
-        ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
-        ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+        ...finalFields,
         ...(metadata ? { metadata } : {}),
       });
     } else if (outcome.status === 'timeout') {
@@ -6072,8 +6072,7 @@ async function persistSupercarOutcome(
           outcome.reason ?? 'supercar: task timeout',
         ),
         tickCount: outcome.iterations,
-        ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
-        ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+        ...finalFields,
         ...(metadata ? { metadata } : {}),
       });
     } else {
@@ -6085,8 +6084,7 @@ async function persistSupercarOutcome(
           outcome.reason ?? 'supercar: task failed',
         ),
         tickCount: outcome.iterations,
-        ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
-        ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+        ...finalFields,
         ...(metadata ? { metadata } : {}),
       });
     }
@@ -6172,11 +6170,25 @@ async function convergePlanStatusOnSuccess(
  * and the persisted result simply omits the screenshot. The caller
  * doesn't need to differentiate.
  */
+interface CapturedFinalState {
+  finalScreenshot?: string;
+  finalUrl?: string;
+  finalViewport?: { width: number; height: number };
+}
+
+function finalStatePersistFields(finalState: CapturedFinalState): CapturedFinalState {
+  return {
+    ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
+    ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
+    ...(finalState.finalViewport ? { finalViewport: finalState.finalViewport } : {}),
+  };
+}
+
 async function captureFinalState(
   executor: PlaywrightExecutor | null,
   logger: import('pino').Logger,
   taskId: string,
-): Promise<{ finalScreenshot?: string; finalUrl?: string }> {
+): Promise<CapturedFinalState> {
   if (!executor) return {};
   try {
     const page = await executor.getPage();
@@ -6194,6 +6206,14 @@ async function captureFinalState(
     return {
       finalScreenshot: shot.base64,
       ...(finalUrl ? { finalUrl } : {}),
+      ...(shot.viewportWidth && shot.viewportHeight
+        ? {
+            finalViewport: {
+              width: shot.viewportWidth,
+              height: shot.viewportHeight,
+            },
+          }
+        : {}),
     };
   } catch (err) {
     logger.warn(

@@ -567,6 +567,34 @@ describe('selectTask detail hydration', () => {
     expect(state.awaitingUserByTask.tsk_detail).toBeUndefined();
   });
 
+  it('hydrates final screenshot viewport dimensions from task detail', async () => {
+    detailQuery.mockResolvedValueOnce({
+      intent: '打开移动页面',
+      title: null,
+      status: 'completed',
+      createdAt: '2026-06-05T00:00:00.000Z',
+      steps: [],
+      result: {
+        summary: 'Done',
+        finalScreenshot: 'base64-jpeg',
+        finalUrl: 'https://example.com/',
+        finalViewport: { width: 430.8, height: 760.2 },
+      },
+      verificationPassed: true,
+      failureLevel: null,
+    } as never);
+
+    useTaskStore.getState().selectTask('tsk_viewport_detail', 'ui');
+    await flushPromises();
+
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      taskId: 'tsk_viewport_detail',
+      finalScreenshot: 'base64-jpeg',
+      finalUrl: 'https://example.com/',
+      finalViewport: { width: 430, height: 760 },
+    });
+  });
+
   it('uses humanised detail errorMessage when failed detail has no result reason', async () => {
     detailQuery.mockResolvedValueOnce({
       intent: '打开网页',

@@ -266,6 +266,7 @@ export class TaskRepository {
           /** R7 — final-state evidence captured pre-pool-release. */
           finalScreenshot?: string;
           finalUrl?: string;
+          finalViewport?: { width: number; height: number };
           /**
            * Spec B3 — structured execution metadata stamped into the
            * `result` JSON under `metadata`. Carries fields the eval
@@ -291,6 +292,7 @@ export class TaskRepository {
           tickCount: number;
           finalScreenshot?: string;
           finalUrl?: string;
+          finalViewport?: { width: number; height: number };
           metadata?: Record<string, unknown>;
           failedChecks?: Array<{ type: string; detail: string }>;
         }
@@ -301,6 +303,7 @@ export class TaskRepository {
           errorCode?: string;
           finalScreenshot?: string;
           finalUrl?: string;
+          finalViewport?: { width: number; height: number };
           metadata?: Record<string, unknown>;
           failedChecks?: Array<{ type: string; detail: string }>;
         }
@@ -313,6 +316,7 @@ export class TaskRepository {
           // has a frame to render after a refresh / disconnect.
           finalScreenshot?: string;
           finalUrl?: string;
+          finalViewport?: { width: number; height: number };
           metadata?: Record<string, unknown>;
         }
       | {
@@ -320,6 +324,7 @@ export class TaskRepository {
           tickCount: number;
           finalScreenshot?: string;
           finalUrl?: string;
+          finalViewport?: { width: number; height: number };
           metadata?: Record<string, unknown>;
         },
   ): Promise<{ persisted: boolean }> {
@@ -345,6 +350,7 @@ export class TaskRepository {
       result.summary = outcome.summary;
       if (outcome.finalScreenshot) result.finalScreenshot = outcome.finalScreenshot;
       if (outcome.finalUrl) result.finalUrl = outcome.finalUrl;
+      if (outcome.finalViewport) result.finalViewport = outcome.finalViewport;
       if (outcome.metadata) result.metadata = outcome.metadata;
       if (outcome.failedChecks && outcome.failedChecks.length > 0) {
         result.failedChecks = outcome.failedChecks;
@@ -358,6 +364,7 @@ export class TaskRepository {
       result.reason = outcome.reason;
       if (outcome.finalScreenshot) result.finalScreenshot = outcome.finalScreenshot;
       if (outcome.finalUrl) result.finalUrl = outcome.finalUrl;
+      if (outcome.finalViewport) result.finalViewport = outcome.finalViewport;
       if (outcome.metadata) result.metadata = outcome.metadata;
       if (outcome.failedChecks && outcome.failedChecks.length > 0) {
         result.failedChecks = outcome.failedChecks;
@@ -369,6 +376,7 @@ export class TaskRepository {
       // Phase 1 follow-up — accept finalScreenshot/finalUrl/metadata.
       if (outcome.finalScreenshot) result.finalScreenshot = outcome.finalScreenshot;
       if (outcome.finalUrl) result.finalUrl = outcome.finalUrl;
+      if (outcome.finalViewport) result.finalViewport = outcome.finalViewport;
       if (outcome.metadata) result.metadata = outcome.metadata;
       eventPayload = { ...eventPayload, reason: outcome.reason };
     } else {
@@ -377,6 +385,7 @@ export class TaskRepository {
       // Phase 1 follow-up — capture terminal frame on cancellation.
       if (outcome.finalScreenshot) result.finalScreenshot = outcome.finalScreenshot;
       if (outcome.finalUrl) result.finalUrl = outcome.finalUrl;
+      if (outcome.finalViewport) result.finalViewport = outcome.finalViewport;
       if (outcome.metadata) result.metadata = outcome.metadata;
     }
     update.result = result;

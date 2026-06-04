@@ -77,6 +77,8 @@ export interface UiTask {
   finalScreenshot?: string;
   /** R7 — URL the per-task Brave was on at terminal. */
   finalUrl?: string;
+  /** R7 follow-up — dimensions of the terminal screenshot viewport. */
+  finalViewport?: { width: number; height: number };
   /**
    * P2-A — what kind of input the agent is waiting on while
    * `status === 'awaiting_user'`. Drives the BrowserPanel's verify

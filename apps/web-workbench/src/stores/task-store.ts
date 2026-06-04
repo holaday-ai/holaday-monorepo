@@ -461,6 +461,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           safeTaskListText(resultObj.finalUrl).length > 0
             ? safeTaskListText(resultObj.finalUrl)
             : undefined;
+        const finalViewport = normalizeFinalViewport(
+          resultObj.finalViewport ?? metadata.finalViewport,
+        );
         // Phase 4 R1 — hydrate metadata.attachments[] +
         // metadata.expertWorkflowId from the terminal-state JSON.
         // Both fields are nullable; we only pass them through when
@@ -593,6 +596,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                     ...(planStatus ? { planStatus } : {}),
                     ...(finalScreenshot ? { finalScreenshot } : {}),
                     ...(finalUrl ? { finalUrl } : {}),
+                    ...(finalViewport ? { finalViewport } : {}),
                     ...(awaitingKind ? { awaitingKind } : {}),
                     ...(executionMode ? { executionMode } : {}),
                     ...(attachments ? { attachments } : {}),
@@ -623,6 +627,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             ...(planStatus ? { planStatus } : {}),
             ...(finalScreenshot ? { finalScreenshot } : {}),
             ...(finalUrl ? { finalUrl } : {}),
+            ...(finalViewport ? { finalViewport } : {}),
             ...(awaitingKind ? { awaitingKind } : {}),
             ...(executionMode ? { executionMode } : {}),
             ...(attachments ? { attachments } : {}),
@@ -1956,6 +1961,28 @@ function safeNullableTaskListText(value: unknown): string | null {
 
 function safeTaskListText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeFinalViewport(
+  value: unknown,
+): UiTask['finalViewport'] | undefined {
+  if (!isTaskListRecord(value)) return undefined;
+  const width = value.width;
+  const height = value.height;
+  if (
+    typeof width !== 'number' ||
+    typeof height !== 'number' ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return undefined;
+  }
+  return {
+    width: Math.floor(width),
+    height: Math.floor(height),
+  };
 }
 
 function safeNullableTaskListDate(value: unknown): Date | null {

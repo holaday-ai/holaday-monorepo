@@ -327,10 +327,10 @@ export function BrowserPanel({
       tickIndex: -1,
       imageBase64: activeTask.finalScreenshot,
       url: activeTask.finalUrl ?? 'about:blank',
-      viewport: { width: 0, height: 0 },
+      viewport: activeTask.finalViewport ?? { width: 0, height: 0 },
       timestamp: new Date().toISOString(),
     };
-  }, [activeTask?.finalScreenshot, activeTask?.finalUrl]);
+  }, [activeTask?.finalScreenshot, activeTask?.finalUrl, activeTask?.finalViewport]);
   const latestFrame = React.useMemo<UiScreencast | null>(() => {
     const all = Object.values(screencastByTask);
     if (all.length === 0) return null;
@@ -1556,7 +1556,7 @@ export function BrowserPanel({
                 BROWSER_DIVIDER,
               )}
             >
-              <span>{browserViewportFrameLabel(frame?.viewport)}</span>
+              <span>{browserViewportFrameLabel(displayFrame?.viewport)}</span>
               <span>{frame ? `第 ${frame.tickIndex + 1} 帧` : ''}</span>
             </footer>
           )}
