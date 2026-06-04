@@ -1010,7 +1010,7 @@ export function BrowserPanel({
       className={cn(
         'relative flex flex-col border-l border-[#DCDDDD] backdrop-blur-xl dark:border-white/10',
         isSheet
-          ? 'fixed inset-x-0 bottom-0 z-[75] h-[75vh] rounded-t-lg border-t border-l-0 shadow-2xl animate-fade-in'
+          ? 'fixed inset-x-0 bottom-0 z-[75] h-[calc(100dvh-16px)] max-h-[calc(100dvh-16px)] rounded-t-lg border-t border-l-0 shadow-2xl animate-fade-in'
           : 'h-full transition-[width] duration-150',
         // Desktop: fill the parent wrapper (App owns the flex-basis /
         // resize logic). The collapsed rail stays a local state the
@@ -1244,7 +1244,7 @@ export function BrowserPanel({
             ref={screencastHostRef}
             className={cn(
               'flex min-h-0 min-w-0 flex-1 items-start justify-center overflow-hidden',
-              fullscreen ? 'p-0' : 'p-3',
+              fullscreen ? 'p-0' : isSheet ? 'p-2' : 'p-3',
               interactiveActive
                 ? 'bg-[#EA1F59]/5'
                 : 'bg-[#EFEFEF]/50 dark:bg-white/[0.03]',
@@ -1477,8 +1477,16 @@ export function BrowserPanel({
                     )}
                   </div>
                 </div>
-                <div className={cn('flex shrink-0 items-center justify-center gap-2 border-t bg-background/70 px-3 py-2 text-[12px]', BROWSER_DIVIDER)}>
-                  <span className="text-muted-foreground">想继续操作？新建任务或重新执行。</span>
+                <div
+                  className={cn(
+                    'flex shrink-0 items-center justify-center gap-2 border-t bg-background/70 text-[12px]',
+                    isSheet ? 'px-2 py-1' : 'px-3 py-2',
+                    BROWSER_DIVIDER,
+                  )}
+                >
+                  <span className="text-muted-foreground">
+                    {isSheet ? '完成后可重新执行。' : '想继续操作？新建任务或重新执行。'}
+                  </span>
                   {onReExecute && (
                     <button
                       type="button"
@@ -1505,7 +1513,13 @@ export function BrowserPanel({
             )}
           </div>
           {!fullscreen && shouldConnect && showHeader && (
-            <footer className={cn('flex h-7 items-center justify-between border-t px-3 text-[11px] text-muted-foreground', BROWSER_DIVIDER)}>
+            <footer
+              className={cn(
+                'flex items-center justify-between border-t text-muted-foreground',
+                isSheet ? 'h-6 px-2 text-[10px]' : 'h-7 px-3 text-[11px]',
+                BROWSER_DIVIDER,
+              )}
+            >
               <span>{browserViewportFrameLabel(frame?.viewport)}</span>
               <span>{frame ? `第 ${frame.tickIndex + 1} 帧` : ''}</span>
             </footer>
