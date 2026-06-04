@@ -14,7 +14,12 @@
 
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { pino } from 'pino';
-import type { BrowserViewportProfile } from '@holaday/shared-types';
+import {
+  type BrowserViewportProfile,
+  braveWindowSizeForProfile,
+  dimensionsForProfile,
+  xvfbScreenForProfile,
+} from '@holaday/shared-types';
 import { BrowserPool, PoolCapacityError } from './browser-pool.js';
 import type { BrowserInstance, PoolConfig } from './types.js';
 
@@ -286,5 +291,17 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
     it('is a safe no-op for unknown taskId', () => {
       expect(() => pool.touch('tsk_unknown')).not.toThrow();
     });
+  });
+});
+
+describe('browser viewport profile geometry', () => {
+  it('keeps portrait surfaces on narrow real browser dimensions', () => {
+    expect(dimensionsForProfile('mobile')).toEqual({ width: 390, height: 844 });
+    expect(xvfbScreenForProfile('mobile')).toBe('390x844x24');
+    expect(braveWindowSizeForProfile('mobile')).toBe('390,844');
+
+    expect(dimensionsForProfile('sidepanel')).toEqual({ width: 430, height: 760 });
+    expect(xvfbScreenForProfile('sidepanel')).toBe('430x760x24');
+    expect(braveWindowSizeForProfile('sidepanel')).toBe('430,760');
   });
 });
