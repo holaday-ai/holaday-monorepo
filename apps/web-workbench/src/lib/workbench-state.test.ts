@@ -214,42 +214,76 @@ describe('workbench state helpers', () => {
         taskId: 'tsk_live',
         mode: 'browser-live',
         isMobile: true,
-        autoOpenedTaskId: null,
+        autoOpenedKey: null,
       }),
-    ).toEqual({ shouldOpen: true, autoOpenedTaskId: 'tsk_live' });
+    ).toEqual({
+      shouldOpen: true,
+      autoOpenedKey: 'tsk_live:browser-live',
+    });
     expect(
       mobileBrowserSheetAutoOpenState({
         taskId: 'tsk_live',
         mode: 'browser-live',
         isMobile: true,
-        autoOpenedTaskId: 'tsk_live',
+        autoOpenedKey: 'tsk_live:browser-live',
       }),
-    ).toEqual({ shouldOpen: false, autoOpenedTaskId: 'tsk_live' });
+    ).toEqual({
+      shouldOpen: false,
+      autoOpenedKey: 'tsk_live:browser-live',
+    });
     expect(
       mobileBrowserSheetAutoOpenState({
         taskId: 'tsk_next',
         mode: 'browser-live',
         isMobile: true,
-        autoOpenedTaskId: 'tsk_live',
+        autoOpenedKey: 'tsk_live:browser-live',
       }),
-    ).toEqual({ shouldOpen: true, autoOpenedTaskId: 'tsk_next' });
+    ).toEqual({
+      shouldOpen: true,
+      autoOpenedKey: 'tsk_next:browser-live',
+    });
   });
 
-  it('keeps the mobile browser sheet closed outside live mobile browser mode', () => {
+  it('auto-opens terminal browser evidence after the live mobile sheet', () => {
+    expect(
+      mobileBrowserSheetAutoOpenState({
+        taskId: 'tsk_live',
+        mode: 'browser-record',
+        isMobile: true,
+        autoOpenedKey: 'tsk_live:browser-live',
+      }),
+    ).toEqual({
+      shouldOpen: true,
+      autoOpenedKey: 'tsk_live:browser-record',
+    });
+    expect(
+      mobileBrowserSheetAutoOpenState({
+        taskId: 'tsk_live',
+        mode: 'browser-record',
+        isMobile: true,
+        autoOpenedKey: 'tsk_live:browser-record',
+      }),
+    ).toEqual({
+      shouldOpen: false,
+      autoOpenedKey: 'tsk_live:browser-record',
+    });
+  });
+
+  it('keeps the mobile browser sheet closed outside mobile browser surfaces', () => {
     expect(
       mobileBrowserSheetAutoOpenState({
         taskId: 'tsk_live',
         mode: 'browser-live',
         isMobile: false,
-        autoOpenedTaskId: null,
+        autoOpenedKey: null,
       }).shouldOpen,
     ).toBe(false);
     expect(
       mobileBrowserSheetAutoOpenState({
-        taskId: 'tsk_done',
-        mode: 'browser-record',
+        taskId: 'tsk_live',
+        mode: 'closed',
         isMobile: true,
-        autoOpenedTaskId: null,
+        autoOpenedKey: null,
       }).shouldOpen,
     ).toBe(false);
     expect(
@@ -257,8 +291,11 @@ describe('workbench state helpers', () => {
         taskId: null,
         mode: 'browser-live',
         isMobile: true,
-        autoOpenedTaskId: 'tsk_live',
+        autoOpenedKey: 'tsk_live:browser-live',
       }),
-    ).toEqual({ shouldOpen: false, autoOpenedTaskId: 'tsk_live' });
+    ).toEqual({
+      shouldOpen: false,
+      autoOpenedKey: 'tsk_live:browser-live',
+    });
   });
 });

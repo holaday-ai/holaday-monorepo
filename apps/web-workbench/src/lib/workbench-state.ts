@@ -96,15 +96,20 @@ export function mobileBrowserSheetAutoOpenState(input: {
   taskId: string | null;
   mode: SidePanelMode;
   isMobile: boolean;
-  autoOpenedTaskId: string | null;
-}): { shouldOpen: boolean; autoOpenedTaskId: string | null } {
-  if (!input.isMobile || !input.taskId || input.mode !== 'browser-live') {
-    return { shouldOpen: false, autoOpenedTaskId: input.autoOpenedTaskId };
+  autoOpenedKey: string | null;
+}): { shouldOpen: boolean; autoOpenedKey: string | null } {
+  if (
+    !input.isMobile ||
+    !input.taskId ||
+    (input.mode !== 'browser-live' && input.mode !== 'browser-record')
+  ) {
+    return { shouldOpen: false, autoOpenedKey: input.autoOpenedKey };
   }
-  if (input.autoOpenedTaskId === input.taskId) {
-    return { shouldOpen: false, autoOpenedTaskId: input.autoOpenedTaskId };
+  const nextKey = `${input.taskId}:${input.mode}`;
+  if (input.autoOpenedKey === nextKey) {
+    return { shouldOpen: false, autoOpenedKey: input.autoOpenedKey };
   }
-  return { shouldOpen: true, autoOpenedTaskId: input.taskId };
+  return { shouldOpen: true, autoOpenedKey: nextKey };
 }
 
 export function normalizeTaskActionCount(value: unknown): number {

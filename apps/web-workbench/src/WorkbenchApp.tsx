@@ -75,7 +75,7 @@ export function WorkbenchApp(): JSX.Element {
   // Inner-workbench state.
   const [panelFullscreen, setPanelFullscreen] = React.useState(false);
   const [browserSheetOpen, setBrowserSheetOpen] = React.useState(false);
-  const mobileBrowserSheetAutoOpenedTaskRef = React.useRef<string | null>(null);
+  const mobileBrowserSheetAutoOpenedKeyRef = React.useRef<string | null>(null);
   /**
    * BUG-11 follow-up — viewport breakpoint flag. The inline desktop
    * panel used to stay mounted behind CSS breakpoints, so hidden
@@ -441,10 +441,9 @@ export function WorkbenchApp(): JSX.Element {
       taskId: selectedTaskId,
       mode: sidePanelMode,
       isMobile,
-      autoOpenedTaskId: mobileBrowserSheetAutoOpenedTaskRef.current,
+      autoOpenedKey: mobileBrowserSheetAutoOpenedKeyRef.current,
     });
-    mobileBrowserSheetAutoOpenedTaskRef.current =
-      nextSheetState.autoOpenedTaskId;
+    mobileBrowserSheetAutoOpenedKeyRef.current = nextSheetState.autoOpenedKey;
     if (nextSheetState.shouldOpen) {
       setBrowserSheetOpen(true);
     }
