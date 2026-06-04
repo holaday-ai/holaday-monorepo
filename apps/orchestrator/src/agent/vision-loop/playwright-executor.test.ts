@@ -840,6 +840,7 @@ describe('PlaywrightExecutor.resetPageForTask', () => {
   // symptom and drops residual state (timers, cookies-in-memory).
   it('opens a fresh newPage, pins it, and closes prior pages', async () => {
     const closeCalls: string[] = [];
+    const viewportCalls: Array<{ width: number; height: number }> = [];
     const old1 = {
       url: () => 'https://prev.task/',
       close: async () => {
@@ -855,6 +856,9 @@ describe('PlaywrightExecutor.resetPageForTask', () => {
     const fresh = {
       url: () => 'about:blank',
       evaluate: async () => 1,
+      setViewportSize: async (size: { width: number; height: number }) => {
+        viewportCalls.push(size);
+      },
       close: async () => {
         closeCalls.push('fresh');
       },
@@ -878,6 +882,7 @@ describe('PlaywrightExecutor.resetPageForTask', () => {
       },
     });
     await exec.connect('http://a');
+    exec.setViewportSize({ width: 390, height: 844 });
     await exec.resetPageForTask();
     // Both priors got a close() queued. Fresh is NOT closed.
     await new Promise((r) => setTimeout(r, 10)); // drain fire-and-forget
@@ -885,5 +890,6 @@ describe('PlaywrightExecutor.resetPageForTask', () => {
     // Subsequent getPage returns the pinned fresh page, not pages[0].
     const p = await exec.getPage();
     expect(p).toBe(fresh);
+    expect(viewportCalls).toEqual([{ width: 390, height: 844 }]);
   });
 });

@@ -50,6 +50,7 @@ import type { Logger } from 'pino';
 import {
   type BrowserViewportProfile,
   braveWindowSizeForProfile,
+  dimensionsForProfile,
   xvfbScreenForProfile,
 } from '@holaday/shared-types';
 import { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
@@ -374,6 +375,9 @@ export class BrowserPool {
       processes.push(websockify);
 
       const executor = new PlaywrightExecutor();
+      if (viewportProfile) {
+        executor.setViewportSize(dimensionsForProfile(viewportProfile));
+      }
       const connectResult = await executor.connect(
         `http://127.0.0.1:${slot.cdpPort}`,
       );

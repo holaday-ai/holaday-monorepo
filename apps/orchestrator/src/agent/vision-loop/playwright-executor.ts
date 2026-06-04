@@ -128,6 +128,7 @@ export interface PageLike {
   ariaSnapshot(opts?: { ref?: boolean }): Promise<string>;
   waitForTimeout(ms: number): Promise<void>;
   goto(url: string, opts?: { waitUntil?: string; timeout?: number }): Promise<unknown>;
+  setViewportSize?: (size: { width: number; height: number }) => Promise<void>;
   /**
    * Added as part of the anti-bot recovery work: we race a trivial
    * evaluate against a timeout to check liveness. Real playwright.Page
@@ -197,6 +198,7 @@ export class PlaywrightExecutor {
    * evaluate on every getPage() call.
    */
   private readonly stealthApplied = new WeakSet<object>();
+  private targetViewportSize: { width: number; height: number } | null = null;
 
   constructor(
     opts: {
@@ -244,6 +246,23 @@ export class PlaywrightExecutor {
         error: `connectOverCDP(${cdpEndpoint}) failed: ${errMsg(err)}`,
       };
     }
+  }
+
+  setViewportSize(size: { width: number; height: number } | null): void {
+    if (
+      size &&
+      Number.isFinite(size.width) &&
+      Number.isFinite(size.height) &&
+      size.width > 0 &&
+      size.height > 0
+    ) {
+      this.targetViewportSize = {
+        width: Math.floor(size.width),
+        height: Math.floor(size.height),
+      };
+      return;
+    }
+    this.targetViewportSize = null;
   }
 
   /**
@@ -473,6 +492,7 @@ export class PlaywrightExecutor {
     if (!page) {
       page = await ctx.newPage();
       this.activePage = page;
+      await this.applyTargetViewportToPage(page as unknown as PageLike);
       await this.applyStealthToPageIfNeeded(page as unknown as PageLike);
       return page;
     }
@@ -506,6 +526,7 @@ export class PlaywrightExecutor {
     const fresh = await ctx.newPage();
     const stuck = page;
     this.activePage = fresh;
+    await this.applyTargetViewportToPage(fresh as unknown as PageLike);
     // Fire-and-forget close so we don't re-hang on the stuck page.
     void (async () => {
       const closer = (stuck as unknown as PageLike).close;
@@ -513,6 +534,19 @@ export class PlaywrightExecutor {
     })();
     await this.applyStealthToPageIfNeeded(fresh as unknown as PageLike);
     return fresh;
+  }
+
+  private async applyTargetViewportToPage(page: PageLike): Promise<void> {
+    const size = this.targetViewportSize;
+    if (!size || typeof page.setViewportSize !== 'function') return;
+    try {
+      await page.setViewportSize(size);
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), size },
+        'setViewportSize failed — continuing with browser window geometry',
+      );
+    }
   }
 
   /**
@@ -910,6 +944,7 @@ export class PlaywrightExecutor {
     if (!ctx) return null;
     const fresh = await ctx.newPage();
     this.activePage = fresh;
+    await this.applyTargetViewportToPage(fresh as unknown as PageLike);
     await this.applyStealthToPageIfNeeded(fresh as unknown as PageLike);
     if (stuck) {
       void (async () => {
@@ -950,6 +985,7 @@ export class PlaywrightExecutor {
       const fresh = await ctx.newPage();
       const prior = this.activePage;
       this.activePage = fresh;
+      await this.applyTargetViewportToPage(fresh as unknown as PageLike);
       await this.applyStealthToPageIfNeeded(fresh as unknown as PageLike);
       // Close all existing pages that aren't our new one. Fire-and-
       // forget so we don't block task start on a flaky close. Skips
