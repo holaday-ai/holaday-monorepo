@@ -1334,6 +1334,7 @@ export function BrowserPanel({
                 {activityVisible && recentSteps.length > 0 && (
                   <ActivityOverlay
                     steps={recentSteps}
+                    compact={isSheet}
                     onClose={() => setActivityVisible(false)}
                   />
                 )}
@@ -1395,6 +1396,7 @@ export function BrowserPanel({
                   {activityVisible && recentSteps.length > 0 && (
                     <ActivityOverlay
                       steps={recentSteps}
+                      compact={isSheet}
                       onClose={() => setActivityVisible(false)}
                     />
                   )}
@@ -1476,31 +1478,38 @@ export function BrowserPanel({
                       <span className="truncate font-mono opacity-80">{finalEvidenceFrame.url}</span>
                     )}
                   </div>
-                </div>
-                <div
-                  className={cn(
-                    'flex shrink-0 items-center justify-center gap-2 border-t bg-background/70 text-[12px]',
-                    isSheet ? 'px-2 py-1' : 'px-3 py-2',
-                    BROWSER_DIVIDER,
-                  )}
-                >
-                  <span className="text-muted-foreground">
-                    {isSheet ? '完成后可重新执行。' : '想继续操作？新建任务或重新执行。'}
-                  </span>
-                  {onReExecute && (
+                  {isSheet && onReExecute && (
                     <button
                       type="button"
                       onClick={onReExecute}
                       disabled={reExecuting}
                       aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
                       title={reExecuting ? '正在重新执行' : '重新执行'}
-                      className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+                      className="absolute right-2 top-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-white/25 bg-black/45 px-2 text-[11px] font-medium text-white shadow-sm backdrop-blur transition-colors hover:bg-black/60 disabled:cursor-wait disabled:opacity-60"
                     >
                       <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
-                      {reExecuting ? '提交中…' : '重新执行'}
+                      {reExecuting ? '提交中…' : '重跑'}
                     </button>
                   )}
                 </div>
+                {!isSheet && (
+                  <div className={cn('flex shrink-0 items-center justify-center gap-2 border-t bg-background/70 px-3 py-2 text-[12px]', BROWSER_DIVIDER)}>
+                    <span className="text-muted-foreground">想继续操作？新建任务或重新执行。</span>
+                    {onReExecute && (
+                      <button
+                        type="button"
+                        onClick={onReExecute}
+                        disabled={reExecuting}
+                        aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
+                        title={reExecuting ? '正在重新执行' : '重新执行'}
+                        className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+                      >
+                        <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
+                        {reExecuting ? '提交中…' : '重新执行'}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <EmptyBrowserState
@@ -1552,14 +1561,29 @@ export function BrowserPanel({
  */
 function ActivityOverlay({
   steps,
+  compact = false,
   onClose,
 }: {
   steps: UiStep[];
+  compact?: boolean;
   onClose: () => void;
 }): JSX.Element {
+  const visibleSteps = compact ? steps.slice(-1) : steps;
   return (
-    <div className="pointer-events-none absolute inset-x-2 bottom-2 rounded-md bg-black/55 px-3 py-2 text-[11px] text-white backdrop-blur-md">
-      <div className="pointer-events-auto mb-1 flex items-center justify-between text-[10px] uppercase tracking-wider text-white/70">
+    <div
+      className={cn(
+        'pointer-events-none absolute rounded-md bg-black/55 text-white backdrop-blur-md',
+        compact
+          ? 'inset-x-1 bottom-1 px-2 py-1 text-[10px]'
+          : 'inset-x-2 bottom-2 px-3 py-2 text-[11px]',
+      )}
+    >
+      <div
+        className={cn(
+          'pointer-events-auto flex items-center justify-between uppercase tracking-wider text-white/70',
+          compact ? 'mb-0.5 text-[9px]' : 'mb-1 text-[10px]',
+        )}
+      >
         <span>最近操作</span>
         <button
           type="button"
@@ -1572,7 +1596,7 @@ function ActivityOverlay({
         </button>
       </div>
       <ul className="space-y-0.5 font-mono leading-snug">
-        {steps.map((s) => (
+        {visibleSteps.map((s) => (
           <li key={s.tickIndex} className="flex items-start gap-1.5">
             <span className="shrink-0 text-white/50">{activityGlyph(s.actionKind)}</span>
             <span className="min-w-0 flex-1 truncate">{summariseAction(s)}</span>
