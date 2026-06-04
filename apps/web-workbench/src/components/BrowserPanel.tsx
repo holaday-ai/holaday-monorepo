@@ -44,7 +44,7 @@ import {
   browserNavFailureMessage,
 } from '@/lib/browser-nav-copy';
 import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
-import { fitScreencastContain } from '@/lib/screencast-fit';
+import { fitScreencastContain, fitScreencastReadable } from '@/lib/screencast-fit';
 import {
   externalLinkConfirmDescription,
   safeExternalHttpHref,
@@ -255,6 +255,7 @@ export function BrowserPanel({
   onReExecute,
   reExecuting = false,
 }: Props): JSX.Element | null {
+  const isSheet = layout === 'sheet';
   // P2-A — only the non-clarification kinds need browser takeover.
   // Treat missing kind as `clarification` so older WS events / legacy
   // DB rows (NULL awaiting_kind) don't accidentally flash the verify
@@ -718,7 +719,8 @@ export function BrowserPanel({
     if (natW <= 0 || natH <= 0) return;
     const hostW = host.clientWidth;
     const hostH = host.clientHeight;
-    const fit = fitScreencastContain({
+    const fitFn = isSheet ? fitScreencastReadable : fitScreencastContain;
+    const fit = fitFn({
       hostWidth: hostW,
       hostHeight: hostH,
       sourceWidth: natW,
@@ -727,7 +729,7 @@ export function BrowserPanel({
     if (!fit) return;
     img.style.width = `${fit.width}px`;
     img.style.height = `${fit.height}px`;
-  }, []);
+  }, [isSheet]);
   React.useEffect(() => {
     const host = screencastHostRef.current;
     if (!host) return;
@@ -1002,7 +1004,6 @@ export function BrowserPanel({
 
   if (layout === 'sheet' && !open) return null;
 
-  const isSheet = layout === 'sheet';
   const section = (
     <section
       ref={panelRootRef}
@@ -1243,7 +1244,8 @@ export function BrowserPanel({
           <div
             ref={screencastHostRef}
             className={cn(
-              'flex min-h-0 min-w-0 flex-1 items-start justify-center overflow-hidden',
+              'flex min-h-0 min-w-0 flex-1 items-start',
+              isSheet ? 'justify-start overflow-auto' : 'justify-center overflow-hidden',
               fullscreen ? 'p-0' : isSheet ? 'p-2' : 'p-3',
               interactiveActive
                 ? 'bg-[#EA1F59]/5'
@@ -1364,7 +1366,12 @@ export function BrowserPanel({
                    pixel dimensions on the image. That avoids the
                    source frame's intrinsic width leaking through
                    flex layout during side-panel resize. */
-                <div className="relative max-h-full max-w-full min-h-0 min-w-0">
+                <div
+                  className={cn(
+                    'relative min-h-0 min-w-0',
+                    isSheet ? 'mx-auto' : 'max-h-full max-w-full',
+                  )}
+                >
                   {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard capture is handled via window listener in interactive mode */}
                   {/* BUG-11 final — width/height set imperatively in
                       `fitScreencastImg` (pure JS, pixel values).
@@ -1381,6 +1388,7 @@ export function BrowserPanel({
                     draggable={false}
                     className={cn(
                       'block rounded-md border shadow-[0_1px_3px_rgba(17,24,39,0.06)]',
+                      isSheet && 'mx-auto',
                       interactiveActive
                         ? 'cursor-pointer border-[#EA1F59]/45 ring-2 ring-[#EA1F59]/15'
                         : 'border-black/[0.06]',
@@ -1463,14 +1471,22 @@ export function BrowserPanel({
               // evidence viewer and offer a fresh re-run instead of a
               // misleading live takeover.
               <div className="relative flex h-full w-full flex-col">
-                <div className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden">
+                <div
+                  className={cn(
+                    'relative flex min-h-0 min-w-0 flex-1 items-start',
+                    isSheet ? 'justify-start overflow-auto' : 'justify-center overflow-hidden',
+                  )}
+                >
                   <img
                     ref={imgRef}
                     src={`data:image/jpeg;base64,${finalEvidenceFrame.imageBase64}`}
                     alt="任务完成时的浏览器截图"
                     draggable={false}
                     onLoad={fitScreencastImg}
-                    className="block rounded-md border border-black/[0.06] shadow-[0_1px_3px_rgba(17,24,39,0.06)]"
+                    className={cn(
+                      'block rounded-md border border-black/[0.06] shadow-[0_1px_3px_rgba(17,24,39,0.06)]',
+                      isSheet && 'mx-auto',
+                    )}
                   />
                   <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2 rounded bg-black/55 px-2 py-1 text-[11px] text-white backdrop-blur">
                     <span className="truncate">{terminalEvidenceLabel} · 最终页面</span>

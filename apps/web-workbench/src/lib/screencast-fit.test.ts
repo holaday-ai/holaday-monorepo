@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   fitScreencastContain,
+  fitScreencastReadable,
   mapClientPointToScreencast,
   placeScreencastContainTop,
 } from './screencast-fit';
@@ -37,6 +38,30 @@ describe('fitScreencastContain', () => {
         sourceHeight: 800,
       }),
     ).toBeNull();
+  });
+});
+
+describe('fitScreencastReadable', () => {
+  it('keeps desktop-only pages readable in portrait sheets', () => {
+    expect(
+      fitScreencastReadable({
+        hostWidth: 540,
+        hostHeight: 760,
+        sourceWidth: 1280,
+        sourceHeight: 800,
+      }),
+    ).toEqual({ width: 896, height: 560, scale: 0.7 });
+  });
+
+  it('keeps normal portrait browser frames on contain sizing', () => {
+    expect(
+      fitScreencastReadable({
+        hostWidth: 390,
+        hostHeight: 720,
+        sourceWidth: 390,
+        sourceHeight: 844,
+      }),
+    ).toEqual({ width: 332, height: 720, scale: 0.8530805687203792 });
   });
 });
 

@@ -55,6 +55,44 @@ export function fitScreencastContain({
   };
 }
 
+/**
+ * Mobile sheets are tall portrait surfaces. When the remote page is a
+ * wide desktop-only viewport, pure contain makes it technically fit
+ * but often unreadable, with a large empty band below. Prefer a
+ * readable width/height compromise and let the sheet scroll instead
+ * of shrinking all text to dust.
+ */
+export function fitScreencastReadable({
+  hostWidth,
+  hostHeight,
+  sourceWidth,
+  sourceHeight,
+}: ScreencastFitInput): ScreencastFitSize | null {
+  const fit = fitScreencastContain({
+    hostWidth,
+    hostHeight,
+    sourceWidth,
+    sourceHeight,
+  });
+  if (!fit) return null;
+
+  const hostAspect = hostWidth / hostHeight;
+  const sourceAspect = sourceWidth / sourceHeight;
+  const portraitHost = hostAspect < 0.86;
+  const wideSource = sourceAspect > 1.12;
+  if (!portraitHost || !wideSource || fit.scale >= 0.62) {
+    return fit;
+  }
+
+  const heightScale = hostHeight / sourceHeight;
+  const readableScale = Math.min(1, Math.max(fit.scale, Math.min(0.7, heightScale)));
+  return {
+    width: Math.max(1, Math.floor(sourceWidth * readableScale)),
+    height: Math.max(1, Math.floor(sourceHeight * readableScale)),
+    scale: readableScale,
+  };
+}
+
 export function placeScreencastContainTop({
   hostWidth,
   hostHeight,
