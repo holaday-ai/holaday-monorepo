@@ -316,6 +316,7 @@ export function CdpScreencastViewport({
       // after attach, or Brave navigates to a page that emits a
       // different size), kick the scale recomputer.
       if (sizeChanged) sourceDimsRecomputeRef.current?.();
+      requestAnimationFrame(() => sourceDimsRecomputeRef.current?.());
     };
     img.src = `data:image/jpeg;base64,${base64}`;
   }

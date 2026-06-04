@@ -42,6 +42,7 @@ import {
   browserNavFailureMessage,
 } from '@/lib/browser-nav-copy';
 import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
+import { fitScreencastContain } from '@/lib/screencast-fit';
 import {
   externalLinkConfirmDescription,
   safeExternalHttpHref,
@@ -715,10 +716,15 @@ export function BrowserPanel({
     if (natW <= 0 || natH <= 0) return;
     const hostW = host.clientWidth;
     const hostH = host.clientHeight;
-    if (hostW <= 0 || hostH <= 0) return;
-    const scale = Math.min(hostW / natW, hostH / natH);
-    img.style.width = `${Math.round(natW * scale)}px`;
-    img.style.height = `${Math.round(natH * scale)}px`;
+    const fit = fitScreencastContain({
+      hostWidth: hostW,
+      hostHeight: hostH,
+      sourceWidth: natW,
+      sourceHeight: natH,
+    });
+    if (!fit) return;
+    img.style.width = `${fit.width}px`;
+    img.style.height = `${fit.height}px`;
   }, []);
   React.useEffect(() => {
     const host = screencastHostRef.current;
@@ -1224,7 +1230,7 @@ export function BrowserPanel({
           <div
             ref={screencastHostRef}
             className={cn(
-              'flex flex-1 items-center justify-center overflow-hidden',
+              'flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden',
               fullscreen ? 'p-0' : 'p-3',
               interactiveActive
                 ? 'bg-[#EA1F59]/5'
@@ -1238,7 +1244,7 @@ export function BrowserPanel({
                 waking={waking}
               />
             ) : useVnc ? (
-              <div className="relative h-full w-full">
+              <div className="relative h-full w-full min-h-0 min-w-0 overflow-hidden">
                 {usingCdp ? (
                   <CdpScreencastViewport
                     // Codex Pack B2 — bumping reconnectEpoch forces a
@@ -1339,16 +1345,12 @@ export function BrowserPanel({
                   等待浏览器加载页面...
                 </div>
               ) : (
-                /* BUG-11 final-final — the JPEG-fallback path renders
-                   an <img>, not the canvas branch. Without an
-                   explicit-size wrapper, the img + relative div
-                   sized each other circularly to the source's
-                   intrinsic width (e.g. 1014), bypassing the panel's
-                   real width. Wrapper now `h-full w-full min-w-0
-                   min-h-0` so it fills the panel slot; img is
-                   `absolute inset-0 w-full h-full object-contain`
-                   so it letterboxes inside that bounded box. */
-                <div className="relative">
+                /* JPEG fallback path: keep the wrapper shrinkable
+                   and let fitScreencastImg write exact contained
+                   pixel dimensions on the image. That avoids the
+                   source frame's intrinsic width leaking through
+                   flex layout during side-panel resize. */
+                <div className="relative max-h-full max-w-full min-h-0 min-w-0">
                   {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard capture is handled via window listener in interactive mode */}
                   {/* BUG-11 final — width/height set imperatively in
                       `fitScreencastImg` (pure JS, pixel values).
@@ -1446,7 +1448,7 @@ export function BrowserPanel({
               // evidence viewer and offer a fresh re-run instead of a
               // misleading live takeover.
               <div className="relative flex h-full w-full flex-col">
-                <div className="relative flex flex-1 items-center justify-center min-h-0 min-w-0">
+                <div className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden">
                   <img
                     ref={imgRef}
                     src={`data:image/jpeg;base64,${finalEvidenceFrame.imageBase64}`}
