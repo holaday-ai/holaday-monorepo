@@ -311,6 +311,43 @@ describe('autoFix — ecommerce empty URLs', () => {
     expect(out.fixed).toContain('仅保留了 1 条有独立商品详情链接');
     expect(out.applied.map((op) => op.kind)).toContain('ecommerce_row_prune');
   });
+
+  it('prunes catalogue rows even when product-link evidence is missing', () => {
+    const contract = buildContract({
+      taskId: 'tsk_ecom_prune_by_shape',
+      intent: '去电商站搜 iPhone 16，按价格排序，给前3结果（名称/价格/链接）',
+      executionMode: 'browser',
+    });
+    const ledger = new EvidenceLedger('tsk_ecom_prune_by_shape');
+    ledger.add({
+      fact: 'search_ecommerce_source platform=taobao query="iPhone 16" url=https://pcdetail.taobao.com/WWNWblVJMTNVaFpTZ1c0cFoyY0N1UT09.html',
+      sourceType: 'tool_result',
+      sourceDetail: 'search_ecommerce.firecrawl',
+      confidence: 'extracted',
+    });
+    ledger.add({
+      fact: 'search_ecommerce_source platform=taobao query="iPhone 16" url=https://mobile-phone.taobao.com/chanpin/a623.html',
+      sourceType: 'tool_result',
+      sourceDetail: 'search_ecommerce.firecrawl',
+      confidence: 'extracted',
+    });
+    const answer = [
+      '| # | 商品名称 | 价格 | 链接 |',
+      '|---|---|---|---|',
+      '| 1 | Apple iPhone 16 | ¥2798 | [查看](https://pcdetail.taobao.com/WWNWblVJMTNVaFpTZ1c0cFoyY0N1UT09.html) |',
+      '| 2 | Apple iPhone 16 Plus | ¥2868 | [查看](https://mobile-phone.taobao.com/chanpin/a623.html) |',
+      '| 3 | Apple iPhone 16 Pro | ¥3208 | [查看](https://mobile-phone.taobao.com/chanpin/a623.html) |',
+    ].join('\n');
+
+    const v1 = verifyDeterministic({ contract, ledger, answerText: answer });
+    expect(v1.passed).toBe(false);
+    const out = autoFix({ contract, ledger, verification: v1, answerText: answer });
+
+    expect(out.fixed).toContain('pcdetail.taobao.com/WWNWblVJMTNVaFpTZ1c0cFoyY0N1UT09.html');
+    expect(out.fixed).not.toContain('iPhone 16 Plus');
+    expect(out.fixed).not.toContain('iPhone 16 Pro');
+    expect(out.applied.map((op) => op.kind)).toContain('ecommerce_row_prune');
+  });
 });
 
 describe('autoFix — missing fields note', () => {

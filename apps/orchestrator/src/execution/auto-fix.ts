@@ -279,7 +279,7 @@ function pruneEcommerceRowsToProductLinks(
   ledger: EvidenceLedger,
 ): { text: string; ops: AutoFixOp[] } {
   const productUrls = productLinkUrls(ledger);
-  if (productUrls.size === 0 || !text.includes('|')) return { text, ops: [] };
+  if (!text.includes('|')) return { text, ops: [] };
 
   const lines = text.split('\n');
   const keptProductUrls = new Set<string>();
@@ -290,7 +290,8 @@ function pruneEcommerceRowsToProductLinks(
     const urls = uniqueUrls(line.match(URL_RE) ?? []);
     if (urls.length === 0) return true;
     const url = urls[0]!;
-    if (productUrls.has(url) && !keptProductUrls.has(url)) {
+    const isProductLink = productUrls.has(url) || isLikelyEcommerceProductUrl(url);
+    if (isProductLink && !keptProductUrls.has(url)) {
       keptProductUrls.add(url);
       kept += 1;
       return true;
@@ -330,6 +331,24 @@ function looksLikeMarkdownTableRow(line: string): boolean {
   if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) return false;
   if (/^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(trimmed)) return false;
   return trimmed.includes('|');
+}
+
+function isLikelyEcommerceProductUrl(url: string): boolean {
+  try {
+    const u = new URL(stripTrailingPunct(url));
+    const host = u.hostname.toLowerCase();
+    const path = u.pathname.toLowerCase();
+    if (host === 'item.jd.com' && /\/\d+\.html$/.test(path)) return true;
+    if (host === 'item.taobao.com' || host === 'detail.tmall.com') return true;
+    if (host === 'pcdetail.taobao.com' && path.length > 1) return true;
+    if (host === 'www.taobao.com' && /\/list\/item\//.test(path)) return true;
+    if (/(^|\.)amazon\./.test(host) && /\/(?:dp|gp\/product)\//.test(path)) {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 function uniqueUrls(urls: readonly string[]): string[] {
