@@ -59,6 +59,12 @@ import type { UiScreencast, UiStep, UiTaskStatus } from '@/types/task';
 import { isTerminalStatus } from '@/types/task';
 import { liveStatusLabel } from '@/utils/step-humanize';
 
+interface StaticEvidenceFit {
+  width: number;
+  height: number;
+  hostWidth: number;
+}
+
 /**
  * VNC bridge URL. Relative path lets the browser auto-resolve the
  * scheme (wss on HTTPS, ws on HTTP dev) and host. The nginx block on
@@ -695,6 +701,9 @@ export function BrowserPanel({
   const rippleIdRef = React.useRef(0);
   const imgRef = React.useRef<HTMLImageElement | null>(null);
   const finalEvidenceScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const finalEvidenceImgRef = React.useRef<HTMLImageElement | null>(null);
+  const [finalEvidenceFit, setFinalEvidenceFit] =
+    React.useState<StaticEvidenceFit | null>(null);
   /**
    * BUG-11 — pure-JS sizing for the JPEG-fallback img.
    *
@@ -731,6 +740,29 @@ export function BrowserPanel({
     img.style.width = `${fit.width}px`;
     img.style.height = `${fit.height}px`;
   }, [isSheet]);
+  const fitFinalEvidenceImg = React.useCallback((): void => {
+    const host = finalEvidenceScrollRef.current;
+    const img = finalEvidenceImgRef.current;
+    if (!host || !img) return;
+    const natW = img.naturalWidth;
+    const natH = img.naturalHeight;
+    if (natW <= 0 || natH <= 0) return;
+    const hostW = host.clientWidth;
+    const hostH = host.clientHeight;
+    const fitFn = isSheet ? fitScreencastReadable : fitScreencastContain;
+    const fit = fitFn({
+      hostWidth: hostW,
+      hostHeight: hostH,
+      sourceWidth: natW,
+      sourceHeight: natH,
+    });
+    if (!fit) return;
+    setFinalEvidenceFit({
+      width: fit.width,
+      height: fit.height,
+      hostWidth: hostW,
+    });
+  }, [isSheet]);
   React.useEffect(() => {
     const host = screencastHostRef.current;
     if (!host) return;
@@ -748,8 +780,42 @@ export function BrowserPanel({
     };
   }, [fitScreencastImg]);
   React.useEffect(() => {
+    const host = finalEvidenceScrollRef.current;
+    if (!host || !finalEvidenceFrame) return;
+    fitFinalEvidenceImg();
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => fitFinalEvidenceImg());
+      ro.observe(host);
+    }
+    const onWin = () => fitFinalEvidenceImg();
+    window.addEventListener('resize', onWin);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', onWin);
+    };
+  }, [fitFinalEvidenceImg, finalEvidenceFrame]);
+  React.useEffect(() => {
+    setFinalEvidenceFit(null);
     finalEvidenceScrollRef.current?.scrollTo({ left: 0, top: 0 });
   }, [activeTaskId, finalEvidenceFrame?.imageBase64]);
+  const finalEvidenceBoxStyle = React.useMemo<React.CSSProperties>(() => {
+    if (!finalEvidenceFit) return {};
+    const centered =
+      isSheet && finalEvidenceFit.width < finalEvidenceFit.hostWidth;
+    return {
+      width: `${finalEvidenceFit.width}px`,
+      height: `${finalEvidenceFit.height}px`,
+      marginInline: centered ? 'auto' : undefined,
+    };
+  }, [finalEvidenceFit, isSheet]);
+  const finalEvidenceImageStyle = React.useMemo<React.CSSProperties>(() => {
+    if (!finalEvidenceFit) return {};
+    return {
+      width: `${finalEvidenceFit.width}px`,
+      height: `${finalEvidenceFit.height}px`,
+    };
+  }, [finalEvidenceFit]);
   // Codex P2 follow-up — hidden input for direct CJK typing on the
   // JPEG screencast path (CDP mode). Browser-native IME composition
   // events fire on this focused-but-invisible element; on
@@ -1485,39 +1551,42 @@ export function BrowserPanel({
                   ref={finalEvidenceScrollRef}
                   className={cn(
                     'relative flex min-h-0 min-w-0 flex-1 items-start',
-                    isSheet ? 'justify-start overflow-auto' : 'justify-center overflow-hidden',
+                    isSheet ? 'overflow-auto' : 'justify-center overflow-hidden',
                   )}
                 >
-                  <img
-                    ref={imgRef}
-                    src={`data:image/jpeg;base64,${finalEvidenceFrame.imageBase64}`}
-                    alt="任务完成时的浏览器截图"
-                    draggable={false}
-                    onLoad={fitScreencastImg}
-                    className={cn(
-                      'block rounded-md border border-black/[0.06] shadow-[0_1px_3px_rgba(17,24,39,0.06)]',
-                      isSheet && 'mx-auto',
-                    )}
-                  />
-                  <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2 rounded bg-black/55 px-2 py-1 text-[11px] text-white backdrop-blur">
-                    <span className="truncate">{terminalEvidenceLabel} · 最终页面</span>
-                    {finalEvidenceFrame.url && finalEvidenceFrame.url !== 'about:blank' && (
-                      <span className="truncate font-mono opacity-80">{finalEvidenceFrame.url}</span>
+                  <div
+                    className="relative shrink-0"
+                    style={finalEvidenceBoxStyle}
+                  >
+                    <img
+                      ref={finalEvidenceImgRef}
+                      src={`data:image/jpeg;base64,${finalEvidenceFrame.imageBase64}`}
+                      alt="任务完成时的浏览器截图"
+                      draggable={false}
+                      onLoad={fitFinalEvidenceImg}
+                      style={finalEvidenceImageStyle}
+                      className="block rounded-md border border-black/[0.06] shadow-[0_1px_3px_rgba(17,24,39,0.06)]"
+                    />
+                    <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2 rounded bg-black/55 px-2 py-1 text-[11px] text-white backdrop-blur">
+                      <span className="truncate">{terminalEvidenceLabel} · 最终页面</span>
+                      {finalEvidenceFrame.url && finalEvidenceFrame.url !== 'about:blank' && (
+                        <span className="truncate font-mono opacity-80">{finalEvidenceFrame.url}</span>
+                      )}
+                    </div>
+                    {isSheet && onReExecute && (
+                      <button
+                        type="button"
+                        onClick={onReExecute}
+                        disabled={reExecuting}
+                        aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
+                        title={reExecuting ? '正在重新执行' : '重新执行'}
+                        className="absolute right-2 top-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-white/25 bg-black/45 px-2 text-[11px] font-medium text-white shadow-sm backdrop-blur transition-colors hover:bg-black/60 disabled:cursor-wait disabled:opacity-60"
+                      >
+                        <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
+                        {reExecuting ? '提交中…' : '重跑'}
+                      </button>
                     )}
                   </div>
-                  {isSheet && onReExecute && (
-                    <button
-                      type="button"
-                      onClick={onReExecute}
-                      disabled={reExecuting}
-                      aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
-                      title={reExecuting ? '正在重新执行' : '重新执行'}
-                      className="absolute right-2 top-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-white/25 bg-black/45 px-2 text-[11px] font-medium text-white shadow-sm backdrop-blur transition-colors hover:bg-black/60 disabled:cursor-wait disabled:opacity-60"
-                    >
-                      <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
-                      {reExecuting ? '提交中…' : '重跑'}
-                    </button>
-                  )}
                 </div>
                 {!isSheet && (
                   <div className={cn('flex shrink-0 items-center justify-center gap-2 border-t bg-background/70 px-3 py-2 text-[12px]', BROWSER_DIVIDER)}>
