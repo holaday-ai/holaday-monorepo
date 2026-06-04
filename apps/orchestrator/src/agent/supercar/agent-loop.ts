@@ -147,9 +147,26 @@ export function formatScrapeWebsiteResult(items: readonly unknown[], requestedUr
   };
   const finalUrl = first.url ?? requestedUrl;
   const title = first.title ?? '(untitled)';
-  const body = first.markdown ?? first.text ?? '';
+  const body = absolutizeMarkdownLinks(first.markdown ?? first.text ?? '', finalUrl);
   const head = `# scrape_website 结果\n来源: ${finalUrl}\n标题: ${title}\n\n---\n\n`;
   return head + truncateText(body, 30_000) + '\n\n---\n**记得回到浏览器继续完成任务**';
+}
+
+export function absolutizeMarkdownLinks(markdown: string, baseUrl: string): string {
+  if (!markdown || !baseUrl) return markdown;
+  return markdown.replace(
+    /\[([^\]\n]+)\]\(([^)\s]+)\)/g,
+    (raw, label: string, href: string) => {
+      if (/^(?:https?:|mailto:|tel:|#)/i.test(href)) return raw;
+      try {
+        const absolute = new URL(href, baseUrl).toString();
+        if (!/^https?:/i.test(absolute)) return raw;
+        return `[${label}](${absolute})`;
+      } catch {
+        return raw;
+      }
+    },
+  );
 }
 
 /**
@@ -2847,9 +2864,10 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
               }
               toolsUsed.add('scrape_website');
               const head = `# scrape_website 结果\n来源: ${r.url}${r.title ? ` — ${r.title}` : ''}\n\n---\n\n`;
-              const body = r.markdown.length > 30_000
-                ? `${r.markdown.slice(0, 29_988)}\n\n…(truncated)`
-                : r.markdown;
+              const markdown = absolutizeMarkdownLinks(r.markdown, r.url);
+              const body = markdown.length > 30_000
+                ? `${markdown.slice(0, 29_988)}\n\n…(truncated)`
+                : markdown;
               const tail = '\n\n---\n**记得回到浏览器中整理 / 呈现这些信息，让用户看到执行过程**';
               toolResults.push({
                 type: 'tool_result',

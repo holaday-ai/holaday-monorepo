@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import {
   APIFY_ECOMMERCE_ACTORS,
   APIFY_SCRAPE_WEBSITE_ACTOR,
+  absolutizeMarkdownLinks,
   extractEcommerceProductLinks,
   formatFirecrawlSearchEcommerceResult,
   formatScrapeWebsiteResult,
@@ -74,6 +75,40 @@ describe('formatScrapeWebsiteResult', () => {
     );
     expect(out.length).toBeLessThan(31_500); // 30K body + header + footer
     expect(out).toMatch(/truncated/);
+  });
+
+  it('absolutizes relative markdown links before giving them to the model', () => {
+    const out = formatScrapeWebsiteResult(
+      [
+        {
+          url: 'https://docs.python.org/3/tutorial/',
+          title: 'The Python Tutorial',
+          markdown:
+            '[Whetting Your Appetite](appetite.html)\n' +
+            '[Library](../library/index.html)\n' +
+            '[Top](#top)\n' +
+            '[Email](mailto:hello@example.com)',
+        },
+      ],
+      'https://docs.python.org/3/tutorial/',
+    );
+    expect(out).toContain(
+      '[Whetting Your Appetite](https://docs.python.org/3/tutorial/appetite.html)',
+    );
+    expect(out).toContain('[Library](https://docs.python.org/3/library/index.html)');
+    expect(out).toContain('[Top](#top)');
+    expect(out).toContain('[Email](mailto:hello@example.com)');
+  });
+});
+
+describe('absolutizeMarkdownLinks', () => {
+  it('keeps absolute links unchanged', () => {
+    expect(
+      absolutizeMarkdownLinks(
+        '[External](https://example.com/path)',
+        'https://docs.python.org/3/tutorial/',
+      ),
+    ).toBe('[External](https://example.com/path)');
   });
 });
 
