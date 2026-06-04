@@ -182,6 +182,37 @@ describe('toUiTask', () => {
     expect(task.resultText).toBe('浏览器连接中断，请重新执行任务。');
   });
 
+  it('hydrates final browser evidence from tasks.list result rows', () => {
+    const task = toUiTask({
+      taskId: 'tsk_browser_evidence',
+      intent: '打开移动页面',
+      title: null,
+      status: 'completed',
+      result: {
+        summary: 'Done',
+        finalScreenshot: 'base64-jpeg',
+        finalUrl: 'https://example.com/',
+        metadata: {
+          finalViewport: { width: 390, height: 844 },
+        },
+      },
+      errorMessage: null,
+      createdAt: new Date('2026-06-05T00:00:00Z'),
+      opusUsed: false,
+      starred: false,
+      starredAt: null,
+      projectId: null,
+      verificationPassed: true,
+      failureLevel: null,
+    } as never);
+
+    expect(task).toMatchObject({
+      finalScreenshot: 'base64-jpeg',
+      finalUrl: 'https://example.com/',
+      finalViewport: { width: 390, height: 844 },
+    });
+  });
+
   it('normalizes malformed task list rows safely', () => {
     expect(
       normalizeTaskListRows([

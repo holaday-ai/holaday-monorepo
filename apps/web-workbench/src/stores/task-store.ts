@@ -1907,10 +1907,22 @@ export function toUiTask(row: ListRow): UiTask {
   // earlier streaming-buffer-persistence + terminalTaskIds Set patch
   // bridged the gap; mapping result.summary here removes the gap
   // entirely, so those guards mostly become belt-and-suspenders.
-  const summaryFromResult = extractSummary((row as { result?: unknown }).result);
-  const failedChecks = extractFailedChecks((row as { result?: unknown }).result);
-  const executionMode = extractExecutionMode(
-    (row as { result?: unknown }).result,
+  const rowResult = (row as { result?: unknown }).result;
+  const resultObj = isTaskListRecord(rowResult) ? rowResult : {};
+  const metadata = isTaskListRecord(resultObj.metadata) ? resultObj.metadata : {};
+  const summaryFromResult = extractSummary(rowResult);
+  const failedChecks = extractFailedChecks(rowResult);
+  const executionMode = extractExecutionMode(rowResult);
+  const finalScreenshot =
+    safeTaskListText(resultObj.finalScreenshot).length > 0
+      ? safeTaskListText(resultObj.finalScreenshot)
+      : undefined;
+  const finalUrl =
+    safeTaskListText(resultObj.finalUrl).length > 0
+      ? safeTaskListText(resultObj.finalUrl)
+      : undefined;
+  const finalViewport = normalizeFinalViewport(
+    resultObj.finalViewport ?? metadata.finalViewport,
   );
   const errorText =
     typeof row.errorMessage === 'string'
@@ -1941,6 +1953,9 @@ export function toUiTask(row: ListRow): UiTask {
     tickCount: 0,
     ...(resultText ? { resultText } : {}),
     ...(executionMode ? { executionMode } : {}),
+    ...(finalScreenshot ? { finalScreenshot } : {}),
+    ...(finalUrl ? { finalUrl } : {}),
+    ...(finalViewport ? { finalViewport } : {}),
     // tRPC serializes Date to string over the wire; coerce back.
     createdAt: new Date(safeTaskListDate((row as { createdAt?: unknown }).createdAt) ?? 0),
     modelLabel: opusUsed ? 'opus' : 'sonnet',
