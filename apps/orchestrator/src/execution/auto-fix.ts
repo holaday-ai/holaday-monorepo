@@ -38,7 +38,8 @@ export type AutoFixKind =
   | 'url_substitute'
   | 'url_drop'
   | 'missing_fields_note'
-  | 'empty_url_fill';
+  | 'empty_url_fill'
+  | 'ecommerce_row_prune';
 
 export interface AutoFixOp {
   kind: AutoFixKind;
@@ -92,6 +93,9 @@ export function autoFix(inputs: AutoFixInputs): AutoFixOutput {
     const out = fillEmptyJsonUrls(text, inputs.ledger);
     text = out.text;
     ops.push(...out.ops);
+    const pruned = pruneEcommerceRowsToProductLinks(text, inputs.ledger);
+    text = pruned.text;
+    ops.push(...pruned.ops);
   }
 
   // 2. Missing required fields — append a補 note.
@@ -242,7 +246,7 @@ function pathOverlap(a: string, b: string): number {
 }
 
 function stripTrailingPunct(url: string): string {
-  return url.replace(/[)\].,;:]+$/, '');
+  return url.replace(/[)\].,;:，。]+$/, '');
 }
 
 function fillEmptyJsonUrls(
@@ -268,6 +272,64 @@ function fillEmptyJsonUrls(
     return `"url": "${url}"`;
   });
   return { text: fixed, ops };
+}
+
+function pruneEcommerceRowsToProductLinks(
+  text: string,
+  ledger: EvidenceLedger,
+): { text: string; ops: AutoFixOp[] } {
+  const productUrls = productLinkUrls(ledger);
+  if (productUrls.size === 0 || !text.includes('|')) return { text, ops: [] };
+
+  const lines = text.split('\n');
+  const keptProductUrls = new Set<string>();
+  let removed = 0;
+  let kept = 0;
+  const nextLines = lines.filter((line) => {
+    if (!looksLikeMarkdownTableRow(line)) return true;
+    const urls = uniqueUrls(line.match(URL_RE) ?? []);
+    if (urls.length === 0) return true;
+    const url = urls[0]!;
+    if (productUrls.has(url) && !keptProductUrls.has(url)) {
+      keptProductUrls.add(url);
+      kept += 1;
+      return true;
+    }
+    removed += 1;
+    return false;
+  });
+
+  if (removed === 0) return { text, ops: [] };
+  const note =
+    `\n\n> 仅保留了 ${kept} 条有独立商品详情链接的结果；` +
+    `其余 ${removed} 行复用了平台品类页/聚合页或重复链接，已移除，避免把不可验证链接当作商品链接。`;
+  return {
+    text: `${nextLines.join('\n')}${note}`,
+    ops: [
+      {
+        kind: 'ecommerce_row_prune',
+        detail: `removed ${removed} ecommerce rows without distinct product links`,
+      },
+    ],
+  };
+}
+
+function productLinkUrls(ledger: EvidenceLedger): Set<string> {
+  const urls = new Set<string>();
+  for (const entry of ledger.entries) {
+    if (entry.sourceDetail !== 'search_ecommerce.firecrawl.product_link') continue;
+    for (const raw of entry.fact.match(URL_RE) ?? []) {
+      urls.add(stripTrailingPunct(raw));
+    }
+  }
+  return urls;
+}
+
+function looksLikeMarkdownTableRow(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) return false;
+  if (/^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(trimmed)) return false;
+  return trimmed.includes('|');
 }
 
 function uniqueUrls(urls: readonly string[]): string[] {

@@ -839,6 +839,9 @@ function checkEcommerceRows(
       incomplete.push(`第 ${i + 1} 行缺少${missing.join('、')}`);
     }
   });
+  const aggregateLinkRows = rows
+    .map((row, i) => ({ row, i }))
+    .filter(({ row }) => row.url && isLikelyEcommerceAggregateUrl(row.url));
   const tooFew = rows.length < minItems;
   const uniqueUrls = new Set(
     rows
@@ -847,12 +850,21 @@ function checkEcommerceRows(
   );
   const tooFewUniqueUrls =
     minUniqueUrls > 0 && rows.length >= minItems && uniqueUrls.size < minUniqueUrls;
-  const passed = incomplete.length === 0 && !tooFew && !tooFewUniqueUrls;
+  const passed =
+    incomplete.length === 0 &&
+    aggregateLinkRows.length === 0 &&
+    !tooFew &&
+    !tooFewUniqueUrls;
   const detailParts: string[] = [];
   if (tooFew) detailParts.push(`只解析到 ${rows.length} 行，要求至少 ${minItems} 条`);
   if (tooFewUniqueUrls) {
     detailParts.push(
       `只解析到 ${uniqueUrls.size} 个唯一商品链接，要求至少 ${minUniqueUrls} 个；不要让多行复用同一个列表页或聚合页链接`,
+    );
+  }
+  if (aggregateLinkRows.length > 0) {
+    detailParts.push(
+      `第 ${aggregateLinkRows.map(({ i }) => i + 1).join('、')} 行使用了搜索页/品类页链接，商品行必须使用商品详情页链接`,
     );
   }
   if (incomplete.length > 0) detailParts.push(incomplete.join('；'));
@@ -866,6 +878,27 @@ function checkEcommerceRows(
       : detailParts.join('；'),
     severity: passed ? undefined : 'fixable',
   };
+}
+
+function isLikelyEcommerceAggregateUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    const path = u.pathname.toLowerCase();
+    if (host === 'search.jd.com') return true;
+    if (host.endsWith('.taobao.com')) {
+      if (path.includes('/chanpin/')) return true;
+      if (path.includes('/search')) return true;
+    }
+    if (host === 's.taobao.com') return true;
+    if (host === 'list.tmall.com') return true;
+    if (/(^|\.)amazon\./.test(host) && (path === '/s' || path.startsWith('/s/'))) {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 function checkCustom(

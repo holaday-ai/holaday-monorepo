@@ -1208,4 +1208,31 @@ describe('price_sort — only consults parsed items (no prose poisoning)', () =>
     expect(rowCheck!.detail).toContain('唯一商品链接');
     expect(rowCheck!.severity).toBe('fixable');
   });
+
+  it('flags ecommerce rows that use catalogue pages as product links', () => {
+    const contract = buildContract({
+      taskId: 'tsk_ecom_catalogue_urls',
+      intent: '去电商站搜 iPhone 16，按价格排序，给前3结果（名称/价格/链接）',
+      executionMode: 'generate',
+    });
+    const answer = [
+      '| # | 商品名称 | 价格 | 链接 |',
+      '|---|---|---|---|',
+      '| 1 | iPhone 16 128GB | ¥4599 | https://mobile-phone.taobao.com/chanpin/a.html |',
+      '| 2 | iPhone 16 256GB | ¥4999 | https://search.jd.com/Search?keyword=iPhone16 |',
+      '| 3 | iPhone 16 Plus | ¥5299 | https://pcdetail.taobao.com/product-a.html |',
+    ].join('\n');
+
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_ecom_catalogue_urls'),
+      answerText: answer,
+    });
+
+    const rowCheck = result.checks.find((c) => c.criterionType === 'ecommerce_rows');
+    expect(rowCheck).toBeDefined();
+    expect(rowCheck!.passed).toBe(false);
+    expect(rowCheck!.detail).toContain('搜索页/品类页链接');
+    expect(rowCheck!.severity).toBe('fixable');
+  });
 });

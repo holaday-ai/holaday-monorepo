@@ -272,6 +272,45 @@ describe('autoFix — ecommerce empty URLs', () => {
     const v2 = verifyDeterministic({ contract, ledger, answerText: out.fixed });
     expect(v2.passed).toBe(true);
   });
+
+  it('prunes markdown rows that reuse catalogue pages instead of product links', () => {
+    const contract = buildContract({
+      taskId: 'tsk_ecom_prune',
+      intent: '去电商站搜 iPhone 16，按价格排序，给前3结果（名称/价格/链接）',
+      executionMode: 'browser',
+    });
+    const ledger = new EvidenceLedger('tsk_ecom_prune');
+    ledger.add({
+      fact: 'search_ecommerce_product_link platform=taobao query="iPhone 16" url=https://pcdetail.taobao.com/WWNWblVJ.html',
+      sourceType: 'tool_result',
+      sourceDetail: 'search_ecommerce.firecrawl.product_link',
+      confidence: 'extracted',
+    });
+    ledger.add({
+      fact: 'search_ecommerce_source platform=taobao query="iPhone 16" url=https://mobile-phone.taobao.com/chanpin/a623.html',
+      sourceType: 'tool_result',
+      sourceDetail: 'search_ecommerce.firecrawl',
+      confidence: 'extracted',
+    });
+    const answer = [
+      '| # | 商品名称 | 价格 | 链接 |',
+      '|---|---|---|---|',
+      '| 1 | Apple iPhone 16 | ¥2798 | [淘宝](https://pcdetail.taobao.com/WWNWblVJ.html) |',
+      '| 2 | Apple iPhone 16 Plus | ¥2868 | [淘宝](https://mobile-phone.taobao.com/chanpin/a623.html) |',
+      '| 3 | Apple iPhone 16 Pro | ¥3208 | [淘宝](https://mobile-phone.taobao.com/chanpin/a623.html) |',
+    ].join('\n');
+
+    const v1 = verifyDeterministic({ contract, ledger, answerText: answer });
+    expect(v1.passed).toBe(false);
+    expect(v1.failureLevel).toBe('fixable');
+    const out = autoFix({ contract, ledger, verification: v1, answerText: answer });
+
+    expect(out.fixed).toContain('https://pcdetail.taobao.com/WWNWblVJ.html');
+    expect(out.fixed).not.toContain('iPhone 16 Plus');
+    expect(out.fixed).not.toContain('iPhone 16 Pro');
+    expect(out.fixed).toContain('仅保留了 1 条有独立商品详情链接');
+    expect(out.applied.map((op) => op.kind)).toContain('ecommerce_row_prune');
+  });
 });
 
 describe('autoFix — missing fields note', () => {
