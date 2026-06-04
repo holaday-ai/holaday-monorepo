@@ -223,6 +223,14 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       // back to its built-in 1280×800 default.
       const profile = args.instance!.viewportProfile;
       const profileDims = profile ? dimensionsForProfile(profile) : null;
+      userLog.info(
+        {
+          viewportProfile: profile ?? 'desktop',
+          frameCapWidth: profileDims?.width ?? 1280,
+          frameCapHeight: profileDims?.height ?? 800,
+        },
+        'screencast: resolved viewport profile',
+      );
       streamer = new CdpStreamer({
         getPage: () => executor.getPage(),
         ws: args.ws,

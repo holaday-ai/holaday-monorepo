@@ -14,6 +14,7 @@
 
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { pino } from 'pino';
+import type { BrowserViewportProfile } from '@holaday/shared-types';
 import { BrowserPool, PoolCapacityError } from './browser-pool.js';
 import type { BrowserInstance, PoolConfig } from './types.js';
 
@@ -39,7 +40,12 @@ function makePool(maxInstances = 10): {
   // through the real SlotAllocator so capacity bookkeeping (claim
   // on spawn, release on tearDown) matches production behaviour;
   // tests for canAllocate / capacity / port reuse depend on this.
-  const spawnSpy = vi.fn(async (taskId: string, userId: string) => {
+  const spawnSpy = vi.fn(
+    async (
+      taskId: string,
+      userId: string,
+      viewportProfile?: BrowserViewportProfile,
+    ) => {
     const allocator = (
       pool as unknown as { allocator: { claim: () => unknown; isFull: () => boolean } }
     ).allocator;
@@ -68,13 +74,15 @@ function makePool(maxInstances = 10): {
       createdAt: Date.now(),
       lastActiveAt: Date.now(),
       status: 'ready',
+      ...(viewportProfile ? { viewportProfile } : {}),
     };
     (pool as unknown as { instances: Map<string, BrowserInstance> }).instances.set(
       taskId,
       inst,
     );
     return inst;
-  });
+    },
+  );
   (pool as unknown as { spawnInstance: typeof spawnSpy }).spawnInstance = spawnSpy;
   const tearDownSpy = vi.fn(async () => undefined);
   (pool as unknown as { tearDownInstance: typeof tearDownSpy }).tearDownInstance =
@@ -122,6 +130,17 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
       // across tasks). Should encode taskId.
       expect(a.userDataDir).toContain('tsk_a');
       expect(b.userDataDir).toContain('tsk_b');
+    });
+
+    it('preserves the viewport profile on allocated instances', async () => {
+      const inst = await pool.allocate('tsk_panel', 'usr_panel', 'sidepanel');
+
+      expect(inst.viewportProfile).toBe('sidepanel');
+      expect(spawnSpy).toHaveBeenCalledWith(
+        'tsk_panel',
+        'usr_panel',
+        'sidepanel',
+      );
     });
 
     it('release(t1) tears down only t1; t2 and t3 stay alive', async () => {
