@@ -49,7 +49,14 @@ export function isLiveBrowserTaskForWorkbench(task: UiTask | null): boolean {
   return Boolean(
     task &&
       task.executionMode === 'browser' &&
-      !isTerminalStatus(task.status),
+      !isWorkbenchTerminalTask(task),
+  );
+}
+
+export function isWorkbenchTerminalTask(task: UiTask): boolean {
+  return (
+    isTerminalStatus(task.status) ||
+    (task.status === 'paused' && Boolean(task.resultText))
   );
 }
 
@@ -61,7 +68,7 @@ export function followUpTargetForTask(input: {
   const { selectedTask, selectedTaskId } = input;
   if (!selectedTask || !selectedTaskId) return null;
   if (input.selectedNeedsUser) return null;
-  if (!isTerminalStatus(selectedTask.status)) return null;
+  if (!isWorkbenchTerminalTask(selectedTask)) return null;
 
   return {
     taskId: selectedTaskId,

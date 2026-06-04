@@ -37,6 +37,17 @@ describe('workbench state helpers', () => {
     );
   });
 
+  it('only treats paused browser tasks as terminal once a result is available', () => {
+    expect(isLiveBrowserTaskForWorkbench(task({ status: 'paused' }))).toBe(
+      true,
+    );
+    expect(
+      isLiveBrowserTaskForWorkbench(
+        task({ status: 'paused', resultText: '已完成到可跟进的阶段。' }),
+      ),
+    ).toBe(false);
+  });
+
   it('allows follow-up chips for all terminal statuses including partial success', () => {
     expect(
       followUpTargetForTask({
@@ -50,10 +61,33 @@ describe('workbench state helpers', () => {
     });
   });
 
+  it('allows follow-up chips for paused tasks once they have a result', () => {
+    expect(
+      followUpTargetForTask({
+        selectedTask: task({
+          status: 'paused',
+          resultText: '已完成到可跟进的阶段。',
+        }),
+        selectedTaskId: 'tsk_test',
+        selectedNeedsUser: false,
+      }),
+    ).toEqual({
+      taskId: 'tsk_test',
+      title: '打开 https://example.com 并总结结果',
+    });
+  });
+
   it('suppresses follow-up chips while the task is still active or awaiting user input', () => {
     expect(
       followUpTargetForTask({
         selectedTask: task({ status: 'executing' }),
+        selectedTaskId: 'tsk_test',
+        selectedNeedsUser: false,
+      }),
+    ).toBeNull();
+    expect(
+      followUpTargetForTask({
+        selectedTask: task({ status: 'paused' }),
         selectedTaskId: 'tsk_test',
         selectedNeedsUser: false,
       }),
