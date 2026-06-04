@@ -699,19 +699,29 @@ function checkUrlCount(
   const min = Number(criterion.data?.min ?? 1);
   const items = extractStructuredItems(answerText);
   const itemUrls = items.map((it) => it.url).filter((u): u is string => Boolean(u));
-  // Fall back to global URL count only when no items parsed at all
-  // (stock_quote / comparison responses that are mostly prose).
-  const count =
-    items.length === 0 ? (answerText.match(URL_RE) ?? []).length : itemUrls.length;
+  const globalUrlCount = (answerText.match(URL_RE) ?? []).length;
+  // Fall back to global URL count when item-level URLs are below the
+  // required floor. Browser execution answers often mix a small facts
+  // table with a prose "page link" (Wikipedia / Skyscanner), which is
+  // still a valid answer-level source. URL grounding runs separately,
+  // so fabricated prose URLs are not allowed through by this fallback.
+  const usedGlobalFallback = itemUrls.length < min;
+  const count = usedGlobalFallback ? globalUrlCount : itemUrls.length;
   const passed = count >= min;
+  const sourceLabel =
+    items.length === 0
+      ? 'global scan'
+      : usedGlobalFallback
+        ? 'global scan fallback'
+        : 'parsed items';
   return {
     criterionId: criterion.id,
     criterionType: 'url_count',
     passed,
     checker: 'deterministic',
     detail: passed
-      ? `${count} URL(s) found (${items.length === 0 ? 'global scan' : 'parsed items'}), min ${min}`
-      : `only ${count} URL(s) found (${items.length === 0 ? 'global scan' : 'parsed items'}), need at least ${min}`,
+      ? `${count} URL(s) found (${sourceLabel}), min ${min}`
+      : `only ${count} URL(s) found (${sourceLabel}), need at least ${min}`,
     severity: passed ? undefined : 'fixable',
   };
 }

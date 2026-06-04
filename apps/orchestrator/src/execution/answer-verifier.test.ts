@@ -515,6 +515,75 @@ describe('verifyDeterministic — criterion: url_match', () => {
   });
 });
 
+describe('verifyDeterministic — criterion: url_count', () => {
+  it('accepts answer-level grounded URLs when parsed table items have no URL column', () => {
+    const contract = buildContract({
+      taskId: 'tsk_url_count_prose_link',
+      intent:
+        '打开 Wikipedia，搜索 OpenAI，进入对应条目，提取 founded date、headquarters 和 founders，并给出页面链接。',
+      executionMode: 'browser',
+      targetDomain: 'wikipedia.org',
+    });
+    const ledger = ledgerWith('tsk_url_count_prose_link', {
+      fact: 'navigated to https://en.wikipedia.org/wiki/OpenAI',
+      sourceType: 'browser_state',
+      sourceDetail: 'page.goto',
+      confidence: 'observed',
+    });
+    const result = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: [
+        '| 字段 | 内容 |',
+        '|---|---|',
+        '| Founded | December 8, 2015 |',
+        '| Headquarters | San Francisco |',
+        '',
+        '页面链接：https://en.wikipedia.org/wiki/OpenAI',
+      ].join('\n'),
+      finalUrl: 'https://en.wikipedia.org/wiki/OpenAI',
+    });
+
+    expect(result.passed).toBe(true);
+    const urlCheck = result.checks.find((c) => c.criterionType === 'url_count');
+    expect(urlCheck?.detail).toContain('global scan fallback');
+  });
+
+  it('still fails answer-level URLs that are not grounded', () => {
+    const contract = buildContract({
+      taskId: 'tsk_url_count_fabricated_prose_link',
+      intent:
+        '打开 Wikipedia，搜索 OpenAI，进入对应条目，提取 founded date、headquarters 和 founders，并给出页面链接。',
+      executionMode: 'browser',
+      targetDomain: 'wikipedia.org',
+    });
+    const ledger = ledgerWith('tsk_url_count_fabricated_prose_link', {
+      fact: 'navigated to https://en.wikipedia.org/wiki/OpenAI',
+      sourceType: 'browser_state',
+      sourceDetail: 'page.goto',
+      confidence: 'observed',
+    });
+    const result = verifyDeterministic({
+      contract,
+      ledger,
+      answerText: [
+        '| 字段 | 内容 |',
+        '|---|---|',
+        '| Founded | December 8, 2015 |',
+        '',
+        '页面链接：https://made-up.example/openai',
+      ].join('\n'),
+      finalUrl: 'https://en.wikipedia.org/wiki/OpenAI',
+    });
+
+    expect(result.passed).toBe(false);
+    const grounding = result.checks.find(
+      (c) => c.criterionId === 'generic.url_grounding',
+    );
+    expect(grounding?.passed).toBe(false);
+  });
+});
+
 describe('verifyDeterministic — criterion: data_present', () => {
   it('hard_fails when ledger has no productive entries', () => {
     const contract = buildContract({
