@@ -1259,7 +1259,12 @@ export function BrowserPanel({
                 waking={waking}
               />
             ) : useVnc ? (
-              <div className="relative h-full w-full min-h-0 min-w-0 overflow-hidden">
+              <div
+                className={cn(
+                  'relative h-full w-full min-h-0 min-w-0',
+                  isSheet ? 'overflow-auto' : 'overflow-hidden',
+                )}
+              >
                 {usingCdp ? (
                   <CdpScreencastViewport
                     // Codex Pack B2 — bumping reconnectEpoch forces a
@@ -1269,6 +1274,7 @@ export function BrowserPanel({
                     key={`cdp-${reconnectEpoch}`}
                     wsUrl={screencastUrlForCdp}
                     viewOnly={!interactiveActive}
+                    fitMode={isSheet ? 'readable' : 'contain'}
                     onStatusChange={(s: CdpScreencastStatus) =>
                       // Reuse the VNC status state — the enum values
                       // overlap exactly so the existing

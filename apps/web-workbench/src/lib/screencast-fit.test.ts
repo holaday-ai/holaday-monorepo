@@ -4,6 +4,7 @@ import {
   fitScreencastReadable,
   mapClientPointToScreencast,
   placeScreencastContainTop,
+  placeScreencastReadableTop,
 } from './screencast-fit';
 
 describe('fitScreencastContain', () => {
@@ -96,6 +97,42 @@ describe('placeScreencastContainTop', () => {
       height: 350,
       scale: 0.4375,
       offsetX: 0,
+      offsetY: 0,
+    });
+  });
+});
+
+describe('placeScreencastReadableTop', () => {
+  it('pins wide desktop frames to the top and lets portrait sheets scroll horizontally', () => {
+    expect(
+      placeScreencastReadableTop({
+        hostWidth: 540,
+        hostHeight: 760,
+        sourceWidth: 1280,
+        sourceHeight: 800,
+      }),
+    ).toEqual({
+      width: 896,
+      height: 560,
+      scale: 0.7,
+      offsetX: 0,
+      offsetY: 0,
+    });
+  });
+
+  it('still centres portrait frames when they fit inside the sheet', () => {
+    expect(
+      placeScreencastReadableTop({
+        hostWidth: 390,
+        hostHeight: 720,
+        sourceWidth: 390,
+        sourceHeight: 844,
+      }),
+    ).toEqual({
+      width: 332,
+      height: 720,
+      scale: 0.8530805687203792,
+      offsetX: 29,
       offsetY: 0,
     });
   });

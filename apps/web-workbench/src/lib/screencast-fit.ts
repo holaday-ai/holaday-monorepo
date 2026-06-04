@@ -114,6 +114,27 @@ export function placeScreencastContainTop({
   };
 }
 
+export function placeScreencastReadableTop({
+  hostWidth,
+  hostHeight,
+  sourceWidth,
+  sourceHeight,
+}: ScreencastFitInput): ScreencastContainPlacement | null {
+  const fit = fitScreencastReadable({
+    hostWidth,
+    hostHeight,
+    sourceWidth,
+    sourceHeight,
+  });
+  if (!fit) return null;
+
+  return {
+    ...fit,
+    offsetX: Math.max(0, (hostWidth - fit.width) / 2),
+    offsetY: 0,
+  };
+}
+
 export function mapClientPointToScreencast({
   clientX,
   clientY,

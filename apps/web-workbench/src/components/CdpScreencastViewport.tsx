@@ -3,6 +3,7 @@ import { hdDebug } from '@/lib/hd-debug';
 import {
   mapClientPointToScreencast,
   placeScreencastContainTop,
+  placeScreencastReadableTop,
 } from '@/lib/screencast-fit';
 import { cn } from '@/lib/utils';
 
@@ -51,6 +52,7 @@ interface Props {
    * that ignore navigation events still work fine.
    */
   onUrlChange?: (url: string) => void;
+  fitMode?: 'contain' | 'readable';
   className?: string;
 }
 
@@ -84,6 +86,7 @@ export function CdpScreencastViewport({
   viewOnly = true,
   onStatusChange,
   onUrlChange,
+  fitMode = 'contain',
   className,
 }: Props): JSX.Element {
   // Latest onUrlChange ref so the WS onmessage closure stays stable
@@ -152,7 +155,11 @@ export function CdpScreencastViewport({
       if (srcW <= 0 || srcH <= 0) return;
       const rect = host.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
-      const placement = placeScreencastContainTop({
+      const place =
+        fitMode === 'readable'
+          ? placeScreencastReadableTop
+          : placeScreencastContainTop;
+      const placement = place({
         hostWidth: rect.width,
         hostHeight: rect.height,
         sourceWidth: srcW,
@@ -183,7 +190,7 @@ export function CdpScreencastViewport({
       window.removeEventListener('resize', onWindowResize);
       sourceDimsRecomputeRef.current = null;
     };
-  }, [status]);
+  }, [fitMode, status]);
 
   // ---- WS lifecycle: always-be-trying-to-connect ----
   // Browser hibernation is a normal state — the per-user pool's idle
@@ -459,7 +466,8 @@ export function CdpScreencastViewport({
     <div
       ref={hostRef}
       className={cn(
-        'cdp-screencast-host relative h-full w-full min-h-0 min-w-0 overflow-hidden',
+        'cdp-screencast-host relative h-full w-full min-h-0 min-w-0',
+        fitMode === 'readable' ? 'overflow-auto' : 'overflow-hidden',
         className,
       )}
     >
