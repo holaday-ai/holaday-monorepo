@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clampInlineBrowserPanelWidth,
   estimateInlineBrowserPanelWidth,
   pickBrowserViewportProfile,
   pickWorkbenchBrowserViewportProfile,
@@ -75,6 +76,24 @@ describe('pickBrowserViewportProfile', () => {
 });
 
 describe('pickWorkbenchBrowserViewportProfile', () => {
+  it('clamps saved inline panel widths so the main column is not clipped', () => {
+    expect(
+      clampInlineBrowserPanelWidth({
+        width: 980,
+        rowWidth: 1180,
+      }),
+    ).toBe(760);
+  });
+
+  it('keeps inline panel widths above the readable minimum', () => {
+    expect(
+      clampInlineBrowserPanelWidth({
+        width: 180,
+        rowWidth: 1180,
+      }),
+    ).toBe(300);
+  });
+
   it('estimates the inline desktop panel from the actual flex row width', () => {
     expect(
       estimateInlineBrowserPanelWidth({

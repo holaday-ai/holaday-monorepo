@@ -14,6 +14,7 @@ import { useSidebar } from '@/components/ui/sidebar';
 import { hdDebug } from '@/lib/hd-debug';
 import { taskActionError } from '@/lib/error-copy';
 import {
+  clampInlineBrowserPanelWidth,
   estimateInlineBrowserPanelWidth,
   pickWorkbenchBrowserViewportProfile,
 } from '@/lib/browser-viewport-profile';
@@ -210,12 +211,39 @@ export function WorkbenchApp(): JSX.Element {
       }
       const rowWidth = row.getBoundingClientRect().width;
       const raw = dragStartPxRef.current - dx;
-      const min = PANEL_MIN_PX;
-      const max = Math.max(min, rowWidth - 360);
-      setPanelPx(Math.min(max, Math.max(min, raw)));
+      setPanelPx(
+        clampInlineBrowserPanelWidth({
+          width: raw,
+          rowWidth,
+          panelMinWidth: PANEL_MIN_PX,
+          mainMinWidth: MAIN_PANEL_MIN_PX,
+        }),
+      );
     },
     [computeInitialPanelPx],
   );
+  React.useEffect(() => {
+    if (!isDesktop || panelPx == null || typeof ResizeObserver === 'undefined') return;
+    const row = contentRowRef.current;
+    if (!row) return;
+
+    const clampToRow = (): void => {
+      const next = clampInlineBrowserPanelWidth({
+        width: panelPxRef.current,
+        rowWidth: row.getBoundingClientRect().width,
+        panelMinWidth: PANEL_MIN_PX,
+        mainMinWidth: MAIN_PANEL_MIN_PX,
+      });
+      if (next != null && next !== panelPxRef.current) {
+        setPanelPx(next);
+      }
+    };
+
+    clampToRow();
+    const ro = new ResizeObserver(clampToRow);
+    ro.observe(row);
+    return () => ro.disconnect();
+  }, [isDesktop, panelPx]);
   const onPanelResizeEnd = React.useCallback(() => {
     dragStartPxRef.current = null;
     const current = panelPxRef.current;

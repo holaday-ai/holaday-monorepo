@@ -75,9 +75,31 @@ export function estimateInlineBrowserPanelWidth(input: {
 
   const panelMinWidth = input.panelMinWidth ?? DEFAULT_PANEL_MIN_PX;
   const mainMinWidth = input.mainMinWidth ?? DEFAULT_INLINE_MAIN_MIN_PX;
-  const maxWidth = Math.max(panelMinWidth, rowWidth - mainMinWidth);
+  const maxWidth = inlinePanelMaxWidth(rowWidth, panelMinWidth, mainMinWidth);
   const flexWidth = Math.round(rowWidth * INLINE_PANEL_FLEX_SHARE);
   return Math.min(maxWidth, Math.max(panelMinWidth, flexWidth));
+}
+
+export function clampInlineBrowserPanelWidth(input: {
+  width: number | null;
+  rowWidth: number | null;
+  panelMinWidth?: number;
+  mainMinWidth?: number;
+}): number | null {
+  const width = positiveFinite(input.width);
+  const rowWidth = positiveFinite(input.rowWidth);
+  if (width == null) return null;
+  if (rowWidth == null) {
+    const panelMinWidth = input.panelMinWidth ?? DEFAULT_PANEL_MIN_PX;
+    return Math.max(panelMinWidth, width);
+  }
+
+  const panelMinWidth = input.panelMinWidth ?? DEFAULT_PANEL_MIN_PX;
+  const mainMinWidth = input.mainMinWidth ?? DEFAULT_INLINE_MAIN_MIN_PX;
+  return Math.min(
+    inlinePanelMaxWidth(rowWidth, panelMinWidth, mainMinWidth),
+    Math.max(panelMinWidth, width),
+  );
 }
 
 export function pickWorkbenchBrowserViewportProfile({
@@ -134,4 +156,12 @@ function positiveFinite(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
     ? value
     : null;
+}
+
+function inlinePanelMaxWidth(
+  rowWidth: number,
+  panelMinWidth: number,
+  mainMinWidth: number,
+): number {
+  return Math.max(panelMinWidth, rowWidth - mainMinWidth);
 }
