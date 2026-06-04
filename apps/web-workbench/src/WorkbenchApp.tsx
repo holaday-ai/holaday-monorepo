@@ -15,6 +15,12 @@ import { hdDebug } from '@/lib/hd-debug';
 import { taskActionError } from '@/lib/error-copy';
 import { pickBrowserViewportProfile } from '@/lib/browser-viewport-profile';
 import {
+  isWorkbenchDesktopWidth,
+  isWorkbenchMobileWidth,
+  WORKBENCH_DESKTOP_BREAKPOINT_PX,
+  WORKBENCH_MOBILE_BREAKPOINT_PX,
+} from '@/lib/workbench-breakpoints';
+import {
   followUpTargetForTask,
   isLiveBrowserTaskForWorkbench,
 } from '@/lib/workbench-state';
@@ -64,15 +70,10 @@ export function WorkbenchApp(): JSX.Element {
   const [browserSheetOpen, setBrowserSheetOpen] = React.useState(false);
   /**
    * BUG-11 follow-up — viewport breakpoint flag. The inline desktop
-   * panel was rendered always (just CSS-hidden via lg:hidden below
-   * 1024px), which meant its CdpScreencastViewport stayed mounted
-   * and its WS connection stayed open even when invisible. When the
-   * bottom sheet opened on resize, BOTH viewports were live —
-   * each opened its own CDP session, each fired
-   * Emulation.setDeviceMetricsOverride, and they fought over the
-   * shared Brave page (screencast frames stalled, watchdog
-   * restarted, white-screen). Now: inline mounts only at lg+; sheet
-   * only mounts below lg. Exactly one viewport per moment.
+   * panel used to stay mounted behind CSS breakpoints, so hidden
+   * and visible browser surfaces could both keep a screencast socket
+   * alive. Now the render tree has one lane per viewport:
+   * desktop inline, tablet overlay, mobile sheet.
    *
    * Track the breakpoint in state (not just a ref) so the render
    * tree updates on resize. matchMedia keeps the listener cheap.
@@ -95,16 +96,20 @@ export function WorkbenchApp(): JSX.Element {
    */
   const [isDesktop, setIsDesktop] = React.useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
-    return window.matchMedia('(min-width: 1360px)').matches;
+    return isWorkbenchDesktopWidth(window.innerWidth);
   });
   const [isMobile, setIsMobile] = React.useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    return !window.matchMedia('(min-width: 960px)').matches;
+    return isWorkbenchMobileWidth(window.innerWidth);
   });
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    const desktopMq = window.matchMedia('(min-width: 1360px)');
-    const mobileMq = window.matchMedia('(min-width: 960px)');
+    const desktopMq = window.matchMedia(
+      `(min-width: ${WORKBENCH_DESKTOP_BREAKPOINT_PX}px)`,
+    );
+    const mobileMq = window.matchMedia(
+      `(min-width: ${WORKBENCH_MOBILE_BREAKPOINT_PX}px)`,
+    );
     const onDesktop = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
     const onMobile = (e: MediaQueryListEvent) => setIsMobile(!e.matches);
     desktopMq.addEventListener('change', onDesktop);
@@ -289,7 +294,7 @@ export function WorkbenchApp(): JSX.Element {
   // desktop open/close; this effect is sheet-only.
   React.useEffect(() => {
     if (!selectedNeedsBrowser) return;
-    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+    if (typeof window !== 'undefined' && isWorkbenchMobileWidth(window.innerWidth)) {
       setBrowserSheetOpen(true);
     }
   }, [selectedNeedsBrowser]);
@@ -481,16 +486,15 @@ export function WorkbenchApp(): JSX.Element {
           sidePanelMode={sidePanelMode}
           browserAttentionNeeded={selectedNeedsBrowser}
           onToggleSidePanel={() => {
-            // BOSS bug fix — on mobile (lg:hidden inline panel)
+            // BOSS bug fix — on mobile (bottom-sheet browser lane)
             // the bottom sheet IS the only browser surface, so the
             // toolbar button must toggle THAT directly. The old
             // guard only opened the sheet when sidePanelMode was
             // 'closed' — but for a live browser task the mode is
-            // 'browser-live' even on mobile (inline panel is just
-            // CSS-hidden), so the button looked dead.
-            const isMobile =
-              typeof window !== 'undefined' && window.innerWidth < 1024;
-            if (isMobile) {
+            // 'browser-live' even on mobile, so the button looked dead.
+            const mobileWidth =
+              typeof window !== 'undefined' && isWorkbenchMobileWidth(window.innerWidth);
+            if (mobileWidth) {
               setBrowserSheetOpen((open) => !open);
               return;
             }

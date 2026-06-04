@@ -1,4 +1,5 @@
 import type { BrowserViewportProfile } from '@holaday/shared-types';
+import { WORKBENCH_MOBILE_BREAKPOINT_PX } from './workbench-breakpoints';
 
 export interface BrowserViewportProfileInput {
   viewportWidth: number;
@@ -8,7 +9,6 @@ export interface BrowserViewportProfileInput {
   fullscreen?: boolean;
 }
 
-const MOBILE_BREAKPOINT_PX = 960;
 const LANDSCAPE_PANEL_ASPECT = 0.9;
 const WIDE_DESKTOP_PANEL_PX = 1040;
 
@@ -20,7 +20,7 @@ export function pickBrowserViewportProfile({
   fullscreen = false,
 }: BrowserViewportProfileInput): BrowserViewportProfile {
   if (fullscreen) return 'fullscreen';
-  if (viewportWidth < MOBILE_BREAKPOINT_PX) return 'mobile';
+  if (viewportWidth < WORKBENCH_MOBILE_BREAKPOINT_PX) return 'mobile';
 
   const safePanelWidth =
     typeof panelWidth === 'number' && Number.isFinite(panelWidth) && panelWidth > 0
