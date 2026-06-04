@@ -1084,12 +1084,13 @@ export function BrowserPanel({
             // bottom of most sites.
             <FullscreenFloatingToolbar
               displayUrl={displayUrl}
-              status={headerStatus}
+              status={displayedHeaderStatus}
               interactiveActive={interactiveActive}
               interactive={interactive}
               onToggleInteractive={handleUserTakeoverClick}
-              navTaskId={activeTaskId ?? null}
-              isExecuting={isExecuting}
+              navTaskId={evidenceHeaderActive ? null : activeTaskId ?? null}
+              controlsEnabled={!evidenceHeaderActive}
+              isExecuting={!evidenceHeaderActive && isExecuting}
               aborting={aborting}
               onStop={onStopClick}
               onExitFullscreen={onToggleFullscreen}
@@ -2326,6 +2327,10 @@ function NavButton({
  *   - takeover toggle (Hand icon, mirrors the header button)
  *   - stop button (when executing)
  *   - exit fullscreen
+ *
+ * Terminal evidence mode reuses the toolbar as a passive viewer: the
+ * task's Brave has already been released, so nav / stop / takeover
+ * controls are hidden and the URL bar becomes read-only.
  */
 function FullscreenFloatingToolbar({
   displayUrl,
@@ -2334,6 +2339,7 @@ function FullscreenFloatingToolbar({
   interactive,
   onToggleInteractive,
   navTaskId,
+  controlsEnabled,
   isExecuting,
   aborting,
   onStop,
@@ -2345,6 +2351,7 @@ function FullscreenFloatingToolbar({
   interactive: boolean;
   onToggleInteractive: () => void;
   navTaskId: string | null;
+  controlsEnabled: boolean;
   isExecuting: boolean;
   aborting: boolean;
   onStop: () => Promise<void> | void;
@@ -2400,13 +2407,18 @@ function FullscreenFloatingToolbar({
     >
       <StatusDot status={status.dotStatus} />
       <BrowserConnectionChip state={status} compact={false} />
-      <NavButton direction="back" title="后退" navTaskId={navTaskId} />
-      <NavButton direction="forward" title="前进" navTaskId={navTaskId} />
-      <NavButton direction="reload" title="刷新" navTaskId={navTaskId} />
+      {controlsEnabled && (
+        <>
+          <NavButton direction="back" title="后退" navTaskId={navTaskId} />
+          <NavButton direction="forward" title="前进" navTaskId={navTaskId} />
+          <NavButton direction="reload" title="刷新" navTaskId={navTaskId} />
+        </>
+      )}
       <UrlBar
         displayUrl={displayUrl}
         interactiveActive={interactiveActive}
         navTaskId={navTaskId}
+        readOnly={!controlsEnabled}
       />
       {isExecuting && navTaskId && (
         <button
@@ -2425,18 +2437,20 @@ function FullscreenFloatingToolbar({
           <Square className="h-3 w-3" strokeWidth={2.5} />
         </button>
       )}
-      <button
-        type="button"
-        onClick={onToggleInteractive}
-        title={interactive ? '退出接管 — 让 AI 继续操作' : '接管 — 你自己操作浏览器'}
-        aria-label={interactive ? '退出接管' : '接管'}
-        className={cn(
-          'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-white/85 transition-colors hover:bg-white/10',
-          interactive && 'bg-[#EA1F59]/35 text-white',
-        )}
-      >
-        <Hand className="h-3.5 w-3.5" />
-      </button>
+      {controlsEnabled && (
+        <button
+          type="button"
+          onClick={onToggleInteractive}
+          title={interactive ? '退出接管 — 让 AI 继续操作' : '接管 — 你自己操作浏览器'}
+          aria-label={interactive ? '退出接管' : '接管'}
+          className={cn(
+            'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-white/85 transition-colors hover:bg-white/10',
+            interactive && 'bg-[#EA1F59]/35 text-white',
+          )}
+        >
+          <Hand className="h-3.5 w-3.5" />
+        </button>
+      )}
       <button
         type="button"
         onClick={onExitFullscreen}
