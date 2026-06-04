@@ -4,6 +4,7 @@ import {
   browserPanelHeaderStatus,
   browserPanelEvidenceHeaderStatus,
   browserReleasedCardCopy,
+  browserViewportFrameLabel,
   browserWakeFeedback,
   browserPanelDotLabel,
   browserLiveStatusLabel,
@@ -119,6 +120,19 @@ describe('BrowserPanel state helpers', () => {
       dotStatus: 'idle',
       showLabel: true,
     });
+  });
+
+  it('labels screencast frame geometry so narrow panels are easy to verify', () => {
+    expect(browserViewportFrameLabel(null)).toBe('—');
+    expect(browserViewportFrameLabel({ width: 430, height: 760 })).toBe(
+      '430×760 · 竖屏视口',
+    );
+    expect(browserViewportFrameLabel({ width: 560, height: 720 })).toBe(
+      '560×720 · 窄屏视口',
+    );
+    expect(browserViewportFrameLabel({ width: 1280, height: 800 })).toBe(
+      '1280×800 · 桌面帧',
+    );
   });
 
   it('prioritises awaiting-user and takeover states over transport labels', () => {

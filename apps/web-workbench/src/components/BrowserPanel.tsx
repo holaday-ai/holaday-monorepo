@@ -27,6 +27,7 @@ import {
   type BrowserPanelHeaderStatus,
   browserPanelDotLabel,
   browserReleasedCardCopy,
+  browserViewportFrameLabel,
   browserWakeFeedback,
   shouldShowBrowserHeader,
   terminalBrowserTakeoverMessage,
@@ -1505,7 +1506,7 @@ export function BrowserPanel({
           </div>
           {!fullscreen && shouldConnect && showHeader && (
             <footer className={cn('flex h-7 items-center justify-between border-t px-3 text-[11px] text-muted-foreground', BROWSER_DIVIDER)}>
-              <span>{frame ? `${frame.viewport.width}×${frame.viewport.height}` : '—'}</span>
+              <span>{browserViewportFrameLabel(frame?.viewport)}</span>
               <span>{frame ? `第 ${frame.tickIndex + 1} 帧` : ''}</span>
             </footer>
           )}

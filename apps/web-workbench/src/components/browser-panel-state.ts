@@ -165,6 +165,18 @@ export function browserPanelEvidenceHeaderStatus(
   };
 }
 
+export function browserViewportFrameLabel(
+  viewport: { width: number; height: number } | null | undefined,
+): string {
+  if (!viewport || viewport.width <= 0 || viewport.height <= 0) return '—';
+  const size = `${viewport.width}×${viewport.height}`;
+  const aspect = viewport.width / viewport.height;
+  if (viewport.width <= 480 && aspect < 0.75) return `${size} · 竖屏视口`;
+  if (viewport.width <= 720 && aspect < 0.9) return `${size} · 窄屏视口`;
+  if (viewport.width >= 1200 && aspect > 1.3) return `${size} · 桌面帧`;
+  return size;
+}
+
 export function browserLiveOverlayCopy(inputs: {
   status: BrowserLiveStatus;
   showReconnect: boolean;
