@@ -22,6 +22,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import {
   browserLiveOverlayCopy,
+  browserPanelEvidenceHeaderStatus,
   browserPanelHeaderStatus,
   type BrowserPanelHeaderStatus,
   browserPanelDotLabel,
@@ -773,6 +774,11 @@ export function BrowserPanel({
     interactiveActive,
     showReconnect,
   });
+  const evidenceHeaderActive =
+    taskIsTerminal && Boolean(finalEvidenceFrame);
+  const displayedHeaderStatus = evidenceHeaderActive
+    ? browserPanelEvidenceHeaderStatus(taskStatus)
+    : headerStatus;
 
   // BOSS-feedback follow-up — the blue "你正在直接操作浏览器" banner
   // was confusing average users because it appeared whenever the
@@ -1089,92 +1095,97 @@ export function BrowserPanel({
               onExitFullscreen={onToggleFullscreen}
             />
           )}
-          {!fullscreen && shouldConnect && showHeader && (
-          <header className={cn('flex h-11 items-center gap-2 border-b px-3 pt-2', BROWSER_DIVIDER)}>
-            <StatusDot status={headerStatus.dotStatus} />
-            <BrowserConnectionChip state={headerStatus} compact={isNarrow} />
-            {/* BOSS bug fix — when the panel is narrow (< 500px),
-                hide back/forward to keep the URL bar legible. The
-                agent rarely needs them, and the user can take over
-                + use Brave's own gestures if they really need to
-                go back. Reload stays — it's the highest-utility
-                button when a page hangs. */}
-            {!isNarrow && (
-              <>
-                <NavButton direction="back" title="后退" navTaskId={activeTaskId ?? null} />
-                <NavButton direction="forward" title="前进" navTaskId={activeTaskId ?? null} />
-              </>
-            )}
-            <NavButton direction="reload" title="刷新" navTaskId={activeTaskId ?? null} />
-            <UrlBar
-              displayUrl={displayUrl}
-              interactiveActive={interactiveActive}
-              navTaskId={activeTaskId ?? null}
-            />
-            {isExecuting && activeTaskId && (
-              <button
-                type="button"
-                onClick={onStopClick}
-                disabled={aborting}
-                title="停止当前任务"
-                aria-label="停止当前任务"
-                className={cn(
-                  'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition-colors',
-                  aborting
-                    ? 'cursor-wait border-[#DCDDDD] bg-[#EFEFEF] text-muted-foreground dark:border-white/10 dark:bg-white/5'
-                    : 'border-[#EA1F59]/35 bg-white text-[#EA1F59] hover:bg-[#EA1F59]/10 dark:border-[#EA1F59]/35 dark:bg-transparent dark:hover:bg-[#EA1F59]/10',
-                )}
-              >
-                <Square className="h-3 w-3" strokeWidth={2.5} />
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={handleUserTakeoverClick}
-              title={
-                interactive
-                  ? '退出接管 — 让 AI 继续操作'
-                  : '接管浏览器 — 你的鼠标键盘直接控制 Brave'
-              }
-              aria-label={interactive ? '退出浏览器接管' : '接管浏览器'}
-              aria-pressed={interactive}
-              className={cn(
-                'inline-flex h-6 w-6 items-center justify-center rounded-md border transition-colors',
-                interactive
-                  ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
-                  : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5',
+          {!fullscreen && showHeader && (shouldConnect || evidenceHeaderActive) && (
+            <header className={cn('flex h-11 items-center gap-2 border-b px-3 pt-2', BROWSER_DIVIDER)}>
+              <StatusDot status={displayedHeaderStatus.dotStatus} />
+              <BrowserConnectionChip state={displayedHeaderStatus} compact={isNarrow} />
+              {/* BOSS bug fix — when the panel is narrow (< 500px),
+                  hide back/forward to keep the URL bar legible. The
+                  agent rarely needs them, and the user can take over
+                  + use Brave's own gestures if they really need to
+                  go back. Reload stays — it's the highest-utility
+                  button when a page hangs. */}
+              {!evidenceHeaderActive && !isNarrow && (
+                <>
+                  <NavButton direction="back" title="后退" navTaskId={activeTaskId ?? null} />
+                  <NavButton direction="forward" title="前进" navTaskId={activeTaskId ?? null} />
+                </>
               )}
-            >
-              {interactive ? (
-                <MousePointerClick className="h-3.5 w-3.5" />
-              ) : (
-                <Power className="h-3.5 w-3.5" />
+              {!evidenceHeaderActive && (
+                <NavButton direction="reload" title="刷新" navTaskId={activeTaskId ?? null} />
               )}
-            </button>
-            {/* Fullscreen toggle is a power-user feature; hide on
-                narrow panels (BOSS bug — toolbar was crowded). The
-                user can still open fullscreen from the keyboard
-                shortcut or by widening the panel first. */}
-            {onToggleFullscreen && !isNarrow && (
-              <button
-                type="button"
-                onClick={onToggleFullscreen}
-                title={fullscreen ? '退出全屏 (Esc)' : '全屏浏览器模式'}
-                aria-label={fullscreen ? '退出全屏' : '全屏浏览器模式'}
-                aria-pressed={fullscreen}
-                className={cn(
-                  'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors',
-                  'hover:bg-foreground/5 hover:text-foreground',
-                )}
-              >
-                {fullscreen ? (
-                  <Minimize2 className="h-3.5 w-3.5" />
-                ) : (
-                  <Maximize2 className="h-3.5 w-3.5" />
-                )}
-              </button>
-            )}
-          </header>
+              <UrlBar
+                displayUrl={displayUrl}
+                interactiveActive={interactiveActive}
+                navTaskId={evidenceHeaderActive ? null : activeTaskId ?? null}
+                readOnly={evidenceHeaderActive}
+              />
+              {!evidenceHeaderActive && isExecuting && activeTaskId && (
+                <button
+                  type="button"
+                  onClick={onStopClick}
+                  disabled={aborting}
+                  title="停止当前任务"
+                  aria-label="停止当前任务"
+                  className={cn(
+                    'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition-colors',
+                    aborting
+                      ? 'cursor-wait border-[#DCDDDD] bg-[#EFEFEF] text-muted-foreground dark:border-white/10 dark:bg-white/5'
+                      : 'border-[#EA1F59]/35 bg-white text-[#EA1F59] hover:bg-[#EA1F59]/10 dark:border-[#EA1F59]/35 dark:bg-transparent dark:hover:bg-[#EA1F59]/10',
+                  )}
+                >
+                  <Square className="h-3 w-3" strokeWidth={2.5} />
+                </button>
+              )}
+              {!evidenceHeaderActive && (
+                <button
+                  type="button"
+                  onClick={handleUserTakeoverClick}
+                  title={
+                    interactive
+                      ? '退出接管 — 让 AI 继续操作'
+                      : '接管浏览器 — 你的鼠标键盘直接控制 Brave'
+                  }
+                  aria-label={interactive ? '退出浏览器接管' : '接管浏览器'}
+                  aria-pressed={interactive}
+                  className={cn(
+                    'inline-flex h-6 w-6 items-center justify-center rounded-md border transition-colors',
+                    interactive
+                      ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
+                      : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5',
+                  )}
+                >
+                  {interactive ? (
+                    <MousePointerClick className="h-3.5 w-3.5" />
+                  ) : (
+                    <Power className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              )}
+              {/* Fullscreen toggle is a power-user feature; hide on
+                  narrow panels (BOSS bug — toolbar was crowded). The
+                  user can still open fullscreen from the keyboard
+                  shortcut or by widening the panel first. */}
+              {onToggleFullscreen && !isNarrow && (
+                <button
+                  type="button"
+                  onClick={onToggleFullscreen}
+                  title={fullscreen ? '退出全屏 (Esc)' : '全屏浏览器模式'}
+                  aria-label={fullscreen ? '退出全屏' : '全屏浏览器模式'}
+                  aria-pressed={fullscreen}
+                  className={cn(
+                    'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors',
+                    'hover:bg-foreground/5 hover:text-foreground',
+                  )}
+                >
+                  {fullscreen ? (
+                    <Minimize2 className="h-3.5 w-3.5" />
+                  ) : (
+                    <Maximize2 className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              )}
+            </header>
           )}
           {browserAwaiting && (
             <div
@@ -2118,6 +2129,7 @@ function UrlBar({
   displayUrl,
   interactiveActive,
   navTaskId,
+  readOnly = false,
 }: {
   displayUrl: string;
   interactiveActive: boolean;
@@ -2129,6 +2141,7 @@ function UrlBar({
    * backend falls through to peekActiveForUser.
    */
   navTaskId: string | null;
+  readOnly?: boolean;
 }): JSX.Element {
   const toast = useToast();
   // Local editing state. Resync to the prop whenever the agent
@@ -2149,6 +2162,7 @@ function UrlBar({
   }, [displayUrl, editing]);
 
   const submit = async (): Promise<void> => {
+    if (readOnly) return;
     if (pending) return;
     const target = draft.trim();
     if (!target || target === displayUrl) {
@@ -2189,11 +2203,17 @@ function UrlBar({
       value={draft}
       title={draft}
       placeholder="输入 URL 回车跳转"
-      onFocus={() => setEditing(true)}
+      readOnly={readOnly}
+      onFocus={() => {
+        if (!readOnly) setEditing(true);
+      }}
       onBlur={() => setEditing(false)}
-      onChange={(e) => setDraft(e.target.value)}
+      onChange={(e) => {
+        if (!readOnly) setDraft(e.target.value);
+      }}
       onKeyDown={(e) => {
         e.stopPropagation();
+        if (readOnly) return;
         // Phase 4 R2 4c — composing-Enter guard. URL bar with a
         // Chinese-domain IME commit (e.g. typing 中文.com) used to
         // submit the partial composition.
@@ -2206,12 +2226,13 @@ function UrlBar({
         }
       }}
       disabled={pending}
-      aria-label="浏览器地址栏 (Enter 跳转, Esc 还原)"
+      aria-label={readOnly ? '浏览器最终地址' : '浏览器地址栏 (Enter 跳转, Esc 还原)'}
       className={cn(
         'min-w-0 flex-1 truncate rounded-md border bg-transparent px-2 py-1 font-mono text-[11px] outline-none transition-colors',
         'border-transparent text-muted-foreground hover:border-[#DCDDDD] hover:bg-[#EFEFEF]/50 dark:hover:border-white/10 dark:hover:bg-white/5',
         'focus:border-foreground/20 focus:bg-background focus:text-foreground focus:ring-0',
         interactiveActive && 'border-[#EA1F59]/35',
+        readOnly && 'cursor-default hover:border-transparent hover:bg-transparent focus:border-transparent focus:bg-transparent',
         pending && 'cursor-wait opacity-60',
       )}
     />

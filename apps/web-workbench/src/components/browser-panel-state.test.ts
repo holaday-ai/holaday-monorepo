@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   browserLiveOverlayCopy,
   browserPanelHeaderStatus,
+  browserPanelEvidenceHeaderStatus,
   browserReleasedCardCopy,
   browserWakeFeedback,
   browserPanelDotLabel,
@@ -106,6 +107,16 @@ describe('BrowserPanel state helpers', () => {
       label: '已断开',
       tone: 'recovering',
       dotStatus: 'error',
+      showLabel: true,
+    });
+  });
+
+  it('labels terminal evidence headers without implying a live browser', () => {
+    expect(browserPanelEvidenceHeaderStatus('completed')).toEqual({
+      label: '证据',
+      tooltip: '任务已完成，显示任务结束时的浏览器页面',
+      tone: 'idle',
+      dotStatus: 'idle',
       showLabel: true,
     });
   });

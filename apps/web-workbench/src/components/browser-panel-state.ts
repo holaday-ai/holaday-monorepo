@@ -151,6 +151,20 @@ export function browserPanelHeaderStatus(inputs: {
   };
 }
 
+export function browserPanelEvidenceHeaderStatus(
+  status: UiTaskStatus | null | undefined,
+): BrowserPanelHeaderStatus {
+  const label = '证据';
+  const statusLabel = terminalEvidenceStatusLabel(status);
+  return {
+    label,
+    tooltip: `${statusLabel}，显示任务结束时的浏览器页面`,
+    tone: 'idle',
+    dotStatus: 'idle',
+    showLabel: true,
+  };
+}
+
 export function browserLiveOverlayCopy(inputs: {
   status: BrowserLiveStatus;
   showReconnect: boolean;
