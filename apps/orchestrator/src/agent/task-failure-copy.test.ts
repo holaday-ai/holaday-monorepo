@@ -29,6 +29,12 @@ describe('friendlyTaskFailureReason', () => {
     ).toBe('任务执行出错。请重试；如果反复出现，请联系 support@holaday.ai。');
   });
 
+  it('turns supercar timeout sentinels into user-facing copy', () => {
+    expect(
+      friendlyTaskFailureReason('failed', 'VISION_GAVE_UP task timeout (600s) elapsed'),
+    ).toBe('任务超时。可能原因：目标网站响应缓慢或被反爬拦截。建议：重试，或把任务描述简化后再试。');
+  });
+
   it('does not leak unknown English technical failures', () => {
     expect(friendlyTaskFailureReason('failed', 'Unexpected protocol invariant violation')).toBe(
       '任务执行出错。请重试；如果反复出现，请联系 support@holaday.ai。',

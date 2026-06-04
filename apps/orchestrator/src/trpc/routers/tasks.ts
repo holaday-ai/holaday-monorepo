@@ -6059,7 +6059,10 @@ async function persistSupercarOutcome(
     } else if (outcome.status === 'timeout') {
       return await repo.persistVisionOutcome(taskId, {
         status: 'failed',
-        reason: outcome.reason ?? 'supercar: task timeout',
+        reason: friendlyTaskFailureReason(
+          outcome.status,
+          outcome.reason ?? 'supercar: task timeout',
+        ),
         tickCount: outcome.iterations,
         ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
         ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
@@ -6069,7 +6072,10 @@ async function persistSupercarOutcome(
       // 'failed'
       return await repo.persistVisionOutcome(taskId, {
         status: 'failed',
-        reason: outcome.reason ?? 'supercar: task failed',
+        reason: friendlyTaskFailureReason(
+          outcome.status,
+          outcome.reason ?? 'supercar: task failed',
+        ),
         tickCount: outcome.iterations,
         ...(finalState.finalScreenshot ? { finalScreenshot: finalState.finalScreenshot } : {}),
         ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
