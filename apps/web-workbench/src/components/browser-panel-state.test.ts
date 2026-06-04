@@ -123,7 +123,7 @@ describe('BrowserPanel state helpers', () => {
   });
 
   it('labels screencast frame geometry so narrow panels are easy to verify', () => {
-    expect(browserViewportFrameLabel(null)).toBe('—');
+    expect(browserViewportFrameLabel(null)).toBe('视口未知');
     expect(browserViewportFrameLabel({ width: 430, height: 760 })).toBe(
       '430×760 · 竖屏视口',
     );

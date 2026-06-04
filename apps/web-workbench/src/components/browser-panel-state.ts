@@ -168,7 +168,7 @@ export function browserPanelEvidenceHeaderStatus(
 export function browserViewportFrameLabel(
   viewport: { width: number; height: number } | null | undefined,
 ): string {
-  if (!viewport || viewport.width <= 0 || viewport.height <= 0) return '—';
+  if (!viewport || viewport.width <= 0 || viewport.height <= 0) return '视口未知';
   const size = `${viewport.width}×${viewport.height}`;
   const aspect = viewport.width / viewport.height;
   if (viewport.width <= 480 && aspect < 0.75) return `${size} · 竖屏视口`;
