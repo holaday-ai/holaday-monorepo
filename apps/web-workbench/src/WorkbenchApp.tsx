@@ -13,7 +13,10 @@ import { useToast } from '@/components/ui/toast';
 import { useSidebar } from '@/components/ui/sidebar';
 import { hdDebug } from '@/lib/hd-debug';
 import { taskActionError } from '@/lib/error-copy';
-import { pickBrowserViewportProfile } from '@/lib/browser-viewport-profile';
+import {
+  estimateInlineBrowserPanelWidth,
+  pickWorkbenchBrowserViewportProfile,
+} from '@/lib/browser-viewport-profile';
 import {
   isWorkbenchDesktopWidth,
   isWorkbenchMobileWidth,
@@ -189,9 +192,14 @@ export function WorkbenchApp(): JSX.Element {
 
   const computeInitialPanelPx = React.useCallback((): number => {
     const row = contentRowRef.current;
-    if (!row) return Math.max(720, Math.round(window.innerWidth * 0.55));
+    if (!row) return Math.max(PANEL_MIN_PX, Math.round(window.innerWidth * 0.55));
     const rect = row.getBoundingClientRect();
-    return Math.max(720, Math.min(rect.width - 420, Math.round(rect.width * 0.6)));
+    return estimateInlineBrowserPanelWidth({
+      rowWidth: rect.width,
+      explicitPanelWidth: null,
+      panelMinWidth: PANEL_MIN_PX,
+      mainMinWidth: MAIN_PANEL_MIN_PX,
+    }) ?? Math.max(PANEL_MIN_PX, Math.round(window.innerWidth * 0.55));
   }, []);
   const onPanelResizeDrag = React.useCallback(
     (dx: number) => {
@@ -233,22 +241,19 @@ export function WorkbenchApp(): JSX.Element {
         typeof window !== 'undefined' ? window.innerWidth : 1280;
       const viewportHeight =
         typeof window !== 'undefined' ? window.innerHeight : 800;
-      const overlayPanelWidth = Math.min(560, Math.round(viewportWidth * 0.9));
-      const panelContentHeight =
-        rowRect && !panelFullscreen
-          ? Math.max(360, rowRect.height - PANEL_CHROME_ESTIMATE_PX)
-          : (rowRect?.height ?? null);
       const picked =
         viewportProfile ??
-        pickBrowserViewportProfile({
+        pickWorkbenchBrowserViewportProfile({
           viewportWidth,
           viewportHeight,
-          panelWidth:
-            panelFullscreen
-              ? (rowRect?.width ?? null)
-              : panelPx ?? (isTablet ? overlayPanelWidth : null),
-          panelHeight: panelContentHeight,
+          rowWidth: rowRect?.width ?? null,
+          rowHeight: rowRect?.height ?? null,
+          explicitPanelWidth: panelPx,
+          isTablet,
           fullscreen: panelFullscreen,
+          panelMinWidth: PANEL_MIN_PX,
+          mainMinWidth: MAIN_PANEL_MIN_PX,
+          panelChromeHeight: PANEL_CHROME_ESTIMATE_PX,
         });
       return createTaskRaw(intent, fileIds, replyToTaskId, mode, expertMode, picked);
     },
@@ -712,6 +717,7 @@ export function WorkbenchApp(): JSX.Element {
  * narrower widths, so 300 is the new floor.
  */
 const PANEL_MIN_PX = 300;
+const MAIN_PANEL_MIN_PX = 420;
 const PANEL_CHROME_ESTIMATE_PX = 140;
 
 function preferredDisplayName(

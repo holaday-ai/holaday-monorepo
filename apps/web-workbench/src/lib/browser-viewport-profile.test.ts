@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { pickBrowserViewportProfile } from './browser-viewport-profile';
+import {
+  estimateInlineBrowserPanelWidth,
+  pickBrowserViewportProfile,
+  pickWorkbenchBrowserViewportProfile,
+} from './browser-viewport-profile';
 
 describe('pickBrowserViewportProfile', () => {
   it('uses the mobile profile on narrow app viewports', () => {
@@ -65,6 +69,67 @@ describe('pickBrowserViewportProfile', () => {
         viewportHeight: 780,
         panelWidth: null,
         panelHeight: null,
+      }),
+    ).toBe('desktop');
+  });
+});
+
+describe('pickWorkbenchBrowserViewportProfile', () => {
+  it('estimates the inline desktop panel from the actual flex row width', () => {
+    expect(
+      estimateInlineBrowserPanelWidth({
+        rowWidth: 1180,
+        explicitPanelWidth: null,
+      }),
+    ).toBe(708);
+
+    expect(
+      pickWorkbenchBrowserViewportProfile({
+        viewportWidth: 1440,
+        viewportHeight: 900,
+        rowWidth: 1180,
+        rowHeight: 900,
+        explicitPanelWidth: null,
+        isTablet: false,
+      }),
+    ).toBe('desktop');
+  });
+
+  it('keeps tighter inline panels portrait-friendly near the desktop breakpoint', () => {
+    expect(
+      pickWorkbenchBrowserViewportProfile({
+        viewportWidth: 1360,
+        viewportHeight: 900,
+        rowWidth: 1100,
+        rowHeight: 900,
+        explicitPanelWidth: null,
+        isTablet: false,
+      }),
+    ).toBe('sidepanel');
+  });
+
+  it('uses the tablet overlay dimensions instead of a stale desktop estimate', () => {
+    expect(
+      pickWorkbenchBrowserViewportProfile({
+        viewportWidth: 1180,
+        viewportHeight: 780,
+        rowWidth: 1180,
+        rowHeight: 780,
+        explicitPanelWidth: null,
+        isTablet: true,
+      }),
+    ).toBe('sidepanel');
+  });
+
+  it('switches short tablet overlays to desktop geometry', () => {
+    expect(
+      pickWorkbenchBrowserViewportProfile({
+        viewportWidth: 1280,
+        viewportHeight: 720,
+        rowWidth: 1280,
+        rowHeight: 720,
+        explicitPanelWidth: null,
+        isTablet: true,
       }),
     ).toBe('desktop');
   });
