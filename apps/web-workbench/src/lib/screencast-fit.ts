@@ -11,6 +11,22 @@ export interface ScreencastFitSize {
   scale: number;
 }
 
+export interface ScreencastPointInput {
+  clientX: number;
+  clientY: number;
+  rectLeft: number;
+  rectTop: number;
+  rectWidth: number;
+  rectHeight: number;
+  sourceWidth: number;
+  sourceHeight: number;
+}
+
+export interface ScreencastPoint {
+  x: number;
+  y: number;
+}
+
 export function fitScreencastContain({
   hostWidth,
   hostHeight,
@@ -31,6 +47,31 @@ export function fitScreencastContain({
     width: Math.max(1, Math.floor(sourceWidth * scale)),
     height: Math.max(1, Math.floor(sourceHeight * scale)),
     scale,
+  };
+}
+
+export function mapClientPointToScreencast({
+  clientX,
+  clientY,
+  rectLeft,
+  rectTop,
+  rectWidth,
+  rectHeight,
+  sourceWidth,
+  sourceHeight,
+}: ScreencastPointInput): ScreencastPoint {
+  if (
+    !isPositiveFinite(rectWidth) ||
+    !isPositiveFinite(rectHeight) ||
+    !isPositiveFinite(sourceWidth) ||
+    !isPositiveFinite(sourceHeight)
+  ) {
+    return { x: 0, y: 0 };
+  }
+
+  return {
+    x: Math.round((clientX - rectLeft) * (sourceWidth / rectWidth)),
+    y: Math.round((clientY - rectTop) * (sourceHeight / rectHeight)),
   };
 }
 

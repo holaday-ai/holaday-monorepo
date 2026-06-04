@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { hdDebug } from '@/lib/hd-debug';
+import { mapClientPointToScreencast } from '@/lib/screencast-fit';
 import { cn } from '@/lib/utils';
 
 /**
@@ -343,13 +344,16 @@ export function CdpScreencastViewport({
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    return {
-      x: Math.round((e.clientX - rect.left) * scaleX),
-      y: Math.round((e.clientY - rect.top) * scaleY),
-    };
+    return mapClientPointToScreencast({
+      clientX: e.clientX,
+      clientY: e.clientY,
+      rectLeft: rect.left,
+      rectTop: rect.top,
+      rectWidth: rect.width,
+      rectHeight: rect.height,
+      sourceWidth: canvas.width,
+      sourceHeight: canvas.height,
+    });
   }
 
   // Mouse handlers
