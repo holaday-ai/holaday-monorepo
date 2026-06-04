@@ -1,8 +1,5 @@
 import * as React from 'react';
-import {
-  type BrowserViewportProfile,
-  type PlanId,
-} from '@holaday/shared-types';
+import { type PlanId } from '@holaday/shared-types';
 import { useAppShellContext } from '@/components/AppShell';
 import { BrowserPanel } from '@/components/BrowserPanel';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -16,6 +13,7 @@ import { useToast } from '@/components/ui/toast';
 import { useSidebar } from '@/components/ui/sidebar';
 import { hdDebug } from '@/lib/hd-debug';
 import { taskActionError } from '@/lib/error-copy';
+import { pickBrowserViewportProfile } from '@/lib/browser-viewport-profile';
 import {
   followUpTargetForTask,
   isLiveBrowserTaskForWorkbench,
@@ -223,16 +221,31 @@ export function WorkbenchApp(): JSX.Element {
       // Pack C1 added `expertMode` at position 5; viewportProfile
       // moved to position 6. The wrapper still auto-picks viewport
       // from the current panel layout when callers don't pass one.
+      const rowRect = contentRowRef.current?.getBoundingClientRect();
+      const viewportWidth =
+        typeof window !== 'undefined' ? window.innerWidth : 1280;
+      const viewportHeight =
+        typeof window !== 'undefined' ? window.innerHeight : 800;
+      const overlayPanelWidth = Math.min(560, Math.round(viewportWidth * 0.9));
+      const panelContentHeight =
+        rowRect && !panelFullscreen
+          ? Math.max(360, rowRect.height - PANEL_CHROME_ESTIMATE_PX)
+          : (rowRect?.height ?? null);
       const picked =
         viewportProfile ??
-        pickViewportProfile({
-          panelPx,
-          isMobile:
-            typeof window !== 'undefined' && window.innerWidth < 1024,
+        pickBrowserViewportProfile({
+          viewportWidth,
+          viewportHeight,
+          panelWidth:
+            panelFullscreen
+              ? (rowRect?.width ?? null)
+              : panelPx ?? (isTablet ? overlayPanelWidth : null),
+          panelHeight: panelContentHeight,
+          fullscreen: panelFullscreen,
         });
       return createTaskRaw(intent, fileIds, replyToTaskId, mode, expertMode, picked);
     },
-    [createTaskRaw, panelPx],
+    [createTaskRaw, isTablet, panelFullscreen, panelPx],
   );
   const replyToTask = useTaskStore((s) => s.replyToTask);
   const awaitingUserByTask = useTaskStore((s) => s.awaitingUserByTask);
@@ -673,25 +686,7 @@ export function WorkbenchApp(): JSX.Element {
  * narrower widths, so 300 is the new floor.
  */
 const PANEL_MIN_PX = 300;
-
-/**
- * Picks the viewport profile baked into the task at create time.
- * Browser sessions are spawned once at task start; the SPA's
- * fullscreen toggle is a display-side zoom only — it can't shift the
- * agent's click coordinates relative to its plan.
- *
- *   Mobile viewport (< 1024) → 'mobile' (390×844)
- *   panelPx explicit and ≥ 1100 → 'desktop' (1280×800)
- *   Otherwise → 'sidepanel' (900×900)
- */
-function pickViewportProfile(inputs: {
-  panelPx: number | null;
-  isMobile: boolean;
-}): BrowserViewportProfile {
-  if (inputs.isMobile) return 'mobile';
-  if (inputs.panelPx != null && inputs.panelPx >= 1100) return 'desktop';
-  return 'sidepanel';
-}
+const PANEL_CHROME_ESTIMATE_PX = 140;
 
 function preferredDisplayName(
   me: { displayName: string | null; email: string | null; phone?: string | null } | null,
