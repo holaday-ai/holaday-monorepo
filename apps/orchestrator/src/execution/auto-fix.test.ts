@@ -41,6 +41,23 @@ describe('pickSimilarUrl', () => {
       'https://www.example.com/x',
     );
   });
+
+  it('does not replace a specific child page with its parent directory', () => {
+    const grounded = ['https://docs.python.org/3/tutorial/'];
+    expect(
+      pickSimilarUrl('https://docs.python.org/3/tutorial/appetite.html', grounded),
+    ).toBeUndefined();
+  });
+
+  it('still replaces a specific child page with a similar specific grounded page', () => {
+    const grounded = [
+      'https://docs.python.org/3/tutorial/appetite.html',
+      'https://docs.python.org/3/tutorial/',
+    ];
+    expect(
+      pickSimilarUrl('https://docs.python.org/3/tutorial/appetites.html', grounded),
+    ).toBe('https://docs.python.org/3/tutorial/appetite.html');
+  });
 });
 
 describe('autoFix — URL fabrication', () => {

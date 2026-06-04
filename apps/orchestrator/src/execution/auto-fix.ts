@@ -202,6 +202,10 @@ export function pickSimilarUrl(
   for (const g of grounded) {
     const gHost = hostOf(g);
     if (!gHost) continue;
+    const gPath = pathOf(g);
+    if (isStrictParentPath(gPath, fabPath)) {
+      continue;
+    }
     let score = 0;
     if (gHost === fabHost) {
       score = 100;
@@ -210,7 +214,7 @@ export function pickSimilarUrl(
     } else {
       continue;
     }
-    score += pathOverlap(fabPath, pathOf(g));
+    score += pathOverlap(fabPath, gPath);
     if (!best || score > best.score) best = { url: g, score };
   }
   return best?.url;
@@ -243,6 +247,14 @@ function pathOverlap(a: string, b: string): number {
     else break;
   }
   return Math.min(matched, 10);
+}
+
+function isStrictParentPath(candidate: string, target: string): boolean {
+  const candidateSegs = candidate.split('/').filter(Boolean);
+  const targetSegs = target.split('/').filter(Boolean);
+  if (candidateSegs.length === 0) return false;
+  if (candidateSegs.length >= targetSegs.length) return false;
+  return candidateSegs.every((seg, idx) => seg === targetSegs[idx]);
 }
 
 function stripTrailingPunct(url: string): string {
