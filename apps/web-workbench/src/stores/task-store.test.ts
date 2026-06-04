@@ -469,6 +469,40 @@ describe('selectTask detail hydration', () => {
     });
   });
 
+  it('sends a default viewport profile for non-workbench create entry points', async () => {
+    createMutate.mockResolvedValueOnce({
+      taskId: 'tsk_new',
+      status: 'executing',
+      executionMode: 'browser',
+    } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+
+    await useTaskStore.getState().createTask('打开 https://example.com', []);
+
+    expect(createMutate).toHaveBeenCalledWith({
+      intent: '打开 https://example.com',
+      viewportProfile: 'desktop',
+    });
+  });
+
+  it('keeps an explicit viewport profile from the workbench panel wrapper', async () => {
+    createMutate.mockResolvedValueOnce({
+      taskId: 'tsk_new',
+      status: 'executing',
+      executionMode: 'browser',
+    } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+
+    await useTaskStore
+      .getState()
+      .createTask('打开 https://example.com', [], undefined, undefined, undefined, 'sidepanel');
+
+    expect(createMutate).toHaveBeenCalledWith({
+      intent: '打开 https://example.com',
+      viewportProfile: 'sidepanel',
+    });
+  });
+
   it('survives malformed detail rows and synthesizes a safe selected task', async () => {
     detailQuery.mockResolvedValueOnce({
       intent: { unsafe: true },

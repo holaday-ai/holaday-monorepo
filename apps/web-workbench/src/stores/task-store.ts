@@ -1,5 +1,6 @@
 import type { BrowserViewportProfile, ServerMessage } from '@holaday/shared-types';
 import { create } from 'zustand';
+import { pickDefaultBrowserViewportProfile } from '@/lib/browser-viewport-profile';
 import { humaniseTaskError } from '@/lib/error-copy';
 import { pageErrorMessage } from '@/lib/page-error-copy';
 import { hdDebug } from '@/lib/hd-debug';
@@ -1069,13 +1070,15 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       return { error: msg };
     }
     try {
+      const pickedViewportProfile =
+        viewportProfile ?? pickDefaultBrowserViewportProfile();
       const res = await trpc.tasks.create.mutate({
         intent,
         ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
         ...(replyToTaskId ? { replyToTaskId } : {}),
         ...(mode === 'plan' ? { mode } : {}),
         ...(expertMode && expertMode !== 'auto' ? { expertMode } : {}),
-        ...(viewportProfile ? { viewportProfile } : {}),
+        viewportProfile: pickedViewportProfile,
       });
       // Optimistic insert at the top so the UI feels instant; the next
       // refreshTasks() will pick up the canonical server row.

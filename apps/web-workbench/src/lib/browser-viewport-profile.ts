@@ -43,3 +43,15 @@ export function pickBrowserViewportProfile({
 
   return aspect >= LANDSCAPE_PANEL_ASPECT ? 'desktop' : 'sidepanel';
 }
+
+export function pickDefaultBrowserViewportProfile(): BrowserViewportProfile {
+  if (typeof window === 'undefined') {
+    return 'desktop';
+  }
+  return pickBrowserViewportProfile({
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    panelWidth: null,
+    panelHeight: null,
+  });
+}
