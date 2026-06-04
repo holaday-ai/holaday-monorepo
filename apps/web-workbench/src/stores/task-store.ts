@@ -434,16 +434,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         : {};
       const steps = normalizeTaskDetailSteps(detail.steps);
       set((prev) => {
-        const rawResultText = extractSummary(detail.result);
-        const isFailed =
-          safeTaskListText(detail.status) === 'failed' ||
-          safeTaskListText(detail.status) === 'cancelled';
-        const resultText = rawResultText
-          ? isFailed
-            ? humaniseTaskError(rawResultText)
-            : rawResultText
-          : undefined;
         const detailStatus = normaliseStatus(safeTaskListText(detail.status) || 'queued');
+        const rawResultText = extractSummary(detail.result);
+        const rawErrorText = safeTaskListText(detail.errorMessage);
+        const resultText =
+          displayResultTextForStatus(detailStatus, rawResultText, rawErrorText) ??
+          undefined;
         const planText = safeTaskListText(detail.planText) || undefined;
         const planStatus = normalizeTaskPlanStatus(detail.planStatus);
         const resultObj = isTaskListRecord(detail.result) ? detail.result : {};
@@ -1665,6 +1661,18 @@ function extractFailedChecks(
   return checks.length > 0 ? checks : null;
 }
 
+function displayResultTextForStatus(
+  status: UiTask['status'],
+  resultText: string | null,
+  fallbackErrorText: string | null,
+): string | null {
+  const raw = resultText || fallbackErrorText;
+  if (!raw) return null;
+  return status === 'failed' || status === 'cancelled'
+    ? humaniseTaskError(raw)
+    : raw;
+}
+
 /**
  * Read `executionMode` out of the `result` JSON. Two locations:
  *   - `result.executionMode` (parked-from-generate write path)
@@ -1866,6 +1874,7 @@ function normalizeStepAntiBot(value: unknown): UiStep['antiBot'] | undefined {
 export function toUiTask(row: ListRow): UiTask {
   const opusUsed = (row as { opusUsed?: unknown }).opusUsed === true;
   const r = row as { starred?: unknown; starredAt?: unknown; projectId?: unknown };
+  const status = normaliseStatus(safeTaskListText((row as { status?: unknown }).status) || 'queued');
   // Root-cause fix for the "result text disappears on refresh" / brief
   // post-terminal flash: tasks.list already ships `result` for every
   // row, but toUiTask used to drop it and only map errorMessage. The
@@ -1884,7 +1893,11 @@ export function toUiTask(row: ListRow): UiTask {
     typeof row.errorMessage === 'string'
       ? humaniseTaskError(row.errorMessage)
       : null;
-  const resultText = summaryFromResult ?? errorText ?? null;
+  const resultText = displayResultTextForStatus(
+    status,
+    summaryFromResult,
+    errorText,
+  ) ?? null;
   // Codex Pack A4 — verifier verdict columns (null on legacy rows).
   const verificationPassedRaw = (row as { verificationPassed?: unknown })
     .verificationPassed;
@@ -1899,7 +1912,7 @@ export function toUiTask(row: ListRow): UiTask {
     taskId: safeTaskListText((row as { taskId?: unknown }).taskId),
     intent: safeTaskListText((row as { intent?: unknown }).intent) || '未命名任务',
     title: safeNullableTaskListText((row as { title?: unknown }).title),
-    status: normaliseStatus(safeTaskListText((row as { status?: unknown }).status) || 'queued'),
+    status,
     // The list endpoint doesn't expose tickCount directly; we leave 0
     // for now and let G4's ws events fill it in as ticks stream.
     tickCount: 0,

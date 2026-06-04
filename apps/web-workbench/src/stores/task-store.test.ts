@@ -160,6 +160,28 @@ describe('toUiTask', () => {
     ]);
   });
 
+  it('humanises failed task result reasons from tasks.list rows', () => {
+    const task = toUiTask({
+      taskId: 'tsk_failed_reason',
+      intent: '打开网页',
+      title: null,
+      status: 'failed',
+      result: {
+        reason: 'Protocol error (Page.navigate): Target closed',
+      },
+      errorMessage: null,
+      createdAt: new Date('2026-05-22T00:00:00Z'),
+      opusUsed: false,
+      starred: false,
+      starredAt: null,
+      projectId: null,
+      verificationPassed: null,
+      failureLevel: null,
+    } as never);
+
+    expect(task.resultText).toBe('浏览器连接中断，请重新执行任务。');
+  });
+
   it('normalizes malformed task list rows safely', () => {
     expect(
       normalizeTaskListRows([
@@ -492,6 +514,29 @@ describe('selectTask detail hydration', () => {
     expect(state.tasks[0]?.attachments).toBeUndefined();
     expect(state.tasks[0]?.planStatus).toBeUndefined();
     expect(state.awaitingUserByTask.tsk_detail).toBeUndefined();
+  });
+
+  it('uses humanised detail errorMessage when failed detail has no result reason', async () => {
+    detailQuery.mockResolvedValueOnce({
+      intent: '打开网页',
+      title: null,
+      status: 'failed',
+      createdAt: '2026-05-22T00:00:00.000Z',
+      steps: [],
+      result: null,
+      errorMessage: 'Protocol error (Page.navigate): Target closed',
+      verificationPassed: null,
+      failureLevel: null,
+    } as never);
+
+    useTaskStore.getState().selectTask('tsk_failed_detail', 'ui');
+    await flushPromises();
+
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      taskId: 'tsk_failed_detail',
+      status: 'failed',
+      resultText: '浏览器连接中断，请重新执行任务。',
+    });
   });
 });
 
