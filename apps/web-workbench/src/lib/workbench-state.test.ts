@@ -5,6 +5,7 @@ import {
   isLiveBrowserTaskForWorkbench,
   networkTransitionToast,
   normalizeTaskActionCount,
+  preserveBrowserRecordAfterLive,
   realtimeConnectionTransition,
 } from './workbench-state';
 
@@ -171,5 +172,38 @@ describe('workbench state helpers', () => {
         authed: false,
       }),
     ).toEqual({ hadDisconnect: false, toast: null });
+  });
+
+  it('keeps browser evidence visible when a live browser task reaches terminal state', () => {
+    expect(
+      preserveBrowserRecordAfterLive({
+        previousTaskId: 'tsk_test',
+        currentTaskId: 'tsk_test',
+        previousMode: 'browser-live',
+        currentOverride: null,
+        isTerminalBrowserTask: true,
+      }),
+    ).toBe('open');
+  });
+
+  it('does not reopen evidence after a manual close or task switch', () => {
+    expect(
+      preserveBrowserRecordAfterLive({
+        previousTaskId: 'tsk_test',
+        currentTaskId: 'tsk_test',
+        previousMode: 'browser-live',
+        currentOverride: 'close',
+        isTerminalBrowserTask: true,
+      }),
+    ).toBe('close');
+    expect(
+      preserveBrowserRecordAfterLive({
+        previousTaskId: 'tsk_old',
+        currentTaskId: 'tsk_new',
+        previousMode: 'browser-live',
+        currentOverride: null,
+        isTerminalBrowserTask: true,
+      }),
+    ).toBeNull();
   });
 });

@@ -23,6 +23,8 @@ import {
 import {
   followUpTargetForTask,
   isLiveBrowserTaskForWorkbench,
+  isWorkbenchTerminalTask,
+  preserveBrowserRecordAfterLive,
 } from '@/lib/workbench-state';
 import { useTaskStore } from '@/stores/task-store';
 import { isQuotaExhausted, useQuotaStatus } from '@/lib/use-quota-status';
@@ -404,6 +406,26 @@ export function WorkbenchApp(): JSX.Element {
     override: sidePanelOverride,
   });
   const showBrowserPanel = sidePanelMode !== 'closed';
+  const previousPanelStateRef = React.useRef<{
+    taskId: string | null;
+    mode: SidePanelMode;
+  }>({ taskId: selectedTaskId, mode: sidePanelMode });
+  React.useEffect(() => {
+    const nextOverride = preserveBrowserRecordAfterLive({
+      previousTaskId: previousPanelStateRef.current.taskId,
+      currentTaskId: selectedTaskId,
+      previousMode: previousPanelStateRef.current.mode,
+      currentOverride: sidePanelOverride,
+      isTerminalBrowserTask: Boolean(
+        selectedTask?.executionMode === 'browser' &&
+          isWorkbenchTerminalTask(selectedTask),
+      ),
+    });
+    previousPanelStateRef.current = { taskId: selectedTaskId, mode: sidePanelMode };
+    if (nextOverride !== sidePanelOverride) {
+      setSidePanelOverride(nextOverride);
+    }
+  }, [selectedTask, selectedTaskId, sidePanelMode, sidePanelOverride]);
   // Toolbar click flips the panel: closed → open, anything-else → close.
   const onToggleSidePanel = React.useCallback(() => {
     setSidePanelOverride(sidePanelMode === 'closed' ? 'open' : 'close');

@@ -1,6 +1,7 @@
 import type { UiTask } from '@/types/task';
 import { isTerminalStatus } from '@/types/task';
 import type { ConnStatus } from '@/lib/ws';
+import type { SidePanelMode, SidePanelOverride } from '@/types/side-panel';
 
 export interface WorkbenchToastCopy {
   message: string;
@@ -74,6 +75,21 @@ export function followUpTargetForTask(input: {
     taskId: selectedTaskId,
     title: (selectedTask.title || selectedTask.intent || '').slice(0, 40),
   };
+}
+
+export function preserveBrowserRecordAfterLive(input: {
+  previousTaskId: string | null;
+  currentTaskId: string | null;
+  previousMode: SidePanelMode;
+  currentOverride: SidePanelOverride;
+  isTerminalBrowserTask: boolean;
+}): SidePanelOverride {
+  if (input.currentOverride !== null) return input.currentOverride;
+  if (!input.currentTaskId || input.previousTaskId !== input.currentTaskId) {
+    return input.currentOverride;
+  }
+  if (!input.isTerminalBrowserTask) return input.currentOverride;
+  return input.previousMode === 'browser-live' ? 'open' : input.currentOverride;
 }
 
 export function normalizeTaskActionCount(value: unknown): number {
