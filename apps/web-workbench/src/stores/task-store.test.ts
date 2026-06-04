@@ -485,6 +485,23 @@ describe('selectTask detail hydration', () => {
     });
   });
 
+  it('uses the current workbench viewport profile for direct retry entry points', async () => {
+    createMutate.mockResolvedValueOnce({
+      taskId: 'tsk_new',
+      status: 'executing',
+      executionMode: 'browser',
+    } as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+    useTaskStore.getState().setDefaultViewportProfile('mobile');
+
+    await useTaskStore.getState().createTask('打开 https://example.com', []);
+
+    expect(createMutate).toHaveBeenCalledWith({
+      intent: '打开 https://example.com',
+      viewportProfile: 'mobile',
+    });
+  });
+
   it('keeps an explicit viewport profile from the workbench panel wrapper', async () => {
     createMutate.mockResolvedValueOnce({
       taskId: 'tsk_new',

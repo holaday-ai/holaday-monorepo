@@ -134,6 +134,14 @@ export interface TaskStore {
    *  terminal summary's "Continue in browser" button can flip it on. */
   browserInteractive: boolean;
   setBrowserInteractive(v: boolean): void;
+  /**
+   * Current workbench browser surface. WorkbenchApp updates this from
+   * the live panel/sheet/fullscreen layout so retry buttons outside
+   * WorkbenchApp's submit wrapper still create the right browser
+   * geometry instead of falling back to desktop.
+   */
+  defaultViewportProfile: BrowserViewportProfile | null;
+  setDefaultViewportProfile(profile: BrowserViewportProfile | null): void;
 
   /**
    * Toggle the pin state on a task. Pin is now server-persisted —
@@ -687,6 +695,10 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   setBrowserInteractive(v) {
     set({ browserInteractive: v });
   },
+  defaultViewportProfile: null,
+  setDefaultViewportProfile(profile) {
+    set({ defaultViewportProfile: profile });
+  },
 
 
   selectTask(taskId, source = 'ui') {
@@ -1071,7 +1083,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
     try {
       const pickedViewportProfile =
-        viewportProfile ?? pickDefaultBrowserViewportProfile();
+        viewportProfile ??
+        get().defaultViewportProfile ??
+        pickDefaultBrowserViewportProfile();
       const res = await trpc.tasks.create.mutate({
         intent,
         ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
@@ -1594,6 +1608,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       subStatusByTask: {},
       terminalTaskIds: new Set<string>(),
       animatedTaskIds: new Set<string>(),
+      defaultViewportProfile: null,
     });
   },
   };

@@ -260,34 +260,39 @@ export function WorkbenchApp(): JSX.Element {
   const composerMode = useTaskStore((s) => s.composerMode);
   const loading = useTaskStore((s) => s.loading);
   const enterNewTaskMode = useTaskStore((s) => s.enterNewTaskMode);
+  const setDefaultViewportProfile = useTaskStore((s) => s.setDefaultViewportProfile);
   const createTaskRaw = useTaskStore((s) => s.createTask);
+  const pickCurrentViewportProfile = React.useCallback(() => {
+    const rowRect = contentRowRef.current?.getBoundingClientRect();
+    const viewportWidth =
+      typeof window !== 'undefined' ? window.innerWidth : 1280;
+    const viewportHeight =
+      typeof window !== 'undefined' ? window.innerHeight : 800;
+    return pickWorkbenchBrowserViewportProfile({
+      viewportWidth,
+      viewportHeight,
+      rowWidth: rowRect?.width ?? null,
+      rowHeight: rowRect?.height ?? null,
+      explicitPanelWidth: panelPx,
+      isTablet,
+      fullscreen: panelFullscreen,
+      panelMinWidth: PANEL_MIN_PX,
+      mainMinWidth: MAIN_PANEL_MIN_PX,
+      panelChromeHeight: PANEL_CHROME_ESTIMATE_PX,
+    });
+  }, [isTablet, panelFullscreen, panelPx]);
+  React.useEffect(() => {
+    setDefaultViewportProfile(pickCurrentViewportProfile());
+  }, [pickCurrentViewportProfile, setDefaultViewportProfile]);
   const createTask: typeof createTaskRaw = React.useCallback(
     (intent, fileIds, replyToTaskId, mode, expertMode, viewportProfile) => {
       // Pack C1 added `expertMode` at position 5; viewportProfile
       // moved to position 6. The wrapper still auto-picks viewport
       // from the current panel layout when callers don't pass one.
-      const rowRect = contentRowRef.current?.getBoundingClientRect();
-      const viewportWidth =
-        typeof window !== 'undefined' ? window.innerWidth : 1280;
-      const viewportHeight =
-        typeof window !== 'undefined' ? window.innerHeight : 800;
-      const picked =
-        viewportProfile ??
-        pickWorkbenchBrowserViewportProfile({
-          viewportWidth,
-          viewportHeight,
-          rowWidth: rowRect?.width ?? null,
-          rowHeight: rowRect?.height ?? null,
-          explicitPanelWidth: panelPx,
-          isTablet,
-          fullscreen: panelFullscreen,
-          panelMinWidth: PANEL_MIN_PX,
-          mainMinWidth: MAIN_PANEL_MIN_PX,
-          panelChromeHeight: PANEL_CHROME_ESTIMATE_PX,
-        });
+      const picked = viewportProfile ?? pickCurrentViewportProfile();
       return createTaskRaw(intent, fileIds, replyToTaskId, mode, expertMode, picked);
     },
-    [createTaskRaw, isTablet, panelFullscreen, panelPx],
+    [createTaskRaw, pickCurrentViewportProfile],
   );
   const replyToTask = useTaskStore((s) => s.replyToTask);
   const awaitingUserByTask = useTaskStore((s) => s.awaitingUserByTask);
