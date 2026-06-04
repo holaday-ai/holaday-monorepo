@@ -5,6 +5,7 @@ import {
   isLiveBrowserTaskForWorkbench,
   networkTransitionToast,
   normalizeTaskActionCount,
+  mobileBrowserSheetAutoOpenState,
   preserveBrowserRecordAfterLive,
   realtimeConnectionTransition,
 } from './workbench-state';
@@ -205,5 +206,59 @@ describe('workbench state helpers', () => {
         isTerminalBrowserTask: true,
       }),
     ).toBeNull();
+  });
+
+  it('auto-opens the mobile browser sheet once for each live browser task', () => {
+    expect(
+      mobileBrowserSheetAutoOpenState({
+        taskId: 'tsk_live',
+        mode: 'browser-live',
+        isMobile: true,
+        autoOpenedTaskId: null,
+      }),
+    ).toEqual({ shouldOpen: true, autoOpenedTaskId: 'tsk_live' });
+    expect(
+      mobileBrowserSheetAutoOpenState({
+        taskId: 'tsk_live',
+        mode: 'browser-live',
+        isMobile: true,
+        autoOpenedTaskId: 'tsk_live',
+      }),
+    ).toEqual({ shouldOpen: false, autoOpenedTaskId: 'tsk_live' });
+    expect(
+      mobileBrowserSheetAutoOpenState({
+        taskId: 'tsk_next',
+        mode: 'browser-live',
+        isMobile: true,
+        autoOpenedTaskId: 'tsk_live',
+      }),
+    ).toEqual({ shouldOpen: true, autoOpenedTaskId: 'tsk_next' });
+  });
+
+  it('keeps the mobile browser sheet closed outside live mobile browser mode', () => {
+    expect(
+      mobileBrowserSheetAutoOpenState({
+        taskId: 'tsk_live',
+        mode: 'browser-live',
+        isMobile: false,
+        autoOpenedTaskId: null,
+      }).shouldOpen,
+    ).toBe(false);
+    expect(
+      mobileBrowserSheetAutoOpenState({
+        taskId: 'tsk_done',
+        mode: 'browser-record',
+        isMobile: true,
+        autoOpenedTaskId: null,
+      }).shouldOpen,
+    ).toBe(false);
+    expect(
+      mobileBrowserSheetAutoOpenState({
+        taskId: null,
+        mode: 'browser-live',
+        isMobile: true,
+        autoOpenedTaskId: 'tsk_live',
+      }),
+    ).toEqual({ shouldOpen: false, autoOpenedTaskId: 'tsk_live' });
   });
 });

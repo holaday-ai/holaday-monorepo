@@ -28,6 +28,7 @@ import {
   followUpTargetForTask,
   isLiveBrowserTaskForWorkbench,
   isWorkbenchTerminalTask,
+  mobileBrowserSheetAutoOpenState,
   preserveBrowserRecordAfterLive,
 } from '@/lib/workbench-state';
 import { useTaskStore } from '@/stores/task-store';
@@ -74,6 +75,7 @@ export function WorkbenchApp(): JSX.Element {
   // Inner-workbench state.
   const [panelFullscreen, setPanelFullscreen] = React.useState(false);
   const [browserSheetOpen, setBrowserSheetOpen] = React.useState(false);
+  const mobileBrowserSheetAutoOpenedTaskRef = React.useRef<string | null>(null);
   /**
    * BUG-11 follow-up — viewport breakpoint flag. The inline desktop
    * panel used to stay mounted behind CSS breakpoints, so hidden
@@ -324,16 +326,6 @@ export function WorkbenchApp(): JSX.Element {
           selectedAwaitingKind !== 'clarification')),
   );
 
-  // Mobile sheet auto-pop when the agent needs the user in the
-  // viewport. The sidePanelMode state machine already handles the
-  // desktop open/close; this effect is sheet-only.
-  React.useEffect(() => {
-    if (!selectedNeedsBrowser) return;
-    if (typeof window !== 'undefined' && isWorkbenchMobileWidth(window.innerWidth)) {
-      setBrowserSheetOpen(true);
-    }
-  }, [selectedNeedsBrowser]);
-
   // Reset the side-panel intent on task switch so a manual open/close
   // from task A doesn't follow into task B — each task starts from
   // its default (live → open, terminal → closed).
@@ -439,6 +431,20 @@ export function WorkbenchApp(): JSX.Element {
     override: sidePanelOverride,
   });
   const showBrowserPanel = sidePanelMode !== 'closed';
+  React.useEffect(() => {
+    const nextSheetState = mobileBrowserSheetAutoOpenState({
+      taskId: selectedTaskId,
+      mode: sidePanelMode,
+      isMobile,
+      autoOpenedTaskId: mobileBrowserSheetAutoOpenedTaskRef.current,
+    });
+    mobileBrowserSheetAutoOpenedTaskRef.current =
+      nextSheetState.autoOpenedTaskId;
+    if (nextSheetState.shouldOpen) {
+      setBrowserSheetOpen(true);
+    }
+  }, [isMobile, selectedTaskId, sidePanelMode]);
+
   const previousPanelStateRef = React.useRef<{
     taskId: string | null;
     mode: SidePanelMode;

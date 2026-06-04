@@ -92,6 +92,21 @@ export function preserveBrowserRecordAfterLive(input: {
   return input.previousMode === 'browser-live' ? 'open' : input.currentOverride;
 }
 
+export function mobileBrowserSheetAutoOpenState(input: {
+  taskId: string | null;
+  mode: SidePanelMode;
+  isMobile: boolean;
+  autoOpenedTaskId: string | null;
+}): { shouldOpen: boolean; autoOpenedTaskId: string | null } {
+  if (!input.isMobile || !input.taskId || input.mode !== 'browser-live') {
+    return { shouldOpen: false, autoOpenedTaskId: input.autoOpenedTaskId };
+  }
+  if (input.autoOpenedTaskId === input.taskId) {
+    return { shouldOpen: false, autoOpenedTaskId: input.autoOpenedTaskId };
+  }
+  return { shouldOpen: true, autoOpenedTaskId: input.taskId };
+}
+
 export function normalizeTaskActionCount(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
   return Math.max(0, Math.floor(value));
