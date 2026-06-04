@@ -172,6 +172,8 @@ export function CdpScreencastViewport({
       canvas.style.setProperty('--hd-scale', String(placement.scale));
       canvas.style.setProperty('--hd-offset-x', `${placement.offsetX}px`);
       canvas.style.setProperty('--hd-offset-y', `${placement.offsetY}px`);
+      host.style.setProperty('--hd-content-width', `${placement.width}px`);
+      host.style.setProperty('--hd-content-height', `${placement.height}px`);
     };
     recompute();
     let ro: ResizeObserver | null = null;
@@ -471,6 +473,14 @@ export function CdpScreencastViewport({
         className,
       )}
     >
+      <div
+        aria-hidden="true"
+        className="pointer-events-none"
+        style={{
+          width: 'var(--hd-content-width, 100%)',
+          height: 'var(--hd-content-height, 100%)',
+        }}
+      />
       <canvas
         ref={canvasRef}
         onMouseMove={onMouseMove}
