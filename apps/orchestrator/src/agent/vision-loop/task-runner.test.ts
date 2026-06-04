@@ -358,6 +358,7 @@ describe('startVisionLoopTask — wait_for_human action triggers Layer 4', () =>
 
     expect(detections.length).toBeGreaterThanOrEqual(1);
     expect(detections[0]?.message).toMatch(/Cloudflare 验证/);
+    expect(detections[0]?.message).not.toContain('匹配：');
     // Snapshot was clean → auto-resolve.
     expect(resolutions[0]?.reason).toBe('auto');
   }, 10_000);

@@ -3805,7 +3805,15 @@ export const tasksRouter = router({
                         durationMs: info.durationMs,
                         mode: info.mode,
                         ...(info.message ? { message: info.message } : {}),
-                        ...(info.antiBot ? { antiBot: info.antiBot } : {}),
+                        ...(info.antiBot
+                          ? {
+                              antiBot: {
+                                type: info.antiBot.type,
+                                confidence: info.antiBot.confidence,
+                                message: describeSignal(info.antiBot),
+                              },
+                            }
+                          : {}),
                       },
                       ...(info.ok ? {} : { errorMessage: (info.message ?? '').slice(0, 2000) }),
                       startedAt: new Date(Date.now() - info.durationMs),
@@ -3833,13 +3841,13 @@ export const tasksRouter = router({
                 ...(info.antiBot
                   ? {
                       // Flatten the server-side signal into the
-                      // WS-facing shape: the UI wants a human-readable
-                      // Chinese tag + the raw match concatenated, and
-                      // never sees rawMatch as a separate field.
+                      // WS-facing shape. Keep raw detector snippets out
+                      // of user-visible progress; logs/forensics can use
+                      // the server-side AntiBotSignal before this point.
                       antiBot: {
                         type: info.antiBot.type,
                         confidence: info.antiBot.confidence,
-                        message: `${describeSignal(info.antiBot)}（匹配：${info.antiBot.rawMatch}）`,
+                        message: describeSignal(info.antiBot),
                       },
                     }
                   : {}),

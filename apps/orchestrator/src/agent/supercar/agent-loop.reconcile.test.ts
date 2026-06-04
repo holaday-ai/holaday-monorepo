@@ -89,11 +89,11 @@ describe('reconcileFinalAnswerText', () => {
       expect(out).not.toContain('/domains/reserved');
     });
 
-    it('replaces multiple same-domain URLs in one go', () => {
+    it('replaces repeated copies of one same-domain URL in one go', () => {
       const text = [
         '页面 1: https://www.iana.org/foo',
-        '页面 2: [IANA Page](https://www.iana.org/bar)',
-        '页面 3: https://www.iana.org/baz',
+        '页面 2: [IANA Page](https://www.iana.org/foo)',
+        '页面 3: https://www.iana.org/foo',
       ].join('\n');
       const out = reconcileFinalAnswerText(
         text,
@@ -106,8 +106,24 @@ describe('reconcileFinalAnswerText', () => {
       );
       expect(matches?.length).toBe(3);
       expect(out).not.toContain('iana.org/foo');
-      expect(out).not.toContain('iana.org/bar');
-      expect(out).not.toContain('iana.org/baz');
+    });
+
+    it('does not collapse multiple distinct same-domain product links into one observed page', () => {
+      const text = [
+        '- 商品 A: [A](https://item.jd.com/100001.html)',
+        '- 商品 B: [B](https://item.jd.com/100002.html)',
+        '- 商品 C: https://item.jd.com/100003.html',
+      ].join('\n');
+      const out = reconcileFinalAnswerText(
+        text,
+        'https://item.jd.com/100004.html',
+        '商品 D',
+      );
+      expect(out).toContain('https://item.jd.com/100001.html');
+      expect(out).toContain('https://item.jd.com/100002.html');
+      expect(out).toContain('https://item.jd.com/100003.html');
+      expect(out).toContain('📍 实际浏览器页面');
+      expect(out).toContain('[商品 D](https://item.jd.com/100004.html)');
     });
 
     it('falls back to URL itself when observedTitle is empty', () => {

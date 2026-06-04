@@ -227,6 +227,7 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
   // anti-bot signal fires; consumed + cleared by the afterTickHook.
   // `null` means no pause pending.
   let pendingCaptchaSignal: AntiBotSignal | null = null;
+  let pendingCaptchaHint: string | null = null;
   // Layer 5: cross-tick counter. Incremented on every high-confidence
   // detection; crossing the threshold triggers a transport swap.
   let antiBotStrikeCount = 0;
@@ -271,10 +272,12 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
     afterTickHook: async (_tickIndex) => {
       if (!pendingCaptchaSignal) return;
       const signal = pendingCaptchaSignal;
+      const hint = pendingCaptchaHint;
       pendingCaptchaSignal = null;
+      pendingCaptchaHint = null;
       opts.onCaptchaDetected?.({
         antiBotType: signal.type,
-        message: `${describeSignal(signal)}（匹配：${signal.rawMatch}）`,
+        message: formatAntiBotPauseMessage(signal, hint),
         waitTimeoutMs: captchaWaitTimeoutMs,
       });
       const started = Date.now();
@@ -470,12 +473,14 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
       // hooks) works identically whether the commander or the
       // heuristic detector raised it.
       let antiBot: AntiBotSignal | null = null;
+      let antiBotHint: string | null = null;
       if (action.kind === 'wait_for_human') {
         antiBot = {
           type: 'captcha',
           confidence: 'high',
           rawMatch: action.reason,
         };
+        antiBotHint = action.reason;
       } else {
         antiBot = detectAntiBot({
           errorMessage: exec?.ok === false ? exec.message : null,
@@ -484,6 +489,7 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
       }
       if (antiBot && antiBot.confidence === 'high') {
         pendingCaptchaSignal = antiBot;
+        pendingCaptchaHint = cleanAntiBotHint(antiBotHint);
         antiBotStrikeCount += 1;
         // Layer 5 trigger: crossed the strike threshold AND we
         // haven't already swapped. Only relevant when we're
@@ -554,6 +560,21 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
   }
 
   return runner.run(opts.intent);
+}
+
+function formatAntiBotPauseMessage(
+  signal: AntiBotSignal,
+  hint: string | null,
+): string {
+  const base = describeSignal(signal);
+  return hint ? `${base}：${hint}` : base;
+}
+
+function cleanAntiBotHint(value: string | null): string | null {
+  const trimmed = value?.replace(/\s+/g, ' ').trim();
+  if (!trimmed) return null;
+  if (trimmed.length > 120) return `${trimmed.slice(0, 117)}...`;
+  return trimmed;
 }
 
 /**

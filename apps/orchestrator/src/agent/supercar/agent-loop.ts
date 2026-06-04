@@ -4054,23 +4054,41 @@ export function reconcileFinalAnswerText(
       ? observedTitle.trim()
       : observedUrl;
 
-  // Same-domain mismatch path: replace inline. Apply edits in
-  // descending position order so earlier offsets stay valid as we
-  // splice. Markdown labels get replaced too — the model picks the
-  // label from memory just like the URL.
-  const edits: Array<{ start: number; end: number; replacement: string }> = [];
-  for (const ml of mdLinks) {
-    if (parseDomain(ml.url) === observedDomain) {
-      edits.push({
-        start: ml.start,
-        end: ml.end,
-        replacement: `[${safeTitle}](${observedUrl})`,
-      });
-    }
+  const sameDomainUrls = allUrls.filter((u) => parseDomain(u) === observedDomain);
+  const distinctSameDomainUrls = new Set(sameDomainUrls.map((u) => normalize(u)));
+  if (distinctSameDomainUrls.size > 1) {
+    const correction = `\n\n> 📍 实际浏览器页面：[${safeTitle}](${observedUrl})`;
+    logger.info(
+      {
+        taskId,
+        observedUrl,
+        observedTitle,
+        sameDomainUrls: sameDomainUrls.slice(0, 5),
+      },
+      'reconcile: skipped inline rewrite for multiple distinct same-domain URLs',
+    );
+    return finalText + correction;
   }
-  for (const bu of bareUrls) {
-    if (parseDomain(bu.url) === observedDomain) {
-      edits.push({ start: bu.start, end: bu.end, replacement: observedUrl });
+
+  // Same-domain mismatch path: replace inline only when the answer has
+  // a single distinct same-domain URL. Product/listing answers often
+  // contain several legitimate URLs on the same host; replacing all of
+  // them with the final observed page corrupts evidence.
+  const edits: Array<{ start: number; end: number; replacement: string }> = [];
+  if (distinctSameDomainUrls.size === 1) {
+    for (const ml of mdLinks) {
+      if (parseDomain(ml.url) === observedDomain) {
+        edits.push({
+          start: ml.start,
+          end: ml.end,
+          replacement: `[${safeTitle}](${observedUrl})`,
+        });
+      }
+    }
+    for (const bu of bareUrls) {
+      if (parseDomain(bu.url) === observedDomain) {
+        edits.push({ start: bu.start, end: bu.end, replacement: observedUrl });
+      }
     }
   }
 

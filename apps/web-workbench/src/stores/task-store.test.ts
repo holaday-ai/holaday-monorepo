@@ -87,6 +87,7 @@ describe('normaliseDetailStepStatus', () => {
                 type: 'captcha',
                 confidence: 'high',
                 message: ' captcha seen ',
+                rawMatch: 'should not leak',
               },
             },
             startedAt: '2026-05-25T00:00:00.000Z',
