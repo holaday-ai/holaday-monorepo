@@ -69,6 +69,8 @@ interface StaticEvidenceFit {
   hostWidth: number;
 }
 
+type StaticEvidenceViewMode = 'readable' | 'contain';
+
 /**
  * VNC bridge URL. Relative path lets the browser auto-resolve the
  * scheme (wss on HTTPS, ws on HTTP dev) and host. The nginx block on
@@ -710,6 +712,8 @@ export function BrowserPanel({
   const finalEvidenceAutoScrolledKeyRef = React.useRef<string | null>(null);
   const [finalEvidenceFit, setFinalEvidenceFit] =
     React.useState<StaticEvidenceFit | null>(null);
+  const [finalEvidenceViewMode, setFinalEvidenceViewMode] =
+    React.useState<StaticEvidenceViewMode>('readable');
   /**
    * BUG-11 — pure-JS sizing for the JPEG-fallback img.
    *
@@ -772,7 +776,10 @@ export function BrowserPanel({
     if (natW <= 0 || natH <= 0) return;
     const hostW = host.clientWidth;
     const hostH = host.clientHeight;
-    const fitFn = isSheet ? fitScreencastReadable : fitScreencastContain;
+    const fitFn =
+      isSheet && finalEvidenceViewMode === 'readable'
+        ? fitScreencastReadable
+        : fitScreencastContain;
     const fit = fitFn({
       hostWidth: hostW,
       hostHeight: hostH,
@@ -785,7 +792,9 @@ export function BrowserPanel({
       height: fit.height,
       hostWidth: hostW,
     });
-    const evidenceKey = finalEvidenceFrame?.imageBase64 ?? null;
+    const evidenceKey = finalEvidenceFrame?.imageBase64
+      ? `${finalEvidenceViewMode}:${finalEvidenceFrame.imageBase64}`
+      : null;
     if (
       isSheet &&
       evidenceKey &&
@@ -798,7 +807,12 @@ export function BrowserPanel({
       });
       host.scrollTo({ left: centeredLeft, top: 0 });
     }
-  }, [finalEvidenceFrame?.imageBase64, finalEvidenceFrame?.viewport, isSheet]);
+  }, [
+    finalEvidenceFrame?.imageBase64,
+    finalEvidenceFrame?.viewport,
+    finalEvidenceViewMode,
+    isSheet,
+  ]);
   React.useEffect(() => {
     const host = screencastHostRef.current;
     if (!host) return;
@@ -837,6 +851,7 @@ export function BrowserPanel({
   }, [activeTaskId, frame?.imageBase64]);
   React.useEffect(() => {
     setFinalEvidenceFit(null);
+    setFinalEvidenceViewMode('readable');
     finalEvidenceAutoScrolledKeyRef.current = null;
     finalEvidenceScrollRef.current?.scrollTo({ left: 0, top: 0 });
   }, [activeTaskId, finalEvidenceFrame?.imageBase64]);
@@ -872,6 +887,10 @@ export function BrowserPanel({
     isSheet &&
     finalEvidenceFit != null &&
     finalEvidenceFit.width > finalEvidenceFit.hostWidth + 8;
+  const finalEvidenceCanToggleFit =
+    isSheet &&
+    finalEvidenceFit != null &&
+    (finalEvidenceCanPan || finalEvidenceViewMode === 'contain');
   // Codex P2 follow-up — hidden input for direct CJK typing on the
   // JPEG screencast path (CDP mode). Browser-native IME composition
   // events fire on this focused-but-invisible element; on
@@ -1668,6 +1687,29 @@ export function BrowserPanel({
                       >
                         <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
                         {reExecuting ? '提交中…' : '重跑'}
+                      </button>
+                    )}
+                    {finalEvidenceCanToggleFit && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFinalEvidenceViewMode((mode) =>
+                            mode === 'readable' ? 'contain' : 'readable',
+                          )
+                        }
+                        aria-label={
+                          finalEvidenceViewMode === 'readable'
+                            ? '完整适应证据截图'
+                            : '清晰查看证据截图'
+                        }
+                        title={
+                          finalEvidenceViewMode === 'readable'
+                            ? '完整适应'
+                            : '清晰查看'
+                        }
+                        className="absolute left-2 top-2 inline-flex h-7 items-center rounded-md border border-white/25 bg-black/45 px-2 text-[11px] font-medium text-white shadow-sm backdrop-blur transition-colors hover:bg-black/60"
+                      >
+                        {finalEvidenceViewMode === 'readable' ? '全貌' : '清晰'}
                       </button>
                     )}
                     {finalEvidenceCanPan && (
