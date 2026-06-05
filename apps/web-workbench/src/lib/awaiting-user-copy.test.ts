@@ -7,6 +7,7 @@ describe('awaiting user copy', () => {
     expect(awaitingUserCopy(undefined)).toMatchObject({
       title: '需要你补充信息',
       toolbarLabel: '需要你回复',
+      panelBody: '请回到输入框补充信息，任务会继续，不用重新提交任务。',
       composerPlaceholder: '回答 HOLA DAY 的问题...',
     });
   });

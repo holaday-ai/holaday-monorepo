@@ -36,7 +36,7 @@ const COPY_BY_KIND: Record<AwaitingKind, AwaitingUserCopy> = {
     streamBody: '需要更多信息才能继续。',
     streamHint: '在下方输入框回答',
     panelTitle: '需要补充信息',
-    panelBody: '请回到输入框补充信息，任务会继续。',
+    panelBody: '请回到输入框补充信息，任务会继续，不用重新提交任务。',
     toolbarLabel: '需要你回复',
     composerPlaceholder: '回答 HOLA DAY 的问题...',
   },
