@@ -233,7 +233,7 @@ export function MainPanel({
               work product). Only rendered for browser-shaped tasks
               so generate / scrape don't pay a header height. */}
           {isBrowserLikely(task) && (
-            <div className="flex h-10 items-center justify-end gap-2 border-b border-[#DCDDDD]/70 bg-white/60 px-4 backdrop-blur dark:border-white/10 dark:bg-card/50">
+            <div className="flex h-10 items-center justify-start gap-2 border-b border-[#DCDDDD]/70 bg-white/60 px-3 backdrop-blur sm:justify-end sm:px-4 dark:border-white/10 dark:bg-card/50">
               <TaskToolbar
                 task={task}
                 sidePanelMode={sidePanelMode}
