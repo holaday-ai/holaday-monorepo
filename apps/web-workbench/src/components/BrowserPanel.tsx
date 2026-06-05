@@ -1202,9 +1202,15 @@ export function BrowserPanel({
             />
           )}
           {!fullscreen && showHeader && (shouldConnect || evidenceHeaderActive) && (
-            <header className={cn('flex h-11 items-center gap-2 border-b px-3 pt-2', BROWSER_DIVIDER)}>
+            <header
+              className={cn(
+                'flex items-center border-b',
+                isSheet ? 'h-10 gap-1.5 px-2 pt-3' : 'h-11 gap-2 px-3 pt-2',
+                BROWSER_DIVIDER,
+              )}
+            >
               <StatusDot status={displayedHeaderStatus.dotStatus} />
-              <BrowserConnectionChip state={displayedHeaderStatus} compact={isNarrow} />
+              <BrowserConnectionChip state={displayedHeaderStatus} compact={isNarrow || isSheet} />
               {/* BOSS bug fix — when the panel is narrow (< 500px),
                   hide back/forward to keep the URL bar legible. The
                   agent rarely needs them, and the user can take over
@@ -1296,16 +1302,24 @@ export function BrowserPanel({
           {browserAwaiting && (
             <div
               role="alert"
-              className="mx-3 mt-3 flex animate-fade-in items-start gap-3 rounded-lg border border-[#FFC910]/60 bg-white px-4 py-3 text-[#595757] shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#FFC910]/35 dark:bg-card/85 dark:text-foreground"
+              className={cn(
+                'flex animate-fade-in items-start rounded-lg border border-[#FFC910]/60 bg-white text-[#595757] shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#FFC910]/35 dark:bg-card/85 dark:text-foreground',
+                isSheet ? 'mx-2 mt-2 gap-2 px-3 py-2' : 'mx-3 mt-3 gap-3 px-4 py-3',
+              )}
             >
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#FFC910]/20 text-base font-bold text-[#57479C]">
+              <span
+                className={cn(
+                  'flex shrink-0 items-center justify-center rounded-full bg-[#FFC910]/20 font-bold text-[#57479C]',
+                  isSheet ? 'h-7 w-7 text-sm' : 'h-8 w-8 text-base',
+                )}
+              >
                 !
               </span>
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold">
+                <div className={cn('font-semibold', isSheet ? 'text-[13px]' : 'text-sm')}>
                   {awaitingUserCopy(awaitingKind).panelTitle}
                 </div>
-                <div className="mt-0.5 text-xs text-muted-foreground">
+                <div className={cn('mt-0.5 text-muted-foreground', isSheet ? 'text-[11px] leading-snug' : 'text-xs')}>
                   {awaitingUserCopy(awaitingKind).panelBody}
                 </div>
                 {/* Phase 1 follow-up — login park resume affordance.
@@ -1349,7 +1363,7 @@ export function BrowserPanel({
             className={cn(
               'flex min-h-0 min-w-0 flex-1 items-start',
               isSheet ? 'justify-start overflow-auto' : 'justify-center overflow-hidden',
-              fullscreen ? 'p-0' : isSheet ? 'p-2' : 'p-3',
+              fullscreen ? 'p-0' : isSheet ? 'p-1' : 'p-3',
               interactiveActive
                 ? 'bg-[#EA1F59]/5'
                 : 'bg-[#EFEFEF]/50 dark:bg-white/[0.03]',
@@ -1654,7 +1668,7 @@ export function BrowserPanel({
             <footer
               className={cn(
                 'flex items-center justify-between border-t text-muted-foreground',
-                isSheet ? 'h-6 px-2 text-[10px]' : 'h-7 px-3 text-[11px]',
+                isSheet ? 'h-5 px-2 text-[10px]' : 'h-7 px-3 text-[11px]',
                 BROWSER_DIVIDER,
               )}
             >
