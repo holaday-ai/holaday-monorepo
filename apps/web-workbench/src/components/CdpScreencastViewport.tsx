@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { hdDebug } from '@/lib/hd-debug';
 import {
+  centeredScreencastScrollLeft,
   mapClientPointToScreencast,
   placeScreencastContainTop,
   placeScreencastReadableTop,
@@ -108,6 +109,7 @@ export function CdpScreencastViewport({
   const imgRef = React.useRef<HTMLImageElement | null>(null);
   const frameSeqRef = React.useRef(0);
   const mountedRef = React.useRef(false);
+  const readableAutoScrollKeyRef = React.useRef<string | null>(null);
   React.useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -126,6 +128,7 @@ export function CdpScreencastViewport({
     viewOnlyRef.current = viewOnly;
   }, [viewOnly]);
   React.useEffect(() => {
+    readableAutoScrollKeyRef.current = null;
     hostRef.current?.scrollTo({ left: 0, top: 0 });
   }, [fitMode, wsUrl]);
 
@@ -177,6 +180,19 @@ export function CdpScreencastViewport({
       canvas.style.setProperty('--hd-offset-y', `${placement.offsetY}px`);
       host.style.setProperty('--hd-content-width', `${placement.width}px`);
       host.style.setProperty('--hd-content-height', `${placement.height}px`);
+      const autoScrollKey = `${wsUrl ?? 'none'}:${srcW}x${srcH}`;
+      if (
+        fitMode === 'readable' &&
+        viewOnlyRef.current &&
+        readableAutoScrollKeyRef.current !== autoScrollKey
+      ) {
+        readableAutoScrollKeyRef.current = autoScrollKey;
+        const centeredLeft = centeredScreencastScrollLeft({
+          contentWidth: placement.width,
+          hostWidth: rect.width,
+        });
+        host.scrollTo({ left: centeredLeft, top: 0 });
+      }
     };
     recompute();
     let ro: ResizeObserver | null = null;
@@ -195,7 +211,7 @@ export function CdpScreencastViewport({
       window.removeEventListener('resize', onWindowResize);
       sourceDimsRecomputeRef.current = null;
     };
-  }, [fitMode, status]);
+  }, [fitMode, status, wsUrl]);
 
   // ---- WS lifecycle: always-be-trying-to-connect ----
   // Browser hibernation is a normal state — the per-user pool's idle

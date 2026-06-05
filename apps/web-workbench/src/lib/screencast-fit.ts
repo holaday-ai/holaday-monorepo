@@ -32,6 +32,20 @@ export interface ScreencastPoint {
   y: number;
 }
 
+export function centeredScreencastScrollLeft(input: {
+  contentWidth: number;
+  hostWidth: number;
+}): number {
+  if (
+    !isPositiveFinite(input.contentWidth) ||
+    !isPositiveFinite(input.hostWidth) ||
+    input.contentWidth <= input.hostWidth
+  ) {
+    return 0;
+  }
+  return Math.round((input.contentWidth - input.hostWidth) / 2);
+}
+
 export function fitScreencastContain({
   hostWidth,
   hostHeight,

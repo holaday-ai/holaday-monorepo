@@ -44,7 +44,11 @@ import {
   browserNavFailureMessage,
 } from '@/lib/browser-nav-copy';
 import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
-import { fitScreencastContain, fitScreencastReadable } from '@/lib/screencast-fit';
+import {
+  centeredScreencastScrollLeft,
+  fitScreencastContain,
+  fitScreencastReadable,
+} from '@/lib/screencast-fit';
 import {
   externalLinkConfirmDescription,
   safeExternalHttpHref,
@@ -773,7 +777,10 @@ export function BrowserPanel({
       finalEvidenceAutoScrolledKeyRef.current !== evidenceKey
     ) {
       finalEvidenceAutoScrolledKeyRef.current = evidenceKey;
-      const centeredLeft = Math.max(0, Math.round((fit.width - hostW) / 2));
+      const centeredLeft = centeredScreencastScrollLeft({
+        contentWidth: fit.width,
+        hostWidth: hostW,
+      });
       host.scrollTo({ left: centeredLeft, top: 0 });
     }
   }, [finalEvidenceFrame?.imageBase64, finalEvidenceFrame?.viewport, isSheet]);
