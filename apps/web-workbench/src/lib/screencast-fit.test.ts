@@ -72,7 +72,7 @@ describe('fitScreencastReadable', () => {
         sourceWidth: 1280,
         sourceHeight: 800,
       }),
-    ).toEqual({ width: 1049, height: 656, scale: 0.82 });
+    ).toEqual({ width: 1177, height: 736, scale: 0.92 });
   });
 
   it('keeps normal portrait browser frames on contain sizing', () => {
@@ -133,9 +133,9 @@ describe('placeScreencastReadableTop', () => {
         sourceHeight: 800,
       }),
     ).toEqual({
-      width: 1049,
-      height: 656,
-      scale: 0.82,
+      width: 1177,
+      height: 736,
+      scale: 0.92,
       offsetX: 0,
       offsetY: 0,
     });

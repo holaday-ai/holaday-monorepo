@@ -99,7 +99,7 @@ export function fitScreencastReadable({
   }
 
   const heightScale = hostHeight / sourceHeight;
-  const readableScale = Math.min(1, Math.max(fit.scale, Math.min(0.82, heightScale)));
+  const readableScale = Math.min(1, Math.max(fit.scale, Math.min(0.92, heightScale)));
   return {
     width: Math.max(1, Math.floor(sourceWidth * readableScale)),
     height: Math.max(1, Math.floor(sourceHeight * readableScale)),
