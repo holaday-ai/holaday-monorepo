@@ -1213,8 +1213,10 @@ export function BrowserPanel({
           onClick={onClose}
           aria-label="关闭浏览器抽屉"
           title="关闭浏览器抽屉"
-          className="absolute left-1/2 top-2 h-1.5 w-10 -translate-x-1/2 rounded-full bg-muted-foreground/30"
-        />
+          className="absolute left-1/2 top-0 z-[90] flex h-8 w-20 -translate-x-1/2 items-start justify-center pt-2"
+        >
+          <span className="h-1.5 w-10 rounded-full bg-muted-foreground/30" aria-hidden />
+        </button>
       )}
 
       {!isSheet && collapsed ? (
