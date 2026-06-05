@@ -744,8 +744,11 @@ export function BrowserPanel({
     const host = finalEvidenceScrollRef.current;
     const img = finalEvidenceImgRef.current;
     if (!host || !img) return;
-    const natW = img.naturalWidth;
-    const natH = img.naturalHeight;
+    const savedViewport = finalEvidenceFrame?.viewport;
+    const natW =
+      img.naturalWidth > 0 ? img.naturalWidth : (savedViewport?.width ?? 0);
+    const natH =
+      img.naturalHeight > 0 ? img.naturalHeight : (savedViewport?.height ?? 0);
     if (natW <= 0 || natH <= 0) return;
     const hostW = host.clientWidth;
     const hostH = host.clientHeight;
@@ -762,7 +765,7 @@ export function BrowserPanel({
       height: fit.height,
       hostWidth: hostW,
     });
-  }, [isSheet]);
+  }, [finalEvidenceFrame?.viewport, isSheet]);
   React.useEffect(() => {
     const host = screencastHostRef.current;
     if (!host) return;
@@ -800,7 +803,11 @@ export function BrowserPanel({
     finalEvidenceScrollRef.current?.scrollTo({ left: 0, top: 0 });
   }, [activeTaskId, finalEvidenceFrame?.imageBase64]);
   const finalEvidenceBoxStyle = React.useMemo<React.CSSProperties>(() => {
-    if (!finalEvidenceFit) return {};
+    if (!finalEvidenceFit) {
+      return {
+        width: '100%',
+      };
+    }
     const centered =
       isSheet && finalEvidenceFit.width < finalEvidenceFit.hostWidth;
     return {
@@ -810,7 +817,14 @@ export function BrowserPanel({
     };
   }, [finalEvidenceFit, isSheet]);
   const finalEvidenceImageStyle = React.useMemo<React.CSSProperties>(() => {
-    if (!finalEvidenceFit) return {};
+    if (!finalEvidenceFit) {
+      return {
+        height: 'auto',
+        maxHeight: '100%',
+        maxWidth: '100%',
+        width: '100%',
+      };
+    }
     return {
       width: `${finalEvidenceFit.width}px`,
       height: `${finalEvidenceFit.height}px`,
