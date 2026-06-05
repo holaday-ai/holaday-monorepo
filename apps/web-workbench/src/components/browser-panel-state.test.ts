@@ -114,7 +114,7 @@ describe('BrowserPanel state helpers', () => {
 
   it('labels terminal evidence headers without implying a live browser', () => {
     expect(browserPanelEvidenceHeaderStatus('completed')).toEqual({
-      label: '证据',
+      label: '浏览器',
       tooltip: '任务已完成，显示任务结束时的浏览器页面',
       tone: 'idle',
       dotStatus: 'idle',

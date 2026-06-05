@@ -154,7 +154,7 @@ export function browserPanelHeaderStatus(inputs: {
 export function browserPanelEvidenceHeaderStatus(
   status: UiTaskStatus | null | undefined,
 ): BrowserPanelHeaderStatus {
-  const label = '证据';
+  const label = '浏览器';
   const statusLabel = terminalEvidenceStatusLabel(status);
   return {
     label,
