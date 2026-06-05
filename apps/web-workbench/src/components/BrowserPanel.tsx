@@ -1397,9 +1397,23 @@ export function BrowserPanel({
             ) : useVnc ? (
               <div
                 className={cn(
-                  'relative h-full w-full min-h-0 min-w-0',
+                  'relative h-full min-h-0 min-w-0',
+                  isSheet ? 'shrink-0' : 'w-full',
                   isSheet ? 'overflow-auto' : 'overflow-hidden',
                 )}
+                style={
+                  isSheet
+                    ? {
+                        // noVNC handles its own internal canvas scale.
+                        // In a portrait sheet, giving it only the
+                        // phone-width container forces desktop pages
+                        // into a tiny full-page thumbnail. Mirror the
+                        // CDP/JPEG readable mode by letting the VNC
+                        // surface own a wider virtual canvas and scroll.
+                        width: 'min(900px, max(100%, 166dvw))',
+                      }
+                    : undefined
+                }
               >
                 {usingCdp ? (
                   <CdpScreencastViewport
