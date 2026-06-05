@@ -833,6 +833,12 @@ export function BrowserPanel({
     const host = finalEvidenceScrollRef.current;
     if (!host || !finalEvidenceFrame) return;
     fitFinalEvidenceImg();
+    const raf =
+      typeof window !== 'undefined'
+        ? window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(fitFinalEvidenceImg);
+          })
+        : null;
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver !== 'undefined') {
       ro = new ResizeObserver(() => fitFinalEvidenceImg());
@@ -841,10 +847,11 @@ export function BrowserPanel({
     const onWin = () => fitFinalEvidenceImg();
     window.addEventListener('resize', onWin);
     return () => {
+      if (raf != null) window.cancelAnimationFrame(raf);
       ro?.disconnect();
       window.removeEventListener('resize', onWin);
     };
-  }, [fitFinalEvidenceImg, finalEvidenceFrame]);
+  }, [fitFinalEvidenceImg, finalEvidenceFrame, open]);
   React.useEffect(() => {
     screencastAutoScrolledKeyRef.current = null;
     screencastHostRef.current?.scrollTo({ left: 0, top: 0 });
