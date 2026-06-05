@@ -325,26 +325,39 @@ export function BrowserPanel({
   // showing. Brave is a shared singleton, so whatever URL another
   // task left it on is also what's on screen right now.
   const screencastByTask = useTaskStore((s) => s.screencastByTask);
-  // R7 — terminal-state evidence frame, synthesised from the
-  // captured-pre-release screenshot persisted on the task row.
-  // Lets the panel render the final-state image after refresh
-  // instead of leaving an empty about:blank when the live Brave is
-  // gone. Memoised so the synthetic UiScreencast keeps a stable
-  // identity across renders (preventing the inner viewport's
-  // useEffect from refiring).
+  // R7 — terminal-state browser frame, synthesised from the
+  // captured-pre-release screenshot persisted on the task row. If
+  // the row has no finalScreenshot yet but still owns a last live
+  // frame, reuse that frame as a static final view. Memoised so the
+  // synthetic UiScreencast keeps a stable identity across renders
+  // (preventing the inner viewport's useEffect from refiring).
   const activeTask = useTaskStore((s) =>
     activeTaskId ? s.tasks.find((t) => t.taskId === activeTaskId) ?? null : null,
   );
+  const taskTerminalForEvidence = taskStatus ? isTerminalStatus(taskStatus) : false;
   const finalEvidenceFrame = React.useMemo<UiScreencast | null>(() => {
-    if (!activeTask?.finalScreenshot) return null;
+    if (activeTask?.finalScreenshot) {
+      return {
+        tickIndex: -1,
+        imageBase64: activeTask.finalScreenshot,
+        url: activeTask.finalUrl ?? 'about:blank',
+        viewport: activeTask.finalViewport ?? { width: 0, height: 0 },
+        timestamp: new Date().toISOString(),
+      };
+    }
+    if (!taskTerminalForEvidence || !frame || isBlankUrl(frame.url)) return null;
     return {
-      tickIndex: -1,
-      imageBase64: activeTask.finalScreenshot,
-      url: activeTask.finalUrl ?? 'about:blank',
-      viewport: activeTask.finalViewport ?? { width: 0, height: 0 },
-      timestamp: new Date().toISOString(),
+      ...frame,
+      url: activeTask?.finalUrl ?? frame.url,
+      viewport: activeTask?.finalViewport ?? frame.viewport,
     };
-  }, [activeTask?.finalScreenshot, activeTask?.finalUrl, activeTask?.finalViewport]);
+  }, [
+    activeTask?.finalScreenshot,
+    activeTask?.finalUrl,
+    activeTask?.finalViewport,
+    frame,
+    taskTerminalForEvidence,
+  ]);
   const latestFrame = React.useMemo<UiScreencast | null>(() => {
     const all = Object.values(screencastByTask);
     if (all.length === 0) return null;
@@ -355,18 +368,18 @@ export function BrowserPanel({
     null as UiScreencast | null) ?? null;
   }, [screencastByTask]);
   // P1.1 — terminal task fall-through policy:
-  //   1. If the task is terminal AND has captured evidence
+  //   1. If the task is terminal AND has a terminal browser frame
   //      (finalEvidenceFrame), use ONLY that. Don't bleed
   //      another task's latestFrame into the panel.
-  //   2. If the task is terminal WITHOUT evidence (legacy task,
-  //      or capture failed), don't fall through to another task's
-  //      latestFrame either — render the empty terminal state.
+  //   2. If the task is terminal WITHOUT a browser frame (legacy
+  //      task, or capture failed), don't fall through to another
+  //      task's latestFrame either — render the empty terminal state.
   //   3. For active tasks, prefer live `frame`, then any latest
   //      frame as a hint, then evidence (rare; would mean a task
   //      ended but isn't marked terminal here yet).
   // The previous "frame ?? finalEvidenceFrame ?? latestFrame" mixed
   // task A's frame into task B's panel after a task switch.
-  const taskIsTerminal = taskStatus ? isTerminalStatus(taskStatus) : false;
+  const taskIsTerminal = taskTerminalForEvidence;
   const displayFrame = taskIsTerminal
     ? finalEvidenceFrame
     : (frame ?? latestFrame ?? finalEvidenceFrame);
@@ -1551,7 +1564,7 @@ export function BrowserPanel({
                   <CjkInputBar onSend={sendInsertText} fullscreen={fullscreen} />
                 )}
               </div>
-            ) : frame ? (
+            ) : !taskIsTerminal && frame ? (
               isBlankUrl(frame.url) ? (
                 <div className="text-center text-xs text-muted-foreground/80">
                   等待浏览器加载页面...
