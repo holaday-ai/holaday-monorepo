@@ -868,6 +868,10 @@ export function BrowserPanel({
       height: `${finalEvidenceFit.height}px`,
     };
   }, [finalEvidenceFit]);
+  const finalEvidenceCanPan =
+    isSheet &&
+    finalEvidenceFit != null &&
+    finalEvidenceFit.width > finalEvidenceFit.hostWidth + 8;
   // Codex P2 follow-up — hidden input for direct CJK typing on the
   // JPEG screencast path (CDP mode). Browser-native IME composition
   // events fire on this focused-but-invisible element; on
@@ -1665,6 +1669,11 @@ export function BrowserPanel({
                         <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
                         {reExecuting ? '提交中…' : '重跑'}
                       </button>
+                    )}
+                    {finalEvidenceCanPan && (
+                      <div className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 rounded-full bg-black/45 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm backdrop-blur">
+                        左右拖动查看
+                      </div>
                     )}
                   </div>
                 </div>
