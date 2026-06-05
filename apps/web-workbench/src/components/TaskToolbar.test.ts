@@ -69,9 +69,9 @@ describe('TaskToolbar helpers', () => {
     ).toBe('需要操作浏览器');
   });
 
-  it('uses compact mobile labels that expose the evidence entry', () => {
+  it('uses compact mobile labels that expose the browser entry', () => {
     expect(browserToolbarShortLabel(task({ status: 'completed' }), 'closed')).toBe(
-      '证据',
+      '浏览器',
     );
     expect(browserToolbarShortLabel(task({ status: 'executing' }), 'closed')).toBe(
       '浏览器',

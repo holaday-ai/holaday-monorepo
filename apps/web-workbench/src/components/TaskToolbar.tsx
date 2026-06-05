@@ -53,7 +53,7 @@ export function browserToolbarShortLabel(
 ): string {
   if (attentionNeeded) return awaitingUserCopy(task.awaitingKind).toolbarLabel;
   if (sidePanelMode !== 'closed') return '关闭';
-  return isTerminalStatus(task.status) ? '证据' : '浏览器';
+  return '浏览器';
 }
 
 interface Props {
