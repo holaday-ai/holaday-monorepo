@@ -1714,8 +1714,8 @@ export function BrowserPanel({
                         }
                         aria-label={
                           finalEvidenceViewMode === 'readable'
-                            ? '完整适应证据截图'
-                            : '清晰查看证据截图'
+                            ? '完整适应浏览器截图'
+                            : '清晰查看浏览器截图'
                         }
                         title={
                           finalEvidenceViewMode === 'readable'
@@ -2177,7 +2177,7 @@ function EmptyBrowserState({
       <div className={cn('flex flex-col items-center px-6 py-4 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-lg')}>
         <Globe className="h-10 w-10 text-[#42C0EF]/70" aria-hidden />
         <div className="mt-3 text-sm font-medium text-foreground/80">
-          这条历史任务没有保存浏览器证据
+          这条历史任务没有保存浏览器画面
         </div>
         <div className="mt-1 text-xs leading-relaxed">
           可能是上线前的旧任务。可以重新执行同样的意图来生成截图。

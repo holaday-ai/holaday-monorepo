@@ -32,9 +32,9 @@ describe('TaskToolbar helpers', () => {
     ).toBe(false);
   });
 
-  it('labels terminal browser tasks as evidence when the panel is closed', () => {
-    expect(browserToolbarLabel(task({ status: 'completed' }), 'closed')).toBe('查看浏览器证据');
-    expect(browserToolbarLabel(task({ status: 'failed' }), 'closed')).toBe('查看浏览器证据');
+  it('labels terminal browser tasks as browser entries when the panel is closed', () => {
+    expect(browserToolbarLabel(task({ status: 'completed' }), 'closed')).toBe('查看浏览器');
+    expect(browserToolbarLabel(task({ status: 'failed' }), 'closed')).toBe('查看浏览器');
     expect(browserToolbarLabel(task({ status: 'executing' }), 'closed')).toBe('查看浏览器');
   });
 

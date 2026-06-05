@@ -1,7 +1,6 @@
 import { Globe } from 'lucide-react';
 import type { SidePanelMode } from '@/types/side-panel';
 import type { UiTask } from '@/types/task';
-import { isTerminalStatus } from '@/types/task';
 import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
 import { cn } from '@/lib/utils';
 
@@ -43,7 +42,7 @@ export function browserToolbarLabel(
   if (attentionNeeded) return awaitingUserCopy(task.awaitingKind).toolbarLabel;
   if (sidePanelMode === 'browser-live') return '浏览器进行中';
   if (sidePanelMode !== 'closed') return '关闭浏览器面板';
-  return isTerminalStatus(task.status) ? '查看浏览器证据' : '查看浏览器';
+  return '查看浏览器';
 }
 
 export function browserToolbarShortLabel(

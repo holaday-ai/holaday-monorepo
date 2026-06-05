@@ -2025,7 +2025,7 @@ function TerminalSummary({
           复制 — because it's the action 90% of users take first.
           复制 Markdown / 下载 .md / 分享任务 / 设为定时 fold into a
           单一 Radix More menu so the row isn't a wall of text
-          buttons. 查看证据 lives in the top-right of the card;
+          buttons. 浏览器 lives in the top-right of the card;
           打开最终页面 keeps its own URL row below. */}
       <div
         className={cn(
