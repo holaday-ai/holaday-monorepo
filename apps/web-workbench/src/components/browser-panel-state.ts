@@ -48,6 +48,26 @@ export function terminalEvidenceStatusLabel(
   }
 }
 
+export function isBrowserErrorUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  const normalized = url.trim().toLowerCase();
+  return (
+    normalized.startsWith('chrome-error://') ||
+    normalized.startsWith('edge-error://') ||
+    normalized.startsWith('about:neterror')
+  );
+}
+
+export function terminalEvidenceFrameLabel(inputs: {
+  status: UiTaskStatus | null | undefined;
+  url?: string | null;
+}): string {
+  const statusLabel = terminalEvidenceStatusLabel(inputs.status);
+  return isBrowserErrorUrl(inputs.url)
+    ? '页面无法打开 · 最终浏览器'
+    : `${statusLabel} · 最终页面`;
+}
+
 export function browserLiveStatusLabel(status: BrowserLiveStatus): string {
   switch (status) {
     case 'connected':
@@ -153,14 +173,18 @@ export function browserPanelHeaderStatus(inputs: {
 
 export function browserPanelEvidenceHeaderStatus(
   status: UiTaskStatus | null | undefined,
+  finalUrl?: string | null,
 ): BrowserPanelHeaderStatus {
   const label = '浏览器';
   const statusLabel = terminalEvidenceStatusLabel(status);
+  const errorPage = isBrowserErrorUrl(finalUrl);
   return {
     label,
-    tooltip: `${statusLabel}，显示任务结束时的浏览器页面`,
-    tone: 'idle',
-    dotStatus: 'idle',
+    tooltip: errorPage
+      ? `${statusLabel}，任务结束在浏览器错误页`
+      : `${statusLabel}，显示任务结束时的浏览器页面`,
+    tone: errorPage ? 'attention' : 'idle',
+    dotStatus: errorPage ? 'error' : 'idle',
     showLabel: true,
   };
 }

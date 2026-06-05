@@ -36,6 +36,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
 import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
+import { isBrowserErrorUrl } from '@/components/browser-panel-state';
 import { copyTextToClipboard } from '@/lib/copy-text';
 import {
   downloadFailureMessage,
@@ -698,7 +699,7 @@ function AwaitingUserBanner({
           </p>
           {showAgentQuestion && (
             <p className="mt-2 text-[11px] text-muted-foreground">
-              在下方输入框回答，任务会继续。
+              在下方输入框回答，任务会继续，不用重新提交。
             </p>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
@@ -744,7 +745,12 @@ const AWAITING_KIND_ICON: Record<
  * "在新标签页打开 <url>" affordance takes over from there.
  */
 function CurrentUrlChip({ url }: { url: string }): JSX.Element | null {
-  if (!url || url === 'about:blank' || url.startsWith('chrome://')) return null;
+  if (
+    !url ||
+    url === 'about:blank' ||
+    url.startsWith('chrome://') ||
+    isBrowserErrorUrl(url)
+  ) return null;
   let host = '';
   try {
     host = new URL(url).hostname;
@@ -1302,6 +1308,22 @@ function ExpertReportHeader({ workflowId }: { workflowId: string }): JSX.Element
   );
 }
 
+function BrowserErrorFinalUrlBanner(): JSX.Element {
+  return (
+    <div className="mb-3 rounded-md border border-[#EA1F59]/30 bg-[#EA1F59]/5 px-3 py-2 text-sm text-[#595757] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10 dark:text-foreground">
+      <div className="flex items-start gap-2">
+        <Globe className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" aria-hidden />
+        <div className="min-w-0">
+          <div className="font-medium">网页没有成功打开</div>
+          <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+            浏览器停在错误页。这次结果可作为失败原因诊断；要继续执行，请检查网址或换一个能直接访问的页面后重新执行。
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Phase 4 R1 — HOLA_FOLLOW_UP_ACTIONS extractor. The orchestrator
  * inserts an HTML-comment-delimited marker around a JSON array of
@@ -1809,6 +1831,7 @@ function TerminalSummary({
   };
   const safeCurrentUrl = safeExternalHttpHref(currentUrl);
   const hasRealUrl = safeCurrentUrl !== null;
+  const endedOnBrowserErrorPage = isBrowserErrorUrl(currentUrl);
   const fallbackPlainText = React.useMemo(
     () =>
       terminalArtifactFallbackText({
@@ -1876,6 +1899,9 @@ function TerminalSummary({
           status={status}
           errorText={status === 'failed' ? displayText ?? '' : ''}
         />
+      )}
+      {!isFailedLike && endedOnBrowserErrorPage && (
+        <BrowserErrorFinalUrlBanner />
       )}
       {/* Phase 4 R1 B.6 — expert-report header (only on success
           panels; failed/cancelled never carry a workflow id). */}

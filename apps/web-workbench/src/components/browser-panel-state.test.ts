@@ -6,10 +6,12 @@ import {
   browserReleasedCardCopy,
   browserViewportFrameLabel,
   browserWakeFeedback,
+  isBrowserErrorUrl,
   browserPanelDotLabel,
   browserLiveStatusLabel,
   shouldShowBrowserHeader,
   terminalBrowserTakeoverMessage,
+  terminalEvidenceFrameLabel,
   terminalEvidenceStatusLabel,
 } from './browser-panel-state';
 
@@ -118,6 +120,31 @@ describe('BrowserPanel state helpers', () => {
       tooltip: '任务已完成，显示任务结束时的浏览器页面',
       tone: 'idle',
       dotStatus: 'idle',
+      showLabel: true,
+    });
+  });
+
+  it('marks browser error pages as unsuccessful final browser evidence', () => {
+    expect(isBrowserErrorUrl('chrome-error://chromewebdata/')).toBe(true);
+    expect(isBrowserErrorUrl('edge-error://edgewebdata/')).toBe(true);
+    expect(isBrowserErrorUrl('about:neterror?e=dnsNotFound')).toBe(true);
+    expect(isBrowserErrorUrl('https://example.com/')).toBe(false);
+    expect(
+      terminalEvidenceFrameLabel({
+        status: 'completed',
+        url: 'chrome-error://chromewebdata/',
+      }),
+    ).toBe('页面无法打开 · 最终浏览器');
+    expect(
+      browserPanelEvidenceHeaderStatus(
+        'completed',
+        'chrome-error://chromewebdata/',
+      ),
+    ).toEqual({
+      label: '浏览器',
+      tooltip: '任务已完成，任务结束在浏览器错误页',
+      tone: 'attention',
+      dotStatus: 'error',
       showLabel: true,
     });
   });

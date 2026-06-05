@@ -29,8 +29,10 @@ import {
   browserReleasedCardCopy,
   browserViewportFrameLabel,
   browserWakeFeedback,
+  isBrowserErrorUrl,
   shouldShowBrowserHeader,
   terminalBrowserTakeoverMessage,
+  terminalEvidenceFrameLabel,
   terminalEvidenceStatusLabel,
 } from '@/components/browser-panel-state';
 import {
@@ -433,7 +435,6 @@ export function BrowserPanel({
     setLastKnownUrl(url); // also feed the grace cache
   }, []);
   const terminalStatus = taskStatus ? isTerminalStatus(taskStatus) : false;
-  const terminalEvidenceLabel = terminalEvidenceStatusLabel(taskStatus);
   const displayUrl = terminalStatus
     ? (persistedFinalUrl ?? cdpLiveUrl ?? frameUrl ?? lastKnownUrl ?? 'about:blank')
     : (cdpLiveUrl ?? frameUrl ?? persistedFinalUrl ?? lastKnownUrl ?? 'about:blank');
@@ -953,7 +954,7 @@ export function BrowserPanel({
   const evidenceHeaderActive =
     taskIsTerminal && Boolean(finalEvidenceFrame);
   const displayedHeaderStatus = evidenceHeaderActive
-    ? browserPanelEvidenceHeaderStatus(taskStatus)
+    ? browserPanelEvidenceHeaderStatus(taskStatus, finalEvidenceFrame?.url)
     : headerStatus;
 
   // BOSS-feedback follow-up — the blue "你正在直接操作浏览器" banner
@@ -1701,7 +1702,12 @@ export function BrowserPanel({
                       className="block rounded-md border border-black/[0.06] shadow-[0_1px_3px_rgba(17,24,39,0.06)]"
                     />
                     <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2 rounded bg-black/55 px-2 py-1 text-[11px] text-white backdrop-blur">
-                      <span className="truncate">{terminalEvidenceLabel} · 最终页面</span>
+                      <span className="truncate">
+                        {terminalEvidenceFrameLabel({
+                          status: taskStatus,
+                          url: finalEvidenceFrame.url,
+                        })}
+                      </span>
                       {finalEvidenceFrame.url && finalEvidenceFrame.url !== 'about:blank' && (
                         <span className="truncate font-mono opacity-80">{finalEvidenceFrame.url}</span>
                       )}
@@ -2161,11 +2167,38 @@ function EmptyBrowserState({
   if (terminal && isBrowserTask) {
     const statusLabel = terminalEvidenceStatusLabel(taskStatus);
     const safeFinalUrl = safeExternalHttpHref(finalUrl);
+    const errorFinalUrl = isBrowserErrorUrl(finalUrl);
     // Three branches: finalScreenshot is handled before reaching us
     // (the parent renders `finalEvidenceFrame` directly). Here we
     // only see "no screenshot" cases — either finalUrl exists (give
     // the user a link to verify) or nothing was saved at all (offer
     // to re-execute the intent).
+    if (errorFinalUrl) {
+      return (
+        <div className={cn('flex flex-col items-center px-6 py-4 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-lg')}>
+          <Globe className="h-10 w-10 text-[#EA1F59]/70" aria-hidden />
+          <div className="mt-3 text-sm font-medium text-foreground/80">
+            {statusLabel}，页面无法打开
+          </div>
+          <div className="mt-1 text-xs leading-relaxed">
+            任务结束在浏览器错误页。请检查网址是否正确，或换一个能直接访问的页面后重新执行。
+          </div>
+          {onReExecute && (
+            <button
+              type="button"
+              onClick={onReExecute}
+              disabled={reExecuting}
+              aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
+              title={reExecuting ? '正在重新执行' : '重新执行'}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 py-1 text-[12px] text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+            >
+              <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
+              {reExecuting ? '提交中…' : '重新执行'}
+            </button>
+          )}
+        </div>
+      );
+    }
     if (safeFinalUrl) {
       return (
         <div className={cn('flex flex-col items-center px-6 py-4 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-lg')}>
