@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { UiTask } from '@/types/task';
-import { browserToolbarLabel, isBrowserLikely } from './TaskToolbar';
+import {
+  browserToolbarLabel,
+  browserToolbarShortLabel,
+  isBrowserLikely,
+} from './TaskToolbar';
 
 function task(overrides: Partial<UiTask> = {}): UiTask {
   return {
@@ -63,5 +67,24 @@ describe('TaskToolbar helpers', () => {
         true,
       ),
     ).toBe('需要操作浏览器');
+  });
+
+  it('uses compact mobile labels that expose the evidence entry', () => {
+    expect(browserToolbarShortLabel(task({ status: 'completed' }), 'closed')).toBe(
+      '证据',
+    );
+    expect(browserToolbarShortLabel(task({ status: 'executing' }), 'closed')).toBe(
+      '浏览器',
+    );
+    expect(browserToolbarShortLabel(task({ status: 'completed' }), 'browser-record')).toBe(
+      '关闭',
+    );
+    expect(
+      browserToolbarShortLabel(
+        task({ status: 'awaiting_user', awaitingKind: 'login' }),
+        'browser-live',
+        true,
+      ),
+    ).toBe('需要登录');
   });
 });

@@ -46,6 +46,16 @@ export function browserToolbarLabel(
   return isTerminalStatus(task.status) ? '查看浏览器证据' : '查看浏览器';
 }
 
+export function browserToolbarShortLabel(
+  task: UiTask,
+  sidePanelMode: SidePanelMode,
+  attentionNeeded = false,
+): string {
+  if (attentionNeeded) return awaitingUserCopy(task.awaitingKind).toolbarLabel;
+  if (sidePanelMode !== 'closed') return '关闭';
+  return isTerminalStatus(task.status) ? '证据' : '浏览器';
+}
+
 interface Props {
   task: UiTask | null;
   sidePanelMode: SidePanelMode;
@@ -64,6 +74,7 @@ export function TaskToolbar({
   const live = sidePanelMode === 'browser-live';
   const open = sidePanelMode !== 'closed';
   const label = browserToolbarLabel(task, sidePanelMode, attentionNeeded);
+  const shortLabel = browserToolbarShortLabel(task, sidePanelMode, attentionNeeded);
   return (
     <div className="flex items-center gap-1.5">
       <button
@@ -73,7 +84,7 @@ export function TaskToolbar({
         aria-pressed={open}
         title={label}
         className={cn(
-          'relative inline-flex h-7 w-7 items-center justify-center rounded-md border text-[11px] font-medium transition-colors',
+          'relative inline-flex h-7 w-auto items-center justify-center gap-1 rounded-md border px-2 text-[11px] font-medium transition-colors sm:w-7 sm:px-0',
           attentionNeeded
             ? 'border-[#EA1F59]/40 bg-[#EA1F59]/10 text-[#EA1F59] shadow-[0_1px_3px_rgba(234,31,89,0.10)] hover:bg-[#EA1F59]/15'
             : live
@@ -84,10 +95,11 @@ export function TaskToolbar({
         )}
       >
         <Globe className="h-3.5 w-3.5" />
+        <span className="sm:hidden">{shortLabel}</span>
         {attentionNeeded && (
           <span
             aria-hidden
-            className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[#EA1F59]"
+            className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[#EA1F59] sm:right-1 sm:top-1"
           />
         )}
       </button>
