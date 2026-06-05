@@ -32,6 +32,7 @@ import {
   shouldClearComposerAfterSubmit,
 } from '@/components/composer-submit';
 import { pageErrorMessage } from '@/lib/page-error-copy';
+import { awaitingUserCopy, type AwaitingKind } from '@/lib/awaiting-user-copy';
 import { quotaExhaustedCopy } from '@/lib/quota-exhausted-copy';
 import { isUploadError, uploadFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
@@ -52,6 +53,7 @@ interface Props {
    * to tasks.reply when the current task is awaiting a user reply.
    */
   replyMode?: boolean;
+  replyKind?: AwaitingKind;
   /**
    * Phase 14 audit follow-up — when a terminal task is selected,
    * the next message defaults to a 追问 of that task (server skips
@@ -163,6 +165,7 @@ export function InputArea({
   busy,
   inputRef,
   replyMode,
+  replyKind,
   followUpTarget,
   quotaExhausted,
   quotaPlan,
@@ -580,7 +583,7 @@ export function InputArea({
           onKeyDown={handleKeyDown}
           placeholder={
             replyMode
-              ? '回复 HOLA DAY...'
+              ? awaitingUserCopy(replyKind).composerPlaceholder
               : followUpTarget
                 ? '补充问题或下一步指令...'
                 : expertWorkflow

@@ -486,6 +486,7 @@ export function WorkbenchApp(): JSX.Element {
           greetingName={preferredDisplayName(me) || undefined}
           inputRef={inputRef}
           replyMode={isReplyMode}
+          replyKind={selectedAwaitingKind}
           followUpTarget={followUpTarget}
           userPlan={me?.plan}
           userSelectedRoles={me?.selectedRoles ?? null}

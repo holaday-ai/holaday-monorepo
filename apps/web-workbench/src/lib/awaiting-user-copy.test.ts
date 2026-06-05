@@ -7,6 +7,7 @@ describe('awaiting user copy', () => {
     expect(awaitingUserCopy(undefined)).toMatchObject({
       title: '需要你补充信息',
       toolbarLabel: '需要你回复',
+      composerPlaceholder: '回答 HOLA DAY 的问题...',
     });
   });
 
@@ -17,6 +18,7 @@ describe('awaiting user copy', () => {
       panelTitle: '需要登录',
       panelBody: '交互模式已开启。完成登录或扫码后，HOLA DAY 会继续执行，不用重新提交任务。',
       toolbarLabel: '需要登录',
+      composerPlaceholder: '登录完成后可在这里补充说明...',
     });
     expect(awaitingUserCopy('captcha')).toMatchObject({
       title: '需要验证',
@@ -28,6 +30,7 @@ describe('awaiting user copy', () => {
       panelTitle: '需要操作浏览器',
       panelBody: '交互模式已开启。按页面提示完成点击或选择后，HOLA DAY 会继续执行，不用重新提交任务。',
       toolbarLabel: '需要操作浏览器',
+      composerPlaceholder: '完成页面操作后可在这里补充说明...',
     });
   });
 
@@ -36,6 +39,7 @@ describe('awaiting user copy', () => {
       title: '需要权限',
       panelBody: '当前页面拒绝访问。请确认账号权限，或换一个公开来源后回复继续，不用重新提交任务。',
       toolbarLabel: '需要权限',
+      composerPlaceholder: '说明已授权，或提供可访问的替代来源...',
     });
   });
 });

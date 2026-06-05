@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import type { ComposerSubmitResult } from '@/components/composer-submit';
 import { shouldResetComposerOnSelectionChange } from '@/components/composer-reset';
 import { useTaskStore } from '@/stores/task-store';
+import type { AwaitingKind } from '@/lib/awaiting-user-copy';
 import type { SidePanelMode } from '@/types/side-panel';
 import type { UiTask } from '@/types/task';
 
@@ -50,6 +51,7 @@ interface Props {
    * "reply to agent" mode. Drives the App's onSubmit branching too.
    */
   replyMode?: boolean;
+  replyKind?: AwaitingKind;
   /** Phase 14 audit follow-up — passed straight through to InputArea. */
   followUpTarget?: { taskId: string; title: string } | null;
   /** Plan id from auth.me — drives the role-nudge banner visibility. */
@@ -94,6 +96,7 @@ export function MainPanel({
   greetingName,
   inputRef,
   replyMode,
+  replyKind,
   followUpTarget,
   userPlan,
   userSelectedRoles,
@@ -205,6 +208,7 @@ export function MainPanel({
               busy={busy}
               inputRef={inputRef}
               replyMode={replyMode}
+              replyKind={replyKind}
               followUpTarget={followUpTarget}
               quotaExhausted={quotaExhausted}
               quotaPlan={userPlan}
@@ -264,6 +268,7 @@ export function MainPanel({
             busy={busy}
             inputRef={inputRef}
             replyMode={replyMode}
+            replyKind={replyKind}
             followUpTarget={followUpTarget}
             quotaExhausted={quotaExhausted}
             quotaPlan={userPlan}
