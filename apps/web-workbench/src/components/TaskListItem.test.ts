@@ -25,4 +25,27 @@ describe('taskListItemSubtitle', () => {
       '执行中 · 第 3 步',
     );
   });
+
+  it('uses the awaiting kind in task rows so action-needed tasks are scannable', () => {
+    expect(
+      taskListItemSubtitle({
+        status: 'awaiting_user',
+        tickCount: 4,
+        awaitingKind: 'login',
+      }),
+    ).toBe('需要登录');
+    expect(
+      taskListItemSubtitle({
+        status: 'awaiting_user',
+        tickCount: 4,
+        awaitingKind: 'captcha',
+      }),
+    ).toBe('需要验证');
+    expect(
+      taskListItemSubtitle({
+        status: 'awaiting_user',
+        tickCount: 4,
+      }),
+    ).toBe('需要你回复');
+  });
 });

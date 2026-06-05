@@ -1,5 +1,6 @@
 import { Check, MoreHorizontal } from 'lucide-react';
 import * as React from 'react';
+import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
 import { cn } from '@/lib/utils';
 import { type UiTask, isActive } from '@/types/task';
 import { summariseIntent } from '@/utils/summarise-intent';
@@ -280,7 +281,7 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
 }
 
 export function taskListItemSubtitle(
-  task: Pick<UiTask, 'queuePosition' | 'status' | 'tickCount'>,
+  task: Pick<UiTask, 'awaitingKind' | 'queuePosition' | 'status' | 'tickCount'>,
   liveSubStatus?: TaskLiveSubStatus | null,
 ): string {
   if (task.queuePosition && task.queuePosition > 1 && task.tickCount === 0) {
@@ -299,7 +300,7 @@ export function taskListItemSubtitle(
       // to the default branch and rendered `undefined` in the row's
       // tooltip / aria-label, both visually wrong and a screen-reader
       // hole.
-      return '等待你回复';
+      return awaitingUserCopy(task.awaitingKind).toolbarLabel;
     case 'paused':
       return task.tickCount === 0 ? '已暂停' : `已暂停 · ${task.tickCount} 步`;
     case 'completed':
