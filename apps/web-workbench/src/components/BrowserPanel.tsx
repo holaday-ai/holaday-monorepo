@@ -704,6 +704,7 @@ export function BrowserPanel({
   const [ripple, setRipple] = React.useState<{ x: number; y: number; id: number } | null>(null);
   const rippleIdRef = React.useRef(0);
   const imgRef = React.useRef<HTMLImageElement | null>(null);
+  const screencastAutoScrolledKeyRef = React.useRef<string | null>(null);
   const finalEvidenceScrollRef = React.useRef<HTMLDivElement | null>(null);
   const finalEvidenceImgRef = React.useRef<HTMLImageElement | null>(null);
   const finalEvidenceAutoScrolledKeyRef = React.useRef<string | null>(null);
@@ -744,7 +745,21 @@ export function BrowserPanel({
     if (!fit) return;
     img.style.width = `${fit.width}px`;
     img.style.height = `${fit.height}px`;
-  }, [isSheet]);
+    const frameKey = frame?.imageBase64 ?? null;
+    if (
+      isSheet &&
+      !interactive &&
+      frameKey &&
+      screencastAutoScrolledKeyRef.current !== frameKey
+    ) {
+      screencastAutoScrolledKeyRef.current = frameKey;
+      const centeredLeft = centeredScreencastScrollLeft({
+        contentWidth: fit.width,
+        hostWidth: hostW,
+      });
+      host.scrollTo({ left: centeredLeft, top: 0 });
+    }
+  }, [frame?.imageBase64, interactive, isSheet]);
   const fitFinalEvidenceImg = React.useCallback((): void => {
     const host = finalEvidenceScrollRef.current;
     const img = finalEvidenceImgRef.current;
@@ -816,6 +831,10 @@ export function BrowserPanel({
       window.removeEventListener('resize', onWin);
     };
   }, [fitFinalEvidenceImg, finalEvidenceFrame]);
+  React.useEffect(() => {
+    screencastAutoScrolledKeyRef.current = null;
+    screencastHostRef.current?.scrollTo({ left: 0, top: 0 });
+  }, [activeTaskId, frame?.imageBase64]);
   React.useEffect(() => {
     setFinalEvidenceFit(null);
     finalEvidenceAutoScrolledKeyRef.current = null;
