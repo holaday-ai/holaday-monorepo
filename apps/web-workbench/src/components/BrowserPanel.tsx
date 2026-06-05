@@ -67,6 +67,8 @@ interface StaticEvidenceFit {
   width: number;
   height: number;
   hostWidth: number;
+  sourceWidth: number;
+  sourceHeight: number;
 }
 
 type StaticEvidenceViewMode = 'readable' | 'contain';
@@ -791,6 +793,8 @@ export function BrowserPanel({
       width: fit.width,
       height: fit.height,
       hostWidth: hostW,
+      sourceWidth: natW,
+      sourceHeight: natH,
     });
     const evidenceKey = finalEvidenceFrame?.imageBase64
       ? `${finalEvidenceViewMode}:${finalEvidenceFrame.imageBase64}`
@@ -894,10 +898,14 @@ export function BrowserPanel({
     isSheet &&
     finalEvidenceFit != null &&
     finalEvidenceFit.width > finalEvidenceFit.hostWidth + 8;
+  const finalEvidenceWideSource =
+    isSheet &&
+    finalEvidenceFit != null &&
+    finalEvidenceFit.sourceWidth / finalEvidenceFit.sourceHeight > 1.12;
   const finalEvidenceCanToggleFit =
     isSheet &&
     finalEvidenceFit != null &&
-    (finalEvidenceCanPan || finalEvidenceViewMode === 'contain');
+    (finalEvidenceWideSource || finalEvidenceCanPan || finalEvidenceViewMode === 'contain');
   // Codex P2 follow-up — hidden input for direct CJK typing on the
   // JPEG screencast path (CDP mode). Browser-native IME composition
   // events fire on this focused-but-invisible element; on
