@@ -35,6 +35,7 @@ import { useTaskStore } from '@/stores/task-store';
 import { isQuotaExhausted, useQuotaStatus } from '@/lib/use-quota-status';
 import {
   computeSidePanelMode,
+  sidePanelModeForToolbar,
   type SidePanelMode,
   type SidePanelOverride,
 } from '@/types/side-panel';
@@ -436,6 +437,11 @@ export function WorkbenchApp(): JSX.Element {
     override: sidePanelOverride,
   });
   const showBrowserPanel = sidePanelMode !== 'closed';
+  const toolbarSidePanelMode = sidePanelModeForToolbar({
+    sidePanelMode,
+    isMobile,
+    browserSheetOpen,
+  });
   React.useEffect(() => {
     const nextSheetState = mobileBrowserSheetAutoOpenState({
       taskId: selectedTaskId,
@@ -549,7 +555,7 @@ export function WorkbenchApp(): JSX.Element {
             return clearComposerOnSubmitSuccess;
           }}
           onOpenSidebar={() => setOpenMobile(true)}
-          sidePanelMode={sidePanelMode}
+          sidePanelMode={toolbarSidePanelMode}
           browserAttentionNeeded={selectedNeedsBrowser}
           onToggleSidePanel={() => {
             // BOSS bug fix — on mobile (bottom-sheet browser lane)

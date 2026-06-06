@@ -63,3 +63,18 @@ export function computeSidePanelMode(
   if (input.override === 'open') return 'browser-record';
   return 'closed';
 }
+
+export function sidePanelModeForToolbar({
+  sidePanelMode,
+  isMobile,
+  browserSheetOpen,
+}: {
+  sidePanelMode: SidePanelMode;
+  isMobile: boolean;
+  browserSheetOpen: boolean;
+}): SidePanelMode {
+  if (isMobile && browserSheetOpen && sidePanelMode === 'closed') {
+    return 'browser-record';
+  }
+  return sidePanelMode;
+}
