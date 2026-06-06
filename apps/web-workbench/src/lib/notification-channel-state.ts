@@ -33,10 +33,18 @@ export function notificationChannelTestErrorMessage({
   status?: unknown;
 }): string {
   const httpStatus = safeStatus(status);
-  const fallback = httpStatus
-    ? `发送失败（HTTP ${httpStatus}）`
-    : '发送失败，请稍后重试。';
-  return pageErrorMessage(error, fallback);
+  return pageErrorMessage(error, notificationStatusFallback(httpStatus));
+}
+
+export function notificationStatusFallback(status: number | null): string {
+  if (status === null) return '发送失败，请稍后重试。';
+  if (status >= 400 && status < 500) {
+    return '发送失败，请检查通知地址或签名配置后重试。';
+  }
+  if (status >= 500) {
+    return '发送失败，对方服务暂时没有接收，请稍后重试。';
+  }
+  return '发送失败，请稍后重试。';
 }
 
 function normalizeNotificationChannel(value: unknown): NotificationChannelRow | null {

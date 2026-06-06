@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   notificationChannelTestErrorMessage,
+  notificationStatusFallback,
   normalizeNotificationChannels,
   notificationChannelsLoadErrorMessage,
 } from './notification-channel-state';
@@ -89,12 +90,22 @@ describe('notificationChannelTestErrorMessage', () => {
     ).toBe('任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。');
   });
 
-  it('falls back to the HTTP status when the server gives no message', () => {
+  it('falls back to friendly delivery guidance when the server gives no message', () => {
     expect(notificationChannelTestErrorMessage({ status: 503 })).toBe(
-      '发送失败（HTTP 503）',
+      '发送失败，对方服务暂时没有接收，请稍后重试。',
     );
     expect(notificationChannelTestErrorMessage({ status: 'bad' })).toBe(
       '发送失败，请稍后重试。',
     );
+  });
+
+  it('groups notification status fallbacks by likely next step', () => {
+    expect(notificationStatusFallback(401)).toBe(
+      '发送失败，请检查通知地址或签名配置后重试。',
+    );
+    expect(notificationStatusFallback(500)).toBe(
+      '发送失败，对方服务暂时没有接收，请稍后重试。',
+    );
+    expect(notificationStatusFallback(302)).toBe('发送失败，请稍后重试。');
   });
 });
