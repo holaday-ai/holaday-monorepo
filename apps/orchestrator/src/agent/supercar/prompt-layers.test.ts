@@ -72,6 +72,13 @@ describe('buildLayeredSystemPrompt', () => {
     expect(styleIdx).toBeGreaterThan(roleIdx);
   });
 
+  it('requires unsourced benchmark numbers to be labelled as assumptions', () => {
+    const out = buildLayeredSystemPrompt('growth-hacker');
+    expect(out).toContain('没有来源支撑的行业 benchmark');
+    expect(out).toContain('经验假设 / 常见区间 / 需要实测确认');
+    expect(out).toContain('不要把它当成已验证事实');
+  });
+
   it('falls back to Base + Style when role id is unknown', () => {
     const out = buildLayeredSystemPrompt('not-a-real-role');
     expect(out).toContain(BASE_PROMPT);
