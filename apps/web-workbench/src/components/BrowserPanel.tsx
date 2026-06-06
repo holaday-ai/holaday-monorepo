@@ -1722,7 +1722,7 @@ export function BrowserPanel({
                     )}
                   </div>
                 </div>
-                {isSheet && (finalEvidenceCanToggleFit || finalEvidenceCanPan || onReExecute) && (
+                {isSheet && (finalEvidenceCanToggleFit || finalEvidenceCanPan) && (
                   <div className="pointer-events-none absolute left-2 right-2 top-2 z-20 flex flex-col items-stretch gap-1">
                     <div className="flex min-w-0 items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -1750,21 +1750,6 @@ export function BrowserPanel({
                           </button>
                         )}
                       </div>
-                      {onReExecute && (
-                        <button
-                          type="button"
-                          onClick={onReExecute}
-                          disabled={reExecuting}
-                          aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
-                          title={reExecuting ? '正在重新执行' : '重新执行'}
-                          className="pointer-events-auto inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-white/25 bg-black/45 px-2 text-[11px] font-medium text-white shadow-sm backdrop-blur transition-colors hover:bg-black/60 disabled:cursor-wait disabled:opacity-60"
-                        >
-                          <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
-                          <span className={cn(isNarrow && 'sr-only')}>
-                            {reExecuting ? '重新执行中…' : '重新执行'}
-                          </span>
-                        </button>
-                      )}
                     </div>
                     {finalEvidenceCanPan && (
                       <div className="mx-auto max-w-full truncate rounded-full bg-black/45 px-2 py-0.5 text-center text-[10px] font-medium text-white shadow-sm backdrop-blur">
@@ -1774,17 +1759,31 @@ export function BrowserPanel({
                   </div>
                 )}
                 {isSheet && (
-                  <div className="pointer-events-none absolute bottom-2 left-2 right-2 z-20 flex min-w-0 flex-col items-start gap-0.5 rounded bg-black/55 px-2 py-1 text-[11px] leading-tight text-white shadow-sm backdrop-blur">
-                    <span className="max-w-full truncate">
-                      {terminalEvidenceFrameLabel({
-                        status: taskStatus,
-                        url: finalEvidenceFrame.url,
-                      })}
-                    </span>
-                    {finalEvidenceFrame.url && finalEvidenceFrame.url !== 'about:blank' && (
-                      <span className="max-w-full truncate font-mono text-[10px] opacity-80">
-                        {finalEvidenceFrame.url}
+                  <div className="pointer-events-none absolute bottom-2 left-2 right-2 z-20 flex min-w-0 items-center gap-2 rounded bg-black/55 px-2 py-1 text-[11px] leading-tight text-white shadow-sm backdrop-blur">
+                    <div className="min-w-0 flex-1">
+                      <span className="block max-w-full truncate">
+                        {terminalEvidenceFrameLabel({
+                          status: taskStatus,
+                          url: finalEvidenceFrame.url,
+                        })}
                       </span>
+                      {finalEvidenceFrame.url && finalEvidenceFrame.url !== 'about:blank' && (
+                        <span className="block max-w-full truncate font-mono text-[10px] opacity-80">
+                          {finalEvidenceFrame.url}
+                        </span>
+                      )}
+                    </div>
+                    {onReExecute && (
+                      <button
+                        type="button"
+                        onClick={onReExecute}
+                        disabled={reExecuting}
+                        aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
+                        title={reExecuting ? '正在重新执行' : '重新执行'}
+                        className="pointer-events-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/20 bg-white/10 text-white transition-colors hover:bg-white/20 disabled:cursor-wait disabled:opacity-60"
+                      >
+                        <RotateCw className={cn('h-3.5 w-3.5', reExecuting && 'animate-spin')} />
+                      </button>
                     )}
                   </div>
                 )}
