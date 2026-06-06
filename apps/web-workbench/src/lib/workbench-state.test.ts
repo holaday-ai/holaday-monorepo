@@ -127,7 +127,7 @@ describe('workbench state helpers', () => {
     });
   });
 
-  it('keeps realtime reconnect toasts gated on an actual disconnect', () => {
+  it('keeps task reconnect toasts gated on an actual disconnect', () => {
     expect(
       realtimeConnectionTransition({
         previousStatus: 'idle',
@@ -145,7 +145,7 @@ describe('workbench state helpers', () => {
       }),
     ).toEqual({
       hadDisconnect: true,
-      toast: { message: '实时连接已断开，正在重连…', tone: 'error' },
+      toast: { message: '任务连接已断开，正在重连…', tone: 'error' },
     });
     expect(
       realtimeConnectionTransition({
@@ -157,14 +157,14 @@ describe('workbench state helpers', () => {
     ).toEqual({
       hadDisconnect: false,
       toast: {
-        message: '实时连接已恢复',
+        message: '任务连接已恢复',
         tone: 'info',
         durationMs: 3000,
       },
     });
   });
 
-  it('does not show realtime reconnect toasts while signed out', () => {
+  it('does not show task reconnect toasts while signed out', () => {
     expect(
       realtimeConnectionTransition({
         previousStatus: 'open',
