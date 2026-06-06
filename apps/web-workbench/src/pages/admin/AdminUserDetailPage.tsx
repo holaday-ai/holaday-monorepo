@@ -78,7 +78,7 @@ export function AdminUserDetailPage(): JSX.Element {
   }, [mountedRef, userId]);
 
   if (!userId) {
-    return <div className="px-6 py-8 text-muted-foreground">缺少 userId 参数</div>;
+    return <div className="px-6 py-8 text-muted-foreground">缺少用户信息</div>;
   }
   if (error) {
     return (

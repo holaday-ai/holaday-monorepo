@@ -86,7 +86,7 @@ export function AdminLearningDomainPage(): JSX.Element {
 
   if (!domain) {
     return (
-      <div className="px-6 py-8 text-muted-foreground">缺少 domain 参数</div>
+      <div className="px-6 py-8 text-muted-foreground">缺少域名信息</div>
     );
   }
 
