@@ -246,7 +246,7 @@ export function MainPanel({
               />
             </div>
           )}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto scroll-pb-40 pb-28 sm:scroll-pb-0 sm:pb-0">
             <LazyLoadBoundary surfaceLabel="任务详情" resetKey={task.taskId}>
               <React.Suspense fallback={<TaskStreamFallback />}>
                 <TaskStream
