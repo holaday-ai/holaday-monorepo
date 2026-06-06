@@ -212,7 +212,7 @@ export function ScheduledPage(): JSX.Element {
                         className="cursor-help text-rose-700 dark:text-rose-300"
                         title={humaniseTaskError(r.lastError)}
                       >
-                        ⓘ 错误详情
+                        ⓘ 失败详情
                       </span>
                     )}
                   </div>
