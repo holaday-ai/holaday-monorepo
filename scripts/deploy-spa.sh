@@ -103,11 +103,11 @@ run_with_retry_filtered() {
     rc=$?
     set -e
     if ((rc == 0)); then
-      grep -v 'LIBARCHIVE.xattr' "$tmp" || true
+      grep -v -E 'LIBARCHIVE\.xattr|time stamp .* is .* in the future' "$tmp" || true
       rm -f "$tmp"
       return 0
     fi
-    grep -v 'LIBARCHIVE.xattr' "$tmp" || true
+    grep -v -E 'LIBARCHIVE\.xattr|time stamp .* is .* in the future' "$tmp" || true
     rm -f "$tmp"
     if ((attempt == REMOTE_RETRIES)); then
       echo "❌ $label failed after $attempt attempt(s) (exit $rc)" >&2
@@ -191,7 +191,7 @@ run_with_retry "Aliyun backup" "${ALIYUN_SSH[@]}" "$ALIYUN_HOST" \
 
 echo "→ Packing + uploading $DIST_DIR"
 rm -f "$TARBALL"
-tar czf "$TARBALL" -C apps/web-workbench dist
+COPYFILE_DISABLE=1 tar czf "$TARBALL" -C apps/web-workbench dist
 run_with_retry "Aliyun upload" "${ALIYUN_SCP[@]}" "$TARBALL" "$ALIYUN_HOST:/tmp/" >/dev/null
 
 echo "→ Extracting on Aliyun"
