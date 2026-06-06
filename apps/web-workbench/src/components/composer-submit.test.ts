@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   clearComposerOnSubmitSuccess,
+  composerSubmittingStatus,
   composerSubmitErrorMessage,
   keepComposerOnSubmitFailure,
   shouldClearComposerAfterSubmit,
@@ -33,6 +34,18 @@ describe('shouldClearComposerAfterSubmit', () => {
     );
     expect(composerSubmitErrorMessage('扩展未连接，无法走 Mode B')).toBe(
       '提交失败：浏览器扩展未连接，请打开 HOLA DAY 扩展后重试。',
+    );
+  });
+
+  it('names the in-flight submit state by composer context', () => {
+    expect(composerSubmittingStatus({})).toBe(
+      '正在创建任务，成功后会自动进入任务页...',
+    );
+    expect(composerSubmittingStatus({ hasFollowUpTarget: true })).toBe(
+      '正在创建追问任务，成功后会自动进入新任务页...',
+    );
+    expect(composerSubmittingStatus({ replyMode: true })).toBe(
+      '正在发送回复，HOLA DAY 会继续当前任务...',
     );
   });
 });

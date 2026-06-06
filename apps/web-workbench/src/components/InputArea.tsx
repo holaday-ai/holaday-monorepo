@@ -27,6 +27,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import {
+  composerSubmittingStatus,
   composerSubmitErrorMessage,
   type ComposerSubmitResult,
   shouldClearComposerAfterSubmit,
@@ -498,6 +499,10 @@ export function InputArea({
   }
 
   const disabled = submitting || Boolean(busy);
+  const submittingStatus = composerSubmittingStatus({
+    replyMode,
+    hasFollowUpTarget: Boolean(followUpTarget),
+  });
   const expertWorkflow =
     !replyMode && !followUpTarget
       ? detectComposerExpertWorkflow(value, attachments.some((a) => a.status === 'ready'))
@@ -764,7 +769,17 @@ export function InputArea({
           )}
         </Button>
       </div>
-      <div className="mt-2 flex items-center justify-end px-1 text-[11px] text-muted-foreground/70">
+      <div className="mt-2 flex min-h-[24px] items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground/70">
+        <span
+          aria-live="polite"
+          className={cn(
+            'inline-flex min-w-0 items-center gap-1.5 rounded-full px-1.5 py-0.5 text-[#595757] transition-opacity dark:text-foreground/75',
+            submitting ? 'opacity-100' : 'opacity-0',
+          )}
+        >
+          {submitting && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-[#EA1F59]" />}
+          <span className="truncate">{submitting ? submittingStatus : ' '}</span>
+        </span>
         <span className="hidden shrink-0 rounded-[6px] px-1.5 py-0.5 text-[#ADADAD] sm:inline">
           Enter 发送
         </span>
