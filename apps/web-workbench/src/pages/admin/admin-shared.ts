@@ -85,7 +85,7 @@ export function statusToken(status: string): StatusToken {
   }
   return (
     STATUS_MAP[status] ?? {
-      label: status,
+      label: '未知状态',
       textClass: 'text-[#595757]',
       bgClass: 'bg-[#EFEFEF]',
     }

@@ -22,6 +22,10 @@ describe('admin statusToken', () => {
   it('falls back for missing statuses', () => {
     expect(statusToken('').label).toBe('未知');
   });
+
+  it('hides raw unknown status codes in badges', () => {
+    expect(statusToken('unknown_internal_state').label).toBe('未知状态');
+  });
 });
 
 describe('admin shared data guards', () => {
