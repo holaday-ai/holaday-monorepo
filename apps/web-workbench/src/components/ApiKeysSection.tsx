@@ -4,6 +4,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import {
+  apiKeySettingsActionError,
   apiKeySettingsErrorMessage,
   normalizeApiKeyRows,
   normalizeFreshApiKey,
@@ -93,7 +94,7 @@ export function ApiKeysSection(): JSX.Element {
       await reload();
     } catch (err) {
       if (!mountedRef.current) return;
-      toast.show(apiKeySettingsErrorMessage(err, '创建失败'), 'error');
+      toast.show(apiKeySettingsActionError('创建失败', err), 'error');
     } finally {
       if (mountedRef.current) setSubmitting(false);
     }
@@ -107,7 +108,7 @@ export function ApiKeysSection(): JSX.Element {
       await reload();
     } catch (err) {
       if (!mountedRef.current) return;
-      toast.show(apiKeySettingsErrorMessage(err, '撤销失败'), 'error');
+      toast.show(apiKeySettingsActionError('撤销失败', err), 'error');
     }
   };
 

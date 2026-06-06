@@ -66,6 +66,13 @@ export function apiKeySettingsErrorMessage(
   return pageErrorMessage(err, fallback);
 }
 
+export function apiKeySettingsActionError(
+  action: string,
+  err: unknown,
+): string {
+  return `${action}：${apiKeySettingsErrorMessage(err)}`;
+}
+
 function safeApiKeyText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }

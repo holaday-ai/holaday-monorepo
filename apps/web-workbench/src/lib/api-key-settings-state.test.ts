@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  apiKeySettingsActionError,
   apiKeySettingsErrorMessage,
   normalizeApiKeyRows,
   normalizeFreshApiKey,
@@ -97,5 +98,12 @@ describe('api key settings state helpers', () => {
     );
     expect(apiKeySettingsErrorMessage('Key 已撤销')).toBe('Key 已撤销');
     expect(apiKeySettingsErrorMessage({})).toBe('请稍后重试');
+  });
+
+  it('keeps API key action context on failures', () => {
+    expect(apiKeySettingsActionError('创建失败', {})).toBe('创建失败：请稍后重试');
+    expect(apiKeySettingsActionError('撤销失败', 'Key 已撤销')).toBe(
+      '撤销失败：Key 已撤销',
+    );
   });
 });
