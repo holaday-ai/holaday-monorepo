@@ -195,7 +195,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKey}
             placeholder="搜索任务…"
-            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            className="h-8 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
           {searching && (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[#EA1F59]" />
