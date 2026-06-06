@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  shouldShowStepCard,
   stepDurationLabel,
   stepDisplaySummary,
   stepDisplayTitle,
@@ -82,6 +83,24 @@ describe('step-card-state', () => {
         actionSummary: '表达式 `128^2` 已就绪，按 = 求值。',
       }),
     ).toBe('表达式 `128^2` 已就绪，按 = 求值。');
+  });
+
+  it('drops uninformative generic browser detail cards', () => {
+    expect(
+      shouldShowStepCard({ actionKind: 'computer', actionSummary: 'computer' }),
+    ).toBe(false);
+    expect(shouldShowStepCard({ actionKind: 'text', actionSummary: 'text' })).toBe(
+      false,
+    );
+    expect(shouldShowStepCard({ actionKind: 'navigate', actionSummary: 'navigate' })).toBe(
+      true,
+    );
+    expect(
+      shouldShowStepCard({
+        actionKind: 'computer',
+        actionSummary: '页面已加载，开始输入计算式。',
+      }),
+    ).toBe(true);
   });
 
   it('explains browser tool timeouts without exposing driver jargon', () => {

@@ -97,6 +97,13 @@ export function stepDisplaySummary(
   return summary;
 }
 
+export function shouldShowStepCard(
+  step: Pick<UiStep, 'actionKind' | 'actionSummary'>,
+): boolean {
+  if (stepDisplaySummary(step)) return true;
+  return step.actionKind !== 'computer' && step.actionKind !== 'text';
+}
+
 export function stepFailureMessage(step: Pick<UiStep, 'actionKind' | 'message'>): string | null {
   const message = step.message?.trim();
   if (!message) return null;

@@ -56,6 +56,7 @@ import { downloadMarkdownFile } from '@/lib/markdown-download';
 import { terminalArtifactFallbackText } from '@/lib/terminal-artifact-copy';
 import { terminalEmptyCopy, terminalInsufficientCopy } from '@/lib/terminal-empty-copy';
 import {
+  shouldShowStepCard,
   stepDetailSummary,
   stepStatusText,
   type StepDetailSummary,
@@ -357,7 +358,11 @@ function AgentBlock({
     return undefined;
   }, [steps]);
   const latestRunningStatus = steps[steps.length - 1]?.status ?? 'done';
-  const detailSummary = React.useMemo(() => stepDetailSummary(steps), [steps]);
+  const detailSteps = React.useMemo(() => steps.filter(shouldShowStepCard), [steps]);
+  const detailSummary = React.useMemo(
+    () => stepDetailSummary(detailSteps),
+    [detailSteps],
+  );
 
   const hasAnyActivity =
     humanLines.length > 0 ||
@@ -541,20 +546,20 @@ function AgentBlock({
           <EmptyTerminalCard status={task.status} intent={task.intent} />
         )}
 
-        {steps.length > 0 && (
+        {detailSteps.length > 0 && (
           <DetailToggle
             open={detailOpen}
-            count={steps.length}
+            count={detailSteps.length}
             summary={detailSummary}
             onToggle={() => setDetailOpen((v) => !v)}
           >
             <div className="mt-2 space-y-2">
-              {steps.map((step, i) => (
+              {detailSteps.map((step, i) => (
                 <StepCard
                   key={step.tickIndex}
                   step={step}
                   isFirst={i === 0}
-                  isLast={i === steps.length - 1}
+                  isLast={i === detailSteps.length - 1}
                 />
               ))}
             </div>
