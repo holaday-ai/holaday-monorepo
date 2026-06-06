@@ -31,10 +31,9 @@ import {
   type ComposerSubmitResult,
   shouldClearComposerAfterSubmit,
 } from '@/components/composer-submit';
-import { pageErrorMessage } from '@/lib/page-error-copy';
 import { awaitingUserCopy, type AwaitingKind } from '@/lib/awaiting-user-copy';
 import { quotaExhaustedCopy } from '@/lib/quota-exhausted-copy';
-import { isUploadError, uploadFile } from '@/lib/upload-file';
+import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -411,7 +410,7 @@ export function InputArea({
         );
       } catch (err) {
         if (!mountedRef.current) return;
-        const msg = isUploadError(err) ? err.message : pageErrorMessage(err, '上传失败');
+        const msg = uploadFailureMessage(err);
         setAttachments((prev) =>
           prev.map((a) =>
             a.clientId === draft.clientId
@@ -465,8 +464,9 @@ export function InputArea({
       }
       submitOk = shouldClearComposerAfterSubmit(result);
     } catch (err) {
-      const msg = pageErrorMessage(err);
-      toast.show(composerSubmitErrorMessage(msg), 'error');
+      const raw =
+        err instanceof Error ? err.message : typeof err === 'string' ? err : undefined;
+      toast.show(composerSubmitErrorMessage(raw), 'error');
       submitOk = false;
     } finally {
       if (mountedRef.current) {
