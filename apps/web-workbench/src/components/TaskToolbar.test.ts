@@ -41,7 +41,7 @@ describe('TaskToolbar helpers', () => {
   it('uses live and close labels for open panel states', () => {
     expect(browserToolbarLabel(task({ status: 'executing' }), 'browser-live')).toBe('浏览器进行中');
     expect(browserToolbarLabel(task({ status: 'completed' }), 'browser-record')).toBe(
-      '关闭浏览器面板',
+      '收起浏览器面板',
     );
   });
 
@@ -77,7 +77,7 @@ describe('TaskToolbar helpers', () => {
       '浏览器',
     );
     expect(browserToolbarShortLabel(task({ status: 'completed' }), 'browser-record')).toBe(
-      '关闭',
+      '收起',
     );
     expect(
       browserToolbarShortLabel(
