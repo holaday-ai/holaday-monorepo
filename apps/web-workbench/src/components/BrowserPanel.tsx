@@ -1721,7 +1721,7 @@ export function BrowserPanel({
                     )}
                   </div>
                 </div>
-                {isSheet && (
+                {isSheet && (finalEvidenceCanToggleFit || finalEvidenceCanPan || onReExecute) && (
                   <div className="pointer-events-none absolute left-2 right-2 top-2 z-20 flex flex-col items-stretch gap-1">
                     <div className="flex min-w-0 items-start justify-between gap-2">
                       <div className="min-w-0">
