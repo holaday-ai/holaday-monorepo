@@ -232,7 +232,7 @@ export function AddChannelModal({
             type="button"
             onClick={requestClose}
             disabled={saving || testing}
-            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
             aria-label="关闭"
             title="关闭"
           >
