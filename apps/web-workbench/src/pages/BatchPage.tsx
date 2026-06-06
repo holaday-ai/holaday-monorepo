@@ -121,7 +121,7 @@ function BatchList(): JSX.Element {
     } catch (err) {
       if (!mountedRef.current || reloadRequestRef.current !== requestId) return;
       const message = batchErrorMessage(err);
-      toast.show(taskActionError('加载失败', message), 'error');
+      toast.show(taskActionError('批量任务暂时无法加载', message), 'error');
       setLoadError(message);
     } finally {
       if (mountedRef.current && reloadRequestRef.current === requestId) {
@@ -214,7 +214,7 @@ function BatchList(): JSX.Element {
         )}
         {!loading && loadError && rows == null && (
           <HardErrorState
-            title="批量任务加载失败"
+            title={statusCopy?.title ?? '批量任务暂时无法加载'}
             message={loadError}
             onRetry={() => void reload()}
             supportSubject="批量任务列表加载失败"
@@ -354,7 +354,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
     } catch (err) {
       if (!mountedRef.current || reloadRequestRef.current !== requestId) return;
       const message = batchErrorMessage(err);
-      toast.show(taskActionError('加载失败', message), 'error');
+      toast.show(taskActionError('批量任务详情暂时无法加载', message), 'error');
       setLoadError(message);
     } finally {
       if (mountedRef.current && reloadRequestRef.current === requestId) {
@@ -466,7 +466,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
             </div>
           ) : loadError ? (
             <HardErrorState
-              title="批量任务详情加载失败"
+              title={detailStatusCopy?.title ?? '批量任务详情暂时无法加载'}
               message={loadError}
               onRetry={() => void reload()}
               supportSubject="批量任务详情加载失败"

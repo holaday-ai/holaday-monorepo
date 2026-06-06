@@ -18,7 +18,7 @@ describe('batch page state helpers', () => {
       '批量任务加载中…',
     );
     expect(batchListSummary({ loading: false, error: 'offline', count: 0 })).toBe(
-      '批量任务加载失败',
+      '批量任务暂时无法加载',
     );
     expect(batchListSummary({ loading: false, error: 'offline', count: 2 })).toBe(
       '刷新失败 · 显示 2 个批量',
@@ -32,7 +32,7 @@ describe('batch page state helpers', () => {
       '详情加载中…',
     );
     expect(batchDetailSummary({ loading: false, error: 'offline', total: null, finished: 0 })).toBe(
-      '详情加载失败',
+      '详情暂时无法加载',
     );
     expect(batchDetailSummary({ loading: false, error: 'offline', total: 5, finished: 2 })).toBe(
       '刷新失败 · 显示上次详情',
@@ -48,7 +48,7 @@ describe('batch page state helpers', () => {
     ).toBe('批量任务加载中…');
     expect(batchStatusCopy({ loading: false, error: 'offline', hasData: false, target: 'detail' }))
       .toEqual({
-        title: '批量任务详情加载失败',
+        title: '批量任务详情暂时无法加载',
         body: 'offline',
       });
     expect(

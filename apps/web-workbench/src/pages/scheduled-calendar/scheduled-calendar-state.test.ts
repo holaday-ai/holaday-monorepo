@@ -11,7 +11,7 @@ describe('scheduled calendar state helpers', () => {
       '定时任务加载中…',
     );
     expect(scheduledCalendarSummary({ loading: false, error: 'offline', count: 0 })).toBe(
-      '定时任务加载失败',
+      '定时任务暂时无法加载',
     );
     expect(scheduledCalendarSummary({ loading: false, error: 'offline', count: 3 })).toBe(
       '刷新失败 · 显示 3 个计划',
@@ -29,7 +29,7 @@ describe('scheduled calendar state helpers', () => {
       '定时任务加载中…',
     );
     expect(scheduledCalendarStatusCopy({ loading: false, error: 'offline', count: 0 })).toEqual({
-      title: '定时任务加载失败',
+      title: '定时任务暂时无法加载',
       body: 'offline',
     });
     expect(scheduledCalendarStatusCopy({ loading: false, error: 'offline', count: 1 })?.title).toBe(

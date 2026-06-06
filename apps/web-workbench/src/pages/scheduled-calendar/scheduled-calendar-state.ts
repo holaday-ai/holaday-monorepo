@@ -11,7 +11,7 @@ export function scheduledCalendarSummary({
 }): string {
   if (loading && count === 0) return '定时任务加载中…';
   if (error && count > 0) return `刷新失败 · 显示 ${count} 个计划`;
-  if (error) return '定时任务加载失败';
+  if (error) return '定时任务暂时无法加载';
   if (count === 0) return '本视图暂无计划';
   return `本视图 ${count} 个计划`;
 }
@@ -33,7 +33,7 @@ export function scheduledCalendarStatusCopy({
   }
   if (error) {
     return {
-      title: '定时任务加载失败',
+      title: '定时任务暂时无法加载',
       body: error,
     };
   }

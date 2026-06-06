@@ -40,7 +40,7 @@ export function batchListSummary({
   const safeCount = safeBatchCount(count);
   if (loading && safeCount === 0) return '批量任务加载中…';
   if (error && safeCount > 0) return `刷新失败 · 显示 ${safeCount} 个批量`;
-  if (error) return '批量任务加载失败';
+  if (error) return '批量任务暂时无法加载';
   if (safeCount === 0) return '暂无批量任务';
   return `共 ${safeCount} 个批量任务`;
 }
@@ -60,7 +60,7 @@ export function batchDetailSummary({
   const safeFinished = safeBatchCount(finished);
   if (loading && safeTotal == null) return '详情加载中…';
   if (error && safeTotal != null) return '刷新失败 · 显示上次详情';
-  if (error) return '详情加载失败';
+  if (error) return '详情暂时无法加载';
   if (safeTotal == null) return '暂无详情';
   return `${safeFinished} / ${safeTotal} 已处理`;
 }
@@ -85,7 +85,7 @@ export function batchStatusCopy({
   }
   if (error) {
     return {
-      title: `${label}加载失败`,
+      title: `${label}暂时无法加载`,
       body: error,
     };
   }
