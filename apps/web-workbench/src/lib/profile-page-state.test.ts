@@ -26,7 +26,7 @@ describe('profile page state helpers', () => {
       }),
     ).toEqual({ email: '', displayName: '' });
     expect(() => normalizeProfileSnapshot(null)).toThrow(
-      '个人资料数据格式异常，请稍后重试。',
+      '个人资料暂时无法读取，请刷新后重试。',
     );
   });
 

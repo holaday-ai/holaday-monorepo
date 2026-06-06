@@ -91,7 +91,7 @@ export function connectionAccessMailBody(providerName: string): string {
 
 export function normalizeConnectionProviders(value: unknown): ConnectionProviderView[] {
   if (!Array.isArray(value)) {
-    throw new Error('连接器数据格式异常，请稍后重试。');
+    throw new Error('连接器列表暂时无法读取，请刷新后重试。');
   }
   const seen = new Set<string>();
   return value.flatMap((item): ConnectionProviderView[] => {

@@ -56,12 +56,12 @@ export interface NormalizedBatchCreateResult {
 export function normalizeBatchCreateResult(
   value: unknown,
 ): NormalizedBatchCreateResult {
-  if (!isRecord(value)) throw new Error('批量任务创建结果异常，请刷新后查看任务列表。');
+  if (!isRecord(value)) throw new Error('批量任务已提交，但结果暂时无法确认，请刷新后查看任务列表。');
   const batchId = typeof value.batchId === 'string' ? value.batchId.trim() : '';
   const itemsTotal = normalizePositiveInteger(value.itemsTotal);
   const concurrency = normalizePositiveInteger(value.concurrency);
   if (!batchId || itemsTotal == null || concurrency == null) {
-    throw new Error('批量任务创建结果异常，请刷新后查看任务列表。');
+    throw new Error('批量任务已提交，但结果暂时无法确认，请刷新后查看任务列表。');
   }
   return { batchId, itemsTotal, concurrency };
 }

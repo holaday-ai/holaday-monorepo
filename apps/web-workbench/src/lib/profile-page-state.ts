@@ -7,7 +7,7 @@ export interface ProfileSnapshot {
 
 export function normalizeProfileSnapshot(value: unknown): ProfileSnapshot {
   if (typeof value !== 'object' || value === null) {
-    throw new Error('个人资料数据格式异常，请稍后重试。');
+    throw new Error('个人资料暂时无法读取，请刷新后重试。');
   }
   const raw = value as Record<string, unknown>;
   return {

@@ -47,7 +47,7 @@ export function QuotaIndicator({ compact = false, refreshKey }: Props): JSX.Elem
         setSnap(nextSnap);
         setError(null);
       } else {
-        setError('额度数据格式异常，请稍后重试。');
+        setError('额度暂时无法读取，请稍后重试。');
       }
     } catch (err) {
       if (!mountedRef.current || requestId !== requestIdRef.current) return;

@@ -65,9 +65,9 @@ describe('memory settings state helpers', () => {
   });
 
   it('rejects malformed memory payload roots', () => {
-    expect(() => normalizeMemoryRows(null)).toThrow('AI 记忆数据格式异常，请稍后重试。');
+    expect(() => normalizeMemoryRows(null)).toThrow('AI 记忆暂时无法读取，请刷新后重试。');
     expect(() => normalizeMemoryRows({ memories: { bad: true } })).toThrow(
-      'AI 记忆数据格式异常，请稍后重试。',
+      'AI 记忆暂时无法读取，请刷新后重试。',
     );
   });
 

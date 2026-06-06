@@ -309,7 +309,7 @@ export function NotificationBell({
 
 function normalizeNotificationRows(value: unknown): NotificationRow[] {
   if (!Array.isArray(value)) {
-    throw new Error('通知数据格式异常，请稍后重试。');
+    throw new Error('通知暂时无法读取，请刷新后重试。');
   }
   return value.flatMap((row, index): NotificationRow[] => {
     if (typeof row !== 'object' || row === null) return [];

@@ -18,7 +18,7 @@ export interface FreshApiKeyView {
 
 export function normalizeApiKeyRows(value: unknown): ApiKeyRowView[] {
   if (!Array.isArray(value)) {
-    throw new Error('API Key 数据格式异常，请稍后重试。');
+    throw new Error('API Key 列表暂时无法读取，请刷新后重试。');
   }
   return value.flatMap((row): ApiKeyRowView[] => {
     if (typeof row !== 'object' || row === null) return [];
@@ -44,13 +44,13 @@ export function normalizeFreshApiKey(
   fallbackName: string,
 ): FreshApiKeyView {
   if (typeof value !== 'object' || value === null) {
-    throw new Error('API Key 创建结果格式异常，请稍后重试。');
+    throw new Error('API Key 已创建，但结果暂时无法确认，请刷新后查看列表。');
   }
   const raw = value as Record<string, unknown>;
   const apiKeyId = safeApiKeyText(raw.apiKeyId);
   const plaintext = safeApiKeyText(raw.plaintext);
   if (!apiKeyId || !plaintext) {
-    throw new Error('API Key 创建结果格式异常，请稍后重试。');
+    throw new Error('API Key 已创建，但结果暂时无法确认，请刷新后查看列表。');
   }
   return {
     apiKeyId,

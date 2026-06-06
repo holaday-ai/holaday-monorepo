@@ -69,12 +69,12 @@ describe('batch dialog state helpers', () => {
   });
 
   it('rejects malformed batch creation results before navigation', () => {
-    expect(() => normalizeBatchCreateResult(null)).toThrow('创建结果异常');
+    expect(() => normalizeBatchCreateResult(null)).toThrow('结果暂时无法确认');
     expect(() =>
       normalizeBatchCreateResult({ batchId: '', itemsTotal: 3, concurrency: 2 }),
-    ).toThrow('创建结果异常');
+    ).toThrow('结果暂时无法确认');
     expect(() =>
       normalizeBatchCreateResult({ batchId: 'batch_123', itemsTotal: 0, concurrency: 2 }),
-    ).toThrow('创建结果异常');
+    ).toThrow('结果暂时无法确认');
   });
 });

@@ -62,7 +62,7 @@ describe('api key settings state helpers', () => {
 
   it('rejects malformed API key list payloads', () => {
     expect(() => normalizeApiKeyRows({ rows: [] })).toThrow(
-      'API Key 数据格式异常，请稍后重试。',
+      'API Key 列表暂时无法读取，请刷新后重试。',
     );
   });
 
@@ -85,10 +85,10 @@ describe('api key settings state helpers', () => {
 
   it('rejects malformed create results before showing one-time secrets', () => {
     expect(() => normalizeFreshApiKey({ apiKeyId: 'key_4' }, 'Zapier')).toThrow(
-      'API Key 创建结果格式异常，请稍后重试。',
+      'API Key 已创建，但结果暂时无法确认，请刷新后查看列表。',
     );
     expect(() => normalizeFreshApiKey(null, 'Zapier')).toThrow(
-      'API Key 创建结果格式异常，请稍后重试。',
+      'API Key 已创建，但结果暂时无法确认，请刷新后查看列表。',
     );
   });
 

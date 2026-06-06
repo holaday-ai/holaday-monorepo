@@ -18,11 +18,11 @@ export const MEMORY_CATEGORY_LABELS: Record<string, string> = {
 
 export function normalizeMemoryRows(value: unknown): MemoryRowView[] {
   if (typeof value !== 'object' || value === null) {
-    throw new Error('AI 记忆数据格式异常，请稍后重试。');
+    throw new Error('AI 记忆暂时无法读取，请刷新后重试。');
   }
   const memories = (value as { memories?: unknown }).memories;
   if (!Array.isArray(memories)) {
-    throw new Error('AI 记忆数据格式异常，请稍后重试。');
+    throw new Error('AI 记忆暂时无法读取，请刷新后重试。');
   }
   return memories.flatMap((row, index): MemoryRowView[] => {
     if (typeof row !== 'object' || row === null) return [];

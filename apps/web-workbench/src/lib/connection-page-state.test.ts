@@ -170,7 +170,7 @@ describe('connection page state helpers', () => {
 
   it('rejects non-array provider payloads and sanitizes counts', () => {
     expect(() => normalizeConnectionProviders({ providers: [] })).toThrow(
-      '连接器数据格式异常，请稍后重试。',
+      '连接器列表暂时无法读取，请刷新后重试。',
     );
     expect(safeConnectionCount(Number.NaN)).toBe(0);
     expect(safeConnectionCount(Number.POSITIVE_INFINITY)).toBe(0);
