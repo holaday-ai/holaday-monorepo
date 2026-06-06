@@ -34,7 +34,13 @@ HEALTH_MARKER='"status":"ok"'
 
 build_ssh_password_prefix "${VULTR_PASSWORD:-}"
 VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
-SSH_OPTS=(-o StrictHostKeyChecking=no -o ConnectTimeout=20)
+SSH_OPTS=(
+  -o StrictHostKeyChecking=no
+  -o ConnectTimeout=20
+  -o ServerAliveInterval=10
+  -o ServerAliveCountMax=3
+  -o TCPKeepAlive=yes
+)
 REMOTE_RETRIES="${DEPLOY_REMOTE_RETRIES:-3}"
 REMOTE_RETRY_SLEEP="${DEPLOY_REMOTE_RETRY_SLEEP:-5}"
 
