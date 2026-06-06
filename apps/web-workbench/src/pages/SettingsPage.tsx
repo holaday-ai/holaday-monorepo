@@ -155,7 +155,7 @@ function SettingsSectionNav({ active }: { active: SettingsSectionId }): JSX.Elem
             to={settingsSectionHref(section.id)}
             aria-current={active === section.id ? 'true' : undefined}
             className={cn(
-              'rounded-md px-2.5 py-1.5 text-center text-xs font-medium transition-colors',
+              'flex h-8 items-center justify-center rounded-md px-2.5 text-center text-xs font-medium transition-colors',
               active === section.id
                 ? 'bg-primary text-primary-foreground shadow-sm'
                 : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground',
@@ -221,7 +221,7 @@ function ThemeOption({
       aria-pressed={active}
       title={label}
       className={cn(
-        'flex items-center justify-center gap-1 rounded px-3 py-1 text-xs transition-colors',
+        'flex h-8 items-center justify-center gap-1 rounded px-3 text-xs transition-colors',
         active
           ? 'bg-background text-foreground shadow-sm'
           : 'text-muted-foreground hover:text-foreground',
