@@ -2200,7 +2200,7 @@ function TerminalSummary({
           <button
             type="button"
             onClick={() => setPendingLink(safeCurrentUrl)}
-            className="group flex min-h-12 min-w-0 items-start gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+            className="group flex min-h-12 w-full min-w-0 items-start gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
           >
             <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-[#EFEFEF]/70 text-[#595757] transition-colors group-hover:bg-white dark:bg-white/10 dark:text-foreground/80">
               <ExternalLink className="h-3.5 w-3.5" />
