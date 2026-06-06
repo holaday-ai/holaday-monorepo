@@ -94,7 +94,7 @@ describe('notificationChannelTestErrorMessage', () => {
       '发送失败（HTTP 503）',
     );
     expect(notificationChannelTestErrorMessage({ status: 'bad' })).toBe(
-      '发送失败（HTTP 0）',
+      '发送失败，请稍后重试。',
     );
   });
 });

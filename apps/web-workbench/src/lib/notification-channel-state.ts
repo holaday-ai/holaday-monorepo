@@ -32,7 +32,10 @@ export function notificationChannelTestErrorMessage({
   error?: unknown;
   status?: unknown;
 }): string {
-  const fallback = `发送失败（HTTP ${safeStatus(status)}）`;
+  const httpStatus = safeStatus(status);
+  const fallback = httpStatus
+    ? `发送失败（HTTP ${httpStatus}）`
+    : '发送失败，请稍后重试。';
   return pageErrorMessage(error, fallback);
 }
 
@@ -68,8 +71,10 @@ function safeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function safeStatus(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+function safeStatus(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
