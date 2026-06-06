@@ -22,6 +22,10 @@ describe('error-copy', () => {
     expect(humaniseTaskError('Anthropic API error: overloaded_error')).toBe('AI 服务暂时出错，请稍后重试。');
   });
 
+  it('hides PayPal SDK wording in payment component failures', () => {
+    expect(humaniseTaskError('PayPal SDK failed to load')).toBe('PayPal 加载失败，请刷新页面后重试。');
+  });
+
   it('maps extension timeouts to user-facing browser copy', () => {
     expect(humaniseTaskError('扩展工具调用超时（已等待 30 秒，请确认浏览器标签页仍在加载或重试）')).toBe(
       '浏览器响应超时，页面可能仍在加载。请稍后重试。',

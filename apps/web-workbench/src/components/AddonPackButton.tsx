@@ -97,7 +97,7 @@ export function AddonPackButton({
               },
               onApprove: async (data) => {
                 if (!pendingPaymentId) {
-                  onError?.('内部错误：缺少支付 ID');
+                  onError?.('支付状态缺失，请重新发起支付。');
                   return;
                 }
                 try {
@@ -111,7 +111,7 @@ export function AddonPackButton({
                 }
               },
               onError: (err) => {
-                onError?.(pageErrorMessage(err, 'PayPal SDK 错误'));
+                onError?.(pageErrorMessage(err, 'PayPal 支付组件出错，请稍后重试。'));
               },
               onCancel: () => {
                 /* user closed popup */
@@ -128,7 +128,7 @@ export function AddonPackButton({
       .catch((err) => {
         if (!cancelled) {
           setStatus('error');
-          onError?.(pageErrorMessage(err, 'PayPal SDK 加载失败'));
+          onError?.(pageErrorMessage(err, 'PayPal 支付组件加载失败，请刷新后重试。'));
         }
       });
     return () => {
