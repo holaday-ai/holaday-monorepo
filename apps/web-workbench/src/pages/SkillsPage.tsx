@@ -265,11 +265,22 @@ export function SkillsPage(): JSX.Element {
           so the action sits adjacent to the skill grid the user is
           interacting with. */}
       {limitBanner && planId !== 'pro' && (
-        <div className="mb-5 rounded-[8px] border border-[#DCDDDD] border-l-[#FFC910] bg-white px-4 py-3 text-[13px] text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
-          <div className="font-medium">{limitBanner.title}</div>
-          <div className="mt-0.5 text-[12px] text-muted-foreground">
-            {limitBanner.body}
+        <div className="mb-5 flex flex-col gap-3 rounded-[8px] border border-[#DCDDDD] border-l-[#FFC910] bg-white px-4 py-3 text-[13px] text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px] sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="font-medium">{limitBanner.title}</div>
+            <div className="mt-0.5 text-[12px] text-muted-foreground">
+              {limitBanner.body}
+            </div>
           </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="shrink-0"
+            onClick={() => navigate('/plan')}
+          >
+            查看套餐
+          </Button>
         </div>
       )}
       {loading ? (
