@@ -54,7 +54,7 @@ import { formatFileSize } from '@/lib/file-size';
 import { downloadFileMetaLabel } from '@/lib/file-download-card-copy';
 import { downloadMarkdownFile } from '@/lib/markdown-download';
 import { terminalArtifactFallbackText } from '@/lib/terminal-artifact-copy';
-import { terminalEmptyCopy } from '@/lib/terminal-empty-copy';
+import { terminalEmptyCopy, terminalInsufficientCopy } from '@/lib/terminal-empty-copy';
 import {
   stepDetailSummary,
   stepStatusText,
@@ -1944,12 +1944,12 @@ function TerminalSummary({
           intent,
           attachmentCount: attachments?.length ?? 0,
         })) {
+          const copy = terminalInsufficientCopy();
           return (
             <div className="rounded-md border border-[#FFC910]/55 bg-[#FFC910]/10 px-3 py-2.5 text-sm text-[#595757] dark:border-[#FFC910]/35 dark:text-foreground">
-              <div className="font-medium">结果内容不足</div>
+              <div className="font-medium">{copy.title}</div>
               <div className="mt-1 text-xs text-muted-foreground">
-                这次输出几乎没有有效内容。建议重新执行或换一种描述
-                方式（更具体的指令、提供示例数据、缩小范围）。
+                {copy.body}
               </div>
               <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                 {intent && onSuggestionPick && (

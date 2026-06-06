@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { terminalEmptyCopy } from './terminal-empty-copy';
+import { terminalEmptyCopy, terminalInsufficientCopy } from './terminal-empty-copy';
 
 describe('terminalEmptyCopy', () => {
   it('uses explicit cancellation copy for cancelled tasks with no final text', () => {
@@ -27,6 +27,13 @@ describe('terminalEmptyCopy', () => {
     expect(terminalEmptyCopy('completed')).toEqual({
       title: '没有回复内容',
       body: '这个任务已经结束，但没有收到回复内容。可以重新执行当前任务。',
+    });
+  });
+
+  it('keeps insufficient-result copy consistent with empty terminal states', () => {
+    expect(terminalInsufficientCopy()).toEqual({
+      title: '结果内容不足',
+      body: '这次输出几乎没有有效内容。已完成的步骤仍保留在详情里；可以重新执行，或换一种更具体的描述后再试。',
     });
   });
 });

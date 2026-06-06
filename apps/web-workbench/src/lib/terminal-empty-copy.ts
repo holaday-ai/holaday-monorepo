@@ -30,3 +30,13 @@ export function terminalEmptyCopy(status: UiTask['status']): {
     body: '这个任务已经结束，但没有收到回复内容。可以重新执行当前任务。',
   };
 }
+
+export function terminalInsufficientCopy(): {
+  title: string;
+  body: string;
+} {
+  return {
+    title: '结果内容不足',
+    body: '这次输出几乎没有有效内容。已完成的步骤仍保留在详情里；可以重新执行，或换一种更具体的描述后再试。',
+  };
+}
