@@ -11,7 +11,7 @@ export function ServerErrorPage(): JSX.Element {
         </div>
         <h1 className="text-xl font-semibold tracking-tight">服务暂时不可用</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          服务器遇到了一个错误。我们已经记录了这次异常，通常刷新后就能恢复。
+          服务刚才没有正常响应。我们已经记录了这次异常，通常刷新后就能恢复。
         </p>
         <div className="mt-6 flex items-center justify-center gap-2">
           <Button onClick={() => window.location.reload()}>重试</Button>

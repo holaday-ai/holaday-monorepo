@@ -131,10 +131,10 @@ export async function fetchFileBlobAuthed(
  */
 export function downloadFailureMessage(status: number | null): string {
   if (status === 401 || status === 403) {
-    return '下载失败：未授权（请刷新页面后重试）';
+    return '下载失败，请刷新页面后重试。';
   }
   if (status === 404 || status === 410) {
-    return '下载失败：链接已过期（产出文件保留 24 小时）';
+    return '链接已过期，产出文件保留 24 小时。';
   }
-  return '下载失败或链接已过期';
+  return '下载失败，或链接已过期。';
 }

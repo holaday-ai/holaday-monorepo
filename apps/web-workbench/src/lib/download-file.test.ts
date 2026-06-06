@@ -24,8 +24,8 @@ describe('safeDownloadFilename', () => {
 
 describe('downloadFailureMessage', () => {
   it('keeps auth and expiry failures specific', () => {
-    expect(downloadFailureMessage(401)).toContain('未授权');
-    expect(downloadFailureMessage(403)).toContain('未授权');
+    expect(downloadFailureMessage(401)).toContain('刷新页面后重试');
+    expect(downloadFailureMessage(403)).toContain('刷新页面后重试');
     expect(downloadFailureMessage(404)).toContain('链接已过期');
     expect(downloadFailureMessage(410)).toContain('链接已过期');
   });
