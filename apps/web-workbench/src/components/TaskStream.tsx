@@ -549,7 +549,6 @@ function AgentBlock({
         {detailSteps.length > 0 && (
           <DetailToggle
             open={detailOpen}
-            count={detailSteps.length}
             summary={detailSummary}
             onToggle={() => setDetailOpen((v) => !v)}
           >
@@ -994,13 +993,11 @@ function LineBadge({
 
 function DetailToggle({
   open,
-  count,
   summary,
   onToggle,
   children,
 }: {
   open: boolean;
-  count: number;
   summary: StepDetailSummary;
   onToggle(): void;
   children: React.ReactNode;
@@ -1010,6 +1007,8 @@ function DetailToggle({
       <button
         type="button"
         onClick={onToggle}
+        aria-label={`详细步骤，${summary.label}`}
+        title={`详细步骤，${summary.label}`}
         aria-expanded={open}
         className="group flex w-full items-center justify-between gap-3 rounded-[8px] border border-[#DCDDDD] bg-white/85 px-3 py-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.04)] transition-colors hover:border-[#ADADAD] hover:bg-white dark:border-white/10 dark:bg-card/80 dark:hover:bg-card"
       >
@@ -1035,7 +1034,6 @@ function DetailToggle({
           ) : (
             <ChevronRight className="h-3 w-3" />
           )}
-          {!open && <span className="tabular-nums">{count}</span>}
         </span>
       </button>
       {open && children}
