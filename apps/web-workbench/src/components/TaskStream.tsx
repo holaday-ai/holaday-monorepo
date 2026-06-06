@@ -1330,13 +1330,14 @@ function EmptyTerminalCard({
           onClick={() => void handleRetry()}
           disabled={retrying}
           className={cn(
-            'mt-3 inline-flex h-7 w-7 items-center justify-center rounded-md border bg-white/70 text-[11px] font-medium transition-colors hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:bg-transparent dark:hover:bg-white/10',
+            'mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border bg-white/70 px-2.5 text-[11px] font-medium transition-colors hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:bg-transparent dark:hover:bg-white/10',
             partial
               ? 'border-[#FFC910]/60 text-[#57479C] dark:border-[#FFC910]/35 dark:text-foreground'
               : 'border-[#EA1F59]/40 text-[#EA1F59] dark:border-[#EA1F59]/35',
           )}
         >
           <RotateCcw className={cn('h-3 w-3', retrying && 'animate-spin')} />
+          <span>{retrying ? '重新执行中…' : '重新执行'}</span>
         </button>
       )}
     </div>
@@ -1934,6 +1935,12 @@ function TerminalSummary({
         <FailureHeaderCard
           status={status}
           errorText={status === 'failed' ? displayText ?? '' : ''}
+          onRetry={
+            status === 'failed' && intent
+              ? () => void handleRetry(intent)
+              : undefined
+          }
+          retrying={status === 'failed' && retryingIntent != null}
         />
       )}
       {!isFailedLike && endedOnBrowserErrorPage && (
@@ -2679,9 +2686,13 @@ function markdownElementTagName(element: React.ReactElement): string | null {
 function FailureHeaderCard({
   status,
   errorText,
+  onRetry,
+  retrying = false,
 }: {
   status: UiTask['status'];
   errorText: string;
+  onRetry?: () => void;
+  retrying?: boolean;
 }): JSX.Element {
   const cancelled = status === 'cancelled';
   const friendly = cancelled
@@ -2706,9 +2717,24 @@ function FailureHeaderCard({
     >
       <div className="font-medium">{friendly.title}</div>
       <div className="mt-0.5 text-xs opacity-80">{friendly.subtitle}</div>
-      <div className="mt-2 inline-flex items-center gap-1.5 rounded-[6px] border border-[#DCDDDD]/75 bg-white/70 px-2 py-1 text-[11px] text-[#595757] dark:border-white/10 dark:bg-white/10 dark:text-foreground/80">
-        <RotateCcw className="h-3 w-3 text-[#EA1F59]" aria-hidden />
-        <span>{friendly.nextStep}</span>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className="inline-flex min-h-7 items-center gap-1.5 rounded-[6px] border border-[#DCDDDD]/75 bg-white/70 px-2 py-1 text-[11px] text-[#595757] dark:border-white/10 dark:bg-white/10 dark:text-foreground/80">
+          <RotateCcw className="h-3 w-3 text-[#EA1F59]" aria-hidden />
+          <span>{friendly.nextStep}</span>
+        </div>
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={retrying}
+            aria-label={retrying ? '正在重新执行任务' : '重新执行任务'}
+            title={retrying ? '正在重新执行' : '重新执行任务'}
+            className="inline-flex h-7 items-center gap-1.5 rounded-[6px] border border-[#EA1F59]/25 bg-white px-2.5 text-[11px] font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/5 disabled:cursor-wait disabled:opacity-60 dark:border-[#EA1F59]/35 dark:bg-transparent dark:text-foreground dark:hover:bg-[#EA1F59]/10"
+          >
+            <RotateCcw className={cn('h-3 w-3', retrying && 'animate-spin')} aria-hidden />
+            <span>{retrying ? '重新执行中…' : '重新执行'}</span>
+          </button>
+        )}
       </div>
       {hasTechnical && (
         <div className="mt-2">
