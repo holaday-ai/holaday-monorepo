@@ -493,6 +493,9 @@ function StatusIcon({ status }: { status: string }): JSX.Element {
   if (status === 'failed') {
     return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" />;
   }
+  if (status === 'awaiting_user') {
+    return <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#8A6A00]" />;
+  }
   if (status === 'cancelled') {
     return (
       <CircleSlash className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />

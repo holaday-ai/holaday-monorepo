@@ -338,8 +338,9 @@ function searchStatusTone(status: string): string {
   if (status === 'completed') return 'bg-[#42C0EF]/10 text-[#1688AA]';
   if (status === 'failed') return 'bg-[#EA1F59]/10 text-[#EA1F59]';
   if (status === 'partial_success') return 'bg-[#FFC910]/20 text-[#8A6A00]';
+  if (status === 'awaiting_user') return 'bg-[#FFC910]/20 text-[#8A6A00]';
   if (status === 'cancelled') return 'bg-[#EFEFEF] text-[#595757]';
-  if (status === 'executing' || status === 'queued' || status === 'awaiting_user') {
+  if (status === 'executing' || status === 'queued') {
     return 'bg-[#57479C]/10 text-[#57479C]';
   }
   return 'bg-[#EFEFEF] text-[#595757]';
