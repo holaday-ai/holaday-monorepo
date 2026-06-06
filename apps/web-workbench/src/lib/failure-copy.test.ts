@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyFriendlyFailure } from './failure-copy';
+import { classifyFriendlyFailure, friendlyFailureDetail } from './failure-copy';
 
 describe('classifyFriendlyFailure', () => {
   it('uses terminal-safe login recovery copy', () => {
@@ -109,5 +109,12 @@ describe('classifyFriendlyFailure', () => {
       subtitle: '服务器拒绝连接或网络不可达。请稍后重试，或换一个站点。',
       nextStep: '稍后重新执行，或换一个能直接访问的网址。',
     });
+  });
+
+  it('hides raw English failure details while keeping localized details', () => {
+    expect(friendlyFailureDetail('Protocol error (Page.navigate): Target closed')).toBe(
+      '浏览器连接中断，请重新执行任务。',
+    );
+    expect(friendlyFailureDetail('目标网站要求登录')).toBe('目标网站要求登录');
   });
 });

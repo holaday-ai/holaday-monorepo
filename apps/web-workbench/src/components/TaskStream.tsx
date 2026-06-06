@@ -49,7 +49,7 @@ import {
   externalLinkConfirmDescription,
   safeExternalHttpHref,
 } from '@/lib/external-link-copy';
-import { classifyFriendlyFailure } from '@/lib/failure-copy';
+import { classifyFriendlyFailure, friendlyFailureDetail } from '@/lib/failure-copy';
 import { formatFileSize } from '@/lib/file-size';
 import { downloadFileMetaLabel } from '@/lib/file-download-card-copy';
 import { downloadMarkdownFile } from '@/lib/markdown-download';
@@ -2651,6 +2651,7 @@ function FailureHeaderCard({
       }
     : classifyFriendlyFailure(errorText);
   const hasTechnical = !cancelled && errorText.trim().length > 0;
+  const detailText = friendlyFailureDetail(errorText);
   const [showTechnical, setShowTechnical] = React.useState(false);
   return (
     <div
@@ -2674,8 +2675,8 @@ function FailureHeaderCard({
             type="button"
             onClick={() => setShowTechnical((v) => !v)}
             aria-expanded={showTechnical}
-            aria-label={showTechnical ? '收起技术信息' : '查看技术信息'}
-            title={showTechnical ? '收起技术信息' : '查看技术信息'}
+            aria-label={showTechnical ? '收起失败详情' : '查看失败详情'}
+            title={showTechnical ? '收起失败详情' : '查看失败详情'}
             className="inline-flex h-6 items-center gap-1 rounded-[6px] px-1.5 text-[11px] font-medium text-[#595757] transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
           >
             {showTechnical ? (
@@ -2683,11 +2684,11 @@ function FailureHeaderCard({
             ) : (
               <ChevronRight className="h-3 w-3" aria-hidden />
             )}
-            <span>技术</span>
+            <span>详情</span>
           </button>
           {showTechnical && (
             <pre className="mt-1.5 whitespace-pre-wrap break-words rounded bg-white/70 px-2 py-1.5 text-[11px] font-mono leading-relaxed text-[#595757] dark:bg-white/10 dark:text-foreground">
-              {errorText}
+              {detailText}
             </pre>
           )}
         </div>

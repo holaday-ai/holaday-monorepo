@@ -1,4 +1,5 @@
 import { classifyBrowserErrorKind } from './browser-error-kind';
+import { humaniseTaskError } from './error-copy';
 
 export interface FriendlyFailure {
   title: string;
@@ -163,4 +164,8 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
     subtitle: '请重试，或换一种描述方式（更具体的指令、提供示例数据）。',
     nextStep: '换一种更具体的描述后重新执行。',
   };
+}
+
+export function friendlyFailureDetail(errorText: string): string {
+  return humaniseTaskError(errorText);
 }
