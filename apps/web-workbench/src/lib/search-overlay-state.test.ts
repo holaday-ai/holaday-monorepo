@@ -101,7 +101,7 @@ describe('search overlay state helpers', () => {
       }),
     ).toEqual({
       title: '机票订单',
-      secondary: '需要登录 · 登录航空公司查看订单',
+      secondary: '登录航空公司查看订单',
     });
 
     expect(
@@ -113,7 +113,33 @@ describe('search overlay state helpers', () => {
       }),
     ).toEqual({
       title: '补充预算',
-      secondary: '需要你回复',
+      secondary: '',
+    });
+  });
+
+  it('does not repeat terminal status when the badge already shows it', () => {
+    expect(
+      searchOverlayRowCopy({
+        intent: '打开 example.com',
+        title: null,
+        status: 'completed',
+        awaitingKind: null,
+      }),
+    ).toEqual({
+      title: '打开 example.com',
+      secondary: '',
+    });
+
+    expect(
+      searchOverlayRowCopy({
+        intent: '原始任务描述',
+        title: '整理好的标题',
+        status: 'failed',
+        awaitingKind: null,
+      }),
+    ).toEqual({
+      title: '整理好的标题',
+      secondary: '原始任务描述',
     });
   });
 });

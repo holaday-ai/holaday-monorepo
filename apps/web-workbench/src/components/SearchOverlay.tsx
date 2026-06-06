@@ -290,9 +290,11 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                     <span className="block truncate text-sm text-foreground">
                       {copy.title}
                     </span>
-                    <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-                      {copy.secondary}
-                    </span>
+                    {copy.secondary && (
+                      <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                        {copy.secondary}
+                      </span>
+                    )}
                   </div>
                   <SearchStatusBadge status={t.status} awaitingKind={t.awaitingKind} />
                 </button>

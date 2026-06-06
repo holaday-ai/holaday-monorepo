@@ -1,6 +1,5 @@
 import { pageErrorMessage } from './page-error-copy';
 import type { AwaitingKind } from './awaiting-user-copy';
-import { taskStatusLabel } from './task-status-copy';
 
 export interface SearchOverlayRow {
   readonly taskId: string;
@@ -80,16 +79,9 @@ export function searchOverlayRowCopy(
   row: Pick<SearchOverlayRow, 'awaitingKind' | 'intent' | 'status' | 'title'>,
 ): { readonly title: string; readonly secondary: string } {
   const title = row.title && row.title.trim().length > 0 ? row.title : row.intent;
-  if (row.status === 'awaiting_user') {
-    const status = taskStatusLabel(row.status, row.awaitingKind);
-    return {
-      title,
-      secondary: title === row.intent ? status : `${status} · ${row.intent}`,
-    };
-  }
   return {
     title,
-    secondary: title === row.intent ? taskStatusLabel(row.status) : row.intent,
+    secondary: title === row.intent ? '' : row.intent,
   };
 }
 
