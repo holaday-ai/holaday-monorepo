@@ -176,7 +176,7 @@ export function AddChannelModal({
       if (res.ok) {
         setTestResult({
           ok: true,
-          message: `发送成功（HTTP ${res.status ?? 200}）`,
+          message: '测试消息已发送',
         });
       } else {
         setTestResult({
