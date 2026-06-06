@@ -72,7 +72,25 @@ describe('fitScreencastReadable', () => {
         sourceWidth: 1280,
         sourceHeight: 800,
       }),
-    ).toEqual({ width: 1177, height: 736, scale: 0.92 });
+    ).toEqual({ width: 1216, height: 760, scale: 0.95 });
+  });
+
+  it('fills phone-height sheets instead of shrinking desktop pages to a tiny strip', () => {
+    const contain = fitScreencastContain({
+      hostWidth: 390,
+      hostHeight: 720,
+      sourceWidth: 1280,
+      sourceHeight: 800,
+    });
+    const readable = fitScreencastReadable({
+      hostWidth: 390,
+      hostHeight: 720,
+      sourceWidth: 1280,
+      sourceHeight: 800,
+    });
+
+    expect(contain).toEqual({ width: 390, height: 243, scale: 0.3046875 });
+    expect(readable).toEqual({ width: 1152, height: 720, scale: 0.9 });
   });
 
   it('keeps normal portrait browser frames on contain sizing', () => {
@@ -133,9 +151,9 @@ describe('placeScreencastReadableTop', () => {
         sourceHeight: 800,
       }),
     ).toEqual({
-      width: 1177,
-      height: 736,
-      scale: 0.92,
+      width: 1216,
+      height: 760,
+      scale: 0.95,
       offsetX: 0,
       offsetY: 0,
     });
