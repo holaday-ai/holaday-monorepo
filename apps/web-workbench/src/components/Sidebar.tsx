@@ -944,7 +944,7 @@ function LoadMoreTasksButton({
       type="button"
       onClick={onLoadMore}
       disabled={loadingMore}
-      className="mx-2 my-2 inline-flex w-[calc(100%-1rem)] items-center justify-center gap-1.5 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-2 py-1.5 text-center text-xs text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
+      className="mx-2 my-2 inline-flex h-8 w-[calc(100%-1rem)] items-center justify-center gap-1.5 rounded-[8px] border border-[#DCDDDD]/70 bg-white/55 px-2 text-center text-xs text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
     >
       <RotateCcw className={cn('h-3 w-3', loadingMore && 'animate-spin')} aria-hidden />
       {loadingMore ? '加载中…' : '加载更多任务'}

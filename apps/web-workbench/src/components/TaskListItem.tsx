@@ -124,7 +124,7 @@ export function TaskListItem({
       role={batchMode ? 'button' : undefined}
       title={rowTitle}
       className={cn(
-        'group relative flex w-full items-center gap-2 rounded-[8px] border border-transparent px-2.5 py-1.5 text-left transition-colors',
+        'group relative flex w-full items-center gap-2 rounded-[8px] border border-transparent px-2.5 py-0.5 text-left transition-colors',
         'hover:border-[#EA1F59]/14 hover:bg-[#EA1F59]/[0.035] dark:hover:border-[#EA1F59]/30 dark:hover:bg-[#EA1F59]/10',
         selected && !batchMode && 'border-[#EA1F59]/22 bg-white/70 shadow-[0_8px_22px_rgba(234,31,89,0.06)] dark:bg-white/[0.05]',
         batchMode && batchChecked && 'border-[#57479C]/22 bg-[#57479C]/10 dark:bg-[#57479C]/20',
@@ -179,7 +179,7 @@ export function TaskListItem({
           }}
           aria-pressed={selected && !batchMode ? true : undefined}
           className={cn(
-            'min-w-0 flex-1 truncate bg-transparent text-left text-[13px] leading-5 outline-none focus-visible:ring-1 focus-visible:ring-[#EA1F59]/45',
+            'flex h-8 min-w-0 flex-1 items-center truncate bg-transparent text-left text-[13px] leading-5 outline-none focus-visible:ring-1 focus-visible:ring-[#EA1F59]/45',
             task.status === 'failed' ? 'text-[#ADADAD]' : 'text-[#595757] dark:text-foreground/85',
             selected && 'font-medium text-[#EA1F59] dark:text-[#EA1F59]',
           )}
@@ -196,7 +196,7 @@ export function TaskListItem({
           e.stopPropagation();
           onContextMenu(task.taskId, e);
         }}
-          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] text-[#ADADAD] opacity-100 transition-opacity hover:bg-white hover:text-[#EA1F59] focus-visible:opacity-100 dark:hover:bg-white/10 lg:opacity-0 lg:group-hover:opacity-100"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-[#ADADAD] opacity-100 transition-opacity hover:bg-white hover:text-[#EA1F59] focus-visible:opacity-100 dark:hover:bg-white/10 lg:opacity-0 lg:group-hover:opacity-100"
         >
           <MoreHorizontal className="h-3.5 w-3.5" />
         </button>
