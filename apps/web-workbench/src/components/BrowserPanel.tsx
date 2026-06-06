@@ -1218,7 +1218,7 @@ export function BrowserPanel({
              to top-1/2 (vertical center) so the collapse handle
              reads as a panel-edge affordance, not part of the
              browser nav row. */
-          className="absolute left-0 top-1/2 z-10 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.08)] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-card"
+          className="absolute left-0 top-1/2 z-10 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.08)] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-card"
         >
           {collapsed ? (
             <ChevronLeft className="h-3.5 w-3.5" />
@@ -1319,7 +1319,7 @@ export function BrowserPanel({
                   title="停止当前任务"
                   aria-label="停止当前任务"
                   className={cn(
-                    'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition-colors',
+                    'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors',
                     aborting
                       ? 'cursor-wait border-[#DCDDDD] bg-[#EFEFEF] text-muted-foreground dark:border-white/10 dark:bg-white/5'
                       : 'border-[#EA1F59]/35 bg-white text-[#EA1F59] hover:bg-[#EA1F59]/10 dark:border-[#EA1F59]/35 dark:bg-transparent dark:hover:bg-[#EA1F59]/10',
@@ -1340,7 +1340,7 @@ export function BrowserPanel({
                   aria-label={interactive ? '退出浏览器接管' : '接管浏览器'}
                   aria-pressed={interactive}
                   className={cn(
-                    'inline-flex h-6 w-6 items-center justify-center rounded-md border transition-colors',
+                    'inline-flex h-8 w-8 items-center justify-center rounded-md border transition-colors',
                     interactive
                       ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
                       : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5',
@@ -1365,7 +1365,7 @@ export function BrowserPanel({
                   aria-label={fullscreen ? '退出全屏' : '全屏浏览器模式'}
                   aria-pressed={fullscreen}
                   className={cn(
-                    'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors',
+                    'inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors',
                     'hover:bg-foreground/5 hover:text-foreground',
                   )}
                 >
@@ -1533,7 +1533,7 @@ export function BrowserPanel({
                         onClick={handleManualReconnect}
                         aria-label={liveOverlayCopy.reconnectLabel}
                         title={liveOverlayCopy.reconnectLabel}
-                        className="pointer-events-auto inline-flex h-7 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
+                        className="pointer-events-auto inline-flex h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
                       >
                         <RotateCw className="h-3 w-3" />
                         刷新画面
@@ -1561,7 +1561,7 @@ export function BrowserPanel({
                   <button
                     type="button"
                     onClick={() => setActivityVisible(true)}
-                    className="absolute bottom-2 right-2 inline-flex h-7 w-7 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60"
+                    className="absolute bottom-2 right-2 inline-flex h-8 w-8 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60"
                     aria-label="显示操作日志"
                     title="显示操作日志"
                   >
@@ -1628,7 +1628,7 @@ export function BrowserPanel({
                     <button
                       type="button"
                       onClick={() => setActivityVisible(true)}
-                      className="absolute bottom-2 right-2 inline-flex h-7 w-7 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60"
+                      className="absolute bottom-2 right-2 inline-flex h-8 w-8 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60"
                       aria-label="显示操作日志"
                       title="显示操作日志"
                     >
@@ -1662,7 +1662,7 @@ export function BrowserPanel({
                         hiddenCjkInputRef.current?.blur();
                       }}
                       className={cn(
-                        'absolute left-2 z-30 inline-flex h-7 w-7 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60',
+                        'absolute left-2 z-30 inline-flex h-8 w-8 items-center justify-center rounded bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60',
                         fullscreen ? 'bottom-4' : 'bottom-2',
                       )}
                       aria-label="切换输入方式"
@@ -1744,7 +1744,7 @@ export function BrowserPanel({
                                 ? '完整适应'
                                 : '清晰查看'
                             }
-                            className="pointer-events-auto inline-flex h-7 shrink-0 items-center rounded-md border border-white/25 bg-black/45 px-2 text-[11px] font-medium text-white shadow-sm backdrop-blur transition-colors hover:bg-black/60"
+                            className="pointer-events-auto inline-flex h-8 shrink-0 items-center rounded-md border border-white/25 bg-black/45 px-2.5 text-[11px] font-medium text-white shadow-sm backdrop-blur transition-colors hover:bg-black/60"
                           >
                             {finalEvidenceViewMode === 'readable' ? '全貌' : '清晰'}
                           </button>
@@ -1780,7 +1780,7 @@ export function BrowserPanel({
                         disabled={reExecuting}
                         aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
                         title={reExecuting ? '正在重新执行' : '重新执行'}
-                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:text-foreground/80 dark:hover:bg-white/10"
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:text-foreground/80 dark:hover:bg-white/10"
                       >
                         <RotateCw className={cn('h-3.5 w-3.5', reExecuting && 'animate-spin')} />
                       </button>
@@ -1797,7 +1797,7 @@ export function BrowserPanel({
                         disabled={reExecuting}
                         aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
                         title={reExecuting ? '正在重新执行' : '重新执行'}
-                        className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
                       >
                         <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
                         {reExecuting ? '重新执行中…' : '重新执行'}
@@ -2660,7 +2660,7 @@ function NavButton({
         }
       }}
       className={cn(
-        'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors',
+        'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors',
         'hover:bg-[#EFEFEF]/60 hover:text-foreground dark:hover:bg-white/10',
         pending && 'opacity-50',
       )}
@@ -2795,7 +2795,7 @@ function FullscreenFloatingToolbar({
           title="停止当前任务"
           aria-label="停止当前任务"
           className={cn(
-            'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition-colors',
+            'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors',
             aborting
               ? 'cursor-wait border-white/20 bg-white/10 text-white/60'
               : 'border-[#EA1F59]/35 bg-[#EA1F59]/15 text-white hover:bg-[#EA1F59]/25',
@@ -2811,7 +2811,7 @@ function FullscreenFloatingToolbar({
           title={interactive ? '退出接管 — 让 AI 继续操作' : '接管 — 你自己操作浏览器'}
           aria-label={interactive ? '退出接管' : '接管'}
           className={cn(
-            'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-white/85 transition-colors hover:bg-white/10',
+            'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-white/85 transition-colors hover:bg-white/10',
             interactive && 'bg-[#EA1F59]/35 text-white',
           )}
         >
@@ -2823,7 +2823,7 @@ function FullscreenFloatingToolbar({
         onClick={onExitFullscreen}
         title="退出全屏 (Cmd/Ctrl+Esc)"
         aria-label="退出全屏"
-        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-white/85 transition-colors hover:bg-white/10"
+        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-white/85 transition-colors hover:bg-white/10"
       >
         <Minimize2 className="h-3.5 w-3.5" />
       </button>
