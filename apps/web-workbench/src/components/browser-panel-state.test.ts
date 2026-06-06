@@ -60,16 +60,16 @@ describe('BrowserPanel state helpers', () => {
   });
 
   it('labels live browser connection states for icon-only status dots', () => {
-    expect(browserLiveStatusLabel('idle')).toBe('等待实时画面');
-    expect(browserLiveStatusLabel('connecting')).toBe('实时画面连接中');
-    expect(browserLiveStatusLabel('connected')).toBe('实时画面已连接');
-    expect(browserLiveStatusLabel('disconnected')).toBe('实时画面已断开');
-    expect(browserLiveStatusLabel('error')).toBe('实时画面连接失败');
+    expect(browserLiveStatusLabel('idle')).toBe('等待浏览器画面');
+    expect(browserLiveStatusLabel('connecting')).toBe('浏览器画面连接中');
+    expect(browserLiveStatusLabel('connected')).toBe('浏览器画面已连接');
+    expect(browserLiveStatusLabel('disconnected')).toBe('浏览器画面已断开');
+    expect(browserLiveStatusLabel('error')).toBe('浏览器画面连接失败');
   });
 
   it('keeps the browser status dot label neutral for action-needed states', () => {
-    expect(browserPanelDotLabel('idle')).toBe('等待实时画面');
-    expect(browserPanelDotLabel('live')).toBe('实时画面已连接');
+    expect(browserPanelDotLabel('idle')).toBe('等待浏览器画面');
+    expect(browserPanelDotLabel('live')).toBe('浏览器画面已连接');
     expect(browserPanelDotLabel('error')).toBe('需要处理');
   });
 
@@ -220,16 +220,16 @@ describe('BrowserPanel state helpers', () => {
     expect(
       browserLiveOverlayCopy({ status: 'connecting', showReconnect: false }),
     ).toEqual({
-      title: '正在连接实时画面',
+      title: '正在连接浏览器画面',
       detail: '浏览器正在启动或恢复连接，任务会继续执行。',
-      reconnectLabel: '重新连接实时画面',
+      reconnectLabel: '刷新浏览器画面',
     });
     expect(
       browserLiveOverlayCopy({ status: 'connecting', showReconnect: true }),
     ).toEqual({
-      title: '实时画面连接时间较久',
-      detail: '浏览器可能还在启动。可以继续等待，或手动重连画面。',
-      reconnectLabel: '重新连接实时画面',
+      title: '浏览器画面连接时间较久',
+      detail: '浏览器可能还在启动。可以继续等待，或手动刷新画面。',
+      reconnectLabel: '刷新浏览器画面',
     });
   });
 
@@ -237,16 +237,16 @@ describe('BrowserPanel state helpers', () => {
     expect(
       browserLiveOverlayCopy({ status: 'disconnected', showReconnect: false }),
     ).toEqual({
-      title: '实时画面正在恢复',
+      title: '浏览器画面正在恢复',
       detail: 'HOLA DAY 正在自动重连。你可以继续等待，任务不会重新提交。',
-      reconnectLabel: '重新连接实时画面',
+      reconnectLabel: '刷新浏览器画面',
     });
     expect(
       browserLiveOverlayCopy({ status: 'disconnected', showReconnect: true }),
     ).toEqual({
-      title: '实时画面已断开',
-      detail: '任务可能仍在执行。点击重新连接只刷新画面，不会重新提交任务。',
-      reconnectLabel: '重新连接实时画面',
+      title: '浏览器画面已断开',
+      detail: '任务可能仍在执行。点击刷新只刷新画面，不会重新提交任务。',
+      reconnectLabel: '刷新浏览器画面',
     });
   });
 
@@ -254,9 +254,9 @@ describe('BrowserPanel state helpers', () => {
     expect(
       browserLiveOverlayCopy({ status: 'error', showReconnect: true }),
     ).toEqual({
-      title: '实时画面连接失败',
-      detail: '连接没有建立成功。点击重新连接会刷新画面，任务本身会继续处理。',
-      reconnectLabel: '重新连接实时画面',
+      title: '浏览器画面连接失败',
+      detail: '连接没有建立成功。点击刷新会刷新画面，任务本身会继续处理。',
+      reconnectLabel: '刷新浏览器画面',
     });
   });
 
@@ -281,7 +281,7 @@ describe('BrowserPanel state helpers', () => {
       tone: 'info',
     });
     expect(browserWakeFeedback('spawning')).toEqual({
-      message: '浏览器正在启动，实时画面会自动连接',
+      message: '浏览器正在启动，画面会自动连接',
       tone: 'info',
     });
     expect(browserWakeFeedback('unavailable')).toEqual({

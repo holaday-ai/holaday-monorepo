@@ -71,16 +71,16 @@ export function terminalEvidenceFrameLabel(inputs: {
 export function browserLiveStatusLabel(status: BrowserLiveStatus): string {
   switch (status) {
     case 'connected':
-      return '实时画面已连接';
+      return '浏览器画面已连接';
     case 'connecting':
-      return '实时画面连接中';
+      return '浏览器画面连接中';
     case 'disconnected':
-      return '实时画面已断开';
+      return '浏览器画面已断开';
     case 'error':
-      return '实时画面连接失败';
+      return '浏览器画面连接失败';
     case 'idle':
     default:
-      return '等待实时画面';
+      return '等待浏览器画面';
   }
 }
 
@@ -133,7 +133,7 @@ export function browserPanelHeaderStatus(inputs: {
   if (inputs.liveStatus === 'connecting') {
     return {
       label: '连接中',
-      tooltip: '正在连接实时浏览器画面',
+      tooltip: '正在连接浏览器画面',
       tone: 'live',
       dotStatus: 'live',
       showLabel: true,
@@ -143,8 +143,8 @@ export function browserPanelHeaderStatus(inputs: {
     return {
       label: inputs.showReconnect ? '已断开' : '恢复中',
       tooltip: inputs.showReconnect
-        ? '实时画面已断开，可手动重新连接'
-        : '实时画面短暂断开，正在自动恢复',
+        ? '浏览器画面已断开，可手动刷新画面'
+        : '浏览器画面短暂断开，正在自动恢复',
       tone: 'recovering',
       dotStatus: inputs.showReconnect ? 'error' : 'live',
       showLabel: true,
@@ -153,7 +153,7 @@ export function browserPanelHeaderStatus(inputs: {
   if (inputs.liveStatus === 'error') {
     return {
       label: '连接失败',
-      tooltip: '实时画面连接失败，可重新连接画面',
+      tooltip: '浏览器画面连接失败，可刷新画面',
       tone: 'error',
       dotStatus: 'error',
       showLabel: true,
@@ -218,49 +218,49 @@ export function browserLiveOverlayCopy(inputs: {
   if (inputs.showReconnect) {
     if (inputs.status === 'disconnected') {
       return {
-        title: '实时画面已断开',
-        detail: '任务可能仍在执行。点击重新连接只刷新画面，不会重新提交任务。',
-        reconnectLabel: '重新连接实时画面',
+        title: '浏览器画面已断开',
+        detail: '任务可能仍在执行。点击刷新只刷新画面，不会重新提交任务。',
+        reconnectLabel: '刷新浏览器画面',
       };
     }
     if (inputs.status === 'error') {
       return {
-        title: '实时画面连接失败',
-        detail: '连接没有建立成功。点击重新连接会刷新画面，任务本身会继续处理。',
-        reconnectLabel: '重新连接实时画面',
+        title: '浏览器画面连接失败',
+        detail: '连接没有建立成功。点击刷新会刷新画面，任务本身会继续处理。',
+        reconnectLabel: '刷新浏览器画面',
       };
     }
     return {
-      title: '实时画面连接时间较久',
-      detail: '浏览器可能还在启动。可以继续等待，或手动重连画面。',
-      reconnectLabel: '重新连接实时画面',
+      title: '浏览器画面连接时间较久',
+      detail: '浏览器可能还在启动。可以继续等待，或手动刷新画面。',
+      reconnectLabel: '刷新浏览器画面',
     };
   }
   if (inputs.status === 'idle') {
     return {
-      title: '正在准备实时画面',
+      title: '正在准备浏览器画面',
       detail: '任务开始后会自动连接到浏览器。',
-      reconnectLabel: '重新连接实时画面',
+      reconnectLabel: '刷新浏览器画面',
     };
   }
   if (inputs.status === 'disconnected') {
     return {
-      title: '实时画面正在恢复',
+      title: '浏览器画面正在恢复',
       detail: 'HOLA DAY 正在自动重连。你可以继续等待，任务不会重新提交。',
-      reconnectLabel: '重新连接实时画面',
+      reconnectLabel: '刷新浏览器画面',
     };
   }
   if (inputs.status === 'error') {
     return {
-      title: '实时画面暂时不可用',
+      title: '浏览器画面暂时不可用',
       detail: '浏览器画面连接失败，任务可能仍在后台继续。',
-      reconnectLabel: '重新连接实时画面',
+      reconnectLabel: '刷新浏览器画面',
     };
   }
   return {
-    title: '正在连接实时画面',
+    title: '正在连接浏览器画面',
     detail: '浏览器正在启动或恢复连接，任务会继续执行。',
-    reconnectLabel: '重新连接实时画面',
+    reconnectLabel: '刷新浏览器画面',
   };
 }
 
@@ -289,7 +289,7 @@ export function browserWakeFeedback(
     case 'ready':
       return { message: '已有任务浏览器可连接，正在刷新画面', tone: 'info' };
     case 'spawning':
-      return { message: '浏览器正在启动，实时画面会自动连接', tone: 'info' };
+      return { message: '浏览器正在启动，画面会自动连接', tone: 'info' };
     case 'unavailable':
       return {
         message: '当前没有正在运行的浏览器。新任务会自动打开浏览器。',
