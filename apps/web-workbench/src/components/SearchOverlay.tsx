@@ -5,6 +5,7 @@ import {
   nextSearchActiveIndex,
   normalizeSearchOverlayRows,
   searchOverlayErrorMessage,
+  searchOverlayRowCopy,
   searchOverlayStatusCopy,
   type SearchOverlayRow,
 } from '@/lib/search-overlay-state';
@@ -265,9 +266,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
             </li>
           )}
           {filtered.map((t, i) => {
-            const displayTitle = t.title && t.title.trim().length > 0 ? t.title : t.intent;
-            const secondary =
-              displayTitle === t.intent ? taskStatusLabel(t.status, t.awaitingKind) : t.intent;
+            const copy = searchOverlayRowCopy(t);
             return (
               <li key={t.taskId}>
                 <button
@@ -289,10 +288,10 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                   </div>
                   <div className="min-w-0 flex-1">
                     <span className="block truncate text-sm text-foreground">
-                      {displayTitle}
+                      {copy.title}
                     </span>
                     <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-                      {secondary}
+                      {copy.secondary}
                     </span>
                   </div>
                   <SearchStatusBadge status={t.status} awaitingKind={t.awaitingKind} />

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   nextSearchActiveIndex,
   normalizeSearchOverlayRows,
+  searchOverlayRowCopy,
   searchOverlayErrorMessage,
   searchOverlayStatusCopy,
 } from './search-overlay-state';
@@ -88,5 +89,31 @@ describe('search overlay state helpers', () => {
   it('treats malformed search row collections as empty', () => {
     expect(normalizeSearchOverlayRows({ tasks: [] })).toEqual([]);
     expect(normalizeSearchOverlayRows('bad')).toEqual([]);
+  });
+
+  it('keeps action-needed status visible in mobile search rows', () => {
+    expect(
+      searchOverlayRowCopy({
+        intent: '登录航空公司查看订单',
+        title: '机票订单',
+        status: 'awaiting_user',
+        awaitingKind: 'login',
+      }),
+    ).toEqual({
+      title: '机票订单',
+      secondary: '需要登录 · 登录航空公司查看订单',
+    });
+
+    expect(
+      searchOverlayRowCopy({
+        intent: '补充预算',
+        title: null,
+        status: 'awaiting_user',
+        awaitingKind: 'clarification',
+      }),
+    ).toEqual({
+      title: '补充预算',
+      secondary: '需要你回复',
+    });
   });
 });
