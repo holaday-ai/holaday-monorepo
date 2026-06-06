@@ -1886,11 +1886,11 @@ function ActivityOverlay({
         <button
           type="button"
           onClick={onClose}
-          className="inline-flex h-5 w-5 items-center justify-center rounded hover:bg-white/10"
+          className="inline-flex h-8 w-8 items-center justify-center rounded hover:bg-white/10"
           aria-label="收起操作日志"
           title="收起操作日志"
         >
-          <X className="h-3 w-3" aria-hidden />
+          <X className="h-3.5 w-3.5" aria-hidden />
         </button>
       </div>
       <ul className="space-y-0.5 font-mono leading-snug">
