@@ -52,10 +52,12 @@ export function SettingsPage(): JSX.Element {
     };
 
     const frame = window.requestAnimationFrame(scrollToSection);
-    const timer = window.setTimeout(scrollToSection, 350);
+    const timers = [100, 350, 800, 1400, 2200].map((delay) =>
+      window.setTimeout(scrollToSection, delay),
+    );
     return () => {
       window.cancelAnimationFrame(frame);
-      window.clearTimeout(timer);
+      timers.forEach((timer) => window.clearTimeout(timer));
     };
   }, [location.hash]);
 
