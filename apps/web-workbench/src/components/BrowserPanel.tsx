@@ -2596,7 +2596,7 @@ function UrlBar({
       disabled={pending}
       aria-label={readOnly ? '浏览器最终地址' : '浏览器地址栏 (Enter 跳转, Esc 还原)'}
       className={cn(
-        'min-w-0 flex-1 truncate rounded-md border bg-transparent px-2 py-1 font-mono text-[11px] outline-none transition-colors',
+        'h-8 min-w-0 flex-1 truncate rounded-md border bg-transparent px-2 font-mono text-[11px] outline-none transition-colors',
         'border-transparent text-muted-foreground hover:border-[#DCDDDD] hover:bg-[#EFEFEF]/50 dark:hover:border-white/10 dark:hover:bg-white/5',
         'focus:border-foreground/20 focus:bg-background focus:text-foreground focus:ring-0',
         interactiveActive && 'border-[#EA1F59]/35',
