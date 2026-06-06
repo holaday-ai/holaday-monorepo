@@ -295,7 +295,7 @@ function FilterTab({
       type="button"
       onClick={onClick}
       className={cn(
-        'rounded-md px-3 py-1.5 text-xs font-medium transition-[background-color,box-shadow,color]',
+        'h-8 rounded-md px-3 text-xs font-medium transition-[background-color,box-shadow,color]',
         active
           ? 'bg-white text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.05)]'
           : 'text-[#595757] hover:bg-white/70 hover:text-foreground',
