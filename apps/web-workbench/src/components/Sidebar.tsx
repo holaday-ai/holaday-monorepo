@@ -798,7 +798,7 @@ function TaskContextMenu({
         {onRetry && (
           <DropdownMenuItem onSelect={onRetry}>
             <RotateCcw className="text-muted-foreground" />
-            <span>用相同意图重试</span>
+            <span>重新执行同一任务</span>
           </DropdownMenuItem>
         )}
         {onMoveToProject && (

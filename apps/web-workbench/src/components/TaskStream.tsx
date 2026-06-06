@@ -1249,10 +1249,10 @@ function EmptyTerminalCard({
       const result = await createTask(intent, []);
       if (!mountedRef.current) return;
       if ('error' in result) {
-        toast.show(taskActionError('重试失败', result.error), 'error');
+        toast.show(taskActionError('重新执行失败', result.error), 'error');
         return;
       }
-      toast.show('已重新提交', 'info', 2000);
+      toast.show('已开始重新执行', 'info', 2000);
     } finally {
       if (mountedRef.current) {
         setRetrying(false);
@@ -1877,10 +1877,10 @@ function TerminalSummary({
         const result = await createTask(retryIntent, []);
         if (!mountedRef.current) return;
         if ('error' in result) {
-          toast.show(taskActionError('重试失败', result.error), 'error');
+          toast.show(taskActionError('重新执行失败', result.error), 'error');
           return;
         }
-        toast.show('已重新提交', 'info', 2000);
+        toast.show('已开始重新执行', 'info', 2000);
       } finally {
         if (mountedRef.current) {
           setRetryingIntent(null);

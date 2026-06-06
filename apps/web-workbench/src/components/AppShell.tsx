@@ -728,7 +728,7 @@ export function AppShell(): JSX.Element {
           const res = await createTask(intent);
           if (!mountedRef.current) return;
           if ('error' in res) {
-            toast.show(taskActionError('重试失败', res.error), 'error');
+            toast.show(taskActionError('重新执行失败', res.error), 'error');
           } else if (location.pathname !== '/') {
             navigate('/');
           }
