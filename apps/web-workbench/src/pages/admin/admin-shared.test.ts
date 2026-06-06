@@ -3,6 +3,7 @@ import {
   clampNumber,
   finiteNumber,
   formatDurationMs,
+  indexedFallback,
   nonNegativeNumber,
   nullableFiniteNumber,
   safeArray,
@@ -40,6 +41,8 @@ describe('admin shared data guards', () => {
 
   it('keeps text and duration helpers resilient to bad payload values', () => {
     expect(safeText('', 'fallback')).toBe('fallback');
+    expect(indexedFallback('未知任务', 2)).toBe('未知任务 3');
+    expect(indexedFallback('未知任务', -1)).toBe('未知任务 1');
     expect(formatDurationMs(Number.NaN)).toBe('—');
     expect(formatDurationMs(90_000)).toBe('1分30秒');
   });

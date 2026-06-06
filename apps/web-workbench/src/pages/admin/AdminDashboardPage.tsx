@@ -37,6 +37,7 @@ import {
   formatDateTime,
   formatDurationMs,
   formatInteger,
+  indexedFallback,
   nullableFiniteNumber,
   optionalText,
   safeArray,
@@ -355,7 +356,7 @@ function normalizeRecentTask(value: unknown, index: number) {
   const row = asRecord(value);
   const user = asRecord(row.user);
   return {
-    taskId: safeText(row.taskId, `unknown-${index}`),
+    taskId: safeText(row.taskId, indexedFallback('未知任务', index)),
     createdAt: optionalText(row.createdAt),
     title: optionalText(row.title),
     intent: optionalText(row.intent),

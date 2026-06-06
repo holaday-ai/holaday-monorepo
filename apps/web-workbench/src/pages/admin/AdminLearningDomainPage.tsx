@@ -29,6 +29,7 @@ import {
   formatDateTime,
   formatDurationMs,
   formatInteger,
+  indexedFallback,
   nullableFiniteNumber,
   nonNegativeNumber,
   optionalText,
@@ -377,7 +378,7 @@ function normalizeDomainDetail(value: DomainDetail, fallbackDomain: string) {
     failureBreakdown: safeArray(root.failureBreakdown).map((item, index) => {
       const row = asRecord(item);
       return {
-        category: safeText(row.category, `unknown-${index}`),
+        category: safeText(row.category, indexedFallback('未知分类', index)),
         label: safeText(row.label, '未知'),
         count: nonNegativeNumber(row.count),
         share: clampNumber(row.share, 0, 100),
@@ -387,7 +388,7 @@ function normalizeDomainDetail(value: DomainDetail, fallbackDomain: string) {
     recentTasks: safeArray(root.recentTasks).map((item, index) => {
       const row = asRecord(item);
       return {
-        taskId: safeText(row.taskId, `unknown-${index}`),
+        taskId: safeText(row.taskId, indexedFallback('未知任务', index)),
         createdAt: optionalText(row.createdAt),
         title: optionalText(row.title),
         intent: optionalText(row.intent),
@@ -406,7 +407,7 @@ function normalizeDomainDetail(value: DomainDetail, fallbackDomain: string) {
     memories: safeArray(root.memories).map((item, index) => {
       const row = asRecord(item);
       return {
-        externalId: safeText(row.externalId, `unknown-${index}`),
+        externalId: safeText(row.externalId, indexedFallback('未知记忆', index)),
         keyName: safeText(row.keyName),
         value: safeText(row.value, ''),
         updatedAt: optionalText(row.updatedAt),

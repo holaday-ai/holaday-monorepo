@@ -132,6 +132,10 @@ export function safeText(value: unknown, fallback = '—'): string {
   return typeof value === 'string' && value.trim() ? value : fallback;
 }
 
+export function indexedFallback(label: string, index: number): string {
+  return `${label} ${Math.max(0, index) + 1}`;
+}
+
 export function optionalText(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
 }

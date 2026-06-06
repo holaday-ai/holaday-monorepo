@@ -41,6 +41,7 @@ import {
   finiteNumber,
   formatDateTime,
   formatInteger,
+  indexedFallback,
   nonNegativeNumber,
   optionalText,
   safeArray,
@@ -280,7 +281,7 @@ function RevenueTab(): JSX.Element {
   const planRows = safeArray(plan.plans).map((item) => {
     const row = asRecord(item);
     return {
-      plan: safeText(row.plan, 'unknown'),
+      plan: safeText(row.plan, '未知套餐'),
       userCount: nonNegativeNumber(row.userCount),
       monthRevenueCnyCents: nonNegativeNumber(row.monthRevenueCnyCents),
     };
@@ -485,7 +486,7 @@ function CostTab(): JSX.Element {
   const models = safeArray(breakdown.models).map((item) => {
     const row = asRecord(item);
     return {
-      model: safeText(row.model, 'unknown'),
+      model: safeText(row.model, '未知模型'),
       costCnyCents: nonNegativeNumber(row.costCnyCents),
       callCount: nonNegativeNumber(row.callCount),
       totalTokens: nonNegativeNumber(row.totalTokens),
@@ -502,7 +503,7 @@ function CostTab(): JSX.Element {
     const row = asRecord(item);
     const user = asRecord(row.user);
     return {
-      taskId: optionalText(row.taskId) ?? `unknown-${index}`,
+      taskId: optionalText(row.taskId) ?? indexedFallback('未知任务', index),
       title: optionalText(row.title),
       intent: optionalText(row.intent),
       model: optionalText(row.model),

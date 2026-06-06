@@ -24,6 +24,7 @@ import {
   clampNumber,
   formatDateTime,
   formatInteger,
+  indexedFallback,
   nonNegativeNumber,
   optionalText,
   safeArray,
@@ -239,7 +240,7 @@ function normalizeLearningOverview(value: OverviewData | null) {
     domains: safeArray(root.domains).map((item, index) => {
       const row = asRecord(item);
       return {
-        domain: safeText(row.domain, `unknown-${index}`),
+        domain: safeText(row.domain, indexedFallback('未知域名', index)),
         total: nonNegativeNumber(row.total),
         success: nonNegativeNumber(row.success),
         failed: nonNegativeNumber(row.failed),

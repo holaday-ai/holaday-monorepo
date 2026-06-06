@@ -27,6 +27,7 @@ import {
   formatDate,
   formatDateTime,
   formatDurationMs,
+  indexedFallback,
   nullableFiniteNumber,
   nonNegativeNumber,
   optionalText,
@@ -296,7 +297,7 @@ function normalizeUserDetail(value: DetailData) {
       email: optionalText(user.email),
       phone: optionalText(user.phone),
       plan: safeText(user.plan),
-      status: safeText(user.status, 'unknown'),
+      status: safeText(user.status, ''),
       role: safeText(user.role, 'user'),
       createdAt: optionalText(user.createdAt),
       planExpiresAt: optionalText(user.planExpiresAt),
@@ -307,7 +308,7 @@ function normalizeUserDetail(value: DetailData) {
         .map((item) => {
           const row = asRecord(item);
           return {
-            model: safeText(row.model, 'unknown'),
+            model: safeText(row.model, '未知模型'),
             calls: nonNegativeNumber(row.calls),
           };
         })
@@ -316,7 +317,7 @@ function normalizeUserDetail(value: DetailData) {
     recentTasks: safeArray(root.recentTasks).map((item, index) => {
       const row = asRecord(item);
       return {
-        taskId: safeText(row.taskId, `unknown-${index}`),
+        taskId: safeText(row.taskId, indexedFallback('未知任务', index)),
         createdAt: optionalText(row.createdAt),
         title: optionalText(row.title),
         intent: optionalText(row.intent),
