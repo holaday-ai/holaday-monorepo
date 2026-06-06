@@ -83,6 +83,7 @@ export function App(): JSX.Element {
         <Route path="/500" element={lazyElement(<ServerErrorPage />)} />
         <Route path="/app" element={<AppAliasRedirect />} />
         <Route path="/roles" element={<LegacyRolesRedirect />} />
+        <Route path="/tasks" element={<LegacyPathRedirect pathname="/history" />} />
         <Route path="/schedule" element={<LegacyPathRedirect pathname="/scheduled" />} />
         <Route path="/calendar" element={<LegacyPathRedirect pathname="/scheduled" />} />
         <Route path="/experts" element={<LegacyPathRedirect pathname="/skills" />} />
