@@ -548,11 +548,6 @@ function AgentBlock({
             summary={detailSummary}
             onToggle={() => setDetailOpen((v) => !v)}
           >
-            {terminal && humanLines.length > 0 && (
-              <div className="mt-2">
-                <HumanLineList lines={humanLines} />
-              </div>
-            )}
             <div className="mt-2 space-y-2">
               {steps.map((step, i) => (
                 <StepCard
