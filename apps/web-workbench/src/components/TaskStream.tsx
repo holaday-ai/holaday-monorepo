@@ -2052,7 +2052,7 @@ function TerminalSummary({
           body so it doesn't compete with the content. */}
       {/* Footer (Codex IA pass). The primary action stays inline —
           复制 — because it's the action 90% of users take first.
-          复制 Markdown / 下载 .md / 分享任务 / 设为定时 fold into a
+          复制为 Markdown / 下载 .md / 分享任务 / 设为定时 fold into a
           单一 Radix More menu so the row isn't a wall of text
           buttons. 浏览器 lives in the top-right of the card;
           打开最终浏览器 keeps its own URL row below. */}
@@ -2108,7 +2108,7 @@ function TerminalSummary({
             className="w-52 rounded-[8px] border-[#DCDDDD] bg-white p-1.5 shadow-[0_12px_28px_rgba(17,24,39,0.12)] dark:border-white/10 dark:bg-card"
           >
             <DropdownMenuItem
-              onSelect={() => void copyTo(markdownText, 'Markdown')}
+              onSelect={() => void copyTo(markdownText, '为 Markdown')}
               className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
             >
               <FileText className="text-[#ADADAD]" />
