@@ -83,6 +83,30 @@ export function App(): JSX.Element {
         <Route path="/500" element={lazyElement(<ServerErrorPage />)} />
         <Route path="/app" element={<AppAliasRedirect />} />
         <Route path="/roles" element={<LegacyRolesRedirect />} />
+        <Route path="/schedule" element={<LegacyPathRedirect pathname="/scheduled" />} />
+        <Route path="/calendar" element={<LegacyPathRedirect pathname="/scheduled" />} />
+        <Route path="/experts" element={<LegacyPathRedirect pathname="/skills" />} />
+        <Route path="/plugins" element={<LegacyPathRedirect pathname="/skills" />} />
+        <Route
+          path="/settings/appearance"
+          element={<LegacySettingsSectionRedirect section="appearance" />}
+        />
+        <Route
+          path="/settings/api-keys"
+          element={<LegacySettingsSectionRedirect section="api-keys" />}
+        />
+        <Route
+          path="/settings/memory"
+          element={<LegacySettingsSectionRedirect section="memory" />}
+        />
+        <Route
+          path="/settings/notifications"
+          element={<LegacySettingsSectionRedirect section="notifications" />}
+        />
+        <Route
+          path="/settings/account"
+          element={<LegacySettingsSectionRedirect section="account" />}
+        />
 
         {/* Phase 27 — admin surface. Sits OUTSIDE AppShell because
             it has its own auth + role gate and a dedicated left nav.
@@ -140,6 +164,26 @@ function LegacyRolesRedirect(): JSX.Element {
   return (
     <Navigate
       to={{ pathname: '/settings/roles', search: location.search, hash: location.hash }}
+      replace
+    />
+  );
+}
+
+function LegacyPathRedirect({ pathname }: { pathname: string }): JSX.Element {
+  const location = useLocation();
+  return (
+    <Navigate
+      to={{ pathname, search: location.search, hash: location.hash }}
+      replace
+    />
+  );
+}
+
+function LegacySettingsSectionRedirect({ section }: { section: string }): JSX.Element {
+  const location = useLocation();
+  return (
+    <Navigate
+      to={{ pathname: '/settings', search: location.search, hash: `#${section}` }}
       replace
     />
   );
