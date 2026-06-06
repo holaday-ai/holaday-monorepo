@@ -40,7 +40,7 @@ describe('usage page state helpers', () => {
   it('summarizes loading, failed, empty, and loaded states', () => {
     expect(usagePageSummary({ loading: true, error: null, snapshot: null })).toBe('用量加载中…');
     expect(usagePageSummary({ loading: false, error: 'offline', snapshot: null })).toBe(
-      '用量加载失败',
+      '用量暂时无法加载',
     );
     expect(usagePageSummary({ loading: false, error: 'offline', snapshot })).toBe(
       '刷新失败 · 显示上次用量',

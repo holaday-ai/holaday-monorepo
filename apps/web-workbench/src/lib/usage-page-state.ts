@@ -38,7 +38,7 @@ export function usagePageSummary(options: {
 }): string {
   if (options.loading && !options.snapshot) return '用量加载中…';
   if (options.error && options.snapshot) return '刷新失败 · 显示上次用量';
-  if (options.error) return '用量加载失败';
+  if (options.error) return '用量暂时无法加载';
   if (!options.snapshot) return '暂无用量数据';
   const total = usageQuotaTotal(options.snapshot);
   const pct = usagePercent(options.snapshot.quotaUsed, total);

@@ -64,7 +64,7 @@ export function skillPageSummary(options: {
   readonly planId: string;
 }): string {
   if (options.loading) return '技能加载中…';
-  if (options.error) return '技能加载失败';
+  if (options.error) return '技能暂时无法加载';
   if (options.totalCount === 0) return '暂无可用技能';
   if (options.cap > 0) {
     return `已启用 ${options.enabledCount} / ${options.cap} · ${skillPlanLabel(options.planId)}`;

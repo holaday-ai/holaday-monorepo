@@ -56,7 +56,7 @@ describe('task hub state helpers', () => {
         status: 'all',
         range: '30d',
       }),
-    ).toBe('历史任务加载失败');
+    ).toBe('历史任务暂时无法加载');
     expect(
       historyPageSummary({
         loading: false,
@@ -86,7 +86,7 @@ describe('task hub state helpers', () => {
       '置顶任务加载中…',
     );
     expect(starredPageSummary({ loading: false, error: 'offline', count: 0, hasMore: false })).toBe(
-      '置顶任务加载失败',
+      '置顶任务暂时无法加载',
     );
     expect(starredPageSummary({ loading: false, error: 'offline', count: 3, hasMore: true })).toBe(
       '刷新失败 · 显示 3+ 个',

@@ -65,7 +65,7 @@ describe('roles page state helpers', () => {
         selectedCount: 0,
         totalCount: 0,
       }),
-    ).toBe('角色加载失败');
+    ).toBe('角色暂时无法加载');
     expect(
       rolePageSummary({
         loading: false,

@@ -58,7 +58,7 @@ describe('billing page state helpers', () => {
 
   it('summarizes loading, failed, and loaded subscription states', () => {
     expect(billingPageSummary({ loading: true, error: null, plan: null })).toBe('订阅加载中…');
-    expect(billingPageSummary({ loading: false, error: 'offline', plan: null })).toBe('订阅加载失败');
+    expect(billingPageSummary({ loading: false, error: 'offline', plan: null })).toBe('订阅信息暂时无法加载');
     expect(billingPageSummary({ loading: false, error: null, plan: 'pro' })).toBe(
       'Pro · 当前订阅',
     );

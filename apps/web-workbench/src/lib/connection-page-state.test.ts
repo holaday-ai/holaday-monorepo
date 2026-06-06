@@ -80,7 +80,7 @@ describe('connection page state helpers', () => {
       '连接器加载中…',
     );
     expect(connectionPageSummary({ count: 0, categoryCount: 0, loading: false, error: 'down' })).toBe(
-      '连接器加载失败',
+      '连接器暂时无法加载',
     );
     expect(connectionPageSummary({ count: 0, categoryCount: 0, loading: false, error: null })).toBe(
       '暂无规划连接器',

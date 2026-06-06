@@ -47,7 +47,7 @@ export function billingPageSummary(options: {
   readonly plan: string | null | undefined;
 }): string {
   if (options.loading) return '订阅加载中…';
-  if (options.error) return '订阅加载失败';
+  if (options.error) return '订阅信息暂时无法加载';
   return `${billingPlanLabel(options.plan)} · 当前订阅`;
 }
 

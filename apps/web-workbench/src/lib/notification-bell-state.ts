@@ -12,7 +12,7 @@ export function notificationListSummary({
   const safeCount = safeNotificationCount(count);
   if (loading && safeCount === 0) return '通知加载中…';
   if (error && safeCount > 0) return `刷新失败 · 显示 ${safeCount} 条通知`;
-  if (error) return '通知加载失败';
+  if (error) return '通知暂时无法加载';
   if (safeCount === 0) return '暂无通知';
   return `${safeCount} 条通知`;
 }

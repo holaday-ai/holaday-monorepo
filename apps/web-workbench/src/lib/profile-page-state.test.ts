@@ -50,7 +50,7 @@ describe('profile page state helpers', () => {
   it('summarizes profile loading, failed, loaded, and incomplete states', () => {
     expect(profilePageSummary({ loading: true, error: null, email: null })).toBe('资料加载中…');
     expect(profilePageSummary({ loading: false, error: 'offline', email: null })).toBe(
-      '资料加载失败',
+      '个人资料暂时无法加载',
     );
     expect(profilePageSummary({ loading: false, error: null, email: 'yale@example.com' })).toBe(
       '账号资料已加载',

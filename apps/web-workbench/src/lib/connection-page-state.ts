@@ -85,7 +85,7 @@ export function connectionPageSummary(options: {
   const count = safeConnectionCount(options.count);
   const categoryCount = safeConnectionCount(options.categoryCount);
   if (options.loading) return '连接器加载中…';
-  if (options.error) return '连接器加载失败';
+  if (options.error) return '连接器暂时无法加载';
   if (count === 0) return '暂无规划连接器';
   return `已规划 ${count} 个连接器 · ${categoryCount} 类工具`;
 }

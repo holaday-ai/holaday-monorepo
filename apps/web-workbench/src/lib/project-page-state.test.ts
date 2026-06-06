@@ -61,7 +61,7 @@ describe('project page state helpers', () => {
     expect(projectCountSummary({ count: 3, loading: true, error: null })).toBe(
       '正在刷新 3 个项目…',
     );
-    expect(projectCountSummary({ count: 0, loading: false, error: 'offline' })).toBe('项目加载失败');
+    expect(projectCountSummary({ count: 0, loading: false, error: 'offline' })).toBe('项目暂时无法加载');
     expect(projectCountSummary({ count: 3, loading: false, error: 'offline' })).toBe(
       '共 3 个项目，上次刷新失败',
     );

@@ -44,7 +44,7 @@ export function profilePageSummary(options: {
   readonly email: unknown;
 }): string {
   if (options.loading) return '资料加载中…';
-  if (options.error) return '资料加载失败';
+  if (options.error) return '个人资料暂时无法加载';
   return profileSafeText(options.email) ? '账号资料已加载' : '资料待完善';
 }
 

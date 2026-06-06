@@ -12,7 +12,7 @@ describe('notification bell state helpers', () => {
       '通知加载中…',
     );
     expect(notificationListSummary({ loading: false, error: 'offline', count: 0 })).toBe(
-      '通知加载失败',
+      '通知暂时无法加载',
     );
     expect(notificationListSummary({ loading: false, error: 'offline', count: 2 })).toBe(
       '刷新失败 · 显示 2 条通知',

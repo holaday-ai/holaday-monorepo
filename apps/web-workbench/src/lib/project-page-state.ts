@@ -68,7 +68,7 @@ export function projectCountSummary(options: {
   if (options.loading) return '项目加载中…';
   if (options.error && options.count > 0)
     return `共 ${options.count} 个项目，上次刷新失败`;
-  if (options.error) return '项目加载失败';
+  if (options.error) return '项目暂时无法加载';
   if (options.count === 0) return '尚无项目';
   return `共 ${options.count} 个项目`;
 }

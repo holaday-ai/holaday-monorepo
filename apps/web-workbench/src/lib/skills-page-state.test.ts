@@ -57,7 +57,7 @@ describe('skills page state helpers', () => {
         cap: 0,
         planId: 'free',
       }),
-    ).toBe('技能加载失败');
+    ).toBe('技能暂时无法加载');
     expect(
       skillPageSummary({
         loading: false,

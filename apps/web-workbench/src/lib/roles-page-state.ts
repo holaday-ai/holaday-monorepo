@@ -65,7 +65,7 @@ export function rolePageSummary(options: {
   readonly pickLimit?: number;
 }): string {
   if (options.loading) return '角色加载中…';
-  if (options.error) return '角色加载失败';
+  if (options.error) return '角色暂时无法加载';
   if (options.totalCount === 0) return '暂无可用角色';
   if (options.plan === 'pro') return `全部 ${options.totalCount} 个角色 · 专业版`;
   if (options.plan === 'basic') {

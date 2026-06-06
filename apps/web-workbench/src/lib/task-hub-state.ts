@@ -74,7 +74,7 @@ export function historyPageSummary({
   if (loading && count === 0) return '历史任务加载中…';
   const suffix = hasMore ? '+' : '';
   if (error && count > 0) return `刷新失败 · 显示 ${count}${suffix} 条`;
-  if (error) return '历史任务加载失败';
+  if (error) return '历史任务暂时无法加载';
   if (hasHistoryFilters({ query, status, range })) return `当前筛选 ${count}${suffix} 条`;
   return `近 30 天 ${count}${suffix} 条`;
 }
@@ -92,7 +92,7 @@ export function starredPageSummary({
 }): string {
   if (loading && count === 0) return '置顶任务加载中…';
   if (error && count > 0) return `刷新失败 · 显示 ${count}${hasMore ? '+' : ''} 个`;
-  if (error) return '置顶任务加载失败';
+  if (error) return '置顶任务暂时无法加载';
   return `已置顶 ${count}${hasMore ? '+' : ''} 个`;
 }
 
