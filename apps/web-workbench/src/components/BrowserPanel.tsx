@@ -1464,7 +1464,7 @@ export function BrowserPanel({
                         // into a tiny full-page thumbnail. Mirror the
                         // CDP/JPEG readable mode by letting the VNC
                         // surface own a wider virtual canvas and scroll.
-                        width: 'min(900px, max(100%, 166dvw))',
+                        width: 'min(1280px, max(100%, 300dvw))',
                       }
                     : undefined
                 }
