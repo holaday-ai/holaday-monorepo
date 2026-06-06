@@ -82,6 +82,7 @@ export function App(): JSX.Element {
         <Route path="/terms" element={lazyElement(<TermsPage />)} />
         <Route path="/500" element={lazyElement(<ServerErrorPage />)} />
         <Route path="/app" element={<AppAliasRedirect />} />
+        <Route path="/roles" element={<LegacyRolesRedirect />} />
 
         {/* Phase 27 — admin surface. Sits OUTSIDE AppShell because
             it has its own auth + role gate and a dedicated left nav.
@@ -129,6 +130,16 @@ function AppAliasRedirect(): JSX.Element {
   return (
     <Navigate
       to={{ pathname: '/', search: location.search, hash: location.hash }}
+      replace
+    />
+  );
+}
+
+function LegacyRolesRedirect(): JSX.Element {
+  const location = useLocation();
+  return (
+    <Navigate
+      to={{ pathname: '/settings/roles', search: location.search, hash: location.hash }}
       replace
     />
   );
