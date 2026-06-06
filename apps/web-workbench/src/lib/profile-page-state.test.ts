@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   normalizeProfileSnapshot,
+  profileLoadErrorCopy,
   profileLoadErrorMessage,
   profileDisplayName,
   profileInitial,
@@ -68,5 +69,16 @@ describe('profile page state helpers', () => {
     );
     expect(profileLoadErrorMessage('个人资料不存在')).toBe('个人资料不存在');
     expect(profileLoadErrorMessage({})).toBe('个人资料暂时无法加载，请稍后重试。');
+  });
+
+  it('formats profile load errors for user-facing surfaces', () => {
+    expect(profileLoadErrorCopy('  offline  ')).toEqual({
+      title: '个人资料暂时无法加载',
+      body: 'offline',
+    });
+    expect(profileLoadErrorCopy(null)).toEqual({
+      title: '个人资料暂时无法加载',
+      body: '请稍后重试，或刷新页面后再打开个人资料。',
+    });
   });
 });

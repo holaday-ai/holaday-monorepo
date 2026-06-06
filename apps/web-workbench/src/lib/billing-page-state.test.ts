@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  billingLoadErrorCopy,
   billingLoadErrorMessage,
   billingPageSummary,
   billingPlanLabel,
@@ -73,5 +74,16 @@ describe('billing page state helpers', () => {
     );
     expect(billingLoadErrorMessage('订阅已取消')).toBe('订阅已取消');
     expect(billingLoadErrorMessage({})).toBe('订阅信息暂时无法加载，请稍后重试。');
+  });
+
+  it('formats billing load errors for user-facing surfaces', () => {
+    expect(billingLoadErrorCopy('  offline  ')).toEqual({
+      title: '订阅信息暂时无法加载',
+      body: 'offline',
+    });
+    expect(billingLoadErrorCopy(undefined)).toEqual({
+      title: '订阅信息暂时无法加载',
+      body: '请稍后重试，或刷新页面后再打开账单。',
+    });
   });
 });

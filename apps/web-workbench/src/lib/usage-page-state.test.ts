@@ -56,7 +56,7 @@ describe('usage page state helpers', () => {
       '用量加载中…',
     );
     expect(usageStatusCopy({ loading: false, error: 'offline', snapshot: null })).toEqual({
-      title: '用量加载失败',
+      title: '用量暂时无法加载',
       body: 'offline',
     });
     expect(usageStatusCopy({ loading: false, error: 'offline', snapshot })?.title).toBe(

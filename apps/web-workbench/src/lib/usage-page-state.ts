@@ -58,7 +58,7 @@ export function usageStatusCopy(options: {
   }
   if (options.error) {
     return {
-      title: '用量加载失败',
+      title: '用量暂时无法加载',
       body: options.error,
     };
   }

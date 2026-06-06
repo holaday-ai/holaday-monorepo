@@ -6,6 +6,11 @@ export interface BillingSnapshot {
   readonly planExpiresAt: string | null;
 }
 
+export interface BillingLoadErrorCopy {
+  readonly title: string;
+  readonly body: string;
+}
+
 export function normalizeBillingSnapshot(value: unknown): BillingSnapshot {
   const raw = isRecord(value) ? value : {};
   return {
@@ -55,6 +60,17 @@ export function billingLoadErrorMessage(
   fallback = '订阅信息暂时无法加载，请稍后重试。',
 ): string {
   return pageErrorMessage(err, fallback);
+}
+
+export function billingLoadErrorCopy(message: string | null | undefined): BillingLoadErrorCopy {
+  const body =
+    typeof message === 'string' && message.trim()
+      ? message.trim()
+      : '请稍后重试，或刷新页面后再打开账单。';
+  return {
+    title: '订阅信息暂时无法加载',
+    body,
+  };
 }
 
 function safeBillingNullableText(value: unknown): string | null {

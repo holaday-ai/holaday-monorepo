@@ -162,8 +162,12 @@ export function UsagePage(): JSX.Element {
         ) : error && snap == null ? (
           <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
             <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
-            <div className="text-sm font-medium text-foreground/80">用量加载失败</div>
-            <div className="max-w-md text-xs leading-5 text-muted-foreground">{error}</div>
+            <div className="text-sm font-medium text-foreground/80">
+              {statusCopy?.title ?? '用量暂时无法加载'}
+            </div>
+            <div className="max-w-md text-xs leading-5 text-muted-foreground">
+              {statusCopy?.body ?? error}
+            </div>
             <div className="mt-1 flex flex-wrap justify-center gap-2">
               <Button type="button" size="sm" onClick={() => void refresh()}>
                 重试

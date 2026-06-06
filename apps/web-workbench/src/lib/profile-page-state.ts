@@ -5,6 +5,11 @@ export interface ProfileSnapshot {
   readonly displayName: string;
 }
 
+export interface ProfileLoadErrorCopy {
+  readonly title: string;
+  readonly body: string;
+}
+
 export function normalizeProfileSnapshot(value: unknown): ProfileSnapshot {
   if (typeof value !== 'object' || value === null) {
     throw new Error('个人资料暂时无法读取，请刷新后重试。');
@@ -52,6 +57,17 @@ export function profileLoadErrorMessage(
   fallback = '个人资料暂时无法加载，请稍后重试。',
 ): string {
   return pageErrorMessage(err, fallback);
+}
+
+export function profileLoadErrorCopy(message: string | null | undefined): ProfileLoadErrorCopy {
+  const body =
+    typeof message === 'string' && message.trim()
+      ? message.trim()
+      : '请稍后重试，或刷新页面后再打开个人资料。';
+  return {
+    title: '个人资料暂时无法加载',
+    body,
+  };
 }
 
 function profileSafeText(value: unknown): string {

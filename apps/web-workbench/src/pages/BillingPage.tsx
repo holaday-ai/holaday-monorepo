@@ -3,6 +3,7 @@ import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
+  billingLoadErrorCopy,
   billingLoadErrorMessage,
   billingPageSummary,
   billingPlanLabel,
@@ -55,6 +56,7 @@ export function BillingPage(): JSX.Element {
   const nextAmountText = nextBillingAmountText(plan);
   const nextBillingDate = nextBillingDateText(plan, snapshot?.planExpiresAt ?? null);
   const summary = billingPageSummary({ loading, error: loadError, plan });
+  const loadErrorCopy = billingLoadErrorCopy(loadError);
 
   return (
     <PageContainer width="list">
@@ -75,9 +77,9 @@ export function BillingPage(): JSX.Element {
         ) : loadError ? (
           <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
             <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
-            <div className="text-sm font-medium text-foreground/80">订阅加载失败</div>
+            <div className="text-sm font-medium text-foreground/80">{loadErrorCopy.title}</div>
             <div className="max-w-md text-xs leading-5 text-muted-foreground">
-              {loadError}
+              {loadErrorCopy.body}
             </div>
             <div className="mt-1 flex flex-wrap justify-center gap-2">
               <Button type="button" size="sm" onClick={() => void refresh()}>
