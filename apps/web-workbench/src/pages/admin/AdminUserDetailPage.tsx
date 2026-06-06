@@ -150,7 +150,7 @@ export function AdminUserDetailPage(): JSX.Element {
             {formatInteger(usage.monthTasks)}
           </div>
           <div className="mt-1 text-[12px] text-muted-foreground">
-            自然月窗口 · 按 UTC 统计
+            自然月窗口 · 按 UTC 时间统计
           </div>
         </section>
         <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)] lg:col-span-2">

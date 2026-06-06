@@ -135,7 +135,7 @@ export function AdminDashboardPage(): JSX.Element {
       <header className="mb-6">
         <h1 className="text-xl font-semibold">仪表盘</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">
-          今日运行情况一览 · 数据按北京时间 (UTC+8) 计算
+          今日运行情况一览 · 按北京时间统计
         </p>
       </header>
 

@@ -2571,7 +2571,7 @@ function UrlBar({
       autoComplete="off"
       value={draft}
       title={draft}
-      placeholder="输入 URL 回车跳转"
+      placeholder="输入网址回车跳转"
       readOnly={readOnly}
       onFocus={() => {
         if (!readOnly) setEditing(true);
