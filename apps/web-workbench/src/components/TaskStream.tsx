@@ -44,6 +44,7 @@ import {
   fetchFileBlobAuthed,
 } from '@/lib/download-file';
 import { taskActionError } from '@/lib/error-copy';
+import { EXPERT_RESULT_LABELS, expertResultUsageCopy } from '@/lib/expert-result-usage';
 import { pageActionError } from '@/lib/page-error-copy';
 import {
   externalLinkConfirmDescription,
@@ -1228,12 +1229,6 @@ export function sanitizeMarkdownTrailingPunctuation(text: string): string {
  * edit. If the count grows the right move is to derive this from
  * packages/shared-types.
  */
-const EXPERT_HEADER_META: Record<string, { label: string }> = {
-  'content-topic': { label: '选题分析' },
-  'ecom-daily': { label: '电商日报' },
-  'douyin-review': { label: '抖音稿件复盘' },
-};
-
 function EmptyTerminalCard({
   status,
   intent,
@@ -1307,11 +1302,11 @@ function EmptyTerminalCard({
 }
 
 function ExpertReportHeader({ workflowId }: { workflowId: string }): JSX.Element | null {
-  const meta = EXPERT_HEADER_META[workflowId];
-  if (!meta) return null;
+  const label = EXPERT_RESULT_LABELS[workflowId];
+  if (!label) return null;
   return (
     <div className="mb-3 flex items-center gap-2 border-b border-[#DCDDDD] pb-2 text-sm font-semibold text-[#57479C] dark:border-white/10 dark:text-foreground">
-      <span>{meta.label}</span>
+      <span>{label}</span>
     </div>
   );
 }
@@ -1859,10 +1854,7 @@ function TerminalSummary({
     },
     [toast],
   );
-  const expertUsageLabel = expertWorkflowId
-    ? (EXPERT_HEADER_META[expertWorkflowId]?.label ?? null)
-    : null;
-  const shouldShowExpertUsage = Boolean(expertWorkflowId) || expertMode === 'expert';
+  const expertUsageCopy = expertResultUsageCopy({ expertWorkflowId, expertMode });
   // BOSS feedback — retry button on failed task. Creates a NEW
   // task (not a reply), so quota + supercar prompt + role
   // classification all run fresh. createTask emits the
@@ -2072,13 +2064,10 @@ function TerminalSummary({
           task is the only shape today (X = 1); the "X 个" phrasing
           stays per spec so a future multi-skill path renders without
           template change. */}
-      {shouldShowExpertUsage && (
+      {expertUsageCopy && (
         <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <Puzzle className="h-3 w-3 text-muted-foreground/70" />
-          <span>
-            {expertWorkflowId ? '本次使用了 1 个专家技能' : '本次按专家模式处理'}
-            {expertUsageLabel ? `（${expertUsageLabel}）` : ''}
-          </span>
+          <span>{expertUsageCopy}</span>
         </div>
       )}
       {/* Inline copy / share footer. Replaced the prior absolute-
