@@ -191,7 +191,7 @@ export function CnPaymentDialog({
           onClick={onClose}
           aria-label="关闭"
           title="关闭"
-          className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground"
+          className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground"
         >
           <X className="h-4 w-4" />
         </button>
