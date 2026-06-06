@@ -47,9 +47,9 @@ import {
 } from '@/lib/browser-nav-copy';
 import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
 import {
-  centeredScreencastScrollLeft,
   fitScreencastContain,
   fitScreencastReadable,
+  readableScreencastStartScrollLeft,
 } from '@/lib/screencast-fit';
 import {
   externalLinkConfirmDescription,
@@ -773,11 +773,11 @@ export function BrowserPanel({
       screencastAutoScrolledKeyRef.current !== frameKey
     ) {
       screencastAutoScrolledKeyRef.current = frameKey;
-      const centeredLeft = centeredScreencastScrollLeft({
+      const startLeft = readableScreencastStartScrollLeft({
         contentWidth: fit.width,
         hostWidth: hostW,
       });
-      host.scrollTo({ left: centeredLeft, top: 0 });
+      host.scrollTo({ left: startLeft, top: 0 });
     }
   }, [frame?.imageBase64, interactive, isSheet]);
   const fitFinalEvidenceImg = React.useCallback((): void => {
@@ -819,11 +819,11 @@ export function BrowserPanel({
       finalEvidenceAutoScrolledKeyRef.current !== evidenceKey
     ) {
       finalEvidenceAutoScrolledKeyRef.current = evidenceKey;
-      const centeredLeft = centeredScreencastScrollLeft({
+      const startLeft = readableScreencastStartScrollLeft({
         contentWidth: fit.width,
         hostWidth: hostW,
       });
-      host.scrollTo({ left: centeredLeft, top: 0 });
+      host.scrollTo({ left: startLeft, top: 0 });
     }
   }, [
     finalEvidenceFrame?.imageBase64,

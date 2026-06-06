@@ -1,10 +1,10 @@
 import * as React from 'react';
 import { hdDebug } from '@/lib/hd-debug';
 import {
-  centeredScreencastScrollLeft,
   mapClientPointToScreencast,
   placeScreencastContainTop,
   placeScreencastReadableTop,
+  readableScreencastStartScrollLeft,
 } from '@/lib/screencast-fit';
 import { cn } from '@/lib/utils';
 
@@ -172,9 +172,10 @@ export function CdpScreencastViewport({
         sourceHeight: srcH,
       });
       if (!placement) return;
-      // Keep the remote page horizontally centred but pinned to the
-      // top. A portrait panel should not spend half its height on
-      // blank letterbox above the page.
+      // Keep the remote page pinned to the top. Portrait readable
+      // mode may make wide desktop pages horizontally scrollable,
+      // but the first view should behave like a browser and start at
+      // the left edge instead of opening on a centered crop.
       canvas.style.setProperty('--hd-scale', String(placement.scale));
       canvas.style.setProperty('--hd-offset-x', `${placement.offsetX}px`);
       canvas.style.setProperty('--hd-offset-y', `${placement.offsetY}px`);
@@ -187,11 +188,11 @@ export function CdpScreencastViewport({
         readableAutoScrollKeyRef.current !== autoScrollKey
       ) {
         readableAutoScrollKeyRef.current = autoScrollKey;
-        const centeredLeft = centeredScreencastScrollLeft({
+        const startLeft = readableScreencastStartScrollLeft({
           contentWidth: placement.width,
           hostWidth: rect.width,
         });
-        host.scrollTo({ left: centeredLeft, top: 0 });
+        host.scrollTo({ left: startLeft, top: 0 });
       }
     };
     recompute();

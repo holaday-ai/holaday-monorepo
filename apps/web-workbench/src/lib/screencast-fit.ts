@@ -46,6 +46,19 @@ export function centeredScreencastScrollLeft(input: {
   return Math.round((input.contentWidth - input.hostWidth) / 2);
 }
 
+export function readableScreencastStartScrollLeft(input: {
+  contentWidth: number;
+  hostWidth: number;
+}): number {
+  if (
+    !isPositiveFinite(input.contentWidth) ||
+    !isPositiveFinite(input.hostWidth)
+  ) {
+    return 0;
+  }
+  return 0;
+}
+
 export function fitScreencastContain({
   hostWidth,
   hostHeight,

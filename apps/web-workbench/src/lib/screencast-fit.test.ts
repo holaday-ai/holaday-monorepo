@@ -6,6 +6,7 @@ import {
   mapClientPointToScreencast,
   placeScreencastContainTop,
   placeScreencastReadableTop,
+  readableScreencastStartScrollLeft,
 } from './screencast-fit';
 
 describe('centeredScreencastScrollLeft', () => {
@@ -23,6 +24,26 @@ describe('centeredScreencastScrollLeft', () => {
       centeredScreencastScrollLeft({
         contentWidth: 332,
         hostWidth: 390,
+      }),
+    ).toBe(0);
+  });
+});
+
+describe('readableScreencastStartScrollLeft', () => {
+  it('opens wide readable browser content at the left edge in portrait sheets', () => {
+    expect(
+      readableScreencastStartScrollLeft({
+        contentWidth: 896,
+        hostWidth: 540,
+      }),
+    ).toBe(0);
+  });
+
+  it('keeps invalid or unmeasured content pinned to the start', () => {
+    expect(
+      readableScreencastStartScrollLeft({
+        contentWidth: 0,
+        hostWidth: 540,
       }),
     ).toBe(0);
   });
