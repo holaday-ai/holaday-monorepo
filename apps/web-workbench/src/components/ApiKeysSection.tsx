@@ -377,10 +377,10 @@ function WebhookDocs(): JSX.Element {
         </summary>
         <ol className="mt-2 list-decimal space-y-1 pl-4">
           <li>新建 Zap，选触发器（Email / Slack / RSS / 任意）</li>
-          <li>添加 Action：搜 <span className="font-mono">Webhooks by Zapier</span> → POST</li>
-          <li>URL 填上方 Webhook 地址；Method = POST；Data Pass-Through = No</li>
+          <li>添加动作：搜索 <span className="font-mono">Webhooks by Zapier</span>，选择 POST</li>
+          <li>通知地址填上方 Webhook 地址；请求方式选 POST；关闭 Data Pass-Through</li>
           <li>
-            Headers 加两条：
+            请求头加两条：
             <div className="mt-1 rounded bg-background p-2 font-mono">
               Authorization: Bearer hd_live_xxxxxxxxxxxxxxxxxxxxxxxx<br />
               Idempotency-Key: &#123;&#123;zap_meta_id&#125;&#125;
@@ -396,7 +396,7 @@ function WebhookDocs(): JSX.Element {
             </p>
           </li>
           <li>
-            Body 选 JSON，填：
+            正文选择 JSON，填：
             <div className="mt-1 rounded bg-background p-2 font-mono">
               &#123;"prompt": "&#123;&#123;trigger_field&#125;&#125;"&#125;
             </div>
@@ -422,8 +422,8 @@ function WebhookDocs(): JSX.Element {
           {curlExample}
         </pre>
         <p className="mt-2">
-          带 <span className="font-mono">Idempotency-Key</span> 的重复请求 24h 内会返回相同
-          taskId；同 key 但不同 body 会返回 <span className="font-mono">409</span>。
+          带 <span className="font-mono">Idempotency-Key</span> 的重复请求 24 小时内会复用同一个任务；
+          如果同一个 key 对应了不同内容，HOLA DAY 会返回冲突提示，避免重复创建。
         </p>
       </div>
     </div>
