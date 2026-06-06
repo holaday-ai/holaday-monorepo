@@ -227,9 +227,9 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                     onClick={retrySearch}
                     aria-label="重试搜索"
                     title="重试搜索"
-                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[8px] border border-[#EA1F59]/20 text-[#EA1F59] transition-colors hover:bg-[#EA1F59]/10"
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[#EA1F59]/20 text-[#EA1F59] transition-colors hover:bg-[#EA1F59]/10"
                   >
-                    <RotateCw className="h-3 w-3" aria-hidden />
+                    <RotateCw className="h-3.5 w-3.5" aria-hidden />
                   </button>
                 )}
               </div>

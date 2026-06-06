@@ -344,7 +344,7 @@ export function QuickCreatePopover({
               disabled={submitting}
               aria-label={showAdvanced ? '收起 RRULE' : '展开 RRULE'}
               title={showAdvanced ? '收起 RRULE' : '展开 RRULE'}
-              className="inline-flex h-7 items-center gap-1 rounded-[8px] px-2 text-xs font-medium text-[#595757] hover:bg-[#EFEFEF] hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-55"
+              className="inline-flex h-8 items-center gap-1 rounded-[8px] px-2.5 text-xs font-medium text-[#595757] hover:bg-[#EFEFEF] hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-55"
             >
               {showAdvanced ? (
                 <>
