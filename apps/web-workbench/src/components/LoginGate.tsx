@@ -30,7 +30,7 @@ const LOGIN_INPUT =
 const LOGIN_PRIMARY =
   'bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.16)] hover:bg-[#EA1F59]/90';
 const LOGIN_LINK =
-  'inline-flex min-h-8 items-center text-[#EA1F59] underline-offset-2 hover:underline';
+  'inline-flex min-h-8 min-w-8 items-center justify-center text-[#EA1F59] underline-offset-2 hover:underline';
 
 /**
  * Login / register / forgot-password card. Modes:
@@ -349,7 +349,7 @@ export function LoginGate({ onAuthenticated, initialMode = 'login' }: Props): JS
               <button
                 type="button"
                 onClick={() => switchMode('forgot')}
-                className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+                className={cn(LOGIN_LINK, 'text-[11px] text-muted-foreground hover:text-foreground')}
               >
                 忘记密码？
               </button>
