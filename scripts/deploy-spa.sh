@@ -20,6 +20,15 @@
 
 set -euo pipefail
 
+# Optional local credentials. The file is ignored by git when using
+# .env.deploy.local, so deploys no longer need passwords pasted in chat.
+DEPLOY_ENV_LOADER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/load-deploy-env.sh"
+if [[ -f "$DEPLOY_ENV_LOADER" ]]; then
+  # shellcheck source=scripts/load-deploy-env.sh
+  source "$DEPLOY_ENV_LOADER"
+fi
+unset DEPLOY_ENV_LOADER
+
 ALIYUN_HOST="root@47.99.169.186"
 SPA_PATH="/opt/holaday-spa/dist"
 BACKUP_PATH="/opt/holaday-spa/dist.bak"

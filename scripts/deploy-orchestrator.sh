@@ -15,6 +15,15 @@
 
 set -euo pipefail
 
+# Optional local credentials. The file is ignored by git when using
+# .env.deploy.local, so deploys no longer need passwords pasted in chat.
+DEPLOY_ENV_LOADER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/load-deploy-env.sh"
+if [[ -f "$DEPLOY_ENV_LOADER" ]]; then
+  # shellcheck source=scripts/load-deploy-env.sh
+  source "$DEPLOY_ENV_LOADER"
+fi
+unset DEPLOY_ENV_LOADER
+
 VULTR_HOST="root@207.148.70.106"
 BRANCH="${1:-claude/musing-keller-ae1d05}"
 HEALTH_URL="http://localhost:4001/healthz"
