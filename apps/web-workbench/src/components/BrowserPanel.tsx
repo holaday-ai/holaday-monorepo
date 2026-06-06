@@ -1717,49 +1717,55 @@ export function BrowserPanel({
                         <span className="truncate font-mono opacity-80">{finalEvidenceFrame.url}</span>
                       )}
                     </div>
-                    {isSheet && onReExecute && (
+                  </div>
+                </div>
+                {isSheet && (
+                  <div className="pointer-events-none absolute left-2 right-2 top-2 z-20 flex items-start justify-between gap-2">
+                    <div className="flex min-w-0 flex-1 items-start gap-2">
+                      {finalEvidenceCanToggleFit && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setFinalEvidenceViewMode((mode) =>
+                              mode === 'readable' ? 'contain' : 'readable',
+                            )
+                          }
+                          aria-label={
+                            finalEvidenceViewMode === 'readable'
+                              ? '完整适应浏览器画面'
+                              : '清晰查看浏览器画面'
+                          }
+                          title={
+                            finalEvidenceViewMode === 'readable'
+                              ? '完整适应'
+                              : '清晰查看'
+                          }
+                          className="pointer-events-auto inline-flex h-7 shrink-0 items-center rounded-md border border-white/25 bg-black/45 px-2 text-[11px] font-medium text-white shadow-sm backdrop-blur transition-colors hover:bg-black/60"
+                        >
+                          {finalEvidenceViewMode === 'readable' ? '全貌' : '清晰'}
+                        </button>
+                      )}
+                      {finalEvidenceCanPan && (
+                        <div className="mt-0.5 min-w-0 truncate rounded-full bg-black/45 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm backdrop-blur">
+                          从左侧开始，左右滑动查看
+                        </div>
+                      )}
+                    </div>
+                    {onReExecute && (
                       <button
                         type="button"
                         onClick={onReExecute}
                         disabled={reExecuting}
                         aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
                         title={reExecuting ? '正在重新执行' : '重新执行'}
-                        className="absolute right-2 top-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-white/25 bg-black/45 px-2 text-[11px] font-medium text-white shadow-sm backdrop-blur transition-colors hover:bg-black/60 disabled:cursor-wait disabled:opacity-60"
+                        className="pointer-events-auto inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-white/25 bg-black/45 px-2 text-[11px] font-medium text-white shadow-sm backdrop-blur transition-colors hover:bg-black/60 disabled:cursor-wait disabled:opacity-60"
                       >
                         <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
                         {reExecuting ? '重新执行中…' : '重新执行'}
                       </button>
                     )}
-                    {finalEvidenceCanToggleFit && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setFinalEvidenceViewMode((mode) =>
-                            mode === 'readable' ? 'contain' : 'readable',
-                          )
-                        }
-                        aria-label={
-                          finalEvidenceViewMode === 'readable'
-                            ? '完整适应浏览器画面'
-                            : '清晰查看浏览器画面'
-                        }
-                        title={
-                          finalEvidenceViewMode === 'readable'
-                            ? '完整适应'
-                            : '清晰查看'
-                        }
-                        className="absolute left-2 top-2 inline-flex h-7 items-center rounded-md border border-white/25 bg-black/45 px-2 text-[11px] font-medium text-white shadow-sm backdrop-blur transition-colors hover:bg-black/60"
-                      >
-                        {finalEvidenceViewMode === 'readable' ? '全貌' : '清晰'}
-                      </button>
-                    )}
-                    {finalEvidenceCanPan && (
-                      <div className="pointer-events-none absolute left-1/2 top-10 max-w-[calc(100%-1rem)] -translate-x-1/2 truncate rounded-full bg-black/45 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm backdrop-blur">
-                        从左侧开始，左右滑动查看
-                      </div>
-                    )}
                   </div>
-                </div>
+                )}
                 {!isSheet && (
                   <div className={cn('flex shrink-0 items-center justify-center gap-2 border-t bg-background/70 px-3 py-2 text-[12px]', BROWSER_DIVIDER)}>
                     <span className="text-muted-foreground">想继续操作？新建任务或重新执行。</span>
