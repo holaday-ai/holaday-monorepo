@@ -41,7 +41,7 @@ export function browserToolbarLabel(
 ): string {
   if (attentionNeeded) return awaitingUserCopy(task.awaitingKind).toolbarLabel;
   if (sidePanelMode === 'browser-live') return '浏览器进行中';
-  if (sidePanelMode !== 'closed') return '收起浏览器面板';
+  if (sidePanelMode !== 'closed') return '收起浏览器';
   return '查看浏览器';
 }
 

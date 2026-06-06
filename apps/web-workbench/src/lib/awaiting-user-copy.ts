@@ -15,7 +15,7 @@ export interface AwaitingUserCopy {
 const COPY_BY_KIND: Record<AwaitingKind, AwaitingUserCopy> = {
   login: {
     title: '需要登录',
-    streamBody: '请打开浏览器面板完成登录或扫码，完成后任务会继续，不用重新提交。',
+    streamBody: '请打开浏览器完成登录或扫码，完成后任务会继续，不用重新提交。',
     streamHint: '打开浏览器完成登录',
     panelTitle: '需要登录',
     panelBody: '交互模式已开启。完成登录或扫码后，HOLA DAY 会继续执行，不用重新提交任务。',
@@ -24,7 +24,7 @@ const COPY_BY_KIND: Record<AwaitingKind, AwaitingUserCopy> = {
   },
   captcha: {
     title: '需要验证',
-    streamBody: '请打开浏览器面板完成验证码或滑块，完成后任务会继续，不用重新提交。',
+    streamBody: '请打开浏览器完成验证码或滑块，完成后任务会继续，不用重新提交。',
     streamHint: '打开浏览器通过验证',
     panelTitle: '需要验证',
     panelBody: '交互模式已开启。完成验证码或滑块后，HOLA DAY 会继续执行，不用重新提交任务。',
@@ -51,7 +51,7 @@ const COPY_BY_KIND: Record<AwaitingKind, AwaitingUserCopy> = {
   },
   browser_action: {
     title: '需要操作浏览器',
-    streamBody: '请打开浏览器面板，按页面提示完成下一步操作；完成后任务会继续，不用重新提交。',
+    streamBody: '请打开浏览器，按页面提示完成下一步操作；完成后任务会继续，不用重新提交。',
     streamHint: '打开浏览器完成操作',
     panelTitle: '需要操作浏览器',
     panelBody: '交互模式已开启。按页面提示完成点击或选择后，HOLA DAY 会继续执行，不用重新提交任务。',
