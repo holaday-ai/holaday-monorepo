@@ -103,6 +103,28 @@ describe('fitScreencastReadable', () => {
       }),
     ).toEqual({ width: 332, height: 720, scale: 0.8530805687203792 });
   });
+
+  it('keeps portrait browser frames readable in short landscape sheets', () => {
+    const contain = fitScreencastContain({
+      hostWidth: 836,
+      hostHeight: 260,
+      sourceWidth: 390,
+      sourceHeight: 844,
+    });
+    const readable = fitScreencastReadable({
+      hostWidth: 836,
+      hostHeight: 260,
+      sourceWidth: 390,
+      sourceHeight: 844,
+    });
+
+    expect(contain).toEqual({
+      width: 120,
+      height: 260,
+      scale: 0.3080568720379147,
+    });
+    expect(readable).toEqual({ width: 390, height: 844, scale: 1 });
+  });
 });
 
 describe('placeScreencastContainTop', () => {
@@ -172,6 +194,23 @@ describe('placeScreencastReadableTop', () => {
       height: 720,
       scale: 0.8530805687203792,
       offsetX: 29,
+      offsetY: 0,
+    });
+  });
+
+  it('pins readable portrait frames in short landscape sheets for vertical scrolling', () => {
+    expect(
+      placeScreencastReadableTop({
+        hostWidth: 836,
+        hostHeight: 260,
+        sourceWidth: 390,
+        sourceHeight: 844,
+      }),
+    ).toEqual({
+      width: 390,
+      height: 844,
+      scale: 1,
+      offsetX: 223,
       offsetY: 0,
     });
   });
