@@ -152,7 +152,7 @@ export function ApiKeysSection(): JSX.Element {
                 <button
                   type="button"
                   onClick={() => setReveal((v) => !v)}
-                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                   aria-label={reveal ? '隐藏' : '显示'}
                   title={reveal ? '隐藏' : '显示'}
                 >
@@ -161,7 +161,7 @@ export function ApiKeysSection(): JSX.Element {
                 <button
                   type="button"
                   onClick={() => void copyPlaintext()}
-                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                   aria-label="复制"
                   title="复制"
                 >
@@ -363,7 +363,7 @@ function WebhookDocs(): JSX.Element {
           <button
             type="button"
             onClick={() => void copyUrl()}
-            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
             aria-label="复制 Webhook 地址"
             title="复制"
           >
@@ -413,7 +413,7 @@ function WebhookDocs(): JSX.Element {
           <button
             type="button"
             onClick={() => void copyCurl()}
-            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
             aria-label="复制 curl 示例"
             title="复制 curl"
           >
