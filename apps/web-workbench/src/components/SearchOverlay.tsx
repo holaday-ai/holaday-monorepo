@@ -205,7 +205,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
             onClick={onClose}
             aria-label="关闭"
             title="关闭"
-            className="flex h-7 w-7 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
+            className="flex h-8 w-8 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
           >
             <X className="h-3.5 w-3.5" />
           </button>
