@@ -10,14 +10,23 @@ describe('terminalEmptyCopy', () => {
   });
 
   it('keeps failed empty-output copy action-oriented', () => {
-    expect(terminalEmptyCopy('failed').title).toBe('任务未能完成');
-    expect(terminalEmptyCopy('failed').body).toContain('没有收到可用回复');
+    expect(terminalEmptyCopy('failed')).toEqual({
+      title: '任务未能完成',
+      body: '这个任务已经结束，但没有收到可用回复。可以重新执行当前任务。',
+    });
   });
 
   it('uses partial-success copy when verification produced no final text', () => {
     expect(terminalEmptyCopy('partial_success')).toEqual({
       title: '部分完成',
-      body: '任务只完成了一部分，但没有生成可用的最终回复。可以重试同样的意图继续验证。',
+      body: '任务只完成了一部分，但没有生成可用的最终回复。可以重新执行当前任务继续验证。',
+    });
+  });
+
+  it('uses rerun copy for unexpected terminal empty states', () => {
+    expect(terminalEmptyCopy('completed')).toEqual({
+      title: '没有回复内容',
+      body: '这个任务已经结束，但没有收到回复内容。可以重新执行当前任务。',
     });
   });
 });
