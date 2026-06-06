@@ -242,6 +242,7 @@ export function InputArea({
     const state = location.state as
       | {
           attachFile?: { fileId: string; filename: string; mimetype: string; sizeBytes: number };
+          skillTaskDraft?: unknown;
         }
       | null;
     const handoff = state?.attachFile;
@@ -259,7 +260,10 @@ export function InputArea({
         },
       ];
     });
-    navigate(location.pathname + location.search, { replace: true, state: null });
+    navigate(location.pathname + location.search, {
+      replace: true,
+      state: state.skillTaskDraft ? { skillTaskDraft: state.skillTaskDraft } : null,
+    });
   }, [location, navigate]);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   // Product polish #6 — + button menu state. Radix DropdownMenu
@@ -289,6 +293,48 @@ export function InputArea({
   // on tasks.create as `expertMode`; the backend honours it when
   // not null.
   const [expertMode, setExpertMode] = React.useState<'normal' | 'expert' | 'auto'>('auto');
+  // SkillsPage → 用此专家. This is an editable draft, not an
+  // auto-submit: it lands in the composer, flips plugin mode to
+  // "开启", then lets the user complete the task request.
+  React.useEffect(() => {
+    const state = location.state as
+      | {
+          attachFile?: unknown;
+          skillTaskDraft?: {
+            prompt?: unknown;
+            expertMode?: unknown;
+          };
+        }
+      | null;
+    const draft = state?.skillTaskDraft;
+    const prompt = typeof draft?.prompt === 'string' ? draft.prompt.trimEnd() : '';
+    if (!prompt) return;
+    setValue(prompt);
+    if (
+      draft?.expertMode === 'expert' ||
+      draft?.expertMode === 'normal' ||
+      draft?.expertMode === 'auto'
+    ) {
+      setExpertMode(draft.expertMode);
+    } else {
+      setExpertMode('expert');
+    }
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      const len = el.value.length;
+      try {
+        el.setSelectionRange(len, len);
+      } catch {
+        /* setSelectionRange not supported on every input type */
+      }
+    });
+    navigate(location.pathname + location.search, {
+      replace: true,
+      state: state?.attachFile ? { attachFile: state.attachFile } : null,
+    });
+  }, [location, navigate]);
   // One-shot cleanup of the legacy persisted preference key. Older
   // builds wrote 'plan' here and read it on every mount; users
   // upgrading would otherwise stay stuck in Plan mode silently.

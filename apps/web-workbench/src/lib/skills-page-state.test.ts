@@ -5,6 +5,7 @@ import {
   normalizeSkillToggleResponse,
   skillCardBadge,
   skillCardUsageHint,
+  skillTaskDraft,
   skillLimitBannerCopy,
   skillLimitMessage,
   skillLoadErrorCopy,
@@ -146,6 +147,22 @@ describe('skills page state helpers', () => {
     );
     expect(skillCardUsageHint({ enabled: false, pending: true })).toBe(
       '正在保存选择',
+    );
+  });
+
+  it('builds an editable expert task draft from a skill card', () => {
+    expect(
+      skillTaskDraft({
+        name: ' 增长黑客 ',
+        description: ' 设计增长实验 ',
+      }),
+    ).toEqual({
+      skillName: '增长黑客',
+      expertMode: 'expert',
+      prompt: '使用「增长黑客」专家技能：设计增长实验\n\n请帮我：',
+    });
+    expect(skillTaskDraft({ name: '', description: '' }).prompt).toBe(
+      '使用「专家」专家技能：\n\n请帮我：',
     );
   });
 

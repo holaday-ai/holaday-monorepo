@@ -49,6 +49,7 @@ import {
   skillLimitMessage,
   skillLoadErrorCopy,
   skillPageSummary,
+  skillTaskDraft,
 } from '@/lib/skills-page-state';
 import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
 import { supportMailtoHref } from '@/lib/support-links';
@@ -334,6 +335,14 @@ export function SkillsPage(): JSX.Element {
                     pending={pendingId === s.id}
                     blocked={pendingId !== null && pendingId !== s.id}
                     onToggle={() => void onToggle(s)}
+                    onUse={() => {
+                      navigate('/', {
+                        state: {
+                          newTask: true,
+                          skillTaskDraft: skillTaskDraft(s),
+                        },
+                      });
+                    }}
                   />
                 ))}
               </div>
@@ -350,20 +359,17 @@ function SkillCard({
   pending,
   blocked,
   onToggle,
+  onUse,
 }: {
   skill: UiSkill;
   pending: boolean;
   blocked: boolean;
   onToggle: () => void;
+  onUse: () => void;
 }): JSX.Element {
   const Icon = ICONS[skill.icon] ?? Sparkles;
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      disabled={pending || blocked}
-      aria-pressed={skill.enabled}
-      aria-busy={pending}
+    <article
       className={cn(
         'group relative flex min-h-[124px] flex-col items-start gap-2 rounded-[8px] border bg-white p-4 text-left shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-[border-color,box-shadow] duration-150',
         skill.enabled
@@ -388,12 +394,32 @@ function SkillCard({
       <div className="line-clamp-2 text-xs leading-5 text-muted-foreground">
         {skill.description}
       </div>
-      <div className="mt-auto border-t border-[#EFEFEF] pt-2 text-[11px] leading-4 text-muted-foreground">
-        {skillCardUsageHint({ enabled: skill.enabled, pending })}
+      <div className="mt-auto flex w-full items-center justify-between gap-2 border-t border-[#EFEFEF] pt-2">
+        <div className="min-w-0 text-[11px] leading-4 text-muted-foreground">
+          {skillCardUsageHint({ enabled: skill.enabled, pending })}
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 shrink-0 rounded-[7px] px-2 text-[11px]"
+          disabled={!skill.enabled || pending || blocked}
+          title={skill.enabled ? `用${skill.name}创建任务` : '启用后可用此专家创建任务'}
+          onClick={onUse}
+        >
+          用此专家
+        </Button>
       </div>
-      <span
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={pending || blocked}
+        aria-pressed={skill.enabled}
+        aria-busy={pending}
+        aria-label={`${skill.enabled ? '停用' : '启用'}${skill.name}`}
+        title={`${skill.enabled ? '停用' : '启用'}${skill.name}`}
         className={cn(
-          'absolute right-3 top-3 rounded-full px-2 py-0.5 text-[10px] font-medium',
+          'absolute right-3 top-3 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20',
           pending
             ? 'border border-[#42C0EF]/45 bg-white text-[#217EA0]'
             : skill.enabled
@@ -402,7 +428,7 @@ function SkillCard({
         )}
       >
         {skillCardBadge({ enabled: skill.enabled, pending })}
-      </span>
-    </button>
+      </button>
+    </article>
   );
 }

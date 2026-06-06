@@ -338,19 +338,22 @@ export function AppShell(): JSX.Element {
   // /scheduled) navigates back with `state.newTask`, the bootstrap
   // effect doesn't re-run — so the old selectedTask would linger.
   // Catch it here on every location change, drop the selection, and
-  // clear the state so a refresh doesn't re-fire. Preserve attachFile
-  // since FilesPage uses the same state.location pathway to hand off
-  // a file into the composer.
+  // clear the state so a refresh doesn't re-fire. Preserve composer
+  // handoffs (attachFile / skillTaskDraft) since sub-pages use the
+  // same location.state pathway to seed the new-task composer.
   React.useEffect(() => {
     if (!bootstrapped) return;
     const state = location.state as
-      | { newTask?: boolean; attachFile?: unknown }
+      | { newTask?: boolean; attachFile?: unknown; skillTaskDraft?: unknown }
       | null;
     if (!state?.newTask) return;
     enterNewTaskMode();
+    const nextState: { attachFile?: unknown; skillTaskDraft?: unknown } = {};
+    if (state.attachFile) nextState.attachFile = state.attachFile;
+    if (state.skillTaskDraft) nextState.skillTaskDraft = state.skillTaskDraft;
     navigate(location.pathname + location.search, {
       replace: true,
-      state: state.attachFile ? { attachFile: state.attachFile } : null,
+      state: Object.keys(nextState).length > 0 ? nextState : null,
     });
   }, [
     bootstrapped,

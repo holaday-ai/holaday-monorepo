@@ -34,6 +34,12 @@ export interface SkillLimitBannerCopy {
   readonly body: string;
 }
 
+export interface SkillTaskDraft {
+  readonly skillName: string;
+  readonly expertMode: 'expert';
+  readonly prompt: string;
+}
+
 const PLAN_LABELS: Record<string, string> = {
   free: '体验版',
   basic: '基础版',
@@ -133,6 +139,20 @@ export function skillCardUsageHint(options: {
 }): string {
   if (options.pending) return '正在保存选择';
   return options.enabled ? '新任务会自动匹配' : '启用后可参与自动匹配';
+}
+
+export function skillTaskDraft(
+  skill: Pick<UiSkill, 'name' | 'description'>,
+): SkillTaskDraft {
+  const name = safeSkillText(skill.name) || '专家';
+  const description = safeSkillText(skill.description);
+  return {
+    skillName: name,
+    expertMode: 'expert',
+    prompt: description
+      ? `使用「${name}」专家技能：${description}\n\n请帮我：`
+      : `使用「${name}」专家技能：\n\n请帮我：`,
+  };
 }
 
 export function normalizeSkillRows(value: unknown): UiSkill[] {
