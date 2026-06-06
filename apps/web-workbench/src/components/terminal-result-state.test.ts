@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { terminalResultContentInsufficient } from './terminal-result-state';
+import {
+  taskCancelStateChangedMessage,
+  terminalResultContentInsufficient,
+} from './terminal-result-state';
 
 describe('terminalResultContentInsufficient', () => {
   it('allows concise single-fact browser answers such as page titles', () => {
@@ -57,5 +60,13 @@ describe('terminalResultContentInsufficient', () => {
         attachmentCount: 1,
       }),
     ).toBe(false);
+  });
+
+  it('hides raw task states in cancel failure copy', () => {
+    expect(taskCancelStateChangedMessage('completed')).toBe('任务已经结束，当前详情已保留。');
+    expect(taskCancelStateChangedMessage('awaiting_user')).toBe(
+      '任务状态刚刚变化，请刷新后再确认是否需要取消。',
+    );
+    expect(taskCancelStateChangedMessage('unknown')).toBe('任务状态已变化，请刷新后查看最新进度。');
   });
 });

@@ -58,6 +58,17 @@ export function allowsConciseFactResult(intent?: string): boolean {
   const asksForLongForm =
     /报告|总结|分析|对比|列表|清单|多(个|条)|前\s*\d+|top\s*\d+|report|summary|analysis|compare|list/i.test(
       goal,
-    );
+  );
   return (asksForConciseAnswer || asksForSingleFact) && !asksForLongForm;
+}
+
+export function taskCancelStateChangedMessage(state: string | null | undefined): string {
+  const status = typeof state === 'string' ? state.trim() : '';
+  if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+    return '任务已经结束，当前详情已保留。';
+  }
+  if (status === 'running' || status === 'awaiting_user') {
+    return '任务状态刚刚变化，请刷新后再确认是否需要取消。';
+  }
+  return '任务状态已变化，请刷新后查看最新进度。';
 }

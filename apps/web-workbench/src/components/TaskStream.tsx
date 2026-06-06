@@ -70,7 +70,10 @@ import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 import { PlanCard } from '@/components/PlanCard';
 import { SearchResultCard } from '@/components/SearchResultCard';
 import { StepCard } from '@/components/StepCard';
-import { terminalResultContentInsufficient } from '@/components/terminal-result-state';
+import {
+  taskCancelStateChangedMessage,
+  terminalResultContentInsufficient,
+} from '@/components/terminal-result-state';
 import { hdDebug } from '@/lib/hd-debug';
 import { trpc } from '@/lib/trpc';
 import { useTaskStore } from '@/stores/task-store';
@@ -668,7 +671,7 @@ function AwaitingUserBanner({
       const res = await trpc.tasks.abort.mutate({ taskId });
       if (!mountedRef.current) return;
       if (!res.ok) {
-        toast.show(taskActionError('取消失败', `当前状态：${res.state ?? 'unknown'}`), 'error');
+        toast.show(`取消失败：${taskCancelStateChangedMessage(res.state)}`, 'error');
         return;
       }
       toast.show('已取消任务', 'info', 2000);
