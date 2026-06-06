@@ -172,7 +172,7 @@ function ProfitBar({ summary }: { summary: SummaryData | null }): JSX.Element {
         label="本月成本"
         value={formatYuan(summary.monthCostCnyCents)}
         tint="rgba(255,201,16,0.18)"
-        sub={`LLM ${formatYuanCompact(summary.monthLlmCostCnyCents)} · 服务器 ${formatYuanCompact(summary.monthServerCostCnyCents)}`}
+        sub={`模型 ${formatYuanCompact(summary.monthLlmCostCnyCents)} · 服务器 ${formatYuanCompact(summary.monthServerCostCnyCents)}`}
       />
       <SummaryCard
         label={profitPositive ? '本月利润' : '本月亏损'}
@@ -525,9 +525,9 @@ function CostTab(): JSX.Element {
     <div className="space-y-6">
       {/* Cost summary chips */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <ChipCard label="本月 LLM 成本" value={formatYuan(totalLlmCost)} />
-        <ChipCard label="本月 LLM 调用" value={`${formatInteger(totalCalls)} 次`} />
-        <ChipCard label="本月 Token 用量" value={formatTokens(totalTokens)} />
+        <ChipCard label="本月模型成本" value={formatYuan(totalLlmCost)} />
+        <ChipCard label="本月模型调用" value={`${formatInteger(totalCalls)} 次`} />
+        <ChipCard label="本月模型用量" value={formatTokens(totalTokens)} />
         <ChipCard
           label="单次调用均价"
           value={
@@ -541,7 +541,7 @@ function CostTab(): JSX.Element {
         <Section title="按模型成本分布">
           {models.length === 0 ? (
             <div className="flex h-44 items-center justify-center text-[12px] text-muted-foreground">
-            本月暂无 LLM 调用
+            本月暂无模型调用
             </div>
           ) : (
             <div className="flex flex-col gap-6 sm:flex-row sm:items-center">

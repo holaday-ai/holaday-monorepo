@@ -159,7 +159,7 @@ export function AdminUserDetailPage(): JSX.Element {
           </h2>
           {totalCalls === 0 ? (
             <div className="flex h-40 items-center justify-center text-[12px] text-muted-foreground">
-              本月暂无 LLM 调用记录
+              本月暂无模型调用记录
             </div>
           ) : (
             <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
