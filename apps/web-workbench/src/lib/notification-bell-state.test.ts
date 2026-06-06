@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  notificationBadgeText,
   notificationErrorMessage,
   notificationListStatusCopy,
   notificationListSummary,
   safeNotificationCount,
+  shouldRenderCompactNotificationDot,
 } from './notification-bell-state';
 
 describe('notification bell state helpers', () => {
@@ -54,5 +56,14 @@ describe('notification bell state helpers', () => {
     expect(notificationListStatusCopy({ loading: true, error: null, count: 'bad' })?.title).toBe(
       '通知加载中…',
     );
+  });
+
+  it('keeps the mobile header badge compact when unread counts grow', () => {
+    expect(notificationBadgeText(3, 'mobile-header')).toBe('3');
+    expect(notificationBadgeText(10, 'mobile-header')).toBe('');
+    expect(shouldRenderCompactNotificationDot(10, 'mobile-header')).toBe(true);
+    expect(notificationBadgeText(22, 'sidebar-footer')).toBe('22');
+    expect(notificationBadgeText(120, 'sidebar-footer')).toBe('99+');
+    expect(shouldRenderCompactNotificationDot(120, 'sidebar-footer')).toBe(false);
   });
 });

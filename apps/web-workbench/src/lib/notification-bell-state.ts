@@ -46,6 +46,24 @@ export function notificationErrorMessage(err: unknown, fallback = '请稍后重�
   return pageErrorMessage(err, fallback);
 }
 
+export function notificationBadgeText(
+  count: unknown,
+  placement: 'sidebar-footer' | 'mobile-header' = 'sidebar-footer',
+): string {
+  const safeCount = safeNotificationCount(count);
+  if (safeCount <= 0) return '';
+  if (placement === 'mobile-header' && safeCount > 9) return '';
+  if (placement === 'sidebar-footer' && safeCount > 99) return '99+';
+  return String(safeCount);
+}
+
+export function shouldRenderCompactNotificationDot(
+  count: unknown,
+  placement: 'sidebar-footer' | 'mobile-header' = 'sidebar-footer',
+): boolean {
+  return placement === 'mobile-header' && safeNotificationCount(count) > 9;
+}
+
 export function safeNotificationCount(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
   return Math.max(0, Math.floor(value));

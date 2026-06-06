@@ -34,10 +34,12 @@ import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
 import {
+  notificationBadgeText,
   notificationErrorMessage,
   notificationListStatusCopy,
   notificationListSummary,
   safeNotificationCount,
+  shouldRenderCompactNotificationDot,
 } from '@/lib/notification-bell-state';
 
 const POLL_INTERVAL_MS = 30_000;
@@ -196,8 +198,9 @@ export function NotificationBell({
   }, [fetchList, markingAll, refreshCount, unreadCount]);
 
   const safeUnreadCount = safeNotificationCount(unreadCount);
-  const badge = safeUnreadCount > 99 ? '99+' : String(safeUnreadCount);
+  const badge = notificationBadgeText(safeUnreadCount, placement);
   const hasUnread = safeUnreadCount > 0;
+  const compactBadge = shouldRenderCompactNotificationDot(safeUnreadCount, placement);
   const summary = notificationListSummary({
     loading,
     error: listError,
@@ -214,8 +217,8 @@ export function NotificationBell({
       <button
         type="button"
         onClick={handleToggle}
-        aria-label="通知"
-        title="通知"
+        aria-label={hasUnread ? `通知，${safeUnreadCount} 条未读` : '通知'}
+        title={hasUnread ? `通知，${safeUnreadCount} 条未读` : '通知'}
         aria-expanded={open}
         className={cn(
           'relative flex h-9 w-9 items-center justify-center rounded-[8px] border border-[#DCDDDD]/60 bg-white/45 text-[#595757] shadow-[0_8px_22px_rgba(89,87,87,0.035)] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:border-white/10 dark:bg-white/[0.04] dark:text-foreground/70 dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
@@ -225,10 +228,16 @@ export function NotificationBell({
         <Bell className="h-4 w-4" />
         {hasUnread && (
           <span
-            className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-semibold text-white"
+            aria-hidden="true"
+            className={cn(
+              'absolute flex items-center justify-center rounded-full font-semibold text-white',
+              compactBadge
+                ? 'right-1 top-1 h-2 w-2'
+                : '-right-0.5 -top-0.5 h-4 min-w-[16px] px-1 text-[10px]',
+            )}
             style={{ backgroundColor: '#EA1F59' }}
           >
-            {badge}
+            {compactBadge ? null : badge}
           </span>
         )}
       </button>
