@@ -56,6 +56,9 @@ describe('verificationBannerCopy', () => {
 
     expect(copy.tone).toBe('danger');
     expect(copy.title).toBe('这次结果不够可信');
+    expect(copy.body).toBe(
+      'HOLA DAY 已拦截这次结果。建议重新执行任务，或把范围、来源、字段要求写得更具体。',
+    );
   });
 
   it('dedupes and caps visible checks', () => {

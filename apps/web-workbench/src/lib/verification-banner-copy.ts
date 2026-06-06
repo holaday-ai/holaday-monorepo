@@ -68,8 +68,8 @@ export function verificationBannerCopy({
       title: '这次结果不够可信',
       body:
         labels.length > 0
-          ? 'HOLA DAY 已拦截这次结果。建议重试，或把范围、来源、字段要求写得更具体。'
-          : 'HOLA DAY 已拦截这次结果，但旧任务没有保存具体检查项。建议重试或补充更明确的要求。',
+          ? 'HOLA DAY 已拦截这次结果。建议重新执行任务，或把范围、来源、字段要求写得更具体。'
+          : 'HOLA DAY 已拦截这次结果，但旧任务没有保存具体检查项。建议重新执行任务或补充更明确的要求。',
       checks,
       hiddenCount,
     };
