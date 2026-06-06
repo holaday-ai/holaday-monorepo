@@ -24,6 +24,11 @@ export interface SkillToggleSnapshot {
   readonly enabled: boolean;
 }
 
+export interface SkillLoadErrorCopy {
+  readonly title: string;
+  readonly body: string;
+}
+
 const PLAN_LABELS: Record<string, string> = {
   free: '体验版',
   basic: '基础版',
@@ -65,6 +70,17 @@ export function skillPageSummary(options: {
     return `已启用 ${options.enabledCount} / ${options.cap} · ${skillPlanLabel(options.planId)}`;
   }
   return `已加载 ${options.totalCount} 个技能 · ${skillPlanLabel(options.planId)}`;
+}
+
+export function skillLoadErrorCopy(message: string | null | undefined): SkillLoadErrorCopy {
+  const body =
+    typeof message === 'string' && message.trim()
+      ? message.trim()
+      : '请稍后重试，或刷新页面后再打开专家技能。';
+  return {
+    title: '技能暂时无法加载',
+    body,
+  };
 }
 
 export function skillLimitMessage(options: {

@@ -5,6 +5,7 @@ import {
   normalizeRoleListResponse,
   normalizeRoleSelectResponse,
   roleLimitMessage,
+  roleLoadErrorCopy,
   rolePageSummary,
   rolePlanLabel,
   roleRemainingChanges,
@@ -107,6 +108,17 @@ describe('roles page state helpers', () => {
   it('keeps remaining monthly changes non-negative', () => {
     expect(roleRemainingChanges(1, 3)).toBe(2);
     expect(roleRemainingChanges(4, 3)).toBe(0);
+  });
+
+  it('formats role load errors for user-facing surfaces', () => {
+    expect(roleLoadErrorCopy('  offline  ')).toEqual({
+      title: '角色暂时无法加载',
+      body: 'offline',
+    });
+    expect(roleLoadErrorCopy(null)).toEqual({
+      title: '角色暂时无法加载',
+      body: '请稍后重试，或刷新页面后再打开角色设置。',
+    });
   });
 
   it('describes the basic pick limit', () => {

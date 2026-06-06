@@ -19,6 +19,7 @@ import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import {
   connectionAccessMailBody,
+  connectionLoadErrorCopy,
   connectionPageSummary,
   connectionProviderActionLabel,
   connectionProviderStatus,
@@ -26,7 +27,7 @@ import {
   normalizeConnectionProviders,
   type ConnectionProviderView,
 } from '@/lib/connection-page-state';
-import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
+import { pageErrorMessage } from '@/lib/page-error-copy';
 import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
@@ -72,7 +73,7 @@ export function ConnectionsPage(): JSX.Element {
         const message = pageErrorMessage(err);
         setLoadError(message);
         if (!options.silent) {
-          toast.show(pageActionError('连接器加载失败', err), 'error');
+          toast.show('连接器暂时无法加载', 'error');
         }
       } finally {
         if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
@@ -102,6 +103,7 @@ export function ConnectionsPage(): JSX.Element {
     loading,
     error: loadError,
   });
+  const loadErrorCopy = connectionLoadErrorCopy(loadError);
 
   return (
     <PageContainer width="wide">
@@ -130,9 +132,9 @@ export function ConnectionsPage(): JSX.Element {
       ) : loadError ? (
         <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center animate-fade-in motion-reduce:animate-none">
           <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
-          <div className="text-sm font-medium text-foreground/80">连接器加载失败</div>
+          <div className="text-sm font-medium text-foreground/80">{loadErrorCopy.title}</div>
           <div className="max-w-md text-xs leading-5 text-muted-foreground">
-            {loadError}
+            {loadErrorCopy.body}
           </div>
           <div className="mt-1 flex flex-wrap justify-center gap-2">
             <Button type="button" size="sm" onClick={() => void refresh()}>

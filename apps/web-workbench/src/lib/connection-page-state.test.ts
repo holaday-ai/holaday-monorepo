@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   connectionAccessMailBody,
+  connectionLoadErrorCopy,
   connectionPageSummary,
   connectionProviderActionLabel,
   connectionProviderStatus,
@@ -100,6 +101,17 @@ describe('connection page state helpers', () => {
   it('asks for the concrete provider and use case in the request body', () => {
     expect(connectionAccessMailBody('GitHub')).toContain('请协助开通 GitHub 连接器。');
     expect(connectionAccessMailBody('GitHub')).toContain('需要执行的典型操作：');
+  });
+
+  it('formats connection load errors for user-facing surfaces', () => {
+    expect(connectionLoadErrorCopy('  offline  ')).toEqual({
+      title: '连接器暂时无法加载',
+      body: 'offline',
+    });
+    expect(connectionLoadErrorCopy(undefined)).toEqual({
+      title: '连接器暂时无法加载',
+      body: '请稍后重试，或刷新页面后再打开连接器。',
+    });
   });
 
   it('normalizes malformed connection provider responses', () => {

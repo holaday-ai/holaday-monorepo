@@ -27,6 +27,11 @@ export interface RoleSelectSnapshot {
   readonly changesLimit: number;
 }
 
+export interface RoleLoadErrorCopy {
+  readonly title: string;
+  readonly body: string;
+}
+
 export const ROLE_CATEGORY_ORDER: readonly Pick<RoleGroup, 'key' | 'nameZh'>[] = [
   { key: 'marketing', nameZh: '营销 & 内容' },
   { key: 'ecommerce', nameZh: '电商 & 运营' },
@@ -67,6 +72,17 @@ export function rolePageSummary(options: {
     return `已选 ${options.selectedCount} / ${options.pickLimit ?? BASIC_ROLE_PICK_LIMIT} · 基础版`;
   }
   return `解锁 ${options.totalCount} 个角色 · ${rolePlanLabel(options.plan)}`;
+}
+
+export function roleLoadErrorCopy(message: string | null | undefined): RoleLoadErrorCopy {
+  const body =
+    typeof message === 'string' && message.trim()
+      ? message.trim()
+      : '请稍后重试，或刷新页面后再打开角色设置。';
+  return {
+    title: '角色暂时无法加载',
+    body,
+  };
 }
 
 export function roleRemainingChanges(changesThisMonth: number, changesLimit = ROLE_CHANGES_PER_MONTH): number {

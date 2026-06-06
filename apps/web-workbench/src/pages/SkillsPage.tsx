@@ -45,6 +45,7 @@ import {
   normalizeSkillToggleResponse,
   skillCardBadge,
   skillLimitMessage,
+  skillLoadErrorCopy,
   skillPageSummary,
 } from '@/lib/skills-page-state';
 import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
@@ -146,7 +147,7 @@ export function SkillsPage(): JSX.Element {
         const message = pageErrorMessage(err);
         setLoadError(message);
         if (!options.silent) {
-          toast.show(pageActionError('技能加载失败', err), 'error');
+          toast.show('技能暂时无法加载', 'error');
         }
       } finally {
         if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
@@ -175,6 +176,7 @@ export function SkillsPage(): JSX.Element {
     cap,
     planId,
   });
+  const loadErrorCopy = skillLoadErrorCopy(loadError);
 
   async function onToggle(skill: UiSkill): Promise<void> {
     if (pendingId) return;
@@ -249,9 +251,9 @@ export function SkillsPage(): JSX.Element {
       ) : loadError ? (
         <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center">
           <AlertCircle className="h-8 w-8 text-primary" aria-hidden />
-          <div className="text-sm font-medium text-foreground/80">技能加载失败</div>
+          <div className="text-sm font-medium text-foreground/80">{loadErrorCopy.title}</div>
           <div className="max-w-md text-xs leading-5 text-muted-foreground">
-            {loadError}
+            {loadErrorCopy.body}
           </div>
           <div className="mt-1 flex flex-wrap justify-center gap-2">
             <Button type="button" size="sm" onClick={() => void refresh()}>

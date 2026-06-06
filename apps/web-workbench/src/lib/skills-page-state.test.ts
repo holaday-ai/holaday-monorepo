@@ -5,6 +5,7 @@ import {
   normalizeSkillToggleResponse,
   skillCardBadge,
   skillLimitMessage,
+  skillLoadErrorCopy,
   skillPageSummary,
   skillPlanLabel,
   type SkillCategory,
@@ -94,6 +95,17 @@ describe('skills page state helpers', () => {
     expect(skillLimitMessage({ cap: 5, planId: 'basic' })).toBe(
       '已达到当前套餐的技能上限（5 个）· 升级到专业版可使用全部 33 个技能',
     );
+  });
+
+  it('formats skill load errors for user-facing surfaces', () => {
+    expect(skillLoadErrorCopy('  offline  ')).toEqual({
+      title: '技能暂时无法加载',
+      body: 'offline',
+    });
+    expect(skillLoadErrorCopy('')).toEqual({
+      title: '技能暂时无法加载',
+      body: '请稍后重试，或刷新页面后再打开专家技能。',
+    });
   });
 
   it('describes the card badge while saving', () => {

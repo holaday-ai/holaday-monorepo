@@ -26,6 +26,11 @@ export interface ConnectionProviderGroup<TProvider extends ConnectionProviderLik
   readonly items: readonly TProvider[];
 }
 
+export interface ConnectionLoadErrorCopy {
+  readonly title: string;
+  readonly body: string;
+}
+
 export const CONNECTION_CATEGORY_LABELS: Record<ConnectionCategory, string> = {
   productivity: '效率工具',
   communication: '沟通协作',
@@ -83,6 +88,17 @@ export function connectionPageSummary(options: {
   if (options.error) return '连接器加载失败';
   if (count === 0) return '暂无规划连接器';
   return `已规划 ${count} 个连接器 · ${categoryCount} 类工具`;
+}
+
+export function connectionLoadErrorCopy(message: string | null | undefined): ConnectionLoadErrorCopy {
+  const body =
+    typeof message === 'string' && message.trim()
+      ? message.trim()
+      : '请稍后重试，或刷新页面后再打开连接器。';
+  return {
+    title: '连接器暂时无法加载',
+    body,
+  };
 }
 
 export function connectionAccessMailBody(providerName: string): string {
