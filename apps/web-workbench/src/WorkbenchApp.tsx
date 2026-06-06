@@ -639,7 +639,7 @@ export function WorkbenchApp(): JSX.Element {
             aria-hidden
             onClick={() => setSidePanelOverride('close')}
           />
-          <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[560px] max-w-[90vw] flex-col bg-background shadow-2xl">
+          <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[520px] max-w-[88vw] flex-col bg-background shadow-2xl">
             <BrowserPanel
               frame={
                 selectedTask
