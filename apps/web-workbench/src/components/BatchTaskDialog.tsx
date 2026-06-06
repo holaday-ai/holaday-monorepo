@@ -355,7 +355,7 @@ export function BatchTaskDialog({
                               : '先写步骤或输出后再复用'
                           }
                           aria-label={`复用任务 ${index + 1} 的步骤和输出`}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#57479C]/10 hover:text-[#57479C] disabled:pointer-events-none disabled:opacity-35"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#57479C]/10 hover:text-[#57479C] disabled:pointer-events-none disabled:opacity-35"
                         >
                           <Copy className="h-3.5 w-3.5" />
                         </button>
@@ -365,7 +365,7 @@ export function BatchTaskDialog({
                           disabled={submitting || items.length === 1}
                           aria-label={`删除任务 ${index + 1}`}
                           title={`删除任务 ${index + 1}`}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:pointer-events-none disabled:opacity-40"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:pointer-events-none disabled:opacity-40"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
