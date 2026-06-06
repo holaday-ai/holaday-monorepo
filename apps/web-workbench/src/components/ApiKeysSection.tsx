@@ -339,7 +339,7 @@ function WebhookDocs(): JSX.Element {
   const curlExample = webhookCurlExample(webhookUrl);
   const copyUrl = async (): Promise<void> => {
     if (await copyTextToClipboard(webhookUrl)) {
-      toast.show('已复制 Webhook URL');
+      toast.show('已复制 Webhook 地址');
     } else {
       toast.show('复制失败', 'error');
     }
@@ -355,14 +355,14 @@ function WebhookDocs(): JSX.Element {
     <div className="mt-4 space-y-3">
       {/* URL row with one-click copy. */}
       <div className="rounded-md border border-dashed border-border bg-card/40 p-3">
-        <div className="text-xs font-medium text-foreground/80">Webhook URL</div>
+        <div className="text-xs font-medium text-foreground/80">Webhook 地址</div>
         <div className="mt-1.5 flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 font-mono text-[11px]">
           <span className="min-w-0 flex-1 break-all">{webhookUrl}</span>
           <button
             type="button"
             onClick={() => void copyUrl()}
             className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-            aria-label="复制 URL"
+            aria-label="复制 Webhook 地址"
             title="复制"
           >
             <Copy className="h-3.5 w-3.5" />
@@ -378,7 +378,7 @@ function WebhookDocs(): JSX.Element {
         <ol className="mt-2 list-decimal space-y-1 pl-4">
           <li>新建 Zap，选触发器（Email / Slack / RSS / 任意）</li>
           <li>添加 Action：搜 <span className="font-mono">Webhooks by Zapier</span> → POST</li>
-          <li>URL 填上方 Webhook URL；Method = POST；Data Pass-Through = No</li>
+          <li>URL 填上方 Webhook 地址；Method = POST；Data Pass-Through = No</li>
           <li>
             Headers 加两条：
             <div className="mt-1 rounded bg-background p-2 font-mono">

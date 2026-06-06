@@ -17,7 +17,7 @@ describe('error-copy', () => {
   it('hides model provider internals in AI service errors', () => {
     expect(humaniseTaskError('API call timed out twice')).toBe('AI 服务连续超时，请稍后重试。');
     expect(humaniseTaskError('Anthropic API error: 429 rate_limit_error')).toBe(
-      'AI 服务暂时无法处理请求，可能是配额或参数问题。请稍后重试。',
+      'AI 服务暂时无法处理请求，可能是请求信息不完整或额度受限。请稍后重试。',
     );
     expect(humaniseTaskError('Anthropic API error: overloaded_error')).toBe('AI 服务暂时出错，请稍后重试。');
   });

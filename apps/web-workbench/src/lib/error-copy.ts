@@ -38,7 +38,7 @@ const AI_SERVICE_RULES: Rule[] = [
   },
   {
     match: /Anthropic API error:\s*4\d\d/i,
-    to: 'AI 服务暂时无法处理请求，可能是配额或参数问题。请稍后重试。',
+    to: 'AI 服务暂时无法处理请求，可能是请求信息不完整或额度受限。请稍后重试。',
   },
   {
     match: /Anthropic API error/i,

@@ -9,7 +9,7 @@ export const NOTIFICATION_PLATFORM_LABEL: Record<NotificationPlatform, string> =
 
 export function maskWebhookUrl(url: string): string {
   const trimmed = url.trim();
-  if (!trimmed) return '未填写 URL';
+  if (!trimmed) return '未填写通知地址';
 
   try {
     const parsed = new URL(trimmed);
