@@ -324,7 +324,7 @@ function SearchStatusBadge({
   return (
     <span
       className={cn(
-        'mt-0.5 hidden shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium sm:inline-flex',
+        'mt-0.5 inline-flex shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium sm:px-2 sm:text-[11px]',
         searchStatusTone(status),
       )}
     >
