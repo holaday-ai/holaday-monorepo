@@ -127,6 +127,14 @@ export function skillCardBadge(options: {
   return options.enabled ? '已启用' : '启用';
 }
 
+export function skillCardUsageHint(options: {
+  readonly enabled: boolean;
+  readonly pending: boolean;
+}): string {
+  if (options.pending) return '正在保存选择';
+  return options.enabled ? '新任务会自动匹配' : '启用后可参与自动匹配';
+}
+
 export function normalizeSkillRows(value: unknown): UiSkill[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();

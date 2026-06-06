@@ -44,6 +44,7 @@ import {
   normalizeSkillRows,
   normalizeSkillToggleResponse,
   skillCardBadge,
+  skillCardUsageHint,
   skillLimitBannerCopy,
   skillLimitMessage,
   skillLoadErrorCopy,
@@ -386,6 +387,9 @@ function SkillCard({
       </div>
       <div className="line-clamp-2 text-xs leading-5 text-muted-foreground">
         {skill.description}
+      </div>
+      <div className="mt-auto border-t border-[#EFEFEF] pt-2 text-[11px] leading-4 text-muted-foreground">
+        {skillCardUsageHint({ enabled: skill.enabled, pending })}
       </div>
       <span
         className={cn(

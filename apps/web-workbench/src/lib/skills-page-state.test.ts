@@ -4,6 +4,7 @@ import {
   normalizeSkillRows,
   normalizeSkillToggleResponse,
   skillCardBadge,
+  skillCardUsageHint,
   skillLimitBannerCopy,
   skillLimitMessage,
   skillLoadErrorCopy,
@@ -134,6 +135,18 @@ describe('skills page state helpers', () => {
     expect(skillCardBadge({ enabled: false, pending: false })).toBe('启用');
     expect(skillCardBadge({ enabled: true, pending: false })).toBe('已启用');
     expect(skillCardBadge({ enabled: true, pending: true })).toBe('保存中…');
+  });
+
+  it('explains how enabled skill cards affect new tasks', () => {
+    expect(skillCardUsageHint({ enabled: true, pending: false })).toBe(
+      '新任务会自动匹配',
+    );
+    expect(skillCardUsageHint({ enabled: false, pending: false })).toBe(
+      '启用后可参与自动匹配',
+    );
+    expect(skillCardUsageHint({ enabled: false, pending: true })).toBe(
+      '正在保存选择',
+    );
   });
 
   it('normalizes skill list payloads before rendering', () => {
