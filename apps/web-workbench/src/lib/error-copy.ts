@@ -29,6 +29,9 @@ const RULES: Rule[] = [
     match: /exhausted\s+maxIterations/i,
     to: '任务步骤过多，未能在限制内完成。试着把意图写得更具体，或换个方式提问。',
   },
+];
+
+const AI_SERVICE_RULES: Rule[] = [
   {
     match: /API call timed out twice/i,
     to: 'AI 服务连续超时，请稍后重试。',
@@ -41,6 +44,10 @@ const RULES: Rule[] = [
     match: /Anthropic API error/i,
     to: 'AI 服务暂时出错，请稍后重试。',
   },
+];
+
+RULES.push(
+  ...AI_SERVICE_RULES,
   {
     match: /browser unavailable/i,
     to: '浏览器服务暂时不可用，请稍后重试。',
@@ -85,9 +92,7 @@ const RULES: Rule[] = [
     match: /paypal sdk failed to load|paypal sdk/i,
     to: 'PayPal 加载失败，请刷新页面后重试。',
   },
-];
-
-const AI_SERVICE_RULES = RULES.slice(2, 5);
+);
 
 /**
  * Apply the rules in order; return the first match's replacement, or
