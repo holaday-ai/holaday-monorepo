@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  browserFrameCanPanInPortraitSheet,
   browserLiveOverlayCopy,
   browserPanelHeaderStatus,
   browserPanelEvidenceHeaderStatus,
@@ -163,6 +164,27 @@ describe('BrowserPanel state helpers', () => {
     expect(browserViewportFrameLabel({ width: 1280, height: 800 })).toBe(
       '1280×800 · 桌面帧',
     );
+  });
+
+  it('only hints horizontal panning for wide browser frames in portrait sheets', () => {
+    expect(
+      browserFrameCanPanInPortraitSheet({
+        isSheet: true,
+        viewport: { width: 1280, height: 800 },
+      }),
+    ).toBe(true);
+    expect(
+      browserFrameCanPanInPortraitSheet({
+        isSheet: true,
+        viewport: { width: 430, height: 760 },
+      }),
+    ).toBe(false);
+    expect(
+      browserFrameCanPanInPortraitSheet({
+        isSheet: false,
+        viewport: { width: 1280, height: 800 },
+      }),
+    ).toBe(false);
   });
 
   it('prioritises awaiting-user and takeover states over transport labels', () => {

@@ -201,6 +201,16 @@ export function browserViewportFrameLabel(
   return size;
 }
 
+export function browserFrameCanPanInPortraitSheet(inputs: {
+  isSheet: boolean;
+  viewport: { width: number; height: number } | null | undefined;
+}): boolean {
+  if (!inputs.isSheet) return false;
+  const { viewport } = inputs;
+  if (!viewport || viewport.width <= 0 || viewport.height <= 0) return false;
+  return viewport.width / viewport.height > 1.12;
+}
+
 export function browserLiveOverlayCopy(inputs: {
   status: BrowserLiveStatus;
   showReconnect: boolean;
