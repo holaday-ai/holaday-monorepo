@@ -91,6 +91,10 @@ export function starredPageSummary({
   return `已置顶 ${count}${hasMore ? '+' : ''} 个`;
 }
 
+export function taskHubNeedsAttention(status: string): boolean {
+  return status === 'awaiting_user';
+}
+
 export function taskHubErrorMessage(err: unknown, fallback = '请稍后重试'): string {
   return pageErrorMessage(err, fallback);
 }

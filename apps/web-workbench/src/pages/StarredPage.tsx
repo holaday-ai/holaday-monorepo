@@ -12,6 +12,7 @@ import {
   normalizeTaskHubRows,
   starredPageSummary,
   taskHubErrorMessage,
+  taskHubNeedsAttention,
   type NormalizedTaskHubRow,
 } from '@/lib/task-hub-state';
 import { taskStatusLabel } from '@/lib/task-status-copy';
@@ -203,9 +204,7 @@ export function StarredPage(): JSX.Element {
                 key={t.taskId}
                 className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-[#EFEFEF]/35"
               >
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#EA1F59]">
-                  <Pin className="h-3.5 w-3.5" />
-                </span>
+                <PinnedStatusIcon status={t.status} />
                 <button
                   type="button"
                   onClick={() => open(t.taskId)}
@@ -266,5 +265,20 @@ export function StarredPage(): JSX.Element {
         </>
       )}
     </PageContainer>
+  );
+}
+
+function PinnedStatusIcon({ status }: { status: string }): JSX.Element {
+  if (taskHubNeedsAttention(status)) {
+    return (
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#FFC910]/55 bg-[#FFC910]/15 text-[#8A6A00]">
+        <AlertCircle className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  return (
+    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#EA1F59]">
+      <Pin className="h-3.5 w-3.5" />
+    </span>
   );
 }

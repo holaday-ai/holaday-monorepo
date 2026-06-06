@@ -10,6 +10,7 @@ import {
   shouldApplyHistoryResponse,
   starredPageSummary,
   taskHubErrorMessage,
+  taskHubNeedsAttention,
 } from './task-hub-state';
 
 describe('task hub state helpers', () => {
@@ -91,6 +92,12 @@ describe('task hub state helpers', () => {
     expect(starredPageSummary({ loading: false, error: null, count: 50, hasMore: true })).toBe(
       '已置顶 50+ 个',
     );
+  });
+
+  it('marks awaiting task hub rows as needing attention', () => {
+    expect(taskHubNeedsAttention('awaiting_user')).toBe(true);
+    expect(taskHubNeedsAttention('executing')).toBe(false);
+    expect(taskHubNeedsAttention('completed')).toBe(false);
   });
 
   it('keys history requests to the active filter set', () => {
