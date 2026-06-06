@@ -2112,14 +2112,14 @@ function TerminalSummary({
               className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
             >
               <FileText className="text-[#ADADAD]" />
-              <span>复制 Markdown</span>
+              <span>复制为 Markdown</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={() => {
                 if (downloadMarkdownFile(markdownText, taskId)) {
-                  toast.show('已开始下载 Markdown');
+                  toast.show('已开始下载 .md 文件');
                 } else {
-                  toast.show('下载失败，请复制 Markdown 后手动保存', 'error');
+                  toast.show('下载失败，请复制内容后手动保存', 'error');
                 }
               }}
               className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
