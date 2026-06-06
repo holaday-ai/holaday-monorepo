@@ -1225,8 +1225,8 @@ export function BrowserPanel({
         <button
           type="button"
           onClick={onClose}
-          aria-label="关闭浏览器抽屉"
-          title="关闭浏览器抽屉"
+          aria-label="关闭浏览器面板"
+          title="关闭浏览器面板"
           className="absolute left-1/2 top-0 z-[90] flex h-8 w-20 -translate-x-1/2 items-start justify-center pt-2"
         >
           <span className="h-1.5 w-10 rounded-full bg-muted-foreground/30" aria-hidden />
@@ -1806,8 +1806,8 @@ export function BrowserPanel({
         <button
           type="button"
           onClick={onClose}
-          aria-label="关闭浏览器抽屉"
-          title="关闭浏览器抽屉"
+          aria-label="关闭浏览器面板"
+          title="关闭浏览器面板"
           className="fixed inset-0 z-[70] bg-black/30 backdrop-blur-sm animate-fade-in"
         />
         {section}
