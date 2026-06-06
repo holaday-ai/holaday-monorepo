@@ -486,7 +486,7 @@ export function BrowserPanel({
   const hasActiveTask = Boolean(activeTaskId);
   // RC follow-up audit fix — generate / scrape tasks have NO pool
   // slot (no Brave allocated), so /screencast-ws/<taskId> 409s in a
-  // loop and the user sees "实时画面断开，正在自动重连" cycling every ~5s
+  // loop and the user sees "浏览器画面断开，正在自动重连" cycling every ~5s
   // forever. Detect non-pool tasks via the streaming/progress
   // buffers (those types only ever populate for generate/scrape
   // runners) and skip the WS entirely. Browser tasks never populate
@@ -578,8 +578,8 @@ export function BrowserPanel({
   // Codex Pack B2 — long-connecting reconnect affordance. The viewer
   // sits in `connecting` state when noVNC is still finishing its TLS
   // handshake / RFB protocol negotiation. Usually 1-3s; if it drags
-  // past 5s, surface a "重新连接" button so the user can force a
-  // fresh WS attempt instead of staring at the placeholder text.
+  // past 5s, surface a "刷新画面" button so the user can force a
+  // fresh browser-frame attempt instead of staring at the placeholder text.
   // Tracked separately from `vncAttemptFails` (which counts
   // disconnected/error, not slow-connect).
   const [showReconnect, setShowReconnect] = React.useState(false);
@@ -1479,7 +1479,7 @@ export function BrowserPanel({
                     // Codex Pack B2 — bumping reconnectEpoch forces a
                     // fresh CdpScreencastViewport mount, which closes
                     // the existing WS and opens a new one. Drives the
-                    // "重新连接" button after 5s of connecting.
+                    // "刷新画面" button after 5s of connecting.
                     key={`cdp-${reconnectEpoch}`}
                     wsUrl={screencastUrlForCdp}
                     viewOnly={!interactiveActive}
@@ -1534,7 +1534,7 @@ export function BrowserPanel({
                         className="pointer-events-auto inline-flex h-7 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
                       >
                         <RotateCw className="h-3 w-3" />
-                        重新连接
+                        刷新画面
                       </button>
                     )}
                   </div>
