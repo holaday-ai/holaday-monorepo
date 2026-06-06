@@ -31,15 +31,15 @@ const RULES: Rule[] = [
   },
   {
     match: /API call timed out twice/i,
-    to: '模型 API 连续超时，请稍后重试。',
+    to: 'AI 服务连续超时，请稍后重试。',
   },
   {
     match: /Anthropic API error:\s*4\d\d/i,
-    to: '模型请求被拒绝，可能是配额或参数问题。请稍后重试。',
+    to: 'AI 服务暂时无法处理请求，可能是配额或参数问题。请稍后重试。',
   },
   {
     match: /Anthropic API error/i,
-    to: '模型 API 出错，请稍后重试。',
+    to: 'AI 服务暂时出错，请稍后重试。',
   },
   {
     match: /browser unavailable/i,
@@ -87,6 +87,8 @@ const RULES: Rule[] = [
   },
 ];
 
+const AI_SERVICE_RULES = RULES.slice(2, 5);
+
 /**
  * Apply the rules in order; return the first match's replacement, or
  * the original string when nothing matches.
@@ -95,6 +97,10 @@ export function humaniseTaskError(raw: string | null | undefined): string {
   if (!raw) return '';
   const trimmed = raw.trim();
   if (!trimmed) return '';
+  for (const rule of AI_SERVICE_RULES) {
+    const m = trimmed.match(rule.match);
+    if (m) return typeof rule.to === 'function' ? rule.to(m) : rule.to;
+  }
   const browserKind = classifyBrowserErrorKind(trimmed);
   switch (browserKind) {
     case 'extension_timeout':

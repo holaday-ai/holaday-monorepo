@@ -14,6 +14,14 @@ describe('error-copy', () => {
     );
   });
 
+  it('hides model provider internals in AI service errors', () => {
+    expect(humaniseTaskError('API call timed out twice')).toBe('AI 服务连续超时，请稍后重试。');
+    expect(humaniseTaskError('Anthropic API error: 429 rate_limit_error')).toBe(
+      'AI 服务暂时无法处理请求，可能是配额或参数问题。请稍后重试。',
+    );
+    expect(humaniseTaskError('Anthropic API error: overloaded_error')).toBe('AI 服务暂时出错，请稍后重试。');
+  });
+
   it('maps extension timeouts to user-facing browser copy', () => {
     expect(humaniseTaskError('扩展工具调用超时（已等待 30 秒，请确认浏览器标签页仍在加载或重试）')).toBe(
       '浏览器响应超时，页面可能仍在加载。请稍后重试。',
