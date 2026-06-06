@@ -579,7 +579,7 @@ export function AppShell(): JSX.Element {
             ? { ...prev, loading: false, error: msg }
             : prev,
         );
-        toast.show(taskActionError('项目任务加载失败', msg), 'error');
+        toast.show(taskActionError('项目任务暂时无法加载', msg), 'error');
       });
     return () => {
       cancelled = true;
@@ -647,7 +647,7 @@ export function AppShell(): JSX.Element {
             error: msg,
           }),
         );
-        toast.show(taskActionError('更多项目任务加载失败', msg), 'error');
+        toast.show(taskActionError('更多项目任务暂时无法加载', msg), 'error');
       });
   }, [projectFilter, projectTaskFilter, toast]);
   const projectPagerOverride = React.useMemo(() => {

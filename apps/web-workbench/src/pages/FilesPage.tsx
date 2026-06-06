@@ -92,7 +92,7 @@ export function FilesPage(): JSX.Element {
       setFiles(normalizeFileRows(list));
     } catch (err) {
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
-      toast.show(pageActionError('加载失败', err), 'error');
+      toast.show(pageActionError('文件暂时无法加载', err), 'error');
     } finally {
       if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
     }

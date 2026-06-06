@@ -395,7 +395,7 @@ function NotificationHardError({
   return (
     <div className="px-3 py-8 text-center">
       <AlertCircle className="mx-auto h-7 w-7 text-[#EA1F59]" aria-hidden />
-      <div className="mt-2 text-sm font-medium text-foreground/85">通知加载失败</div>
+      <div className="mt-2 text-sm font-medium text-foreground/85">通知暂时无法加载</div>
       <div className="mx-auto mt-1 max-w-[260px] text-xs leading-5 text-muted-foreground">
         {message}
       </div>

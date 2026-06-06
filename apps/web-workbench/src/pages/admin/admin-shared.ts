@@ -145,7 +145,7 @@ export function adminLoadErrorCopy(message: string | null | undefined): {
   body: string;
 } {
   return {
-    title: '加载失败',
+    title: '数据暂时无法加载',
     body: optionalText(message) ?? '数据暂时无法加载，请稍后重试。',
   };
 }

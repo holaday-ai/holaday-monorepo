@@ -75,7 +75,7 @@ export function ScheduledPage(): JSX.Element {
       setRows(list as UiScheduled[]);
     } catch (err) {
       if (reloadRequestRef.current !== requestId) return;
-      toast.show(taskActionError('加载失败', errorMessage(err)), 'error');
+      toast.show(taskActionError('定时任务暂时无法加载', errorMessage(err)), 'error');
       setRows([]);
     }
   }, [toast]);

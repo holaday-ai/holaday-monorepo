@@ -23,7 +23,7 @@ describe('error-copy', () => {
   });
 
   it('hides PayPal SDK wording in payment component failures', () => {
-    expect(humaniseTaskError('PayPal SDK failed to load')).toBe('PayPal 加载失败，请刷新页面后重试。');
+    expect(humaniseTaskError('PayPal SDK failed to load')).toBe('PayPal 暂时无法加载，请刷新页面后重试。');
   });
 
   it('hides model secret names in missing configuration errors', () => {

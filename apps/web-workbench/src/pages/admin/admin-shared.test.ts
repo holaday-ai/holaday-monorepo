@@ -33,11 +33,11 @@ describe('admin statusToken', () => {
 describe('adminLoadErrorCopy', () => {
   it('keeps admin load errors in a title/body shape', () => {
     expect(adminLoadErrorCopy('请稍后重试')).toEqual({
-      title: '加载失败',
+      title: '数据暂时无法加载',
       body: '请稍后重试',
     });
     expect(adminLoadErrorCopy('')).toEqual({
-      title: '加载失败',
+      title: '数据暂时无法加载',
       body: '数据暂时无法加载，请稍后重试。',
     });
   });

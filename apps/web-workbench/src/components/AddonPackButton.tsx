@@ -140,10 +140,10 @@ export function AddonPackButton({
     <div className="w-full">
       <div ref={containerRef} className="min-h-[36px]" />
       {status === 'loading' && (
-        <div className="text-center text-[10px] text-muted-foreground">加载 PayPal 中...</div>
+        <div className="text-center text-[10px] text-muted-foreground">正在加载 PayPal...</div>
       )}
       {status === 'error' && (
-        <div className="text-center text-[10px] text-destructive">PayPal 加载失败</div>
+        <div className="text-center text-[10px] text-destructive">PayPal 暂时无法加载</div>
       )}
     </div>
   );

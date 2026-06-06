@@ -27,7 +27,7 @@ describe('page-error-copy', () => {
 
   it('maps PayPal SDK failures to payment-specific copy', () => {
     expect(pageErrorMessage(new Error('PayPal SDK failed to load'))).toBe(
-      'PayPal 加载失败，请刷新页面后重试。',
+      'PayPal 暂时无法加载，请刷新页面后重试。',
     );
   });
 });

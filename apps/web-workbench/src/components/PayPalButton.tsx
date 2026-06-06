@@ -143,10 +143,10 @@ export function PayPalButton({ plan, cycle, clientId, env, onSuccess, onError }:
     <div className="w-full">
       <div ref={containerRef} className="min-h-[40px]" />
       {status === 'loading' && (
-        <div className="text-center text-xs text-muted-foreground">加载 PayPal 中...</div>
+        <div className="text-center text-xs text-muted-foreground">正在加载 PayPal...</div>
       )}
       {status === 'error' && (
-        <div className="text-center text-xs text-destructive">PayPal 加载失败，请刷新重试</div>
+        <div className="text-center text-xs text-destructive">PayPal 暂时无法加载，请刷新重试</div>
       )}
     </div>
   );

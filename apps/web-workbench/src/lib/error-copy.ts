@@ -90,7 +90,7 @@ RULES.push(
   },
   {
     match: /paypal sdk failed to load|paypal sdk/i,
-    to: 'PayPal 加载失败，请刷新页面后重试。',
+    to: 'PayPal 暂时无法加载，请刷新页面后重试。',
   },
 );
 
