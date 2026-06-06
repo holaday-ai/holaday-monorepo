@@ -10,6 +10,11 @@ export interface NotificationChannelRow {
   readonly createdAt: string | Date;
 }
 
+export interface NotificationChannelLoadErrorCopy {
+  readonly title: string;
+  readonly body: string;
+}
+
 export function normalizeNotificationChannels(value: unknown): NotificationChannelRow[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) => {
@@ -23,6 +28,15 @@ export function notificationChannelsLoadErrorMessage(
   fallback = '通知渠道暂时无法加载，请稍后重试。',
 ): string {
   return pageErrorMessage(err, fallback);
+}
+
+export function notificationChannelsLoadErrorCopy(
+  err: unknown,
+): NotificationChannelLoadErrorCopy {
+  return {
+    title: '通知渠道暂时无法加载',
+    body: notificationChannelsLoadErrorMessage(err),
+  };
 }
 
 export function notificationChannelTestErrorMessage({

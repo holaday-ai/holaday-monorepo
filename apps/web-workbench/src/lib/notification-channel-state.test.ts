@@ -3,6 +3,7 @@ import {
   notificationChannelTestErrorMessage,
   notificationStatusFallback,
   normalizeNotificationChannels,
+  notificationChannelsLoadErrorCopy,
   notificationChannelsLoadErrorMessage,
 } from './notification-channel-state';
 
@@ -71,6 +72,13 @@ describe('notificationChannelsLoadErrorMessage', () => {
     expect(notificationChannelsLoadErrorMessage({})).toBe(
       '通知渠道暂时无法加载，请稍后重试。',
     );
+  });
+
+  it('returns title/body copy for rendered load errors', () => {
+    expect(notificationChannelsLoadErrorCopy('请稍后重试')).toEqual({
+      title: '通知渠道暂时无法加载',
+      body: '请稍后重试',
+    });
   });
 });
 

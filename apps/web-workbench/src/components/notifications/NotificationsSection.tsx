@@ -25,6 +25,7 @@ import {
 } from '@/lib/notification-channel-copy';
 import {
   normalizeNotificationChannels,
+  notificationChannelsLoadErrorCopy,
   notificationChannelsLoadErrorMessage,
   type NotificationChannelRow,
 } from '@/lib/notification-channel-state';
@@ -59,10 +60,7 @@ export function NotificationsSection(): JSX.Element {
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
       const message = notificationChannelsLoadErrorMessage(err);
       setLoadError(message);
-      toast.show(
-        `加载失败：${message}`,
-        'error',
-      );
+      toast.show('通知渠道暂时无法加载', 'error');
     } finally {
       if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
     }
@@ -190,7 +188,10 @@ export function NotificationsSection(): JSX.Element {
           {loadError && !loading && (
             <div className="mx-4 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#EA1F59]/25 bg-[#EA1F59]/5 px-3 py-2 text-xs text-muted-foreground">
               <span className="min-w-0 flex-1">
-                通知渠道加载失败：{loadError}
+                <span className="block font-medium text-[#EA1F59]">
+                  {notificationChannelsLoadErrorCopy(loadError).title}
+                </span>
+                <span className="mt-1 block">{loadError}</span>
               </span>
               <Button
                 type="button"
