@@ -1,3 +1,5 @@
+import { pageErrorMessage } from './page-error-copy';
+
 export function normaliseEmailInput(value: string): string {
   return value.trim();
 }
@@ -47,5 +49,5 @@ export function authErrorMessage(err: unknown, fallback: string): string {
   ) {
     return fallback;
   }
-  return trimmed;
+  return pageErrorMessage(trimmed, fallback);
 }
