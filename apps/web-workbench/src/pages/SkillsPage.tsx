@@ -399,7 +399,7 @@ function SkillCard({
       >
         <Icon className="h-4 w-4" aria-hidden />
       </div>
-      <div className="min-w-0 pr-14 text-sm font-medium leading-5 text-foreground">
+      <div className="min-w-0 pr-20 text-sm font-medium leading-5 text-foreground">
         {skill.name}
       </div>
       <div className="line-clamp-2 text-xs leading-5 text-muted-foreground">
@@ -413,7 +413,7 @@ function SkillCard({
           type="button"
           size="sm"
           variant="outline"
-          className="h-7 shrink-0 rounded-[7px] px-2 text-[11px]"
+          className="h-8 shrink-0 rounded-[7px] px-3 text-xs"
           disabled={!skill.enabled || pending || blocked}
           title={skill.enabled ? `用${skill.name}创建任务` : '启用后可用此专家创建任务'}
           onClick={onUse}
@@ -430,7 +430,7 @@ function SkillCard({
         aria-label={`${skill.enabled ? '停用' : '启用'}${skill.name}`}
         title={`${skill.enabled ? '停用' : '启用'}${skill.name}`}
         className={cn(
-          'absolute right-3 top-3 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20',
+          'absolute right-3 top-3 flex h-8 items-center rounded-full px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20',
           pending
             ? 'border border-[#42C0EF]/45 bg-white text-[#217EA0]'
             : skill.enabled
