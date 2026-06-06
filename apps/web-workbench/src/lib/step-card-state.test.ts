@@ -50,7 +50,7 @@ describe('step-card-state', () => {
         message:
           '扩展工具调用超时（已等待 30 秒，请确认浏览器标签页仍在加载或重试）',
       }),
-    ).toBe('浏览器响应超时，可能是页面仍在加载或扩展连接短暂中断。可以重试当前任务。');
+    ).toBe('浏览器响应超时，可能是页面仍在加载或扩展连接短暂中断。可以重新执行当前任务。');
   });
 
   it('explains hibernated browser sessions', () => {
@@ -125,7 +125,7 @@ describe('step-card-state', () => {
         actionKind: 'click',
         message: 'Execution context was destroyed, most likely because of a navigation',
       }),
-    ).toBe('页面正在切换，本次步骤未能稳定完成。可以重试当前任务。');
+    ).toBe('页面正在切换，本次步骤未能稳定完成。可以重新执行当前任务。');
   });
 
   it('explains raw Chromium navigation failures per step', () => {

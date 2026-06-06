@@ -35,7 +35,7 @@ export function stepFailureMessage(step: Pick<UiStep, 'actionKind' | 'message'>)
   switch (browserKind) {
     case 'extension_timeout':
     case 'timeout':
-      return '浏览器响应超时，可能是页面仍在加载或扩展连接短暂中断。可以重试当前任务。';
+      return '浏览器响应超时，可能是页面仍在加载或扩展连接短暂中断。可以重新执行当前任务。';
     case 'extension_missing':
       return '浏览器扩展未连接。请打开 HOLA DAY 扩展后重试。';
     case 'extension_disconnected':
@@ -55,7 +55,7 @@ export function stepFailureMessage(step: Pick<UiStep, 'actionKind' | 'message'>)
     case 'transport_closed':
       return '浏览器连接中断，请重新执行任务。';
     case 'page_switch':
-      return '页面正在切换，本次步骤未能稳定完成。可以重试当前任务。';
+      return '页面正在切换，本次步骤未能稳定完成。可以重新执行当前任务。';
     case 'captcha':
       return '网站要求人机验证。请在浏览器里完成验证后继续，或重新执行任务。';
     default:

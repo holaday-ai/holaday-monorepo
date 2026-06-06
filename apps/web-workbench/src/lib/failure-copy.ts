@@ -39,7 +39,7 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
   if (browserKind === 'page_switch') {
     return {
       title: '页面正在切换',
-      subtitle: '网站跳转太快导致本次步骤失效，请重试当前任务。',
+      subtitle: '网站跳转太快导致本次步骤失效，请重新执行当前任务。',
       nextStep: '重新执行时尽量从稳定页面开始。',
     };
   }
@@ -68,7 +68,7 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
   ) {
     return {
       title: '浏览器响应超时',
-      subtitle: '页面可能仍在加载，或浏览器扩展连接短暂中断。请重试当前任务。',
+      subtitle: '页面可能仍在加载，或浏览器扩展连接短暂中断。请重新执行当前任务。',
       nextStep: '等页面稳定后重新执行当前任务。',
     };
   }
@@ -118,7 +118,7 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
   if (/execution context.*destroyed|frame detached|frame[^\w]not|页面.*切换/.test(haystack)) {
     return {
       title: '页面正在切换',
-      subtitle: '网站跳转太快导致本次步骤失效，请重试当前任务。',
+      subtitle: '网站跳转太快导致本次步骤失效，请重新执行当前任务。',
       nextStep: '重新执行时尽量从稳定页面开始。',
     };
   }

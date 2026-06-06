@@ -23,7 +23,7 @@ describe('classifyFriendlyFailure', () => {
 
     expect(copy).toEqual({
       title: '浏览器响应超时',
-      subtitle: '页面可能仍在加载，或浏览器扩展连接短暂中断。请重试当前任务。',
+      subtitle: '页面可能仍在加载，或浏览器扩展连接短暂中断。请重新执行当前任务。',
       nextStep: '等页面稳定后重新执行当前任务。',
     });
   });
@@ -85,7 +85,7 @@ describe('classifyFriendlyFailure', () => {
   it('classifies fast page changes as transient page switching', () => {
     expect(classifyFriendlyFailure('Execution context was destroyed, most likely because of a navigation')).toEqual({
       title: '页面正在切换',
-      subtitle: '网站跳转太快导致本次步骤失效，请重试当前任务。',
+      subtitle: '网站跳转太快导致本次步骤失效，请重新执行当前任务。',
       nextStep: '重新执行时尽量从稳定页面开始。',
     });
   });
