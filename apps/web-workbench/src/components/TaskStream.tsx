@@ -1947,6 +1947,19 @@ function TerminalSummary({
                 {copy.body}
               </div>
               <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                {intent && (
+                  <button
+                    type="button"
+                    onClick={() => void handleRetry(intent)}
+                    disabled={retryingIntent != null}
+                    aria-label={retryingIntent ? '正在重新执行任务' : '重新执行任务'}
+                    title={retryingIntent ? '正在重新执行' : '重新执行任务'}
+                    className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#EA1F59]/25 bg-[#EA1F59]/5 px-2.5 text-[11px] font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/10 disabled:cursor-wait disabled:opacity-60 dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10 dark:text-foreground"
+                  >
+                    <RotateCcw className={cn('h-3 w-3', retryingIntent && 'animate-spin')} />
+                    <span>重新执行</span>
+                  </button>
+                )}
                 {intent && onSuggestionPick && (
                   <button
                     type="button"
