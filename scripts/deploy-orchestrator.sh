@@ -8,7 +8,7 @@
 #
 # Usage:   ./scripts/deploy-orchestrator.sh [BRANCH]
 #          BRANCH defaults to claude/musing-keller-ae1d05
-# Env:     VULTR_PASSWORD (sshpass)
+# Env:     VULTR_PASSWORD (password auth)
 # Exits:   0 on success, 1 on health-check failure (no auto-rollback;
 #          PM2 keeps last-good binary running unless build broke,
 #          in which case re-run after fixing).
@@ -24,15 +24,16 @@ if [[ -f "$DEPLOY_ENV_LOADER" ]]; then
 fi
 unset DEPLOY_ENV_LOADER
 
+# shellcheck source=scripts/ssh-password-auth.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ssh-password-auth.sh"
+
 VULTR_HOST="root@207.148.70.106"
 BRANCH="${1:-claude/musing-keller-ae1d05}"
 HEALTH_URL="http://localhost:4001/healthz"
 HEALTH_MARKER='"status":"ok"'
 
-SSHPASS_ARGS=()
-if [[ -n "${VULTR_PASSWORD:-}" ]]; then
-  SSHPASS_ARGS=(sshpass -p "$VULTR_PASSWORD")
-fi
+build_ssh_password_prefix "${VULTR_PASSWORD:-}"
+VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
 SSH_OPTS=(-o StrictHostKeyChecking=no -o ConnectTimeout=20)
 REMOTE_RETRIES="${DEPLOY_REMOTE_RETRIES:-3}"
 REMOTE_RETRY_SLEEP="${DEPLOY_REMOTE_RETRY_SLEEP:-5}"
@@ -69,25 +70,25 @@ run_with_retry() {
 }
 
 echo "→ Fetching $BRANCH on Vultr"
-run_with_retry "Vultr fetch" "${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+run_with_retry "Vultr fetch" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
   cd /opt/holaday-monorepo && \
   git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' && \
   git reset --hard origin/$BRANCH && \
   git rev-parse HEAD" | tail -5
 
 echo "→ Installing + building"
-run_with_retry "Vultr install/build" "${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+run_with_retry "Vultr install/build" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
   cd /opt/holaday-monorepo && \
   pnpm install && \
   pnpm --filter @holaday/orchestrator build" 2>&1 | tail -5
 
 echo "→ pm2 restart"
-run_with_retry "Vultr pm2 restart" "${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+run_with_retry "Vultr pm2 restart" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
   "pm2 restart holaday-orchestrator"
 
 echo "→ Health check ($HEALTH_URL must return '$HEALTH_MARKER')"
 sleep 3
-HEALTH_OUT=$(run_with_retry "Vultr healthz" "${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+HEALTH_OUT=$(run_with_retry "Vultr healthz" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
   "curl -sf --max-time 10 $HEALTH_URL || echo 'FAIL'")
 if echo "$HEALTH_OUT" | grep -q "$HEALTH_MARKER"; then
   echo "✅ Health check passed"
@@ -95,12 +96,12 @@ else
   echo "❌ Health check FAILED"
   echo "Response: $HEALTH_OUT" >&2
   echo "→ Last 10 error log lines:"
-  run_with_retry "Vultr pm2 error logs" "${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+  run_with_retry "Vultr pm2 error logs" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
     "pm2 logs holaday-orchestrator --lines 10 --nostream --err 2>&1 | tail -15" >&2
   exit 1
 fi
 
-RESTART=$(run_with_retry "Vultr restart count" "${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+RESTART=$(run_with_retry "Vultr restart count" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
   "node -e \"const list=JSON.parse(require('child_process').execFileSync('pm2',['jlist'],{encoding:'utf8'})); const app=list.find((p)=>p.name==='holaday-orchestrator'); process.stdout.write(String(app?.pm2_env?.restart_time ?? 'unknown'));\"")
 echo "✅ Orchestrator deployed — restart count: $RESTART"
 
@@ -114,7 +115,7 @@ if [[ "${SKIP_AUTO_SMOKE:-0}" == "1" ]]; then
   echo "→ Auto-smoke skipped (SKIP_AUTO_SMOKE=1)"
 else
   echo "→ Running P0 smoke (informational; failure does NOT block deploy)"
-  SMOKE_OUT=$(run_with_retry "Vultr auto-smoke" "${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+  SMOKE_OUT=$(run_with_retry "Vultr auto-smoke" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
     "cd /opt/holaday-monorepo && \
      set -a && . apps/orchestrator/.env && set +a && \
      EVAL_BASE_URL=http://127.0.0.1:4001 \

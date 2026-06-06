@@ -29,6 +29,9 @@ if [[ -f "$DEPLOY_ENV_LOADER" ]]; then
 fi
 unset DEPLOY_ENV_LOADER
 
+# shellcheck source=scripts/ssh-password-auth.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ssh-password-auth.sh"
+
 ALIYUN_HOST="root@47.99.169.186"
 SPA_PATH="/opt/holaday-spa/dist"
 BACKUP_PATH="/opt/holaday-spa/dist.bak"
@@ -48,13 +51,11 @@ VULTR_SMOKE_URL="https://holaday.ai/app"
 VULTR_SMOKE_RESOLVE="holaday.ai:443:207.148.70.106"
 VULTR_REMOTE_SMOKE_RESOLVE="holaday.ai:443:127.0.0.1"
 
-# sshpass + non-interactive password — pulled from env so the
-# password doesn't end up in shell history. Falls back to interactive
-# if ALIYUN_PASSWORD isn't set.
-SSHPASS_ARGS=()
-if [[ -n "${ALIYUN_PASSWORD:-}" ]]; then
-  SSHPASS_ARGS=(sshpass -p "$ALIYUN_PASSWORD")
-fi
+# Non-interactive password auth — pulled from env / local deploy env so
+# passwords don't end up in shell history. Uses sshpass when installed,
+# otherwise OpenSSH SSH_ASKPASS.
+build_ssh_password_prefix "${ALIYUN_PASSWORD:-}"
+ALIYUN_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
 SSH_OPTS=(-o StrictHostKeyChecking=no -o NumberOfPasswordPrompts=1 -o ConnectTimeout=15)
 REMOTE_RETRIES="${DEPLOY_REMOTE_RETRIES:-3}"
 REMOTE_RETRY_SLEEP="${DEPLOY_REMOTE_RETRY_SLEEP:-5}"
@@ -181,8 +182,8 @@ fi
 NEW_HASH=$(grep -o 'index-[^"]*\.js' "$DIST_DIR/index.html" | head -1 || echo unknown)
 echo "📦 Local bundle: $NEW_HASH"
 
-ALIYUN_SSH=("${SSHPASS_ARGS[@]}" ssh "${SSH_OPTS[@]}")
-ALIYUN_SCP=("${SSHPASS_ARGS[@]}" scp "${SSH_OPTS[@]}")
+ALIYUN_SSH=("${ALIYUN_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}")
+ALIYUN_SCP=("${ALIYUN_AUTH_PREFIX[@]}" scp "${SSH_OPTS[@]}")
 
 echo "→ Backing up current dist on Aliyun"
 run_with_retry "Aliyun backup" "${ALIYUN_SSH[@]}" "$ALIYUN_HOST" \
@@ -219,10 +220,9 @@ fi
 
 # ───────────────────────── Vultr mirror ─────────────────────────
 #
-# Vultr's password has special chars that bork `sshpass -p`; we use
-# `sshpass -e` reading from $SSHPASS env var. Same tarball, different
-# extract path. Smoke probes a deep route (/app — under the SPA
-# fallback) since `/` lands on the marketing landing page.
+# Same tarball, different extract path. Smoke probes a deep route
+# (/app — under the SPA fallback) since `/` lands on the marketing
+# landing page.
 echo
 echo "→ Mirroring to Vultr (holaday.ai)"
 if [[ -z "${VULTR_PASSWORD:-}" ]]; then
@@ -231,9 +231,10 @@ if [[ -z "${VULTR_PASSWORD:-}" ]]; then
   exit 1
 fi
 
-VULTR_SSH=(sshpass -e ssh "${SSH_OPTS[@]}")
-VULTR_SCP=(sshpass -e scp "${SSH_OPTS[@]}")
-export SSHPASS="$VULTR_PASSWORD"
+build_ssh_password_prefix "$VULTR_PASSWORD"
+VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
+VULTR_SSH=("${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}")
+VULTR_SCP=("${VULTR_AUTH_PREFIX[@]}" scp "${SSH_OPTS[@]}")
 
 echo "→ Backing up Vultr dist"
 run_with_retry "Vultr backup" "${VULTR_SSH[@]}" "$VULTR_HOST" \
