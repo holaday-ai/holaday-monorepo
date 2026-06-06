@@ -385,7 +385,12 @@ function AgentBlock({
   // structure that an avatar adds noise without information.
   return (
     <div className="flex items-start gap-3">
-      <div className="min-w-0 flex-1 space-y-3">
+      <div
+        className={cn(
+          'min-w-0 flex-1 space-y-3',
+          terminal && 'pb-24 sm:pb-0',
+        )}
+      >
         {/* Phase 13 Dim 1 — plan card lands above thinking + steps so
          *  the user sees the upcoming-step list as soon as the
          *  orchestrator emits server.task.plan (or on tab re-open
