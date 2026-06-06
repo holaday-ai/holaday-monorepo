@@ -236,18 +236,29 @@ VULTR_AUTH_PREFIX=("${SSH_PASSWORD_PREFIX[@]}")
 VULTR_SSH=("${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}")
 VULTR_SCP=("${VULTR_AUTH_PREFIX[@]}" scp "${SSH_OPTS[@]}")
 
-echo "→ Backing up Vultr dist"
-run_with_retry "Vultr backup" "${VULTR_SSH[@]}" "$VULTR_HOST" \
-  "rm -rf $VULTR_BACKUP_PATH && \
-   if [ -d $VULTR_SPA_PATH ]; then cp -r $VULTR_SPA_PATH $VULTR_BACKUP_PATH; fi"
-
 echo "→ Uploading tarball to Vultr"
 run_with_retry "Vultr upload" "${VULTR_SCP[@]}" "$TARBALL" "$VULTR_HOST:/tmp/" >/dev/null
 
-echo "→ Extracting on Vultr"
-run_with_retry_filtered "Vultr extract" "${VULTR_SSH[@]}" "$VULTR_HOST" \
-  "cd /opt/holaday-monorepo/apps/web-workbench && \
-   rm -rf dist && tar xzf /tmp/holaday-spa-dist.tar.gz"
+echo "→ Staging Vultr dist"
+run_with_retry_filtered "Vultr stage" "${VULTR_SSH[@]}" "$VULTR_HOST" \
+  "rm -rf /tmp/holaday-spa-new && \
+   mkdir -p /tmp/holaday-spa-new && \
+   tar xzf /tmp/holaday-spa-dist.tar.gz -C /tmp/holaday-spa-new"
+
+echo "→ Switching Vultr dist"
+run_with_retry "Vultr switch" "${VULTR_SSH[@]}" "$VULTR_HOST" \
+  "set -e; \
+   cd /opt/holaday-monorepo/apps/web-workbench; \
+   if [ ! -d /tmp/holaday-spa-new/dist ]; then \
+     grep -q '$NEW_HASH' dist/index.html 2>/dev/null && exit 0; \
+     echo 'staged dist missing' >&2; \
+     exit 1; \
+   fi; \
+   rm -rf dist.prev; \
+   if [ -d dist ]; then mv dist dist.prev; fi; \
+   mv /tmp/holaday-spa-new/dist dist; \
+   rm -rf $VULTR_BACKUP_PATH; \
+   if [ -d dist.prev ]; then mv dist.prev $VULTR_BACKUP_PATH; fi"
 
 echo "→ Vultr smoke check ($VULTR_SMOKE_URL via $VULTR_SMOKE_RESOLVE must return '$SMOKE_MARKER' + $NEW_HASH)"
 sleep 2
