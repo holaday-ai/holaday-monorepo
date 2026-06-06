@@ -504,7 +504,7 @@ function AgentBlock({
             status={task.status}
             text={task.resultText ?? ''}
             // task.finalUrl is the persisted final-page URL (R7), so
-            // refreshes / history clicks still surface "打开最终页面"
+            // refreshes / history clicks still surface "打开最终浏览器"
             // even after the live screencast has gone. Live tasks
             // fall back to the screencast url so an in-flight URL
             // chip still tracks navigation.
@@ -2052,7 +2052,7 @@ function TerminalSummary({
           复制 Markdown / 下载 .md / 分享任务 / 设为定时 fold into a
           单一 Radix More menu so the row isn't a wall of text
           buttons. 浏览器 lives in the top-right of the card;
-          打开最终页面 keeps its own URL row below. */}
+          打开最终浏览器 keeps its own URL row below. */}
       <div
         className={cn(
           'mt-3 flex flex-col gap-2 border-t pt-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between',
@@ -2204,7 +2204,7 @@ function TerminalSummary({
             </span>
             <span className="min-w-0 flex-1">
               <span className="block font-medium text-foreground/85">
-                打开最终页面
+                打开最终浏览器
               </span>
               <span className="mt-0.5 block truncate leading-5 text-muted-foreground">
                 {safeCurrentUrl}

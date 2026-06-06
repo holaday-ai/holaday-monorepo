@@ -2207,7 +2207,7 @@ function EmptyBrowserState({
             {statusLabel}，没有截图
           </div>
           <div className="mt-1 text-xs leading-relaxed">
-            这次任务结束时没有捕获截图，可打开最终页面复核。
+            这次任务结束时没有捕获截图，可打开最终浏览器地址复核。
           </div>
           <SafeExternalLinkButton
             href={safeFinalUrl}
