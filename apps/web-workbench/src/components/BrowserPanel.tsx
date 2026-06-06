@@ -924,6 +924,7 @@ export function BrowserPanel({
   const liveBrowserCanPan = browserFrameCanPanInPortraitSheet({
     isSheet,
     viewport: displayFrame?.viewport,
+    assumeScrollableWhenUnknown: useVnc,
   });
   // Codex P2 follow-up — hidden input for direct CJK typing on the
   // JPEG screencast path (CDP mode). Browser-native IME composition

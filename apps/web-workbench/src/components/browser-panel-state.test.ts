@@ -185,6 +185,13 @@ describe('BrowserPanel state helpers', () => {
         viewport: { width: 1280, height: 800 },
       }),
     ).toBe(false);
+    expect(
+      browserFrameCanPanInPortraitSheet({
+        isSheet: true,
+        viewport: null,
+        assumeScrollableWhenUnknown: true,
+      }),
+    ).toBe(true);
   });
 
   it('prioritises awaiting-user and takeover states over transport labels', () => {

@@ -204,10 +204,13 @@ export function browserViewportFrameLabel(
 export function browserFrameCanPanInPortraitSheet(inputs: {
   isSheet: boolean;
   viewport: { width: number; height: number } | null | undefined;
+  assumeScrollableWhenUnknown?: boolean;
 }): boolean {
   if (!inputs.isSheet) return false;
   const { viewport } = inputs;
-  if (!viewport || viewport.width <= 0 || viewport.height <= 0) return false;
+  if (!viewport || viewport.width <= 0 || viewport.height <= 0) {
+    return Boolean(inputs.assumeScrollableWhenUnknown);
+  }
   return viewport.width / viewport.height > 1.12;
 }
 
