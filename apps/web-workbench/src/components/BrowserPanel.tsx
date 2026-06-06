@@ -1749,8 +1749,8 @@ export function BrowserPanel({
                       </button>
                     )}
                     {finalEvidenceCanPan && (
-                      <div className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 rounded-full bg-black/45 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm backdrop-blur">
-                        左右拖动查看
+                      <div className="pointer-events-none absolute left-1/2 top-10 max-w-[calc(100%-1rem)] -translate-x-1/2 truncate rounded-full bg-black/45 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm backdrop-blur">
+                        从左侧开始，左右滑动查看
                       </div>
                     )}
                   </div>
