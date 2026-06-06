@@ -10,6 +10,7 @@ import {
   shouldApplyHistoryResponse,
   starredPageSummary,
   taskHubErrorMessage,
+  taskHubLoadMoreErrorCopy,
   taskHubNeedsAttention,
 } from './task-hub-state';
 
@@ -144,6 +145,17 @@ describe('task hub state helpers', () => {
     );
     expect(taskHubErrorMessage('任务不存在')).toBe('任务不存在');
     expect(taskHubErrorMessage({})).toBe('请稍后重试');
+  });
+
+  it('formats load-more errors for task hub pages', () => {
+    expect(taskHubLoadMoreErrorCopy('  offline  ')).toEqual({
+      title: '更多任务暂时无法加载',
+      body: 'offline',
+    });
+    expect(taskHubLoadMoreErrorCopy(undefined)).toEqual({
+      title: '更多任务暂时无法加载',
+      body: '请稍后重试，当前列表会保留已加载的任务。',
+    });
   });
 
   it('normalizes task hub rows before history or starred rendering', () => {

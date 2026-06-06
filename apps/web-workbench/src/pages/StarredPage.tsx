@@ -12,6 +12,7 @@ import {
   normalizeTaskHubRows,
   starredPageSummary,
   taskHubErrorMessage,
+  taskHubLoadMoreErrorCopy,
   taskHubNeedsAttention,
   type NormalizedTaskHubRow,
 } from '@/lib/task-hub-state';
@@ -146,6 +147,7 @@ export function StarredPage(): JSX.Element {
     count: items.length,
     hasMore,
   });
+  const loadMoreErrorCopy = taskHubLoadMoreErrorCopy(loadMoreError);
 
   return (
     <PageContainer width="form">
@@ -237,7 +239,8 @@ export function StarredPage(): JSX.Element {
           </div>
           {loadMoreError && (
             <div className="mt-4 flex flex-col items-center gap-2 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-3 py-2 text-center text-xs text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
-              <div>加载更多失败：{loadMoreError}</div>
+              <div className="font-medium">{loadMoreErrorCopy.title}</div>
+              <div className="max-w-md text-muted-foreground">{loadMoreErrorCopy.body}</div>
               <Button
                 variant="outline"
                 size="sm"

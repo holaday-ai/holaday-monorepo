@@ -15,6 +15,11 @@ export interface NormalizedTaskHubRow {
   readonly starredAt: string | number | Date | null;
 }
 
+export interface TaskHubInlineErrorCopy {
+  readonly title: string;
+  readonly body: string;
+}
+
 export function hasHistoryFilters({
   query,
   status,
@@ -97,6 +102,19 @@ export function taskHubNeedsAttention(status: string): boolean {
 
 export function taskHubErrorMessage(err: unknown, fallback = '请稍后重试'): string {
   return pageErrorMessage(err, fallback);
+}
+
+export function taskHubLoadMoreErrorCopy(
+  message: string | null | undefined,
+): TaskHubInlineErrorCopy {
+  const body =
+    typeof message === 'string' && message.trim()
+      ? message.trim()
+      : '请稍后重试，当前列表会保留已加载的任务。';
+  return {
+    title: '更多任务暂时无法加载',
+    body,
+  };
 }
 
 export function mergeTaskHubRowsById<T extends { readonly taskId: string }>(

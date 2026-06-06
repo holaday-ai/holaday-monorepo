@@ -13,6 +13,7 @@ import {
   normalizeTaskHubRows,
   shouldApplyHistoryResponse,
   taskHubErrorMessage,
+  taskHubLoadMoreErrorCopy,
   type HistoryRangeFilter,
   type HistoryStatusFilter,
   type NormalizedTaskHubRow,
@@ -264,6 +265,7 @@ export function HistoryPage(): JSX.Element {
     status,
     range,
   });
+  const loadMoreErrorCopy = taskHubLoadMoreErrorCopy(loadMoreError);
   const loadingWithoutRows = loading && tasks.length === 0;
 
   function resetFilters(): void {
@@ -421,7 +423,8 @@ export function HistoryPage(): JSX.Element {
 
           {loadMoreError && !error && (
             <div className="mx-4 mb-4 mt-4 flex flex-col items-center gap-2 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-3 py-2 text-center text-xs text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
-              <div>加载更多失败：{loadMoreError}</div>
+              <div className="font-medium">{loadMoreErrorCopy.title}</div>
+              <div className="max-w-md text-muted-foreground">{loadMoreErrorCopy.body}</div>
               <Button
                 variant="outline"
                 size="sm"
