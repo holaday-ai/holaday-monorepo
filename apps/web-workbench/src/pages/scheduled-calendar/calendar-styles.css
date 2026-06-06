@@ -134,7 +134,7 @@
   background: rgba(255, 255, 255, 0.08);
 }
 .hd-calendar-toolbar__today {
-  height: 28px;
+  height: 32px;
   padding: 0 12px;
   border-radius: 8px;
   border: 1px solid var(--hd-grid-strong);
@@ -183,7 +183,7 @@
   color: #595757;
   font-size: 13px;
   font-weight: 600;
-  height: 26px;
+  height: 32px;
   padding: 0 14px;
   border-radius: 6px;
   cursor: pointer;
