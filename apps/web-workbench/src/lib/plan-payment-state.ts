@@ -65,6 +65,24 @@ export function planPaymentCtaState(input: PaymentStateInput): {
   };
 }
 
+export function planPaymentErrorMessage(rawMsg: string | null | undefined, zh: boolean): string {
+  const message = typeof rawMsg === 'string' ? rawMsg.trim() : '';
+  if (!message) return zh ? '支付失败，请重试。' : 'Payment failed. Please try again.';
+  if (/timeout|timed out/i.test(message)) {
+    return zh
+      ? '支付确认超时，刷新页面查看状态。'
+      : 'Payment confirmation timed out. Refresh to check status.';
+  }
+  if (/PRECONDITION/i.test(message) || /not configured/i.test(message)) {
+    return zh
+      ? '支付暂未开放，请联系 support@holaday.ai。'
+      : 'Payment is not enabled yet. Contact support@holaday.ai.';
+  }
+  return zh
+    ? '支付未完成，请稍后重试；如果已经扣款，请联系 support@holaday.ai。'
+    : 'Payment was not completed. Please try again later, or contact support@holaday.ai if you were charged.';
+}
+
 function emptyPaymentOptions(): PaymentOptions {
   return { paypal: false, paypalClientId: null, paypalEnv: null };
 }

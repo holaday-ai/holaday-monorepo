@@ -22,6 +22,7 @@ import {
   normalizeCnPaymentOptions,
   normalizePaymentOptions,
   planPaymentCtaState,
+  planPaymentErrorMessage,
   type CnPaymentOptions,
   type PaymentOptions,
 } from '@/lib/plan-payment-state';
@@ -129,19 +130,7 @@ export function PlanPage(): JSX.Element {
 
   const handlePaymentError = React.useCallback(
     (rawMsg: string) => {
-      const msg = (() => {
-        if (!rawMsg) return zh ? '支付失败，请重试' : 'Payment failed';
-        if (/timeout|timed out/i.test(rawMsg)) {
-          return zh
-            ? '支付确认超时，刷新页面查看状态'
-            : 'Payment confirmation timed out, refresh to check status';
-        }
-        if (/PRECONDITION/i.test(rawMsg) || /not configured/i.test(rawMsg)) {
-          return zh ? '支付未开启，联系 support@holaday.ai' : 'Payment not enabled, contact support@holaday.ai';
-        }
-        return zh ? `支付未完成：${rawMsg}` : `Payment incomplete: ${rawMsg}`;
-      })();
-      toast.show(msg);
+      toast.show(planPaymentErrorMessage(rawMsg, zh));
     },
     [toast, zh],
   );

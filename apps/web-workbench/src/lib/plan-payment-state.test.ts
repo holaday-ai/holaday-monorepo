@@ -3,6 +3,7 @@ import {
   normalizeCnPaymentOptions,
   normalizePaymentOptions,
   planPaymentCtaState,
+  planPaymentErrorMessage,
 } from './plan-payment-state';
 
 describe('normalizePaymentOptions', () => {
@@ -49,6 +50,34 @@ describe('normalizePaymentOptions', () => {
       paypalClientId: null,
       paypalEnv: null,
     });
+  });
+});
+
+describe('planPaymentErrorMessage', () => {
+  it('keeps payment errors user-facing without leaking raw gateway text', () => {
+    expect(planPaymentErrorMessage('', true)).toBe('支付失败，请重试。');
+    expect(planPaymentErrorMessage('paypal timeout waiting for capture', true)).toBe(
+      '支付确认超时，刷新页面查看状态。',
+    );
+    expect(planPaymentErrorMessage('PRECONDITION_FAILED paypal not configured', true)).toBe(
+      '支付暂未开放，请联系 support@holaday.ai。',
+    );
+    expect(planPaymentErrorMessage('INTERNAL_SERVER_ERROR stack=payment_gateway', true)).toBe(
+      '支付未完成，请稍后重试；如果已经扣款，请联系 support@holaday.ai。',
+    );
+  });
+
+  it('returns English payment guidance for non-Chinese locales', () => {
+    expect(planPaymentErrorMessage(null, false)).toBe('Payment failed. Please try again.');
+    expect(planPaymentErrorMessage('timed out', false)).toBe(
+      'Payment confirmation timed out. Refresh to check status.',
+    );
+    expect(planPaymentErrorMessage('not configured', false)).toBe(
+      'Payment is not enabled yet. Contact support@holaday.ai.',
+    );
+    expect(planPaymentErrorMessage('gateway raw failure', false)).toBe(
+      'Payment was not completed. Please try again later, or contact support@holaday.ai if you were charged.',
+    );
   });
 });
 
