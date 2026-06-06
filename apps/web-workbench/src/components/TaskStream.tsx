@@ -2058,7 +2058,7 @@ function TerminalSummary({
           the final-page external link keeps its own URL row below. */}
       <div
         className={cn(
-          'mt-3 flex flex-col gap-2 border-t pt-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between',
+          'mt-3 flex items-center justify-between gap-2 border-t pt-3 text-xs text-muted-foreground',
           tone.divider,
         )}
       >
