@@ -153,7 +153,7 @@ export function BillingPage(): JSX.Element {
                     取消订阅请联系客服：
                     <a
                       href={`mailto:${SUPPORT_EMAIL}`}
-                      className="text-[#EA1F59] underline-offset-2 hover:underline"
+                      className="inline-flex h-8 items-center text-[#EA1F59] underline-offset-2 hover:underline"
                     >
                       {SUPPORT_EMAIL}
                     </a>

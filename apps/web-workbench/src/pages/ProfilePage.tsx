@@ -182,7 +182,7 @@ export function ProfilePage(): JSX.Element {
               密码修改功能开发中，请联系{' '}
               <a
                 href={supportMailtoHref({ subject: 'HOLA DAY 账号安全支持' })}
-                className="font-medium text-[#EA1F59] underline-offset-2 hover:underline"
+                className="inline-flex h-8 items-center font-medium text-[#EA1F59] underline-offset-2 hover:underline"
               >
                 {SUPPORT_EMAIL}
               </a>
