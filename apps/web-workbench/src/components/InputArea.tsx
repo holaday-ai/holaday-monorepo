@@ -102,6 +102,8 @@ interface Props {
    * own padding would double-shrink it.
    */
   fullBleed?: boolean;
+  /** Compact terminal follow-up composer so mobile result cards keep more room. */
+  compact?: boolean;
 }
 
 const ACCEPT_FILES = '.csv,.xlsx,.xls,.pdf,.txt,.json,.md';
@@ -173,6 +175,7 @@ export function InputArea({
   prefillIntent,
   onPrefillConsumed,
   fullBleed,
+  compact,
 }: Props): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
@@ -590,8 +593,13 @@ export function InputArea({
                   ? '补充直播场次、数据来源或你想要的报告形式...'
                   : '描述你想让 HOLA DAY 做什么...'
           }
-          rows={2}
-          className="min-h-[92px] resize-none border-0 bg-transparent px-4 pb-12 pt-4 pr-14 text-[15px] leading-relaxed shadow-none placeholder:text-muted-foreground/55 focus-visible:ring-0"
+          rows={compact ? 1 : 2}
+          className={cn(
+            'resize-none border-0 bg-transparent px-4 pr-14 text-[15px] leading-relaxed shadow-none placeholder:text-muted-foreground/55 focus-visible:ring-0',
+            compact
+              ? 'min-h-[76px] pb-10 pt-3 sm:min-h-[92px] sm:pb-12 sm:pt-4'
+              : 'min-h-[92px] pb-12 pt-4',
+          )}
           style={{ maxHeight: '10rem' }}
           disabled={disabled}
         />

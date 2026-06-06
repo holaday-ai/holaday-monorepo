@@ -270,6 +270,7 @@ export function MainPanel({
             replyMode={replyMode}
             replyKind={replyKind}
             followUpTarget={followUpTarget}
+            compact={Boolean(followUpTarget) && !replyMode}
             quotaExhausted={quotaExhausted}
             quotaPlan={userPlan}
             attachmentsAllowed={attachmentsAllowed}
