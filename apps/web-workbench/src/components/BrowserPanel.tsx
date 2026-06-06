@@ -1840,11 +1840,9 @@ export function BrowserPanel({
   if (isSheet) {
     return (
       <>
-        <button
-          type="button"
+        <div
+          aria-hidden="true"
           onClick={onClose}
-          aria-label="收起浏览器"
-          title="收起浏览器"
           className="fixed inset-0 z-[70] bg-black/30 backdrop-blur-sm animate-fade-in"
         />
         {section}
