@@ -44,19 +44,49 @@ deploy_orchestrator() {
   "$ROOT_DIR/scripts/deploy-orchestrator.sh" "$BRANCH"
 }
 
+verify_healthz() {
+  local urls=(
+    "https://holaday.ai/api/healthz"
+    "https://hd-app.orangebench.tech/api/healthz"
+  )
+  local url response http_code attempt
+
+  for url in "${urls[@]}"; do
+    response=$(mktemp)
+    for attempt in 1 2 3; do
+      http_code=$(curl -sS --max-time 15 -o "$response" -w '%{http_code}' "$url" 2>&1 || true)
+      if [[ "$http_code" == "200" ]] && grep -Fq '"status":"ok"' "$response"; then
+        echo "✅ $url healthz 200"
+        rm -f "$response"
+        continue 2
+      fi
+      echo "   $url attempt $attempt: http=$http_code"
+      sleep 2
+    done
+    echo "❌ $url healthz check failed" >&2
+    echo "Last response head:" >&2
+    head -5 "$response" 2>/dev/null | sed 's/^/   /' >&2
+    rm -f "$response"
+    exit 1
+  done
+}
+
 case "$TARGET" in
   spa)
     fetch_current
     deploy_spa
+    verify_healthz
     ;;
   orchestrator)
     fetch_current
     deploy_orchestrator
+    verify_healthz
     ;;
   both)
     fetch_current
     deploy_spa
     deploy_orchestrator
+    verify_healthz
     ;;
   *)
     echo "Usage: $0 [spa|orchestrator|both]" >&2
