@@ -1989,6 +1989,32 @@ function TerminalSummary({
           </div>
         );
       })()}
+      {hasRealUrl && (
+        <div
+          className={cn(
+            'mt-4 border-t pt-3 text-xs',
+            tone.divider,
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => setPendingLink(safeCurrentUrl)}
+            className="group flex min-h-12 w-full min-w-0 items-start gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+          >
+            <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-[#EFEFEF]/70 text-[#595757] transition-colors group-hover:bg-white dark:bg-white/10 dark:text-foreground/80">
+              <ExternalLink className="h-3.5 w-3.5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-medium text-foreground/85">
+                打开页面链接
+              </span>
+              <span className="mt-0.5 block truncate leading-5 text-muted-foreground">
+                {safeCurrentUrl}
+              </span>
+            </span>
+          </button>
+        </div>
+      )}
       {/* Phase 4 R1 B.5 — AttachmentBar. Hidden when attachments is
           empty/undefined. Rendered for every terminal status: failed
           and cancelled tasks can still leave useful evidence files. */}
@@ -2186,32 +2212,6 @@ function TerminalSummary({
               <span className="min-w-0 flex-1 leading-5">{s}</span>
             </button>
           ))}
-        </div>
-      )}
-      {hasRealUrl && (
-        <div
-          className={cn(
-            'mt-4 border-t pt-3 text-xs',
-            tone.divider,
-          )}
-        >
-          <button
-            type="button"
-            onClick={() => setPendingLink(safeCurrentUrl)}
-            className="group flex min-h-12 w-full min-w-0 items-start gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 py-2 text-left shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
-          >
-            <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-[#EFEFEF]/70 text-[#595757] transition-colors group-hover:bg-white dark:bg-white/10 dark:text-foreground/80">
-              <ExternalLink className="h-3.5 w-3.5" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block font-medium text-foreground/85">
-                打开页面链接
-              </span>
-              <span className="mt-0.5 block truncate leading-5 text-muted-foreground">
-                {safeCurrentUrl}
-              </span>
-            </span>
-          </button>
         </div>
       )}
       <ExternalLinkConfirm
