@@ -1584,7 +1584,7 @@ export function BrowserPanel({
                 <div
                   className={cn(
                     'relative min-h-0 min-w-0',
-                    isSheet ? 'mx-auto' : 'max-h-full max-w-full',
+                    isSheet ? 'shrink-0' : 'max-h-full max-w-full',
                   )}
                 >
                   {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard capture is handled via window listener in interactive mode */}
@@ -1603,7 +1603,6 @@ export function BrowserPanel({
                     draggable={false}
                     className={cn(
                       'block rounded-md border shadow-[0_1px_3px_rgba(17,24,39,0.06)]',
-                      isSheet && 'mx-auto',
                       interactiveActive
                         ? 'cursor-pointer border-[#EA1F59]/45 ring-2 ring-[#EA1F59]/15'
                         : 'border-black/[0.06]',
