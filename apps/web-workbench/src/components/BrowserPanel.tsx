@@ -1706,17 +1706,19 @@ export function BrowserPanel({
                       style={finalEvidenceImageStyle}
                       className="block rounded-md border border-black/[0.06] shadow-[0_1px_3px_rgba(17,24,39,0.06)]"
                     />
-                    <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2 rounded bg-black/55 px-2 py-1 text-[11px] text-white backdrop-blur">
-                      <span className="truncate">
-                        {terminalEvidenceFrameLabel({
-                          status: taskStatus,
-                          url: finalEvidenceFrame.url,
-                        })}
-                      </span>
-                      {finalEvidenceFrame.url && finalEvidenceFrame.url !== 'about:blank' && (
-                        <span className="truncate font-mono opacity-80">{finalEvidenceFrame.url}</span>
-                      )}
-                    </div>
+                    {!isSheet && (
+                      <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2 rounded bg-black/55 px-2 py-1 text-[11px] text-white backdrop-blur">
+                        <span className="truncate">
+                          {terminalEvidenceFrameLabel({
+                            status: taskStatus,
+                            url: finalEvidenceFrame.url,
+                          })}
+                        </span>
+                        {finalEvidenceFrame.url && finalEvidenceFrame.url !== 'about:blank' && (
+                          <span className="truncate font-mono opacity-80">{finalEvidenceFrame.url}</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
                 {isSheet && (
@@ -1767,6 +1769,19 @@ export function BrowserPanel({
                       <div className="mx-auto max-w-full truncate rounded-full bg-black/45 px-2 py-0.5 text-center text-[10px] font-medium text-white shadow-sm backdrop-blur">
                         从左侧开始，左右滑动查看
                       </div>
+                    )}
+                  </div>
+                )}
+                {isSheet && (
+                  <div className="pointer-events-none absolute bottom-2 left-2 right-2 z-20 flex min-w-0 items-center justify-between gap-2 rounded bg-black/55 px-2 py-1 text-[11px] text-white shadow-sm backdrop-blur">
+                    <span className="min-w-0 truncate">
+                      {terminalEvidenceFrameLabel({
+                        status: taskStatus,
+                        url: finalEvidenceFrame.url,
+                      })}
+                    </span>
+                    {finalEvidenceFrame.url && finalEvidenceFrame.url !== 'about:blank' && (
+                      <span className="min-w-0 truncate font-mono opacity-80">{finalEvidenceFrame.url}</span>
                     )}
                   </div>
                 )}
