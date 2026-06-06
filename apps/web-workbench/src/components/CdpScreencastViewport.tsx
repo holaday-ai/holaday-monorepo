@@ -321,7 +321,21 @@ export function CdpScreencastViewport({
       frameSeqRef.current += 1;
       if (retryTimer) clearTimeout(retryTimer);
       try {
-        activeWs?.close();
+        if (activeWs?.readyState === WebSocket.CONNECTING) {
+          const ws = activeWs;
+          ws.onmessage = null;
+          ws.onerror = null;
+          ws.onclose = null;
+          ws.onopen = () => {
+            try {
+              ws.close();
+            } catch {
+              /* ignore */
+            }
+          };
+        } else {
+          activeWs?.close();
+        }
       } catch {
         /* ignore */
       }
