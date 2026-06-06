@@ -263,7 +263,7 @@ export function NotificationBell({
                 variant="ghost"
                 onClick={() => void handleMarkAll()}
                 disabled={markingAll}
-                className="h-7 rounded-[6px] px-2 text-xs hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:hover:bg-white/10"
+                className="h-8 rounded-[6px] px-2.5 text-xs hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:hover:bg-white/10"
               >
                 {markingAll ? (
                   <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden />
@@ -384,7 +384,7 @@ function NotificationStatusNotice({
             size="sm"
             onClick={onRetry}
             disabled={loading}
-            className="h-7 rounded-[6px] border-[#DCDDDD]/75 px-2 text-xs text-[#595757] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+            className="h-8 rounded-[6px] border-[#DCDDDD]/75 px-2.5 text-xs text-[#595757] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
           >
             {loading ? '重试中…' : '重试'}
           </Button>
