@@ -2058,11 +2058,11 @@ function TerminalSummary({
           the final-page external link keeps its own URL row below. */}
       <div
         className={cn(
-          'mt-3 flex items-center justify-between gap-2 border-t pt-3 text-xs text-muted-foreground',
+          'mt-3 flex items-center justify-end gap-2 border-t pt-3 text-xs text-muted-foreground',
           tone.divider,
         )}
       >
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => void copyTo(plainText, '纯文本')}
@@ -2089,71 +2089,71 @@ function TerminalSummary({
               <RotateCcw className={cn('h-3.5 w-3.5', retryingIntent && 'animate-spin')} aria-hidden />
             </button>
           )}
-        </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label="打开更多结果操作"
-              title="更多"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-[#DCDDDD] bg-white/60 font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/75 dark:hover:bg-white/10"
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="打开更多结果操作"
+                title="更多"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-[#DCDDDD] bg-white/60 font-medium text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:border-white/10 dark:bg-white/5 dark:text-foreground/75 dark:hover:bg-white/10"
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              side="top"
+              sideOffset={8}
+              className="w-52 rounded-[8px] border-[#DCDDDD] bg-white p-1.5 shadow-[0_12px_28px_rgba(17,24,39,0.12)] dark:border-white/10 dark:bg-card"
             >
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            side="top"
-            sideOffset={8}
-            className="w-52 rounded-[8px] border-[#DCDDDD] bg-white p-1.5 shadow-[0_12px_28px_rgba(17,24,39,0.12)] dark:border-white/10 dark:bg-card"
-          >
-            <DropdownMenuItem
-              onSelect={() => void copyTo(markdownText, '为 Markdown')}
-              className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
-            >
-              <FileText className="text-[#ADADAD]" />
-              <span>复制为 Markdown</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => {
-                if (downloadMarkdownFile(markdownText, taskId)) {
-                  toast.show('已开始下载 .md 文件');
-                } else {
-                  toast.show('下载失败，请复制内容后手动保存', 'error');
-                }
-              }}
-              className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
-            >
-              <Download className="text-[#ADADAD]" />
-              <span>下载 .md</span>
-            </DropdownMenuItem>
-            {taskId && (
+              <DropdownMenuItem
+                onSelect={() => void copyTo(markdownText, '为 Markdown')}
+                className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
+              >
+                <FileText className="text-[#ADADAD]" />
+                <span>复制为 Markdown</span>
+              </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => {
-                  const origin =
-                    typeof window !== 'undefined' ? window.location.origin : '';
-                  void copyTo(
-                    `${origin}/?task=${encodeURIComponent(taskId)}`,
-                    '任务链接',
-                  );
+                  if (downloadMarkdownFile(markdownText, taskId)) {
+                    toast.show('已开始下载 .md 文件');
+                  } else {
+                    toast.show('下载失败，请复制内容后手动保存', 'error');
+                  }
                 }}
                 className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
               >
-                <Link2 className="text-[#ADADAD]" />
-                <span>分享任务</span>
+                <Download className="text-[#ADADAD]" />
+                <span>下载 .md</span>
               </DropdownMenuItem>
-            )}
-            {!isFailedLike && intent && (
-              <DropdownMenuItem
-                onSelect={() => setScheduleDialogOpen(true)}
-                className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
-              >
-                <Clock className="text-[#ADADAD]" />
-                <span>设为定时</span>
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+              {taskId && (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    const origin =
+                      typeof window !== 'undefined' ? window.location.origin : '';
+                    void copyTo(
+                      `${origin}/?task=${encodeURIComponent(taskId)}`,
+                      '任务链接',
+                    );
+                  }}
+                  className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
+                >
+                  <Link2 className="text-[#ADADAD]" />
+                  <span>分享任务</span>
+                </DropdownMenuItem>
+              )}
+              {!isFailedLike && intent && (
+                <DropdownMenuItem
+                  onSelect={() => setScheduleDialogOpen(true)}
+                  className="rounded-[6px] text-[13px] text-[#595757] focus:bg-[#EFEFEF]/65 focus:text-[#EA1F59] dark:text-foreground/80 dark:focus:bg-white/10 dark:focus:text-foreground"
+                >
+                  <Clock className="text-[#ADADAD]" />
+                  <span>设为定时</span>
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
       {/* Phase 4 R1 B.2 — FollowUpChips. The orchestrator inserts a
           structured marker around explicit next-action suggestions
