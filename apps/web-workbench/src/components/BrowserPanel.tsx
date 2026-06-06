@@ -1722,7 +1722,7 @@ export function BrowserPanel({
                         className="absolute right-2 top-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-white/25 bg-black/45 px-2 text-[11px] font-medium text-white shadow-sm backdrop-blur transition-colors hover:bg-black/60 disabled:cursor-wait disabled:opacity-60"
                       >
                         <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
-                        {reExecuting ? '提交中…' : '重新执行'}
+                        {reExecuting ? '重新执行中…' : '重新执行'}
                       </button>
                     )}
                     {finalEvidenceCanToggleFit && (
@@ -1768,7 +1768,7 @@ export function BrowserPanel({
                         className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[11px] font-medium text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
                       >
                         <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
-                        {reExecuting ? '提交中…' : '重新执行'}
+                        {reExecuting ? '重新执行中…' : '重新执行'}
                       </button>
                     )}
                   </div>
@@ -2193,7 +2193,7 @@ function EmptyBrowserState({
               className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 py-1 text-[12px] text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
             >
               <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
-              {reExecuting ? '提交中…' : '重新执行'}
+              {reExecuting ? '重新执行中…' : '重新执行'}
             </button>
           )}
         </div>
@@ -2240,7 +2240,7 @@ function EmptyBrowserState({
             className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
           >
             <RotateCw className={cn('h-3 w-3', reExecuting && 'animate-spin')} />
-            {reExecuting ? '提交中…' : '重新执行'}
+            {reExecuting ? '重新执行中…' : '重新执行'}
           </button>
         )}
       </div>
