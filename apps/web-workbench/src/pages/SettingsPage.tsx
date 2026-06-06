@@ -9,6 +9,7 @@ import { useToast } from '@/components/ui/toast';
 import { supportMailtoHref } from '@/lib/support-links';
 import {
   memoryCategoryLabel,
+  memoryLoadErrorCopy,
   memoryLoadErrorMessage,
   normalizeMemoryRows,
   type MemoryRowView,
@@ -264,7 +265,7 @@ function MemorySection(): JSX.Element {
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
       const message = memoryLoadErrorMessage(err);
       setLoadError(message);
-      if (!options.silent) toast.show(`加载记忆失败：${message}`, 'error');
+      if (!options.silent) toast.show('AI 记忆暂时无法加载', 'error');
       setMemories([]);
     } finally {
       if (mountedRef.current && requestId === requestIdRef.current) setLoading(false);
@@ -314,6 +315,7 @@ function MemorySection(): JSX.Element {
       toast.show(pageActionError('清空失败', err), 'error');
     }
   };
+  const loadErrorCopy = memoryLoadErrorCopy(loadError);
 
   return (
     <Section id="memory" title="AI 记忆">
@@ -340,10 +342,10 @@ function MemorySection(): JSX.Element {
           <div className="rounded-md border border-border bg-card/40 px-3 py-4 text-center">
             <AlertCircle className="mx-auto h-6 w-6 text-primary" aria-hidden />
             <div className="mt-2 text-sm font-medium text-foreground/85">
-              AI 记忆加载失败
+              {loadErrorCopy.title}
             </div>
             <div className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
-              {loadError}
+              {loadErrorCopy.body}
             </div>
             <Button
               type="button"

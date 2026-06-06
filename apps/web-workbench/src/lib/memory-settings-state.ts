@@ -9,6 +9,11 @@ export interface MemoryRowView {
   readonly updatedAt: string;
 }
 
+export interface MemoryLoadErrorCopy {
+  readonly title: string;
+  readonly body: string;
+}
+
 export const MEMORY_CATEGORY_LABELS: Record<string, string> = {
   preference: '偏好',
   site_state: '网站状态',
@@ -52,6 +57,17 @@ export function memoryLoadErrorMessage(
   fallback = 'AI 记忆暂时无法加载，请稍后重试。',
 ): string {
   return pageErrorMessage(err, fallback);
+}
+
+export function memoryLoadErrorCopy(message: string | null | undefined): MemoryLoadErrorCopy {
+  const body =
+    typeof message === 'string' && message.trim()
+      ? message.trim()
+      : '请稍后重试，或刷新页面后再打开设置。';
+  return {
+    title: 'AI 记忆暂时无法加载',
+    body,
+  };
 }
 
 function safeMemoryText(value: unknown): string {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   memoryCategoryLabel,
+  memoryLoadErrorCopy,
   memoryLoadErrorMessage,
   normalizeMemoryRows,
 } from './memory-settings-state';
@@ -83,5 +84,16 @@ describe('memory settings state helpers', () => {
     );
     expect(memoryLoadErrorMessage('记忆不存在')).toBe('记忆不存在');
     expect(memoryLoadErrorMessage({})).toBe('AI 记忆暂时无法加载，请稍后重试。');
+  });
+
+  it('formats memory load errors for user-facing surfaces', () => {
+    expect(memoryLoadErrorCopy('  offline  ')).toEqual({
+      title: 'AI 记忆暂时无法加载',
+      body: 'offline',
+    });
+    expect(memoryLoadErrorCopy(null)).toEqual({
+      title: 'AI 记忆暂时无法加载',
+      body: '请稍后重试，或刷新页面后再打开设置。',
+    });
   });
 });
