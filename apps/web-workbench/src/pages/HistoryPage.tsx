@@ -406,7 +406,8 @@ export function HistoryPage(): JSX.Element {
                         {t.intent || '未命名任务'}
                       </div>
                       <div className="mt-0.5 text-[11px] text-muted-foreground">
-                        {formatTaskHubTime(t.createdAt)} · {taskStatusLabel(t.status)}
+                        {formatTaskHubTime(t.createdAt)} ·{' '}
+                        {taskStatusLabel(t.status, t.awaitingKind)}
                       </div>
                     </div>
                     <span className="shrink-0 self-center pr-2 text-[11px] text-[#595757] opacity-0 group-hover:text-[#EA1F59] group-hover:opacity-100">

@@ -215,7 +215,8 @@ export function StarredPage(): JSX.Element {
                     {pinnedTaskTitle(t)}
                   </div>
                   <div className="mt-0.5 text-[11px] text-muted-foreground">
-                    {taskStatusLabel(t.status)} · 置顶于 {formatTaskHubTime(t.starredAt)}
+                    {taskStatusLabel(t.status, t.awaitingKind)} · 置顶于{' '}
+                    {formatTaskHubTime(t.starredAt)}
                   </div>
                 </button>
                 <button

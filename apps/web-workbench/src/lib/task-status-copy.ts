@@ -1,6 +1,10 @@
 import type { UiTaskStatus } from '@/types/task';
+import { awaitingUserCopy, type AwaitingKind } from './awaiting-user-copy';
 
-export function taskStatusLabel(status: UiTaskStatus | string): string {
+export function taskStatusLabel(
+  status: UiTaskStatus | string,
+  awaitingKind?: AwaitingKind | null,
+): string {
   switch (status) {
     case 'queued':
     case 'pending':
@@ -10,7 +14,7 @@ export function taskStatusLabel(status: UiTaskStatus | string): string {
     case 'executing':
       return '执行中';
     case 'awaiting_user':
-      return '等待你回复';
+      return awaitingUserCopy(awaitingKind ?? undefined).toolbarLabel;
     case 'paused':
       return '已暂停';
     case 'completed':

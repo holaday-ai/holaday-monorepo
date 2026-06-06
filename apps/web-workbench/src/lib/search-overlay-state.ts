@@ -1,10 +1,12 @@
 import { pageErrorMessage } from './page-error-copy';
+import type { AwaitingKind } from './awaiting-user-copy';
 
 export interface SearchOverlayRow {
   readonly taskId: string;
   readonly intent: string;
   readonly title: string | null;
   readonly status: string;
+  readonly awaitingKind: AwaitingKind | null;
 }
 
 export function searchOverlayErrorMessage(
@@ -82,6 +84,7 @@ function normalizeSearchOverlayRow(value: unknown): SearchOverlayRow | null {
     intent: safeSearchText(value.intent) || '未命名任务',
     title: safeNullableSearchText(value.title),
     status: normalizeSearchStatus(value.status),
+    awaitingKind: normalizeAwaitingKind(value.awaitingKind),
   };
 }
 
@@ -101,6 +104,16 @@ function normalizeSearchStatus(value: unknown): string {
 function safeNullableSearchText(value: unknown): string | null {
   const text = safeSearchText(value);
   return text || null;
+}
+
+function normalizeAwaitingKind(value: unknown): AwaitingKind | null {
+  return value === 'clarification' ||
+    value === 'login' ||
+    value === 'captcha' ||
+    value === 'permission' ||
+    value === 'browser_action'
+    ? value
+    : null;
 }
 
 function safeSearchText(value: unknown): string {

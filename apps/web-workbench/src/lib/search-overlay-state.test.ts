@@ -57,12 +57,14 @@ describe('search overlay state helpers', () => {
           intent: '  Weekly report  ',
           title: '  Report title  ',
           status: 'completed',
+          awaitingKind: 'login',
         },
         {
           taskId: 'tsk_2',
           intent: { unsafe: true },
           title: { unsafe: true },
           status: 'mystery',
+          awaitingKind: 'mystery',
         },
       ]),
     ).toEqual([
@@ -71,12 +73,14 @@ describe('search overlay state helpers', () => {
         intent: 'Weekly report',
         title: 'Report title',
         status: 'completed',
+        awaitingKind: 'login',
       },
       {
         taskId: 'tsk_2',
         intent: '未命名任务',
         title: null,
         status: 'queued',
+        awaitingKind: null,
       },
     ]);
   });

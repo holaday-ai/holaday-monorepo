@@ -1,4 +1,5 @@
 import { pageErrorMessage } from './page-error-copy';
+import type { AwaitingKind } from './awaiting-user-copy';
 
 export type HistoryStatusFilter = 'all' | 'completed' | 'failed' | 'running';
 export type HistoryRangeFilter = '7d' | '30d' | 'all';
@@ -8,6 +9,7 @@ export interface NormalizedTaskHubRow {
   readonly intent: string;
   readonly title: string | null;
   readonly status: string;
+  readonly awaitingKind: AwaitingKind | null;
   readonly createdAt: string | number | Date;
   readonly completedAt: string | number | Date | null;
   readonly starredAt: string | number | Date | null;
@@ -156,6 +158,7 @@ function normalizeTaskHubRow(value: unknown): NormalizedTaskHubRow | null {
     intent: safeTaskHubText(value.intent) || '未命名任务',
     title: safeNullableTaskHubText(value.title),
     status: normalizeTaskHubStatus(value.status),
+    awaitingKind: normalizeAwaitingKind(value.awaitingKind),
     createdAt: safeTaskHubDate(value.createdAt) ?? '',
     completedAt: safeNullableTaskHubDate(value.completedAt),
     starredAt: safeNullableTaskHubDate(value.starredAt),
@@ -180,6 +183,16 @@ function normalizeTaskHubStatus(value: unknown): string {
 function safeNullableTaskHubText(value: unknown): string | null {
   const text = safeTaskHubText(value);
   return text || null;
+}
+
+function normalizeAwaitingKind(value: unknown): AwaitingKind | null {
+  return value === 'clarification' ||
+    value === 'login' ||
+    value === 'captcha' ||
+    value === 'permission' ||
+    value === 'browser_action'
+    ? value
+    : null;
 }
 
 function safeTaskHubText(value: unknown): string {

@@ -114,6 +114,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
         intent: t.intent,
         title: t.title,
         status: t.status,
+        awaitingKind: t.awaitingKind ?? null,
       }));
     }
     return resultQuery === query.trim() ? serverResults : [];
@@ -265,7 +266,8 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
           )}
           {filtered.map((t, i) => {
             const displayTitle = t.title && t.title.trim().length > 0 ? t.title : t.intent;
-            const secondary = displayTitle === t.intent ? taskStatusLabel(t.status) : t.intent;
+            const secondary =
+              displayTitle === t.intent ? taskStatusLabel(t.status, t.awaitingKind) : t.intent;
             return (
               <li key={t.taskId}>
                 <button
@@ -293,7 +295,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                       {secondary}
                     </span>
                   </div>
-                  <SearchStatusBadge status={t.status} />
+                  <SearchStatusBadge status={t.status} awaitingKind={t.awaitingKind} />
                 </button>
               </li>
             );
@@ -313,7 +315,13 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
   );
 }
 
-function SearchStatusBadge({ status }: { status: string }): JSX.Element {
+function SearchStatusBadge({
+  status,
+  awaitingKind,
+}: {
+  status: string;
+  awaitingKind?: SearchOverlayRow['awaitingKind'];
+}): JSX.Element {
   return (
     <span
       className={cn(
@@ -321,7 +329,7 @@ function SearchStatusBadge({ status }: { status: string }): JSX.Element {
         searchStatusTone(status),
       )}
     >
-      {taskStatusLabel(status)}
+      {taskStatusLabel(status, awaitingKind)}
     </span>
   );
 }
