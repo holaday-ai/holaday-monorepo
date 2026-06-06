@@ -1759,16 +1759,16 @@ export function BrowserPanel({
                   </div>
                 )}
                 {isSheet && (
-                  <div className="pointer-events-none absolute bottom-2 left-2 right-2 z-20 flex min-w-0 items-center gap-2 rounded bg-black/55 px-2 py-1 text-[11px] leading-tight text-white shadow-sm backdrop-blur">
+                  <div className={cn('flex shrink-0 min-w-0 items-center gap-2 border-t bg-background/95 px-2 py-1.5 text-[11px] leading-tight shadow-sm backdrop-blur', BROWSER_DIVIDER)}>
                     <div className="min-w-0 flex-1">
-                      <span className="block max-w-full truncate">
+                      <span className="block max-w-full truncate text-foreground/85">
                         {terminalEvidenceFrameLabel({
                           status: taskStatus,
                           url: finalEvidenceFrame.url,
                         })}
                       </span>
                       {finalEvidenceFrame.url && finalEvidenceFrame.url !== 'about:blank' && (
-                        <span className="block max-w-full truncate font-mono text-[10px] opacity-80">
+                        <span className="block max-w-full truncate font-mono text-[10px] text-muted-foreground">
                           {finalEvidenceFrame.url}
                         </span>
                       )}
@@ -1780,7 +1780,7 @@ export function BrowserPanel({
                         disabled={reExecuting}
                         aria-label={reExecuting ? '正在重新执行任务' : '重新执行任务'}
                         title={reExecuting ? '正在重新执行' : '重新执行'}
-                        className="pointer-events-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/20 bg-white/10 text-white transition-colors hover:bg-white/20 disabled:cursor-wait disabled:opacity-60"
+                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-transparent dark:text-foreground/80 dark:hover:bg-white/10"
                       >
                         <RotateCw className={cn('h-3.5 w-3.5', reExecuting && 'animate-spin')} />
                       </button>
