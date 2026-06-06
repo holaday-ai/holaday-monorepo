@@ -265,7 +265,7 @@ export function browserLiveOverlayCopy(inputs: {
 }
 
 export function terminalBrowserTakeoverMessage(status: UiTaskStatus | null | undefined): string {
-  return `${terminalEvidenceStatusLabel(status)}，实时浏览器已关闭。重新执行任务可打开新浏览器。`;
+  return `${terminalEvidenceStatusLabel(status)}，浏览器已关闭。重新执行任务可打开新浏览器。`;
 }
 
 export function browserReleasedCardCopy(): {

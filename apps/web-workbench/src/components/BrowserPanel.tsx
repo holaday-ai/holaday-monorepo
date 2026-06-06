@@ -2197,7 +2197,7 @@ function EmptyBrowserState({
         </div>
         <div>
           <div className="text-sm font-medium text-foreground">等待浏览器画面</div>
-          <div className="mt-0.5 text-xs text-muted-foreground">正在连接当前任务的实时页面。</div>
+          <div className="mt-0.5 text-xs text-muted-foreground">正在连接当前任务的浏览器页面。</div>
         </div>
       </div>
     );

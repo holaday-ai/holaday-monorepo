@@ -262,7 +262,7 @@ describe('BrowserPanel state helpers', () => {
 
   it('keeps terminal takeover refusal tied to task state', () => {
     expect(terminalBrowserTakeoverMessage('failed')).toBe(
-      '任务未完成，实时浏览器已关闭。重新执行任务可打开新浏览器。',
+      '任务未完成，浏览器已关闭。重新执行任务可打开新浏览器。',
     );
   });
 
