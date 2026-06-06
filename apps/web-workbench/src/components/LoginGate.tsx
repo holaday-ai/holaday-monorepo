@@ -29,7 +29,8 @@ const LOGIN_INPUT =
   'border-[#DCDDDD] bg-white shadow-none placeholder:text-muted-foreground/55 focus-visible:border-[#EA1F59]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/10 dark:border-white/10 dark:bg-card';
 const LOGIN_PRIMARY =
   'bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.16)] hover:bg-[#EA1F59]/90';
-const LOGIN_LINK = 'text-[#EA1F59] underline-offset-2 hover:underline';
+const LOGIN_LINK =
+  'inline-flex min-h-8 items-center text-[#EA1F59] underline-offset-2 hover:underline';
 
 /**
  * Login / register / forgot-password card. Modes:
@@ -540,7 +541,7 @@ function TabButton({
       type="button"
       onClick={onClick}
       className={cn(
-        'min-w-0 flex-1 rounded-md border px-2 py-1 font-medium transition-colors',
+        'flex min-h-8 min-w-0 flex-1 items-center justify-center rounded-md border px-2 py-1 font-medium transition-colors',
         active
           ? 'border-[#DCDDDD] bg-white text-foreground shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card'
           : 'border-transparent text-muted-foreground hover:bg-white/70 hover:text-foreground dark:hover:bg-white/10',
