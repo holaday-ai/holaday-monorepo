@@ -252,7 +252,7 @@ function ConnectionProviderCard({ provider }: { provider: ConnectionProviderView
         asChild
         variant="outline"
         size="sm"
-        className="mt-auto h-7 border-[#DCDDDD] bg-white text-[11px] text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+        className="mt-auto h-8 border-[#DCDDDD] bg-white text-[11px] text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
       >
         <a
           href={supportMailtoHref({
