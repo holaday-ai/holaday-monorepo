@@ -318,7 +318,7 @@ export function HistoryPage(): JSX.Element {
                 <button
                   type="button"
                   onClick={resetFilters}
-                  className="inline-flex h-7 items-center gap-1 rounded-md border border-[#DCDDDD] bg-white px-2 text-xs text-[#595757] transition-colors hover:border-[#ADADAD] hover:text-[#EA1F59]"
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-xs text-[#595757] transition-colors hover:border-[#ADADAD] hover:text-[#EA1F59]"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
                   重置筛选
@@ -478,7 +478,7 @@ function FilterGroup<T extends string>({
           type="button"
           onClick={() => onChange(o.id)}
           className={cn(
-            'rounded-md px-2.5 py-1 transition-colors',
+            'flex h-8 items-center rounded-md px-2.5 transition-colors',
             value === o.id
               ? 'bg-white text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.06)]'
               : 'text-[#595757] hover:text-foreground',

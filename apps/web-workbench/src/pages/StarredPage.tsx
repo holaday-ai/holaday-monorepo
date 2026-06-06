@@ -233,7 +233,7 @@ export function StarredPage(): JSX.Element {
                   aria-label="取消置顶"
                   title={unpinningIds.has(t.taskId) ? '取消置顶中…' : '取消置顶'}
                   disabled={unpinningIds.has(t.taskId)}
-                  className="rounded-md p-1 text-[#595757] transition-colors hover:bg-[#EFEFEF]/70 hover:text-[#EA1F59] disabled:cursor-wait disabled:opacity-50"
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/70 hover:text-[#EA1F59] disabled:cursor-wait disabled:opacity-50"
                 >
                   {unpinningIds.has(t.taskId) ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />

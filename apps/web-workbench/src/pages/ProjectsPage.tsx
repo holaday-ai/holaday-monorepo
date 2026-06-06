@@ -323,7 +323,7 @@ export function ProjectsPage(): JSX.Element {
                       type="button"
                       aria-label={`项目 ${p.name} 操作`}
                       title="更多"
-                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/60 hover:text-foreground"
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/60 hover:text-foreground"
                     >
                       <MoreHorizontal className="h-4 w-4" />
                     </button>
