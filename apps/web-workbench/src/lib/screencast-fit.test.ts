@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  centeredScreencastScrollLeft,
   fitScreencastContain,
   fitScreencastReadable,
   mapClientPointToScreencast,
@@ -8,26 +7,6 @@ import {
   placeScreencastReadableTop,
   readableScreencastStartScrollLeft,
 } from './screencast-fit';
-
-describe('centeredScreencastScrollLeft', () => {
-  it('centres wide readable browser content inside portrait sheets', () => {
-    expect(
-      centeredScreencastScrollLeft({
-        contentWidth: 896,
-        hostWidth: 540,
-      }),
-    ).toBe(178);
-  });
-
-  it('keeps non-overflowing browser content pinned to the start', () => {
-    expect(
-      centeredScreencastScrollLeft({
-        contentWidth: 332,
-        hostWidth: 390,
-      }),
-    ).toBe(0);
-  });
-});
 
 describe('readableScreencastStartScrollLeft', () => {
   it('opens wide readable browser content at the left edge in portrait sheets', () => {
