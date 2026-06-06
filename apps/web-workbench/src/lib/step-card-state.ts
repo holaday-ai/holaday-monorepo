@@ -27,6 +27,67 @@ export function stepStatusText(status: StepExecutionStatus): string {
   return '执行中';
 }
 
+export function stepDisplayTitle(
+  step: Pick<UiStep, 'actionKind' | 'tickIndex'>,
+): string {
+  if (!step.actionKind) return `步骤 ${Math.max(0, step.tickIndex) + 1}`;
+  switch (step.actionKind) {
+    case 'click':
+    case 'click_ref':
+      return '点击元素';
+    case 'type':
+    case 'type_in_ref':
+      return '输入文本';
+    case 'key':
+    case 'press_key':
+      return '按键';
+    case 'scroll':
+      return '滚动页面';
+    case 'wait':
+      return '等待页面';
+    case 'screenshot':
+      return '截图';
+    case 'navigate':
+      return '跳转页面';
+    case 'computer':
+      return '浏览器操作';
+    case 'web_search':
+      return '联网搜索';
+    case 'bash':
+      return '命令执行';
+    case 'code_execution':
+    case 'run_code':
+    case 'python':
+      return '代码执行';
+    case 'str_replace_editor':
+    case 'file_editor':
+    case 'text_editor':
+      return '文件编辑';
+    case 'text':
+      return '结果说明';
+    case 'wait_for_human':
+      return '等待人工验证';
+    case 'done':
+      return '任务完成';
+    case 'give_up':
+      return '放弃任务';
+    default:
+      return '任务步骤';
+  }
+}
+
+export function stepDisplaySummary(
+  step: Pick<UiStep, 'actionKind' | 'actionSummary'>,
+): string | null {
+  const summary = step.actionSummary?.trim();
+  if (!summary) return null;
+  const raw = summary.toLowerCase();
+  const kind = step.actionKind?.toLowerCase();
+  if (kind && raw === kind) return null;
+  if (RAW_LABEL_SUMMARIES.has(raw)) return null;
+  return summary;
+}
+
 export function stepFailureMessage(step: Pick<UiStep, 'actionKind' | 'message'>): string | null {
   const message = step.message?.trim();
   if (!message) return null;
@@ -65,6 +126,33 @@ export function stepFailureMessage(step: Pick<UiStep, 'actionKind' | 'message'>)
 
   return humaniseTaskError(message);
 }
+
+const RAW_LABEL_SUMMARIES = new Set([
+  'bash',
+  'click',
+  'click_ref',
+  'code_execution',
+  'computer',
+  'done',
+  'file_editor',
+  'give_up',
+  'key',
+  'navigate',
+  'press_key',
+  'python',
+  'run_code',
+  'screenshot',
+  'scroll',
+  'str_replace_editor',
+  'text',
+  'text_editor',
+  'thinking',
+  'type',
+  'type_in_ref',
+  'wait',
+  'wait_for_human',
+  'web_search',
+]);
 
 export function stepDetailSummary(
   steps: readonly Pick<UiStep, 'status'>[],

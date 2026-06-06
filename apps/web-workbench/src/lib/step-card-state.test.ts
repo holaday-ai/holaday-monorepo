@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  stepDisplaySummary,
+  stepDisplayTitle,
   stepDetailSummary,
   stepFailureMessage,
   stepStatusLabel,
@@ -41,6 +43,36 @@ describe('step-card-state', () => {
   it('provides localized status labels for step badges', () => {
     expect(stepStatusText('running')).toBe('执行中');
     expect(stepStatusLabel('failed', 2)).toBe('步骤 3 · 失败');
+  });
+
+  it('uses user-facing titles for raw browser step kinds', () => {
+    expect(stepDisplayTitle({ actionKind: 'computer', tickIndex: 0 })).toBe(
+      '浏览器操作',
+    );
+    expect(stepDisplayTitle({ actionKind: 'text', tickIndex: 1 })).toBe(
+      '结果说明',
+    );
+    expect(stepDisplayTitle({ actionKind: 'web_search', tickIndex: 2 })).toBe(
+      '联网搜索',
+    );
+    expect(stepDisplayTitle({ actionKind: 'unknown_tool', tickIndex: 3 })).toBe(
+      '任务步骤',
+    );
+  });
+
+  it('hides label-only step summaries but keeps useful descriptions', () => {
+    expect(
+      stepDisplaySummary({ actionKind: 'computer', actionSummary: 'computer' }),
+    ).toBeNull();
+    expect(
+      stepDisplaySummary({ actionKind: 'text', actionSummary: ' text ' }),
+    ).toBeNull();
+    expect(
+      stepDisplaySummary({
+        actionKind: 'computer',
+        actionSummary: '表达式 `128^2` 已就绪，按 = 求值。',
+      }),
+    ).toBe('表达式 `128^2` 已就绪，按 = 求值。');
   });
 
   it('explains browser tool timeouts without exposing driver jargon', () => {

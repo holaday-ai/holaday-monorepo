@@ -7,7 +7,12 @@ import {
   externalLinkConfirmDescription,
   safeExternalHttpHref,
 } from '@/lib/external-link-copy';
-import { stepFailureMessage, stepStatusLabel } from '@/lib/step-card-state';
+import {
+  stepDisplaySummary,
+  stepDisplayTitle,
+  stepFailureMessage,
+  stepStatusLabel,
+} from '@/lib/step-card-state';
 import { cn } from '@/lib/utils';
 import type { UiStep } from '@/types/task';
 
@@ -35,7 +40,8 @@ interface Props {
  * for the driver message if present.
  */
 export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
-  const title = stepTitle(step);
+  const title = stepDisplayTitle(step);
+  const summary = stepDisplaySummary(step);
   const failureMessage = stepFailureMessage(step);
   const antiBotHigh = step.antiBot?.confidence === 'high';
   const [pendingHref, setPendingHref] = React.useState<string | null>(null);
@@ -84,7 +90,7 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
             {step.durationMs != null ? formatDuration(step.durationMs) : '…'}
           </div>
         </div>
-        {step.actionSummary && (
+        {summary && (
           // QA #14 — actionSummary may contain markdown (the agent's
           // self-narrated step description occasionally has **bold**
           // emphasis, inline code, or short links). Render through
@@ -99,7 +105,7 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
               remarkPlugins={[remarkGfm]}
               components={markdownComponents}
             >
-              {step.actionSummary}
+              {summary}
             </ReactMarkdown>
             {step.status === 'running' && <Cursor />}
           </div>
@@ -212,37 +218,6 @@ function Cursor(): JSX.Element {
       className="ml-1 inline-block h-3 w-[2px] animate-pulse-dot bg-current align-middle"
     />
   );
-}
-
-function stepTitle(step: UiStep): string {
-  if (!step.actionKind) return `步骤 ${step.tickIndex + 1}`;
-  switch (step.actionKind) {
-    case 'click':
-    case 'click_ref':
-      return '点击元素';
-    case 'type':
-    case 'type_in_ref':
-      return '输入文本';
-    case 'key':
-    case 'press_key':
-      return '按键';
-    case 'scroll':
-      return '滚动页面';
-    case 'wait':
-      return '等待';
-    case 'screenshot':
-      return '截图';
-    case 'navigate':
-      return '跳转页面';
-    case 'wait_for_human':
-      return '等待人工验证';
-    case 'done':
-      return '任务完成';
-    case 'give_up':
-      return '放弃任务';
-    default:
-      return step.actionKind;
-  }
 }
 
 function formatDuration(ms: number): string {
