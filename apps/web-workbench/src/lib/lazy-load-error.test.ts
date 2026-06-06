@@ -28,7 +28,7 @@ describe('lazy load error helpers', () => {
     expect(isLazyLoadError(new Error('Cannot read properties of null'))).toBe(false);
     expect(lazyLoadErrorCopy(new Error('Cannot read properties of null'), '任务详情')).toEqual({
       title: '任务详情加载失败',
-      body: '页面渲染时遇到异常。刷新后仍然失败的话，请稍后再试或联系支持。',
+      body: '这个页面刚才没有打开成功。刷新后仍然失败的话，请稍后再试或联系支持。',
       actionLabel: '刷新重试',
     });
   });

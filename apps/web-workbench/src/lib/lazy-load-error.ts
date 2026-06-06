@@ -32,7 +32,7 @@ export function lazyLoadErrorCopy(
   }
   return {
     title: `${surfaceLabel}加载失败`,
-    body: '页面渲染时遇到异常。刷新后仍然失败的话，请稍后再试或联系支持。',
+    body: '这个页面刚才没有打开成功。刷新后仍然失败的话，请稍后再试或联系支持。',
     actionLabel: '刷新重试',
   };
 }
