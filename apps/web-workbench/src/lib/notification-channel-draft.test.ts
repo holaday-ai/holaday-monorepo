@@ -22,7 +22,7 @@ describe('buildNotificationChannelDraft', () => {
         webhookUrl: '',
         templateJson: '{}',
       }),
-    ).toEqual({ error: '请填写 Webhook URL' });
+    ).toEqual({ error: '请填写通知地址' });
 
     expect(
       buildNotificationChannelDraft({
@@ -31,7 +31,7 @@ describe('buildNotificationChannelDraft', () => {
         templateJson: '{}',
       }),
     ).toEqual({
-      error: 'Webhook URL 格式不正确，请以 http:// 或 https:// 开头',
+      error: '通知地址格式不正确，请以 http:// 或 https:// 开头',
     });
   });
 
@@ -69,7 +69,7 @@ describe('buildNotificationChannelDraft', () => {
         templateJson: 'null',
       }),
     ).toEqual({
-      error: '自定义模板不能是 null，请填写可发送的 JSON 内容',
+      error: '自定义模板不能为空，请填写可发送的 JSON 内容',
     });
   });
 });

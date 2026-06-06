@@ -68,7 +68,7 @@ const PLATFORM_CARDS: ReadonlyArray<{
   {
     value: 'custom',
     label: NOTIFICATION_PLATFORM_LABEL.custom,
-    hint: '任意 HTTP webhook + 模板',
+    hint: '自定义通知地址 + 模板',
   },
 ];
 
@@ -284,7 +284,7 @@ export function AddChannelModal({
               htmlFor="webhookUrl"
               className="mb-1 block text-xs font-medium text-muted-foreground"
             >
-              Webhook URL
+              通知地址
             </label>
             <input
               id="webhookUrl"

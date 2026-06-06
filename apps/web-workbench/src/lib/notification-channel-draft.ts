@@ -16,12 +16,12 @@ export function buildNotificationChannelDraft({
   templateJson: string;
 }): NotificationChannelDraft | { error: string } {
   const trimmedUrl = webhookUrl.trim();
-  if (!trimmedUrl) return { error: '请填写 Webhook URL' };
+  if (!trimmedUrl) return { error: '请填写通知地址' };
 
   try {
     new URL(trimmedUrl);
   } catch {
-    return { error: 'Webhook URL 格式不正确，请以 http:// 或 https:// 开头' };
+    return { error: '通知地址格式不正确，请以 http:// 或 https:// 开头' };
   }
 
   if (platform !== 'custom') {
@@ -31,7 +31,7 @@ export function buildNotificationChannelDraft({
   try {
     const parsed = JSON.parse(templateJson) as unknown;
     if (parsed === null) {
-      return { error: '自定义模板不能是 null，请填写可发送的 JSON 内容' };
+      return { error: '自定义模板不能为空，请填写可发送的 JSON 内容' };
     }
     return {
       platform,
