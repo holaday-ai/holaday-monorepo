@@ -12,14 +12,14 @@ describe('terminalEmptyCopy', () => {
   it('keeps failed empty-output copy action-oriented', () => {
     expect(terminalEmptyCopy('failed')).toEqual({
       title: '任务未能完成',
-      body: '这个任务已经结束，但没有收到可用回复。可以重新执行当前任务。',
+      body: '这个任务已经结束，但没有收到可用回复。已完成的步骤仍保留在详情里，可以重新执行当前任务。',
     });
   });
 
   it('uses partial-success copy when verification produced no final text', () => {
     expect(terminalEmptyCopy('partial_success')).toEqual({
       title: '部分完成',
-      body: '任务只完成了一部分，但没有生成可用的最终回复。可以重新执行当前任务继续验证。',
+      body: '任务只完成了一部分，但没有生成可用的最终回复。已完成的步骤仍保留在详情里，可以重新执行当前任务继续验证。',
     });
   });
 
