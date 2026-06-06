@@ -194,7 +194,7 @@ export function ScheduledCalendarPage(): JSX.Element {
       setLoadError(null);
     } catch (err) {
       if (!mountedRef.current || refreshRequestRef.current !== requestId) return;
-      const message = scheduledCalendarErrorMessage(err, '加载失败');
+      const message = scheduledCalendarErrorMessage(err, '请稍后重试');
       setLoadError(message);
       toast.show(taskActionError('定时任务暂时无法加载', message), 'error');
     } finally {

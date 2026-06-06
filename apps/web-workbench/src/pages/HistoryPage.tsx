@@ -168,7 +168,7 @@ export function HistoryPage(): JSX.Element {
         ) {
           return;
         }
-        const message = taskHubErrorMessage(err, '加载失败');
+        const message = taskHubErrorMessage(err, '请稍后重试');
         if (append) setLoadMoreError(message);
         else setError(message);
       } finally {
@@ -234,7 +234,7 @@ export function HistoryPage(): JSX.Element {
         setTasks([]);
         setCursor(null);
         setHasMore(false);
-        setError(taskHubErrorMessage(err, '加载失败'));
+        setError(taskHubErrorMessage(err, '请稍后重试'));
       })
       .finally(() => {
         if (

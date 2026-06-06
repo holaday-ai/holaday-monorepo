@@ -85,7 +85,7 @@ describe('project task filter state', () => {
     ).toEqual({
       projectId: 'proj_a',
       name: 'Launch',
-      detail: '任务加载失败',
+      detail: '任务暂时无法加载',
       tone: 'error',
     });
   });

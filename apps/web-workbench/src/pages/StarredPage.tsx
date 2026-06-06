@@ -86,7 +86,7 @@ export function StarredPage(): JSX.Element {
         }
       } catch (err) {
         if (!mountedRef.current || myToken !== fetchToken.current) return;
-        const message = taskHubErrorMessage(err, '加载失败');
+        const message = taskHubErrorMessage(err, '请稍后重试');
         if (append) {
           setLoadMoreError(message);
         } else {

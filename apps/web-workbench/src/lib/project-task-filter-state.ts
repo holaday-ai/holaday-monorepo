@@ -153,7 +153,7 @@ export function projectFilterChipState(options: {
       detail:
         options.state.tasks.length > 0
           ? '任务刷新失败，显示上次结果'
-          : '任务加载失败',
+          : '任务暂时无法加载',
       tone: 'error',
     };
   }

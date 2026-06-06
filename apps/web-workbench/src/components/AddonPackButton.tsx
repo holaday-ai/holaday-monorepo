@@ -128,7 +128,7 @@ export function AddonPackButton({
       .catch((err) => {
         if (!cancelled) {
           setStatus('error');
-          onError?.(pageErrorMessage(err, 'PayPal 支付组件加载失败，请刷新后重试。'));
+          onError?.(pageErrorMessage(err, 'PayPal 暂时无法加载，请刷新后重试。'));
         }
       });
     return () => {
