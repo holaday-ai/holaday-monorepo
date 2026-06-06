@@ -29,6 +29,11 @@ export interface SkillLoadErrorCopy {
   readonly body: string;
 }
 
+export interface SkillLimitBannerCopy {
+  readonly title: string;
+  readonly body: string;
+}
+
 const PLAN_LABELS: Record<string, string> = {
   free: '体验版',
   basic: '基础版',
@@ -67,6 +72,9 @@ export function skillPageSummary(options: {
   if (options.error) return '技能暂时无法加载';
   if (options.totalCount === 0) return '暂无可用技能';
   if (options.cap > 0) {
+    if (options.enabledCount > options.cap) {
+      return `已启用 ${options.enabledCount} 个 · ${skillPlanLabel(options.planId)}上限 ${options.cap}`;
+    }
     return `已启用 ${options.enabledCount} / ${options.cap} · ${skillPlanLabel(options.planId)}`;
   }
   return `已加载 ${options.totalCount} 个技能 · ${skillPlanLabel(options.planId)}`;
@@ -89,6 +97,26 @@ export function skillLimitMessage(options: {
 }): string {
   if (options.planId === 'pro') return `已达到 ${options.cap} 个技能上限`;
   return `已达到当前套餐的技能上限（${options.cap} 个）· 升级到专业版可使用全部 33 个技能`;
+}
+
+export function skillLimitBannerCopy(options: {
+  readonly cap: number;
+  readonly enabledCount: number;
+  readonly planId: string;
+}): SkillLimitBannerCopy {
+  if (options.enabledCount > options.cap) {
+    return {
+      title: `当前已启用 ${options.enabledCount} 个技能`,
+      body: `${skillPlanLabel(options.planId)}上限为 ${options.cap} 个。已启用的技能会继续可用；如果停用后想启用新技能，需要先保持在上限内。`,
+    };
+  }
+  return {
+    title: `已达到 ${options.cap} 个技能上限`,
+    body:
+      options.planId === 'pro'
+        ? '你已启用当前套餐支持的全部技能。'
+        : '升级到专业版可使用全部 33 个技能。',
+  };
 }
 
 export function skillCardBadge(options: {

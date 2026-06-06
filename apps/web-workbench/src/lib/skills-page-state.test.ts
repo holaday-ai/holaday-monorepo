@@ -4,6 +4,7 @@ import {
   normalizeSkillRows,
   normalizeSkillToggleResponse,
   skillCardBadge,
+  skillLimitBannerCopy,
   skillLimitMessage,
   skillLoadErrorCopy,
   skillPageSummary,
@@ -83,6 +84,16 @@ describe('skills page state helpers', () => {
         loading: false,
         error: null,
         totalCount: 33,
+        enabledCount: 11,
+        cap: 5,
+        planId: 'basic',
+      }),
+    ).toBe('已启用 11 个 · 基础版上限 5');
+    expect(
+      skillPageSummary({
+        loading: false,
+        error: null,
+        totalCount: 33,
         enabledCount: 0,
         cap: 0,
         planId: 'free',
@@ -95,6 +106,17 @@ describe('skills page state helpers', () => {
     expect(skillLimitMessage({ cap: 5, planId: 'basic' })).toBe(
       '已达到当前套餐的技能上限（5 个）· 升级到专业版可使用全部 33 个技能',
     );
+  });
+
+  it('explains over-limit skill states without implying a broken counter', () => {
+    expect(skillLimitBannerCopy({ cap: 5, enabledCount: 11, planId: 'basic' })).toEqual({
+      title: '当前已启用 11 个技能',
+      body: '基础版上限为 5 个。已启用的技能会继续可用；如果停用后想启用新技能，需要先保持在上限内。',
+    });
+    expect(skillLimitBannerCopy({ cap: 5, enabledCount: 5, planId: 'basic' })).toEqual({
+      title: '已达到 5 个技能上限',
+      body: '升级到专业版可使用全部 33 个技能。',
+    });
   });
 
   it('formats skill load errors for user-facing surfaces', () => {

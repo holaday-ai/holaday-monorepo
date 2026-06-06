@@ -36,7 +36,7 @@ import {
   Video,
 } from 'lucide-react';
 import * as React from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useNavigate, useOutletContext } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import {
@@ -44,6 +44,7 @@ import {
   normalizeSkillRows,
   normalizeSkillToggleResponse,
   skillCardBadge,
+  skillLimitBannerCopy,
   skillLimitMessage,
   skillLoadErrorCopy,
   skillPageSummary,
@@ -113,6 +114,7 @@ const ICONS: Record<string, LucideIcon> = {
  */
 export function SkillsPage(): JSX.Element {
   const toast = useToast();
+  const navigate = useNavigate();
   const mountedRef = React.useRef(false);
   const requestIdRef = React.useRef(0);
   // BOSS feedback — surface plan-bound cap. AppShell exposes `me`
@@ -177,6 +179,9 @@ export function SkillsPage(): JSX.Element {
     planId,
   });
   const loadErrorCopy = skillLoadErrorCopy(loadError);
+  const limitBanner = atLimit
+    ? skillLimitBannerCopy({ cap, enabledCount, planId })
+    : null;
 
   async function onToggle(skill: UiSkill): Promise<void> {
     if (pendingId) return;
@@ -235,14 +240,33 @@ export function SkillsPage(): JSX.Element {
           </div>
         }
       />
+      {!loading && !loadError && grouped.length > 0 && (
+        <div className="mb-5 flex flex-col gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-4 py-3 text-[13px] text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="font-medium">如何使用专家技能</div>
+            <div className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
+              启用后，新任务会自动匹配相关专家。想强制使用专家，在输入框左下角“插件”里选择“开启”。
+            </div>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="shrink-0"
+            onClick={() => navigate('/app')}
+          >
+            开始新任务
+          </Button>
+        </div>
+      )}
       {/* Upgrade nudge when Basic user hits the cap. Inline banner
           so the action sits adjacent to the skill grid the user is
           interacting with. */}
-      {atLimit && planId !== 'pro' && (
+      {limitBanner && planId !== 'pro' && (
         <div className="mb-5 rounded-[8px] border border-[#DCDDDD] border-l-[#FFC910] bg-white px-4 py-3 text-[13px] text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
-          <div className="font-medium">已达到 {cap} 个技能上限</div>
+          <div className="font-medium">{limitBanner.title}</div>
           <div className="mt-0.5 text-[12px] text-muted-foreground">
-            升级到专业版可使用全部 33 个技能。
+            {limitBanner.body}
           </div>
         </div>
       )}
