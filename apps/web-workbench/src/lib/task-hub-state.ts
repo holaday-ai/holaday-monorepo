@@ -104,6 +104,24 @@ export function taskHubErrorMessage(err: unknown, fallback = '请稍后重试'):
   return pageErrorMessage(err, fallback);
 }
 
+export function taskHubLoadErrorCopy({
+  label,
+  message,
+}: {
+  readonly label: string;
+  readonly message: string | null | undefined;
+}): TaskHubInlineErrorCopy {
+  const safeLabel = label.trim() || '任务列表';
+  const body =
+    typeof message === 'string' && message.trim()
+      ? message.trim()
+      : '请稍后重试，或刷新页面后再打开列表。';
+  return {
+    title: `${safeLabel}暂时无法加载`,
+    body,
+  };
+}
+
 export function taskHubLoadMoreErrorCopy(
   message: string | null | undefined,
 ): TaskHubInlineErrorCopy {

@@ -13,6 +13,7 @@ import {
   normalizeTaskHubRows,
   shouldApplyHistoryResponse,
   taskHubErrorMessage,
+  taskHubLoadErrorCopy,
   taskHubLoadMoreErrorCopy,
   type HistoryRangeFilter,
   type HistoryStatusFilter,
@@ -265,6 +266,10 @@ export function HistoryPage(): JSX.Element {
     status,
     range,
   });
+  const pageErrorCopy = taskHubLoadErrorCopy({
+    label: '历史任务',
+    message: error,
+  });
   const loadMoreErrorCopy = taskHubLoadMoreErrorCopy(loadMoreError);
   const loadingWithoutRows = loading && tasks.length === 0;
 
@@ -342,10 +347,10 @@ export function HistoryPage(): JSX.Element {
             <div className="flex h-56 flex-col items-center justify-center text-center">
               <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
               <div className="mt-3 text-sm font-medium text-foreground/80">
-                历史任务加载失败
+                {pageErrorCopy.title}
               </div>
               <div className="mt-1 max-w-md text-xs text-muted-foreground">
-                {error}
+                {pageErrorCopy.body}
               </div>
               <div className="mt-3 flex flex-wrap justify-center gap-2">
                 <Button

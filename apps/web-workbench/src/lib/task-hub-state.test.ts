@@ -10,6 +10,7 @@ import {
   shouldApplyHistoryResponse,
   starredPageSummary,
   taskHubErrorMessage,
+  taskHubLoadErrorCopy,
   taskHubLoadMoreErrorCopy,
   taskHubNeedsAttention,
 } from './task-hub-state';
@@ -148,6 +149,14 @@ describe('task hub state helpers', () => {
   });
 
   it('formats load-more errors for task hub pages', () => {
+    expect(taskHubLoadErrorCopy({ label: '历史任务', message: '  offline  ' })).toEqual({
+      title: '历史任务暂时无法加载',
+      body: 'offline',
+    });
+    expect(taskHubLoadErrorCopy({ label: '', message: null })).toEqual({
+      title: '任务列表暂时无法加载',
+      body: '请稍后重试，或刷新页面后再打开列表。',
+    });
     expect(taskHubLoadMoreErrorCopy('  offline  ')).toEqual({
       title: '更多任务暂时无法加载',
       body: 'offline',

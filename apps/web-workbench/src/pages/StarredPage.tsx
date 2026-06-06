@@ -12,6 +12,7 @@ import {
   normalizeTaskHubRows,
   starredPageSummary,
   taskHubErrorMessage,
+  taskHubLoadErrorCopy,
   taskHubLoadMoreErrorCopy,
   taskHubNeedsAttention,
   type NormalizedTaskHubRow,
@@ -147,6 +148,10 @@ export function StarredPage(): JSX.Element {
     count: items.length,
     hasMore,
   });
+  const pageErrorCopy = taskHubLoadErrorCopy({
+    label: '置顶任务',
+    message: loadError,
+  });
   const loadMoreErrorCopy = taskHubLoadMoreErrorCopy(loadMoreError);
 
   return (
@@ -165,8 +170,10 @@ export function StarredPage(): JSX.Element {
       ) : loadError ? (
         <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
-          <div className="text-sm font-medium text-foreground/80">置顶任务加载失败</div>
-          <div className="max-w-md text-xs leading-5 text-muted-foreground">{loadError}</div>
+          <div className="text-sm font-medium text-foreground/80">{pageErrorCopy.title}</div>
+          <div className="max-w-md text-xs leading-5 text-muted-foreground">
+            {pageErrorCopy.body}
+          </div>
           <div className="mt-1 flex flex-wrap justify-center gap-2">
             <Button type="button" size="sm" onClick={() => void fetchPage(null, false)} disabled={loading}>
               {loading ? '重试中…' : '重试'}
