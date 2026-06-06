@@ -3,6 +3,7 @@ import {
   describeScheduledEventReminder,
   describeScheduledEventRepeat,
   scheduledEventCanRunNow,
+  scheduledEventFailureDetail,
   scheduledEventCanToggle,
   scheduledEventToggleLabel,
   scheduledEventToggleSuccessMessage,
@@ -46,6 +47,15 @@ describe('event detail state helpers', () => {
         nextStatus: 'active',
       }),
     ).toBe('已重新启用');
+  });
+
+  it('hides raw scheduled event failure details', () => {
+    expect(scheduledEventFailureDetail('missing ANTHROPIC_API_KEY')).toBe(
+      'AI 服务暂未配置，请联系 support@holaday.ai。',
+    );
+    expect(scheduledEventFailureDetail(null)).toBe(
+      '上次执行失败，请检查任务配置后重试。',
+    );
   });
 
   it('describes reminders for compact metadata rows', () => {

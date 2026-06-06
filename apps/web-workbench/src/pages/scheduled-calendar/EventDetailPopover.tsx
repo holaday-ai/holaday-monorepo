@@ -20,6 +20,7 @@ import {
   describeScheduledEventRepeat,
   scheduledEventCanRunNow,
   scheduledEventCanToggle,
+  scheduledEventFailureDetail,
   scheduledEventToggleLabel,
 } from './event-detail-state';
 import type { ScheduledTaskRow } from './event-mapping';
@@ -177,8 +178,10 @@ export function EventDetailPopover({
 
       {row.lastError && row.lastRunStatus === 'failed' && (
         <div className="mt-3 rounded-[8px] border border-[#EA1F59]/20 bg-[#EA1F59]/[0.06] px-3 py-2 text-xs text-[#EA1F59]">
-          <div className="mb-0.5 font-semibold">上次错误</div>
-          <div className="break-words font-mono text-[11px]">{row.lastError}</div>
+          <div className="mb-0.5 font-semibold">上次失败详情</div>
+          <div className="break-words text-[11px]">
+            {scheduledEventFailureDetail(row.lastError)}
+          </div>
         </div>
       )}
 

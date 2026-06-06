@@ -1,3 +1,4 @@
+import { humaniseTaskError } from '@/lib/error-copy';
 import type { ScheduledTaskRow } from './event-mapping';
 
 export type ScheduledEventStatus = ScheduledTaskRow['status'];
@@ -26,6 +27,10 @@ export function scheduledEventToggleSuccessMessage(input: {
   }
   if (input.nextStatus === 'active') return '已恢复';
   return '已更新';
+}
+
+export function scheduledEventFailureDetail(error: string | null): string {
+  return humaniseTaskError(error) || '上次执行失败，请检查任务配置后重试。';
 }
 
 export function describeScheduledEventReminder(minutes: number | null): string {
