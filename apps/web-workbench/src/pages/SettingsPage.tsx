@@ -329,7 +329,8 @@ function MemorySection(): JSX.Element {
               type="button"
               onClick={() => setConfirming(true)}
               disabled={loading}
-              className="shrink-0 text-xs text-red-600 underline-offset-2 hover:underline dark:text-red-400"
+              title="清空全部 AI 记忆"
+              className="inline-flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950/25"
             >
               清空全部
             </button>
@@ -389,7 +390,7 @@ function MemorySection(): JSX.Element {
                       disabled={deleting}
                       aria-label="删除记忆"
                       title={deleting ? '删除中' : '删除'}
-                      className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:text-red-400"
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-red-950/25 dark:hover:text-red-400"
                     >
                       {deleting ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
