@@ -149,12 +149,18 @@ describe('step-card-state', () => {
     ).toBe('无法连接到该站点。请稍后重试，或换一个能直接访问的网址。');
   });
 
-  it('keeps unknown step failures visible', () => {
+  it('hides unknown English step failures but keeps localized ones visible', () => {
     expect(
       stepFailureMessage({
         actionKind: 'bash',
         message: 'command failed with exit code 2',
       }),
-    ).toBe('command failed with exit code 2');
+    ).toBe('任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。');
+    expect(
+      stepFailureMessage({
+        actionKind: 'custom',
+        message: '字段不能为空',
+      }),
+    ).toBe('字段不能为空');
   });
 });

@@ -1,5 +1,6 @@
 import type { UiStep } from '@/types/task';
 import { classifyBrowserErrorKind } from './browser-error-kind';
+import { humaniseTaskError } from './error-copy';
 
 export type StepExecutionStatus = UiStep['status'];
 
@@ -62,7 +63,7 @@ export function stepFailureMessage(step: Pick<UiStep, 'actionKind' | 'message'>)
       break;
   }
 
-  return message;
+  return humaniseTaskError(message);
 }
 
 export function stepDetailSummary(
