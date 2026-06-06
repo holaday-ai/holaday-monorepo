@@ -1772,15 +1772,17 @@ export function BrowserPanel({
                   </div>
                 )}
                 {isSheet && (
-                  <div className="pointer-events-none absolute bottom-2 left-2 right-2 z-20 flex min-w-0 items-center justify-between gap-2 rounded bg-black/55 px-2 py-1 text-[11px] text-white shadow-sm backdrop-blur">
-                    <span className="min-w-0 truncate">
+                  <div className="pointer-events-none absolute bottom-2 left-2 right-2 z-20 flex min-w-0 flex-col items-start gap-0.5 rounded bg-black/55 px-2 py-1 text-[11px] leading-tight text-white shadow-sm backdrop-blur">
+                    <span className="max-w-full truncate">
                       {terminalEvidenceFrameLabel({
                         status: taskStatus,
                         url: finalEvidenceFrame.url,
                       })}
                     </span>
                     {finalEvidenceFrame.url && finalEvidenceFrame.url !== 'about:blank' && (
-                      <span className="min-w-0 truncate font-mono opacity-80">{finalEvidenceFrame.url}</span>
+                      <span className="max-w-full truncate font-mono text-[10px] opacity-80">
+                        {finalEvidenceFrame.url}
+                      </span>
                     )}
                   </div>
                 )}
