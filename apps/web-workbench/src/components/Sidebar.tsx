@@ -567,7 +567,7 @@ export function Sidebar({
                     <button
                       type="button"
                       onClick={selectAllVisible}
-                      className="rounded-[6px] px-2 py-0.5 text-[#595757] hover:bg-[#EFEFEF]/70 hover:text-[#57479C] dark:text-[#DCDDDD] dark:hover:bg-white/10"
+                      className="inline-flex h-8 items-center rounded-[6px] px-2 text-[#595757] hover:bg-[#EFEFEF]/70 hover:text-[#57479C] dark:text-[#DCDDDD] dark:hover:bg-white/10"
                     >
                       全选
                     </button>
@@ -576,7 +576,7 @@ export function Sidebar({
                       onClick={deleteSelected}
                       disabled={selectedBatchDeleteIds.length === 0}
                       className={cn(
-                        'rounded-[6px] px-2 py-0.5 font-medium transition-colors',
+                        'inline-flex h-8 items-center rounded-[6px] px-2 font-medium transition-colors',
                         selectedBatchDeleteIds.length === 0
                           ? 'cursor-not-allowed opacity-50'
                           : 'bg-[#EA1F59] text-white shadow-[0_3px_10px_rgba(234,31,89,0.12)] hover:bg-[#EA1F59]/90',
@@ -587,7 +587,7 @@ export function Sidebar({
                     <button
                       type="button"
                       onClick={exitBatchMode}
-                      className="rounded-[6px] px-2 py-0.5 text-[#ADADAD] hover:bg-[#EFEFEF]/70 hover:text-[#595757] dark:hover:bg-white/10"
+                      className="inline-flex h-8 items-center rounded-[6px] px-2 text-[#ADADAD] hover:bg-[#EFEFEF]/70 hover:text-[#595757] dark:hover:bg-white/10"
                     >
                       取消
                     </button>
@@ -599,7 +599,7 @@ export function Sidebar({
                     <button
                       type="button"
                       onClick={() => setBatchMode(true)}
-                      className="inline-flex items-center gap-1 rounded-[7px] border border-transparent px-2 py-1 text-[11px] text-[#ADADAD] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
+                      className="inline-flex h-8 items-center gap-1 rounded-[7px] border border-transparent px-2 text-[11px] text-[#ADADAD] transition-colors hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10"
                     >
                       <Layers className="h-3 w-3" />
                       批量管理
