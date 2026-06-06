@@ -512,6 +512,7 @@ function AgentBlock({
             level={task.failureLevel ?? 'fixable'}
             status={task.status}
             failedChecks={task.failedChecks ?? null}
+            intent={task.intent}
           />
         )}
         {terminal && (task.resultText || hasTerminalArtifacts) && (
@@ -586,13 +587,36 @@ function VerificationBanner({
   level,
   status,
   failedChecks,
+  intent,
 }: {
   level: 'fixable' | 'needs_clarification' | 'hard_fail' | null;
   status: string;
   failedChecks: Array<{ type: string; detail: string }> | null;
+  intent?: string;
 }): JSX.Element {
   const copy = verificationBannerCopy({ level, status, failedChecks });
   const isDanger = copy.tone === 'danger';
+  const toast = useToast();
+  const createTask = useTaskStore((s) => s.createTask);
+  const mountedRef = useMountedRef();
+  const [retrying, setRetrying] = React.useState(false);
+  const handleRetry = React.useCallback(async (): Promise<void> => {
+    if (!intent || retrying) return;
+    setRetrying(true);
+    try {
+      const res = await createTask(intent, []);
+      if (!mountedRef.current) return;
+      if ('error' in res) {
+        toast.show(taskActionError('重新执行失败', res.error), 'error');
+        return;
+      }
+      toast.show('已开始重新执行', 'info', 2000);
+    } finally {
+      if (mountedRef.current) {
+        setRetrying(false);
+      }
+    }
+  }, [createTask, intent, mountedRef, retrying, toast]);
   return (
     <div
       className={cn(
@@ -632,6 +656,24 @@ function VerificationBanner({
             <div className="mt-1 text-xs opacity-75">
               另有 {copy.hiddenCount} 项检查未展开
             </div>
+          )}
+          {intent && (
+            <button
+              type="button"
+              onClick={() => void handleRetry()}
+              disabled={retrying}
+              aria-label={retrying ? '正在重新执行任务' : '重新执行任务'}
+              title={retrying ? '正在重新执行' : '重新执行任务'}
+              className={cn(
+                'mt-2 inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition-colors disabled:cursor-wait disabled:opacity-60',
+                isDanger
+                  ? 'border-[#EA1F59]/25 bg-[#EA1F59]/5 text-[#EA1F59] hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/10'
+                  : 'border-[#FFC910]/60 bg-[#FFC910]/10 text-[#57479C] hover:border-[#FFC910]/80 hover:bg-[#FFC910]/15',
+              )}
+            >
+              <RotateCcw className={cn('h-3 w-3', retrying && 'animate-spin')} />
+              <span>{retrying ? '重新执行中…' : '重新执行'}</span>
+            </button>
           )}
         </div>
       </div>
