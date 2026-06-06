@@ -138,7 +138,7 @@ export function skillCardUsageHint(options: {
   readonly pending: boolean;
 }): string {
   if (options.pending) return '正在保存选择';
-  return options.enabled ? '新任务会自动匹配' : '启用后可参与自动匹配';
+  return options.enabled ? '可自动匹配，也可直接使用' : '启用后可参与自动匹配';
 }
 
 export function skillTaskDraft(

@@ -247,7 +247,7 @@ export function SkillsPage(): JSX.Element {
           <div className="min-w-0">
             <div className="font-medium">如何使用专家技能</div>
             <div className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
-              启用后，新任务会自动匹配相关专家。想强制使用专家，在输入框左下角“插件”里选择“开启”。
+              启用后，新任务会自动匹配相关专家；也可以在技能卡上点“用此专家”直接开始。
             </div>
           </div>
           <Button

@@ -140,7 +140,7 @@ describe('skills page state helpers', () => {
 
   it('explains how enabled skill cards affect new tasks', () => {
     expect(skillCardUsageHint({ enabled: true, pending: false })).toBe(
-      '新任务会自动匹配',
+      '可自动匹配，也可直接使用',
     );
     expect(skillCardUsageHint({ enabled: false, pending: false })).toBe(
       '启用后可参与自动匹配',
