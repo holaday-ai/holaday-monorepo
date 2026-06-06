@@ -671,7 +671,7 @@ function AwaitingUserBanner({
       const res = await trpc.tasks.abort.mutate({ taskId });
       if (!mountedRef.current) return;
       if (!res.ok) {
-        toast.show(`取消失败：${taskCancelStateChangedMessage(res.state)}`, 'error');
+        toast.show(taskCancelStateChangedMessage(res.state), 'error');
         return;
       }
       toast.show('已取消任务', 'info', 2000);

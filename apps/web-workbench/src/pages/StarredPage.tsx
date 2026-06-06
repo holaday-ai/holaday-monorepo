@@ -126,10 +126,10 @@ export function StarredPage(): JSX.Element {
       await togglePin(taskId, false);
       if (!mountedRef.current) return;
       toast.show('已取消置顶');
-    } catch (err) {
+    } catch {
       if (!mountedRef.current) return;
       setItems((prev) => (prev.some((t) => t.taskId === taskId) ? prev : [removed, ...prev]));
-      toast.show(`取消置顶失败：${taskHubErrorMessage(err)}`, 'error');
+      toast.show('取消置顶失败，请重试。', 'error');
     } finally {
       if (mountedRef.current) {
         setUnpinningIds((prev) => {
