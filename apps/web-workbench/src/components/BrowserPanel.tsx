@@ -1695,7 +1695,7 @@ export function BrowserPanel({
                     <img
                       ref={finalEvidenceImgRef}
                       src={`data:image/jpeg;base64,${finalEvidenceFrame.imageBase64}`}
-                      alt="任务完成时的浏览器截图"
+                      alt="任务完成时的浏览器画面"
                       draggable={false}
                       onLoad={fitFinalEvidenceImg}
                       style={finalEvidenceImageStyle}
@@ -1735,8 +1735,8 @@ export function BrowserPanel({
                         }
                         aria-label={
                           finalEvidenceViewMode === 'readable'
-                            ? '完整适应浏览器截图'
-                            : '清晰查看浏览器截图'
+                            ? '完整适应浏览器画面'
+                            : '清晰查看浏览器画面'
                         }
                         title={
                           finalEvidenceViewMode === 'readable'
@@ -2204,10 +2204,10 @@ function EmptyBrowserState({
         <div className={cn('flex flex-col items-center px-6 py-4 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-lg')}>
           <Globe className="h-10 w-10 text-[#42C0EF]/70" aria-hidden />
           <div className="mt-3 text-sm font-medium text-foreground/80">
-            {statusLabel}，没有截图
+            {statusLabel}，没有浏览器画面
           </div>
           <div className="mt-1 text-xs leading-relaxed">
-            这次任务结束时没有捕获截图，可打开最终浏览器地址复核。
+            这次任务结束时没有保存浏览器画面，可打开最终地址复核。
           </div>
           <SafeExternalLinkButton
             href={safeFinalUrl}
@@ -2228,7 +2228,7 @@ function EmptyBrowserState({
           这条历史任务没有保存浏览器画面
         </div>
         <div className="mt-1 text-xs leading-relaxed">
-          可能是上线前的旧任务。可以重新执行同样的意图来生成截图。
+          可能是上线前的旧任务。可以重新执行同样的意图来生成浏览器画面。
         </div>
         {onReExecute && (
           <button
