@@ -4,6 +4,7 @@ import {
   normalizeProjectName,
   normalizeProjectRows,
   projectCountSummary,
+  projectLoadErrorCopy,
   projectNameState,
 } from './project-page-state';
 
@@ -42,6 +43,17 @@ describe('project page state helpers', () => {
 
     expect(state.error).toBeNull();
     expect(state.canSubmit).toBe(true);
+  });
+
+  it('formats project load errors for user-facing surfaces', () => {
+    expect(projectLoadErrorCopy('  Network Error  ')).toEqual({
+      title: '项目暂时无法加载',
+      body: 'Network Error',
+    });
+    expect(projectLoadErrorCopy('')).toEqual({
+      title: '项目暂时无法加载',
+      body: '请稍后重试，或刷新页面后再打开项目列表。',
+    });
   });
 
   it('summarizes loading, failed, empty, and populated project lists', () => {

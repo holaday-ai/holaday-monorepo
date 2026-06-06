@@ -13,6 +13,7 @@ import { useAppShellContext } from '@/components/AppShell';
 import {
   PROJECT_NAME_MAX_LENGTH,
   projectCountSummary,
+  projectLoadErrorCopy,
   projectNameState,
 } from '@/lib/project-page-state';
 import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
@@ -61,6 +62,7 @@ export function ProjectsPage(): JSX.Element {
   const hasProjects = projects.length > 0;
   const initialLoading = loading && !hasProjects;
   const fullPageError = loadError && !hasProjects;
+  const loadErrorCopy = projectLoadErrorCopy(loadError);
 
   const refresh = React.useCallback(async () => {
     const requestId = refreshRequestRef.current + 1;
@@ -72,7 +74,7 @@ export function ProjectsPage(): JSX.Element {
     if ('error' in res) {
       const message = pageErrorMessage(res.error);
       setLoadError(message);
-      toast.show(`项目加载失败：${message}`, 'error');
+      toast.show('项目暂时无法加载', 'error');
     } else {
       setProjects(res.projects);
       setLoading(false);
@@ -233,7 +235,7 @@ export function ProjectsPage(): JSX.Element {
           <div className="flex min-w-0 items-start gap-2">
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#EA1F59]" />
             <span className="min-w-0">
-              项目列表刷新失败，当前保留上次结果：{loadError}
+              {loadErrorCopy.title}，当前保留上次结果：{loadErrorCopy.body}
             </span>
           </div>
           <button
@@ -257,9 +259,9 @@ export function ProjectsPage(): JSX.Element {
       ) : fullPageError ? (
         <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <AlertCircle className="h-8 w-8 text-primary" />
-          <div className="text-sm font-medium text-foreground/80">项目加载失败</div>
+          <div className="text-sm font-medium text-foreground/80">{loadErrorCopy.title}</div>
           <div className="max-w-md text-xs leading-5 text-muted-foreground">
-            {loadError}
+            {loadErrorCopy.body}
           </div>
           <button
             type="button"

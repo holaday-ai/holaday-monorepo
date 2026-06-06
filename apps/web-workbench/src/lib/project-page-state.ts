@@ -10,8 +10,24 @@ export interface ProjectNameState {
   readonly canSubmit: boolean;
 }
 
+export interface ProjectLoadErrorCopy {
+  readonly title: string;
+  readonly body: string;
+}
+
 export function normalizeProjectName(value: string): string {
   return value.trim();
+}
+
+export function projectLoadErrorCopy(message: string | null | undefined): ProjectLoadErrorCopy {
+  const body =
+    typeof message === 'string' && message.trim()
+      ? message.trim()
+      : '请稍后重试，或刷新页面后再打开项目列表。';
+  return {
+    title: '项目暂时无法加载',
+    body,
+  };
 }
 
 export function projectNameState(
