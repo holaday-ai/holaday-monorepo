@@ -27,5 +27,5 @@ export function downloadFileMetaLabel(options: {
   readonly formattedSize: string;
 }): string {
   const kind = classifyDownloadFileKind(options.filename);
-  return `${downloadFileKindLabel(kind)} · ${options.formattedSize} · 24h 内可下载`;
+  return `${downloadFileKindLabel(kind)} · ${options.formattedSize} · 24 小时内可下载`;
 }

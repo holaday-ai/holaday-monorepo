@@ -25,6 +25,6 @@ describe('file-download-card-copy', () => {
   it('includes file kind, size and expiry in the idle meta label', () => {
     expect(
       downloadFileMetaLabel({ filename: 'report.csv', formattedSize: '1 KB' }),
-    ).toBe('表格文件 · 1 KB · 24h 内可下载');
+    ).toBe('表格文件 · 1 KB · 24 小时内可下载');
   });
 });
