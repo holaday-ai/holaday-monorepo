@@ -1505,6 +1505,7 @@ export function BrowserPanel({
                     wsUrl={vncUrl}
                     viewOnly={!interactiveActive}
                     onStatusChange={handleVncStatus}
+                    fitMode={isSheet ? 'readable' : 'contain'}
                     className={cn(
                       'rounded-md border shadow-[0_1px_3px_rgba(17,24,39,0.06)]',
                       interactiveActive

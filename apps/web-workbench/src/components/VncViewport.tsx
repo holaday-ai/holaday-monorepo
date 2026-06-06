@@ -1,4 +1,8 @@
 import * as React from 'react';
+import {
+  placeScreencastReadableTop,
+  readableScreencastStartScrollLeft,
+} from '@/lib/screencast-fit';
 import { cn } from '@/lib/utils';
 
 // @novnc/novnc's lib/util/browser.js uses top-level await (for
@@ -54,6 +58,7 @@ interface Props {
   /** Called whenever the RFB connection state flips. Lets the parent
    *  show "connecting…" / retry banners without reaching inside. */
   onStatusChange?: (status: VncStatus) => void;
+  fitMode?: 'contain' | 'readable';
   className?: string;
 }
 
@@ -81,11 +86,14 @@ export function VncViewport({
   viewOnly = false,
   password = null,
   onStatusChange,
+  fitMode = 'contain',
   className,
 }: Props): JSX.Element {
-  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const viewportRef = React.useRef<HTMLDivElement | null>(null);
+  const targetRef = React.useRef<HTMLDivElement | null>(null);
   const rfbRef = React.useRef<RFBInstance | null>(null);
   const onStatusChangeRef = React.useRef(onStatusChange);
+  const readableAutoScrollKeyRef = React.useRef<string | null>(null);
   React.useEffect(() => {
     onStatusChangeRef.current = onStatusChange;
   }, [onStatusChange]);
@@ -113,8 +121,8 @@ export function VncViewport({
       emitStatus('idle');
       return;
     }
-    const container = containerRef.current;
-    if (!container) return;
+    const target = targetRef.current;
+    if (!target) return;
 
     emitStatus('connecting');
     let disposed = false;
@@ -147,10 +155,10 @@ export function VncViewport({
 
     loadRFB()
       .then((Ctor) => {
-        if (disposed || !containerRef.current) return;
+        if (disposed || !targetRef.current) return;
         try {
           rfb = new Ctor(
-            containerRef.current,
+            targetRef.current,
             wsUrl,
             password ? { credentials: { password } } : undefined,
           );
@@ -215,6 +223,56 @@ export function VncViewport({
     if (rfb) rfb.viewOnly = viewOnly;
   }, [viewOnly]);
 
+  const recomputeReadableFrame = React.useCallback((): void => {
+    const viewport = viewportRef.current;
+    const target = targetRef.current;
+    if (!viewport || !target) return;
+
+    if (fitMode !== 'readable') {
+      target.style.width = '100%';
+      target.style.height = '100%';
+      target.style.marginLeft = '';
+      target.style.marginRight = '';
+      readableAutoScrollKeyRef.current = null;
+      return;
+    }
+
+    const canvas = target.querySelector('canvas');
+    const sourceWidth = canvas?.width ?? 0;
+    const sourceHeight = canvas?.height ?? 0;
+    const rect = viewport.getBoundingClientRect();
+    if (sourceWidth <= 0 || sourceHeight <= 0 || rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
+
+    const placement = placeScreencastReadableTop({
+      hostWidth: rect.width,
+      hostHeight: rect.height,
+      sourceWidth,
+      sourceHeight,
+    });
+    if (!placement) return;
+
+    target.style.width = `${placement.width}px`;
+    target.style.height = `${placement.height}px`;
+    target.style.marginLeft =
+      placement.width < rect.width ? `${placement.offsetX}px` : '0px';
+    target.style.marginRight =
+      placement.width < rect.width ? `${placement.offsetX}px` : '0px';
+
+    const key = `${wsUrl ?? 'none'}:${sourceWidth}x${sourceHeight}:${placement.width}x${placement.height}`;
+    if (viewOnlyRef.current && readableAutoScrollKeyRef.current !== key) {
+      readableAutoScrollKeyRef.current = key;
+      viewport.scrollTo({
+        left: readableScreencastStartScrollLeft({
+          contentWidth: placement.width,
+          hostWidth: rect.width,
+        }),
+        top: 0,
+      });
+    }
+  }, [fitMode, wsUrl]);
+
   // Re-trigger noVNC's scale calculation whenever the container
   // resizes. noVNC only recomputes on window 'resize' and on
   // `scaleViewport` setter writes — Panel drag-resize changes our
@@ -227,8 +285,9 @@ export function VncViewport({
   // which is exactly what triggers the internal _resize(). That's a
   // documented pattern in noVNC issues.
   React.useEffect(() => {
-    const container = containerRef.current;
-    if (!container || typeof ResizeObserver === 'undefined') return;
+    const viewport = viewportRef.current;
+    const target = targetRef.current;
+    if (!viewport || !target || typeof ResizeObserver === 'undefined') return;
     // noVNC's internal _resize is async; the canvas recomputes its
     // transform but can land on the prior container box if we're
     // mid-drag. We fire twice — once on the raw observer tick and
@@ -237,30 +296,43 @@ export function VncViewport({
     // see the right edge of the viewport clipped during drag resize.
     let raf = 0;
     let t = 0;
-    const ro = new ResizeObserver(() => {
+    let mutationTimer = 0;
+    const forceScale = () => {
+      recomputeReadableFrame();
       const rfb = rfbRef.current;
-      if (!rfb) return;
-      rfb.scaleViewport = true;
+      if (rfb) rfb.scaleViewport = true;
+    };
+    const ro = new ResizeObserver(() => {
+      forceScale();
       cancelAnimationFrame(raf);
       clearTimeout(t);
       raf = requestAnimationFrame(() => {
         t = window.setTimeout(() => {
-          const r = rfbRef.current;
-          if (r) r.scaleViewport = true;
+          forceScale();
         }, 120);
       });
     });
-    ro.observe(container);
+    ro.observe(viewport);
+    ro.observe(target);
+    const mo = new MutationObserver(() => {
+      clearTimeout(mutationTimer);
+      mutationTimer = window.setTimeout(forceScale, 0);
+    });
+    mo.observe(target, { childList: true, subtree: true });
+    forceScale();
     return () => {
       ro.disconnect();
+      mo.disconnect();
       cancelAnimationFrame(raf);
       clearTimeout(t);
+      clearTimeout(mutationTimer);
     };
-  }, []);
+  }, [recomputeReadableFrame]);
 
   return (
     <div
-      ref={containerRef}
+      ref={viewportRef}
+      data-fit-mode={fitMode}
       // `min-h-0 min-w-0` — needed so this div can SHRINK inside a
       // flex parent; without them the intrinsic size of the canvas
       // child would push the parent wider than intended, defeating
@@ -270,9 +342,15 @@ export function VncViewport({
       // brief sizing gap at mount shows a full 1920x1080 canvas
       // bleeding out of the panel.
       className={cn(
-        'vnc-viewport-host relative h-full w-full min-h-0 min-w-0 overflow-hidden',
+        'vnc-viewport-host relative h-full w-full min-h-0 min-w-0',
+        fitMode === 'readable' ? 'overflow-auto' : 'overflow-hidden',
         className,
       )}
-    />
+    >
+      <div
+        ref={targetRef}
+        className="vnc-viewport-target relative h-full w-full min-h-0 min-w-0"
+      />
+    </div>
   );
 }

@@ -174,7 +174,11 @@
 /* noVNC ships its canvas wrapped in a div that sometimes gets fixed
  * px sizes from scaleViewport. Relax them so they conform to our
  * flex layout instead of overflowing. */
-.vnc-viewport-host > div {
+.vnc-viewport-host:not([data-fit-mode='readable']) > div {
+  max-width: 100%;
+  max-height: 100%;
+}
+.vnc-viewport-target > div {
   max-width: 100%;
   max-height: 100%;
 }
