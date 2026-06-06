@@ -2034,7 +2034,10 @@ function CjkInputBar({
         'pointer-events-auto absolute left-1/2 z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-lg border bg-background/95 px-2 py-1.5 shadow-lg backdrop-blur',
         fullscreen ? 'bottom-4' : 'bottom-2',
       )}
-      style={{ minWidth: 280, maxWidth: '70%' }}
+      style={{
+        width: 'min(360px, calc(100% - 1rem))',
+        maxWidth: 'calc(100% - 1rem)',
+      }}
     >
       <input
         type="text"
