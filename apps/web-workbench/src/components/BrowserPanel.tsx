@@ -1784,6 +1784,11 @@ export function BrowserPanel({
               />
             )}
           </div>
+          {isSheet && useVnc && !hibernated && !interactiveActive && !showLiveOverlay && (
+            <div className="pointer-events-none absolute left-1/2 top-20 z-20 max-w-[calc(100%-1rem)] -translate-x-1/2 truncate rounded-full bg-black/45 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm backdrop-blur">
+              左右滑动查看页面
+            </div>
+          )}
           {!fullscreen && shouldConnect && showHeader && (
             <footer
               className={cn(
