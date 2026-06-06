@@ -1254,9 +1254,16 @@ const URL_TRAILING_PUNCT_RE = new RegExp(
   `(https?://[^${URL_STOP_CHARS}]+)([${CJK_TRAILING_PUNCT}])`,
   'g',
 );
+const BROKEN_BOLD_URL_RE = /(^|[\s:：])\*\*(https?:\/\/\S+)(?=$|\s)/g;
+
+export function sanitizeMarkdownBrokenBoldUrls(text: string): string {
+  if (!text) return text;
+  return text.replace(BROKEN_BOLD_URL_RE, '$1$2');
+}
+
 export function sanitizeMarkdownTrailingPunctuation(text: string): string {
   if (!text) return text;
-  return text.replace(URL_TRAILING_PUNCT_RE, '$1 $2');
+  return sanitizeMarkdownBrokenBoldUrls(text).replace(URL_TRAILING_PUNCT_RE, '$1 $2');
 }
 
 /**
