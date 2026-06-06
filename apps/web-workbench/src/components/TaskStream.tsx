@@ -665,13 +665,13 @@ function VerificationBanner({
               aria-label={retrying ? '正在重新执行任务' : '重新执行任务'}
               title={retrying ? '正在重新执行' : '重新执行任务'}
               className={cn(
-                'mt-2 inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition-colors disabled:cursor-wait disabled:opacity-60',
+                'mt-2 inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[11px] font-medium transition-colors disabled:cursor-wait disabled:opacity-60',
                 isDanger
                   ? 'border-[#EA1F59]/25 bg-[#EA1F59]/5 text-[#EA1F59] hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/10'
                   : 'border-[#FFC910]/60 bg-[#FFC910]/10 text-[#57479C] hover:border-[#FFC910]/80 hover:bg-[#FFC910]/15',
               )}
             >
-              <RotateCcw className={cn('h-3 w-3', retrying && 'animate-spin')} />
+              <RotateCcw className={cn('h-3.5 w-3.5', retrying && 'animate-spin')} />
               <span>{retrying ? '重新执行中…' : '重新执行'}</span>
             </button>
           )}
@@ -1330,13 +1330,13 @@ function EmptyTerminalCard({
           onClick={() => void handleRetry()}
           disabled={retrying}
           className={cn(
-            'mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border bg-white/70 px-2.5 text-[11px] font-medium transition-colors hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:bg-transparent dark:hover:bg-white/10',
+            'mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border bg-white/70 px-3 text-[11px] font-medium transition-colors hover:bg-[#EFEFEF]/50 disabled:cursor-wait disabled:opacity-60 dark:bg-transparent dark:hover:bg-white/10',
             partial
               ? 'border-[#FFC910]/60 text-[#57479C] dark:border-[#FFC910]/35 dark:text-foreground'
               : 'border-[#EA1F59]/40 text-[#EA1F59] dark:border-[#EA1F59]/35',
           )}
         >
-          <RotateCcw className={cn('h-3 w-3', retrying && 'animate-spin')} />
+          <RotateCcw className={cn('h-3.5 w-3.5', retrying && 'animate-spin')} />
           <span>{retrying ? '重新执行中…' : '重新执行'}</span>
         </button>
       )}
@@ -2002,9 +2002,9 @@ function TerminalSummary({
                     disabled={retryingIntent != null}
                     aria-label={retryingIntent ? '正在重新执行任务' : '重新执行任务'}
                     title={retryingIntent ? '正在重新执行' : '重新执行任务'}
-                    className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#EA1F59]/25 bg-[#EA1F59]/5 px-2.5 text-[11px] font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/10 disabled:cursor-wait disabled:opacity-60 dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10 dark:text-foreground"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#EA1F59]/25 bg-[#EA1F59]/5 px-3 text-[11px] font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/10 disabled:cursor-wait disabled:opacity-60 dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10 dark:text-foreground"
                   >
-                    <RotateCcw className={cn('h-3 w-3', retryingIntent && 'animate-spin')} />
+                    <RotateCcw className={cn('h-3.5 w-3.5', retryingIntent && 'animate-spin')} />
                     <span>重新执行</span>
                   </button>
                 )}
@@ -2014,9 +2014,9 @@ function TerminalSummary({
                     onClick={() => onSuggestionPick(intent)}
                     aria-label="填入原描述"
                     title="填入原描述后可编辑再发送"
-                    className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#FFC910]/60 bg-white/70 px-2.5 text-[11px] font-medium text-[#57479C] transition-colors hover:bg-white dark:border-[#FFC910]/35 dark:bg-transparent dark:text-foreground dark:hover:bg-white/10"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#FFC910]/60 bg-white/70 px-3 text-[11px] font-medium text-[#57479C] transition-colors hover:bg-white dark:border-[#FFC910]/35 dark:bg-transparent dark:text-foreground dark:hover:bg-white/10"
                   >
-                    <RotateCcw className="h-3 w-3" />
+                    <RotateCcw className="h-3.5 w-3.5" />
                     填入原描述
                   </button>
                 )}
@@ -2028,9 +2028,9 @@ function TerminalSummary({
                   }}
                   aria-label="复制反馈内容"
                   title="复制反馈"
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[#DCDDDD] bg-white/60 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-white dark:border-white/10 dark:bg-transparent dark:text-foreground dark:hover:bg-white/10"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white/60 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-white dark:border-white/10 dark:bg-transparent dark:text-foreground dark:hover:bg-white/10"
                 >
-                  <Copy className="h-3 w-3" />
+                  <Copy className="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>
@@ -2729,9 +2729,9 @@ function FailureHeaderCard({
             disabled={retrying}
             aria-label={retrying ? '正在重新执行任务' : '重新执行任务'}
             title={retrying ? '正在重新执行' : '重新执行任务'}
-            className="inline-flex h-7 items-center gap-1.5 rounded-[6px] border border-[#EA1F59]/25 bg-white px-2.5 text-[11px] font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/5 disabled:cursor-wait disabled:opacity-60 dark:border-[#EA1F59]/35 dark:bg-transparent dark:text-foreground dark:hover:bg-[#EA1F59]/10"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-[#EA1F59]/25 bg-white px-3 text-[11px] font-medium text-[#EA1F59] transition-colors hover:border-[#EA1F59]/45 hover:bg-[#EA1F59]/5 disabled:cursor-wait disabled:opacity-60 dark:border-[#EA1F59]/35 dark:bg-transparent dark:text-foreground dark:hover:bg-[#EA1F59]/10"
           >
-            <RotateCcw className={cn('h-3 w-3', retrying && 'animate-spin')} aria-hidden />
+            <RotateCcw className={cn('h-3.5 w-3.5', retrying && 'animate-spin')} aria-hidden />
             <span>{retrying ? '重新执行中…' : '重新执行'}</span>
           </button>
         )}
@@ -2744,7 +2744,7 @@ function FailureHeaderCard({
             aria-expanded={showTechnical}
             aria-label={showTechnical ? '收起失败详情' : '查看失败详情'}
             title={showTechnical ? '收起失败详情' : '查看失败详情'}
-            className="inline-flex h-6 items-center gap-1 rounded-[6px] px-1.5 text-[11px] font-medium text-[#595757] transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
+            className="inline-flex h-8 items-center gap-1 rounded-[6px] px-2 text-[11px] font-medium text-[#595757] transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59]"
           >
             {showTechnical ? (
               <ChevronDown className="h-3 w-3" aria-hidden />
