@@ -76,6 +76,7 @@ import {
   terminalResultContentInsufficient,
 } from '@/components/terminal-result-state';
 import { hdDebug } from '@/lib/hd-debug';
+import { markdownCodeBlockMeta } from '@/lib/markdown-code-block-state';
 import { trpc } from '@/lib/trpc';
 import { useTaskStore } from '@/stores/task-store';
 import { cn } from '@/lib/utils';
@@ -1621,14 +1622,17 @@ function MarkdownCodeBlock({
   const mountedRef = useMountedRef();
   const [copied, setCopied] = React.useState(false);
   const text = React.useMemo(() => reactNodeText(children).replace(/\n$/, ''), [children]);
-  const languageLabel = markdownLanguageLabel(languageClassName);
+  const meta = React.useMemo(
+    () => markdownCodeBlockMeta(languageClassName, text),
+    [languageClassName, text],
+  );
   const handleCopy = async (): Promise<void> => {
     if (!text) return;
     const copiedOk = await copyTextToClipboard(text);
     if (!mountedRef.current) return;
     if (copiedOk) {
       setCopied(true);
-      toast.show('已复制代码');
+      toast.show(meta.copiedToast);
       window.setTimeout(() => {
         if (mountedRef.current) setCopied(false);
       }, 1600);
@@ -1642,7 +1646,7 @@ function MarkdownCodeBlock({
         <div className="flex min-w-0 items-center gap-2">
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#57479C]" />
           <span className="truncate text-[11px] font-medium text-muted-foreground">
-            {languageLabel}
+            {meta.label}
           </span>
         </div>
         <button
@@ -1650,8 +1654,8 @@ function MarkdownCodeBlock({
           onClick={() => void handleCopy()}
           disabled={!text}
           className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-white hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/10"
-          aria-label={copied ? '代码块已复制' : '复制代码块'}
-          title={copied ? '已复制' : '复制代码'}
+          aria-label={copied ? `${meta.copyLabel}已复制` : `复制${meta.copyLabel}`}
+          title={copied ? '已复制' : `复制${meta.copyLabel}`}
         >
           {copied ? (
             <Check className="h-3.5 w-3.5 text-[#42C0EF]" aria-hidden />
@@ -1664,34 +1668,19 @@ function MarkdownCodeBlock({
         className="max-w-full overflow-x-auto bg-[#EFEFEF]/20 px-3 py-3 text-[12px] leading-relaxed dark:bg-white/[0.02]"
         {...rest}
       >
-        <code className="block min-w-max whitespace-pre font-mono text-foreground/90">
+        <code
+          className={cn(
+            'block text-foreground/90',
+            meta.codeLike
+              ? 'min-w-max whitespace-pre font-mono'
+              : 'whitespace-pre-wrap break-words font-sans',
+          )}
+        >
           {text || reactNodeText(children)}
         </code>
       </pre>
     </div>
   );
-}
-
-function markdownLanguageLabel(className?: string): string {
-  const raw = className?.replace(/^language-/, '').trim();
-  if (!raw) return '代码';
-  const known: Record<string, string> = {
-    bash: 'SHELL',
-    sh: 'SHELL',
-    shell: 'SHELL',
-    zsh: 'SHELL',
-    js: 'JavaScript',
-    javascript: 'JavaScript',
-    jsx: 'JSX',
-    ts: 'TypeScript',
-    typescript: 'TypeScript',
-    tsx: 'TSX',
-    json: 'JSON',
-    toml: 'TOML',
-    yaml: 'YAML',
-    yml: 'YAML',
-  };
-  return known[raw.toLowerCase()] ?? raw.toUpperCase();
 }
 
 function reactNodeText(node: React.ReactNode): string {
