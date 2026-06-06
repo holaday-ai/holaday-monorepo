@@ -386,13 +386,13 @@ function WebhookDocs(): JSX.Element {
               Idempotency-Key: &#123;&#123;zap_meta_id&#125;&#125;
             </div>
             <p className="mt-1 leading-relaxed">
-              <span className="font-medium text-foreground/80">用稳定 ID</span>：
+              <span className="font-medium text-foreground/80">用稳定标识</span>：
               <span className="font-mono">zap_meta_id</span>{' '}
               是 Zapier 自动重试同一动作时保持不变的标识；也可用触发数据自身的稳定字段（邮件
               Message-ID、RSS GUID、Slack message ts 等）。
               <span className="font-medium text-foreground/80">避免</span>使用时间戳变量（如
               <span className="font-mono"> zap_meta_human_now</span>）—— 重试时时间会变，
-              会被当成新 key 重复建任务。
+              会被当成新标识重复建任务。
             </p>
           </li>
           <li>

@@ -647,7 +647,7 @@ function CostTab(): JSX.Element {
                 <th className="py-2 pr-3 font-medium">用户</th>
                 <th className="py-2 pr-3 font-medium">模型</th>
                 <th className="py-2 pr-3 font-medium text-right">调用</th>
-                <th className="py-2 pr-3 font-medium text-right">Tokens</th>
+                <th className="py-2 pr-3 font-medium text-right">用量</th>
                 <th className="py-2 pr-3 font-medium text-right">成本</th>
               </tr>
             </thead>
