@@ -597,7 +597,7 @@ export function BrowserPanel({
     setVncStatus('idle');
     setVncAttemptFails(0);
     setReconnectEpoch((n) => n + 1);
-    toast.show('正在重新连接实时画面', 'info');
+    toast.show('正在刷新浏览器画面', 'info');
   }, [toast]);
   const liveOverlayCopy = browserLiveOverlayCopy({
     status: vncStatus,
@@ -607,7 +607,7 @@ export function BrowserPanel({
     vncStatus === 'idle' ||
     vncStatus === 'connecting' ||
     ((vncStatus === 'disconnected' || vncStatus === 'error') && showReconnect);
-  // RC audit fix — banner grace period. The "实时画面断开，正在自动重连"
+  // RC audit fix — banner grace period. The "浏览器画面断开，正在自动重连"
   // banner used to flip ON instantly when the WS closed, and stay on
   // for the entire backoff window (up to 5 s). For transient closes
   // (network jitter, CDP frame stalls) the banner would flash on/off
@@ -1545,7 +1545,7 @@ export function BrowserPanel({
                     aria-live="polite"
                     className="pointer-events-none absolute right-2 top-2 rounded bg-[#FFC910]/95 px-2 py-0.5 text-[10px] font-semibold text-[#595757] shadow-sm"
                   >
-                    实时画面断开，正在自动重连
+                    浏览器画面断开，正在自动重连
                   </div>
                 )}
                 {activityVisible && recentSteps.length > 0 && (
