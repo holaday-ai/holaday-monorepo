@@ -388,7 +388,7 @@ export function AppShell(): JSX.Element {
 
   // WS reconnect / disconnect toasts.
   //
-  // BOSS feedback: the "实时连接已恢复" toast was firing on initial
+  // BOSS feedback: the "任务连接已恢复" toast was firing on initial
   // page load (the WS goes idle → connecting → open, and the old
   // guard `prev !== 'idle'` skipped only the very first frame —
   // first-paint reconnections still triggered). Now gated on a

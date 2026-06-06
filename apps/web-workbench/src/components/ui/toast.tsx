@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 interface ToastCtx {
   /**
    * Show a toast. `durationMs` defaults to 4000; pass a shorter
-   * value for low-priority confirmations (e.g. "实时连接已恢复" at
+   * value for low-priority confirmations (e.g. "任务连接已恢复" at
    * 3000ms).
    */
   show(text: string, kind?: ToastKind, durationMs?: number): void;

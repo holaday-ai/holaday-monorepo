@@ -2290,7 +2290,7 @@ function EmptyBrowserState({
       <Globe className="h-10 w-10 text-[#42C0EF]/70" aria-hidden />
       <div className="mt-3 text-sm font-medium text-foreground/80">浏览器将在这里显示</div>
       <div className="mt-1 text-xs leading-relaxed">
-        创建一个任务后，HOLA DAY 的浏览器画面会实时出现在这里，
+        创建一个任务后，HOLA DAY 的浏览器画面会显示在这里，
         <br />
         你可以观察或亲自接管。
       </div>
