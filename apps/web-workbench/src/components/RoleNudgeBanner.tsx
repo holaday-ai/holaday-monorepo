@@ -95,7 +95,7 @@ export function RoleNudgeBanner({ plan, selectedRoles }: Props): JSX.Element | n
             onClick={handleDismiss}
             aria-label="关闭角色引导"
             title="关闭"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-[6px] text-[#ADADAD] transition-colors hover:bg-[#EFEFEF]/70 hover:text-[#595757] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:hover:bg-white/10 dark:hover:text-foreground"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] text-[#ADADAD] transition-colors hover:bg-[#EFEFEF]/70 hover:text-[#595757] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20 dark:hover:bg-white/10 dark:hover:text-foreground"
           >
             <X className="h-3.5 w-3.5" />
           </button>
