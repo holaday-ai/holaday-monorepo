@@ -56,7 +56,7 @@ describe('BrowserPanel state helpers', () => {
     expect(terminalEvidenceStatusLabel(null)).toBe('任务已结束');
     expect(
       terminalEvidenceFrameLabel({ status: 'completed', url: 'https://example.com/' }),
-    ).toBe('任务已完成 · 最终浏览器');
+    ).toBe('任务已完成 · 浏览器页面');
   });
 
   it('labels live browser connection states for icon-only status dots', () => {
@@ -138,7 +138,7 @@ describe('BrowserPanel state helpers', () => {
         status: 'completed',
         url: 'chrome-error://chromewebdata/',
       }),
-    ).toBe('页面无法打开 · 最终浏览器');
+    ).toBe('页面无法打开 · 浏览器页面');
     expect(
       browserPanelEvidenceHeaderStatus(
         'completed',

@@ -15,7 +15,7 @@ export function terminalArtifactFallbackText({
   }
   const url = finalUrl?.trim();
   if (url && url !== 'about:blank' && !url.startsWith('chrome://')) {
-    parts.push(`最终浏览器：${url}`);
+    parts.push(`浏览器页面：${url}`);
   }
   return parts.join('\n');
 }

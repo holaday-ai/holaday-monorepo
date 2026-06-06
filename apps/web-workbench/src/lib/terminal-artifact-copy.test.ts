@@ -19,7 +19,7 @@ describe('terminalArtifactFallbackText', () => {
         attachmentCount: 2,
         finalUrl: 'https://example.com/result',
       }),
-    ).toBe('任务产出了 2 个文件\n最终浏览器：https://example.com/result');
+    ).toBe('任务产出了 2 个文件\n浏览器页面：https://example.com/result');
   });
 
   it('ignores blank and browser-internal URLs', () => {
