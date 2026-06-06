@@ -8,6 +8,7 @@ import {
   safeExternalHttpHref,
 } from '@/lib/external-link-copy';
 import {
+  stepDurationLabel,
   stepDisplaySummary,
   stepDisplayTitle,
   stepFailureMessage,
@@ -42,6 +43,10 @@ interface Props {
 export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
   const title = stepDisplayTitle(step);
   const summary = stepDisplaySummary(step);
+  const durationLabel =
+    step.status === 'running' && step.durationMs == null
+      ? '…'
+      : stepDurationLabel(step.durationMs);
   const failureMessage = stepFailureMessage(step);
   const antiBotHigh = step.antiBot?.confidence === 'high';
   const [pendingHref, setPendingHref] = React.useState<string | null>(null);
@@ -86,9 +91,11 @@ export function StepCard({ step, isFirst, isLast }: Props): JSX.Element {
             )}
             <div className="truncate text-sm font-medium text-foreground">{title}</div>
           </div>
-          <div className="shrink-0 rounded-full border border-[#DCDDDD] bg-white px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground dark:border-white/10 dark:bg-transparent">
-            {step.durationMs != null ? formatDuration(step.durationMs) : '…'}
-          </div>
+          {durationLabel && (
+            <div className="shrink-0 rounded-full border border-[#DCDDDD] bg-white px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground dark:border-white/10 dark:bg-transparent">
+              {durationLabel}
+            </div>
+          )}
         </div>
         {summary && (
           // QA #14 — actionSummary may contain markdown (the agent's
@@ -218,9 +225,4 @@ function Cursor(): JSX.Element {
       className="ml-1 inline-block h-3 w-[2px] animate-pulse-dot bg-current align-middle"
     />
   );
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
 }

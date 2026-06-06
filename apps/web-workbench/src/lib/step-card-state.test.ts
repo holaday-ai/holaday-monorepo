@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  stepDurationLabel,
   stepDisplaySummary,
   stepDisplayTitle,
   stepDetailSummary,
@@ -43,6 +44,14 @@ describe('step-card-state', () => {
   it('provides localized status labels for step badges', () => {
     expect(stepStatusText('running')).toBe('执行中');
     expect(stepStatusLabel('failed', 2)).toBe('步骤 3 · 失败');
+  });
+
+  it('formats step durations without exposing zero-millisecond noise', () => {
+    expect(stepDurationLabel(null)).toBeNull();
+    expect(stepDurationLabel(0)).toBeNull();
+    expect(stepDurationLabel(420)).toBe('<1s');
+    expect(stepDurationLabel(1250)).toBe('1.3s');
+    expect(stepDurationLabel(65_400)).toBe('1分05秒');
   });
 
   it('uses user-facing titles for raw browser step kinds', () => {
