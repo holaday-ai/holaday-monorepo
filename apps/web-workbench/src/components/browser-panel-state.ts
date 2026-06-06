@@ -65,7 +65,7 @@ export function terminalEvidenceFrameLabel(inputs: {
   const statusLabel = terminalEvidenceStatusLabel(inputs.status);
   return isBrowserErrorUrl(inputs.url)
     ? '页面无法打开 · 最终浏览器'
-    : `${statusLabel} · 最终页面`;
+    : `${statusLabel} · 最终浏览器`;
 }
 
 export function browserLiveStatusLabel(status: BrowserLiveStatus): string {

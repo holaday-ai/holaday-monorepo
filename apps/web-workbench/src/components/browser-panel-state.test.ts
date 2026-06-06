@@ -53,6 +53,9 @@ describe('BrowserPanel state helpers', () => {
     expect(terminalEvidenceStatusLabel('cancelled')).toBe('任务已取消');
     expect(terminalEvidenceStatusLabel('executing')).toBe('任务已结束');
     expect(terminalEvidenceStatusLabel(null)).toBe('任务已结束');
+    expect(
+      terminalEvidenceFrameLabel({ status: 'completed', url: 'https://example.com/' }),
+    ).toBe('任务已完成 · 最终浏览器');
   });
 
   it('labels live browser connection states for icon-only status dots', () => {
