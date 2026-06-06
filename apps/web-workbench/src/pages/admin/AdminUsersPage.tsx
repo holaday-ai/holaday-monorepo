@@ -15,6 +15,7 @@ import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import {
+  adminLoadErrorCopy,
   asRecord,
   formatDate,
   formatDateTime,
@@ -90,6 +91,7 @@ export function AdminUsersPage(): JSX.Element {
   const pageEnd = Math.min(offset + PAGE_SIZE, total);
   const hasPrev = offset > 0;
   const hasNext = offset + PAGE_SIZE < total;
+  const errorCopy = adminLoadErrorCopy(error);
 
   function toggleSort(next: Sort) {
     if (sort === next) {
@@ -149,7 +151,10 @@ export function AdminUsersPage(): JSX.Element {
 
       <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-0 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
         {error && (
-          <div className="border-b border-[#EFEFEF] px-5 py-3 text-sm text-[#EA1F59]">加载失败：{error}</div>
+          <div className="border-b border-[#EFEFEF] px-5 py-3 text-sm">
+            <div className="font-medium text-[#EA1F59]">{errorCopy.title}</div>
+            <div className="mt-1 text-xs text-[#595757]">{errorCopy.body}</div>
+          </div>
         )}
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">

@@ -22,6 +22,7 @@ import {
   ADMIN_BORDER,
   ADMIN_DIVIDER,
   ADMIN_MAGENTA,
+  adminLoadErrorCopy,
   asRecord,
   formatInteger,
   formatDate,
@@ -81,6 +82,7 @@ export function AdminUserDetailPage(): JSX.Element {
     return <div className="px-6 py-8 text-muted-foreground">缺少用户信息</div>;
   }
   if (error) {
+    const copy = adminLoadErrorCopy(error);
     return (
       <div className="mx-auto max-w-5xl px-6 py-10">
         <Link
@@ -91,7 +93,8 @@ export function AdminUserDetailPage(): JSX.Element {
           返回用户列表
         </Link>
         <div className="mt-4 rounded-[8px] border border-[#EA1F59]/25 border-l-[#EA1F59] bg-white px-4 py-3 text-sm text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
-          加载失败：{error}
+          <div className="font-medium">{copy.title}</div>
+          <div className="mt-1 text-xs text-[#595757]">{copy.body}</div>
         </div>
       </div>
     );

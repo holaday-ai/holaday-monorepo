@@ -140,6 +140,16 @@ export function optionalText(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
+export function adminLoadErrorCopy(message: string | null | undefined): {
+  title: string;
+  body: string;
+} {
+  return {
+    title: '加载失败',
+    body: optionalText(message) ?? '数据暂时无法加载，请稍后重试。',
+  };
+}
+
 export function formatInteger(value: unknown): string {
   return nonNegativeNumber(value).toLocaleString('zh-CN');
 }

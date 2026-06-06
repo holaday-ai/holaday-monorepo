@@ -20,6 +20,7 @@ import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { learningEmptyCopy } from './admin-learning-copy';
 import {
+  adminLoadErrorCopy,
   asRecord,
   clampNumber,
   formatDateTime,
@@ -88,6 +89,7 @@ export function AdminLearningPage(): JSX.Element {
   }, [mountedRef, searchDebounced, filter, offset]);
 
   const normalized = normalizeLearningOverview(data);
+  const errorCopy = adminLoadErrorCopy(error);
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
@@ -150,7 +152,10 @@ export function AdminLearningPage(): JSX.Element {
 
       <section className="mt-4 rounded-[8px] border border-[#DCDDDD] bg-white p-0 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
         {error && (
-          <div className="border-b border-[#EFEFEF] px-5 py-3 text-sm text-[#EA1F59]">加载失败：{error}</div>
+          <div className="border-b border-[#EFEFEF] px-5 py-3 text-sm">
+            <div className="font-medium text-[#EA1F59]">{errorCopy.title}</div>
+            <div className="mt-1 text-xs text-[#595757]">{errorCopy.body}</div>
+          </div>
         )}
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">

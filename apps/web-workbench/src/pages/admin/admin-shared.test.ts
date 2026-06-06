@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  adminLoadErrorCopy,
   clampNumber,
   finiteNumber,
   formatDurationMs,
@@ -26,6 +27,19 @@ describe('admin statusToken', () => {
 
   it('hides raw unknown status codes in badges', () => {
     expect(statusToken('unknown_internal_state').label).toBe('未知状态');
+  });
+});
+
+describe('adminLoadErrorCopy', () => {
+  it('keeps admin load errors in a title/body shape', () => {
+    expect(adminLoadErrorCopy('请稍后重试')).toEqual({
+      title: '加载失败',
+      body: '请稍后重试',
+    });
+    expect(adminLoadErrorCopy('')).toEqual({
+      title: '加载失败',
+      body: '数据暂时无法加载，请稍后重试。',
+    });
   });
 });
 
