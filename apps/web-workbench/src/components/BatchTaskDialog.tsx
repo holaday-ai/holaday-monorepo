@@ -315,10 +315,10 @@ export function BatchTaskDialog({
                         onClick={() => setActiveIndex(index)}
                         disabled={submitting}
                         aria-expanded={isActive}
-                        className="min-w-0 flex-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/15 disabled:pointer-events-none"
+                        className="min-h-8 min-w-0 flex-1 rounded-md py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/15 disabled:pointer-events-none"
                       >
                         <div className="flex items-center gap-2">
-                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[#EA1F59] text-[11px] font-semibold text-white">
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#EA1F59] text-[11px] font-semibold text-white">
                             {index + 1}
                           </span>
                           <span className="truncate text-xs font-medium text-[#2F2F2F] dark:text-foreground">
