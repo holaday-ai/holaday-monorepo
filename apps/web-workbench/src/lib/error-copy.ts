@@ -82,7 +82,7 @@ RULES.push(
   },
   {
     match: /missing\s+ANTHROPIC_API_KEY/i,
-    to: '后端模型密钥未配置，请联系管理员。',
+    to: 'AI 服务暂未配置，请联系 support@holaday.ai。',
   },
   {
     match: /SUPERCAR_TIMEOUT/i,

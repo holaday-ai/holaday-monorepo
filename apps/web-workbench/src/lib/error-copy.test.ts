@@ -26,6 +26,12 @@ describe('error-copy', () => {
     expect(humaniseTaskError('PayPal SDK failed to load')).toBe('PayPal 加载失败，请刷新页面后重试。');
   });
 
+  it('hides model secret names in missing configuration errors', () => {
+    expect(humaniseTaskError('missing ANTHROPIC_API_KEY')).toBe(
+      'AI 服务暂未配置，请联系 support@holaday.ai。',
+    );
+  });
+
   it('maps extension timeouts to user-facing browser copy', () => {
     expect(humaniseTaskError('扩展工具调用超时（已等待 30 秒，请确认浏览器标签页仍在加载或重试）')).toBe(
       '浏览器响应超时，页面可能仍在加载。请稍后重试。',
