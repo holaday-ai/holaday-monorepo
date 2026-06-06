@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   apiKeySettingsActionError,
   apiKeySettingsErrorMessage,
+  apiKeySettingsLoadErrorCopy,
   normalizeApiKeyRows,
   normalizeFreshApiKey,
 } from './api-key-settings-state';
@@ -98,6 +99,17 @@ describe('api key settings state helpers', () => {
     );
     expect(apiKeySettingsErrorMessage('Key 已撤销')).toBe('Key 已撤销');
     expect(apiKeySettingsErrorMessage({})).toBe('请稍后重试');
+  });
+
+  it('formats API key load errors for user-facing surfaces', () => {
+    expect(apiKeySettingsLoadErrorCopy('  offline  ')).toEqual({
+      title: 'API Key 暂时无法加载',
+      body: 'offline',
+    });
+    expect(apiKeySettingsLoadErrorCopy(null)).toEqual({
+      title: 'API Key 暂时无法加载',
+      body: '请稍后重试，或刷新页面后再打开开发者设置。',
+    });
   });
 
   it('keeps API key action context on failures', () => {

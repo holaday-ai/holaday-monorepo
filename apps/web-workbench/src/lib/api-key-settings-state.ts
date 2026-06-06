@@ -16,6 +16,11 @@ export interface FreshApiKeyView {
   readonly name: string;
 }
 
+export interface ApiKeySettingsLoadErrorCopy {
+  readonly title: string;
+  readonly body: string;
+}
+
 export function normalizeApiKeyRows(value: unknown): ApiKeyRowView[] {
   if (!Array.isArray(value)) {
     throw new Error('API Key 列表暂时无法读取，请刷新后重试。');
@@ -64,6 +69,19 @@ export function apiKeySettingsErrorMessage(
   fallback = '请稍后重试',
 ): string {
   return pageErrorMessage(err, fallback);
+}
+
+export function apiKeySettingsLoadErrorCopy(
+  message: string | null | undefined,
+): ApiKeySettingsLoadErrorCopy {
+  const body =
+    typeof message === 'string' && message.trim()
+      ? message.trim()
+      : '请稍后重试，或刷新页面后再打开开发者设置。';
+  return {
+    title: 'API Key 暂时无法加载',
+    body,
+  };
 }
 
 export function apiKeySettingsActionError(

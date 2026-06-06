@@ -6,6 +6,7 @@ import { useToast } from '@/components/ui/toast';
 import {
   apiKeySettingsActionError,
   apiKeySettingsErrorMessage,
+  apiKeySettingsLoadErrorCopy,
   normalizeApiKeyRows,
   normalizeFreshApiKey,
   type ApiKeyRowView,
@@ -62,7 +63,7 @@ export function ApiKeysSection(): JSX.Element {
         'API Key 暂时无法加载，请稍后重试。',
       );
       setLoadError(message);
-      if (!options.silent) toast.show(`加载失败：${message}`, 'error');
+      if (!options.silent) toast.show('API Key 暂时无法加载', 'error');
       setRows((current) => current ?? []);
     }
   }, [toast]);
@@ -304,12 +305,13 @@ function ApiKeyLoadError({
   message: string;
   onRetry(): void;
 }): JSX.Element {
+  const copy = apiKeySettingsLoadErrorCopy(message);
   return (
     <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
       <AlertCircle className="h-6 w-6 text-primary" aria-hidden />
-      <div className="text-sm font-medium text-foreground/85">API Key 加载失败</div>
+      <div className="text-sm font-medium text-foreground/85">{copy.title}</div>
       <div className="max-w-md text-xs leading-5 text-muted-foreground">
-        {message}
+        {copy.body}
       </div>
       <Button type="button" size="sm" className="mt-1" onClick={onRetry}>
         重试
