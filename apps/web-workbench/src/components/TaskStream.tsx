@@ -534,6 +534,7 @@ function AgentBlock({
             // AttachmentBar + expert report header can render.
             attachments={task.attachments}
             expertWorkflowId={task.expertWorkflowId}
+            expertMode={task.expertMode}
             // Typewriter reveal only fires for tasks that hit terminal
             // during this session (set populated in applyServerMessage).
             // History clicks render the summary in full immediately so
@@ -1703,6 +1704,7 @@ function TerminalSummary({
   serverSuggestions,
   attachments,
   expertWorkflowId,
+  expertMode,
   animateReveal = true,
 }: {
   status: UiTask['status'];
@@ -1739,6 +1741,7 @@ function TerminalSummary({
    * the markdown body. Unknown ids fall through to no header.
    */
   expertWorkflowId?: string;
+  expertMode?: UiTask['expertMode'];
   /**
    * When false (e.g. user clicked into a historical task), skip the
    * typewriter reveal — render the full summary immediately. Default
@@ -1856,6 +1859,10 @@ function TerminalSummary({
     },
     [toast],
   );
+  const expertUsageLabel = expertWorkflowId
+    ? (EXPERT_HEADER_META[expertWorkflowId]?.label ?? null)
+    : null;
+  const shouldShowExpertUsage = Boolean(expertWorkflowId) || expertMode === 'expert';
   // BOSS feedback — retry button on failed task. Creates a NEW
   // task (not a reply), so quota + supercar prompt + role
   // classification all run fresh. createTask emits the
@@ -2065,14 +2072,12 @@ function TerminalSummary({
           task is the only shape today (X = 1); the "X 个" phrasing
           stays per spec so a future multi-skill path renders without
           template change. */}
-      {expertWorkflowId && (
+      {shouldShowExpertUsage && (
         <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <Puzzle className="h-3 w-3 text-muted-foreground/70" />
           <span>
-            本次使用了 1 个专家技能
-            {EXPERT_HEADER_META[expertWorkflowId]
-              ? `（${EXPERT_HEADER_META[expertWorkflowId]!.label}）`
-              : ''}
+            {expertWorkflowId ? '本次使用了 1 个专家技能' : '本次按专家模式处理'}
+            {expertUsageLabel ? `（${expertUsageLabel}）` : ''}
           </span>
         </div>
       )}
