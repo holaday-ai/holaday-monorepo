@@ -110,12 +110,14 @@ export function BillingPage(): JSX.Element {
                   <span className="rounded-full border border-[#57479C]/30 bg-white px-2 py-1 text-xs font-medium text-[#57479C]">
                     {planLabel}
                   </span>
-                  <Link
-                    to="/plan"
-                    className="text-xs font-medium text-[#EA1F59] underline-offset-2 hover:underline"
+                  <Button
+                    asChild
+                    variant="outline"
+                    size="sm"
+                    className="h-8 border-[#DCDDDD] bg-white px-3 text-[#EA1F59] hover:border-[#EA1F59]/35 hover:bg-white hover:text-[#EA1F59]"
                   >
-                    升级
-                  </Link>
+                    <Link to="/plan">升级</Link>
+                  </Button>
                 </div>
               </Row>
               <Row label="下次扣款日期">
