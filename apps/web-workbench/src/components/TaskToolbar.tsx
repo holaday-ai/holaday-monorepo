@@ -83,7 +83,7 @@ export function TaskToolbar({
         aria-pressed={open}
         title={label}
         className={cn(
-          'relative inline-flex h-7 w-auto items-center justify-center gap-1 rounded-md border px-2 text-[11px] font-medium transition-colors sm:w-7 sm:px-0',
+          'relative inline-flex h-8 w-auto items-center justify-center gap-1 rounded-md border px-2.5 text-[11px] font-medium transition-colors sm:w-8 sm:px-0',
           attentionNeeded
             ? 'border-[#EA1F59]/40 bg-[#EA1F59]/10 text-[#EA1F59] shadow-[0_1px_3px_rgba(234,31,89,0.10)] hover:bg-[#EA1F59]/15'
             : live
