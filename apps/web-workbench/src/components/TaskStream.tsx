@@ -1062,7 +1062,7 @@ function ThinkingBlock({ text }: { text: string }): JSX.Element {
     >
       <summary className="flex cursor-pointer items-center gap-1 list-none">
         {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        <span className="font-medium uppercase tracking-wide text-[10px]">思考</span>
+        <span className="font-medium uppercase tracking-wide text-[10px]">过程摘要</span>
       </summary>
       <p className="mt-1.5 whitespace-pre-wrap leading-relaxed">{open ? text : preview}</p>
     </details>
