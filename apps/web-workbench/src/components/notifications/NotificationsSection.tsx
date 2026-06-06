@@ -244,7 +244,7 @@ export function NotificationsSection(): JSX.Element {
                   </div>
                   <label
                     className={cn(
-                      'flex h-5 w-9 cursor-pointer items-center rounded-full p-0.5 transition-colors',
+                      'flex h-8 w-12 cursor-pointer items-center rounded-full p-1 transition-colors',
                       rowPending && 'cursor-wait opacity-70',
                       row.enabled ? 'bg-[#EA1F59]' : 'bg-muted-foreground/40',
                     )}
@@ -260,7 +260,7 @@ export function NotificationsSection(): JSX.Element {
                     />
                     <span
                       className={cn(
-                        'h-4 w-4 rounded-full bg-white transition-transform',
+                        'h-6 w-6 rounded-full bg-white transition-transform',
                         row.enabled && 'translate-x-4',
                       )}
                     />
@@ -272,7 +272,7 @@ export function NotificationsSection(): JSX.Element {
                       setModalOpen(true);
                     }}
                     disabled={rowPending}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground disabled:pointer-events-none disabled:opacity-40 dark:hover:bg-white/10"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground disabled:pointer-events-none disabled:opacity-40 dark:hover:bg-white/10"
                     aria-label={`编辑${NOTIFICATION_PLATFORM_LABEL[row.platform]}通知渠道`}
                     title={rowPending ? '正在更新' : '编辑'}
                   >
@@ -282,7 +282,7 @@ export function NotificationsSection(): JSX.Element {
                     type="button"
                     onClick={() => setConfirmDelete(row.channelId)}
                     disabled={rowPending}
-                    className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:pointer-events-none disabled:opacity-40"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EA1F59]/10 hover:text-[#EA1F59] disabled:pointer-events-none disabled:opacity-40"
                     aria-label="删除渠道"
                     title={rowPending ? '正在更新' : '删除'}
                   >
