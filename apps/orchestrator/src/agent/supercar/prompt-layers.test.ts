@@ -148,6 +148,17 @@ describe('selectModelAndEffort', () => {
     'create a draft issue in GitHub',
     'create a budget spreadsheet in Google Sheets',
     'schedule a project meeting in Google Calendar but do not send invites',
+    '在 HubSpot 创建一个联系人草稿',
+    '在 Salesforce 更新这个客户备注',
+    '在 Stripe dashboard 查找这个付款并下载收据',
+    '在 Calendly 创建一个会议链接草稿',
+    '在 Trello 新建一个项目看板',
+    '在 Asana 创建三个任务草稿',
+    '在 Jira 创建一个 bug issue 草稿',
+    'create a contact draft in HubSpot',
+    'update this customer note in Salesforce',
+    'download a receipt in Stripe',
+    'create a bug issue in Jira',
   ])('live app workflow → Sonnet 4.6 high: %s', (intent) => {
     expect(selectModelAndEffort(intent, 'none')).toEqual({
       model: 'claude-sonnet-4-6',
@@ -211,6 +222,17 @@ describe('getTaskBudget', () => {
     'create a draft issue in GitHub',
     'create a budget spreadsheet in Google Sheets',
     'schedule a project meeting in Google Calendar but do not send invites',
+    '在 HubSpot 创建一个联系人草稿',
+    '在 Salesforce 更新这个客户备注',
+    '在 Stripe dashboard 查找这个付款并下载收据',
+    '在 Calendly 创建一个会议链接草稿',
+    '在 Trello 新建一个项目看板',
+    '在 Asana 创建三个任务草稿',
+    '在 Jira 创建一个 bug issue 草稿',
+    'create a contact draft in HubSpot',
+    'update this customer note in Salesforce',
+    'download a receipt in Stripe',
+    'create a bug issue in Jira',
   ])('live app workflow → 200K budget: %s', (intent) => {
     expect(getTaskBudget(intent, 'none')).toBe(200_000);
   });
