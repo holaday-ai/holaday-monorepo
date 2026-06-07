@@ -86,13 +86,11 @@ export interface ClassifyOpts {
  * verb). The user wants the agent to ACT on a page, not just read.
  */
 const INTERACTION_VERBS: readonly string[] = [
-  '登录', '下单',
   '比价', '抓取', '截图',
   '订票', '订机票', '订酒店', '订餐', '挂号',
   '加购',
   '加入购物车', '结账', '取消订阅', '发送邮件', '发邮件',
   // English
-  'log in', 'log into', 'sign in', 'sign into',
   'navigate to', 'fill in', 'fill out',
   'make a reservation',
   'sign up', 'send email', 'send an email',
@@ -105,6 +103,10 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/(?:提交|填写|填表|填入|输入).{0,24}(?:表单|申请|订单|资料|信息|姓名|邮箱|地址|验证码|问卷|报名|简历|这个|这|该)/i, '中文表单操作'],
   [/(?:下载(?![量率])|保存).{0,24}(?:文件|图片|截图|报告|附件|pdf|csv|xlsx|表格|资料|这个|这|该)/i, '中文下载文件'],
   [/(?:操作).{0,24}(?:网页|页面|网站|后台|这个|这|该)/i, '中文页面操作'],
+  [/(?:登录|登陆|登入)(?!页|率|流程|体验|文案|策略).{0,24}(?:账号|账户|后台|网站|平台|app|系统|淘宝|天猫|京东|拼多多|小红书|微博|知乎|抖音|b站|bilibili|github|linkedin|amazon|gmail|我的|这个|该)/i, '中文登录账号'],
+  [/(?:帮我|给我|替我|为我)?下单(?!率).{0,24}(?:订单|商品|外卖|咖啡|奶茶|餐|票|这个|这|该|它|杯|份|个|件)/i, '中文下单'],
+  [/\b(?:log\s+in|sign\s+in)(?!\s+(?:page|rate|flow|experience|copy|strategy))\s+(?:to|into|on)?\s*(?:my\s+|the\s+)?(?:account|dashboard|website|site|app|gmail|amazon|github|linkedin|reddit|youtube|instagram|tiktok|twitter|x\.com)\b/i, 'login to site'],
+  [/\b(?:log|sign)\s+into\s+(?:my\s+|the\s+)?(?:account|dashboard|website|site|app|gmail|amazon|github|linkedin|reddit|youtube|instagram|tiktok|twitter|x\.com)\b/i, 'login to site'],
   [/\b(?:open|visit|go to)\s+(?:https?:\/\/|www\.|[a-z0-9.-]+\.(?:com|cn|ai|net|org)|(?:the\s+)?(?:website|webpage|page|link|dashboard|app|site)|(?:amazon|github|linkedin|gmail|reddit|youtube|instagram|tiktok|twitter|x\.com))\b/i, 'open page'],
   [/\b(?:open|visit|go to)\s+(?:the\s+)?(?:amazon|github|linkedin|gmail|reddit|youtube|instagram|tiktok|twitter|x\.com)(?:\s+(?:product|profile|page|site|listing|dashboard|app))*\b/i, 'open platform page'],
   [/\bclick\s+(?:the\s+|this\s+|that\s+)?(?:button|link|menu|tab|option|submit|continue|next|login|sign in|confirm|buy|pay|download)\b/i, 'click control'],

@@ -442,6 +442,8 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
     for (const intent of [
       'open https://example.com',
       'visit the Amazon product page',
+      'log in to Gmail',
+      'sign into the dashboard',
       'click the submit button',
       'submit the application form',
       'download this PDF',
@@ -459,6 +461,9 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       '访问量趋势分析',
       '打开率提升策略',
       '操作系统安全报告',
+      '登录页转化率优化',
+      '登录流程体验分析',
+      '下单率提升策略',
     ]) {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
       expect(out).toBe('generate');
@@ -470,6 +475,8 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       'open rate optimization plan',
       'visit volume analysis',
       'click-through rate strategy',
+      'sign in page conversion strategy',
+      'log in flow copy review',
       'submission rate report',
       'download growth report',
     ]) {
