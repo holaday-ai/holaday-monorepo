@@ -248,6 +248,7 @@ export function classifyAsSimpleSearch(intent: string): boolean {
     'google calendar', 'gmail', 'slack', 'notion', '飞书', 'github',
     'hubspot', 'salesforce', 'stripe', 'calendly', 'trello', 'asana', 'jira',
     'shopify', 'zendesk', 'intercom', 'linear', 'monday',
+    'airtable', 'figma', 'cloudinary', 'buffer', 'mailchimp',
     'linkedin',
   ];
   const LIVE_APP_ACTION_HINTS = [
@@ -255,12 +256,12 @@ export function classifyAsSimpleSearch(intent: string): boolean {
     '收藏', '保存筛选', '保存条件', '直飞',
     '草稿', '创建', '新建', '填写', '写一封', '撰写', '更新',
     '查找', '搜索', '下载', '上传', '导出', '分享', '复制链接',
-    '移动', '重命名', '添加', '安排', '预约', '回复', '停在',
+    '移动', '重命名', '添加', '安排', '预约', '回复', '创建', '新建', '停在',
     '付款前', '支付前', '提交前', '确认前',
     'filter', 'sort', 'favorite', 'bookmark', 'save filter',
     'draft', 'compose', 'create', 'update', 'find', 'download',
     'upload', 'export', 'share', 'copy link', 'attach', 'import',
-    'move', 'rename', 'schedule', 'add', 'reply', 'fill out', 'before payment',
+    'move', 'rename', 'schedule', 'add', 'reply', 'fill out', 'refund', 'before payment',
     'before checkout', 'before submit',
   ];
   if (
@@ -303,6 +304,7 @@ export function classifyAsSimpleSearch(intent: string): boolean {
     /\bsubscribe\b/, /\bunsubscribe\b/, /\bcancel\b/,
     /\bdelete\b/, /\bupdate\b/, /\bpay\b/, /\btransfer\b/,
     /\bcomment\b/, /\blike\b/, /\bfollow\b/,
+    /\b(?:create|draft|edit|add|reply\s+to|send|upload|download|schedule|refund)\s+.{0,80}\b(?:github\s+issue|asana\s+task|trello\s+card|zendesk\s+ticket|hubspot\s+contact|salesforce\s+customer|stripe\s+(?:payment|invoice|receipt)|slack\s+message|linkedin\s+message|google\s+doc|calendar\s+invite|notion\s+page|airtable\s+row|figma\s+design|cloudinary\s+image|buffer\s+post|mailchimp\s+campaign|shopify\s+discount)/,
     /\bhelp me (?:book|buy|order|register|send|post|submit|apply)\b/,
   ];
   for (const p of EN_ACTION_PATTERNS) {
