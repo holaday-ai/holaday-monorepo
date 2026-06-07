@@ -169,6 +169,52 @@ describe('sanitizeFinalText — orphan JSON fragment lines (BOSS sweep)', () => 
   });
 });
 
+describe('sanitizeFinalText — internal terminal metadata JSON', () => {
+  it('strips browser result metadata appended after the user-facing answer', () => {
+    const input = [
+      '结果已显示：',
+      '',
+      '页面上清楚呈现了 **(128 + 256) / 3 = 128**',
+      JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        finalUrl: 'https://web2.0calc.com/',
+        elapsedMs: 35631,
+        toolsUsed: ['navigate', 'computer'],
+        expertMode: 'auto',
+        iterations: 6,
+        attachments: [
+          {
+            kind: 'screenshot',
+            fileId: 'file_123',
+            filename: 'screenshot.jpg',
+            downloadUrl: '/files/file_123/download',
+          },
+        ],
+        selectedRole: null,
+        executionMode: 'browser',
+        fallbackChain: ['browser'],
+        modelFinalText: '结果已显示：页面上清楚呈现了...',
+        expertWorkflowId: null,
+        awaitingUserCount: 0,
+        finalExecutionMode: 'browser',
+        hasFinalScreenshot: true,
+      }),
+    ].join('\n');
+
+    const out = sanitizeFinalText(input);
+
+    expect(out).toBe('结果已显示：\n\n页面上清楚呈现了 **(128 + 256) / 3 = 128**');
+    expect(out).not.toContain('"model"');
+    expect(out).not.toContain('"finalUrl"');
+    expect(out).not.toContain('"attachments"');
+  });
+
+  it('keeps ordinary JSON examples with a model field but no terminal metadata shape', () => {
+    const input = '配置示例：{"model":"gpt-5","temperature":0.2,"format":"json"}';
+    expect(sanitizeFinalText(input)).toBe(input);
+  });
+});
+
 describe('sanitizeFinalText — stop-reason markers', () => {
   it('strips [STOP_REASON: ...]', () => {
     const input = 'final answer [STOP_REASON: end_turn] done';

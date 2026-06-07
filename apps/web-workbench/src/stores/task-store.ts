@@ -1657,10 +1657,67 @@ function extractSummary(result: unknown): string | null {
   if (!result || typeof result !== 'object') return null;
   const r = result as Record<string, unknown>;
   const summary = safeTaskListText(r.summary);
-  if (summary) return summary;
+  if (summary) return stripInternalResultMetadata(summary);
   const reason = safeTaskListText(r.reason);
-  if (reason) return reason;
+  if (reason) return stripInternalResultMetadata(reason);
   return null;
+}
+
+const INTERNAL_RESULT_METADATA_KEYS = [
+  '"model"',
+  '"finalUrl"',
+  '"elapsedMs"',
+  '"toolsUsed"',
+  '"expertMode"',
+  '"iterations"',
+  '"attachments"',
+  '"selectedRole"',
+  '"executionMode"',
+  '"fallbackChain"',
+  '"modelFinalText"',
+  '"expertWorkflowId"',
+  '"awaitingUserCount"',
+  '"finalExecutionMode"',
+  '"hasFinalScreenshot"',
+] as const;
+
+function looksLikeInternalResultMetadata(block: string): boolean {
+  let hits = 0;
+  for (const key of INTERNAL_RESULT_METADATA_KEYS) {
+    if (block.includes(key)) hits += 1;
+  }
+  return hits >= 4 && /"(?:finalUrl|modelFinalText|fallbackChain|toolsUsed)"/.test(block);
+}
+
+function stripInternalResultMetadata(input: string): string {
+  let out = '';
+  let i = 0;
+  while (i < input.length) {
+    if (input[i] !== '{') {
+      out += input[i];
+      i += 1;
+      continue;
+    }
+
+    const start = i;
+    let depth = 1;
+    let j = i + 1;
+    while (j < input.length && depth > 0 && j - start < 50_000) {
+      const ch = input[j];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') depth -= 1;
+      j += 1;
+    }
+    if (depth !== 0) {
+      out += input.slice(start);
+      break;
+    }
+
+    const block = input.slice(start, j);
+    if (!looksLikeInternalResultMetadata(block)) out += block;
+    i = j;
+  }
+  return out.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function extractFailedChecks(

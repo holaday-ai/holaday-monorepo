@@ -98,6 +98,32 @@ const STANDALONE_BASE64_RE = /(^|\s)([A-Za-z0-9+/=]{50,})(\s|$)/g;
 const TOOL_RESPONSE_MARKERS_RE =
   /"(?:status|content|screenshot|base64)"|"type"\s*:\s*"image"|"data"\s*:\s*"(?:\/9j\/|iVBORw0KGgo|R0lGOD|UklGR)/i;
 
+const INTERNAL_RESULT_METADATA_KEYS = [
+  '"model"',
+  '"finalUrl"',
+  '"elapsedMs"',
+  '"toolsUsed"',
+  '"expertMode"',
+  '"iterations"',
+  '"attachments"',
+  '"selectedRole"',
+  '"executionMode"',
+  '"fallbackChain"',
+  '"modelFinalText"',
+  '"expertWorkflowId"',
+  '"awaitingUserCount"',
+  '"finalExecutionMode"',
+  '"hasFinalScreenshot"',
+] as const;
+
+function looksLikeInternalResultMetadata(block: string): boolean {
+  let hits = 0;
+  for (const key of INTERNAL_RESULT_METADATA_KEYS) {
+    if (block.includes(key)) hits += 1;
+  }
+  return hits >= 4 && /"(?:finalUrl|modelFinalText|fallbackChain|toolsUsed)"/.test(block);
+}
+
 /**
  * Brace-counted tool-response JSON stripper. Walks the input,
  * finds every `{...}` (handles arbitrary nesting), and drops the
@@ -134,7 +160,10 @@ function stripToolJsonBlocks(text: string): string {
         return out;
       }
       const block = text.slice(start, j);
-      if (TOOL_RESPONSE_MARKERS_RE.test(block)) {
+      if (
+        TOOL_RESPONSE_MARKERS_RE.test(block) ||
+        looksLikeInternalResultMetadata(block)
+      ) {
         // Drop the block entirely; iterator continues at j.
       } else {
         out += block;

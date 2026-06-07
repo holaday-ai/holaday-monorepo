@@ -182,6 +182,53 @@ describe('toUiTask', () => {
     expect(task.resultText).toBe('浏览器连接中断，请重新执行任务。');
   });
 
+  it('hides internal terminal metadata JSON from persisted result summaries', () => {
+    const task = toUiTask({
+      taskId: 'tsk_metadata_tail',
+      intent: '使用在线计算器',
+      title: null,
+      status: 'completed',
+      result: {
+        summary: [
+          '结果已显示：',
+          '',
+          '页面上清楚呈现了 **(128 + 256) / 3 = 128**',
+          JSON.stringify({
+            model: 'claude-sonnet-4-6',
+            finalUrl: 'https://web2.0calc.com/',
+            elapsedMs: 35631,
+            toolsUsed: ['navigate', 'computer'],
+            expertMode: 'auto',
+            iterations: 6,
+            attachments: [{ kind: 'screenshot', fileId: 'file_123' }],
+            selectedRole: null,
+            executionMode: 'browser',
+            fallbackChain: ['browser'],
+            modelFinalText: '结果已显示：页面上清楚呈现了...',
+            expertWorkflowId: null,
+            awaitingUserCount: 0,
+            finalExecutionMode: 'browser',
+            hasFinalScreenshot: true,
+          }),
+        ].join('\n'),
+      },
+      errorMessage: null,
+      createdAt: new Date('2026-06-04T00:00:00Z'),
+      opusUsed: false,
+      starred: false,
+      starredAt: null,
+      projectId: null,
+      verificationPassed: true,
+      failureLevel: null,
+    } as never);
+
+    expect(task.resultText).toBe(
+      '结果已显示：\n\n页面上清楚呈现了 **(128 + 256) / 3 = 128**',
+    );
+    expect(task.resultText).not.toContain('"model"');
+    expect(task.resultText).not.toContain('"finalUrl"');
+  });
+
   it('hydrates final browser evidence from tasks.list result rows', () => {
     const task = toUiTask({
       taskId: 'tsk_browser_evidence',
