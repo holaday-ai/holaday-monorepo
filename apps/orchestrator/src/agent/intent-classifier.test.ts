@@ -470,6 +470,14 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       '登录页转化率优化',
       '登录流程体验分析',
       '下单率提升策略',
+      '订票率提升策略',
+      '订酒店转化率分析',
+      '订餐系统设计报告',
+      '挂号流程体验分析',
+      '挂号率下降原因',
+      '加购率提升方案',
+      '结账页转化率优化',
+      '比价框架怎么写',
       '取消订阅率下降分析',
       '抓取率是什么意思',
       '截图率统计',
@@ -492,6 +500,9 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       'send email open rate report',
       'submission rate report',
       'download growth report',
+      'fill out rate analysis',
+      'make a reservation strategy',
+      'add to cart conversion strategy',
     ]) {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
       expect(out).toBe('generate');

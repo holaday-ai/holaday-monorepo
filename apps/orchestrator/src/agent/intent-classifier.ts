@@ -85,16 +85,7 @@ export interface ClassifyOpts {
  * when the intent ALSO matches a scrape signal (URL / site / search
  * verb). The user wants the agent to ACT on a page, not just read.
  */
-const INTERACTION_VERBS: readonly string[] = [
-  '比价',
-  '订票', '订机票', '订酒店', '订餐', '挂号',
-  '加购',
-  '加入购物车', '结账',
-  // English
-  'navigate to', 'fill in', 'fill out',
-  'make a reservation',
-  'add to cart',
-];
+const INTERACTION_VERBS: readonly string[] = [];
 
 const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/(?:打开|访问|进入|前往|跳转到).{0,32}(?:https?:\/\/|www\.|[a-z0-9.-]+\.(?:com|cn|ai|net|org)|网站|网页|页面|链接|后台|app|平台|京东|淘宝|天猫|拼多多|小红书|微博|知乎|抖音|b站|bilibili|github|linkedin|amazon|gmail)/i, '中文打开页面'],
@@ -107,31 +98,35 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/(?:抓取(?!率).{0,24}(?:页面|网页|网站|数据|表格|列表|这个|这|该|链接|内容))/i, '中文抓取页面'],
   [/(?:(?:截图|截屏)(?!率).{0,24}(?:页面|网页|网站|屏幕|结果|证据|这个|这|该)|(?:给|帮我给|帮我|为).{0,16}(?:页面|网页|网站|这个|这|该).{0,12}(?:截图|截屏))/i, '中文截图页面'],
   [/(?:取消订阅(?!率).{0,24}(?:服务|邮件|会员|这个|这|该|它|账号|账户)|(?:点击|点).{0,12}取消订阅(?:按钮|链接)?)/i, '中文取消订阅'],
+  [/(?:帮我|给我|替我|为我)?比价(?!率|策略|框架|方案|分析|报告|系统).{0,32}(?:商品|价格|平台|京东|淘宝|天猫|拼多多|amazon|航班|酒店|机票|bose|iphone|手机|耳机|电脑|相机|型号|这个|这|该|[a-z0-9][a-z0-9 -]{1,})/i, '中文比价执行'],
   [/\b(?:log\s+in|sign\s+in)(?!\s+(?:page|rate|flow|experience|copy|strategy))\s+(?:to|into|on)?\s*(?:my\s+|the\s+)?(?:account|dashboard|website|site|app|gmail|amazon|github|linkedin|reddit|youtube|instagram|tiktok|twitter|x\.com)\b/i, 'login to site'],
   [/\b(?:log|sign)\s+into\s+(?:my\s+|the\s+)?(?:account|dashboard|website|site|app|gmail|amazon|github|linkedin|reddit|youtube|instagram|tiktok|twitter|x\.com)\b/i, 'login to site'],
   [/\bsign\s+up\s+for\s+(?:this\s+)?(?:event|webinar|class|course|workshop|conference|account|trial|newsletter)\b/i, 'sign up for service'],
   [/\bsend\s+(?:an?\s+|this\s+)?(?:email|message|dm|direct message)(?!\s+(?:open rate|click rate|conversion|copy|strategy|analysis|report))\b/i, 'send message'],
   [/\b(?:open|visit|go to)\s+(?:https?:\/\/|www\.|[a-z0-9.-]+\.(?:com|cn|ai|net|org)|(?:the\s+)?(?:website|webpage|page|link|dashboard|app|site)|(?:amazon|github|linkedin|gmail|reddit|youtube|instagram|tiktok|twitter|x\.com))\b/i, 'open page'],
   [/\b(?:open|visit|go to)\s+(?:the\s+)?(?:amazon|github|linkedin|gmail|reddit|youtube|instagram|tiktok|twitter|x\.com)(?:\s+(?:product|profile|page|site|listing|dashboard|app))*\b/i, 'open platform page'],
+  [/\bnavigate\s+to\s+(?:https?:\/\/|www\.|[a-z0-9.-]+\.(?:com|cn|ai|net|org)|(?:the\s+)?(?:website|webpage|page|link|dashboard|app|site)|(?:amazon|github|linkedin|gmail|reddit|youtube|instagram|tiktok|twitter|x\.com))\b/i, 'navigate to page'],
   [/\bclick\s+(?:the\s+|this\s+|that\s+)?(?:button|link|menu|tab|option|submit|continue|next|login|sign in|confirm|buy|pay|download)\b/i, 'click control'],
   [/\bsubmit\s+(?:the\s+|this\s+|that\s+)?(?:form|application|order|request|signup|registration|survey|resume|cv)\b/i, 'submit form'],
+  [/\bfill\s+(?:in|out)\s+(?:the\s+|this\s+|that\s+)?(?:form|application|survey|signup|registration|questionnaire|field|input|profile|address|email|name|resume|cv)\b/i, 'fill form'],
   [/\bdownload\s+(?:the\s+|this\s+|that\s+)?(?:file|image|screenshot|report|attachment|pdf|csv|xlsx|spreadsheet|document)\b/i, 'download file'],
-  [/(?<!制)(?:帮我|给我|替我|为我)?(?:预订|预定|订|定).{0,24}(?:机票|航班|酒店|房间|民宿|餐厅|座位|车票|火车票|门票|票|会议室)/i, '中文预订服务'],
-  [/(?<!制)(?:帮我|给我|替我|为我)?预约.{0,24}(?:医生|牙医|门诊|挂号|服务|面试|会议|咨询|体检|维修|上门|时间|今天|明天|后天|周[一二三四五六日天]|下周)/i, '中文预约服务'],
+  [/(?!.*(?:订票率|订机票率|订酒店(?:转化率|率|策略|框架|方案|分析|报告|系统)|订餐(?:率|策略|框架|方案|分析|报告|系统)|预订(?:率|策略|框架|方案|分析|报告|系统)|预定(?:率|策略|框架|方案|分析|报告|系统)))(?<!制)(?:帮我|给我|替我|为我|在|到|去|用|通过)?(?:携程|去哪儿|飞猪|美团|大众点评|booking|airbnb)?(?:预订|预定|订票|订机票|订酒店|订餐|订|定)(?!率|策略|框架|方案|分析|报告|系统|页面).{0,24}(?:机票|航班|酒店|房间|民宿|餐厅|座位|车票|火车票|门票|票|会议室|今晚|明晚|今天|明天|后天|周[一二三四五六日天]|下周)/i, '中文预订服务'],
+  [/(?<!制)(?:帮我|给我|替我|为我|在|到|去|用|通过)?(?:医院|平台|app|系统)?(?:预约|挂号)(?!率|流程|体验|文案|策略|分析|报告|系统).{0,24}(?:医生|牙医|门诊|科|服务|面试|会议|咨询|体检|维修|上门|时间|今天|明天|后天|周[一二三四五六日天]|下周)/i, '中文预约服务'],
   [/(?:帮我|给我|替我|为我)?报名.{0,24}(?:活动|课程|会议|讲座|班|workshop|webinar|conference)/i, '中文报名活动'],
   [/(?:帮我|给我|替我|为我)?投递.{0,24}(?:简历|岗位|职位|工作|job|role|position)/i, '中文投递职位'],
   [/(?:帮我|给我|替我|为我)?(?:发|发送|回复).{0,24}(?:邮件|消息|私信|短信|微信|email|gmail)(?!打开率|点击率|转化|文案|策略|分析|报告)/i, '中文发送消息'],
-  [/(?:帮我|给我|替我|为我)?(?:把|将)?.{0,24}(?:放进|加入|添加).{0,24}(?:购物车|cart)/i, '中文加入购物车'],
-  [/(?:帮我|给我|替我|为我)?(?:去)?结算.{0,24}(?:订单|商品|购物车|这个|它)/i, '中文结算'],
+  [/(?:帮我|给我|替我|为我)?(?:把|将)?.{0,24}(?:加购|放进|加入|添加)(?!率|策略|分析|报告|方案).{0,24}(?:购物车|cart|这个|这|该|它|商品)/i, '中文加入购物车'],
+  [/(?:帮我|给我|替我|为我)?(?:去)?(?:结账|结算)(?!页|率|流程|体验|策略|分析|报告|方案).{0,24}(?:订单|商品|购物车|这个|它)/i, '中文结算'],
   [/(?:帮我|给我|替我|为我|去)(?:付款|支付)|(?:付款|支付).{0,16}(?:订单|商品|费用|尾款|这个|它)/i, '中文支付'],
   [/(?:在|到|去)?(?:小红书|微博|知乎|抖音|b站|bilibili|twitter|x\.com|linkedin|reddit|instagram|facebook|threads).{0,24}(?:发帖|评论|点赞|关注|发布)/i, '中文社交平台操作'],
   [/(?:发帖|评论|点赞|关注).{0,18}(?:这|该|那个|账号|帖子|笔记|视频|微博|动态|文章|post|tweet)/i, '中文社交对象操作'],
   [/(?:给|帮我给|替我给|为).{0,24}(?:评论|点赞|关注)/i, '中文社交互动'],
   [/\bbook\s+(?:me\s+)?(?:a\s+|an\s+|the\s+)?(?:flight|ticket|hotel|room|table|restaurant|appointment|ride|car|train|bus)\b/i, 'book service'],
   [/\breserve\s+(?:a\s+|an\s+|the\s+)?(?:table|room|seat|ticket|hotel|restaurant|car)\b/i, 'reserve service'],
+  [/\bmake\s+a\s+reservation\s+(?:for|at|with)\s+(?:a\s+|an\s+|the\s+|this\s+)?(?:restaurant|table|hotel|room|flight|ticket|car|service|dinner|lunch|brunch)\b/i, 'make reservation'],
   [/\bschedule\s+(?:a\s+|an\s+|the\s+)?(?:appointment|meeting|call|visit|consultation|interview)\b/i, 'schedule appointment'],
   [/\bschedule\s+.{1,60}\s+(?:appointment|meeting|call|visit|consultation|interview)\b/i, 'schedule appointment'],
-  [/\b(?:make|set\s+up)\s+(?:a\s+|an\s+)?(?:appointment|reservation|meeting|call)\b/i, 'make appointment'],
+  [/\b(?:make|set\s+up)\s+(?:a\s+|an\s+)?(?:appointment|reservation|meeting|call)(?!\s+(?:strategy|analysis|report|framework|copy|conversion|rate))\b/i, 'make appointment'],
   [/\bregister\s+for\s+(?:this\s+)?(?:event|webinar|class|course|workshop|conference)\b/i, 'register for event'],
   [/\bapply\s+(?:for|to)\s+(?:this\s+)?(?:job|role|position|opening|listing)\b/i, 'apply for job'],
   [/\bapply\s+(?:on|in)\s+(?:linkedin|indeed|greenhouse|lever)\b/i, 'apply on job site'],
