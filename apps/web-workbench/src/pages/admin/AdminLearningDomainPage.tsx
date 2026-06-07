@@ -20,6 +20,7 @@ import { Link, useParams } from 'react-router-dom';
 import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
+import { verificationCheckLabel } from '@/lib/verification-banner-copy';
 import {
   ADMIN_DIVIDER,
   ADMIN_MAGENTA,
@@ -290,19 +291,25 @@ export function AdminLearningDomainPage(): JSX.Element {
                             <div className="space-y-2 text-[11px] text-muted-foreground">
                               {failedChecks.length > 0 && (
                                 <ul className="space-y-1">
-                                  {failedChecks.map((check, index) => (
-                                    <li
-                                      key={`${check.type}-${index}`}
-                                      className="flex gap-2"
-                                    >
-                                      <span className="shrink-0 rounded-[6px] bg-[#FFC910]/20 px-1.5 py-0.5 font-medium text-[#8A6A00]">
-                                        {check.type}
-                                      </span>
-                                      <span className="min-w-0 break-words">
-                                        {check.detail}
-                                      </span>
-                                    </li>
-                                  ))}
+                                  {failedChecks.map((check, index) => {
+                                    const label = verificationCheckLabel(check);
+                                    const detail = check.detail.trim();
+                                    return (
+                                      <li
+                                        key={`${check.type}-${index}`}
+                                        className="flex flex-wrap gap-1.5"
+                                      >
+                                        <span className="shrink-0 rounded-[6px] bg-[#FFC910]/20 px-1.5 py-0.5 font-medium text-[#8A6A00]">
+                                          {label}
+                                        </span>
+                                        {detail && detail !== label && (
+                                          <span className="min-w-0 break-words py-0.5">
+                                            {detail}
+                                          </span>
+                                        )}
+                                      </li>
+                                    );
+                                  })}
                                 </ul>
                               )}
                               {t.errorMessage && (
