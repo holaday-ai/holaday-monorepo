@@ -32,6 +32,15 @@ describe('verificationCheckLabel', () => {
       }),
     ).toBe('自动审核超时，未阻塞任务结果');
   });
+
+  it('clarifies when required source links were removed or absent', () => {
+    expect(
+      verificationCheckLabel({
+        type: 'url_count',
+        detail: 'only 0 URL(s) found (global scan), need at least 1',
+      }),
+    ).toBe('缺少可验证来源链接');
+  });
 });
 
 describe('verificationBannerCopy', () => {
@@ -45,6 +54,24 @@ describe('verificationBannerCopy', () => {
     expect(copy.tone).toBe('warning');
     expect(copy.eyebrow).toBe('自动审核发现可修正问题');
     expect(copy.checks).toEqual(['缺少来源链接']);
+  });
+
+  it('explains missing verifiable sources without exposing raw URL counts', () => {
+    const copy = verificationBannerCopy({
+      level: 'fixable',
+      status: 'partial_success',
+      failedChecks: [
+        {
+          type: 'url_count',
+          detail: 'only 0 URL(s) found (global scan), need at least 1',
+        },
+      ],
+    });
+
+    expect(copy.checks).toEqual(['缺少可验证来源链接']);
+    expect(copy.body).toBe(
+      '答案可先参考，但原始来源链接不足或已被移除，避免把未验证链接当作事实来源。建议重新执行或指定可信来源。',
+    );
   });
 
   it('uses a danger tone for hard failures', () => {

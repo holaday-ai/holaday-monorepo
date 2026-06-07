@@ -33,6 +33,9 @@ const CHECK_TYPE_LABELS: Record<string, string> = {
 export function verificationCheckLabel(check: VerificationCheck): string {
   const detail = check.detail.trim();
   if (check.type === 'ecommerce_rows' && detail) return detail;
+  if (check.type === 'url_count' && /only\s+0\s+URL|链接数减少|0\s*→/i.test(detail)) {
+    return '缺少可验证来源链接';
+  }
   if (/second-opinion|verifier_fallback|disagrees/i.test(detail)) {
     return '自动复核认为答案需要人工确认';
   }
@@ -98,6 +101,8 @@ export function verificationBannerCopy({
     body:
       timeoutOnly
         ? '答案已经生成，但自动审核等待过久。HOLA DAY 没有因此阻塞任务，请按关键数据和来源自行核对。'
+        : labels.includes('缺少可验证来源链接')
+        ? '答案可先参考，但原始来源链接不足或已被移除，避免把未验证链接当作事实来源。建议重新执行或指定可信来源。'
         : labels.length > 0
         ? '答案可先参考，但下面的结构性要求没有完全满足。建议核对来源后再行动。'
         : '答案可先参考，但旧任务没有保存具体检查项。建议核对来源、数量和排序后再行动。',

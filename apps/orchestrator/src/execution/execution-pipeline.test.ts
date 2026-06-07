@@ -21,6 +21,7 @@ import { _resetLedgerRegistryForTest, getLedger } from './evidence-ledger.js';
 import {
   _resetExecutionPipelineForTest,
   disposeExecution,
+  deriveFinalStatus,
   extractFailedChecks,
   getContract,
   initExecution,
@@ -263,6 +264,40 @@ describe('all flags on — URL fabrication autoFix loop', () => {
     expect(out.finalText).not.toContain('totally-unrelated.example.org');
     expect(out.finalText).not.toContain('[未验证');
     expect(out.verification!.passed).toBe(true);
+  });
+
+  it('explicit source-link tasks stay partial when autoFix removes the only URL', async () => {
+    initExecution({
+      taskId: 'tsk_f3',
+      intent: '帮我查今天特斯拉股价并给出来源链接',
+      executionMode: 'generate',
+    });
+    recordEvidence('tsk_f3', {
+      fact: 'visited https://finance.example.com/quote/TSLA',
+      sourceType: 'browser_state',
+      sourceDetail: 'goto',
+      confidence: 'observed',
+    });
+
+    const out = await verifyAndFinalize({
+      taskId: 'tsk_f3',
+      answerText:
+        '特斯拉当前股价为 123.45 美元，来源：https://totally-unrelated.example.org/tsla。' +
+        '请以交易所实时行情为准。',
+    });
+
+    expect(out.finalText).not.toContain('totally-unrelated.example.org');
+    expect(out.verification!.passed).toBe(false);
+    expect(out.verification!.failureLevel).toBe('fixable');
+    expect(out.verification!.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          criterionType: 'url_count',
+          passed: false,
+        }),
+      ]),
+    );
+    expect(deriveFinalStatus('completed', out.verification)).toBe('partial_success');
   });
 });
 
