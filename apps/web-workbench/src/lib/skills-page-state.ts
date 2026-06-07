@@ -128,16 +128,20 @@ export function skillLimitBannerCopy(options: {
 export function skillCardBadge(options: {
   readonly enabled: boolean;
   readonly pending: boolean;
+  readonly limitBlocked?: boolean;
 }): string {
   if (options.pending) return '保存中…';
+  if (!options.enabled && options.limitBlocked) return '已达上限';
   return options.enabled ? '已启用' : '启用';
 }
 
 export function skillCardUsageHint(options: {
   readonly enabled: boolean;
   readonly pending: boolean;
+  readonly limitBlocked?: boolean;
 }): string {
   if (options.pending) return '正在保存选择';
+  if (!options.enabled && options.limitBlocked) return '先停用一个技能后可启用';
   return options.enabled ? '可自动匹配，也可直接使用' : '启用后可参与自动匹配';
 }
 

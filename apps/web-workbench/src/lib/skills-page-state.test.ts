@@ -136,6 +136,9 @@ describe('skills page state helpers', () => {
     expect(skillCardBadge({ enabled: false, pending: false })).toBe('启用');
     expect(skillCardBadge({ enabled: true, pending: false })).toBe('已启用');
     expect(skillCardBadge({ enabled: true, pending: true })).toBe('保存中…');
+    expect(skillCardBadge({ enabled: false, pending: false, limitBlocked: true })).toBe(
+      '已达上限',
+    );
   });
 
   it('explains how enabled skill cards affect new tasks', () => {
@@ -147,6 +150,9 @@ describe('skills page state helpers', () => {
     );
     expect(skillCardUsageHint({ enabled: false, pending: true })).toBe(
       '正在保存选择',
+    );
+    expect(skillCardUsageHint({ enabled: false, pending: false, limitBlocked: true })).toBe(
+      '先停用一个技能后可启用',
     );
   });
 

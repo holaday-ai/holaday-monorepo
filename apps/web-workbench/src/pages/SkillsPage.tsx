@@ -345,6 +345,7 @@ export function SkillsPage(): JSX.Element {
                     skill={s}
                     pending={pendingId === s.id}
                     blocked={pendingId !== null && pendingId !== s.id}
+                    limitBlocked={atLimit && !s.enabled}
                     onToggle={() => void onToggle(s)}
                     onUse={() => {
                       navigate('/', {
@@ -369,16 +370,22 @@ function SkillCard({
   skill,
   pending,
   blocked,
+  limitBlocked,
   onToggle,
   onUse,
 }: {
   skill: UiSkill;
   pending: boolean;
   blocked: boolean;
+  limitBlocked: boolean;
   onToggle: () => void;
   onUse: () => void;
 }): JSX.Element {
   const Icon = ICONS[skill.icon] ?? Sparkles;
+  const toggleDisabled = pending || blocked || limitBlocked;
+  const toggleTitle = limitBlocked
+    ? '已达到技能上限，先停用一个已启用技能'
+    : `${skill.enabled ? '停用' : '启用'}${skill.name}`;
   return (
     <article
       className={cn(
@@ -407,7 +414,7 @@ function SkillCard({
       </div>
       <div className="mt-auto flex w-full items-center justify-between gap-2 border-t border-[#EFEFEF] pt-2">
         <div className="min-w-0 text-[11px] leading-4 text-muted-foreground">
-          {skillCardUsageHint({ enabled: skill.enabled, pending })}
+          {skillCardUsageHint({ enabled: skill.enabled, pending, limitBlocked })}
         </div>
         <Button
           type="button"
@@ -424,21 +431,23 @@ function SkillCard({
       <button
         type="button"
         onClick={onToggle}
-        disabled={pending || blocked}
+        disabled={toggleDisabled}
         aria-pressed={skill.enabled}
         aria-busy={pending}
-        aria-label={`${skill.enabled ? '停用' : '启用'}${skill.name}`}
-        title={`${skill.enabled ? '停用' : '启用'}${skill.name}`}
+        aria-label={toggleTitle}
+        title={toggleTitle}
         className={cn(
           'absolute right-3 top-3 flex h-8 items-center rounded-full px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#57479C]/20',
           pending
             ? 'border border-[#42C0EF]/45 bg-white text-[#217EA0]'
             : skill.enabled
               ? 'border border-[#EA1F59]/35 bg-white text-[#EA1F59]'
-              : 'border border-[#DCDDDD] bg-white text-[#595757]',
+              : limitBlocked
+                ? 'border border-[#FFC910]/60 bg-[#FFC910]/10 text-[#6E5B00]'
+                : 'border border-[#DCDDDD] bg-white text-[#595757]',
         )}
       >
-        {skillCardBadge({ enabled: skill.enabled, pending })}
+        {skillCardBadge({ enabled: skill.enabled, pending, limitBlocked })}
       </button>
     </article>
   );
