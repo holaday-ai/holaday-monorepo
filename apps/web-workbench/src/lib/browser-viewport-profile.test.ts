@@ -94,7 +94,7 @@ describe('pickWorkbenchBrowserViewportProfile', () => {
     ).toBe(300);
   });
 
-  it('estimates the inline desktop panel from the actual flex row width', () => {
+  it('keeps the default inline browser panel on sidepanel geometry', () => {
     expect(
       estimateInlineBrowserPanelWidth({
         rowWidth: 1180,
@@ -109,6 +109,19 @@ describe('pickWorkbenchBrowserViewportProfile', () => {
         rowWidth: 1180,
         rowHeight: 900,
         explicitPanelWidth: null,
+        isTablet: false,
+      }),
+    ).toBe('sidepanel');
+  });
+
+  it('uses desktop geometry only after the inline panel has real width', () => {
+    expect(
+      pickWorkbenchBrowserViewportProfile({
+        viewportWidth: 1800,
+        viewportHeight: 1000,
+        rowWidth: 1600,
+        rowHeight: 900,
+        explicitPanelWidth: 980,
         isTablet: false,
       }),
     ).toBe('desktop');
