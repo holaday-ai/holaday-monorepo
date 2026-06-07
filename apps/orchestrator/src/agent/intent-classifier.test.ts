@@ -608,10 +608,14 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       'use zapier.com to create an automation draft',
       'use mailchimp.com to create a campaign draft',
       'use webflow.com to edit this landing page draft',
+      'use notion.so to create a page draft',
+      'On canva.com, create a poster draft',
+      'In airtable.com, add a row to the leads table',
       '在 canva.com 创建一个海报草稿',
       '在 zapier.com 创建一个自动化草稿',
       '在 mailchimp.com 创建一个邮件 campaign 草稿',
       '在 webflow.com 编辑这个 landing page 草稿',
+      '在 airtable.com 添加一条记录',
     ];
     for (const intent of cases) {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
@@ -648,6 +652,8 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       'Monday.com 项目管理分析',
       'canva.com 海报设计策略',
       'zapier 自动化模板',
+      'airtable 数据库设计方案',
+      'notion 模板',
       'Slack 团队公告文案',
       'GitHub README 模板',
       'GitHub issue 模板',

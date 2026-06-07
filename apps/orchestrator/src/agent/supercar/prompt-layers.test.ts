@@ -185,10 +185,14 @@ describe('selectModelAndEffort', () => {
     'use zapier.com to create an automation draft',
     'use mailchimp.com to create a campaign draft',
     'use webflow.com to edit this landing page draft',
+    'use notion.so to create a page draft',
+    'On canva.com, create a poster draft',
+    'In airtable.com, add a row to the leads table',
     '在 canva.com 创建一个海报草稿',
     '在 zapier.com 创建一个自动化草稿',
     '在 mailchimp.com 创建一个邮件 campaign 草稿',
     '在 webflow.com 编辑这个 landing page 草稿',
+    '在 airtable.com 添加一条记录',
   ])('live app workflow → Sonnet 4.6 high: %s', (intent) => {
     expect(selectModelAndEffort(intent, 'none')).toEqual({
       model: 'claude-sonnet-4-6',
@@ -289,10 +293,14 @@ describe('getTaskBudget', () => {
     'use zapier.com to create an automation draft',
     'use mailchimp.com to create a campaign draft',
     'use webflow.com to edit this landing page draft',
+    'use notion.so to create a page draft',
+    'On canva.com, create a poster draft',
+    'In airtable.com, add a row to the leads table',
     '在 canva.com 创建一个海报草稿',
     '在 zapier.com 创建一个自动化草稿',
     '在 mailchimp.com 创建一个邮件 campaign 草稿',
     '在 webflow.com 编辑这个 landing page 草稿',
+    '在 airtable.com 添加一条记录',
   ])('live app workflow → 200K budget: %s', (intent) => {
     expect(getTaskBudget(intent, 'none')).toBe(200_000);
   });
