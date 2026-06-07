@@ -526,6 +526,43 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
     });
     expect(out).toBe('browser');
   });
+
+  it('multi-step web execution tasks across travel, forms, drafts, and SaaS apps → browser', async () => {
+    const cases = [
+      '在携程查询上海到东京机票，筛选直飞并停在付款前',
+      '在 Google Flights 查找东京到纽约航班并筛选直飞',
+      '在 Airbnb 找下周末东京民宿并收藏前两个',
+      '在 Google Forms 填写这份报名表但不要提交',
+      '在 Gmail 写一封邮件草稿给客户，不要发送',
+      '在 LinkedIn 搜索产品经理岗位并保存筛选条件',
+      '在 Notion 创建一个项目计划页面草稿',
+      '在飞书创建一个会议纪要文档草稿',
+      '在 Slack 给团队频道写一条草稿消息，不要发送',
+    ];
+    for (const intent of cases) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out).toBe('browser');
+    }
+  });
+
+  it('execution-adjacent strategy, template, and metrics topics stay generate', async () => {
+    const cases = [
+      '机票预订转化率分析',
+      '酒店预订流程优化建议',
+      '取消订阅率下降原因',
+      '提交率提升策略',
+      '发邮件文案模板',
+      '表单设计规范',
+      'Gmail 邮件草稿模板',
+      'LinkedIn 岗位搜索策略',
+      'Notion 项目计划页面模板',
+      'Slack 团队公告文案',
+    ];
+    for (const intent of cases) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out).toBe('generate');
+    }
+  });
 });
 
 describe('classifyExecutionMode — generate stays generate', () => {
