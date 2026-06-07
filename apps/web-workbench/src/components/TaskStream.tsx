@@ -55,7 +55,11 @@ import { formatFileSize } from '@/lib/file-size';
 import { downloadFileMetaLabel } from '@/lib/file-download-card-copy';
 import { downloadMarkdownFile } from '@/lib/markdown-download';
 import { terminalArtifactFallbackText } from '@/lib/terminal-artifact-copy';
-import { terminalEmptyCopy, terminalInsufficientCopy } from '@/lib/terminal-empty-copy';
+import {
+  terminalEmptyAllowsRerun,
+  terminalEmptyCopy,
+  terminalInsufficientCopy,
+} from '@/lib/terminal-empty-copy';
 import {
   shouldShowStepCard,
   stepDetailSummary,
@@ -1311,7 +1315,7 @@ function EmptyTerminalCard({
   const cancelled = status === 'cancelled';
   const failed = status === 'failed';
   const partial = status === 'partial_success';
-  const retryable = failed || partial;
+  const retryable = terminalEmptyAllowsRerun(status);
   const toast = useToast();
   const createTask = useTaskStore((s) => s.createTask);
   const mountedRef = useMountedRef();

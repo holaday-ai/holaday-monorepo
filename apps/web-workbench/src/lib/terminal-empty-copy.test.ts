@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { terminalEmptyCopy, terminalInsufficientCopy } from './terminal-empty-copy';
+import {
+  terminalEmptyAllowsRerun,
+  terminalEmptyCopy,
+  terminalInsufficientCopy,
+} from './terminal-empty-copy';
 
 describe('terminalEmptyCopy', () => {
   it('uses explicit cancellation copy for cancelled tasks with no final text', () => {
@@ -28,6 +32,13 @@ describe('terminalEmptyCopy', () => {
       title: '没有回复内容',
       body: '这个任务已经结束，但没有收到回复内容。可以重新执行当前任务；原记录会保留。',
     });
+  });
+
+  it('offers rerun only when empty-terminal copy points at rerunning', () => {
+    expect(terminalEmptyAllowsRerun('completed')).toBe(true);
+    expect(terminalEmptyAllowsRerun('partial_success')).toBe(true);
+    expect(terminalEmptyAllowsRerun('failed')).toBe(true);
+    expect(terminalEmptyAllowsRerun('cancelled')).toBe(false);
   });
 
   it('keeps insufficient-result copy consistent with empty terminal states', () => {

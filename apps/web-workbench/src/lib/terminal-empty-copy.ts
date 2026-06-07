@@ -31,6 +31,14 @@ export function terminalEmptyCopy(status: UiTask['status']): {
   };
 }
 
+export function terminalEmptyAllowsRerun(status: UiTask['status']): boolean {
+  return (
+    status === 'completed' ||
+    status === 'partial_success' ||
+    status === 'failed'
+  );
+}
+
 export function terminalInsufficientCopy(): {
   title: string;
   body: string;
