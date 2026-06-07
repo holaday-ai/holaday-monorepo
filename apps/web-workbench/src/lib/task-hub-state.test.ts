@@ -13,6 +13,7 @@ import {
   taskHubLoadErrorCopy,
   taskHubLoadMoreErrorCopy,
   taskHubNeedsAttention,
+  taskHubStatusTone,
 } from './task-hub-state';
 
 describe('task hub state helpers', () => {
@@ -100,6 +101,22 @@ describe('task hub state helpers', () => {
     expect(taskHubNeedsAttention('awaiting_user')).toBe(true);
     expect(taskHubNeedsAttention('executing')).toBe(false);
     expect(taskHubNeedsAttention('completed')).toBe(false);
+  });
+
+  it('classifies task status into hub display tones', () => {
+    // Terminal states each get a distinct icon tone…
+    expect(taskHubStatusTone('completed')).toBe('completed');
+    expect(taskHubStatusTone('partial_success')).toBe('partial_success');
+    expect(taskHubStatusTone('failed')).toBe('failed');
+    expect(taskHubStatusTone('awaiting_user')).toBe('awaiting');
+    expect(taskHubStatusTone('cancelled')).toBe('cancelled');
+    // …while every non-terminal status collapses to 'running'.
+    expect(taskHubStatusTone('pending')).toBe('running');
+    expect(taskHubStatusTone('planning')).toBe('running');
+    expect(taskHubStatusTone('queued')).toBe('running');
+    expect(taskHubStatusTone('executing')).toBe('running');
+    expect(taskHubStatusTone('paused')).toBe('running');
+    expect(taskHubStatusTone('mystery')).toBe('running');
   });
 
   it('keys history requests to the active filter set', () => {

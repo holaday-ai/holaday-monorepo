@@ -100,6 +100,31 @@ export function taskHubNeedsAttention(status: string): boolean {
   return status === 'awaiting_user';
 }
 
+/**
+ * Display tone for a task row's status icon, shared across the hub
+ * surfaces (history / starred). Collapses the non-terminal statuses
+ * (pending / planning / queued / executing / paused) into a single
+ * 'running' bucket so callers only branch on the states that get a
+ * distinct icon. Kept as a pure classifier so the icon choice is
+ * unit-testable without rendering.
+ */
+export type TaskHubStatusTone =
+  | 'completed'
+  | 'partial_success'
+  | 'failed'
+  | 'awaiting'
+  | 'cancelled'
+  | 'running';
+
+export function taskHubStatusTone(status: string): TaskHubStatusTone {
+  if (status === 'completed') return 'completed';
+  if (status === 'partial_success') return 'partial_success';
+  if (status === 'failed') return 'failed';
+  if (status === 'awaiting_user') return 'awaiting';
+  if (status === 'cancelled') return 'cancelled';
+  return 'running';
+}
+
 export function taskHubErrorMessage(err: unknown, fallback = '请稍后重试'): string {
   return pageErrorMessage(err, fallback);
 }

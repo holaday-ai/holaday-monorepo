@@ -1,4 +1,4 @@
-import { AlertCircle, Loader2, Pin, PinOff } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, Pin, PinOff, XCircle } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTaskStore } from '@/stores/task-store';
@@ -15,6 +15,7 @@ import {
   taskHubLoadErrorCopy,
   taskHubLoadMoreErrorCopy,
   taskHubNeedsAttention,
+  taskHubStatusTone,
   type NormalizedTaskHubRow,
 } from '@/lib/task-hub-state';
 import { taskStatusLabel } from '@/lib/task-status-copy';
@@ -296,10 +297,31 @@ export function StarredPage(): JSX.Element {
 }
 
 function PinnedStatusIcon({ status }: { status: string }): JSX.Element {
-  if (taskHubNeedsAttention(status)) {
+  // Surface the exceptional terminal states (awaiting / failed /
+  // partial) with the same icon vocabulary as the history page so a
+  // pinned task that needs the user's attention is spottable at a
+  // glance — previously every non-awaiting pin showed an identical
+  // Pin icon, hiding failures behind the status label text. Healthy
+  // pins (completed / running / cancelled) keep the Pin affordance.
+  const tone = taskHubStatusTone(status);
+  if (tone === 'awaiting') {
     return (
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#FFC910]/55 bg-[#FFC910]/15 text-[#8A6A00]">
         <AlertCircle className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  if (tone === 'failed') {
+    return (
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#EA1F59]/45 bg-[#EA1F59]/10 text-[#EA1F59]">
+        <XCircle className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  if (tone === 'partial_success') {
+    return (
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#FFC910]/55 bg-[#FFC910]/15 text-[#8A6A00]">
+        <CheckCircle2 className="h-3.5 w-3.5" />
       </span>
     );
   }
