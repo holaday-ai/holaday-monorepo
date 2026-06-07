@@ -79,6 +79,13 @@ describe('buildLayeredSystemPrompt', () => {
     expect(out).toContain('不要把它当成已验证事实');
   });
 
+  it('requires user confirmation before transactional final submits', () => {
+    const out = buildLayeredSystemPrompt('none');
+    expect(out).toContain('预订 / 预约 / 报名 / 投递 / 加购 / 结账');
+    expect(out).toContain('不要点击最终确认 / 提交预约 / 提交报名 / 提交申请 / 确认预订 / Place order');
+    expect(out).toContain('先展示对象、时间、价格、费用、收件人/申请对象和关键条款');
+  });
+
   it('falls back to Base + Style when role id is unknown', () => {
     const out = buildLayeredSystemPrompt('not-a-real-role');
     expect(out).toContain(BASE_PROMPT);

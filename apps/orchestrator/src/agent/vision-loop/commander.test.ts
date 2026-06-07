@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { LlmCallRecord, LlmCallRecorder } from '../llm-call-recorder.js';
 import {
+  A11Y_SYSTEM_PROMPT,
   type AccessibilityLoopContext,
   AnthropicVisionLoopCommander,
   VISION_SYSTEM_PROMPT,
@@ -707,5 +708,17 @@ describe('VISION_SYSTEM_PROMPT — anti-hallucination guardrail', () => {
     // false positives for minimal real pages.
     expect(VISION_SYSTEM_PROMPT).toMatch(/Current URL/);
     expect(VISION_SYSTEM_PROMPT).toMatch(/不要凭截图的视觉空白程度猜/);
+  });
+
+  it('stops before transactional final submits and reports a preview', () => {
+    expect(VISION_SYSTEM_PROMPT).toMatch(/预订 \/ 预约 \/ 报名 \/ 投递 \/ 加购 \/ 结账 \/ 发邮件 \/ 发消息/);
+    expect(VISION_SYSTEM_PROMPT).toMatch(/不要点击最终的"确认预订 \/ 提交预约 \/ 提交报名 \/ 提交申请 \/ Place order \/ Send \/ Pay"/);
+    expect(VISION_SYSTEM_PROMPT).toMatch(/未点击最终提交\/支付\/发送/);
+  });
+
+  it('applies the same transactional guardrail in accessibility mode', () => {
+    expect(A11Y_SYSTEM_PROMPT).toMatch(/预订 \/ 预约 \/ 报名 \/ 投递 \/ 加购 \/ 结账 \/ 发邮件 \/ 发消息/);
+    expect(A11Y_SYSTEM_PROMPT).toMatch(/不要点击最终的"确认预订 \/ 提交预约 \/ 提交报名 \/ 提交申请 \/ Place order \/ Send \/ Pay"/);
+    expect(A11Y_SYSTEM_PROMPT).toMatch(/未点击最终提交\/支付\/发送/);
   });
 });
