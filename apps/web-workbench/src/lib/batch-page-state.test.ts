@@ -6,6 +6,7 @@ import {
   batchListSummary,
   batchProgressPercent,
   batchRemainingCount,
+  batchShouldPoll,
   batchStatusCopy,
   normalizeBatchDetail,
   normalizeBatchRows,
@@ -105,6 +106,15 @@ describe('batch page state helpers', () => {
     );
     expect(batchErrorMessage('批量任务不存在')).toBe('批量任务不存在');
     expect(batchErrorMessage({})).toBe('请稍后重试');
+  });
+
+  it('polls only batches that can still make progress', () => {
+    expect(batchShouldPoll('pending')).toBe(true);
+    expect(batchShouldPoll('running')).toBe(true);
+    expect(batchShouldPoll('completed')).toBe(false);
+    expect(batchShouldPoll('partial')).toBe(false);
+    expect(batchShouldPoll('cancelled')).toBe(false);
+    expect(batchShouldPoll(null)).toBe(false);
   });
 
   it('normalizes malformed batch counters before rendering', () => {

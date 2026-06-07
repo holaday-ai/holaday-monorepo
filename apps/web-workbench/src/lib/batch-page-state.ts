@@ -151,6 +151,10 @@ export function batchErrorMessage(err: unknown, fallback = '请稍后重试'): s
   return pageErrorMessage(err, fallback);
 }
 
+export function batchShouldPoll(status: string | null | undefined): boolean {
+  return status === 'pending' || status === 'running';
+}
+
 export function safeBatchCount(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
   return Math.max(0, Math.floor(value));

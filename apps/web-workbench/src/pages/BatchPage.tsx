@@ -28,6 +28,7 @@ import {
   batchFinishedCount,
   batchProgressPercent,
   batchRemainingCount,
+  batchShouldPoll,
   batchStatusCopy,
   safeBatchCount,
 } from '@/lib/batch-page-state';
@@ -365,8 +366,17 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
 
   React.useEffect(() => {
     void reload();
-    // Lightweight polling — WS events update immediately; this keeps
-    // the view correct after reconnects or missed frames.
+  }, [reload]);
+
+  const shouldPollDetail = batchShouldPoll(detail?.status);
+
+  React.useEffect(() => {
+    if (!shouldPollDetail) return undefined;
+    // Lightweight polling while work is still queued/running — WS
+    // events update immediately; this keeps the view correct after
+    // reconnects or missed frames. Terminal batches stop polling so
+    // a reader doesn't get stale refresh errors while reviewing
+    // completed results.
     const handle = setInterval(() => {
       void reload();
     }, 5_000);
@@ -374,7 +384,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
       clearInterval(handle);
       reloadRequestRef.current += 1;
     };
-  }, [reload]);
+  }, [reload, shouldPollDetail]);
 
   React.useEffect(() => {
     return onServerMessage((msg) => {
