@@ -928,23 +928,51 @@ function LiveSubStatusChip({
   }, []);
   const elapsedSec = Math.max(0, Math.floor((now - since) / 1000));
   const showTimer = elapsedSec >= 30;
+  const longRunningHint = liveSubStatusLongRunningHint(subStatus, elapsedSec);
   return (
-    <div className="flex items-center gap-3 text-sm text-muted-foreground">
-      <span className="text-foreground/70">{labels[subStatus]}</span>
-      <span aria-hidden className="flex items-end text-muted-foreground">
-        <span className="hola-typing-dot" />
-        <span className="hola-typing-dot" />
-        <span className="hola-typing-dot" />
-      </span>
-      {showTimer && (
-        <span className="text-[11px] tabular-nums text-muted-foreground/70">
-          {elapsedSec < 60
-            ? `${elapsedSec}s`
-            : `${Math.floor(elapsedSec / 60)}分${elapsedSec % 60}s`}
+    <div className="space-y-1 text-sm text-muted-foreground">
+      <div className="flex items-center gap-3">
+        <span className="text-foreground/70">{labels[subStatus]}</span>
+        <span aria-hidden className="flex items-end text-muted-foreground">
+          <span className="hola-typing-dot" />
+          <span className="hola-typing-dot" />
+          <span className="hola-typing-dot" />
         </span>
+        {showTimer && (
+          <span className="text-[11px] tabular-nums text-muted-foreground/70">
+            {elapsedSec < 60
+              ? `${elapsedSec}s`
+              : `${Math.floor(elapsedSec / 60)}分${elapsedSec % 60}s`}
+          </span>
+        )}
+      </div>
+      {longRunningHint && (
+        <div className="max-w-[42rem] text-xs leading-5 text-muted-foreground/80">
+          {longRunningHint}
+        </div>
       )}
     </div>
   );
+}
+
+export function liveSubStatusLongRunningHint(
+  subStatus: 'planning' | 'browsing' | 'extracting' | 'verifying' | 'generating',
+  elapsedSec: number,
+): string | null {
+  if (elapsedSec < 120) return null;
+  if (elapsedSec >= 300) {
+    if (subStatus === 'browsing') {
+      return '仍在执行网页操作。复杂站点可能需要几分钟，你可以继续等待或稍后回来查看结果。';
+    }
+    return '仍在处理当前任务。你可以继续等待，HOLA DAY 会在完成或需要你配合时更新状态。';
+  }
+  if (subStatus === 'browsing') {
+    return '仍在执行网页操作，不是卡死。遇到登录、风控或慢页面时会多花一点时间。';
+  }
+  if (subStatus === 'extracting' || subStatus === 'verifying') {
+    return '仍在整理和核对结果，不是卡死。';
+  }
+  return null;
 }
 
 function BoardingLine(): JSX.Element {
