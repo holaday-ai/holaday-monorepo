@@ -86,14 +86,13 @@ export interface ClassifyOpts {
  * verb). The user wants the agent to ACT on a page, not just read.
  */
 const INTERACTION_VERBS: readonly string[] = [
-  '比价', '抓取', '截图',
+  '比价',
   '订票', '订机票', '订酒店', '订餐', '挂号',
   '加购',
-  '加入购物车', '结账', '取消订阅', '发送邮件', '发邮件',
+  '加入购物车', '结账',
   // English
   'navigate to', 'fill in', 'fill out',
   'make a reservation',
-  'sign up', 'send email', 'send an email',
   'add to cart',
 ];
 
@@ -105,8 +104,13 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/(?:操作).{0,24}(?:网页|页面|网站|后台|这个|这|该)/i, '中文页面操作'],
   [/(?:登录|登陆|登入)(?!页|率|流程|体验|文案|策略).{0,24}(?:账号|账户|后台|网站|平台|app|系统|淘宝|天猫|京东|拼多多|小红书|微博|知乎|抖音|b站|bilibili|github|linkedin|amazon|gmail|我的|这个|该)/i, '中文登录账号'],
   [/(?:帮我|给我|替我|为我)?下单(?!率).{0,24}(?:订单|商品|外卖|咖啡|奶茶|餐|票|这个|这|该|它|杯|份|个|件)/i, '中文下单'],
+  [/(?:抓取(?!率).{0,24}(?:页面|网页|网站|数据|表格|列表|这个|这|该|链接|内容))/i, '中文抓取页面'],
+  [/(?:(?:截图|截屏)(?!率).{0,24}(?:页面|网页|网站|屏幕|结果|证据|这个|这|该)|(?:给|帮我给|帮我|为).{0,16}(?:页面|网页|网站|这个|这|该).{0,12}(?:截图|截屏))/i, '中文截图页面'],
+  [/(?:取消订阅(?!率).{0,24}(?:服务|邮件|会员|这个|这|该|它|账号|账户)|(?:点击|点).{0,12}取消订阅(?:按钮|链接)?)/i, '中文取消订阅'],
   [/\b(?:log\s+in|sign\s+in)(?!\s+(?:page|rate|flow|experience|copy|strategy))\s+(?:to|into|on)?\s*(?:my\s+|the\s+)?(?:account|dashboard|website|site|app|gmail|amazon|github|linkedin|reddit|youtube|instagram|tiktok|twitter|x\.com)\b/i, 'login to site'],
   [/\b(?:log|sign)\s+into\s+(?:my\s+|the\s+)?(?:account|dashboard|website|site|app|gmail|amazon|github|linkedin|reddit|youtube|instagram|tiktok|twitter|x\.com)\b/i, 'login to site'],
+  [/\bsign\s+up\s+for\s+(?:this\s+)?(?:event|webinar|class|course|workshop|conference|account|trial|newsletter)\b/i, 'sign up for service'],
+  [/\bsend\s+(?:an?\s+|this\s+)?(?:email|message|dm|direct message)(?!\s+(?:open rate|click rate|conversion|copy|strategy|analysis|report))\b/i, 'send message'],
   [/\b(?:open|visit|go to)\s+(?:https?:\/\/|www\.|[a-z0-9.-]+\.(?:com|cn|ai|net|org)|(?:the\s+)?(?:website|webpage|page|link|dashboard|app|site)|(?:amazon|github|linkedin|gmail|reddit|youtube|instagram|tiktok|twitter|x\.com))\b/i, 'open page'],
   [/\b(?:open|visit|go to)\s+(?:the\s+)?(?:amazon|github|linkedin|gmail|reddit|youtube|instagram|tiktok|twitter|x\.com)(?:\s+(?:product|profile|page|site|listing|dashboard|app))*\b/i, 'open platform page'],
   [/\bclick\s+(?:the\s+|this\s+|that\s+)?(?:button|link|menu|tab|option|submit|continue|next|login|sign in|confirm|buy|pay|download)\b/i, 'click control'],
@@ -116,7 +120,7 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/(?<!制)(?:帮我|给我|替我|为我)?预约.{0,24}(?:医生|牙医|门诊|挂号|服务|面试|会议|咨询|体检|维修|上门|时间|今天|明天|后天|周[一二三四五六日天]|下周)/i, '中文预约服务'],
   [/(?:帮我|给我|替我|为我)?报名.{0,24}(?:活动|课程|会议|讲座|班|workshop|webinar|conference)/i, '中文报名活动'],
   [/(?:帮我|给我|替我|为我)?投递.{0,24}(?:简历|岗位|职位|工作|job|role|position)/i, '中文投递职位'],
-  [/(?:帮我|给我|替我|为我)?(?:发|发送|回复).{0,24}(?:邮件|消息|私信|短信|微信|email|gmail)/i, '中文发送消息'],
+  [/(?:帮我|给我|替我|为我)?(?:发|发送|回复).{0,24}(?:邮件|消息|私信|短信|微信|email|gmail)(?!打开率|点击率|转化|文案|策略|分析|报告)/i, '中文发送消息'],
   [/(?:帮我|给我|替我|为我)?(?:把|将)?.{0,24}(?:放进|加入|添加).{0,24}(?:购物车|cart)/i, '中文加入购物车'],
   [/(?:帮我|给我|替我|为我)?(?:去)?结算.{0,24}(?:订单|商品|购物车|这个|它)/i, '中文结算'],
   [/(?:帮我|给我|替我|为我|去)(?:付款|支付)|(?:付款|支付).{0,16}(?:订单|商品|费用|尾款|这个|它)/i, '中文支付'],
@@ -131,7 +135,7 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/\bregister\s+for\s+(?:this\s+)?(?:event|webinar|class|course|workshop|conference)\b/i, 'register for event'],
   [/\bapply\s+(?:for|to)\s+(?:this\s+)?(?:job|role|position|opening|listing)\b/i, 'apply for job'],
   [/\bapply\s+(?:on|in)\s+(?:linkedin|indeed|greenhouse|lever)\b/i, 'apply on job site'],
-  [/\b(?:send|reply\s+to)\s+(?:a\s+|an\s+|this\s+)?(?:email|message|dm|direct message)\b/i, 'send message'],
+  [/\b(?:send|reply\s+to)\s+(?:a\s+|an\s+|this\s+)?(?:email|message|dm|direct message)(?!\s+(?:open rate|click rate|conversion|copy|strategy|analysis|report))\b/i, 'send message'],
   [/\bmessage\s+(?:on|in)\s+(?:linkedin|slack|gmail|whatsapp|telegram|discord|instagram|facebook)\b/i, 'message on platform'],
   [/\badd\s+.{1,80}\s+to\s+(?:the\s+)?cart\b/i, 'add item to cart'],
   [/\b(?:add|put)\s+.{1,80}\s+(?:in|into)\s+(?:the\s+)?cart\b/i, 'add item to cart'],

@@ -429,6 +429,10 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       '下载这个文件',
       '访问京东商品页',
       '操作这个后台页面',
+      '抓取这个页面的数据',
+      '给这个页面截图',
+      '取消订阅这个服务',
+      '点击取消订阅按钮',
     ]) {
       const out = await classifyExecutionMode({
         intent,
@@ -444,9 +448,11 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       'visit the Amazon product page',
       'log in to Gmail',
       'sign into the dashboard',
+      'sign up for this webinar',
       'click the submit button',
       'submit the application form',
       'download this PDF',
+      'send an email in Gmail',
     ]) {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
       expect(out).toBe('browser');
@@ -464,6 +470,11 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       '登录页转化率优化',
       '登录流程体验分析',
       '下单率提升策略',
+      '取消订阅率下降分析',
+      '抓取率是什么意思',
+      '截图率统计',
+      '发送邮件打开率分析',
+      '取消订阅按钮文案优化',
     ]) {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
       expect(out).toBe('generate');
@@ -476,7 +487,9 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       'visit volume analysis',
       'click-through rate strategy',
       'sign in page conversion strategy',
+      'sign up conversion strategy',
       'log in flow copy review',
+      'send email open rate report',
       'submission rate report',
       'download growth report',
     ]) {
