@@ -581,6 +581,16 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       'update this customer note in Salesforce',
       'download a receipt in Stripe',
       'create a bug issue in Jira',
+      '在 Shopify 后台创建一个折扣码草稿',
+      '在 Zendesk 回复这张工单草稿',
+      '在 Intercom 给这个用户添加一条备注',
+      '在 Linear 创建一个 bug issue 草稿',
+      '在 Monday.com 新建一个项目任务',
+      'create a discount code draft in Shopify',
+      'reply to this support ticket in Zendesk',
+      'add a user note in Intercom',
+      'create a bug issue in Linear',
+      'create a project task in Monday.com',
     ];
     for (const intent of cases) {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
@@ -610,6 +620,11 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       'Trello 看板模板',
       'Asana 任务拆解方法',
       'Jira bug 模板',
+      'Shopify 店铺转化率报告',
+      'Zendesk 工单回复模板',
+      'Intercom onboarding 消息策略',
+      'Linear issue 模板',
+      'Monday.com 项目管理分析',
       'Slack 团队公告文案',
       'GitHub README 模板',
       'GitHub issue 模板',

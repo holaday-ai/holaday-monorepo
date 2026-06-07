@@ -217,17 +217,18 @@ export function classifyAsSimpleSearch(intent: string): boolean {
     'google forms', 'google docs', 'google sheets', 'google slides',
     'google calendar', 'gmail', 'slack', 'notion', '飞书', 'github',
     'hubspot', 'salesforce', 'stripe', 'calendly', 'trello', 'asana', 'jira',
+    'shopify', 'zendesk', 'intercom', 'linear', 'monday',
     'linkedin',
   ];
   const LIVE_APP_ACTION_HINTS = [
     '筛选', '排序', '选择', '勾选', '切换', '设置',
     '收藏', '保存筛选', '保存条件', '直飞',
     '草稿', '创建', '新建', '填写', '写一封', '撰写', '更新',
-    '查找', '搜索', '下载', '添加', '安排', '预约', '停在',
+    '查找', '搜索', '下载', '添加', '安排', '预约', '回复', '停在',
     '付款前', '支付前', '提交前', '确认前',
     'filter', 'sort', 'favorite', 'bookmark', 'save filter',
     'draft', 'compose', 'create', 'update', 'find', 'download',
-    'schedule', 'add', 'fill out', 'before payment',
+    'schedule', 'add', 'reply', 'fill out', 'before payment',
     'before checkout', 'before submit',
   ];
   if (

@@ -159,6 +159,16 @@ describe('selectModelAndEffort', () => {
     'update this customer note in Salesforce',
     'download a receipt in Stripe',
     'create a bug issue in Jira',
+    '在 Shopify 后台创建一个折扣码草稿',
+    '在 Zendesk 回复这张工单草稿',
+    '在 Intercom 给这个用户添加一条备注',
+    '在 Linear 创建一个 bug issue 草稿',
+    '在 Monday.com 新建一个项目任务',
+    'create a discount code draft in Shopify',
+    'reply to this support ticket in Zendesk',
+    'add a user note in Intercom',
+    'create a bug issue in Linear',
+    'create a project task in Monday.com',
   ])('live app workflow → Sonnet 4.6 high: %s', (intent) => {
     expect(selectModelAndEffort(intent, 'none')).toEqual({
       model: 'claude-sonnet-4-6',
@@ -233,6 +243,16 @@ describe('getTaskBudget', () => {
     'update this customer note in Salesforce',
     'download a receipt in Stripe',
     'create a bug issue in Jira',
+    '在 Shopify 后台创建一个折扣码草稿',
+    '在 Zendesk 回复这张工单草稿',
+    '在 Intercom 给这个用户添加一条备注',
+    '在 Linear 创建一个 bug issue 草稿',
+    '在 Monday.com 新建一个项目任务',
+    'create a discount code draft in Shopify',
+    'reply to this support ticket in Zendesk',
+    'add a user note in Intercom',
+    'create a bug issue in Linear',
+    'create a project task in Monday.com',
   ])('live app workflow → 200K budget: %s', (intent) => {
     expect(getTaskBudget(intent, 'none')).toBe(200_000);
   });
