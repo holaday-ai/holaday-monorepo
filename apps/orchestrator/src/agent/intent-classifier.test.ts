@@ -438,6 +438,19 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
     }
   });
 
+  it('English page control verbs with concrete objects → browser', async () => {
+    for (const intent of [
+      'open https://example.com',
+      'visit the Amazon product page',
+      'click the submit button',
+      'submit the application form',
+      'download this PDF',
+    ]) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out).toBe('browser');
+    }
+  });
+
   it('中文 interaction metrics stay generate', async () => {
     for (const intent of [
       '点击率优化方案',
@@ -446,6 +459,19 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       '访问量趋势分析',
       '打开率提升策略',
       '操作系统安全报告',
+    ]) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out).toBe('generate');
+    }
+  });
+
+  it('English interaction metrics stay generate', async () => {
+    for (const intent of [
+      'open rate optimization plan',
+      'visit volume analysis',
+      'click-through rate strategy',
+      'submission rate report',
+      'download growth report',
     ]) {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
       expect(out).toBe('generate');
