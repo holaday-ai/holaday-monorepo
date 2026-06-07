@@ -1555,7 +1555,7 @@ export function BrowserPanel({
                   <div
                     role="status"
                     aria-live="polite"
-                    className="pointer-events-none absolute right-2 top-2 rounded bg-[#FFC910]/95 px-2 py-0.5 text-[10px] font-semibold text-[#595757] shadow-sm"
+                    className="pointer-events-none absolute left-1/2 top-3 max-w-[calc(100%-1.5rem)] -translate-x-1/2 truncate rounded-full bg-[#FFC910]/95 px-3 py-1 text-[11px] font-semibold text-[#595757] shadow-sm"
                   >
                     浏览器画面断开，正在自动重连
                   </div>
@@ -1762,7 +1762,7 @@ export function BrowserPanel({
                       </div>
                     </div>
                     {finalEvidenceCanPan && (
-                      <div className="mx-auto max-w-full truncate rounded-full bg-black/45 px-2 py-0.5 text-center text-[10px] font-medium text-white shadow-sm backdrop-blur">
+                      <div className="mx-auto max-w-full truncate rounded-full bg-black/45 px-3 py-1 text-center text-[11px] font-medium text-white shadow-sm backdrop-blur">
                         已居中，可左右滑动查看
                       </div>
                     )}
@@ -1778,7 +1778,7 @@ export function BrowserPanel({
                         })}
                       </span>
                       {finalEvidenceFrame.url && finalEvidenceFrame.url !== 'about:blank' && (
-                        <span className="block max-w-full truncate font-mono text-[10px] text-muted-foreground">
+                        <span className="block max-w-full truncate font-mono text-[11px] text-muted-foreground">
                           {finalEvidenceFrame.url}
                         </span>
                       )}
@@ -1827,7 +1827,7 @@ export function BrowserPanel({
             )}
           </div>
           {liveBrowserCanPan && useVnc && !hibernated && !interactiveActive && !showLiveOverlay && (
-            <div className="pointer-events-none absolute left-1/2 top-20 z-20 max-w-[calc(100%-1rem)] -translate-x-1/2 truncate rounded-full bg-black/45 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm backdrop-blur">
+            <div className="pointer-events-none absolute left-1/2 top-20 z-20 max-w-[calc(100%-1rem)] -translate-x-1/2 truncate rounded-full bg-black/45 px-3 py-1 text-[11px] font-medium text-white shadow-sm backdrop-blur">
               左右滑动查看页面
             </div>
           )}
@@ -1882,14 +1882,14 @@ function ActivityOverlay({
       className={cn(
         'pointer-events-none absolute rounded-md bg-black/55 text-white backdrop-blur-md',
         compact
-          ? 'inset-x-1 bottom-1 px-2 py-1 text-[10px]'
+          ? 'inset-x-1 bottom-1 px-2.5 py-1.5 text-[11px]'
           : 'inset-x-2 bottom-2 px-3 py-2 text-[11px]',
       )}
     >
       <div
         className={cn(
           'pointer-events-auto flex items-center justify-between uppercase tracking-wider text-white/70',
-          compact ? 'mb-0.5 text-[9px]' : 'mb-1 text-[10px]',
+          compact ? 'mb-1 text-[10px]' : 'mb-1 text-[10px]',
         )}
       >
         <span>最近操作</span>
