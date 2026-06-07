@@ -41,6 +41,17 @@ describe('markdown code block state', () => {
     );
   });
 
+  it('treats explicit diagram languages as diagrams instead of code', () => {
+    expect(markdownCodeBlockMeta('language-mermaid', 'flowchart TD\n  A --> B')).toEqual({
+      label: '图示',
+      copyLabel: '内容',
+      copiedToast: '已复制内容',
+      codeLike: true,
+      variant: 'diagram',
+    });
+    expect(markdownCodeBlockMeta('language-flowchart', 'A -> B').copyLabel).toBe('内容');
+  });
+
   it('falls back to a plain text block', () => {
     expect(markdownCodeBlockMeta(undefined, '这是一段需要保留换行的说明。')).toEqual({
       label: '文本块',

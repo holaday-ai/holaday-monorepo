@@ -23,11 +23,30 @@ const KNOWN_LANGUAGE_LABELS: Record<string, string> = {
   yml: 'YAML',
 };
 
+const DIAGRAM_LANGUAGE_LABELS: Record<string, string> = {
+  ascii: '图示',
+  diagram: '图示',
+  flowchart: '图示',
+  graph: '图示',
+  mermaid: '图示',
+  sequence: '图示',
+};
+
 export function markdownCodeBlockMeta(
   className: string | undefined,
   text: string,
 ): MarkdownCodeBlockMeta {
   const raw = className?.replace(/^language-/, '').trim().toLowerCase();
+  if (raw && DIAGRAM_LANGUAGE_LABELS[raw]) {
+    return {
+      label: DIAGRAM_LANGUAGE_LABELS[raw],
+      copyLabel: '内容',
+      copiedToast: '已复制内容',
+      codeLike: true,
+      variant: 'diagram',
+    };
+  }
+
   if (raw) {
     return {
       label: KNOWN_LANGUAGE_LABELS[raw] ?? raw.toUpperCase(),
