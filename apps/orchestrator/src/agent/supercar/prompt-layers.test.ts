@@ -86,6 +86,14 @@ describe('buildLayeredSystemPrompt', () => {
     expect(out).toContain('先展示对象、时间、价格、费用、收件人/申请对象和关键条款');
   });
 
+  it('asks for missing transactional inputs before opening the browser', () => {
+    const out = buildLayeredSystemPrompt('none');
+    expect(out).toContain('交易/预约类任务的最小信息检查');
+    expect(out).toContain('不要先打开网页乱试');
+    expect(out).toContain('一次只问 1-3 个最关键问题');
+    expect(out).toContain('[AWAITING_USER_INPUT]');
+  });
+
   it('falls back to Base + Style when role id is unknown', () => {
     const out = buildLayeredSystemPrompt('not-a-real-role');
     expect(out).toContain(BASE_PROMPT);
