@@ -42,7 +42,7 @@ export function readableScreencastStartScrollLeft(input: {
   ) {
     return 0;
   }
-  return 0;
+  return Math.max(0, Math.floor((input.contentWidth - input.hostWidth) / 2));
 }
 
 export function fitScreencastContain({

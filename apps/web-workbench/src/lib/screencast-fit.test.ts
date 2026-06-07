@@ -9,10 +9,19 @@ import {
 } from './screencast-fit';
 
 describe('readableScreencastStartScrollLeft', () => {
-  it('opens wide readable browser content at the left edge in portrait sheets', () => {
+  it('opens wide readable browser content around the center in portrait sheets', () => {
     expect(
       readableScreencastStartScrollLeft({
         contentWidth: 896,
+        hostWidth: 540,
+      }),
+    ).toBe(178);
+  });
+
+  it('keeps readable browser content pinned when it already fits', () => {
+    expect(
+      readableScreencastStartScrollLeft({
+        contentWidth: 390,
         hostWidth: 540,
       }),
     ).toBe(0);
