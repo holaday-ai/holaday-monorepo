@@ -711,16 +711,16 @@ describe('VISION_SYSTEM_PROMPT — anti-hallucination guardrail', () => {
   });
 
   it('stops before transactional final submits and reports a preview', () => {
-    expect(VISION_SYSTEM_PROMPT).toMatch(/预订 \/ 预约 \/ 报名 \/ 投递 \/ 加购 \/ 结账 \/ 发邮件 \/ 发消息 \/ 取消订阅 \/ 退订 \/ 删除 \/ 注销 \/ 关闭账户/);
-    expect(VISION_SYSTEM_PROMPT).toMatch(/不要点击最终的"确认预订 \/ 提交预约 \/ 提交报名 \/ 提交申请 \/ Place order \/ Send \/ Pay \/ Confirm \/ Delete \/ Unsubscribe"/);
-    expect(VISION_SYSTEM_PROMPT).toMatch(/未点击最终提交\/支付\/发送\/删除\/退订/);
+    expect(VISION_SYSTEM_PROMPT).toMatch(/预订 \/ 预约 \/ 报名 \/ 投递 \/ 加购 \/ 结账 \/ 发邮件 \/ 发消息 \/ 分享文件 \/ 改权限 \/ 取消订阅 \/ 退订 \/ 删除 \/ 注销 \/ 关闭账户/);
+    expect(VISION_SYSTEM_PROMPT).toMatch(/不要点击最终的"确认预订 \/ 提交预约 \/ 提交报名 \/ 提交申请 \/ Place order \/ Send \/ Pay \/ Confirm \/ Share \/ Change access \/ Delete \/ Unsubscribe"/);
+    expect(VISION_SYSTEM_PROMPT).toMatch(/未点击最终提交\/支付\/发送\/分享\/改权限\/删除\/退订/);
     expect(VISION_SYSTEM_PROMPT).toMatch(/停在最终确认页/);
   });
 
   it('applies the same transactional guardrail in accessibility mode', () => {
-    expect(A11Y_SYSTEM_PROMPT).toMatch(/预订 \/ 预约 \/ 报名 \/ 投递 \/ 加购 \/ 结账 \/ 发邮件 \/ 发消息 \/ 取消订阅 \/ 退订 \/ 删除 \/ 注销 \/ 关闭账户/);
-    expect(A11Y_SYSTEM_PROMPT).toMatch(/不要点击最终的"确认预订 \/ 提交预约 \/ 提交报名 \/ 提交申请 \/ Place order \/ Send \/ Pay \/ Confirm \/ Delete \/ Unsubscribe"/);
-    expect(A11Y_SYSTEM_PROMPT).toMatch(/未点击最终提交\/支付\/发送\/删除\/退订/);
+    expect(A11Y_SYSTEM_PROMPT).toMatch(/预订 \/ 预约 \/ 报名 \/ 投递 \/ 加购 \/ 结账 \/ 发邮件 \/ 发消息 \/ 分享文件 \/ 改权限 \/ 取消订阅 \/ 退订 \/ 删除 \/ 注销 \/ 关闭账户/);
+    expect(A11Y_SYSTEM_PROMPT).toMatch(/不要点击最终的"确认预订 \/ 提交预约 \/ 提交报名 \/ 提交申请 \/ Place order \/ Send \/ Pay \/ Confirm \/ Share \/ Change access \/ Delete \/ Unsubscribe"/);
+    expect(A11Y_SYSTEM_PROMPT).toMatch(/未点击最终提交\/支付\/发送\/分享\/改权限\/删除\/退订/);
     expect(A11Y_SYSTEM_PROMPT).toMatch(/停在最终确认页/);
   });
 });

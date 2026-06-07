@@ -331,7 +331,7 @@ Output rules:
   change account settings, or push content live as risk="high".
   Anything the user could want to review before it happens is high risk.
 - Do NOT include the final confirmation action for high-risk flows
-  (Place order, Pay, Send, Confirm booking, Delete, Unsubscribe,
+  (Place order, Pay, Send, Confirm booking, Share, Change access, Delete, Unsubscribe,
   close account). Plan only up to the review / confirmation page so
   the downstream executor can stop and ask the user to confirm.
 - Use payload.url for goto steps; payload.text for type steps;

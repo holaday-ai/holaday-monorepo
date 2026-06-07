@@ -20,6 +20,6 @@ describe('supercar system prompt safety boundaries', () => {
 
   it('keeps first-frame plans from promising high-risk final clicks', () => {
     expect(PLAN_SYSTEM).toContain('到达最终确认页 / 草稿预览页并展示明细');
-    expect(PLAN_SYSTEM).toContain('不要把"点击确认 / Place order / Pay / Send / Delete / Unsubscribe"列为步骤');
+    expect(PLAN_SYSTEM).toContain('不要把"点击确认 / Place order / Pay / Send / Share / Change access / Delete / Unsubscribe"列为步骤');
   });
 });

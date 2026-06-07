@@ -101,6 +101,8 @@ describe('AnthropicPlanner', () => {
       const systemText = JSON.stringify(req.system);
       expect(systemText).toContain('Do NOT include the final confirmation action');
       expect(systemText).toContain('Place order');
+      expect(systemText).toContain('Share');
+      expect(systemText).toContain('Change access');
       expect(systemText).toContain('Delete');
       expect(systemText).toContain('Unsubscribe');
       expect(systemText).toContain('review / confirmation page');
