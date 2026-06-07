@@ -41,6 +41,15 @@ describe('verificationCheckLabel', () => {
       }),
     ).toBe('缺少可验证来源链接');
   });
+
+  it('keeps legacy source-count checks on the same source-link copy path', () => {
+    expect(
+      verificationCheckLabel({
+        type: 'source_count',
+        detail: '缺少来源链接',
+      }),
+    ).toBe('缺少可验证来源链接');
+  });
 });
 
 describe('verificationBannerCopy', () => {
@@ -66,6 +75,19 @@ describe('verificationBannerCopy', () => {
           detail: 'only 0 URL(s) found (global scan), need at least 1',
         },
       ],
+    });
+
+    expect(copy.checks).toEqual(['缺少可验证来源链接']);
+    expect(copy.body).toBe(
+      '答案可先参考，但原始来源链接不足或已被移除，避免把未验证链接当作事实来源。建议重新执行或指定可信来源。',
+    );
+  });
+
+  it('uses the source-link recovery copy for legacy source-count checks', () => {
+    const copy = verificationBannerCopy({
+      level: 'fixable',
+      status: 'partial_success',
+      failedChecks: [{ type: 'source_count', detail: '缺少来源链接' }],
     });
 
     expect(copy.checks).toEqual(['缺少可验证来源链接']);

@@ -19,6 +19,7 @@ export interface VerificationBannerCopy {
 }
 
 const CHECK_TYPE_LABELS: Record<string, string> = {
+  source_count: '缺少来源链接',
   url_count: '缺少来源链接',
   result_count: '结果数量不足',
   price_sort: '价格排序不正确',
@@ -33,7 +34,10 @@ const CHECK_TYPE_LABELS: Record<string, string> = {
 export function verificationCheckLabel(check: VerificationCheck): string {
   const detail = check.detail.trim();
   if (check.type === 'ecommerce_rows' && detail) return detail;
-  if (check.type === 'url_count' && /only\s+0\s+URL|链接数减少|0\s*→/i.test(detail)) {
+  if (
+    (check.type === 'url_count' || check.type === 'source_count') &&
+    /only\s+0\s+URL|链接数减少|0\s*→|缺少来源链接/i.test(detail)
+  ) {
     return '缺少可验证来源链接';
   }
   if (/second-opinion|verifier_fallback|disagrees/i.test(detail)) {
