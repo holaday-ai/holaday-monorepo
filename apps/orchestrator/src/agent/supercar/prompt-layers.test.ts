@@ -79,6 +79,14 @@ describe('buildLayeredSystemPrompt', () => {
     expect(out).toContain('不要把它当成已验证事实');
   });
 
+  it('prevents repeated generic links from posing as per-candidate links', () => {
+    const out = buildLayeredSystemPrompt('none');
+    expect(out).toContain('多候选结果');
+    expect(out).toContain('独立详情页/地点页/预订页');
+    expect(out).toContain('不要把同一个搜索页、地图页、方向页、列表页重复贴到多行');
+    expect(out).toContain('独立链接未取得');
+  });
+
   it('requires user confirmation before transactional final submits', () => {
     const out = buildLayeredSystemPrompt('none');
     expect(out).toContain('预订 / 预约 / 报名 / 投递 / 加购 / 结账 / 取消订阅 / 退订 / 文件分享或权限变更');
