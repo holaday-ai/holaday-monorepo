@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   classifyFriendlyFailure,
+  failureResultCopyText,
   friendlyFailureDetail,
   terminalAllowsRerun,
 } from './failure-copy';
@@ -157,6 +158,23 @@ describe('classifyFriendlyFailure', () => {
     expect(terminalAllowsRerun('partial_success')).toBe(false);
     expect(terminalAllowsRerun('awaiting_user')).toBe(false);
     expect(terminalAllowsRerun('executing')).toBe(false);
+  });
+
+  it('builds friendly, raw-error-free copy text for failed results', () => {
+    // The footer copy/download must never serialise the raw technical
+    // error the user can't read.
+    expect(
+      failureResultCopyText('Protocol error (Page.navigate): Target closed'),
+    ).toBe(
+      '浏览器连接中断\n浏览器会话已断开，请重新执行任务。\n下一步：重新执行任务会建立新的浏览器会话。',
+    );
+    expect(
+      failureResultCopyText('Protocol error (Page.navigate): Target closed'),
+    ).not.toMatch(/Protocol error|Target closed/);
+    // Empty / unknown errors still yield a usable summary, never '' .
+    expect(failureResultCopyText('')).toBe(
+      '任务未能完成\n请重试，或换一种描述方式（更具体的指令、提供示例数据）。\n下一步：换一种更具体的描述后重新执行。',
+    );
   });
 
   it('hides raw English failure details while keeping localized details', () => {

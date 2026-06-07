@@ -203,6 +203,22 @@ export function friendlyFailureDetail(errorText: string): string {
 }
 
 /**
+ * Useful clipboard / download text for a FAILED task. The result
+ * footer's copy & download actions otherwise serialise the raw error
+ * string (the task's resultText), which is the internal technical
+ * message — e.g. "Protocol error (Page.navigate): Target closed" —
+ * exactly the jargon the failure card hides behind humanised copy.
+ * Return the same friendly, actionable summary the user actually
+ * reads (title + what happened + next step), which classifyFriendlyFailure
+ * always renders as clean Chinese (it has a catch-all), so copying a
+ * failed result never yields raw English or an empty string.
+ */
+export function failureResultCopyText(errorText: string): string {
+  const friendly = classifyFriendlyFailure(errorText);
+  return [friendly.title, friendly.subtitle, `下一步：${friendly.nextStep}`].join('\n');
+}
+
+/**
  * Whether a terminal task's result card should offer a "重新执行"
  * (re-run) affordance. Both failed and cancelled tasks point the user
  * at re-running in their recovery copy ("重新执行当前任务" / "需要继续

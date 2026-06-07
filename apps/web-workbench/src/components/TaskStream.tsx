@@ -50,7 +50,7 @@ import {
   externalLinkConfirmDescription,
   safeExternalHttpHref,
 } from '@/lib/external-link-copy';
-import { classifyFriendlyFailure, friendlyFailureDetail, terminalAllowsRerun } from '@/lib/failure-copy';
+import { classifyFriendlyFailure, failureResultCopyText, friendlyFailureDetail, terminalAllowsRerun } from '@/lib/failure-copy';
 import { formatFileSize } from '@/lib/file-size';
 import { downloadFileMetaLabel } from '@/lib/file-download-card-copy';
 import { downloadMarkdownFile } from '@/lib/markdown-download';
@@ -1967,11 +1967,20 @@ function TerminalSummary({
   // user gets what they'd visually read. The markdown copy keeps the raw
   // source so paste into Notion / Slack / a doc editor preserves
   // structure.
-  const plainText = React.useMemo(
-    () => stripMarkdown(displayText) || fallbackPlainText,
-    [displayText, fallbackPlainText],
+  // Failed tasks store the raw technical error in displayText; the
+  // footer copy / download must not serialise that jargon (the failure
+  // card itself only ever shows the humanised version). Substitute the
+  // same friendly summary the user reads. Other terminal states copy
+  // their actual result text unchanged.
+  const copyBodyText = React.useMemo(
+    () => (status === 'failed' ? failureResultCopyText(displayText) : displayText),
+    [status, displayText],
   );
-  const markdownText = displayText.trim() || fallbackPlainText;
+  const plainText = React.useMemo(
+    () => stripMarkdown(copyBodyText) || fallbackPlainText,
+    [copyBodyText, fallbackPlainText],
+  );
+  const markdownText = copyBodyText.trim() || fallbackPlainText;
   const copyTo = React.useCallback(
     async (value: string, label: string): Promise<void> => {
       if (await copyTextToClipboard(value)) {
