@@ -90,18 +90,16 @@ export function WorkbenchApp(): JSX.Element {
   /**
    * Codex Pack B2 + Round 2 P1-8 — three-tier responsive breakpoint:
    *   - desktop  ≥ 1360px → inline split panel (resize handle, flex)
-   *   - tablet   960-1359 → overlay panel (fixed right, backdrop)
-   *   - mobile   < 960px → bottom sheet (unchanged from pre-B2)
+   *   - tablet   1100-1359 → overlay panel (fixed right, backdrop)
+   *   - compact  < 1100px → bottom sheet
    *
    * Round 2 P1-8 bumped the inline threshold from 1200 → 1360. At
    * 1200, the panel's 300-px floor + main's 480-px min-width left
    * ~420 px for the panel header / toolbar / screencast canvas —
    * tight enough that buttons started crowding when an expert
    * report card sat alongside. 1360 gives ~580 px for the panel at
-   * its 540-px default. Common 13" laptops are 1280-px native and
-   * fall into the overlay tier (closer to a focused single-pane
-   * read), which the resize handle inside the overlay drawer would
-   * over-engineer anyway.
+   * its 540-px default. Narrow tablets and 1024-wide desktop windows
+   * use the bottom sheet so the task body is not squeezed sideways.
    */
   const [isDesktop, setIsDesktop] = React.useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
@@ -581,10 +579,10 @@ export function WorkbenchApp(): JSX.Element {
       )}
 
       {/* Codex Pack B2 — three-tier panel rendering:
-          inline (desktop ≥1200) renders here as a flex sibling of the
-          main column; tablet (960-1199) renders below in the overlay
-          branch (fixed right, backdrop); mobile (<960) goes through
-          the existing sheet branch. Only ONE BrowserPanel mount per
+          inline (desktop ≥1360) renders here as a flex sibling of the
+          main column; tablet (1100-1359) renders below in the overlay
+          branch (fixed right, backdrop); compact widths (<1100) go
+          through the sheet branch. Only ONE BrowserPanel mount per
           moment so CdpScreencastViewport doesn't fight itself. */}
       {(panelFullscreen || (showBrowserPanel && isDesktop)) && (
         <div
@@ -633,7 +631,7 @@ export function WorkbenchApp(): JSX.Element {
         </div>
       )}
 
-      {/* Codex Pack B2 — overlay panel (tablet 960-1199). Sits over
+      {/* Codex Pack B2 — overlay panel (tablet 1100-1359). Sits over
           the main column as a fixed right-edge drawer with a backdrop
           tap-to-close. No resize handle (the width is fixed at
           560 px to fit comfortably while leaving room for the main
@@ -679,8 +677,8 @@ export function WorkbenchApp(): JSX.Element {
         </>
       )}
 
-      {/* Bottom-sheet panel: ONLY renders on true mobile (< 960px).
-          Tablet (960-1199) routes through the overlay branch above, so
+      {/* Bottom-sheet panel: renders on compact widths (<1100px).
+          Tablet (1100-1359) routes through the overlay branch above, so
           the sheet doesn't double-mount alongside an overlay. The
           BrowserPanel internally returns null when `open=false`, but
           we ALSO gate the wrapping div on isMobile so the React tree
