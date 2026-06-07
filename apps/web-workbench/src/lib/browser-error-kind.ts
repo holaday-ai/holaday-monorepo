@@ -72,7 +72,11 @@ export function classifyBrowserErrorKind(
   ) {
     return 'page_switch';
   }
-  if (/target closed|session closed|socket_closed|websocket.*closed|browser.*disconnected|cdp.*closed|连接.*中断/.test(text)) {
+  if (
+    /target closed|session closed|socket_closed|websocket.*closed|websocket.*handshake|unexpected response code:\s*502|err_connection_closed|browser.*disconnected|cdp.*closed|连接.*中断/.test(
+      text,
+    )
+  ) {
     return 'transport_closed';
   }
   if (/err_connection_refused|err_connection_reset|err_address_unreachable|err_internet_disconnected/.test(text)) {

@@ -28,6 +28,14 @@ describe('classifyBrowserErrorKind', () => {
     expect(classifyBrowserErrorKind('导航地址无效，请检查后重试')).toBe('invalid_url');
     expect(classifyBrowserErrorKind('浏览器当前没有活动标签页')).toBe('no_active_tab');
     expect(classifyBrowserErrorKind('Protocol error (Page.navigate): Target closed')).toBe('transport_closed');
+    expect(
+      classifyBrowserErrorKind(
+        "WebSocket connection to 'wss://holaday.ai/ws' failed: Error during WebSocket handshake: Unexpected response code: 502",
+      ),
+    ).toBe('transport_closed');
+    expect(classifyBrowserErrorKind('net::ERR_CONNECTION_CLOSED')).toBe(
+      'transport_closed',
+    );
     expect(classifyBrowserErrorKind('Navigation timeout of 15000 ms exceeded')).toBe('timeout');
   });
 });
