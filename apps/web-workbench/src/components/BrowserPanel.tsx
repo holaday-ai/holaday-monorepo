@@ -1799,7 +1799,9 @@ export function BrowserPanel({
                 )}
                 {!isSheet && (
                   <div className={cn('flex shrink-0 items-center justify-center gap-2 border-t bg-background/70 px-3 py-2 text-[12px]', BROWSER_DIVIDER)}>
-                    <span className="text-muted-foreground">想继续操作？新建任务或重新执行。</span>
+                    <span className="text-muted-foreground">
+                      任务已结束；重新执行会新开一次尝试并保留当前记录。
+                    </span>
                     {onReExecute && (
                       <button
                         type="button"
