@@ -21,6 +21,7 @@ import {
   MessageSquare,
   Palette,
   PenTool,
+  PlayCircle,
   Presentation,
   Scale,
   Share2,
@@ -45,6 +46,7 @@ import {
   normalizeSkillToggleResponse,
   skillCardBadge,
   skillCardUsageHint,
+  skillUseActionCopy,
   skillLimitBannerCopy,
   skillLimitMessage,
   skillLoadErrorCopy,
@@ -386,6 +388,12 @@ function SkillCard({
   const toggleTitle = limitBlocked
     ? '已达到技能上限，先停用一个已启用技能'
     : `${skill.enabled ? '停用' : '启用'}${skill.name}`;
+  const useAction = skillUseActionCopy({
+    skillName: skill.name,
+    enabled: skill.enabled,
+    pending,
+    blocked,
+  });
   return (
     <article
       className={cn(
@@ -419,13 +427,19 @@ function SkillCard({
         <Button
           type="button"
           size="sm"
-          variant="outline"
-          className="h-8 shrink-0 rounded-[7px] px-3 text-xs"
+          variant={skill.enabled ? 'default' : 'outline'}
+          className={cn(
+            'h-8 shrink-0 rounded-[7px] px-3 text-xs',
+            skill.enabled &&
+              'bg-[#EA1F59] text-white hover:bg-[#CA174A] focus-visible:ring-[#EA1F59]/25',
+          )}
           disabled={!skill.enabled || pending || blocked}
-          title={skill.enabled ? `用${skill.name}创建任务` : '启用后可用此专家创建任务'}
+          title={useAction.title}
+          aria-label={useAction.ariaLabel}
           onClick={onUse}
         >
-          用此专家
+          {skill.enabled && <PlayCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
+          {useAction.label}
         </Button>
       </div>
       <button

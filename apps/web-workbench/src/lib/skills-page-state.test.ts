@@ -5,6 +5,7 @@ import {
   normalizeSkillToggleResponse,
   skillCardBadge,
   skillCardUsageHint,
+  skillUseActionCopy,
   skillTaskDraft,
   skillLimitBannerCopy,
   skillLimitMessage,
@@ -143,7 +144,7 @@ describe('skills page state helpers', () => {
 
   it('explains how enabled skill cards affect new tasks', () => {
     expect(skillCardUsageHint({ enabled: true, pending: false })).toBe(
-      '可自动匹配，也可直接使用',
+      '会自动匹配；也可立即开始',
     );
     expect(skillCardUsageHint({ enabled: false, pending: false })).toBe(
       '启用后可参与自动匹配',
@@ -154,6 +155,45 @@ describe('skills page state helpers', () => {
     expect(skillCardUsageHint({ enabled: false, pending: false, limitBlocked: true })).toBe(
       '先停用一个技能后可启用',
     );
+  });
+
+  it('builds direct expert action copy for skill cards', () => {
+    expect(
+      skillUseActionCopy({
+        skillName: '增长黑客',
+        enabled: true,
+        pending: false,
+        blocked: false,
+      }),
+    ).toEqual({
+      label: '用此专家',
+      title: '用增长黑客创建任务',
+      ariaLabel: '用增长黑客创建任务',
+    });
+    expect(
+      skillUseActionCopy({
+        skillName: '增长黑客',
+        enabled: false,
+        pending: false,
+        blocked: false,
+      }).label,
+    ).toBe('先启用');
+    expect(
+      skillUseActionCopy({
+        skillName: '增长黑客',
+        enabled: true,
+        pending: true,
+        blocked: false,
+      }).title,
+    ).toBe('正在保存技能选择');
+    expect(
+      skillUseActionCopy({
+        skillName: '增长黑客',
+        enabled: true,
+        pending: false,
+        blocked: true,
+      }).title,
+    ).toBe('另一个技能正在保存，稍后可用此专家创建任务');
   });
 
   it('builds an editable expert task draft from a skill card', () => {

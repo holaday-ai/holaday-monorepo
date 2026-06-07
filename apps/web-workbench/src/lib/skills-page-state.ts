@@ -142,7 +142,46 @@ export function skillCardUsageHint(options: {
 }): string {
   if (options.pending) return '正在保存选择';
   if (!options.enabled && options.limitBlocked) return '先停用一个技能后可启用';
-  return options.enabled ? '可自动匹配，也可直接使用' : '启用后可参与自动匹配';
+  return options.enabled ? '会自动匹配；也可立即开始' : '启用后可参与自动匹配';
+}
+
+export function skillUseActionCopy(options: {
+  readonly skillName: string;
+  readonly enabled: boolean;
+  readonly pending: boolean;
+  readonly blocked: boolean;
+}): {
+  readonly label: string;
+  readonly title: string;
+  readonly ariaLabel: string;
+} {
+  const skillName = safeSkillText(options.skillName) || '专家';
+  if (options.pending) {
+    return {
+      label: '保存中',
+      title: '正在保存技能选择',
+      ariaLabel: '正在保存技能选择',
+    };
+  }
+  if (options.blocked) {
+    return {
+      label: '稍后使用',
+      title: '另一个技能正在保存，稍后可用此专家创建任务',
+      ariaLabel: `稍后用${skillName}创建任务`,
+    };
+  }
+  if (!options.enabled) {
+    return {
+      label: '先启用',
+      title: '启用后可用此专家创建任务',
+      ariaLabel: `启用${skillName}后创建任务`,
+    };
+  }
+  return {
+    label: '用此专家',
+    title: `用${skillName}创建任务`,
+    ariaLabel: `用${skillName}创建任务`,
+  };
 }
 
 export function skillTaskDraft(
