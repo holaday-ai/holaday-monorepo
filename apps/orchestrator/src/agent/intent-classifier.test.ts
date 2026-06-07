@@ -165,6 +165,20 @@ describe('classifyExecutionMode — strong keyword overrides skill hint (Phase 1
     expect(out).toBe('scrape');
   });
 
+  it('English search-pattern signal beats browser skill hints → scrape', async () => {
+    for (const [intent, skillId] of [
+      ['search P1F-G Xiaohongshu camping notes', 'xiaohongshu'],
+      ['look up P1F-H recent posts on Douyin', 'douyin'],
+    ] as const) {
+      const out = await classifyExecutionMode({
+        intent,
+        skillId,
+        logger: fakeLogger(),
+      });
+      expect(out).toBe('scrape');
+    }
+  });
+
   it('URL signal beats douyin skill hint → scrape', async () => {
     const out = await classifyExecutionMode({
       intent: '看一下 https://example.com/p1f-c-page',
@@ -255,6 +269,14 @@ describe('classifyExecutionMode — scrape route (Firecrawl path)', () => {
   it('URL with 分析 verb → scrape', async () => {
     const out = await classifyExecutionMode({
       intent: '总结 https://example.com/article 这篇文章',
+      logger: fakeLogger(),
+    });
+    expect(out).toBe('scrape');
+  });
+
+  it('URL beats non-execution platform topic protection → scrape', async () => {
+    const out = await classifyExecutionMode({
+      intent: '分析 https://linkedin.com/jobs/view/123 的岗位搜索策略',
       logger: fakeLogger(),
     });
     expect(out).toBe('scrape');

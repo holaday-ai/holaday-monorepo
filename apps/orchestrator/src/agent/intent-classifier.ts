@@ -251,6 +251,14 @@ function matchSearchPattern(intent: string): string | null {
   return null;
 }
 
+function matchSearchVerb(intent: string): string | null {
+  for (const verb of SEARCH_VERBS) {
+    const pattern = new RegExp(`(?:^|[\\s，。；、,;:：]|帮我|给我|替我|为我)${verb}(?:一下|一下子|下)?`, 'i');
+    if (pattern.test(intent)) return verb;
+  }
+  return null;
+}
+
 function isNonExecutionPlatformTopic(intent: string): boolean {
   return NON_EXECUTION_PLATFORM_TOPIC_PATTERNS.some((pattern) => pattern.test(intent));
 }
@@ -293,9 +301,6 @@ function decide(intent: string): RouteDecision {
   }
 
   // 2. URL / site / search-verb / info-verb → scrape.
-  if (isNonExecutionPlatformTopic(intent)) {
-    return { mode: 'generate', source: 'default' };
-  }
   const urlMatch = URL_REGEX.exec(intent);
   if (urlMatch) {
     return { mode: 'scrape', source: 'kw:url', match: urlMatch[0].slice(0, 64) };
@@ -304,7 +309,10 @@ function decide(intent: string): RouteDecision {
   if (searchPattern) {
     return { mode: 'scrape', source: 'kw:search-pattern', match: searchPattern };
   }
-  const search = hasAny(intent, SEARCH_VERBS);
+  if (isNonExecutionPlatformTopic(intent)) {
+    return { mode: 'generate', source: 'default' };
+  }
+  const search = matchSearchVerb(intent);
   if (search) {
     return { mode: 'scrape', source: 'kw:search-verb', match: search };
   }
@@ -366,6 +374,7 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
   const STRONG_SIGNAL_SOURCES = new Set([
     'kw:interaction',
     'kw:url',
+    'kw:search-pattern',
     'kw:search-verb',
     'kw:ecommerce-listing',
   ]);
