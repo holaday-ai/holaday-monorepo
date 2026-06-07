@@ -708,6 +708,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
   selectTask(taskId, source = 'ui') {
     if (!taskId) return;
+    if (isLocalPendingTaskId(taskId)) return;
     if (get().selectedTaskId === taskId) {
       // Idempotent: already selected. Still re-hydrate detail —
       // a re-click on the same task is the user asking for fresh
@@ -1086,11 +1087,28 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       set({ error: msg });
       return { error: msg };
     }
+    const pickedViewportProfile =
+      viewportProfile ??
+      get().defaultViewportProfile ??
+      pickDefaultBrowserViewportProfile();
+    const localTaskId = `${LOCAL_PENDING_TASK_PREFIX}${Date.now().toString(36)}_${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    const createdAt = new Date();
+    const pendingTask: UiTask = {
+      taskId: localTaskId,
+      intent,
+      title: '正在创建任务',
+      status: 'executing',
+      tickCount: 0,
+      createdAt,
+      executionMode: inferExecutionModeFromIntent(intent),
+    };
+    set((prev) => ({
+      tasks: [pendingTask, ...prev.tasks],
+      browserInteractive: false,
+    }));
     try {
-      const pickedViewportProfile =
-        viewportProfile ??
-        get().defaultViewportProfile ??
-        pickDefaultBrowserViewportProfile();
       const res = await trpc.tasks.create.mutate({
         intent,
         ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
@@ -1114,14 +1132,13 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       // version-skew window after a deploy.
       const serverExecutionMode = (res as { executionMode?: UiTask['executionMode'] })
         .executionMode;
-      const now = new Date();
       const optimistic: UiTask = {
         taskId: res.taskId,
         intent,
         title: null,
         status: (res.status as UiTaskStatus) ?? 'executing',
         tickCount: 0,
-        createdAt: now,
+        createdAt,
         executionMode: serverExecutionMode ?? inferExecutionModeFromIntent(intent),
       };
       // composerMode flips back to 'task' here. Without this, a user
@@ -1132,7 +1149,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       // browserInteractive clears so the new task starts view-only
       // unless it explicitly needs user action.
       set((prev) => ({
-        tasks: [optimistic, ...prev.tasks.filter((t) => t.taskId !== res.taskId)],
+        tasks: [
+          optimistic,
+          ...prev.tasks.filter(
+            (t) => t.taskId !== res.taskId && t.taskId !== localTaskId,
+          ),
+        ],
         selectedTaskId: res.taskId,
         composerMode: 'task' as const,
         browserInteractive: false,
@@ -1147,7 +1169,10 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       return { taskId: res.taskId };
     } catch (err) {
       const msg = taskStoreError(err);
-      set({ error: msg });
+      set((prev) => ({
+        error: msg,
+        tasks: prev.tasks.filter((t) => t.taskId !== localTaskId),
+      }));
       return { error: msg };
     }
   },
@@ -1636,6 +1661,11 @@ const CONTROL_WORDS: ReadonlySet<string> = new Set([
   'kill',
   'quit',
 ]);
+const LOCAL_PENDING_TASK_PREFIX = 'local_pending_';
+
+function isLocalPendingTaskId(taskId: string): boolean {
+  return taskId.startsWith(LOCAL_PENDING_TASK_PREFIX);
+}
 
 // Dev helper — pins the store on `window.__taskStore` so browser-based
 // smoke tests can inject fake server frames without spinning up the

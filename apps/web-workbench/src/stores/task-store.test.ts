@@ -547,6 +547,54 @@ describe('selectTask detail hydration', () => {
     });
   });
 
+  it('shows a local pending task row while createTask is in flight', async () => {
+    let resolveCreate!: (value: unknown) => void;
+    const createPromise = new Promise((resolve) => {
+      resolveCreate = resolve;
+    });
+    createMutate.mockReturnValueOnce(createPromise as never);
+    listQuery.mockResolvedValueOnce({ tasks: [], nextCursor: null } as never);
+
+    const resultPromise = useTaskStore.getState().createTask('打开 https://example.com', []);
+    const pending = useTaskStore.getState().tasks[0];
+
+    expect(pending).toMatchObject({
+      intent: '打开 https://example.com',
+      title: '正在创建任务',
+      status: 'executing',
+      tickCount: 0,
+    });
+    expect(pending?.taskId).toMatch(/^local_pending_/);
+    expect(useTaskStore.getState().selectedTaskId).toBeNull();
+
+    useTaskStore.getState().selectTask(pending!.taskId, 'ui');
+    expect(useTaskStore.getState().selectedTaskId).toBeNull();
+
+    resolveCreate({
+      taskId: 'tsk_new',
+      status: 'executing',
+      executionMode: 'browser',
+    });
+
+    await expect(resultPromise).resolves.toEqual({ taskId: 'tsk_new' });
+    expect(useTaskStore.getState().tasks.some((t) => t.taskId.startsWith('local_pending_'))).toBe(false);
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      taskId: 'tsk_new',
+      title: null,
+    });
+    expect(['executing', 'queued']).toContain(useTaskStore.getState().tasks[0]?.status);
+  });
+
+  it('removes the local pending task row when createTask fails', async () => {
+    createMutate.mockRejectedValueOnce(new Error('offline') as never);
+
+    const resultPromise = useTaskStore.getState().createTask('打开 https://example.com', []);
+    expect(useTaskStore.getState().tasks[0]?.taskId).toMatch(/^local_pending_/);
+
+    await expect(resultPromise).resolves.toMatchObject({ error: expect.any(String) });
+    expect(useTaskStore.getState().tasks.some((t) => t.taskId.startsWith('local_pending_'))).toBe(false);
+  });
+
   it('sends a default viewport profile for non-workbench create entry points', async () => {
     createMutate.mockResolvedValueOnce({
       taskId: 'tsk_new',
