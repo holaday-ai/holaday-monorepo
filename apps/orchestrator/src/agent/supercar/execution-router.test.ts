@@ -17,6 +17,7 @@ describe('classifyAsSimpleSearch', () => {
       '比较一下京东和天猫的 iPhone 价格',
       '帮我查一下淘宝上这个多少钱',
       'MacBook Air M4 现在多少钱',
+      'find MacBook cases for flight travel',
       '今天上海天气',
       '比特币汇率',
       '明天台北的航班',

@@ -184,16 +184,21 @@ export function classifyAsSimpleSearch(intent: string): boolean {
     'flight', 'flights', 'hotel', 'hotels', 'restaurant', 'restaurants',
     'train ticket', 'tickets',
   ];
-  const TRAVEL_WORKFLOW_ACTIONS = [
+  const TRAVEL_WORKFLOW_ACTIONS_CN = [
     '筛选', '选择', '选出', '直飞', '经停', '转机', '排序',
     '停在', '付款前', '支付前', '确认前', '预订', '预定', '预约', '收藏',
-    'filter', 'select', 'choose', 'nonstop', 'direct flight', 'layover',
-    'sort', 'before payment', 'before checkout', 'before booking',
-    'reserve', 'reservation', 'book',
+  ];
+  const TRAVEL_WORKFLOW_ACTIONS_EN: RegExp[] = [
+    /\bfilter\b/, /\bselect\b/, /\bchoose\b/, /\bnonstop\b/,
+    /\bdirect\s+flight\b/, /\blayover\b/, /\bsort\b/,
+    /\bbefore\s+payment\b/, /\bbefore\s+checkout\b/,
+    /\bbefore\s+booking\b/, /\breserve\b/, /\breservation\b/,
+    /\bbook\b/,
   ];
   if (
     TRAVEL_WORKFLOW_HINTS.some((hint) => lower.includes(hint)) &&
-    TRAVEL_WORKFLOW_ACTIONS.some((hint) => lower.includes(hint))
+    (TRAVEL_WORKFLOW_ACTIONS_CN.some((hint) => lower.includes(hint)) ||
+      TRAVEL_WORKFLOW_ACTIONS_EN.some((pattern) => pattern.test(lower)))
   ) {
     return false;
   }
