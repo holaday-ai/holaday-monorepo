@@ -365,7 +365,7 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
     ];
     for (const intent of cases) {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
-      expect(out).toBe('browser');
+      expect(out, intent).toBe('browser');
     }
   });
 
@@ -578,12 +578,20 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       '在 Google Sheets 创建一个预算表草稿',
       '在 Google Slides 创建一个路演演示文稿草稿',
       '在 Google Calendar 安排一个项目会议但不要发送邀请',
+      '在 Google Drive 找到合同 PDF 并分享链接',
+      '打开 Dropbox 查找发票 PDF 并下载',
+      '在 OneDrive 搜索预算表并导出 PDF',
+      '在 iCloud Drive 上传这个附件到项目文件夹',
       '在飞书创建一个会议纪要文档草稿',
       '在 Slack 给团队频道写一条草稿消息，不要发送',
       '在 GitHub 创建一个 issue 草稿',
       'create a draft issue in GitHub',
       'create a budget spreadsheet in Google Sheets',
       'schedule a project meeting in Google Calendar but do not send invites',
+      'find a PDF in Google Drive and download it',
+      'search Dropbox for contract.pdf and share a link',
+      'use OneDrive to export the budget spreadsheet as PDF',
+      'open iCloud Drive and upload this attachment',
       '在 HubSpot 创建一个联系人草稿',
       '在 Salesforce 更新这个客户备注',
       '在 Stripe dashboard 查找这个付款并下载收据',
@@ -662,6 +670,9 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       'Google Sheets 预算表模板',
       'Google Slides 路演模板',
       'Google Calendar 日程管理策略',
+      'Google Drive 文件管理策略',
+      'Dropbox 文件夹权限模板',
+      'OneDrive 共享链接安全报告',
       'HubSpot 客户生命周期邮件模板',
       'Salesforce pipeline 管理策略',
       'Stripe 付款失败率分析',

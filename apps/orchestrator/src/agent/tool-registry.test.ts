@@ -37,10 +37,16 @@ describe('tool registry', () => {
     '在 Google Docs 新建一个会议纪要文档草稿',
     '在 Google Sheets 创建一个预算表草稿',
     '在 Google Calendar 安排一个项目会议但不要发送邀请',
+    '在 Google Drive 找到合同 PDF 并分享链接',
+    '打开 Dropbox 查找发票 PDF 并下载',
+    '在 OneDrive 搜索预算表并导出 PDF',
     '在 GitHub 创建一个 issue 草稿',
     'create a draft issue in GitHub',
     'create a budget spreadsheet in Google Sheets',
     'schedule a project meeting in Google Calendar but do not send invites',
+    'find a PDF in Google Drive and download it',
+    'search Dropbox for contract.pdf and share a link',
+    'use OneDrive to export the budget spreadsheet as PDF',
     '在 HubSpot 创建一个联系人草稿',
     '在 Salesforce 更新这个客户备注',
     '在 Stripe dashboard 查找这个付款并下载收据',
@@ -98,7 +104,7 @@ describe('tool registry', () => {
     '在 framer.site 编辑一个 landing page 草稿',
     '在 brand.design 创建一个 logo 草稿',
   ])('keeps live app workflows in the hybrid tool profile: %s', (intent) => {
-    expect(classifyTaskType(intent)).toBe('hybrid');
+    expect(classifyTaskType(intent), intent).toBe('hybrid');
   });
 
   it.each([
