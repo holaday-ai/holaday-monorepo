@@ -1753,7 +1753,7 @@ export function BrowserPanel({
                     </div>
                     {finalEvidenceCanPan && (
                       <div className="mx-auto max-w-full truncate rounded-full bg-black/45 px-2 py-0.5 text-center text-[10px] font-medium text-white shadow-sm backdrop-blur">
-                        从左侧开始，左右滑动查看
+                        已居中，可左右滑动查看
                       </div>
                     )}
                   </div>
