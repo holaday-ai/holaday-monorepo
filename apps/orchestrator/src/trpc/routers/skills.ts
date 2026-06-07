@@ -11,12 +11,36 @@
  * one-shot `scripts/split-skills.ts` partitions existing rows.
  */
 
+import { PLAN_CATALOGUE, type PlanId } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { SKILL_META, skillMetaById } from '../../agent/skills/skill-meta.js';
 import { users } from '../../db/schema/users.js';
 import { protectedProcedure, router } from '../trpc.js';
+
+const PLAN_IDS = new Set<string>(Object.keys(PLAN_CATALOGUE));
+const SKILL_ID_SET: ReadonlySet<string> = new Set(SKILL_META.map((skill) => skill.id));
+
+function skillCapForPlan(plan: string | null | undefined): number {
+  if (plan && PLAN_IDS.has(plan)) {
+    return PLAN_CATALOGUE[plan as PlanId].rolesAllowed;
+  }
+  return PLAN_CATALOGUE.free.rolesAllowed;
+}
+
+function skillLimitErrorMessage(plan: string | null | undefined, cap: number): string {
+  if (cap <= 0) return '当前套餐暂不支持启用专家技能';
+  const label = plan === 'pro' ? '专业版' : plan === 'basic' ? '基础版' : '当前套餐';
+  return `${label}最多可启用 ${cap} 个专家技能，请先停用一个技能后再启用新的技能`;
+}
+
+function normalizeSelectedSkillIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(value.filter((skillId): skillId is string => SKILL_ID_SET.has(skillId))),
+  );
+}
 
 /**
  * Read users.selected_skills for the caller. Returns [] when the
@@ -69,15 +93,22 @@ export const skillsRouter = router({
         });
       }
       const [row] = await ctx.db
-        .select({ id: users.id, selectedSkills: users.selectedSkills })
+        .select({ id: users.id, plan: users.plan, selectedSkills: users.selectedSkills })
         .from(users)
         .where(eq(users.externalId, ctx.userId))
         .limit(1);
       if (!row) {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
       }
-      const current = new Set(Array.isArray(row.selectedSkills) ? row.selectedSkills : []);
+      const current = new Set(normalizeSelectedSkillIds(row.selectedSkills));
       const wasEnabled = current.has(input.skillId);
+      const cap = skillCapForPlan(row.plan);
+      if (!wasEnabled && current.size >= cap) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: skillLimitErrorMessage(row.plan, cap),
+        });
+      }
       if (wasEnabled) current.delete(input.skillId);
       else current.add(input.skillId);
       const next = Array.from(current);
@@ -88,3 +119,9 @@ export const skillsRouter = router({
       return { skillId: input.skillId, enabled: !wasEnabled };
     }),
 });
+
+export const __skillsInternals = {
+  normalizeSelectedSkillIds,
+  skillCapForPlan,
+  skillLimitErrorMessage,
+};
