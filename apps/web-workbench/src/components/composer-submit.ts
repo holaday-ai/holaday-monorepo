@@ -25,10 +25,10 @@ export function composerSubmittingStatus(input: {
   readonly hasFollowUpTarget?: boolean;
 }): string {
   if (input.replyMode) {
-    return '已收到回复，正在让 HOLA DAY 继续当前任务...';
+    return '已收到回复，正在继续当前任务…';
   }
   if (input.hasFollowUpTarget) {
-    return '已收到追问，正在创建新任务页...';
+    return '已收到追问，正在打开跟进任务…';
   }
-  return '已收到任务，正在创建任务页...';
+  return '已收到任务，正在打开执行页…';
 }
