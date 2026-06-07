@@ -1143,7 +1143,7 @@ function CaptchaWaitBanner({ wait }: { wait: UiCaptchaWait }): JSX.Element {
         <div className="font-semibold text-foreground">目标网站需要人工验证</div>
         <div className="mt-1 text-xs text-muted-foreground">{wait.message}</div>
         <div className="mt-1 text-xs text-muted-foreground">
-          请在右侧 Chrome 窗口中完成验证，HOLA DAY 将自动继续。
+          请在右侧浏览器中完成验证，HOLA DAY 将自动继续。
         </div>
         <div className="mt-2 text-[11px] font-medium text-[#57479C]">
           自动恢复窗口剩余：{remainingSec}s
@@ -1166,11 +1166,10 @@ function ExecutorFallbackBanner({
       >
         <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-[#EA1F59]" />
         <div className="min-w-0 flex-1 text-sm">
-          <div className="font-semibold text-foreground">反爬保护触发，但扩展未连接</div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            HOLA DAY 想切到 Chrome 扩展继续任务，但没有检测到在线的扩展客户端。请安装并打开
-            HOLA DAY 扩展后重试。
-          </div>
+        <div className="font-semibold text-foreground">反爬保护触发，但扩展未连接</div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          HOLA DAY 想切到本机浏览器扩展继续任务，但没有检测到在线的 HOLA DAY 扩展。请安装并打开扩展后重试。
+        </div>
         </div>
       </div>
     );
@@ -1181,8 +1180,7 @@ function ExecutorFallbackBanner({
       <div className="min-w-0 flex-1 text-sm">
         <div className="font-semibold text-foreground">已切换到浏览器扩展模式执行</div>
         <div className="mt-1 text-xs text-muted-foreground">
-          连续检测到反爬拦截，HOLA DAY 切到 Chrome 扩展继续任务，后续步骤会通过你已登录的
-          Chrome 环境执行。
+          连续检测到反爬拦截，HOLA DAY 切到本机浏览器扩展继续任务，后续步骤会通过你已登录的浏览器环境执行。
         </div>
       </div>
     </div>
