@@ -1305,3 +1305,63 @@ describe('price_sort — only consults parsed items (no prose poisoning)', () =>
     expect(rowCheck!.severity).toBe('fixable');
   });
 });
+
+describe('duplicate candidate links', () => {
+  it('flags multi-candidate rows that reuse one generic map URL', () => {
+    const contract = buildContract({
+      taskId: 'tsk_duplicate_candidate_urls',
+      intent: '找涩谷附近 3 家适合晚餐的餐厅，给名称、评分、链接',
+      executionMode: 'browser',
+    });
+    const repeatedUrl = 'https://www.google.com/maps/dir/?api=1&destination=shibuya';
+    const ledger = ledgerWith('tsk_duplicate_candidate_urls', {
+      fact: `visited ${repeatedUrl}`,
+      sourceType: 'browser_state',
+      sourceDetail: 'goto',
+      confidence: 'observed',
+    });
+    const answer = [
+      '| 餐厅 | 评分 | 链接 |',
+      '|---|---:|---|',
+      `| Uobei Shibuya | 4.2 | [Google Maps](${repeatedUrl}) |`,
+      `| Ichiran Shibuya | 4.1 | [Google Maps](${repeatedUrl}) |`,
+      `| Gyukatsu Motomura | 4.6 | [Google Maps](${repeatedUrl}) |`,
+      '这三家都在涩谷附近，按评价和距离做了筛选。',
+    ].join('\n');
+
+    const result = verifyDeterministic({ contract, ledger, answerText: answer });
+
+    const duplicateCheck = result.checks.find(
+      (c) => c.criterionId === 'generic.duplicate_candidate_urls',
+    );
+    expect(duplicateCheck).toBeDefined();
+    expect(duplicateCheck!.passed).toBe(false);
+    expect(duplicateCheck!.severity).toBe('fixable');
+    expect(duplicateCheck!.detail).toContain('复用了同一个链接');
+  });
+
+  it('allows one answer-level source URL outside structured candidate rows', () => {
+    const contract = buildContract({
+      taskId: 'tsk_single_source_ok',
+      intent: '总结 Wikipedia 上 Example Domain 的用途',
+      executionMode: 'browser',
+    });
+    const url = 'https://en.wikipedia.org/wiki/Example.com';
+    const ledger = ledgerWith('tsk_single_source_ok', {
+      fact: `visited ${url}`,
+      sourceType: 'browser_state',
+      sourceDetail: 'goto',
+      confidence: 'observed',
+    });
+    const answer =
+      `Example Domain 是 IANA 保留用于文档示例的域名，[Wikipedia](${url}) 说明它不面向真实服务。` +
+      '它适合出现在教程、测试说明和不会真实访问第三方系统的示例里。';
+
+    const result = verifyDeterministic({ contract, ledger, answerText: answer });
+
+    expect(
+      result.checks.find((c) => c.criterionId === 'generic.duplicate_candidate_urls'),
+    ).toBeUndefined();
+    expect(result.passed).toBe(true);
+  });
+});

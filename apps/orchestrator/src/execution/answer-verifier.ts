@@ -148,6 +148,9 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   const groundingCheck = checkUrlGrounding(answerText, ledger);
   if (groundingCheck) checks.push(groundingCheck);
 
+  const duplicateCandidateUrlCheck = checkDuplicateCandidateUrls(answerText, contract);
+  if (duplicateCandidateUrlCheck) checks.push(duplicateCandidateUrlCheck);
+
   const constraintCheck = checkConstraints(contract.constraints, ledger);
   if (constraintCheck) checks.push(constraintCheck);
 
@@ -905,6 +908,95 @@ function isLikelyEcommerceAggregateUrl(url: string): boolean {
     if (/(^|\.)amazon\./.test(host) && (path === '/s' || path.startsWith('/s/'))) {
       return true;
     }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function checkDuplicateCandidateUrls(
+  answerText: string,
+  contract: ExecutionContract,
+): CheckResult | null {
+  const rows = extractStructuredItems(answerText).filter(
+    (row) =>
+      row.source !== 'bullet' &&
+      row.name &&
+      row.url &&
+      row.name.trim().length > 0,
+  );
+  if (rows.length < 2) return null;
+
+  const byUrl = new Map<string, ParsedItem[]>();
+  for (const row of rows) {
+    const clean = stripTrailingPunct(row.url!);
+    byUrl.set(clean, [...(byUrl.get(clean) ?? []), row]);
+  }
+
+  for (const [url, group] of byUrl) {
+    if (group.length < 2) continue;
+    const distinctNames = new Set(
+      group
+        .map((row) => normalizeCandidateName(row.name ?? ''))
+        .filter(Boolean),
+    );
+    if (distinctNames.size < 2) continue;
+    const allLinkedRowsUseSameUrl = group.length === rows.length;
+    if (
+      !allLinkedRowsUseSameUrl &&
+      !isLikelyGenericCandidateUrl(url) &&
+      !isMultiCandidateIntent(contract.goal)
+    ) {
+      continue;
+    }
+    return {
+      criterionId: 'generic.duplicate_candidate_urls',
+      criterionType: 'duplicate_candidate_urls',
+      passed: false,
+      checker: 'deterministic',
+      detail:
+        `多候选结果中 ${group.length} 行复用了同一个链接 ${url}；` +
+        '若未取得每项独立链接，应只保留一次总来源，不要把同一个链接放到多行',
+      severity: 'fixable',
+    };
+  }
+
+  return null;
+}
+
+function normalizeCandidateName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\[[^\]]+\]\([^)]+\)/g, '')
+    .replace(URL_RE, '')
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+    .trim();
+}
+
+function stripTrailingPunct(url: string): string {
+  return url.replace(/[)\].,;:，。]+$/, '');
+}
+
+function isMultiCandidateIntent(intent: string): boolean {
+  return /前\s*\d+|top\s*\d+|列表|候选|推荐|对比|比较|餐厅|酒店|航班|机票|商品|产品|地点|工具|结果|options?|candidates?|restaurants?|hotels?|flights?|products?|places?/i.test(
+    intent,
+  );
+}
+
+function isLikelyGenericCandidateUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    const path = u.pathname.toLowerCase();
+    const query = u.search.toLowerCase();
+    if (/google\./.test(host) && /\/maps\/(?:dir|search|place)?/.test(path)) {
+      return true;
+    }
+    if (/maps\.app\.goo\.gl|goo\.gl/.test(host)) return true;
+    if (/search|list|category|results?|query|maps|dir|directions/.test(path)) {
+      return true;
+    }
+    if (/[?&](q|query|keyword|search|wd|s)=/.test(query)) return true;
   } catch {
     return false;
   }

@@ -367,6 +367,47 @@ describe('autoFix — ecommerce empty URLs', () => {
   });
 });
 
+describe('autoFix — duplicate candidate links', () => {
+  it('keeps candidate rows but downgrades repeated generic links to same-source text', () => {
+    const contract = buildContract({
+      taskId: 'tsk_candidate_duplicate_fix',
+      intent: '找涩谷附近 3 家适合晚餐的餐厅，给名称、评分、链接',
+      executionMode: 'browser',
+    });
+    const repeatedUrl = 'https://www.google.com/maps/dir/?api=1&destination=shibuya';
+    const ledger = new EvidenceLedger('tsk_candidate_duplicate_fix');
+    ledger.add({
+      fact: `visited ${repeatedUrl}`,
+      sourceType: 'browser_state',
+      sourceDetail: 'goto',
+      confidence: 'observed',
+    });
+    const answer = [
+      '| 餐厅 | 评分 | 链接 |',
+      '|---|---:|---|',
+      `| Uobei Shibuya | 4.2 | [Google Maps](${repeatedUrl}) |`,
+      `| Ichiran Shibuya | 4.1 | [Google Maps](${repeatedUrl}) |`,
+      `| Gyukatsu Motomura | 4.6 | [Google Maps](${repeatedUrl}) |`,
+      '这三家都在涩谷附近，按评价和距离做了筛选。',
+    ].join('\n');
+
+    const v1 = verifyDeterministic({ contract, ledger, answerText: answer });
+    expect(v1.passed).toBe(false);
+    expect(v1.failureLevel).toBe('fixable');
+
+    const out = autoFix({ contract, ledger, verification: v1, answerText: answer });
+    expect(out.applied.map((op) => op.kind)).toContain('duplicate_candidate_link_drop');
+    expect(out.fixed).toContain('Uobei Shibuya');
+    expect(out.fixed).toContain('Ichiran Shibuya');
+    expect(out.fixed).toContain('Gyukatsu Motomura');
+    expect(out.fixed.match(new RegExp(repeatedUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))).toHaveLength(1);
+    expect(out.fixed).toContain('同一来源页');
+
+    const v2 = verifyDeterministic({ contract, ledger, answerText: out.fixed });
+    expect(v2.passed).toBe(true);
+  });
+});
+
 describe('autoFix — missing fields note', () => {
   it('appends a 补充字段 line when provided inputs missing from answer', () => {
     const contract = buildContract({

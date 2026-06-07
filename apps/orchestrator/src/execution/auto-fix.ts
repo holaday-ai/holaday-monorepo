@@ -39,7 +39,8 @@ export type AutoFixKind =
   | 'url_drop'
   | 'missing_fields_note'
   | 'empty_url_fill'
-  | 'ecommerce_row_prune';
+  | 'ecommerce_row_prune'
+  | 'duplicate_candidate_link_drop';
 
 export interface AutoFixOp {
   kind: AutoFixKind;
@@ -96,6 +97,15 @@ export function autoFix(inputs: AutoFixInputs): AutoFixOutput {
     const pruned = pruneEcommerceRowsToProductLinks(text, inputs.ledger);
     text = pruned.text;
     ops.push(...pruned.ops);
+  }
+
+  const duplicateCandidateUrlOp = inputs.verification.checks.find(
+    (c) => c.criterionId === 'generic.duplicate_candidate_urls' && !c.passed,
+  );
+  if (duplicateCandidateUrlOp) {
+    const out = dropRepeatedCandidateLinks(text);
+    text = out.text;
+    ops.push(...out.ops);
   }
 
   // 2. Missing required fields — append a補 note.
@@ -325,6 +335,56 @@ function pruneEcommerceRowsToProductLinks(
       },
     ],
   };
+}
+
+function dropRepeatedCandidateLinks(text: string): { text: string; ops: AutoFixOp[] } {
+  const seen = new Set<string>();
+  let changed = 0;
+  const lines = text.split('\n');
+  const nextLines = lines.map((line) => {
+    if (!looksLikeCandidateResultLine(line)) return line;
+    const urls = uniqueUrls(line.match(URL_RE) ?? []);
+    if (urls.length === 0) return line;
+    const duplicated = urls.filter((url) => seen.has(url));
+    for (const url of urls) seen.add(url);
+    if (duplicated.length === 0) return line;
+
+    let next = line;
+    for (const url of duplicated) {
+      const escaped = escapeRegExp(url);
+      next = next.replace(
+        new RegExp(`\\[([^\\]\\n]+)\\]\\(${escaped}\\)`, 'g'),
+        '$1（同一来源页）',
+      );
+      next = next.replace(new RegExp(escaped, 'g'), '同一来源页');
+    }
+    if (next !== line) changed += 1;
+    return next;
+  });
+
+  if (changed === 0) return { text, ops: [] };
+  const note =
+    '\n\n> 多个候选复用了同一个来源链接；已把重复链接改为“同一来源页”，避免误导为每项都有独立页面。';
+  return {
+    text: `${nextLines.join('\n')}${note}`,
+    ops: [
+      {
+        kind: 'duplicate_candidate_link_drop',
+        detail: `removed repeated candidate links from ${changed} row(s)`,
+      },
+    ],
+  };
+}
+
+function looksLikeCandidateResultLine(line: string): boolean {
+  return (
+    looksLikeMarkdownTableRow(line) ||
+    /^\s*(?:\d+[.、)]|[-*+])\s+/.test(line)
+  );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function productLinkUrls(ledger: EvidenceLedger): Set<string> {
