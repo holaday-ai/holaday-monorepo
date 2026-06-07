@@ -229,7 +229,7 @@ describe('TaskController state machine', () => {
     }
   });
 
-  it('high-risk step pauses for user confirm even if it returned ok', async () => {
+  it('high-risk step opens a review gate after reaching the boundary', async () => {
     const c = await setup();
     const { state: s0 } = c.start({
       state: null,

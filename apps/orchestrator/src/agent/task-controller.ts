@@ -52,7 +52,12 @@ export interface PlannedStep {
   requiresConfirm?: boolean;
 }
 
-/** Single-step confirm — the W1 flow (one prompt, one Confirm/Reject). */
+  /**
+   * Single-step confirm — the W1 flow (one prompt, one Confirm/Reject).
+   * This is a review gate after the runner reaches a high-risk boundary,
+   * not permission for the runner to click a final submit/pay/delete
+   * control. Single approve advances past the gated step.
+   */
 export interface PendingSingleConfirm {
   kind: 'single';
   stepId: string;
@@ -193,7 +198,7 @@ export class TaskController {
    *   - ok    → advance cursor; dispatch next or complete
    *   - error (retries remaining) → re-dispatch same step, bump retry_count
    *   - error (retries exhausted) → transition to paused (reason='retries_exhausted')
-   *   - awaiting_user → emit server.user.confirm with prompt; wait
+   *   - awaiting_user / high-risk boundary → emit server.user.confirm with prompt; wait
    */
   onStepResult(
     state: TaskState,
@@ -345,7 +350,9 @@ export class TaskController {
    * User responded to an awaiting_user gate (single confirm or batch).
    *   - 'approve'  → resume executing. For batch, re-dispatch the same
    *                  step so the client can actually execute this batch.
-   *                  For single, advance to the next step.
+   *                  For single, advance to the next step because the
+   *                  high-risk boundary has already been reached and
+   *                  final submit/pay/delete controls remain user-owned.
    *   - 'skip'     → advance past the gate without executing. For batch,
    *                  this means "this batch is done, move to the next
    *                  batch or next step in the plan". For single, treat
