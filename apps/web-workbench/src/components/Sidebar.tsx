@@ -450,7 +450,7 @@ export function Sidebar({
                       key={t.taskId}
                       task={t}
                       selected={t.taskId === selectedTaskId}
-                      liveSubStatus={liveSubStatusByTask[t.taskId]?.subStatus ?? null}
+                      liveSubStatus={liveSubStatusByTask[t.taskId] ?? null}
                       renaming={renamingId === t.taskId}
                       onSelect={(id) => {
                         onSelectTask(id);
@@ -489,7 +489,7 @@ export function Sidebar({
                       key={t.taskId}
                       task={t}
                       selected={t.taskId === selectedTaskId}
-                      liveSubStatus={liveSubStatusByTask[t.taskId]?.subStatus ?? null}
+                      liveSubStatus={liveSubStatusByTask[t.taskId] ?? null}
                       renaming={renamingId === t.taskId}
                       onSelect={(id) => {
                         onSelectTask(id);

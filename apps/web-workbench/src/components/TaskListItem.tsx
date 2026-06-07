@@ -8,7 +8,7 @@ import { summariseIntent } from '@/utils/summarise-intent';
 interface Props {
   task: UiTask;
   selected: boolean;
-  liveSubStatus?: TaskLiveSubStatus | null;
+  liveSubStatus?: TaskLiveSubStatusEntry | null;
   /**
    * Inline-edit mode: when this matches task.taskId the row replaces
    * its label with a text input seeded from the current display title.
@@ -37,6 +37,9 @@ interface Props {
 }
 
 type TaskLiveSubStatus = 'planning' | 'browsing' | 'extracting' | 'verifying' | 'generating';
+type TaskLiveSubStatusEntry =
+  | TaskLiveSubStatus
+  | { subStatus: TaskLiveSubStatus; since: number };
 
 const LIVE_SUB_STATUS_LABELS: Record<TaskLiveSubStatus, string> = {
   planning: '正在规划任务',
@@ -93,6 +96,10 @@ export function TaskListItem({
   batchDisabled,
 }: Props): JSX.Element {
   const active = isActive(task.status);
+  const elapsedNow = useTaskListElapsedNow(active && Boolean(liveSubStatus));
+  const elapsedLabel = active
+    ? taskListElapsedLabel(liveSubStatus, elapsedNow)
+    : null;
   const handleRowClick = (
     e: React.MouseEvent | React.KeyboardEvent,
   ): void => {
@@ -109,7 +116,7 @@ export function TaskListItem({
     ? undefined
     : batchMode && batchDisabled
       ? '进行中的任务无法批量删除'
-      : `${task.intent}\n${taskListItemSubtitle(task, liveSubStatus)}`;
+      : `${task.intent}\n${taskListItemSubtitle(task, liveSubStatus, elapsedNow)}`;
   return (
     <div
       onContextMenu={
@@ -188,6 +195,15 @@ export function TaskListItem({
         </button>
       )}
       {!renaming && onContextMenu && (
+        <>
+          {elapsedLabel && (
+            <span
+              className="shrink-0 rounded-[5px] bg-[#42C0EF]/10 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-[#268AAF] dark:bg-[#42C0EF]/15 dark:text-[#8EDAF2]"
+              title={`任务仍在运行：${elapsedLabel}`}
+            >
+              {elapsedLabel}
+            </span>
+          )}
         <button
           type="button"
           aria-label="任务菜单"
@@ -200,9 +216,10 @@ export function TaskListItem({
         >
           <MoreHorizontal className="h-3.5 w-3.5" />
         </button>
+        </>
       )}
       {active && !renaming && (
-        <span className="sr-only">进行中 · {taskListItemSubtitle(task, liveSubStatus)}</span>
+        <span className="sr-only">进行中 · {taskListItemSubtitle(task, liveSubStatus, elapsedNow)}</span>
       )}
     </div>
   );
@@ -282,7 +299,8 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
 
 export function taskListItemSubtitle(
   task: Pick<UiTask, 'awaitingKind' | 'queuePosition' | 'status' | 'tickCount'>,
-  liveSubStatus?: TaskLiveSubStatus | null,
+  liveSubStatus?: TaskLiveSubStatusEntry | null,
+  now = Date.now(),
 ): string {
   if (task.queuePosition && task.queuePosition > 1 && task.tickCount === 0) {
     return `排队中 · 第 ${task.queuePosition} 位`;
@@ -292,7 +310,11 @@ export function taskListItemSubtitle(
       return '排队中 · 等待空闲槽位';
     case 'executing':
       if (liveSubStatus) {
-        return LIVE_SUB_STATUS_LABELS[liveSubStatus];
+        const subStatus = liveSubStatusValue(liveSubStatus);
+        const elapsed = taskListElapsedLabel(liveSubStatus, now);
+        return elapsed
+          ? `${LIVE_SUB_STATUS_LABELS[subStatus]} · 已运行 ${elapsed}`
+          : LIVE_SUB_STATUS_LABELS[subStatus];
       }
       return task.tickCount === 0 ? '正在启动…' : `执行中 · 第 ${task.tickCount} 步`;
     case 'awaiting_user':
@@ -319,4 +341,29 @@ export function taskListItemSubtitle(
       // future status sneaks past TS narrowing.
       return '';
   }
+}
+
+function liveSubStatusValue(entry: TaskLiveSubStatusEntry): TaskLiveSubStatus {
+  return typeof entry === 'string' ? entry : entry.subStatus;
+}
+
+export function taskListElapsedLabel(
+  liveSubStatus: TaskLiveSubStatusEntry | null | undefined,
+  now = Date.now(),
+): string | null {
+  if (!liveSubStatus || typeof liveSubStatus === 'string') return null;
+  const elapsedSec = Math.max(0, Math.floor((now - liveSubStatus.since) / 1000));
+  if (elapsedSec < 120) return null;
+  const minutes = Math.max(2, Math.floor(elapsedSec / 60));
+  return `${minutes}分+`;
+}
+
+function useTaskListElapsedNow(enabled: boolean): number {
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    if (!enabled) return undefined;
+    const interval = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(interval);
+  }, [enabled]);
+  return now;
 }
