@@ -134,6 +134,30 @@ describe('selectModelAndEffort', () => {
     });
   });
 
+  it.each([
+    '在 Google Flights 查找东京到纽约航班并筛选直飞',
+    '在携程查询上海到东京机票，筛选直飞并停在付款前',
+    '在 Airbnb 找下周末东京民宿并收藏前两个',
+    '在 Gmail 写一封邮件草稿给客户，不要发送',
+    '在 GitHub 创建一个 issue 草稿',
+    'create a draft issue in GitHub',
+  ])('live app workflow → Sonnet 4.6 high: %s', (intent) => {
+    expect(selectModelAndEffort(intent, 'none')).toEqual({
+      model: 'claude-sonnet-4-6',
+      effort: 'high',
+    });
+  });
+
+  it.each([
+    '今天上海天气',
+    'What is the Tesla stock price today?',
+  ])('pure fact lookup still uses Haiku 4.5 medium: %s', (intent) => {
+    expect(selectModelAndEffort(intent, 'none')).toEqual({
+      model: 'claude-haiku-4-5',
+      effort: 'medium',
+    });
+  });
+
   it('xhigh is only paired with Sonnet 4.6 (Opus retired from auto-routing)', () => {
     const cases: Array<[string, string]> = [
       ['none', '查天气'],
@@ -164,6 +188,17 @@ describe('getTaskBudget', () => {
   it('research / analysis tasks → 200K', () => {
     expect(getTaskBudget('竞品分析', 'trend-researcher')).toBe(200_000);
     expect(getTaskBudget('财报分析', 'financial-forecaster')).toBe(200_000);
+  });
+
+  it.each([
+    '在 Google Flights 查找东京到纽约航班并筛选直飞',
+    '在携程查询上海到东京机票，筛选直飞并停在付款前',
+    '在 Airbnb 找下周末东京民宿并收藏前两个',
+    '在 Gmail 写一封邮件草稿给客户，不要发送',
+    '在 GitHub 创建一个 issue 草稿',
+    'create a draft issue in GitHub',
+  ])('live app workflow → 200K budget: %s', (intent) => {
+    expect(getTaskBudget(intent, 'none')).toBe(200_000);
   });
 
   it('budget always meets API minimum (20K)', () => {
