@@ -169,6 +169,16 @@ describe('selectModelAndEffort', () => {
     'add a user note in Intercom',
     'create a bug issue in Linear',
     'create a project task in Monday.com',
+    'In Zendesk, reply to this support ticket but do not send',
+    'Use Shopify admin to create a discount code draft',
+    'Open Intercom and add a note to this user',
+    'In Linear, create a bug issue draft',
+    'In Monday.com, create a project task',
+    'Use Stripe dashboard to find the payment and download a receipt',
+    'Use HubSpot to create a contact draft',
+    'Open Salesforce and update this customer note',
+    '打开 Zendesk 回复这张工单草稿',
+    '进入 Intercom 给这个用户添加备注',
   ])('live app workflow → Sonnet 4.6 high: %s', (intent) => {
     expect(selectModelAndEffort(intent, 'none')).toEqual({
       model: 'claude-sonnet-4-6',
@@ -253,6 +263,16 @@ describe('getTaskBudget', () => {
     'add a user note in Intercom',
     'create a bug issue in Linear',
     'create a project task in Monday.com',
+    'In Zendesk, reply to this support ticket but do not send',
+    'Use Shopify admin to create a discount code draft',
+    'Open Intercom and add a note to this user',
+    'In Linear, create a bug issue draft',
+    'In Monday.com, create a project task',
+    'Use Stripe dashboard to find the payment and download a receipt',
+    'Use HubSpot to create a contact draft',
+    'Open Salesforce and update this customer note',
+    '打开 Zendesk 回复这张工单草稿',
+    '进入 Intercom 给这个用户添加备注',
   ])('live app workflow → 200K budget: %s', (intent) => {
     expect(getTaskBudget(intent, 'none')).toBe(200_000);
   });

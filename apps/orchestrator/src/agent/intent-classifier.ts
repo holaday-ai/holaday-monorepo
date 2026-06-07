@@ -123,6 +123,7 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/(?:给|帮我给|替我给|为).{0,24}(?:评论|点赞|关注)/i, '中文社交互动'],
   [/(?:在|到|去|用|通过).{0,24}(?:携程|去哪儿|飞猪|google flights|airbnb|booking|linkedin).{0,72}(?:筛选|排序|选择|勾选|切换|设置|保存筛选|保存条件|收藏|付款前|支付前|确认前|提交前|停在)/i, '中文站内筛选保存'],
   [/(?:在|用|通过).{0,24}(?:gmail|slack|linkedin|notion|飞书|github|google docs|google forms|google sheets|google slides|google calendar|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?).{0,64}(?:写|撰写|起草|创建|新建|编辑|更新|查找|搜索|下载|安排|预约|添加|保存|回复).{0,48}(?:草稿|邮件|消息|页面|文档|会议纪要|计划|报名表|表单|帖子|表格|演示文稿|幻灯片|会议|日程|邀请|联系人|客户|备注|付款|收据|链接|看板|任务|bug|issue|pull request|pr|折扣码|工单|回复|用户|项目|订单|商品|库存)/i, '中文应用草稿操作'],
+  [/(?:打开|进入|访问|前往).{0,24}(?:hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?).{0,64}(?:写|撰写|起草|创建|新建|编辑|更新|查找|搜索|下载|安排|预约|添加|保存|回复).{0,48}(?:草稿|联系人|客户|备注|付款|收据|链接|看板|任务|bug|issue|折扣码|工单|回复|用户|项目|订单|商品|库存)/i, '中文打开应用后操作'],
   [/\bbook\s+(?:me\s+)?(?:a\s+|an\s+|the\s+)?(?:flight|ticket|hotel|room|table|restaurant|appointment|ride|car|train|bus)\b/i, 'book service'],
   [/\breserve\s+(?:a\s+|an\s+|the\s+)?(?:table|room|seat|ticket|hotel|restaurant|car)\b/i, 'reserve service'],
   [/\bmake\s+a\s+reservation\s+(?:for|at|with)\s+(?:a\s+|an\s+|the\s+|this\s+)?(?:restaurant|table|hotel|room|flight|ticket|car|service|dinner|lunch|brunch)\b/i, 'make reservation'],
@@ -144,6 +145,8 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/\b(?:filter|sort|save|favorite|bookmark)\s+.{1,80}\s+(?:on|in)\s+(?:google flights|airbnb|booking|linkedin|indeed|gmail|slack|notion)\b/i, 'filter or save on site'],
   [/\b(?:draft|compose|create|edit|update|schedule|save|add|reply\s+to)\s+.{1,80}\s+(?:in|on)\s+(?:gmail|slack|notion|github|google docs|google forms|google sheets|google slides|google calendar|linkedin|hubspot|salesforce|stripe|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?)\b/i, 'draft in app'],
   [/\b(?:find|search|download)\s+.{1,80}\s+(?:in|on)\s+(?:hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?)\b/i, 'find or download in SaaS app'],
+  [/\b(?:in|on)\s+(?:hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?),?\s+(?:draft|compose|create|edit|update|schedule|save|add|reply\s+to|find|search|download)\b/i, 'app-first workflow'],
+  [/\b(?:use|open|visit|go\s+to|launch)\s+(?:hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify(?:\s+admin)?|zendesk|intercom|linear|monday(?:\.com)?)(?:\s+(?:admin|dashboard))?\s+(?:to|and)\s+(?:draft|compose|create|edit|update|schedule|save|add|reply\s+to|find|search|download)\b/i, 'open app then act'],
   [/发布(?:到|在)(?:小红书|微博|知乎|抖音|b站|bilibili|twitter|x\.com|linkedin|reddit)/i, '发布到平台'],
 ];
 
