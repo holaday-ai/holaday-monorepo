@@ -1823,11 +1823,11 @@ export function BrowserPanel({
           )}
           {!fullscreen && shouldConnect && showHeader && (
             <footer
-              className={cn(
-                'flex items-center justify-between border-t text-muted-foreground',
-                isSheet ? 'h-5 px-2 text-[10px]' : 'h-7 px-3 text-[11px]',
-                BROWSER_DIVIDER,
-              )}
+	              className={cn(
+	                'flex items-center justify-between border-t text-muted-foreground',
+	                isSheet ? 'h-7 px-2 text-[11px]' : 'h-7 px-3 text-[11px]',
+	                BROWSER_DIVIDER,
+	              )}
             >
               <span>{browserViewportFrameLabel(displayFrame?.viewport)}</span>
               <span>{frame ? `第 ${frame.tickIndex + 1} 帧` : ''}</span>
