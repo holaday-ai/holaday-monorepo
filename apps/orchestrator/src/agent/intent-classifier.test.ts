@@ -220,6 +220,14 @@ describe('classifyExecutionMode — scrape route (Firecrawl path)', () => {
     expect(out).toBe('scrape');
   });
 
+  it('查 + current info context → scrape', async () => {
+    const out = await classifyExecutionMode({
+      intent: '帮我查今天特斯拉股价并给出来源链接',
+      logger: fakeLogger(),
+    });
+    expect(out).toBe('scrape');
+  });
+
   it('research / 研究 → scrape', async () => {
     const out = await classifyExecutionMode({
       intent: '研究中国新能源车 2026 年市场格局',
@@ -503,6 +511,8 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       'fill out rate analysis',
       'make a reservation strategy',
       'add to cart conversion strategy',
+      'research plan template',
+      'compare two onboarding strategies',
     ]) {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
       expect(out).toBe('generate');

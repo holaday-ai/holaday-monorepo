@@ -149,9 +149,14 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
  * + a single LLM synthesis call.
  */
 const SEARCH_VERBS: readonly string[] = [
-  '搜索', '查找', '查询', '研究', '对比', '调研',
-  // English
-  'search ', 'find ', 'research ', 'compare ', 'look up',
+  '搜索', '查找', '查询',
+];
+
+const SEARCH_PATTERNS: readonly [RegExp, string][] = [
+  [/\b(?:search|find|look\s+up)\b/i, 'English search verb'],
+  [/(?:帮我|给我|替我|为我)?查(?:一下|找|询)?(?:今天|最新|当前|现在|实时|近期|本周|今年).{0,48}(?:股价|价格|天气|汇率|新闻|财报|来源|链接|市场|排名|航班|酒店|票价|openai|特斯拉|苹果|微软|aapl|tsla|nvda)/i, '中文查实时信息'],
+  [/(?:研究|调研|对比).{0,64}(?:今天|最新|当前|现在|实时|近期|今年|新闻|股价|价格|汇率|天气|财报|官网|来源|链接|市场|格局|竞品|公司|平台|小红书|京东|淘宝|拼多多|amazon|openai|特斯拉|苹果|微软|aapl|tsla|iphone)/i, '中文联网研究'],
+  [/\b(?:research|compare)\b.{0,72}\b(?:latest|current|today|recent|news|price|stock|weather|source|links?|market|competitors?|company|platform|openai|tesla|aapl|tsla|amazon|microsoft|apple|iphone)\b/i, 'English web research'],
 ];
 
 /**
@@ -230,6 +235,13 @@ function matchInteractionPattern(intent: string): string | null {
   return null;
 }
 
+function matchSearchPattern(intent: string): string | null {
+  for (const [pattern, label] of SEARCH_PATTERNS) {
+    if (pattern.test(intent)) return label;
+  }
+  return null;
+}
+
 function isEcommerceListingIntent(intent: string): boolean {
   const lower = intent.toLowerCase();
   const hasEcommerce = ECOMMERCE_SITE_HINTS.some((hint) => lower.includes(hint));
@@ -271,6 +283,10 @@ function decide(intent: string): RouteDecision {
   const urlMatch = URL_REGEX.exec(intent);
   if (urlMatch) {
     return { mode: 'scrape', source: 'kw:url', match: urlMatch[0].slice(0, 64) };
+  }
+  const searchPattern = matchSearchPattern(intent);
+  if (searchPattern) {
+    return { mode: 'scrape', source: 'kw:search-pattern', match: searchPattern };
   }
   const search = hasAny(intent, SEARCH_VERBS);
   if (search) {
