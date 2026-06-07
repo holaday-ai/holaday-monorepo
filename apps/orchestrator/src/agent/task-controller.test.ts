@@ -479,7 +479,7 @@ describe('TaskController state machine', () => {
     });
     expect(s1.pendingConfirm?.kind).toBe('single');
     if (s1.pendingConfirm?.kind === 'single') {
-      expect(s1.pendingConfirm.prompt).toContain('提交、支付、发送、删除或退订');
+      expect(s1.pendingConfirm.prompt).toContain('提交、支付、发送、分享、改权限、删除或退订');
     }
   });
 
