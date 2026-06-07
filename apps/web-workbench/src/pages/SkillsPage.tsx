@@ -137,7 +137,7 @@ export function SkillsPage(): JSX.Element {
     () => skills.reduce((n, s) => (s.enabled ? n + 1 : n), 0),
     [skills],
   );
-  const atLimit = cap > 0 && enabledCount >= cap;
+  const atLimit = enabledCount >= cap;
 
   const refresh = React.useCallback(
     async (options: { silent?: boolean } = {}) => {
@@ -192,7 +192,7 @@ export function SkillsPage(): JSX.Element {
     // BOSS feedback — UI-side cap. Server doesn't enforce a hard
     // limit today; this is just a guard against accidental over-
     // enablement and a clear upgrade prompt for Basic users.
-    if (!skill.enabled && cap > 0 && enabledCount >= cap) {
+    if (!skill.enabled && enabledCount >= cap) {
       toast.show(skillLimitMessage({ cap, planId }), 'error');
       return;
     }
@@ -348,6 +348,7 @@ export function SkillsPage(): JSX.Element {
                     pending={pendingId === s.id}
                     blocked={pendingId !== null && pendingId !== s.id}
                     limitBlocked={atLimit && !s.enabled}
+                    cap={cap}
                     onToggle={() => void onToggle(s)}
                     onUse={() => {
                       navigate('/', {
@@ -373,6 +374,7 @@ function SkillCard({
   pending,
   blocked,
   limitBlocked,
+  cap,
   onToggle,
   onUse,
 }: {
@@ -380,13 +382,16 @@ function SkillCard({
   pending: boolean;
   blocked: boolean;
   limitBlocked: boolean;
+  cap: number;
   onToggle: () => void;
   onUse: () => void;
 }): JSX.Element {
   const Icon = ICONS[skill.icon] ?? Sparkles;
   const toggleDisabled = pending || blocked || limitBlocked;
   const toggleTitle = limitBlocked
-    ? '已达到技能上限，先停用一个已启用技能'
+    ? cap <= 0
+      ? '当前套餐暂不支持启用专家技能'
+      : '已达到技能上限，先停用一个已启用技能'
     : `${skill.enabled ? '停用' : '启用'}${skill.name}`;
   const useAction = skillUseActionCopy({
     skillName: skill.name,
@@ -422,7 +427,7 @@ function SkillCard({
       </div>
       <div className="mt-auto flex w-full items-center justify-between gap-2 border-t border-[#EFEFEF] pt-2">
         <div className="min-w-0 text-[11px] leading-4 text-muted-foreground">
-          {skillCardUsageHint({ enabled: skill.enabled, pending, limitBlocked })}
+          {skillCardUsageHint({ enabled: skill.enabled, pending, limitBlocked, cap })}
         </div>
         <Button
           type="button"
@@ -461,7 +466,7 @@ function SkillCard({
                 : 'border border-[#DCDDDD] bg-white text-[#595757]',
         )}
       >
-        {skillCardBadge({ enabled: skill.enabled, pending, limitBlocked })}
+        {skillCardBadge({ enabled: skill.enabled, pending, limitBlocked, cap })}
       </button>
     </article>
   );

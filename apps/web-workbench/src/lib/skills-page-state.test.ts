@@ -101,10 +101,13 @@ describe('skills page state helpers', () => {
         cap: 0,
         planId: 'free',
       }),
-    ).toBe('已加载 33 个技能 · 体验版');
+    ).toBe('体验版暂不支持启用专家技能');
   });
 
   it('builds plan-aware limit messages', () => {
+    expect(skillLimitMessage({ cap: 0, planId: 'free' })).toBe(
+      '体验版暂不支持启用专家技能',
+    );
     expect(skillLimitMessage({ cap: 33, planId: 'pro' })).toBe('已达到 33 个技能上限');
     expect(skillLimitMessage({ cap: 5, planId: 'basic' })).toBe(
       '已达到当前套餐的技能上限（5 个）· 升级到专业版可使用全部 33 个技能',
@@ -112,6 +115,10 @@ describe('skills page state helpers', () => {
   });
 
   it('explains over-limit skill states without implying a broken counter', () => {
+    expect(skillLimitBannerCopy({ cap: 0, enabledCount: 0, planId: 'free' })).toEqual({
+      title: '体验版暂不支持启用专家技能',
+      body: '升级到基础版可自选专家技能；升级到专业版可使用全部 33 个技能。',
+    });
     expect(skillLimitBannerCopy({ cap: 5, enabledCount: 11, planId: 'basic' })).toEqual({
       title: '当前已启用 11 个技能',
       body: '基础版上限为 5 个。已启用的技能会继续可用；如果停用后想启用新技能，需要先保持在上限内。',
@@ -137,6 +144,9 @@ describe('skills page state helpers', () => {
     expect(skillCardBadge({ enabled: false, pending: false })).toBe('启用');
     expect(skillCardBadge({ enabled: true, pending: false })).toBe('已启用');
     expect(skillCardBadge({ enabled: true, pending: true })).toBe('保存中…');
+    expect(skillCardBadge({ enabled: false, pending: false, limitBlocked: true, cap: 0 })).toBe(
+      '不可启用',
+    );
     expect(skillCardBadge({ enabled: false, pending: false, limitBlocked: true })).toBe(
       '已达上限',
     );
@@ -152,6 +162,9 @@ describe('skills page state helpers', () => {
     expect(skillCardUsageHint({ enabled: false, pending: true })).toBe(
       '正在保存选择',
     );
+    expect(
+      skillCardUsageHint({ enabled: false, pending: false, limitBlocked: true, cap: 0 }),
+    ).toBe('当前套餐不可启用');
     expect(skillCardUsageHint({ enabled: false, pending: false, limitBlocked: true })).toBe(
       '先停用一个技能后可启用',
     );

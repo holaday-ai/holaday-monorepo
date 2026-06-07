@@ -77,6 +77,9 @@ export function skillPageSummary(options: {
   if (options.loading) return '技能加载中…';
   if (options.error) return '技能暂时无法加载';
   if (options.totalCount === 0) return '暂无可用技能';
+  if (options.cap <= 0) {
+    return `${skillPlanLabel(options.planId)}暂不支持启用专家技能`;
+  }
   if (options.cap > 0) {
     if (options.enabledCount > options.cap) {
       return `已启用 ${options.enabledCount} 个 · ${skillPlanLabel(options.planId)}上限 ${options.cap}`;
@@ -101,6 +104,7 @@ export function skillLimitMessage(options: {
   readonly cap: number;
   readonly planId: string;
 }): string {
+  if (options.cap <= 0) return `${skillPlanLabel(options.planId)}暂不支持启用专家技能`;
   if (options.planId === 'pro') return `已达到 ${options.cap} 个技能上限`;
   return `已达到当前套餐的技能上限（${options.cap} 个）· 升级到专业版可使用全部 33 个技能`;
 }
@@ -110,6 +114,12 @@ export function skillLimitBannerCopy(options: {
   readonly enabledCount: number;
   readonly planId: string;
 }): SkillLimitBannerCopy {
+  if (options.cap <= 0) {
+    return {
+      title: `${skillPlanLabel(options.planId)}暂不支持启用专家技能`,
+      body: '升级到基础版可自选专家技能；升级到专业版可使用全部 33 个技能。',
+    };
+  }
   if (options.enabledCount > options.cap) {
     return {
       title: `当前已启用 ${options.enabledCount} 个技能`,
@@ -129,8 +139,10 @@ export function skillCardBadge(options: {
   readonly enabled: boolean;
   readonly pending: boolean;
   readonly limitBlocked?: boolean;
+  readonly cap?: number;
 }): string {
   if (options.pending) return '保存中…';
+  if (!options.enabled && options.limitBlocked && (options.cap ?? 1) <= 0) return '不可启用';
   if (!options.enabled && options.limitBlocked) return '已达上限';
   return options.enabled ? '已启用' : '启用';
 }
@@ -139,8 +151,12 @@ export function skillCardUsageHint(options: {
   readonly enabled: boolean;
   readonly pending: boolean;
   readonly limitBlocked?: boolean;
+  readonly cap?: number;
 }): string {
   if (options.pending) return '正在保存选择';
+  if (!options.enabled && options.limitBlocked && (options.cap ?? 1) <= 0) {
+    return '当前套餐不可启用';
+  }
   if (!options.enabled && options.limitBlocked) return '先停用一个技能后可启用';
   return options.enabled ? '会自动匹配；也可立即开始' : '启用后可参与自动匹配';
 }
