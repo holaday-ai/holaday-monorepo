@@ -19,6 +19,7 @@ import {
 } from '@/lib/task-hub-state';
 import { taskStatusLabel } from '@/lib/task-status-copy';
 import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
 
 /**
@@ -208,41 +209,57 @@ export function StarredPage(): JSX.Element {
       ) : (
         <>
           <div className="divide-y divide-[#EFEFEF] rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-            {items.map((t) => (
-              <div
-                key={t.taskId}
-                className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-[#EFEFEF]/35"
-              >
-                <PinnedStatusIcon status={t.status} />
-                <button
-                  type="button"
-                  onClick={() => open(t.taskId)}
-                  className="min-w-0 flex-1 text-left"
-                >
-                  <div className="truncate text-sm text-foreground group-hover:text-[#EA1F59]">
-                    {pinnedTaskTitle(t)}
-                  </div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">
-                    {taskStatusLabel(t.status, t.awaitingKind)} · 置顶于{' '}
-                    {formatTaskHubTime(t.starredAt)}
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleUnpin(t.taskId)}
-                  aria-label="取消置顶"
-                  title={unpinningIds.has(t.taskId) ? '取消置顶中…' : '取消置顶'}
-                  disabled={unpinningIds.has(t.taskId)}
-                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/70 hover:text-[#EA1F59] disabled:cursor-wait disabled:opacity-50"
-                >
-                  {unpinningIds.has(t.taskId) ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <PinOff className="h-3.5 w-3.5" />
+            {items.map((t) => {
+              const needsAttention = taskHubNeedsAttention(t.status);
+              const statusLabel = taskStatusLabel(t.status, t.awaitingKind);
+              return (
+                <div
+                  key={t.taskId}
+                  className={cn(
+                    'group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-[#EFEFEF]/35',
+                    needsAttention &&
+                      'bg-[#FFC910]/[0.06] [box-shadow:inset_3px_0_0_rgba(255,201,16,0.75)] hover:bg-[#FFC910]/[0.10]',
                   )}
-                </button>
-              </div>
-            ))}
+                >
+                  <PinnedStatusIcon status={t.status} />
+                  <button
+                    type="button"
+                    onClick={() => open(t.taskId)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <div className="truncate text-sm text-foreground group-hover:text-[#EA1F59]">
+                      {pinnedTaskTitle(t)}
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-muted-foreground">
+                      {needsAttention ? (
+                        <>
+                          <span className="font-medium text-[#8A6A00]">{statusLabel}</span>
+                          <span> · 置顶于 {formatTaskHubTime(t.starredAt)}</span>
+                        </>
+                      ) : (
+                        <>
+                          {statusLabel} · 置顶于 {formatTaskHubTime(t.starredAt)}
+                        </>
+                      )}
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleUnpin(t.taskId)}
+                    aria-label="取消置顶"
+                    title={unpinningIds.has(t.taskId) ? '取消置顶中…' : '取消置顶'}
+                    disabled={unpinningIds.has(t.taskId)}
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#595757] transition-colors hover:bg-[#EFEFEF]/70 hover:text-[#EA1F59] disabled:cursor-wait disabled:opacity-50"
+                  >
+                    {unpinningIds.has(t.taskId) ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <PinOff className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </div>
+              );
+            })}
           </div>
           {loadMoreError && (
             <div className="mt-4 flex flex-col items-center gap-2 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-3 py-2 text-center text-xs text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">

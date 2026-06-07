@@ -15,6 +15,7 @@ import {
   taskHubErrorMessage,
   taskHubLoadErrorCopy,
   taskHubLoadMoreErrorCopy,
+  taskHubNeedsAttention,
   type HistoryRangeFilter,
   type HistoryStatusFilter,
   type NormalizedTaskHubRow,
@@ -400,29 +401,50 @@ export function HistoryPage(): JSX.Element {
             </div>
           ) : (
             <ul className="divide-y divide-[#EFEFEF]">
-              {tasks.map((t) => (
-                <li key={t.taskId}>
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/?task=${encodeURIComponent(t.taskId)}`)}
-                    className="group flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-[#EFEFEF]/35"
+              {tasks.map((t) => {
+                const needsAttention = taskHubNeedsAttention(t.status);
+                const statusLabel = taskStatusLabel(t.status, t.awaitingKind);
+                return (
+                  <li
+                    key={t.taskId}
+                    className={cn(
+                      needsAttention &&
+                        'bg-[#FFC910]/[0.06] [box-shadow:inset_3px_0_0_rgba(255,201,16,0.75)]',
+                    )}
                   >
-                    <StatusIcon status={t.status} />
-                    <div className="min-w-0 flex-1 px-1">
-                      <div className="truncate text-sm font-medium group-hover:text-[#EA1F59]">
-                        {t.intent || '未命名任务'}
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/?task=${encodeURIComponent(t.taskId)}`)}
+                      className={cn(
+                        'group flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-[#EFEFEF]/35',
+                        needsAttention && 'hover:bg-[#FFC910]/[0.10]',
+                      )}
+                    >
+                      <StatusIcon status={t.status} />
+                      <div className="min-w-0 flex-1 px-1">
+                        <div className="truncate text-sm font-medium group-hover:text-[#EA1F59]">
+                          {t.intent || '未命名任务'}
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-muted-foreground">
+                          {needsAttention ? (
+                            <>
+                              <span className="font-medium text-[#8A6A00]">{statusLabel}</span>
+                              <span> · {formatTaskHubTime(t.createdAt)}</span>
+                            </>
+                          ) : (
+                            <>
+                              {formatTaskHubTime(t.createdAt)} · {statusLabel}
+                            </>
+                          )}
+                        </div>
                       </div>
-                      <div className="mt-0.5 text-[11px] text-muted-foreground">
-                        {formatTaskHubTime(t.createdAt)} ·{' '}
-                        {taskStatusLabel(t.status, t.awaitingKind)}
-                      </div>
-                    </div>
-                    <span className="shrink-0 self-center pr-2 text-[11px] text-[#595757] opacity-100 group-hover:text-[#EA1F59] sm:opacity-0 sm:group-hover:opacity-100">
-                      查看 →
-                    </span>
-                  </button>
-                </li>
-              ))}
+                      <span className="shrink-0 self-center pr-2 text-[11px] text-[#595757] opacity-100 group-hover:text-[#EA1F59] sm:opacity-0 sm:group-hover:opacity-100">
+                        查看 →
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
 
