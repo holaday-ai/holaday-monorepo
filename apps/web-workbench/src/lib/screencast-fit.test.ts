@@ -5,6 +5,7 @@ import {
   mapClientPointToScreencast,
   placeScreencastContainTop,
   placeScreencastReadableTop,
+  readableScreencastAutoScrollKey,
   readableScreencastStartScrollLeft,
 } from './screencast-fit';
 
@@ -34,6 +35,42 @@ describe('readableScreencastStartScrollLeft', () => {
         hostWidth: 540,
       }),
     ).toBe(0);
+  });
+});
+
+describe('readableScreencastAutoScrollKey', () => {
+  it('changes when the sheet geometry changes for the same browser frame', () => {
+    const frameKey = 'frame-1';
+
+    expect(
+      readableScreencastAutoScrollKey({
+        frameKey,
+        hostWidth: 390,
+        hostHeight: 720,
+        contentWidth: 1152,
+        viewMode: 'readable',
+      }),
+    ).not.toBe(
+      readableScreencastAutoScrollKey({
+        frameKey,
+        hostWidth: 720,
+        hostHeight: 390,
+        contentWidth: 720,
+        viewMode: 'readable',
+      }),
+    );
+  });
+
+  it('keeps invalid geometry keyed to the frame and mode', () => {
+    expect(
+      readableScreencastAutoScrollKey({
+        frameKey: 'frame-1',
+        hostWidth: 0,
+        hostHeight: 720,
+        contentWidth: 1152,
+        viewMode: 'readable',
+      }),
+    ).toBe('readable:frame-1');
   });
 });
 

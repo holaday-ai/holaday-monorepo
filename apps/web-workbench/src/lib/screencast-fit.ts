@@ -45,6 +45,27 @@ export function readableScreencastStartScrollLeft(input: {
   return Math.max(0, Math.floor((input.contentWidth - input.hostWidth) / 2));
 }
 
+export function readableScreencastAutoScrollKey(input: {
+  frameKey: string | null | undefined;
+  hostWidth: number;
+  hostHeight: number;
+  contentWidth: number;
+  viewMode?: string | null;
+}): string | null {
+  if (!input.frameKey) return null;
+  if (
+    !isPositiveFinite(input.hostWidth) ||
+    !isPositiveFinite(input.hostHeight) ||
+    !isPositiveFinite(input.contentWidth)
+  ) {
+    return input.viewMode ? `${input.viewMode}:${input.frameKey}` : input.frameKey;
+  }
+  const prefix = input.viewMode ? `${input.viewMode}:` : '';
+  return `${prefix}${input.frameKey}:${Math.round(input.hostWidth)}x${Math.round(
+    input.hostHeight,
+  )}:${Math.round(input.contentWidth)}`;
+}
+
 export function fitScreencastContain({
   hostWidth,
   hostHeight,

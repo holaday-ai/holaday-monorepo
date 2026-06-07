@@ -50,6 +50,7 @@ import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
 import {
   fitScreencastContain,
   fitScreencastReadable,
+  readableScreencastAutoScrollKey,
   readableScreencastStartScrollLeft,
 } from '@/lib/screencast-fit';
 import {
@@ -766,7 +767,12 @@ export function BrowserPanel({
     if (!fit) return;
     img.style.width = `${fit.width}px`;
     img.style.height = `${fit.height}px`;
-    const frameKey = frame?.imageBase64 ?? null;
+    const frameKey = readableScreencastAutoScrollKey({
+      frameKey: frame?.imageBase64,
+      hostWidth: hostW,
+      hostHeight: hostH,
+      contentWidth: fit.width,
+    });
     if (
       isSheet &&
       !interactive &&
@@ -811,9 +817,13 @@ export function BrowserPanel({
       sourceWidth: natW,
       sourceHeight: natH,
     });
-    const evidenceKey = finalEvidenceFrame?.imageBase64
-      ? `${finalEvidenceViewMode}:${finalEvidenceFrame.imageBase64}`
-      : null;
+    const evidenceKey = readableScreencastAutoScrollKey({
+      frameKey: finalEvidenceFrame?.imageBase64,
+      hostWidth: hostW,
+      hostHeight: hostH,
+      contentWidth: fit.width,
+      viewMode: finalEvidenceViewMode,
+    });
     if (
       isSheet &&
       evidenceKey &&
