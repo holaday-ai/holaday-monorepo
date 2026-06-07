@@ -665,6 +665,8 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       'zapier 自动化模板',
       'airtable 数据库设计方案',
       'notion 模板',
+      'make a report on canva.com pricing',
+      'create a strategy in figma.com design systems',
       'Slack 团队公告文案',
       'GitHub README 模板',
       'GitHub issue 模板',
