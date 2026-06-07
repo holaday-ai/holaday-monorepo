@@ -81,9 +81,10 @@ describe('buildLayeredSystemPrompt', () => {
 
   it('requires user confirmation before transactional final submits', () => {
     const out = buildLayeredSystemPrompt('none');
-    expect(out).toContain('预订 / 预约 / 报名 / 投递 / 加购 / 结账');
-    expect(out).toContain('不要点击最终确认 / 提交预约 / 提交报名 / 提交申请 / 确认预订 / Place order');
-    expect(out).toContain('先展示对象、时间、价格、费用、收件人/申请对象和关键条款');
+    expect(out).toContain('预订 / 预约 / 报名 / 投递 / 加购 / 结账 / 取消订阅 / 退订');
+    expect(out).toContain('不要点击最终确认 / 提交预约 / 提交报名 / 提交申请 / 确认预订 / Place order / Delete / Unsubscribe');
+    expect(out).toContain('关键条款或将要改变的账户状态');
+    expect(out).toContain('停在最终确认页，先说明影响');
   });
 
   it('asks for missing transactional inputs before opening the browser', () => {

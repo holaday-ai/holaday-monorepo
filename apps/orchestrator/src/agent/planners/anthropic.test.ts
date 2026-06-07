@@ -94,6 +94,23 @@ describe('AnthropicPlanner', () => {
     expect(plan[1]?.selector?.description).toBe('Inbox tab');
   });
 
+  it('tells the planner to stop before high-risk final confirmations', async () => {
+    const { AnthropicPlanner, PLAN_TOOL_NAME } = await import('./anthropic.js');
+
+    const client = fakeClient((req) => {
+      const systemText = JSON.stringify(req.system);
+      expect(systemText).toContain('Do NOT include the final confirmation action');
+      expect(systemText).toContain('Place order');
+      expect(systemText).toContain('Delete');
+      expect(systemText).toContain('Unsubscribe');
+      expect(systemText).toContain('review / confirmation page');
+      return buildToolUseMessage({ steps: [{ kind: 'wait', risk: 'low' }] }, PLAN_TOOL_NAME);
+    });
+
+    const planner = new AnthropicPlanner({ client });
+    await planner.plan({ intent: '取消订阅这个服务' });
+  });
+
   it('throws PlannerError when the response has no tool_use block', async () => {
     const { AnthropicPlanner, PlannerError } = await import('./anthropic.js');
 
