@@ -364,6 +364,28 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
     expect(out).toBe('generate');
   });
 
+  it('cart and checkout verbs → browser', async () => {
+    const cases = [
+      '把这个商品放进购物车',
+      '加入购物车但不要付款',
+      '去结算这个订单',
+      '帮我付款',
+      'place an order for this item',
+      'buy this product on Amazon',
+    ];
+    for (const intent of cases) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out).toBe('browser');
+    }
+  });
+
+  it('checkout and cart as topics do not force browser', async () => {
+    for (const intent of ['checkout strategy', '购物车转化率优化方案']) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out).toBe('generate');
+    }
+  });
+
   it('English book as a noun does not force browser', async () => {
     const out = await classifyExecutionMode({
       intent: 'give me book recommendations about product strategy',

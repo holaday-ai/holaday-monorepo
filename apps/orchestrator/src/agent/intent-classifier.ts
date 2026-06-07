@@ -96,7 +96,7 @@ const INTERACTION_VERBS: readonly string[] = [
   'submit ', 'click ', 'navigate to', 'fill in', 'fill out', 'download',
   'make a reservation',
   'sign up', 'send email', 'send an email',
-  'add to cart', 'checkout', 'check out', 'place order',
+  'add to cart',
 ];
 
 const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
@@ -105,6 +105,9 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/(?:帮我|给我|替我|为我)?报名.{0,24}(?:活动|课程|会议|讲座|班|workshop|webinar|conference)/i, '中文报名活动'],
   [/(?:帮我|给我|替我|为我)?投递.{0,24}(?:简历|岗位|职位|工作|job|role|position)/i, '中文投递职位'],
   [/(?:帮我|给我|替我|为我)?(?:发|发送|回复).{0,24}(?:邮件|消息|私信|短信|微信|email|gmail)/i, '中文发送消息'],
+  [/(?:帮我|给我|替我|为我)?(?:把|将)?.{0,24}(?:放进|加入|添加).{0,24}(?:购物车|cart)/i, '中文加入购物车'],
+  [/(?:帮我|给我|替我|为我)?(?:去)?结算.{0,24}(?:订单|商品|购物车|这个|它)/i, '中文结算'],
+  [/(?:帮我|给我|替我|为我|去)(?:付款|支付)|(?:付款|支付).{0,16}(?:订单|商品|费用|尾款|这个|它)/i, '中文支付'],
   [/\bbook\s+(?:me\s+)?(?:a\s+|an\s+|the\s+)?(?:flight|ticket|hotel|room|table|restaurant|appointment|ride|car|train|bus)\b/i, 'book service'],
   [/\breserve\s+(?:a\s+|an\s+|the\s+)?(?:table|room|seat|ticket|hotel|restaurant|car)\b/i, 'reserve service'],
   [/\bschedule\s+(?:a\s+|an\s+|the\s+)?(?:appointment|meeting|call|visit|consultation|interview)\b/i, 'schedule appointment'],
@@ -116,6 +119,10 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/\b(?:send|reply\s+to)\s+(?:a\s+|an\s+|this\s+)?(?:email|message|dm|direct message)\b/i, 'send message'],
   [/\bmessage\s+(?:on|in)\s+(?:linkedin|slack|gmail|whatsapp|telegram|discord|instagram|facebook)\b/i, 'message on platform'],
   [/\badd\s+.{1,80}\s+to\s+(?:the\s+)?cart\b/i, 'add item to cart'],
+  [/\b(?:add|put)\s+.{1,80}\s+(?:in|into)\s+(?:the\s+)?cart\b/i, 'add item to cart'],
+  [/\b(?:place|submit)\s+(?:an?\s+|the\s+)?order\b/i, 'place order'],
+  [/\bbuy\s+(?:this|that|the|a|an)\s+.{1,80}\s+(?:on|from)\s+(?:amazon|jd|taobao|tmall|pinduoduo|shopify|etsy|ebay)\b/i, 'buy item on platform'],
+  [/\bcheck\s*out\s+(?:this\s+)?(?:cart|order|item|product)\b/i, 'checkout item'],
   [/\bpost\s+(?:on|to)\s+(?:twitter|x\.com|linkedin|reddit|instagram|tiktok|facebook|threads)\b/i, 'post on site'],
   [/\b(?:publish|share)\s+(?:this\s+)?(?:post|update|article|comment)\s+(?:on|to)\b/i, 'publish to site'],
   [/发布(?:到|在)(?:小红书|微博|知乎|抖音|b站|bilibili|twitter|x\.com|linkedin|reddit)/i, '发布到平台'],
