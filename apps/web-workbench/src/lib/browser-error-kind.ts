@@ -73,7 +73,7 @@ export function classifyBrowserErrorKind(
     return 'page_switch';
   }
   if (
-    /target closed|session closed|socket_closed|websocket.*closed|websocket.*handshake|unexpected response code:\s*502|err_connection_closed|browser.*disconnected|cdp.*closed|连接.*中断/.test(
+    /target closed|session closed|socket_closed|websocket.*closed|websocket.*handshake|unexpected response code:\s*5\d\d|err_connection_closed|browser.*disconnected|cdp.*closed|连接.*中断/.test(
       text,
     )
   ) {

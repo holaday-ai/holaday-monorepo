@@ -33,6 +33,11 @@ describe('classifyBrowserErrorKind', () => {
         "WebSocket connection to 'wss://holaday.ai/ws' failed: Error during WebSocket handshake: Unexpected response code: 502",
       ),
     ).toBe('transport_closed');
+    expect(
+      classifyBrowserErrorKind(
+        "WebSocket connection to 'wss://holaday.ai/ws' failed: Error during WebSocket handshake: Unexpected response code: 503",
+      ),
+    ).toBe('transport_closed');
     expect(classifyBrowserErrorKind('net::ERR_CONNECTION_CLOSED')).toBe(
       'transport_closed',
     );
