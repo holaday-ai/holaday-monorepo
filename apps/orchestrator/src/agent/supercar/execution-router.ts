@@ -174,6 +174,30 @@ export function classifyAsSimpleSearch(intent: string): boolean {
     return false;
   }
 
+  // Travel workflows often start with query verbs ("查航班"),
+  // but if the user also asks to filter / choose / stop before
+  // payment, this is no longer a plain fact lookup. Keep these in
+  // the browser lane even when no site name (Google Flights / 携程)
+  // is present in the prompt.
+  const TRAVEL_WORKFLOW_HINTS = [
+    '机票', '航班', '酒店', '民宿', '餐厅', '火车票', '高铁票', '车票',
+    'flight', 'flights', 'hotel', 'hotels', 'restaurant', 'restaurants',
+    'train ticket', 'tickets',
+  ];
+  const TRAVEL_WORKFLOW_ACTIONS = [
+    '筛选', '选择', '选出', '直飞', '经停', '转机', '排序',
+    '停在', '付款前', '支付前', '确认前', '预订', '预定', '预约', '收藏',
+    'filter', 'select', 'choose', 'nonstop', 'direct flight', 'layover',
+    'sort', 'before payment', 'before checkout', 'before booking',
+    'reserve', 'reservation', 'book',
+  ];
+  if (
+    TRAVEL_WORKFLOW_HINTS.some((hint) => lower.includes(hint)) &&
+    TRAVEL_WORKFLOW_ACTIONS.some((hint) => lower.includes(hint))
+  ) {
+    return false;
+  }
+
   // Phase 22a follow-up — explicit-navigation disqualifier MUST run
   // before the PRICE_HINTS / FACT_NOUNS positive checks below. The
   // 22a regression: "打开 amazon.com 搜键盘 找销量最高的 3 个产品
