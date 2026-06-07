@@ -51,6 +51,13 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
       nextStep: '重新执行当前任务。',
     };
   }
+  if (browserKind === 'transport_closed') {
+    return {
+      title: '浏览器连接中断',
+      subtitle: '浏览器会话已断开，请重新执行任务。',
+      nextStep: '重新执行任务会建立新的浏览器会话。',
+    };
+  }
   if (
     /dns|enotfound|getaddrinfo|net::err_name|net::err_address|无法访问|网络错误|网络异常|解析失败/.test(
       haystack,

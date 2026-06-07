@@ -80,6 +80,20 @@ describe('classifyFriendlyFailure', () => {
       subtitle: '浏览器会话已断开，请重新执行任务。',
       nextStep: '重新执行任务会建立新的浏览器会话。',
     });
+    expect(
+      classifyFriendlyFailure(
+        "WebSocket connection to 'wss://hd-app.orangebench.tech/ws' failed: Error during WebSocket handshake: Unexpected response code: 502",
+      ),
+    ).toEqual({
+      title: '浏览器连接中断',
+      subtitle: '浏览器会话已断开，请重新执行任务。',
+      nextStep: '重新执行任务会建立新的浏览器会话。',
+    });
+    expect(classifyFriendlyFailure('net::ERR_CONNECTION_CLOSED')).toEqual({
+      title: '浏览器连接中断',
+      subtitle: '浏览器会话已断开，请重新执行任务。',
+      nextStep: '重新执行任务会建立新的浏览器会话。',
+    });
   });
 
   it('classifies fast page changes as transient page switching', () => {
