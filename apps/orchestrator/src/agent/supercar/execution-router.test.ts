@@ -175,6 +175,10 @@ describe('classifyAsSimpleSearch', () => {
       'help me book a flight to tokyo',
       '帮我注册一个账号',
       'Sign up for OpenAI',
+      'reserve a table at OpenTable for tomorrow night',
+      'make a reservation at a sushi restaurant',
+      'make an appointment with a dentist next Tuesday',
+      'RSVP to this event',
     ])('false: %s', (intent) => {
       expect(classifyAsSimpleSearch(intent)).toBe(false);
     });
