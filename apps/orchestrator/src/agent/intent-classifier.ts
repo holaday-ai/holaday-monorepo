@@ -121,7 +121,7 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/(?:在|到|去)(?:小红书|微博|知乎|抖音|b站|bilibili|twitter|x\.com|linkedin|reddit|instagram|facebook|threads).{0,24}(?:发帖|评论|点赞|关注|发布)/i, '中文社交平台操作'],
   [/(?:发帖|评论|点赞|关注).{0,18}(?:这|该|那个|账号|帖子|笔记|视频|微博|动态|文章|post|tweet)/i, '中文社交对象操作'],
   [/(?:给|帮我给|替我给|为).{0,24}(?:评论|点赞|关注)/i, '中文社交互动'],
-  [/(?:在|到|去|用|通过).{0,24}(?:携程|去哪儿|飞猪|google flights|airbnb|booking|linkedin).{0,72}(?:筛选|排序|保存筛选|保存条件|收藏|付款前|支付前|确认前|提交前|停在)/i, '中文站内筛选保存'],
+  [/(?:在|到|去|用|通过).{0,24}(?:携程|去哪儿|飞猪|google flights|airbnb|booking|linkedin).{0,72}(?:筛选|排序|选择|勾选|切换|设置|保存筛选|保存条件|收藏|付款前|支付前|确认前|提交前|停在)/i, '中文站内筛选保存'],
   [/(?:在|用|通过).{0,24}(?:gmail|slack|linkedin|notion|飞书|github|google docs|google forms).{0,64}(?:写|撰写|起草|创建|新建|编辑).{0,48}(?:草稿|邮件|消息|页面|文档|会议纪要|计划|报名表|表单|帖子|issue|pull request|pr)/i, '中文应用草稿操作'],
   [/\bbook\s+(?:me\s+)?(?:a\s+|an\s+|the\s+)?(?:flight|ticket|hotel|room|table|restaurant|appointment|ride|car|train|bus)\b/i, 'book service'],
   [/\breserve\s+(?:a\s+|an\s+|the\s+)?(?:table|room|seat|ticket|hotel|restaurant|car)\b/i, 'reserve service'],

@@ -29,8 +29,10 @@ describe('tool registry', () => {
 
   it.each([
     '在 Google Flights 查找东京到纽约航班并筛选直飞',
+    '用 Google Flights 搜索东京到纽约航班，选择最早出发',
     '在携程查询上海到东京机票，筛选直飞并停在付款前',
     '在 Airbnb 找下周末东京民宿并收藏前两个',
+    '用 Airbnb 搜索东京民宿，勾选整租并设置两位住客',
     '在 Gmail 写一封邮件草稿给客户，不要发送',
     '在 GitHub 创建一个 issue 草稿',
     'create a draft issue in GitHub',

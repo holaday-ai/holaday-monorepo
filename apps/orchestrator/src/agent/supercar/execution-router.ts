@@ -218,7 +218,8 @@ export function classifyAsSimpleSearch(intent: string): boolean {
     'linkedin',
   ];
   const LIVE_APP_ACTION_HINTS = [
-    '筛选', '排序', '收藏', '保存筛选', '保存条件', '直飞',
+    '筛选', '排序', '选择', '勾选', '切换', '设置',
+    '收藏', '保存筛选', '保存条件', '直飞',
     '草稿', '创建', '新建', '填写', '写一封', '撰写', '停在',
     '付款前', '支付前', '提交前', '确认前',
     'filter', 'sort', 'favorite', 'bookmark', 'save filter',
