@@ -162,6 +162,9 @@ describe('skills page state helpers', () => {
     expect(skillCardUsageHint({ enabled: false, pending: true })).toBe(
       '正在保存选择',
     );
+    expect(skillCardUsageHint({ enabled: true, pending: false, cap: 0 })).toBe(
+      '当前套餐不可使用，可停用',
+    );
     expect(
       skillCardUsageHint({ enabled: false, pending: false, limitBlocked: true, cap: 0 }),
     ).toBe('当前套餐不可启用');
@@ -207,6 +210,19 @@ describe('skills page state helpers', () => {
         blocked: true,
       }).title,
     ).toBe('另一个技能正在保存，稍后可用此专家创建任务');
+    expect(
+      skillUseActionCopy({
+        skillName: '增长黑客',
+        enabled: true,
+        pending: false,
+        blocked: false,
+        planBlocked: true,
+      }),
+    ).toEqual({
+      label: '不可使用',
+      title: '当前套餐暂不支持用此专家创建任务',
+      ariaLabel: '当前套餐暂不支持用增长黑客创建任务',
+    });
   });
 
   it('builds an editable expert task draft from a skill card', () => {

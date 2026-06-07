@@ -388,6 +388,7 @@ function SkillCard({
 }): JSX.Element {
   const Icon = ICONS[skill.icon] ?? Sparkles;
   const toggleDisabled = pending || blocked || limitBlocked;
+  const useBlockedByPlan = skill.enabled && cap <= 0;
   const toggleTitle = limitBlocked
     ? cap <= 0
       ? '当前套餐暂不支持启用专家技能'
@@ -398,6 +399,7 @@ function SkillCard({
     enabled: skill.enabled,
     pending,
     blocked,
+    planBlocked: useBlockedByPlan,
   });
   return (
     <article
@@ -438,7 +440,7 @@ function SkillCard({
             skill.enabled &&
               'bg-[#EA1F59] text-white hover:bg-[#CA174A] focus-visible:ring-[#EA1F59]/25',
           )}
-          disabled={!skill.enabled || pending || blocked}
+          disabled={!skill.enabled || pending || blocked || useBlockedByPlan}
           title={useAction.title}
           aria-label={useAction.ariaLabel}
           onClick={onUse}

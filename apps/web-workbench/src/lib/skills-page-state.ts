@@ -154,6 +154,9 @@ export function skillCardUsageHint(options: {
   readonly cap?: number;
 }): string {
   if (options.pending) return '正在保存选择';
+  if (options.enabled && (options.cap ?? 1) <= 0) {
+    return '当前套餐不可使用，可停用';
+  }
   if (!options.enabled && options.limitBlocked && (options.cap ?? 1) <= 0) {
     return '当前套餐不可启用';
   }
@@ -166,6 +169,7 @@ export function skillUseActionCopy(options: {
   readonly enabled: boolean;
   readonly pending: boolean;
   readonly blocked: boolean;
+  readonly planBlocked?: boolean;
 }): {
   readonly label: string;
   readonly title: string;
@@ -184,6 +188,13 @@ export function skillUseActionCopy(options: {
       label: '稍后使用',
       title: '另一个技能正在保存，稍后可用此专家创建任务',
       ariaLabel: `稍后用${skillName}创建任务`,
+    };
+  }
+  if (options.planBlocked) {
+    return {
+      label: '不可使用',
+      title: '当前套餐暂不支持用此专家创建任务',
+      ariaLabel: `当前套餐暂不支持用${skillName}创建任务`,
     };
   }
   if (!options.enabled) {
