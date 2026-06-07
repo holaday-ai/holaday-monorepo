@@ -15,7 +15,7 @@ describe('planProgressSummary', () => {
       failed: 0,
       running: 1,
       percent: 33,
-      label: '1/3 步完成',
+      label: '1/3 阶段完成',
       tone: 'running',
     });
   });
@@ -31,7 +31,7 @@ describe('planProgressSummary', () => {
       failed: 1,
       running: 1,
       percent: 33,
-      label: '1/3 步完成 · 1 失败',
+      label: '1/3 阶段完成 · 1 阶段失败',
       tone: 'failed',
     });
   });

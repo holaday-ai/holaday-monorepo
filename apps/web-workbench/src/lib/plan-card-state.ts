@@ -23,7 +23,7 @@ export function planProgressSummary(
     failed > 0 ? 'failed' : running > 0 ? 'running' : total > 0 && done === total ? 'done' : 'idle';
   const label =
     total > 0
-      ? `${done}/${total} 步完成${failed > 0 ? ` · ${failed} 失败` : ''}`
+      ? `${done}/${total} 阶段完成${failed > 0 ? ` · ${failed} 阶段失败` : ''}`
       : '等待计划步骤';
   return {
     total,
