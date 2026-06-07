@@ -601,6 +601,8 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       'Open Salesforce and update this customer note',
       '打开 Zendesk 回复这张工单草稿',
       '进入 Intercom 给这个用户添加备注',
+      '在 web2.0calc.com 计算 128*128',
+      'use web2.0calc.com to calculate 128*128',
     ];
     for (const intent of cases) {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });

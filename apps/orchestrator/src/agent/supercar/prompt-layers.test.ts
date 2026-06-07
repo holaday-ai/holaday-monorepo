@@ -179,6 +179,8 @@ describe('selectModelAndEffort', () => {
     'Open Salesforce and update this customer note',
     '打开 Zendesk 回复这张工单草稿',
     '进入 Intercom 给这个用户添加备注',
+    '在 web2.0calc.com 计算 128*128',
+    'use web2.0calc.com to calculate 128*128',
   ])('live app workflow → Sonnet 4.6 high: %s', (intent) => {
     expect(selectModelAndEffort(intent, 'none')).toEqual({
       model: 'claude-sonnet-4-6',
@@ -273,6 +275,8 @@ describe('getTaskBudget', () => {
     'Open Salesforce and update this customer note',
     '打开 Zendesk 回复这张工单草稿',
     '进入 Intercom 给这个用户添加备注',
+    '在 web2.0calc.com 计算 128*128',
+    'use web2.0calc.com to calculate 128*128',
   ])('live app workflow → 200K budget: %s', (intent) => {
     expect(getTaskBudget(intent, 'none')).toBe(200_000);
   });
