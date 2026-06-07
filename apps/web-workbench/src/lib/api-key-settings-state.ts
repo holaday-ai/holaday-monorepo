@@ -99,5 +99,7 @@ function safeApiKeyDate(value: unknown): string | Date | null {
   if (value === null || value === undefined) return null;
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
   if (typeof value !== 'string') return null;
-  return value.trim() || null;
+  const text = value.trim();
+  if (!text) return null;
+  return Number.isFinite(Date.parse(text)) ? text : null;
 }

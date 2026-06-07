@@ -43,7 +43,7 @@ describe('api key settings state helpers', () => {
           name: { unsafe: true },
           keyPrefix: { unsafe: true },
           lastUsedAt: { unsafe: true },
-          expiresAt: Number.NaN,
+          expiresAt: 'not a date',
           revokedAt: new Date('not-a-date'),
           createdAt: '',
         },
