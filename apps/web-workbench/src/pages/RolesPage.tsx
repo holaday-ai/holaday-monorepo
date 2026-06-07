@@ -409,7 +409,7 @@ function RoleCard({ role, checked, locked, disabled, onClick }: CardProps): JSX.
         <span className="text-sm font-medium leading-tight">{role.nameZh}</span>
         {locked ? (
           <span
-            className="inline-flex items-center gap-1 rounded-full border border-[#57479C]/30 bg-white px-1.5 py-0.5 text-[10px] font-medium text-[#57479C]"
+            className="inline-flex items-center gap-1 rounded-full border border-[#57479C]/30 bg-white px-2 py-1 text-[11px] font-medium leading-none text-[#57479C]"
             title="升级到专业版解锁"
           >
             <Lock className="h-2.5 w-2.5" />

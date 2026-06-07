@@ -178,7 +178,7 @@ export function PlanPage(): JSX.Element {
             <span>{zh ? '按年' : 'Yearly'}</span>
             <span
               className={cn(
-                'rounded-full border px-1.5 py-0.5 text-[10px] font-medium',
+                'rounded-full border px-2 py-1 text-[11px] font-medium leading-none',
                 cycle === 'yearly'
                   ? 'border-[#EA1F59]/30 bg-white text-[#EA1F59]'
                   : 'border-[#DCDDDD] bg-white text-[#595757]',
@@ -260,12 +260,12 @@ export function PlanPage(): JSX.Element {
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
                   {featured && !isCurrent && (
-                    <span className="rounded-full border border-[#EA1F59]/35 bg-white px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[#EA1F59]">
+                    <span className="rounded-full border border-[#EA1F59]/35 bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-[#EA1F59]">
                       {zh ? '推荐' : 'Recommended'}
                     </span>
                   )}
                   {isCurrent && (
-                    <span className="rounded-full border border-[#57479C]/30 bg-white px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[#57479C]">
+                    <span className="rounded-full border border-[#57479C]/30 bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-[#57479C]">
                       {zh ? '当前' : 'Current'}
                     </span>
                   )}
