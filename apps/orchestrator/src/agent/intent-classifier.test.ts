@@ -379,6 +379,25 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
     }
   });
 
+  it('social platform actions → browser', async () => {
+    for (const intent of [
+      '在小红书评论这篇笔记',
+      '给这条微博点赞',
+      '关注这个账号',
+      'post on LinkedIn',
+    ]) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out).toBe('browser');
+    }
+  });
+
+  it('social engagement metrics stay generate', async () => {
+    for (const intent of ['评论区情绪分析', '点赞率优化方案', '关注度趋势报告']) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out).toBe('generate');
+    }
+  });
+
   it('checkout and cart as topics do not force browser', async () => {
     for (const intent of ['checkout strategy', '购物车转化率优化方案']) {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });

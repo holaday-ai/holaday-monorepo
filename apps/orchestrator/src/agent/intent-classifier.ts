@@ -89,7 +89,7 @@ const INTERACTION_VERBS: readonly string[] = [
   '登录', '打开', '访问', '下单', '操作', '提交', '点击', '填写', '填表',
   '比价', '抓取', '截图', '下载',
   '订票', '订机票', '订酒店', '订餐', '挂号',
-  '发帖', '评论', '点赞', '关注', '加购',
+  '加购',
   '加入购物车', '结账', '取消订阅', '发送邮件', '发邮件',
   // English
   'open ', 'visit ', 'log in', 'log into', 'sign in', 'sign into',
@@ -108,6 +108,9 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/(?:帮我|给我|替我|为我)?(?:把|将)?.{0,24}(?:放进|加入|添加).{0,24}(?:购物车|cart)/i, '中文加入购物车'],
   [/(?:帮我|给我|替我|为我)?(?:去)?结算.{0,24}(?:订单|商品|购物车|这个|它)/i, '中文结算'],
   [/(?:帮我|给我|替我|为我|去)(?:付款|支付)|(?:付款|支付).{0,16}(?:订单|商品|费用|尾款|这个|它)/i, '中文支付'],
+  [/(?:在|到|去)?(?:小红书|微博|知乎|抖音|b站|bilibili|twitter|x\.com|linkedin|reddit|instagram|facebook|threads).{0,24}(?:发帖|评论|点赞|关注|发布)/i, '中文社交平台操作'],
+  [/(?:发帖|评论|点赞|关注).{0,18}(?:这|该|那个|账号|帖子|笔记|视频|微博|动态|文章|post|tweet)/i, '中文社交对象操作'],
+  [/(?:给|帮我给|替我给|为).{0,24}(?:评论|点赞|关注)/i, '中文社交互动'],
   [/\bbook\s+(?:me\s+)?(?:a\s+|an\s+|the\s+)?(?:flight|ticket|hotel|room|table|restaurant|appointment|ride|car|train|bus)\b/i, 'book service'],
   [/\breserve\s+(?:a\s+|an\s+|the\s+)?(?:table|room|seat|ticket|hotel|restaurant|car)\b/i, 'reserve service'],
   [/\bschedule\s+(?:a\s+|an\s+|the\s+)?(?:appointment|meeting|call|visit|consultation|interview)\b/i, 'schedule appointment'],
