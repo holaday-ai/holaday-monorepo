@@ -417,7 +417,7 @@ export function HistoryPage(): JSX.Element {
                         {taskStatusLabel(t.status, t.awaitingKind)}
                       </div>
                     </div>
-                    <span className="shrink-0 self-center pr-2 text-[11px] text-[#595757] opacity-0 group-hover:text-[#EA1F59] group-hover:opacity-100">
+                    <span className="shrink-0 self-center pr-2 text-[11px] text-[#595757] opacity-100 group-hover:text-[#EA1F59] sm:opacity-0 sm:group-hover:opacity-100">
                       查看 →
                     </span>
                   </button>
