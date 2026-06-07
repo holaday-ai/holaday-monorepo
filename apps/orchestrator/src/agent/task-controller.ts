@@ -605,5 +605,8 @@ function parseBatchFromData(
 
 function defaultConfirmPrompt(step: PlannedStep): string {
   const what = step.selector?.description ?? step.kind;
+  if (step.risk === 'high' || step.requiresConfirm === true) {
+    return `请确认是否继续：${what}。HOLA DAY 会停在最终确认页；提交、支付、发送、删除或退订等最终动作需要你手动完成。`;
+  }
   return `请确认下一步：${what}`;
 }

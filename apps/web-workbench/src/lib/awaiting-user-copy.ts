@@ -56,12 +56,12 @@ const COPY_BY_KIND: Record<AwaitingKind, AwaitingUserCopy> = {
   },
   browser_action: {
     title: '等待你确认',
-    streamBody: '请打开浏览器查看当前页面。确认无误后完成页面操作，或在下方输入框告诉 HOLA DAY 继续。',
+    streamBody: '请打开浏览器检查当前页面。确认无误后在下方回复继续；涉及提交、支付、发送、删除或退订时，HOLA DAY 不会替你点最终确认。',
     streamHint: '打开浏览器确认下一步',
     panelTitle: '等待你确认',
-    panelBody: '交互模式已开启。确认当前页面无误后完成页面操作，HOLA DAY 会继续执行，不用重新提交任务。',
+    panelBody: '交互模式已开启。请检查当前页面并回复继续；涉及提交、支付、发送、删除或退订时，最终确认由你手动完成。',
     toolbarLabel: '需要确认',
-    composerPlaceholder: '确认无误后回复，或说明要调整的地方...',
+    composerPlaceholder: '确认无误后回复继续，或说明要调整的地方...',
   },
 };
 
@@ -93,7 +93,7 @@ export function awaitingUserStreamMessage(
   if (normalized === 'browser_action' && trimmedQuestion) {
     return {
       body: trimmedQuestion,
-      followUp: '确认无误后在浏览器完成操作，或在下方输入框说明后继续。',
+      followUp: '确认无误后在下方回复继续；最终提交、支付、发送、删除或退订由你手动完成。',
     };
   }
   return {

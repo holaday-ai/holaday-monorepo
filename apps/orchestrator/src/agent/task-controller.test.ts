@@ -249,6 +249,10 @@ describe('TaskController state machine', () => {
     expect(sendEffect).toBeDefined();
     if (sendEffect?.kind === 'send') {
       expect(sendEffect.message.type).toBe('server.user.confirm');
+      if (sendEffect.message.type === 'server.user.confirm') {
+        expect(sendEffect.message.prompt).toContain('HOLA DAY 会停在最终确认页');
+        expect(sendEffect.message.prompt).toContain('最终动作需要你手动完成');
+      }
     }
   });
 
@@ -474,6 +478,9 @@ describe('TaskController state machine', () => {
       data: { batch: { batchTotal: 3 } }, // missing items + batchIndex
     });
     expect(s1.pendingConfirm?.kind).toBe('single');
+    if (s1.pendingConfirm?.kind === 'single') {
+      expect(s1.pendingConfirm.prompt).toContain('提交、支付、发送、删除或退订');
+    }
   });
 
   // ---------------- allowedOrigins propagation ----------------
