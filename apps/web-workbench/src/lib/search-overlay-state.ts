@@ -89,6 +89,20 @@ export function searchOverlayNeedsAttention(status: string): boolean {
   return status === 'awaiting_user';
 }
 
+/**
+ * Whether the search overlay's "retry" affordance may fire. A retry is
+ * only meaningful once the in-flight request has settled — firing it
+ * mid-search just bumps the request nonce, which resets the 300ms
+ * debounce and pushes the result further out, so on a flaky connection
+ * impatient re-taps make the search feel *more* stuck. Gate both the
+ * button (`disabled`) and the handler on this, matching the
+ * `disabled={loading}` guard every other retry / load-more button in
+ * the app already uses.
+ */
+export function searchOverlayCanRetry(searching: boolean): boolean {
+  return !searching;
+}
+
 function normalizeSearchOverlayRow(value: unknown): SearchOverlayRow | null {
   if (!isRecord(value)) return null;
   const taskId = safeSearchText(value.taskId);

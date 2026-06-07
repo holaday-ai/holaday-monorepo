@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import {
   nextSearchActiveIndex,
   normalizeSearchOverlayRows,
+  searchOverlayCanRetry,
   searchOverlayErrorMessage,
   searchOverlayNeedsAttention,
   searchOverlayRowCopy,
@@ -139,7 +140,14 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
     error: searchError,
     resultCount: filtered.length,
   });
-  const retrySearch = (): void => setSearchNonce((n) => n + 1);
+  // Only let a retry fire once the in-flight search has settled —
+  // re-firing mid-search resets the 300ms debounce and delays the
+  // result, matching the disabled={loading} guard used elsewhere.
+  const canRetry = searchOverlayCanRetry(searching);
+  const retrySearch = (): void => {
+    if (!canRetry) return;
+    setSearchNonce((n) => n + 1);
+  };
 
   function onKey(e: React.KeyboardEvent): void {
     if (e.key === 'Escape') {
@@ -226,9 +234,10 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                   <button
                     type="button"
                     onClick={retrySearch}
+                    disabled={!canRetry}
                     aria-label="重试搜索"
                     title="重试搜索"
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[#EA1F59]/20 text-[#EA1F59] transition-colors hover:bg-[#EA1F59]/10"
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[#EA1F59]/20 text-[#EA1F59] transition-colors hover:bg-[#EA1F59]/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <RotateCw className="h-3.5 w-3.5" aria-hidden />
                   </button>
@@ -257,6 +266,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                   variant="outline"
                   size="icon"
                   onClick={retrySearch}
+                  disabled={!canRetry}
                   aria-label="重试搜索"
                   title="重试搜索"
                   className="mt-3 h-8 w-8 rounded-[8px] border-[#DCDDDD] hover:border-[#EA1F59]/40 hover:text-[#EA1F59]"

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   nextSearchActiveIndex,
   normalizeSearchOverlayRows,
+  searchOverlayCanRetry,
   searchOverlayNeedsAttention,
   searchOverlayRowCopy,
   searchOverlayErrorMessage,
@@ -39,6 +40,11 @@ describe('search overlay state helpers', () => {
         resultCount: 2,
       })?.title,
     ).toBe('搜索失败，正在显示上次结果');
+  });
+
+  it('blocks search retry while a request is still in flight', () => {
+    expect(searchOverlayCanRetry(false)).toBe(true);
+    expect(searchOverlayCanRetry(true)).toBe(false);
   });
 
   it('normalizes unknown search errors', () => {
