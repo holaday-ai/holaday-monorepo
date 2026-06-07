@@ -641,11 +641,11 @@ export function WorkbenchApp(): JSX.Element {
       {!panelFullscreen && showBrowserPanel && isTablet && (
         <>
           <div
-            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px]"
+            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px]"
             aria-hidden
             onClick={() => setSidePanelOverride('close')}
           />
-          <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[520px] max-w-[88vw] flex-col bg-background shadow-2xl">
+          <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[480px] max-w-[84vw] flex-col bg-background shadow-2xl">
             <BrowserPanel
               frame={
                 selectedTask
