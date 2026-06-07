@@ -241,6 +241,7 @@ const SKILL_HINTS: ReadonlyMap<string, ExecutionMode> = new Map([
 ]);
 
 const URL_REGEX = /\b(?:https?:\/\/|www\.)\S+/i;
+const DOMAIN_REGEX = /\b[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}(?:\/[^\s，。；、,;]*)?/i;
 
 function hasAny(haystack: string, needles: readonly string[]): string | null {
   const lower = haystack.toLowerCase();
@@ -274,6 +275,31 @@ function matchSearchVerb(intent: string): string | null {
 
 function isNonExecutionPlatformTopic(intent: string): boolean {
   return NON_EXECUTION_PLATFORM_TOPIC_PATTERNS.some((pattern) => pattern.test(intent));
+}
+
+function matchDomainInfoIntent(intent: string): string | null {
+  const domainMatch = DOMAIN_REGEX.exec(intent);
+  if (!domainMatch) return null;
+  const domain = domainMatch[0].slice(0, 64);
+  if (/\b(?:report|strategy|framework|template|playbook|guide)\b.{0,80}\b[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}/i.test(intent)) {
+    return null;
+  }
+  if (/(?:报告|策略|框架|模板|指南|方案).{0,80}\b[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}/i.test(intent)) {
+    return null;
+  }
+  if (/(?:查看|分析|提取|抓取|总结|看一下|看看).{0,80}\b[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}/i.test(intent)) {
+    return domain;
+  }
+  if (/\b(?:summari[sz]e|analy[sz]e|extract|review)\b.{0,80}\b[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}/i.test(intent)) {
+    return domain;
+  }
+  if (/\b(?:pricing|price|homepage|home\s+page|landing\s+page|docs?|documentation)\b.{0,40}\b(?:from|on|of|for)\s+[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}/i.test(intent)) {
+    return domain;
+  }
+  if (/\b[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}(?:\/[^\s，。；、,;]*)?.{0,40}(?:定价|价格|首页|主页|页面|文档|内容|\bpricing\b|\bprice\b|\bhomepage\b|\bdocs?\b|\bdocumentation\b)/i.test(intent)) {
+    return domain;
+  }
+  return null;
 }
 
 function isEcommerceListingIntent(intent: string): boolean {
@@ -317,6 +343,10 @@ function decide(intent: string): RouteDecision {
   const urlMatch = URL_REGEX.exec(intent);
   if (urlMatch) {
     return { mode: 'scrape', source: 'kw:url', match: urlMatch[0].slice(0, 64) };
+  }
+  const domainInfoMatch = matchDomainInfoIntent(intent);
+  if (domainInfoMatch) {
+    return { mode: 'scrape', source: 'kw:domain-info', match: domainInfoMatch };
   }
   const searchPattern = matchSearchPattern(intent);
   if (searchPattern) {

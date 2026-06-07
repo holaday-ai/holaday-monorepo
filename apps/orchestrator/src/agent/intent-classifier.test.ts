@@ -105,6 +105,19 @@ describe('classifyExecutionMode — pre-Firecrawl regression suite (site/URL wit
     });
     expect(out).toBe('scrape');
   });
+
+  it('naked domain with info intent → scrape', async () => {
+    for (const intent of [
+      '分析 canva.com pricing page',
+      'summarize framer.site homepage',
+      'extract pricing from brand.design',
+      '看一下 read.cv 的首页内容',
+      '总结 stripe.com/pricing',
+    ]) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out).toBe('scrape');
+    }
+  });
 });
 
 describe('classifyExecutionMode — explicit skill hint short-circuit', () => {
