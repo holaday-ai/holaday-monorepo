@@ -313,10 +313,12 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
   it('booking and appointment verbs → browser', async () => {
     const cases = [
       '帮我预订上海到东京的机票',
+      '帮我定明晚的酒店',
       '在携程订酒店',
       '预约明天下午的牙医',
       '帮我挂号皮肤科',
       '报名这个线上活动',
+      '帮我投递这个岗位',
     ];
     for (const intent of cases) {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
@@ -343,6 +345,14 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
   it('English book as a noun does not force browser', async () => {
     const out = await classifyExecutionMode({
       intent: 'give me book recommendations about product strategy',
+      logger: fakeLogger(),
+    });
+    expect(out).toBe('generate');
+  });
+
+  it('中文预订 as a topic does not force browser', async () => {
+    const out = await classifyExecutionMode({
+      intent: '制定一个酒店预订策略',
       logger: fakeLogger(),
     });
     expect(out).toBe('generate');

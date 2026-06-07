@@ -88,8 +88,8 @@ export interface ClassifyOpts {
 const INTERACTION_VERBS: readonly string[] = [
   '登录', '打开', '访问', '下单', '操作', '提交', '点击', '填写', '填表',
   '比价', '抓取', '截图', '下载',
-  '预订', '预定', '预约', '订票', '订机票', '订酒店', '订餐', '挂号',
-  '报名', '投递', '发帖', '评论', '点赞', '关注', '加购',
+  '订票', '订机票', '订酒店', '订餐', '挂号',
+  '发帖', '评论', '点赞', '关注', '加购',
   '加入购物车', '结账', '取消订阅', '发送邮件', '发邮件',
   // English
   'open ', 'visit ', 'log in', 'log into', 'sign in', 'sign into',
@@ -100,6 +100,10 @@ const INTERACTION_VERBS: readonly string[] = [
 ];
 
 const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
+  [/(?<!制)(?:帮我|给我|替我|为我)?(?:预订|预定|订|定).{0,24}(?:机票|航班|酒店|房间|民宿|餐厅|座位|车票|火车票|门票|票|会议室)/i, '中文预订服务'],
+  [/(?<!制)(?:帮我|给我|替我|为我)?预约.{0,24}(?:医生|牙医|门诊|挂号|服务|面试|会议|咨询|体检|维修|上门|时间|今天|明天|后天|周[一二三四五六日天]|下周)/i, '中文预约服务'],
+  [/(?:帮我|给我|替我|为我)?报名.{0,24}(?:活动|课程|会议|讲座|班|workshop|webinar|conference)/i, '中文报名活动'],
+  [/(?:帮我|给我|替我|为我)?投递.{0,24}(?:简历|岗位|职位|工作|job|role|position)/i, '中文投递职位'],
   [/\bbook\s+(?:me\s+)?(?:a\s+|an\s+|the\s+)?(?:flight|ticket|hotel|room|table|restaurant|appointment|ride|car|train|bus)\b/i, 'book service'],
   [/\breserve\s+(?:a\s+|an\s+|the\s+)?(?:table|room|seat|ticket|hotel|restaurant|car)\b/i, 'reserve service'],
   [/\bschedule\s+(?:a\s+|an\s+|the\s+)?(?:appointment|meeting|call|visit|consultation|interview)\b/i, 'schedule appointment'],
