@@ -342,6 +342,28 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
     }
   });
 
+  it('message and email send verbs → browser', async () => {
+    const cases = [
+      '给客户发一封邮件',
+      '在 Gmail 给客户发一封邮件',
+      '帮我给客户发消息',
+      'send a message on LinkedIn',
+      'reply to this email',
+    ];
+    for (const intent of cases) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out).toBe('browser');
+    }
+  });
+
+  it('email drafting stays generate', async () => {
+    const out = await classifyExecutionMode({
+      intent: '写一封邮件文案',
+      logger: fakeLogger(),
+    });
+    expect(out).toBe('generate');
+  });
+
   it('English book as a noun does not force browser', async () => {
     const out = await classifyExecutionMode({
       intent: 'give me book recommendations about product strategy',
