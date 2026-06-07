@@ -5,6 +5,7 @@ import {
   nextSearchActiveIndex,
   normalizeSearchOverlayRows,
   searchOverlayErrorMessage,
+  searchOverlayNeedsAttention,
   searchOverlayRowCopy,
   searchOverlayStatusCopy,
   type SearchOverlayRow,
@@ -267,6 +268,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
           )}
           {filtered.map((t, i) => {
             const copy = searchOverlayRowCopy(t);
+            const needsAttention = searchOverlayNeedsAttention(t.status);
             return (
               <li key={t.taskId}>
                 <button
@@ -278,12 +280,24 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                   }}
                   className={cn(
                     'group flex w-full items-start gap-3 rounded-[8px] border border-transparent px-3 py-2.5 text-left transition-colors',
-                    i === active
+                    needsAttention &&
+                      'border-[#FFC910]/35 bg-[#FFC910]/[0.07] shadow-[inset_3px_0_0_rgba(255,201,16,0.75)]',
+                    i === active && !needsAttention
                       ? 'border-[#EA1F59]/20 bg-[#EA1F59]/10 shadow-[inset_3px_0_0_#EA1F59]'
-                      : 'hover:bg-[#EFEFEF]/60',
+                      : needsAttention
+                        ? 'hover:bg-[#FFC910]/[0.12]'
+                        : 'hover:bg-[#EFEFEF]/60',
+                    i === active &&
+                      needsAttention &&
+                      'border-[#FFC910]/60 bg-[#FFC910]/[0.13]',
                   )}
                 >
-                  <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] bg-[#EFEFEF] text-muted-foreground transition-colors group-hover:text-[#EA1F59]">
+                  <div
+                    className={cn(
+                      'mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] bg-[#EFEFEF] text-muted-foreground transition-colors group-hover:text-[#EA1F59]',
+                      needsAttention && 'bg-[#FFC910]/20 text-[#8A6A00] group-hover:text-[#8A6A00]',
+                    )}
+                  >
                     <Search className="h-3.5 w-3.5" aria-hidden />
                   </div>
                   <div className="min-w-0 flex-1">

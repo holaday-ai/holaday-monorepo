@@ -85,6 +85,10 @@ export function searchOverlayRowCopy(
   };
 }
 
+export function searchOverlayNeedsAttention(status: string): boolean {
+  return status === 'awaiting_user';
+}
+
 function normalizeSearchOverlayRow(value: unknown): SearchOverlayRow | null {
   if (!isRecord(value)) return null;
   const taskId = safeSearchText(value.taskId);

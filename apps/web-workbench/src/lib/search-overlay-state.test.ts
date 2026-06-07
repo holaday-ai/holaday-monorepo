@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   nextSearchActiveIndex,
   normalizeSearchOverlayRows,
+  searchOverlayNeedsAttention,
   searchOverlayRowCopy,
   searchOverlayErrorMessage,
   searchOverlayStatusCopy,
@@ -92,6 +93,9 @@ describe('search overlay state helpers', () => {
   });
 
   it('keeps action-needed status visible in mobile search rows', () => {
+    expect(searchOverlayNeedsAttention('awaiting_user')).toBe(true);
+    expect(searchOverlayNeedsAttention('executing')).toBe(false);
+
     expect(
       searchOverlayRowCopy({
         intent: '登录航空公司查看订单',
