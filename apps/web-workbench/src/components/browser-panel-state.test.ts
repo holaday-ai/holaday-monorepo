@@ -11,6 +11,7 @@ import {
   browserPanelDotLabel,
   browserLiveStatusLabel,
   shouldShowBrowserHeader,
+  terminalBrowserMissingFrameCopy,
   terminalBrowserTakeoverMessage,
   terminalEvidenceFrameLabel,
   terminalEvidenceStatusLabel,
@@ -271,6 +272,42 @@ describe('BrowserPanel state helpers', () => {
     expect(terminalBrowserTakeoverMessage('failed')).toBe(
       '任务未完成，浏览器已关闭。重新执行任务可打开新浏览器。',
     );
+  });
+
+  it('frames missing terminal browser frames as a next action, not lost evidence', () => {
+    expect(
+      terminalBrowserMissingFrameCopy({
+        status: 'completed',
+        hasFinalUrl: true,
+        finalUrlIsError: false,
+      }),
+    ).toEqual({
+      title: '任务已完成，可打开最终页面复核',
+      body: '这次任务没有保存浏览器截图，但保留了最终地址。你可以打开页面核对结果。',
+      actionLabel: '打开最终地址',
+    });
+    expect(
+      terminalBrowserMissingFrameCopy({
+        status: 'failed',
+        hasFinalUrl: false,
+        finalUrlIsError: true,
+      }),
+    ).toEqual({
+      title: '任务未完成，页面无法打开',
+      body: '任务结束在浏览器错误页。请检查网址是否正确，或换一个能直接访问的页面后重新执行。',
+      actionLabel: '重新执行',
+    });
+    expect(
+      terminalBrowserMissingFrameCopy({
+        status: 'cancelled',
+        hasFinalUrl: false,
+        finalUrlIsError: false,
+      }),
+    ).toEqual({
+      title: '这条任务没有保存浏览器画面',
+      body: '可以重新执行同样的意图，HOLA DAY 会打开新的浏览器并保留新的浏览器画面。',
+      actionLabel: '重新执行',
+    });
   });
 
   it('keeps the released-browser card about the browser, not task outcome', () => {

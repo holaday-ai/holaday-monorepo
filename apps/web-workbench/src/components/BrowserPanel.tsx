@@ -32,9 +32,9 @@ import {
   browserWakeFeedback,
   isBrowserErrorUrl,
   shouldShowBrowserHeader,
+  terminalBrowserMissingFrameCopy,
   terminalBrowserTakeoverMessage,
   terminalEvidenceFrameLabel,
-  terminalEvidenceStatusLabel,
 } from '@/components/browser-panel-state';
 import {
   CdpScreencastViewport,
@@ -2213,9 +2213,13 @@ function EmptyBrowserState({
   }
   const terminal = taskStatus ? isTerminalStatus(taskStatus) : false;
   if (terminal && isBrowserTask) {
-    const statusLabel = terminalEvidenceStatusLabel(taskStatus);
     const safeFinalUrl = safeExternalHttpHref(finalUrl);
     const errorFinalUrl = isBrowserErrorUrl(finalUrl);
+    const missingFrameCopy = terminalBrowserMissingFrameCopy({
+      status: taskStatus,
+      hasFinalUrl: Boolean(safeFinalUrl),
+      finalUrlIsError: errorFinalUrl,
+    });
     // Three branches: finalScreenshot is handled before reaching us
     // (the parent renders `finalEvidenceFrame` directly). Here we
     // only see "no screenshot" cases — either finalUrl exists (give
@@ -2226,10 +2230,10 @@ function EmptyBrowserState({
         <div className={cn('flex flex-col items-center px-6 py-4 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-lg')}>
           <Globe className="h-10 w-10 text-[#EA1F59]/70" aria-hidden />
           <div className="mt-3 text-sm font-medium text-foreground/80">
-            {statusLabel}，页面无法打开
+            {missingFrameCopy.title}
           </div>
           <div className="mt-1 text-xs leading-relaxed">
-            任务结束在浏览器错误页。请检查网址是否正确，或换一个能直接访问的页面后重新执行。
+            {missingFrameCopy.body}
           </div>
           {onReExecute && (
             <button
@@ -2252,17 +2256,18 @@ function EmptyBrowserState({
         <div className={cn('flex flex-col items-center px-6 py-4 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-lg')}>
           <Globe className="h-10 w-10 text-[#42C0EF]/70" aria-hidden />
           <div className="mt-3 text-sm font-medium text-foreground/80">
-            {statusLabel}，没有浏览器画面
+            {missingFrameCopy.title}
           </div>
           <div className="mt-1 text-xs leading-relaxed">
-            这次任务结束时没有保存浏览器画面，可打开最终地址复核。
+            {missingFrameCopy.body}
           </div>
           <SafeExternalLinkButton
             href={safeFinalUrl}
             className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 py-1 text-[12px] text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/50 dark:border-white/10 dark:bg-transparent dark:hover:bg-white/10"
           >
             <ExternalLink className="h-3 w-3" />
-            <span className="max-w-[260px] truncate font-mono text-[11px]">
+            <span>{missingFrameCopy.actionLabel}</span>
+            <span className="max-w-[160px] truncate font-mono text-[11px] text-muted-foreground">
               {safeFinalUrl}
             </span>
           </SafeExternalLinkButton>
@@ -2273,10 +2278,10 @@ function EmptyBrowserState({
       <div className={cn('flex flex-col items-center px-6 py-4 text-center text-muted-foreground', BROWSER_SURFACE, 'rounded-lg')}>
         <Globe className="h-10 w-10 text-[#42C0EF]/70" aria-hidden />
         <div className="mt-3 text-sm font-medium text-foreground/80">
-          这条历史任务没有保存浏览器画面
+          {missingFrameCopy.title}
         </div>
         <div className="mt-1 text-xs leading-relaxed">
-          可能是上线前的旧任务。可以重新执行同样的意图来生成浏览器画面。
+          {missingFrameCopy.body}
         </div>
         {onReExecute && (
           <button

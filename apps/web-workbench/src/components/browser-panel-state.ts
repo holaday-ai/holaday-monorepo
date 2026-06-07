@@ -302,3 +302,30 @@ export function browserWakeFeedback(
       return { message: '浏览器状态检查失败，请稍后重试', tone: 'error' };
   }
 }
+
+export function terminalBrowserMissingFrameCopy(inputs: {
+  status: UiTaskStatus | null | undefined;
+  hasFinalUrl: boolean;
+  finalUrlIsError: boolean;
+}): { title: string; body: string; actionLabel?: string } {
+  const statusLabel = terminalEvidenceStatusLabel(inputs.status);
+  if (inputs.finalUrlIsError) {
+    return {
+      title: `${statusLabel}，页面无法打开`,
+      body: '任务结束在浏览器错误页。请检查网址是否正确，或换一个能直接访问的页面后重新执行。',
+      actionLabel: '重新执行',
+    };
+  }
+  if (inputs.hasFinalUrl) {
+    return {
+      title: `${statusLabel}，可打开最终页面复核`,
+      body: '这次任务没有保存浏览器截图，但保留了最终地址。你可以打开页面核对结果。',
+      actionLabel: '打开最终地址',
+    };
+  }
+  return {
+    title: '这条任务没有保存浏览器画面',
+    body: '可以重新执行同样的意图，HOLA DAY 会打开新的浏览器并保留新的浏览器画面。',
+    actionLabel: '重新执行',
+  };
+}
