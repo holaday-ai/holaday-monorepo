@@ -135,6 +135,10 @@ describe('selectModelAndEffort', () => {
   });
 
   it.each([
+    '查上海到东京航班，筛选直飞并选择最早出发',
+    '找下周五东京酒店，按评分排序并停在预订确认前',
+    'find flights from SFO to Tokyo, filter nonstop, choose the earliest departure',
+    'find a restaurant reservation for tomorrow and stop before booking',
     '在 Google Flights 查找东京到纽约航班并筛选直飞',
     '用 Google Flights 搜索东京到纽约航班，选择最早出发',
     '在携程查询上海到东京机票，筛选直飞并停在付款前',
@@ -254,6 +258,10 @@ describe('getTaskBudget', () => {
   });
 
   it.each([
+    '查上海到东京航班，筛选直飞并选择最早出发',
+    '找下周五东京酒店，按评分排序并停在预订确认前',
+    'find flights from SFO to Tokyo, filter nonstop, choose the earliest departure',
+    'find a restaurant reservation for tomorrow and stop before booking',
     '在 Google Flights 查找东京到纽约航班并筛选直飞',
     '用 Google Flights 搜索东京到纽约航班，选择最早出发',
     '在携程查询上海到东京机票，筛选直飞并停在付款前',
