@@ -52,6 +52,17 @@ describe('browserNavFailureMessage', () => {
     expect(browserNavExceptionMessage(new Error('CDP session closed'), 'reload')).toBe(
       '浏览器连接中断，请重新执行任务',
     );
+    expect(
+      browserNavExceptionMessage(
+        new Error(
+          "WebSocket connection to 'wss://hd-app.orangebench.tech/ws' failed: Error during WebSocket handshake: Unexpected response code: 502",
+        ),
+        'reload',
+      ),
+    ).toBe('浏览器连接中断，请重新执行任务');
+    expect(browserNavExceptionMessage(new Error('net::ERR_CONNECTION_CLOSED'), 'goto')).toBe(
+      '浏览器连接中断，请重新执行任务',
+    );
     expect(browserNavExceptionMessage(new Error('socket_closed: 浏览器扩展连接已断开'), 'reload')).toBe(
       '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试',
     );

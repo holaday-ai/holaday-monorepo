@@ -42,6 +42,14 @@ describe('error-copy', () => {
     expect(humaniseTaskError('Protocol error (Page.navigate): Target closed')).toBe(
       '浏览器连接中断，请重新执行任务。',
     );
+    expect(
+      humaniseTaskError(
+        "WebSocket connection to 'wss://holaday.ai/ws' failed: Error during WebSocket handshake: Unexpected response code: 502",
+      ),
+    ).toBe('浏览器连接中断，请重新执行任务。');
+    expect(humaniseTaskError('net::ERR_CONNECTION_CLOSED')).toBe(
+      '浏览器连接中断，请重新执行任务。',
+    );
   });
 
   it('maps missing extension clients without internal mode names', () => {

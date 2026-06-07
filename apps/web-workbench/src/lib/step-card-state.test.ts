@@ -152,6 +152,22 @@ describe('step-card-state', () => {
     ).toBe('浏览器扩展连接已断开。请重新打开 HOLA DAY 扩展后重试。');
   });
 
+  it('explains raw browser transport closures in step details', () => {
+    expect(
+      stepFailureMessage({
+        actionKind: 'navigate',
+        message:
+          "WebSocket connection to 'wss://holaday.ai/ws' failed: Error during WebSocket handshake: Unexpected response code: 502",
+      }),
+    ).toBe('浏览器连接中断，请重新执行任务。');
+    expect(
+      stepFailureMessage({
+        actionKind: 'navigate',
+        message: 'net::ERR_CONNECTION_CLOSED',
+      }),
+    ).toBe('浏览器连接中断，请重新执行任务。');
+  });
+
   it('explains extension host permission failures', () => {
     expect(
       stepFailureMessage({
