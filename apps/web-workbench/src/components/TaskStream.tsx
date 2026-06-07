@@ -2261,9 +2261,9 @@ function TerminalSummary({
               key={`${i}-${s.slice(0, 10)}`}
               type="button"
               onClick={() => onSuggestionPick(s)}
-              className="group flex w-full items-start gap-2 rounded-[6px] px-2.5 py-2 text-left text-xs text-[#595757] transition-colors hover:bg-[#EFEFEF]/55 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 dark:text-foreground/75 dark:hover:bg-white/10 dark:hover:text-foreground"
+              className="group flex min-h-10 w-full items-start gap-2.5 rounded-[6px] px-2.5 py-2.5 text-left text-xs text-[#595757] transition-colors hover:bg-[#EFEFEF]/55 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/20 dark:text-foreground/75 dark:hover:bg-white/10 dark:hover:text-foreground"
             >
-              <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[#DCDDDD] bg-[#EFEFEF]/55 text-[10px] font-medium text-[#595757] transition-colors group-hover:border-[#EA1F59]/35 group-hover:bg-[#EA1F59]/5 group-hover:text-[#EA1F59] dark:border-white/10 dark:bg-white/5 dark:text-foreground/70">
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#DCDDDD] bg-[#EFEFEF]/55 text-[11px] font-medium text-[#595757] transition-colors group-hover:border-[#EA1F59]/35 group-hover:bg-[#EA1F59]/5 group-hover:text-[#EA1F59] dark:border-white/10 dark:bg-white/5 dark:text-foreground/70">
                 {i + 1}
               </span>
               <span className="min-w-0 flex-1 leading-5">{s}</span>
