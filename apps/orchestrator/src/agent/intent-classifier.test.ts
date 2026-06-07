@@ -329,6 +329,7 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       'help me book a flight to Tokyo',
       'reserve a table for tomorrow night',
       'schedule a dentist appointment',
+      'make an appointment with a dentist',
       'apply for this job on LinkedIn',
       'send an email in Gmail',
       'add this item to cart',
@@ -337,6 +338,14 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
       expect(out).toBe('browser');
     }
+  });
+
+  it('English book as a noun does not force browser', async () => {
+    const out = await classifyExecutionMode({
+      intent: 'give me book recommendations about product strategy',
+      logger: fakeLogger(),
+    });
+    expect(out).toBe('generate');
   });
 
   it('点击 / 提交 / 填写 → browser', async () => {

@@ -94,12 +94,17 @@ const INTERACTION_VERBS: readonly string[] = [
   // English
   'open ', 'visit ', 'log in', 'log into', 'sign in', 'sign into',
   'submit ', 'click ', 'navigate to', 'fill in', 'fill out', 'download',
-  'book ', 'reserve ', 'make a reservation', 'schedule ',
+  'make a reservation',
   'sign up', 'send email', 'send an email',
   'add to cart', 'checkout', 'check out', 'place order',
 ];
 
 const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
+  [/\bbook\s+(?:me\s+)?(?:a\s+|an\s+|the\s+)?(?:flight|ticket|hotel|room|table|restaurant|appointment|ride|car|train|bus)\b/i, 'book service'],
+  [/\breserve\s+(?:a\s+|an\s+|the\s+)?(?:table|room|seat|ticket|hotel|restaurant|car)\b/i, 'reserve service'],
+  [/\bschedule\s+(?:a\s+|an\s+|the\s+)?(?:appointment|meeting|call|visit|consultation|interview)\b/i, 'schedule appointment'],
+  [/\bschedule\s+.{1,60}\s+(?:appointment|meeting|call|visit|consultation|interview)\b/i, 'schedule appointment'],
+  [/\b(?:make|set\s+up)\s+(?:a\s+|an\s+)?(?:appointment|reservation|meeting|call)\b/i, 'make appointment'],
   [/\bregister\s+for\s+(?:this\s+)?(?:event|webinar|class|course|workshop|conference)\b/i, 'register for event'],
   [/\bapply\s+(?:for|to)\s+(?:this\s+)?(?:job|role|position|opening|listing)\b/i, 'apply for job'],
   [/\bapply\s+(?:on|in)\s+(?:linkedin|indeed|greenhouse|lever)\b/i, 'apply on job site'],
