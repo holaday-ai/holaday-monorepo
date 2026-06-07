@@ -20,11 +20,22 @@ interface Rule {
   to: string | ((m: RegExpMatchArray) => string);
 }
 
-const RULES: Rule[] = [
+const SYSTEM_TASK_RULES: Rule[] = [
   {
-    match: /orchestrator restarted while task was in-flight/i,
-    to: '服务重启导致任务中断，重新发送一次即可。',
+    match: /ORCHESTRATOR_RESTART|orchestrator restarted while task was in-flight|服务重启导致任务中断/i,
+    to: '服务刚重启过，这个任务没能继续。重新执行会保留旧记录并新开一次。',
   },
+  {
+    match: /AWAITING_USER_TIMEOUT|等待用户响应超时/i,
+    to: '等待你操作的时间已过，任务已自动释放。重新执行后会从新的浏览器会话开始。',
+  },
+  {
+    match: /EXECUTION_TIMEOUT|SUPERCAR_WATCHDOG_TIMEOUT|任务执行超过\s*\d+\s*分钟未更新/i,
+    to: '任务长时间没有进展，已自动停止。可以重新执行，或把步骤拆小一点。',
+  },
+];
+
+const RULES: Rule[] = [
   {
     match: /exhausted\s+maxIterations/i,
     to: '任务步骤过多，未能在限制内完成。试着把意图写得更具体，或换个方式提问。',
@@ -103,6 +114,10 @@ export function humaniseTaskError(raw: string | null | undefined): string {
   const trimmed = raw.trim();
   if (!trimmed) return '';
   for (const rule of AI_SERVICE_RULES) {
+    const m = trimmed.match(rule.match);
+    if (m) return typeof rule.to === 'function' ? rule.to(m) : rule.to;
+  }
+  for (const rule of SYSTEM_TASK_RULES) {
     const m = trimmed.match(rule.match);
     if (m) return typeof rule.to === 'function' ? rule.to(m) : rule.to;
   }

@@ -2,6 +2,24 @@ import { describe, expect, it } from 'vitest';
 import { classifyFriendlyFailure, friendlyFailureDetail } from './failure-copy';
 
 describe('classifyFriendlyFailure', () => {
+  it('separates system-stopped task failures from website failures', () => {
+    expect(classifyFriendlyFailure('ORCHESTRATOR_RESTART')).toEqual({
+      title: '服务重启中断了任务',
+      subtitle: '这个任务没能继续执行；旧记录会保留，重新执行会新开一次尝试。',
+      nextStep: '重新执行当前任务。',
+    });
+    expect(classifyFriendlyFailure('等待用户响应超时（>35分钟），任务已自动释放。')).toEqual({
+      title: '等待操作超时',
+      subtitle: '任务等你登录、验证或确认太久，已经自动释放资源。',
+      nextStep: '重新执行后在新的浏览器会话里继续操作。',
+    });
+    expect(classifyFriendlyFailure('任务执行超过 20 分钟未更新，已自动标记失败。')).toEqual({
+      title: '任务长时间没有进展',
+      subtitle: 'HOLA DAY 已自动停止这次尝试，避免任务一直卡在执行中。',
+      nextStep: '可以重新执行，或把目标拆成更小的步骤。',
+    });
+  });
+
   it('uses terminal-safe login recovery copy', () => {
     expect(classifyFriendlyFailure('login required').subtitle).toBe(
       '请重新执行；如果再次停在登录页，请先完成登录。',

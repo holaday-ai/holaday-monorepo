@@ -26,6 +26,18 @@ describe('error-copy', () => {
     expect(humaniseTaskError('PayPal SDK failed to load')).toBe('PayPal 暂时无法加载，请刷新页面后重试。');
   });
 
+  it('explains system-stopped tasks without generic failure copy', () => {
+    expect(humaniseTaskError('ORCHESTRATOR_RESTART')).toBe(
+      '服务刚重启过，这个任务没能继续。重新执行会保留旧记录并新开一次。',
+    );
+    expect(humaniseTaskError('等待用户响应超时（>35分钟），任务已自动释放。')).toBe(
+      '等待你操作的时间已过，任务已自动释放。重新执行后会从新的浏览器会话开始。',
+    );
+    expect(humaniseTaskError('任务执行超过 20 分钟未更新，已自动标记失败。')).toBe(
+      '任务长时间没有进展，已自动停止。可以重新执行，或把步骤拆小一点。',
+    );
+  });
+
   it('hides model secret names in missing configuration errors', () => {
     expect(humaniseTaskError('missing ANTHROPIC_API_KEY')).toBe(
       'AI 服务暂未配置，请联系 support@holaday.ai。',

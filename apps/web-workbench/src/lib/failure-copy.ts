@@ -16,6 +16,31 @@ export interface FriendlyFailure {
 export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
   const haystack = (errorText ?? '').toLowerCase();
   const browserKind = classifyBrowserErrorKind(errorText);
+  if (/ORCHESTRATOR_RESTART|orchestrator_restart|服务重启导致任务中断|orchestrator restarted/i.test(errorText)) {
+    return {
+      title: '服务重启中断了任务',
+      subtitle: '这个任务没能继续执行；旧记录会保留，重新执行会新开一次尝试。',
+      nextStep: '重新执行当前任务。',
+    };
+  }
+  if (/AWAITING_USER_TIMEOUT|awaiting_user_timeout|等待用户响应超时/i.test(errorText)) {
+    return {
+      title: '等待操作超时',
+      subtitle: '任务等你登录、验证或确认太久，已经自动释放资源。',
+      nextStep: '重新执行后在新的浏览器会话里继续操作。',
+    };
+  }
+  if (
+    /EXECUTION_TIMEOUT|execution_timeout|SUPERCAR_WATCHDOG_TIMEOUT|任务执行超过\s*\d+\s*分钟未更新/i.test(
+      errorText,
+    )
+  ) {
+    return {
+      title: '任务长时间没有进展',
+      subtitle: 'HOLA DAY 已自动停止这次尝试，避免任务一直卡在执行中。',
+      nextStep: '可以重新执行，或把目标拆成更小的步骤。',
+    };
+  }
   if (browserKind === 'dns') {
     return {
       title: '无法打开这个网站',
