@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import {
   describeScheduledEventReminder,
   describeScheduledEventRepeat,
+  scheduledEventActionHint,
   scheduledEventCanRunNow,
   scheduledEventCanToggle,
   scheduledEventFailureDetail,
@@ -87,6 +88,7 @@ export function EventDetailPopover({
   const canRunNow = scheduledEventCanRunNow(row.status);
   const toggleLabel = scheduledEventToggleLabel(row.status);
   const ToggleIcon = row.status === 'paused' || row.status === 'failed' ? Play : Pause;
+  const actionHint = scheduledEventActionHint(row);
 
   return (
     <div
@@ -182,6 +184,22 @@ export function EventDetailPopover({
           <div className="break-words text-[11px]">
             {scheduledEventFailureDetail(row.lastError)}
           </div>
+        </div>
+      )}
+
+      {actionHint && (
+        <div
+          className={cn(
+            'mt-3 rounded-[8px] border px-3 py-2 text-xs',
+            actionHint.tone === 'error'
+              ? 'border-[#EA1F59]/20 bg-[#EA1F59]/[0.06] text-[#9F153D]'
+              : actionHint.tone === 'attention'
+                ? 'border-[#FFC910]/35 bg-[#FFC910]/10 text-[#6F5700]'
+                : 'border-[#DCDDDD] bg-[#FAFAFA] text-[#595757]',
+          )}
+        >
+          <div className="font-semibold text-foreground/85">{actionHint.title}</div>
+          <div className="mt-0.5 leading-5">{actionHint.body}</div>
         </div>
       )}
 
