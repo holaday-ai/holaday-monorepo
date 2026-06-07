@@ -1828,7 +1828,7 @@ export function BrowserPanel({
               />
             )}
           </div>
-          {liveBrowserCanPan && useVnc && !hibernated && !interactiveActive && !showLiveOverlay && (
+          {liveBrowserCanPan && !taskIsTerminal && !hibernated && !interactiveActive && !showLiveOverlay && (
             <div className="pointer-events-none absolute left-1/2 top-20 z-20 max-w-[calc(100%-1rem)] -translate-x-1/2 truncate rounded-full bg-black/45 px-3 py-1 text-[11px] font-medium text-white shadow-sm backdrop-blur">
               左右滑动查看页面
             </div>
