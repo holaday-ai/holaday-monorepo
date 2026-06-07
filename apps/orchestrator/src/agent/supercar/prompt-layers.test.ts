@@ -81,8 +81,9 @@ describe('buildLayeredSystemPrompt', () => {
 
   it('requires user confirmation before transactional final submits', () => {
     const out = buildLayeredSystemPrompt('none');
-    expect(out).toContain('预订 / 预约 / 报名 / 投递 / 加购 / 结账 / 取消订阅 / 退订');
-    expect(out).toContain('不要点击最终确认 / 提交预约 / 提交报名 / 提交申请 / 确认预订 / Place order / Delete / Unsubscribe');
+    expect(out).toContain('预订 / 预约 / 报名 / 投递 / 加购 / 结账 / 取消订阅 / 退订 / 文件分享或权限变更');
+    expect(out).toContain('不要点击最终确认 / 提交预约 / 提交报名 / 提交申请 / 确认预订 / Place order / Share / Change access / Delete / Unsubscribe');
+    expect(out).toContain('分享对象/权限');
     expect(out).toContain('关键条款或将要改变的账户状态');
     expect(out).toContain('停在最终确认页，先说明影响');
   });
@@ -90,6 +91,7 @@ describe('buildLayeredSystemPrompt', () => {
   it('asks for missing transactional inputs before opening the browser', () => {
     const out = buildLayeredSystemPrompt('none');
     expect(out).toContain('交易/预约类任务的最小信息检查');
+    expect(out).toContain('文件操作：至少需要目标平台/文件名或文件位置');
     expect(out).toContain('不要先打开网页乱试');
     expect(out).toContain('一次只问 1-3 个最关键问题');
     expect(out).toContain('[AWAITING_USER_INPUT]');
