@@ -87,11 +87,16 @@ describe('tool registry', () => {
     'publish a draft on medium.com',
     'make a poster in canva.com',
     'upload an image to cloudinary.com',
+    'use framer.site to edit a landing page draft',
+    'make a logo in brand.design',
+    'create a profile draft in read.cv',
     '在 canva.com 创建一个海报草稿',
     '在 zapier.com 创建一个自动化草稿',
     '在 mailchimp.com 创建一个邮件 campaign 草稿',
     '在 webflow.com 编辑这个 landing page 草稿',
     '在 airtable.com 添加一条记录',
+    '在 framer.site 编辑一个 landing page 草稿',
+    '在 brand.design 创建一个 logo 草稿',
   ])('keeps live app workflows in the hybrid tool profile: %s', (intent) => {
     expect(classifyTaskType(intent)).toBe('hybrid');
   });
