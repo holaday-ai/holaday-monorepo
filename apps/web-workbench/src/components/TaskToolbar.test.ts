@@ -66,7 +66,7 @@ describe('TaskToolbar helpers', () => {
         'browser-live',
         true,
       ),
-    ).toBe('需要操作浏览器');
+    ).toBe('需要确认');
   });
 
   it('uses compact mobile labels that expose the browser entry', () => {

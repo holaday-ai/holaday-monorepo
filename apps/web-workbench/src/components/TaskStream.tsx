@@ -35,7 +35,7 @@ import remarkGfm from 'remark-gfm';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ui/toast';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
-import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
+import { awaitingUserCopy, awaitingUserStreamMessage } from '@/lib/awaiting-user-copy';
 import { isBrowserErrorUrl } from '@/components/browser-panel-state';
 import { copyTextToClipboard } from '@/lib/copy-text';
 import {
@@ -712,6 +712,7 @@ function AwaitingUserBanner({
   const [cancelling, setCancelling] = React.useState(false);
   const kind = wait.awaitingKind ?? 'clarification';
   const copy = awaitingUserCopy(kind);
+  const message = awaitingUserStreamMessage(kind, wait.question);
   const Icon = AWAITING_KIND_ICON[kind] ?? AWAITING_KIND_ICON.clarification;
   const handleCancel = React.useCallback(async () => {
     if (cancelling) return;
@@ -733,11 +734,6 @@ function AwaitingUserBanner({
       }
     }
   }, [cancelling, mountedRef, taskId, toast]);
-  // Clarification questions have the agent's actual prompt in
-  // wait.question; the auth/permission kinds use a static prompt
-  // because the agent didn't compose a fresh sentence. Show the
-  // question text in clarification mode only.
-  const showAgentQuestion = kind === 'clarification' && wait.question;
   return (
     <div className="rounded-lg border border-[#FFC910]/55 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#FFC910]/35 dark:bg-card/85">
       <div className="flex items-start gap-2.5">
@@ -747,11 +743,11 @@ function AwaitingUserBanner({
             {copy.title}
           </div>
           <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-            {showAgentQuestion ? wait.question : copy.streamBody}
+            {message.body}
           </p>
-          {showAgentQuestion && (
+          {message.followUp && (
             <p className="mt-2 text-[11px] text-muted-foreground">
-              在下方输入框回答，任务会继续，不用重新提交。
+              {message.followUp}
             </p>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">

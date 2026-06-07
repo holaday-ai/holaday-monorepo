@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { awaitingUserCopy, normalizeAwaitingKind } from './awaiting-user-copy';
+import {
+  awaitingUserCopy,
+  awaitingUserStreamMessage,
+  normalizeAwaitingKind,
+} from './awaiting-user-copy';
 
 describe('awaiting user copy', () => {
   it('defaults missing kinds to clarification copy', () => {
@@ -28,12 +32,34 @@ describe('awaiting user copy', () => {
       toolbarLabel: '需要验证',
     });
     expect(awaitingUserCopy('browser_action')).toMatchObject({
-      title: '需要操作浏览器',
-      streamBody: '请打开浏览器，按页面提示完成下一步操作；完成后任务会继续，不用重新提交。',
-      panelTitle: '需要操作浏览器',
-      panelBody: '交互模式已开启。按页面提示完成点击或选择后，HOLA DAY 会继续执行，不用重新提交任务。',
-      toolbarLabel: '需要操作浏览器',
-      composerPlaceholder: '完成页面操作后可在这里补充说明...',
+      title: '等待你确认',
+      streamBody: '请打开浏览器查看当前页面。确认无误后完成页面操作，或在下方输入框告诉 HOLA DAY 继续。',
+      panelTitle: '等待你确认',
+      panelBody: '交互模式已开启。确认当前页面无误后完成页面操作，HOLA DAY 会继续执行，不用重新提交任务。',
+      toolbarLabel: '需要确认',
+      composerPlaceholder: '确认无误后回复，或说明要调整的地方...',
+    });
+  });
+
+  it('shows concrete prompts for clarification and browser confirmation parks', () => {
+    expect(
+      awaitingUserStreamMessage('clarification', '你想订哪一天的机票？'),
+    ).toEqual({
+      body: '你想订哪一天的机票？',
+      followUp: '在下方输入框回答，任务会继续，不用重新提交。',
+    });
+    expect(
+      awaitingUserStreamMessage('browser_action', '请确认是否提交这份申请。'),
+    ).toEqual({
+      body: '请确认是否提交这份申请。',
+      followUp: '确认无误后在浏览器完成操作，或在下方输入框说明后继续。',
+    });
+  });
+
+  it('keeps login and captcha prompts static even when legacy questions exist', () => {
+    expect(awaitingUserStreamMessage('login', 'legacy login prompt')).toMatchObject({
+      body: '请打开浏览器完成登录或扫码，完成后任务会继续，不用重新提交。',
+      followUp: null,
     });
   });
 

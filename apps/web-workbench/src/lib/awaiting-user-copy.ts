@@ -12,6 +12,11 @@ export interface AwaitingUserCopy {
   composerPlaceholder: string;
 }
 
+export interface AwaitingUserStreamMessage {
+  body: string;
+  followUp: string | null;
+}
+
 const COPY_BY_KIND: Record<AwaitingKind, AwaitingUserCopy> = {
   login: {
     title: '需要登录',
@@ -50,13 +55,13 @@ const COPY_BY_KIND: Record<AwaitingKind, AwaitingUserCopy> = {
     composerPlaceholder: '说明已授权，或提供可访问的替代来源...',
   },
   browser_action: {
-    title: '需要操作浏览器',
-    streamBody: '请打开浏览器，按页面提示完成下一步操作；完成后任务会继续，不用重新提交。',
-    streamHint: '打开浏览器完成操作',
-    panelTitle: '需要操作浏览器',
-    panelBody: '交互模式已开启。按页面提示完成点击或选择后，HOLA DAY 会继续执行，不用重新提交任务。',
-    toolbarLabel: '需要操作浏览器',
-    composerPlaceholder: '完成页面操作后可在这里补充说明...',
+    title: '等待你确认',
+    streamBody: '请打开浏览器查看当前页面。确认无误后完成页面操作，或在下方输入框告诉 HOLA DAY 继续。',
+    streamHint: '打开浏览器确认下一步',
+    panelTitle: '等待你确认',
+    panelBody: '交互模式已开启。确认当前页面无误后完成页面操作，HOLA DAY 会继续执行，不用重新提交任务。',
+    toolbarLabel: '需要确认',
+    composerPlaceholder: '确认无误后回复，或说明要调整的地方...',
   },
 };
 
@@ -70,4 +75,29 @@ export function awaitingUserCopy(
   kind: UiAwaitingUser['awaitingKind'] | undefined,
 ): AwaitingUserCopy {
   return COPY_BY_KIND[normalizeAwaitingKind(kind)];
+}
+
+export function awaitingUserStreamMessage(
+  kind: UiAwaitingUser['awaitingKind'] | undefined,
+  question: string | null | undefined,
+): AwaitingUserStreamMessage {
+  const normalized = normalizeAwaitingKind(kind);
+  const copy = awaitingUserCopy(normalized);
+  const trimmedQuestion = question?.trim();
+  if (normalized === 'clarification' && trimmedQuestion) {
+    return {
+      body: trimmedQuestion,
+      followUp: '在下方输入框回答，任务会继续，不用重新提交。',
+    };
+  }
+  if (normalized === 'browser_action' && trimmedQuestion) {
+    return {
+      body: trimmedQuestion,
+      followUp: '确认无误后在浏览器完成操作，或在下方输入框说明后继续。',
+    };
+  }
+  return {
+    body: copy.streamBody,
+    followUp: null,
+  };
 }

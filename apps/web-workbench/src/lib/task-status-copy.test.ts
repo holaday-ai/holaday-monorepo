@@ -11,7 +11,7 @@ describe('taskStatusLabel', () => {
     expect(taskStatusLabel('partial_success')).toBe('部分完成');
     expect(taskStatusLabel('awaiting_user')).toBe('需要你回复');
     expect(taskStatusLabel('awaiting_user', 'login')).toBe('需要登录');
-    expect(taskStatusLabel('awaiting_user', 'browser_action')).toBe('需要操作浏览器');
+    expect(taskStatusLabel('awaiting_user', 'browser_action')).toBe('需要确认');
     expect(taskStatusLabel('planning')).toBe('规划中');
   });
 
