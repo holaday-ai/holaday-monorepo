@@ -130,6 +130,12 @@ export function humaniseTaskError(raw: string | null | undefined): string {
       return '浏览器连接中断，请重新执行任务。';
     case 'page_switch':
       return '页面正在切换，本次浏览器步骤未能稳定完成。请重试。';
+    case 'captcha':
+      if (!shouldRewriteBrowserBlocker(trimmed, 'captcha')) return trimmed;
+      return '网站要求人机验证，请在浏览器里完成验证后继续，或重新执行任务。';
+    case 'login':
+      if (!shouldRewriteBrowserBlocker(trimmed, 'login')) return trimmed;
+      return '目标网站需要登录，请先完成登录后重试。';
     case 'hibernated':
       return '浏览器已休眠，重新执行任务会打开新的浏览器。';
     case 'timeout':
@@ -161,4 +167,13 @@ function looksLikeEnglishTech(s: string): boolean {
     if (ch.codePointAt(0)! < 128) ascii += 1;
   }
   return ascii / s.length > 0.85;
+}
+
+function shouldRewriteBrowserBlocker(s: string, kind: 'captcha' | 'login'): boolean {
+  if (looksLikeEnglishTech(s)) return true;
+  if (/浏览器|扩展|chrome|brave/i.test(s)) return true;
+  if (kind === 'captcha') {
+    return /cloudflare|recaptcha|hcaptcha|human|robot/i.test(s) || /人机|滑块/.test(s);
+  }
+  return /401|unauthor/i.test(s);
 }

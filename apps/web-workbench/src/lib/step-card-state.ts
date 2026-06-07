@@ -136,6 +136,8 @@ export function stepFailureMessage(step: Pick<UiStep, 'actionKind' | 'message'>)
       return '页面正在切换，本次步骤未能稳定完成。可以重新执行当前任务。';
     case 'captcha':
       return '网站要求人机验证。请在浏览器里完成验证后继续，或重新执行任务。';
+    case 'login':
+      return '目标网站需要登录。请在浏览器里完成登录后继续，或重新执行任务。';
     default:
       break;
   }

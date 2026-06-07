@@ -170,6 +170,15 @@ describe('step-card-state', () => {
     ).toBe('浏览器当前没有活动标签页。请打开一个网页后重试。');
   });
 
+  it('explains login blockers in step details instead of generic failures', () => {
+    expect(
+      stepFailureMessage({
+        actionKind: 'navigate',
+        message: 'login required before checkout',
+      }),
+    ).toBe('目标网站需要登录。请在浏览器里完成登录后继续，或重新执行任务。');
+  });
+
   it('explains browser transport closures without exposing protocol text', () => {
     expect(
       stepFailureMessage({

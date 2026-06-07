@@ -99,4 +99,13 @@ describe('error-copy', () => {
       '浏览器已休眠，重新执行任务会打开新的浏览器。',
     );
   });
+
+  it('maps login and captcha browser blockers to explicit next steps', () => {
+    expect(humaniseTaskError('login required before checkout')).toBe(
+      '目标网站需要登录，请先完成登录后重试。',
+    );
+    expect(humaniseTaskError('Cloudflare captcha required')).toBe(
+      '网站要求人机验证，请在浏览器里完成验证后继续，或重新执行任务。',
+    );
+  });
 });
