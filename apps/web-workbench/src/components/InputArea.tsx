@@ -706,7 +706,7 @@ export function InputArea({
                 >
                   <ListChecks className="h-4 w-4 text-[#595757]" />
                   <span className="min-w-0 flex-1 font-medium text-foreground">
-                    计划模式
+                    先出方案
                   </span>
                   <MiniSwitch checked={taskMode === 'plan'} />
                 </DropdownMenuItem>
@@ -719,7 +719,7 @@ export function InputArea({
                 >
                   <Target className="h-4 w-4 text-[#595757]" />
                   <span className="min-w-0 flex-1 font-medium text-foreground">
-                    追求目标
+                    自动执行
                   </span>
                   <MiniSwitch checked={taskMode === 'auto'} />
                 </DropdownMenuItem>
