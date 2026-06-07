@@ -560,10 +560,16 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       '在 Gmail 写一封邮件草稿给客户，不要发送',
       '在 LinkedIn 搜索产品经理岗位并保存筛选条件',
       '在 Notion 创建一个项目计划页面草稿',
+      '在 Google Docs 新建一个会议纪要文档草稿',
+      '在 Google Sheets 创建一个预算表草稿',
+      '在 Google Slides 创建一个路演演示文稿草稿',
+      '在 Google Calendar 安排一个项目会议但不要发送邀请',
       '在飞书创建一个会议纪要文档草稿',
       '在 Slack 给团队频道写一条草稿消息，不要发送',
       '在 GitHub 创建一个 issue 草稿',
       'create a draft issue in GitHub',
+      'create a budget spreadsheet in Google Sheets',
+      'schedule a project meeting in Google Calendar but do not send invites',
     ];
     for (const intent of cases) {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
@@ -582,6 +588,10 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       'Gmail 邮件草稿模板',
       'LinkedIn 岗位搜索策略',
       'Notion 项目计划页面模板',
+      'Google Docs 会议纪要模板',
+      'Google Sheets 预算表模板',
+      'Google Slides 路演模板',
+      'Google Calendar 日程管理策略',
       'Slack 团队公告文案',
       'GitHub README 模板',
       'GitHub issue 模板',

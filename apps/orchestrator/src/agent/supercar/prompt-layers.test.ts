@@ -141,8 +141,13 @@ describe('selectModelAndEffort', () => {
     '在 Airbnb 找下周末东京民宿并收藏前两个',
     '用 Airbnb 搜索东京民宿，勾选整租并设置两位住客',
     '在 Gmail 写一封邮件草稿给客户，不要发送',
+    '在 Google Docs 新建一个会议纪要文档草稿',
+    '在 Google Sheets 创建一个预算表草稿',
+    '在 Google Calendar 安排一个项目会议但不要发送邀请',
     '在 GitHub 创建一个 issue 草稿',
     'create a draft issue in GitHub',
+    'create a budget spreadsheet in Google Sheets',
+    'schedule a project meeting in Google Calendar but do not send invites',
   ])('live app workflow → Sonnet 4.6 high: %s', (intent) => {
     expect(selectModelAndEffort(intent, 'none')).toEqual({
       model: 'claude-sonnet-4-6',
@@ -199,8 +204,13 @@ describe('getTaskBudget', () => {
     '在 Airbnb 找下周末东京民宿并收藏前两个',
     '用 Airbnb 搜索东京民宿，勾选整租并设置两位住客',
     '在 Gmail 写一封邮件草稿给客户，不要发送',
+    '在 Google Docs 新建一个会议纪要文档草稿',
+    '在 Google Sheets 创建一个预算表草稿',
+    '在 Google Calendar 安排一个项目会议但不要发送邀请',
     '在 GitHub 创建一个 issue 草稿',
     'create a draft issue in GitHub',
+    'create a budget spreadsheet in Google Sheets',
+    'schedule a project meeting in Google Calendar but do not send invites',
   ])('live app workflow → 200K budget: %s', (intent) => {
     expect(getTaskBudget(intent, 'none')).toBe(200_000);
   });

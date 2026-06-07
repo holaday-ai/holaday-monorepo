@@ -46,8 +46,14 @@ describe('classifyAsSimpleSearch', () => {
       '在 Gmail 写一封邮件草稿给客户，不要发送',
       '在 LinkedIn 搜索产品经理岗位并保存筛选条件',
       '在 Notion 创建一个项目计划页面草稿',
+      '在 Google Docs 新建一个会议纪要文档草稿',
+      '在 Google Sheets 创建一个预算表草稿',
+      '在 Google Slides 创建一个路演演示文稿草稿',
+      '在 Google Calendar 安排一个项目会议但不要发送邀请',
       '在 GitHub 创建一个 issue 草稿',
       'create a draft issue in GitHub',
+      'create a budget spreadsheet in Google Sheets',
+      'schedule a project meeting in Google Calendar but do not send invites',
     ])('false: %s', (intent) => {
       expect(classifyAsSimpleSearch(intent)).toBe(false);
     });
