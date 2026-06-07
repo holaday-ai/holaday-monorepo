@@ -805,8 +805,8 @@ export function InputArea({
           onClick={() => void handleSubmit()}
           disabled={disabled || value.trim().length === 0}
           className="absolute bottom-2.5 right-2.5 h-8 w-8 rounded-full bg-[#EA1F59] text-white shadow-[0_4px_12px_rgba(234,31,89,0.18)] hover:bg-[#EA1F59]/90 focus-visible:ring-[#EA1F59]/25"
-          aria-label={submitting ? '发送中' : '发送'}
-          title={submitting ? '发送中' : '发送'}
+          aria-label={submitting ? submittingStatus : '发送'}
+          title={submitting ? submittingStatus : '发送'}
         >
           {submitting ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -815,12 +815,14 @@ export function InputArea({
           )}
         </Button>
       </div>
-      <div className="mt-2 flex min-h-[24px] items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground/70">
+      <div className="mt-2 flex min-h-[28px] items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground/70">
         <span
           aria-live="polite"
           className={cn(
-            'inline-flex min-w-0 items-center gap-1.5 rounded-full px-1.5 py-0.5 text-[#595757] transition-opacity dark:text-foreground/75',
-            submitting ? 'opacity-100' : 'opacity-0',
+            'inline-flex min-w-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[#595757] shadow-[0_1px_2px_rgba(17,24,39,0.03)] transition-opacity dark:text-foreground/75',
+            submitting
+              ? 'border-[#EA1F59]/25 bg-[#EA1F59]/5 opacity-100'
+              : 'border-transparent bg-transparent opacity-0',
           )}
         >
           {submitting && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-[#EA1F59]" />}
