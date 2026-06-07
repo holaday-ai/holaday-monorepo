@@ -8,6 +8,7 @@ describe('markdown code block state', () => {
       copyLabel: '代码',
       copiedToast: '已复制代码',
       codeLike: true,
+      variant: 'code',
     });
     expect(markdownCodeBlockMeta('language-python', 'print(42)').label).toBe('PYTHON');
   });
@@ -23,6 +24,7 @@ describe('markdown code block state', () => {
       copyLabel: '内容',
       copiedToast: '已复制内容',
       codeLike: false,
+      variant: 'content',
     });
   });
 
@@ -32,6 +34,7 @@ describe('markdown code block state', () => {
       copyLabel: '内容',
       copiedToast: '已复制内容',
       codeLike: true,
+      variant: 'diagram',
     });
     expect(markdownCodeBlockMeta(undefined, '访客流量\n    ↓\n价值传递\n    ↓\n转化用户').label).toBe(
       '图示',
@@ -44,6 +47,7 @@ describe('markdown code block state', () => {
       copyLabel: '内容',
       copiedToast: '已复制内容',
       codeLike: false,
+      variant: 'content',
     });
   });
 });

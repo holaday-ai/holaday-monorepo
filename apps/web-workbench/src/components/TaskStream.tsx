@@ -1687,10 +1687,37 @@ function MarkdownCodeBlock({
     }
   };
   return (
-    <div className="my-3 overflow-hidden rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85">
-      <div className="flex items-center justify-between gap-3 border-b border-[#EFEFEF] bg-[#EFEFEF]/45 px-3 py-2 dark:border-white/10 dark:bg-white/[0.03]">
+    <div
+      className={cn(
+        'my-3 overflow-hidden rounded-[8px] border bg-white shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-white/10 dark:bg-card/85',
+        meta.variant === 'diagram'
+          ? 'border-[#42C0EF]/30'
+          : meta.variant === 'content'
+            ? 'border-[#DCDDDD]'
+            : 'border-[#DCDDDD]',
+      )}
+    >
+      <div
+        className={cn(
+          'flex items-center justify-between gap-3 border-b px-3 py-2 dark:border-white/10 dark:bg-white/[0.03]',
+          meta.variant === 'diagram'
+            ? 'border-[#42C0EF]/20 bg-[#42C0EF]/8'
+            : meta.variant === 'content'
+              ? 'border-[#EFEFEF] bg-white'
+              : 'border-[#EFEFEF] bg-[#EFEFEF]/45',
+        )}
+      >
         <div className="flex min-w-0 items-center gap-2">
-          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#57479C]" />
+          <span
+            className={cn(
+              'h-1.5 w-1.5 shrink-0 rounded-full',
+              meta.variant === 'diagram'
+                ? 'bg-[#42C0EF]'
+                : meta.variant === 'content'
+                  ? 'bg-[#EA1F59]'
+                  : 'bg-[#57479C]',
+            )}
+          />
           <span className="truncate text-[11px] font-medium text-muted-foreground">
             {meta.label}
           </span>
@@ -1711,7 +1738,14 @@ function MarkdownCodeBlock({
         </button>
       </div>
       <pre
-        className="max-w-full overflow-x-auto bg-[#EFEFEF]/20 px-3 py-3 text-[12px] leading-relaxed dark:bg-white/[0.02]"
+        className={cn(
+          'max-w-full overflow-x-auto px-3 py-3 leading-relaxed dark:bg-white/[0.02]',
+          meta.variant === 'diagram'
+            ? 'bg-[#F7FBFC] text-[13px]'
+            : meta.variant === 'content'
+              ? 'bg-white text-[13px]'
+              : 'bg-[#EFEFEF]/20 text-[12px]',
+        )}
         {...rest}
       >
         <code

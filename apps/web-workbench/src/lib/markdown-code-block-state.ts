@@ -3,6 +3,7 @@ export interface MarkdownCodeBlockMeta {
   readonly copyLabel: string;
   readonly copiedToast: string;
   readonly codeLike: boolean;
+  readonly variant: 'code' | 'diagram' | 'content';
 }
 
 const KNOWN_LANGUAGE_LABELS: Record<string, string> = {
@@ -33,6 +34,7 @@ export function markdownCodeBlockMeta(
       copyLabel: '代码',
       copiedToast: '已复制代码',
       codeLike: true,
+      variant: 'code',
     };
   }
 
@@ -42,6 +44,7 @@ export function markdownCodeBlockMeta(
       copyLabel: '内容',
       copiedToast: '已复制内容',
       codeLike: false,
+      variant: 'content',
     };
   }
 
@@ -51,6 +54,7 @@ export function markdownCodeBlockMeta(
       copyLabel: '内容',
       copiedToast: '已复制内容',
       codeLike: true,
+      variant: 'diagram',
     };
   }
 
@@ -59,6 +63,7 @@ export function markdownCodeBlockMeta(
     copyLabel: '内容',
     copiedToast: '已复制内容',
     codeLike: false,
+    variant: 'content',
   };
 }
 
