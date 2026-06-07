@@ -501,6 +501,7 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       '登录流程体验分析',
       '下单率提升策略',
       '订票率提升策略',
+      'Expedia 订机票转化率分析',
       '订酒店转化率分析',
       '订餐系统设计报告',
       '挂号流程体验分析',
