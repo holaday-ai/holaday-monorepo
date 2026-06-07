@@ -421,13 +421,34 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
     expect(out).toBe('generate');
   });
 
-  it('点击 / 提交 / 填写 → browser', async () => {
-    for (const verb of ['点击', '提交', '填写']) {
+  it('page control verbs with concrete objects → browser', async () => {
+    for (const intent of [
+      '点击提交按钮',
+      '提交申请表单',
+      '填写这个报名表',
+      '下载这个文件',
+      '访问京东商品页',
+      '操作这个后台页面',
+    ]) {
       const out = await classifyExecutionMode({
-        intent: `${verb}表单`,
+        intent,
         logger: fakeLogger(),
       });
       expect(out).toBe('browser');
+    }
+  });
+
+  it('中文 interaction metrics stay generate', async () => {
+    for (const intent of [
+      '点击率优化方案',
+      '提交率下降原因分析',
+      '下载量增长报告',
+      '访问量趋势分析',
+      '打开率提升策略',
+      '操作系统安全报告',
+    ]) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out).toBe('generate');
     }
   });
 
