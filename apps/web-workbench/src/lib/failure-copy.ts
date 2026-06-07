@@ -201,3 +201,15 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
 export function friendlyFailureDetail(errorText: string): string {
   return humaniseTaskError(errorText);
 }
+
+/**
+ * Whether a terminal task's result card should offer a "重新执行"
+ * (re-run) affordance. Both failed and cancelled tasks point the user
+ * at re-running in their recovery copy ("重新执行当前任务" / "需要继续
+ * 时可以重新执行这个任务"), so both must actually surface the button —
+ * otherwise the guidance is a dead end. Re-running always starts a
+ * fresh task (createTask), never replays completed steps.
+ */
+export function terminalAllowsRerun(status: string): boolean {
+  return status === 'failed' || status === 'cancelled';
+}

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { classifyFriendlyFailure, friendlyFailureDetail } from './failure-copy';
+import {
+  classifyFriendlyFailure,
+  friendlyFailureDetail,
+  terminalAllowsRerun,
+} from './failure-copy';
 
 describe('classifyFriendlyFailure', () => {
   it('separates system-stopped task failures from website failures', () => {
@@ -141,6 +145,18 @@ describe('classifyFriendlyFailure', () => {
       subtitle: '服务器拒绝连接或网络不可达。请稍后重试，或换一个站点。',
       nextStep: '稍后重新执行，或换一个能直接访问的网址。',
     });
+  });
+
+  it('offers re-run for both failed and cancelled terminal tasks', () => {
+    // Both surface "重新执行" recovery copy, so both must allow the
+    // button — otherwise cancelled tasks promise a re-run they can't do.
+    expect(terminalAllowsRerun('failed')).toBe(true);
+    expect(terminalAllowsRerun('cancelled')).toBe(true);
+    // Non-terminal / success states never show the failure card's retry.
+    expect(terminalAllowsRerun('completed')).toBe(false);
+    expect(terminalAllowsRerun('partial_success')).toBe(false);
+    expect(terminalAllowsRerun('awaiting_user')).toBe(false);
+    expect(terminalAllowsRerun('executing')).toBe(false);
   });
 
   it('hides raw English failure details while keeping localized details', () => {

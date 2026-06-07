@@ -50,7 +50,7 @@ import {
   externalLinkConfirmDescription,
   safeExternalHttpHref,
 } from '@/lib/external-link-copy';
-import { classifyFriendlyFailure, friendlyFailureDetail } from '@/lib/failure-copy';
+import { classifyFriendlyFailure, friendlyFailureDetail, terminalAllowsRerun } from '@/lib/failure-copy';
 import { formatFileSize } from '@/lib/file-size';
 import { downloadFileMetaLabel } from '@/lib/file-download-card-copy';
 import { downloadMarkdownFile } from '@/lib/markdown-download';
@@ -1999,11 +1999,11 @@ function TerminalSummary({
           status={status}
           errorText={status === 'failed' ? displayText ?? '' : ''}
           onRetry={
-            status === 'failed' && intent
+            terminalAllowsRerun(status) && intent
               ? () => void handleRetry(intent)
               : undefined
           }
-          retrying={status === 'failed' && retryingIntent != null}
+          retrying={terminalAllowsRerun(status) && retryingIntent != null}
         />
       )}
       {!isFailedLike && endedOnBrowserErrorPage && (
