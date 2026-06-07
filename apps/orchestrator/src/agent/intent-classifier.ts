@@ -88,9 +88,25 @@ export interface ClassifyOpts {
 const INTERACTION_VERBS: readonly string[] = [
   '登录', '打开', '访问', '下单', '操作', '提交', '点击', '填写', '填表',
   '比价', '抓取', '截图', '下载',
+  '预订', '预定', '预约', '订票', '订机票', '订酒店', '订餐', '挂号',
+  '报名', '投递', '发帖', '评论', '点赞', '关注', '加购',
+  '加入购物车', '结账', '取消订阅', '发送邮件', '发邮件',
   // English
   'open ', 'visit ', 'log in', 'log into', 'sign in', 'sign into',
   'submit ', 'click ', 'navigate to', 'fill in', 'fill out', 'download',
+  'book ', 'reserve ', 'make a reservation', 'schedule ',
+  'sign up', 'send email', 'send an email',
+  'add to cart', 'checkout', 'check out', 'place order',
+];
+
+const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
+  [/\bregister\s+for\s+(?:this\s+)?(?:event|webinar|class|course|workshop|conference)\b/i, 'register for event'],
+  [/\bapply\s+(?:for|to)\s+(?:this\s+)?(?:job|role|position|opening|listing)\b/i, 'apply for job'],
+  [/\bapply\s+(?:on|in)\s+(?:linkedin|indeed|greenhouse|lever)\b/i, 'apply on job site'],
+  [/\badd\s+.{1,80}\s+to\s+(?:the\s+)?cart\b/i, 'add item to cart'],
+  [/\bpost\s+(?:on|to)\s+(?:twitter|x\.com|linkedin|reddit|instagram|tiktok|facebook|threads)\b/i, 'post on site'],
+  [/\b(?:publish|share)\s+(?:this\s+)?(?:post|update|article|comment)\s+(?:on|to)\b/i, 'publish to site'],
+  [/发布(?:到|在)(?:小红书|微博|知乎|抖音|b站|bilibili|twitter|x\.com|linkedin|reddit)/i, '发布到平台'],
 ];
 
 /**
@@ -174,6 +190,13 @@ function hasAny(haystack: string, needles: readonly string[]): string | null {
   return null;
 }
 
+function matchInteractionPattern(intent: string): string | null {
+  for (const [pattern, label] of INTERACTION_PATTERNS) {
+    if (pattern.test(intent)) return label;
+  }
+  return null;
+}
+
 function isEcommerceListingIntent(intent: string): boolean {
   const lower = intent.toLowerCase();
   const hasEcommerce = ECOMMERCE_SITE_HINTS.some((hint) => lower.includes(hint));
@@ -205,6 +228,10 @@ function decide(intent: string): RouteDecision {
   const interaction = hasAny(intent, INTERACTION_VERBS);
   if (interaction) {
     return { mode: 'browser', source: 'kw:interaction', match: interaction };
+  }
+  const interactionPattern = matchInteractionPattern(intent);
+  if (interactionPattern) {
+    return { mode: 'browser', source: 'kw:interaction', match: interactionPattern };
   }
 
   // 2. URL / site / search-verb / info-verb → scrape.

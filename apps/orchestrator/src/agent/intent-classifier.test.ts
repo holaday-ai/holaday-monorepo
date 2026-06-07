@@ -310,6 +310,35 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
     expect(out).toBe('browser');
   });
 
+  it('booking and appointment verbs → browser', async () => {
+    const cases = [
+      '帮我预订上海到东京的机票',
+      '在携程订酒店',
+      '预约明天下午的牙医',
+      '帮我挂号皮肤科',
+      '报名这个线上活动',
+    ];
+    for (const intent of cases) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out).toBe('browser');
+    }
+  });
+
+  it('English booking and transactional verbs → browser', async () => {
+    const cases = [
+      'help me book a flight to Tokyo',
+      'reserve a table for tomorrow night',
+      'schedule a dentist appointment',
+      'apply for this job on LinkedIn',
+      'send an email in Gmail',
+      'add this item to cart',
+    ];
+    for (const intent of cases) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out).toBe('browser');
+    }
+  });
+
   it('点击 / 提交 / 填写 → browser', async () => {
     for (const verb of ['点击', '提交', '填写']) {
       const out = await classifyExecutionMode({
