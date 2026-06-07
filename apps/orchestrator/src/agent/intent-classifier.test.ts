@@ -560,6 +560,8 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       '在 Notion 创建一个项目计划页面草稿',
       '在飞书创建一个会议纪要文档草稿',
       '在 Slack 给团队频道写一条草稿消息，不要发送',
+      '在 GitHub 创建一个 issue 草稿',
+      'create a draft issue in GitHub',
     ];
     for (const intent of cases) {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
@@ -579,6 +581,14 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       'LinkedIn 岗位搜索策略',
       'Notion 项目计划页面模板',
       'Slack 团队公告文案',
+      'GitHub README 模板',
+      'GitHub issue 模板',
+      'Amazon 商品页优化策略',
+      'YouTube 视频脚本模板',
+      'Instagram 内容策略',
+      'Twitter 发布文案模板',
+      'Reddit 社群运营策略',
+      'Shopify 店铺转化率报告',
     ];
     for (const intent of cases) {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });

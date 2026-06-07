@@ -118,11 +118,11 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/(?:帮我|给我|替我|为我)?(?:把|将)?.{0,24}(?:加购|放进|加入|添加)(?!率|策略|分析|报告|方案).{0,24}(?:购物车|cart|这个|这|该|它|商品)/i, '中文加入购物车'],
   [/(?:帮我|给我|替我|为我)?(?:去)?(?:结账|结算)(?!页|率|流程|体验|策略|分析|报告|方案).{0,24}(?:订单|商品|购物车|这个|它)/i, '中文结算'],
   [/(?:帮我|给我|替我|为我|去)(?:付款|支付)|(?:付款|支付).{0,16}(?:订单|商品|费用|尾款|这个|它)/i, '中文支付'],
-  [/(?:在|到|去)?(?:小红书|微博|知乎|抖音|b站|bilibili|twitter|x\.com|linkedin|reddit|instagram|facebook|threads).{0,24}(?:发帖|评论|点赞|关注|发布)/i, '中文社交平台操作'],
+  [/(?:在|到|去)(?:小红书|微博|知乎|抖音|b站|bilibili|twitter|x\.com|linkedin|reddit|instagram|facebook|threads).{0,24}(?:发帖|评论|点赞|关注|发布)/i, '中文社交平台操作'],
   [/(?:发帖|评论|点赞|关注).{0,18}(?:这|该|那个|账号|帖子|笔记|视频|微博|动态|文章|post|tweet)/i, '中文社交对象操作'],
   [/(?:给|帮我给|替我给|为).{0,24}(?:评论|点赞|关注)/i, '中文社交互动'],
   [/(?:在|到|去|用|通过).{0,24}(?:携程|去哪儿|飞猪|google flights|airbnb|booking|linkedin).{0,72}(?:筛选|排序|保存筛选|保存条件|收藏|付款前|支付前|确认前|提交前|停在)/i, '中文站内筛选保存'],
-  [/(?:在|用|通过).{0,24}(?:gmail|slack|linkedin|notion|飞书|google docs|google forms).{0,64}(?:写|撰写|起草|创建|新建|编辑).{0,48}(?:草稿|邮件|消息|页面|文档|会议纪要|计划|报名表|表单|帖子)/i, '中文应用草稿操作'],
+  [/(?:在|用|通过).{0,24}(?:gmail|slack|linkedin|notion|飞书|github|google docs|google forms).{0,64}(?:写|撰写|起草|创建|新建|编辑).{0,48}(?:草稿|邮件|消息|页面|文档|会议纪要|计划|报名表|表单|帖子|issue|pull request|pr)/i, '中文应用草稿操作'],
   [/\bbook\s+(?:me\s+)?(?:a\s+|an\s+|the\s+)?(?:flight|ticket|hotel|room|table|restaurant|appointment|ride|car|train|bus)\b/i, 'book service'],
   [/\breserve\s+(?:a\s+|an\s+|the\s+)?(?:table|room|seat|ticket|hotel|restaurant|car)\b/i, 'reserve service'],
   [/\bmake\s+a\s+reservation\s+(?:for|at|with)\s+(?:a\s+|an\s+|the\s+|this\s+)?(?:restaurant|table|hotel|room|flight|ticket|car|service|dinner|lunch|brunch)\b/i, 'make reservation'],
@@ -142,13 +142,16 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/\bpost\s+(?:on|to)\s+(?:twitter|x\.com|linkedin|reddit|instagram|tiktok|facebook|threads)\b/i, 'post on site'],
   [/\b(?:publish|share)\s+(?:this\s+)?(?:post|update|article|comment)\s+(?:on|to)\b/i, 'publish to site'],
   [/\b(?:filter|sort|save|favorite|bookmark)\s+.{1,80}\s+(?:on|in)\s+(?:google flights|airbnb|booking|linkedin|indeed|gmail|slack|notion)\b/i, 'filter or save on site'],
-  [/\b(?:draft|compose|create|edit)\s+.{1,80}\s+(?:in|on)\s+(?:gmail|slack|notion|google docs|linkedin)\b/i, 'draft in app'],
+  [/\b(?:draft|compose|create|edit)\s+.{1,80}\s+(?:in|on)\s+(?:gmail|slack|notion|github|google docs|linkedin)\b/i, 'draft in app'],
   [/发布(?:到|在)(?:小红书|微博|知乎|抖音|b站|bilibili|twitter|x\.com|linkedin|reddit)/i, '发布到平台'],
 ];
 
+const NON_EXECUTION_PLATFORM_NAMES =
+  '(?:gmail|linkedin|slack|notion|github|amazon|youtube|instagram|twitter|x\\.com|reddit|shopify|飞书|google forms|google flights)';
+
 const NON_EXECUTION_PLATFORM_TOPIC_PATTERNS: readonly RegExp[] = [
-  /(?:gmail|linkedin|slack|notion|飞书|google forms|google flights).{0,40}(?:模板|文案|策略|规范|设计|优化|分析|报告|指南|教程|案例|框架)/i,
-  /(?:模板|文案|策略|规范|设计|优化|分析|报告|指南|教程|案例|框架).{0,40}(?:gmail|linkedin|slack|notion|飞书|google forms|google flights)/i,
+  new RegExp(`${NON_EXECUTION_PLATFORM_NAMES}.{0,40}(?:模板|文案|策略|规范|设计|优化|分析|报告|指南|教程|案例|框架|脚本|转化率|运营)`, 'i'),
+  new RegExp(`(?:模板|文案|策略|规范|设计|优化|分析|报告|指南|教程|案例|框架|脚本|转化率|运营).{0,40}${NON_EXECUTION_PLATFORM_NAMES}`, 'i'),
 ];
 
 /**
