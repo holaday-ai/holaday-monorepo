@@ -1,3 +1,14 @@
+/**
+ * Whether a value is worth writing to the clipboard. Guards copy
+ * actions against silently "succeeding" on an empty / whitespace-only
+ * string — e.g. a terminal result that is pure markdown structure
+ * strips to nothing, and a "已复制" toast over an empty clipboard is
+ * misleading.
+ */
+export function hasCopyableText(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
 interface ClipboardLike {
   writeText(text: string): Promise<void>;
 }

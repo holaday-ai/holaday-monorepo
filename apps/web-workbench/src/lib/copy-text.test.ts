@@ -1,5 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
-import { copyTextToClipboard } from './copy-text';
+import { copyTextToClipboard, hasCopyableText } from './copy-text';
+
+describe('hasCopyableText', () => {
+  it('treats empty / whitespace / nullish values as not copyable', () => {
+    expect(hasCopyableText('hello')).toBe(true);
+    expect(hasCopyableText('  x  ')).toBe(true);
+    expect(hasCopyableText('')).toBe(false);
+    expect(hasCopyableText('   \n\t ')).toBe(false);
+    expect(hasCopyableText(null)).toBe(false);
+    expect(hasCopyableText(undefined)).toBe(false);
+  });
+});
 
 describe('copyTextToClipboard', () => {
   it('uses navigator clipboard when available', async () => {

@@ -37,7 +37,7 @@ import { useToast } from '@/components/ui/toast';
 import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDownloadCard';
 import { awaitingUserCopy, awaitingUserStreamMessage } from '@/lib/awaiting-user-copy';
 import { isBrowserErrorUrl } from '@/components/browser-panel-state';
-import { copyTextToClipboard } from '@/lib/copy-text';
+import { copyTextToClipboard, hasCopyableText } from '@/lib/copy-text';
 import {
   downloadFailureMessage,
   downloadFileAuthed,
@@ -1983,6 +1983,13 @@ function TerminalSummary({
   const markdownText = copyBodyText.trim() || fallbackPlainText;
   const copyTo = React.useCallback(
     async (value: string, label: string): Promise<void> => {
+      // Don't claim "已复制" over an empty clipboard — a result that is
+      // pure markdown structure strips to nothing, and a false success
+      // toast is worse than telling the user there's nothing to copy.
+      if (!hasCopyableText(value)) {
+        toast.show('没有可复制的内容', 'error');
+        return;
+      }
       if (await copyTextToClipboard(value)) {
         toast.show(`已复制${label}`);
       } else {
