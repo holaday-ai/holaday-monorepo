@@ -31,6 +31,25 @@ const CHECK_TYPE_LABELS: Record<string, string> = {
   'llm.overall': '整体答案需要人工复核',
 };
 
+/**
+ * Whether the auto-review (verification) banner should render for a
+ * terminal task. The banner is the authoritative recovery surface for
+ * flagged results: it explains the failed checks and offers the
+ * "重新执行" action. Callers also use this to suppress the *duplicate*
+ * re-run button on the empty / insufficient fallback cards — when the
+ * banner already provides one, a second identical button just muddies
+ * which action is primary.
+ */
+export function shouldShowVerificationBanner(task: {
+  status: string;
+  verificationPassed?: boolean | null;
+  failedChecks?: readonly unknown[] | null;
+}): boolean {
+  if (task.status === 'partial_success') return true;
+  if (task.verificationPassed === false) return true;
+  return (task.failedChecks?.length ?? 0) > 0;
+}
+
 export function verificationCheckLabel(check: VerificationCheck): string {
   const detail = check.detail.trim();
   if (check.type === 'ecommerce_rows' && detail) return detail;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  shouldShowVerificationBanner,
   verificationBannerCopy,
   verificationCheckLabel,
 } from './verification-banner-copy';
@@ -49,6 +50,39 @@ describe('verificationCheckLabel', () => {
         detail: '缺少来源链接',
       }),
     ).toBe('缺少可验证来源链接');
+  });
+});
+
+describe('shouldShowVerificationBanner', () => {
+  it('always shows for partial_success regardless of checks', () => {
+    expect(shouldShowVerificationBanner({ status: 'partial_success' })).toBe(true);
+    expect(
+      shouldShowVerificationBanner({ status: 'partial_success', failedChecks: [] }),
+    ).toBe(true);
+  });
+
+  it('shows when verification explicitly failed or checks were flagged', () => {
+    expect(
+      shouldShowVerificationBanner({ status: 'completed', verificationPassed: false }),
+    ).toBe(true);
+    expect(
+      shouldShowVerificationBanner({
+        status: 'failed',
+        failedChecks: [{ type: 'url_count', detail: '' }],
+      }),
+    ).toBe(true);
+  });
+
+  it('stays hidden for clean terminal results', () => {
+    expect(
+      shouldShowVerificationBanner({
+        status: 'completed',
+        verificationPassed: true,
+        failedChecks: [],
+      }),
+    ).toBe(false);
+    expect(shouldShowVerificationBanner({ status: 'completed' })).toBe(false);
+    expect(shouldShowVerificationBanner({ status: 'cancelled' })).toBe(false);
   });
 });
 

@@ -71,7 +71,7 @@ import {
   RESULT_SOURCE_BADGES,
   type ResultSourceMarker,
 } from '@/lib/result-source-badges';
-import { verificationBannerCopy } from '@/lib/verification-banner-copy';
+import { shouldShowVerificationBanner, verificationBannerCopy } from '@/lib/verification-banner-copy';
 import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
 import { PlanCard } from '@/components/PlanCard';
 import { SearchResultCard } from '@/components/SearchResultCard';
@@ -141,12 +141,6 @@ function useMountedRef(): React.MutableRefObject<boolean> {
 
 function hasPausedTerminalResult(task: UiTask): boolean {
   return task.status === 'paused' && Boolean(task.resultText);
-}
-
-function shouldShowVerificationBanner(task: UiTask): boolean {
-  if (task.status === 'partial_success') return true;
-  if (task.verificationPassed === false) return true;
-  return (task.failedChecks?.length ?? 0) > 0;
 }
 
 /**
@@ -546,6 +540,11 @@ function AgentBlock({
             // History clicks render the summary in full immediately so
             // the panel doesn't replay-and-jitter on every navigation.
             animateReveal={animateTerminalReveal}
+            // When the verification banner is already showing a
+            // "重新执行" button, the insufficient-result fallback must
+            // not render a second identical one (keeps one primary
+            // re-run action; its 填入原描述 / copy stay as secondary).
+            verificationBannerPresent={shouldShowVerificationBanner(task)}
           />
         )}
         {/* Phase 11 QA #11 — terminal-but-empty fallback. Catches the
@@ -556,7 +555,14 @@ function AgentBlock({
          *  like the SPA broke. The retry hint mirrors the failed-card
          *  copy so the next-step is obvious. */}
         {terminal && !task.resultText && !hasTerminalArtifacts && (
-          <EmptyTerminalCard status={task.status} intent={task.intent} />
+          <EmptyTerminalCard
+            status={task.status}
+            intent={task.intent}
+            // Defer the re-run button to the verification banner when
+            // it is already showing one, so partial_success / flagged
+            // empty results don't surface two identical "重新执行".
+            verificationBannerPresent={shouldShowVerificationBanner(task)}
+          />
         )}
 
         {detailSteps.length > 0 && (
@@ -1307,15 +1313,19 @@ export function sanitizeMarkdownTrailingPunctuation(text: string): string {
 function EmptyTerminalCard({
   status,
   intent,
+  verificationBannerPresent = false,
 }: {
   status: UiTask['status'];
   intent?: string;
+  verificationBannerPresent?: boolean;
 }): JSX.Element {
   const copy = terminalEmptyCopy(status);
   const cancelled = status === 'cancelled';
   const failed = status === 'failed';
   const partial = status === 'partial_success';
-  const retryable = terminalEmptyAllowsRerun(status);
+  // The verification banner, when present, already owns the primary
+  // "重新执行" action — avoid rendering a duplicate here.
+  const retryable = terminalEmptyAllowsRerun(status) && !verificationBannerPresent;
   const toast = useToast();
   const createTask = useTaskStore((s) => s.createTask);
   const mountedRef = useMountedRef();
@@ -1811,6 +1821,7 @@ function TerminalSummary({
   expertWorkflowId,
   expertMode,
   animateReveal = true,
+  verificationBannerPresent = false,
 }: {
   status: UiTask['status'];
   text: string;
@@ -1853,6 +1864,13 @@ function TerminalSummary({
    * `true` preserves the live-completion experience.
    */
   animateReveal?: boolean;
+  /**
+   * True when the verification banner above this summary is already
+   * rendering a "重新执行" button. The insufficient-result fallback
+   * card then drops its own duplicate re-run button to keep a single
+   * primary action.
+   */
+  verificationBannerPresent?: boolean;
 }): JSX.Element {
   const toast = useToast();
   const mountedRef = useMountedRef();
@@ -2062,7 +2080,7 @@ function TerminalSummary({
                 {copy.body}
               </div>
               <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                {intent && (
+                {intent && !verificationBannerPresent && (
                   <button
                     type="button"
                     onClick={() => void handleRetry(intent)}
