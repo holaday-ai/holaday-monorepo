@@ -155,6 +155,7 @@ export function NotificationsSection(): JSX.Element {
     confirmDelete === null
       ? null
       : channels.find((row) => row.channelId === confirmDelete) ?? null;
+  const loadErrorCopy = notificationChannelsLoadErrorCopy(loadError);
 
   return (
     <>
@@ -189,9 +190,9 @@ export function NotificationsSection(): JSX.Element {
             <div className="mx-4 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#EA1F59]/25 bg-[#EA1F59]/5 px-3 py-2 text-xs text-muted-foreground">
               <span className="min-w-0 flex-1">
                 <span className="block font-medium text-[#EA1F59]">
-                  {notificationChannelsLoadErrorCopy(loadError).title}
+                  {loadErrorCopy.title}
                 </span>
-                <span className="mt-1 block">{loadError}</span>
+                <span className="mt-1 block">{loadErrorCopy.body}</span>
               </span>
               <Button
                 type="button"
