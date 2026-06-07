@@ -3,6 +3,7 @@ import {
   billingLoadErrorCopy,
   billingLoadErrorMessage,
   billingPageSummary,
+  billingPlanActionLabel,
   billingPlanLabel,
   cancellationMailBody,
   isPaidBillingPlan,
@@ -39,6 +40,12 @@ describe('billing page state helpers', () => {
     expect(billingPlanLabel('basic')).toBe('Basic');
     expect(billingPlanLabel('pro')).toBe('Pro');
     expect(billingPlanLabel('enterprise')).toBe('Free · 试用');
+  });
+
+  it('labels plan actions without promising an upgrade from the top plan', () => {
+    expect(billingPlanActionLabel('free')).toBe('升级');
+    expect(billingPlanActionLabel('basic')).toBe('升级');
+    expect(billingPlanActionLabel('pro')).toBe('管理套餐');
   });
 
   it('detects paid plans', () => {

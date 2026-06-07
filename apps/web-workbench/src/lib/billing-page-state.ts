@@ -25,6 +25,11 @@ export function billingPlanLabel(plan: string | null | undefined): string {
   return 'Free · 试用';
 }
 
+export function billingPlanActionLabel(plan: string | null | undefined): string {
+  if (plan === 'pro') return '管理套餐';
+  return '升级';
+}
+
 export function isPaidBillingPlan(plan: string | null | undefined): plan is PaidPlanId {
   return plan === 'pro' || plan === 'basic';
 }

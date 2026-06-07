@@ -6,6 +6,7 @@ import {
   billingLoadErrorCopy,
   billingLoadErrorMessage,
   billingPageSummary,
+  billingPlanActionLabel,
   billingPlanLabel,
   cancellationMailBody,
   type BillingSnapshot,
@@ -52,6 +53,7 @@ export function BillingPage(): JSX.Element {
 
   const plan = snapshot?.plan ?? null;
   const planLabel = billingPlanLabel(plan);
+  const planActionLabel = billingPlanActionLabel(plan);
   const isPaid = isPaidBillingPlan(plan);
   const nextAmountText = nextBillingAmountText(plan);
   const nextBillingDate = nextBillingDateText(plan, snapshot?.planExpiresAt ?? null);
@@ -116,7 +118,7 @@ export function BillingPage(): JSX.Element {
                     size="sm"
                     className="h-8 border-[#DCDDDD] bg-white px-3 text-[#EA1F59] hover:border-[#EA1F59]/35 hover:bg-white hover:text-[#EA1F59]"
                   >
-                    <Link to="/plan">升级</Link>
+                    <Link to="/plan">{planActionLabel}</Link>
                   </Button>
                 </div>
               </Row>
