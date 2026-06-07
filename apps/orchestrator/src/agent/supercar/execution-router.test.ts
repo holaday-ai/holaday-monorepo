@@ -87,6 +87,14 @@ describe('classifyAsSimpleSearch', () => {
       '进入 Intercom 给这个用户添加备注',
       '在 web2.0calc.com 计算 128*128',
       'use web2.0calc.com to calculate 128*128',
+      'use canva.com to create a poster draft',
+      'use zapier.com to create an automation draft',
+      'use mailchimp.com to create a campaign draft',
+      'use webflow.com to edit this landing page draft',
+      '在 canva.com 创建一个海报草稿',
+      '在 zapier.com 创建一个自动化草稿',
+      '在 mailchimp.com 创建一个邮件 campaign 草稿',
+      '在 webflow.com 编辑这个 landing page 草稿',
     ])('false: %s', (intent) => {
       expect(classifyAsSimpleSearch(intent)).toBe(false);
     });

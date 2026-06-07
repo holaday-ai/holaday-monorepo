@@ -603,6 +603,14 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       '进入 Intercom 给这个用户添加备注',
       '在 web2.0calc.com 计算 128*128',
       'use web2.0calc.com to calculate 128*128',
+      'use canva.com to create a poster draft',
+      'use zapier.com to create an automation draft',
+      'use mailchimp.com to create a campaign draft',
+      'use webflow.com to edit this landing page draft',
+      '在 canva.com 创建一个海报草稿',
+      '在 zapier.com 创建一个自动化草稿',
+      '在 mailchimp.com 创建一个邮件 campaign 草稿',
+      '在 webflow.com 编辑这个 landing page 草稿',
     ];
     for (const intent of cases) {
       const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
@@ -637,6 +645,8 @@ describe('classifyExecutionMode — browser overrides scrape (interaction verbs)
       'Intercom onboarding 消息策略',
       'Linear issue 模板',
       'Monday.com 项目管理分析',
+      'canva.com 海报设计策略',
+      'zapier 自动化模板',
       'Slack 团队公告文案',
       'GitHub README 模板',
       'GitHub issue 模板',
