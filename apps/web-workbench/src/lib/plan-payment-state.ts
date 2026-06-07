@@ -15,6 +15,12 @@ interface PaymentStateInput {
   paypalEnabled?: boolean | null;
 }
 
+interface PaymentOptionsLoadingInput {
+  zh: boolean;
+  paymentOptionsLoaded: boolean;
+  cnPaymentOptionsLoaded: boolean;
+}
+
 export function normalizePaymentOptions(value: unknown): PaymentOptions {
   if (!isRecord(value)) return emptyPaymentOptions();
   const paypalClientId = safeText(value.paypalClientId);
@@ -33,6 +39,11 @@ export function normalizeCnPaymentOptions(value: unknown): CnPaymentOptions {
   return {
     enabled: isRecord(value) && value.enabled === true,
   };
+}
+
+export function planPaymentOptionsLoading(input: PaymentOptionsLoadingInput): boolean {
+  if (!input.paymentOptionsLoaded) return true;
+  return input.zh && !input.cnPaymentOptionsLoaded;
 }
 
 export function planPaymentCtaState(input: PaymentStateInput): {

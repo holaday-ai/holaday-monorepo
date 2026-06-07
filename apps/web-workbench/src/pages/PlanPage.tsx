@@ -23,6 +23,7 @@ import {
   normalizePaymentOptions,
   planPaymentCtaState,
   planPaymentErrorMessage,
+  planPaymentOptionsLoading,
   type CnPaymentOptions,
   type PaymentOptions,
 } from '@/lib/plan-payment-state';
@@ -201,7 +202,11 @@ export function PlanPage(): JSX.Element {
           const isPaid = planId !== 'free';
           const isOpen = openPayFor === planId;
           const paymentCta = planPaymentCtaState({
-            loading: paymentOpts === null && cnOpts === null,
+            loading: planPaymentOptionsLoading({
+              zh,
+              paymentOptionsLoaded: paymentOpts !== null,
+              cnPaymentOptionsLoaded: cnOpts !== null,
+            }),
             zh,
             cnEnabled: cnOpts?.enabled ?? false,
             paypalEnabled: paymentOpts?.paypal ?? false,

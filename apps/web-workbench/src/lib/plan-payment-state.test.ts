@@ -4,6 +4,7 @@ import {
   normalizePaymentOptions,
   planPaymentCtaState,
   planPaymentErrorMessage,
+  planPaymentOptionsLoading,
 } from './plan-payment-state';
 
 describe('normalizePaymentOptions', () => {
@@ -130,5 +131,51 @@ describe('planPaymentCtaState', () => {
         paypalEnabled: true,
       }),
     ).toMatchObject({ disabled: false, label: 'Upgrade', unavailableMessage: null });
+  });
+});
+
+describe('planPaymentOptionsLoading', () => {
+  it('waits for PayPal options for every locale', () => {
+    expect(
+      planPaymentOptionsLoading({
+        zh: false,
+        paymentOptionsLoaded: false,
+        cnPaymentOptionsLoaded: true,
+      }),
+    ).toBe(true);
+    expect(
+      planPaymentOptionsLoading({
+        zh: true,
+        paymentOptionsLoaded: false,
+        cnPaymentOptionsLoaded: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('waits for local payment options only for Chinese locales', () => {
+    expect(
+      planPaymentOptionsLoading({
+        zh: true,
+        paymentOptionsLoaded: true,
+        cnPaymentOptionsLoaded: false,
+      }),
+    ).toBe(true);
+    expect(
+      planPaymentOptionsLoading({
+        zh: false,
+        paymentOptionsLoaded: true,
+        cnPaymentOptionsLoaded: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('finishes loading once the required payment options are known', () => {
+    expect(
+      planPaymentOptionsLoading({
+        zh: true,
+        paymentOptionsLoaded: true,
+        cnPaymentOptionsLoaded: true,
+      }),
+    ).toBe(false);
   });
 });
