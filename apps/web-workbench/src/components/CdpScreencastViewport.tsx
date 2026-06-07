@@ -4,6 +4,7 @@ import {
   mapClientPointToScreencast,
   placeScreencastContainTop,
   placeScreencastReadableTop,
+  readableScreencastAutoScrollKey,
   readableScreencastStartScrollLeft,
 } from '@/lib/screencast-fit';
 import { cn } from '@/lib/utils';
@@ -173,15 +174,21 @@ export function CdpScreencastViewport({
       });
       if (!placement) return;
       // Keep the remote page pinned to the top. Portrait readable
-      // mode may make wide desktop pages horizontally scrollable,
-      // but the first view should behave like a browser and start at
-      // the left edge instead of opening on a centered crop.
+      // mode may make wide desktop pages horizontally scrollable, so
+      // center the first view on the readable region and recompute it
+      // when the host changes size.
       canvas.style.setProperty('--hd-scale', String(placement.scale));
       canvas.style.setProperty('--hd-offset-x', `${placement.offsetX}px`);
       canvas.style.setProperty('--hd-offset-y', `${placement.offsetY}px`);
       host.style.setProperty('--hd-content-width', `${placement.width}px`);
       host.style.setProperty('--hd-content-height', `${placement.height}px`);
-      const autoScrollKey = `${wsUrl ?? 'none'}:${srcW}x${srcH}`;
+      const autoScrollKey = readableScreencastAutoScrollKey({
+        frameKey: `${wsUrl ?? 'none'}:${srcW}x${srcH}`,
+        hostWidth: rect.width,
+        hostHeight: rect.height,
+        contentWidth: placement.width,
+        viewMode: fitMode,
+      });
       if (
         fitMode === 'readable' &&
         viewOnlyRef.current &&

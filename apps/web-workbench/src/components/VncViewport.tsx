@@ -1,6 +1,7 @@
 import * as React from 'react';
 import {
   placeScreencastReadableTop,
+  readableScreencastAutoScrollKey,
   readableScreencastStartScrollLeft,
 } from '@/lib/screencast-fit';
 import { cn } from '@/lib/utils';
@@ -260,7 +261,13 @@ export function VncViewport({
     target.style.marginRight =
       placement.width < rect.width ? `${placement.offsetX}px` : '0px';
 
-    const key = `${wsUrl ?? 'none'}:${sourceWidth}x${sourceHeight}:${placement.width}x${placement.height}`;
+    const key = readableScreencastAutoScrollKey({
+      frameKey: `${wsUrl ?? 'none'}:${sourceWidth}x${sourceHeight}`,
+      hostWidth: rect.width,
+      hostHeight: rect.height,
+      contentWidth: placement.width,
+      viewMode: fitMode,
+    });
     if (viewOnlyRef.current && readableAutoScrollKeyRef.current !== key) {
       readableAutoScrollKeyRef.current = key;
       viewport.scrollTo({
