@@ -955,7 +955,13 @@ export function ScheduledCalendarPage(): JSX.Element {
         destructive
         onClose={() => setConfirmDelete(null)}
         onConfirm={() => {
-          if (confirmDelete) void handleDelete(confirmDelete);
+          // Return the promise so ConfirmDialog's in-flight `busy`
+          // guard actually holds — a bare `void handleDelete()`
+          // resolves onConfirm immediately, re-enabling the 删除 button
+          // mid-request so a double-tap fires a second (already-deleted
+          // → "删除失败") mutation.
+          if (!confirmDelete) return undefined;
+          return handleDelete(confirmDelete);
         }}
       />
     </PageContainer>
