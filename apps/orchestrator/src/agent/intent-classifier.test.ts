@@ -14,6 +14,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Logger } from 'pino';
 import { classifyExecutionMode } from './intent-classifier.js';
+import { classifyLightweightTask } from '../execution/lightweight-task.js';
 
 function fakeLogger(): Logger {
   const noop = vi.fn();
@@ -762,6 +763,52 @@ describe('classifyExecutionMode — generate stays generate', () => {
       logger: fakeLogger(),
     });
     expect(out).toBe('generate');
+  });
+});
+
+describe('Task 2 — must-execute intents never become a direct-answerable generate', () => {
+  // The generate-lane direct-answer shortcut fires only when BOTH
+  // (a) classifyExecutionMode routed to 'generate' AND
+  // (b) classifyLightweightTask(intent) !== null.
+  // For every must-execute task at least one of those is false, so the
+  // task always runs its real lane (browser/scrape) or a full generate
+  // with web_search — never the trivial direct-answer path. This pins
+  // the invariant at the routing boundary, the layer the lightweight
+  // helper unit test can't see.
+  function isDirectAnswerable(mode: string, intent: string): boolean {
+    return mode === 'generate' && classifyLightweightTask(intent) !== null;
+  }
+
+  it('explicit lanes for the unambiguous cases', async () => {
+    const expected: ReadonlyArray<[string, string]> = [
+      ['打开 https://example.com', 'browser'],
+      ['查今天特斯拉股价', 'scrape'],
+      ['搜索最新 AI 新闻', 'scrape'],
+      ['登录 LinkedIn 查看页面', 'browser'],
+    ];
+    for (const [intent, lane] of expected) {
+      const mode = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(mode, intent).toBe(lane);
+    }
+  });
+
+  it('none of the must-execute set is direct-answerable', async () => {
+    // Includes the two whose lane is debatable but must never be a
+    // direct answer: "生成一个可下载的 Markdown 文件" (file production)
+    // and "去 Google Flights 查机票" (named-site lookup — currently
+    // routes to generate, but the lightweight null guard keeps
+    // web_search on so it is not direct-answered).
+    for (const intent of [
+      '打开 https://example.com',
+      '查今天特斯拉股价',
+      '搜索最新 AI 新闻',
+      '生成一个可下载的 Markdown 文件',
+      '去 Google Flights 查机票',
+      '登录 LinkedIn 查看页面',
+    ]) {
+      const mode = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(isDirectAnswerable(mode, intent), intent).toBe(false);
+    }
   });
 });
 

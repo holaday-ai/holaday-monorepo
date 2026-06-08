@@ -432,6 +432,32 @@ describe('runGenerateTask — lightweight direct-answer path', () => {
     expect(req.tools).toEqual([]);
   });
 
+  it('must-execute intents that reach the runner keep web_search (no direct-answer)', async () => {
+    // Defense-in-depth: even if a web/action/file intent were dispatched
+    // to the generate runner (e.g. the named-site "去 Google Flights 查
+    // 机票" currently routes to generate), it must NOT take the
+    // direct-answer shortcut — web_search stays on so the model can
+    // actually fetch live data instead of hedging from priors.
+    for (const intent of [
+      '生成一个可下载的 Markdown 文件',
+      '去 Google Flights 查机票',
+      '查今天特斯拉股价',
+      '搜索最新 AI 新闻',
+    ]) {
+      const client = makeClient({ textOut: '……' });
+      await runGenerateTask({
+        taskId: `tsk_me_${intent.length}`,
+        userId: 'usr_test',
+        intent,
+        client,
+        logger: makeLogger(),
+      });
+      const req = (client.messages.stream as unknown as { mock: { calls: unknown[][] } })
+        .mock.calls[0]?.[0] as { tools?: unknown[] } | undefined ?? {};
+      expect((req.tools as unknown[]).length, intent).toBeGreaterThan(0);
+    }
+  });
+
   it('a real research task keeps web_search (not intercepted)', async () => {
     const client = makeClient({ textOut: '这是一份 2026 行业研究报告……' });
     await runGenerateTask({

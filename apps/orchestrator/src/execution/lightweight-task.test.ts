@@ -67,4 +67,22 @@ describe('classifyLightweightTask — must-execute intents stay null', () => {
     expect(classifyLightweightTask('')).toBeNull();
     expect(classifyLightweightTask(null)).toBeNull();
   });
+
+  // Task 2 (2026-06-09) — the exact must-execute prompts BOSS listed.
+  // Every one must classify null so it never takes the generate-lane
+  // direct-answer shortcut. Routing to browser/scrape/generate is a
+  // separate concern (see intent-classifier.test.ts); here we only
+  // pin that the lightweight net never swallows an execution task.
+  it('does NOT intercept BOSS must-execute set', () => {
+    for (const intent of [
+      '打开 https://example.com',
+      '查今天特斯拉股价',
+      '搜索最新 AI 新闻',
+      '生成一个可下载的 Markdown 文件',
+      '去 Google Flights 查机票',
+      '登录 LinkedIn 查看页面',
+    ]) {
+      expect(classifyLightweightTask(intent), intent).toBeNull();
+    }
+  });
 });
