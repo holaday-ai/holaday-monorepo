@@ -400,6 +400,38 @@ describe('runGenerateTask — lightweight direct-answer path', () => {
     expect(outcome.summary).toContain('你好');
   });
 
+  it('"100 * 23 等于几？" → direct-answer path, no web_search, result survives', async () => {
+    const client = makeClient({ textOut: '100 × 23 = 2300' });
+    const outcome = await runGenerateTask({
+      taskId: 'tsk_lw_mul',
+      userId: 'usr_test',
+      intent: '100 * 23 等于几？',
+      client,
+      logger: makeLogger(),
+    });
+    expect(outcome.status).toBe('completed');
+    expect(outcome.summary).toContain('2300');
+    const req = (client.messages.stream as unknown as { mock: { calls: unknown[][] } })
+      .mock.calls[0]?.[0] as { tools?: unknown[] } | undefined ?? {};
+    expect(req.tools).toEqual([]); // web_search dropped for lightweight
+  });
+
+  it('thank-you "谢谢" → short reply survives via direct-answer', async () => {
+    const client = makeClient({ textOut: '不客气！还有什么我可以帮你的吗？' });
+    const outcome = await runGenerateTask({
+      taskId: 'tsk_lw_thanks',
+      userId: 'usr_test',
+      intent: '谢谢',
+      client,
+      logger: makeLogger(),
+    });
+    expect(outcome.status).toBe('completed');
+    expect(outcome.summary).toContain('不客气');
+    const req = (client.messages.stream as unknown as { mock: { calls: unknown[][] } })
+      .mock.calls[0]?.[0] as { tools?: unknown[] } | undefined ?? {};
+    expect(req.tools).toEqual([]);
+  });
+
   it('a real research task keeps web_search (not intercepted)', async () => {
     const client = makeClient({ textOut: '这是一份 2026 行业研究报告……' });
     await runGenerateTask({

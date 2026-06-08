@@ -1490,4 +1490,52 @@ describe('verifyDeterministic — lightweight Q&A passes with a concise answer',
     });
     expect(result.passed).toBe(false);
   });
+
+  it('"什么是 AI？" + a one-line explanation => passed (not 结果内容不足)', () => {
+    const contract = buildContract({
+      taskId: 'tsk_lw4',
+      intent: '什么是 AI？',
+      executionMode: 'generate',
+    });
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_lw4'),
+      answerText: 'AI 指人工智能，让机器模拟人类的学习与推理能力。',
+    });
+    expect(result.passed).toBe(true);
+    expect(
+      result.checks.find((c) => c.criterionId === 'generic.empty_result'),
+    ).toBeUndefined();
+  });
+
+  it('"100 * 23 等于几？" + answer "2300" => passed', () => {
+    const contract = buildContract({
+      taskId: 'tsk_lw5',
+      intent: '100 * 23 等于几？',
+      executionMode: 'generate',
+    });
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_lw5'),
+      answerText: '2300',
+    });
+    expect(result.passed).toBe(true);
+  });
+
+  // Guard the upper boundary too: a short answer to a long-form task
+  // (no lightweight intent) must NOT slip past the verifier just
+  // because the answer happens to be brief.
+  it('long-form report intent with a one-line answer still flags empty_result', () => {
+    const contract = buildContract({
+      taskId: 'tsk_lw6',
+      intent: '写一份季度营销复盘报告',
+      executionMode: 'generate',
+    });
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_lw6'),
+      answerText: '已完成',
+    });
+    expect(result.passed).toBe(false);
+  });
 });
