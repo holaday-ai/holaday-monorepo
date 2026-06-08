@@ -145,3 +145,66 @@ describe('evaluateFileArtifact — screenshot must not satisfy the claim', () =>
     expect(v.inconsistent).toBe(false);
   });
 });
+
+describe('answerClaimsDownloadableFile — filename + generation phrasing', () => {
+  it('matches "filename.ext 已生成" including backtick-wrapped + lowercase ext', () => {
+    expect(answerClaimsDownloadableFile('`qa-summary.pdf` 已生成')).toBe(true);
+    expect(answerClaimsDownloadableFile('qa-summary.pdf 已生成')).toBe(true);
+    expect(answerClaimsDownloadableFile('productivity-tips.md 已生成')).toBe(true);
+    expect(answerClaimsDownloadableFile('report.csv 已创建，可下载')).toBe(true);
+  });
+
+  it('does NOT match a bare source link ending in .pdf', () => {
+    expect(
+      answerClaimsDownloadableFile('来源：https://example.com/spec.pdf（仅供参考）'),
+    ).toBe(false);
+    expect(answerClaimsDownloadableFile('参考文档 spec.pdf，可供参考')).toBe(false);
+  });
+});
+
+describe('evaluateFileArtifact — filename-phrasing claims vs screenshot-only', () => {
+  it('1. `qa-summary.pdf` 已生成 + only screenshot => inconsistent', () => {
+    expect(
+      evaluateFileArtifact({
+        answerText: '`qa-summary.pdf` 已生成，可从上方卡片下载。',
+        outputFiles: [SCREENSHOT],
+      }).inconsistent,
+    ).toBe(true);
+  });
+
+  it('2. qa-summary.pdf 已生成 + only screenshot => inconsistent', () => {
+    expect(
+      evaluateFileArtifact({
+        answerText: 'qa-summary.pdf 已生成。',
+        outputFiles: [SCREENSHOT],
+      }).inconsistent,
+    ).toBe(true);
+  });
+
+  it('3. productivity-tips.md 已生成 + only screenshot => inconsistent', () => {
+    expect(
+      evaluateFileArtifact({
+        answerText: 'productivity-tips.md 已生成。',
+        outputFiles: [SCREENSHOT],
+      }).inconsistent,
+    ).toBe(true);
+  });
+
+  it('4. source-link-only .pdf without generation phrasing => not flagged', () => {
+    const v = evaluateFileArtifact({
+      answerText: '总结完成。来源：https://example.com/spec.pdf',
+      outputFiles: [SCREENSHOT],
+    });
+    expect(v.claimsFile).toBe(false);
+    expect(v.inconsistent).toBe(false);
+  });
+
+  it('5. qa-summary.pdf 已生成 + a real PDF output => pass', () => {
+    expect(
+      evaluateFileArtifact({
+        answerText: 'qa-summary.pdf 已生成。',
+        outputFiles: [SCREENSHOT, PDF],
+      }).inconsistent,
+    ).toBe(false);
+  });
+});

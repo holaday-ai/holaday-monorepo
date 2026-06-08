@@ -59,13 +59,24 @@ export function fencedFileIds(answerText: string | null | undefined): Set<string
  * not trip it.
  */
 const FILE_CLAIM_RE =
-  /文件已生成|已生成(?:好|了)?(?:一个|这个)?(?:可下载)?文件|点击下载|从上方卡片下载|可从.{0,6}卡片下载|可下载的?\s*(?:Markdown|markdown|PDF|pdf|文档|表格|文件|CSV|csv)|PDF\s*已(?:生成|创建)|下载链接\s*[:：]|供你下载|文件供下载|为你生成(?:了|好)?(?:一个|这个)?文件|生成(?:了|好)(?:一个|这个)?(?:可下载)?(?:的)?(?:Markdown|PDF|文档|表格|文件)/;
+  /文件已生成|已生成(?:好|了)?(?:一个|这个)?(?:可下载)?文件|点击下载|从上方卡片下载|可从.{0,6}卡片下载|可下载文件卡片|可下载的?\s*(?:Markdown|markdown|PDF|pdf|文档|表格|文件|CSV|csv)|PDF\s*已(?:生成|创建)|下载链接\s*[:：]|供你下载|文件供下载|为你生成(?:了|好)?(?:一个|这个)?文件|生成(?:了|好)(?:一个|这个)?(?:可下载)?(?:的)?(?:Markdown|PDF|文档|表格|文件)/;
+
+/**
+ * A document FILENAME immediately followed by a generation / download
+ * phrase — "qa-summary.pdf 已生成", "`report.md` 已创建", "x.csv 可下载".
+ * Only whitespace and closing quote/backtick/bracket chars may sit
+ * between the filename and the phrase, so a bare source link
+ * ("来源：https://example.com/spec.pdf（仅供参考）") does NOT match — its
+ * `.pdf` is not adjacent to any generation / download wording.
+ */
+const FILE_CLAIM_FILENAME_RE =
+  /[\w\-]+\.(?:pdf|md|markdown|csv|json|xlsx|docx|txt|pptx)\s*[`'"」』）)\]]*\s*(?:已(?:生成|创建|完成|备好)|生成(?:完毕|好了|完成)?|可(?:下载|供下载|从[^。\n]{0,8}下载)|下载卡片)/i;
 
 export function answerClaimsDownloadableFile(
   answerText: string | null | undefined,
 ): boolean {
   if (!answerText) return false;
-  return FILE_CLAIM_RE.test(answerText);
+  return FILE_CLAIM_RE.test(answerText) || FILE_CLAIM_FILENAME_RE.test(answerText);
 }
 
 /**
