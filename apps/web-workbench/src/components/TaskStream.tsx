@@ -38,6 +38,7 @@ import { FileDownloadCard, parseHoladayFilePayload } from '@/components/FileDown
 import { awaitingUserCopy, awaitingUserStreamMessage } from '@/lib/awaiting-user-copy';
 import { isBrowserErrorUrl } from '@/components/browser-panel-state';
 import { copyTextToClipboard, hasCopyableText } from '@/lib/copy-text';
+import { shouldRenderLiveSubStatus } from '@/lib/live-substatus';
 import {
   downloadFailureMessage,
   downloadFileAuthed,
@@ -415,7 +416,7 @@ function AgentBlock({
             Takes precedence over BoardingLine since the chip is the
             more specific surface ("正在操作浏览器… 45s" beats "正在
             分析您的请求"). */}
-        {!terminal && subStatusEntry && (
+        {subStatusEntry && shouldRenderLiveSubStatus(task.status, terminal) && (
           <LiveSubStatusChip
             subStatus={subStatusEntry.subStatus}
             since={subStatusEntry.since}
