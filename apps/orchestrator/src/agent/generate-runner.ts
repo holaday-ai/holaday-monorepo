@@ -26,6 +26,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from 'pino';
 import { buildPromptSchemaSuffix } from '../execution/execution-contract.js';
 import { buildLayeredSystemPrompt, classifyRole } from './supercar/prompt-layers.js';
+import { classifyLightweightTask } from '../execution/lightweight-task.js';
 // Phase 2 — typed expert workflow framework. When the
 // EXPERT_WORKFLOW flag is on AND the intent matches a registered
 // workflow, the runner runs deterministic intake (parse →
@@ -142,6 +143,20 @@ export interface RunGenerateOpts {
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
 const DEFAULT_MAX_TOKENS = 8192;
+
+/**
+ * Direct-answer system prompt for lightweight Q&A (arithmetic / greeting
+ * / short knowledge). The full layered prompt + JSON-schema suffix +
+ * web_search push the model toward hedging ("没有答案 2") on a trivial
+ * "1 加 1 等于几？". This minimal prompt — and dropping web_search for
+ * these intents — gets a clean, concise answer. Brand-neutral; the final
+ * sanitizer still strips any model self-ID.
+ */
+const DIRECT_ANSWER_SYSTEM =
+  '你是 HOLA DAY 的智能助手。用中文（除非用户用其他语言）直接、准确、简洁地回答用户的问题。' +
+  '这是一个简单的问答，不需要联网搜索、不需要生成文件、不需要操作浏览器——直接给出答案即可。' +
+  '简单计算请直接给出最终结果（可附一行算式）；简短问候请友好回应；概念问题请用一两句话解释清楚。' +
+  '不要回复“没有答案”或空内容——务必给出有用的回答。';
 // Phase 24 RC follow-up — bumped 120s → 300s after RC's V2 SOP-write
 // task hit the wall on a long-form output. SOPs / contracts / detailed
 // proposals routinely run 90-150s of streaming; the old 120s margin
@@ -257,8 +272,18 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
   // producing valid output on the first try. Workflow tier already
   // has its own structured prompt (workflowReportSystem) so we only
   // augment the layered fallback path.
-  const schemaSuffix = workflowReportSystem ? '' : buildPromptSchemaSuffix(opts.intent);
-  const system = (workflowReportSystem ?? buildLayeredSystemPrompt(roleId)) + schemaSuffix;
+  // Lightweight Q&A (arithmetic / greeting / short knowledge) takes a
+  // direct-answer path: minimal prompt, NO schema suffix, NO web_search
+  // (see requestArgs below). classifyLightweightTask returns null for any
+  // web / action / file intent, so real generate tasks are unaffected.
+  const isLightweight = !workflowReportSystem && classifyLightweightTask(opts.intent) !== null;
+  const schemaSuffix =
+    workflowReportSystem || isLightweight ? '' : buildPromptSchemaSuffix(opts.intent);
+  const system = workflowReportSystem
+    ? workflowReportSystem
+    : isLightweight
+      ? DIRECT_ANSWER_SYSTEM
+      : buildLayeredSystemPrompt(roleId) + schemaSuffix;
 
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
@@ -308,13 +333,17 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
     // Allow but don't force web_search. Up to 5 server-side queries
     // per turn. The model uses zero for "translate this" and a few
     // for "give me a 2026 industry brief" — pay-per-use, not blocked.
-    tools: [
-      {
-        type: 'web_search_20260209',
-        name: 'web_search',
-        max_uses: 5,
-      } as unknown as never,
-    ],
+    // Lightweight Q&A drops the tool entirely: searching "1+1" returns
+    // nothing and pushes the model into a "没有答案" hedge.
+    tools: isLightweight
+      ? []
+      : [
+          {
+            type: 'web_search_20260209',
+            name: 'web_search',
+            max_uses: 5,
+          } as unknown as never,
+        ],
   };
 
   let totalInputTokens = 0;

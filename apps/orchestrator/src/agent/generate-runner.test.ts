@@ -366,3 +366,51 @@ describe('runGenerateTask (phase 22a)', () => {
     });
   });
 });
+
+describe('runGenerateTask — lightweight direct-answer path', () => {
+  it('"1 加 1 等于几？" → clean short summary, NOT lost/emptied; no web_search', async () => {
+    const client = makeClient({ textOut: '1 + 1 = 2' });
+    const outcome = await runGenerateTask({
+      taskId: 'tsk_lw',
+      userId: 'usr_test',
+      intent: '1 加 1 等于几？',
+      client,
+      logger: makeLogger(),
+    });
+    expect(outcome.status).toBe('completed');
+    // The short answer survives the runner — not blanked / not "没有答案".
+    expect(outcome.summary).toBe('1 + 1 = 2');
+    expect(outcome.summary).toContain('2');
+    const req = (client.messages.stream as unknown as { mock: { calls: unknown[][] } })
+      .mock.calls[0]?.[0] as { tools?: unknown[]; system?: Array<{ text: string }> } | undefined ?? {};
+    expect(req.tools).toEqual([]); // web_search dropped for lightweight
+    expect(req.system?.[0]?.text).toContain('简洁');
+  });
+
+  it('greeting "你好" → short reply survives', async () => {
+    const client = makeClient({ textOut: '你好！很高兴见到你，有什么我可以帮你的吗？' });
+    const outcome = await runGenerateTask({
+      taskId: 'tsk_lw_hi',
+      userId: 'usr_test',
+      intent: '你好',
+      client,
+      logger: makeLogger(),
+    });
+    expect(outcome.status).toBe('completed');
+    expect(outcome.summary).toContain('你好');
+  });
+
+  it('a real research task keeps web_search (not intercepted)', async () => {
+    const client = makeClient({ textOut: '这是一份 2026 行业研究报告……' });
+    await runGenerateTask({
+      taskId: 'tsk_full',
+      userId: 'usr_test',
+      intent: '写一份 2026 年 AI 行业研究报告，包含市场格局与趋势',
+      client,
+      logger: makeLogger(),
+    });
+    const req = (client.messages.stream as unknown as { mock: { calls: unknown[][] } })
+      .mock.calls[0]?.[0] as { tools?: unknown[] } | undefined ?? {};
+    expect((req.tools as unknown[]).length).toBeGreaterThan(0);
+  });
+});

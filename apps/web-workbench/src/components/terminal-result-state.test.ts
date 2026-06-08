@@ -70,3 +70,41 @@ describe('terminalResultContentInsufficient', () => {
     expect(taskCancelStateChangedMessage('unknown')).toBe('任务状态已变化，请刷新后查看最新进度。');
   });
 });
+
+describe('terminalResultContentInsufficient — lightweight Q&A', () => {
+  it('does NOT flag a concise arithmetic answer', () => {
+    expect(
+      terminalResultContentInsufficient({
+        status: 'completed',
+        displayText: '1 + 1 = 2',
+        revealedText: '1 + 1 = 2',
+        intent: '1 加 1 等于几？',
+        attachmentCount: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it('does NOT flag a short greeting reply', () => {
+    expect(
+      terminalResultContentInsufficient({
+        status: 'completed',
+        displayText: '你好！有什么可以帮你的吗？',
+        revealedText: '你好！有什么可以帮你的吗？',
+        intent: '你好',
+        attachmentCount: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it('still flags a near-empty answer for a real report task', () => {
+    expect(
+      terminalResultContentInsufficient({
+        status: 'completed',
+        displayText: '完成',
+        revealedText: '完成',
+        intent: '写一份季度营销复盘报告，含数据与建议',
+        attachmentCount: 0,
+      }),
+    ).toBe(true);
+  });
+});

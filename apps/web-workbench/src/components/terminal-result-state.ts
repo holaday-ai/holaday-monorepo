@@ -59,7 +59,18 @@ export function allowsConciseFactResult(intent?: string): boolean {
     /报告|总结|分析|对比|列表|清单|多(个|条)|前\s*\d+|top\s*\d+|report|summary|analysis|compare|list/i.test(
       goal,
   );
-  return (asksForConciseAnswer || asksForSingleFact) && !asksForLongForm;
+  // Lightweight Q&A — simple arithmetic ("1 加 1 等于几") and greetings
+  // ("你好") have a legitimately tiny answer ("2" / "你好！…"); without
+  // this they'd render the 结果内容不足 card instead of the real reply.
+  const asksLightweight =
+    (/\d|[加减乘除]/.test(goal) &&
+      /等于|=|多少|几|计算|算一?下|换算|乘以|除以/.test(goal)) ||
+    /^(?:你好|您好|哈喽|哈罗|嗨|hi|hello|hey|在吗|早上?好|晚上好|谢谢|多谢|thanks?)/i.test(
+      goal.trim(),
+    );
+  return (
+    (asksForConciseAnswer || asksForSingleFact || asksLightweight) && !asksForLongForm
+  );
 }
 
 export function taskCancelStateChangedMessage(state: string | null | undefined): string {
