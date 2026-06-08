@@ -1365,3 +1365,82 @@ describe('duplicate candidate links', () => {
     expect(result.passed).toBe(true);
   });
 });
+
+describe('verifyDeterministic — file-artifact consistency', () => {
+  // A substantial Chinese answer that OFFERS a downloadable file but
+  // carries no holaday-file fence. >200 non-whitespace chars so the
+  // empty-result guard doesn't fire and we isolate the file check.
+  const claimAnswer =
+    '我已经把这份提效技巧整理好了。文件已生成，点击下载：productivity-tips.md。' +
+    '内容包含番茄工作法、每日三件最重要的事、集中处理通知、把重复操作模板化、' +
+    '以及下班前两分钟的收尾清单这五条技巧，每一条都配了简短的执行说明，方便你' +
+    '直接照着做。希望这份清单能帮助你更高效地安排每天的工作节奏，减少不必要的打断。';
+
+  it('flags a download claim with no fence AND no output file (fixable)', () => {
+    const contract = happyChecklistContract('tsk_fa1');
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_fa1'),
+      answerText: claimAnswer,
+      outputFileCount: 0,
+    });
+    const check = result.checks.find(
+      (c) => c.criterionId === 'generic.file_artifact_consistency',
+    );
+    expect(check?.passed).toBe(false);
+    expect(check?.severity).toBe('fixable');
+    expect(result.passed).toBe(false);
+    expect(result.failureLevel).toBe('fixable');
+  });
+
+  it('does NOT flag when an output file was created (folded into attachments)', () => {
+    const contract = happyChecklistContract('tsk_fa2');
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_fa2'),
+      answerText: claimAnswer,
+      outputFileCount: 1,
+    });
+    expect(
+      result.checks.find((c) => c.criterionId === 'generic.file_artifact_consistency'),
+    ).toBeUndefined();
+  });
+
+  it('does NOT flag when a holaday-file fence backs the claim', () => {
+    const contract = happyChecklistContract('tsk_fa3');
+    const fenced =
+      claimAnswer +
+      '\n\n```holaday-file\n' +
+      JSON.stringify({
+        fileId: 'file_ok',
+        filename: 'productivity-tips.md',
+        size: 200,
+        downloadUrl: '/api/files/file_ok/download',
+      }) +
+      '\n```';
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_fa3'),
+      answerText: fenced,
+      outputFileCount: 0,
+    });
+    expect(
+      result.checks.find((c) => c.criterionId === 'generic.file_artifact_consistency'),
+    ).toBeUndefined();
+  });
+
+  it('does NOT flag an ordinary answer that makes no file claim', () => {
+    const contract = happyChecklistContract('tsk_fa4');
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_fa4'),
+      answerText:
+        '北京今天天气晴朗，最高气温约 26 摄氏度，适合户外活动。空气质量良好，' +
+        '没有明显的降水，风力较小，体感舒适，建议出门时备一件薄外套以防早晚温差。',
+      outputFileCount: 0,
+    });
+    expect(
+      result.checks.find((c) => c.criterionId === 'generic.file_artifact_consistency'),
+    ).toBeUndefined();
+  });
+});

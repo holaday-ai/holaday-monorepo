@@ -30,6 +30,7 @@ import type {
 } from './execution-contract.js';
 import type { EvidenceLedger } from './evidence-ledger.js';
 import type { ExpertWorkflowContract } from './expert-workflow-contract.js';
+import { evaluateFileArtifact } from './file-artifact-consistency.js';
 
 export type FailureLevel = 'fixable' | 'needs_clarification' | 'hard_fail';
 
@@ -76,6 +77,13 @@ export interface VerifyInputs {
    * entirely (no false positives on translation / browser tasks).
    */
   workflowContract?: ExpertWorkflowContract;
+  /**
+   * Count of output files actually created during this task
+   * (task_files, kind='output', non-expired). Feeds the file-artifact
+   * consistency check below. Absent / 0 for lanes that can't create
+   * files; the check then relies on holaday-file fence presence alone.
+   */
+  outputFileCount?: number;
 }
 
 const URL_RE = /https?:\/\/[^\s,;'")\]>]+/g;
@@ -181,6 +189,19 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   //    as a "success".
   const emptyCheck = checkEmptyResult(answerText, contract);
   if (emptyCheck) checks.push(emptyCheck);
+
+  // 5. File-artifact consistency. The answer must not offer the user a
+  //    downloadable file ("文件已生成，点击下载：x.md" / "PDF 已生成：x.pdf")
+  //    unless a real artifact backs it — a holaday-file fence the SPA
+  //    can render, or a created output file the finaliser folds into
+  //    metadata.attachments. QA found ~1/3 of file tasks claiming a
+  //    file with neither. Flag as fixable so the row reads
+  //    partial_success instead of presenting a dead download link.
+  const fileArtifactCheck = checkFileArtifactConsistency(
+    answerText,
+    inputs.outputFileCount ?? 0,
+  );
+  if (fileArtifactCheck) checks.push(fileArtifactCheck);
 
   const passed = checks.every((c) => c.passed);
   const result: VerificationResult = {
@@ -1132,6 +1153,31 @@ function checkEmptyResult(
     passed: false,
     checker: 'deterministic',
     detail: `meaningful answer length ${meaningful.length}, hasContentChars=${hasContentChars} — output looks empty after sanitization`,
+    severity: 'fixable',
+  };
+}
+
+/**
+ * File-artifact consistency guard. Fails (fixable) when the answer
+ * OFFERS a downloadable file but nothing real backs it — no
+ * ```holaday-file fence and no output file created during the task.
+ * The result finaliser folds real-but-un-fenced files into
+ * metadata.attachments BEFORE this runs (passing their count as
+ * outputFileCount), so this only trips on a genuine dead-end claim.
+ * Chinese detail so the SPA banner surfaces it cleanly (no SPA change).
+ */
+function checkFileArtifactConsistency(
+  answerText: string,
+  outputFileCount: number,
+): CheckResult | null {
+  const verdict = evaluateFileArtifact({ answerText, outputFileCount });
+  if (!verdict.inconsistent) return null;
+  return {
+    criterionId: 'generic.file_artifact_consistency',
+    criterionType: 'file_artifact_consistency',
+    passed: false,
+    checker: 'deterministic',
+    detail: '回复声称生成了可下载文件，但没有实际产出文件或下载卡片',
     severity: 'fixable',
   };
 }

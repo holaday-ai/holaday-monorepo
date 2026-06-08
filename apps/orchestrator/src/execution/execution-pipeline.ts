@@ -165,6 +165,14 @@ export interface VerifyInputs {
   client?: AnthropicLikeClient | Anthropic | null;
   /** Optional logger for non-blocking warnings. */
   logger?: Logger;
+  /**
+   * Count of output files actually created during this task
+   * (task_files, kind='output', non-expired). Feeds the file-artifact
+   * consistency check: a download claim with no fence AND no created
+   * output file is flagged fixable. Omit / 0 when the lane can't create
+   * files (generate / scrape).
+   */
+  outputFileCount?: number;
 }
 
 export interface VerifyOutput {
@@ -335,6 +343,9 @@ export async function verifyAndFinalize(
     answerText: inputs.answerText,
     ...(inputs.finalUrl ? { finalUrl: inputs.finalUrl } : {}),
     ...(workflowContract ? { workflowContract } : {}),
+    ...(inputs.outputFileCount != null
+      ? { outputFileCount: inputs.outputFileCount }
+      : {}),
   });
 
   if (!det.passed) {

@@ -108,6 +108,7 @@ import {
   type VerifyOutput,
 } from '../../execution/execution-pipeline.js';
 import type { VerificationResult } from '../../execution/answer-verifier.js';
+import { fencedFileIds } from '../../execution/file-artifact-consistency.js';
 // Phase 1 follow-up — final-text sanitiser + scrape-failure
 // humaniser. Strips tool-XML / base64 / stop-reason markers from
 // outcome.summary BEFORE it goes through verify + persist.
@@ -3189,6 +3190,57 @@ export const tasksRouter = router({
                 };
               }
             }
+            // File-artifact consistency (B). The agent creates
+            // downloadable files via the create_file tool and is told
+            // to surface them with a ```holaday-file fence in the final
+            // answer; QA found ~1/3 of file tasks where the prose claims
+            // a file but the fence is omitted/garbled, so the user is
+            // told to click a download that isn't there. Fold any
+            // created output file NOT already referenced by a fence into
+            // metadata.attachments — the SPA's AttachmentBar then renders
+            // a download card without any SPA change. Deduped against
+            // fences so a correctly-surfaced file isn't doubled.
+            let createdOutputFileCount = 0;
+            if (taskDbId && outcome.status === 'completed') {
+              try {
+                const now = Date.now();
+                const outputFiles = (await fileService.listForTask(taskDbId)).filter(
+                  (f) =>
+                    f.kind === 'output' &&
+                    f.status !== 'expired' &&
+                    (f.expiresAt == null || f.expiresAt.getTime() > now),
+                );
+                createdOutputFileCount = outputFiles.length;
+                if (outputFiles.length > 0) {
+                  const fenced = fencedFileIds(outcome.summary ?? '');
+                  const unfenced = outputFiles.filter((f) => !fenced.has(f.externalId));
+                  if (unfenced.length > 0) {
+                    const existing = (metadata.attachments as unknown[]) ?? [];
+                    metadata.attachments = [
+                      ...existing,
+                      ...unfenced.map((f) => ({
+                        fileId: f.externalId,
+                        downloadUrl: `/api/files/${f.externalId}/download`,
+                        filename: f.filename,
+                        mimetype: f.mimetype,
+                        sizeBytes: f.sizeBytes,
+                        expiresAt: f.expiresAt ? f.expiresAt.toISOString() : null,
+                        kind: 'file',
+                      })),
+                    ];
+                    ctx.logger.info(
+                      { taskId, recovered: unfenced.map((f) => f.externalId) },
+                      'file-artifact: folded un-fenced output files into metadata.attachments',
+                    );
+                  }
+                }
+              } catch (err) {
+                ctx.logger.warn(
+                  { err: err instanceof Error ? err.message : String(err), taskId },
+                  'file-artifact: output-file fold failed (non-fatal)',
+                );
+              }
+            }
             // Phase 1 Day 5 Round 2 — pipeline verification on the
             // supercar/browser final answer. Mirrors the generate +
             // scrape pattern: seed terminal-state evidence into the
@@ -3219,6 +3271,9 @@ export const tasksRouter = router({
                 ...(finalState.finalUrl ? { finalUrl: finalState.finalUrl } : {}),
                 client: anthropicForResolver,
                 logger: ctx.logger,
+                // File-artifact guard (C): a download claim with no
+                // fence AND no created output file → fixable.
+                outputFileCount: createdOutputFileCount,
               });
               if (verified.finalText !== outcome.summary) {
                 outcome = { ...outcome, summary: verified.finalText };
