@@ -34,6 +34,23 @@ describe('verificationCheckLabel', () => {
     ).toBe('自动审核超时，未阻塞任务结果');
   });
 
+  it('humanises content-length checks instead of leaking raw notation', () => {
+    expect(
+      verificationCheckLabel({ type: 'generic.min_length', detail: 'length 81 outside [100, ∞]' }),
+    ).toBe('回复内容过短，可能不完整');
+  });
+
+  it('never surfaces a raw English check detail verbatim', () => {
+    // Unmapped check type + ASCII assertion string → generic label, not raw leak.
+    expect(
+      verificationCheckLabel({ type: 'unknown_check', detail: 'assertion failed: got 3, expected >= 5' }),
+    ).toBe('自动审核发现一项问题');
+    // Chinese details are still surfaced as-is.
+    expect(
+      verificationCheckLabel({ type: 'unknown_check', detail: '第 2 行缺少价格' }),
+    ).toBe('第 2 行缺少价格');
+  });
+
   it('clarifies when required source links were removed or absent', () => {
     expect(
       verificationCheckLabel({

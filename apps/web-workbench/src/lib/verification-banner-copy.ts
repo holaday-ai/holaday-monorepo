@@ -65,7 +65,36 @@ export function verificationCheckLabel(check: VerificationCheck): string {
   if (/timeout|timed out|超时/i.test(detail)) {
     return '自动审核超时，未阻塞任务结果';
   }
-  return CHECK_TYPE_LABELS[check.type] ?? (detail || '自动审核发现一项问题');
+  // Content-length / empty-result checks emit raw notation like
+  // "length 81 outside [100, ∞]" — surface a readable Chinese label
+  // instead of leaking the assertion string into the banner.
+  if (/length\s+\d+\s+outside|too\s+short|min(?:imum)?\s+length|内容过短|内容过少|字数不足/i.test(detail)) {
+    return '回复内容过短，可能不完整';
+  }
+  const mapped = CHECK_TYPE_LABELS[check.type];
+  if (mapped) return mapped;
+  // Defence-in-depth: never render a raw English / technical detail
+  // verbatim (e.g. "length 81 outside [100, ∞]", "assertion failed").
+  // Only a detail that reads as Chinese user copy is safe to surface;
+  // otherwise fall back to a generic label.
+  return detail && !looksLikeRawCheckDetail(detail)
+    ? detail
+    : '自动审核发现一项问题';
+}
+
+/**
+ * A check detail is "raw" (not user-facing) when it's overwhelmingly
+ * ASCII — internal verifier strings like "length 81 outside [100, ∞]"
+ * or English assertion messages. Chinese labels (which contain CJK)
+ * stay safe to show.
+ */
+function looksLikeRawCheckDetail(detail: string): boolean {
+  if (!detail) return false;
+  let ascii = 0;
+  for (const ch of detail) {
+    if (ch.codePointAt(0)! < 128) ascii += 1;
+  }
+  return ascii / detail.length > 0.85;
 }
 
 export function verificationBannerCopy({
