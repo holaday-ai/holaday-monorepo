@@ -34,6 +34,7 @@ import {
   evaluateFileArtifact,
   type OutputFileDescriptor,
 } from './file-artifact-consistency.js';
+import { classifyLightweightTask } from './lightweight-task.js';
 
 export type FailureLevel = 'fixable' | 'needs_clarification' | 'hard_fail';
 
@@ -1145,6 +1146,14 @@ function checkEmptyResult(
   // call the task completed.
   const hasContentChars =
     /[A-Za-z0-9一-鿿぀-ゟ゠-ヿ]/.test(meaningful);
+  // Plain Q&A — arithmetic / greeting / short knowledge — has a
+  // legitimately tiny answer ("2" / "你好！"). Pass on any non-empty
+  // content character. classifyLightweightTask returns null for any
+  // web / action / file intent, so this never green-lights an empty
+  // real-execution result.
+  if (classifyLightweightTask(contract.goal) && meaningful.length >= 1 && hasContentChars) {
+    return null;
+  }
   if (
     allowsConciseFactAnswer(contract) &&
     meaningful.length >= 3 &&

@@ -18,6 +18,7 @@
  * contract afterwards.
  */
 import { randomUUID } from 'node:crypto';
+import { classifyLightweightTask } from './lightweight-task.js';
 
 export type ContractTier = 'full' | 'light' | 'checklist';
 
@@ -553,6 +554,12 @@ function summariseIntent(intent: string): string {
  */
 function pickChecklistMinWordCount(inputs: ContractInputs): number {
   if (inputs.executionMode === 'scrape') return 100;
+  // Plain Q&A — arithmetic / greeting / short knowledge — can answer in
+  // a few chars ("2" / "你好！"). The 10-char floor wrongly flags those
+  // 结果内容不足. classifyLightweightTask is keyword-only (no LLM) and
+  // returns null for any web / action / file signal, so real generate
+  // tasks keep the normal threshold.
+  if (classifyLightweightTask(inputs.intent)) return 1;
   const isShortPrompt = inputs.intent.length < 100;
   const hasAttachments = inputs.hasAttachments === true;
   if (isShortPrompt && !hasAttachments) return 10;

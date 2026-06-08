@@ -1444,3 +1444,50 @@ describe('verifyDeterministic — file-artifact consistency', () => {
     ).toBeUndefined();
   });
 });
+
+describe('verifyDeterministic — lightweight Q&A passes with a concise answer', () => {
+  it('"1 加 1 等于几？" + answer "2" => passed (no empty_result / word_count fail)', () => {
+    const contract = buildContract({
+      taskId: 'tsk_lw1',
+      intent: '1 加 1 等于几？',
+      executionMode: 'generate',
+    });
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_lw1'),
+      answerText: '2',
+    });
+    expect(result.passed).toBe(true);
+    expect(
+      result.checks.find((c) => c.criterionId === 'generic.empty_result'),
+    ).toBeUndefined();
+  });
+
+  it('greeting "你好" + short reply => passed', () => {
+    const contract = buildContract({
+      taskId: 'tsk_lw2',
+      intent: '你好',
+      executionMode: 'generate',
+    });
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_lw2'),
+      answerText: '你好！有什么可以帮你的？',
+    });
+    expect(result.passed).toBe(true);
+  });
+
+  it('a real generate task with a 2-char stub still flags empty_result', () => {
+    const contract = buildContract({
+      taskId: 'tsk_lw3',
+      intent: '帮我写一份完整的季度营销复盘报告，包含数据与建议',
+      executionMode: 'generate',
+    });
+    const result = verifyDeterministic({
+      contract,
+      ledger: new EvidenceLedger('tsk_lw3'),
+      answerText: '完成',
+    });
+    expect(result.passed).toBe(false);
+  });
+});
