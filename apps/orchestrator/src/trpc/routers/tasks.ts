@@ -108,7 +108,10 @@ import {
   type VerifyOutput,
 } from '../../execution/execution-pipeline.js';
 import type { VerificationResult } from '../../execution/answer-verifier.js';
-import { fencedFileIds } from '../../execution/file-artifact-consistency.js';
+import {
+  fencedFileIds,
+  isDocumentOutput,
+} from '../../execution/file-artifact-consistency.js';
 // Phase 1 follow-up — final-text sanitiser + scrape-failure
 // humaniser. Strips tool-XML / base64 / stop-reason markers from
 // outcome.summary BEFORE it goes through verify + persist.
@@ -3200,22 +3203,35 @@ export const tasksRouter = router({
             // metadata.attachments — the SPA's AttachmentBar then renders
             // a download card without any SPA change. Deduped against
             // fences so a correctly-surfaced file isn't doubled.
-            let createdOutputFileCount = 0;
+            let outputDocDescriptors: Array<{ filename: string; mimetype: string }> = [];
             if (taskDbId && outcome.status === 'completed') {
               try {
                 const now = Date.now();
-                const outputFiles = (await fileService.listForTask(taskDbId)).filter(
+                // DOCUMENT outputs only — the auto-final-screenshot is
+                // also a kind='output' row (added to attachments by L1
+                // above) and must not be re-folded here nor count as the
+                // claimed PDF/Markdown artifact.
+                const outputDocs = (await fileService.listForTask(taskDbId)).filter(
                   (f) =>
                     f.kind === 'output' &&
                     f.status !== 'expired' &&
-                    (f.expiresAt == null || f.expiresAt.getTime() > now),
+                    (f.expiresAt == null || f.expiresAt.getTime() > now) &&
+                    isDocumentOutput({ filename: f.filename, mimetype: f.mimetype }),
                 );
-                createdOutputFileCount = outputFiles.length;
-                if (outputFiles.length > 0) {
+                outputDocDescriptors = outputDocs.map((f) => ({
+                  filename: f.filename,
+                  mimetype: f.mimetype,
+                }));
+                if (outputDocs.length > 0) {
                   const fenced = fencedFileIds(outcome.summary ?? '');
-                  const unfenced = outputFiles.filter((f) => !fenced.has(f.externalId));
+                  const existing = (metadata.attachments as Array<{ fileId?: unknown }>) ?? [];
+                  const alreadyAttached = new Set(
+                    existing.map((a) => (typeof a.fileId === 'string' ? a.fileId : '')),
+                  );
+                  const unfenced = outputDocs.filter(
+                    (f) => !fenced.has(f.externalId) && !alreadyAttached.has(f.externalId),
+                  );
                   if (unfenced.length > 0) {
-                    const existing = (metadata.attachments as unknown[]) ?? [];
                     metadata.attachments = [
                       ...existing,
                       ...unfenced.map((f) => ({
@@ -3230,7 +3246,7 @@ export const tasksRouter = router({
                     ];
                     ctx.logger.info(
                       { taskId, recovered: unfenced.map((f) => f.externalId) },
-                      'file-artifact: folded un-fenced output files into metadata.attachments',
+                      'file-artifact: folded un-fenced document outputs into metadata.attachments',
                     );
                   }
                 }
@@ -3272,8 +3288,9 @@ export const tasksRouter = router({
                 client: anthropicForResolver,
                 logger: ctx.logger,
                 // File-artifact guard (C): a download claim with no
-                // fence AND no created output file → fixable.
-                outputFileCount: createdOutputFileCount,
+                // fence AND no matching DOCUMENT output → fixable. The
+                // screenshot is excluded from outputDocDescriptors.
+                outputFiles: outputDocDescriptors,
               });
               if (verified.finalText !== outcome.summary) {
                 outcome = { ...outcome, summary: verified.finalText };

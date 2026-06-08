@@ -1382,7 +1382,7 @@ describe('verifyDeterministic — file-artifact consistency', () => {
       contract,
       ledger: new EvidenceLedger('tsk_fa1'),
       answerText: claimAnswer,
-      outputFileCount: 0,
+      outputFiles: [{ filename: 'screenshot-tsk.jpg', mimetype: 'image/jpeg' }],
     });
     const check = result.checks.find(
       (c) => c.criterionId === 'generic.file_artifact_consistency',
@@ -1399,7 +1399,7 @@ describe('verifyDeterministic — file-artifact consistency', () => {
       contract,
       ledger: new EvidenceLedger('tsk_fa2'),
       answerText: claimAnswer,
-      outputFileCount: 1,
+      outputFiles: [{ filename: 'productivity-tips.md', mimetype: 'text/markdown' }],
     });
     expect(
       result.checks.find((c) => c.criterionId === 'generic.file_artifact_consistency'),
@@ -1422,7 +1422,7 @@ describe('verifyDeterministic — file-artifact consistency', () => {
       contract,
       ledger: new EvidenceLedger('tsk_fa3'),
       answerText: fenced,
-      outputFileCount: 0,
+      outputFiles: [],
     });
     expect(
       result.checks.find((c) => c.criterionId === 'generic.file_artifact_consistency'),
@@ -1437,7 +1437,7 @@ describe('verifyDeterministic — file-artifact consistency', () => {
       answerText:
         '北京今天天气晴朗，最高气温约 26 摄氏度，适合户外活动。空气质量良好，' +
         '没有明显的降水，风力较小，体感舒适，建议出门时备一件薄外套以防早晚温差。',
-      outputFileCount: 0,
+      outputFiles: [],
     });
     expect(
       result.checks.find((c) => c.criterionId === 'generic.file_artifact_consistency'),

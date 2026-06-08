@@ -42,6 +42,7 @@ import type { DB } from '../db/client.js';
 
 import type { CheckResult, ParsedItem, VerificationResult } from './answer-verifier.js';
 import { extractStructuredItems, verifyDeterministic } from './answer-verifier.js';
+import type { OutputFileDescriptor } from './file-artifact-consistency.js';
 import { autoFix } from './auto-fix.js';
 import type {
   ContractInputs,
@@ -166,13 +167,13 @@ export interface VerifyInputs {
   /** Optional logger for non-blocking warnings. */
   logger?: Logger;
   /**
-   * Count of output files actually created during this task
-   * (task_files, kind='output', non-expired). Feeds the file-artifact
-   * consistency check: a download claim with no fence AND no created
-   * output file is flagged fixable. Omit / 0 when the lane can't create
-   * files (generate / scrape).
+   * Output files created during this task (task_files, kind='output',
+   * non-expired). Feeds the file-artifact consistency check: a download
+   * claim with no fence AND no matching DOCUMENT output (the
+   * auto-screenshot doesn't count) is flagged fixable. Omit when the
+   * lane can't create files (generate / scrape).
    */
-  outputFileCount?: number;
+  outputFiles?: ReadonlyArray<OutputFileDescriptor>;
 }
 
 export interface VerifyOutput {
@@ -343,9 +344,7 @@ export async function verifyAndFinalize(
     answerText: inputs.answerText,
     ...(inputs.finalUrl ? { finalUrl: inputs.finalUrl } : {}),
     ...(workflowContract ? { workflowContract } : {}),
-    ...(inputs.outputFileCount != null
-      ? { outputFileCount: inputs.outputFileCount }
-      : {}),
+    ...(inputs.outputFiles ? { outputFiles: inputs.outputFiles } : {}),
   });
 
   if (!det.passed) {

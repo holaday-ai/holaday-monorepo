@@ -30,7 +30,10 @@ import type {
 } from './execution-contract.js';
 import type { EvidenceLedger } from './evidence-ledger.js';
 import type { ExpertWorkflowContract } from './expert-workflow-contract.js';
-import { evaluateFileArtifact } from './file-artifact-consistency.js';
+import {
+  evaluateFileArtifact,
+  type OutputFileDescriptor,
+} from './file-artifact-consistency.js';
 
 export type FailureLevel = 'fixable' | 'needs_clarification' | 'hard_fail';
 
@@ -78,12 +81,14 @@ export interface VerifyInputs {
    */
   workflowContract?: ExpertWorkflowContract;
   /**
-   * Count of output files actually created during this task
-   * (task_files, kind='output', non-expired). Feeds the file-artifact
-   * consistency check below. Absent / 0 for lanes that can't create
-   * files; the check then relies on holaday-file fence presence alone.
+   * Output files created during this task (task_files, kind='output',
+   * non-expired). Feeds the file-artifact consistency check, which
+   * counts DOCUMENT outputs only — the auto-final-screenshot is also a
+   * kind='output' row and must NOT satisfy a PDF/Markdown claim. Absent
+   * for lanes that can't create files; the check then relies on the
+   * holaday-file fence alone.
    */
-  outputFileCount?: number;
+  outputFiles?: ReadonlyArray<OutputFileDescriptor>;
 }
 
 const URL_RE = /https?:\/\/[^\s,;'")\]>]+/g;
@@ -199,7 +204,7 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
   //    partial_success instead of presenting a dead download link.
   const fileArtifactCheck = checkFileArtifactConsistency(
     answerText,
-    inputs.outputFileCount ?? 0,
+    inputs.outputFiles ?? [],
   );
   if (fileArtifactCheck) checks.push(fileArtifactCheck);
 
@@ -1168,9 +1173,9 @@ function checkEmptyResult(
  */
 function checkFileArtifactConsistency(
   answerText: string,
-  outputFileCount: number,
+  outputFiles: ReadonlyArray<OutputFileDescriptor>,
 ): CheckResult | null {
-  const verdict = evaluateFileArtifact({ answerText, outputFileCount });
+  const verdict = evaluateFileArtifact({ answerText, outputFiles });
   if (!verdict.inconsistent) return null;
   return {
     criterionId: 'generic.file_artifact_consistency',
