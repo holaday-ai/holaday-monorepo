@@ -208,3 +208,59 @@ describe('evaluateFileArtifact — filename-phrasing claims vs screenshot-only',
     ).toBe(false);
   });
 });
+
+describe('answerClaimsDownloadableFile — reverse word order (verb before filename)', () => {
+  it('matches "已生成 <filename.ext>" and "生成了 <filename.ext>"', () => {
+    expect(answerClaimsDownloadableFile('已生成 qa-summary.pdf')).toBe(true);
+    expect(answerClaimsDownloadableFile('已生成了 qa-summary.pdf，可下载')).toBe(true);
+    expect(answerClaimsDownloadableFile('生成了 report.md')).toBe(true);
+    expect(answerClaimsDownloadableFile('为你创建了 notes.csv')).toBe(true);
+    expect(answerClaimsDownloadableFile('已创建：`data.xlsx`')).toBe(true);
+  });
+
+  it('does NOT match a source/reference link with no generation verb', () => {
+    expect(
+      answerClaimsDownloadableFile('这是参考链接 https://example.com/spec.pdf'),
+    ).toBe(false);
+    expect(answerClaimsDownloadableFile('任务已完成。详见 https://x.com/report.pdf')).toBe(false);
+    expect(answerClaimsDownloadableFile('参考文档 spec.pdf，可供参考')).toBe(false);
+  });
+});
+
+describe('evaluateFileArtifact — reverse-order claims vs screenshot-only', () => {
+  it('已生成 qa-summary.pdf + only screenshot => inconsistent (fixable)', () => {
+    const v = evaluateFileArtifact({
+      answerText: '已生成 qa-summary.pdf',
+      outputFiles: [SCREENSHOT],
+    });
+    expect(v.inconsistent).toBe(true);
+    expect(v.hasArtifact).toBe(false);
+  });
+
+  it('文件 qa-summary.pdf 已创建，可下载 + only screenshot => inconsistent', () => {
+    expect(
+      evaluateFileArtifact({
+        answerText: '文件 qa-summary.pdf 已创建，可下载。',
+        outputFiles: [SCREENSHOT],
+      }).inconsistent,
+    ).toBe(true);
+  });
+
+  it('reference link spec.pdf + only screenshot => not flagged', () => {
+    const v = evaluateFileArtifact({
+      answerText: '这是参考链接 https://example.com/spec.pdf',
+      outputFiles: [SCREENSHOT],
+    });
+    expect(v.claimsFile).toBe(false);
+    expect(v.inconsistent).toBe(false);
+  });
+
+  it('已生成 report.md + a real Markdown output (no fence) => pass (fold-in)', () => {
+    const v = evaluateFileArtifact({
+      answerText: '已生成 report.md',
+      outputFiles: [SCREENSHOT, { filename: 'report.md', mimetype: 'text/markdown' }],
+    });
+    expect(v.inconsistent).toBe(false);
+    expect(v.hasArtifact).toBe(true);
+  });
+});

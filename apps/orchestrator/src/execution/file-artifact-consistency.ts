@@ -72,11 +72,27 @@ const FILE_CLAIM_RE =
 const FILE_CLAIM_FILENAME_RE =
   /[\w\-]+\.(?:pdf|md|markdown|csv|json|xlsx|docx|txt|pptx)\s*[`'"」』）)\]]*\s*(?:已(?:生成|创建|完成|备好)|生成(?:完毕|好了|完成)?|可(?:下载|供下载|从[^。\n]{0,8}下载)|下载卡片)/i;
 
+/**
+ * The REVERSE word order of FILE_CLAIM_FILENAME_RE: a generation /
+ * creation verb immediately followed by a document FILENAME — "已生成
+ * qa-summary.pdf", "生成了 report.md", "为你创建了 notes.csv". Only a
+ * colon, whitespace, and one optional opening quote/bracket may sit
+ * between the verb and the filename, so a source link with no
+ * generation wording ("这是参考链接 https://example.com/spec.pdf") does
+ * NOT match — there is no 已生成/生成了/创建了 adjacent to its `.pdf`.
+ */
+const FILE_CLAIM_VERB_FIRST_RE =
+  /(?:已(?:生成|创建|完成|备好)了?|(?:生成|创建|备好)了|为你(?:生成|创建)了?)\s*[:：]?\s*[`'"「『（(\[]?\s*[\w\-]+\.(?:pdf|md|markdown|csv|json|xlsx|docx|txt|pptx)\b/i;
+
 export function answerClaimsDownloadableFile(
   answerText: string | null | undefined,
 ): boolean {
   if (!answerText) return false;
-  return FILE_CLAIM_RE.test(answerText) || FILE_CLAIM_FILENAME_RE.test(answerText);
+  return (
+    FILE_CLAIM_RE.test(answerText) ||
+    FILE_CLAIM_FILENAME_RE.test(answerText) ||
+    FILE_CLAIM_VERB_FIRST_RE.test(answerText)
+  );
 }
 
 /**
