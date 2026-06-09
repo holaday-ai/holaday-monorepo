@@ -367,9 +367,14 @@ describe('runGenerateTask (phase 22a)', () => {
   });
 });
 
-describe('runGenerateTask — lightweight direct-answer path', () => {
-  it('"1 加 1 等于几？" → clean short summary, NOT lost/emptied; no web_search', async () => {
-    const client = makeClient({ textOut: '1 + 1 = 2' });
+describe('runGenerateTask — deterministic fast path (Task B)', () => {
+  function streamCallCount(client: Anthropic): number {
+    return (client.messages.stream as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .length;
+  }
+
+  it('"1 加 1 等于几？" → deterministic answer, NO model call', async () => {
+    const client = makeClient({ textOut: 'should not be reached' });
     const outcome = await runGenerateTask({
       taskId: 'tsk_lw',
       userId: 'usr_test',
@@ -378,15 +383,87 @@ describe('runGenerateTask — lightweight direct-answer path', () => {
       logger: makeLogger(),
     });
     expect(outcome.status).toBe('completed');
-    // The short answer survives the runner — not blanked / not "没有答案".
     expect(outcome.summary).toBe('1 + 1 = 2');
-    expect(outcome.summary).toContain('2');
+    expect(outcome.inputTokens).toBe(0);
+    expect(outcome.outputTokens).toBe(0);
+    expect(streamCallCount(client)).toBe(0); // model never invoked
+  });
+
+  it('"100 * 23 等于几？" → deterministic 2300, NO model call', async () => {
+    const client = makeClient({ textOut: 'should not be reached' });
+    const outcome = await runGenerateTask({
+      taskId: 'tsk_lw_mul',
+      userId: 'usr_test',
+      intent: '100 * 23 等于几？',
+      client,
+      logger: makeLogger(),
+    });
+    expect(outcome.status).toBe('completed');
+    expect(outcome.summary).toBe('100 × 23 = 2300');
+    expect(streamCallCount(client)).toBe(0);
+  });
+
+  it('thank-you "谢谢" → deterministic reply, NO model call', async () => {
+    const client = makeClient({ textOut: 'should not be reached' });
+    const outcome = await runGenerateTask({
+      taskId: 'tsk_lw_thanks',
+      userId: 'usr_test',
+      intent: '谢谢',
+      client,
+      logger: makeLogger(),
+    });
+    expect(outcome.status).toBe('completed');
+    expect(outcome.summary).toContain('不客气');
+    expect(streamCallCount(client)).toBe(0);
+  });
+
+  it('emits the deterministic answer through onStreamDelta', async () => {
+    const client = makeClient({ textOut: 'should not be reached' });
+    const deltas: string[] = [];
+    await runGenerateTask({
+      taskId: 'tsk_lw_delta',
+      userId: 'usr_test',
+      intent: '1+1',
+      client,
+      logger: makeLogger(),
+      onStreamDelta: (d) => deltas.push(d),
+    });
+    expect(deltas).toEqual(['1 + 1 = 2']);
+  });
+
+  it('"什么是 AI？" → lightweight but NOT deterministic → model direct-answer (web_search dropped)', async () => {
+    const client = makeClient({ textOut: 'AI 指人工智能，让机器模拟人类的学习与推理能力。' });
+    const outcome = await runGenerateTask({
+      taskId: 'tsk_lw_know',
+      userId: 'usr_test',
+      intent: '什么是 AI？',
+      client,
+      logger: makeLogger(),
+    });
+    expect(outcome.status).toBe('completed');
+    expect(outcome.summary).toContain('人工智能');
     const req = (client.messages.stream as unknown as { mock: { calls: unknown[][] } })
       .mock.calls[0]?.[0] as { tools?: unknown[]; system?: Array<{ text: string }> } | undefined ?? {};
     expect(req.tools).toEqual([]); // web_search dropped for lightweight
     expect(req.system?.[0]?.text).toContain('简洁');
   });
 
+  it('unit conversion stays on the model (not deterministic)', async () => {
+    const client = makeClient({ textOut: '100 摄氏度 = 212 华氏度' });
+    const outcome = await runGenerateTask({
+      taskId: 'tsk_lw_conv',
+      userId: 'usr_test',
+      intent: '把 100 摄氏度换算成华氏度',
+      client,
+      logger: makeLogger(),
+    });
+    expect(outcome.status).toBe('completed');
+    expect(outcome.summary).toContain('212');
+    expect(streamCallCount(client)).toBe(1); // model WAS called
+  });
+});
+
+describe('runGenerateTask — lightweight direct-answer path', () => {
   it('greeting "你好" → short reply survives', async () => {
     const client = makeClient({ textOut: '你好！很高兴见到你，有什么我可以帮你的吗？' });
     const outcome = await runGenerateTask({
@@ -400,44 +477,13 @@ describe('runGenerateTask — lightweight direct-answer path', () => {
     expect(outcome.summary).toContain('你好');
   });
 
-  it('"100 * 23 等于几？" → direct-answer path, no web_search, result survives', async () => {
-    const client = makeClient({ textOut: '100 × 23 = 2300' });
-    const outcome = await runGenerateTask({
-      taskId: 'tsk_lw_mul',
-      userId: 'usr_test',
-      intent: '100 * 23 等于几？',
-      client,
-      logger: makeLogger(),
-    });
-    expect(outcome.status).toBe('completed');
-    expect(outcome.summary).toContain('2300');
-    const req = (client.messages.stream as unknown as { mock: { calls: unknown[][] } })
-      .mock.calls[0]?.[0] as { tools?: unknown[] } | undefined ?? {};
-    expect(req.tools).toEqual([]); // web_search dropped for lightweight
-  });
-
-  it('thank-you "谢谢" → short reply survives via direct-answer', async () => {
-    const client = makeClient({ textOut: '不客气！还有什么我可以帮你的吗？' });
-    const outcome = await runGenerateTask({
-      taskId: 'tsk_lw_thanks',
-      userId: 'usr_test',
-      intent: '谢谢',
-      client,
-      logger: makeLogger(),
-    });
-    expect(outcome.status).toBe('completed');
-    expect(outcome.summary).toContain('不客气');
-    const req = (client.messages.stream as unknown as { mock: { calls: unknown[][] } })
-      .mock.calls[0]?.[0] as { tools?: unknown[] } | undefined ?? {};
-    expect(req.tools).toEqual([]);
-  });
-
   it('must-execute intents that reach the runner keep web_search (no direct-answer)', async () => {
     // Defense-in-depth: even if a web/action/file intent were dispatched
-    // to the generate runner (e.g. the named-site "去 Google Flights 查
-    // 机票" currently routes to generate), it must NOT take the
-    // direct-answer shortcut — web_search stays on so the model can
-    // actually fetch live data instead of hedging from priors.
+    // to the generate runner, it must NOT take the direct-answer or
+    // deterministic shortcut — web_search stays on so the model can
+    // actually fetch live data instead of hedging from priors. ("去
+    // Google Flights 查机票" routes to browser now, but is fed here to
+    // prove the runner-level guard regardless of routing.)
     for (const intent of [
       '生成一个可下载的 Markdown 文件',
       '去 Google Flights 查机票',

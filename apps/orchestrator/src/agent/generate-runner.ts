@@ -27,6 +27,7 @@ import type { Logger } from 'pino';
 import { buildPromptSchemaSuffix } from '../execution/execution-contract.js';
 import { buildLayeredSystemPrompt, classifyRole } from './supercar/prompt-layers.js';
 import { classifyLightweightTask } from '../execution/lightweight-task.js';
+import { tryDeterministicLightweightAnswer } from '../execution/deterministic-answer.js';
 // Phase 2 — typed expert workflow framework. When the
 // EXPERT_WORKFLOW flag is on AND the intent matches a registered
 // workflow, the runner runs deterministic intake (parse →
@@ -277,6 +278,33 @@ export async function runGenerateTask(opts: RunGenerateOpts): Promise<GenerateOu
   // (see requestArgs below). classifyLightweightTask returns null for any
   // web / action / file intent, so real generate tasks are unaffected.
   const isLightweight = !workflowReportSystem && classifyLightweightTask(opts.intent) !== null;
+
+  // Task B — deterministic fast path. For the safest lightweight Q&A
+  // (a single binary arithmetic op, or 你好/谢谢) we skip the model
+  // call entirely: instant, free, and zero model variance on "1+1=2".
+  // Gated on isLightweight so a must-execute intent (classifyLightweight
+  // returns null for any web/action/file/current-data signal) can never
+  // reach it; the helper itself also returns null for anything outside
+  // the safe subset (unit conversion / multi-step / equations / messy
+  // decimals), which then falls through to the model below.
+  if (isLightweight) {
+    const deterministic = tryDeterministicLightweightAnswer(opts.intent);
+    if (deterministic) {
+      log.info(
+        { intentPreview: opts.intent.slice(0, 40) },
+        'generate: deterministic fast-path hit (no model call)',
+      );
+      opts.onStreamDelta?.(deterministic);
+      return {
+        status: 'completed',
+        summary: deterministic,
+        inputTokens: 0,
+        outputTokens: 0,
+        durationMs: Date.now() - start,
+      };
+    }
+  }
+
   const schemaSuffix =
     workflowReportSystem || isLightweight ? '' : buildPromptSchemaSuffix(opts.intent);
   const system = workflowReportSystem
