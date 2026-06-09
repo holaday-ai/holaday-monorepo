@@ -836,6 +836,61 @@ describe('Task A — Google Flights/Hotels/Maps + travel execution → browser',
   });
 });
 
+describe('China OTA execution — 携程/飞猪/去哪儿/同程/美团 → browser', () => {
+  // Holaday is an execution agent: querying flights/hotels/trains on a
+  // Chinese OTA is a live in-site task (search APIs can't reach real
+  // inventory). Topic/strategy phrasing about the same sites stays
+  // generate. Lightweight Q&A and current-data scrape are untouched.
+  it('OTA + travel object → browser', async () => {
+    for (const intent of [
+      '携程查机票',
+      '飞猪查酒店',
+      '去哪儿查航班',
+      '同程查火车票',
+      '美团酒店 上海',
+      '携程筛选直飞',
+      '携程查酒店星级',
+    ]) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).toBe('browser');
+    }
+  });
+
+  it('the four OTA QA prompts → browser', async () => {
+    for (const intent of [
+      '打开携程查北京到上海的机票，不要下单。筛选直飞，给最便宜的 3 个选项（航空公司/时间/价格）。',
+      '打开携程查上海 2026-08-01 到 2026-08-03 的酒店，不要预订。筛选 4 星以上，价格低于 800 元，给 5 个结果。',
+      '打开去哪儿查东京到上海机票，不要下单，给前 3 个结果。',
+      '打开飞猪查大阪酒店，不要预订，给 5 个结果。',
+    ]) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).toBe('browser');
+    }
+  });
+
+  it('OTA topic / strategy / analysis phrasing → generate (not browser/scrape)', async () => {
+    for (const intent of [
+      '携程营销策略',
+      '酒店预订转化率分析',
+      '机票平台商业模式分析',
+      '去哪儿产品体验报告',
+      '飞猪产品体验报告',
+      '携程产品体验报告',
+      '制定一个酒店预订策略',
+    ]) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).toBe('generate');
+    }
+  });
+
+  it('current-data and lightweight stay unaffected by the OTA path', async () => {
+    expect(await classifyExecutionMode({ intent: '查今天特斯拉股价', logger: fakeLogger() })).toBe('scrape');
+    expect(await classifyExecutionMode({ intent: '搜索最新 AI 新闻', logger: fakeLogger() })).toBe('scrape');
+    expect(await classifyExecutionMode({ intent: '1 加 1 等于几？', logger: fakeLogger() })).toBe('generate');
+    expect(await classifyExecutionMode({ intent: '什么是 AI？', logger: fakeLogger() })).toBe('generate');
+  });
+});
+
 describe('Task 2 — must-execute intents never become a direct-answerable generate', () => {
   // The generate-lane direct-answer shortcut fires only when BOTH
   // (a) classifyExecutionMode routed to 'generate' AND

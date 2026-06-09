@@ -143,6 +143,14 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   // execution — scrape/generate can't honour "stop before booking".
   // Topic/analysis phrasing ("机票预订转化率分析") has no 不要/别 → safe.
   [/(?:机票|航班|酒店|民宿|房间|车票|火车票|路线|行程|导航).{0,40}(?:不要|别|勿|先别|暂时不|不需要).{0,8}(?:下单|预订|预定|购买|付款|支付|订购|导航|出发)/i, '中文出行执行但不提交'],
+  // China OTA execution — 携程/飞猪/去哪儿/同程/美团(酒店) are
+  // interactive booking sites; querying flights/hotels/trains on them
+  // is a live in-site task (Firecrawl/search can't reach real-time
+  // inventory). Naming one ALONGSIDE a travel object/verb routes to
+  // browser. A leading negative lookahead drops topic/strategy phrasing
+  // (策略/分析/报告/营销/转化率/商业模式/产品体验/…), which the
+  // NON_EXECUTION topic guard then sends to generate.
+  [/^(?!.*(?:策略|分析|报告|模板|方案|转化率|商业模式|体验报告|产品体验|营销|规范|优化方案|教程|案例|框架|趋势|运营|拆解|复盘))(?=.*(?:携程|飞猪|去哪儿|去哪网|同程|美团))(?=.*(?:机票|航班|酒店|民宿|住宿|火车票|车票|门票|路线|直飞|筛选|排序|星级|入住|出发|往返|单程|预订前|不要下单|不要预订|价格|查机票|查航班|查酒店|查询|查一下|查看|搜)).+/i, '中文OTA出行执行'],
   [/(?:在|用|通过).{0,24}(?:gmail|slack|linkedin|notion|飞书|github|google docs|google forms|google sheets|google slides|google calendar|google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?).{0,64}(?:写|撰写|起草|创建|新建|编辑|更新|查找|搜索|下载|上传|导出|分享|移动|重命名|复制链接|安排|预约|添加|保存|回复).{0,48}(?:草稿|邮件|消息|页面|文档|会议纪要|计划|报名表|表单|帖子|表格|演示文稿|幻灯片|会议|日程|邀请|联系人|客户|备注|付款|收据|文件|附件|pdf|csv|xlsx|链接|权限|文件夹|看板|任务|bug|issue|pull request|pr|折扣码|工单|回复|用户|项目|订单|商品|库存)/i, '中文应用草稿操作'],
   [/(?:打开|进入|访问|前往).{0,24}(?:google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?).{0,64}(?:写|撰写|起草|创建|新建|编辑|更新|查找|搜索|下载|上传|导出|分享|移动|重命名|复制链接|安排|预约|添加|保存|回复).{0,48}(?:草稿|联系人|客户|备注|付款|收据|文件|附件|pdf|csv|xlsx|链接|权限|文件夹|看板|任务|bug|issue|折扣码|工单|回复|用户|项目|订单|商品|库存)/i, '中文打开应用后操作'],
   [/(?:上传|下载|导出|分享|移动|重命名|复制链接|改权限|授权).{0,48}(?:文件|附件|pdf|csv|xlsx|表格|资料|文档|图片|链接|权限|这个|这|该).{0,48}(?:google drive|dropbox|onedrive|icloud drive)/i, '中文云盘对象操作'],
@@ -180,7 +188,7 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
 ];
 
 const NON_EXECUTION_PLATFORM_NAMES =
-  '(?:gmail|linkedin|slack|notion|github|amazon|youtube|instagram|twitter|x\\.com|reddit|shopify|飞书|google forms|google docs|google sheets|google slides|google calendar|google flights|google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe|calendly|trello|asana|jira|zendesk|intercom|linear|monday(?:\\.com)?)';
+  '(?:gmail|linkedin|slack|notion|github|amazon|youtube|instagram|twitter|x\\.com|reddit|shopify|飞书|google forms|google docs|google sheets|google slides|google calendar|google flights|google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe|calendly|trello|asana|jira|zendesk|intercom|linear|monday(?:\\.com)?|携程|飞猪|去哪儿|去哪网|同程|美团)';
 
 const NON_EXECUTION_PLATFORM_TOPIC_PATTERNS: readonly RegExp[] = [
   new RegExp(`${NON_EXECUTION_PLATFORM_NAMES}.{0,40}(?:模板|文案|策略|规范|设计|优化|分析|报告|指南|教程|案例|框架|脚本|转化率|运营)`, 'i'),
