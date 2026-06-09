@@ -6,6 +6,7 @@ import {
   filterAndFormatHotels,
   isValidHotelName,
   parseHotelJson,
+  parseHotelPriceLimit,
   resolveCtripHotelUrl,
   validateHotelJson,
 } from './ctrip-hotel-extractor.js';
@@ -246,5 +247,75 @@ describe('bodyMatchesCity v2 — dominant city among recommendations', () => {
     const mixed = SH_V2_BODY + '\n猜你喜欢 北京王府井希尔顿酒店 ¥1,200 北京三里屯洲际 ¥1,400';
     expect(bodyMatchesCity(mixed, '上海')).toBe(true); // 上海 dominates
     expect(bodyMatchesCity(mixed, '北京')).toBe(false); // not the result city
+  });
+});
+
+describe('parseHotelPriceLimit — natural-language budget parsing (P1 fix)', () => {
+  // Positives: every phrasing of "≤ 800" must resolve to 800.
+  it.each([
+    ['800以内', '800以内'],
+    ['800 以内 (space)', '800 以内'],
+    ['800以下', '800以下'],
+    ['800之内', '800之内'],
+    ['800元以内', '800元以内'],
+    ['预算800', '预算800'],
+    ['预算 800 元', '预算 800 元'],
+    ['不超过800', '不超过800'],
+    ['低于 800', '低于 800'],
+    ['价格 800 元以内', '价格 800 元以内'],
+    // The exact QA-#6 prompt that produced priceLimit=null before the fix.
+    ['QA-#6 广州 "800 以内"', '我想在广州住一晚，帮我看看携程上 800 以内有哪些靠谱酒店，不要预订。'],
+  ])('%s → 800', (_label, intent) => {
+    expect(parseHotelPriceLimit(intent)).toBe(800);
+  });
+
+  // Negatives: dates / 星级 / 人数 / 数量 must NEVER be read as a price.
+  it.each([
+    ['住一晚', '住一晚'],
+    ['2晚', '查上海酒店，住 2 晚'],
+    ['4星', '优先 4 星左右'],
+    ['5个选择', '给 5 个选择'],
+    ['6月10日', '6月10日入住'],
+    ['ISO date', '明天 2026-06-10 入住后天 2026-06-12 退房'],
+    ['no budget at all', '帮我查上海的酒店，不要预订'],
+  ])('%s → null', (_label, intent) => {
+    expect(parseHotelPriceLimit(intent)).toBeNull();
+  });
+
+  it('null/undefined/empty → null', () => {
+    expect(parseHotelPriceLimit(null)).toBeNull();
+    expect(parseHotelPriceLimit(undefined)).toBeNull();
+    expect(parseHotelPriceLimit('')).toBeNull();
+  });
+
+  it('picks the budget number, not a co-occurring 星级/数量', () => {
+    expect(parseHotelPriceLimit('优先 4 星左右，预算 500 元以内，给 5 个')).toBe(500);
+  });
+});
+
+describe('validateHotelJson — price cap honours parsed limit (P1 fix)', () => {
+  const GZ_ITEMS = [
+    { hotelName: '广州天河太古汇城际酒店', price: 693, rating: '4.8' },
+    { hotelName: '广州白云国际会议中心越秀万豪酒店', price: 719, rating: '4.7' },
+    { hotelName: '广州德安丽舍凯宾斯基酒店', price: 762, rating: '4.6' },
+    { hotelName: '广州花园酒店', price: 838, rating: '4.6' }, // > 800
+    { hotelName: '广州圣丰索菲特大酒店', price: 892, rating: '4.6' }, // > 800
+  ];
+
+  it('priceLimit=800 (from "800 以内") drops ¥838/¥892, keeps ≤800', () => {
+    const limit = parseHotelPriceLimit('携程上 800 以内有哪些靠谱酒店');
+    expect(limit).toBe(800);
+    const rows = validateHotelJson({ items: GZ_ITEMS, priceLimit: limit ?? undefined });
+    const names = rows.map((r) => r.name);
+    expect(names).toContain('广州天河太古汇城际酒店');
+    expect(names).toContain('广州德安丽舍凯宾斯基酒店');
+    expect(names).not.toContain('广州花园酒店'); // ¥838 > 800
+    expect(names).not.toContain('广州圣丰索菲特大酒店'); // ¥892 > 800
+    expect(rows.every((r) => r.priceCNY <= 800)).toBe(true);
+  });
+
+  it('priceLimit=null (no budget) → no cap, all valid hotels kept', () => {
+    const rows = validateHotelJson({ items: GZ_ITEMS, priceLimit: undefined });
+    expect(rows).toHaveLength(5); // nothing dropped on price
   });
 });

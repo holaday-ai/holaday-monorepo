@@ -37,6 +37,7 @@ import {
   filterAndFormatHotels,
   lowestDeterministicPrice,
   parseHotelJson,
+  parseHotelPriceLimit,
   resolveCtripHotelUrl,
   validateHotelJson,
 } from './ctrip-hotel-extractor.js';
@@ -110,13 +111,14 @@ const HOTEL_JSON_SYSTEM =
   '⑥ price 为纯数字（人民币元）；缺失字段用空字符串。' +
   '⑦ 只输出 JSON，不要 Markdown、不要解释。若读不到任何真实酒店，输出 []。';
 
-/** Parse 价格上限 / top-N out of the intent ("价格低于 800", "给 5 个"). */
+/** Parse 价格上限 / top-N out of the intent ("价格低于 800", "给 5 个").
+ *  Price parsing delegates to the pure parseHotelPriceLimit helper (unit
+ *  tested) so phrasings like "800 以内" (no 元) are honoured; null → no cap. */
 function parseHotelFilters(intent: string): { maxPriceCNY?: number; topN: number } {
-  const price = intent.match(/(?:低于|不超过|不高于|以内)\s*(\d{2,5})|(\d{2,5})\s*元(?:以内|以下|之内)?/);
-  const maxPriceCNY = price ? parseInt(price[1] ?? price[2] ?? '', 10) : undefined;
+  const maxPriceCNY = parseHotelPriceLimit(intent);
   const top = intent.match(/(?:给|取|前|top|列)\s*(\d{1,2})/i);
   const topN = top ? Math.min(10, Math.max(1, parseInt(top[1] ?? '5', 10))) : 5;
-  return { ...(Number.isFinite(maxPriceCNY) ? { maxPriceCNY } : {}), topN };
+  return { ...(maxPriceCNY != null ? { maxPriceCNY } : {}), topN };
 }
 
 interface GuardResult {

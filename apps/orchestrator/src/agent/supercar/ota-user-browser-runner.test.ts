@@ -183,4 +183,32 @@ describe('runOtaUserBrowserReadonly — hotels (Step 9 model-primary + validator
     expect(out.status).toBe('completed');
     expect(out.toolsUsed.sort()).toEqual(['navigate', 'screenshot']);
   });
+
+  // Regression for natural-language QA #6: "携程上 800 以内" (no 元, number-first)
+  // previously parsed to priceLimit=null → ¥838/¥892 leaked into the ≤800 table.
+  it('广州 "800 以内" (no 元) → priceLimit 800 applied, >800 hotels dropped', async () => {
+    const GZ_BODY = [
+      '携程酒店 广州 共找到 980 家',
+      '广州天河太古汇城际酒店 高档型 4.8分 天河体育中心 ¥693 起',
+      '广州花园酒店 豪华型 4.6分 环市东 ¥838 起',
+    ].join('\n');
+    const gzJson = JSON.stringify([
+      { hotelName: '广州天河太古汇城际酒店', price: 693, rating: '4.8', location: '天河体育中心' },
+      { hotelName: '广州德安丽舍凯宾斯基酒店', price: 762, rating: '4.6', location: '珠江新城' },
+      { hotelName: '广州花园酒店', price: 838, rating: '4.6', location: '环市东' }, // > 800
+      { hotelName: '广州圣丰索菲特大酒店', price: 892, rating: '4.6', location: '天河城' }, // > 800
+    ]);
+    const { client } = makeClient([gzJson]);
+    const out = await runOtaUserBrowserReadonly({
+      taskId: 'tsk_gz800',
+      intent: '我想在广州住一晚，帮我看看携程上 800 以内有哪些靠谱酒店，不要预订。',
+      deps: { client, dispatchNavigate: navOk({ finalUrl: 'https://hotels.ctrip.com/hotels/list?city=32', title: '酒店', bodyText: GZ_BODY }), audit: () => {}, logger: silentLogger },
+      now: NOW,
+    });
+    expect(out.status).toBe('completed');
+    expect(out.summary).toContain('广州天河太古汇城际酒店');
+    expect(out.summary).toContain('广州德安丽舍凯宾斯基酒店');
+    expect(out.summary).not.toContain('广州花园酒店'); // ¥838 > 800 → dropped
+    expect(out.summary).not.toContain('圣丰索菲特'); // ¥892 > 800 → dropped
+  });
 });

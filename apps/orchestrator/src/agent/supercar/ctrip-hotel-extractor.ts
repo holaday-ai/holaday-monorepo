@@ -80,6 +80,28 @@ export function extractCityFromIntent(intent: string | null | undefined): string
 }
 
 /**
+ * Parse a 价格上限 (max nightly price, CNY) out of a natural-language hotel
+ * intent. Returns the number, or null when no budget is expressed — callers
+ * must treat null as "no cap" (never default to a number). Deliberately does
+ * NOT mistake dates / 星级 / 人数 / 数量 for a price.
+ *
+ * Matches (number is 2–5 digits):
+ *   - 预算/低于/不超过/不高于/不高过/最多 + 数字   → 预算800, 低于 800, 不超过800
+ *   - 数字 + (元)? + 以内/以下/之内                 → 800以内, 800 以内, 800以下, 800之内, 800元以内
+ *   - 数字 + 元                                     → 800元, 预算 800 元, 价格 800 元
+ * Ignores bare numbers with no price marker so 住一晚 / 2晚 / 4星 / 5个选择 /
+ * 6月10日 / ISO dates all return null.
+ */
+export function parseHotelPriceLimit(intent: string | null | undefined): number | null {
+  const m = (intent ?? '').match(
+    /(?:预算|低于|不超过|不高于|不高过|最多)\s*(\d{2,5})|(\d{2,5})\s*元?\s*(?:以内|以下|之内)|(\d{2,5})\s*元/,
+  );
+  if (!m) return null;
+  const n = parseInt(m[1] ?? m[2] ?? m[3] ?? '', 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
  * Resolve a deterministic Ctrip hotel-list URL for the intent's city.
  * Dates are ALWAYS in the future (checkin = now+1, checkout = now+3),
  * derived from `now` (default current time) — never a model-invented or
