@@ -31,6 +31,18 @@ describe('resolveCtripHotelUrl — deterministic city/date schema', () => {
     expect(r.checkin! > '2026-08-10').toBe(true);
     expect(r.checkout! > r.checkin!).toBe(true);
   });
+  it('v2 city map: 成都/重庆/南京/苏州/武汉/西安/厦门/青岛/三亚 resolve to ids', () => {
+    const ids: Record<string, number> = {
+      成都: 28, 重庆: 4, 南京: 12, 苏州: 14, 武汉: 477, 西安: 10, 厦门: 25, 青岛: 29, 三亚: 43,
+    };
+    for (const [city, id] of Object.entries(ids)) {
+      const r = resolveCtripHotelUrl({ intent: `携程查${city}酒店`, now: NOW });
+      expect(r.cityId, city).toBe(id);
+      expect(r.knownSchema, city).toBe(true);
+      expect(r.url, city).toContain(`city=${id}`);
+    }
+  });
+
   it('大阪 (international) → knownSchema=false, no faked URL', () => {
     const r = resolveCtripHotelUrl({ intent: '携程查大阪酒店', now: NOW });
     expect(r.city).toBe('大阪');
@@ -108,5 +120,77 @@ describe('filterAndFormatHotels — hard price cap', () => {
     expect(r.table).toBeUndefined();
     expect(r.reason).toContain('最低价为 ¥1,500');
     expect(r.reason).toContain('未找到符合');
+  });
+});
+
+// ── v2 extractor: suffix-free brands, ad filtering, dominant city ──
+const SH_V2_BODY = [
+  '携程酒店 上海 共找到 1380 家 推荐排序 价格排序',
+  '广告 上海必住榜 口碑榜单 领券立减 ¥99 会员专享',
+  '上海素凯泰酒店 豪华型 4.9分 1024条点评 静安寺商圈 ¥1,880 起',
+  '上海外滩亚朵S酒店 舒适型 4.7分 312条点评 南京东路步行街 ¥669 起',
+  '上海虹桥全季酒店 经济型 4.5分 880条点评 虹桥火车站 ¥420 起',
+  '上海陆家嘴柏悦酒店 豪华型 4.8分 506条点评 陆家嘴CBD ¥2,180 起',
+  '上海五角场汉庭酒店 经济型 4.3分 1500条点评 五角场商圈 ¥389 起',
+].join('\n');
+
+describe('extractCtripHotels v2 — suffix-free brands + ad filtering', () => {
+  it('parses brand names incl. 亚朵S/全季/汉庭/素凯泰/柏悦; ignores the ad/榜单/领券 card', () => {
+    const hotels = extractCtripHotels(SH_V2_BODY);
+    const names = hotels.map((h) => h.name);
+    expect(hotels.length).toBe(5); // ad card excluded
+    expect(names.some((n) => n.includes('亚朵S'))).toBe(true);
+    expect(names.some((n) => n.includes('全季'))).toBe(true);
+    expect(names.some((n) => n.includes('素凯泰'))).toBe(true);
+    // the ad/ranking/coupon line must NOT become a hotel
+    expect(names.some((n) => /必住榜|榜单|广告|领券/.test(n))).toBe(false);
+    expect(hotels.some((h) => h.priceCNY === 99)).toBe(false);
+  });
+
+  it('binds price/rating/location to the right card', () => {
+    const all = extractCtripHotels(SH_V2_BODY);
+    const quanji = all.find((h) => h.name.includes('全季'));
+    expect(quanji?.priceCNY).toBe(420);
+    expect(quanji?.rating).toBe(4.5);
+    expect(quanji?.location).toContain('虹桥');
+    expect(quanji?.starLabel).toBe('经济型');
+  });
+
+  it('上海 ≤800 filter keeps 全季/亚朵S/汉庭, drops 素凯泰/柏悦', () => {
+    const r = filterAndFormatHotels({ hotels: extractCtripHotels(SH_V2_BODY), city: '上海', url: 'https://hotels.ctrip.com/hotels/list?city=2', maxPriceCNY: 800, topN: 5 });
+    expect(r.table).toContain('全季');
+    expect(r.table).toContain('亚朵S');
+    expect(r.table).toContain('汉庭');
+    expect(r.table).not.toContain('素凯泰'); // ¥1880
+    expect(r.table).not.toContain('柏悦'); // ¥2180
+  });
+});
+
+const HZ_V2_BODY = [
+  '携程酒店 杭州 共找到 920 家',
+  '杭州西湖国宾馆 豪华型 4.8分 西湖景区 ¥760 起',
+  '杭州武林银泰亚朵酒店 舒适型 4.6分 武林广场 ¥560 起',
+  '杭州西溪喜来登度假大酒店 豪华型 4.7分 西溪湿地 ¥980 起',
+  '杭州滨江星程酒店 经济型 4.4分 滨江开发区 ¥320 起',
+].join('\n');
+
+describe('extractCtripHotels v2 — 杭州 fixture (3-5 rows)', () => {
+  it('reads 杭州 hotels and applies the ≤800 cap', () => {
+    const hotels = extractCtripHotels(HZ_V2_BODY);
+    expect(hotels.length).toBe(4);
+    const r = filterAndFormatHotels({ hotels, city: '杭州', url: 'https://hotels.ctrip.com/hotels/list?city=17', maxPriceCNY: 800, topN: 5 });
+    expect(r.table).toContain('星程'); // ¥320 in
+    expect(r.table).toContain('亚朵'); // ¥560 in
+    expect(r.table).toContain('国宾馆'); // ¥760 in
+    expect(r.table).not.toContain('喜来登'); // ¥980 over cap
+    expect(r.table).toContain('未下单/未预订');
+  });
+});
+
+describe('bodyMatchesCity v2 — dominant city among recommendations', () => {
+  it('Shanghai page with a few Beijing recommendations still matches 上海', () => {
+    const mixed = SH_V2_BODY + '\n猜你喜欢 北京王府井希尔顿酒店 ¥1,200 北京三里屯洲际 ¥1,400';
+    expect(bodyMatchesCity(mixed, '上海')).toBe(true); // 上海 dominates
+    expect(bodyMatchesCity(mixed, '北京')).toBe(false); // not the result city
   });
 });

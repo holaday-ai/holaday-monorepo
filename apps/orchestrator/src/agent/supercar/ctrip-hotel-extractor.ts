@@ -20,13 +20,24 @@
  * No DOM selectors, no click/type — text in, structured out.
  */
 
-/** Canonical Ctrip domestic destination ids (long-standing, stable). */
+/** Canonical Ctrip domestic destination ids (long-standing, stable).
+ *  Only mainland-China cities — international schema is different and
+ *  intentionally out of scope (returns knownSchema=false). */
 const CTRIP_CITY_IDS: Readonly<Record<string, number>> = {
   上海: 2,
   北京: 1,
   广州: 32,
   深圳: 30,
   杭州: 17,
+  成都: 28,
+  重庆: 4,
+  南京: 12,
+  苏州: 14,
+  武汉: 477,
+  西安: 10,
+  厦门: 25,
+  青岛: 29,
+  三亚: 43,
 };
 
 /** Cities QA targets but whose Ctrip hotel URL schema we are NOT sure of. */
@@ -153,15 +164,43 @@ export interface CtripHotel {
   readonly starLabel?: string;
 }
 
-const HOTEL_NAME_RE = /[一-龥A-Za-z0-9·\- ]{2,30}?(?:酒店|宾馆|度假村|公寓|客栈|旅馆|Hotel|Resort|Inn)/;
-const STAR_LABEL_RE = /(五钻|四钻|三钻|豪华型|高档型|舒适型|经济型|五星级?|四星级?|三星级?)/;
-const LOCATION_RE = /([一-龥]{2,8}(?:商圈|商业区|新区|开发区|广场|火车站|机场|地铁站|大学|景区|路|街|区))/;
+const STAR_LABEL_RE = /(五钻|四钻|三钻|二钻|豪华型|高档型|舒适型|经济型|五星级?|四星级?|三星级?)/;
+const LOCATION_RE =
+  /([一-龥]{2,10}(?:商圈|商业区|cbd|CBD|新区|开发区|度假区|广场|火车站|高铁站|机场|地铁站|大学|景区|步行街|古镇|老街|湾|路|街|区|附近))/;
+// A "hotel card" must carry at least one of these signals; a bare price
+// (promo "立减¥120", a ranking-card price) without any of them is skipped.
+const HOTEL_SIGNAL_RE =
+  /[1-5]\.\d\s*分?|[五四三二]钻|豪华型|高档型|舒适型|经济型|\d+\s*条(?:点评|评价)|星级|含早|早餐|大床|双床|入住/;
+// Ad / ranking / coupon cards — never extract these as hotels.
+const AD_CARD_RE = /广告|榜单|必住榜|口碑榜|金榜|银榜|领券|立减|满减|超值券|限时(?:抢|秒)|会员日|大促|专享券/;
+// First metadata token that ends the hotel-name prefix in a card chunk.
+const NAME_END_RE =
+  /[1-5]\.\d|[五四三二]钻|豪华型|高档型|舒适型|经济型|星级|\d+\s*条(?:点评|评价)|[¥￥]|预订|[一-龥]{2,10}(?:商圈|cbd|CBD|新区|开发区|度假区|广场|火车站|高铁站|机场|地铁站|大学|景区|步行街|古镇|老街)|\d{2,}(?:人|条)/;
+// Leading page-noise to strip off a candidate name.
+const NAME_NOISE_RE =
+  /^(?:.*?(?:共找到[\d,]+家|找到[\d,]+家|推荐排序|价格排序|好评优先|低价优先|智能排序|距离优先|综合排序|筛选|清空|携程(?:旅行|酒店)?|hotels?\.ctrip|广告|榜单|排名第?\d*|第\d+名|猜你喜欢))\s*/i;
+
+/** Pull a hotel name from a price-anchored card. Does NOT require a
+ *  "酒店/宾馆" suffix — brand names (亚朵/丽思卡尔顿/柏悦/W) are accepted:
+ *  it's the leading run before the first metadata token, page-noise
+ *  stripped. Returns '' when nothing name-like remains. */
+function extractName(card: string): string {
+  const chunk = card.split(/[\n\r]+/).map((s) => s.trim()).filter(Boolean).pop() ?? card.trim();
+  const end = chunk.search(NAME_END_RE);
+  let name = (end > 0 ? chunk.slice(0, end) : chunk).trim();
+  name = name.replace(NAME_NOISE_RE, '').trim();
+  name = name.replace(/^[\s|·,，、.。:：\-]+/, '').replace(/[\s|·,，、.。:：\-]+$/, '').trim();
+  if (name.length < 2 || name.length > 34) return '';
+  if (!/[一-龥A-Za-z]/.test(name)) return '';
+  return name;
+}
 
 /**
- * Best-effort hotel rows from the page's visible text. Anchored on price
- * tokens (¥587 / ¥1,034); for each price the nearby window yields the
- * hotel name, rating, location, and tier label when present. Conservative:
- * a price with no recognisable hotel name nearby is skipped.
+ * Best-effort hotel rows from the page's visible text (v2). Anchors on
+ * price tokens; the CARD is the text between the previous price and this
+ * one. A card must carry a hotel signal (rating / tier / 点评 / room
+ * words) and not be an ad/ranking/coupon card; the name is the leading
+ * run before the first metadata token (no suffix required).
  */
 export function extractCtripHotels(bodyText: string | null | undefined): CtripHotel[] {
   const out: CtripHotel[] = [];
@@ -169,27 +208,22 @@ export function extractCtripHotels(bodyText: string | null | undefined): CtripHo
   const text = bodyText.replace(/ /g, ' ');
   const priceRe = /[¥￥]\s?(\d{1,3}(?:,\d{3})+|\d{2,6})/g;
   const seen = new Set<string>();
+  let prevEnd = 0;
   let m: RegExpExecArray | null;
   while ((m = priceRe.exec(text)) !== null) {
     const price = parseInt((m[1] ?? '').replace(/,/g, ''), 10);
+    const cardStart = Math.max(prevEnd, m.index - 120);
+    const card = text.slice(cardStart, m.index);
+    prevEnd = m.index + m[0].length;
     if (!Number.isFinite(price) || price < 50 || price > 100000) continue;
-    const before = text.slice(Math.max(0, m.index - 80), m.index);
-    const after = text.slice(m.index, m.index + 80);
-    const window = before + after;
-    // Bind to the hotel name CLOSEST to (immediately before) the price —
-    // the LAST name match in the before-window — so a page header
-    // ("携程酒店") or the previous card's name can't steal the price.
-    const nameRe = new RegExp(HOTEL_NAME_RE.source, 'g');
-    let last: string | undefined;
-    let nm: RegExpExecArray | null;
-    while ((nm = nameRe.exec(before)) !== null) last = nm[0];
-    if (!last) continue;
-    const name = last.trim();
-    if (seen.has(name)) continue;
-    const ratingMatch = window.match(/\b([1-5]\.\d)\b(?:\s*分)?/);
+    if (AD_CARD_RE.test(card)) continue; // ad / ranking / coupon — skip
+    if (!HOTEL_SIGNAL_RE.test(card)) continue; // no hotel signal — skip promo / bare price
+    const name = extractName(card);
+    if (!name || seen.has(name)) continue;
+    const ratingMatch = card.match(/\b([1-5]\.\d)\b(?:\s*分)?/);
     const rating = ratingMatch ? Number(ratingMatch[1]) : undefined;
-    const starLabel = window.match(STAR_LABEL_RE)?.[1];
-    const location = window.match(LOCATION_RE)?.[1];
+    const starLabel = card.match(STAR_LABEL_RE)?.[1];
+    const location = card.match(LOCATION_RE)?.[1];
     seen.add(name);
     out.push({
       name,
