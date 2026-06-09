@@ -35,7 +35,10 @@ import {
   supercarReply,
   type SupercarOutcome,
 } from '../../agent/supercar/index.js';
-import { resolveOtaLaneForIntent } from '../../agent/supercar/ota-user-browser-policy.js';
+import {
+  parseOtaAllowlist,
+  resolveOtaCanaryLane,
+} from '../../agent/supercar/ota-user-browser-policy.js';
 import { runOtaUserBrowserReadonly } from '../../agent/supercar/ota-user-browser-runner.js';
 import {
   classifyRole,
@@ -2818,19 +2821,39 @@ export const tasksRouter = router({
       // navigate/screenshot channel (no chrome.debugger, no click/type,
       // no order/pay) and returns a SupercarOutcome consumed by the same
       // terminal handler below.
-      const otaUserBrowserLane =
-        getExecutionFeatureFlags().OTA_USER_BROWSER && anthropicForResolver
-          ? resolveOtaLaneForIntent({
-              intent: input.intent,
-              extensionOnline: hasConnectedExtension(ctx.userId),
-              flagEnabled: true,
-            })
-          : null;
-      const useOtaUserBrowser = otaUserBrowserLane === 'user-browser';
-      if (useOtaUserBrowser) {
+      // Step 2.5 — canary-scoped gate. user-browser-readonly fires ONLY
+      // for an allowlisted user + allowlisted OTA domain + online
+      // extension, on top of the master flag. Empty allowlists (prod
+      // default) ⇒ nobody is canaried ⇒ server Brave for everyone.
+      const otaExtensionOnline = hasConnectedExtension(ctx.userId);
+      const otaMasterEnabled =
+        getExecutionFeatureFlags().OTA_USER_BROWSER && Boolean(anthropicForResolver);
+      const otaAllowedDomains = parseOtaAllowlist(process.env.OTA_USER_BROWSER_ALLOWED_DOMAINS);
+      const otaCanary = resolveOtaCanaryLane({
+        intent: input.intent,
+        userId: ctx.userId,
+        extensionOnline: otaExtensionOnline,
+        masterEnabled: otaMasterEnabled,
+        allowedUserIds: parseOtaAllowlist(process.env.OTA_USER_BROWSER_ALLOWED_USER_IDS),
+        allowedDomains: otaAllowedDomains,
+      });
+      const useOtaUserBrowser = otaCanary.lane === 'user-browser';
+      if (otaCanary.lane !== null) {
+        // Rollout audit — every OTA-prefer task records its gate outcome.
         ctx.logger.info(
-          { taskId, userId: ctx.userId, lane: 'user-browser-readonly' },
-          'ota: user-browser readonly lane selected',
+          {
+            event: 'ota.user_browser.rollout',
+            taskId,
+            userId: ctx.userId,
+            domain: otaCanary.matchedDomain,
+            flagEnabled: otaMasterEnabled,
+            userAllowed: otaCanary.userAllowed,
+            domainAllowed: otaCanary.domainAllowed,
+            extensionOnline: otaExtensionOnline,
+            decision: otaCanary.lane,
+            reason: otaCanary.reason,
+          },
+          'ota: user-browser rollout decision',
         );
       }
       const runUserBrowserReadonly = (): Promise<SupercarOutcome> =>
@@ -2855,6 +2878,7 @@ export const tasksRouter = router({
             onProgress: (message) =>
               broadcastSubStatus(ctx.userId, taskId, 'browsing', message),
             logger: ctx.logger,
+            allowedDomains: otaAllowedDomains,
           },
         });
       const runFn = () =>

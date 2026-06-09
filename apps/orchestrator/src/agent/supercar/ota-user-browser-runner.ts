@@ -26,6 +26,7 @@ import type { SupercarOutcome } from './agent-loop.js';
 import {
   buildOtaAuditRecord,
   classifyOtaAction,
+  isHostAllowed,
   isOtaDomain,
   type OtaAuditRecord,
 } from './ota-user-browser-policy.js';
@@ -57,6 +58,14 @@ export interface OtaReadonlyDeps {
   readonly onProgress?: (message: string) => void;
   readonly logger: { info: (o: unknown, m?: string) => void; warn: (o: unknown, m?: string) => void };
   readonly model?: string;
+  /**
+   * Step 2.5 canary scope — the navigate URL host must be in this set
+   * (e.g. {ctrip.com}). Defence-in-depth on top of the lane decision:
+   * even if the model derives a non-canary OTA URL (qunar/fliggy/...),
+   * navigate is blocked. Omit/empty ⇒ no canary narrowing (the broad
+   * OTA whitelist + classifyOtaAction still apply).
+   */
+  readonly allowedDomains?: ReadonlySet<string>;
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
@@ -149,6 +158,25 @@ export async function runOtaUserBrowserReadonly(opts: {
     return {
       status: 'failed',
       reason: `只读模式拒绝打开该地址（${verdict.reason}）。仅允许携程等 OTA 的查询页，不触达下单/支付页。`,
+      iterations,
+      toolsUsed,
+    };
+  }
+  // Step 2.5 canary scope — narrow the navigate target to the canary
+  // domain set when one is configured.
+  if (deps.allowedDomains && deps.allowedDomains.size > 0 && !isHostAllowed(domain, deps.allowedDomains)) {
+    deps.audit(
+      buildOtaAuditRecord({
+        taskId,
+        domain,
+        lane: 'user-browser',
+        action: navAction,
+        verdict: { allowed: false, reason: `navigate blocked: host not in canary allowlist (${domain})` },
+      }),
+    );
+    return {
+      status: 'failed',
+      reason: '该 OTA 域名暂不在灰度范围内，已停止读取。',
       iterations,
       toolsUsed,
     };

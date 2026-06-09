@@ -3,7 +3,10 @@ import {
   buildOtaAuditRecord,
   classifyOtaAction,
   decideOtaLane,
+  isHostAllowed,
   isOtaDomain,
+  parseOtaAllowlist,
+  resolveOtaCanaryLane,
   resolveOtaLaneForIntent,
 } from './ota-user-browser-policy.js';
 
@@ -88,6 +91,66 @@ describe('resolveOtaLaneForIntent (Task 4 lane cases)', () => {
     expect(
       resolveOtaLaneForIntent({ intent: '打开携程查上海酒店', extensionOnline: true, flagEnabled: false }),
     ).toBeNull();
+  });
+});
+
+describe('parseOtaAllowlist / isHostAllowed', () => {
+  it('parses comma lists into a lowercased set', () => {
+    const s = parseOtaAllowlist(' ctrip.com , Flights.Ctrip.com ,, ');
+    expect([...s].sort()).toEqual(['ctrip.com', 'flights.ctrip.com']);
+    expect(parseOtaAllowlist(undefined).size).toBe(0);
+  });
+  it('matches host exactly or as subdomain; empty set ⇒ false', () => {
+    const allow = parseOtaAllowlist('ctrip.com');
+    expect(isHostAllowed('ctrip.com', allow)).toBe(true);
+    expect(isHostAllowed('hotels.ctrip.com', allow)).toBe(true);
+    expect(isHostAllowed('qunar.com', allow)).toBe(false);
+    expect(isHostAllowed('ctrip.com', new Set())).toBe(false);
+  });
+});
+
+describe('resolveOtaCanaryLane (Step 2.5 gate matrix)', () => {
+  const HOTEL = '打开携程查上海酒店，不要预订。筛选 4 星以上，给 5 个结果。';
+  const USER = 'usr_test';
+  const allowedUserIds = new Set([USER]);
+  const allowedDomains = parseOtaAllowlist('ctrip.com,flights.ctrip.com,hotels.ctrip.com');
+
+  it('flag off → server-browser', () => {
+    const d = resolveOtaCanaryLane({ intent: HOTEL, userId: USER, extensionOnline: true, masterEnabled: false, allowedUserIds, allowedDomains });
+    expect(d.lane).toBe('server-browser');
+    expect(d.reason).toMatch(/master flag off/);
+  });
+  it('flag on but user NOT allowlisted → server-browser', () => {
+    const d = resolveOtaCanaryLane({ intent: HOTEL, userId: 'usr_other', extensionOnline: true, masterEnabled: true, allowedUserIds, allowedDomains });
+    expect(d.lane).toBe('server-browser');
+    expect(d.userAllowed).toBe(false);
+    expect(d.reason).toMatch(/user not in canary/);
+  });
+  it('flag on + user allowlisted but DOMAIN not allowlisted → server-browser', () => {
+    const d = resolveOtaCanaryLane({ intent: '去哪儿查东京到上海机票', userId: USER, extensionOnline: true, masterEnabled: true, allowedUserIds, allowedDomains });
+    expect(d.matchedDomain).toBe('qunar.com');
+    expect(d.lane).toBe('server-browser');
+    expect(d.domainAllowed).toBe(false);
+    expect(d.reason).toMatch(/domain not in canary/);
+  });
+  it('flag on + user + domain allowlisted + extension online → user-browser', () => {
+    const d = resolveOtaCanaryLane({ intent: HOTEL, userId: USER, extensionOnline: true, masterEnabled: true, allowedUserIds, allowedDomains });
+    expect(d.lane).toBe('user-browser');
+    expect(d.userAllowed).toBe(true);
+    expect(d.domainAllowed).toBe(true);
+  });
+  it('extension offline → server-browser', () => {
+    const d = resolveOtaCanaryLane({ intent: HOTEL, userId: USER, extensionOnline: false, masterEnabled: true, allowedUserIds, allowedDomains });
+    expect(d.lane).toBe('server-browser');
+    expect(d.reason).toMatch(/extension offline/);
+  });
+  it('non-OTA intent → null (routing unchanged)', () => {
+    const d = resolveOtaCanaryLane({ intent: '打开 https://example.com 看看', userId: USER, extensionOnline: true, masterEnabled: true, allowedUserIds, allowedDomains });
+    expect(d.lane).toBeNull();
+  });
+  it('empty allowlists (prod default) → never user-browser', () => {
+    const d = resolveOtaCanaryLane({ intent: HOTEL, userId: USER, extensionOnline: true, masterEnabled: true, allowedUserIds: new Set(), allowedDomains: new Set() });
+    expect(d.lane).toBe('server-browser');
   });
 });
 

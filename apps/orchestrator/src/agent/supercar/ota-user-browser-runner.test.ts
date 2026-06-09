@@ -154,6 +154,29 @@ describe('runOtaUserBrowserReadonly — safety', () => {
     expect(out.reason).toMatch(/无法在你的浏览器中打开/);
   });
 
+  it('canary domain guard: blocks a non-canary OTA URL even if it is a valid OTA site', async () => {
+    // allowedDomains = {ctrip.com}; model derives a qunar URL → blocked,
+    // never dispatched (defence-in-depth beyond the lane decision).
+    const { client } = makeClient(['https://flights.qunar.com/online/list/oneway?dep=BJS&arr=SHA']);
+    const dispatchNavigate = vi.fn(async () => ({ ok: true, result: { finalUrl: '', title: '', bodyText: '' } }));
+    const audit: OtaAuditRecord[] = [];
+    const out = await runOtaUserBrowserReadonly({
+      taskId: 'tsk_canary',
+      intent: '查机票',
+      deps: {
+        client,
+        dispatchNavigate,
+        audit: (r) => audit.push(r),
+        logger: silentLogger,
+        allowedDomains: new Set(['ctrip.com']),
+      },
+    });
+    expect(out.status).toBe('failed');
+    expect(out.reason).toMatch(/灰度范围/);
+    expect(dispatchNavigate).not.toHaveBeenCalled();
+    expect(audit.some((r) => r.decision === 'blocked' && /canary allowlist/.test(r.reason))).toBe(true);
+  });
+
   it('the runner only ever dispatches navigate/screenshot — no click/type path exists', async () => {
     // Structural guarantee: the deps shape has no click/type dispatcher,
     // and the only browser call made is navigate (+ optional screenshot).

@@ -99,6 +99,84 @@ export function resolveOtaLaneForIntent(opts: {
 }
 
 // ---------------------------------------------------------------------------
+// Canary rollout gate (Step 2.5)
+// ---------------------------------------------------------------------------
+
+/** Parse a comma-separated env allowlist into a lowercased Set. */
+export function parseOtaAllowlist(envValue: string | null | undefined): Set<string> {
+  return new Set(
+    (envValue ?? '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s.length > 0),
+  );
+}
+
+/** host ∈ allowlist (exact or subdomain of a listed base). Empty list ⇒ false. */
+export function isHostAllowed(host: string | null | undefined, allowed: ReadonlySet<string>): boolean {
+  if (!host) return false;
+  const h = host.trim().toLowerCase().replace(/^\./, '');
+  if (!h || /[^a-z0-9.-]/.test(h)) return false;
+  for (const d of allowed) {
+    if (h === d || h.endsWith(`.${d}`)) return true;
+  }
+  return false;
+}
+
+export interface OtaCanaryInputs {
+  readonly intent: string;
+  readonly userId: string;
+  readonly extensionOnline: boolean;
+  /** Master flag (OTA_USER_BROWSER) AND any other prereqs (e.g. model client present). */
+  readonly masterEnabled: boolean;
+  /** OTA_USER_BROWSER_ALLOWED_USER_IDS. */
+  readonly allowedUserIds: ReadonlySet<string>;
+  /** OTA_USER_BROWSER_ALLOWED_DOMAINS. */
+  readonly allowedDomains: ReadonlySet<string>;
+}
+
+export interface OtaCanaryDecision {
+  /** 'user-browser' only when EVERY gate passes; 'server-browser' when an
+   *  OTA-prefer task fails a gate; null for non-OTA (routing unchanged). */
+  readonly lane: OtaLane | null;
+  readonly matchedDomain: string | null;
+  readonly userAllowed: boolean;
+  readonly domainAllowed: boolean;
+  readonly reason: string;
+}
+
+/**
+ * Canary-scoped lane decision. user-browser-readonly fires ONLY when:
+ *   master flag on  +  intent matches an OTA preferUserBrowser playbook
+ *   +  userId in the user allowlist  +  matched domain in the domain
+ *   allowlist  +  extension online.
+ * Any miss on an OTA task → 'server-browser' (runs on server Brave as
+ * today). Non-OTA intent → null (untouched). Both empty allowlists →
+ * nobody is canaried, so production default stays server Brave.
+ */
+export function resolveOtaCanaryLane(inputs: OtaCanaryInputs): OtaCanaryDecision {
+  const pb = matchPlaybooks(inputs.intent).find((p) => p.preferUserBrowser === true);
+  if (!pb) {
+    return {
+      lane: null,
+      matchedDomain: null,
+      userAllowed: false,
+      domainAllowed: false,
+      reason: 'non-OTA: no preferUserBrowser playbook match',
+    };
+  }
+  const matchedDomain = pb.domain;
+  const userAllowed = inputs.allowedUserIds.has(inputs.userId);
+  const domainAllowed = isHostAllowed(matchedDomain, inputs.allowedDomains);
+  const base = { matchedDomain, userAllowed, domainAllowed } as const;
+  if (!inputs.masterEnabled) return { lane: 'server-browser', ...base, reason: 'master flag off' };
+  if (!userAllowed) return { lane: 'server-browser', ...base, reason: 'user not in canary allowlist' };
+  if (!domainAllowed) return { lane: 'server-browser', ...base, reason: 'domain not in canary allowlist' };
+  if (!inputs.extensionOnline) return { lane: 'server-browser', ...base, reason: 'extension offline' };
+  return { lane: 'user-browser', ...base, reason: 'canary: user+domain allowlisted, extension online' };
+}
+
+// ---------------------------------------------------------------------------
 // Action safety classifier
 // ---------------------------------------------------------------------------
 
