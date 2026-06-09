@@ -46,4 +46,25 @@ describe('friendlyTaskFailureReason', () => {
       '任务执行失败：输入内容缺少店铺名称。建议：简化任务描述后重试。',
     );
   });
+
+  // Travel QA 2026-06-09 — Google Hotels/Maps timed out and the agent
+  // loop's "请求处理时间过长，正在重试。" sentinel fell through to the
+  // generic branch, surfacing a double period and a vague reason.
+  it('classifies the "时间过长" deadline sentinel as a timeout', () => {
+    expect(friendlyTaskFailureReason('failed', '请求处理时间过长，正在重试。')).toBe(
+      '任务超时。可能原因：目标网站响应缓慢或被反爬拦截。建议：重试，或把任务描述简化后再试。',
+    );
+  });
+
+  it('does not double the trailing period when a raw reason ends in 。', () => {
+    expect(friendlyTaskFailureReason('failed', '输入内容缺少店铺名称。')).toBe(
+      '任务执行失败：输入内容缺少店铺名称。建议：简化任务描述后重试。',
+    );
+    // The exact QA sentinel — would have rendered "…正在重试。。建议…"
+    // before the fix; now it's classified as a timeout (above), but the
+    // generic path must still never double up.
+    expect(friendlyTaskFailureReason('failed', '操作未完成，请稍后再试。')).toBe(
+      '任务执行失败：操作未完成，请稍后再试。建议：简化任务描述后重试。',
+    );
+  });
 });

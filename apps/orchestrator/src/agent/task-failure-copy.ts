@@ -7,7 +7,7 @@ export function friendlyTaskFailureReason(
   const r = (raw ?? '').toLowerCase();
   const browserFailure = friendlyBrowserFailureReason(raw);
   if (browserFailure) return browserFailure;
-  if (status === 'timeout' || /timeout|elapsed|time ?out|超时/.test(r)) {
+  if (status === 'timeout' || /timeout|elapsed|time ?out|超时|时间过长|处理时间过长/.test(r)) {
     return '任务超时。可能原因：目标网站响应缓慢或被反爬拦截。建议：重试，或把任务描述简化后再试。';
   }
   if (/429|rate ?limit|too many requests/.test(r)) {
@@ -42,7 +42,11 @@ export function friendlyTaskFailureReason(
     if (looksLikeInternalError(trimmed)) {
       return '任务执行出错。请重试；如果反复出现，请联系 support@holaday.ai。';
     }
-    return `任务执行失败：${trimmed}。建议：简化任务描述后重试。`;
+    // Strip a trailing sentence terminator so we don't double up on the
+    // "。建议…" we append — a raw reason like "请求处理时间过长，正在重试。"
+    // otherwise renders "…正在重试。。建议…".
+    const cleaned = trimmed.replace(/[。.!！?？;；,，、\s]+$/u, '');
+    return `任务执行失败：${cleaned}。建议：简化任务描述后重试。`;
   }
   return '任务执行失败。建议：简化任务描述后重试。';
 }
