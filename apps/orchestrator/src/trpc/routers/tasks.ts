@@ -35,6 +35,8 @@ import {
   supercarReply,
   type SupercarOutcome,
 } from '../../agent/supercar/index.js';
+import { resolveOtaLaneForIntent } from '../../agent/supercar/ota-user-browser-policy.js';
+import { runOtaUserBrowserReadonly } from '../../agent/supercar/ota-user-browser-runner.js';
 import {
   classifyRole,
   selectModelAndEffort,
@@ -2808,8 +2810,58 @@ export const tasksRouter = router({
       // Codex Pack B1 — browsing chip fires right before the agent
       // loop actually runs (Brave allocate, first tool call, etc.).
       broadcastSubStatus(ctx.userId, taskId, 'browsing');
+      // B-专项 Step 2 — read-only OTA user-browser lane. ONLY when the
+      // OTA_USER_BROWSER flag is on AND the user's extension is online
+      // AND the intent matches an OTA-prefer site. Otherwise this is a
+      // no-op and the task runs the server-Brave supercar exactly as
+      // today. The readonly runner uses the extension's Mode B
+      // navigate/screenshot channel (no chrome.debugger, no click/type,
+      // no order/pay) and returns a SupercarOutcome consumed by the same
+      // terminal handler below.
+      const otaUserBrowserLane =
+        getExecutionFeatureFlags().OTA_USER_BROWSER && anthropicForResolver
+          ? resolveOtaLaneForIntent({
+              intent: input.intent,
+              extensionOnline: hasConnectedExtension(ctx.userId),
+              flagEnabled: true,
+            })
+          : null;
+      const useOtaUserBrowser = otaUserBrowserLane === 'user-browser';
+      if (useOtaUserBrowser) {
+        ctx.logger.info(
+          { taskId, userId: ctx.userId, lane: 'user-browser-readonly' },
+          'ota: user-browser readonly lane selected',
+        );
+      }
+      const runUserBrowserReadonly = (): Promise<SupercarOutcome> =>
+        runOtaUserBrowserReadonly({
+          taskId,
+          intent: effectiveIntent,
+          deps: {
+            client: anthropicForResolver!,
+            dispatchNavigate: async (url: string) => {
+              const r = await sendExtensionToolCall(ctx.userId, {
+                taskId,
+                kind: 'navigate',
+                args: { url },
+              });
+              return r.ok
+                ? { ok: true, result: r.result as { finalUrl: string; title: string; bodyText: string } }
+                : { ok: false, error: r.error };
+            },
+            dispatchScreenshot: () =>
+              sendExtensionToolCall(ctx.userId, { taskId, kind: 'screenshot' }),
+            audit: (rec) => ctx.logger.info(rec, 'ota: user-browser audit'),
+            onProgress: (message) =>
+              broadcastSubStatus(ctx.userId, taskId, 'browsing', message),
+            logger: ctx.logger,
+          },
+        });
       const runFn = () =>
-        runSupercarWithRetry(supercarArgs, { userId, taskId, logger: ctx.logger })
+        (useOtaUserBrowser
+          ? runUserBrowserReadonly()
+          : runSupercarWithRetry(supercarArgs, { userId, taskId, logger: ctx.logger })
+        )
           .then(async (outcome) => {
             ctx.logger.info(
               { taskId, status: outcome.status, iterations: outcome.iterations, toolsUsed: outcome.toolsUsed },
