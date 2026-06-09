@@ -128,6 +128,21 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/(?:发帖|评论|点赞|关注).{0,18}(?:这|该|那个|账号|帖子|笔记|视频|微博|动态|文章|post|tweet)/i, '中文社交对象操作'],
   [/(?:给|帮我给|替我给|为).{0,24}(?:评论|点赞|关注)/i, '中文社交互动'],
   [/(?:在|到|去|用|通过).{0,24}(?:携程|去哪儿|飞猪|google flights|airbnb|booking|linkedin).{0,72}(?:筛选|排序|选择|勾选|切换|设置|保存筛选|保存条件|收藏|付款前|支付前|确认前|提交前|停在)/i, '中文站内筛选保存'],
+  // Google Flights / Hotels / Maps and equivalent live travel apps are
+  // interactive itinerary tools, NOT scrape-able article pages — the
+  // value of an execution agent here is to actually drive the page.
+  // Naming one alongside a travel object/verb (机票/航班/酒店/路线/
+  // 导航/查/搜/筛选/...) routes to browser. A travel OBJECT is required,
+  // so pure topic phrasing ("Google Maps 营销策略", "什么是 Google
+  // Flights") carries no object and falls through to generate.
+  [/google\s*(?:flights?|hotels?|maps|travel)\b.{0,48}(?:航班|机票|酒店|民宿|住宿|房间|路线|导航|出发|到达|往返|单程|入住|直飞|查|搜|筛选|排序|预订|预定|查询|查找|查看|比价|flight|hotel|route|directions|search|find|filter|sort|book|nonstop)/i, 'google travel app'],
+  [/(?:航班|机票|酒店|民宿|路线|导航|直飞).{0,48}google\s*(?:flights?|hotels?|maps|travel)\b/i, 'travel object then google app'],
+  // Travel search/booking that explicitly asks to STOP before the
+  // commit ("查…航班…不要下单", "筛选酒店…不要预订", "查路线…不开始
+  // 导航"). A stop-before-commit instruction is unambiguous live
+  // execution — scrape/generate can't honour "stop before booking".
+  // Topic/analysis phrasing ("机票预订转化率分析") has no 不要/别 → safe.
+  [/(?:机票|航班|酒店|民宿|房间|车票|火车票|路线|行程|导航).{0,40}(?:不要|别|勿|先别|暂时不|不需要).{0,8}(?:下单|预订|预定|购买|付款|支付|订购|导航|出发)/i, '中文出行执行但不提交'],
   [/(?:在|用|通过).{0,24}(?:gmail|slack|linkedin|notion|飞书|github|google docs|google forms|google sheets|google slides|google calendar|google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?).{0,64}(?:写|撰写|起草|创建|新建|编辑|更新|查找|搜索|下载|上传|导出|分享|移动|重命名|复制链接|安排|预约|添加|保存|回复).{0,48}(?:草稿|邮件|消息|页面|文档|会议纪要|计划|报名表|表单|帖子|表格|演示文稿|幻灯片|会议|日程|邀请|联系人|客户|备注|付款|收据|文件|附件|pdf|csv|xlsx|链接|权限|文件夹|看板|任务|bug|issue|pull request|pr|折扣码|工单|回复|用户|项目|订单|商品|库存)/i, '中文应用草稿操作'],
   [/(?:打开|进入|访问|前往).{0,24}(?:google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify|zendesk|intercom|linear|monday(?:\.com)?).{0,64}(?:写|撰写|起草|创建|新建|编辑|更新|查找|搜索|下载|上传|导出|分享|移动|重命名|复制链接|安排|预约|添加|保存|回复).{0,48}(?:草稿|联系人|客户|备注|付款|收据|文件|附件|pdf|csv|xlsx|链接|权限|文件夹|看板|任务|bug|issue|折扣码|工单|回复|用户|项目|订单|商品|库存)/i, '中文打开应用后操作'],
   [/(?:上传|下载|导出|分享|移动|重命名|复制链接|改权限|授权).{0,48}(?:文件|附件|pdf|csv|xlsx|表格|资料|文档|图片|链接|权限|这个|这|该).{0,48}(?:google drive|dropbox|onedrive|icloud drive)/i, '中文云盘对象操作'],

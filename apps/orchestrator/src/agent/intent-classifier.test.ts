@@ -766,6 +766,61 @@ describe('classifyExecutionMode — generate stays generate', () => {
   });
 });
 
+describe('Task A — Google Flights/Hotels/Maps + travel execution → browser', () => {
+  // Holaday is an execution agent: these are interactive itinerary
+  // apps, so the agent should drive the live page, not direct-answer
+  // or scrape an article. Lightweight Q&A and current-data scrape
+  // must be unaffected.
+  it('Google travel apps with a travel object → browser', async () => {
+    for (const intent of [
+      '去 Google Flights 查东京到上海机票，不要下单',
+      '打开 Google Hotels 筛选酒店，不要预订',
+      '打开 Google Maps 查路线，不开始导航',
+      '去 Google Flights 查机票',
+    ]) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).toBe('browser');
+    }
+  });
+
+  it('travel search/booking that stops before commit → browser (even without a Google app)', async () => {
+    for (const intent of [
+      '查上海到东京航班，不要下单',
+      '筛选酒店但先别预订',
+    ]) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).toBe('browser');
+    }
+  });
+
+  it('lightweight Q&A stays generate (direct-answer lane)', async () => {
+    for (const intent of ['1 加 1 等于几', '你好', '什么是 AI？']) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).toBe('generate');
+    }
+  });
+
+  it('current-data / search stays scrape — not mis-routed to browser', async () => {
+    for (const intent of ['查今天特斯拉股价', '搜索最新 AI 新闻']) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).toBe('scrape');
+    }
+  });
+
+  it('travel/maps topic & strategy phrasing stays generate (no live execution)', async () => {
+    for (const intent of [
+      'Google Maps 营销策略',
+      '什么是 Google Flights',
+      '机票预订转化率分析',
+      '酒店预订流程优化建议',
+      '制定一个酒店预订策略',
+    ]) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).toBe('generate');
+    }
+  });
+});
+
 describe('Task 2 — must-execute intents never become a direct-answerable generate', () => {
   // The generate-lane direct-answer shortcut fires only when BOTH
   // (a) classifyExecutionMode routed to 'generate' AND
