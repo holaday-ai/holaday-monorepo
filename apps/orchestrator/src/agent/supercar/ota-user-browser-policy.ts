@@ -102,23 +102,30 @@ export function resolveOtaLaneForIntent(opts: {
 // Canary rollout gate (Step 2.5)
 // ---------------------------------------------------------------------------
 
-/** Parse a comma-separated env allowlist into a lowercased Set. */
+/**
+ * Parse a comma-separated env allowlist into a trimmed Set. Case is
+ * PRESERVED — userIds (usr_…) are case-sensitive, so lowercasing them
+ * would break the match. Host comparison handles case-insensitivity
+ * itself (see isHostAllowed).
+ */
 export function parseOtaAllowlist(envValue: string | null | undefined): Set<string> {
   return new Set(
     (envValue ?? '')
       .split(',')
-      .map((s) => s.trim().toLowerCase())
+      .map((s) => s.trim())
       .filter((s) => s.length > 0),
   );
 }
 
-/** host ∈ allowlist (exact or subdomain of a listed base). Empty list ⇒ false. */
+/** host ∈ allowlist (exact or subdomain of a listed base), case-insensitive. Empty list ⇒ false. */
 export function isHostAllowed(host: string | null | undefined, allowed: ReadonlySet<string>): boolean {
   if (!host) return false;
   const h = host.trim().toLowerCase().replace(/^\./, '');
   if (!h || /[^a-z0-9.-]/.test(h)) return false;
   for (const d of allowed) {
-    if (h === d || h.endsWith(`.${d}`)) return true;
+    const dl = d.trim().toLowerCase().replace(/^\./, '');
+    if (!dl) continue;
+    if (h === dl || h.endsWith(`.${dl}`)) return true;
   }
   return false;
 }

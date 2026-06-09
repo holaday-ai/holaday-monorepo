@@ -95,13 +95,13 @@ describe('resolveOtaLaneForIntent (Task 4 lane cases)', () => {
 });
 
 describe('parseOtaAllowlist / isHostAllowed', () => {
-  it('parses comma lists into a lowercased set', () => {
-    const s = parseOtaAllowlist(' ctrip.com , Flights.Ctrip.com ,, ');
-    expect([...s].sort()).toEqual(['ctrip.com', 'flights.ctrip.com']);
+  it('parses comma lists, trimming but PRESERVING case (userIds are case-sensitive)', () => {
+    const s = parseOtaAllowlist(' ctrip.com , usr_EeYpvsvLtyDzN4VLQi7BT ,, ');
+    expect([...s].sort()).toEqual(['ctrip.com', 'usr_EeYpvsvLtyDzN4VLQi7BT'].sort());
     expect(parseOtaAllowlist(undefined).size).toBe(0);
   });
-  it('matches host exactly or as subdomain; empty set ⇒ false', () => {
-    const allow = parseOtaAllowlist('ctrip.com');
+  it('host match is case-insensitive (exact or subdomain); empty set ⇒ false', () => {
+    const allow = parseOtaAllowlist('Ctrip.com'); // mixed-case env entry
     expect(isHostAllowed('ctrip.com', allow)).toBe(true);
     expect(isHostAllowed('hotels.ctrip.com', allow)).toBe(true);
     expect(isHostAllowed('qunar.com', allow)).toBe(false);
@@ -148,6 +148,20 @@ describe('resolveOtaCanaryLane (Step 2.5 gate matrix)', () => {
     const d = resolveOtaCanaryLane({ intent: '打开 https://example.com 看看', userId: USER, extensionOnline: true, masterEnabled: true, allowedUserIds, allowedDomains });
     expect(d.lane).toBeNull();
   });
+  it('REGRESSION: mixed-case userId matches a mixed-case allowlist entry (no lowercasing)', () => {
+    const mixed = 'usr_EeYpvsvLtyDzN4VLQi7BT';
+    const d = resolveOtaCanaryLane({
+      intent: HOTEL,
+      userId: mixed,
+      extensionOnline: true,
+      masterEnabled: true,
+      allowedUserIds: parseOtaAllowlist(mixed),
+      allowedDomains,
+    });
+    expect(d.userAllowed).toBe(true);
+    expect(d.lane).toBe('user-browser');
+  });
+
   it('empty allowlists (prod default) → never user-browser', () => {
     const d = resolveOtaCanaryLane({ intent: HOTEL, userId: USER, extensionOnline: true, masterEnabled: true, allowedUserIds: new Set(), allowedDomains: new Set() });
     expect(d.lane).toBe('server-browser');
