@@ -45,6 +45,7 @@ const ALLOWED_BASE_DOMAINS = [
   'ctrip.com',
   'qunar.com',
   'fliggy.com',
+  'ly.com',
   'zhipin.com',
   'liepin.com',
   'lagou.com',
