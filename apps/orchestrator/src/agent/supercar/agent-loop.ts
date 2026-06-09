@@ -66,6 +66,7 @@ import {
 import { buildSupercarSystemPrompt } from './system-prompt.js';
 import { classifyError as classifyToolError, extractDomain as extractDomainStat } from './stats-service.js';
 import { env as appEnv } from '../../config/env.js';
+import { buildCtripFlightHint, isCtripFlightResultsUrl } from './ctrip-flight-extractor.js';
 
 /**
  * Anti-crawl stuck detection thresholds.
@@ -1393,6 +1394,10 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   let activeAntiBotSignal: AntiBotSignal | null = null;
   /** One-shot guard for the Apify fallback path; runs at most once per task. */
   let apifyAttempted = false;
+  /** One-shot guard for the Ctrip flight-results extraction hint. Once we
+   *  hand the model the page text it stays in history, so we only inject
+   *  it the first time we successfully read a Ctrip flight-results page. */
+  let ctripFlightHintSent = false;
   // Phase 13 Dim 1 follow-up — local plan-step state. Mutates as
   // markers parse out of the model's text. Caller seeded it from
   // tasks.plan_status; we copy to avoid mutating the caller's
@@ -3295,6 +3300,35 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
         }
       }
 
+      // Ctrip flight-results extraction adapter. The model only sees
+      // screenshots + scrape_website output, never the page's own text,
+      // so the dense flights.ctrip.com SPA makes it vision-grind to the
+      // iteration cap (QA: tsk_sjxJEBQavJ5sPzcKeCrwN, 50 iters, no
+      // result). When parked on a Ctrip flight-results URL, read the
+      // visible text and hand it to the model with an extraction
+      // directive so it can finalize a table. One-shot — once the text
+      // is in history we don't re-inject. Best-effort, never blocks.
+      let ctripFlightHintText: string | null = null;
+      if (!ctripFlightHintSent && hadComputerAction && toolUseBlocks.length > 0) {
+        try {
+          const cp = (await executor.getPage()) as unknown as { url?: () => string };
+          const curUrl = typeof cp.url === 'function' ? cp.url() : '';
+          if (isCtripFlightResultsUrl(curUrl)) {
+            const longText = await readPageText(executor, 16384);
+            ctripFlightHintText = buildCtripFlightHint({ pageText: longText, url: curUrl, topN: 3 });
+            if (ctripFlightHintText) {
+              ctripFlightHintSent = true;
+              logger.info(
+                { taskId: opts.taskId, iteration, url: curUrl.slice(0, 80) },
+                'supercar: injected Ctrip flight extraction hint',
+              );
+            }
+          }
+        } catch {
+          // best-effort — never break the loop on a page-read failure
+        }
+      }
+
       // Both stuck advisories go in the same user message as the
       // tool_results. Mixing text + tool_result blocks in one user turn
       // is legal per the Anthropic schema — tool_result blocks just
@@ -3302,6 +3336,9 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       const nudgeContent: ContentBlockParam[] = [];
       if (antiBotHintText) {
         nudgeContent.push({ type: 'text', text: antiBotHintText });
+      }
+      if (ctripFlightHintText) {
+        nudgeContent.push({ type: 'text', text: ctripFlightHintText });
       }
       // Phase 24 RC follow-up — `hasApifyTools` was the original
       // flag name, but the rescue nudge is correct whenever EITHER
@@ -4411,7 +4448,10 @@ function extractWebSearchSources(
   return [];
 }
 
-async function readPageText(executor: PlaywrightExecutor): Promise<string> {
+async function readPageText(
+  executor: PlaywrightExecutor,
+  maxChars = 4096,
+): Promise<string> {
   try {
     const page = (await executor.getPage()) as unknown as {
       evaluate: <T>(fn: () => T) => Promise<T>;
@@ -4423,15 +4463,17 @@ async function readPageText(executor: PlaywrightExecutor): Promise<string> {
         // to see. Fallback to textContent for pages that aren't fully
         // hydrated yet (Cloudflare interstitial has the content in a
         // <noscript> sibling and textContent picks it up regardless).
+        // Browser-side cap is a generous upper bound; the Node side
+        // slices to the caller's requested maxChars below.
         const body = (globalThis as { document?: { body?: unknown } }).document?.body as
           | { innerText?: string; textContent?: string }
           | undefined;
         if (!body) return '';
-        return (body.innerText ?? body.textContent ?? '').slice(0, 4096);
+        return (body.innerText ?? body.textContent ?? '').slice(0, 20000);
       }),
       new Promise<string>((resolve) => setTimeout(() => resolve(''), 1500)),
     ]);
-    return text ?? '';
+    return (text ?? '').slice(0, maxChars);
   } catch {
     return '';
   }
