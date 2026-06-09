@@ -227,6 +227,45 @@ describe('answerClaimsDownloadableFile — reverse word order (verb before filen
   });
 });
 
+describe('answerClaimsDownloadableFile — Task C boundary phrasings', () => {
+  it('detects 报告已生成 / 为你准备好 / 下载文件 phrasings', () => {
+    expect(answerClaimsDownloadableFile('报告已生成：qa-summary.pdf')).toBe(true);
+    expect(answerClaimsDownloadableFile('我已经为你准备好 qa-summary.pdf')).toBe(true);
+    expect(answerClaimsDownloadableFile('下载文件：qa-summary.pdf')).toBe(true);
+  });
+
+  it('does NOT trip on a reference link or a "详见 file" pointer', () => {
+    expect(
+      answerClaimsDownloadableFile('参考链接：https://example.com/qa-summary.pdf'),
+    ).toBe(false);
+    expect(answerClaimsDownloadableFile('任务已完成，详见 report.pdf')).toBe(false);
+  });
+
+  it('evaluateFileArtifact flags the new phrasings vs screenshot-only', () => {
+    for (const answerText of [
+      '报告已生成：qa-summary.pdf',
+      '我已经为你准备好 qa-summary.pdf',
+      '下载文件：qa-summary.pdf',
+    ]) {
+      expect(
+        evaluateFileArtifact({ answerText, outputFiles: [SCREENSHOT] }).inconsistent,
+        answerText,
+      ).toBe(true);
+    }
+  });
+
+  it('evaluateFileArtifact does NOT flag the reference-link / pointer cases', () => {
+    for (const answerText of [
+      '参考链接：https://example.com/qa-summary.pdf',
+      '任务已完成，详见 report.pdf',
+    ]) {
+      const v = evaluateFileArtifact({ answerText, outputFiles: [SCREENSHOT] });
+      expect(v.claimsFile, answerText).toBe(false);
+      expect(v.inconsistent, answerText).toBe(false);
+    }
+  });
+});
+
 describe('evaluateFileArtifact — reverse-order claims vs screenshot-only', () => {
   it('已生成 qa-summary.pdf + only screenshot => inconsistent (fixable)', () => {
     const v = evaluateFileArtifact({

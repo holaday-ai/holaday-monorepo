@@ -73,16 +73,21 @@ const FILE_CLAIM_FILENAME_RE =
   /[\w\-]+\.(?:pdf|md|markdown|csv|json|xlsx|docx|txt|pptx)\s*[`'"」』）)\]]*\s*(?:已(?:生成|创建|完成|备好)|生成(?:完毕|好了|完成)?|可(?:下载|供下载|从[^。\n]{0,8}下载)|下载卡片)/i;
 
 /**
- * The REVERSE word order of FILE_CLAIM_FILENAME_RE: a generation /
- * creation verb immediately followed by a document FILENAME — "已生成
- * qa-summary.pdf", "生成了 report.md", "为你创建了 notes.csv". Only a
- * colon, whitespace, and one optional opening quote/bracket may sit
- * between the verb and the filename, so a source link with no
- * generation wording ("这是参考链接 https://example.com/spec.pdf") does
- * NOT match — there is no 已生成/生成了/创建了 adjacent to its `.pdf`.
+ * A download-offer PHRASE immediately followed by a document
+ * FILENAME — the reverse word order of FILE_CLAIM_FILENAME_RE plus
+ * the "下载文件：x.pdf" / "为你准备好 x.pdf" variants. Covers:
+ *   "已生成 qa-summary.pdf", "生成了 report.md", "为你创建了 notes.csv",
+ *   "报告已生成：qa-summary.pdf", "我已经为你准备好 qa-summary.pdf",
+ *   "下载文件：qa-summary.pdf".
+ * Only a colon, whitespace, and one optional opening quote/bracket
+ * may sit between the phrase and the filename, so a source link with
+ * no download wording ("参考链接：https://example.com/spec.pdf",
+ * "任务已完成，详见 report.pdf") does NOT match — there is no
+ * 已生成/下载文件/为你准备好 adjacent to its `.pdf` (the CJK comma in
+ * "已完成，详见" breaks the adjacency).
  */
 const FILE_CLAIM_VERB_FIRST_RE =
-  /(?:已(?:生成|创建|完成|备好)了?|(?:生成|创建|备好)了|为你(?:生成|创建)了?)\s*[:：]?\s*[`'"「『（(\[]?\s*[\w\-]+\.(?:pdf|md|markdown|csv|json|xlsx|docx|txt|pptx)\b/i;
+  /(?:已(?:生成|创建|完成|备好)了?|(?:生成|创建|备好|准备好)了|为你(?:生成|创建|准备)(?:好|了)?|下载文件)\s*[:：]?\s*[`'"「『（(\[]?\s*[\w\-]+\.(?:pdf|md|markdown|csv|json|xlsx|docx|txt|pptx)\b/i;
 
 export function answerClaimsDownloadableFile(
   answerText: string | null | undefined,
