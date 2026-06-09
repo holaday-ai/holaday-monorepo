@@ -783,6 +783,21 @@ describe('Task A — Google Flights/Hotels/Maps + travel execution → browser',
     }
   });
 
+  it('exact QA prompts (2026-06-09 travel QA) → browser', async () => {
+    // The verbatim prompts validated end-to-end against the live
+    // browser lane. Pinned so a future classifier tweak that drops
+    // any of them back to generate is caught at unit time.
+    for (const intent of [
+      '去 Google Flights 查东京到上海机票，不要下单。筛选直飞，给出最便宜的 3 个选项（航空公司/价格/时间/链接）。',
+      '打开 Google Hotels 查大阪 2026-08-01 到 2026-08-03 的酒店，不要预订。筛选 4 星以上、价格低于 100 美元，给 5 个结果。',
+      '打开 Google Maps 查东京站到羽田机场的公共交通路线，不开始导航。给出 3 条路线、时间、票价和链接。',
+      '打开 Google Flights 查北京到上海航班，不要下单。如果页面无法稳定加载，请给出友好失败原因和下一步。',
+    ]) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).toBe('browser');
+    }
+  });
+
   it('travel search/booking that stops before commit → browser (even without a Google app)', async () => {
     for (const intent of [
       '查上海到东京航班，不要下单',
