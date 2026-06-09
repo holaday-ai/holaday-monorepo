@@ -149,12 +149,33 @@ export const PLAYBOOKS: Record<string, SitePlaybook> = {
     nameEn: 'Ctrip',
     category: 'travel',
     searchUrl: 'https://flights.ctrip.com/online/list/oneway-{from}-{to}?depdate={date}',
+    keySelectors: {
+      flightSearchUrl: 'https://flights.ctrip.com/online/list/oneway-{from}-{to}?depdate={date}',
+      roundTripSearchUrl:
+        'https://flights.ctrip.com/online/list/round-{from}-{to}?depdate={date}&rdate={returnDate}',
+      hotelSearchUrl: 'https://hotels.ctrip.com/hotels/list?city={cityId}&checkin={in}&checkout={out}',
+    },
     preferredLane: 'browser_cdp',
     antiBot: 'medium',
     loginRequired: 'partial',
     loginTrigger: '预订/查看详细票价规则',
-    tips: '携程机票搜索必须用浏览器（API 搜不到实时价格）。价格分"经济舱/超级经济舱/公务舱"，注意筛选。显示价格可能不含税费和燃油附加费。低价机票通常不可退改。携程会员和非会员价格可能不同。',
-    commonPitfalls: ['显示价格不含税费', '低价票不可退改', '同一航班不同渠道价格不同'],
+    // Concrete operating playbook (flights + hotels). Search/list pages
+    // do NOT need login; only 预订/详细规则 does — if a login or 验证码
+    // wall appears, hand back to the user (awaiting_user), don't fail.
+    tips:
+      '携程机票/酒店搜索必须用浏览器（搜索 API 拿不到实时价格）。' +
+      '【机票】① 进 flights.ctrip.com ② 在出发/到达城市框输入城市（中文城市名即可）' +
+      '③ 选好出发日期（往返再选返程）④ 点"搜索"⑤ 用左侧/顶部筛选「直飞」「起飞时间」「价格区间」' +
+      '⑥ 取价格最低的前 3 个航班。【酒店】进 hotels.ctrip.com，输入城市+入住/离店日期，搜索后用' +
+      '「星级(4星/5星)」「价格区间」筛选，取前 5 家。价格分经济舱/超经/公务舱；显示价可能不含税费燃油，' +
+      '低价票多不可退改。输出统一用表格：机票=航空公司/航班时间/时长/是否直飞/价格/链接；' +
+      '酒店=酒店名/星级/价格/位置/链接。务必在结尾注明「仅查询，未下单/未预订」。',
+    commonPitfalls: [
+      '显示价格不含税费',
+      '低价票不可退改',
+      '同一航班不同渠道价格不同',
+      '严禁点"预订/去支付/提交订单"，最多停在列表或详情页',
+    ],
   },
 
   'qunar.com': {
@@ -192,7 +213,19 @@ export const PLAYBOOKS: Record<string, SitePlaybook> = {
     antiBot: 'medium',
     loginRequired: 'partial',
     loginTrigger: '预订',
-    tips: '飞猪是阿里旗下旅游平台，和淘宝账号互通。经常有会员专属价和平台补贴价。国际机票有时比携程便宜。',
+    tips: '飞猪是阿里旗下旅游平台，和淘宝账号互通。经常有会员专属价和平台补贴价。国际机票有时比携程便宜。搜索机票/酒店用浏览器：输入城市+日期→搜索→用直飞/价格/星级筛选→取前 3-5 个，表格输出。结尾注明「仅查询，未下单/未预订」，严禁点预订/支付。',
+  },
+
+  'ly.com': {
+    domain: 'ly.com',
+    name: '同程',
+    nameEn: 'Tongcheng',
+    category: 'travel',
+    preferredLane: 'browser_cdp',
+    antiBot: 'medium',
+    loginRequired: 'partial',
+    loginTrigger: '预订',
+    tips: '同程旅行（同程艺龙）主打机票/火车票/酒店，下沉市场份额高。搜索用浏览器：输入出发/到达城市+日期→搜索→用直飞/价格/星级筛选→取前 3-5 个结果，表格输出（航司或酒店名/时间/价格/链接）。结尾注明「仅查询，未下单/未预订」，严禁点预订/支付/提交订单。',
   },
 
   'zhipin.com': {

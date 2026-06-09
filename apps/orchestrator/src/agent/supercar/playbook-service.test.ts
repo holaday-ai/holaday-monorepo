@@ -68,6 +68,18 @@ describe('matchPlaybooks', () => {
     const domains = matched.map((p) => p.domain).sort();
     expect(domains).toEqual(['dianping.com', 'xiaohongshu.com']);
   });
+
+  // China OTA — the verbatim QA prompts must inject the right playbook.
+  it('OTA QA prompts inject the matching travel playbook', () => {
+    expect(matchPlaybooks('打开携程查北京到上海的机票，不要下单。筛选直飞，给最便宜的 3 个选项（航空公司/时间/价格）。').map((p) => p.domain)).toEqual(['ctrip.com']);
+    expect(matchPlaybooks('打开携程查上海 2026-08-01 到 2026-08-03 的酒店，不要预订。筛选 4 星以上，价格低于 800 元，给 5 个结果。').map((p) => p.domain)).toEqual(['ctrip.com']);
+    expect(matchPlaybooks('打开去哪儿查东京到上海机票，不要下单，给前 3 个结果。').map((p) => p.domain)).toEqual(['qunar.com']);
+    expect(matchPlaybooks('打开飞猪查大阪酒店，不要预订，给 5 个结果。').map((p) => p.domain)).toEqual(['fliggy.com']);
+  });
+
+  it('matches the new 同程 (ly.com) playbook', () => {
+    expect(matchPlaybooks('打开同程查上海到北京的火车票').map((p) => p.domain)).toEqual(['ly.com']);
+  });
 });
 
 describe('formatForPrompt', () => {
@@ -102,6 +114,20 @@ describe('formatForPrompt', () => {
     const matched = matchPlaybooks('12306');
     const out = formatForPrompt(matched);
     expect(out).toContain('必须登录');
+  });
+
+  it('携程 playbook carries the concrete operating steps + no-order reminder', () => {
+    const out = formatForPrompt(matchPlaybooks('携程'));
+    expect(out).toContain('【携程】');
+    // operating sequence cues
+    expect(out).toContain('搜索');
+    expect(out).toContain('筛选');
+    expect(out).toContain('表格');
+    // explicit no-order / no-booking guard surfaced to the model
+    expect(out).toContain('未下单/未预订');
+    expect(out).toContain('严禁点');
+    // partial login requirement rendered
+    expect(out).toContain('需要登录');
   });
 
   it('renders both playbooks when two are matched', () => {

@@ -4,6 +4,7 @@
  * Pure-function lookup: given a URL, return the matching SiteConfig
  * (or null). No I/O, no Playwright deps — easy to unit test.
  */
+import { CTRIP_SITE_CONFIG } from './ctrip.js';
 import { DOUYIN_COMPASS_SITE_CONFIG } from './douyin-compass.js';
 import { TAOBAO_SITE_CONFIG } from './taobao.js';
 import { WEIBO_SITE_CONFIG } from './weibo.js';
@@ -17,6 +18,7 @@ const ALL_SITE_CONFIGS: readonly SiteConfig[] = [
   TAOBAO_SITE_CONFIG,
   ZHIHU_SITE_CONFIG,
   WEIBO_SITE_CONFIG,
+  CTRIP_SITE_CONFIG,
 ];
 
 /**

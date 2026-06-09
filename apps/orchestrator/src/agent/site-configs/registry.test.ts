@@ -41,6 +41,15 @@ describe('matchSiteConfig — domain matching', () => {
     expect(matchSiteConfig('https://buyin.jinritemai.com/')?.siteId).toBe('douyin-compass');
   });
 
+  it('ctrip flights / hotels subdomains map to ctrip', () => {
+    expect(matchSiteConfig('https://ctrip.com/')?.siteId).toBe('ctrip');
+    expect(matchSiteConfig('https://flights.ctrip.com/online/list/oneway-bjs-sha')?.siteId).toBe(
+      'ctrip',
+    );
+    expect(matchSiteConfig('https://hotels.ctrip.com/hotels/list')?.siteId).toBe('ctrip');
+    expect(matchSiteConfig('https://www.ctrip.com/')?.siteId).toBe('ctrip');
+  });
+
   it('unrelated domain returns null', () => {
     expect(matchSiteConfig('https://example.com/')).toBeNull();
     expect(matchSiteConfig('https://google.com/')).toBeNull();
@@ -63,10 +72,10 @@ describe('matchSiteConfig — domain matching', () => {
 describe('SiteConfig registry — shape', () => {
   const all = _getAllSiteConfigsForTest();
 
-  it('5 configs registered', () => {
-    expect(all).toHaveLength(5);
+  it('6 configs registered', () => {
+    expect(all).toHaveLength(6);
     expect(all.map((c) => c.siteId).sort()).toEqual(
-      ['douyin-compass', 'taobao', 'weibo', 'xiaohongshu', 'zhihu'].sort(),
+      ['ctrip', 'douyin-compass', 'taobao', 'weibo', 'xiaohongshu', 'zhihu'].sort(),
     );
   });
 
@@ -106,5 +115,14 @@ describe('SiteConfig registry — shape', () => {
   it('xiaohongshu + douyin-compass have requiresAuth=true', () => {
     expect(all.find((c) => c.siteId === 'xiaohongshu')?.requiresAuth).toBe(true);
     expect(all.find((c) => c.siteId === 'douyin-compass')?.requiresAuth).toBe(true);
+  });
+
+  it('ctrip: search is open (requiresAuth=false) but carries login/captcha phrases for awaiting_user', () => {
+    const ctrip = all.find((c) => c.siteId === 'ctrip');
+    expect(ctrip?.requiresAuth).toBe(false); // do not gate plain search
+    expect(ctrip?.auth?.loginUrlPaths?.length ?? 0).toBeGreaterThan(0);
+    expect(ctrip?.auth?.loginBodyPhrases ?? []).toContain('扫码登录');
+    // captcha/slider phrasing present so a verify wall parks awaiting_user
+    expect(ctrip?.auth?.loginBodyPhrases ?? []).toContain('拖动滑块');
   });
 });
