@@ -34,6 +34,16 @@ interface FeatureFlags {
    * supercar/expert-workflows.ts flow unchanged.
    */
   EXPERT_WORKFLOW: boolean;
+  /**
+   * B-专项 — user-browser/extension execution for China-OTA query
+   * tasks (查询/筛选/提取, never 下单/预订/支付). When false (default),
+   * OTA tasks run on the server Brave exactly as today; the
+   * user-browser lane decision may be computed but is never dispatched.
+   * The actual extension transport stays behind this flag so enabling
+   * it is a deliberate, reviewed switch — not an accidental revival of
+   * the disabled P0 chrome.debugger path.
+   */
+  OTA_USER_BROWSER: boolean;
 }
 
 function readFlagsFromEnv(): FeatureFlags {
@@ -42,6 +52,7 @@ function readFlagsFromEnv(): FeatureFlags {
     EXECUTION_VERIFIER: process.env.EXECUTION_VERIFIER_ENABLED === 'true',
     EVIDENCE_LEDGER: process.env.EVIDENCE_LEDGER_ENABLED === 'true',
     EXPERT_WORKFLOW: process.env.EXPERT_WORKFLOW_ENABLED === 'true',
+    OTA_USER_BROWSER: process.env.OTA_USER_BROWSER_ENABLED === 'true',
   };
 }
 

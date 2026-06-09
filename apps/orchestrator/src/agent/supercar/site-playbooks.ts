@@ -42,6 +42,15 @@ export interface SitePlaybook {
   /** Agent operating tip — injected verbatim into the user message. */
   tips: string;
   commonPitfalls?: string[];
+  /**
+   * B-专项 — when true, this site's query tasks prefer the user's own
+   * logged-in browser (extension/Mode B) over the server Brave, because
+   * the server can't reproduce the user's login/device session (China
+   * OTA hotel pages gate results behind login + 风控). Consumed by the
+   * OTA user-browser lane decision (gated by the OTA_USER_BROWSER flag).
+   * Read/search/filter/extract only — never 下单/预订/支付.
+   */
+  preferUserBrowser?: boolean;
 }
 
 export const PLAYBOOKS: Record<string, SitePlaybook> = {
@@ -147,6 +156,7 @@ export const PLAYBOOKS: Record<string, SitePlaybook> = {
     domain: 'ctrip.com',
     name: '携程',
     nameEn: 'Ctrip',
+    preferUserBrowser: true,
     category: 'travel',
     searchUrl: 'https://flights.ctrip.com/online/list/oneway-{from}-{to}?depdate={date}',
     keySelectors: {
@@ -182,6 +192,7 @@ export const PLAYBOOKS: Record<string, SitePlaybook> = {
     domain: 'qunar.com',
     name: '去哪儿',
     nameEn: 'Qunar',
+    preferUserBrowser: true,
     category: 'travel',
     preferredLane: 'browser_cdp',
     antiBot: 'medium',
@@ -208,6 +219,7 @@ export const PLAYBOOKS: Record<string, SitePlaybook> = {
     domain: 'fliggy.com',
     name: '飞猪',
     nameEn: 'Fliggy',
+    preferUserBrowser: true,
     category: 'travel',
     preferredLane: 'browser_cdp',
     antiBot: 'medium',
@@ -220,6 +232,7 @@ export const PLAYBOOKS: Record<string, SitePlaybook> = {
     domain: 'ly.com',
     name: '同程',
     nameEn: 'Tongcheng',
+    preferUserBrowser: true,
     category: 'travel',
     preferredLane: 'browser_cdp',
     antiBot: 'medium',
@@ -315,6 +328,7 @@ export const PLAYBOOKS: Record<string, SitePlaybook> = {
     domain: 'meituan.com',
     name: '美团',
     nameEn: 'Meituan',
+    preferUserBrowser: true,
     category: 'food',
     preferredLane: 'browser_cdp',
     antiBot: 'medium',

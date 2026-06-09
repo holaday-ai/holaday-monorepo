@@ -80,6 +80,20 @@ describe('matchPlaybooks', () => {
   it('matches the new 同程 (ly.com) playbook', () => {
     expect(matchPlaybooks('打开同程查上海到北京的火车票').map((p) => p.domain)).toEqual(['ly.com']);
   });
+
+  it('preferUserBrowser is set ONLY on the China-OTA playbooks (B-专项 scope)', () => {
+    const prefer = (intent: string) => matchPlaybooks(intent)[0]?.preferUserBrowser === true;
+    // OTA scope whitelist → true
+    expect(prefer('打开携程查酒店')).toBe(true); // ctrip
+    expect(prefer('去哪儿查机票')).toBe(true); // qunar
+    expect(prefer('飞猪查酒店')).toBe(true); // fliggy
+    expect(prefer('同程查火车票')).toBe(true); // ly
+    expect(prefer('美团查酒店')).toBe(true); // meituan
+    // non-OTA → not set
+    expect(prefer('京东搜手机')).toBe(false); // jd
+    expect(prefer('百度搜索 AI')).toBe(false); // baidu
+    expect(prefer('Boss直聘找工作')).toBe(false); // zhipin
+  });
 });
 
 describe('formatForPrompt', () => {
