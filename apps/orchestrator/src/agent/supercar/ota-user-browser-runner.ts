@@ -34,9 +34,11 @@ import {
 import {
   bodyMatchesCity,
   dominantSupportedCity,
-  extractCtripHotels,
   filterAndFormatHotels,
+  lowestDeterministicPrice,
+  parseHotelJson,
   resolveCtripHotelUrl,
+  validateHotelJson,
 } from './ctrip-hotel-extractor.js';
 
 /** Result shape the extension returns for a `navigate` tool call. */
@@ -98,11 +100,15 @@ async function ask(
   return textFromMessage(msg);
 }
 
-const HOTEL_EXTRACT_SYSTEM =
-  '你从携程酒店结果页的可见文本中提取酒店。输出 Markdown 表格，列：酒店名 | 评分 | 价格(¥) | 位置 | 档次。' +
-  '只用文本里真实出现的数据，不要编造；没有的字段写「未标注」。务必排除价格高于给定上限的酒店。' +
-  '按价格升序取最多 N 个。表格后另起一行写「仅查询，未预订」。' +
-  '若文本里没有可读的酒店列表（登录页/空白），只回复一行：已进入携程酒店结果页，但未能稳定读取酒店列表。';
+const HOTEL_JSON_SYSTEM =
+  '你从携程酒店结果页的可见文本中提取酒店，输出**严格 JSON 数组**，每项：' +
+  '{"hotelName":"","rating":"","price":678,"location":"","starOrTier":""}。规则：' +
+  '① hotelName 必须是真实的酒店/宾馆/公寓/品牌名（如「上海五角场希尔顿花园酒店」「亚朵」「全季」「柏悦」）。' +
+  '② 严禁把优惠/促销/徽章标签当作酒店名，包括但不限于：会员价、特惠、一口价、降价、优惠XX、' +
+  '「连续XX位住客好评」、立减、满减、折扣、券、套餐、限时、比收藏时降价。不确定酒店名就丢弃该项，绝不编造。' +
+  '③ 只返回目标城市的酒店；④ 只返回 price ≤ 给定上限的酒店；⑤ 最多 topN 个，按价格升序；' +
+  '⑥ price 为纯数字（人民币元）；缺失字段用空字符串。' +
+  '⑦ 只输出 JSON，不要 Markdown、不要解释。若读不到任何真实酒店，输出 []。';
 
 /** Parse 价格上限 / top-N out of the intent ("价格低于 800", "给 5 个"). */
 function parseHotelFilters(intent: string): { maxPriceCNY?: number; topN: number } {
@@ -320,44 +326,56 @@ export async function runOtaUserBrowserReadonly(opts: {
     };
   }
 
-  // 4. Hotels — deterministic extractor + hard price cap; model fallback.
+  // 4. Hotels — MODEL-PRIMARY extraction (Step 9). The model reads the
+  //    real page text and returns strict JSON; the deterministic extractor
+  //    is demoted to validation only (it grabbed promo labels like
+  //    「优惠74」/「特惠一口价」as names on real Ctrip text). A validator
+  //    drops any item whose name is a promo/badge label or whose price is
+  //    over the cap; nothing reaches the table unless the name is real.
   const filters = parseHotelFilters(intent);
-  const hotels = extractCtripHotels(bodyText);
-  if (hotels.length > 0) {
-    const formatted = filterAndFormatHotels({
-      hotels,
-      city: targetCity ?? '该城市',
-      url: finalUrl,
-      ...(filters.maxPriceCNY != null ? { maxPriceCNY: filters.maxPriceCNY } : {}),
-      topN: filters.topN,
-    });
-    if (formatted.table) {
-      return {
-        status: 'completed',
-        summary: `已用你的浏览器读取携程酒店结果页（仅查询，未预订）：\n\n${formatted.table}`,
-        iterations,
-        toolsUsed,
-      };
-    }
-    // Hotels read but none within the price cap — report honestly.
-    return { status: 'failed', reason: formatted.reason ?? '未找到符合筛选的酒店。', iterations, toolsUsed };
-  }
-  // Deterministic parse found nothing — fall back to model extraction.
+  const city = targetCity ?? '该城市';
   iterations += 1;
-  let extracted: string;
+  let modelText: string;
   try {
-    const userMsg = `目标城市：${targetCity ?? '未知'}；价格上限：${filters.maxPriceCNY ?? '无'}；取前 ${filters.topN} 个。\n\n页面文本：\n${bodyText.slice(0, 12000)}`;
-    extracted = await ask(deps.client, model, HOTEL_EXTRACT_SYSTEM, userMsg, 1500);
+    const userMsg =
+      `目标城市：${city}；价格上限：${filters.maxPriceCNY ?? '无'} 元；最多 ${filters.topN} 个。\n\n` +
+      `页面可见文本：\n${bodyText.slice(0, 12000)}`;
+    modelText = await ask(deps.client, model, HOTEL_JSON_SYSTEM, userMsg, 2000);
   } catch (err) {
     deps.logger.warn({ taskId, err: err instanceof Error ? err.message : String(err) }, 'ota-readonly: hotel model extract failed');
-    return { status: 'failed', reason: '已进入携程酒店结果页，但未能稳定读取酒店列表。', iterations, toolsUsed };
+    return { status: 'failed', reason: `已读取${city}携程酒店页面，但未能稳定识别符合条件的酒店名。`, iterations, toolsUsed };
   }
-  if (!extracted || /未能稳定读取/.test(extracted)) {
-    return { status: 'failed', reason: '已进入携程酒店结果页，但未能稳定读取酒店列表。', iterations, toolsUsed };
+  const valid = validateHotelJson({
+    items: parseHotelJson(modelText),
+    ...(filters.maxPriceCNY != null ? { priceLimit: filters.maxPriceCNY } : {}),
+    topN: filters.topN,
+  });
+  deps.logger.info(
+    { taskId, city, modelItems: parseHotelJson(modelText).length, validHotels: valid.length, priceLimit: filters.maxPriceCNY ?? null },
+    'ota: hotel model extraction validated',
+  );
+  if (valid.length > 0) {
+    const formatted = filterAndFormatHotels({ hotels: valid, city, url: finalUrl, topN: filters.topN });
+    return {
+      status: 'completed',
+      summary: `已用你的浏览器读取携程酒店结果页（仅查询，未预订）：\n\n${formatted.table ?? ''}`,
+      iterations,
+      toolsUsed,
+    };
+  }
+  // 0 valid hotels — be honest, never dump promo-label rows.
+  const lowest = lowestDeterministicPrice(bodyText);
+  if (filters.maxPriceCNY != null && lowest != null && lowest > filters.maxPriceCNY) {
+    return {
+      status: 'failed',
+      reason: `${city}：页面读到的酒店最低价为 ¥${lowest.toLocaleString('en-US')}，未找到符合「≤¥${filters.maxPriceCNY}」筛选的酒店。`,
+      iterations,
+      toolsUsed,
+    };
   }
   return {
-    status: 'completed',
-    summary: `已用你的浏览器读取携程酒店结果页（仅查询，未预订）：\n\n${extracted}`,
+    status: 'failed',
+    reason: `已读取${city}携程酒店页面，但未能稳定识别符合条件的酒店名（仅查询，未预订）。`,
     iterations,
     toolsUsed,
   };

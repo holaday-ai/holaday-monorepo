@@ -236,6 +236,117 @@ export function extractCtripHotels(bodyText: string | null | undefined): CtripHo
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Model-primary extraction: validator + name blacklist (Step 9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Promo / discount / badge labels that the model (or a naive parser) must
+ * NEVER emit as a hotel name. These are the exact junk Step-8 surfaced
+ * (会员价 / 优惠74 / 特惠一口价 / 比收藏时降价 / 连续39位住客好评 …).
+ */
+export const HOTEL_NAME_BLACKLIST_RE =
+  /优惠|会员价|特惠|一口价|降价|连续\s*\d+\s*位住客|好评|立减|满减|折扣|券|促销|秒杀|补贴|直降|大促|今日特价|限时|比收藏|套餐|预订|抢购|起$/;
+
+/** A model-returned hotelName is valid only if it is a real name (CJK or
+ *  ≥2 letters), 2–40 chars, and not a promo/badge label. */
+export function isValidHotelName(name: unknown): name is string {
+  if (typeof name !== 'string') return false;
+  const n = name.trim();
+  if (n.length < 2 || n.length > 40) return false;
+  if (!/[一-龥A-Za-z]/.test(n)) return false; // not pure digits/punct
+  if (HOTEL_NAME_BLACKLIST_RE.test(n)) return false;
+  return true;
+}
+
+function coercePrice(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return Math.round(v);
+  if (typeof v === 'string') {
+    const m = v.replace(/,/g, '').match(/\d{2,6}/);
+    if (m) return parseInt(m[0], 10);
+  }
+  return null;
+}
+function coerceRating(v: unknown): number | undefined {
+  if (typeof v === 'number' && v >= 1 && v <= 5) return v;
+  if (typeof v === 'string') {
+    const m = v.match(/([1-5]\.\d)/);
+    if (m) return Number(m[1]);
+  }
+  return undefined;
+}
+function cleanField(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const s = v.trim();
+  if (!s || s === '未标注' || s === '-' || s.length > 40) return undefined;
+  // Don't carry obvious promo junk into location/tier either.
+  if (HOTEL_NAME_BLACKLIST_RE.test(s) && !/型|星|钻/.test(s)) return undefined;
+  return s;
+}
+
+/**
+ * Parse the model's JSON array of hotels from a (possibly fenced) text
+ * blob. Returns [] on any parse failure — never throws.
+ */
+export function parseHotelJson(text: string | null | undefined): unknown[] {
+  if (!text) return [];
+  const start = text.indexOf('[');
+  const end = text.lastIndexOf(']');
+  if (start === -1 || end <= start) return [];
+  try {
+    const arr = JSON.parse(text.slice(start, end + 1));
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Validate + normalise the model's hotel objects into CtripHotel rows.
+ * Drops items with an invalid/blacklisted name or no/over-cap price.
+ * Sorted by price asc, capped at topN. Star is never invented.
+ */
+export function validateHotelJson(opts: {
+  items: readonly unknown[];
+  priceLimit?: number;
+  topN?: number;
+}): CtripHotel[] {
+  const cap = opts.priceLimit ?? Infinity;
+  const topN = opts.topN ?? 5;
+  const seen = new Set<string>();
+  const out: CtripHotel[] = [];
+  for (const raw of opts.items) {
+    if (!raw || typeof raw !== 'object') continue;
+    const o = raw as Record<string, unknown>;
+    const name = (o.hotelName ?? o.name) as unknown;
+    if (!isValidHotelName(name)) continue;
+    const price = coercePrice(o.price ?? o.priceCNY);
+    if (price == null || price < 50 || price > 100000 || price > cap) continue;
+    const key = (name as string).trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const rating = coerceRating(o.rating);
+    const location = cleanField(o.location);
+    const starLabel = cleanField(o.starOrTier ?? o.starLabel ?? o.tier);
+    out.push({
+      name: key,
+      priceCNY: price,
+      ...(rating != null ? { rating } : {}),
+      ...(location ? { location } : {}),
+      ...(starLabel ? { starLabel } : {}),
+    });
+  }
+  return out.sort((a, b) => a.priceCNY - b.priceCNY).slice(0, topN);
+}
+
+/** Lowest price seen by the deterministic scan (for honest "no match"
+ *  reporting), or null when nothing parseable. */
+export function lowestDeterministicPrice(bodyText: string | null | undefined): number | null {
+  const hotels = extractCtripHotels(bodyText);
+  if (hotels.length === 0) return null;
+  return Math.min(...hotels.map((h) => h.priceCNY));
+}
+
 export interface HotelFilterResult {
   /** Markdown table when ≥1 hotel passes the filter. */
   readonly table?: string;

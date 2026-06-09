@@ -4,7 +4,10 @@ import {
   extractCityFromIntent,
   extractCtripHotels,
   filterAndFormatHotels,
+  isValidHotelName,
+  parseHotelJson,
   resolveCtripHotelUrl,
+  validateHotelJson,
 } from './ctrip-hotel-extractor.js';
 
 const NOW = new Date('2026-08-10T00:00:00Z');
@@ -184,6 +187,57 @@ describe('extractCtripHotels v2 — 杭州 fixture (3-5 rows)', () => {
     expect(r.table).toContain('国宾馆'); // ¥760 in
     expect(r.table).not.toContain('喜来登'); // ¥980 over cap
     expect(r.table).toContain('未下单/未预订');
+  });
+});
+
+describe('Step 9 — isValidHotelName (promo-label blacklist)', () => {
+  it('rejects the exact Step-8 junk names', () => {
+    for (const n of ['百达屋会员价', '优惠74', '特惠一口价', '比收藏时降价', '连续39位住客好评', '立减200', '3项优惠192', '券后价']) {
+      expect(isValidHotelName(n), n).toBe(false);
+    }
+  });
+  it('accepts real hotel / brand names (suffix or not)', () => {
+    for (const n of ['上海五角场希尔顿花园酒店', '亚朵', '全季', '柏悦', '上海素凯泰', '汉庭酒店']) {
+      expect(isValidHotelName(n), n).toBe(true);
+    }
+  });
+  it('rejects empty / pure-digit / over-long', () => {
+    expect(isValidHotelName('')).toBe(false);
+    expect(isValidHotelName('12345')).toBe(false);
+    expect(isValidHotelName('x'.repeat(50))).toBe(false);
+    expect(isValidHotelName(123)).toBe(false);
+  });
+});
+
+describe('Step 9 — parseHotelJson + validateHotelJson', () => {
+  it('parses a fenced JSON array', () => {
+    expect(parseHotelJson('```json\n[{"hotelName":"亚朵","price":420}]\n```').length).toBe(1);
+    expect(parseHotelJson('garbage')).toEqual([]);
+    expect(parseHotelJson(null)).toEqual([]);
+  });
+  it('good case: real hotels pass through, sorted + capped', () => {
+    const items = [
+      { hotelName: '上海外滩亚朵酒店', rating: '4.7', price: 678, location: '外滩', starOrTier: '舒适型' },
+      { hotelName: '上海虹桥全季酒店', rating: 4.5, price: 420, location: '虹桥', starOrTier: '经济型' },
+    ];
+    const v = validateHotelJson({ items, priceLimit: 800, topN: 5 });
+    expect(v.map((h) => h.name)).toEqual(['上海虹桥全季酒店', '上海外滩亚朵酒店']); // price asc
+    expect(v[0]!.rating).toBe(4.5);
+    expect(v[0]!.location).toBe('虹桥');
+  });
+  it('mixed: junk names + over-cap dropped, only real in-budget kept', () => {
+    const items = [
+      { hotelName: '上海外滩亚朵酒店', price: 678 },
+      { hotelName: '特惠一口价', price: 420 }, // blacklisted name
+      { hotelName: '上海静安香格里拉大酒店', price: 1164 }, // over cap
+      { hotelName: '连续39位住客好评', price: 300 }, // blacklisted
+    ];
+    const v = validateHotelJson({ items, priceLimit: 800, topN: 5 });
+    expect(v.map((h) => h.name)).toEqual(['上海外滩亚朵酒店']);
+  });
+  it('price-cap: nothing under cap → empty', () => {
+    const items = [{ hotelName: '上海王府酒店', price: 1500 }, { hotelName: '上海国贸酒店', price: 1800 }];
+    expect(validateHotelJson({ items, priceLimit: 800 })).toEqual([]);
   });
 });
 
