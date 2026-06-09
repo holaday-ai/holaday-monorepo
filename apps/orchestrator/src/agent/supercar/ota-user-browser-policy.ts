@@ -130,6 +130,29 @@ export function isHostAllowed(host: string | null | undefined, allowed: Readonly
   return false;
 }
 
+export type OtaIntentSubtype = 'hotel' | 'flight' | 'train' | 'maps' | 'unknown';
+
+const FLIGHT_RE = /机票|航班|直飞|航司|航空公司|起飞|到达|机场|flight/i;
+const TRAIN_RE = /火车票|高铁|动车|车次|train/i;
+const MAPS_RE = /路线|导航|怎么走|公交|地铁线|地图|maps/i;
+const HOTEL_RE = /酒店|宾馆|住宿|入住|星级|房价|客栈|民宿|hotel|check[\s-]?in|check[\s-]?out/i;
+
+/**
+ * Classify an OTA intent's subtype. flight/train/maps are checked BEFORE
+ * hotel so a mixed prompt (or a flight that happens to mention a hotel
+ * word) is forced to the safe server lane. Only 'hotel' is user-browser
+ * eligible — Ctrip flights have a proven server-Brave adapter, and the
+ * extension's read-only body text can't surface the flight list.
+ */
+export function classifyOtaIntentSubtype(intent: string | null | undefined): OtaIntentSubtype {
+  const t = intent ?? '';
+  if (FLIGHT_RE.test(t)) return 'flight';
+  if (TRAIN_RE.test(t)) return 'train';
+  if (MAPS_RE.test(t)) return 'maps';
+  if (HOTEL_RE.test(t)) return 'hotel';
+  return 'unknown';
+}
+
 export interface OtaCanaryInputs {
   readonly intent: string;
   readonly userId: string;
@@ -149,6 +172,7 @@ export interface OtaCanaryDecision {
   readonly matchedDomain: string | null;
   readonly userAllowed: boolean;
   readonly domainAllowed: boolean;
+  readonly intentSubtype: OtaIntentSubtype;
   readonly reason: string;
 }
 
@@ -162,6 +186,7 @@ export interface OtaCanaryDecision {
  * nobody is canaried, so production default stays server Brave.
  */
 export function resolveOtaCanaryLane(inputs: OtaCanaryInputs): OtaCanaryDecision {
+  const intentSubtype = classifyOtaIntentSubtype(inputs.intent);
   const pb = matchPlaybooks(inputs.intent).find((p) => p.preferUserBrowser === true);
   if (!pb) {
     return {
@@ -169,18 +194,33 @@ export function resolveOtaCanaryLane(inputs: OtaCanaryInputs): OtaCanaryDecision
       matchedDomain: null,
       userAllowed: false,
       domainAllowed: false,
+      intentSubtype,
       reason: 'non-OTA: no preferUserBrowser playbook match',
     };
   }
   const matchedDomain = pb.domain;
   const userAllowed = inputs.allowedUserIds.has(inputs.userId);
   const domainAllowed = isHostAllowed(matchedDomain, inputs.allowedDomains);
-  const base = { matchedDomain, userAllowed, domainAllowed } as const;
+  const base = { matchedDomain, userAllowed, domainAllowed, intentSubtype } as const;
   if (!inputs.masterEnabled) return { lane: 'server-browser', ...base, reason: 'master flag off' };
   if (!userAllowed) return { lane: 'server-browser', ...base, reason: 'user not in canary allowlist' };
   if (!domainAllowed) return { lane: 'server-browser', ...base, reason: 'domain not in canary allowlist' };
+  // Subtype gate — ONLY hotels use the read-only user browser. Flights
+  // have a proven server-Brave adapter (the extension's read-only body
+  // text can't surface the flight list); trains/maps/unknown also stay
+  // on the server lane for now.
+  if (intentSubtype !== 'hotel') {
+    return {
+      lane: 'server-browser',
+      ...base,
+      reason:
+        intentSubtype === 'flight'
+          ? 'flight-prefers-server-brave-adapter'
+          : `${intentSubtype}-prefers-server-browser`,
+    };
+  }
   if (!inputs.extensionOnline) return { lane: 'server-browser', ...base, reason: 'extension offline' };
-  return { lane: 'user-browser', ...base, reason: 'canary: user+domain allowlisted, extension online' };
+  return { lane: 'user-browser', ...base, reason: 'canary: hotel + user+domain allowlisted, extension online' };
 }
 
 // ---------------------------------------------------------------------------

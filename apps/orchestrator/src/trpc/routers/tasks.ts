@@ -2850,6 +2850,8 @@ export const tasksRouter = router({
             userAllowed: otaCanary.userAllowed,
             domainAllowed: otaCanary.domainAllowed,
             extensionOnline: otaExtensionOnline,
+            intentSubtype: otaCanary.intentSubtype,
+            subtypeReason: otaCanary.reason,
             decision: otaCanary.lane,
             reason: otaCanary.reason,
           },

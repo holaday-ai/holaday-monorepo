@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildOtaAuditRecord,
   classifyOtaAction,
+  classifyOtaIntentSubtype,
   decideOtaLane,
   isHostAllowed,
   isOtaDomain,
@@ -30,6 +31,28 @@ describe('isOtaDomain', () => {
     for (const h of ['example.com', 'ctrip.com.evil.com', 'booking.com', 'has space', '']) {
       expect(isOtaDomain(h), h).toBe(false);
     }
+  });
+});
+
+describe('classifyOtaIntentSubtype', () => {
+  it('hotel markers → hotel', () => {
+    for (const i of ['打开携程查上海酒店', '携程查北京住宿 4 星级', 'ctrip hotel checkin']) {
+      expect(classifyOtaIntentSubtype(i), i).toBe('hotel');
+    }
+  });
+  it('flight markers → flight (precedence over a stray hotel word)', () => {
+    for (const i of ['携程查北京到上海的机票', '携程直飞航班', '查机场到酒店附近的机票']) {
+      expect(classifyOtaIntentSubtype(i), i).toBe('flight');
+    }
+  });
+  it('train / maps → their subtype', () => {
+    expect(classifyOtaIntentSubtype('携程高铁车次')).toBe('train');
+    expect(classifyOtaIntentSubtype('携程火车票')).toBe('train');
+    expect(classifyOtaIntentSubtype('查路线导航')).toBe('maps');
+  });
+  it('no markers → unknown', () => {
+    expect(classifyOtaIntentSubtype('携程营销策略')).toBe('unknown');
+    expect(classifyOtaIntentSubtype('')).toBe('unknown');
   });
 });
 
@@ -133,11 +156,28 @@ describe('resolveOtaCanaryLane (Step 2.5 gate matrix)', () => {
     expect(d.domainAllowed).toBe(false);
     expect(d.reason).toMatch(/domain not in canary/);
   });
-  it('flag on + user + domain allowlisted + extension online → user-browser', () => {
+  it('flag on + user + domain allowlisted + extension online + HOTEL → user-browser', () => {
     const d = resolveOtaCanaryLane({ intent: HOTEL, userId: USER, extensionOnline: true, masterEnabled: true, allowedUserIds, allowedDomains });
     expect(d.lane).toBe('user-browser');
     expect(d.userAllowed).toBe(true);
     expect(d.domainAllowed).toBe(true);
+    expect(d.intentSubtype).toBe('hotel');
+  });
+
+  it('Step 7: a Ctrip FLIGHT with ALL canary gates satisfied is forced to server-browser', () => {
+    for (const intent of ['打开携程查北京到上海的机票，不要下单，筛选直飞', '打开携程查上海到北京机票']) {
+      const d = resolveOtaCanaryLane({ intent, userId: USER, extensionOnline: true, masterEnabled: true, allowedUserIds, allowedDomains });
+      expect(d.intentSubtype, intent).toBe('flight');
+      expect(d.lane, intent).toBe('server-browser');
+      expect(d.reason, intent).toBe('flight-prefers-server-brave-adapter');
+    }
+  });
+
+  it('Step 7: Ctrip 火车票/高铁 → server-browser', () => {
+    const d = resolveOtaCanaryLane({ intent: '携程查上海到北京的高铁车次', userId: USER, extensionOnline: true, masterEnabled: true, allowedUserIds, allowedDomains });
+    expect(d.intentSubtype).toBe('train');
+    expect(d.lane).toBe('server-browser');
+    expect(d.reason).toMatch(/train-prefers-server-browser/);
   });
   it('extension offline → server-browser', () => {
     const d = resolveOtaCanaryLane({ intent: HOTEL, userId: USER, extensionOnline: false, masterEnabled: true, allowedUserIds, allowedDomains });

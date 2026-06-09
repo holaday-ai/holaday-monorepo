@@ -26,15 +26,11 @@ import type { SupercarOutcome } from './agent-loop.js';
 import {
   buildOtaAuditRecord,
   classifyOtaAction,
+  classifyOtaIntentSubtype,
   isHostAllowed,
   isOtaDomain,
   type OtaAuditRecord,
 } from './ota-user-browser-policy.js';
-import {
-  extractCtripFlights,
-  formatCtripFlightsTable,
-  isCtripFlightResultsUrl,
-} from './ctrip-flight-extractor.js';
 import {
   bodyMatchesCity,
   dominantSupportedCity,
@@ -102,27 +98,11 @@ async function ask(
   return textFromMessage(msg);
 }
 
-const FLIGHT_URL_DERIVE_SYSTEM =
-  '你是携程机票查询 URL 生成器。给定一个中文机票查询意图，只输出**一个**携程机票查询页 URL：' +
-  'https://flights.ctrip.com/online/list/oneway-<出发城市码>-<到达城市码>?depdate=<YYYY-MM-DD>&nonstop=1 ' +
-  '（直飞需求加 nonstop=1；城市码三字母 bjs/sha/can/szx/hgh/ctu）。' +
-  '只输出 URL 本身，不要解释/markdown。绝不输出含 /pay /order /checkout /cashier 的下单或支付页。';
-
-/** Pull the first http(s) URL out of a model response. */
-function firstUrl(text: string): string | null {
-  const m = text.match(/https?:\/\/[^\s"'<>）)】]+/);
-  return m ? m[0] : null;
-}
-
 const HOTEL_EXTRACT_SYSTEM =
   '你从携程酒店结果页的可见文本中提取酒店。输出 Markdown 表格，列：酒店名 | 评分 | 价格(¥) | 位置 | 档次。' +
   '只用文本里真实出现的数据，不要编造；没有的字段写「未标注」。务必排除价格高于给定上限的酒店。' +
   '按价格升序取最多 N 个。表格后另起一行写「仅查询，未预订」。' +
   '若文本里没有可读的酒店列表（登录页/空白），只回复一行：已进入携程酒店结果页，但未能稳定读取酒店列表。';
-
-function detectTaskKind(intent: string): 'hotel' | 'flight' {
-  return /酒店|宾馆|住宿|民宿|客栈|\bhotel\b/i.test(intent) ? 'hotel' : 'flight';
-}
 
 /** Parse 价格上限 / top-N out of the intent ("价格低于 800", "给 5 个"). */
 function parseHotelFilters(intent: string): { maxPriceCNY?: number; topN: number } {
@@ -242,46 +222,48 @@ export async function runOtaUserBrowserReadonly(opts: {
   const model = deps.model ?? DEFAULT_MODEL;
   const toolsUsed: string[] = [];
   let iterations = 0;
-  deps.onProgress?.('正在使用你的浏览器读取页面…');
-  const kind = detectTaskKind(intent);
 
-  // 1. Resolve the query URL.
-  //    Hotels: deterministic city→cityId + future dates (NO model URL
-  //    invention — the Step-5 wrong-city bug). Flights: model-derived.
-  let url: string;
-  let targetCity: string | null = null;
-  if (kind === 'hotel') {
-    const r = resolveCtripHotelUrl({ intent, ...(opts.now ? { now: opts.now } : {}) });
-    targetCity = r.city;
-    if (!r.knownSchema || !r.url) {
-      deps.logger.info(
-        { taskId, city: r.city, knownSchema: r.knownSchema, reason: 'unknown-ctrip-hotel-schema' },
-        'ota: ctrip hotel schema unknown — not faking a URL',
-      );
-      return {
-        status: 'failed',
-        reason: r.city
-          ? `「${r.city}」的携程酒店页面地址暂不在已支持范围内（避免读到错误城市），未执行。`
-          : '未能从你的描述中识别要查询的城市，请明确城市名后重试。',
-        iterations,
-        toolsUsed,
-      };
-    }
-    url = r.url;
-    iterations += 1;
-  } else {
-    iterations += 1;
-    let derived: string | null = null;
-    try {
-      derived = firstUrl(await ask(deps.client, model, FLIGHT_URL_DERIVE_SYSTEM, intent, 300));
-    } catch (err) {
-      deps.logger.warn({ taskId, err: err instanceof Error ? err.message : String(err) }, 'ota-readonly: flight url derive failed');
-    }
-    if (!derived) {
-      return { status: 'failed', reason: '无法为该机票查询生成携程页面地址，请重试或换个说法。', iterations, toolsUsed };
-    }
-    url = derived;
+  // 0. Subtype guard (Step 7) — the read-only user browser handles HOTELS
+  //    ONLY. Flights have a proven server-Brave adapter and can't be read
+  //    from the extension's body text; trains/maps/unknown also belong on
+  //    the server lane. tasks.ts already avoids routing non-hotel intents
+  //    here; this is defence-in-depth so a mis-route fails fast (and is
+  //    re-runnable on server Brave) instead of grinding.
+  const subtype = classifyOtaIntentSubtype(intent);
+  if (subtype !== 'hotel') {
+    deps.logger.info(
+      { taskId, intentSubtype: subtype, reason: 'non-hotel-rejected-by-readonly-runner' },
+      'ota: readonly runner only handles hotels — rejecting',
+    );
+    return {
+      status: 'failed',
+      reason: `只读用户浏览器仅支持酒店查询（本次为 ${subtype}）；机票/火车票/路线等请走服务器浏览器执行，本次未执行。`,
+      iterations,
+      toolsUsed,
+    };
   }
+  deps.onProgress?.('正在使用你的浏览器读取页面…');
+
+  // 1. Resolve the hotel query URL deterministically: city→cityId + future
+  //    dates (NO model URL invention — the Step-5 wrong-city bug).
+  const resolved = resolveCtripHotelUrl({ intent, ...(opts.now ? { now: opts.now } : {}) });
+  const targetCity = resolved.city;
+  iterations += 1;
+  if (!resolved.knownSchema || !resolved.url) {
+    deps.logger.info(
+      { taskId, city: resolved.city, knownSchema: resolved.knownSchema, reason: 'unknown-ctrip-hotel-schema' },
+      'ota: ctrip hotel schema unknown — not faking a URL',
+    );
+    return {
+      status: 'failed',
+      reason: resolved.city
+        ? `「${resolved.city}」的携程酒店页面地址暂不在已支持范围内（避免读到错误城市），未执行。`
+        : '未能从你的描述中识别要查询的城市，请明确城市名后重试。',
+      iterations,
+      toolsUsed,
+    };
+  }
+  const url = resolved.url;
 
   // 2. Safety guard — domain allowlist + no pay/order/checkout + canary scope.
   const guard = guardNavigate(deps, taskId, url);
@@ -289,14 +271,10 @@ export async function runOtaUserBrowserReadonly(opts: {
     return { status: 'failed', reason: guard.reason ?? '导航地址被拒绝。', iterations, toolsUsed };
   }
 
-  // 3. Navigate in the user's logged-in Chrome (with stale/early-read retry).
-  //    Flights retry until the list actually parses (early-read on the
-  //    JS-rendered SPA returns an empty shell); hotels just need content
-  //    (the deterministic+model extractors handle parsing downstream).
+  // 3. Navigate in the user's logged-in Chrome (with stale/early-read retry
+  //    + city-match guard so a stale tab can't yield a wrong-city table).
   iterations += 1;
-  const satisfied =
-    kind === 'flight' ? (body: string) => extractCtripFlights(body).length > 0 : () => true;
-  const read = await navigateWithRetry(deps, taskId, url, targetCity, satisfied);
+  const read = await navigateWithRetry(deps, taskId, url, targetCity);
   toolsUsed.push('navigate');
   if (!read.nav.ok || !read.nav.result) {
     return {
@@ -342,21 +320,7 @@ export async function runOtaUserBrowserReadonly(opts: {
     };
   }
 
-  // 4a. Flights — deterministic extractor (retry already handled above).
-  if (kind === 'flight' || isCtripFlightResultsUrl(finalUrl)) {
-    const flights = extractCtripFlights(bodyText);
-    if (flights.length > 0) {
-      return {
-        status: 'completed',
-        summary: `已用你的浏览器读取携程机票结果页（仅查询，未下单/未预订）：\n\n${formatCtripFlightsTable(flights, { url: finalUrl, topN: 3 })}`,
-        iterations,
-        toolsUsed,
-      };
-    }
-    return { status: 'failed', reason: '已进入携程结果页，但未能稳定读取航班列表。', iterations, toolsUsed };
-  }
-
-  // 4b. Hotels — deterministic extractor + hard price cap; model fallback.
+  // 4. Hotels — deterministic extractor + hard price cap; model fallback.
   const filters = parseHotelFilters(intent);
   const hotels = extractCtripHotels(bodyText);
   if (hotels.length > 0) {
