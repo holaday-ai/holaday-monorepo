@@ -961,3 +961,41 @@ describe('classifyExecutionMode — does not call the API', () => {
     expect(create).not.toHaveBeenCalled();
   });
 });
+
+describe('Open website / online tool + compute/evidence → browser (T6 P1, 2026-06-10)', () => {
+  // Regression: "打开 web2.0calc 算 128×128，给证据" routed to generate
+  // (bare "web2.0calc" suffix ".0calc" is not a valid TLD, and "去" was
+  // not an open-verb), then the generate stream heartbeat-stalled → no
+  // result, no browser evidence. Must drive a live page instead.
+  it('open/去 a website or online calculator → browser', async () => {
+    for (const intent of [
+      '打开 web2.0calc 算 128 × 128，给结果和证据',
+      '打开 https://web2.0calc.com/ 算 128 × 128，给结果和证据',
+      '去 web2.0calc.com 计算 128*128',
+      '打开网页计算器算 128 乘 128，并截图',
+    ]) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).toBe('browser');
+    }
+  });
+
+  it('pure arithmetic / greeting / knowledge are NOT forced to browser', async () => {
+    // These reach the deterministic lightweight path first; the exec
+    // classifier must NOT route them to the browser lane.
+    for (const intent of ['128 * 128 等于几？', '1 加 1 等于几？', '你好', '什么是 web2.0calc']) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).not.toBe('browser');
+    }
+  });
+
+  it('does NOT over-match dotted lib names / 去年 / 访问量 (no nav-to-site intent)', async () => {
+    for (const intent of [
+      '用 node.js 写一个排序函数',
+      '去年的销售数据分析',
+      '访问量分析报告怎么写',
+    ]) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).not.toBe('browser');
+    }
+  });
+});

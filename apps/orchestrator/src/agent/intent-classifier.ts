@@ -89,6 +89,15 @@ const INTERACTION_VERBS: readonly string[] = [];
 
 const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/(?:打开|访问|进入|前往|跳转到).{0,32}(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,24}|网站|网页|页面|链接|后台|app|平台|京东|淘宝|天猫|拼多多|小红书|微博|知乎|抖音|b站|bilibili|github|linkedin|amazon|gmail)/i, '中文打开页面'],
+  // Navigation verb (incl. 去) + a site-like token or an online calculator/
+  // tool → drive a live page. Catches bare tool names whose suffix is NOT a
+  // valid TLD (e.g. "web2.0calc" — ".0calc" starts with a digit, so the
+  // domain regex above misses it) and the verb "去" (absent above). The
+  // token must be letter-led with an internal dot (web2.0calc / web2.0calc.com
+  // / example.com), so bare decimals ("128.0") and dot-less words can't match.
+  // Routed BEFORE scrape/generate so "打开 web2.0calc 算… 给证据" reaches the
+  // browser lane instead of stalling in generate. (T6 P1, 2026-06-10.)
+  [/(?:打开|访问|进入|前往|跳转到|去)\s*(?:https?:\/\/|www\.|[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+|(?:网页|在线)?计算器|在线工具)/i, '中文打开站点或在线工具'],
   [/(?:点击|点开|按下|选择).{0,24}(?:按钮|链接|菜单|选项|标签|tab|继续|下一步|提交|登录|确认|购买|支付|下载|这个|这|该|它)/i, '中文点击控件'],
   [/(?:提交|填写|填表|填入|输入).{0,24}(?:表单|申请|订单|资料|信息|姓名|邮箱|地址|验证码|问卷|报名|简历|这个|这|该)/i, '中文表单操作'],
   [/(?:下载(?![量率])|保存).{0,24}(?:文件|图片|截图|报告|附件|pdf|csv|xlsx|表格|资料|这个|这|该)/i, '中文下载文件'],
