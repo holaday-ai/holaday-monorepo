@@ -39,6 +39,7 @@ import {
 } from '../vision-loop/anti-bot-detector.js';
 import type { PageLike, PlaywrightExecutor } from '../vision-loop/playwright-executor.js';
 import { logger } from '../../config/logger.js';
+import { buildCreateFileToolDescription, buildFileFormatGuidance } from '../../files/writers.js';
 import type { DomainName } from '../vision-loop/domain/classifier.js';
 import type { ApifyAdapter } from './adapters/apify.js';
 import type { ZapierAdapter } from './adapters/zapier.js';
@@ -1326,6 +1327,11 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
     domain: opts.domain ?? null,
     intent: opts.intent,
     layered: tier1,
+    // Plan-aware file-format guidance: honest degrade when the account
+    // can't produce a requested format (free → can't generate files;
+    // basic → office formats fall back to md/csv). Covers the free
+    // path too, where create_file isn't even exposed.
+    fileFormatGuidance: buildFileFormatGuidance(opts.createFileFormats ?? []),
   });
 
   type MsgParam = Anthropic.Beta.BetaMessageParam;
@@ -1683,8 +1689,7 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
                   {
                     type: 'custom' as const,
                     name: 'create_file',
-                    description:
-                      '为用户生成一个可下载的文件。任务结果若需以文件形式交付（数据表/报告/演示稿/JSON 数据等），调用此工具。文件 24 小时内可供用户下载。',
+                    description: buildCreateFileToolDescription(opts.createFileFormats),
                     input_schema: {
                       type: 'object',
                       properties: {

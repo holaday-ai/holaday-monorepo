@@ -207,11 +207,19 @@ export function buildSupercarSystemPrompt(opts: {
    * rollback.
    */
   layered?: boolean;
+  /**
+   * Plan-aware file-format guidance (writers.buildFileFormatGuidance).
+   * Appended verbatim so the model degrades honestly when the account
+   * can't produce a requested format. Empty/undefined → no-op.
+   */
+  fileFormatGuidance?: string;
 } = {}): string {
+  const guidance = opts.fileFormatGuidance?.trim();
   if (opts.layered) {
     const intent = opts.intent ?? '';
     const roleId = classifyRole(intent);
-    return buildLayeredSystemPrompt(roleId);
+    const layered = buildLayeredSystemPrompt(roleId);
+    return guidance ? `${layered}\n\n${guidance}` : layered;
   }
 
   const domain = opts.domain ?? 'general';
@@ -222,6 +230,7 @@ export function buildSupercarSystemPrompt(opts: {
   const parts = [SUPERCAR_CORE_PROMPT];
   if (domainFragment) parts.push(domainFragment);
   if (role) parts.push(role.systemAddon);
+  if (guidance) parts.push(guidance);
   return parts.join('\n\n');
 }
 

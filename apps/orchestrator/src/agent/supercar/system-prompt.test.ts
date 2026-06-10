@@ -22,4 +22,15 @@ describe('supercar system prompt safety boundaries', () => {
     expect(PLAN_SYSTEM).toContain('到达最终确认页 / 草稿预览页并展示明细');
     expect(PLAN_SYSTEM).toContain('不要把"点击确认 / Place order / Pay / Send / Share / Change access / Delete / Unsubscribe"列为步骤');
   });
+
+  it('appends plan-aware file-format guidance verbatim (P1 honest degrade)', () => {
+    const guidance = '【文件生成】TEST-GUIDANCE-MARKER';
+    const layered = buildSupercarSystemPrompt({ intent: '生成一个 PDF', layered: true, fileFormatGuidance: guidance });
+    expect(layered).toContain('TEST-GUIDANCE-MARKER');
+    const legacy = buildSupercarSystemPrompt({ intent: '生成一个 PDF', fileFormatGuidance: guidance });
+    expect(legacy).toContain('TEST-GUIDANCE-MARKER');
+    // No guidance → no trailing marker, prompt still builds.
+    const none = buildSupercarSystemPrompt({ intent: '生成一个 PDF', layered: true });
+    expect(none).not.toContain('TEST-GUIDANCE-MARKER');
+  });
 });

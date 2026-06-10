@@ -95,6 +95,93 @@ export function isCreateFileFormat(value: string): value is CreateFileFormat {
   return (ALL_FORMATS as readonly string[]).includes(value);
 }
 
+// ---------------------------------------------------------------------------
+// Plan-aware file-format guidance (P1 — honest degrade on basic/free)
+// ---------------------------------------------------------------------------
+
+/** Closest open-format substitute for an office format the plan can't render. */
+const OFFICE_FALLBACK: Readonly<Record<string, CreateFileFormat>> = {
+  pdf: 'md',
+  docx: 'md',
+  pptx: 'md',
+  xlsx: 'csv',
+};
+
+/**
+ * Pick the fallback format when `requested` is NOT in the account's allowed
+ * list. Returns null when `requested` is already allowed (no fallback needed)
+ * or no sensible open format is available. Prefers the office→open mapping
+ * (pdf/docx/pptx→md, xlsx→csv), then md/csv/txt/json, then any allowed.
+ */
+export function preferredFallbackFormat(
+  requested: string,
+  allowed: readonly string[],
+): CreateFileFormat | null {
+  if (allowed.includes(requested)) return null; // already available
+  const mapped = OFFICE_FALLBACK[requested];
+  if (mapped && allowed.includes(mapped)) return mapped;
+  for (const f of ['md', 'csv', 'txt', 'json'] as const) {
+    if (allowed.includes(f)) return f;
+  }
+  return (allowed[0] as CreateFileFormat) ?? null;
+}
+
+/**
+ * Plan-aware guidance string injected into the supercar system prompt so the
+ * model behaves consistently when the account can't produce a requested
+ * format. Empty `allowed` (free) → honest "cannot generate files". Otherwise
+ * → list available formats + office→open fallback map + two hard rules:
+ * never claim an unavailable format was generated, and don't browse the web
+ * just to produce a file. Plain code (no model call) so it's deterministic.
+ */
+export function buildFileFormatGuidance(allowed: readonly string[]): string {
+  if (allowed.length === 0) {
+    return (
+      '【文件生成】本账号当前套餐不支持生成可下载文件。若用户要求生成或下载文件，' +
+      '请诚实说明当前套餐无法生成可下载文件，并直接在回答正文给出内容，' +
+      '**切勿声称已生成文件或已提供下载链接**。'
+    );
+  }
+  const unavailable = ALL_FORMATS.filter((f) => !allowed.includes(f));
+  const lines = [
+    `【文件生成】本账号可用的 create_file 格式仅：${allowed.join(' / ')}。`,
+    '生成文件时若内容可直接写出，**不要为生成文件去联网浏览网页**（除非用户明确要求查资料）。',
+  ];
+  if (unavailable.length > 0) {
+    const exMap = unavailable
+      .map((f) => {
+        const fb = preferredFallbackFormat(f, allowed);
+        return fb ? `${f}→${fb}` : null;
+      })
+      .filter((s): s is string => s != null)
+      .join('、');
+    lines.push(
+      `若用户要的格式（${unavailable.join('/')}）不在可用列表：**绝不要声称已生成该格式**；` +
+        `改用最接近的可用格式生成真实文件（${exMap}），` +
+        '并在最终回答中说明「已改用 X 文件交付；PDF/Office 等格式需升级 Pro 套餐」。',
+    );
+  }
+  return lines.join('\n');
+}
+
+/**
+ * create_file tool description, plan-aware. Lists the account's available
+ * formats and the fallback rule so the model substitutes (instead of
+ * hallucinating) when asked for an unavailable office format.
+ */
+export function buildCreateFileToolDescription(allowed: readonly string[]): string {
+  const base =
+    '为用户生成一个可下载的文件。任务结果若需以文件形式交付（数据表/报告/演示稿/JSON 数据等），调用此工具。文件 24 小时内可供用户下载。';
+  const unavailable = ALL_FORMATS.filter((f) => !allowed.includes(f));
+  let note = ` 本账号可用格式：${allowed.join('/')}。`;
+  if (unavailable.length > 0) {
+    note +=
+      `若用户要 ${unavailable.join('/')} 等不可用格式，请改用可用格式生成真实文件` +
+      '（pdf/docx/pptx→md，xlsx→csv），并在回答中说明已降级交付、该格式需升级 Pro，**不要声称已生成不可用格式**。';
+  }
+  return base + note;
+}
+
 /**
  * Main entry point — dispatch on format. `content` is whatever the
  * model passed in the tool input. For structured formats it MUST be
