@@ -145,6 +145,9 @@ export function buildFileFormatGuidance(allowed: readonly string[]): string {
   const unavailable = ALL_FORMATS.filter((f) => !allowed.includes(f));
   const lines = [
     `【文件生成】本账号可用的 create_file 格式仅：${allowed.join(' / ')}。`,
+    // Kill the "I can author a PDF/DOCX directly" hallucination: the model
+    // has no code-exec/reportlab/office renderer; create_file is the ONLY way.
+    '你没有 Python / reportlab / 代码执行 / Office 渲染能力；**产出任何可下载文件的唯一方式就是调用 create_file 工具**。',
     '生成文件时若内容可直接写出，**不要为生成文件去联网浏览网页**（除非用户明确要求查资料）。',
   ];
   if (unavailable.length > 0) {
@@ -156,12 +159,66 @@ export function buildFileFormatGuidance(allowed: readonly string[]): string {
       .filter((s): s is string => s != null)
       .join('、');
     lines.push(
-      `若用户要的格式（${unavailable.join('/')}）不在可用列表：**绝不要声称已生成该格式**；` +
-        `改用最接近的可用格式生成真实文件（${exMap}），` +
-        '并在最终回答中说明「已改用 X 文件交付；PDF/Office 等格式需升级 Pro 套餐」。',
+      `若用户要的格式（${unavailable.join('/')}）不在可用列表：**绝不要声称已生成该格式、绝不要假装用 reportlab 等库直接生成**；` +
+        `你必须实际调用 create_file 以最接近的可用格式生成真实文件（${exMap}），` +
+        '然后在最终回答中说明「已改用 X 文件交付；PDF/Office 等格式需升级 Pro 套餐」。未调用 create_file 就不得声称已生成任何文件。',
     );
   }
   return lines.join('\n');
+}
+
+const FORMAT_REQUEST_PATTERNS: ReadonlyArray<readonly [CreateFileFormat, RegExp]> = [
+  ['pdf', /\bpdf\b|pdf\s*文件|pdf\s*文档/i],
+  ['xlsx', /\bxlsx\b|\bexcel\b|电子表格|excel\s*文件/i],
+  ['docx', /\bdocx\b|word\s*文档|word\s*文件|\bword\b/i],
+  ['pptx', /\bpptx\b|\bppt\b|幻灯片|演示文稿|演示文件/i],
+  ['csv', /\bcsv\b|csv\s*文件/i],
+  ['json', /\bjson\b|json\s*文件/i],
+  ['md', /\bmarkdown\b|\bmd\b|md\s*文件|markdown\s*文件/i],
+  ['txt', /\btxt\b|纯文本文件|文本文件/i],
+];
+
+/**
+ * Best-effort: which concrete file format did the user explicitly ask for?
+ * Returns null when no explicit format is named. Office formats are matched
+ * before open ones so "可下载的 PDF 文件" → 'pdf'. Used to inject a forceful
+ * per-task directive when the requested format is unavailable on the plan.
+ */
+export function detectRequestedFileFormat(intent: string | null | undefined): CreateFileFormat | null {
+  const t = intent ?? '';
+  for (const [fmt, re] of FORMAT_REQUEST_PATTERNS) {
+    if (re.test(t)) return fmt;
+  }
+  return null;
+}
+
+/**
+ * High-attention directive prepended to the FIRST user message when the user
+ * asked for a format the plan can't produce. Returns '' when the requested
+ * format is available (or none detected) so it no-ops in the common case.
+ * This sits next to the intent (far higher attention than the trailing system
+ * guidance) to stop the PDF/DOCX "I'll just render it" hallucination.
+ */
+export function buildUnavailableFormatDirective(
+  intent: string | null | undefined,
+  allowed: readonly string[],
+): string {
+  const requested = detectRequestedFileFormat(intent);
+  if (!requested) return '';
+  if (allowed.includes(requested)) return '';
+  if (allowed.length === 0) {
+    return (
+      `【重要·文件格式】本账号当前套餐无法生成可下载文件，更无法生成 ${requested}。` +
+      '请诚实告知用户当前套餐不支持生成可下载文件，直接在正文给出内容，**切勿声称已生成任何文件或下载链接**。'
+    );
+  }
+  const fb = preferredFallbackFormat(requested, allowed) ?? 'md';
+  return (
+    `【重要·文件格式】本账号无法生成 ${requested}（需升级 Pro）。你也没有 reportlab/代码执行能力。` +
+    `请**直接调用 create_file，format='${fb}'**，生成真实的 ${fb} 文件来承载用户要的内容；` +
+    `然后在回答中说明「已改用 ${fb} 文件交付；${requested} 需升级 Pro 套餐」。` +
+    `**严禁声称已生成 ${requested}、严禁假装用库直接渲染、严禁为此联网浏览。**`
+  );
 }
 
 /**

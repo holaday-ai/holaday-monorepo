@@ -39,7 +39,11 @@ import {
 } from '../vision-loop/anti-bot-detector.js';
 import type { PageLike, PlaywrightExecutor } from '../vision-loop/playwright-executor.js';
 import { logger } from '../../config/logger.js';
-import { buildCreateFileToolDescription, buildFileFormatGuidance } from '../../files/writers.js';
+import {
+  buildCreateFileToolDescription,
+  buildFileFormatGuidance,
+  buildUnavailableFormatDirective,
+} from '../../files/writers.js';
 import type { DomainName } from '../vision-loop/domain/classifier.js';
 import type { ApifyAdapter } from './adapters/apify.js';
 import type { ZapierAdapter } from './adapters/zapier.js';
@@ -1350,6 +1354,19 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
   // Phase 14: playbook context lands AFTER the memory preamble (so
   // user-specific memories take precedence) and BEFORE attachments.
   const intentParts: string[] = [opts.intent];
+  // Plan-aware file-format directive — when the user explicitly asks for a
+  // format this account can't produce (e.g. PDF/DOCX on basic), a forceful
+  // directive sits right next to the intent (far higher attention than the
+  // trailing system guidance) so the model degrades to a real create_file
+  // call instead of hallucinating "PDF 已生成 (reportlab)". No-ops when the
+  // requested format is available or none is named.
+  const fileFormatDirective = buildUnavailableFormatDirective(
+    opts.intent,
+    opts.createFileFormats ?? [],
+  );
+  if (fileFormatDirective) {
+    intentParts.push(fileFormatDirective);
+  }
   if (opts.memoryPreamble && opts.memoryPreamble.trim().length > 0) {
     intentParts.push(opts.memoryPreamble);
   }
