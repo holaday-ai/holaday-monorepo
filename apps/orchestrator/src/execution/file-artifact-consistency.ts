@@ -138,8 +138,14 @@ export function claimedDownloadFamilies(
 ): Set<string> {
   const fams = new Set<string>();
   if (!answerText) return fams;
+  // The stem before the extension may be CJK (e.g. "会议纪要模板.md"); a
+  // [\w-]+ stem (ASCII-only) misses those, so the genuinely-produced file's
+  // family wouldn't be recognised and an honest md-fallback for a docx
+  // request would be mis-flagged. Match any run up to whitespace / common
+  // CJK+ASCII punctuation instead. URLs behave as before (the path segment
+  // before the extension still matches).
   for (const match of answerText.matchAll(
-    /[\w\-]+\.(pdf|md|markdown|csv|json|xlsx|docx|txt|pptx)\b/gi,
+    /[^\s/\\，。、；：,;!?()（）[\]【】「」『』"'`]+\.(pdf|md|markdown|csv|json|xlsx|docx|txt|pptx)\b/gi,
   )) {
     const ext = (match[1] ?? '').toLowerCase();
     if (ext) fams.add(ext === 'markdown' ? 'md' : ext);

@@ -81,6 +81,11 @@ describe('claimedDownloadFamilies', () => {
   it('is empty for a generic file claim', () => {
     expect(claimedDownloadFamilies('文件已生成，点击下载。').size).toBe(0);
   });
+
+  it('reads the family from a CJK-stem filename (会议纪要模板.md → md)', () => {
+    const fams = claimedDownloadFamilies('会议纪要模板已生成，点击下载：会议纪要模板.md');
+    expect([...fams]).toContain('md');
+  });
 });
 
 describe('evaluateFileArtifact — screenshot must not satisfy the claim', () => {
@@ -123,6 +128,28 @@ describe('evaluateFileArtifact — screenshot must not satisfy the claim', () =>
     const v = evaluateFileArtifact({
       answerText: 'PDF 已生成：report.pdf。',
       outputFiles: [MD],
+    });
+    expect(v.inconsistent).toBe(true);
+  });
+
+  it('docx→md degrade with a CJK-named md output => pass (no false guard)', () => {
+    // Real regression: model degraded a docx request to md, produced a real
+    // CJK-named md, and explained "docx 需升级 Pro". The md must satisfy the
+    // claim even though the prose also mentions "docx".
+    const minutes = { filename: '会议纪要模板.md', mimetype: 'text/markdown' };
+    const v = evaluateFileArtifact({
+      answerText:
+        '会议纪要模板已生成，点击下载：会议纪要模板.md。已改用 md 文件交付；docx 格式需升级 Pro 套餐，可粘贴到 Word 后另存为 docx。',
+      outputFiles: [SCREENSHOT, minutes],
+    });
+    expect(v.hasArtifact).toBe(true);
+    expect(v.inconsistent).toBe(false);
+  });
+
+  it('still flags a real docx hallucination: claims docx, no document output', () => {
+    const v = evaluateFileArtifact({
+      answerText: 'docx 已生成：会议纪要.docx，点击下载。',
+      outputFiles: [SCREENSHOT],
     });
     expect(v.inconsistent).toBe(true);
   });
