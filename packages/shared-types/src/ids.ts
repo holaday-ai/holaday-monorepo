@@ -29,6 +29,8 @@ export const ID_PREFIXES = {
   // Phase 26B — per-user inbox row + external webhook channel.
   notification: 'nfn',
   notificationChannel: 'nch',
+  // Phase 1 #2 — A股自选股 (watchlist row).
+  watchlist: 'wl',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

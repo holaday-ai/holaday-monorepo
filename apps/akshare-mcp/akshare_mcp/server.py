@@ -5,13 +5,14 @@ each backed by a per-interface TTL cache. The HOLA DAY orchestrator (or
 the a-share-analyst skill) consumes these instead of reverse-engineering
 东方财富's private endpoints.
 
-Tools (scope fixed by the sprint plan):
+Tools (scope fixed by the sprint plan; 选1扩展版 +cn 指数 +解禁):
   get_stock_quote        行情 — 实时
   get_stock_kline        行情 — 历史 K 线
   get_stock_announcements 公告
   get_dragon_tiger       龙虎榜
   get_northbound_flow    北向资金
-  get_index_quote        港美股指数
+  get_index_quote        港 / 美 / A股指数（hk / us / cn）
+  get_share_unlock       个股解禁（G2）
 
 Compliance (red lines, enforced here + restated in every envelope):
   - 只聚合 + 结构化，绝不给买卖建议、不预测股价
@@ -71,6 +72,7 @@ _announce = cached(adp.TTL_ANNOUNCE)(adp.get_announcements)
 _lhb = cached(adp.TTL_LHB)(adp.get_dragon_tiger)
 _north = cached(adp.TTL_NORTHBOUND)(adp.get_northbound_flow)
 _index = cached(adp.TTL_INDEX)(adp.get_index_quote)
+_unlock = cached(adp.TTL_UNLOCK)(adp.get_share_unlock)
 
 
 @mcp.tool()
@@ -122,8 +124,21 @@ def get_northbound_flow() -> dict[str, Any]:
 
 @mcp.tool()
 def get_index_quote(market: str) -> dict[str, Any]:
-    """港 / 美股主要指数实时行情。market: 'hk'（恒指等）/ 'us'（道指等）。"""
+    """港 / 美 / A股主要指数行情。
+
+    market: 'hk'（恒指等）/ 'us'（标普/道指/纳指，含隔夜涨跌幅）/
+    'cn'（上证指数/深证成指/创业板指 实时 spot）。
+    """
     return _safe(_index, market)
+
+
+@mcp.tool()
+def get_share_unlock(symbol: str) -> dict[str, Any]:
+    """个股限售解禁安排（批次 / 解禁时间 / 数量）。symbol: 6 位代码。
+
+    用于盘前简报「今日关键事项」。新股 / 财经日历暂未覆盖（backlog）。
+    """
+    return _safe(_unlock, symbol)
 
 
 def main() -> None:

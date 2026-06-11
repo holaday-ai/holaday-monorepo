@@ -20,3 +20,4 @@ export * from './payments.js';
 export * from './pending-cookies.js';
 export * from './user-site-stats.js';
 export * from './notifications.js';
+export * from './watchlists.js';

@@ -15,6 +15,13 @@ VERIFIED 2026-06-11 against **akshare 1.18.64** (实跑核对):
   - 美股 index_us_stock_sina(".INX") 返的是**历史 OHLCV**（date/open/high/
     low/close/volume），非实时 spot —— get_index_quote 取末行=最新收盘。
 
+⚠️ 选1扩展版新增（**待 Vultr 实跑核对 akshare 1.18.64 函数名 + 列名**）：
+  - G1 美股三大指数 .INX/.DJI/.IXIC（index_us_stock_sina 各调一次），末 2 行算隔夜涨跌幅。
+  - G3 A股三大指数 stock_zh_index_spot_em(symbol="沪深重要指数")，按名称取 上证指数/深证成指/创业板指。
+  - G2 个股解禁 stock_restricted_release_queue_em(symbol)。新股 / 财经日历留 backlog。
+  - 北向 stock_hsgt_fund_flow_summary_em：2024-08 后净买额披露规则变更，**Vultr 真接第一件事就是验当天返回**，
+    若净买额不可得 → 消费侧（渲染器）降级为成交额或移除，禁用过期口径。
+
 Scope (per the sprint plan, intentionally NARROW — 股民每日信息 only):
   行情      get_quote / get_kline
   公告      get_announcements
@@ -52,6 +59,7 @@ TTL_ANNOUNCE = _ttl("ANNOUNCE", 1800)
 TTL_LHB = _ttl("LHB", 3600)
 TTL_NORTHBOUND = _ttl("NORTHBOUND", 60)
 TTL_INDEX = _ttl("INDEX", 60)
+TTL_UNLOCK = _ttl("UNLOCK", 3600)
 
 # Row caps so a single tool call can't dump thousands of rows into the
 # model's context.
@@ -101,6 +109,23 @@ def _records(df: Any, limit: int = MAX_ROWS) -> list[dict[str, Any]]:
 
 def _json_safe(v: Any) -> bool:
     return v is None or isinstance(v, (str, int, float, bool))
+
+
+def _to_float(v: Any) -> float | None:
+    """宽松转 float（None / 非数 → None）。"""
+    try:
+        return None if v is None else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def pct_change(prev_close: Any, last_close: Any) -> float | None:
+    """末 2 行 close 环比涨跌幅（百分比，2 位）。任一不可用 → None。G1 核心逻辑，可单测。"""
+    prev = _to_float(prev_close)
+    last = _to_float(last_close)
+    if prev is None or last is None or prev == 0:
+        return None
+    return round((last - prev) / prev * 100, 2)
 
 
 # --- 行情 ------------------------------------------------------------
@@ -169,18 +194,67 @@ def get_northbound_flow() -> tuple[list[dict[str, Any]], str]:
     return _records(df), "akshare:stock_hsgt_fund_flow_summary_em"
 
 
-# --- 港美股指数 ------------------------------------------------------
-def get_index_quote(market: str) -> tuple[list[dict[str, Any]], str]:
-    """港/美股主要指数实时行情。market: 'hk' | 'us'。"""
+# --- 港 / 美 / A股指数 ------------------------------------------------
+US_INDICES = [(".INX", "标普500"), (".DJI", "道琼斯"), (".IXIC", "纳斯达克")]
+CN_INDEX_NAMES = ["上证指数", "深证成指", "创业板指"]
+
+
+def _us_indices() -> list[dict[str, Any]]:
+    """G1: 标普/道指/纳指 隔夜收盘 + 涨跌幅（sina 历史末 2 行 close 环比）。"""
+    out: list[dict[str, Any]] = []
     a = _require_ak()
+    for sym, name in US_INDICES:
+        try:
+            df = a.index_us_stock_sina(symbol=sym)
+        except Exception:  # noqa: BLE001 - 单指数失败不拖垮整段
+            continue
+        rows = _records(df.tail(2), limit=2) if (df is not None and len(df) > 0) else []
+        if not rows:
+            continue
+        last = rows[-1]
+        prev_close = rows[-2].get("close") if len(rows) >= 2 else None
+        out.append(
+            {
+                "名称": name,
+                "代码": sym,
+                "收盘": _to_float(last.get("close")),
+                "涨跌幅": pct_change(prev_close, last.get("close")),
+                "日期": last.get("date"),
+            }
+        )
+    return out
+
+
+def _cn_indices() -> list[dict[str, Any]]:
+    """G3: A股三大指数实时 spot（上证指数 / 深证成指 / 创业板指）。"""
+    a = _require_ak()
+    df = a.stock_zh_index_spot_em(symbol="沪深重要指数")
+    rows = _records(df, limit=200)
+    order = {n: i for i, n in enumerate(CN_INDEX_NAMES)}
+    picked = [r for r in rows if str(r.get("名称")) in order]
+    picked.sort(key=lambda r: order.get(str(r.get("名称")), 99))
+    return picked
+
+
+def get_index_quote(market: str) -> tuple[list[dict[str, Any]], str]:
+    """港 / 美 / A股主要指数行情。market: 'hk' | 'us' | 'cn'。"""
     m = market.lower()
     if m == "hk":
+        a = _require_ak()
         df = a.stock_hk_index_spot_em()
         return _records(df), "akshare:stock_hk_index_spot_em"
     if m == "us":
-        # Verified: index_us_stock_sina returns HISTORICAL OHLCV — take
-        # the latest row as the current close (盘前看隔夜收盘够用).
-        df = a.index_us_stock_sina(symbol=".INX")
-        latest = df.tail(1) if (df is not None and len(df) > 0) else df
-        return _records(latest), "akshare:index_us_stock_sina(latest)"
-    raise AkShareUnavailable(f"未知市场 '{market}'，仅支持 hk / us")
+        # G1: 标普(.INX)/道指(.DJI)/纳指(.IXIC)，sina 历史末 2 行算隔夜涨跌幅。
+        return _us_indices(), "akshare:index_us_stock_sina(.INX/.DJI/.IXIC,末2行)"
+    if m == "cn":
+        # G3: 上证指数/深证成指/创业板指 实时 spot。
+        return _cn_indices(), "akshare:stock_zh_index_spot_em(沪深重要指数)"
+    raise AkShareUnavailable(f"未知市场 '{market}'，仅支持 hk / us / cn")
+
+
+# --- 解禁（G2；新股 / 财经日历留 backlog） ---------------------------
+def get_share_unlock(symbol: str) -> tuple[list[dict[str, Any]], str]:
+    """个股限售解禁安排（批次 / 解禁时间 / 数量）。symbol 形如 '600519'。"""
+    a = _require_ak()
+    df = a.stock_restricted_release_queue_em(symbol=symbol)
+    return _records(df), "akshare:stock_restricted_release_queue_em"
