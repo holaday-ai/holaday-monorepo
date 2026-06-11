@@ -75,6 +75,29 @@ run_with_retry() {
   done
 }
 
+# Roll the live deploy back to a known-good commit + rebuild + restart
+# with the env reloaded. Called when a post-deploy verification fails so
+# we never silently leave a broken / keyless binary serving traffic.
+rollback() {
+  local target="$1"
+  if [[ -z "$target" ]]; then
+    echo "⚠️  No rollback target captured — manual intervention needed" >&2
+    return
+  fi
+  echo "→ Rolling back to $target" >&2
+  run_with_retry "Vultr rollback" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+    cd /opt/holaday-monorepo && \
+    git reset --hard $target && \
+    pnpm --filter @holaday/orchestrator build && \
+    set -a && . apps/orchestrator/.env && set +a && \
+    pm2 restart holaday-orchestrator --update-env" 2>&1 | tail -5 >&2 || true
+}
+
+echo "→ Capturing current HEAD for rollback"
+PREV_HEAD=$(run_with_retry "Vultr prev-head" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+  "cd /opt/holaday-monorepo && git rev-parse HEAD" | tail -1 | tr -d '[:space:]')
+echo "   prev HEAD: ${PREV_HEAD:-unknown}"
+
 echo "→ Fetching $BRANCH on Vultr"
 run_with_retry "Vultr fetch" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
   cd /opt/holaday-monorepo && \
@@ -88,9 +111,9 @@ run_with_retry "Vultr install/build" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@
   pnpm install && \
   pnpm --filter @holaday/orchestrator build" 2>&1 | tail -5
 
-echo "→ pm2 restart"
+echo "→ pm2 restart (--update-env so new .env keys load into the process)"
 run_with_retry "Vultr pm2 restart" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
-  "pm2 restart holaday-orchestrator"
+  "cd /opt/holaday-monorepo && set -a && . apps/orchestrator/.env && set +a && pm2 restart holaday-orchestrator --update-env"
 
 echo "→ Health check ($HEALTH_URL must return '$HEALTH_MARKER')"
 sleep 3
@@ -104,12 +127,36 @@ else
   echo "→ Last 10 error log lines:"
   run_with_retry "Vultr pm2 error logs" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
     "pm2 logs holaday-orchestrator --lines 10 --nostream --err 2>&1 | tail -15" >&2
+  rollback "$PREV_HEAD"
+  echo "❌ Deploy FAILED (health check) — rolled back to ${PREV_HEAD:-unknown}" >&2
   exit 1
 fi
 
 RESTART=$(run_with_retry "Vultr restart count" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
   "node -e \"const list=JSON.parse(require('child_process').execFileSync('pm2',['jlist'],{encoding:'utf8'})); const app=list.find((p)=>p.name==='holaday-orchestrator'); process.stdout.write(String(app?.pm2_env?.restart_time ?? 'unknown'));\"")
 echo "✅ Orchestrator deployed — restart count: $RESTART"
+
+# Verify the required LLM keys actually made it INTO the running process
+# (not just the .env file). A plain `pm2 restart` reuses pm2's cached env
+# and silently drops a newly-added key — hence the --update-env above +
+# this guard. We only print key NAMES that have a non-empty value (never
+# the secret). Failure rolls back rather than leaving the image lane
+# keyless (image intents would silently degrade to generate).
+REQUIRED_PROCESS_KEYS="${DEPLOY_REQUIRED_PROCESS_KEYS:-GEMINI_API_KEY ANTHROPIC_API_KEY}"
+echo "→ Verifying keys loaded in process: $REQUIRED_PROCESS_KEYS"
+PROC_KEYS=$(run_with_retry "Vultr key-check" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+  "PID=\$(pm2 pid holaday-orchestrator | head -1); tr '\\0' '\\n' < /proc/\$PID/environ 2>/dev/null | grep -oE '^[A-Z_]+=.' | grep -oE '^[A-Z_]+'" | tr -d '\r')
+KEY_MISS=""
+for k in $REQUIRED_PROCESS_KEYS; do
+  echo "$PROC_KEYS" | grep -qx "$k" || KEY_MISS="$KEY_MISS $k"
+done
+if [[ -n "$KEY_MISS" ]]; then
+  echo "❌ Required keys missing/empty in process:$KEY_MISS" >&2
+  rollback "$PREV_HEAD"
+  echo "❌ Deploy FAILED (keys not loaded into process) — rolled back to ${PREV_HEAD:-unknown}" >&2
+  exit 1
+fi
+echo "✅ Keys present in process"
 
 # Phase 1 follow-up — auto-run P0 smoke after every deploy. Failure
 # does NOT block the deploy (smoke runs against a live orchestrator
