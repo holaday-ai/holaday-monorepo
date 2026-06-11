@@ -42,6 +42,7 @@
     "docxtemplater": "^3.68.7",
     "dotenv": "16.4.7",
     "drizzle-orm": "0.38.4",
+    "exceljs": "^4.4.0",
     "express": "5.1.0",
     "global-agent": "^4.1.3",
     "https-proxy-agent": "^9.0.0",

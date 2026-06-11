@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Logger } from 'pino';
 import { Document, Packer, Paragraph, TextRun } from 'docx';
+import ExcelJS from 'exceljs';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import {
@@ -99,6 +100,39 @@ describe('runTemplateFillTask — happy path', () => {
     const text = fullText(captured.buffer!);
     expect(text).toContain('苹果:5');
     expect(text).toContain('香蕉:3');
+  });
+});
+
+describe('runTemplateFillTask — xlsx', () => {
+  it('fills an xlsx template (style preserved) and completes', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Quote');
+    const c = ws.getCell('A1');
+    c.value = '客户：{client_name}';
+    c.font = { bold: true };
+    const template = Buffer.from((await wb.xlsx.writeBuffer()) as ArrayBuffer);
+    const { save, captured } = capturingSave();
+    const out = await runTemplateFillTask({
+      intent: '客户是李四',
+      template: {
+        buffer: template,
+        filename: '报价单.xlsx',
+        mimetype: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      },
+      allowedFormats: PRO_FORMATS,
+      save,
+      model: modelReturning('{"fields":{"client_name":"李四"},"loops":{},"missing":[]}'),
+      logger: fakeLogger(),
+    });
+    expect(out.status).toBe('completed');
+    expect(out.format).toBe('xlsx');
+    expect(out.attachments[0]!.filename).toBe('报价单-已填充.xlsx');
+    // verify the captured output is a real xlsx with the value + style
+    const wb2 = new ExcelJS.Workbook();
+    await wb2.xlsx.load(captured.buffer!);
+    const cell = wb2.getWorksheet('Quote')!.getCell('A1');
+    expect(cell.value).toBe('客户：李四');
+    expect(cell.font?.bold).toBe(true);
   });
 });
 

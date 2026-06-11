@@ -31,7 +31,7 @@ import {
 } from './placeholder-schema.js';
 import { inspectTemplate, checkPlaceholderBudget } from './template-safety.js';
 import * as docxEngine from './docx-template-engine.js';
-// M3 will add: import * as xlsxEngine from './xlsx-template-engine.js';
+import * as xlsxEngine from './xlsx-template-engine.js';
 
 /** Matches the SPA's metadata.attachments entry shape (task-store.ts). */
 export interface TemplateAttachment {
@@ -164,7 +164,7 @@ export async function runTemplateFillTask(
   // 5. Extract the placeholder schema.
   let schema: PlaceholderSchema;
   try {
-    schema = engine.extractPlaceholders(template.buffer);
+    schema = await engine.extractPlaceholders(template.buffer);
   } catch (err) {
     return {
       status: 'failed',
@@ -257,7 +257,7 @@ export async function runTemplateFillTask(
   // 12. Fill the bytes deterministically.
   let outBuf: Buffer;
   try {
-    outBuf = engine.fill(template.buffer, validated.data);
+    outBuf = await engine.fill(template.buffer, validated.data);
   } catch (err) {
     return {
       status: 'failed',
@@ -307,15 +307,18 @@ export async function runTemplateFillTask(
 // ---------------------------------------------------------------------------
 
 interface TemplateEngine {
-  extractPlaceholders(buf: Buffer): PlaceholderSchema;
-  fill(buf: Buffer, data: FillData): Buffer;
+  extractPlaceholders(buf: Buffer): PlaceholderSchema | Promise<PlaceholderSchema>;
+  fill(buf: Buffer, data: FillData): Buffer | Promise<Buffer>;
 }
 
 function selectEngine(format: TemplateFormat): TemplateEngine | null {
   if (format === 'docx') {
     return { extractPlaceholders: docxEngine.extractPlaceholders, fill: docxEngine.fill };
   }
-  // xlsx → M3; pptx handled before this.
+  if (format === 'xlsx') {
+    return { extractPlaceholders: xlsxEngine.extractPlaceholders, fill: xlsxEngine.fill };
+  }
+  // pptx is handled (honest decline) before this.
   return null;
 }
 
