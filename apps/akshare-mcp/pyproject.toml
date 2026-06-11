@@ -1,0 +1,27 @@
+[project]
+name = "akshare-mcp"
+version = "0.1.0"
+description = "Thin MCP wrapper over AkShare for A股股民每日信息 (行情/公告/龙虎榜/北向资金/港美股指数)"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.2.0",
+    "akshare>=1.14.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+akshare-mcp = "akshare_mcp.server:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["akshare_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
