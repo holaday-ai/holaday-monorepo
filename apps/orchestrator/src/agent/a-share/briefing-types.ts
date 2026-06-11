@@ -83,6 +83,8 @@ export interface DragonTigerRow {
   代码?: string;
   名称?: string;
   上榜原因?: string;
+  /** akshare 自带一行中性解读（如「主力做T」）—— 非我们生成，合规。 */
+  解读?: string;
   收盘价?: number;
   涨跌幅?: number;
   龙虎榜净买额?: number;

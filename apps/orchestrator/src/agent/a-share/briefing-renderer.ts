@@ -284,45 +284,41 @@ function keyEventLines(
 
 // --- 盘后各段 --------------------------------------------------------
 
-/** 北向资金行（含 2024-08 净买额口径降级）。 */
+/**
+ * 北向资金行。2024-08 起交易所停披露北向(沪/深股通)实时净买额，实测恒为
+ * 0.0（Vultr 核对）。0.0 不是真零是「停披露」→ 整行省略（禁用过期口径，
+ * BOSS 红线）。若日后恢复披露(非 0)，自动恢复展示。
+ */
 function northboundLines(nb: AkEnvelope<NorthboundRow>, mode: BriefingMode): string[] {
   const out: string[] = [];
-  if (nb.error) {
-    out.push(`- 北向资金：数据暂不可用（${nb.error}）`);
+  if (nb.error || nb.data.length === 0) {
+    if (mode === 'dev') {
+      out.push(`  - [dev] 北向资金不可用${nb.error ? `（${nb.error}）` : '（空）'}`);
+    }
     return out;
   }
-  if (nb.data.length === 0) {
-    out.push('- 北向资金：暂无数据');
-    return out;
+  // 只取北向行（沪股通/深股通）；南向港股通不属「北向资金」。
+  const north = nb.data.filter((r) => {
+    const dir = String(pick(r, ['资金方向']) ?? '');
+    const seg = String(pick(r, ['板块', '类型']) ?? '');
+    return dir === '北向' || seg === '沪股通' || seg === '深股通';
+  });
+  // 净买额是否仍在披露？停披露时北向行净买额恒 0/null。
+  const disclosed = north.some((r) => {
+    const n = toNum(pick(r, ['成交净买额']));
+    return n !== null && n !== 0;
+  });
+  if (!disclosed) {
+    if (mode === 'dev') {
+      out.push('  - [dev] 北向净买额停披露(2024-08,实测 0.0)→ 整行省略');
+    }
+    return out; // prod：整行省略，不显示「+0.00亿元」
   }
-  // 净买额口径是否可得？（2024-08 后规则变更，可能整列缺失）
-  const hasNet = nb.data.some((r) => toNum(pick(r, ['成交净买额'])) !== null);
-  if (hasNet) {
-    const parts = nb.data.map((r) => {
-      const seg = String(pick(r, ['板块', '类型']) ?? '北向');
-      return `${seg} 净买额 ${fmtYiUnit(pick(r, ['成交净买额']), true)}`;
-    });
-    out.push(`- 北向资金：${parts.join(' ｜ ')}（${sourceTag(nb)}）`);
-    return out;
-  }
-  // 降级：净买额不可得 → 用成交额，明确标注，禁用过期口径
-  const parts = nb.data
-    .map((r) => {
-      const seg = String(pick(r, ['板块', '类型']) ?? '北向');
-      const amt = pick(r, ['成交额', '买入成交额']);
-      return amt != null ? `${seg} 成交额 ${fmtYiUnit(amt)}` : '';
-    })
-    .filter(Boolean);
-  if (parts.length > 0) {
-    out.push(
-      `- 北向资金（成交额；净买额口径 2024-08 后已停披露）：${parts.join(' ｜ ')}（${sourceTag(nb)}）`,
-    );
-  } else {
-    out.push('- 北向资金：净买额口径已变更，当前无可用字段。');
-  }
-  if (mode === 'dev') {
-    out.push('  - [dev] 北向净买额缺失→降级成交额；Vultr 真接须先验当天返回字段。');
-  }
+  const parts = north.map((r) => {
+    const seg = String(pick(r, ['板块', '类型']) ?? '北向');
+    return `${seg} 净买额 ${fmtYiUnit(pick(r, ['成交净买额']), true)}`;
+  });
+  out.push(`- 北向资金：${parts.join(' ｜ ')}（${sourceTag(nb)}）`);
   return out;
 }
 
@@ -337,7 +333,7 @@ function marketOverviewLines(
     out.push(`- A股指数：数据暂不可用（${cn.error}）`);
   } else if (cn.data.length === 0) {
     out.push('- A股指数：暂无数据');
-    if (mode === 'dev') out.push('  - [dev] cn 指数为空，核对 stock_zh_index_spot_em 名称过滤');
+    if (mode === 'dev') out.push('  - [dev] cn 指数为空，核对 stock_zh_index_spot_sina 代码过滤');
   } else {
     const idx = cn.data.map(
       (r) =>
@@ -397,8 +393,11 @@ function dragonTigerLines(wl: WatchlistEntry[], dt: AkEnvelope<DragonTigerRow>):
     const name = String(pick(r, ['名称']) ?? '');
     const code = String(pick(r, ['代码']) ?? '');
     const reason = String(pick(r, ['上榜原因']) ?? '—');
+    // akshare 自带「解读」列（一行中性解读，如「主力做T」）—— 非我们生成，合规。
+    const jiedu = pick(r, ['解读']);
+    const jieduMd = jiedu ? ` ｜ 解读：${String(jiedu)}` : '';
     out.push(
-      `- ${name}（${code}）：${reason} ｜ 龙虎榜净买额 ${fmtYiYuan(pick(r, ['龙虎榜净买额']), true)}`,
+      `- ${name}（${code}）：${reason} ｜ 龙虎榜净买额 ${fmtYiYuan(pick(r, ['龙虎榜净买额']), true)}${jieduMd}`,
     );
   }
   out.push(`  （${sourceTag(dt)}）`);

@@ -1,7 +1,7 @@
-"""选1扩展版 新增 adapter 逻辑测试（G1 US 隔夜涨跌幅 + G3 A股指数过滤排序）。
+"""adapter 逻辑测试（G1 US 涨跌幅 + G3 A股指数 sina 过滤 + kline sina + 前缀）。
 
-`pct_change` 纯逻辑随处可跑；`_us_indices` / `_cn_indices` 经 `_records` 依赖
-pandas（随 akshare 安装），本地无 pandas 时 `importorskip` 跳过，CI / Vultr 跑。
+`pct_change` / `sina_prefix` 纯逻辑随处可跑；用到 `_records` 的经 pandas（随
+akshare 安装），本地无 pandas 时 `importorskip` 跳过，CI / Vultr 跑。
 
 直接按文件加载 adapters.py，避免 `import akshare_mcp` 触发可选依赖 akshare。
 """
@@ -35,6 +35,14 @@ def test_pct_change_guards():
     assert adp.pct_change("x", 100) is None  # 非数
 
 
+def test_sina_prefix():
+    assert adp.sina_prefix("600519") == "sh600519"  # 沪
+    assert adp.sina_prefix("000001") == "sz000001"  # 深
+    assert adp.sina_prefix("300750") == "sz300750"  # 创业板
+    assert adp.sina_prefix("830799") == "bj830799"  # 北交所(8)
+    assert adp.sina_prefix("sh600519") == "sh600519"  # 已带前缀
+
+
 class _FakeAk:
     """最小 fake akshare：按调用返回预置 DataFrame。"""
 
@@ -53,13 +61,29 @@ class _FakeAk:
         # .IXIC 仅一行 → 涨跌幅 None
         return self._pd.DataFrame({"date": ["2026-06-10"], "close": [17000.0]})
 
-    def stock_zh_index_spot_em(self, symbol):
+    def stock_zh_index_spot_sina(self):
+        # sina A股指数 spot：代码带 sh/sz 前缀，渲染器/adapter 按代码过滤。
         return self._pd.DataFrame(
             {
-                "名称": ["上证指数", "某无关指数", "创业板指", "深证成指"],
-                "最新价": [3100.0, 1.0, 2000.0, 9800.0],
-                "涨跌幅": [0.5, 9.9, -0.3, 0.2],
-                "成交额": [3.2e11, 1.0, 1.1e11, 2.8e11],
+                "代码": ["sh000001", "sh000300", "sz399006", "sz399001"],
+                "名称": ["上证指数", "沪深300", "创业板指", "深证成指"],
+                "最新价": [3100.0, 4000.0, 2000.0, 9800.0],
+                "涨跌幅": [0.5, 0.1, -0.3, 0.2],
+                "成交额": [3.2e11, 5.0e11, 1.1e11, 2.8e11],
+            }
+        )
+
+    def stock_zh_a_daily(self, symbol, start_date=None, end_date=None, adjust=None):
+        # 末 2 行 close 1272 → 1279（涨跌幅由 adapter 算）。
+        return self._pd.DataFrame(
+            {
+                "date": ["2026-06-10", "2026-06-11"],
+                "open": [1270.0, 1272.12],
+                "high": [1275.0, 1282.88],
+                "low": [1268.0, 1266.91],
+                "close": [1272.0, 1279.0],
+                "volume": [2000000, 2535198],
+                "amount": [3.0e9, 3230008220.0],
             }
         )
 
@@ -80,5 +104,17 @@ def test_cn_indices_filters_and_orders(monkeypatch):
     pd = pytest.importorskip("pandas")
     monkeypatch.setattr(adp, "ak", _FakeAk(pd))
     rows = adp._cn_indices()
-    # 过滤掉「某无关指数」，并按 上证 → 深证 → 创业板 规范排序
+    # 按代码 sh000001/sz399001/sz399006 过滤(剔除沪深300)，规范排序 上证→深证→创业板
     assert [r["名称"] for r in rows] == ["上证指数", "深证成指", "创业板指"]
+
+
+def test_get_kline_sina_computes_pct(monkeypatch):
+    pd = pytest.importorskip("pandas")
+    monkeypatch.setattr(adp, "ak", _FakeAk(pd))
+    recs, src = adp.get_kline("600519")
+    assert len(recs) == 1
+    r = recs[0]
+    assert r["收盘"] == 1279.0
+    assert r["涨跌幅"] == round((1279.0 - 1272.0) / 1272.0 * 100, 2)  # 末2行算
+    assert r["成交额"] == 3230008220.0
+    assert "sina" in src

@@ -71,21 +71,17 @@ describe('renderPremarketBriefing（dev）', () => {
 describe('renderPostmarketBriefing（默认 prod）', () => {
   const md = renderPostmarketBriefing(POSTMARKET_SAMPLE);
 
-  it('G3 大盘速览：指数 → 成交额 → 北向（顺序）', () => {
+  it('G3 大盘速览：指数 → 成交额（顺序；北向停披露被省略）', () => {
     expect(md).toContain('## 一、大盘速览');
     expect(md).toContain('指数：上证指数 3,125.40（+0.42%）');
     expect(md).toContain('创业板指 1,987.30（-0.25%）');
     expect(md).toContain('成交额：上证指数 4350.00亿元');
-    // 顺序：指数行在成交额行之前，成交额行在北向行之前
-    const iIdx = md.indexOf('- 指数：');
-    const iAmt = md.indexOf('- 成交额：');
-    const iNb = md.indexOf('- 北向资金');
-    expect(iIdx).toBeLessThan(iAmt);
-    expect(iAmt).toBeLessThan(iNb);
+    expect(md.indexOf('- 指数：')).toBeLessThan(md.indexOf('- 成交额：'));
   });
 
-  it('北向资金（有净买额口径）带正负号 + 亿元', () => {
-    expect(md).toContain('北向资金：沪股通 净买额 +25.30亿元 ｜ 深股通 净买额 +16.88亿元');
+  it('北向资金停披露(0.0) → 整行省略，不显示 +0.00', () => {
+    expect(md).not.toContain('- 北向资金');
+    expect(md).not.toContain('+0.00亿元');
   });
 
   it('自选股当日表现表格 + 成交额「亿元」', () => {
@@ -94,8 +90,10 @@ describe('renderPostmarketBriefing（默认 prod）', () => {
     expect(md).toContain('| 宁德时代 | 300750 | 198.50 | -0.85% | 41.00亿元 |');
   });
 
-  it('龙虎榜只列自选股命中(宁德时代)，单位亿元，过滤非自选股', () => {
-    expect(md).toContain('宁德时代（300750）：日跌幅偏离值达7%的证券 ｜ 龙虎榜净买额 +1.20亿元');
+  it('龙虎榜只列自选股命中(宁德时代)，含 akshare 解读列，过滤非自选股', () => {
+    expect(md).toContain(
+      '宁德时代（300750）：日跌幅偏离值达7%的证券 ｜ 龙虎榜净买额 +1.20亿元 ｜ 解读：主力净卖出，机构现身卖方',
+    );
     expect(md).not.toContain('中国国航');
   });
 
@@ -106,35 +104,30 @@ describe('renderPostmarketBriefing（默认 prod）', () => {
   });
 });
 
-describe('北向净买额口径降级（2024-08 规则变更）', () => {
-  const degradedNb: AkEnvelope<NorthboundRow> = {
-    data: [
-      { 板块: '沪股通', 成交额: 599.5, 买入成交额: 312.4, 卖出成交额: 287.1 },
-      { 板块: '深股通', 成交额: 544.3 },
-    ],
-    count: 2,
-    source: 'akshare:stock_hsgt_fund_flow_summary_em',
-    fetched_at: '2026-06-11T07:25:00Z',
-    disclaimer: 'x',
-  };
-
-  it('净买额不可得 → 降级为成交额并明确标注，禁用过期口径', () => {
-    const md = renderPostmarketBriefing(
-      { ...POSTMARKET_SAMPLE, northbound: degradedNb },
-      { mode: 'prod' },
-    );
-    expect(md).toContain('净买额口径 2024-08 后已停披露');
-    expect(md).toContain('沪股通 成交额 599.50亿元');
-    expect(md).not.toContain('净买额 +25.30'); // 不再用净买额口径
-    expect(md).not.toContain('[dev]'); // prod 仍无诊断
+describe('北向资金 2024-08 停披露（0.0 → 整行省略）', () => {
+  it('北向 0.0 → prod 省略整行，dev 给诊断（POSTMARKET_SAMPLE 已是停披露形态）', () => {
+    const prod = renderPostmarketBriefing(POSTMARKET_SAMPLE, { mode: 'prod' });
+    expect(prod).not.toContain('- 北向资金');
+    expect(prod).not.toContain('[dev]');
+    const dev = renderPostmarketBriefing(POSTMARKET_SAMPLE, { mode: 'dev' });
+    expect(dev).toContain('[dev] 北向净买额停披露');
   });
 
-  it('dev 模式额外给降级诊断', () => {
-    const md = renderPostmarketBriefing(
-      { ...POSTMARKET_SAMPLE, northbound: degradedNb },
-      { mode: 'dev' },
-    );
-    expect(md).toContain('[dev] 北向净买额缺失');
+  it('若恢复披露(非 0) → 仅北向行展示，南向港股通不混入', () => {
+    const disclosedNb: AkEnvelope<NorthboundRow> = {
+      data: [
+        { 板块: '沪股通', 资金方向: '北向', 成交净买额: 25.3 },
+        { 板块: '深股通', 资金方向: '北向', 成交净买额: 16.88 },
+        { 板块: '港股通(沪)', 资金方向: '南向', 成交净买额: -4.2 },
+      ],
+      count: 3,
+      source: 'akshare:stock_hsgt_fund_flow_summary_em',
+      fetched_at: '2026-06-11T07:25:00Z',
+      disclaimer: 'x',
+    };
+    const md = renderPostmarketBriefing({ ...POSTMARKET_SAMPLE, northbound: disclosedNb });
+    expect(md).toContain('北向资金：沪股通 净买额 +25.30亿元 ｜ 深股通 净买额 +16.88亿元');
+    expect(md).not.toContain('港股通(沪)'); // 南向不混入北向资金行
   });
 });
 
