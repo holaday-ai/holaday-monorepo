@@ -4,6 +4,7 @@ import { useToast } from '@/components/ui/toast';
 import {
   downloadFailureMessage,
   downloadFileAuthed,
+  fetchFileBlobAuthed,
 } from '@/lib/download-file';
 import {
   classifyDownloadFileKind,
@@ -44,6 +45,7 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
   const toast = useToast();
   const mountedRef = React.useRef(false);
   const [state, setState] = React.useState<'idle' | 'loading' | 'failed'>('idle');
+  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
   const kind = classifyDownloadFileKind(payload.filename);
   const kindLabel = downloadFileKindLabel(kind);
   const metaLabel = downloadFileMetaLabel({
@@ -65,6 +67,30 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
     }, 3_000);
     return () => clearTimeout(t);
   }, [state]);
+
+  // Image outputs (文生图 / 图生图) get an inline thumbnail. The
+  // download URL is Bearer-gated, so a plain <img src> would 401 —
+  // fetch the blob once with auth and render from an object URL
+  // (revoked on unmount / url change). Non-image kinds keep the
+  // icon-only card; a fetch failure silently falls back to the icon.
+  React.useEffect(() => {
+    if (kind !== 'image') return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    void (async () => {
+      const res = await fetchFileBlobAuthed({ url: payload.downloadUrl });
+      if (cancelled) return;
+      if (res.ok && res.blob) {
+        objectUrl = URL.createObjectURL(res.blob);
+        setPreviewUrl(objectUrl);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setPreviewUrl(null);
+    };
+  }, [kind, payload.downloadUrl]);
 
   const handleClick = async (): Promise<void> => {
     if (state === 'loading') return;
@@ -90,7 +116,7 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
       disabled={state === 'loading'}
       aria-busy={state === 'loading'}
       className={cn(
-        'group my-2 flex w-full max-w-md items-center gap-3 rounded-[8px] border bg-white px-3 py-3 text-left text-sm shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors dark:bg-card/85 sm:px-4',
+        'group my-2 flex w-full max-w-md flex-col gap-2 rounded-[8px] border bg-white px-3 py-3 text-left text-sm shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors dark:bg-card/85 sm:px-4',
         state === 'failed'
           ? 'border-[#EA1F59]/40 bg-[#EA1F59]/5'
           : state === 'loading'
@@ -100,47 +126,57 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
       aria-label={actionLabel}
       title={actionLabel}
     >
-      <span
-        className={cn(
-          'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border',
-          state === 'failed'
-            ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
-            : state === 'loading'
-              ? 'border-[#57479C]/30 bg-[#57479C]/10 text-[#57479C]'
-              : 'border-[#DCDDDD] bg-[#EFEFEF]/55 text-[#595757] group-hover:border-[#42C0EF]/45 group-hover:bg-[#42C0EF]/10 group-hover:text-[#42C0EF] dark:border-white/10 dark:bg-white/10 dark:text-foreground',
-        )}
-      >
-        <FileTypeIcon kind={kind} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="truncate font-medium text-foreground" title={payload.filename}>
-          {payload.filename}
-        </div>
-        <div
+      {previewUrl ? (
+        <img
+          src={previewUrl}
+          alt={payload.filename}
+          loading="lazy"
+          className="max-h-64 w-full rounded-[6px] border border-[#DCDDDD] object-contain dark:border-white/10"
+        />
+      ) : null}
+      <span className="flex w-full items-center gap-3">
+        <span
           className={cn(
-            'text-[11px]',
-            state === 'failed' ? 'text-[#EA1F59]' : 'text-muted-foreground',
+            'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border',
+            state === 'failed'
+              ? 'border-[#EA1F59]/35 bg-[#EA1F59]/10 text-[#EA1F59]'
+              : state === 'loading'
+                ? 'border-[#57479C]/30 bg-[#57479C]/10 text-[#57479C]'
+                : 'border-[#DCDDDD] bg-[#EFEFEF]/55 text-[#595757] group-hover:border-[#42C0EF]/45 group-hover:bg-[#42C0EF]/10 group-hover:text-[#42C0EF] dark:border-white/10 dark:bg-white/10 dark:text-foreground',
           )}
         >
-          {state === 'loading'
-            ? '正在下载…'
-            : state === 'failed'
-              ? '下载失败，点击重试'
-              : metaLabel}
+          <FileTypeIcon kind={kind} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium text-foreground" title={payload.filename}>
+            {payload.filename}
+          </div>
+          <div
+            className={cn(
+              'text-[11px]',
+              state === 'failed' ? 'text-[#EA1F59]' : 'text-muted-foreground',
+            )}
+          >
+            {state === 'loading'
+              ? '正在下载…'
+              : state === 'failed'
+                ? '下载失败，点击重试'
+                : metaLabel}
+          </div>
         </div>
-      </div>
-      {state === 'loading' ? (
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#EA1F59]" />
-      ) : (
-        <Download
-          className={cn(
-            'h-4 w-4 shrink-0 transition-colors',
-            state === 'failed'
-              ? 'text-[#EA1F59]'
-              : 'text-muted-foreground group-hover:text-[#EA1F59]',
-          )}
-        />
-      )}
+        {state === 'loading' ? (
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#EA1F59]" />
+        ) : (
+          <Download
+            className={cn(
+              'h-4 w-4 shrink-0 transition-colors',
+              state === 'failed'
+                ? 'text-[#EA1F59]'
+                : 'text-muted-foreground group-hover:text-[#EA1F59]',
+            )}
+          />
+        )}
+      </span>
     </button>
   );
 }
