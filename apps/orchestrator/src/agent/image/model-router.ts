@@ -1,0 +1,90 @@
+/**
+ * Image-model router — pick Nano Banana 2 (flash) vs Nano Banana Pro
+ * per the user's intent.
+ *
+ * Routing rule (BOSS sprint plan #5):
+ *   default                       → NB2  (gemini-3.1-flash-image), fast/<2s
+ *   poster / embedded text / hi-fi → Pro (gemini-3-pro-image), best text
+ *                                          rendering + complex scenes
+ *
+ * Pure function — model ids are injected (env-overridable) so a model
+ * rename never touches this logic. The default ids match the plan.
+ */
+
+export type ImageModelTier = 'flash' | 'pro';
+
+export interface ImageModelDecision {
+  /** Full model id to call. */
+  readonly model: string;
+  readonly tier: ImageModelTier;
+  /** Human-readable Chinese reason (for logs / the task summary). */
+  readonly reason: string;
+  /** Output resolution when the user explicitly asked for hi-res. */
+  readonly resolution?: string;
+}
+
+export interface ImageModelOptions {
+  /** Default 'gemini-3.1-flash-image'. */
+  readonly flashModel?: string;
+  /** Default 'gemini-3-pro-image'. */
+  readonly proModel?: string;
+}
+
+export const DEFAULT_FLASH_MODEL = 'gemini-3.1-flash-image';
+export const DEFAULT_PRO_MODEL = 'gemini-3-pro-image';
+
+/**
+ * Signals that the request needs Pro's strengths: rendering legible
+ * text inside the image (posters, covers, 详情页, logos with words),
+ * or an explicit demand for high fidelity / resolution.
+ */
+const PRO_HINTS: readonly RegExp[] = [
+  // Chinese — text-in-image / print artefacts
+  /海报|招贴|banner|横幅|封面|杂志|详情页|主图|展板|易拉宝|名片|传单|宣传单|菜单/,
+  /带字|文字|文案|标题|字体|排版|logo|标志|商标|字样|写[着上有].{0,8}字|[几两三四五六七八九十\d]\s*个?字|要有.{0,8}字/,
+  // A quoted phrase in an image prompt is almost always text to render
+  // INTO the image (写"开业大吉" / 标题是「夏日特惠」) → needs Pro.
+  /["'“”‘’「」『』][^"'“”‘’「」『』]{1,40}["'“”‘’「」『』]/,
+  // Chinese — explicit quality / resolution
+  /高清|超清|高精度|高质量|精细|4k|4K|2k|2K|印刷|高分辨率/,
+  // English — text-in-image / print
+  /\b(poster|flyer|banner|cover|magazine|signage|infographic|logo|typograph|lettering|menu)\b/i,
+  /\b(with\s+text|embedded\s+text|readable\s+text|render\s+text)\b/i,
+  // English — explicit quality / resolution
+  /\b(high[-\s]?(res|resolution|fidelity|quality)|hi[-\s]?res|4k|2k|print[-\s]?ready|ultra[-\s]?hd)\b/i,
+];
+
+/** 4K / 超清 demands → request the top resolution Pro supports. */
+const ULTRA_RES_HINTS = /4k|4K|超清|ultra[-\s]?hd|4096/;
+/** 2K demands → mid resolution. */
+const HI_RES_HINTS = /2k|2K|高清|高分辨率|2048|hi[-\s]?res|high[-\s]?res/;
+
+export function pickImageModel(
+  intent: string,
+  opts?: ImageModelOptions,
+): ImageModelDecision {
+  const flashModel = opts?.flashModel ?? DEFAULT_FLASH_MODEL;
+  const proModel = opts?.proModel ?? DEFAULT_PRO_MODEL;
+  const text = intent ?? '';
+
+  const matchedPro = PRO_HINTS.find((re) => re.test(text));
+  if (matchedPro) {
+    const resolution = ULTRA_RES_HINTS.test(text)
+      ? '4096x4096'
+      : HI_RES_HINTS.test(text)
+        ? '2048x2048'
+        : undefined;
+    return {
+      model: proModel,
+      tier: 'pro',
+      reason: '检测到海报/带字/高精度需求 → Nano Banana Pro',
+      ...(resolution ? { resolution } : {}),
+    };
+  }
+
+  return {
+    model: flashModel,
+    tier: 'flash',
+    reason: '默认 → Nano Banana 2（快速出图）',
+  };
+}

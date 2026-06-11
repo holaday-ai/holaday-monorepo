@@ -28,7 +28,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from 'pino';
 
-export type ExecutionMode = 'browser' | 'generate' | 'scrape';
+export type ExecutionMode = 'browser' | 'generate' | 'image' | 'scrape';
 
 interface CacheEntry {
   mode: ExecutionMode;
@@ -204,6 +204,74 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   [/\b(?:use|open|visit|go\s+to|launch)\s+(?:google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe(?:\s+dashboard)?|calendly|trello|asana|jira|shopify(?:\s+admin)?|zendesk|intercom|linear|monday(?:\.com)?)(?:\s+(?:admin|dashboard))?\s+(?:to|and)\s+(?:draft|compose|create|edit|update|schedule|save|add|reply\s+to|find|search|download|upload|export|share|move|rename|attach|import)\b/i, 'open app then act'],
   [/发布(?:到|在)(?:小红书|微博|知乎|抖音|b站|bilibili|twitter|x\.com|linkedin|reddit)/i, '发布到平台'],
 ];
+
+/**
+ * IMAGE-generation intent (sprint #5). The user wants HOLA DAY to
+ * CREATE or EDIT an image — text-to-image ("画一只橘猫" / "生成一张
+ * 海报") or image-to-image ("把这张图背景换成海边" / "edit this
+ * image"). Routes to the dedicated 'image' lane (Gemini nano banana),
+ * NOT browser/scrape/generate. STRONG signal — overrides skill hints.
+ *
+ * Guarded against (a) diagrams/charts (流程图/图表/思维导图 — those are
+ * structured-data tasks, not photoreal gen) and (b) image
+ * UNDERSTANDING ("分析这张图片" — a read task, verb isn't a gen verb).
+ */
+const IMAGE_NOUN =
+  '(?:图片|图像|图象|插画|插图|海报|招贴|封面|头像|壁纸|表情包|漫画|贴纸|logo|图标|icon|banner|横幅|主图|配图)';
+
+const IMAGE_NEGATIVE =
+  /流程图|思维导图|架构图|结构图|柱状图|折线图|饼图|统计图|示意图|图表|甘特图|拓扑图|地图/;
+
+const IMAGE_STRONG_WORDS =
+  /海报|插画|插图|头像|壁纸|表情包|漫画|配图|文生图|图生图|招贴|封面/;
+
+// Inherently-image phrasings (jargon, 画-verb, edit verbs, English) —
+// high precision, no proximity needed.
+const IMAGE_PATTERNS: readonly [RegExp, string][] = [
+  // Unambiguous image-gen jargon.
+  [/文生图|图生图|配图|作图|出图|[pP]\s?图|抠图|修图|改图|扩图|重绘/, '图像生成术语'],
+  // 画 + quantifier/output (excluding 动画/漫画/壁画/油画/版画/国画/年画/简笔画).
+  [/(?<![动漫壁油版国年简笔])画\s*(?:一|1|个|张|幅|只|副|点|出|套)/, '中文画图'],
+  [/(?:帮|给|替|为|来)\s*我?\s*画(?![室家廊展])/, '中文帮我画'],
+  // Image-to-image edit phrasings.
+  [/(?:把|将|给)?\s*(?:这|那|此)?\s*(?:张|幅|个)?\s*图[片像]?.{0,8}(?:背景|风格|换成|改成|变成|[pP]成|加上|去掉|抠掉|换)/, '中文图片编辑'],
+  [/(?:换|改|改变|替换)\s*(?:一下|个)?\s*(?:图[片像]?的?)?(?:背景|风格|滤镜|色调|配色)/, '中文换背景'],
+  // English text-to-image.
+  [/\b(?:draw|generate|create|make|design|render|paint)\s+(?:me\s+)?(?:an?\s+|some\s+|a\s+couple\s+of\s+)?(?:image|picture|photo|illustration|poster|avatar|logo|icon|wallpaper|drawing|artwork|art|graphic|banner|sticker|emoji)s?\b/i, 'english image gen'],
+  [/\b(?:image|picture|illustration|artwork)\s+of\b/i, 'english image of'],
+  [/\bgenerate\b.{0,24}\b(?:image|picture|art|visual)s?\b/i, 'english generate image'],
+  // English image-to-image edit.
+  [/\b(?:edit|modify|change|replace|remove|swap|inpaint)\s+(?:the\s+|this\s+|that\s+)?(?:image|picture|photo|background|object)\b/i, 'english image edit'],
+];
+
+// Looser verb + image-noun proximity for "生成一张<描述>海报" where
+// descriptive words sit between the verb and the noun. Bounded to one
+// clause (no sentence punctuation) and ≤14 chars so it can't run away.
+const IMAGE_VERB_NOUN = new RegExp(
+  `(?:生成|制作|做|设计|画|绘制|绘|渲染|创作|来|搞|出)[^，。；！？!?\\n]{0,14}${IMAGE_NOUN}`,
+);
+// Veto: "...图片的报告 / 头像设计方案" is a document ABOUT images, not
+// an image to generate — the image noun is immediately followed by a
+// document deliverable.
+const IMAGE_DOC_COLLISION = new RegExp(
+  `${IMAGE_NOUN}.{0,4}(?:报告|文档|方案|计划|总结|文章|周报|日报|论文|ppt|表格|excel|word)`,
+  'i',
+);
+
+function matchImagePattern(intent: string): string | null {
+  // Diagram/chart/map asks stay OUT of the photoreal image lane unless
+  // a strong image word (海报/插画/...) is also present.
+  if (IMAGE_NEGATIVE.test(intent) && !IMAGE_STRONG_WORDS.test(intent)) {
+    return null;
+  }
+  for (const [pattern, label] of IMAGE_PATTERNS) {
+    if (pattern.test(intent)) return label;
+  }
+  if (IMAGE_VERB_NOUN.test(intent) && !IMAGE_DOC_COLLISION.test(intent)) {
+    return '中文生成图片';
+  }
+  return null;
+}
 
 const NON_EXECUTION_PLATFORM_NAMES =
   '(?:gmail|linkedin|slack|notion|github|amazon|youtube|instagram|twitter|x\\.com|reddit|shopify|飞书|google forms|google docs|google sheets|google slides|google calendar|google flights|google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe|calendly|trello|asana|jira|zendesk|intercom|linear|monday(?:\\.com)?|携程|飞猪|去哪儿|去哪网|同程|美团|京东|淘宝|天猫|拼多多|豆瓣|百度地图|高德地图|大众点评)';
@@ -386,7 +454,10 @@ function decide(intent: string): RouteDecision {
     return { mode: 'browser', source: 'kw:ecommerce-listing' };
   }
 
-  // 1. Interaction verb wins outright — agent must drive a live page.
+  // 1. Interaction verb / pattern wins — agent must drive a live page.
+  // Checked BEFORE image so "make a poster in canva.com" / "在 figma
+  // 设计海报" drive the named site instead of generating a local
+  // image. (A named site/app to act in beats local image generation.)
   const interaction = hasAny(intent, INTERACTION_VERBS);
   if (interaction) {
     return { mode: 'browser', source: 'kw:interaction', match: interaction };
@@ -394,6 +465,15 @@ function decide(intent: string): RouteDecision {
   const interactionPattern = matchInteractionPattern(intent);
   if (interactionPattern) {
     return { mode: 'browser', source: 'kw:interaction', match: interactionPattern };
+  }
+
+  // 1b. Image generation / editing — the dedicated nano-banana lane.
+  // After interaction (a named site wins) but before the url/site
+  // scrape checks so "画一张京东风格的插画" generates an image instead
+  // of scraping 京东. Beats the generate default for "画一张..." asks.
+  const image = matchImagePattern(intent);
+  if (image) {
+    return { mode: 'image', source: 'kw:image', match: image };
   }
 
   // 2. URL / site / search-verb / info-verb → scrape.
@@ -472,6 +552,7 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
   // ambiguous prompts while preventing the search-verb foot-gun.
   const d = decide(intent);
   const STRONG_SIGNAL_SOURCES = new Set([
+    'kw:image',
     'kw:interaction',
     'kw:url',
     'kw:search-pattern',

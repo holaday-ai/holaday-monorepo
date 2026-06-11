@@ -20,6 +20,11 @@ import { TaskRepository } from '../../agent/task-repository.js';
 import { classifyExecutionMode } from '../../agent/intent-classifier.js';
 import { runGenerateTask } from '../../agent/generate-runner.js';
 import { runScrapeTask } from '../../agent/scrape-runner.js';
+import {
+  runImageTask,
+  type ImageAttachment,
+  type RunImageTaskResult,
+} from '../../agent/image/image-runner.js';
 import { tryAcquire as rateLimitTryAcquire } from '../../quota/rate-limiter.js';
 import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
@@ -920,6 +925,178 @@ export const tasksRouter = router({
         ctx.browserPool.canAllocate(),
     );
 
+    // ===== image-mode fork (sprint #5 — nano banana) =====
+    // 文生图 / 图生图 tasks: classify NB2 vs Pro, call Gemini, persist
+    // each PNG to R2, surface as FileDownloadCard via
+    // result.metadata.attachments. No agent loop, no pool slot, no
+    // verifier — a single outbound API call that produces a file.
+    //
+    // Gated on GEMINI_API_KEY (mirrors FIRECRAWL_API_KEY gating scrape):
+    // when the key is unset the image intent falls through to the
+    // generate lane below, so deploying before the key is provisioned
+    // is a no-op for users instead of a "未配置" error on every 画图 ask.
+    if (executionMode === 'image' && appEnv.GEMINI_API_KEY) {
+      const taskId = newExternalId('task');
+      const repo = new TaskRepository(ctx.db);
+
+      await repo.insertTask(
+        {
+          taskId,
+          status: 'executing',
+          plan: [],
+          cursor: 0,
+          pendingConfirm: null,
+        },
+        {
+          userId: userRow.id,
+          intent: input.intent,
+          roleId: gatedRole === 'none' ? null : gatedRole,
+          opusUsed: false,
+        },
+      );
+
+      ctx.logger.info(
+        { taskId, userId: ctx.userId, executorLane: 'image', executionMode },
+        'task: executor lane selected',
+      );
+      broadcastSubStatus(ctx.userId, taskId, 'generating');
+
+      // Input images (图生图 / edit) come from the user's uploaded
+      // attachments, already parsed into base64 image content blocks.
+      const inputImages: Array<{ data: string; mimeType: string }> = [];
+      for (const b of attachmentBlocks) {
+        if (b.type === 'image' && b.source.type === 'base64') {
+          inputImages.push({ data: b.source.data, mimeType: b.source.media_type });
+        }
+      }
+
+      const imageStartedAt = Date.now();
+      void (async () => {
+        const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+        let result: RunImageTaskResult;
+        if (taskInternalId == null) {
+          result = {
+            status: 'failed',
+            summary: '',
+            reason: '任务记录丢失，请重试。',
+            attachments: [],
+          };
+        } else {
+          const save = async (
+            img: { buffer: Buffer; mimeType: string },
+            index: number,
+          ): Promise<ImageAttachment> => {
+            const ext =
+              img.mimeType === 'image/jpeg'
+                ? 'jpg'
+                : img.mimeType === 'image/webp'
+                  ? 'webp'
+                  : img.mimeType === 'image/gif'
+                    ? 'gif'
+                    : 'png';
+            const stored = await fileService.storeOutput({
+              userIdInternal: userRow.id,
+              userExternalId: ctx.userId,
+              taskIdInternal: taskInternalId,
+              filename: `holaday-image-${index + 1}.${ext}`,
+              mimetype: img.mimeType,
+              buffer: img.buffer,
+            });
+            return {
+              fileId: stored.externalId,
+              downloadUrl: `/api/files/${stored.externalId}/download`,
+              filename: stored.filename,
+              mimetype: stored.mimetype,
+              sizeBytes: Number(stored.sizeBytes),
+              expiresAt: stored.expiresAt
+                ? stored.expiresAt.toISOString()
+                : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+              kind: 'output',
+            };
+          };
+
+          result = await runImageTask({
+            intent: input.intent,
+            ...(inputImages.length > 0 ? { inputImages } : {}),
+            apiKey: appEnv.GEMINI_API_KEY,
+            baseUrl: appEnv.GEMINI_BASE_URL,
+            flashModel: appEnv.GEMINI_IMAGE_MODEL,
+            proModel: appEnv.GEMINI_IMAGE_MODEL_PRO,
+            save,
+            logger: ctx.logger,
+          });
+        }
+
+        const metadata = {
+          executionMode: 'image' as const,
+          finalExecutionMode: 'image' as const,
+          model: result.model ?? null,
+          imageTier: result.tier ?? null,
+          elapsedMs: Date.now() - imageStartedAt,
+          ...(result.attachments.length > 0 ? { attachments: result.attachments } : {}),
+        };
+
+        ctx.logger.info(
+          {
+            taskId,
+            userId: ctx.userId,
+            runnerStatus: result.status,
+            model: result.model ?? null,
+            imageCount: result.attachments.length,
+          },
+          'task:completed',
+        );
+
+        try {
+          if (result.status === 'completed') {
+            await repo.persistVisionOutcome(taskId, {
+              status: 'completed',
+              summary: result.summary,
+              tickCount: 1,
+              metadata,
+            });
+          } else {
+            await repo.persistVisionOutcome(taskId, {
+              status: 'failed',
+              reason: result.reason ?? '图片生成失败，请稍后重试。',
+              tickCount: 1,
+              metadata,
+            });
+          }
+        } catch (err) {
+          ctx.logger.error({ err, taskId }, 'image: persist failed');
+        }
+
+        try {
+          if (result.status === 'completed') {
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'completed',
+              ...(result.summary ? { summary: result.summary } : {}),
+            });
+          } else {
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'failed',
+              ...(result.reason ? { reason: result.reason } : {}),
+            });
+          }
+        } catch (err) {
+          ctx.logger.warn({ err, taskId }, 'image: broadcast terminal failed');
+        }
+      })();
+
+      return {
+        taskId,
+        status: 'executing' as const,
+        steps: [],
+        executionMode: 'image' as const,
+      };
+    }
+    // ===== end image-mode fork =====
+
     // ===== Phase 21b — generate-mode fork =====
     // Pure-generation tasks (write a PRD, translate this, summarize that)
     // skip the supercar agent loop entirely. One Anthropic call with
@@ -927,7 +1104,11 @@ export const tasksRouter = router({
     // returns immediately. No pool slot, no Playwright, no plan-step
     // state machine. Falls through to the existing supercar branch
     // below for executionMode === 'browser'.
-    if (executionMode === 'generate' && appEnv.ANTHROPIC_API_KEY && anthropicForResolver) {
+    if (
+      (executionMode === 'generate' || executionMode === 'image') &&
+      appEnv.ANTHROPIC_API_KEY &&
+      anthropicForResolver
+    ) {
       const taskId = newExternalId('task');
       const repo = new TaskRepository(ctx.db);
 

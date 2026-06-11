@@ -54,6 +54,27 @@ const schema = z.object({
   FIRECRAWL_BASE_URL: z.string().url().default('https://api.firecrawl.dev'),
 
   /**
+   * Sprint #5 — Gemini image generation ("nano banana"). When set, the
+   * 'image' execution lane can call Google's generateContent image API
+   * to satisfy 文生图 / 图生图 tasks. Empty string = the image lane
+   * fails with a clear "GEMINI_API_KEY not configured" reason instead
+   * of silently degrading. The orchestrator runs on Vultr (Singapore
+   * egress) so it reaches generativelanguage.googleapis.com directly;
+   * GEMINI_BASE_URL is overridable for a future gateway/proxy. Set on
+   * Vultr .env; keep in sync with the secret.
+   */
+  GEMINI_API_KEY: z.string().optional().default(''),
+  GEMINI_BASE_URL: z.string().url().default('https://generativelanguage.googleapis.com'),
+  /**
+   * Image model ids. Defaults from the BOSS sprint plan (2026-06):
+   * NB2 = gemini-3.1-flash-image (fast default), NB Pro =
+   * gemini-3-pro-image (best text rendering for posters / 带字图). A
+   * wrong id is a one-env-var fix because the adapter never hard-codes.
+   */
+  GEMINI_IMAGE_MODEL: z.string().default('gemini-3.1-flash-image'),
+  GEMINI_IMAGE_MODEL_PRO: z.string().default('gemini-3-pro-image'),
+
+  /**
    * Phase D Step 3 rollout switch.
    *   playwright → boot connects PlaywrightExecutor to Chrome's
    *                CDP (needs Chrome launched with

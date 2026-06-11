@@ -27,6 +27,9 @@ interface ModeBuckets {
   // Phase 24 RC follow-up — third bucket for the Firecrawl-backed
   // 'scrape' mode. No-pool concurrency, similar to generate.
   scrape: Set<string>;
+  // Sprint #5 — image generation (nano banana). No-pool concurrency
+  // (just an outbound API call), tracked like generate/scrape.
+  image: Set<string>;
 }
 
 const TRACKER = new Map<string, ModeBuckets>();
@@ -34,7 +37,7 @@ const TRACKER = new Map<string, ModeBuckets>();
 function getOrInit(userId: string): ModeBuckets {
   let b = TRACKER.get(userId);
   if (!b) {
-    b = { browser: new Set(), generate: new Set(), scrape: new Set() };
+    b = { browser: new Set(), generate: new Set(), scrape: new Set(), image: new Set() };
     TRACKER.set(userId, b);
   }
   return b;
@@ -57,7 +60,13 @@ export function trackEnd(userId: string, taskId: string): void {
   b.browser.delete(taskId);
   b.generate.delete(taskId);
   b.scrape.delete(taskId);
-  if (b.browser.size === 0 && b.generate.size === 0 && b.scrape.size === 0) {
+  b.image.delete(taskId);
+  if (
+    b.browser.size === 0 &&
+    b.generate.size === 0 &&
+    b.scrape.size === 0 &&
+    b.image.size === 0
+  ) {
     TRACKER.delete(userId);
   }
 }
