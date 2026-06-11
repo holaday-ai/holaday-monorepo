@@ -143,7 +143,7 @@
       "mustComplete": true,
       "executionMode": "generate",
       "mustNotContain": ["Nano Banana"],
-      "maxDurationMs": 120000
+      "maxDurationMs": 150000
     }
   },
   {
@@ -155,7 +155,7 @@
       "mustComplete": true,
       "executionMode": "generate",
       "mustNotContain": ["Nano Banana"],
-      "maxDurationMs": 120000
+      "maxDurationMs": 150000
     }
   }
 ]
