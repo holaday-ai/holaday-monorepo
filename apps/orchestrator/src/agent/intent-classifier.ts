@@ -253,8 +253,11 @@ const IMAGE_PATTERNS: readonly [RegExp, string][] = [
 // Looser verb + image-noun proximity for "生成一张<描述>海报" where
 // descriptive words sit between the verb and the noun. Bounded to one
 // clause (no sentence punctuation) and ≤14 chars so it can't run away.
+// Gap widened to 40 (still clause-bounded by punctuation) so embedded
+// quoted text between the verb and the noun doesn't break the match:
+// "做一张写着“618大促 全场5折”的海报" (verb→海报 spans ~16 chars).
 const IMAGE_VERB_NOUN = new RegExp(
-  `(?:生成|制作|做|设计|画|绘制|绘|渲染|创作|来|搞|出)[^，。；！？!?\\n]{0,14}${IMAGE_NOUN}`,
+  `(?:生成|制作|做|设计|画|绘制|绘|渲染|创作|来|搞|出)[^，。；！？!?\\n]{0,40}${IMAGE_NOUN}`,
 );
 // Veto: "...图片的报告 / 头像设计方案" is a document ABOUT images, not
 // an image to generate — the image noun is immediately followed by a
@@ -263,6 +266,16 @@ const IMAGE_DOC_COLLISION = new RegExp(
   `${IMAGE_NOUN}.{0,4}(?:报告|文档|方案|计划|总结|文章|周报|日报|论文|ppt|表格|excel|word)`,
   'i',
 );
+
+// A make-an-image verb + a quoted phrase = "render this text INTO an
+// image" (海报/促销图/艺术字 with 写着“X” / 上面写“X”). Catches asks
+// whose object noun isn't in IMAGE_NOUN (促销图) — the quote IS the
+// signal. Skipped when a document/copy deliverable is present
+// ("写一份‘季度总结’报告" / "写句‘XX’文案" → text, not an image).
+const IMAGE_MAKE_VERB = /(?:做|制作|生成|设计|画|绘制|搞|出|整)/;
+const QUOTED_TEXT = /["'“”‘’「」『』][^"'“”‘’「」『』]{1,40}["'“”‘’「」『』]/;
+const IMAGE_QUOTE_DOC_WORDS =
+  /报告|文档|文章|方案|计划|周报|日报|论文|ppt|表格|excel|word|邮件|短信|文案|脚本|代码|总结/i;
 
 function matchImagePattern(intent: string): string | null {
   // Diagram/chart/map asks stay OUT of the photoreal image lane unless
@@ -275,6 +288,13 @@ function matchImagePattern(intent: string): string | null {
   }
   if (IMAGE_VERB_NOUN.test(intent) && !IMAGE_DOC_COLLISION.test(intent)) {
     return '中文生成图片';
+  }
+  if (
+    IMAGE_MAKE_VERB.test(intent) &&
+    QUOTED_TEXT.test(intent) &&
+    !IMAGE_QUOTE_DOC_WORDS.test(intent)
+  ) {
+    return '中文带引号文字出图';
   }
   return null;
 }

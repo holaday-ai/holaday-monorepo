@@ -54,11 +54,6 @@ const PRO_HINTS: readonly RegExp[] = [
   /\b(high[-\s]?(res|resolution|fidelity|quality)|hi[-\s]?res|4k|2k|print[-\s]?ready|ultra[-\s]?hd)\b/i,
 ];
 
-/** 4K / 超清 demands → request the top resolution Pro supports. */
-const ULTRA_RES_HINTS = /4k|4K|超清|ultra[-\s]?hd|4096/;
-/** 2K demands → mid resolution. */
-const HI_RES_HINTS = /2k|2K|高清|高分辨率|2048|hi[-\s]?res|high[-\s]?res/;
-
 export function pickImageModel(
   intent: string,
   opts?: ImageModelOptions,
@@ -69,16 +64,15 @@ export function pickImageModel(
 
   const matchedPro = PRO_HINTS.find((re) => re.test(text));
   if (matchedPro) {
-    const resolution = ULTRA_RES_HINTS.test(text)
-      ? '4096x4096'
-      : HI_RES_HINTS.test(text)
-        ? '2048x2048'
-        : undefined;
+    // v1: `imageConfig.resolution:"4096x4096"` was rejected by the API
+    // (400), so we do NOT request an explicit resolution. A 4K / 高清
+    // ask still routes to Pro for text/print quality; explicit 4K is a
+    // follow-up once the correct imageConfig format is verified against
+    // a live Pro model.
     return {
       model: proModel,
       tier: 'pro',
       reason: '检测到海报/带字/高精度需求 → Nano Banana Pro',
-      ...(resolution ? { resolution } : {}),
     };
   }
 

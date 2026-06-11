@@ -87,18 +87,20 @@ describe('runImageTask', () => {
     );
   });
 
-  it('honours an explicit resolution from the router (4K poster)', async () => {
+  it('routes a 4K poster to Pro without an explicit resolution (v1)', async () => {
     const generate = okGenerate();
-    await runImageTask({
+    const out = await runImageTask({
       intent: '做一张4K高清电影海报',
       apiKey: 'k',
       save,
       logger: fakeLogger(),
       generate,
     });
-    expect(generate).toHaveBeenCalledWith(
-      expect.objectContaining({ resolution: '4096x4096' }),
-    );
+    expect(out.tier).toBe('pro');
+    // v1: resolution dropped (API rejected 4096x4096) — not sent.
+    const call = generate.mock.calls[0]![0];
+    expect(call.model).toBe('gemini-3-pro-image');
+    expect(call.resolution).toBeUndefined();
   });
 
   it('persists every image when the model returns a batch', async () => {

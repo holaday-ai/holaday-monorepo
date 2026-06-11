@@ -34,6 +34,9 @@ describe('classifyExecutionMode — image lane', () => {
     '文生图：一杯冰美式',
     '设计一张杂志封面',
     '来张壁纸，星空主题',
+    '做一张写着“618大促 全场5折”的海报',
+    '制作一张促销图，上面写“全场五折 仅限今天”几个大字',
+    '设计一个写着“开业大吉”的横幅',
   ])('routes "%s" → image', async (intent) => {
     expect(await classify(intent)).toBe('image');
   });
@@ -74,6 +77,8 @@ describe('classifyExecutionMode — image lane', () => {
     '写一份周报',
     'draw a conclusion from this data',
     'draw up a contract for the new hire',
+    '写一份“季度总结”报告',
+    '帮我写一句“怕上火喝XX”的广告文案',
   ])('does not over-trigger on understanding/normal asks: "%s"', async (intent) => {
     expect(await classify(intent)).not.toBe('image');
   });

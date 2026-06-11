@@ -29,16 +29,16 @@ describe('pickImageModel', () => {
     expect(pickImageModel('a logo with the brand name').tier).toBe('pro');
   });
 
-  it('requests 4K resolution on 超清/4K asks', () => {
+  it('routes 4K/超清 asks to Pro (no explicit resolution in v1)', () => {
     const d = pickImageModel('做一张4K高清的电影海报');
     expect(d.tier).toBe('pro');
-    expect(d.resolution).toBe('4096x4096');
+    expect(d.resolution).toBeUndefined();
   });
 
-  it('requests 2K resolution on 高清/2K asks (no 4K)', () => {
+  it('routes 2K/高清 asks to Pro (no explicit resolution in v1)', () => {
     const d = pickImageModel('2K 高清封面');
     expect(d.tier).toBe('pro');
-    expect(d.resolution).toBe('2048x2048');
+    expect(d.resolution).toBeUndefined();
   });
 
   it('does not force resolution for a plain Pro hint without a res demand', () => {
