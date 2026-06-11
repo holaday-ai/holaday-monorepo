@@ -53,12 +53,15 @@ def _ttl(name: str, default: int) -> int:
     return default
 
 
+# 简报投递窗口去重：08:30/15:30 同时 N 个用户任务触发时，市场级 + 个股共享
+# 数据只真实拉取一次，其余命中缓存。故简报用到的接口 TTL 全 ≥ 600s(10min)，
+# 覆盖投递窗口（BOSS 要求）。QUOTE(15s) 仅 ④ 即时问答用，保持实时。
 TTL_QUOTE = _ttl("QUOTE", 15)
-TTL_KLINE = _ttl("KLINE", 300)
+TTL_KLINE = _ttl("KLINE", 600)
 TTL_ANNOUNCE = _ttl("ANNOUNCE", 1800)
 TTL_LHB = _ttl("LHB", 3600)
-TTL_NORTHBOUND = _ttl("NORTHBOUND", 60)
-TTL_INDEX = _ttl("INDEX", 60)
+TTL_NORTHBOUND = _ttl("NORTHBOUND", 600)
+TTL_INDEX = _ttl("INDEX", 600)
 TTL_UNLOCK = _ttl("UNLOCK", 3600)
 
 # Row caps so a single tool call can't dump thousands of rows into the

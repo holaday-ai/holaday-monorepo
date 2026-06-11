@@ -57,7 +57,9 @@ app = FastAPI(title="akshare-cn-http", docs_url=None, redoc_url=None)
 
 
 @app.get("/health")
+@app.get("/healthz")
 def health() -> dict[str, str]:
+    """pm2 smoke check 用（/healthz，照 orchestrator 模式）。"""
     return {"status": "ok"}
 
 

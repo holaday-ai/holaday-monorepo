@@ -43,7 +43,7 @@ export interface HttpAkshareClientOptions {
   baseUrl: string;
   /** 注入便于测试；默认 globalThis.fetch。 */
   fetchImpl?: FetchLike;
-  /** 单次请求超时，默认 8000ms。 */
+  /** 单次请求超时，默认 10000ms（BOSS 要求；超时/挂服→error envelope→对应段降级）。 */
   timeoutMs?: number;
 }
 
@@ -55,7 +55,7 @@ export class HttpAkshareClient implements AkshareClient {
   constructor(opts: HttpAkshareClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
     this.fetchImpl = opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
-    this.timeoutMs = opts.timeoutMs ?? 8000;
+    this.timeoutMs = opts.timeoutMs ?? 10_000;
   }
 
   private async get<T>(path: string): Promise<AkEnvelope<T>> {

@@ -11,6 +11,7 @@ import {
   recoverStuckRunningScheduledTasks,
   startScheduledRunner,
 } from './agent/scheduled-runner.js';
+import { isBriefingIntent } from './agent/a-share/briefing-dispatch.js';
 import { injectPendingCookies } from './cookies/sync-service.js';
 import { createScreencastProxy } from './streaming/screencast-proxy.js';
 import {
@@ -380,10 +381,52 @@ async function main() {
     const { users: usersTable } = await import('./db/schema/users.js');
     const { tasks: tasksTable } = await import('./db/schema/tasks.js');
     const { eq } = await import('drizzle-orm');
+    // §6c — A股简报 dispatch 连续失败计数（per-process 内存；成功重置，≥3 发 inbox 错误）。
+    const briefingFailCounts = new Map<number, number>();
     startScheduledRunner({
       db,
       dispatch: async ({ scheduledTaskId, userInternalId, intent }) => {
         try {
+          // §6c — A股每日简报：哨兵 intent → 直接组装渲染 + 投递 inbox（不走通用
+          // agent 任务）。失败只影响该用户该任务；连续 3 次降级为 inbox 错误通知。
+          if (isBriefingIntent(intent)) {
+            const { runBriefingDispatch } = await import('./agent/a-share/briefing-dispatch.js');
+            const { HttpAkshareClient } = await import('./agent/a-share/akshare-http-client.js');
+            const { notify } = await import('./notifications/notification-service.js');
+            const client = new HttpAkshareClient({
+              baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
+            });
+            try {
+              await runBriefingDispatch(
+                { db, client, notify: (input) => notify({ db, logger }, input) },
+                { scheduledTaskInternalId: scheduledTaskId, userInternalId, intent },
+              );
+              briefingFailCounts.delete(scheduledTaskId);
+              return scheduledTaskId; // 非 null = 成功（简报无 task 行）
+            } catch (err) {
+              const fails = (briefingFailCounts.get(scheduledTaskId) ?? 0) + 1;
+              briefingFailCounts.set(scheduledTaskId, fails);
+              logger.warn(
+                { err: err instanceof Error ? err.message : String(err), scheduledTaskId, fails },
+                'scheduled-runner: briefing dispatch failed',
+              );
+              if (fails >= 3) {
+                briefingFailCounts.set(scheduledTaskId, 0);
+                await notify(
+                  { db, logger },
+                  {
+                    userInternalId,
+                    scheduledTaskInternalId: scheduledTaskId,
+                    type: 'task_failed',
+                    title: 'A股简报生成失败',
+                    message:
+                      '每日 A股简报连续多次生成失败。请稍后重试，或在设置中关闭后重新开启。',
+                  },
+                ).catch(() => {});
+              }
+              return null; // 仅本任务记 failed，下个 interval 重试本任务，不影响他人
+            }
+          }
           const [user] = await db
             .select({ externalId: usersTable.externalId })
             .from(usersTable)
@@ -452,6 +495,8 @@ async function main() {
       // configured webhooks. The notify hook is best-effort; the
       // runner ignores its return value and never blocks on it.
       notify: async ({ userInternalId, scheduledTaskInternalId, intent, ok, error }) => {
+        // 简报 intent 的通知由 dispatch 分支自管（成功投递简报 + 3 连败错误）→ 跳过通用。
+        if (isBriefingIntent(intent)) return;
         const { notify } = await import('./notifications/notification-service.js');
         const payload = buildScheduledDispatchNotification({ intent, ok, error });
         await notify(
