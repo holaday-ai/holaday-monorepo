@@ -98,6 +98,15 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
   // Routed BEFORE scrape/generate so "打开 web2.0calc 算… 给证据" reaches the
   // browser lane instead of stalling in generate. (T6 P1, 2026-06-10.)
   [/(?:打开|访问|进入|前往|跳转到|去)\s*(?:https?:\/\/|www\.|[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+|(?:网页|在线)?计算器|在线工具)/i, '中文打开站点或在线工具'],
+  // Named-site EXECUTION (Web-Agent roadmap Step 1, 2026-06-11): a nav/use
+  // verb + a concrete interactive site (maps / ecommerce / ratings) + an
+  // execution verb or object (查/搜/路线/价格/评分/…) → drive the live site.
+  // Previously these fell to SITE_NAMES → scrape, where Firecrawl either
+  // hits login walls (京东) or silently answers from third-party SEO pages
+  // (百度地图路线 via kan3721.com). The leading negative lookahead keeps
+  // topic/analysis phrasing (是什么/商业模式/分析/策略/介绍/…) OUT of the
+  // browser lane — those stay generate via the non-execution topic guard.
+  [/^(?!.*(?:是什么|什么是|介绍|历史|商业模式|营销|策略|分析|报告|教程|案例|框架|趋势|运营|优缺点))(?=.*(?:用|使用|打开|访问|进入|前往|去|上)\s*(?:百度地图|高德地图|高德|腾讯地图|京东|淘宝|天猫|拼多多|豆瓣|大众点评))(?=.*(?:查|搜索|搜|找|看看|看一下|比较|对比|路线|导航|价格|多少钱|评分|评价|排名|提取)).+/i, '指名站点执行'],
   [/(?:点击|点开|按下|选择).{0,24}(?:按钮|链接|菜单|选项|标签|tab|继续|下一步|提交|登录|确认|购买|支付|下载|这个|这|该|它)/i, '中文点击控件'],
   [/(?:提交|填写|填表|填入|输入).{0,24}(?:表单|申请|订单|资料|信息|姓名|邮箱|地址|验证码|问卷|报名|简历|这个|这|该)/i, '中文表单操作'],
   [/(?:下载(?![量率])|保存).{0,24}(?:文件|图片|截图|报告|附件|pdf|csv|xlsx|表格|资料|这个|这|该)/i, '中文下载文件'],
@@ -197,11 +206,19 @@ const INTERACTION_PATTERNS: readonly [RegExp, string][] = [
 ];
 
 const NON_EXECUTION_PLATFORM_NAMES =
-  '(?:gmail|linkedin|slack|notion|github|amazon|youtube|instagram|twitter|x\\.com|reddit|shopify|飞书|google forms|google docs|google sheets|google slides|google calendar|google flights|google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe|calendly|trello|asana|jira|zendesk|intercom|linear|monday(?:\\.com)?|携程|飞猪|去哪儿|去哪网|同程|美团)';
+  '(?:gmail|linkedin|slack|notion|github|amazon|youtube|instagram|twitter|x\\.com|reddit|shopify|飞书|google forms|google docs|google sheets|google slides|google calendar|google flights|google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe|calendly|trello|asana|jira|zendesk|intercom|linear|monday(?:\\.com)?|携程|飞猪|去哪儿|去哪网|同程|美团|京东|淘宝|天猫|拼多多|豆瓣|百度地图|高德地图|大众点评)';
+
+// Topic words shared by both direction patterns below. 是什么/什么是/介绍/
+// 商业模式/优缺点 added with the named-site execution route (Step 1,
+// 2026-06-11) so "什么是百度地图" / "京东商业模式分析" land on generate
+// instead of a pointless scrape. 历史 deliberately NOT included —
+// "查京东的历史最低价" is a live-data ask, not a topic question.
+const NON_EXECUTION_TOPIC_WORDS =
+  '(?:模板|文案|策略|规范|设计|优化|分析|报告|指南|教程|案例|框架|脚本|转化率|运营|商业模式|是什么|什么是|介绍|优缺点)';
 
 const NON_EXECUTION_PLATFORM_TOPIC_PATTERNS: readonly RegExp[] = [
-  new RegExp(`${NON_EXECUTION_PLATFORM_NAMES}.{0,40}(?:模板|文案|策略|规范|设计|优化|分析|报告|指南|教程|案例|框架|脚本|转化率|运营)`, 'i'),
-  new RegExp(`(?:模板|文案|策略|规范|设计|优化|分析|报告|指南|教程|案例|框架|脚本|转化率|运营).{0,40}${NON_EXECUTION_PLATFORM_NAMES}`, 'i'),
+  new RegExp(`${NON_EXECUTION_PLATFORM_NAMES}.{0,40}${NON_EXECUTION_TOPIC_WORDS}`, 'i'),
+  new RegExp(`${NON_EXECUTION_TOPIC_WORDS}.{0,40}${NON_EXECUTION_PLATFORM_NAMES}`, 'i'),
 ];
 
 /**

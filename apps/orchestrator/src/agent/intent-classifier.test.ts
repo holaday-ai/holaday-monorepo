@@ -999,3 +999,49 @@ describe('Open website / online tool + compute/evidence → browser (T6 P1, 2026
     }
   });
 });
+
+describe('Named-site execution → browser (Web-Agent roadmap Step 1, 2026-06-11)', () => {
+  // Diagnosis: "用百度地图查路线" / "用京东查价格" routed to scrape, where
+  // Firecrawl either hit login walls (京东) or silently answered from a
+  // third-party SEO page (kan3721.com for the Baidu-Maps route). A named
+  // interactive site + an execution verb must drive the live site.
+  it('maps / ecommerce / ratings execution → browser', async () => {
+    for (const intent of [
+      '用百度地图查东京站到羽田机场路线',
+      '打开百度地图查路线',
+      '用京东查 iPhone 价格，不购买',
+      '打开京东搜索 MacBook 价格，不下单',
+      '用豆瓣查电影评分',
+      '打开豆瓣搜索肖申克评分',
+    ]) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).toBe('browser');
+    }
+  });
+
+  it('topic / definition phrasing stays generate', async () => {
+    for (const intent of ['什么是百度地图', '京东商业模式分析', '豆瓣电影 TOP250 榜单介绍']) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).toBe('generate');
+    }
+  });
+
+  it('news / stock / live-data search stays scrape', async () => {
+    for (const intent of ['搜索最新 iPhone 新闻', '查今天特斯拉股价', '查京东的历史最低价']) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).toBe('scrape');
+    }
+  });
+
+  it('existing pins unchanged: 对比电商→scrape, 小红书搜索→scrape, URL 总结→scrape', async () => {
+    expect(
+      await classifyExecutionMode({ intent: '对比拼多多和京东的会员价格', logger: fakeLogger() }),
+    ).toBe('scrape');
+    expect(
+      await classifyExecutionMode({ intent: '搜索小红书上露营笔记', logger: fakeLogger() }),
+    ).toBe('scrape');
+    expect(
+      await classifyExecutionMode({ intent: '总结 https://example.com 的内容', logger: fakeLogger() }),
+    ).toBe('scrape');
+  });
+});

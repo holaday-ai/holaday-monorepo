@@ -34,6 +34,7 @@ import {
   evaluateFileArtifact,
   type OutputFileDescriptor,
 } from './file-artifact-consistency.js';
+import { evaluateSourceDomain } from './source-domain-consistency.js';
 import { classifyLightweightTask } from './lightweight-task.js';
 
 export type FailureLevel = 'fixable' | 'needs_clarification' | 'hard_fail';
@@ -208,6 +209,22 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
     inputs.outputFiles ?? [],
   );
   if (fileArtifactCheck) checks.push(fileArtifactCheck);
+
+  // 6. Source-domain consistency (Web-Agent roadmap Step 2). When the
+  //    intent EXPLICITLY names a site (用百度地图查… / 京东搜索… / Notion
+  //    pricing), the answer's cited sources or the browser finalUrl must
+  //    include that site's domain. Diagnosis T5 showed the scrape lane
+  //    silently answering a 百度地图 route question from a third-party
+  //    SEO page and completing clean. Fixable → partial_success, unless
+  //    the user explicitly allowed other sources.
+  // contract.goal is the one-line summarised intent (≤120 chars) — site
+  // names sit at the head of these prompts, so it's a faithful proxy.
+  const sourceDomainCheck = checkSourceDomainConsistency(
+    contract.goal,
+    answerText,
+    finalUrl,
+  );
+  if (sourceDomainCheck) checks.push(sourceDomainCheck);
 
   const passed = checks.every((c) => c.passed);
   const result: VerificationResult = {
@@ -1192,6 +1209,29 @@ function checkFileArtifactConsistency(
     passed: false,
     checker: 'deterministic',
     detail: '回复声称生成了可下载文件，但没有实际产出文件或下载卡片',
+    severity: 'fixable',
+  };
+}
+
+/**
+ * Source-domain consistency guard. Fails (fixable) when the intent
+ * explicitly names a site but every cited source / the finalUrl belongs
+ * to OTHER domains — a silent source substitution. Pure logic lives in
+ * source-domain-consistency.ts; this is the CheckResult adapter.
+ */
+function checkSourceDomainConsistency(
+  intent: string,
+  answerText: string,
+  finalUrl: string | undefined,
+): CheckResult | null {
+  const verdict = evaluateSourceDomain({ intent, answerText, finalUrl: finalUrl ?? null });
+  if (!verdict.inconsistent) return null;
+  return {
+    criterionId: 'generic.source_domain_consistency',
+    criterionType: 'source_domain_consistency',
+    passed: false,
+    checker: 'deterministic',
+    detail: '结果来源与指定网站不一致，请重新执行或指定是否允许使用第三方来源。',
     severity: 'fixable',
   };
 }
