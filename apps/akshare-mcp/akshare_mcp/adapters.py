@@ -6,6 +6,15 @@ moves interfaces between releases, so when wiring this up run
 https://akshare.akfamily.xyz/ for the installed version — the tool
 contracts in server.py stay stable while these calls get adjusted.
 
+VERIFIED 2026-06-11 against **akshare 1.18.64** (实跑核对):
+  - 全部 7 个函数名有效（无重命名）。
+  - 实测返数: 公告(cninfo) / 龙虎榜 / 北向资金 / 美股指数(sina) ✓
+  - 走 push2.eastmoney.com 的 3 个（quote / kline / 港股指数）从本机代理
+    不可达（ProxyError）—— 函数名 OK，**部署位置须确认 push2.eastmoney.com
+    可达**（国内/新加坡多数可达；本机环境有代理拦截）。
+  - 美股 index_us_stock_sina(".INX") 返的是**历史 OHLCV**（date/open/high/
+    low/close/volume），非实时 spot —— get_index_quote 取末行=最新收盘。
+
 Scope (per the sprint plan, intentionally NARROW — 股民每日信息 only):
   行情      get_quote / get_kline
   公告      get_announcements
@@ -98,7 +107,8 @@ def _json_safe(v: Any) -> bool:
 def get_quote(symbol: str) -> tuple[list[dict[str, Any]], str]:
     """实时行情（买卖盘 + 最新价）。symbol 形如 '600519' / '000001'。"""
     a = _require_ak()
-    # TODO(verify): single-symbol realtime. Alt: ak.stock_zh_a_spot_em()
+    # Name verified (akshare 1.18.64). Source = push2.eastmoney.com —
+    # confirm reachable from the deploy host. Alt: ak.stock_zh_a_spot_em()
     # then filter by 代码 == symbol (heavier, all-market snapshot).
     df = a.stock_bid_ask_em(symbol=symbol)
     return _records(df), "akshare:stock_bid_ask_em"
@@ -128,9 +138,8 @@ def get_announcements(
 ) -> tuple[list[dict[str, Any]], str]:
     """个股公告（巨潮）。symbol 形如 '600519'。"""
     a = _require_ak()
-    # TODO(verify): 巨潮 disclosure interface name varies by version.
-    # Candidates: stock_zh_a_disclosure_report_cninfo /
-    # stock_notice_report. Keep the call isolated here.
+    # Verified (akshare 1.18.64): 35 rows, cols 代码/简称/公告标题/
+    # 公告时间/公告链接. cninfo source reachable from most locations.
     kwargs: dict[str, Any] = {"symbol": symbol}
     if start_date:
         kwargs["start_date"] = start_date
@@ -169,7 +178,9 @@ def get_index_quote(market: str) -> tuple[list[dict[str, Any]], str]:
         df = a.stock_hk_index_spot_em()
         return _records(df), "akshare:stock_hk_index_spot_em"
     if m == "us":
-        # TODO(verify): global/us index spot interface name.
+        # Verified: index_us_stock_sina returns HISTORICAL OHLCV — take
+        # the latest row as the current close (盘前看隔夜收盘够用).
         df = a.index_us_stock_sina(symbol=".INX")
-        return _records(df), "akshare:index_us_stock_sina"
+        latest = df.tail(1) if (df is not None and len(df) > 0) else df
+        return _records(latest), "akshare:index_us_stock_sina(latest)"
     raise AkShareUnavailable(f"未知市场 '{market}'，仅支持 hk / us")
