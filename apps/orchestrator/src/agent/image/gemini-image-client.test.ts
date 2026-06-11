@@ -160,16 +160,45 @@ describe('generateImages', () => {
     });
   });
 
-  it('throws http with status + body on a non-2xx response', async () => {
+  it('throws http immediately on a non-retryable 4xx', async () => {
     const fetchImpl = vi
       .fn()
-      .mockResolvedValue(new Response('quota exceeded', { status: 429 }));
+      .mockResolvedValue(new Response('bad request', { status: 400 }));
 
     const err = await generateImages({ ...BASE, fetchImpl }).catch((e) => e);
     expect(err).toBeInstanceOf(GeminiImageError);
     expect(err.kind).toBe('http');
-    expect(err.status).toBe(429);
-    expect(err.detail).toContain('quota exceeded');
+    expect(err.status).toBe(400);
+    expect(err.detail).toContain('bad request');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries on 503 then succeeds', async () => {
+    const b64 = Buffer.from('OK').toString('base64');
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('overloaded', { status: 503 }))
+      .mockResolvedValueOnce(jsonResponse(okImageBody(b64)));
+
+    const result = await generateImages({ ...BASE, retryBaseMs: 0, fetchImpl });
+    expect(result.images).toHaveLength(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('exhausts retries on persistent 503 and throws http 503', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockImplementation(() => new Response('overloaded', { status: 503 }));
+
+    const err = await generateImages({
+      ...BASE,
+      maxRetries: 1,
+      retryBaseMs: 0,
+      fetchImpl,
+    }).catch((e) => e);
+    expect(err.kind).toBe('http');
+    expect(err.status).toBe(503);
+    expect(fetchImpl).toHaveBeenCalledTimes(2); // initial + 1 retry
   });
 
   it('throws network on fetch rejection', async () => {

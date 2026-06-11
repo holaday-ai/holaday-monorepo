@@ -46,6 +46,9 @@ describe('classifyExecutionMode — image lane', () => {
     'draw me a poster',
     'edit this image and remove the watermark',
     'create a logo for my coffee shop',
+    'draw a cute corgi puppy sitting on green grass',
+    'paint a sunset over the ocean',
+    'sketch a medieval castle on a hill',
   ])('routes "%s" → image (edit/english)', async (intent) => {
     expect(await classify(intent)).toBe('image');
   });
@@ -69,6 +72,8 @@ describe('classifyExecutionMode — image lane', () => {
     '看看这张图说了什么',
     '帮我把这段话翻译成英文',
     '写一份周报',
+    'draw a conclusion from this data',
+    'draw up a contract for the new hire',
   ])('does not over-trigger on understanding/normal asks: "%s"', async (intent) => {
     expect(await classify(intent)).not.toBe('image');
   });

@@ -1,0 +1,91 @@
+[
+  {
+    "id": "E2E_1",
+    "tier": "P1",
+    "category": "image_gen",
+    "prompt": "画一只猫",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "image",
+      "mustContain": ["Nano Banana 2", "/api/files/"],
+      "maxDurationMs": 90000
+    }
+  },
+  {
+    "id": "ACC_01",
+    "tier": "P1",
+    "category": "image_gen",
+    "prompt": "画一片秋天的枫叶林，阳光透过树叶洒下来",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "image",
+      "mustContain": ["Nano Banana 2", "/api/files/"],
+      "maxDurationMs": 90000
+    }
+  },
+  {
+    "id": "ACC_02",
+    "tier": "P1",
+    "category": "image_gen",
+    "prompt": "生成一张赛博朋克风格的城市夜景图片",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "image",
+      "mustContain": ["Nano Banana 2", "/api/files/"],
+      "maxDurationMs": 90000
+    }
+  },
+  {
+    "id": "ACC_03",
+    "tier": "P1",
+    "category": "image_gen_en",
+    "prompt": "draw a cute corgi puppy sitting on green grass",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "image",
+      "mustContain": ["Nano Banana 2", "/api/files/"],
+      "maxDurationMs": 90000
+    }
+  },
+  {
+    "id": "ACC_04",
+    "tier": "P1",
+    "category": "image_gen",
+    "prompt": "给我画一个卡通风格的太空宇航员",
+    "expectations": {
+      "mustComplete": true,
+      "terminalStatus": "completed",
+      "executionMode": "image",
+      "mustContain": ["Nano Banana 2", "/api/files/"],
+      "maxDurationMs": 90000
+    }
+  },
+  {
+    "id": "ACC_09_guard_flowchart",
+    "tier": "P1",
+    "category": "image_routing_guard",
+    "prompt": "画一个用户注册的流程图",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "generate",
+      "mustNotContain": ["Nano Banana"],
+      "maxDurationMs": 120000
+    }
+  },
+  {
+    "id": "ACC_10_guard_understand",
+    "tier": "P1",
+    "category": "image_routing_guard",
+    "prompt": "分析这张图片表达了什么情绪",
+    "expectations": {
+      "mustComplete": true,
+      "executionMode": "generate",
+      "mustNotContain": ["Nano Banana"],
+      "maxDurationMs": 120000
+    }
+  }
+]

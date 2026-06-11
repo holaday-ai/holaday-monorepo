@@ -17,7 +17,7 @@ import {
   GeminiImageError,
   type GeminiImageInput,
 } from './gemini-image-client.js';
-import { pickImageModel, type ImageModelTier } from './model-router.js';
+import { pickImageModel, DEFAULT_FLASH_MODEL, type ImageModelTier } from './model-router.js';
 
 /** Matches the SPA's metadata.attachments entry shape (task-store.ts). */
 export interface ImageAttachment {
@@ -77,36 +77,74 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
     ...(opts.proModel ? { proModel: opts.proModel } : {}),
   });
   const generate = opts.generate ?? generateImages;
+  const flashModel = opts.flashModel ?? DEFAULT_FLASH_MODEL;
 
-  let result;
-  try {
-    result = await generate({
+  const runGenerate = (model: string, resolution?: string) =>
+    generate({
       apiKey: opts.apiKey,
       prompt: intent,
-      model: decision.model,
+      model,
       ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
       ...(hasInputs ? { inputImages: opts.inputImages } : {}),
-      ...(decision.resolution ? { resolution: decision.resolution } : {}),
+      ...(resolution ? { resolution } : {}),
       ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
     });
+
+  const isOverload = (err: unknown): boolean =>
+    err instanceof GeminiImageError &&
+    ((err.kind === 'http' && (err.status === 503 || err.status === 429)) ||
+      err.kind === 'timeout');
+
+  let result;
+  let effectiveTier = decision.tier;
+  let degraded = false;
+  try {
+    result = await runGenerate(decision.model, decision.resolution);
   } catch (err) {
-    const reason = mapImageError(err);
-    opts.logger.warn(
-      {
-        err: err instanceof Error ? err.message : String(err),
-        kind: err instanceof GeminiImageError ? err.kind : 'unknown',
+    // Pro overloaded (503/429/timeout after the client's own retries)
+    // → degrade to NB2 so the user still gets an image (lower text
+    // fidelity) instead of a hard failure.
+    if (decision.tier === 'pro' && decision.model !== flashModel && isOverload(err)) {
+      opts.logger.warn(
+        { kind: err instanceof GeminiImageError ? err.kind : 'unknown', from: decision.model },
+        'image: Pro overloaded — degrading to NB2',
+      );
+      try {
+        result = await runGenerate(flashModel); // drop hi-res on the NB2 fallback
+        degraded = true;
+        effectiveTier = 'flash';
+      } catch (err2) {
+        opts.logger.warn(
+          { err: err2 instanceof Error ? err2.message : String(err2) },
+          'image: NB2 fallback also failed',
+        );
+        return {
+          status: 'failed',
+          summary: '',
+          reason: mapImageError(err2),
+          attachments: [],
+          model: flashModel,
+          tier: 'flash',
+        };
+      }
+    } else {
+      opts.logger.warn(
+        {
+          err: err instanceof Error ? err.message : String(err),
+          kind: err instanceof GeminiImageError ? err.kind : 'unknown',
+          model: decision.model,
+        },
+        'image: generate failed',
+      );
+      return {
+        status: 'failed',
+        summary: '',
+        reason: mapImageError(err),
+        attachments: [],
         model: decision.model,
-      },
-      'image: generate failed',
-    );
-    return {
-      status: 'failed',
-      summary: '',
-      reason,
-      attachments: [],
-      model: decision.model,
-      tier: decision.tier,
-    };
+        tier: decision.tier,
+      };
+    }
   }
 
   const attachments: ImageAttachment[] = [];
@@ -134,17 +172,23 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
 
   return {
     status: 'completed',
-    summary: buildSummary(attachments.length, decision.tier, hasInputs),
+    summary: buildSummary(attachments.length, effectiveTier, hasInputs, degraded),
     attachments,
-    model: decision.model,
-    tier: decision.tier,
+    model: result.model ?? decision.model,
+    tier: effectiveTier,
   };
 }
 
-function buildSummary(count: number, tier: ImageModelTier, isEdit: boolean): string {
+function buildSummary(
+  count: number,
+  tier: ImageModelTier,
+  isEdit: boolean,
+  degraded: boolean,
+): string {
   const modelLabel = tier === 'pro' ? 'Nano Banana Pro' : 'Nano Banana 2';
   const action = isEdit ? '已按你的要求编辑图片' : `已生成 ${count} 张图片`;
-  return `${action}（${modelLabel}）。下载链接见下方，24 小时内有效。`;
+  const note = degraded ? '（Pro 档繁忙，已自动改用 Nano Banana 2 出图）' : '';
+  return `${action}（${modelLabel}）${note}。下载链接见下方，24 小时内有效。`;
 }
 
 /** Map a thrown error → a clean, user-facing Chinese reason. */

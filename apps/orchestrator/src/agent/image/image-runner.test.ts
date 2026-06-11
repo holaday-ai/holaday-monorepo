@@ -158,6 +158,45 @@ describe('runImageTask', () => {
     expect(out.reason).toContain('管理员');
   });
 
+  it('degrades Pro→NB2 when Pro is overloaded (503)', async () => {
+    const generate = vi
+      .fn()
+      .mockRejectedValueOnce(new GeminiImageError('overloaded', 'http', 503))
+      .mockResolvedValueOnce({
+        images: [{ buffer: Buffer.from('NB2'), mimeType: 'image/png' }],
+        model: 'gemini-3.1-flash-image',
+      });
+    const out = await runImageTask({
+      intent: '做一张促销海报，写"全场五折"',
+      apiKey: 'k',
+      save,
+      logger: fakeLogger(),
+      generate,
+    });
+
+    expect(out.status).toBe('completed');
+    expect(out.tier).toBe('flash');
+    expect(out.summary).toContain('Pro 档繁忙');
+    // first attempt used the Pro model, fallback used flash
+    expect(generate.mock.calls[0]![0].model).toBe('gemini-3-pro-image');
+    expect(generate.mock.calls[1]![0].model).toBe('gemini-3.1-flash-image');
+  });
+
+  it('does NOT degrade when NB2 itself fails (no Pro to fall back from)', async () => {
+    const generate = vi
+      .fn()
+      .mockRejectedValue(new GeminiImageError('overloaded', 'http', 503));
+    const out = await runImageTask({
+      intent: '画一只猫', // NB2 route
+      apiKey: 'k',
+      save,
+      logger: fakeLogger(),
+      generate,
+    });
+    expect(out.status).toBe('failed');
+    expect(generate).toHaveBeenCalledTimes(1); // no second attempt
+  });
+
   it('fails when every save fails', async () => {
     const failingSave: SaveImageFn = vi.fn().mockRejectedValue(new Error('disk full'));
     const out = await runImageTask({

@@ -240,6 +240,12 @@ const IMAGE_PATTERNS: readonly [RegExp, string][] = [
   [/\b(?:draw|generate|create|make|design|render|paint)\s+(?:me\s+)?(?:an?\s+|some\s+|a\s+couple\s+of\s+)?(?:image|picture|photo|illustration|poster|avatar|logo|icon|wallpaper|drawing|artwork|art|graphic|banner|sticker|emoji)s?\b/i, 'english image gen'],
   [/\b(?:image|picture|illustration|artwork)\s+of\b/i, 'english image of'],
   [/\bgenerate\b.{0,24}\b(?:image|picture|art|visual)s?\b/i, 'english generate image'],
+  // draw / paint / sketch + article + concrete subject → image, even
+  // without an explicit "image/picture" noun ("draw a cat"). Requires
+  // an article (a/an/some/the) so "draw up a contract" / "draw on X"
+  // don't match, and excludes the common figurative objects
+  // ("draw a conclusion / comparison / the line / a map / a diagram").
+  [/\b(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:a|an|some|the)\s+(?!conclusion|comparison|distinction|parallel|analog|attention|line\b|breath|blood|card\b|plan\b|map\b|diagram|chart|graph|flowchart|town\b)[a-z]/i, 'english draw subject'],
   // English image-to-image edit.
   [/\b(?:edit|modify|change|replace|remove|swap|inpaint)\s+(?:the\s+|this\s+|that\s+)?(?:image|picture|photo|background|object)\b/i, 'english image edit'],
 ];

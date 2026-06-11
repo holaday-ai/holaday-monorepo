@@ -62,6 +62,15 @@ export interface GenerateImagesParams {
   readonly responseModalities?: readonly ('TEXT' | 'IMAGE')[];
   /** Wall-clock per call. Default 60s (Pro/4K is slower than NB2's <2s). */
   readonly timeoutMs?: number;
+  /**
+   * Retries on transient 503 (overload) / 429 (rate-limit). Default 2
+   * → 3 attempts total. The newly-GA Pro model returns 503 "high
+   * demand" under load; a couple of backed-off retries absorb the
+   * common transient spike before the runner degrades to NB2.
+   */
+  readonly maxRetries?: number;
+  /** Base backoff in ms (exponential: base, base*2, …). Default 1000. */
+  readonly retryBaseMs?: number;
   /** Injectable for tests; defaults to global fetch. */
   readonly fetchImpl?: typeof fetch;
   /** Caller cancellation, composed with the internal timeout. */
@@ -106,7 +115,10 @@ export class GeminiImageError extends Error {
 }
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com';
-const DEFAULT_TIMEOUT_MS = 60_000;
+// 120s — flash is normally <2s, but under heavy load (e.g. the 2026-06
+// Pro-GA demand spike) image gen can queue past 60s. Headroom prevents
+// spurious timeouts; the runner/eval still cap overall wall-clock.
+const DEFAULT_TIMEOUT_MS = 120_000;
 
 // Response part shapes — Google's proto3-JSON emits camelCase, but we
 // also tolerate snake_case defensively.
@@ -170,44 +182,57 @@ export async function generateImages(
   };
   if (Object.keys(generationConfig).length > 0) body.generationConfig = generationConfig;
 
-  // Internal timeout, composed with any caller-provided signal.
+  // One HTTP attempt: own timeout + caller-signal composition.
   const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const onCallerAbort = () => controller.abort();
-  if (params.signal) {
-    if (params.signal.aborted) controller.abort();
-    else params.signal.addEventListener('abort', onCallerAbort, { once: true });
-  }
-
-  let res: Response;
-  try {
-    res = await fetchImpl(url, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-goog-api-key': params.apiKey,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } catch (err) {
-    if (controller.signal.aborted && !(params.signal?.aborted ?? false)) {
-      throw new GeminiImageError(
-        `Gemini image request timed out after ${timeoutMs}ms`,
-        'timeout',
-      );
+  const attemptFetch = async (): Promise<Response> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const onCallerAbort = () => controller.abort();
+    if (params.signal) {
+      if (params.signal.aborted) controller.abort();
+      else params.signal.addEventListener('abort', onCallerAbort, { once: true });
     }
-    throw new GeminiImageError(
-      `Gemini image request failed: ${(err as Error).message}`,
-      'network',
-    );
-  } finally {
-    clearTimeout(timer);
-    if (params.signal) params.signal.removeEventListener('abort', onCallerAbort);
-  }
+    try {
+      return await fetchImpl(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-goog-api-key': params.apiKey,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (controller.signal.aborted && !(params.signal?.aborted ?? false)) {
+        throw new GeminiImageError(
+          `Gemini image request timed out after ${timeoutMs}ms`,
+          'timeout',
+        );
+      }
+      throw new GeminiImageError(
+        `Gemini image request failed: ${(err as Error).message}`,
+        'network',
+      );
+    } finally {
+      clearTimeout(timer);
+      if (params.signal) params.signal.removeEventListener('abort', onCallerAbort);
+    }
+  };
 
-  if (!res.ok) {
+  // Retry transient overload (503) / rate-limit (429) with exponential
+  // backoff. Persistent overload still surfaces as `http` so the runner
+  // can degrade Pro→NB2.
+  const maxRetries = params.maxRetries ?? 2;
+  const retryBaseMs = params.retryBaseMs ?? 1000;
+  let res!: Response;
+  for (let attempt = 0; ; attempt += 1) {
+    res = await attemptFetch();
+    if (res.ok) break;
+    if ((res.status === 503 || res.status === 429) && attempt < maxRetries) {
+      await safeText(res); // drain body so the socket frees up
+      await sleep(retryBaseMs * 2 ** attempt);
+      continue;
+    }
     const errBody = await safeText(res);
     throw new GeminiImageError(
       `Gemini image API returned ${res.status}`,
@@ -287,4 +312,8 @@ async function safeText(res: Response): Promise<string> {
   } catch {
     return '';
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
