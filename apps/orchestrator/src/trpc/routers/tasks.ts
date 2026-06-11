@@ -521,6 +521,7 @@ export const tasksRouter = router({
           and(
             eq(tasksTable.externalId, input.replyToTaskId),
             eq(tasksTable.userId, userRow.id),
+            eq(tasksTable.origin, 'user'),
           ),
         )
         .limit(1);
@@ -4962,7 +4963,9 @@ export const tasksRouter = router({
       if (!userRow) {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
       }
-      const conds = [eq(tasksTable.userId, userRow.id)];
+      // Phase 1 #3 — isolation boundary: user history excludes canary/exploration/eval
+      // tasks (no-op today; every row defaults to origin='user').
+      const conds = [eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, 'user')];
       // Cursor is an opaque numeric token whose interpretation matches
       // the active ORDER BY. In starred mode we order by `starredAt
       // DESC` and treat the cursor as a unix-ms timestamp; otherwise
@@ -5128,7 +5131,7 @@ export const tasksRouter = router({
       const [taskRow] = await ctx.db
         .select()
         .from(tasksTable)
-        .where(and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)))
+        .where(and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, 'user')))
         .limit(1);
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
@@ -5268,7 +5271,7 @@ export const tasksRouter = router({
       const [taskRow] = await ctx.db
         .select({ id: tasksTable.id })
         .from(tasksTable)
-        .where(and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)))
+        .where(and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, 'user')))
         .limit(1);
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
@@ -5801,7 +5804,7 @@ export const tasksRouter = router({
       const [taskRow] = await ctx.db
         .select({ id: tasksTable.id, status: tasksTable.status })
         .from(tasksTable)
-        .where(and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)))
+        .where(and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, 'user')))
         .limit(1);
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
@@ -6060,7 +6063,7 @@ export const tasksRouter = router({
         .select({ id: tasksTable.id, status: tasksTable.status })
         .from(tasksTable)
         .where(
-          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)),
+          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, 'user')),
         )
         .limit(1);
       if (!taskRow) {
@@ -6106,7 +6109,7 @@ export const tasksRouter = router({
     const failedRows = await ctx.db
       .select({ id: tasksTable.id })
       .from(tasksTable)
-      .where(and(eq(tasksTable.userId, userRow.id), eq(tasksTable.status, 'failed')));
+      .where(and(eq(tasksTable.userId, userRow.id), eq(tasksTable.status, 'failed'), eq(tasksTable.origin, 'user')));
     const failedIds = failedRows.map((row) => row.id);
     if (failedIds.length === 0) {
       return { ok: true as const, deleted: 0 };
@@ -6149,7 +6152,7 @@ export const tasksRouter = router({
         .select({ id: tasksTable.id })
         .from(tasksTable)
         .where(
-          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)),
+          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, 'user')),
         )
         .limit(1);
       if (!taskRow) {
@@ -6259,7 +6262,7 @@ export const tasksRouter = router({
         .select({ id: tasksTable.id })
         .from(tasksTable)
         .where(
-          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)),
+          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, 'user')),
         )
         .limit(1);
       if (!taskRow) {
@@ -6300,7 +6303,7 @@ export const tasksRouter = router({
         .select({ id: tasksTable.id })
         .from(tasksTable)
         .where(
-          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)),
+          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, 'user')),
         )
         .limit(1);
       if (!taskRow) {
@@ -6410,7 +6413,7 @@ export const tasksRouter = router({
       .select({ count: sql<number>`COUNT(*)` })
       .from(tasksTable)
       .where(
-        and(eq(tasksTable.userId, userRow.id), eq(tasksTable.status, 'failed')),
+        and(eq(tasksTable.userId, userRow.id), eq(tasksTable.status, 'failed'), eq(tasksTable.origin, 'user')),
       );
     return { count: Number(row?.count ?? 0) };
   }),

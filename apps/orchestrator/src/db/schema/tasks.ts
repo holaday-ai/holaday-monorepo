@@ -38,6 +38,16 @@ export const tasks = mysqlTable(
     }),
     status: varchar('status', { length: 24 }).notNull().default('pending'),
     /**
+     * Phase 1 指令 #3 — isolation boundary (Playbook + Evidence Ledger §5.6).
+     * One of `user` | `playbook_canary` | `playbook_exploration` | `eval`
+     * (see `TaskOrigin` in @holaday/shared-types). Defaults to `user`, so
+     * every existing row and every untagged insert is a user task. All
+     * user-facing history / quota / KPI queries filter `origin='user'`;
+     * canary / exploration / eval tasks stay out of the sidebar, usage
+     * page, and product KPIs. Internal queues set the non-user origins.
+     */
+    origin: varchar('origin', { length: 32 }).notNull().default('user'),
+    /**
      * Populated while status='paused'. One of: user, retries_exhausted,
      * quota_exceeded. Nullable everywhere else.
      */
@@ -170,6 +180,11 @@ export const tasks = mysqlTable(
     index('ix_tasks_role_id').on(t.roleId),
     index('ix_tasks_user_starred').on(t.userId, t.starred),
     index('ix_tasks_project_id').on(t.projectId),
+    // Phase 1 #3 — origin-scoped composite indexes for the user-facing
+    // history listing (origin + user + recency) and the status rollups
+    // used by usage / admin KPIs (origin + status + recency).
+    index('ix_tasks_origin_user_created').on(t.origin, t.userId, t.createdAt),
+    index('ix_tasks_origin_status_created').on(t.origin, t.status, t.createdAt),
   ],
 );
 

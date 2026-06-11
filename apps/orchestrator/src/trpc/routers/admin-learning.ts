@@ -121,7 +121,7 @@ async function scanRecentTasks(db: unknown): Promise<TaskScanRow[]> {
       createdAt: tasks.createdAt,
     })
     .from(tasks)
-    .where(gte(tasks.createdAt, windowStart))
+    .where(and(gte(tasks.createdAt, windowStart), eq(tasks.origin, 'user')))
     .orderBy(desc(tasks.id))
     .limit(SCAN_LIMIT);
   return rows as TaskScanRow[];

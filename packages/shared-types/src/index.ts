@@ -2,6 +2,7 @@ export * from './ws.js';
 export * from './occupations.js';
 export * from './selector.js';
 export * from './ids.js';
+export * from './task-origin.js';
 export * from './plans.js';
 export * from './roles.js';
 export * from './addon-packs.js';

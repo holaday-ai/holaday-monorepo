@@ -20,3 +20,13 @@ export * from './payments.js';
 export * from './pending-cookies.js';
 export * from './user-site-stats.js';
 export * from './notifications.js';
+// Phase 1 指令 #3 — Site Playbook + Evidence Ledger (storage foundation).
+export * from './sites.js';
+export * from './site-capabilities.js';
+export * from './operation-paths.js';
+export * from './operation-path-steps.js';
+export * from './exploration-runs.js';
+export * from './evidence-artifacts.js';
+export * from './claims.js';
+export * from './claim-evidence-links.js';
+export * from './canary-results.js';

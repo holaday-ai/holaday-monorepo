@@ -109,7 +109,7 @@ export const adminRouter = router({
         count: sql<number>`COUNT(*)`,
       })
       .from(tasks)
-      .where(gte(tasks.createdAt, sevenDaysAgo))
+      .where(and(gte(tasks.createdAt, sevenDaysAgo), eq(tasks.origin, 'user')))
       .groupBy(dayExpr, tasks.status);
 
     const byDay = buildDashboardDayStats(trendRows);
@@ -139,7 +139,7 @@ export const adminRouter = router({
         distinctUsers: sql<number>`COUNT(DISTINCT ${tasks.userId})`,
       })
       .from(tasks)
-      .where(gte(tasks.createdAt, yesterdayStart))
+      .where(and(gte(tasks.createdAt, yesterdayStart), eq(tasks.origin, 'user')))
       .groupBy(bucketExpr);
     let activeToday = 0;
     let activeYesterday = 0;
@@ -174,6 +174,8 @@ export const adminRouter = router({
       })
       .from(tasks)
       .innerJoin(users, eq(users.id, tasks.userId))
+      // Phase 1 #3 — admin recent-activity feed shows user tasks only.
+      .where(eq(tasks.origin, 'user'))
       .orderBy(desc(tasks.id))
       .limit(20);
 
@@ -316,7 +318,7 @@ export const adminRouter = router({
             count: sql<number>`COUNT(*)`,
           })
           .from(tasks)
-          .where(and(inArray(tasks.userId, userIds), gte(tasks.createdAt, monthStart)))
+          .where(and(inArray(tasks.userId, userIds), gte(tasks.createdAt, monthStart), eq(tasks.origin, 'user')))
           .groupBy(tasks.userId);
         for (const r of monthRows) {
           monthCountByUser.set(Number(r.userId), Number(r.count));
@@ -327,7 +329,7 @@ export const adminRouter = router({
             maxAt: sql<Date>`MAX(${tasks.createdAt})`,
           })
           .from(tasks)
-          .where(inArray(tasks.userId, userIds))
+          .where(and(inArray(tasks.userId, userIds), eq(tasks.origin, 'user')))
           .groupBy(tasks.userId);
         for (const r of lastRows) {
           if (r.maxAt) lastActiveByUser.set(Number(r.userId), r.maxAt as Date);
@@ -397,7 +399,7 @@ export const adminRouter = router({
       const [monthCountRow] = await ctx.db
         .select({ monthCount: sql<number>`COUNT(*)` })
         .from(tasks)
-        .where(and(eq(tasks.userId, user.id), gte(tasks.createdAt, monthStart)));
+        .where(and(eq(tasks.userId, user.id), gte(tasks.createdAt, monthStart), eq(tasks.origin, 'user')));
       const monthTasks = Number(monthCountRow?.monthCount ?? 0);
 
       const recentTasks = await ctx.db
@@ -411,7 +413,7 @@ export const adminRouter = router({
           completedAt: tasks.completedAt,
         })
         .from(tasks)
-        .where(eq(tasks.userId, user.id))
+        .where(and(eq(tasks.userId, user.id), eq(tasks.origin, 'user')))
         .orderBy(desc(tasks.id))
         .limit(50);
 
