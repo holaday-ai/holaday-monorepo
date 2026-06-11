@@ -1,0 +1,112 @@
+"""Thin FastAPI HTTP transport over the akshare adapters.
+
+确定性简报（③）不走 LLM → orchestrator 直接 HTTP 取数（非 MCP-stdio；orchestrator
+无 @modelcontextprotocol/sdk）。复用 adapters + 进程内 TTL cache，envelope 与 MCP
+server.py 完全一致 `{data,count,source,fetched_at,disclaimer}`（错误优雅降级）。
+
+Run（Vultr，仅监听 127.0.0.1，由 orchestrator 同机直取，不对外暴露）：
+    uvicorn akshare_mcp.http_server:app --host 127.0.0.1 --port 8848
+
+合规：DATA 层 only —— 只聚合，不荐股、不预测；每条结果带来源+时间戳+免责。
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, Callable
+
+from fastapi import FastAPI
+
+from . import adapters as adp
+from .cache import cached
+
+DISCLAIMER = "数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。"
+
+
+def _envelope(records: list[dict[str, Any]], source: str) -> dict[str, Any]:
+    return {
+        "data": records,
+        "count": len(records),
+        "source": source,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "disclaimer": DISCLAIMER,
+    }
+
+
+def _safe(fn: Callable[..., tuple[list[dict[str, Any]], str]], *args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Run an adapter, wrap success; degrade any error to a structured payload."""
+    try:
+        records, source = fn(*args, **kwargs)
+        return _envelope(records, source)
+    except adp.AkShareUnavailable as exc:
+        return {"error": str(exc), "data": [], "count": 0, "disclaimer": DISCLAIMER}
+    except Exception as exc:  # noqa: BLE001 - any akshare/network failure
+        return {"error": f"接口调用失败: {exc}", "data": [], "count": 0, "disclaimer": DISCLAIMER}
+
+
+# Cached fetches — one TTL per interface (same as server.py).
+_quote = cached(adp.TTL_QUOTE)(adp.get_quote)
+_kline = cached(adp.TTL_KLINE)(adp.get_kline)
+_announce = cached(adp.TTL_ANNOUNCE)(adp.get_announcements)
+_lhb = cached(adp.TTL_LHB)(adp.get_dragon_tiger)
+_north = cached(adp.TTL_NORTHBOUND)(adp.get_northbound_flow)
+_index = cached(adp.TTL_INDEX)(adp.get_index_quote)
+_unlock = cached(adp.TTL_UNLOCK)(adp.get_share_unlock)
+
+app = FastAPI(title="akshare-cn-http", docs_url=None, redoc_url=None)
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/index/{market}")
+def index_quote(market: str) -> dict[str, Any]:
+    """market: 'hk' | 'us' | 'cn'。"""
+    return _safe(_index, market)
+
+
+@app.get("/announcements/{symbol}")
+def announcements(symbol: str) -> dict[str, Any]:
+    return _safe(_announce, symbol)
+
+
+@app.get("/unlock/{symbol}")
+def share_unlock(symbol: str) -> dict[str, Any]:
+    return _safe(_unlock, symbol)
+
+
+@app.get("/kline/{symbol}")
+def kline(symbol: str) -> dict[str, Any]:
+    return _safe(_kline, symbol)
+
+
+@app.get("/quote/{symbol}")
+def quote(symbol: str) -> dict[str, Any]:
+    return _safe(_quote, symbol)
+
+
+@app.get("/dragon-tiger/{start_date}")
+def dragon_tiger(start_date: str) -> dict[str, Any]:
+    """start_date: 'YYYYMMDD'。"""
+    return _safe(_lhb, start_date)
+
+
+@app.get("/northbound")
+def northbound() -> dict[str, Any]:
+    return _safe(_north)
+
+
+def main() -> None:
+    """Entry point — 仅监听本机回环，由同机 orchestrator 直取。"""
+    import os
+
+    import uvicorn
+
+    port = int(os.environ.get("AKSHARE_HTTP_PORT", "8848"))
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+
+
+if __name__ == "__main__":
+    main()
