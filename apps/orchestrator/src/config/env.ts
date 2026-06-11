@@ -75,6 +75,22 @@ const schema = z.object({
   GEMINI_IMAGE_MODEL_PRO: z.string().default('gemini-3-pro-image'),
 
   /**
+   * Phase 1 #1 — template fill. When true, the 'template_fill' lane
+   * fills a user-uploaded Office template (.docx/.xlsx) deterministically
+   * and returns the filled file. When false (default), template_fill
+   * intents fall through to the generate lane (the model honestly says
+   * it cannot fill the file), so deploying before the feature is vetted
+   * is a no-op for users — same gating shape as GEMINI_API_KEY for #5.
+   * Kill switch: set false → restart → full fall-back to generate.
+   */
+  TEMPLATE_FILL_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /** Model for the one constrained fill-mapping call. Default Sonnet. */
+  TEMPLATE_FILL_MODEL: z.string().default('claude-sonnet-4-6'),
+
+  /**
    * Phase D Step 3 rollout switch.
    *   playwright → boot connects PlaywrightExecutor to Chrome's
    *                CDP (needs Chrome launched with

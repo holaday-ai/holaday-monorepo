@@ -1045,3 +1045,43 @@ describe('Named-site execution → browser (Web-Agent roadmap Step 1, 2026-06-11
     ).toBe('scrape');
   });
 });
+
+describe('classifyExecutionMode — template_fill lane (Phase 1 #1, §5)', () => {
+  it('routes explicit fill-a-template intents to template_fill', async () => {
+    const positives = [
+      '填充模板',
+      '帮我套用模板',
+      '按这个模板生成发票',
+      '把这些数据填到表格里',
+      '用我的模板填一下报价单',
+      '模板里的字段帮我填好',
+      '填写模板里的客户信息',
+      'fill in the template with this data',
+    ];
+    for (const intent of positives) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).toBe('template_fill');
+    }
+  });
+
+  it('does NOT route CREATING or asking-about a template (→ generate)', async () => {
+    const negatives = [
+      '做一个周报模板',
+      '设计一份发票模板',
+      '生成一个简历模板',
+      '模板怎么写',
+      '给我一个合同模板范例',
+    ];
+    for (const intent of negatives) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).not.toBe('template_fill');
+    }
+  });
+
+  it('does NOT hijack a browser form-fill that has no template context', async () => {
+    for (const intent of ['登录网站并填写表单', '在这个页面填写报名信息并提交']) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).not.toBe('template_fill');
+    }
+  });
+});

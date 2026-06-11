@@ -28,7 +28,12 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from 'pino';
 
-export type ExecutionMode = 'browser' | 'generate' | 'image' | 'scrape';
+export type ExecutionMode =
+  | 'browser'
+  | 'generate'
+  | 'image'
+  | 'scrape'
+  | 'template_fill';
 
 interface CacheEntry {
   mode: ExecutionMode;
@@ -299,6 +304,51 @@ function matchImagePattern(intent: string): string | null {
   return null;
 }
 
+/**
+ * TEMPLATE-FILL intent (Phase 1 #1, §5). The user wants HOLA DAY to
+ * fill THEIR uploaded Office template (docx/xlsx) — "填充模板" / "套模板"
+ * / "按这个模板生成" / "把数据填进表格" / "fill the template". Routes to
+ * the dedicated 'template_fill' lane (deterministic engine + one model
+ * mapping call), NOT generate/browser/image. STRONG signal.
+ *
+ * Guarded against CREATING a template ("做一个周报模板" / "设计一份模板"
+ * — that's filegen/generate) and template Q&A ("模板怎么写/范例"). Every
+ * positive pattern requires an explicit 模板/template context word, so a
+ * plain "登录并填写表单" browser task is never mis-routed here.
+ */
+// `写` is a create verb (写一个模板 / 编写模板 = author), but NOT inside
+// `填写` (填写模板 = fill out) — the lookbehind keeps fill intents out of
+// the negative veto.
+const TEMPLATE_FILL_NEGATIVE =
+  /(?:做|设计|制作|生成|创建|(?<!填)写|搞)\s*(?:一个|一份|个|份|新的|新)?\s*[^，。；！？!?\n]{0,8}模板|模板\s*(?:怎么写|怎么做|范例|示例|样例|样式|样本|长什么样|是什么|有哪些)/;
+
+const TEMPLATE_FILL_PATTERNS: readonly [RegExp, string][] = [
+  // Unambiguous jargon.
+  [/填充模板|套模板|套用模板|填模板|模板填充|填充(?:这个|该|此)?模板/, '模板填充术语'],
+  // 按/用/根据 <template> 生成/填 …
+  [/(?:按|用|根据|依照|参照|基于)\s*(?:这个|那个|这份|那份|附件|我的|上传的)?\s*模板\s*(?:来)?(?:生成|填|填充|填写|做|制作|输出|完成)/, '按模板填充'],
+  // 把（这些）数据填进 模板/表格/文档
+  [/把\s*[^，。；！？!?\n]{0,10}?填(?:进|入|到|好)\s*(?:模板|表格|文档|表里|文件)/, '把数据填进模板'],
+  // 用我的/这个模板 …
+  [/用\s*(?:我的|这个|这份|附件|上传的)\s*模板/, '用我的模板'],
+  // 模板里的字段/占位符
+  [/模板\s*(?:里|中|内)\s*的?\s*(?:字段|占位符?|空位?|空格)/, '模板里的字段'],
+  // 填写/填充 模板/占位符
+  [/(?:填写|填充|填入|录入)\s*(?:这个|该|此|模板的)?\s*(?:模板|占位符)/, '填写模板'],
+  // English.
+  [/\bfill\s+(?:in|out)?\s*(?:the|this|my|that)?\s*template\b/i, 'english fill template'],
+  [/\bfill\s+(?:in\s+)?(?:the\s+)?(?:placeholders?|fields?)\b[^.]*\btemplate\b/i, 'english fill template fields'],
+];
+
+function matchTemplateFillPattern(intent: string): string | null {
+  // Creating / asking-about a template is NOT filling one.
+  if (TEMPLATE_FILL_NEGATIVE.test(intent)) return null;
+  for (const [pattern, label] of TEMPLATE_FILL_PATTERNS) {
+    if (pattern.test(intent)) return label;
+  }
+  return null;
+}
+
 const NON_EXECUTION_PLATFORM_NAMES =
   '(?:gmail|linkedin|slack|notion|github|amazon|youtube|instagram|twitter|x\\.com|reddit|shopify|飞书|google forms|google docs|google sheets|google slides|google calendar|google flights|google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe|calendly|trello|asana|jira|zendesk|intercom|linear|monday(?:\\.com)?|携程|飞猪|去哪儿|去哪网|同程|美团|京东|淘宝|天猫|拼多多|豆瓣|百度地图|高德地图|大众点评)';
 
@@ -472,6 +522,15 @@ interface RouteDecision {
 }
 
 function decide(intent: string): RouteDecision {
+  // 0a. Template-fill — the user wants to fill THEIR uploaded Office
+  // template. Checked first: the patterns require an explicit 模板/
+  // template context, and this must win over the interaction form-fill
+  // pattern ("填写模板里的信息" would otherwise route to browser).
+  const templateFill = matchTemplateFillPattern(intent);
+  if (templateFill) {
+    return { mode: 'template_fill', source: 'kw:template_fill', match: templateFill };
+  }
+
   // 0. Product-listing / comparison shopping tasks need the supercar
   // loop so it can use search_ecommerce and preserve source URLs.
   // Firecrawl/generate lanes repeatedly produced price rows with
@@ -578,6 +637,7 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
   // ambiguous prompts while preventing the search-verb foot-gun.
   const d = decide(intent);
   const STRONG_SIGNAL_SOURCES = new Set([
+    'kw:template_fill',
     'kw:image',
     'kw:interaction',
     'kw:url',

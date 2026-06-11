@@ -25,6 +25,11 @@ import {
   type ImageAttachment,
   type RunImageTaskResult,
 } from '../../agent/image/image-runner.js';
+import {
+  runTemplateFillTask,
+  type RunTemplateFillResult,
+  type TemplateAttachment,
+} from '../../agent/template/template-fill-runner.js';
 import { tryAcquire as rateLimitTryAcquire } from '../../quota/rate-limiter.js';
 import { describeSignal } from '../../agent/vision-loop/anti-bot-detector.js';
 import { classify as classifyDomain } from '../../agent/vision-loop/domain/classifier.js';
@@ -1097,6 +1102,261 @@ export const tasksRouter = router({
     }
     // ===== end image-mode fork =====
 
+    // ===== template-fill fork (Phase 1 #1) =====
+    // Fill a user-uploaded Office template (docx/xlsx) deterministically
+    // and return the filled file. Mirrors the image fork: no agent loop,
+    // no pool slot, no verifier — safety check + extract placeholders +
+    // ONE constrained model mapping call + engine fill + storeOutput →
+    // FileDownloadCard via result.metadata.attachments.
+    //
+    // Gated on TEMPLATE_FILL_ENABLED (mirrors GEMINI_API_KEY gating the
+    // image lane): when the flag is off, template_fill intents fall
+    // through to the generate lane below, where the model honestly says
+    // it cannot fill the user's file — so shipping before the feature is
+    // vetted is a no-op for users instead of a broken lane.
+    if (
+      executionMode === 'template_fill' &&
+      appEnv.TEMPLATE_FILL_ENABLED &&
+      anthropicForResolver
+    ) {
+      const taskId = newExternalId('task');
+      const repo = new TaskRepository(ctx.db);
+
+      await repo.insertTask(
+        {
+          taskId,
+          status: 'executing',
+          plan: [],
+          cursor: 0,
+          pendingConfirm: null,
+        },
+        {
+          userId: userRow.id,
+          intent: input.intent,
+          roleId: gatedRole === 'none' ? null : gatedRole,
+          opusUsed: false,
+        },
+      );
+
+      ctx.logger.info(
+        { taskId, userId: ctx.userId, executorLane: 'template_fill', executionMode },
+        'task: executor lane selected',
+      );
+      broadcastSubStatus(ctx.userId, taskId, 'generating');
+
+      const anthropicClient = anthropicForResolver;
+      const templateModel = appEnv.TEMPLATE_FILL_MODEL;
+      const templateStartedAt = Date.now();
+      const fileIds = input.fileIds ?? [];
+      void (async () => {
+        const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+        let result: RunTemplateFillResult;
+        if (taskInternalId == null) {
+          result = {
+            status: 'failed',
+            summary: '',
+            reason: '任务记录丢失，请重试。',
+            attachments: [],
+          };
+        } else {
+          // Re-load the uploaded files for RAW bytes — the shared
+          // attachmentBlocks above are parsed-for-prompt, not raw. The
+          // template is the first Office file (docx preferred); any other
+          // file (csv/xlsx/json) is parsed to text as the data source.
+          let template:
+            | { buffer: Buffer; filename: string; mimetype: string }
+            | undefined;
+          const dataTexts: string[] = [];
+          if (fileIds.length > 0) {
+            const loaded = await fileService.loadMany(fileIds, userRow.id);
+            const isOffice = (name: string, mime: string): boolean =>
+              /\.(?:docx|xlsx)$/i.test(name) ||
+              /wordprocessingml\.document|spreadsheetml\.sheet/i.test(mime);
+            const isDocx = (name: string, mime: string): boolean =>
+              /\.docx$/i.test(name) || /wordprocessingml\.document/i.test(mime);
+            const officeFiles = loaded.filter((f) =>
+              isOffice(f.row.filename, f.row.mimetype),
+            );
+            const tpl =
+              officeFiles.find((f) => isDocx(f.row.filename, f.row.mimetype)) ??
+              officeFiles[0];
+            if (tpl) {
+              template = {
+                buffer: tpl.buffer,
+                filename: tpl.row.filename,
+                mimetype: tpl.row.mimetype,
+              };
+            }
+            for (const f of loaded) {
+              if (tpl && f === tpl) continue;
+              try {
+                const parsed = await parseFileForPrompt(
+                  f.buffer,
+                  f.row.filename,
+                  f.row.mimetype,
+                );
+                for (const b of parsed.blocks) {
+                  if (b.type === 'text') dataTexts.push(b.text);
+                }
+              } catch (err) {
+                ctx.logger.warn(
+                  { err: err instanceof Error ? err.message : String(err) },
+                  'template-fill: data file parse failed — skipping',
+                );
+              }
+            }
+          }
+
+          const save = async (out: {
+            buffer: Buffer;
+            filename: string;
+            mimetype: string;
+          }): Promise<TemplateAttachment> => {
+            const stored = await fileService.storeOutput({
+              userIdInternal: userRow.id,
+              userExternalId: ctx.userId,
+              taskIdInternal: taskInternalId,
+              filename: out.filename,
+              mimetype: out.mimetype,
+              buffer: out.buffer,
+            });
+            return {
+              fileId: stored.externalId,
+              downloadUrl: `/api/files/${stored.externalId}/download`,
+              filename: stored.filename,
+              mimetype: stored.mimetype,
+              sizeBytes: Number(stored.sizeBytes),
+              expiresAt: stored.expiresAt
+                ? stored.expiresAt.toISOString()
+                : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+              kind: 'output',
+            };
+          };
+
+          const model = async (req: {
+            system: string;
+            user: string;
+          }): Promise<string> => {
+            const resp = await anthropicClient.messages.create({
+              model: templateModel,
+              max_tokens: 8192,
+              system: req.system,
+              messages: [{ role: 'user', content: req.user }],
+            });
+            let text = '';
+            for (const block of resp.content) {
+              if (block.type === 'text') text += (text ? '\n' : '') + block.text;
+            }
+            return text;
+          };
+
+          result = await runTemplateFillTask({
+            intent: input.intent,
+            ...(template ? { template } : {}),
+            ...(dataTexts.length > 0 ? { dataText: dataTexts.join('\n\n') } : {}),
+            allowedFormats: allowedFormatsForPlan(planId),
+            save,
+            model,
+            logger: ctx.logger,
+          });
+        }
+
+        const metadata = {
+          executionMode: 'template_fill' as const,
+          finalExecutionMode: 'template_fill' as const,
+          templateFormat: result.format ?? null,
+          ...(result.degraded ? { templateDegraded: result.degraded } : {}),
+          elapsedMs: Date.now() - templateStartedAt,
+          ...(result.attachments.length > 0 ? { attachments: result.attachments } : {}),
+        };
+
+        ctx.logger.info(
+          {
+            taskId,
+            userId: ctx.userId,
+            runnerStatus: result.status,
+            templateFormat: result.format ?? null,
+            missingCount: result.missing?.length ?? 0,
+          },
+          'task:completed',
+        );
+
+        try {
+          if (result.status === 'completed') {
+            await repo.persistVisionOutcome(taskId, {
+              status: 'completed',
+              summary: result.summary,
+              tickCount: 1,
+              metadata,
+            });
+          } else if (result.status === 'partial_success') {
+            await repo.persistVisionOutcome(taskId, {
+              status: 'partial_success',
+              summary: result.summary,
+              tickCount: 1,
+              metadata,
+            });
+          } else if (result.status === 'awaiting_user') {
+            // Chat-only clarification (please upload a template) — same
+            // shape as the generate-lane intake park.
+            await ctx.db
+              .update(tasksTable)
+              .set({
+                status: 'awaiting_user',
+                awaitingQuestion: result.awaitingQuestion ?? '请补充信息后继续。',
+                awaitingKind: 'clarification',
+                result: { ...metadata, executionMode: 'template_fill' as const },
+              })
+              .where(eq(tasksTable.externalId, taskId));
+          } else {
+            await repo.persistVisionOutcome(taskId, {
+              status: 'failed',
+              reason: result.reason ?? '模板填充失败，请稍后重试。',
+              tickCount: 1,
+              metadata,
+            });
+          }
+        } catch (err) {
+          ctx.logger.error({ err, taskId }, 'template-fill: persist failed');
+        }
+
+        try {
+          if (result.status === 'completed' || result.status === 'partial_success') {
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: result.status,
+              ...(result.summary ? { summary: result.summary } : {}),
+            });
+          } else if (result.status === 'awaiting_user') {
+            broadcastToUser(ctx.userId, {
+              type: 'server.supercar.awaiting_user',
+              taskId,
+              question: result.awaitingQuestion ?? '请补充信息后继续。',
+              awaitingKind: 'clarification',
+            });
+          } else {
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'failed',
+              ...(result.reason ? { reason: result.reason } : {}),
+            });
+          }
+        } catch (err) {
+          ctx.logger.warn({ err, taskId }, 'template-fill: broadcast terminal failed');
+        }
+      })();
+
+      return {
+        taskId,
+        status: 'executing' as const,
+        steps: [],
+        executionMode: 'template_fill' as const,
+      };
+    }
+    // ===== end template-fill fork =====
+
     // ===== Phase 21b — generate-mode fork =====
     // Pure-generation tasks (write a PRD, translate this, summarize that)
     // skip the supercar agent loop entirely. One Anthropic call with
@@ -1105,7 +1365,9 @@ export const tasksRouter = router({
     // state machine. Falls through to the existing supercar branch
     // below for executionMode === 'browser'.
     if (
-      (executionMode === 'generate' || executionMode === 'image') &&
+      (executionMode === 'generate' ||
+        executionMode === 'image' ||
+        executionMode === 'template_fill') &&
       appEnv.ANTHROPIC_API_KEY &&
       anthropicForResolver
     ) {

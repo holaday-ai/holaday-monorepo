@@ -30,6 +30,9 @@ interface ModeBuckets {
   // Sprint #5 — image generation (nano banana). No-pool concurrency
   // (just an outbound API call), tracked like generate/scrape.
   image: Set<string>;
+  // Phase 1 #1 — template fill. Deterministic engine + one model call,
+  // no pool slot; tracked like image/generate/scrape.
+  template_fill: Set<string>;
 }
 
 const TRACKER = new Map<string, ModeBuckets>();
@@ -37,7 +40,13 @@ const TRACKER = new Map<string, ModeBuckets>();
 function getOrInit(userId: string): ModeBuckets {
   let b = TRACKER.get(userId);
   if (!b) {
-    b = { browser: new Set(), generate: new Set(), scrape: new Set(), image: new Set() };
+    b = {
+      browser: new Set(),
+      generate: new Set(),
+      scrape: new Set(),
+      image: new Set(),
+      template_fill: new Set(),
+    };
     TRACKER.set(userId, b);
   }
   return b;
@@ -61,11 +70,13 @@ export function trackEnd(userId: string, taskId: string): void {
   b.generate.delete(taskId);
   b.scrape.delete(taskId);
   b.image.delete(taskId);
+  b.template_fill.delete(taskId);
   if (
     b.browser.size === 0 &&
     b.generate.size === 0 &&
     b.scrape.size === 0 &&
-    b.image.size === 0
+    b.image.size === 0 &&
+    b.template_fill.size === 0
   ) {
     TRACKER.delete(userId);
   }

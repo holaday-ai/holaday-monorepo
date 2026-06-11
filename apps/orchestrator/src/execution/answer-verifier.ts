@@ -35,6 +35,7 @@ import {
   type OutputFileDescriptor,
 } from './file-artifact-consistency.js';
 import { evaluateSourceDomain } from './source-domain-consistency.js';
+import { evaluateTemplateFill } from './template-fill-consistency.js';
 import { classifyLightweightTask } from './lightweight-task.js';
 
 export type FailureLevel = 'fixable' | 'needs_clarification' | 'hard_fail';
@@ -225,6 +226,17 @@ export function verifyDeterministic(inputs: VerifyInputs): VerificationResult {
     finalUrl,
   );
   if (sourceDomainCheck) checks.push(sourceDomainCheck);
+
+  // 7. Template-fill consistency (Phase 1 #1, §6) — backstop for the
+  //    template_fill lane: an answer that claims it filled a template
+  //    (保留了模板原有格式) must be backed by a real filled document. The
+  //    runner grades this directly; this catches a runner miss and the
+  //    generate-fallback path. No-op for every non-template answer.
+  const templateFillCheck = checkTemplateFillConsistency(
+    answerText,
+    inputs.outputFiles ?? [],
+  );
+  if (templateFillCheck) checks.push(templateFillCheck);
 
   const passed = checks.every((c) => c.passed);
   const result: VerificationResult = {
@@ -1232,6 +1244,29 @@ function checkSourceDomainConsistency(
     passed: false,
     checker: 'deterministic',
     detail: '结果来源与指定网站不一致，请重新执行或指定是否允许使用第三方来源。',
+    severity: 'fixable',
+  };
+}
+
+/**
+ * Template-fill consistency guard (Phase 1 #1, §6). Fails (fixable) when
+ * the answer claims it filled a template ("…保留了模板原有格式…") but no
+ * real filled document (holaday-file fence or document output) backs it.
+ * Pure logic lives in template-fill-consistency.ts; this is the
+ * CheckResult adapter. No-op for every non-template answer.
+ */
+function checkTemplateFillConsistency(
+  answerText: string,
+  outputFiles: ReadonlyArray<OutputFileDescriptor>,
+): CheckResult | null {
+  const verdict = evaluateTemplateFill({ answerText, outputFiles });
+  if (!verdict.inconsistent) return null;
+  return {
+    criterionId: 'generic.template_fill_consistency',
+    criterionType: 'template_fill_consistency',
+    passed: false,
+    checker: 'deterministic',
+    detail: '回复声称已按模板填充并交付文件，但没有实际产出可下载的文件。',
     severity: 'fixable',
   };
 }
