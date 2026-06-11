@@ -4230,7 +4230,12 @@ function buildReconciledStepUpdate(
  * name; duplicated here so reconcile output stays clean.
  */
 function stripPlanTrackerMarkers(s: string): string {
-  return s.replace(/\[STEP\s+\d+\s+(?:done|running|failed|pending)\]\s*/gi, '');
+  // Drop the [STEP n …] plan markers AND the [AWAITING_USER_INPUT] machine
+  // marker so neither reaches the reconciled step label / "最近操作" overlay
+  // (P2-A). stripAwaitingUserMarker collapses the surrounding whitespace.
+  return stripAwaitingUserMarker(
+    s.replace(/\[STEP\s+\d+\s+(?:done|running|failed|pending)\]\s*/gi, ''),
+  );
 }
 
 /**

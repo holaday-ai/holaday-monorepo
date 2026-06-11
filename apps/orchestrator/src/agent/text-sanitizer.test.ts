@@ -1,6 +1,47 @@
 import { describe, expect, it } from 'vitest';
 
-import { humaniseScrapeFailure, sanitizeFinalText } from './text-sanitizer.js';
+import {
+  humaniseScrapeFailure,
+  sanitizeFinalText,
+  stripStopReasonMarkers,
+} from './text-sanitizer.js';
+
+describe('stripStopReasonMarkers — P2-A awaiting sentinel in step labels', () => {
+  it('strips the [AWAITING_USER_INPUT] sentinel + collapses the gap', () => {
+    expect(stripStopReasonMarkers('你想查哪天从北京出发？ [AWAITING_USER_INPUT]')).toBe(
+      '你想查哪天从北京出发？',
+    );
+    expect(stripStopReasonMarkers('问题？ [AWAITING_USER_INPUT] 正在思考')).toBe('问题？ 正在思考');
+  });
+
+  it('handles space/underscore + case variants', () => {
+    expect(stripStopReasonMarkers('q [AWAITING USER INPUT]')).toBe('q');
+    expect(stripStopReasonMarkers('q [awaiting_user_input]')).toBe('q');
+  });
+
+  it('strips other machine markers too', () => {
+    expect(stripStopReasonMarkers('done [END_TURN]')).toBe('done');
+    expect(stripStopReasonMarkers('done [MAX_TOKENS]')).toBe('done');
+    expect(stripStopReasonMarkers('done [STOP_REASON: end_turn]')).toBe('done');
+  });
+
+  it('leaves normal prose untouched', () => {
+    expect(stripStopReasonMarkers('查北京到上海的机票，给最便宜的 3 个')).toBe(
+      '查北京到上海的机票，给最便宜的 3 个',
+    );
+    expect(stripStopReasonMarkers('一个数组 [1, 2, 3] 的元素')).toBe('一个数组 [1, 2, 3] 的元素');
+  });
+
+  it('null / empty → empty string', () => {
+    expect(stripStopReasonMarkers(null)).toBe('');
+    expect(stripStopReasonMarkers(undefined)).toBe('');
+    expect(stripStopReasonMarkers('')).toBe('');
+  });
+
+  it('sanitizeFinalText still strips it on the final summary path', () => {
+    expect(sanitizeFinalText('最终答案 [AWAITING_USER_INPUT]')).not.toContain('AWAITING_USER_INPUT');
+  });
+});
 
 describe('sanitizeFinalText — paired tool tags', () => {
   it('strips paired <tool_call>...</tool_call>', () => {

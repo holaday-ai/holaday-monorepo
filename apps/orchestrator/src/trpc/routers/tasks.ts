@@ -123,6 +123,7 @@ import {
 import {
   humaniseScrapeFailure,
   sanitizeFinalText,
+  stripStopReasonMarkers,
 } from '../../agent/text-sanitizer.js';
 // Phase 24 RC follow-up — nav-failure safety net. Catches the
 // "false success" case where the agent calls task_done with a body
@@ -5998,7 +5999,12 @@ function truncateString(s: string, max: number): string {
  * won't eat user-typed bracket content.
  */
 function stripPlanTrackerMarkers(s: string): string {
-  return s.replace(/\[STEP\s+\d+[^\]]*\]/g, '').replace(/\s+/g, ' ').trim();
+  // Also strip stop-reason / awaiting-user machine markers so they never
+  // reach the step label / "最近操作" overlay (P2-A). The final summary
+  // is sanitised separately via sanitizeFinalText; step labels are not.
+  return stripStopReasonMarkers(s.replace(/\[STEP\s+\d+[^\]]*\]/g, ''))
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /**

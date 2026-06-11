@@ -8,6 +8,7 @@ import {
   searchOverlayErrorMessage,
   searchOverlayNeedsAttention,
   searchOverlayRowCopy,
+  searchOverlayRowTone,
   searchOverlayStatusCopy,
   type SearchOverlayRow,
 } from '@/lib/search-overlay-state';
@@ -279,6 +280,8 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
           {filtered.map((t, i) => {
             const copy = searchOverlayRowCopy(t);
             const needsAttention = searchOverlayNeedsAttention(t.status);
+            const restingTone =
+              !needsAttention && i !== active ? searchOverlayRowTone(t.status) : '';
             return (
               <li key={t.taskId}>
                 <button
@@ -290,6 +293,7 @@ export function SearchOverlay({ open, tasks, onClose, onPick }: Props): JSX.Elem
                   }}
                   className={cn(
                     'group flex w-full items-start gap-3 rounded-[8px] border border-transparent px-3 py-2.5 text-left transition-colors',
+                    restingTone,
                     needsAttention &&
                       'border-[#FFC910]/35 bg-[#FFC910]/[0.07] shadow-[inset_3px_0_0_rgba(255,201,16,0.75)]',
                     i === active && !needsAttention

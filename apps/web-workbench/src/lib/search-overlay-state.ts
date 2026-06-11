@@ -90,6 +90,26 @@ export function searchOverlayNeedsAttention(status: string): boolean {
 }
 
 /**
+ * Subtle resting tone (faint left border + tint) so a failed / partial /
+ * cancelled row is scannable without the strong awaiting highlight. Applied
+ * only when the row is NOT the active (keyboard-focused) row and NOT
+ * awaiting_user — those two keep their existing stronger styles. Empty
+ * string for completed / running so they stay neutral. P2-B.
+ */
+export function searchOverlayRowTone(status: string): string {
+  if (status === 'failed') {
+    return 'bg-[#EA1F59]/[0.035] shadow-[inset_3px_0_0_rgba(234,31,89,0.4)]';
+  }
+  if (status === 'partial_success') {
+    return 'bg-[#FFC910]/[0.05] shadow-[inset_3px_0_0_rgba(255,201,16,0.5)]';
+  }
+  if (status === 'cancelled') {
+    return 'shadow-[inset_3px_0_0_rgba(89,87,87,0.28)]';
+  }
+  return '';
+}
+
+/**
  * Whether the search overlay's "retry" affordance may fire. A retry is
  * only meaningful once the in-flight request has settled — firing it
  * mid-search just bumps the request nonce, which resets the 300ms

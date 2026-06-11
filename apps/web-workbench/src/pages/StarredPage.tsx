@@ -15,6 +15,7 @@ import {
   taskHubLoadErrorCopy,
   taskHubLoadMoreErrorCopy,
   taskHubNeedsAttention,
+  taskHubRowTone,
   taskHubStatusTone,
   type NormalizedTaskHubRow,
 } from '@/lib/task-hub-state';
@@ -212,12 +213,14 @@ export function StarredPage(): JSX.Element {
           <div className="divide-y divide-[#EFEFEF] rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
             {items.map((t) => {
               const needsAttention = taskHubNeedsAttention(t.status);
+              const restingTone = needsAttention ? '' : taskHubRowTone(t.status);
               const statusLabel = taskStatusLabel(t.status, t.awaitingKind);
               return (
                 <div
                   key={t.taskId}
                   className={cn(
                     'group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-[#EFEFEF]/35',
+                    restingTone,
                     needsAttention &&
                       'bg-[#FFC910]/[0.06] [box-shadow:inset_3px_0_0_rgba(255,201,16,0.75)] hover:bg-[#FFC910]/[0.10]',
                   )}

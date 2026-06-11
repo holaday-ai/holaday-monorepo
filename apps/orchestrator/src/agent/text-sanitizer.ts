@@ -191,6 +191,23 @@ const STOP_REASON_MARKERS = [
 ];
 
 /**
+ * Strip ONLY the stop-reason / machine markers (incl. the awaiting-user
+ * sentinel) without the full sanitiser's image/base64/Claude-signature
+ * passes. Cheap enough to run on per-iteration step labels / "最近操作"
+ * text — those don't flow through sanitizeFinalText (which only runs on
+ * the final summary), so the `[AWAITING_USER_INPUT]` marker leaked into
+ * the step overlay until this was applied at the step-label build points.
+ * Collapses leftover double spaces so removing a mid-line marker doesn't
+ * leave "你想查哪天  ？".
+ */
+export function stripStopReasonMarkers(input: string | null | undefined): string {
+  if (!input) return '';
+  let text = input;
+  for (const re of STOP_REASON_MARKERS) text = text.replace(re, '');
+  return text.replace(/[ \t]{2,}/g, ' ').trim();
+}
+
+/**
  * Phase 4 R1 — Claude self-signature patterns. The product is
  * branded HOLA DAY (橙子智能), not Claude; when the agent emits
  * "I'm Claude Sonnet 4.6" or "由 Claude Opus 生成" the user trusts

@@ -5,9 +5,27 @@ import {
   searchOverlayCanRetry,
   searchOverlayNeedsAttention,
   searchOverlayRowCopy,
+  searchOverlayRowTone,
   searchOverlayErrorMessage,
   searchOverlayStatusCopy,
 } from './search-overlay-state';
+
+describe('searchOverlayRowTone — P2-B resting tone', () => {
+  it('failed → subtle red left border', () => {
+    expect(searchOverlayRowTone('failed')).toContain('rgba(234,31,89');
+  });
+  it('partial_success → subtle amber left border', () => {
+    expect(searchOverlayRowTone('partial_success')).toContain('rgba(255,201,16');
+  });
+  it('cancelled → faint gray left border', () => {
+    expect(searchOverlayRowTone('cancelled')).toContain('rgba(89,87,87');
+  });
+  it('completed / awaiting_user / running → neutral (empty)', () => {
+    expect(searchOverlayRowTone('completed')).toBe('');
+    expect(searchOverlayRowTone('awaiting_user')).toBe('');
+    expect(searchOverlayRowTone('executing')).toBe('');
+  });
+});
 
 describe('search overlay state helpers', () => {
   it('keeps keyboard active index in range', () => {

@@ -101,6 +101,25 @@ export function taskHubNeedsAttention(status: string): boolean {
 }
 
 /**
+ * Subtle resting tone (faint left border + tint) for failed / partial /
+ * cancelled rows in the hub (history / starred) so they're scannable
+ * without the strong awaiting highlight. Empty for awaiting (keeps its
+ * own highlight) and completed / running (neutral). P2-B.
+ */
+export function taskHubRowTone(status: string): string {
+  if (status === 'failed') {
+    return 'bg-[#EA1F59]/[0.035] shadow-[inset_3px_0_0_rgba(234,31,89,0.4)]';
+  }
+  if (status === 'partial_success') {
+    return 'bg-[#FFC910]/[0.05] shadow-[inset_3px_0_0_rgba(255,201,16,0.5)]';
+  }
+  if (status === 'cancelled') {
+    return 'shadow-[inset_3px_0_0_rgba(89,87,87,0.28)]';
+  }
+  return '';
+}
+
+/**
  * Display tone for a task row's status icon, shared across the hub
  * surfaces (history / starred). Collapses the non-terminal statuses
  * (pending / planning / queued / executing / paused) into a single
