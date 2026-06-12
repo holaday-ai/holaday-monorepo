@@ -34,6 +34,7 @@ import {
   ACCEPTED_MIMES,
   FileService,
   UPLOAD_BYTE_LIMIT,
+  isMacroOfficeUpload,
 } from './files/file-service.js';
 import { nextExpiryFor, type PayPalAdapter, type PlanId } from './payment/index.js';
 import { QuotaService } from './quota/quota-service.js';
@@ -472,6 +473,17 @@ export function createHttpApp(deps: HttpAppDeps) {
       const filename = req.file.originalname || 'upload';
       const dotIdx = filename.lastIndexOf('.');
       const ext = dotIdx >= 0 ? filename.slice(dotIdx).toLowerCase() : '';
+      // Phase 1 #1 — reject macro-enabled Office (.docm/.xlsm/…) with a
+      // clear message before the generic 415; template-safety also blocks
+      // them at fill time via vbaProject.bin detection (a renamed .docm).
+      if (isMacroOfficeUpload(filename, req.file.mimetype || '')) {
+        res.status(415).json({
+          error: 'macro_office_unsupported',
+          message:
+            '出于安全考虑，暂不支持含宏的 Office 文件（.docm/.xlsm 等）。请上传不含宏的 .docx / .xlsx 文件。',
+        });
+        return;
+      }
       const mimeOk = ACCEPTED_MIMES.has(req.file.mimetype.toLowerCase());
       const extOk = ext.length > 0 && ACCEPTED_EXTENSIONS.has(ext);
       if (!mimeOk && !extOk) {
