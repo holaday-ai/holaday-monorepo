@@ -89,8 +89,8 @@ baseline `musing-keller` @ `9935e84` 已含 template-fill M1-M3 → **#1 templat
 - 状态：← owner 更新（已知：M1+M2 docx + M3 xlsx 引擎已 commit；`9935e84` 已在 baseline；`TEMPLATE_FILL_ENABLED=true` 已由 #2 部署时翻开）
 
 ### #2 — A股数据层 (ashare)
-- worktree：`/Users/yaleiqi/holaday-ashare`　branch：`claude/ashare-ae1d05` @ `69c9d9f`（**已 push origin** ✓，7 commits）
-- 状态（2026-06-12 **收口·已上线生产** + **简报验收三修** + **内容三优化/预热/S2** 全部署，BOSS 验收 0032 证据通过）：
+- worktree：`/Users/yaleiqi/holaday-ashare`　branch：`claude/ashare-ae1d05` @ `483622d`（**已 push origin** ✓，含 ④ M1+M2）
+- 状态（2026-06-12 **②③简报全链 + 内容三优化 + ④即时问答 M1+M2 全部署**；④ 在 BOSS-only 灰度）：
   - **②③**：`watchlists` 表 + tRPC CRUD（幂等增删）；确定性盘前/盘后简报渲染器（每行源+时间戳+固定免责，**不预测不荐股**）+ dev/prod 双模。
   - **§6 数据层**：⚠️ **push2.eastmoney 从 Vultr 不可达**（RemoteDisconnected，非瞬时；交接「Vultr 可达」前提作废）→ quote/kline/A股指数/港股指数全改 **sina**（实测可达）。北向净买额 2024-08 停披露(恒 0.0)→整行省略。龙虎榜接 akshare 自带「解读」列。详见 worktree `apps/akshare-mcp/README` 已知限制节。
   - **§6c**：`akshare-mcp` 加薄 FastAPI `http_server.py`（仅 127.0.0.1:8848，pm2 `akshare-mcp-http` autorestart，`/healthz`）+ orchestrator `HttpAkshareClient` HTTP 直取（10s 超时 + 段级降级）；简报接口 TTL≥600s 投递窗口去重；scheduled-runner dispatch 分支接简报（单用户失败仅重试本任务 + 连续 3 次降级 inbox 错误）。
@@ -111,7 +111,14 @@ baseline `musing-keller` @ `9935e84` 已含 template-fill M1-M3 → **#1 templat
     - **S2 设置开关**：`NotificationsSection` 加「每日 A股简报」toggle → `watchlists.briefingStatus/enable/disableDailyBriefing`。
     - **测试**：orchestrator a-share 46 + scheduled-runner 24（+prewarm 3 / +renderer 新增 6）全绿；tsc/biome/eslint + SPA tsc/lint clean。重触发盘前 id49 / 盘后 id50 投 BOSS inbox（真数据、周五、无泄漏）。
   - **✅ 冷缓存 follow-up 已闭环**（预热方案落地）。
-  - **待**：④ 即时问答（等 BOSS 内容验收 + Skill Router 一起规划）。注：盘前公告窗口「近 24h」按日历日(昨→今)，周一不回溯上周五，属次要已知限制。
+  - **④ 即时问答 M1+M2 已交付上线（`483622d`，BOSS-only 灰度）**：Skill Router 首场景（方案 `docs/PHASE1_ASHARE_QA_SKILL_ROUTER_DESIGN.md` APPROVED + 通用模式 `docs/SKILL_ROUTER_PATTERN.md` markdown=WHAT/TS=HOW，后 11 技能照办）。
+    - **M1** 接地事实卡（无 LLM，①盘面②同期已披露，逐条溯源）+ 抽 `ashare-format.ts` 共享底座。**M2** 合规闸门（advice/predict/ungrounded 越线降级纯数据 + **打日志计数**，21 对抗测长期保留）+ LLM③ runner（③段尾钉「以上因素与股价变动的关联未经证实」）+ token 上限保护。
+    - **短名 name-search**：⚠️ `stock_info_a_code_name` 从 Vultr **不可达** → sina `stock_zh_a_spot`（5526，日级缓存 + 开盘前 prewarm `warmSymbolTable` 刷新 + 非阻塞自愈）。
+    - **接线**：`tasks.ts` a-share-qa lane（镜像 template-fill，无 agent loop / 背景 async / persist+broadcast）。双门 `ASHARE_QA_ENABLED`(默认 OFF) + `ASHARE_QA_ALLOWLIST`(CSV)。**灰度 env 已开**（restart 623 进程内 flag 实证），符号表 warm(5526)。
+    - **真 LLM 实测**：带 roleId='a-share-analyst' 诱导提问（该买吗/割肉/目标价/抄底）→ haiku **全自合规**（无建议/预测）→ 闸门没触发=最好安全结果；闸门降级由对抗单测确定性兜底。**待 BOSS 产品内实测，过了才 widen flag**。
+    - **⚠️ 已知限制（BOSS 拍板 v1 不兜）**：裸短名问句（未选技能 + 无术语/代码）不命中 → 落通用路径；唯一通路 = 选 a-share-analyst 技能(roleId)。
+  - **测试**：a-share 92 + 全量 2510 全绿。**注**：`tasks.ts` ④ lane 与 #1 template-fill fix（`4e4c6c4` 别人 push 进本支）rebase 无冲突已并。
+  - **待**：盘前公告窗口「近 24h」按日历日，周一不回溯上周五=次要已知限制。
 
 ### #3 — Playbook + Evidence Ledger（本约定创建者）
 - worktree：`/Users/yaleiqi/holaday-playbook-ledger`　branch：`claude/playbook-ledger-ae1d05`（已 push）
