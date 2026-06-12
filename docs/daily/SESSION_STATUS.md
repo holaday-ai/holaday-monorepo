@@ -71,15 +71,24 @@
 
 ### #3 — Playbook + Evidence Ledger（本约定创建者）
 - worktree：`/Users/yaleiqi/holaday-playbook-ledger`　branch：`claude/playbook-ledger-ae1d05`（已 push）
-- HEAD：`84e0cc5`（Pack A）
 - 状态（2026-06-12 停点）：
-  - **Pack A 完成**：tasks.origin 列 + 9 表 schema + migration `0033` + R2 helper + 4 repository
-    + TaskOrigin 常量 + §5.6 origin='user' 读取守卫。tsc 0 错 + 31 新测绿。
-  - **`0033` 已落 Vultr 生产库 `holaday` 并验证通过**：9 表 + `tasks.origin`(varchar32/NOT NULL/
-    default 'user') + 2 个 origin 索引 + 外键全对 + 2719 tasks 全 origin='user' 无损。
-  - **Pack B 暂缓**：等 #2 的部署 + 简报验收完成后解锁（Pack B 要碰 task 完成 hook，又是
-    `tasks.ts`，避免与 #2 撞车）。
-  - eval origin 标记 defer 到 Pack C。
+  - **Pack A 完成 + `0033` 已落 Vultr 生产库并验证**（9 表 + `tasks.origin`varchar32/NOT NULL/
+    default 'user' + 2 索引 + 外键全对 + 2719 tasks 无损）。
+  - **Pack B 完成**（§8：Ledger 写路径 + retention reaper）：
+    - 终态 hook `writeLedgerToDb`（3 处 persistExecution 调用点之后、disposeExecution 之前）
+      把内存 EvidenceLedger 镜像进 `evidence_artifacts`+`claims`+`claim_evidence_links`
+      （+ R2 bundle 对象，artifact 独占以便 reaper 安全删）。`tasks.evidence_json` 兼容快照照写。
+    - `LedgerRepository` 读 API skeleton（getClaimsForTask/getArtifactsForTask/getGroundedUrls/
+      getEvidenceForClaim）—— **未接 verifier**（verifier 逻辑零改，验收：现有结果不变）。
+    - 任务删除分流（§4.9，tasks.delete）：task_evidence→删行+R2；audit/manual_hold→脱敏保留。
+    - retention reaper nightly cron（index.ts，gated `RETENTION_REAPER_ENABLED` 默认 off）：
+      过期 artifact 先删 R2 再删行、跳过 manual_hold、R2 失败留行记 cleanup_error 重试。
+    - 全程 flag-gated `LEDGER_DB_WRITE`（默认 off）→ 对现有流量零影响。**无新 migration**（用 0033 表）。
+    - tsc 0 错 + 2449 测全绿（含 12 新 Pack B 测）+ biome 我的文件 0 error。
+  - ⚠️ **给 #2（merge 协调）**：Pack B 改了 `tasks.ts`（3 处终态 hook + delete 分流，imports）。
+    与 #2 的 ④ expert-workflow-registry **文件不重叠**（#2 在 registry，我在 tasks.ts 终态/删除路径），
+    但都在同一仓。**merge 到 musing-keller 时互相通报时间点**，避免 tasks.ts/registry 交叉时撞车。
+  - eval origin 标记 defer 到 Pack C。Pack C（explorer/canary）等指令。
 
 ### #5 — 图片生成 (image)
 - 状态：← owner 更新

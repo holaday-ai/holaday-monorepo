@@ -44,6 +44,17 @@ interface FeatureFlags {
    * the disabled P0 chrome.debugger path.
    */
   OTA_USER_BROWSER: boolean;
+  /**
+   * Phase 1 #3 Pack B — Evidence Ledger DB write path. When true, the
+   * task terminal hook mirrors the in-memory EvidenceLedger into the
+   * queryable `evidence_artifacts` / `claims` / `claim_evidence_links`
+   * tables (in addition to the existing `tasks.evidence_json` snapshot,
+   * which is always written). When false (default), only the JSON
+   * snapshot is written — identical to pre-Pack-B behaviour, so the
+   * answer verifier is unaffected. Flip on Vultr once R2 + the 0033
+   * tables are validated in production.
+   */
+  LEDGER_DB_WRITE: boolean;
 }
 
 function readFlagsFromEnv(): FeatureFlags {
@@ -53,6 +64,7 @@ function readFlagsFromEnv(): FeatureFlags {
     EVIDENCE_LEDGER: process.env.EVIDENCE_LEDGER_ENABLED === 'true',
     EXPERT_WORKFLOW: process.env.EXPERT_WORKFLOW_ENABLED === 'true',
     OTA_USER_BROWSER: process.env.OTA_USER_BROWSER_ENABLED === 'true',
+    LEDGER_DB_WRITE: process.env.LEDGER_DB_WRITE_ENABLED === 'true',
   };
 }
 

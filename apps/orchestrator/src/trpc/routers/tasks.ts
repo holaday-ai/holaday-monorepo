@@ -95,6 +95,8 @@ import { skills } from '../../db/schema/skills.js';
 import { taskEvents } from '../../db/schema/task-events.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
 import { tasks as tasksTable } from '../../db/schema/tasks.js';
+import { routeTaskEvidenceOnDelete } from '../../evidence/evidence-deletion-service.js';
+import { writeLedgerToDb } from '../../evidence/ledger-write-service.js';
 import { users } from '../../db/schema/users.js';
 import {
   broadcastToUser,
@@ -1766,7 +1768,11 @@ export const tasksRouter = router({
           verification: executionVerification,
           db: ctx.db,
           logger: ctx.logger,
-        }).finally(() => disposeExecution(taskId));
+        })
+          .then(() =>
+            writeLedgerToDb({ taskExternalId: taskId, verification: executionVerification, db: ctx.db, logger: ctx.logger }),
+          )
+          .finally(() => disposeExecution(taskId));
       })();
 
       return {
@@ -2260,7 +2266,11 @@ export const tasksRouter = router({
           verification: executionVerification,
           db: ctx.db,
           logger: ctx.logger,
-        }).finally(() => disposeExecution(taskId));
+        })
+          .then(() =>
+            writeLedgerToDb({ taskExternalId: taskId, verification: executionVerification, db: ctx.db, logger: ctx.logger }),
+          )
+          .finally(() => disposeExecution(taskId));
       })();
 
       return {
@@ -4145,7 +4155,11 @@ export const tasksRouter = router({
               verification: executionVerification,
               db: ctx.db,
               logger: ctx.logger,
-            }).finally(() => disposeExecution(taskId));
+            })
+          .then(() =>
+            writeLedgerToDb({ taskExternalId: taskId, verification: executionVerification, db: ctx.db, logger: ctx.logger }),
+          )
+          .finally(() => disposeExecution(taskId));
           });
 
       // Phase 24 — fire the runFn directly (pre-queue path). Per-task
@@ -6079,6 +6093,18 @@ export const tasksRouter = router({
           code: 'PRECONDITION_FAILED',
           message: `cannot delete task in status=${taskRow.status}; pause or cancel first`,
         });
+      }
+      // Phase 1 #3 Pack B — route this task's evidence artifacts by
+      // purpose/retention BEFORE deleting the task row (while task_id is
+      // still set): task_evidence -> delete row + R2; audit/manual_hold
+      // -> scrub + retain (design 4.9). No-op when no artifacts.
+      try {
+        await routeTaskEvidenceOnDelete(ctx.db, taskRow.id, { logger: ctx.logger });
+      } catch (err) {
+        ctx.logger.warn(
+          { err, taskId: input.taskId },
+          "tasks.delete: evidence routing failed (non-blocking)",
+        );
       }
       // task_steps has onDelete:cascade via FK; task_events has no FK
       // (append-only audit log) so we clean it up manually in one tx
