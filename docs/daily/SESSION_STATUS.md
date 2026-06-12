@@ -30,3 +30,32 @@ the gate matrix, and `茅台为什么涨` → generate/scrape). a-share suite 10
 gate exclude additional modes, move the template_fill fork ahead of the a-share
 fork instead, or relocate the helper — ping #1 / BOSS. The change is intentionally
 minimal (one condition + one pure helper + one test).
+
+
+## 2026-06-13 — #1 (template-fill) 收口待命 / merge input
+
+模板填充线 BOSS 验收关闭。收口三件套已落（e2e fixture 入 CI / backlog 登记 / 本节）。
+**#1 standing by，等三分支合并。**
+
+**我在 live 分支 `claude/ashare-ae1d05` 上的全部 commit**（merge-base = `9935e84`；
+我的模板填充 M1-M3 = `0f50c3b`/`9935e84` 已在 merge-base、与 musing-keller 共享）：
+
+| commit | 内容 |
+|---|---|
+| `4e4c6c4` | fix P0 — docx 上传白名单 + 宏拒收（cherry-pick of template-fill-ae1d05 `7720729`） |
+| `31ea466` | fix P1 衍生计算确定性复核（[待核对]）+ P2 multipart 文件名 UTF-8（of `3a6c8f7`） |
+| `e6b8d4e` | fix P0 — xlsx 多行循环降级 partial_success（of `2c0de9a`） |
+| `f8437c1` | fix — a-share fork executionMode 门（**CROSS-SESSION，动了 #2 一行**，见上节） |
+| `ca52505` | docs — SESSION_STATUS（上节） |
+| (本次收口 commit) | test+docs — e2e fixture + backlog + 本节（无运行时改动，无需部署） |
+
+**合并方案输入**：
+- 模板填充全部代码在 `ashare-ae1d05`（live/已部署，canonical）。把 `ashare-ae1d05`
+  合进 `musing-keller` 即带上 #1 模板填充 + #2 a-share。
+- `template-fill-ae1d05` 有等价原始 commit（`7720729`/`3a6c8f7`/`2c0de9a` 等），
+  但 ashare 是 canonical（已 cherry-pick + 部署）；合并以 ashare 为准，避免重复引入。
+- `f8437c1`（a-share 门）跨 session，合并时 #2 确认即可，无冲突。
+- 模板填充触碰的**共享文件**（合并留意）：`trpc/routers/tasks.ts`（template_fill fork
+  + a-share 门）、`agent/intent-classifier.ts`（template_fill 路由）、`config/env.ts`
+  （TEMPLATE_FILL_ENABLED）、`quota/concurrency-tracker.ts`、`http.ts` + `files/file-service.ts`
+  （上传白名单 + 文件名解码）、`execution/answer-verifier.ts`（第7检查 template_fill_consistency）。
