@@ -12,7 +12,14 @@ import {
   renderPostmarketBriefing,
   renderPremarketBriefing,
 } from './briefing-renderer.js';
-import type { AkEnvelope, NorthboundRow, PremarketBriefingInput } from './briefing-types.js';
+import type {
+  AkEnvelope,
+  AnnouncementRow,
+  DragonTigerRow,
+  IndexRow,
+  NorthboundRow,
+  PremarketBriefingInput,
+} from './briefing-types.js';
 
 /** 投资建议措辞黑名单（针对「荐股」措辞，不误伤 净买额/买入成交额 等事实字段）。 */
 const ADVICE_PATTERN =
@@ -40,10 +47,18 @@ describe('renderPremarketBriefing（默认 prod）', () => {
     expect(md).toContain('疑似「权益分派」');
   });
 
-  it('自选股公告按股分组 + 巨潮链接', () => {
+  it('自选股公告按股分组 + 巨潮链接（空公告股不单列）', () => {
     expect(md).toContain('**贵州茅台（600519）**');
     expect(md).toContain('06-10 贵州茅台2025年年度权益分派实施公告 — [巨潮](http');
-    expect(md).toContain('近期无新公告'); // 300750 公告为空
+    expect(md).not.toContain('**宁德时代（300750）**'); // 300750 公告为空 → 不单列
+  });
+
+  it('上一交易日龙虎榜回顾段：标日期 + 只列自选股命中 + 解读列 + 过滤非自选股', () => {
+    expect(md).toContain('## 四、上一交易日龙虎榜回顾（2026-06-10（周三））');
+    expect(md).toContain(
+      '宁德时代（300750）：日跌幅偏离值达7%的证券 ｜ 龙虎榜净买额 +1.20亿元 ｜ 解读：主力净卖出，机构现身卖方',
+    );
+    expect(md).not.toContain('中国国航'); // 非自选股过滤
   });
 
   it('prod 模式无任何 [dev] 诊断行', () => {
@@ -90,11 +105,9 @@ describe('renderPostmarketBriefing（默认 prod）', () => {
     expect(md).toContain('| 宁德时代 | 300750 | 198.50 | -0.85% | 41.00亿元 |');
   });
 
-  it('龙虎榜只列自选股命中(宁德时代)，含 akshare 解读列，过滤非自选股', () => {
-    expect(md).toContain(
-      '宁德时代（300750）：日跌幅偏离值达7%的证券 ｜ 龙虎榜净买额 +1.20亿元 ｜ 解读：主力净卖出，机构现身卖方',
-    );
-    expect(md).not.toContain('中国国航');
+  it('盘后不再含龙虎榜段（已移到盘前回顾）', () => {
+    expect(md).not.toContain('龙虎榜');
+    expect(md).not.toContain('## 三、龙虎榜');
   });
 
   it('prod 无 [dev]，含免责，合规无建议措辞', () => {
@@ -128,6 +141,81 @@ describe('北向资金 2024-08 停披露（0.0 → 整行省略）', () => {
     const md = renderPostmarketBriefing({ ...POSTMARKET_SAMPLE, northbound: disclosedNb });
     expect(md).toContain('北向资金：沪股通 净买额 +25.30亿元 ｜ 深股通 净买额 +16.88亿元');
     expect(md).not.toContain('港股通(沪)'); // 南向不混入北向资金行
+  });
+});
+
+describe('验收新增：异常非泄漏 / 链接 / 龙虎榜空集 / 无新公告', () => {
+  const errUs: AkEnvelope<IndexRow> = {
+    data: [],
+    count: 0,
+    source: 'http:/index/us',
+    fetched_at: '2026-06-11T00:25:00Z',
+    disclaimer: 'x',
+    error: "接口调用失败: 'NoneType' object is not subscriptable",
+  };
+
+  it('prod：error envelope 只显示「数据暂不可用」，原始异常不泄漏', () => {
+    const md = renderPremarketBriefing({ ...PREMARKET_SAMPLE, indexUs: errUs });
+    expect(md).toContain('- 美股：数据暂不可用');
+    expect(md).not.toContain('NoneType');
+    expect(md).not.toContain('接口调用失败');
+  });
+
+  it('dev：保留原始异常便于排查', () => {
+    const md = renderPremarketBriefing({ ...PREMARKET_SAMPLE, indexUs: errUs }, { mode: 'dev' });
+    expect(md).toContain('数据暂不可用（接口调用失败');
+  });
+
+  it('公告链接含空格 → encodeURI 修正（不裸 URL 断链）', () => {
+    const withSpace: PremarketBriefingInput = {
+      ...PREMARKET_SAMPLE,
+      announcements: {
+        '600519': {
+          data: [
+            {
+              公告标题: '某公告',
+              公告时间: '2026-06-10',
+              公告链接: 'http://x.cn/d?announcementTime=2026-06-10 20:50:29',
+            },
+          ],
+          count: 1,
+          source: 's',
+          fetched_at: '2026-06-11T00:26:00Z',
+          disclaimer: 'x',
+        },
+      },
+      shareUnlock: {},
+    };
+    const md = renderPremarketBriefing(withSpace);
+    expect(md).toContain('[巨潮](http://x.cn/d?announcementTime=2026-06-10%2020:50:29)');
+    expect(md).not.toContain('2026-06-10 20:50:29)'); // 原始空格不再断链
+  });
+
+  it('龙虎榜全市场空集(count=0，未发布) → 友好提示而非「上榜」', () => {
+    const emptyDt: AkEnvelope<DragonTigerRow> = {
+      data: [],
+      count: 0,
+      source: 'akshare:stock_lhb_detail_em(当日无数据)',
+      fetched_at: '2026-06-11T00:27:00Z',
+      disclaimer: 'x',
+    };
+    const md = renderPremarketBriefing({ ...PREMARKET_SAMPLE, dragonTiger: emptyDt });
+    expect(md).toContain('当日无龙虎榜数据');
+  });
+
+  it('盘后全员当日无新公告 → 整段收敛为「今日无新公告」', () => {
+    const emptyAnn = (): AkEnvelope<AnnouncementRow> => ({
+      data: [],
+      count: 0,
+      source: 's',
+      fetched_at: '2026-06-11T07:26:00Z',
+      disclaimer: 'x',
+    });
+    const md = renderPostmarketBriefing({
+      ...POSTMARKET_SAMPLE,
+      announcements: { '600519': emptyAnn(), '300750': emptyAnn(), '000001': emptyAnn() },
+    });
+    expect(md).toContain('今日无新公告');
   });
 });
 

@@ -219,9 +219,20 @@ def get_dragon_tiger(start_date: str, end_date: str = "") -> tuple[list[dict[str
 
     Verified on Vultr: 含 `解读` 列（akshare 自带一行中性解读）+ 代码/名称/上榜原因/
     涨跌幅/龙虎榜净买额/市场总成交额 等。datacenter-eastmoney 从 Vultr 可达。
+
+    ⚠️ 当日龙虎榜收盘后晚间才披露：盘中/当日早些时候查会无数据。akshare 在该日
+    无榜单时内部对 None 取下标抛 `'NoneType' object is not subscriptable`——这是
+    「尚未发布」的常态，不是异常。捕获该情形返回**空集**（非 error），让渲染器据
+    count=0 显示「尚未发布 / 无上榜」，而非把原始异常泄漏给用户。
     """
     a = _require_ak()
-    df = a.stock_lhb_detail_em(start_date=start_date, end_date=end_date or start_date)
+    try:
+        df = a.stock_lhb_detail_em(start_date=start_date, end_date=end_date or start_date)
+    except (TypeError, KeyError, IndexError, AttributeError):
+        # akshare 对空响应取下标/取列失败 → 当日榜单尚未发布，视为空集。
+        return [], "akshare:stock_lhb_detail_em(当日无数据)"
+    if df is None or len(df) == 0:
+        return [], "akshare:stock_lhb_detail_em(当日无数据)"
     return _records(df), "akshare:stock_lhb_detail_em"
 
 

@@ -127,6 +127,13 @@ export interface PremarketBriefingInput {
   announcements: Record<string, AkEnvelope<AnnouncementRow>>;
   /** G2: 按 symbol 分组的 get_share_unlock（个股解禁）结果。 */
   shareUnlock: Record<string, AkEnvelope<UnlockRow>>;
+  /**
+   * 上一交易日龙虎榜（全市场，渲染器按自选股过滤）。当日龙虎榜收盘后晚间才披露，
+   * 15:30 盘后取不到 → 移到次日盘前「回顾」（BOSS 拍板）。
+   */
+  dragonTiger: AkEnvelope<DragonTigerRow>;
+  /** 上一交易日龙虎榜对应日期 'YYYY-MM-DD'（段标题用）。 */
+  dragonTigerDate: string;
 }
 
 /** 盘后复盘输入（大盘 + 自选股表现 + 龙虎榜/北向 + 新公告）。 */
@@ -140,8 +147,6 @@ export interface PostmarketBriefingInput {
   northbound: AkEnvelope<NorthboundRow>;
   /** 按 symbol 分组的 get_stock_kline（末行=当日）当日表现。 */
   dailyKline: Record<string, AkEnvelope<KlineRow>>;
-  /** get_dragon_tiger(today) —— 全市场龙虎榜，渲染器按自选股过滤。 */
-  dragonTiger: AkEnvelope<DragonTigerRow>;
   /** 按 symbol 分组的当日新公告。 */
   announcements: Record<string, AkEnvelope<AnnouncementRow>>;
 }

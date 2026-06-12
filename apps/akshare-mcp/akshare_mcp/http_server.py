@@ -71,8 +71,10 @@ def index_quote(market: str) -> dict[str, Any]:
 
 
 @app.get("/announcements/{symbol}")
-def announcements(symbol: str) -> dict[str, Any]:
-    return _safe(_announce, symbol)
+def announcements(symbol: str, start_date: str = "", end_date: str = "") -> dict[str, Any]:
+    """start_date/end_date: 'YYYYMMDD'。不传日期时 cninfo 返历史默认页（多为旧公告）；
+    简报按日期窗口取（盘前近 24h / 盘后当日），由 service 传范围。cache 按 args 分键。"""
+    return _safe(_announce, symbol, start_date, end_date)
 
 
 @app.get("/unlock/{symbol}")

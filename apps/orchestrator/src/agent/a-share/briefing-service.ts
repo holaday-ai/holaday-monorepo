@@ -66,6 +66,49 @@ function cnDateParts(now: Date): { iso: string; compact: string } {
   return { iso, compact: iso.replace(/-/g, '') };
 }
 
+/** 北京日历日 - days 天（中国无 DST，24h 偏移即前一日历日）。 */
+function cnDatePartsShift(now: Date, days: number): { iso: string; compact: string } {
+  return cnDateParts(new Date(now.getTime() - days * 86_400_000));
+}
+
+/** iso('YYYY-MM-DD') 正午 UTC 的星期（0=周日…6=周六），与渲染器/分发口径一致。 */
+function utcDow(iso: string): number {
+  return new Date(`${iso}T12:00:00Z`).getUTCDay();
+}
+
+/** 该 iso 是否交易日：交易日历优先，日历不可用退「工作日即视为交易日」。 */
+async function isTradingDay(client: AkshareClient, iso: string): Promise<boolean> {
+  try {
+    const env = await client.getTradingDay(iso);
+    const row = env.data[0];
+    if (!env.error && row && typeof row.is_trading_day === 'boolean') return row.is_trading_day;
+  } catch {
+    // 落工作日兜底
+  }
+  const dow = utcDow(iso);
+  return dow !== 0 && dow !== 6;
+}
+
+/**
+ * 上一交易日（盘前龙虎榜回顾用）。先把周末本地跳掉（不耗调用），只对工作日候选
+ * 查交易日历——多数早晨 1 次命中（昨天/上周五），节后早晨多 1~2 次。封顶 4 个候选。
+ */
+async function resolvePrevTradingDay(
+  client: AkshareClient,
+  now: Date,
+): Promise<{ iso: string; compact: string }> {
+  const candidates: { iso: string; compact: string }[] = [];
+  for (let d = 1; d <= 10 && candidates.length < 4; d++) {
+    const parts = cnDatePartsShift(now, d);
+    const dow = utcDow(parts.iso);
+    if (dow !== 0 && dow !== 6) candidates.push(parts);
+  }
+  for (const c of candidates) {
+    if (await isTradingDay(client, c.iso)) return c;
+  }
+  return candidates[0] ?? cnDatePartsShift(now, 1);
+}
+
 async function perSymbol<T>(
   wl: WatchlistEntry[],
   fn: (symbol: string) => Promise<AkEnvelope<T>>,
@@ -80,13 +123,20 @@ export async function buildPremarketBriefing(
   userInternalId: number,
 ): Promise<string> {
   const now = deps.now ?? new Date();
-  const { iso } = cnDateParts(now);
+  const { iso, compact: today } = cnDateParts(now);
+  // 公告窗口「近 24h」：昨天 → 今天（cninfo 不传范围会返历史默认页≈旧公告）。
+  const annStart = cnDatePartsShift(now, 1).compact;
   const watchlist = await listWatchlistForUser(deps.db, userInternalId);
-  const [indexUs, indexHk, announcements, shareUnlock] = await Promise.all([
+  // 上一交易日龙虎榜（盘后取不到 → 移盘前回顾，BOSS 拍板）。
+  const prevTd = await resolvePrevTradingDay(deps.client, now);
+  const [indexUs, indexHk, announcements, shareUnlock, dragonTiger] = await Promise.all([
     deps.client.getIndexQuote('us'),
     deps.client.getIndexQuote('hk'),
-    perSymbol<AnnouncementRow>(watchlist, (s) => deps.client.getStockAnnouncements(s)),
+    perSymbol<AnnouncementRow>(watchlist, (s) =>
+      deps.client.getStockAnnouncements(s, annStart, today),
+    ),
     perSymbol<UnlockRow>(watchlist, (s) => deps.client.getShareUnlock(s)),
+    deps.client.getDragonTiger(prevTd.compact),
   ]);
   const input: PremarketBriefingInput = {
     date: iso,
@@ -96,6 +146,8 @@ export async function buildPremarketBriefing(
     indexHk,
     announcements,
     shareUnlock,
+    dragonTiger,
+    dragonTigerDate: prevTd.iso,
   };
   return renderPremarketBriefing(input, { mode: deps.mode ?? 'prod' });
 }
@@ -106,14 +158,16 @@ export async function buildPostmarketBriefing(
   userInternalId: number,
 ): Promise<string> {
   const now = deps.now ?? new Date();
-  const { iso, compact } = cnDateParts(now);
+  const { iso, compact: today } = cnDateParts(now);
   const watchlist = await listWatchlistForUser(deps.db, userInternalId);
-  const [indexCn, northbound, dragonTiger, dailyKline, announcements] = await Promise.all([
+  // 龙虎榜不在盘后（当日榜单晚间才披露）→ 移到次日盘前回顾。公告窗口「当日」。
+  const [indexCn, northbound, dailyKline, announcements] = await Promise.all([
     deps.client.getIndexQuote('cn'),
     deps.client.getNorthboundFlow(),
-    deps.client.getDragonTiger(compact),
     perSymbol<KlineRow>(watchlist, (s) => deps.client.getStockKline(s)),
-    perSymbol<AnnouncementRow>(watchlist, (s) => deps.client.getStockAnnouncements(s)),
+    perSymbol<AnnouncementRow>(watchlist, (s) =>
+      deps.client.getStockAnnouncements(s, today, today),
+    ),
   ]);
   const input: PostmarketBriefingInput = {
     date: iso,
@@ -122,7 +176,6 @@ export async function buildPostmarketBriefing(
     indexCn,
     northbound,
     dailyKline,
-    dragonTiger,
     announcements,
   };
   return renderPostmarketBriefing(input, { mode: deps.mode ?? 'prod' });

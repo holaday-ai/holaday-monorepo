@@ -157,6 +157,25 @@ function sourceTag(env: AkEnvelope): string {
   return `来源 ${env.source} · 抓取 ${fmtClock(env.fetched_at)}`;
 }
 
+/**
+ * 段级降级文案。用户**只见「数据暂不可用」**（合规 + 不吓人）；原始异常串
+ * 由取数层（HttpAkshareClient）写 logger，不进 prod 简报。dev 模式保留
+ * `（原文）` 便于评审排查。BOSS 红线：原始异常不得泄漏给用户。
+ */
+function unavailableLine(label: string, env: AkEnvelope, mode: BriefingMode): string {
+  const detail = mode === 'dev' && env.error ? `（${env.error}）` : '';
+  return `- ${label}：数据暂不可用${detail}`;
+}
+
+/** markdown 链接 URL 容错：trim + encodeURI（cninfo 链接含空格如 `...Time=2026-06-12 20:50` 会断链）。 */
+function safeLinkUrl(raw: unknown): string {
+  try {
+    return encodeURI(String(raw).trim());
+  } catch {
+    return '';
+  }
+}
+
 function stockLabel(e: WatchlistEntry): string {
   return e.displayName ? `${e.displayName}（${e.symbol}）` : e.symbol;
 }
@@ -175,7 +194,7 @@ function overseasLines(
   const out: string[] = [];
   // 美股三大指数（G1：标普/道指/纳指 + 隔夜涨跌幅）
   if (us.error) {
-    out.push(`- 美股：数据暂不可用（${us.error}）`);
+    out.push(unavailableLine('美股', us, mode));
   } else if (us.data.length === 0) {
     out.push('- 美股：暂无数据');
   } else {
@@ -191,7 +210,7 @@ function overseasLines(
   }
   // 港股恒指
   if (hk.error) {
-    out.push(`- 港股：数据暂不可用（${hk.error}）`);
+    out.push(unavailableLine('港股', hk, mode));
   } else {
     const r =
       hk.data.find((x) => String(pick(x, ['名称']) ?? '').includes('恒生指数')) ?? hk.data[0];
@@ -207,35 +226,47 @@ function overseasLines(
   return out;
 }
 
+/**
+ * 自选股公告段。窗口由 service 服务端按日期取（盘前近 24h / 盘后当日），渲染器
+ * 只展返回行；无行时显示 `emptyLabel`（「今日无新公告」/「近24小时无新公告」）。
+ * 只输出有内容（命中或数据不可用）的个股，避免整段满屏「无公告」噪声——全员空时
+ * 收敛成一行 emptyLabel。链接经 safeLinkUrl 修正（含空格的 cninfo 链接会断链）。
+ */
 function watchlistAnnouncementLines(
   wl: WatchlistEntry[],
   ann: Record<string, AkEnvelope<AnnouncementRow>>,
-  perStock = 3,
+  opts: { mode: BriefingMode; emptyLabel: string; perStock?: number },
 ): string[] {
   if (wl.length === 0) return ['- 自选股清单为空，请先添加关注的股票（自选股 CRUD ②）。'];
+  const perStock = opts.perStock ?? 5;
   const out: string[] = [];
+  let anyContent = false;
   for (const e of wl) {
-    out.push(`**${stockLabel(e)}**`);
     const env = ann[e.symbol];
     if (!env || env.error) {
-      out.push(`- 公告数据暂不可用${env?.error ? `（${env.error}）` : ''}`);
+      out.push(
+        `**${stockLabel(e)}**`,
+        unavailableLine('公告', env ?? ({ error: '' } as AkEnvelope), opts.mode),
+      );
+      anyContent = true;
       continue;
     }
     const rows = env.data.slice(0, perStock);
-    if (rows.length === 0) {
-      out.push('- 近期无新公告');
-      continue;
-    }
+    if (rows.length === 0) continue; // 该股窗口内无新公告 → 不单列，由整段兜底
+    anyContent = true;
+    out.push(`**${stockLabel(e)}**`);
     for (const r of rows) {
       const title = String(pick(r, ['公告标题']) ?? '（无标题）');
       const time = pick(r, ['公告时间']);
       const link = pick(r, ['公告链接']);
       const date = time ? `${shortDate(String(time))} ` : '';
-      const linkMd = link ? ` — [巨潮](${String(link)})` : '';
+      const url = link ? safeLinkUrl(link) : '';
+      const linkMd = url ? ` — [巨潮](${url})` : '';
       out.push(`- ${date}${title}${linkMd}`);
     }
     out.push(`  （${sourceTag(env)}）`);
   }
+  if (!anyContent) return [`- ${opts.emptyLabel}`];
   return out;
 }
 
@@ -336,7 +367,7 @@ function marketOverviewLines(
 ): string[] {
   const out: string[] = [];
   if (cn.error) {
-    out.push(`- A股指数：数据暂不可用（${cn.error}）`);
+    out.push(unavailableLine('A股指数', cn, mode));
   } else if (cn.data.length === 0) {
     out.push('- A股指数：暂无数据');
     if (mode === 'dev') out.push('  - [dev] cn 指数为空，核对 stock_zh_index_spot_sina 代码过滤');
@@ -383,16 +414,26 @@ function watchlistPerformanceLines(
   return out;
 }
 
-function dragonTigerLines(wl: WatchlistEntry[], dt: AkEnvelope<DragonTigerRow>): string[] {
+function dragonTigerLines(
+  wl: WatchlistEntry[],
+  dt: AkEnvelope<DragonTigerRow>,
+  mode: BriefingMode,
+): string[] {
   const out: string[] = [];
   if (dt.error) {
-    out.push(`- 龙虎榜：数据暂不可用（${dt.error}）`);
+    out.push(unavailableLine('龙虎榜', dt, mode));
+    return out;
+  }
+  // 全市场榜单空（dt.data 是当日全市场龙虎榜）：当日尚未发布 / 该日无榜单。
+  // adapter 已把「当日未发布」当常态返空集（非异常），这里据 count=0 友好提示。
+  if (dt.data.length === 0) {
+    out.push('- 当日无龙虎榜数据（通常为尚未发布或无个股上榜）。');
     return out;
   }
   const symset = new Set(wl.map((e) => e.symbol));
   const hits = dt.data.filter((r) => symset.has(String(pick(r, ['代码']) ?? '')));
   if (hits.length === 0) {
-    out.push('- 龙虎榜：自选股今日无个股上榜。');
+    out.push('- 自选股无个股上榜。');
     return out;
   }
   for (const r of hits) {
@@ -425,11 +466,18 @@ export function renderPremarketBriefing(
     '## 一、隔夜外围',
     ...overseasLines(input.indexUs, input.indexHk, mode),
     '',
-    '## 二、自选股相关公告',
-    ...watchlistAnnouncementLines(input.watchlist, input.announcements),
+    '## 二、自选股相关公告（近 24 小时）',
+    ...watchlistAnnouncementLines(input.watchlist, input.announcements, {
+      mode,
+      emptyLabel: '近 24 小时无新公告',
+    }),
     '',
     '## 三、今日关键事项（解禁 / 公告提示）',
     ...keyEventLines(input.watchlist, input.announcements, input.shareUnlock, mode),
+    '',
+    `## 四、上一交易日龙虎榜回顾（${dateHeader(input.dragonTigerDate)}）`,
+    '> A股龙虎榜于收盘后晚间披露，故在次日盘前回顾上一交易日榜单。',
+    ...dragonTigerLines(input.watchlist, input.dragonTiger, mode),
     '',
     disclaimerBlock(),
   ].join('\n');
@@ -451,11 +499,12 @@ export function renderPostmarketBriefing(
     '## 二、自选股当日表现',
     ...watchlistPerformanceLines(input.watchlist, input.dailyKline),
     '',
-    '## 三、龙虎榜（自选股上榜）',
-    ...dragonTigerLines(input.watchlist, input.dragonTiger),
-    '',
-    '## 四、自选股新公告',
-    ...watchlistAnnouncementLines(input.watchlist, input.announcements),
+    // 龙虎榜不在盘后（当日榜单晚间才披露）→ 已移到次日盘前「回顾」段（BOSS 拍板）。
+    '## 三、自选股新公告（当日）',
+    ...watchlistAnnouncementLines(input.watchlist, input.announcements, {
+      mode,
+      emptyLabel: '今日无新公告',
+    }),
     '',
     disclaimerBlock(),
   ].join('\n');

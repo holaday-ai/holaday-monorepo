@@ -53,7 +53,7 @@ function fakeClient(dtSpy?: (d: string) => void): AkshareClient {
     getStockKline: (s) => Promise.resolve(POSTMARKET_SAMPLE.dailyKline[s] ?? emptyEnv('kline')),
     getDragonTiger: (d) => {
       dtSpy?.(d);
-      return Promise.resolve(POSTMARKET_SAMPLE.dragonTiger);
+      return Promise.resolve(PREMARKET_SAMPLE.dragonTiger);
     },
     getNorthboundFlow: () => Promise.resolve(POSTMARKET_SAMPLE.northbound),
     getTradingDay: (date: string) =>
@@ -70,30 +70,36 @@ function fakeClient(dtSpy?: (d: string) => void): AkshareClient {
 const NOW = new Date('2026-06-11T01:00:00Z'); // 北京 09:00
 
 describe('buildPremarketBriefing', () => {
-  it('组装含外围/自选股公告/解禁 + 北京日期', async () => {
-    const md = await buildPremarketBriefing({ db: fakeDb(WL), client: fakeClient(), now: NOW }, 42);
+  it('组装含外围/公告/解禁 + 北京日期 + 上一交易日龙虎榜回顾（compact 日期）', async () => {
+    const seen: string[] = [];
+    const md = await buildPremarketBriefing(
+      { db: fakeDb(WL), client: fakeClient((d) => seen.push(d)), now: NOW },
+      42,
+    );
     expect(md).toContain('# 📋 HOLA DAY · A股盘前简报');
     expect(md).toContain('2026-06-11（周四）');
     expect(md).toContain('标普500 5,433.21（+0.62%）');
     expect(md).toContain('**贵州茅台（600519）**');
     expect(md).toContain('06-20 解禁（流通市值 18.96亿元）');
+    // 龙虎榜移到盘前「回顾」：取上一交易日(2026-06-10 周三)榜单。
+    expect(md).toContain('上一交易日龙虎榜回顾（2026-06-10（周三））');
+    expect(md).toContain('宁德时代（300750）：日跌幅偏离值达7%的证券');
+    expect(seen).toEqual(['20260610']); // getDragonTiger 收到上一交易日 compact
     expect(md).not.toContain('[dev]'); // 默认 prod
   });
 });
 
 describe('buildPostmarketBriefing', () => {
-  it('组装大盘速览/表现表/龙虎榜命中，且龙虎榜用 compact 日期', async () => {
-    const seen: string[] = [];
+  it('组装大盘速览/表现表；龙虎榜已移盘前，不再出现在盘后', async () => {
     const md = await buildPostmarketBriefing(
-      { db: fakeDb(WL), client: fakeClient((d) => seen.push(d)), now: NOW },
+      { db: fakeDb(WL), client: fakeClient(), now: NOW },
       42,
     );
     expect(md).toContain('# 📊 HOLA DAY · A股盘后复盘');
     expect(md).toContain('## 一、大盘速览');
     expect(md).toContain('上证指数 3,125.40（+0.42%）');
     expect(md).toContain('| 贵州茅台 | 600519 | 1,580.00 | +1.23% | 38.20亿元 |');
-    expect(md).toContain('宁德时代（300750）：日跌幅偏离值达7%的证券');
-    expect(seen).toEqual(['20260611']); // dragonTiger 收到北京 compact 日期
+    expect(md).not.toContain('龙虎榜'); // 已移到盘前回顾
   });
 });
 

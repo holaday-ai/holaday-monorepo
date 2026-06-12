@@ -393,6 +393,7 @@ async function main() {
             const { notify } = await import('./notifications/notification-service.js');
             const client = new HttpAkshareClient({
               baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
+              logger,
             });
             try {
               const r = await runBriefingDispatch(
@@ -549,6 +550,23 @@ async function main() {
         );
       },
     });
+
+    // Phase 1 #2 — A股简报缓存预热（BOSS 拍板：冷缓存 → 预热，简报 10s 超时不动）。
+    // 08:25 / 15:25 北京（简报前 5 分钟）用长超时(30s)客户端把 /index/us·hk·cn 各
+    // 调一遍填 akshare-mcp 缓存(TTL 600s)，5 分钟后简报以 10s 读暖缓存即时返回。
+    {
+      const { startPrewarmScheduler, warmSharedCaches } = await import(
+        './agent/a-share/prewarm-scheduler.js'
+      );
+      const { HttpAkshareClient } = await import('./agent/a-share/akshare-http-client.js');
+      const prewarmClient = new HttpAkshareClient({
+        baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
+        timeoutMs: 30_000,
+        logger,
+      });
+      startPrewarmScheduler({ warm: () => warmSharedCaches(prewarmClient), logger });
+      logger.info({ times: ['08:25', '15:25'] }, 'prewarm: A股简报缓存预热调度已启动');
+    }
   }
 
   // Per-user VNC WebSocket proxy — only live when the pool is active.

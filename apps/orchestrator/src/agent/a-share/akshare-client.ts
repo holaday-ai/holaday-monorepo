@@ -33,8 +33,16 @@ export interface TradingDayRow {
 export interface AkshareClient {
   /** get_index_quote(market) — 'hk' 恒指 / 'us' 标普道指纳指 / 'cn' 上证深证创业板。 */
   getIndexQuote(market: 'hk' | 'us' | 'cn'): Promise<AkEnvelope<IndexRow>>;
-  /** get_stock_announcements(symbol) — 个股公告（巨潮）。 */
-  getStockAnnouncements(symbol: string): Promise<AkEnvelope<AnnouncementRow>>;
+  /**
+   * get_stock_announcements(symbol, startDate?, endDate?) — 个股公告（巨潮）。
+   * 日期 'YYYYMMDD'；不传时 cninfo 返历史默认页（多为旧公告）。简报按窗口取
+   * （盘前近 24h / 盘后当日）→ service 传范围，渲染器据此显示「无新公告」。
+   */
+  getStockAnnouncements(
+    symbol: string,
+    startDate?: string,
+    endDate?: string,
+  ): Promise<AkEnvelope<AnnouncementRow>>;
   /** get_share_unlock(symbol) — 个股限售解禁（G2）。 */
   getShareUnlock(symbol: string): Promise<AkEnvelope<UnlockRow>>;
   /** get_stock_kline(symbol) — 历史 K 线（末行=当日表现）。 */
@@ -75,7 +83,7 @@ export class StubAkshareClient implements AkshareClient {
   getIndexQuote(market: 'hk' | 'us' | 'cn') {
     return Promise.resolve(this.err<IndexRow>(`akshare:index(${market})`, this.now()));
   }
-  getStockAnnouncements(symbol: string) {
+  getStockAnnouncements(symbol: string, _startDate?: string, _endDate?: string) {
     return Promise.resolve(
       this.err<AnnouncementRow>(`akshare:announcements(${symbol})`, this.now()),
     );

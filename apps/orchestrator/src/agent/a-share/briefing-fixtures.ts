@@ -126,6 +126,35 @@ export const PREMARKET_SAMPLE: PremarketBriefingInput = {
       disclaimer: DISCLAIMER,
     },
   },
+  // 上一交易日龙虎榜（盘前回顾段；2026-06-11 盘前回顾 06-10 榜单）。
+  dragonTigerDate: '2026-06-10',
+  dragonTiger: {
+    data: [
+      {
+        代码: '300750',
+        名称: '宁德时代',
+        上榜原因: '日跌幅偏离值达7%的证券',
+        解读: '主力净卖出，机构现身卖方',
+        收盘价: 198.5,
+        涨跌幅: -0.85,
+        龙虎榜净买额: 120_000_000,
+        龙虎榜买入额: 580_000_000,
+        龙虎榜卖出额: 460_000_000,
+      },
+      {
+        代码: '601111',
+        名称: '中国国航',
+        上榜原因: '连续三个交易日内收盘价涨幅偏离值累计达20%',
+        收盘价: 9.12,
+        涨跌幅: 9.98,
+        龙虎榜净买额: 230_000_000,
+      },
+    ],
+    count: 2,
+    source: 'akshare:stock_lhb_detail_em',
+    fetched_at: '2026-06-11T00:27:00Z',
+    disclaimer: DISCLAIMER,
+  },
 };
 
 export const POSTMARKET_SAMPLE: PostmarketBriefingInput = {
@@ -229,33 +258,6 @@ export const POSTMARKET_SAMPLE: PostmarketBriefingInput = {
       fetched_at: '2026-06-11T07:25:00Z',
       disclaimer: DISCLAIMER,
     },
-  },
-  dragonTiger: {
-    data: [
-      {
-        代码: '300750',
-        名称: '宁德时代',
-        上榜原因: '日跌幅偏离值达7%的证券',
-        解读: '主力净卖出，机构现身卖方',
-        收盘价: 198.5,
-        涨跌幅: -0.85,
-        龙虎榜净买额: 120_000_000,
-        龙虎榜买入额: 580_000_000,
-        龙虎榜卖出额: 460_000_000,
-      },
-      {
-        代码: '601111',
-        名称: '中国国航',
-        上榜原因: '连续三个交易日内收盘价涨幅偏离值累计达20%',
-        收盘价: 9.12,
-        涨跌幅: 9.98,
-        龙虎榜净买额: 230_000_000,
-      },
-    ],
-    count: 2,
-    source: 'akshare:stock_lhb_detail_em',
-    fetched_at: '2026-06-11T07:25:00Z',
-    disclaimer: DISCLAIMER,
   },
   announcements: {
     '600519': {

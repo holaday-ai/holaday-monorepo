@@ -47,6 +47,9 @@ export function NotificationsSection(): JSX.Element {
     React.useState<NotificationChannelRow | null>(null);
   const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
   const [pendingChannelId, setPendingChannelId] = React.useState<string | null>(null);
+  // S2 — 每日 A股简报 opt-in（null=加载中）。后端 watchlists.briefingStatus/enable/disable。
+  const [briefingEnabled, setBriefingEnabled] = React.useState<boolean | null>(null);
+  const [briefingPending, setBriefingPending] = React.useState(false);
 
   const refresh = React.useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -70,11 +73,43 @@ export function NotificationsSection(): JSX.Element {
   React.useEffect(() => {
     mountedRef.current = true;
     void refresh();
+    void (async () => {
+      try {
+        const res = await trpc.watchlists.briefingStatus.query();
+        if (mountedRef.current) {
+          setBriefingEnabled(Boolean((res as { enabled?: boolean }).enabled));
+        }
+      } catch {
+        if (mountedRef.current) setBriefingEnabled(false);
+      }
+    })();
     return () => {
       mountedRef.current = false;
       requestIdRef.current += 1;
     };
   }, [refresh]);
+
+  const handleBriefingToggle = async (): Promise<void> => {
+    if (briefingPending || briefingEnabled === null) return;
+    const next = !briefingEnabled;
+    setBriefingPending(true);
+    setBriefingEnabled(next); // 乐观
+    try {
+      if (next) await trpc.watchlists.enableDailyBriefing.mutate();
+      else await trpc.watchlists.disableDailyBriefing.mutate();
+      if (!mountedRef.current) return;
+      toast.show(
+        next ? '已开启每日 A股简报（盘前 08:30 / 盘后 15:30）' : '已关闭每日 A股简报',
+        'info',
+      );
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setBriefingEnabled(!next); // 失败回滚
+      toast.show(pageActionError('操作失败', err), 'error');
+    } finally {
+      if (mountedRef.current) setBriefingPending(false);
+    }
+  };
 
   const handleToggle = async (row: NotificationChannelRow): Promise<void> => {
     if (pendingChannelId === row.channelId) return;
@@ -165,6 +200,38 @@ export function NotificationsSection(): JSX.Element {
           description="任务开始、提前提醒、完成或失败时在右上角铃铛收到通知。"
         >
           <span className="text-xs text-muted-foreground">默认开启</span>
+        </Row>
+        <Row
+          label="每日 A股简报"
+          description="开启后每个交易日盘前 08:30、盘后 15:30 自动生成自选股简报推送到站内通知（非交易日自动跳过）。"
+        >
+          {briefingEnabled === null ? (
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-label="加载中" />
+          ) : (
+            <label
+              className={cn(
+                'flex h-8 w-12 cursor-pointer items-center rounded-full p-1 transition-colors',
+                briefingPending && 'cursor-wait opacity-70',
+                briefingEnabled ? 'bg-[#EA1F59]' : 'bg-muted-foreground/40',
+              )}
+              title={briefingPending ? '正在更新' : briefingEnabled ? '关闭' : '开启'}
+            >
+              <input
+                type="checkbox"
+                className="sr-only"
+                checked={briefingEnabled}
+                disabled={briefingPending}
+                aria-label={`${briefingEnabled ? '关闭' : '开启'}每日 A股简报`}
+                onChange={() => void handleBriefingToggle()}
+              />
+              <span
+                className={cn(
+                  'h-6 w-6 rounded-full bg-white transition-transform',
+                  briefingEnabled && 'translate-x-4',
+                )}
+              />
+            </label>
+          )}
         </Row>
         <div className="-mx-4 mt-3 border-t border-border/50">
           <div className="flex items-center justify-between px-4 py-3">
