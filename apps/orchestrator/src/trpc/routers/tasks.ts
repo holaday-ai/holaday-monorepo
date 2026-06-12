@@ -63,6 +63,7 @@ import {
   type TemplateAttachment,
   runTemplateFillTask,
 } from '../../agent/template/template-fill-runner.js';
+import { ashareQaHandlesMode } from '../../agent/a-share/ashare-qa-lane-gate.js';
 // Phase 1 follow-up — final-text sanitiser + scrape-failure
 // humaniser. Strips tool-XML / base64 / stop-reason markers from
 // outcome.summary BEFORE it goes through verify + persist.
@@ -1204,7 +1205,16 @@ export const tasksRouter = router({
       input.skillId === 'a-share-analyst' ||
       input.roleId === 'a-share-analyst' ||
       gatedRole === 'a-share-analyst';
-    if (appEnv.ASHARE_QA_ENABLED && anthropicForResolver && ASHARE_QA_ALLOWLIST.has(ctx.userId)) {
+    // Cross-session guard (#1 session, 2026-06-13, see SESSION_STATUS): only
+    // enter the a-share QA lane for GENERIC info intents — a dedicated lane the
+    // classifier already chose (template_fill / image / browser) must win, or
+    // the matcher hijacks it (bug: "按这个周报模板填充…" → answered as stock 600415).
+    if (
+      appEnv.ASHARE_QA_ENABLED &&
+      ashareQaHandlesMode(executionMode) &&
+      anthropicForResolver &&
+      ASHARE_QA_ALLOWLIST.has(ctx.userId)
+    ) {
       const { resolveAshareQa, resolveAshareInContext } = await import(
         '../../agent/a-share/ashare-qa-matcher.js'
       );
