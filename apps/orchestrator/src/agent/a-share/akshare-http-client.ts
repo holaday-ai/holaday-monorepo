@@ -7,7 +7,7 @@
  * 定时任务不崩。fetch 可注入便于单测。
  */
 
-import type { AkshareClient, TradingDayRow } from './akshare-client.js';
+import type { AkshareClient, SymbolRow, TradingDayRow } from './akshare-client.js';
 import type {
   AkEnvelope,
   AnnouncementRow,
@@ -117,5 +117,8 @@ export class HttpAkshareClient implements AkshareClient {
   }
   getTradingDay(date: string) {
     return this.get<TradingDayRow>(`/trading-day/${encodeURIComponent(date)}`);
+  }
+  searchSymbol(query: string) {
+    return this.get<SymbolRow>(`/symbol-search/${encodeURIComponent(query)}`);
   }
 }

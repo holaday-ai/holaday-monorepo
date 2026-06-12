@@ -37,6 +37,9 @@ from __future__ import annotations
 
 import datetime
 import os
+import re
+import threading
+import time
 from typing import Any
 
 try:
@@ -337,3 +340,102 @@ def is_trading_day(date_str: str) -> tuple[list[dict[str, Any]], str]:
     df = a.tool_trade_date_hist_sina()
     dates = {str(d).replace("-", "") for d in df["trade_date"].astype(str)}
     return [{"date": date_str, "is_trading_day": target in dates}], "akshare:tool_trade_date_hist_sina"
+
+
+# --- 全量代码名称表 + 短名搜索（④ 即时问答 M2） ---------------------
+# ⚠️ stock_info_a_code_name 从 Vultr **不可达**（ConnectionReset，同 push2）。
+# 改用 sina stock_zh_a_spot（实测可达，5526 只，但一次拉取 ~70s）。故**日级缓存
+# + 后台刷新**：search 读内存表（不阻塞请求）；表空时异步触发刷新本次返空；prewarm
+# 每日开盘前调 refresh_symbol_table()（长超时）填表。代码去交易所前缀（sh600519→600519）。
+_symbol_lock = threading.Lock()
+_symbol_table: dict[str, str] = {}  # code(无前缀) -> name
+_symbol_ts: float = 0.0
+_symbol_refreshing = False
+_CJK_RUN = re.compile(r"[一-鿿]{2,}")
+
+
+def _strip_market_prefix(code: str) -> str:
+    """'sh600519'/'sz000001'/'bj920000' → '600519' 等；已是 6 位则原样。"""
+    c = code.strip().lower()
+    if len(c) > 6 and c[:2].isalpha():
+        return c[2:]
+    return c
+
+
+def refresh_symbol_table() -> int:
+    """同步拉全量代码名称表填缓存（~70s，prewarm 调）。返回条数。"""
+    global _symbol_table, _symbol_ts, _symbol_refreshing
+    a = _require_ak()
+    try:
+        df = a.stock_zh_a_spot()
+        table: dict[str, str] = {}
+        for rec in df[["代码", "名称"]].to_dict("records"):
+            code = _strip_market_prefix(str(rec.get("代码", "")))
+            name = str(rec.get("名称", "")).strip()
+            if code and name and name != "nan":
+                table[code] = name
+        with _symbol_lock:
+            _symbol_table = table
+            _symbol_ts = time.time()
+        return len(table)
+    finally:
+        with _symbol_lock:
+            _symbol_refreshing = False
+
+
+def _ensure_table_async() -> None:
+    """表空时非阻塞触发一次后台刷新（避免重复）。"""
+    global _symbol_refreshing
+    with _symbol_lock:
+        if _symbol_refreshing:
+            return
+        _symbol_refreshing = True
+
+    def _run() -> None:
+        try:
+            refresh_symbol_table()
+        except Exception:  # noqa: BLE001 - 后台刷新失败下次再试
+            global _symbol_refreshing
+            with _symbol_lock:
+                _symbol_refreshing = False
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def search_symbol(query: str, limit: int = 5) -> tuple[list[dict[str, Any]], str]:
+    """问句 → 个股 [{code,name}]。全名命中优先；否则中文窗口短名命中（取最具体）。
+
+    表空（冷启/未刷新）→ 异步触发刷新 + 本次返空集（调用方退化为代码/自选股解析）。
+    """
+    with _symbol_lock:
+        table = dict(_symbol_table)
+    if not table:
+        _ensure_table_async()
+        return [], "akshare:stock_zh_a_spot(symbol-table warming)"
+
+    # 1) 全名命中：name 是 query 子串（长名优先）。
+    full = [{"code": c, "name": n} for c, n in table.items() if n and n in query]
+    if full:
+        full.sort(key=lambda r: -len(str(r["name"])))
+        return full[:limit], "akshare:stock_zh_a_spot(name-in-query)"
+
+    # 2) 短名：query 的中文窗口（长 4→2）是某 name 子串，且该窗口在全表命中数 ≤4（够具体）。
+    best: dict[str, tuple[int, int, str]] = {}  # code -> (窗口长, -命中数, name)
+    for run in _CJK_RUN.findall(query):
+        seen: set[str] = set()
+        for win_len in (4, 3, 2):
+            for i in range(len(run) - win_len + 1):
+                w = run[i : i + win_len]
+                if w in seen:
+                    continue
+                seen.add(w)
+                matches = [(c, n) for c, n in table.items() if w in n]
+                if not 1 <= len(matches) <= 4:
+                    continue
+                for c, n in matches:
+                    key = (win_len, -len(matches))
+                    if c not in best or key > best[c][:2]:
+                        best[c] = (win_len, -len(matches), n)
+    ranked = sorted(best.items(), key=lambda kv: kv[1][:2], reverse=True)
+    out = [{"code": c, "name": b[2]} for c, b in ranked[:limit]]
+    return out, "akshare:stock_zh_a_spot(short-name window)"

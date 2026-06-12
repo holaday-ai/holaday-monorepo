@@ -109,6 +109,24 @@ def trading_day(date: str) -> dict[str, Any]:
     return _safe(_tradecal, date)
 
 
+@app.get("/symbol-search/{query}")
+def symbol_search(query: str) -> dict[str, Any]:
+    """问句 → 个股 [{code,name}]（④ 短名解析）。表空时返空 + 异步刷新，不阻塞。"""
+    return _safe(adp.search_symbol, query)
+
+
+@app.post("/symbol-table/warm")
+def symbol_table_warm() -> dict[str, Any]:
+    """同步刷新全量代码名称表（~70s，prewarm 每日开盘前调一次）。"""
+    try:
+        n = adp.refresh_symbol_table()
+        return {"data": [{"count": n}], "count": 1, "source": "akshare:stock_zh_a_spot", "disclaimer": DISCLAIMER}
+    except adp.AkShareUnavailable as exc:
+        return {"error": str(exc), "data": [], "count": 0, "disclaimer": DISCLAIMER}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"接口调用失败: {exc}", "data": [], "count": 0, "disclaimer": DISCLAIMER}
+
+
 def main() -> None:
     """Entry point — 仅监听本机回环，由同机 orchestrator 直取。"""
     import os

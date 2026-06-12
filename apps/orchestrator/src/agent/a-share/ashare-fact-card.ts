@@ -157,45 +157,157 @@ function northboundLine(nb: AkEnvelope<NorthboundRow>): string[] {
   return [`- 北向资金（市场面）：${parts.join(' ｜ ')}（${sourceTag(nb)}）`];
 }
 
-/**
- * 组装接地事实卡（markdown）。无 LLM、无解读，纯客观数据 + 逐条溯源 + 免责。
- */
-export async function buildAshareFactCard(
-  deps: FactCardDeps,
-  match: AshareQaMatch,
-): Promise<string> {
-  const mode = deps.mode ?? 'prod';
-  const now = deps.now ?? new Date();
-  const annStart = shiftCompact(match.dateIso, -7);
+/** 取数后的结构化事实（display 卡与 LLM 上下文共用一次取数）。 */
+export interface FactData {
+  perStock: PerStock[];
+  dragonTiger: AkEnvelope<DragonTigerRow>;
+  northbound: AkEnvelope<NorthboundRow>;
+}
 
+/** 一次并行取数（市场级北向/龙虎榜各一次 + 每股 kline/公告/解禁）。 */
+export async function fetchFactData(
+  client: AkshareClient,
+  match: AshareQaMatch,
+): Promise<FactData> {
+  const annStart = shiftCompact(match.dateIso, -7);
   const [northbound, dragonTiger, ...perStock] = await Promise.all([
-    deps.client.getNorthboundFlow(),
-    deps.client.getDragonTiger(match.dateCompact),
+    client.getNorthboundFlow(),
+    client.getDragonTiger(match.dateCompact),
     ...match.stocks.map(
       async (stock): Promise<PerStock> => ({
         stock,
-        kline: await deps.client.getStockKline(stock.symbol),
-        ann: await deps.client.getStockAnnouncements(stock.symbol, annStart, match.dateCompact),
-        unlock: await deps.client.getShareUnlock(stock.symbol),
+        kline: await client.getStockKline(stock.symbol),
+        ann: await client.getStockAnnouncements(stock.symbol, annStart, match.dateCompact),
+        unlock: await client.getShareUnlock(stock.symbol),
       }),
     ),
   ]);
+  return { perStock, dragonTiger, northbound };
+}
 
+/** 渲染展示用接地事实卡（markdown，①②，无解读）。 */
+export function renderFactCard(
+  data: FactData,
+  match: AshareQaMatch,
+  now: Date,
+  mode: BriefingMode,
+): string {
   const lines: string[] = [
     `# 📈 HOLA DAY · A股个股速览（${dateHeader(match.dateIso)}）`,
     `> 生成于 ${fmtClock(now.toISOString())} ｜ 本卡仅客观数据呈现，**未含分析判断**。`,
     '',
   ];
-  for (const p of perStock) {
+  for (const p of data.perStock) {
     lines.push(`## ${stockLabel(p.stock)}`);
     lines.push('**① 盘面事实**', ...marketFactLines(p, mode), '');
     lines.push('**② 同期已披露信息**');
     lines.push(...announcementLines(p, mode));
-    lines.push(...dragonTigerLines(p.stock.symbol, dragonTiger, mode));
+    lines.push(...dragonTigerLines(p.stock.symbol, data.dragonTiger, mode));
     lines.push(...unlockLines(p));
     lines.push('');
   }
-  lines.push(...northboundLine(northbound));
-  lines.push('', `---\n> **免责声明**：${BRIEFING_DISCLAIMER}`);
-  return lines.join('\n');
+  lines.push(...northboundLine(data.northbound));
+  return lines.join('\n').trimEnd();
+}
+
+/** 固定免责尾块（③解读层在 body 与本块之间插入）。 */
+export const QA_DISCLAIMER_BLOCK = `---\n> **免责声明**：${BRIEFING_DISCLAIMER}`;
+
+/**
+ * 组装接地事实卡（markdown）。无 LLM、无解读，纯客观数据 + 逐条溯源 + 免责。
+ * M1 入口（薄封装 fetch + render + 免责尾）。
+ */
+export async function buildAshareFactCard(
+  deps: FactCardDeps,
+  match: AshareQaMatch,
+): Promise<string> {
+  const data = await fetchFactData(deps.client, match);
+  const body = renderFactCard(data, match, deps.now ?? new Date(), deps.mode ?? 'prod');
+  return `${body}\n\n${QA_DISCLAIMER_BLOCK}`;
+}
+
+/** 一只个股的紧凑上下文块（盘面必留；公告只留前 annCap 条标题）。 */
+function contextBlock(p: PerStock, dt: AkEnvelope<DragonTigerRow>, annCap: number): string {
+  const b: string[] = [`【${stockLabel(p.stock)}】`];
+  const last = p.kline.error ? undefined : p.kline.data[p.kline.data.length - 1];
+  b.push(
+    last
+      ? `- 盘面：收盘 ${fmtNum(pick(last, ['收盘']))} 涨跌幅 ${fmtPct(pick(last, ['涨跌幅']))} 成交额 ${fmtYiYuan(pick(last, ['成交额']))}`
+      : '- 盘面：当日行情数据暂不可用',
+  );
+  if (p.ann.error) b.push('- 公告：数据暂不可用');
+  else {
+    const titles = p.ann.data.map((r) => String(pick(r, ['公告标题']) ?? '')).filter(Boolean);
+    if (titles.length === 0) b.push('- 公告：近 7 日无新公告');
+    else {
+      const shown = titles.slice(0, annCap);
+      const more = titles.length > annCap ? `（另 ${titles.length - annCap} 条略）` : '';
+      b.push(`- 公告(近7日)：${shown.join('；')}${more}`);
+    }
+  }
+  if (dt.error) b.push('- 龙虎榜：数据暂不可用');
+  else if (dt.data.length === 0) b.push('- 龙虎榜：当日无榜单数据');
+  else {
+    const hits = dt.data.filter((r) => String(pick(r, ['代码']) ?? '') === p.stock.symbol);
+    if (hits.length === 0) b.push('- 龙虎榜：当日未上榜');
+    else
+      b.push(
+        `- 龙虎榜：${hits
+          .map(
+            (r) =>
+              `${String(pick(r, ['上榜原因']) ?? '')}${pick(r, ['解读']) ? `(解读:${String(pick(r, ['解读']))})` : ''}`,
+          )
+          .join('；')}`,
+      );
+  }
+  if (!p.unlock.error && p.unlock.data.length > 0) {
+    const u = p.unlock.data
+      .slice(0, 2)
+      .map((r) => `${pick(r, ['解禁时间']) ? shortDate(String(pick(r, ['解禁时间']))) : ''}解禁`)
+      .join('；');
+    b.push(`- 解禁：${u}`);
+  }
+  return b.join('\n');
+}
+
+/**
+ * 喂 LLM 的紧凑接地上下文（**token 上限保护**，BOSS 要求④）。
+ * 策略：①盘面事实**永远保留**；公告**只留标题**（默认前 6 条）；超 maxChars 时
+ * 把公告标题压到前 2 条重建；仍超则硬切片并注明。市场级北向附在末尾。
+ */
+export function buildFactContext(data: FactData, match: AshareQaMatch, maxChars = 3500): string {
+  const head = `日期：${dateHeader(match.dateIso)}`;
+  const nbLine = northboundContextLine(data.northbound);
+  const assemble = (annCap: number): string =>
+    [head, ...data.perStock.map((p) => contextBlock(p, data.dragonTiger, annCap)), nbLine]
+      .filter(Boolean)
+      .join('\n');
+
+  let ctx = assemble(6);
+  if (ctx.length > maxChars) ctx = assemble(2); // 超额：公告压到前 2 条（盘面不动）
+  if (ctx.length > maxChars) {
+    ctx = `${ctx.slice(0, maxChars)}\n…（上下文已截断：盘面事实完整，公告标题部分保留）`;
+  }
+  return ctx;
+}
+
+/** 北向资金上下文行（停披露诚实标注）。 */
+function northboundContextLine(nb: AkEnvelope<NorthboundRow>): string {
+  if (nb.error || nb.data.length === 0) return '';
+  const north = nb.data.filter((r) => {
+    const dir = String(pick(r, ['资金方向']) ?? '');
+    const seg = String(pick(r, ['板块', '类型']) ?? '');
+    return dir === '北向' || seg === '沪股通' || seg === '深股通';
+  });
+  const disclosed = north.some((r) => {
+    const n = toNum(pick(r, ['成交净买额']));
+    return n !== null && n !== 0;
+  });
+  if (!disclosed) return '北向：沪深股通净买额自 2024-08 停披露';
+  return `北向：${north
+    .map(
+      (r) =>
+        `${String(pick(r, ['板块', '类型']) ?? '北向')} ${fmtYiUnit(pick(r, ['成交净买额']), true)}`,
+    )
+    .join('；')}`;
 }

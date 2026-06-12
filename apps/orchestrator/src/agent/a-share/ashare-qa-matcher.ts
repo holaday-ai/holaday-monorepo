@@ -86,25 +86,77 @@ function cnDateParts(now: Date): { iso: string; compact: string } {
   return { iso, compact: iso.replace(/-/g, '') };
 }
 
-export function matchAshareQa(opts: MatchAshareQaOpts): AshareQaMatch | null {
+interface IntentGate {
+  gated: boolean;
+  kind: QaKind;
+  dateIso: string;
+  dateCompact: string;
+  /** sync 解析出的个股（代码/自选股，零网络）。 */
+  syncStocks: ResolvedStock[];
+}
+
+function intentGate(opts: MatchAshareQaOpts): IntentGate {
   const text = opts.intent ?? '';
   const isRole = opts.roleId === ASHARE_ROLE_ID;
   const hasTerm = isRole || ASHARE_TERMS.some((t) => text.includes(t));
   const hasQuestion = QUESTION_MARKERS.some((t) => text.includes(t));
   const wantsWatchlist = WATCHLIST_TERMS.some((t) => text.includes(t));
 
-  let stocks = resolveStocks(text, opts.watchlist);
-  if (stocks.length === 0 && wantsWatchlist && opts.watchlist.length > 0) {
-    stocks = opts.watchlist;
+  let syncStocks = resolveStocks(text, opts.watchlist);
+  if (syncStocks.length === 0 && wantsWatchlist && opts.watchlist.length > 0) {
+    syncStocks = opts.watchlist;
   }
-
   // 意图门槛：显式技能 / 自选股整体问 / （含 A股术语 且（问句 或 命中个股））
-  const intentHit = isRole || wantsWatchlist || (hasTerm && (hasQuestion || stocks.length > 0));
-  if (!intentHit) return null;
-  // M1：事实卡按个股，无个股不出卡（市场级问答 M2+）。
-  if (stocks.length === 0) return null;
-
+  const gated = isRole || wantsWatchlist || (hasTerm && (hasQuestion || syncStocks.length > 0));
   const kind: QaKind = ANOMALY_TERMS.some((t) => text.includes(t)) ? 'anomaly' : 'info';
   const { iso, compact } = cnDateParts(opts.now ?? new Date());
-  return { kind, stocks: stocks.slice(0, 5), dateIso: iso, dateCompact: compact };
+  return { gated, kind, dateIso: iso, dateCompact: compact, syncStocks };
+}
+
+/** 同步 matcher（M1）：仅代码 + 自选股，无个股 → null。 */
+export function matchAshareQa(opts: MatchAshareQaOpts): AshareQaMatch | null {
+  const g = intentGate(opts);
+  if (!g.gated || g.syncStocks.length === 0) return null;
+  return {
+    kind: g.kind,
+    stocks: g.syncStocks.slice(0, 5),
+    dateIso: g.dateIso,
+    dateCompact: g.dateCompact,
+  };
+}
+
+/** name-search 函数：query → 个股（包装 client.searchSymbol → ResolvedStock[]）。 */
+export type SymbolSearchFn = (query: string) => Promise<ResolvedStock[]>;
+
+/**
+ * 异步解析（M2）：先 sync（代码/自选股，零网络）；命中即返。门槛过但无个股 →
+ * name-search 补短名/非自选全名（表 day-cache，冷启返空则降级 null 走通用路径）。
+ */
+export async function resolveAshareQa(
+  opts: MatchAshareQaOpts,
+  search: SymbolSearchFn,
+): Promise<AshareQaMatch | null> {
+  const g = intentGate(opts);
+  if (!g.gated) return null;
+  if (g.syncStocks.length > 0) {
+    return {
+      kind: g.kind,
+      stocks: g.syncStocks.slice(0, 5),
+      dateIso: g.dateIso,
+      dateCompact: g.dateCompact,
+    };
+  }
+  let found: ResolvedStock[] = [];
+  try {
+    found = await search(opts.intent ?? '');
+  } catch {
+    found = [];
+  }
+  if (found.length === 0) return null;
+  return {
+    kind: g.kind,
+    stocks: found.slice(0, 5),
+    dateIso: g.dateIso,
+    dateCompact: g.dateCompact,
+  };
 }

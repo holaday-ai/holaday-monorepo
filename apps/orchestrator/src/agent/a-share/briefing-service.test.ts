@@ -64,6 +64,7 @@ function fakeClient(dtSpy?: (d: string) => void): AkshareClient {
         fetched_at: '2026-06-11T00:00:00Z',
         disclaimer: 'x',
       }),
+    searchSymbol: () => Promise.resolve(emptyEnv('symbol')),
   };
 }
 

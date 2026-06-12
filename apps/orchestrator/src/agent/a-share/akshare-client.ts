@@ -30,6 +30,13 @@ export interface TradingDayRow {
   [k: string]: unknown;
 }
 
+/** 代码名称搜索单行（④ 短名解析）。 */
+export interface SymbolRow {
+  code?: string;
+  name?: string;
+  [k: string]: unknown;
+}
+
 export interface AkshareClient {
   /** get_index_quote(market) — 'hk' 恒指 / 'us' 标普道指纳指 / 'cn' 上证深证创业板。 */
   getIndexQuote(market: 'hk' | 'us' | 'cn'): Promise<AkEnvelope<IndexRow>>;
@@ -53,6 +60,8 @@ export interface AkshareClient {
   getNorthboundFlow(): Promise<AkEnvelope<NorthboundRow>>;
   /** is_trading_day(date) — date('YYYY-MM-DD') 是否 A股交易日（P1 非交易日不投递）。 */
   getTradingDay(date: string): Promise<AkEnvelope<TradingDayRow>>;
+  /** search_symbol(query) — 问句→个股（④ 短名解析；表 day-cache，冷启返空）。 */
+  searchSymbol(query: string): Promise<AkEnvelope<SymbolRow>>;
 }
 
 const STUB_DISCLAIMER = '数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。';
@@ -104,5 +113,8 @@ export class StubAkshareClient implements AkshareClient {
   }
   getTradingDay(date: string) {
     return Promise.resolve(this.err<TradingDayRow>(`akshare:trading_day(${date})`, this.now()));
+  }
+  searchSymbol(query: string) {
+    return Promise.resolve(this.err<SymbolRow>(`akshare:symbol_search(${query})`, this.now()));
   }
 }
