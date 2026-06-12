@@ -555,16 +555,24 @@ async function main() {
     // 08:25 / 15:25 北京（简报前 5 分钟）用长超时(30s)客户端把 /index/us·hk·cn 各
     // 调一遍填 akshare-mcp 缓存(TTL 600s)，5 分钟后简报以 10s 读暖缓存即时返回。
     {
-      const { startPrewarmScheduler, warmSharedCaches } = await import(
+      const { startPrewarmScheduler, warmSharedCaches, warmSymbolTable } = await import(
         './agent/a-share/prewarm-scheduler.js'
       );
       const { HttpAkshareClient } = await import('./agent/a-share/akshare-http-client.js');
+      const akshareBaseUrl = process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848';
       const prewarmClient = new HttpAkshareClient({
-        baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
+        baseUrl: akshareBaseUrl,
         timeoutMs: 30_000,
         logger,
       });
-      startPrewarmScheduler({ warm: () => warmSharedCaches(prewarmClient), logger });
+      startPrewarmScheduler({
+        warm: async () => {
+          await warmSharedCaches(prewarmClient);
+          // ④ 短名解析全量代码名称表（开盘前刷新一次；~70s 长超时，不阻塞简报）。
+          await warmSymbolTable(akshareBaseUrl);
+        },
+        logger,
+      });
       logger.info({ times: ['08:25', '15:25'] }, 'prewarm: A股简报缓存预热调度已启动');
     }
   }

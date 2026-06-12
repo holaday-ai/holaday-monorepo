@@ -84,3 +84,23 @@ export async function warmSharedCaches(client: AkshareClient): Promise<void> {
     client.getIndexQuote('cn'),
   ]);
 }
+
+/**
+ * 预热全量代码名称表（④ 短名解析，BOSS 要求「开盘前刷新一次」）。POST
+ * /symbol-table/warm 同步刷新 ~70s 故**长超时**(默认 120s)。失败不致命——
+ * search 冷启会自愈（异步刷新）。用裸 fetch（非 10s 简报客户端）。
+ */
+export async function warmSymbolTable(baseUrl: string, timeoutMs = 120_000): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    await fetch(`${baseUrl.replace(/\/+$/, '')}/symbol-table/warm`, {
+      method: 'POST',
+      signal: controller.signal,
+    });
+  } catch {
+    // 预热失败忽略
+  } finally {
+    clearTimeout(timer);
+  }
+}
