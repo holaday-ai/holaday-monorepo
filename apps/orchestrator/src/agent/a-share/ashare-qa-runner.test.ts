@@ -96,6 +96,35 @@ describe('runAshareQa', () => {
     expect(hit?.obj.userId).toBe('usr_x');
   });
 
+  it('LLM 自带「③ 可能相关因素」标题行 → 剥重复标题（不双标题，P2-2）', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAshareQa(
+      {
+        client: fakeClient(),
+        skillMarkdown: 's',
+        interpret: async () => '③ 可能相关因素\n\n• 或与近期公告有关',
+        logger,
+        now: NOW,
+      },
+      MATCH,
+    );
+    expect(r.interpreted).toBe(true);
+    expect(r.answer).toContain('## ③ 可能相关因素（分析师判断 · 非定论）');
+    expect(r.answer).toContain('• 或与近期公告有关');
+    expect(r.answer).not.toMatch(/分析师判断 · 非定论）\n+③ 可能相关因素/);
+  });
+
+  it('LLM 返回空 → 无③ + 记日志（P2-2）', async () => {
+    const { logger, warns } = fakeLogger();
+    const r = await runAshareQa(
+      { client: fakeClient(), skillMarkdown: 's', interpret: async () => '   ', logger, now: NOW },
+      MATCH,
+    );
+    expect(r.interpreted).toBe(false);
+    expect(r.answer).not.toContain('## ③');
+    expect(warns.some((w) => /空解读/.test(w.msg))).toBe(true);
+  });
+
   it('诱导预测 → 降级(predict)', async () => {
     const { logger } = fakeLogger();
     const r = await runAshareQa(

@@ -1209,11 +1209,14 @@ export const tasksRouter = router({
     // enter the a-share QA lane for GENERIC info intents — a dedicated lane the
     // classifier already chose (template_fill / image / browser) must win, or
     // the matcher hijacks it (bug: "按这个周报模板填充…" → answered as stock 600415).
+    // widen（BOSS 批准，④ 验收关闭）：ASHARE_QA_ALLOWLIST 为空 = 全量用户可用（flag on）；
+    // 非空 = 仅名单内（灰度）。
+    const ashareQaAllowed = ASHARE_QA_ALLOWLIST.size === 0 || ASHARE_QA_ALLOWLIST.has(ctx.userId);
     if (
       appEnv.ASHARE_QA_ENABLED &&
       ashareQaHandlesMode(executionMode) &&
       anthropicForResolver &&
-      ASHARE_QA_ALLOWLIST.has(ctx.userId)
+      ashareQaAllowed
     ) {
       const { resolveAshareQa, resolveAshareInContext } = await import(
         '../../agent/a-share/ashare-qa-matcher.js'

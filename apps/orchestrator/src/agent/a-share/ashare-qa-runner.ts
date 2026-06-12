@@ -91,7 +91,11 @@ function buildUser(match: AshareQaMatch, factContext: string): string {
 
 /** ③ 通过：插在①②与免责之间。强制钉「相关≠因果」固定话术（BOSS 微调④）。 */
 function assemblePassed(body: string, interpretation: string): string {
-  const core = interpretation.trim();
+  // 剥掉 LLM 偶尔自带的「③ 可能相关因素」标题行（与本段标题重复 → 看着像格式坏）。
+  const core = interpretation
+    .trim()
+    .replace(/^#{0,4}\s*③?\s*可能相关因素[^\n]*\n+/, '')
+    .trim();
   const withTail = core.includes(FIXED_TAIL) ? core : `${core}\n\n${FIXED_TAIL}`;
   return [
     body,
@@ -152,6 +156,8 @@ export async function runAshareQa(
   }
 
   if (!interpretation) {
+    // LLM 返回空（非异常）→ 无③，记日志便于排查「为什么没出③」。
+    deps.logger.warn({ ...deps.context }, 'ashare-qa: LLM 返回空解读，回退纯数据（无③）');
     return { answer: assemblePlain(body), degraded: false, interpreted: false };
   }
 

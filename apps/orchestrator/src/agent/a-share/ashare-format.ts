@@ -118,10 +118,14 @@ export function unavailableLine(label: string, env: AkEnvelope, mode: BriefingMo
   return `- ${label}：数据暂不可用${detail}`;
 }
 
-/** markdown 链接 URL 容错：trim + encodeURI（cninfo 链接含空格如 `...Time=2026-06-12 20:50` 会断链）。 */
+/**
+ * markdown 链接 URL 容错。`encodeURI` 处理空格（cninfo 链接含空格 `...Time=2026-06-12 20:50`
+ * 会断链），但 encodeURI **不编码圆括号** `( )`——URL 含括号会提前闭合 markdown 链接渲染成
+ * 裸 URL，故额外编码括号。简报与事实卡共用本函数。
+ */
 export function safeLinkUrl(raw: unknown): string {
   try {
-    return encodeURI(String(raw).trim());
+    return encodeURI(String(raw).trim()).replace(/\(/g, '%28').replace(/\)/g, '%29');
   } catch {
     return '';
   }

@@ -166,7 +166,7 @@ describe('验收新增：异常非泄漏 / 链接 / 龙虎榜空集 / 无新公�
     expect(md).toContain('数据暂不可用（接口调用失败');
   });
 
-  it('公告链接含空格 → encodeURI 修正（不裸 URL 断链）', () => {
+  it('公告链接含空格/圆括号 → safeLinkUrl 编码（不裸 URL 断链，P2-1）', () => {
     const withSpace: PremarketBriefingInput = {
       ...PREMARKET_SAMPLE,
       announcements: {
@@ -175,7 +175,8 @@ describe('验收新增：异常非泄漏 / 链接 / 龙虎榜空集 / 无新公�
             {
               公告标题: '某公告',
               公告时间: '2026-06-10',
-              公告链接: 'http://x.cn/d?announcementTime=2026-06-10 20:50:29',
+              // 同时含空格 + 圆括号（encodeURI 不编码括号 → 会断链）。
+              公告链接: 'http://x.cn/d?t=2026-06-10 20:50:29&n=(test)',
             },
           ],
           count: 1,
@@ -187,8 +188,9 @@ describe('验收新增：异常非泄漏 / 链接 / 龙虎榜空集 / 无新公�
       shareUnlock: {},
     };
     const md = renderPremarketBriefing(withSpace);
-    expect(md).toContain('[巨潮](http://x.cn/d?announcementTime=2026-06-10%2020:50:29)');
-    expect(md).not.toContain('2026-06-10 20:50:29)'); // 原始空格不再断链
+    expect(md).toContain('[巨潮](http://x.cn/d?t=2026-06-10%2020:50:29&n=%28test%29)');
+    expect(md).not.toContain('20:50:29)'); // 原始空格不再断链
+    expect(md).not.toContain('(test)'); // 原始括号已编码
   });
 
   it('龙虎榜全市场空集(count=0，未发布) → 友好提示而非「上榜」', () => {
