@@ -71,6 +71,21 @@ export function fmtYiUnit(v: unknown, signed = false): string {
   return `${sign}${n.toFixed(2)}亿元`;
 }
 
+/** 已是「亿元」单位的值 → 紧凑「±N亿」（0 位，速读行用）。空值→「—」。 */
+export function fmtYiCompact(v: unknown): string {
+  const n = toNum(v);
+  if (n === null) return '—';
+  const sign = n > 0 ? '+' : '';
+  return `${sign}${Math.round(n)}亿`;
+}
+
+/** 原始「元」金额 →「X.XX万亿」（两市成交额）。空值→「—」。 */
+export function fmtWanYi(v: unknown, digits = 2): string {
+  const n = toNum(v);
+  if (n === null) return '—';
+  return `${(n / 1e12).toFixed(digits)}万亿`;
+}
+
 /** ISO-8601 UTC → 北京时间 HH:MM。 */
 export function fmtClock(iso: string): string {
   const d = new Date(iso);
@@ -103,9 +118,18 @@ export function dateHeader(date: string): string {
   return `${date}${wd}`;
 }
 
-/** 「来源 X · 抓取 HH:MM」。 */
+/** 「来源 X · 抓取 HH:MM」（dev/④ 事实卡用，保留完整 fn 名便于溯源）。 */
 export function sourceTag(env: AkEnvelope): string {
   return `来源 ${env.source} · 抓取 ${fmtClock(env.fetched_at)}`;
+}
+
+/**
+ * 段尾来源短标（prod 简报用）：只「来源 akshare · 抓取 HH:MM」，去冗长 fn 名
+ * （如 zt_pool+dtgc+zbgc+board_summary_ths+index_spot_sina 71 字 → 16 字），
+ * 减视觉噪音（BOSS 易读性原则3）。完整 fn 名仍在 dev（sourceTag）+ 取数层日志。
+ */
+export function sourceTagShort(env: AkEnvelope): string {
+  return `来源 akshare · 抓取 ${fmtClock(env.fetched_at)}`;
 }
 
 /**

@@ -14,8 +14,10 @@ import type {
   DragonTigerRow,
   IndexRow,
   KlineRow,
+  MarketPulseRow,
   NorthboundRow,
   UnlockRow,
+  ZtReviewRow,
 } from './briefing-types.js';
 
 interface FetchResponseLike {
@@ -120,5 +122,11 @@ export class HttpAkshareClient implements AkshareClient {
   }
   searchSymbol(query: string) {
     return this.get<SymbolRow>(`/symbol-search/${encodeURIComponent(query)}`);
+  }
+  getMarketPulse(date: string) {
+    return this.get<MarketPulseRow>(`/market-pulse/${encodeURIComponent(date)}`);
+  }
+  getZtPoolSummary(date: string) {
+    return this.get<ZtReviewRow>(`/zt-pool-summary/${encodeURIComponent(date)}`);
   }
 }

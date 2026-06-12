@@ -221,6 +221,105 @@ describe('验收新增：异常非泄漏 / 链接 / 龙虎榜空集 / 无新公�
   });
 });
 
+describe('v2 盘后：速读 / 市场温度计 / 板块主线（BOSS 四原则）', () => {
+  const md = renderPostmarketBriefing(POSTMARKET_SAMPLE);
+
+  it('原则1 金字塔：顶部一行「今日速读」压缩 5 项关键指标', () => {
+    expect(md).toContain('📊 **今日速读**：沪指 +0.42%');
+    expect(md).toContain('涨3208/跌1892');
+    expect(md).toContain('涨停87(炸板28.1%)');
+    expect(md).toContain('主力净流入+86亿');
+    expect(md).toContain('主线:汽车零部件');
+  });
+
+  it('原则2 固定段序：速读 → 大盘 → 温度计 → 板块主线 → 自选股 → 公告', () => {
+    const order = [
+      '今日速读',
+      '## 一、大盘速览',
+      '## 二、市场温度计',
+      '## 三、板块主线',
+      '## 四、自选股当日表现',
+      '## 五、自选股新公告',
+    ].map((s) => md.indexOf(s));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it('市场温度计：涨停/连板/跌停/炸板率 + 涨跌家数/成交额/主力净流入（行内，无表格）', () => {
+    expect(md).toContain('涨停 87 家，最高 5 连板');
+    expect(md).toContain('跌停 3 家');
+    expect(md).toContain('炸板 34 家（炸板率 28.1%）');
+    expect(md).toContain('涨跌家数 3208/1892');
+    expect(md).toContain('两市成交额 1.54万亿');
+    expect(md).toContain('主力净流入 +86.00亿元');
+  });
+
+  it('板块主线：涨幅前5（含龙头领涨股）+ 跌幅前5', () => {
+    expect(md).toContain('涨幅前5：汽车零部件 +3.20%（迪生力）');
+    expect(md).toContain('小金属 +2.80%（金钼股份）');
+    expect(md).toContain('跌幅前5：白酒 -2.10%');
+  });
+
+  it('原则3 数据密度：全文只有 1 张表（自选股表现），市场级数据全部行内化', () => {
+    const tableSeparators = md.split('\n').filter((l) => /^\|[\s-]*:?-+:?[\s-]*\|/.test(l.trim()));
+    expect(tableSeparators.length).toBe(1);
+  });
+
+  it('原则4 长度硬约束：盘后正文内容 ≤ 600 字，超了砍内容而非缩字号', () => {
+    // BOSS「砍内容」的「内容」= 用户实读的正文：
+    //   - 排除表格行（自选股表现 = 独立「+1表」预算）；
+    //   - 排除段尾来源 +「免责声明」boilerplate（原则3 视觉噪音/合规 chrome，定长不随内容膨胀）；
+    //   - markdown 链接只计可见文字（URL 不渲染、非阅读负担）。
+    const content = md
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('|')) // 表格 → +1表 预算
+      .filter((l) => !l.includes('（来源')) // 段尾来源 chrome
+      .filter((l) => !l.includes('免责声明') && l.trim() !== '---') // 免责 boilerplate
+      .join('')
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // [巨潮](http…) → 巨潮
+      .replace(/\s/g, '');
+    expect(content.length).toBeLessThanOrEqual(600);
+  });
+
+  it('合规哨兵：纯指标，不出现任何周期定性/情绪标签（BOSS 红线）', () => {
+    expect(md).not.toMatch(/高潮|退潮|冰点|亢奋|见顶|筑底|过热|恐慌|贪婪|牛市|熊市/);
+    expect(md).not.toMatch(ADVICE_PATTERN);
+  });
+
+  it('marketPulse 不可达 → 温度计/板块降级「数据暂不可用」，速读仍出沪指（不崩）', () => {
+    const errPulse = {
+      data: [],
+      count: 0,
+      source: 'http:/market-pulse',
+      fetched_at: '2026-06-11T07:25:00Z',
+      disclaimer: 'x',
+      error: 'HTTP 500',
+    };
+    const degraded = renderPostmarketBriefing({ ...POSTMARKET_SAMPLE, marketPulse: errPulse });
+    expect(degraded).toContain('📊 **今日速读**：沪指 +0.42%'); // 速读不崩
+    expect(degraded).toContain('市场温度：数据暂不可用');
+    expect(degraded).toContain('板块：数据暂不可用');
+    expect(degraded).not.toContain('NaN');
+  });
+});
+
+describe('v2 盘前：昨日涨停回顾进龙虎榜回顾段', () => {
+  it('盘前回顾段含「昨日涨停回顾」：家数 + 连板 + 活跃行业（纯指标）', () => {
+    const md = renderPremarketBriefing(PREMARKET_SAMPLE);
+    expect(md).toContain('**昨日涨停回顾**');
+    expect(md).toContain('上一交易日涨停 72 家，最高 4 连板');
+    expect(md).toContain('活跃行业 汽车零部件(6)、半导体(4)、证券(3)');
+  });
+
+  it('ztReview 缺失（旧数据） → prod 静默不出回顾行，不崩', () => {
+    const { ztReview, ...noReview } = PREMARKET_SAMPLE;
+    void ztReview;
+    const md = renderPremarketBriefing(noReview);
+    expect(md).not.toContain('**昨日涨停回顾**');
+    expect(md).toContain(BRIEFING_DISCLAIMER); // 其余照常
+  });
+});
+
 describe('边界', () => {
   it('空自选股 → 盘前优雅提示而非崩溃，免责仍在', () => {
     const empty: PremarketBriefingInput = {

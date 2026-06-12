@@ -129,7 +129,7 @@ export async function buildPremarketBriefing(
   const watchlist = await listWatchlistForUser(deps.db, userInternalId);
   // 上一交易日龙虎榜（盘后取不到 → 移盘前回顾，BOSS 拍板）。
   const prevTd = await resolvePrevTradingDay(deps.client, now);
-  const [indexUs, indexHk, announcements, shareUnlock, dragonTiger] = await Promise.all([
+  const [indexUs, indexHk, announcements, shareUnlock, dragonTiger, ztReview] = await Promise.all([
     deps.client.getIndexQuote('us'),
     deps.client.getIndexQuote('hk'),
     perSymbol<AnnouncementRow>(watchlist, (s) =>
@@ -137,6 +137,8 @@ export async function buildPremarketBriefing(
     ),
     perSymbol<UnlockRow>(watchlist, (s) => deps.client.getShareUnlock(s)),
     deps.client.getDragonTiger(prevTd.compact),
+    // v2: 上一交易日涨停梯队回顾（与龙虎榜同为上一交易日，进回顾段）。
+    deps.client.getZtPoolSummary(prevTd.compact),
   ]);
   const input: PremarketBriefingInput = {
     date: iso,
@@ -148,6 +150,7 @@ export async function buildPremarketBriefing(
     shareUnlock,
     dragonTiger,
     dragonTigerDate: prevTd.iso,
+    ztReview,
   };
   return renderPremarketBriefing(input, { mode: deps.mode ?? 'prod' });
 }
@@ -161,13 +164,15 @@ export async function buildPostmarketBriefing(
   const { iso, compact: today } = cnDateParts(now);
   const watchlist = await listWatchlistForUser(deps.db, userInternalId);
   // 龙虎榜不在盘后（当日榜单晚间才披露）→ 移到次日盘前回顾。公告窗口「当日」。
-  const [indexCn, northbound, dailyKline, announcements] = await Promise.all([
+  const [indexCn, northbound, dailyKline, announcements, marketPulse] = await Promise.all([
     deps.client.getIndexQuote('cn'),
     deps.client.getNorthboundFlow(),
     perSymbol<KlineRow>(watchlist, (s) => deps.client.getStockKline(s)),
     perSymbol<AnnouncementRow>(watchlist, (s) =>
       deps.client.getStockAnnouncements(s, today, today),
     ),
+    // v2: 市场温度计 + 板块主线 + 大盘净流入（当日聚合）。
+    deps.client.getMarketPulse(today),
   ]);
   const input: PostmarketBriefingInput = {
     date: iso,
@@ -177,6 +182,7 @@ export async function buildPostmarketBriefing(
     northbound,
     dailyKline,
     announcements,
+    marketPulse,
   };
   return renderPostmarketBriefing(input, { mode: deps.mode ?? 'prod' });
 }

@@ -328,6 +328,125 @@ def get_share_unlock(symbol: str) -> tuple[list[dict[str, Any]], str]:
     return _records(df), "akshare:stock_restricted_release_queue_em"
 
 
+# --- 市场温度计 + 板块主线（v2 盘后；逐源 try/except，部分失败不拖垮整段）-------
+# ⚠️ Vultr 实测（akshare 1.18.64，2026-06-13）逐个可达性：
+#   stock_zt_pool_em / _dtgc_em(跌停) / _zbgc_em(炸板)  → 可达（含 date 参数取历史）
+#   stock_board_industry_summary_ths(同花顺)            → 可达（板块涨跌+净流入+涨跌家数+领涨股）
+#   ⛔ stock_board_industry_name_em / stock_individual_fund_flow_rank → 从 Vultr **不可达**
+#      （push2.eastmoney RemoteDisconnected）→ 改走上面的 ths 汇总替代（BOSS 逐个先验要求）。
+#   两市成交额 = 上证综指(sh000001)+深证综指(sz399106) spot 成交额（sina 可达）。
+#   ❌ 成交额环比% / 个股主力净流入：无 Vultr 可达源（index daily 仅 volume 无 amount；
+#      个股资金流 push2 不可达）→ 不在 v2 出（同北向停披露的「禁用不可得口径」红线）。
+SZ_COMP_INDEX = "sz399106"  # 深证综指（两市成交额用，覆盖全深市；深证成指 sz399001 仅成份）
+
+
+def _zt_agg(date_compact: str) -> dict[str, Any]:
+    """涨停池聚合：家数 / 最高连板 / 连板梯队(≥2) / 行业分布 top3。失败 → zt_count=None。"""
+    a = _require_ak()
+    try:
+        rows = _records(a.stock_zt_pool_em(date=date_compact), limit=2000)
+    except Exception:  # noqa: BLE001 - 单源失败不拖垮整段
+        return {"zt_count": None}
+    lianban = [int(_to_float(r.get("连板数")) or 0) for r in rows]
+    ladder: dict[str, int] = {}
+    for lb in lianban:
+        if lb >= 2:
+            ladder[str(lb)] = ladder.get(str(lb), 0) + 1
+    ind: dict[str, int] = {}
+    for r in rows:
+        nm = str(r.get("所属行业") or "").strip()
+        if nm and nm != "None":
+            ind[nm] = ind.get(nm, 0) + 1
+    top_ind = sorted(ind.items(), key=lambda kv: -kv[1])[:3]
+    return {
+        "zt_count": len(rows),
+        "max_lianban": max(lianban) if lianban else 0,
+        "ladder": ladder,
+        "top_industries": [{"行业": k, "家数": v} for k, v in top_ind],
+    }
+
+
+def _two_market_amount() -> float | None:
+    """两市成交额（原始「元」）= 上证综指(sh000001)+深证综指 spot 成交额。任一缺则尽力求和。"""
+    try:
+        a = _require_ak()
+        recs = _records(a.stock_zh_index_spot_sina(), limit=600)
+    except Exception:  # noqa: BLE001
+        return None
+    want = {"sh000001", SZ_COMP_INDEX}
+    total, got = 0.0, False
+    for r in recs:
+        if str(r.get("代码")) in want:
+            v = _to_float(r.get("成交额"))
+            if v is not None:
+                total += v
+                got = True
+    return total if got else None
+
+
+def get_zt_pool_summary(date: str) -> tuple[list[dict[str, Any]], str]:
+    """盘前回顾用：某交易日涨停池聚合（家数/连板梯队/行业分布）。date 'YYYYMMDD'。"""
+    return [_zt_agg(date.replace("-", ""))], "akshare:stock_zt_pool_em(agg)"
+
+
+def _board_summary() -> dict[str, Any]:
+    """同花顺行业汇总 → 涨跌家数 / 大盘净流入(亿) / 板块涨跌前5(+领涨股)。失败 → 字段 None。"""
+    try:
+        a = _require_ak()
+        brecs = _records(a.stock_board_industry_summary_ths(), limit=200)
+    except Exception:  # noqa: BLE001
+        brecs = []
+    if not brecs:
+        return {
+            "up_count": None,
+            "down_count": None,
+            "net_inflow_yi": None,
+            "sectors_up": [],
+            "sectors_down": [],
+        }
+
+    def _sec(r: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "板块": str(r.get("板块") or ""),
+            "涨跌幅": _to_float(r.get("涨跌幅")),
+            "领涨股": str(r.get("领涨股") or ""),
+            "领涨股涨跌幅": _to_float(r.get("领涨股-涨跌幅")),
+        }
+
+    srt = sorted(brecs, key=lambda r: _to_float(r.get("涨跌幅")) or 0.0)
+    return {
+        # 净流入单位为「亿元」（同花顺即时净流入；实测单行 ±十~百亿量级），直接求和。
+        "up_count": sum(int(_to_float(r.get("上涨家数")) or 0) for r in brecs),
+        "down_count": sum(int(_to_float(r.get("下跌家数")) or 0) for r in brecs),
+        "net_inflow_yi": round(sum(_to_float(r.get("净流入")) or 0.0 for r in brecs), 2),
+        "sectors_up": [_sec(r) for r in srt[::-1][:5]],
+        "sectors_down": [_sec(r) for r in srt[:5]],
+    }
+
+
+def get_market_pulse(date: str) -> tuple[list[dict[str, Any]], str]:
+    """盘后市场温度计 + 板块主线（单行聚合，逐源容错；纯指标，无周期定性标签）。date 'YYYYMMDD'。"""
+    dc = date.replace("-", "")
+    a = _require_ak()
+    out: dict[str, Any] = {}
+    out.update(_zt_agg(dc))  # zt_count / max_lianban / ladder / top_industries
+    try:
+        out["dt_count"] = len(_records(a.stock_zt_pool_dtgc_em(date=dc), limit=2000))
+    except Exception:  # noqa: BLE001
+        out["dt_count"] = None
+    try:
+        out["zb_count"] = len(_records(a.stock_zt_pool_zbgc_em(date=dc), limit=2000))
+    except Exception:  # noqa: BLE001
+        out["zb_count"] = None
+    zt, zb = out.get("zt_count"), out.get("zb_count")
+    out["zhaban_rate"] = (
+        round(zb / (zt + zb) * 100, 1) if isinstance(zt, int) and isinstance(zb, int) and (zt + zb) > 0 else None
+    )
+    out.update(_board_summary())  # up_count/down_count/net_inflow_yi/sectors_up/sectors_down
+    out["two_market_amount"] = _two_market_amount()
+    return [out], "akshare:zt_pool+dtgc+zbgc+board_summary_ths+index_spot_sina"
+
+
 # --- 交易日历（P1：非交易日不投递简报） -----------------------------
 def is_trading_day(date_str: str) -> tuple[list[dict[str, Any]], str]:
     """`date_str` 是否 A股交易日（周末/节假日 = False）。date 形如 'YYYY-MM-DD' 或 'YYYYMMDD'。

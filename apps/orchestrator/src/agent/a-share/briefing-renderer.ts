@@ -26,11 +26,14 @@ import type {
   DragonTigerRow,
   IndexRow,
   KlineRow,
+  MarketPulseRow,
   NorthboundRow,
   PostmarketBriefingInput,
   PremarketBriefingInput,
+  SectorEntry,
   UnlockRow,
   WatchlistEntry,
+  ZtReviewRow,
 } from './briefing-types.js';
 
 import {
@@ -40,12 +43,15 @@ import {
   fmtClock,
   fmtNum,
   fmtPct,
+  fmtWanYi,
+  fmtYiCompact,
   fmtYiUnit,
   fmtYiYuan,
   pick,
   safeLinkUrl,
   shortDate,
   sourceTag,
+  sourceTagShort,
   stockLabel,
   toNum,
   unavailableLine,
@@ -80,6 +86,11 @@ const EVENT_KEYWORDS = [
 
 function disclaimerBlock(): string {
   return `---\n> **免责声明**：${BRIEFING_DISCLAIMER}`;
+}
+
+/** 段尾来源：prod 用短标（减噪，原则3），dev 保留完整 fn 名便于溯源。 */
+function srcTag(env: AkEnvelope, mode: BriefingMode): string {
+  return mode === 'prod' ? sourceTagShort(env) : sourceTag(env);
 }
 
 // --- 盘前各段 --------------------------------------------------------
@@ -349,6 +360,112 @@ function dragonTigerLines(
   return out;
 }
 
+// --- v2 盘后：速读 / 市场温度计 / 板块主线（金字塔结构 + 行内化，BOSS 四原则）---
+
+/** 上证指数涨跌幅（速读行用）。 */
+function shanghaiPct(cn: AkEnvelope<IndexRow>): string {
+  if (cn.error) return '—';
+  const r = cn.data.find((x) => String(pick(x, ['名称']) ?? '').includes('上证'));
+  return r ? fmtPct(pick(r, ['涨跌幅'])) : '—';
+}
+
+/**
+ * 顶部「今日速读」一行（原则1 金字塔，5 秒看完）：沪指±% ｜ 涨跌家数 ｜ 涨停(炸板率) ｜
+ * 主力净流 ｜ 主线板块。某指标不可得则**跳过该项**（不堆「—」）。纯指标，无周期定性标签。
+ */
+function quickReadLine(input: PostmarketBriefingInput): string {
+  const p = input.marketPulse?.data[0];
+  const parts: string[] = [`沪指 ${shanghaiPct(input.indexCn)}`];
+  if (p && !input.marketPulse?.error) {
+    if (typeof p.up_count === 'number' && typeof p.down_count === 'number')
+      parts.push(`涨${p.up_count}/跌${p.down_count}`);
+    if (typeof p.zt_count === 'number') {
+      const zb = typeof p.zhaban_rate === 'number' ? `(炸板${p.zhaban_rate}%)` : '';
+      parts.push(`涨停${p.zt_count}${zb}`);
+    }
+    if (typeof p.net_inflow_yi === 'number')
+      parts.push(`主力净流入${fmtYiCompact(p.net_inflow_yi)}`);
+    const lead = p.sectors_up?.[0];
+    if (lead?.板块) parts.push(`主线:${lead.板块}`);
+  }
+  return `📊 **今日速读**：${parts.join('｜')}`;
+}
+
+/** 市场温度计（原则3 行内化，2 行；纯指标无定性标签；逐项不可得则跳过）。 */
+function thermometerLines(
+  env: AkEnvelope<MarketPulseRow> | undefined,
+  mode: BriefingMode,
+): string[] {
+  const p = env?.data[0];
+  if (!env || env.error || !p) {
+    return [unavailableLine('市场温度', env ?? ({ error: '' } as AkEnvelope), mode)];
+  }
+  const out: string[] = [];
+  const seg1: string[] = [];
+  if (typeof p.zt_count === 'number') {
+    const lb =
+      typeof p.max_lianban === 'number' && p.max_lianban >= 2 ? `，最高 ${p.max_lianban} 连板` : '';
+    seg1.push(`涨停 ${p.zt_count} 家${lb}`);
+  }
+  if (typeof p.dt_count === 'number') seg1.push(`跌停 ${p.dt_count} 家`);
+  if (typeof p.zb_count === 'number') {
+    const rate = typeof p.zhaban_rate === 'number' ? `（炸板率 ${p.zhaban_rate}%）` : '';
+    seg1.push(`炸板 ${p.zb_count} 家${rate}`);
+  }
+  if (seg1.length) out.push(`- ${seg1.join('，')}。`);
+  const seg2: string[] = [];
+  if (typeof p.up_count === 'number' && typeof p.down_count === 'number')
+    seg2.push(`涨跌家数 ${p.up_count}/${p.down_count}`);
+  if (typeof p.two_market_amount === 'number')
+    seg2.push(`两市成交额 ${fmtWanYi(p.two_market_amount)}`);
+  if (typeof p.net_inflow_yi === 'number')
+    seg2.push(`主力净流入 ${fmtYiUnit(p.net_inflow_yi, true)}`);
+  if (seg2.length) out.push(`- ${seg2.join('；')}。`);
+  if (out.length === 0) return [unavailableLine('市场温度', env, mode)];
+  out.push(`  （${srcTag(env, mode)}）`);
+  return out;
+}
+
+/** 板块主线（涨幅前5+跌幅前5；行内；领涨股=龙头）。纯指标，无定性标签。 */
+function sectorLines(env: AkEnvelope<MarketPulseRow> | undefined, mode: BriefingMode): string[] {
+  const p = env?.data[0];
+  if (!env || env.error || !p) {
+    return [unavailableLine('板块', env ?? ({ error: '' } as AkEnvelope), mode)];
+  }
+  const up = p.sectors_up ?? [];
+  const down = p.sectors_down ?? [];
+  if (up.length === 0 && down.length === 0) return ['- 板块数据暂不可用。'];
+  const fmtUp = (s: SectorEntry) =>
+    `${s.板块} ${fmtPct(s.涨跌幅)}${s.领涨股 ? `（${s.领涨股}）` : ''}`;
+  const out: string[] = [];
+  if (up.length) out.push(`- 涨幅前${up.length}：${up.map(fmtUp).join('、')}`);
+  if (down.length)
+    out.push(
+      `- 跌幅前${down.length}：${down.map((s) => `${s.板块} ${fmtPct(s.涨跌幅)}`).join('、')}`,
+    );
+  out.push(`  （${srcTag(env, mode)}）`);
+  return out;
+}
+
+/** 盘前回顾段：上一交易日涨停梯队（昨日涨停回顾，纯指标；缺数据 prod 静默）。 */
+function ztReviewLines(env: AkEnvelope<ZtReviewRow> | undefined, mode: BriefingMode): string[] {
+  const z = env?.data[0];
+  if (!env || env.error || !z || typeof z.zt_count !== 'number') {
+    return mode === 'dev' ? ['  - [dev] 昨日涨停回顾数据暂不可用'] : [];
+  }
+  const lb =
+    typeof z.max_lianban === 'number' && z.max_lianban >= 2 ? `，最高 ${z.max_lianban} 连板` : '';
+  const inds = (z.top_industries ?? []).filter((i) => i.行业).slice(0, 3);
+  const indStr = inds.length
+    ? `；活跃行业 ${inds.map((i) => `${i.行业}(${i.家数})`).join('、')}`
+    : '';
+  return [
+    '**昨日涨停回顾**',
+    `- 上一交易日涨停 ${z.zt_count} 家${lb}${indStr}。`,
+    `  （${srcTag(env, mode)}）`,
+  ];
+}
+
 // --- 公开渲染入口 ----------------------------------------------------
 
 /** 盘前简报（隔夜外围 + 自选股公告 + 今日关键事项）。默认 prod。 */
@@ -374,7 +491,8 @@ export function renderPremarketBriefing(
     ...keyEventLines(input.watchlist, input.announcements, input.shareUnlock, mode),
     '',
     `## 四、上一交易日龙虎榜回顾（${dateHeader(input.dragonTigerDate)}）`,
-    '> A股龙虎榜于收盘后晚间披露，故在次日盘前回顾上一交易日榜单。',
+    '> A股龙虎榜与涨停榜于收盘后晚间披露，故在次日盘前回顾上一交易日。',
+    ...ztReviewLines(input.ztReview, mode),
     ...dragonTigerLines(input.watchlist, input.dragonTiger, mode),
     '',
     disclaimerBlock(),
@@ -391,14 +509,25 @@ export function renderPostmarketBriefing(
     '# 📊 HOLA DAY · A股盘后复盘',
     `**${dateHeader(input.date)}** ｜ 生成于 ${fmtClock(input.generatedAt)}`,
     '',
+    // 原则1 金字塔：顶部一行速读（5 秒看完）。
+    quickReadLine(input),
+    '',
+    // 原则2 固定段序：速读 → 大盘速览 → 温度计 → 板块主线 → 自选股 → 公告。
     '## 一、大盘速览',
     ...marketOverviewLines(input.indexCn, input.northbound, mode),
     '',
-    '## 二、自选股当日表现',
+    '## 二、市场温度计',
+    ...thermometerLines(input.marketPulse, mode),
+    '',
+    '## 三、板块主线',
+    ...sectorLines(input.marketPulse, mode),
+    '',
+    // 原则3 表格只留自选股（市场级数据已全部行内化于温度计/板块主线）。
+    '## 四、自选股当日表现',
     ...watchlistPerformanceLines(input.watchlist, input.dailyKline),
     '',
     // 龙虎榜不在盘后（当日榜单晚间才披露）→ 已移到次日盘前「回顾」段（BOSS 拍板）。
-    '## 三、自选股新公告（当日）',
+    '## 五、自选股新公告（当日）',
     ...watchlistAnnouncementLines(input.watchlist, input.announcements, {
       mode,
       emptyLabel: '今日无新公告',

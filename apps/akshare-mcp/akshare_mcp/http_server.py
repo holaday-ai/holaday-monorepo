@@ -53,6 +53,9 @@ _north = cached(adp.TTL_NORTHBOUND)(adp.get_northbound_flow)
 _index = cached(adp.TTL_INDEX)(adp.get_index_quote)
 _unlock = cached(adp.TTL_UNLOCK)(adp.get_share_unlock)
 _tradecal = cached(adp.TTL_TRADECAL)(adp.is_trading_day)
+# v2 简报：温度计+板块(含即时 ths/指数 spot)→ 短 TTL 覆盖投递窗口；涨停回顾(prevday 历史)→ 长 TTL。
+_pulse = cached(adp.TTL_INDEX)(adp.get_market_pulse)
+_ztsum = cached(adp.TTL_LHB)(adp.get_zt_pool_summary)
 
 app = FastAPI(title="akshare-cn-http", docs_url=None, redoc_url=None)
 
@@ -107,6 +110,18 @@ def northbound() -> dict[str, Any]:
 def trading_day(date: str) -> dict[str, Any]:
     """date: 'YYYY-MM-DD' 或 'YYYYMMDD' 是否 A股交易日（P1 非交易日不投递）。"""
     return _safe(_tradecal, date)
+
+
+@app.get("/market-pulse/{date}")
+def market_pulse(date: str) -> dict[str, Any]:
+    """date 'YYYYMMDD'。盘后市场温度计(涨停/跌停/炸板/连板/涨跌家数) + 板块主线 + 大盘净流入(单行聚合)。"""
+    return _safe(_pulse, date)
+
+
+@app.get("/zt-pool-summary/{date}")
+def zt_pool_summary(date: str) -> dict[str, Any]:
+    """date 'YYYYMMDD'。某交易日涨停池聚合（盘前回顾上一交易日涨停梯队用）。"""
+    return _safe(_ztsum, date)
 
 
 @app.get("/symbol-search/{query}")

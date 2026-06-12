@@ -19,8 +19,10 @@ import type {
   DragonTigerRow,
   IndexRow,
   KlineRow,
+  MarketPulseRow,
   NorthboundRow,
   UnlockRow,
+  ZtReviewRow,
 } from './briefing-types.js';
 
 /** 交易日历单行（is_trading_day）。 */
@@ -62,6 +64,10 @@ export interface AkshareClient {
   getTradingDay(date: string): Promise<AkEnvelope<TradingDayRow>>;
   /** search_symbol(query) — 问句→个股（④ 短名解析；表 day-cache，冷启返空）。 */
   searchSymbol(query: string): Promise<AkEnvelope<SymbolRow>>;
+  /** get_market_pulse(date) — v2 盘后温度计+板块主线+大盘净流入（date 'YYYYMMDD'，单行聚合）。 */
+  getMarketPulse(date: string): Promise<AkEnvelope<MarketPulseRow>>;
+  /** get_zt_pool_summary(date) — v2 盘前回顾某交易日涨停梯队（date 'YYYYMMDD'）。 */
+  getZtPoolSummary(date: string): Promise<AkEnvelope<ZtReviewRow>>;
 }
 
 const STUB_DISCLAIMER = '数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。';
@@ -116,5 +122,11 @@ export class StubAkshareClient implements AkshareClient {
   }
   searchSymbol(query: string) {
     return Promise.resolve(this.err<SymbolRow>(`akshare:symbol_search(${query})`, this.now()));
+  }
+  getMarketPulse(date: string) {
+    return Promise.resolve(this.err<MarketPulseRow>(`akshare:market_pulse(${date})`, this.now()));
+  }
+  getZtPoolSummary(date: string) {
+    return Promise.resolve(this.err<ZtReviewRow>(`akshare:zt_pool_summary(${date})`, this.now()));
   }
 }

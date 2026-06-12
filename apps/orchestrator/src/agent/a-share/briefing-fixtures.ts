@@ -126,6 +126,25 @@ export const PREMARKET_SAMPLE: PremarketBriefingInput = {
       disclaimer: DISCLAIMER,
     },
   },
+  // v2: 上一交易日涨停梯队回顾（盘前回顾段）。
+  ztReview: {
+    data: [
+      {
+        zt_count: 72,
+        max_lianban: 4,
+        ladder: { '4': 1, '3': 5, '2': 14 },
+        top_industries: [
+          { 行业: '汽车零部件', 家数: 6 },
+          { 行业: '半导体', 家数: 4 },
+          { 行业: '证券', 家数: 3 },
+        ],
+      },
+    ],
+    count: 1,
+    source: 'akshare:stock_zt_pool_em(agg)',
+    fetched_at: '2026-06-11T00:27:00Z',
+    disclaimer: DISCLAIMER,
+  },
   // 上一交易日龙虎榜（盘前回顾段；2026-06-11 盘前回顾 06-10 榜单）。
   dragonTigerDate: '2026-06-10',
   dragonTiger: {
@@ -258,6 +277,46 @@ export const POSTMARKET_SAMPLE: PostmarketBriefingInput = {
       fetched_at: '2026-06-11T07:25:00Z',
       disclaimer: DISCLAIMER,
     },
+  },
+  // v2: 市场温度计 + 板块主线 + 大盘净流入（成交额环比% / 自选股净占比列 因源不可达不出）。
+  marketPulse: {
+    data: [
+      {
+        zt_count: 87,
+        max_lianban: 5,
+        ladder: { '5': 1, '4': 2, '3': 6, '2': 15 },
+        top_industries: [
+          { 行业: '汽车零部件', 家数: 8 },
+          { 行业: '小金属', 家数: 5 },
+          { 行业: '光伏设备', 家数: 4 },
+        ],
+        dt_count: 3,
+        zb_count: 34,
+        zhaban_rate: 28.1,
+        up_count: 3208,
+        down_count: 1892,
+        net_inflow_yi: 86.0,
+        sectors_up: [
+          { 板块: '汽车零部件', 涨跌幅: 3.2, 领涨股: '迪生力', 领涨股涨跌幅: 10.01 },
+          { 板块: '小金属', 涨跌幅: 2.8, 领涨股: '金钼股份', 领涨股涨跌幅: 8.5 },
+          { 板块: '光伏设备', 涨跌幅: 2.1, 领涨股: '阳光电源', 领涨股涨跌幅: 6.0 },
+          { 板块: '风电设备', 涨跌幅: 1.9, 领涨股: '金风科技', 领涨股涨跌幅: 5.2 },
+          { 板块: '半导体', 涨跌幅: 1.5, 领涨股: '北方华创', 领涨股涨跌幅: 4.1 },
+        ],
+        sectors_down: [
+          { 板块: '白酒', 涨跌幅: -2.1, 领涨股: '', 领涨股涨跌幅: null },
+          { 板块: '银行', 涨跌幅: -1.8, 领涨股: '', 领涨股涨跌幅: null },
+          { 板块: '保险', 涨跌幅: -1.5, 领涨股: '', 领涨股涨跌幅: null },
+          { 板块: '煤炭', 涨跌幅: -1.2, 领涨股: '', 领涨股涨跌幅: null },
+          { 板块: '房地产', 涨跌幅: -0.9, 领涨股: '', 领涨股涨跌幅: null },
+        ],
+        two_market_amount: 1_540_000_000_000,
+      },
+    ],
+    count: 1,
+    source: 'akshare:zt_pool+dtgc+zbgc+board_summary_ths+index_spot_sina',
+    fetched_at: '2026-06-11T07:25:00Z',
+    disclaimer: DISCLAIMER,
   },
   announcements: {
     '600519': {

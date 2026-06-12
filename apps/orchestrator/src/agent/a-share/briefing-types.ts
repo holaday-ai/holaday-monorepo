@@ -105,6 +105,52 @@ export interface NorthboundRow {
   [k: string]: unknown;
 }
 
+/** 板块条目（同花顺行业汇总，v2 板块主线）。 */
+export interface SectorEntry {
+  板块: string;
+  涨跌幅: number | null;
+  领涨股: string;
+  领涨股涨跌幅: number | null;
+}
+
+/**
+ * 市场温度计 + 板块主线聚合行（v2 盘后，adapters.get_market_pulse 单行）.
+ *
+ * 逐源容错：某源不可达时对应字段为 null（渲染器降级该项，不拖垮整段）。纯指标，
+ * 无周期定性标签。两市成交额为原始「元」；净流入单位「亿元」（同花顺即时口径）。
+ */
+export interface MarketPulseRow {
+  /** 涨停家数 / 最高连板 / 连板梯队(≥2 板) / 涨停行业分布 top3。 */
+  zt_count?: number | null;
+  max_lianban?: number | null;
+  ladder?: Record<string, number>;
+  top_industries?: { 行业: string; 家数: number }[];
+  /** 跌停家数 / 炸板家数 / 炸板率(%)。 */
+  dt_count?: number | null;
+  zb_count?: number | null;
+  zhaban_rate?: number | null;
+  /** 全市场涨/跌家数（同花顺各行业上涨/下跌家数求和）。 */
+  up_count?: number | null;
+  down_count?: number | null;
+  /** 大盘主力净流入（亿元，同花顺各行业净流入求和）。 */
+  net_inflow_yi?: number | null;
+  /** 板块涨幅前5 / 跌幅前5（含领涨股）。 */
+  sectors_up?: SectorEntry[];
+  sectors_down?: SectorEntry[];
+  /** 两市成交额（原始「元」= 上证综指+深证综指 spot 成交额）。 */
+  two_market_amount?: number | null;
+  [k: string]: unknown;
+}
+
+/** 涨停池聚合行（v2 盘前回顾上一交易日涨停梯队，adapters.get_zt_pool_summary）。 */
+export interface ZtReviewRow {
+  zt_count?: number | null;
+  max_lianban?: number | null;
+  ladder?: Record<string, number>;
+  top_industries?: { 行业: string; 家数: number }[];
+  [k: string]: unknown;
+}
+
 /** 用户自选股清单条目（watchlists 表 list 输出的子集）。 */
 export interface WatchlistEntry {
   symbol: string;
@@ -134,6 +180,8 @@ export interface PremarketBriefingInput {
   dragonTiger: AkEnvelope<DragonTigerRow>;
   /** 上一交易日龙虎榜对应日期 'YYYY-MM-DD'（段标题用）。 */
   dragonTigerDate: string;
+  /** v2: 上一交易日涨停池聚合（盘前回顾「昨日涨停梯队」；date 同 dragonTigerDate）。 */
+  ztReview?: AkEnvelope<ZtReviewRow>;
 }
 
 /** 盘后复盘输入（大盘 + 自选股表现 + 龙虎榜/北向 + 新公告）。 */
@@ -149,4 +197,6 @@ export interface PostmarketBriefingInput {
   dailyKline: Record<string, AkEnvelope<KlineRow>>;
   /** 按 symbol 分组的当日新公告。 */
   announcements: Record<string, AkEnvelope<AnnouncementRow>>;
+  /** v2: 市场温度计 + 板块主线 + 大盘净流入（get_market_pulse 单行聚合）。 */
+  marketPulse?: AkEnvelope<MarketPulseRow>;
 }
