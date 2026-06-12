@@ -1,6 +1,10 @@
 # ④ A股即时问答 — Skill Router 首个场景设计（一页方案 · 待 BOSS+Claude 过目）
 
-> 状态：**✅ APPROVED（BOSS 2026-06-12，4 点全过 + 2 微调，按 Claude 评审）**，进 M1。④ 是 Skill Router 第一个真实场景，本方案锁定**模式**——后续 11 个专家技能都复用，第一个不能随手写。通用模式另见 [SKILL_ROUTER_PATTERN.md](SKILL_ROUTER_PATTERN.md)（架构基线）。
+> 状态：**✅ M1+M2 已交付上线（BOSS-only 灰度，2026-06-12）**。④ 是 Skill Router 第一个真实场景，本方案锁定**模式**——后续 11 个专家技能都复用。通用模式另见 [SKILL_ROUTER_PATTERN.md](SKILL_ROUTER_PATTERN.md)（架构基线）。
+>
+> **M2 交付**：`tasks.ts` a-share-qa lane（flag `ASHARE_QA_ENABLED` 默认 OFF + `ASHARE_QA_ALLOWLIST` 灰度，先只开 BOSS）→ resolveAshareQa（代码/自选股 + name-search 短名）→ 事实卡 → LLM③ → 合规闸门（advice/predict/ungrounded 越线降级纯数据 + 打日志计数）。短名表：`stock_info_a_code_name` 从 Vultr 不可达 → sina `stock_zh_a_spot`（5526，日级缓存 + 开盘前 prewarm 刷新 + 后台自愈）。实测 LLM 对诱导提问自合规、闸门兜底（21 对抗测确定性证明）。
+>
+> **⚠️ 已知限制（v1，BOSS 拍板不兜）**：**裸短名问句**（如未选 A股技能、问句只有「茅台该买吗」无 A股术语/无代码）**不命中** → 落通用路径，无 a-share 闸门。**唯一通路 = 选 a-share-analyst 技能（roleId）**——真实用户用 A股技能问股票是自然路径；为裸问句对灰度用户每条都跑一次 name-search 不值。带 roleId 时任意短名/全名都解析。
 > 关联：复用 #2 已上线的 a-share 数据层（`AkshareClient` / `briefing-*` / akshare-mcp）+ Phase 0 技能包 `skills/a-share-analyst/`。
 
 ---
