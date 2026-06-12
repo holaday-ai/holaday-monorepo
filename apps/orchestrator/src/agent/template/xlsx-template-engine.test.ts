@@ -73,7 +73,7 @@ describe('fill (xlsx)', () => {
       c.value = '客户：{client_name}';
       c.font = { bold: true, color: { argb: 'FF0000FF' } };
     });
-    const out = await fill(buf, { client_name: '张三' });
+    const { buffer: out } = await fill(buf, { client_name: '张三' });
     const ws = await reload(out);
     expect(ws.getCell('A1').value).toBe('客户：张三');
     // style preserved
@@ -86,7 +86,7 @@ describe('fill (xlsx)', () => {
       ws.getCell('A1').value = '{present}';
       ws.getCell('A2').value = '{absent}';
     });
-    const out = await fill(buf, { present: '有' });
+    const { buffer: out } = await fill(buf, { present: '有' });
     const ws = await reload(out);
     expect(ws.getCell('A1').value).toBe('有');
     expect(ws.getCell('A2').value).toBeNull();
@@ -98,7 +98,7 @@ describe('fill (xlsx)', () => {
       ws.getCell('A2').value = '{#items}{desc}';
       ws.getCell('B2').value = '{price}{/items}';
     });
-    const out = await fill(buf, {
+    const { buffer: out } = await fill(buf, {
       items: [
         { desc: '苹果', price: '5' },
         { desc: '香蕉', price: '3' },
@@ -121,29 +121,37 @@ describe('fill (xlsx)', () => {
       ws.getCell('A2').value = '{#items}{desc}{/items}';
       ws.getCell('A3').value = '结尾';
     });
-    const out = await fill(buf, { items: [] });
+    const { buffer: out } = await fill(buf, { items: [] });
     const ws = await reload(out);
     // row 2 (the loop template) is spliced out; 结尾 shifts up to row 2
     expect(ws.getCell('A1').value).toBe('标题');
     expect(ws.getCell('A2').value).toBe('结尾');
   });
 
-  it('fails honestly on a multi-row loop (v1 single-row only)', async () => {
+  it('DEGRADES a multi-row loop — skips it, keeps other fields (P0 regression fix)', async () => {
     const buf = await buildXlsx((ws) => {
-      ws.getCell('A1').value = '{#items}';
-      ws.getCell('A2').value = '{desc}';
-      ws.getCell('A3').value = '{/items}';
+      ws.getCell('A1').value = '客户：{client_name}';
+      ws.getCell('A3').value = '{#items}';
+      ws.getCell('A4').value = '{desc}';
+      ws.getCell('A5').value = '{/items}';
     });
-    await expect(fill(buf, { items: [{ desc: 'x' }] })).rejects.toMatchObject({
-      kind: 'unsupported',
+    const { buffer: out, skippedLoops } = await fill(buf, {
+      client_name: '张三',
+      items: [{ desc: 'x' }],
     });
+    expect(skippedLoops).toContain('items'); // reported, not thrown
+    const ws = await reload(out);
+    expect(ws.getCell('A1').value).toBe('客户：张三'); // non-loop field still filled
+    // the skipped loop's leftover placeholders are cleared (no {tag} leak)
+    expect(String(ws.getCell('A3').value ?? '')).not.toContain('{');
+    expect(String(ws.getCell('A4').value ?? '')).not.toContain('{');
   });
 
   it('produces a valid xlsx (PK zip) buffer', async () => {
     const buf = await buildXlsx((ws) => {
       ws.getCell('A1').value = '{x}';
     });
-    const out = await fill(buf, { x: 'done' });
+    const { buffer: out } = await fill(buf, { x: 'done' });
     expect(out[0]).toBe(0x50); // PK
     expect(out[1]).toBe(0x4b);
   });

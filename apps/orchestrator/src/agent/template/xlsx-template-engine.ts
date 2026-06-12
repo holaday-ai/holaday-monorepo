@@ -50,8 +50,12 @@ export async function extractPlaceholders(buf: Buffer): Promise<PlaceholderSchem
   return { format: 'xlsx', fields };
 }
 
-export async function fill(buf: Buffer, data: FillData): Promise<Buffer> {
+export async function fill(
+  buf: Buffer,
+  data: FillData,
+): Promise<{ buffer: Buffer; skippedLoops: string[] }> {
   const wb = await load(buf);
+  const skippedLoops: string[] = [];
 
   // 1. Expand loops first — bottom-to-top so earlier-row spans keep their
   //    indices while later spans grow/shrink.
@@ -59,10 +63,13 @@ export async function fill(buf: Buffer, data: FillData): Promise<Buffer> {
     const loops = findLoopSpans(sheet);
     for (const loop of [...loops].sort((a, b) => b.startRow - a.startRow)) {
       if (loop.startRow !== loop.endRow) {
-        throw new XlsxTemplateError(
-          `xlsx 循环 "${loop.name}" 跨多行，v1 仅支持单行循环（请把 {#${loop.name}}…{/${loop.name}} 放在同一行）。`,
-          'unsupported',
-        );
+        // v1 — multi-row loops aren't supported yet (P1 backlog). DON'T fail
+        // the whole task: skip this loop section and fill everything else.
+        // Its leftover {#x}/{/x}/{sub} cells are cleared by the simple-field
+        // pass below; the runner marks partial_success + explains which loop
+        // ({#name}…{/name}) went unfilled.
+        if (!skippedLoops.includes(loop.name)) skippedLoops.push(loop.name);
+        continue;
       }
       const rows = Array.isArray(data[loop.name]) ? (data[loop.name] as FillRow[]) : [];
       expandSingleRowLoop(sheet, loop, rows);
@@ -95,7 +102,7 @@ export async function fill(buf: Buffer, data: FillData): Promise<Buffer> {
   }
   const buffer = Buffer.isBuffer(out) ? out : Buffer.from(out as ArrayBuffer);
   if (buffer.length === 0) throw new XlsxTemplateError('生成的 xlsx 为空', 'empty');
-  return buffer;
+  return { buffer, skippedLoops };
 }
 
 // ---------------------------------------------------------------------------
