@@ -7,7 +7,7 @@
  * 定时任务不崩。fetch 可注入便于单测。
  */
 
-import type { AkshareClient } from './akshare-client.js';
+import type { AkshareClient, TradingDayRow } from './akshare-client.js';
 import type {
   AkEnvelope,
   AnnouncementRow,
@@ -89,5 +89,8 @@ export class HttpAkshareClient implements AkshareClient {
   }
   getNorthboundFlow() {
     return this.get<NorthboundRow>('/northbound');
+  }
+  getTradingDay(date: string) {
+    return this.get<TradingDayRow>(`/trading-day/${encodeURIComponent(date)}`);
   }
 }

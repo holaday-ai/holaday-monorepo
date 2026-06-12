@@ -56,6 +56,14 @@ function fakeClient(dtSpy?: (d: string) => void): AkshareClient {
       return Promise.resolve(POSTMARKET_SAMPLE.dragonTiger);
     },
     getNorthboundFlow: () => Promise.resolve(POSTMARKET_SAMPLE.northbound),
+    getTradingDay: (date: string) =>
+      Promise.resolve({
+        data: [{ date, is_trading_day: true }],
+        count: 1,
+        source: 'fake:trading_day',
+        fetched_at: '2026-06-11T00:00:00Z',
+        disclaimer: 'x',
+      }),
   };
 }
 

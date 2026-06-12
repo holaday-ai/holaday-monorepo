@@ -23,6 +23,13 @@ import type {
   UnlockRow,
 } from './briefing-types.js';
 
+/** 交易日历单行（is_trading_day）。 */
+export interface TradingDayRow {
+  date?: string;
+  is_trading_day?: boolean;
+  [k: string]: unknown;
+}
+
 export interface AkshareClient {
   /** get_index_quote(market) — 'hk' 恒指 / 'us' 标普道指纳指 / 'cn' 上证深证创业板。 */
   getIndexQuote(market: 'hk' | 'us' | 'cn'): Promise<AkEnvelope<IndexRow>>;
@@ -36,6 +43,8 @@ export interface AkshareClient {
   getDragonTiger(startDate: string): Promise<AkEnvelope<DragonTigerRow>>;
   /** get_northbound_flow() — 北向资金汇总。 */
   getNorthboundFlow(): Promise<AkEnvelope<NorthboundRow>>;
+  /** is_trading_day(date) — date('YYYY-MM-DD') 是否 A股交易日（P1 非交易日不投递）。 */
+  getTradingDay(date: string): Promise<AkEnvelope<TradingDayRow>>;
 }
 
 const STUB_DISCLAIMER = '数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。';
@@ -84,5 +93,8 @@ export class StubAkshareClient implements AkshareClient {
   }
   getNorthboundFlow() {
     return Promise.resolve(this.err<NorthboundRow>('akshare:northbound', this.now()));
+  }
+  getTradingDay(date: string) {
+    return Promise.resolve(this.err<TradingDayRow>(`akshare:trading_day(${date})`, this.now()));
   }
 }

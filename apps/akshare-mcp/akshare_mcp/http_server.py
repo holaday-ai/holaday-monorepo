@@ -52,6 +52,7 @@ _lhb = cached(adp.TTL_LHB)(adp.get_dragon_tiger)
 _north = cached(adp.TTL_NORTHBOUND)(adp.get_northbound_flow)
 _index = cached(adp.TTL_INDEX)(adp.get_index_quote)
 _unlock = cached(adp.TTL_UNLOCK)(adp.get_share_unlock)
+_tradecal = cached(adp.TTL_TRADECAL)(adp.is_trading_day)
 
 app = FastAPI(title="akshare-cn-http", docs_url=None, redoc_url=None)
 
@@ -98,6 +99,12 @@ def dragon_tiger(start_date: str) -> dict[str, Any]:
 @app.get("/northbound")
 def northbound() -> dict[str, Any]:
     return _safe(_north)
+
+
+@app.get("/trading-day/{date}")
+def trading_day(date: str) -> dict[str, Any]:
+    """date: 'YYYY-MM-DD' 或 'YYYYMMDD' 是否 A股交易日（P1 非交易日不投递）。"""
+    return _safe(_tradecal, date)
 
 
 def main() -> None:

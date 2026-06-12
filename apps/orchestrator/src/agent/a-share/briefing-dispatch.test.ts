@@ -97,4 +97,16 @@ describe('runBriefingDispatch', () => {
     expect(calls[0]?.message).toContain('数据暂不可用');
     expect(calls[0]?.message).toContain('不构成任何投资建议');
   });
+
+  it('非交易日(周末) → skip 不投递，返回 skipped+reason（P1）', async () => {
+    const { deps, calls } = harness();
+    // 2026-06-13 周六；StubClient.getTradingDay 返 error → 退周末兜底 → 非交易日。
+    const r = await runBriefingDispatch(
+      { ...deps, now: new Date('2026-06-13T01:00:00Z') },
+      { scheduledTaskInternalId: 7, userInternalId: 42, intent: PREMARKET_BRIEFING_INTENT },
+    );
+    expect(r).toMatchObject({ handled: true, ok: true, skipped: true });
+    expect(r.reason).toContain('非交易日');
+    expect(calls).toHaveLength(0);
+  });
 });

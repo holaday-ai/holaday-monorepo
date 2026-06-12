@@ -144,3 +144,18 @@ describe('边界', () => {
     expect(md).toContain(BRIEFING_DISCLAIMER);
   });
 });
+
+describe('日期星期（P1 时区 off-by-one 回归）', () => {
+  // 2026-06-12 是周五（曾误显示周四：00:00+08:00 在 UTC runtime 退一天）。
+  // 锁死：星期由「正午 UTC + getUTCDay()」算，与 runtime 时区无关。
+  it.each([
+    ['2026-06-11', '周四'],
+    ['2026-06-12', '周五'],
+    ['2026-06-13', '周六'],
+    ['2026-06-14', '周日'],
+    ['2026-06-15', '周一'],
+  ])('%s → %s', (date, wd) => {
+    expect(renderPremarketBriefing({ ...PREMARKET_SAMPLE, date })).toContain(`${date}（${wd}）`);
+    expect(renderPostmarketBriefing({ ...POSTMARKET_SAMPLE, date })).toContain(`${date}（${wd}）`);
+  });
+});

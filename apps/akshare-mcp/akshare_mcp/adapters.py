@@ -63,6 +63,7 @@ TTL_LHB = _ttl("LHB", 3600)
 TTL_NORTHBOUND = _ttl("NORTHBOUND", 600)
 TTL_INDEX = _ttl("INDEX", 600)
 TTL_UNLOCK = _ttl("UNLOCK", 3600)
+TTL_TRADECAL = _ttl("TRADECAL", 86400)  # 交易日历日内基本不变，缓存 1 天
 
 # Row caps so a single tool call can't dump thousands of rows into the
 # model's context.
@@ -302,3 +303,17 @@ def get_share_unlock(symbol: str) -> tuple[list[dict[str, Any]], str]:
     a = _require_ak()
     df = a.stock_restricted_release_queue_em(symbol=symbol)
     return _records(df), "akshare:stock_restricted_release_queue_em"
+
+
+# --- 交易日历（P1：非交易日不投递简报） -----------------------------
+def is_trading_day(date_str: str) -> tuple[list[dict[str, Any]], str]:
+    """`date_str` 是否 A股交易日（周末/节假日 = False）。date 形如 'YYYY-MM-DD' 或 'YYYYMMDD'。
+
+    `tool_trade_date_hist_sina` 返历史+未来全部交易日（sina，Vultr 可达）。返单行
+    `[{date, is_trading_day}]` 走统一 envelope。简报 dispatch 据此非交易日 skip。
+    """
+    a = _require_ak()
+    target = date_str.replace("-", "").strip()
+    df = a.tool_trade_date_hist_sina()
+    dates = {str(d).replace("-", "") for d in df["trade_date"].astype(str)}
+    return [{"date": date_str, "is_trading_day": target in dates}], "akshare:tool_trade_date_hist_sina"

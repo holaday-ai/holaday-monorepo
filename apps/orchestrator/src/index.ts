@@ -4,6 +4,7 @@ if (_proxy) setGlobalDispatcher(new ProxyAgent(_proxy));
 import { bootstrap } from 'global-agent';
 bootstrap();
 import Anthropic from '@anthropic-ai/sdk';
+import { isBriefingIntent } from './agent/a-share/briefing-dispatch.js';
 import { DrizzleLlmCallRecorder } from './agent/llm-call-recorder.js';
 import { AnthropicPlanner } from './agent/planners/anthropic.js';
 import { StubPlanner } from './agent/planners/stub.js';
@@ -11,29 +12,28 @@ import {
   recoverStuckRunningScheduledTasks,
   startScheduledRunner,
 } from './agent/scheduled-runner.js';
-import { isBriefingIntent } from './agent/a-share/briefing-dispatch.js';
-import { injectPendingCookies } from './cookies/sync-service.js';
-import { createScreencastProxy } from './streaming/screencast-proxy.js';
 import {
+  type ExecutionRouter,
   createApifyAdapter,
   createExecutionRouter,
   createZapierAdapter,
-  type ExecutionRouter,
 } from './agent/supercar/index.js';
-import { BrowserPool, reapOrphans } from './browser-pool/index.js';
-import { createTaskQueue, type TaskQueue } from './queue/task-queue.js';
-import { createPayPalAdapter } from './payment/index.js';
-import { createVncProxy } from './browser-pool/vnc-proxy.js';
 import {
   AnthropicVisionLoopCommander,
   shouldUseLegacyPlanner,
 } from './agent/vision-loop/commander.js';
 import { PlaywrightExecutor } from './agent/vision-loop/playwright-executor.js';
+import { BrowserPool, reapOrphans } from './browser-pool/index.js';
+import { createVncProxy } from './browser-pool/vnc-proxy.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
+import { injectPendingCookies } from './cookies/sync-service.js';
 import { db } from './db/client.js';
 import { createHttpApp } from './http.js';
 import { buildScheduledDispatchNotification } from './notifications/scheduled-copy.js';
+import { createPayPalAdapter } from './payment/index.js';
+import { type TaskQueue, createTaskQueue } from './queue/task-queue.js';
+import { createScreencastProxy } from './streaming/screencast-proxy.js';
 import { createWsServer, loadRehydratedTasks } from './ws/server.js';
 
 /**
@@ -345,9 +345,7 @@ async function main() {
   // 60min. Lookup-time guard already treats expired rows as missing
   // so this is purely about table bloat.
   {
-    const { startIdempotencyCleanup } = await import(
-      './api-keys/webhook-idempotency-service.js'
-    );
+    const { startIdempotencyCleanup } = await import('./api-keys/webhook-idempotency-service.js');
     startIdempotencyCleanup({ db, logger });
   }
 
@@ -397,11 +395,14 @@ async function main() {
               baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
             });
             try {
-              await runBriefingDispatch(
+              const r = await runBriefingDispatch(
                 { db, client, notify: (input) => notify({ db, logger }, input) },
                 { scheduledTaskInternalId: scheduledTaskId, userInternalId, intent },
               );
               briefingFailCounts.delete(scheduledTaskId);
+              // P1 非交易日：未投递，回带 skip → runner 记 last_run_status='skipped' + note。
+              if (r.skipped)
+                return { skipped: true as const, note: r.reason ?? '非交易日，未投递' };
               return scheduledTaskId; // 非 null = 成功（简报无 task 行）
             } catch (err) {
               const fails = (briefingFailCounts.get(scheduledTaskId) ?? 0) + 1;
@@ -419,8 +420,7 @@ async function main() {
                     scheduledTaskInternalId: scheduledTaskId,
                     type: 'task_failed',
                     title: 'A股简报生成失败',
-                    message:
-                      '每日 A股简报连续多次生成失败。请稍后重试，或在设置中关闭后重新开启。',
+                    message: '每日 A股简报连续多次生成失败。请稍后重试，或在设置中关闭后重新开启。',
                   },
                 ).catch(() => {});
               }
@@ -621,10 +621,7 @@ async function main() {
     // takeover-timeout from auto-completing them, but the runtime
     // reaper hadn't existed yet). Set BOOT_SWEEP_AWAITING_USER_MIN=5
     // for one deploy to flush, then restore.
-    const bootAwaitingMin = Number.parseInt(
-      process.env.BOOT_SWEEP_AWAITING_USER_MIN ?? '35',
-      10,
-    );
+    const bootAwaitingMin = Number.parseInt(process.env.BOOT_SWEEP_AWAITING_USER_MIN ?? '35', 10);
     const parkRows = await db.execute(sql`
       UPDATE tasks
          SET status = 'failed',
@@ -657,10 +654,16 @@ async function main() {
         'boot sweep: marked stale awaiting_user parks as failed',
       );
     } else {
-      logger.info({ thresholdMin: bootAwaitingMin }, 'boot sweep: no stale awaiting_user parks to mark');
+      logger.info(
+        { thresholdMin: bootAwaitingMin },
+        'boot sweep: no stale awaiting_user parks to mark',
+      );
     }
   } catch (err) {
-    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'boot sweep failed (non-fatal)');
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'boot sweep failed (non-fatal)',
+    );
   }
 
   // Phase 22a — runtime zombie reaper. Boot sweep above only fires at

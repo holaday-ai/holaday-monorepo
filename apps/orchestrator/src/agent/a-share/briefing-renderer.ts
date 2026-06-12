@@ -139,10 +139,16 @@ function shortDate(s: string): string {
   return s.slice(0, 10);
 }
 
-/** 「2026-06-11（周四）」。 */
+/**
+ * 「2026-06-12（周五）」。`date` 是北京日历日 'YYYY-MM-DD'。
+ *
+ * ⚠️ 用当日**正午 UTC + getUTCDay()** 取星期，不用 `new Date(date+'T00:00+08:00').getDay()`
+ * ——后者在 UTC runtime(Vultr) 下，00:00+08:00 = 前一天 16:00 UTC，`getDay()`（本地时区）
+ * 会退一天（曾把周五显示成周四）。正午 UTC 对任一时区都落在同一日历日，getUTCDay() 稳定。
+ */
 function dateHeader(date: string): string {
-  const d = new Date(`${date}T00:00:00+08:00`);
-  const wd = Number.isNaN(d.getTime()) ? '' : `（${WEEKDAYS[d.getDay()]}）`;
+  const d = new Date(`${date}T12:00:00Z`);
+  const wd = Number.isNaN(d.getTime()) ? '' : `（${WEEKDAYS[d.getUTCDay()]}）`;
   return `${date}${wd}`;
 }
 
