@@ -52,6 +52,19 @@ export interface AshareQaResult {
 
 const FIXED_TAIL = '以上因素与股价变动的关联未经证实';
 
+/**
+ * P0 兜底（BOSS 要求①）：选了 a-share 技能但没解析出个股（或非个股问句）→ 静态引导
+ * 话术，**绝不落通用 LLM**。确保「选了 A股技能的所有问句都在合规框架内，无一例外」。
+ * 纯静态、无 LLM → 零合规风险。
+ */
+export const ASHARE_QA_GUIDANCE = [
+  '请告诉我具体的**股票名称或代码**（例如「贵州茅台」或「600519」），我才能为你聚合该股的盘面行情、公告、龙虎榜、解禁等公开信息。',
+  '',
+  '> 本助手仅做客观信息聚合，**不提供买卖建议、不预测涨跌、不做投资判断**。',
+  '',
+  QA_DISCLAIMER_BLOCK,
+].join('\n');
+
 function buildSystem(skillMarkdown: string, kind: AshareQaMatch['kind']): string {
   return [
     skillMarkdown.trim(),

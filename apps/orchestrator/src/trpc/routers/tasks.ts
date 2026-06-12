@@ -1311,6 +1311,54 @@ export const tasksRouter = router({
           executionMode: 'generate' as const,
         };
       }
+      // P0 兜底（BOSS 要求①）：选了 a-share 技能但没解析出个股（或非个股问句）→
+      // 静态引导话术，**绝不落通用 LLM**——确保「选了 A股技能的所有问句都在合规框架
+      // 内，无一例外」（Q3 泄漏修：原先 resolveAshareQa=null 会落通用路径泄漏建议）。
+      if (input.skillId === 'a-share-analyst') {
+        const { ASHARE_QA_GUIDANCE } = await import('../../agent/a-share/ashare-qa-runner.js');
+        const taskId = newExternalId('task');
+        const repo = new TaskRepository(ctx.db);
+        await repo.insertTask(
+          { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
+          {
+            userId: userRow.id,
+            intent: input.intent,
+            roleId: gatedRole === 'none' ? null : gatedRole,
+            opusUsed: false,
+          },
+        );
+        ctx.logger.info(
+          { taskId, userId: ctx.userId, executorLane: 'ashare_qa_guidance' },
+          'task: executor lane selected',
+        );
+        void (async () => {
+          try {
+            const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+            if (taskInternalId != null) {
+              await repo.persistVisionOutcome(taskId, {
+                status: 'completed',
+                summary: ASHARE_QA_GUIDANCE,
+                tickCount: 1,
+                metadata: { executionMode: 'generate', lane: 'ashare_qa_guidance' },
+              });
+            }
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'completed',
+              summary: ASHARE_QA_GUIDANCE,
+            });
+          } catch (err) {
+            ctx.logger.error({ err, taskId }, 'ashare-qa-guidance: persist/broadcast failed');
+          }
+        })();
+        return {
+          taskId,
+          status: 'executing' as const,
+          steps: [],
+          executionMode: 'generate' as const,
+        };
+      }
     }
     // ===== end a-share QA fork =====
 

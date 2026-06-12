@@ -98,6 +98,19 @@ describe('matchAshareQa', () => {
   it('有 A股术语但无个股（市场级）→ null（M1 限个股）', () => {
     expect(matchAshareQa({ intent: '大盘今天怎么样', watchlist: WL, now: NOW })).toBeNull();
   });
+
+  it('持仓语境词「套牢」+ 自选股全名 → 命中（Q3 修：持仓问句进合规框架）', () => {
+    const m = matchAshareQa({ intent: '贵州茅台套牢了怎么办', watchlist: WL, now: NOW });
+    expect(m?.stocks).toEqual([{ symbol: '600519', displayName: '贵州茅台' }]);
+  });
+
+  it('持仓语境词但无个股（被套了怎么办）→ matchAshareQa null（由 a-share lane 兜底引导）', () => {
+    // 持仓词 gates 但解析不出个股 → sync 返 null；产品里 resolveAshareQa 也 null →
+    // tasks.ts 选了 a-share 技能时走静态引导话术，绝不落通用 LLM（无泄漏）。
+    expect(
+      matchAshareQa({ intent: '被套了怎么办', roleId: 'a-share-analyst', watchlist: WL, now: NOW }),
+    ).toBeNull();
+  });
 });
 
 // ---- fact-card ----

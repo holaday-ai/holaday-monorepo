@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AkshareClient } from './akshare-client.js';
 import { resolveAshareQa } from './ashare-qa-matcher.js';
-import { runAshareQa } from './ashare-qa-runner.js';
+import { ASHARE_QA_GUIDANCE, runAshareQa } from './ashare-qa-runner.js';
 import type { AshareQaMatch, ResolvedStock } from './ashare-qa-types.js';
 
 const MATCH: AshareQaMatch = {
@@ -187,5 +187,23 @@ describe('resolveAshareQa（异步 name-search）', () => {
     );
     expect(m).toBeNull();
     expect(called).toBe(false);
+  });
+
+  it('持仓语境词「茅台套牢了」短名 → name-search 命中 600519（Q3 修）', async () => {
+    const m = await resolveAshareQa(
+      { intent: '茅台套牢了怎么办', watchlist: WL, now: NOW },
+      async () => [{ symbol: '600519', displayName: '贵州茅台' }],
+    );
+    expect(m?.stocks[0]?.symbol).toBe('600519');
+  });
+});
+
+describe('ASHARE_QA_GUIDANCE（P0 兜底引导话术）', () => {
+  it('含引导 + 免责 + 不含任何买卖/预测措辞', () => {
+    expect(ASHARE_QA_GUIDANCE).toContain('股票名称或代码');
+    expect(ASHARE_QA_GUIDANCE).toContain('免责声明');
+    expect(ASHARE_QA_GUIDANCE).toContain('不提供买卖建议');
+    // 静态引导本身不得含建议/预测措辞
+    expect(ASHARE_QA_GUIDANCE).not.toMatch(/建议买入|目标价|会涨|会跌|抄底|割肉/);
   });
 });

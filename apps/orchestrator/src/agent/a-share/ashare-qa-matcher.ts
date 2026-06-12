@@ -13,7 +13,8 @@ import { resolveStocks } from './ashare-stock-resolver.js';
 
 const ASHARE_ROLE_ID = 'a-share-analyst';
 
-/** A股语境术语（命中之一才认为是 A股问题）。 */
+/** A股语境术语（命中之一才认为是 A股问题）。含持仓语境词（Q3 泄漏修：套牢/割肉
+ * 等问句也要进合规框架，BOSS 要求②）。 */
 const ASHARE_TERMS = [
   '龙虎榜',
   '公告',
@@ -30,6 +31,18 @@ const ASHARE_TERMS = [
   '成交',
   '股票',
   '个股',
+  // 持仓语境词（BOSS 要求②）：套牢/割肉/解套/补仓/被套/回本…
+  '套牢',
+  '被套',
+  '套了',
+  '割肉',
+  '解套',
+  '补仓',
+  '回本',
+  '摊薄',
+  '加仓',
+  '减仓',
+  '仓位',
 ];
 
 /** 问句标记。 */
