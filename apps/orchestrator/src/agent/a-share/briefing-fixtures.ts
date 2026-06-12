@@ -283,6 +283,7 @@ export const POSTMARKET_SAMPLE: PostmarketBriefingInput = {
     data: [
       {
         zt_count: 87,
+        zt_count_prev: 85,
         max_lianban: 5,
         ladder: { '5': 1, '4': 2, '3': 6, '2': 15 },
         top_industries: [

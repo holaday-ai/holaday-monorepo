@@ -123,8 +123,9 @@ export class HttpAkshareClient implements AkshareClient {
   searchSymbol(query: string) {
     return this.get<SymbolRow>(`/symbol-search/${encodeURIComponent(query)}`);
   }
-  getMarketPulse(date: string) {
-    return this.get<MarketPulseRow>(`/market-pulse/${encodeURIComponent(date)}`);
+  getMarketPulse(date: string, prevDate?: string) {
+    const qs = prevDate ? `?prev_date=${encodeURIComponent(prevDate)}` : '';
+    return this.get<MarketPulseRow>(`/market-pulse/${encodeURIComponent(date)}${qs}`);
   }
   getZtPoolSummary(date: string) {
     return this.get<ZtReviewRow>(`/zt-pool-summary/${encodeURIComponent(date)}`);

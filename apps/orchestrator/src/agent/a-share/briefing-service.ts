@@ -163,6 +163,8 @@ export async function buildPostmarketBriefing(
   const now = deps.now ?? new Date();
   const { iso, compact: today } = cnDateParts(now);
   const watchlist = await listWatchlistForUser(deps.db, userInternalId);
+  // 涨停「昨对比」需上一交易日 compact（温度计「涨停X(昨Y)」，BOSS 样张）。
+  const prevTd = await resolvePrevTradingDay(deps.client, now);
   // 龙虎榜不在盘后（当日榜单晚间才披露）→ 移到次日盘前回顾。公告窗口「当日」。
   const [indexCn, northbound, dailyKline, announcements, marketPulse] = await Promise.all([
     deps.client.getIndexQuote('cn'),
@@ -171,8 +173,8 @@ export async function buildPostmarketBriefing(
     perSymbol<AnnouncementRow>(watchlist, (s) =>
       deps.client.getStockAnnouncements(s, today, today),
     ),
-    // v2: 市场温度计 + 板块主线 + 大盘净流入（当日聚合）。
-    deps.client.getMarketPulse(today),
+    // v2: 市场温度计 + 板块主线 + 大盘净流入（当日聚合 + 涨停昨对比）。
+    deps.client.getMarketPulse(today, prevTd.compact),
   ]);
   const input: PostmarketBriefingInput = {
     date: iso,

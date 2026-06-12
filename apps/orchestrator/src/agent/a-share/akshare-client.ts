@@ -64,8 +64,8 @@ export interface AkshareClient {
   getTradingDay(date: string): Promise<AkEnvelope<TradingDayRow>>;
   /** search_symbol(query) — 问句→个股（④ 短名解析；表 day-cache，冷启返空）。 */
   searchSymbol(query: string): Promise<AkEnvelope<SymbolRow>>;
-  /** get_market_pulse(date) — v2 盘后温度计+板块主线+大盘净流入（date 'YYYYMMDD'，单行聚合）。 */
-  getMarketPulse(date: string): Promise<AkEnvelope<MarketPulseRow>>;
+  /** get_market_pulse(date, prevDate?) — v2 盘后温度计+板块主线+大盘净流入（prevDate→涨停昨对比）。 */
+  getMarketPulse(date: string, prevDate?: string): Promise<AkEnvelope<MarketPulseRow>>;
   /** get_zt_pool_summary(date) — v2 盘前回顾某交易日涨停梯队（date 'YYYYMMDD'）。 */
   getZtPoolSummary(date: string): Promise<AkEnvelope<ZtReviewRow>>;
 }
@@ -123,7 +123,7 @@ export class StubAkshareClient implements AkshareClient {
   searchSymbol(query: string) {
     return Promise.resolve(this.err<SymbolRow>(`akshare:symbol_search(${query})`, this.now()));
   }
-  getMarketPulse(date: string) {
+  getMarketPulse(date: string, _prevDate?: string) {
     return Promise.resolve(this.err<MarketPulseRow>(`akshare:market_pulse(${date})`, this.now()));
   }
   getZtPoolSummary(date: string) {

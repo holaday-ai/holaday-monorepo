@@ -113,9 +113,10 @@ def trading_day(date: str) -> dict[str, Any]:
 
 
 @app.get("/market-pulse/{date}")
-def market_pulse(date: str) -> dict[str, Any]:
-    """date 'YYYYMMDD'。盘后市场温度计(涨停/跌停/炸板/连板/涨跌家数) + 板块主线 + 大盘净流入(单行聚合)。"""
-    return _safe(_pulse, date)
+def market_pulse(date: str, prev_date: str = "") -> dict[str, Any]:
+    """date 'YYYYMMDD'。盘后市场温度计(涨停/跌停/炸板/连板/涨跌家数) + 板块主线 + 大盘净流入(单行聚合)。
+    prev_date 给定 → 附带上一交易日涨停家数(温度计「涨停X(昨Y)」对比)。cache 按 (date,prev_date) 分键。"""
+    return _safe(_pulse, date, prev_date)
 
 
 @app.get("/zt-pool-summary/{date}")

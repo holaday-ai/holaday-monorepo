@@ -424,12 +424,17 @@ def _board_summary() -> dict[str, Any]:
     }
 
 
-def get_market_pulse(date: str) -> tuple[list[dict[str, Any]], str]:
-    """盘后市场温度计 + 板块主线（单行聚合，逐源容错；纯指标，无周期定性标签）。date 'YYYYMMDD'。"""
+def get_market_pulse(date: str, prev_date: str = "") -> tuple[list[dict[str, Any]], str]:
+    """盘后市场温度计 + 板块主线（单行聚合，逐源容错；纯指标，无周期定性标签）。date 'YYYYMMDD'。
+
+    prev_date 给定时附带上一交易日涨停家数 zt_count_prev（温度计「涨停X(昨Y)」对比，BOSS 样张）。
+    """
     dc = date.replace("-", "")
     a = _require_ak()
     out: dict[str, Any] = {}
     out.update(_zt_agg(dc))  # zt_count / max_lianban / ladder / top_industries
+    if prev_date:
+        out["zt_count_prev"] = _zt_agg(prev_date.replace("-", "")).get("zt_count")
     try:
         out["dt_count"] = len(_records(a.stock_zt_pool_dtgc_em(date=dc), limit=2000))
     except Exception:  # noqa: BLE001

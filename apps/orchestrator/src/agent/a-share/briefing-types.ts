@@ -120,8 +120,9 @@ export interface SectorEntry {
  * 无周期定性标签。两市成交额为原始「元」；净流入单位「亿元」（同花顺即时口径）。
  */
 export interface MarketPulseRow {
-  /** 涨停家数 / 最高连板 / 连板梯队(≥2 板) / 涨停行业分布 top3。 */
+  /** 涨停家数 / 上一交易日涨停家数(昨对比) / 最高连板 / 连板梯队(≥2 板) / 涨停行业分布 top3。 */
   zt_count?: number | null;
+  zt_count_prev?: number | null;
   max_lianban?: number | null;
   ladder?: Record<string, number>;
   top_industries?: { 行业: string; 家数: number }[];

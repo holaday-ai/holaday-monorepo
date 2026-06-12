@@ -403,9 +403,10 @@ function thermometerLines(
   const out: string[] = [];
   const seg1: string[] = [];
   if (typeof p.zt_count === 'number') {
+    const prev = typeof p.zt_count_prev === 'number' ? `（昨 ${p.zt_count_prev}）` : '';
     const lb =
       typeof p.max_lianban === 'number' && p.max_lianban >= 2 ? `，最高 ${p.max_lianban} 连板` : '';
-    seg1.push(`涨停 ${p.zt_count} 家${lb}`);
+    seg1.push(`涨停 ${p.zt_count} 家${prev}${lb}`);
   }
   if (typeof p.dt_count === 'number') seg1.push(`跌停 ${p.dt_count} 家`);
   if (typeof p.zb_count === 'number') {

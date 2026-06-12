@@ -246,7 +246,7 @@ describe('v2 盘后：速读 / 市场温度计 / 板块主线（BOSS 四原则�
   });
 
   it('市场温度计：涨停/连板/跌停/炸板率 + 涨跌家数/成交额/主力净流入（行内，无表格）', () => {
-    expect(md).toContain('涨停 87 家，最高 5 连板');
+    expect(md).toContain('涨停 87 家（昨 85），最高 5 连板');
     expect(md).toContain('跌停 3 家');
     expect(md).toContain('炸板 34 家（炸板率 28.1%）');
     expect(md).toContain('涨跌家数 3208/1892');
