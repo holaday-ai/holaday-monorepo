@@ -89,15 +89,22 @@ baseline `musing-keller` @ `9935e84` 已含 template-fill M1-M3 → **#1 templat
 - 状态：← owner 更新（已知：M1+M2 docx + M3 xlsx 引擎已 commit；`9935e84` 已在 baseline；`TEMPLATE_FILL_ENABLED=true` 已由 #2 部署时翻开）
 
 ### #2 — A股数据层 (ashare)
-- worktree：`/Users/yaleiqi/holaday-ashare`　branch：`claude/ashare-ae1d05` @ `852c73a`（**已 push origin** ✓，4 commits）
-- 状态（2026-06-12 **收口·已上线生产**，BOSS 验收 0032 证据通过）：
+- worktree：`/Users/yaleiqi/holaday-ashare`　branch：`claude/ashare-ae1d05` @ `5d4bb2c`（**已 push origin** ✓，5 commits）
+- 状态（2026-06-12 **收口·已上线生产** + **简报验收三修已部署**，BOSS 验收 0032 证据通过）：
   - **②③**：`watchlists` 表 + tRPC CRUD（幂等增删）；确定性盘前/盘后简报渲染器（每行源+时间戳+固定免责，**不预测不荐股**）+ dev/prod 双模。
   - **§6 数据层**：⚠️ **push2.eastmoney 从 Vultr 不可达**（RemoteDisconnected，非瞬时；交接「Vultr 可达」前提作废）→ quote/kline/A股指数/港股指数全改 **sina**（实测可达）。北向净买额 2024-08 停披露(恒 0.0)→整行省略。龙虎榜接 akshare 自带「解读」列。详见 worktree `apps/akshare-mcp/README` 已知限制节。
   - **§6c**：`akshare-mcp` 加薄 FastAPI `http_server.py`（仅 127.0.0.1:8848，pm2 `akshare-mcp-http` autorestart，`/healthz`）+ orchestrator `HttpAkshareClient` HTTP 直取（10s 超时 + 段级降级）；简报接口 TTL≥600s 投递窗口去重；scheduled-runner dispatch 分支接简报（单用户失败仅重试本任务 + 连续 3 次降级 inbox 错误）。
   - **部署**：orchestrator `ae6c2b6→852c73a`（healthz ok）+ `deploy-akshare-mcp.sh`（venv+pm2+smoke）。
   - **✅ 0032 已落 Vultr 生产库 `holaday`@127.0.0.1**（部署时亲手 apply，回带 `SHOW CREATE TABLE watchlists`：11 列含 `alert_config_json` + 4 索引 + `fk_watchlists_user` ON DELETE CASCADE；同库 server_id=1 / 2719 tasks）。
   - **给 BOSS(usr id1, admin) 开通每日简报**（2 条 scheduled_tasks 盘前 08:30 / 盘后 15:30 SH daily；种自选股 600519/300750/000001）+ 手动触发真数据简报投 inbox（龙虎榜盘前触发无数据→优雅降级，15:30 真发有）。
-  - **待**：SPA 设置页开关（S2 UI，后端 `enable/disable/briefingStatus` ready，进行中）；④ 即时问答（等 BOSS 简报验收 + Skill Router 一起规划）。
+  - **简报验收三修（`5d4bb2c`，已部署，无新 migration）**：
+    - **P0 简报正文可读**：`NotificationBell` 通知点击改为弹**全文渲染弹窗**（ReactMarkdown+remarkGfm+sanitizeForRender，portal 到 body，Esc/遮罩/× 关闭，锁滚动），不再跳日历；带定时任务的通知保留「在定时任务中查看」二级入口。`notifications.list` 本就全文下发（message=text），纯前端改。SPA 已部署双边 `index-CF4EaBpl.js`（Aliyun+Vultr smoke 双绿）。
+    - **P1 星期时区**：`dateHeader` 改正午 UTC + `getUTCDay`，锁死 06-12=周五（+5 单测）。已在投递正文实证：`2026-06-12（周五）`。
+    - **P1 非交易日不投递**：`akshare-mcp` 接 `tool_trade_date_hist_sina` 出 `/trading-day/{date}`（Vultr 实测：周五 true / 周六 false，源 `akshare:tool_trade_date_hist_sina`）；`briefing-dispatch` 交易日判定（日历优先，失败退周末兜底）；非交易日返回 `skipped+reason`，scheduled-runner 记 `last_run_status='skipped'`。
+    - **重触发**：盘前(id43)+盘后(id45) 已投 BOSS inbox（真数据，周五，多段；盘后 id45 大盘速览=上证4038.02/深证15049.18/创业板3852.83）。**注**：盘后首条 id44 因冷缓存 sina 指数 spot >10s 触发 10s 超时→大盘速览段优雅降级「数据暂不可用」；重触发(暖缓存)的 id45 已正常。
+    - **测试**：orchestrator 73（scheduled-runner 24 含新 skip 契约）+ SPA 15 全绿；tsc/biome/eslint clean。
+  - **⚠️ 已知follow-up（非阻塞）**：定时简报 08:30/15:30 命中**冷缓存**时，sina 指数 spot 首取可能 >10s 触发 10s 超时→该段降级。可选治理：该接口超时上调 / 简报前预热缓存（BOSS 决策，10s 系当初规格）。
+  - **待**：SPA 设置页开关（S2 UI，后端 `enable/disable/briefingStatus` ready，未做）；④ 即时问答（等 BOSS 简报验收 + Skill Router 一起规划）。
 
 ### #3 — Playbook + Evidence Ledger（本约定创建者）
 - worktree：`/Users/yaleiqi/holaday-playbook-ledger`　branch：`claude/playbook-ledger-ae1d05`（已 push）
