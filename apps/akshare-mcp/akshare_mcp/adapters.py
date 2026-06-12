@@ -209,7 +209,16 @@ def get_announcements(
         kwargs["start_date"] = start_date
     if end_date:
         kwargs["end_date"] = end_date
-    df = a.stock_zh_a_disclosure_report_cninfo(**kwargs)
+    # ⚠️ 日期窗口内无公告时 cninfo 返空表，akshare 内部对缺列做选列抛
+    # KeyError("None of [...] are in the [columns]")——这是「窗口内无新公告」
+    # 的常态，不是异常。捕获返**空集**（非 error），渲染器据 count=0 显示
+    # 「无新公告」而非把原始异常泄漏成「数据暂不可用」。
+    try:
+        df = a.stock_zh_a_disclosure_report_cninfo(**kwargs)
+    except (KeyError, TypeError, IndexError, AttributeError):
+        return [], "akshare:stock_zh_a_disclosure_report_cninfo(窗口内无公告)"
+    if df is None or len(df) == 0:
+        return [], "akshare:stock_zh_a_disclosure_report_cninfo"
     return _records(df), "akshare:stock_zh_a_disclosure_report_cninfo"
 
 
