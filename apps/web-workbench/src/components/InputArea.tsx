@@ -107,7 +107,7 @@ interface Props {
   compact?: boolean;
 }
 
-const ACCEPT_FILES = '.csv,.xlsx,.xls,.pdf,.txt,.json,.md';
+const ACCEPT_FILES = '.csv,.xlsx,.xls,.docx,.pdf,.txt,.json,.md';
 const ACCEPT_IMAGES = '.png,.jpg,.jpeg,.webp,.gif,image/*';
 const ACCEPT_ATTACHMENTS = `${ACCEPT_FILES},${ACCEPT_IMAGES}`;
 const MAX_ATTACHMENTS = 5;

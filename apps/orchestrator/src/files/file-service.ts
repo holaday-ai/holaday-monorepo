@@ -58,6 +58,9 @@ export const ACCEPTED_MIMES = new Set<string>([
   'application/pdf',
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  // Phase 1 #1 — docx so users can upload a Word TEMPLATE to fill.
+  // (xlsx was already accepted above for data files / templates.)
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'image/png',
   'image/jpeg',
   'image/webp',
@@ -66,9 +69,34 @@ export const ACCEPTED_MIMES = new Set<string>([
 
 /** Loose extension fallback for clients that send octet-stream. */
 export const ACCEPTED_EXTENSIONS = new Set<string>([
-  '.txt', '.csv', '.md', '.json', '.pdf', '.xlsx', '.xls',
+  '.txt', '.csv', '.md', '.json', '.pdf', '.xlsx', '.xls', '.docx',
   '.png', '.jpg', '.jpeg', '.webp', '.gif',
 ]);
+
+/**
+ * Macro-enabled Office files (.docm/.xlsm/.pptm + their template
+ * variants) carry executable VBA. The upload gate rejects them with a
+ * clear message BEFORE storage; the template-fill safety layer
+ * (template-safety.ts) is the real defence — it rejects any file with a
+ * `vbaProject.bin` part even if the extension was renamed to .docx.
+ */
+const MACRO_OFFICE_EXT = /\.(?:docm|xlsm|pptm|dotm|xltm|potm)$/i;
+
+export function isMacroOfficeUpload(filename: string, mimetype: string): boolean {
+  const dotIdx = filename.lastIndexOf('.');
+  const ext = dotIdx >= 0 ? filename.slice(dotIdx).toLowerCase() : '';
+  return MACRO_OFFICE_EXT.test(ext) || /macroenabled/i.test(mimetype.toLowerCase());
+}
+
+/** Whether an upload passes the MIME OR extension allowlist. Pure + testable. */
+export function isAcceptedUpload(filename: string, mimetype: string): boolean {
+  const dotIdx = filename.lastIndexOf('.');
+  const ext = dotIdx >= 0 ? filename.slice(dotIdx).toLowerCase() : '';
+  return (
+    ACCEPTED_MIMES.has(mimetype.toLowerCase()) ||
+    (ext.length > 0 && ACCEPTED_EXTENSIONS.has(ext))
+  );
+}
 
 export class FileService {
   /**
