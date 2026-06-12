@@ -194,7 +194,8 @@ export function renderFactCard(
 ): string {
   const lines: string[] = [
     `# 📈 HOLA DAY · A股个股速览（${dateHeader(match.dateIso)}）`,
-    `> 生成于 ${fmtClock(now.toISOString())} ｜ 本卡仅客观数据呈现，**未含分析判断**。`,
+    // ①② 客观；③（如有，由 runner 追加）为分析师判断·未经证实——头部口径在有/无 ③ 时都成立（BOSS 文案修）。
+    `> 生成于 ${fmtClock(now.toISOString())} ｜ ①② 为公开信息客观聚合，③（如有）为分析师判断·未经证实；**均不构成投资建议**。`,
     '',
   ];
   for (const p of data.perStock) {

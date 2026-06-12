@@ -168,7 +168,8 @@ describe('buildAshareFactCard', () => {
   it('①盘面事实 + ②同期信息 全段 + 溯源 + 免责 + 合规无建议措辞', async () => {
     const md = await buildAshareFactCard({ client: fakeClient(), now: NOW }, ONE);
     expect(md).toContain('# 📈 HOLA DAY · A股个股速览（2026-06-12（周五））');
-    expect(md).toContain('**未含分析判断**');
+    expect(md).toContain('③（如有）为分析师判断·未经证实');
+    expect(md).toContain('**均不构成投资建议**');
     expect(md).toContain('## 贵州茅台（600519）');
     expect(md).toContain('收盘 1,279.00，涨跌幅 +0.24%，成交额 32.30亿元');
     // 公告：当日 + 含空格链接 encodeURI

@@ -228,6 +228,12 @@ const createInput = z.object({
    */
   skillId: z.string().min(1).max(64).optional(),
   /**
+   * Phase 1 #2 ④ — alias for skillId. 历史上 skill/role 字段在本仓库混用，
+   * API 调用方（含对抗实测）常传 `roleId`。接受为 skillId 的别名，避免选了
+   * a-share 技能却因字段名不符落通用路径泄漏建议（Q3 修）。
+   */
+  roleId: z.string().min(1).max(64).optional(),
+  /**
    * Optimization #3 R1 — viewport profile the SPA wants for this
    * task's per-Brave geometry. Picked from the user's current
    * panel layout: sidepanel / desktop / fullscreen / mobile. The
@@ -1185,6 +1191,12 @@ export const tasksRouter = router({
     // （越线降级纯数据 + 打日志计数）→ 直接完成任务。镜像 template-fill lane：
     // 无 agent loop、无 pool slot、背景 async 出答案后 persist + 广播 terminal。
     // 默认 ASHARE_QA_ENABLED=false：关时落通用 generate 路径，零副作用。
+    // 选了 a-share 技能（skillId 或别名 roleId，或 gatedRole）→ 该问句必须全程在
+    // 合规框架内（BOSS 要求①，Q3 修：原先只认 skillId，对抗实测传 roleId 漏到通用）。
+    const ashareSkillSelected =
+      input.skillId === 'a-share-analyst' ||
+      input.roleId === 'a-share-analyst' ||
+      gatedRole === 'a-share-analyst';
     if (appEnv.ASHARE_QA_ENABLED && anthropicForResolver && ASHARE_QA_ALLOWLIST.has(ctx.userId)) {
       const { resolveAshareQa } = await import('../../agent/a-share/ashare-qa-matcher.js');
       const { HttpAkshareClient } = await import('../../agent/a-share/akshare-http-client.js');
@@ -1196,7 +1208,12 @@ export const tasksRouter = router({
         logger: ctx.logger,
       });
       const ashareQaMatch = await resolveAshareQa(
-        { intent: input.intent, roleId: input.skillId ?? null, watchlist, now: new Date() },
+        {
+          intent: input.intent,
+          roleId: ashareSkillSelected ? 'a-share-analyst' : (input.skillId ?? input.roleId ?? null),
+          watchlist,
+          now: new Date(),
+        },
         async (q) => {
           const env = await aksClient.searchSymbol(q);
           return (env.data ?? [])
@@ -1313,8 +1330,8 @@ export const tasksRouter = router({
       }
       // P0 兜底（BOSS 要求①）：选了 a-share 技能但没解析出个股（或非个股问句）→
       // 静态引导话术，**绝不落通用 LLM**——确保「选了 A股技能的所有问句都在合规框架
-      // 内，无一例外」（Q3 泄漏修：原先 resolveAshareQa=null 会落通用路径泄漏建议）。
-      if (input.skillId === 'a-share-analyst') {
+      // 内，无一例外」（Q3 泄漏修：原先只认 skillId 且 resolveAshareQa=null 会落通用）。
+      if (ashareSkillSelected) {
         const { ASHARE_QA_GUIDANCE } = await import('../../agent/a-share/ashare-qa-runner.js');
         const taskId = newExternalId('task');
         const repo = new TaskRepository(ctx.db);
