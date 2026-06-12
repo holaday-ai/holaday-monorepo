@@ -89,7 +89,7 @@ baseline `musing-keller` @ `9935e84` 已含 template-fill M1-M3 → **#1 templat
 - 状态：← owner 更新（已知：M1+M2 docx + M3 xlsx 引擎已 commit；`9935e84` 已在 baseline；`TEMPLATE_FILL_ENABLED=true` 已由 #2 部署时翻开）
 
 ### #2 — A股数据层 (ashare)
-- worktree：`/Users/yaleiqi/holaday-ashare`　branch：`claude/ashare-ae1d05` @ `483622d`（**已 push origin** ✓，含 ④ M1+M2）
+- worktree：`/Users/yaleiqi/holaday-ashare`　branch：`claude/ashare-ae1d05` @ `162824a`（**已 push origin** ✓，含 ④ widen + 简报 v2）
 - 状态（2026-06-12 **②③简报全链 + 内容三优化 + ④即时问答 M1+M2 全部署**；④ 在 BOSS-only 灰度）：
   - **②③**：`watchlists` 表 + tRPC CRUD（幂等增删）；确定性盘前/盘后简报渲染器（每行源+时间戳+固定免责，**不预测不荐股**）+ dev/prod 双模。
   - **§6 数据层**：⚠️ **push2.eastmoney 从 Vultr 不可达**（RemoteDisconnected，非瞬时；交接「Vultr 可达」前提作废）→ quote/kline/A股指数/港股指数全改 **sina**（实测可达）。北向净买额 2024-08 停披露(恒 0.0)→整行省略。龙虎榜接 akshare 自带「解读」列。详见 worktree `apps/akshare-mcp/README` 已知限制节。
@@ -119,6 +119,12 @@ baseline `musing-keller` @ `9935e84` 已含 template-fill M1-M3 → **#1 templat
     - **⚠️ 已知限制（BOSS 拍板 v1 不兜）**：裸短名问句（未选技能 + 无术语/代码）不命中 → 落通用路径；唯一通路 = 选 a-share-analyst 技能(roleId)。
   - **测试**：a-share 92 + 全量 2510 全绿。**注**：`tasks.ts` ④ lane 与 #1 template-fill fix（`4e4c6c4` 别人 push 进本支）rebase 无冲突已并。
   - **待**：盘前公告窗口「近 24h」按日历日，周一不回溯上周五=次要已知限制。
+  - **④ widen 全量上线（`feada2a`，已部署 restart 631→633）**：清空 Vultr `.env` `ASHARE_QA_ALLOWLIST=`（保 `ASHARE_QA_ENABLED=true`）→ 全量用户可用（进程内 /proc/environ 实证 ENABLED=true、ALLOWLIST 空，经多次 redeploy 仍在）。BOSS Claude UI 复测 4/4 过后批准。同批携 #1 守卫 `f8437c1`(executionMode 防 ④ fork 劫持 template_fill/image/browser 专用道) + 2 P2(事实卡公告 safeLinkUrl、③ 空解读打日志)。
+  - **简报 v2 已部署生产（`162824a`，无新 migration）**：BOSS「盘后加三段 + 易读性四原则」批次。
+    - **盘后**段序 速读→大盘速览→市场温度计→板块主线→自选股表→公告；顶部**今日速读**一行（沪指/涨跌家数/涨停炸板率/主力净流/主线）；**市场温度计**（涨停X(昨Y)·最高N连板·跌停·炸板率 + 涨跌家数·两市成交额·主力净流入，行内一句话）；**板块主线**（同花顺行业涨跌前5+领涨股龙头）；盘前龙虎榜回顾段加**昨日涨停回顾**（上一交易日涨停梯队/活跃行业）。四原则：固定段序 / 表格只留自选股 / prod 来源短标减噪 / **长度锁写进单测（盘后正文内容≤600字）**；纯指标无周期定性标签（合规哨兵）。
+    - **数据层（逐个先验 Vultr 可达性，push2 教训）**：可达 substitutes `stock_zt_pool_em(date)`/`_dtgc_em`/`_zbgc_em` + `stock_board_industry_summary_ths`(同花顺，一调给板块+涨跌家数+净流入) + 综指 spot 两市成交额；`get_market_pulse(date,prev?)`/`get_zt_pool_summary(date)` 单行聚合逐源容错。**⛔ 2 名指 _em 接口 push2 死** → 改 ths；**❌ 2 指标无可达源故不出**（成交额环比% / 自选股主力净占比列，同北向停披露红线）。详见 [[reference_ashare_vultr_data]] 2026-06-13 UPDATE。
+    - **Vultr 全链真渲染实证**（盘前+盘后 pin Friday 跑真 `HttpAkshareClient`→真数据 markdown）：涨停89(昨69)/最高4连板/炸板率41.1%/净流入-141亿/两市3.21万亿/板块工业金属+5.28%(新威凌)；昨日涨停回顾 69家·活跃化学制品8·半导体8。
+    - **测试**：a-share 120（+10：长度锁/段序/温度计/板块/合规哨兵/降级/昨日涨停回顾）+ 全量 **2570** 全绿；tsc/biome clean。**周六非交易日 skip**，周一 BOSS scheduled id43/id45 自动产 v2 真投递。
 
 ### #3 — Playbook + Evidence Ledger（本约定创建者）
 - worktree：`/Users/yaleiqi/holaday-playbook-ledger`　branch：`claude/playbook-ledger-ae1d05`（已 push）
