@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { AkshareClient } from './akshare-client.js';
-import { resolveAshareQa } from './ashare-qa-matcher.js';
+import { resolveAshareInContext, resolveAshareQa } from './ashare-qa-matcher.js';
 import { ASHARE_QA_GUIDANCE, runAshareQa } from './ashare-qa-runner.js';
 import type { AshareQaMatch, ResolvedStock } from './ashare-qa-types.js';
 
@@ -195,6 +195,36 @@ describe('resolveAshareQa（异步 name-search）', () => {
       async () => [{ symbol: '600519', displayName: '贵州茅台' }],
     );
     expect(m?.stocks[0]?.symbol).toBe('600519');
+  });
+});
+
+describe('resolveAshareInContext（启用技能·signal-based 门控，BOSS 反向用例长期保留）', () => {
+  const WL: ResolvedStock[] = [{ symbol: '600519', displayName: '贵州茅台' }];
+  it('已启用 + 「帮我写个周报」(无 A股信号) → 放行通用（match=null, hasSignal=false）', async () => {
+    const r = await resolveAshareInContext(
+      { intent: '帮我写个周报', watchlist: WL, now: NOW },
+      async () => [],
+    );
+    expect(r.match).toBeNull();
+    expect(r.hasSignal).toBe(false);
+  });
+
+  it('已启用 + 「被套了怎么办」(持仓语境词，无个股) → 引导兜底（match=null, hasSignal=true）', async () => {
+    const r = await resolveAshareInContext(
+      { intent: '被套了怎么办', watchlist: WL, now: NOW },
+      async () => [],
+    );
+    expect(r.match).toBeNull();
+    expect(r.hasSignal).toBe(true);
+  });
+
+  it('已启用 + 「茅台为什么涨」短名 → name-search 命中 → 出 lane', async () => {
+    const r = await resolveAshareInContext(
+      { intent: '茅台为什么涨', watchlist: WL, now: NOW },
+      async () => [{ symbol: '600519', displayName: '贵州茅台' }],
+    );
+    expect(r.match?.stocks[0]?.symbol).toBe('600519');
+    expect(r.hasSignal).toBe(true);
   });
 });
 

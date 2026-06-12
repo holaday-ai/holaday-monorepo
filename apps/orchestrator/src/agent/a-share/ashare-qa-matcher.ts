@@ -173,3 +173,41 @@ export async function resolveAshareQa(
     dateCompact: g.dateCompact,
   };
 }
+
+/**
+ * 上下文内解析（启用 a-share 技能 / 显式选技能）。BOSS 拍板门控语义：
+ *   - 命中任一 **A股信号**（个股解析成功 / A股术语 / 持仓语境词 / 自选股整体问）→ 进合规
+ *     框架（有个股 → match 出 lane；无个股 → `hasSignal=true` 调用方走引导兜底）。
+ *   - **完全无 A股信号**（如「帮我写周报」）→ match=null & hasSignal=false → 调用方放行
+ *     通用路径，**不得误拦**。
+ * 与 resolveAshareQa 区别：上下文内**总是**尝试 name-search（短名也算个股解析成功）。
+ */
+export async function resolveAshareInContext(
+  opts: MatchAshareQaOpts,
+  search: SymbolSearchFn,
+): Promise<{ match: AshareQaMatch | null; hasSignal: boolean }> {
+  const text = opts.intent ?? '';
+  const hasTerm = ASHARE_TERMS.some((t) => text.includes(t)); // 含持仓语境词
+  const wantsWatchlist = WATCHLIST_TERMS.some((t) => text.includes(t));
+  let stocks = resolveStocks(text, opts.watchlist);
+  if (stocks.length === 0 && wantsWatchlist && opts.watchlist.length > 0) {
+    stocks = opts.watchlist;
+  }
+  if (stocks.length === 0) {
+    try {
+      stocks = await search(text);
+    } catch {
+      stocks = [];
+    }
+  }
+  const hasSignal = stocks.length > 0 || hasTerm || wantsWatchlist;
+  if (stocks.length > 0) {
+    const kind: QaKind = ANOMALY_TERMS.some((t) => text.includes(t)) ? 'anomaly' : 'info';
+    const { iso, compact } = cnDateParts(opts.now ?? new Date());
+    return {
+      match: { kind, stocks: stocks.slice(0, 5), dateIso: iso, dateCompact: compact },
+      hasSignal: true,
+    };
+  }
+  return { match: null, hasSignal };
+}

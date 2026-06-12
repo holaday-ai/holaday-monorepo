@@ -96,6 +96,16 @@ export const SKILL_META: readonly SkillMeta[] = [
     description: '财报解读、估值模型、投资建议',
   },
   {
+    // Phase 1 #2 ④ — 启用后该用户命中 A股信号的问句进合规问答框架（事实卡+③解读+
+    // 合规闸门）。行为由 tasks.ts a-share-qa lane 接管（读 users.selectedSkills），
+    // 不走通用 role/system-prompt 路径，故无需配套 supercar role。
+    id: 'a-share-analyst',
+    name: 'A股分析师',
+    icon: 'LineChart',
+    category: '商业分析',
+    description: 'A股盘面/异动问答：取真数据、接地解读、只聚合不荐股',
+  },
+  {
     id: 'competitive_analyst',
     name: '竞品分析师',
     icon: 'BarChart3',

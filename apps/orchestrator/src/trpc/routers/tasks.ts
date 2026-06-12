@@ -583,6 +583,7 @@ export const tasksRouter = router({
         id: users.id,
         plan: users.plan,
         selectedRoles: users.selectedRoles,
+        selectedSkills: users.selectedSkills,
       })
       .from(users)
       .where(eq(users.externalId, ctx.userId))
@@ -1191,14 +1192,22 @@ export const tasksRouter = router({
     // （越线降级纯数据 + 打日志计数）→ 直接完成任务。镜像 template-fill lane：
     // 无 agent loop、无 pool slot、背景 async 出答案后 persist + 广播 terminal。
     // 默认 ASHARE_QA_ENABLED=false：关时落通用 generate 路径，零副作用。
-    // 选了 a-share 技能（skillId 或别名 roleId，或 gatedRole）→ 该问句必须全程在
-    // 合规框架内（BOSS 要求①，Q3 修：原先只认 skillId，对抗实测传 roleId 漏到通用）。
-    const ashareSkillSelected =
+    // BOSS 拍板门控（持久启用式 + signal-based）：**启用** a-share 技能（users.selectedSkills）
+    // 或显式选技能（skillId/roleId/gatedRole）= 上下文内。上下文内**命中任一 A股信号**（个股
+    // 解析成功 / A股术语 / 持仓语境词 / 自选股整体问）→ 进合规框架（lane 或引导兜底）；**完全无
+    // A股信号**（如「帮我写周报」）→ 放行通用路径，不误拦。per-task 选择器(发 skillId)记 backlog。
+    const ashareSkillEnabled =
+      Array.isArray(userRow.selectedSkills) &&
+      (userRow.selectedSkills as string[]).includes('a-share-analyst');
+    const ashareContext =
+      ashareSkillEnabled ||
       input.skillId === 'a-share-analyst' ||
       input.roleId === 'a-share-analyst' ||
       gatedRole === 'a-share-analyst';
     if (appEnv.ASHARE_QA_ENABLED && anthropicForResolver && ASHARE_QA_ALLOWLIST.has(ctx.userId)) {
-      const { resolveAshareQa } = await import('../../agent/a-share/ashare-qa-matcher.js');
+      const { resolveAshareQa, resolveAshareInContext } = await import(
+        '../../agent/a-share/ashare-qa-matcher.js'
+      );
       const { HttpAkshareClient } = await import('../../agent/a-share/akshare-http-client.js');
       const { listWatchlistForUser } = await import('../../agent/a-share/briefing-service.js');
       const wl = await listWatchlistForUser(ctx.db, userRow.id);
@@ -1207,23 +1216,37 @@ export const tasksRouter = router({
         baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
         logger: ctx.logger,
       });
-      const ashareQaMatch = await resolveAshareQa(
-        {
-          intent: input.intent,
-          roleId: ashareSkillSelected ? 'a-share-analyst' : (input.skillId ?? input.roleId ?? null),
-          watchlist,
-          now: new Date(),
-        },
-        async (q) => {
-          const env = await aksClient.searchSymbol(q);
-          return (env.data ?? [])
-            .map((r) => ({
-              symbol: String(r.code ?? ''),
-              displayName: r.name != null ? String(r.name) : null,
-            }))
-            .filter((s) => s.symbol);
-        },
-      );
+      const searchFn = async (q: string) => {
+        const env = await aksClient.searchSymbol(q);
+        return (env.data ?? [])
+          .map((r) => ({
+            symbol: String(r.code ?? ''),
+            displayName: r.name != null ? String(r.name) : null,
+          }))
+          .filter((s) => s.symbol);
+      };
+      let ashareQaMatch: Awaited<ReturnType<typeof resolveAshareQa>> = null;
+      let guidanceNeeded = false;
+      if (ashareContext) {
+        // 上下文内：总是尝试解析；命中信号无个股 → 引导兜底；无信号 → 放行通用。
+        const r = await resolveAshareInContext(
+          { intent: input.intent, watchlist, now: new Date() },
+          searchFn,
+        );
+        ashareQaMatch = r.match;
+        guidanceNeeded = !r.match && r.hasSignal;
+      } else {
+        // 非上下文（未启用/未选技能）：强信号(术语+个股)出 lane，否则放行（无引导兜底）。
+        ashareQaMatch = await resolveAshareQa(
+          {
+            intent: input.intent,
+            roleId: input.skillId ?? input.roleId ?? null,
+            watchlist,
+            now: new Date(),
+          },
+          searchFn,
+        );
+      }
       if (ashareQaMatch) {
         const taskId = newExternalId('task');
         const repo = new TaskRepository(ctx.db);
@@ -1328,10 +1351,10 @@ export const tasksRouter = router({
           executionMode: 'generate' as const,
         };
       }
-      // P0 兜底（BOSS 要求①）：选了 a-share 技能但没解析出个股（或非个股问句）→
-      // 静态引导话术，**绝不落通用 LLM**——确保「选了 A股技能的所有问句都在合规框架
-      // 内，无一例外」（Q3 泄漏修：原先只认 skillId 且 resolveAshareQa=null 会落通用）。
-      if (ashareSkillSelected) {
+      // P0 兜底（BOSS 要求①）：上下文内命中 A股信号（持仓语境词/术语）但没解析出个股 →
+      // 静态引导话术，**绝不落通用 LLM**。无 A股信号的问句 guidanceNeeded=false，正常放行
+      // 通用路径（如「帮我写周报」不误拦）。
+      if (guidanceNeeded) {
         const { ASHARE_QA_GUIDANCE } = await import('../../agent/a-share/ashare-qa-runner.js');
         const taskId = newExternalId('task');
         const repo = new TaskRepository(ctx.db);
