@@ -35,6 +35,7 @@ import {
   FileService,
   UPLOAD_BYTE_LIMIT,
   isMacroOfficeUpload,
+  decodeUploadFilename,
 } from './files/file-service.js';
 import { nextExpiryFor, type PayPalAdapter, type PlanId } from './payment/index.js';
 import { QuotaService } from './quota/quota-service.js';
@@ -470,7 +471,10 @@ export function createHttpApp(deps: HttpAppDeps) {
       // send 'application/octet-stream' for less common formats; the
       // extension whitelist catches the legitimate cases without
       // turning the door wide open.
-      const filename = req.file.originalname || 'upload';
+      // P2 — multer hands us the multipart filename decoded as latin1;
+      // recover the UTF-8 so Chinese template names aren't mojibake in the
+      // stored file + task summary.
+      const filename = decodeUploadFilename(req.file.originalname || 'upload');
       const dotIdx = filename.lastIndexOf('.');
       const ext = dotIdx >= 0 ? filename.slice(dotIdx).toLowerCase() : '';
       // Phase 1 #1 — reject macro-enabled Office (.docm/.xlsm/…) with a
