@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   isAcceptedUpload,
   isMacroOfficeUpload,
+  decodeUploadFilename,
   ACCEPTED_MIMES,
   ACCEPTED_EXTENSIONS,
 } from './file-service.js';
@@ -59,5 +60,25 @@ describe('macro-Office rejection (docm still refused, coordinates with template-
     // Even if it didn't, .docm is not in the allowlist.
     expect(isMacroOfficeUpload('m.docm', DOCM_MIME)).toBe(true);
     expect(isAcceptedUpload('m.docm', 'application/octet-stream')).toBe(false);
+  });
+});
+
+describe('decodeUploadFilename (P2 — multipart latin1→utf8)', () => {
+  it('recovers a Chinese name that multer decoded as latin1 (the mojibake root cause)', () => {
+    const mojibake = Buffer.from('发票模板.docx', 'utf8').toString('latin1');
+    expect(mojibake).not.toBe('发票模板.docx'); // sanity: it IS garbled
+    expect(decodeUploadFilename(mojibake)).toBe('发票模板.docx');
+  });
+  it('leaves an already-correct Unicode name untouched (filename* / RFC 5987)', () => {
+    expect(decodeUploadFilename('报价单.xlsx')).toBe('报价单.xlsx');
+  });
+  it('leaves a plain ASCII name untouched', () => {
+    expect(decodeUploadFilename('invoice-2026.docx')).toBe('invoice-2026.docx');
+  });
+  it('does NOT corrupt a genuine latin1 name (no valid-UTF-8 recovery)', () => {
+    expect(decodeUploadFilename('café.docx')).toBe('café.docx');
+  });
+  it('handles empty input', () => {
+    expect(decodeUploadFilename('')).toBe('');
   });
 });

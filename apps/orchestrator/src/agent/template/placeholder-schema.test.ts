@@ -258,3 +258,73 @@ describe('validateFillJson — hostile / empty input (no fake success)', () => {
     expect(out.missing.length).toBeGreaterThan(0);
   });
 });
+
+
+describe('validateFillJson — derived-calc re-check (P1)', () => {
+  const calcSchema: PlaceholderSchema = {
+    format: 'docx',
+    fields: [
+      { name: 'revenue', kind: 'field' },
+      { name: 'cost', kind: 'field' },
+      { name: 'profit', kind: 'field' },
+    ],
+  };
+
+  it('keeps a correct derived value', () => {
+    const out = validateFillJson(calcSchema, {
+      fields: { revenue: '50万', cost: '30万', profit: '20万' },
+      derivations: [{ field: 'profit', formula: 'revenue - cost' }],
+    });
+    expect(out.flagged).toEqual([]);
+    expect(out.data.profit).toBe('20万');
+  });
+
+  it('flags a UNIT-CONFUSED derived value as [待核对] (model dropped the 万)', () => {
+    const out = validateFillJson(calcSchema, {
+      fields: { revenue: '50万', cost: '30万', profit: '20' },
+      derivations: [{ field: 'profit', formula: 'revenue - cost' }],
+    });
+    expect(out.flagged).toContain('profit');
+    expect(out.data.profit).toBe('[待核对]');
+    expect(out.warnings.some((w) => w.includes('profit'))).toBe(true);
+  });
+
+  it('flags when the formula cannot be evaluated', () => {
+    const out = validateFillJson(calcSchema, {
+      fields: { revenue: '50万', cost: '30万', profit: '20万' },
+      derivations: [{ field: 'profit', formula: 'revenue - nonexistent' }],
+    });
+    expect(out.data.profit).toBe('[待核对]');
+    expect(out.flagged).toContain('profit');
+  });
+
+  it('re-checks a loop-sum total and flags a wrong one', () => {
+    const loopSchema: PlaceholderSchema = {
+      format: 'docx',
+      fields: [
+        { name: 'items', kind: 'loop', fields: [{ name: 'price', kind: 'field' }] },
+        { name: 'total', kind: 'field' },
+      ],
+    };
+    const ok = validateFillJson(loopSchema, {
+      loops: { items: [{ price: '5' }, { price: '3' }] },
+      fields: { total: '8' },
+      derivations: [{ field: 'total', formula: 'sum(items.price)' }],
+    });
+    expect(ok.flagged).toEqual([]);
+    const bad = validateFillJson(loopSchema, {
+      loops: { items: [{ price: '5' }, { price: '3' }] },
+      fields: { total: '80' },
+      derivations: [{ field: 'total', formula: 'sum(items.price)' }],
+    });
+    expect(bad.data.total).toBe('[待核对]');
+    expect(bad.flagged).toContain('total');
+  });
+
+  it('no derivations → flagged empty (back-compat)', () => {
+    const out = validateFillJson(calcSchema, {
+      fields: { revenue: '1', cost: '2', profit: '3' },
+    });
+    expect(out.flagged).toEqual([]);
+  });
+});

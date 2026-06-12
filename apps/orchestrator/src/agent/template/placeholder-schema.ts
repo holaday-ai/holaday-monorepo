@@ -18,6 +18,14 @@
  * fake success.
  */
 
+import {
+  parseNumeric,
+  evalArithmetic,
+  sumLoopColumn,
+  withinDerivationTolerance,
+  TBD_MARK,
+} from './derivation-check.js';
+
 export type PlaceholderKind = 'field' | 'loop';
 
 export interface PlaceholderField {
@@ -55,6 +63,12 @@ export interface FillJson {
   readonly loops?: Record<string, unknown>;
   /** placeholder names the model itself says it could not fill. */
   readonly missing?: readonly unknown[];
+  /**
+   * Derived fields (合计 / 差值 / 环比 …) the model computed, each as
+   * `{field, formula}` so the validator can deterministically re-check it
+   * against the input values in this fill JSON (P1).
+   */
+  readonly derivations?: readonly unknown[];
 }
 
 /** Render-ready scalar — always a string by the time the engine sees it. */
@@ -87,6 +101,12 @@ export interface ValidatedFill {
   readonly typeErrors: string[];
   /** Non-fatal notices (e.g. a loop truncated to the row cap). */
   readonly warnings: string[];
+  /**
+   * Derived fields whose deterministic re-check failed (or couldn't be
+   * evaluated) — their value is replaced with [待核对] rather than shipping
+   * a wrong number. Drives partial_success (P1).
+   */
+  readonly flagged: string[];
 }
 
 export interface ValidateOptions {
@@ -261,12 +281,52 @@ export function validateFillJson(
     if (knownSimple.has(name) || knownLoops.has(name)) missing.add(name);
   }
 
+  // P1 — derived-calculation defence. The model may compute fields like
+  // 合计 / 差值 / 环比 and get them wrong (esp. unit confusion). Re-derive
+  // each declared derivation deterministically from this fill JSON's input
+  // values; on a mismatch (or an un-evaluable formula) mark the field
+  // [待核对] instead of shipping a wrong number.
+  const flagged: string[] = [];
+  const derivations = Array.isArray(json?.derivations) ? json!.derivations! : [];
+  for (const raw of derivations) {
+    if (!isRecord(raw)) continue;
+    const field = typeof raw.field === 'string' ? raw.field : '';
+    const formula = typeof raw.formula === 'string' ? raw.formula : '';
+    if (!field || !formula) continue;
+    if (!knownSimple.has(field)) {
+      unknownKeys.add(field);
+      continue;
+    }
+    // Only re-check fields the model actually filled with a scalar.
+    if (missing.has(field) || typeof data[field] !== 'string') continue;
+    const computed = evalArithmetic(
+      formula,
+      (name) => parseNumeric(fields[name] ?? data[name]),
+      (arg) => sumLoopColumn(arg, data),
+    );
+    const claimed = parseNumeric(data[field]);
+    if (
+      computed === null ||
+      claimed === null ||
+      !withinDerivationTolerance(computed, claimed)
+    ) {
+      data[field] = TBD_MARK;
+      flagged.push(field);
+      warnings.push(
+        computed === null
+          ? `字段 "${field}" 的推算无法复核（公式 "${formula}"），已标记 ${TBD_MARK}`
+          : `字段 "${field}" 推算复核不一致（公式算得 ${computed}，模型填 ${claimed}），已标记 ${TBD_MARK}`,
+      );
+    }
+  }
+
   return {
     data,
     missing: [...missing].sort(),
     unknownKeys: [...unknownKeys].sort(),
     typeErrors,
     warnings,
+    flagged,
   };
 }
 
