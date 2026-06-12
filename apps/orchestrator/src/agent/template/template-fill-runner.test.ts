@@ -134,6 +134,38 @@ describe('runTemplateFillTask — xlsx', () => {
     expect(cell.value).toBe('客户：李四');
     expect(cell.font?.bold).toBe(true);
   });
+
+  it('DEGRADES a multi-row xlsx loop to partial_success (P0) — fills the rest', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Report');
+    ws.getCell('A1').value = 'GMV：{gmv}';
+    ws.getCell('A3').value = '{#tasks}';
+    ws.getCell('A4').value = '{title}';
+    ws.getCell('A5').value = '{/tasks}';
+    const template = Buffer.from((await wb.xlsx.writeBuffer()) as ArrayBuffer);
+    const { save, captured } = capturingSave();
+    const out = await runTemplateFillTask({
+      intent: 'gmv 100万，任务：A、B',
+      template: {
+        buffer: template,
+        filename: '周报.xlsx',
+        mimetype: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      },
+      allowedFormats: PRO_FORMATS,
+      save,
+      model: modelReturning(
+        '{"fields":{"gmv":"100万"},"loops":{"tasks":[{"title":"A"},{"title":"B"}]},"missing":[]}',
+      ),
+      logger: fakeLogger(),
+    });
+    expect(out.status).toBe('partial_success'); // NOT failed
+    expect(out.skippedLoops).toContain('tasks');
+    expect(out.summary).toContain('循环段未填充');
+    expect(out.attachments).toHaveLength(1); // file still delivered
+    const wb2 = new ExcelJS.Workbook();
+    await wb2.xlsx.load(captured.buffer!);
+    expect(wb2.getWorksheet('Report')!.getCell('A1').value).toBe('GMV：100万');
+  });
 });
 
 describe('runTemplateFillTask — partial / honest paths', () => {
