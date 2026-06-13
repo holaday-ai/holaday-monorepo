@@ -78,11 +78,13 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
   });
   const generate = opts.generate ?? generateImages;
   const flashModel = opts.flashModel ?? DEFAULT_FLASH_MODEL;
+  // P0 compliance — marketing/poster images must NOT invent promo copy.
+  const promptText = buildImagePrompt(intent, decision.tier);
 
   const runGenerate = (model: string, resolution?: string) =>
     generate({
       apiKey: opts.apiKey,
-      prompt: intent,
+      prompt: promptText,
       model,
       ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
       ...(hasInputs ? { inputImages: opts.inputImages } : {}),
@@ -177,6 +179,31 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
     model: result.model ?? decision.model,
     tier: effectiveTier,
   };
+}
+
+// P0 compliance: 营销/海报类图片绝不能自行添加促销承诺（AI 擅自加优惠
+// 条件/买赠/价格 = 商家未做出的商业承诺，会造成实际损失）。营销/带字意图
+// 给模型追加硬约束：图中文字严格限用户指定内容，不编造任何促销语。
+const MARKETING_RE =
+  /海报|招贴|横幅|banner|促销|优惠|折扣|打折|特价|大促|秒杀|限时|满\d+减|买[一二三四五]?送|赠品?|广告|宣传|文案|标语|口号|\bsale\b|\bdiscount\b|\bpromo\b|\boffer\b|\bcoupon\b|%\s*off/i;
+
+const MARKETING_CONSTRAINT =
+  '【严格约束·营销合规】图中出现的所有文字必须严格限定为用户上面明确指定的内容，' +
+  '逐字使用；绝对不得自行添加、扩写或编造任何促销语、优惠条件、折扣比例、买赠/满减、' +
+  '价格、时间承诺或未被要求的标语口号。用户只给了一个优惠就只呈现这一个，不要补第二个；' +
+  '用户未指定具体文字时，不要在图中编造任何促销数字或承诺性文案。';
+
+/**
+ * Build the final image prompt. For marketing / text-bearing images
+ * (Pro tier or promo keywords), append a hard constraint so the model
+ * doesn't fabricate commercial commitments (P0 eval finding: user asked
+ * for "全场五折", model added "买一送一" — a promise the merchant never
+ * made). Plain images (画一只猫) pass through unchanged.
+ */
+export function buildImagePrompt(intent: string, tier: ImageModelTier): string {
+  const isMarketing = tier === 'pro' || MARKETING_RE.test(intent);
+  if (!isMarketing) return intent;
+  return `${intent}\n\n${MARKETING_CONSTRAINT}`;
 }
 
 function buildSummary(
