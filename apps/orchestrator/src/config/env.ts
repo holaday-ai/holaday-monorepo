@@ -91,6 +91,19 @@ const schema = z.object({
   TEMPLATE_FILL_MODEL: z.string().default('claude-sonnet-4-6'),
 
   /**
+   * Phase 1 #2 ④ — A股即时问答闸门。默认 OFF（灰度先只开 BOSS 账号，见
+   * ASHARE_QA_ALLOWLIST）。off → 关时 a-share 问句落通用 generate 路径，无副作用。
+   */
+  ASHARE_QA_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /** 灰度白名单：允许走 a-share 问答的用户 externalId（逗号分隔）。 */
+  ASHARE_QA_ALLOWLIST: z.string().default(''),
+  /** ③ 解读 LLM 模型。Haiku 快/省（gate 兜底合规）。 */
+  ASHARE_QA_MODEL: z.string().default('claude-haiku-4-5-20251001'),
+
+  /**
    * Phase D Step 3 rollout switch.
    *   playwright → boot connects PlaywrightExecutor to Chrome's
    *                CDP (needs Chrome launched with

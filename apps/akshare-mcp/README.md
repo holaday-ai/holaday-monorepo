@@ -17,7 +17,8 @@ Thin **MCP wrapper over [AkShare](https://akshare.akfamily.xyz/)** for A股
 | `get_stock_announcements(symbol, start_date, end_date)` | 公告（巨潮） | 1800s |
 | `get_dragon_tiger(start_date, end_date)` | 龙虎榜 | 3600s |
 | `get_northbound_flow()` | 北向资金流向 | 60s |
-| `get_index_quote(market)` | 港/美股指数（hk/us） | 60s |
+| `get_index_quote(market)` | 港/美/A股指数（hk/us/cn） | 60s |
+| `get_share_unlock(symbol)` | 个股限售解禁（G2） | 3600s |
 
 TTL 全部 env 可覆盖（`AKSHARE_MCP_TTL_*`，见 `.env.example`）。
 
@@ -59,19 +60,34 @@ python -m akshare_mcp.server   # stdio MCP transport
 `python -m akshare_mcp.server`，a-share-analyst skill 通过这些工具取数 →
 结合 skill 方法论出结构化解读（盘前/盘后简报、即时问答归因）。
 
-## ⚠️ 落地前必做：核对 AkShare 接口名
+## ⚠️ 已知限制（2026-06-12 Vultr `207.148.70.106` 实测 akshare 1.18.64）
 
-AkShare 随版本改接口。部署时：
+**真实环境验证换来的知识——不要再信交接文档「push2 从 Vultr 可达」的旧前提**
+（step① 大概只看了 HTTP 302/200，没看真实 akshare 数据调用）。
 
-```bash
-pip show akshare         # 看版本
-```
+1. **`push2.eastmoney.com` 从 Vultr 不可达**（`RemoteDisconnected` ×4，非瞬时，疑 IP
+   层封）。原走 push2/push2his 的 4 个接口已在 `adapters.py` 改走 **sina**（不同基础
+   设施，实测可达）：
 
-按版本核对 `adapters.py` 里每个 `ak.*`（标了 `TODO(verify)` 的尤其）：
-`stock_bid_ask_em` / `stock_zh_a_hist` / `stock_zh_a_disclosure_report_cninfo`
-/ `stock_lhb_detail_em` / `stock_hsgt_fund_flow_summary_em` /
-`stock_hk_index_spot_em` / `index_us_stock_sina`。对照
-<https://akshare.akfamily.xyz/> 调整即可，工具契约不变。
+   | 用途 | 原（push2，死） | 现（sina，活） |
+   |---|---|---|
+   | 行情 quote | `stock_bid_ask_em` | `stock_zh_a_spot` + 代码过滤 |
+   | 日 K 线 | `stock_zh_a_hist` | `stock_zh_a_daily`（末 2 行算涨跌幅） |
+   | A股指数 spot | `stock_zh_index_spot_em` | `stock_zh_index_spot_sina`（取 sh000001/sz399001/sz399006） |
+   | 港股指数 spot | `stock_hk_index_spot_em` | `stock_hk_index_spot_sina`（按名称取恒生指数） |
+
+   仍可达（未动）：公告 `..._cninfo`、龙虎榜/解禁/北向 `..._em`(datacenter)、美股 `index_us_stock_sina`。
+
+2. **北向资金净买额自 2024-08 停披露**：`stock_hsgt_fund_flow_summary_em` 的北向（沪股通/
+   深股通）`成交净买额` 实测恒为 `0.0`（南向港股通仍有值）。**`0.0` 不是真零，是「停披露」**
+   —— 消费侧（简报渲染器）把北向 0.0/null 整行省略，**禁用过期口径上线**。该接口仍提供
+   上涨/下跌数(breadth)、相关指数 + 涨跌幅 等有效字段。
+
+3. **龙虎榜含官方 `解读` 列**：`stock_lhb_detail_em` 自带一行中性解读（如「主力做T」），
+   零成本接入盘后简报（非我们生成，合规）。
+
+> 升级 AkShare 后用 `pip show akshare` 看版本，对照 <https://akshare.akfamily.xyz/>
+> 核对 `adapters.py` 里的 `ak.*`（集中于此，工具契约不变）。
 
 ## 待接（scaffold 之后）
 

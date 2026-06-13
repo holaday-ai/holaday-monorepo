@@ -19,6 +19,7 @@ import { scheduledTasksRouter } from './routers/scheduled-tasks.js';
 import { skillsRouter } from './routers/skills.js';
 import { tasksRouter } from './routers/tasks.js';
 import { usageRouter } from './routers/usage.js';
+import { watchlistsRouter } from './routers/watchlists.js';
 import { publicProcedure, router } from './trpc.js';
 
 export const appRouter = router({
@@ -45,6 +46,7 @@ export const appRouter = router({
   notifications: notificationsRouter,
   notificationChannels: notificationChannelsRouter,
   admin: adminRouter,
+  watchlists: watchlistsRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -62,6 +62,8 @@ export interface RunTemplateFillResult {
   awaitingQuestion?: string;
   /** Placeholders left blank (drives partial_success). */
   missing?: string[];
+  /** Loop sections the engine couldn't render (xlsx multi-row, v1) — skipped, not failed. */
+  skippedLoops?: string[];
   /** Byte-sniffed template format. */
   format?: TemplateFormat;
   /** Honest-degrade marker for analytics. */
@@ -254,10 +256,19 @@ export async function runTemplateFillTask(
     };
   }
 
-  // 12. Fill the bytes deterministically.
+  // 12. Fill the bytes deterministically. The engine may report loop
+  //     sections it couldn't render (xlsx multi-row, v1) — those degrade to
+  //     partial_success rather than failing the whole task.
   let outBuf: Buffer;
+  let skippedLoops: string[] = [];
   try {
-    outBuf = await engine.fill(template.buffer, validated.data);
+    const filled = await engine.fill(template.buffer, validated.data);
+    if (Buffer.isBuffer(filled)) {
+      outBuf = filled;
+    } else {
+      outBuf = filled.buffer;
+      skippedLoops = filled.skippedLoops;
+    }
   } catch (err) {
     return {
       status: 'failed',
@@ -292,12 +303,24 @@ export async function runTemplateFillTask(
 
   // 14. Final text + terminal status.
   const status: TemplateFillStatus =
-    validated.missing.length > 0 ? 'partial_success' : 'completed';
+    validated.missing.length > 0 ||
+    validated.flagged.length > 0 ||
+    skippedLoops.length > 0
+      ? 'partial_success'
+      : 'completed';
   return {
     status,
-    summary: buildFinalText(schema, validated.data, validated.missing, template.filename),
+    summary: buildFinalText(
+      schema,
+      validated.data,
+      validated.missing,
+      validated.flagged,
+      skippedLoops,
+      template.filename,
+    ),
     attachments: [attachment],
     missing: validated.missing,
+    ...(skippedLoops.length > 0 ? { skippedLoops } : {}),
     format,
   };
 }
@@ -308,7 +331,13 @@ export async function runTemplateFillTask(
 
 interface TemplateEngine {
   extractPlaceholders(buf: Buffer): PlaceholderSchema | Promise<PlaceholderSchema>;
-  fill(buf: Buffer, data: FillData): Buffer | Promise<Buffer>;
+  fill(
+    buf: Buffer,
+    data: FillData,
+  ):
+    | Buffer
+    | { buffer: Buffer; skippedLoops: string[] }
+    | Promise<Buffer | { buffer: Buffer; skippedLoops: string[] }>;
 }
 
 function selectEngine(format: TemplateFormat): TemplateEngine | null {
@@ -337,12 +366,14 @@ export function buildSystemPrompt(): string {
     '   {',
     '     "fields": { "占位符名": "值" },',
     '     "loops":  { "循环名": [ { "子字段名": "值" } ] },',
-    '     "missing": ["占位符名"]',
+    '     "missing": ["占位符名"],',
+    '     "derivations": [ { "field": "占位符名", "formula": "算式" } ]',
     '   }',
     '3. 普通字段（fields）的值是标量（字符串或数字）。循环（loops）用于重复的行，每行一个对象。',
     '4. 绝对不要发明 schema 之外的占位符名——只使用提示里列出的占位符。',
     '5. 数据里确实找不到的占位符，放进 "missing"，不要编造、不要填占位文字。',
     '6. 所有值按字面文本照抄用户数据（金额、日期、单位原样保留）。',
+    '7. 需要推算的字段（合计 / 差值 / 环比 / 占比 等）：在 fields 里填你算出的值，并在 derivations 里给出算式——只能用其它占位符名、数字和 + - * / ( )，对循环列求和用 sum(循环名.子字段名)（例 {"field":"total","formula":"sum(items.amount)"}；{"field":"profit","formula":"revenue - cost"}）。系统会用占位符的原始数值确定性复核，不一致的字段会被标记 [待核对]，所以算式务必引用真实输入字段并保持单位一致。',
   ].join('\n');
 }
 
@@ -436,6 +467,8 @@ function buildFinalText(
   schema: PlaceholderSchema,
   data: FillData,
   missing: readonly string[],
+  flagged: readonly string[],
+  skippedLoops: readonly string[],
   filename: string,
 ): string {
   const lines: string[] = [];
@@ -447,6 +480,20 @@ function buildFinalText(
     lines.push(
       `⚠️ 以下 ${missing.length} 个字段未能从你提供的数据中找到，已留空：${missing.join('、')}。` +
         '请补充这些数据后重试，或在下载的文件中手动填写。',
+    );
+  }
+  if (flagged.length > 0) {
+    lines.push('');
+    lines.push(
+      `⚠️ 以下 ${flagged.length} 个字段的推算未能通过确定性复核，已标记 [待核对]，请人工核对后填写：${flagged.join('、')}。`,
+    );
+  }
+  if (skippedLoops.length > 0) {
+    lines.push('');
+    lines.push(
+      `⚠️ 以下 ${skippedLoops.length} 个循环段未填充（v1 暂仅支持单行循环，多行循环支持开发中）：` +
+        `${skippedLoops.map((n) => `{#${n}}…{/${n}}`).join('、')}。` +
+        '请把每个循环放在同一行后重试，或等待多行循环上线；其余字段已正常填充。',
     );
   }
   lines.push('');

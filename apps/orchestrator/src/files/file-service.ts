@@ -98,6 +98,34 @@ export function isAcceptedUpload(filename: string, mimetype: string): boolean {
   );
 }
 
+/**
+ * Decode a multipart upload filename (P2). busboy/multer surfaces the
+ * Content-Disposition `filename` param decoded as LATIN1, which turns a
+ * UTF-8 name (发票模板.docx) into mojibake — that garbled text then shows
+ * up in the task summary («...»). The RFC 5987 `filename*` param, when a
+ * browser sends it, is already proper UTF-8. We must recover the UTF-8
+ * WITHOUT corrupting an already-correct name:
+ *   - real Unicode present (CJK, >U+00FF) → came from filename* / fine → keep
+ *   - pure ASCII → nothing to fix → keep
+ *   - latin1 high bytes (0x80–0xFF) → UTF-8 bytes mis-read as latin1 →
+ *     re-decode; if that yields replacement chars it was a genuine latin1
+ *     name (café.docx), so keep the original.
+ */
+export function decodeUploadFilename(name: string): string {
+  if (!name) return name;
+  let hasHighByte = false;
+  for (let i = 0; i < name.length; i++) {
+    const c = name.charCodeAt(i);
+    if (c > 0xff) return name; // real Unicode (filename*) — already correct
+    if (c >= 0x80) hasHighByte = true;
+  }
+  if (!hasHighByte) return name; // pure ASCII
+  // latin1 high bytes → UTF-8 bytes mis-read as latin1; recover unless that
+  // yields a replacement char (a genuine latin1 name like café.docx).
+  const recovered = Buffer.from(name, 'latin1').toString('utf8');
+  return recovered.includes('\uFFFD') ? name : recovered;
+}
+
 export class FileService {
   /**
    * Phase 5c — disk I/O routed through a StorageProvider. When the

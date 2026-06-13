@@ -4,6 +4,7 @@ if (_proxy) setGlobalDispatcher(new ProxyAgent(_proxy));
 import { bootstrap } from 'global-agent';
 bootstrap();
 import Anthropic from '@anthropic-ai/sdk';
+import { isBriefingIntent } from './agent/a-share/briefing-dispatch.js';
 import { DrizzleLlmCallRecorder } from './agent/llm-call-recorder.js';
 import { AnthropicPlanner } from './agent/planners/anthropic.js';
 import { StubPlanner } from './agent/planners/stub.js';
@@ -11,29 +12,29 @@ import {
   recoverStuckRunningScheduledTasks,
   startScheduledRunner,
 } from './agent/scheduled-runner.js';
-import { injectPendingCookies } from './cookies/sync-service.js';
-import { createScreencastProxy } from './streaming/screencast-proxy.js';
 import {
+  type ExecutionRouter,
   createApifyAdapter,
   createExecutionRouter,
   createZapierAdapter,
-  type ExecutionRouter,
 } from './agent/supercar/index.js';
-import { BrowserPool, reapOrphans } from './browser-pool/index.js';
-import { createTaskQueue, type TaskQueue } from './queue/task-queue.js';
-import { createPayPalAdapter } from './payment/index.js';
-import { createVncProxy } from './browser-pool/vnc-proxy.js';
 import {
   AnthropicVisionLoopCommander,
   shouldUseLegacyPlanner,
 } from './agent/vision-loop/commander.js';
 import { PlaywrightExecutor } from './agent/vision-loop/playwright-executor.js';
+import { BrowserPool, reapOrphans } from './browser-pool/index.js';
+import { createVncProxy } from './browser-pool/vnc-proxy.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
+import { injectPendingCookies } from './cookies/sync-service.js';
 import { db } from './db/client.js';
 import { runRetentionReaper } from './evidence/retention-reaper.js';
 import { createHttpApp } from './http.js';
 import { buildScheduledDispatchNotification } from './notifications/scheduled-copy.js';
+import { createPayPalAdapter } from './payment/index.js';
+import { type TaskQueue, createTaskQueue } from './queue/task-queue.js';
+import { createScreencastProxy } from './streaming/screencast-proxy.js';
 import { createWsServer, loadRehydratedTasks } from './ws/server.js';
 
 /**
@@ -345,9 +346,7 @@ async function main() {
   // 60min. Lookup-time guard already treats expired rows as missing
   // so this is purely about table bloat.
   {
-    const { startIdempotencyCleanup } = await import(
-      './api-keys/webhook-idempotency-service.js'
-    );
+    const { startIdempotencyCleanup } = await import('./api-keys/webhook-idempotency-service.js');
     startIdempotencyCleanup({ db, logger });
   }
 
@@ -381,10 +380,55 @@ async function main() {
     const { users: usersTable } = await import('./db/schema/users.js');
     const { tasks: tasksTable } = await import('./db/schema/tasks.js');
     const { eq } = await import('drizzle-orm');
+    // §6c — A股简报 dispatch 连续失败计数（per-process 内存；成功重置，≥3 发 inbox 错误）。
+    const briefingFailCounts = new Map<number, number>();
     startScheduledRunner({
       db,
       dispatch: async ({ scheduledTaskId, userInternalId, intent }) => {
         try {
+          // §6c — A股每日简报：哨兵 intent → 直接组装渲染 + 投递 inbox（不走通用
+          // agent 任务）。失败只影响该用户该任务；连续 3 次降级为 inbox 错误通知。
+          if (isBriefingIntent(intent)) {
+            const { runBriefingDispatch } = await import('./agent/a-share/briefing-dispatch.js');
+            const { HttpAkshareClient } = await import('./agent/a-share/akshare-http-client.js');
+            const { notify } = await import('./notifications/notification-service.js');
+            const client = new HttpAkshareClient({
+              baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
+              logger,
+            });
+            try {
+              const r = await runBriefingDispatch(
+                { db, client, notify: (input) => notify({ db, logger }, input) },
+                { scheduledTaskInternalId: scheduledTaskId, userInternalId, intent },
+              );
+              briefingFailCounts.delete(scheduledTaskId);
+              // P1 非交易日：未投递，回带 skip → runner 记 last_run_status='skipped' + note。
+              if (r.skipped)
+                return { skipped: true as const, note: r.reason ?? '非交易日，未投递' };
+              return scheduledTaskId; // 非 null = 成功（简报无 task 行）
+            } catch (err) {
+              const fails = (briefingFailCounts.get(scheduledTaskId) ?? 0) + 1;
+              briefingFailCounts.set(scheduledTaskId, fails);
+              logger.warn(
+                { err: err instanceof Error ? err.message : String(err), scheduledTaskId, fails },
+                'scheduled-runner: briefing dispatch failed',
+              );
+              if (fails >= 3) {
+                briefingFailCounts.set(scheduledTaskId, 0);
+                await notify(
+                  { db, logger },
+                  {
+                    userInternalId,
+                    scheduledTaskInternalId: scheduledTaskId,
+                    type: 'task_failed',
+                    title: 'A股简报生成失败',
+                    message: '每日 A股简报连续多次生成失败。请稍后重试，或在设置中关闭后重新开启。',
+                  },
+                ).catch(() => {});
+              }
+              return null; // 仅本任务记 failed，下个 interval 重试本任务，不影响他人
+            }
+          }
           const [user] = await db
             .select({ externalId: usersTable.externalId })
             .from(usersTable)
@@ -453,6 +497,8 @@ async function main() {
       // configured webhooks. The notify hook is best-effort; the
       // runner ignores its return value and never blocks on it.
       notify: async ({ userInternalId, scheduledTaskInternalId, intent, ok, error }) => {
+        // 简报 intent 的通知由 dispatch 分支自管（成功投递简报 + 3 连败错误）→ 跳过通用。
+        if (isBriefingIntent(intent)) return;
         const { notify } = await import('./notifications/notification-service.js');
         const payload = buildScheduledDispatchNotification({ intent, ok, error });
         await notify(
@@ -505,6 +551,31 @@ async function main() {
         );
       },
     });
+
+    // Phase 1 #2 — A股简报缓存预热（BOSS 拍板：冷缓存 → 预热，简报 10s 超时不动）。
+    // 08:25 / 15:25 北京（简报前 5 分钟）用长超时(30s)客户端把 /index/us·hk·cn 各
+    // 调一遍填 akshare-mcp 缓存(TTL 600s)，5 分钟后简报以 10s 读暖缓存即时返回。
+    {
+      const { startPrewarmScheduler, warmSharedCaches, warmSymbolTable } = await import(
+        './agent/a-share/prewarm-scheduler.js'
+      );
+      const { HttpAkshareClient } = await import('./agent/a-share/akshare-http-client.js');
+      const akshareBaseUrl = process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848';
+      const prewarmClient = new HttpAkshareClient({
+        baseUrl: akshareBaseUrl,
+        timeoutMs: 30_000,
+        logger,
+      });
+      startPrewarmScheduler({
+        warm: async () => {
+          await warmSharedCaches(prewarmClient);
+          // ④ 短名解析全量代码名称表（开盘前刷新一次；~70s 长超时，不阻塞简报）。
+          await warmSymbolTable(akshareBaseUrl);
+        },
+        logger,
+      });
+      logger.info({ times: ['08:25', '15:25'] }, 'prewarm: A股简报缓存预热调度已启动');
+    }
   }
 
   // Per-user VNC WebSocket proxy — only live when the pool is active.
@@ -577,10 +648,7 @@ async function main() {
     // takeover-timeout from auto-completing them, but the runtime
     // reaper hadn't existed yet). Set BOOT_SWEEP_AWAITING_USER_MIN=5
     // for one deploy to flush, then restore.
-    const bootAwaitingMin = Number.parseInt(
-      process.env.BOOT_SWEEP_AWAITING_USER_MIN ?? '35',
-      10,
-    );
+    const bootAwaitingMin = Number.parseInt(process.env.BOOT_SWEEP_AWAITING_USER_MIN ?? '35', 10);
     const parkRows = await db.execute(sql`
       UPDATE tasks
          SET status = 'failed',
@@ -613,10 +681,16 @@ async function main() {
         'boot sweep: marked stale awaiting_user parks as failed',
       );
     } else {
-      logger.info({ thresholdMin: bootAwaitingMin }, 'boot sweep: no stale awaiting_user parks to mark');
+      logger.info(
+        { thresholdMin: bootAwaitingMin },
+        'boot sweep: no stale awaiting_user parks to mark',
+      );
     }
   } catch (err) {
-    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'boot sweep failed (non-fatal)');
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'boot sweep failed (non-fatal)',
+    );
   }
 
   // Phase 22a — runtime zombie reaper. Boot sweep above only fires at

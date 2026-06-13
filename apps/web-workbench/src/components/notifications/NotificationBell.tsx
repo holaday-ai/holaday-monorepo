@@ -26,12 +26,17 @@ import {
   CheckCircle2,
   Loader2,
   Play,
+  X,
   XCircle,
 } from 'lucide-react';
 import * as React from 'react';
+import { createPortal } from 'react-dom';
+import ReactMarkdown from 'react-markdown';
 import { useNavigate } from 'react-router-dom';
+import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
+import { sanitizeForRender } from '@/utils/render-sanitizer';
 import { Button } from '@/components/ui/button';
 import {
   notificationBadgeText,
@@ -71,6 +76,10 @@ export function NotificationBell({
   const [listError, setListError] = React.useState<string | null>(null);
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [markingAll, setMarkingAll] = React.useState(false);
+  // The notification opened in the full-text detail modal. Briefings
+  // are multi-section markdown the 2-line preview can't convey, so a
+  // click renders the whole body instead of jumping to the calendar.
+  const [detail, setDetail] = React.useState<NotificationRow | null>(null);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const mountedRef = React.useRef(false);
   const countRequestRef = React.useRef(0);
@@ -148,16 +157,16 @@ export function NotificationBell({
 
   const handleItemClick = React.useCallback(
     async (row: NotificationRow) => {
-      const href = scheduledNotificationHref(row.scheduledTaskInternalId);
-      if (href) {
-        setOpen(false);
-        navigate(href);
-      }
+      // Open the full rendered body. The "在定时任务中查看" calendar
+      // jump (previously the click's only behaviour) now lives as a
+      // secondary action inside the detail modal.
+      setOpen(false);
+      setDetail(row);
 
       setActionError(null);
       // Mark read optimistically so the bell badge ticks down
       // before the round-trip resolves; reconcile on next poll
-      // if the mutation fails. Navigation happens first so a slow
+      // if the mutation fails. The modal opens first so a slow
       // mark-read request never makes a notification feel dead.
       if (!row.isRead) {
         setItems((prev) =>
@@ -177,7 +186,7 @@ export function NotificationBell({
         }
       }
     },
-    [fetchList, navigate, open, refreshCount],
+    [fetchList, open, refreshCount],
   );
 
   const handleMarkAll = React.useCallback(async () => {
@@ -311,6 +320,16 @@ export function NotificationBell({
             )}
           </div>
         </div>
+      )}
+      {detail && (
+        <NotificationDetailModal
+          row={detail}
+          onClose={() => setDetail(null)}
+          onNavigate={(href) => {
+            setDetail(null);
+            navigate(href);
+          }}
+        />
       )}
     </div>
   );
@@ -493,6 +512,103 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
   task_failed: <XCircle className="h-3 w-3" />,
   task_reminder: <BellRing className="h-3 w-3" />,
 };
+
+/**
+ * Full-text detail modal — renders a notification's whole `message`
+ * as markdown (A股 briefings are multi-section: 外围/自选股/大盘速览/
+ * 龙虎榜 with tables). Portalled to <body> so the sidebar footer's
+ * overflow never clips it. `sanitizeForRender` is defensive (the prod
+ * briefing renderer already strips gap markers); GFM tables render via
+ * remark-gfm. Esc / backdrop / × all close; body scroll locks while open.
+ */
+function NotificationDetailModal({
+  row,
+  onClose,
+  onNavigate,
+}: {
+  row: NotificationRow;
+  onClose: () => void;
+  onNavigate: (href: string) => void;
+}): JSX.Element {
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
+
+  const body = sanitizeForRender(row.message);
+  const icon = TYPE_ICON[row.type] ?? <Bell className="h-3.5 w-3.5" />;
+  const color = notificationColor(row.type);
+  const scheduleHref = scheduledNotificationHref(row.scheduledTaskInternalId);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={row.title}
+    >
+      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-[12px] border border-[#DCDDDD]/85 bg-white shadow-[0_12px_32px_rgba(17,24,39,0.18)] dark:border-white/10 dark:bg-card">
+        <div className="flex items-start gap-2.5 border-b border-[#DCDDDD]/80 px-5 py-3.5 dark:border-white/10">
+          <span
+            className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-white"
+            style={{ backgroundColor: color }}
+            aria-hidden
+          >
+            {icon}
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-sm font-semibold text-foreground">{row.title}</h2>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              {formatRelative(row.createdAt)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+            aria-label="关闭"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {body.trim() ? (
+            <div className="prose prose-sm prose-neutral max-w-none leading-relaxed text-foreground prose-headings:text-foreground prose-h1:text-base prose-h1:font-semibold prose-h2:mt-4 prose-h2:text-sm prose-h2:font-semibold prose-h3:text-xs prose-h3:font-semibold prose-p:my-1.5 prose-a:text-[#EA1F59] prose-a:decoration-[#EA1F59]/35 prose-strong:font-semibold prose-strong:text-foreground prose-table:my-2 prose-table:text-xs prose-th:text-foreground prose-td:align-top prose-code:rounded prose-code:bg-[#EFEFEF]/70 prose-code:px-1 prose-code:text-[11px] dark:prose-invert dark:prose-code:bg-white/10">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+            </div>
+          ) : (
+            <p className="py-6 text-center text-xs text-muted-foreground">此通知没有正文内容。</p>
+          )}
+        </div>
+        {scheduleHref && (
+          <div className="flex justify-end border-t border-[#DCDDDD]/80 px-5 py-3 dark:border-white/10">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onNavigate(scheduleHref)}
+              className="h-8 rounded-[6px] border-[#DCDDDD]/75 px-3 text-xs text-[#595757] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+            >
+              在定时任务中查看
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
 
 export function notificationColor(type: string): string {
   if (type === 'task_failed') return '#EA1F59';

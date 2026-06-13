@@ -30,3 +30,4 @@ export * from './evidence-artifacts.js';
 export * from './claims.js';
 export * from './claim-evidence-links.js';
 export * from './canary-results.js';
+export * from './watchlists.js';

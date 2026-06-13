@@ -28,7 +28,9 @@ import { and, eq, isNull, lt, lte, or } from 'drizzle-orm';
 // import + destructure works because the default IS the CJS module
 // object, and the property lookup happens at call time (not import time).
 import rrule from 'rrule';
-const { rrulestr } = rrule as { rrulestr: (s: string) => { after: (d: Date, inc?: boolean) => Date | null } };
+const { rrulestr } = rrule as {
+  rrulestr: (s: string) => { after: (d: Date, inc?: boolean) => Date | null };
+};
 import { logger } from '../config/logger.js';
 import { scheduledTasks } from '../db/schema/scheduled-tasks.js';
 
@@ -48,7 +50,7 @@ export interface ScheduledRunnerDeps {
     scheduledTaskId: number;
     userInternalId: number;
     intent: string;
-  }) => Promise<number | null>;
+  }) => Promise<number | null | { skipped: true; note: string }>;
   /**
    * Phase 26B — optional notification hook. Called after every
    * terminal dispatch (success OR failure) so the user's inbox +
@@ -229,10 +231,7 @@ export async function recoverStuckRunningScheduledTasks(
     }
     return affected;
   } catch (err) {
-    logger.warn(
-      { err: errMsg(err) },
-      'scheduled-runner: boot sweep failed (non-fatal)',
-    );
+    logger.warn({ err: errMsg(err) }, 'scheduled-runner: boot sweep failed (non-fatal)');
     return 0;
   }
 }
@@ -393,9 +392,7 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
         rrule: scheduledTasks.rrule,
       })
       .from(scheduledTasks)
-      .where(
-        and(eq(scheduledTasks.status, 'active'), lte(scheduledTasks.nextRunAt, now)),
-      );
+      .where(and(eq(scheduledTasks.status, 'active'), lte(scheduledTasks.nextRunAt, now)));
   } catch (err) {
     logger.warn({ err: errMsg(err) }, 'scheduled-runner: scan failed');
     return;
@@ -441,12 +438,18 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
     // shot) but the failure is visible in /scheduled.
     let dispatchedTaskId: number | null = null;
     let dispatchError: string | null = null;
+    let skipNote: string | null = null; // 「跳过」语义（如非交易日）→ last_run_status='skipped'
     try {
-      dispatchedTaskId = await deps.dispatch({
+      const result = await deps.dispatch({
         scheduledTaskId: row.id,
         userInternalId: row.userId,
         intent: row.intent,
       });
+      if (typeof result === 'object' && result !== null) {
+        skipNote = result.note;
+      } else {
+        dispatchedTaskId = result;
+      }
     } catch (err) {
       dispatchError = errMsg(err);
       logger.warn(
@@ -454,7 +457,8 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
         'scheduled-runner: dispatch threw',
       );
     }
-    const dispatchOk = dispatchedTaskId !== null && dispatchError === null;
+    const skipped = skipNote !== null;
+    const dispatchOk = skipped || (dispatchedTaskId !== null && dispatchError === null);
     const nextRun = computeNextRunFromInputs({
       from: now,
       rrule: row.rrule,
@@ -464,8 +468,7 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
     // type. 2KB is plenty for a TRPCError / stack-trace-first-line;
     // longer payloads usually mean a system error worth shortening
     // before persisting.
-    const truncatedError =
-      dispatchError !== null ? dispatchError.slice(0, 2000) : null;
+    const truncatedError = dispatchError !== null ? dispatchError.slice(0, 2000) : null;
     try {
       if (nextRun === null) {
         // One-shot — terminal. 'completed' on success; 'failed' when
@@ -475,8 +478,8 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
           .set({
             status: dispatchOk ? 'completed' : 'failed',
             lastRunAt: now,
-            lastRunStatus: dispatchOk ? 'success' : 'failed',
-            lastError: truncatedError,
+            lastRunStatus: skipped ? 'skipped' : dispatchOk ? 'success' : 'failed',
+            lastError: skipped ? skipNote : truncatedError,
             ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
           })
           .where(eq(scheduledTasks.id, row.id));
@@ -491,8 +494,8 @@ async function tick(deps: ScheduledRunnerDeps): Promise<void> {
             status: 'active',
             nextRunAt: nextRun,
             lastRunAt: now,
-            lastRunStatus: dispatchOk ? 'success' : 'failed',
-            lastError: truncatedError,
+            lastRunStatus: skipped ? 'skipped' : dispatchOk ? 'success' : 'failed',
+            lastError: skipped ? skipNote : truncatedError,
             ...(dispatchedTaskId !== null ? { lastTaskId: dispatchedTaskId } : {}),
           })
           .where(eq(scheduledTasks.id, row.id));

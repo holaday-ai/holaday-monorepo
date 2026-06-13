@@ -39,6 +39,8 @@ export const ID_PREFIXES = {
   evidenceArtifact: 'art',
   claim: 'clm',
   canaryResult: 'cnr',
+  // Phase 1 #2 — A股自选股 (watchlist row).
+  watchlist: 'wl',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;
