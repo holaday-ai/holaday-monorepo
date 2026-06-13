@@ -477,6 +477,16 @@ _symbol_ts: float = 0.0
 _symbol_refreshing = False
 _CJK_RUN = re.compile(r"[一-鿿]{2,}")
 
+# 短名窗口停用词（E16 修）：常见时间/大盘/问句词不得作为个股名匹配种子，否则
+# 「查今天A股三大指数收盘」里的「今天」会命中「今天国际(300532)」。这些 2~3 字
+# 窗口虽是某些个股名子串，但作为查询里的普通词出现时绝非个股指向 → 跳过。
+_NAME_SEARCH_STOPWORDS = {
+    "今天", "明天", "昨天", "今日", "明日", "昨日", "前天", "后天", "上午", "下午",
+    "现在", "最近", "今年", "去年", "市场", "大盘", "指数", "股市", "股票", "个股",
+    "行情", "收盘", "开盘", "涨幅", "跌幅", "两市", "板块", "龙头", "资金", "主力",
+    "北向", "南向", "沪深", "为啥", "怎么", "多少", "全部", "所有", "最新", "三大",
+}
+
 
 def _strip_market_prefix(code: str) -> str:
     """'sh600519'/'sz000001'/'bj920000' → '600519' 等；已是 6 位则原样。"""
@@ -553,6 +563,8 @@ def search_symbol(query: str, limit: int = 5) -> tuple[list[dict[str, Any]], str
                 if w in seen:
                     continue
                 seen.add(w)
+                if w in _NAME_SEARCH_STOPWORDS:
+                    continue  # 普通词（今天/大盘/指数…）不作个股名匹配种子（E16）
                 matches = [(c, n) for c, n in table.items() if w in n]
                 if not 1 <= len(matches) <= 4:
                     continue

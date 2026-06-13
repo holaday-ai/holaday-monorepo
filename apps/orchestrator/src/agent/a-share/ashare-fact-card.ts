@@ -227,6 +227,43 @@ export async function buildAshareFactCard(
   return `${body}\n\n${QA_DISCLAIMER_BLOCK}`;
 }
 
+/**
+ * A股三大指数速览卡（E16 指数 lane，确定性无 LLM）.
+ *
+ * 「查今天A股三大指数收盘 / 大盘怎么样」类**指数/大盘**问句走本卡，不进个股 lane
+ * （避免「今天」等普通词被 name-search 误命中成个股，BOSS E16 修）。getIndexQuote('cn')
+ * 返上证指数/深证成指/创业板指 spot，逐条溯源 + 免责。纯客观行情，无解读、无闸门。
+ */
+export async function buildIndexCard(deps: FactCardDeps): Promise<string> {
+  const now = deps.now ?? new Date();
+  const mode = deps.mode ?? 'prod';
+  const iso = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+  const env = await deps.client.getIndexQuote('cn');
+  const lines: string[] = [
+    `# 📊 HOLA DAY · A股大盘速览（${dateHeader(iso)}）`,
+    `> 生成于 ${fmtClock(now.toISOString())} ｜ 三大指数客观行情聚合，**不构成投资建议**。`,
+    '',
+  ];
+  if (env.error || env.data.length === 0) {
+    lines.push(unavailableLine('三大指数', env, mode));
+  } else {
+    for (const r of env.data) {
+      const name = String(pick(r, ['名称']) ?? '指数');
+      const close = fmtNum(pick(r, ['最新价', '收盘']));
+      const pct = fmtPct(pick(r, ['涨跌幅']));
+      const amt = pick(r, ['成交额']) != null ? `，成交额 ${fmtYiYuan(pick(r, ['成交额']))}` : '';
+      lines.push(`- ${name} ${close}（${pct}）${amt}`);
+    }
+    lines.push(`  （${sourceTag(env)}）`);
+  }
+  return `${lines.join('\n').trimEnd()}\n\n${QA_DISCLAIMER_BLOCK}`;
+}
+
 /** 一只个股的紧凑上下文块（盘面必留；公告只留前 annCap 条标题）。 */
 function contextBlock(p: PerStock, dt: AkEnvelope<DragonTigerRow>, annCap: number): string {
   const b: string[] = [`【${stockLabel(p.stock)}】`];

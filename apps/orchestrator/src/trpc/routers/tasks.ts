@@ -1177,14 +1177,17 @@ export const tasksRouter = router({
       };
       let ashareQaMatch: Awaited<ReturnType<typeof resolveAshareQa>> = null;
       let guidanceNeeded = false;
+      let indexIntent = false;
       if (ashareContext) {
-        // 上下文内：总是尝试解析；命中信号无个股 → 引导兜底；无信号 → 放行通用。
+        // 上下文内：命中个股 → 个股 lane；指数/大盘问句 → 指数 lane；命中信号但无个股/非
+        // 指数 → 引导兜底；无信号 → 放行通用。
         const r = await resolveAshareInContext(
           { intent: input.intent, watchlist, now: new Date() },
           searchFn,
         );
         ashareQaMatch = r.match;
-        guidanceNeeded = !r.match && r.hasSignal;
+        indexIntent = r.indexIntent;
+        guidanceNeeded = !r.match && !r.indexIntent && r.hasSignal;
       } else {
         // 非上下文（未启用/未选技能）：强信号(术语+个股)出 lane，否则放行（无引导兜底）。
         ashareQaMatch = await resolveAshareQa(
@@ -1294,6 +1297,61 @@ export const tasksRouter = router({
           }
         })();
 
+        return {
+          taskId,
+          status: 'executing' as const,
+          steps: [],
+          executionMode: 'generate' as const,
+        };
+      }
+      // 指数 lane（E16）：「查今天A股三大指数收盘 / 大盘怎么样」类指数/大盘问句 → 确定性
+      // 三大指数速览卡（无 LLM、无闸门），不进个股 lane（防普通词 name-search 误命中个股）。
+      if (indexIntent) {
+        const { buildIndexCard } = await import('../../agent/a-share/ashare-fact-card.js');
+        const taskId = newExternalId('task');
+        const repo = new TaskRepository(ctx.db);
+        await repo.insertTask(
+          { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
+          {
+            userId: userRow.id,
+            intent: input.intent,
+            roleId: gatedRole === 'none' ? null : gatedRole,
+            opusUsed: false,
+          },
+        );
+        ctx.logger.info(
+          { taskId, userId: ctx.userId, executorLane: 'ashare_index' },
+          'task: executor lane selected',
+        );
+        broadcastSubStatus(ctx.userId, taskId, 'generating');
+        void (async () => {
+          let answer: string;
+          try {
+            answer = await buildIndexCard({ client: aksClient, now: new Date() });
+          } catch (err) {
+            ctx.logger.error({ err, taskId }, 'ashare-index: lane failed');
+            answer = '抱歉，A股大盘指数查询处理失败，请稍后重试。';
+          }
+          try {
+            const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+            if (taskInternalId != null) {
+              await repo.persistVisionOutcome(taskId, {
+                status: 'completed',
+                summary: answer,
+                tickCount: 1,
+                metadata: { executionMode: 'generate', lane: 'ashare_index' },
+              });
+            }
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'completed',
+              summary: answer,
+            });
+          } catch (err) {
+            ctx.logger.error({ err, taskId }, 'ashare-index: persist/broadcast failed');
+          }
+        })();
         return {
           taskId,
           status: 'executing' as const,

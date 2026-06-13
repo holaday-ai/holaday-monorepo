@@ -4,7 +4,8 @@
 
 import { describe, expect, it } from 'vitest';
 import type { AkshareClient } from './akshare-client.js';
-import { resolveAshareInContext, resolveAshareQa } from './ashare-qa-matcher.js';
+import { buildIndexCard } from './ashare-fact-card.js';
+import { isIndexQuery, resolveAshareInContext, resolveAshareQa } from './ashare-qa-matcher.js';
 import { ASHARE_QA_GUIDANCE, runAshareQa } from './ashare-qa-runner.js';
 import type { AshareQaMatch, ResolvedStock } from './ashare-qa-types.js';
 
@@ -254,6 +255,84 @@ describe('resolveAshareInContext（启用技能·signal-based 门控，BOSS 反�
     );
     expect(r.match?.stocks[0]?.symbol).toBe('600519');
     expect(r.hasSignal).toBe(true);
+  });
+});
+
+describe('E16 回归：指数查询走指数 lane，不误命中个股（勿删）', () => {
+  const WL: ResolvedStock[] = [{ symbol: '600519', displayName: '贵州茅台' }];
+  // 这个 search fn 模拟服务端短名窗口把「今天」误命中「今天国际(300532)」——必须**不被调用**。
+  const trapSearch = async () => [{ symbol: '300532', displayName: '今天国际' }];
+
+  it('isIndexQuery：指数/大盘问句 true，个股问句 false', () => {
+    expect(isIndexQuery('查今天A股三大指数收盘')).toBe(true);
+    expect(isIndexQuery('大盘今天怎么样')).toBe(true);
+    expect(isIndexQuery('上证指数多少点')).toBe(true);
+    expect(isIndexQuery('茅台为什么涨')).toBe(false);
+  });
+
+  it('「查今天A股三大指数收盘」→ indexIntent=true，match=null，**不调 name-search**（不命中 300532）', async () => {
+    let searched = false;
+    const r = await resolveAshareInContext(
+      { intent: '查今天A股三大指数收盘', watchlist: WL, now: NOW },
+      async () => {
+        searched = true;
+        return trapSearch();
+      },
+    );
+    expect(r.indexIntent).toBe(true);
+    expect(r.match).toBeNull(); // 不会变成今天国际(300532)
+    expect(r.hasSignal).toBe(true);
+    expect(searched).toBe(false); // 指数问句不进 name-search
+  });
+
+  it('长查询（>16字，无个股指向）不 name-search（防长句乱匹配名称）', async () => {
+    let searched = false;
+    const r = await resolveAshareInContext(
+      { intent: '今天有什么消息可以帮我整理一下最近的情况吗谢谢', watchlist: WL, now: NOW },
+      async () => {
+        searched = true;
+        return trapSearch();
+      },
+    );
+    expect(searched).toBe(false);
+    expect(r.match).toBeNull();
+  });
+
+  it('短个股问句仍正常 name-search（不误伤）', async () => {
+    let searched = false;
+    const r = await resolveAshareInContext(
+      { intent: '比亚迪为什么涨', watchlist: WL, now: NOW },
+      async () => {
+        searched = true;
+        return [{ symbol: '002594', displayName: '比亚迪' }];
+      },
+    );
+    expect(searched).toBe(true);
+    expect(r.match?.stocks[0]?.symbol).toBe('002594');
+  });
+
+  it('buildIndexCard：渲染三大指数 + 免责（指数 lane 产物）', async () => {
+    const idxClient = {
+      getIndexQuote: () =>
+        Promise.resolve({
+          data: [
+            { 名称: '上证指数', 代码: 'sh000001', 最新价: 4031.51, 涨跌幅: 1.12, 成交额: 1.5e12 },
+            { 名称: '深证成指', 代码: 'sz399001', 最新价: 14963.41, 涨跌幅: 0.75, 成交额: 1.6e12 },
+            { 名称: '创业板指', 代码: 'sz399006', 最新价: 3830.35, 涨跌幅: 0.5, 成交额: 8e11 },
+          ],
+          count: 3,
+          source: 'akshare:stock_zh_index_spot_sina',
+          fetched_at: '2026-06-12T07:25:00Z',
+          disclaimer: 'x',
+        }),
+      // biome-ignore lint/suspicious/noExplicitAny: fake
+    } as any;
+    const md = await buildIndexCard({ client: idxClient, now: NOW });
+    expect(md).toContain('A股大盘速览');
+    expect(md).toContain('上证指数 4,031.51（+1.12%）');
+    expect(md).toContain('创业板指 3,830.35（+0.50%）');
+    expect(md).toContain('免责声明');
+    expect(md).not.toContain('今天国际');
   });
 });
 

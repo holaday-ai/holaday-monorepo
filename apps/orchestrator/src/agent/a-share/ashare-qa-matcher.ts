@@ -80,6 +80,41 @@ const ANOMALY_TERMS = [
 /** 自选股整体问。 */
 const WATCHLIST_TERMS = ['自选股', '我的股', '我的自选', '我的持仓', '持仓'];
 
+/**
+ * 指数/大盘级问句信号（E16 修）。命中 → 走**指数 lane**（三大指数速览卡），不进个股 lane，
+ * 也**不做 name-search**（防「查今天A股三大指数收盘」里的「今天」被短名窗口误命中成
+ * 「今天国际(300532)」）。仅在**没有显式个股**（代码/自选股名）时生效——有个股则个股优先。
+ */
+const INDEX_TERMS = [
+  '三大指数',
+  '大盘',
+  '上证',
+  '深证',
+  '创业板',
+  '沪指',
+  '深成指',
+  '科创50',
+  '科创板',
+  '北证',
+  '两市',
+  '综指',
+  '指数',
+];
+
+/** 是否指数/大盘级问句（无 6 位个股代码时才算——有代码以个股为准）。 */
+export function isIndexQuery(text: string): boolean {
+  return INDEX_TERMS.some((t) => text.includes(t));
+}
+
+/**
+ * name-search 仅用于**短问句 / 明确个股指向**（E16 修：长查询不在里面乱匹配名称，
+ * 防普通词被短名窗口误命中）。门槛：去掉指数/大盘信号 + 长度上限（短问句）。
+ */
+const NAME_SEARCH_MAX_LEN = 16;
+function shouldNameSearch(text: string): boolean {
+  return !isIndexQuery(text) && text.trim().length <= NAME_SEARCH_MAX_LEN;
+}
+
 export interface MatchAshareQaOpts {
   intent: string;
   roleId?: string | null;
@@ -159,6 +194,8 @@ export async function resolveAshareQa(
       dateCompact: g.dateCompact,
     };
   }
+  // 仅短问句 / 明确个股指向才 name-search（E16：长查询不乱匹配名称）。
+  if (!shouldNameSearch(opts.intent ?? '')) return null;
   let found: ResolvedStock[] = [];
   try {
     found = await search(opts.intent ?? '');
@@ -185,29 +222,40 @@ export async function resolveAshareQa(
 export async function resolveAshareInContext(
   opts: MatchAshareQaOpts,
   search: SymbolSearchFn,
-): Promise<{ match: AshareQaMatch | null; hasSignal: boolean }> {
+): Promise<{ match: AshareQaMatch | null; hasSignal: boolean; indexIntent: boolean }> {
   const text = opts.intent ?? '';
   const hasTerm = ASHARE_TERMS.some((t) => text.includes(t)); // 含持仓语境词
   const wantsWatchlist = WATCHLIST_TERMS.some((t) => text.includes(t));
+  const toMatch = (stocks: ResolvedStock[]): AshareQaMatch => {
+    const kind: QaKind = ANOMALY_TERMS.some((t) => text.includes(t)) ? 'anomaly' : 'info';
+    const { iso, compact } = cnDateParts(opts.now ?? new Date());
+    return { kind, stocks: stocks.slice(0, 5), dateIso: iso, dateCompact: compact };
+  };
+
+  // 显式个股优先（代码 / 自选股名 / 自选股整体问），零网络。
   let stocks = resolveStocks(text, opts.watchlist);
   if (stocks.length === 0 && wantsWatchlist && opts.watchlist.length > 0) {
     stocks = opts.watchlist;
   }
-  if (stocks.length === 0) {
+  if (stocks.length > 0) {
+    return { match: toMatch(stocks), hasSignal: true, indexIntent: false };
+  }
+
+  // 无显式个股：指数/大盘问句 → 指数 lane（E16：不 name-search，不进个股 lane）。
+  if (isIndexQuery(text)) {
+    return { match: null, hasSignal: true, indexIntent: true };
+  }
+
+  // 仅**短问句 / 明确个股指向**才 name-search（E16：长查询不乱匹配名称）。
+  if (shouldNameSearch(text)) {
     try {
       stocks = await search(text);
     } catch {
       stocks = [];
     }
+    if (stocks.length > 0) {
+      return { match: toMatch(stocks), hasSignal: true, indexIntent: false };
+    }
   }
-  const hasSignal = stocks.length > 0 || hasTerm || wantsWatchlist;
-  if (stocks.length > 0) {
-    const kind: QaKind = ANOMALY_TERMS.some((t) => text.includes(t)) ? 'anomaly' : 'info';
-    const { iso, compact } = cnDateParts(opts.now ?? new Date());
-    return {
-      match: { kind, stocks: stocks.slice(0, 5), dateIso: iso, dateCompact: compact },
-      hasSignal: true,
-    };
-  }
-  return { match: null, hasSignal };
+  return { match: null, hasSignal: hasTerm || wantsWatchlist, indexIntent: false };
 }

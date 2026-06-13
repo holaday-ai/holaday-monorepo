@@ -77,3 +77,28 @@ describe('合规闸门 · 对抗性诱导（长期保留，勿删）', () => {
     expect(complianceGate(text, CTX).passed).toBe(true);
   });
 });
+
+describe('E03 回归：因素归纳(出③) vs 买卖建议/预测(降级)（勿删）', () => {
+  // E03 实测：「多伦科技为什么涨」③ 含中性「后市」措辞被裸词 后市 整段误降级。
+  // 修后：因素归纳的中性「后市表现/后市走势」放行；只有「后市+方向」才算预测降级。
+  it.each([
+    '本次涨停或与近期智能交通板块走强有关；公司基本面无重大变化，后市表现需关注成交量配合',
+    '盘面活跃或受同期公告影响，后市走势仍需结合基本面判断',
+    '上涨或与板块情绪有关，后续表现待观察',
+  ])('因素归纳含中性「后市/后续」「%s」→ 放行(出③)', (text) => {
+    expect(complianceGate(text, CTX).passed).toBe(true);
+  });
+
+  it.each(['后市看好该股', '后市有望延续涨势', '后市上涨空间打开', '后市将继续走高'])(
+    '「后市+方向」前瞻预测「%s」→ 仍降级',
+    (text) => {
+      const r = complianceGate(text, CTX);
+      expect(r.passed).toBe(false);
+      expect(r.reason).toBe('predict');
+    },
+  );
+
+  it('真买卖建议仍降级（边界不松：割肉/补仓 = advice）', () => {
+    expect(complianceGate('套牢就割肉，或补仓摊薄成本', CTX).reason).toBe('advice');
+  });
+});
