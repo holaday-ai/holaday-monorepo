@@ -694,6 +694,9 @@ export const tasksRouter = router({
     const classifiedExecutionMode = await classifyExecutionMode({
       intent: input.intent,
       skillId: input.skillId,
+      // §5 fileIds-aware soft template-fill: an attachment + a fill clue
+      // ("填入…模板…留空") relaxes the strict-pattern adjacency requirement.
+      hasFileAttachment: Boolean(input.fileIds && input.fileIds.length > 0),
       logger: ctx.logger.child({ userId: ctx.userId, stage: 'router' }),
     });
     // Phase 2b — typed expert workflow lane override. When the new

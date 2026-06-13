@@ -1085,3 +1085,85 @@ describe('classifyExecutionMode — template_fill lane (Phase 1 #1, §5)', () =>
     }
   });
 });
+
+describe('classifyExecutionMode — fileIds-aware soft template_fill (§5, 2026-06-13)', () => {
+  // ① The exact sentence that slipped through on 2026-06-13. 周报 wedges
+  //    填入↔模板 apart and "缺的留空" isn't "里的空格", so every STRICT
+  //    pattern misses it. With a file attached + a fill verb + a template
+  //    noun the soft route catches it. (Regression lock — do not loosen.)
+  it('① "把聊天记录信息填入周报模板缺的留空": miss without a file, hit WITH a file', async () => {
+    const intent = '把聊天记录信息填入周报模板缺的留空';
+    // Documents the gap: no file → the strict patterns miss it.
+    const noFile = await classifyExecutionMode({ intent, logger: fakeLogger() });
+    expect(noFile, 'no file → strict miss (the original bug)').not.toBe('template_fill');
+    // The fix: a file makes the soft route fire.
+    const withFile = await classifyExecutionMode({
+      intent,
+      hasFileAttachment: true,
+      logger: fakeLogger(),
+    });
+    expect(withFile, 'file + fill verb + template noun → template_fill').toBe('template_fill');
+  });
+
+  // ② Ordinary "consume the doc" attachment tasks must NOT be upgraded:
+  //    they carry no fill verb (总结/翻译/分析 ≠ 填/录入/补全), and the
+  //    doc cases carry no template noun either — so even WITH a file they
+  //    stay out of the fill lane.
+  it('② does NOT upgrade plain attachment tasks even with a file', async () => {
+    const negatives = [
+      '总结这份文档',
+      '总结这个文档',
+      '翻译这个PDF',
+      '提取这个表格里的关键数据', // template noun (表格) but NO fill verb
+      '分析这份Excel的销售趋势',
+      '把这个文档翻译成英文', // 把…文档… but no fill verb / template noun
+    ];
+    for (const intent of negatives) {
+      const out = await classifyExecutionMode({
+        intent,
+        hasFileAttachment: true,
+        logger: fakeLogger(),
+      });
+      expect(out, intent).not.toBe('template_fill');
+    }
+  });
+
+  // These three are STRICT-miss / SOFT-only (verified): each carries a fill
+  // verb + a template noun but breaks the strict adjacency, so it routes to
+  // template_fill ONLY because a file is attached.
+  const SOFT_ONLY_FILL_INTENTS = [
+    '帮我把数据录入这个报价模板',
+    '这个表格的空格按聊天记录补全',
+    '把聊天记录里的数据补全到这张表格',
+  ];
+
+  it('catches other wedged / long-tail fill phrasings when a file is attached', async () => {
+    for (const intent of SOFT_ONLY_FILL_INTENTS) {
+      const out = await classifyExecutionMode({
+        intent,
+        hasFileAttachment: true,
+        logger: fakeLogger(),
+      });
+      expect(out, intent).toBe('template_fill');
+    }
+  });
+
+  it('the soft route is gated on the file: the same clue alone does NOT trigger it', async () => {
+    // No attachment → soft route off; the strict pass misses these → generate.
+    for (const intent of SOFT_ONLY_FILL_INTENTS) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).not.toBe('template_fill');
+    }
+  });
+
+  it('creating / asking-about a template stays out even with a file', async () => {
+    for (const intent of ['做一个周报模板', '设计一份发票模板', '模板怎么写']) {
+      const out = await classifyExecutionMode({
+        intent,
+        hasFileAttachment: true,
+        logger: fakeLogger(),
+      });
+      expect(out, intent).not.toBe('template_fill');
+    }
+  });
+});
