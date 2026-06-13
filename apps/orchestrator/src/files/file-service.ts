@@ -74,6 +74,72 @@ export const ACCEPTED_EXTENSIONS = new Set<string>([
 ]);
 
 /**
+ * Phase 1 (video) — media MIME/extension allowlist for the video
+ * onboarding upload path. Kept SEPARATE from ACCEPTED_MIMES so the
+ * 200MB media cap applies to video/audio without also letting a 200MB
+ * PDF through the document path.
+ */
+export const MEDIA_ACCEPTED_MIMES = new Set<string>([
+  // video
+  'video/mp4',
+  'video/quicktime', // .mov
+  'video/webm',
+  'video/x-m4v', // .m4v
+  // audio (voice samples for cloning + BGM)
+  'audio/wav',
+  'audio/x-wav',
+  'audio/wave',
+  'audio/mpeg', // .mp3
+  'audio/mp4', // .m4a (some browsers)
+  'audio/x-m4a', // .m4a
+  'audio/aac',
+  'audio/ogg',
+]);
+
+export const MEDIA_ACCEPTED_EXTENSIONS = new Set<string>([
+  '.mp4', '.mov', '.webm', '.m4v',
+  '.wav', '.mp3', '.m4a', '.aac', '.ogg',
+]);
+
+/**
+ * Per-plan cap for the media (video/audio) presigned-upload path.
+ * Base on-camera videos (15-60s @1080p) and voice samples need far
+ * more than the 5/10MB document caps. free=0 keeps uploads gated to
+ * paid plans, consistent with UPLOAD_BYTE_LIMIT.
+ */
+export const MEDIA_UPLOAD_BYTE_LIMIT: Record<PlanId, number> = {
+  free: 0,
+  basic: 200 * 1024 * 1024,
+  pro: 200 * 1024 * 1024,
+};
+
+export type UploadClass = 'document' | 'media';
+
+/**
+ * Classify an upload by MIME/extension into the document vs media lane.
+ * Returns null when neither allowlist matches (the route 415s). Media
+ * is checked first so an .mp4 sent as application/octet-stream still
+ * lands in the media lane via the extension fallback.
+ */
+export function classifyUpload(filename: string, mimetype: string): UploadClass | null {
+  const dotIdx = filename.lastIndexOf('.');
+  const ext = dotIdx >= 0 ? filename.slice(dotIdx).toLowerCase() : '';
+  const mime = mimetype.toLowerCase();
+  if (MEDIA_ACCEPTED_MIMES.has(mime) || (ext.length > 0 && MEDIA_ACCEPTED_EXTENSIONS.has(ext))) {
+    return 'media';
+  }
+  if (ACCEPTED_MIMES.has(mime) || (ext.length > 0 && ACCEPTED_EXTENSIONS.has(ext))) {
+    return 'document';
+  }
+  return null;
+}
+
+/** Resolve the byte cap for a given upload class + plan. */
+export function uploadByteLimit(cls: UploadClass, plan: PlanId): number {
+  return cls === 'media' ? MEDIA_UPLOAD_BYTE_LIMIT[plan] : UPLOAD_BYTE_LIMIT[plan];
+}
+
+/**
  * Macro-enabled Office files (.docm/.xlsm/.pptm + their template
  * variants) carry executable VBA. The upload gate rejects them with a
  * clear message BEFORE storage; the template-fill safety layer
@@ -201,6 +267,109 @@ export class FileService {
       'file: stored upload',
     );
     return row;
+  }
+
+  /**
+   * Phase 1 (video) — begin a direct-to-R2 presigned PUT upload, so a
+   * large file (≤200MB base video) never streams through the
+   * orchestrator / multer memoryStorage. Writes a `status='pending'`
+   * task_files row (sizeBytes = client-DECLARED, provisional) and
+   * returns the presigned PUT URL the browser uploads to directly. The
+   * route layer has already validated mime + declared size against the
+   * caller's plan; the REAL size is verified in `confirmUpload` via a
+   * HEAD once the bytes land.
+   *
+   * Returns null when the provider can't presign (local dev) — the
+   * caller falls back to the multipart `/files/upload` path.
+   */
+  async createPendingUpload(opts: {
+    userIdInternal: number;
+    userExternalId: string;
+    filename: string;
+    mimetype: string;
+    declaredSize: number;
+  }): Promise<{ fileId: string; uploadUrl: string; storagePath: string } | null> {
+    const externalId = newExternalId('file');
+    const safeFilename = sanitiseFilename(opts.filename);
+    const signed = await this.storage.getSignedPutUrl({
+      userExternalId: opts.userExternalId,
+      kind: 'input',
+      fileExternalId: externalId,
+      filename: safeFilename,
+      contentType: opts.mimetype,
+    });
+    if (!signed) return null;
+    await this.db.insert(taskFiles).values({
+      externalId,
+      userId: opts.userIdInternal,
+      taskId: null,
+      kind: 'input',
+      filename: safeFilename,
+      mimetype: opts.mimetype,
+      sizeBytes: opts.declaredSize,
+      storagePath: signed.storagePath,
+      status: 'pending',
+    });
+    this.logger.info(
+      {
+        fileId: externalId,
+        userId: opts.userExternalId,
+        mimetype: opts.mimetype,
+        declaredSize: opts.declaredSize,
+      },
+      'file: pending presigned upload created',
+    );
+    return { fileId: externalId, uploadUrl: signed.url, storagePath: signed.storagePath };
+  }
+
+  /**
+   * Phase 1 (video) — finalize a presigned-PUT upload. Verifies the
+   * object actually landed (HEAD), reads its REAL size (the client's
+   * declared size is untrusted), enforces the per-plan cap, and flips
+   * the row to status='active'. On oversize it deletes both the object
+   * and the pending row so a cap-buster can't leave a 200MB+ orphan in
+   * the bucket. Returns the finalized row or a typed failure the route
+   * maps to a 4xx.
+   */
+  async confirmUpload(opts: {
+    userIdInternal: number;
+    fileExternalId: string;
+    plan: PlanId;
+  }): Promise<
+    | { ok: true; row: TaskFile }
+    | { ok: false; reason: 'not_found' | 'not_uploaded' | 'too_large'; sizeBytes?: number }
+  > {
+    const [row] = await this.db
+      .select()
+      .from(taskFiles)
+      .where(eq(taskFiles.externalId, opts.fileExternalId))
+      .limit(1);
+    if (!row || row.userId !== opts.userIdInternal) return { ok: false, reason: 'not_found' };
+    const meta = await this.storage.stat(row.storagePath);
+    if (!meta) return { ok: false, reason: 'not_uploaded' };
+    // Cap is derived from the STORED mime/filename (what actually landed),
+    // not anything the client re-sends at confirm time.
+    const cap = uploadByteLimit(classifyUpload(row.filename, row.mimetype) ?? 'document', opts.plan);
+    if (meta.sizeBytes > cap) {
+      await this.storage.delete(row.storagePath);
+      await this.db.delete(taskFiles).where(eq(taskFiles.externalId, opts.fileExternalId));
+      return { ok: false, reason: 'too_large', sizeBytes: meta.sizeBytes };
+    }
+    await this.db
+      .update(taskFiles)
+      .set({ status: 'active', sizeBytes: meta.sizeBytes })
+      .where(eq(taskFiles.externalId, opts.fileExternalId));
+    const [updated] = await this.db
+      .select()
+      .from(taskFiles)
+      .where(eq(taskFiles.externalId, opts.fileExternalId))
+      .limit(1);
+    if (!updated) return { ok: false, reason: 'not_found' };
+    this.logger.info(
+      { fileId: opts.fileExternalId, sizeBytes: meta.sizeBytes },
+      'file: presigned upload confirmed',
+    );
+    return { ok: true, row: updated };
   }
 
   /**

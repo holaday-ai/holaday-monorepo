@@ -34,8 +34,10 @@ import {
   ACCEPTED_MIMES,
   FileService,
   UPLOAD_BYTE_LIMIT,
+  classifyUpload,
   isMacroOfficeUpload,
   decodeUploadFilename,
+  uploadByteLimit,
 } from './files/file-service.js';
 import { nextExpiryFor, type PayPalAdapter, type PlanId } from './payment/index.js';
 import { QuotaService } from './quota/quota-service.js';
@@ -516,6 +518,169 @@ export function createHttpApp(deps: HttpAppDeps) {
         'file upload route crashed',
       );
       res.status(500).json({ error: 'upload_failed' });
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // Phase 1 (video) — direct-to-R2 presigned PUT upload (two-phase).
+  //
+  //   POST /files/upload-url      body { filename, mimetype, sizeBytes }
+  //                               → { fileId, uploadUrl, method:'PUT',
+  //                                   requiredHeaders, expiresInSeconds }
+  //                               Validates plan / mime / declared size,
+  //                               writes a status='pending' row, issues a
+  //                               presigned R2 PUT URL. The browser PUTs
+  //                               the bytes straight to R2, bypassing this
+  //                               process (no multer / memoryStorage), so
+  //                               a 200MB base video never sits in RAM.
+  //   POST /files/upload-confirm  body { fileId }
+  //                               → { fileId, filename, mimetype, size }
+  //                               HEADs the object, enforces the REAL size
+  //                               against the plan cap, flips to 'active'.
+  //
+  // Requires STORAGE_PROVIDER=r2 + bucket CORS allowing PUT from the SPA
+  // origin. On local dev the provider can't presign → 501 and the SPA
+  // falls back to the multipart /files/upload path.
+  // ---------------------------------------------------------------------
+  app.post('/files/upload-url', async (req, res) => {
+    const userExternalId = (req as express.Request & { userId?: string }).userId;
+    if (!userExternalId) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    const body = req.body as { filename?: unknown; mimetype?: unknown; sizeBytes?: unknown };
+    const filename = typeof body.filename === 'string' ? decodeUploadFilename(body.filename) : '';
+    const mimetype = typeof body.mimetype === 'string' ? body.mimetype : '';
+    const declaredSize =
+      typeof body.sizeBytes === 'number' && Number.isInteger(body.sizeBytes) ? body.sizeBytes : -1;
+    if (!filename || !mimetype || declaredSize <= 0) {
+      res
+        .status(400)
+        .json({ error: 'bad_request', message: 'filename, mimetype, sizeBytes required' });
+      return;
+    }
+    try {
+      const [user] = await db
+        .select({ id: users.id, plan: users.plan })
+        .from(users)
+        .where(eq(users.externalId, userExternalId))
+        .limit(1);
+      if (!user) {
+        res.status(401).json({ error: 'unknown user' });
+        return;
+      }
+      const planId: PlanId = user.plan === 'basic' || user.plan === 'pro' ? user.plan : 'free';
+      if (isMacroOfficeUpload(filename, mimetype)) {
+        res.status(415).json({
+          error: 'macro_office_not_supported',
+          message:
+            '出于安全考虑，暂不支持含宏的 Office 文件（.docm/.xlsm 等）。请上传不含宏的 .docx / .xlsx 文件。',
+        });
+        return;
+      }
+      const cls = classifyUpload(filename, mimetype);
+      if (!cls) {
+        res.status(415).json({
+          error: 'unsupported_file_type',
+          message: `不支持的文件类型：${mimetype || '未知'}`,
+        });
+        return;
+      }
+      const cap = uploadByteLimit(cls, planId);
+      if (cap === 0) {
+        res.status(403).json({
+          error: 'plan_does_not_allow_uploads',
+          message: '免费版不支持文件上传，升级到基础版即可使用',
+        });
+        return;
+      }
+      if (declaredSize > cap) {
+        res.status(413).json({
+          error: 'file_too_large',
+          message: `文件超过当前套餐限制（${Math.floor(cap / (1024 * 1024))}MB）`,
+        });
+        return;
+      }
+      const pending = await fileService.createPendingUpload({
+        userIdInternal: user.id,
+        userExternalId,
+        filename,
+        mimetype,
+        declaredSize,
+      });
+      if (!pending) {
+        res.status(501).json({
+          error: 'presigned_unavailable',
+          message: '当前环境不支持直传，请使用普通上传',
+        });
+        return;
+      }
+      res.status(200).json({
+        fileId: pending.fileId,
+        uploadUrl: pending.uploadUrl,
+        method: 'PUT',
+        requiredHeaders: { 'Content-Type': mimetype },
+        expiresInSeconds: 900,
+      });
+    } catch (err) {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        'files/upload-url route crashed',
+      );
+      res.status(500).json({ error: 'upload_url_failed' });
+    }
+  });
+
+  app.post('/files/upload-confirm', async (req, res) => {
+    const userExternalId = (req as express.Request & { userId?: string }).userId;
+    if (!userExternalId) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    const body = req.body as { fileId?: unknown };
+    const fileId = typeof body.fileId === 'string' ? body.fileId : '';
+    if (!fileId) {
+      res.status(400).json({ error: 'bad_request', message: 'fileId required' });
+      return;
+    }
+    try {
+      const [user] = await db
+        .select({ id: users.id, plan: users.plan })
+        .from(users)
+        .where(eq(users.externalId, userExternalId))
+        .limit(1);
+      if (!user) {
+        res.status(401).json({ error: 'unknown user' });
+        return;
+      }
+      const planId: PlanId = user.plan === 'basic' || user.plan === 'pro' ? user.plan : 'free';
+      const result = await fileService.confirmUpload({
+        userIdInternal: user.id,
+        fileExternalId: fileId,
+        plan: planId,
+      });
+      if (!result.ok) {
+        if (result.reason === 'not_found') {
+          res.status(404).json({ error: 'file_not_found' });
+        } else if (result.reason === 'not_uploaded') {
+          res.status(409).json({ error: 'not_uploaded', message: '文件尚未上传完成，请重试' });
+        } else {
+          res.status(413).json({ error: 'file_too_large', message: '文件超过当前套餐限制' });
+        }
+        return;
+      }
+      res.status(200).json({
+        fileId: result.row.externalId,
+        filename: result.row.filename,
+        mimetype: result.row.mimetype,
+        size: result.row.sizeBytes,
+      });
+    } catch (err) {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        'files/upload-confirm route crashed',
+      );
+      res.status(500).json({ error: 'upload_confirm_failed' });
     }
   });
 

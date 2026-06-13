@@ -50,6 +50,18 @@ export const users = mysqlTable(
     phone: varchar('phone', { length: 20 }),
     phoneVerified: boolean('phone_verified').notNull().default(false),
     /**
+     * Phase 1 (video) — onboarding assets. Both NULL until the user
+     * completes video onboarding.
+     * - `qwenVoiceId`: voice_id from Qwen3-TTS-VC enrollment
+     *   (DashScope-intl), reused on every synthesis call.
+     * - `baseVideoFileId`: task_files.external_id of the user's base
+     *   on-camera video (kind='input') — the LatentSync lip-sync base.
+     *   Soft reference (no FK) so it stays nullable and decoupled from
+     *   task_files retention.
+     */
+    qwenVoiceId: varchar('qwen_voice_id', { length: 128 }),
+    baseVideoFileId: varchar('base_video_file_id', { length: 32 }),
+    /**
      * Open-pool role ids the Basic-plan user has actively chosen
      * (max 5). Pro plan ignores this — they get all 33 by default.
      * Stored as JSON so future schemas can carry per-pick metadata

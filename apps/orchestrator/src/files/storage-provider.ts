@@ -38,6 +38,7 @@ import path from 'node:path';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -80,6 +81,28 @@ export interface GetSignedUrlOptions {
   downloadFilename?: string;
 }
 
+export interface PutUrlInput {
+  /** User's external_id (`usr_…`). Scopes the storage key. */
+  userExternalId: string;
+  /** input = user upload, output = agent-generated. Drives the key prefix. */
+  kind: FileKind;
+  /** File's external_id (`file_…`). Collision-free per-file key segment. */
+  fileExternalId: string;
+  /** Original filename (already sanitised by caller). */
+  filename: string;
+  /** MIME the client must send as Content-Type on the PUT (signed in). */
+  contentType: string;
+  /** TTL of the issued URL. Defaults to 15 minutes — long enough for a
+   * 200MB upload on a slow link, short enough to limit replay. */
+  expiresInSeconds?: number;
+}
+
+/** Object metadata from a HEAD — size + content-type without the body. */
+export interface StatResult {
+  sizeBytes: number;
+  contentType?: string;
+}
+
 export interface StorageProvider {
   /** Persist a buffer; returns the opaque storage handle for later get/delete. */
   put(input: PutInput): Promise<{ storagePath: StoragePath }>;
@@ -94,6 +117,24 @@ export interface StorageProvider {
    * already used by FileDownloadCard.
    */
   getSignedUrl(storagePath: StoragePath, opts?: GetSignedUrlOptions): Promise<string | null>;
+  /**
+   * Return a short-lived URL the client PUTs raw bytes to directly
+   * (browser → R2), so a large upload never streams through the
+   * orchestrator process / multer memoryStorage. Returns `null` for
+   * providers without native signing (local disk) — the caller then
+   * falls back to the multipart `/files/upload` path.
+   */
+  getSignedPutUrl(
+    input: PutUrlInput,
+  ): Promise<{ url: string; storagePath: StoragePath } | null>;
+  /**
+   * Cheap metadata read (HEAD) — size + content-type without fetching
+   * the body. Used to verify a presigned-PUT upload actually landed and
+   * to read its real size for the per-plan cap check (the client's
+   * declared size is untrusted). Returns `null` when the object is
+   * missing.
+   */
+  stat(storagePath: StoragePath): Promise<StatResult | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +196,28 @@ export class LocalStorageProvider implements StorageProvider {
   ): Promise<string | null> {
     return null;
   }
+
+  async getSignedPutUrl(
+    _input: PutUrlInput,
+  ): Promise<{ url: string; storagePath: StoragePath } | null> {
+    // Local disk can't issue a presigned PUT — the caller falls back to
+    // the multipart `/files/upload` path on local dev.
+    return null;
+  }
+
+  async stat(storagePath: StoragePath): Promise<StatResult | null> {
+    try {
+      const s = await fs.stat(storagePath);
+      return { sizeBytes: s.size };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      this.logger.warn(
+        { err: errMsg(err), path: storagePath },
+        'storage:local: stat failed',
+      );
+      return null;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -204,7 +267,12 @@ export class R2StorageProvider implements StorageProvider {
       });
   }
 
-  private keyFor(input: PutInput): string {
+  private keyFor(input: {
+    userExternalId: string;
+    kind: FileKind;
+    fileExternalId: string;
+    filename: string;
+  }): string {
     // Same logical path shape as local for migration parity. R2 has no
     // notion of directories — slashes are just key characters.
     return `${input.userExternalId}/${input.kind}/${input.fileExternalId}/${input.filename}`;
@@ -293,6 +361,53 @@ export class R2StorageProvider implements StorageProvider {
       this.logger.warn(
         { err: errMsg(err), path: storagePath },
         'storage:r2: getSignedUrl failed',
+      );
+      return null;
+    }
+  }
+
+  async getSignedPutUrl(
+    input: PutUrlInput,
+  ): Promise<{ url: string; storagePath: StoragePath } | null> {
+    const key = this.keyFor(input);
+    try {
+      const cmd = new PutObjectCommand({
+        Bucket: this.config.bucket,
+        Key: key,
+        ContentType: input.contentType,
+      });
+      const url = await getSignedUrl(this.client, cmd, {
+        expiresIn: input.expiresInSeconds ?? 900,
+      });
+      return { url, storagePath: key };
+    } catch (err) {
+      this.logger.warn(
+        { err: errMsg(err), path: key },
+        'storage:r2: getSignedPutUrl failed',
+      );
+      return null;
+    }
+  }
+
+  async stat(storagePath: StoragePath): Promise<StatResult | null> {
+    try {
+      const res = await this.client.send(
+        new HeadObjectCommand({
+          Bucket: this.config.bucket,
+          Key: storagePath,
+        }),
+      );
+      return {
+        sizeBytes: typeof res.ContentLength === 'number' ? res.ContentLength : 0,
+        ...(res.ContentType ? { contentType: res.ContentType } : {}),
+      };
+    } catch (err) {
+      const code = (err as { name?: string }).name;
+      // NoSuchKey/NotFound is the HEAD 404 — object never landed.
+      if (code === 'NoSuchKey' || code === 'NotFound') return null;
+      this.logger.warn(
+        { err: errMsg(err), path: storagePath, code },
+        'storage:r2: stat failed',
       );
       return null;
     }

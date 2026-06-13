@@ -96,6 +96,12 @@ function makeFakeStorage(opts: { failOn?: string } = {}) {
     async getSignedUrl() {
       return null;
     },
+    async getSignedPutUrl() {
+      return null;
+    },
+    async stat() {
+      return null;
+    },
   };
   return { storage, puts, deletes };
 }
