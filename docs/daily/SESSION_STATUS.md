@@ -8,13 +8,17 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`2617392`
-（2026-06-13；#1 模板填充 E10 两个 P0 修复部署 prod，restart 640，healthz ok，build tsc0，
-keys in process（GEMINI+ANTHROPIC）；preflight 实读 live HEAD=`f60e698`（ancestor of 2617392）
-→ FF-safe（**安全闸首次真实部署生效**）；无新 migration。修复：xlsx 多行循环 block-duplication
-（本周完成事项 3 行任务不再丢）+ 下载 CJK 文件名 RFC6266（filename*=UTF-8 + ASCII fallback）。
-E10 live 复测：multi-row 3 行全到、status=completed、下载名 周报模板-已填充.xlsx 正确。
-前态：`f60e698` restart 639（视频 #4 步骤1，migration 0034 已 apply prod）。）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`a139887`
+（2026-06-14；#2 A股 ④ matcher E03/E16 精修部署 prod，restart 641，healthz ok，build tsc0，
+preflight 实读 live HEAD=`2617392`（ancestor of a139887）→ FF-safe；akshare-mcp 同步重启（停用词）；
+无新 migration。修复（Phase 0 评测暴露的 ④ matcher 两处过激，prod 日志实证根因）：
+E03「X 为什么涨」因素归纳③不再被裸词「后市」误降级——gate 改「后市+方向词」才算预测、
+中性「后市表现/走势」放行（真买卖建议/割肉/补仓仍降级）；E16「查今天A股三大指数收盘」不再
+误命中「今天国际(300532)」——走新**指数 lane**（确定性三大指数速览卡）+ name-search 收紧
+（indexIntent/长查询跳过）+ 服务端常见词停用词。**真路径复测**（createCaller 打 prod）：
+E16→executorLane=ashare_index 出大盘速览卡；E03→出③段、尾「以上因素与股价变动的关联未经证实」、
+未降级。全量 2643 测绿（+13 回归锁 E03/E16 原文）。
+前态：`2617392`（#1 模板填充 E10 两个 P0）；`f60e698`（视频 #4 步骤1，migration 0034）。）
 
 ---
 
