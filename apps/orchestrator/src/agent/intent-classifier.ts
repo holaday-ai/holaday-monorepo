@@ -45,8 +45,11 @@ const CACHE = new Map<string, CacheEntry>();
 const CACHE_MAX = 500;
 const CACHE_TTL_MS = 60 * 60 * 1_000;
 
-function cacheKey(intent: string): string {
-  return intent.trim().toLowerCase().slice(0, 280);
+function cacheKey(intent: string, hasFileAttachment: boolean): string {
+  // The soft template-fill route (§5) decides differently with vs without an
+  // attachment, so the file flag MUST be part of the key — otherwise a
+  // file-bearing "填入模板留空" decision would be served to a no-file caller.
+  return `${hasFileAttachment ? 'F' : '_'}:${intent.trim().toLowerCase().slice(0, 280)}`;
 }
 
 function cacheGet(key: string): CacheEntry | null {
@@ -82,6 +85,13 @@ export interface ClassifyOpts {
   client?: Anthropic | null;
   model?: string;
   timeoutMs?: number;
+  /**
+   * Whether the task carries ≥1 uploaded file (fileIds non-empty). Consumed
+   * ONLY by the fileIds-aware soft template-fill route (§5, 2026-06-13): an
+   * attachment + a fill clue relaxes the strict pattern's adjacency
+   * requirement. Defaults to false — every other lane is text-only.
+   */
+  hasFileAttachment?: boolean;
 }
 
 /**
@@ -349,6 +359,31 @@ function matchTemplateFillPattern(intent: string): string | null {
   return null;
 }
 
+// fileIds-aware SOFT template-fill (§5, 2026-06-13). Pure keyword matching
+// can't keep up with the long tail of phrasing: "把聊天记录信息填入周报模板
+// 缺的留空" misses EVERY strict pattern above because 周报 wedges 填入↔模板
+// apart and "缺的留空" isn't "里的空格", so it degraded to a generic task.
+// When the user ALSO uploaded a file that's a strong disambiguator — so we
+// relax the strict adjacency, but ONLY for file-bearing tasks (the runner
+// degrades honestly if the attachment isn't actually a docx/xlsx).
+//
+// The gate is a CONJUNCTION — a fill verb AND a template/blank noun — which
+// is exactly what keeps ordinary attachment tasks out: "总结这个文档" /
+// "翻译这个PDF" / "分析这张表" carry neither a fill verb (only a fill verb is
+// 填/录入/补全, never 总结/翻译/分析) nor — for the doc cases — a template
+// noun, so they are never upgraded. A bare template noun is not enough.
+const TEMPLATE_FILL_SOFT_FILL_VERB = /填|录入|补(?:全|齐|上)/;
+const TEMPLATE_FILL_SOFT_TARGET =
+  /模板|表格|表里|空格|空位|留空|空白|占位符?|字段|待填|套表/;
+
+function matchTemplateFillSoft(intent: string): string | null {
+  // Reuse the strict veto: 做/设计/写一个模板 + 模板怎么写/范例 are never fills.
+  if (TEMPLATE_FILL_NEGATIVE.test(intent)) return null;
+  if (!TEMPLATE_FILL_SOFT_FILL_VERB.test(intent)) return null;
+  if (!TEMPLATE_FILL_SOFT_TARGET.test(intent)) return null;
+  return 'file+fill+template-noun';
+}
+
 const NON_EXECUTION_PLATFORM_NAMES =
   '(?:gmail|linkedin|slack|notion|github|amazon|youtube|instagram|twitter|x\\.com|reddit|shopify|飞书|google forms|google docs|google sheets|google slides|google calendar|google flights|google drive|dropbox|onedrive|icloud drive|hubspot|salesforce|stripe|calendly|trello|asana|jira|zendesk|intercom|linear|monday(?:\\.com)?|携程|飞猪|去哪儿|去哪网|同程|美团|京东|淘宝|天猫|拼多多|豆瓣|百度地图|高德地图|大众点评)';
 
@@ -521,14 +556,29 @@ interface RouteDecision {
   match?: string;
 }
 
-function decide(intent: string): RouteDecision {
-  // 0a. Template-fill — the user wants to fill THEIR uploaded Office
+function decide(
+  intent: string,
+  ctx: { hasFileAttachment: boolean },
+): RouteDecision {
+  // 0a. Template-fill (STRICT) — the user wants to fill THEIR uploaded Office
   // template. Checked first: the patterns require an explicit 模板/
   // template context, and this must win over the interaction form-fill
   // pattern ("填写模板里的信息" would otherwise route to browser).
   const templateFill = matchTemplateFillPattern(intent);
   if (templateFill) {
     return { mode: 'template_fill', source: 'kw:template_fill', match: templateFill };
+  }
+
+  // 0a'. Template-fill (SOFT, fileIds-aware) — see matchTemplateFillSoft. Only
+  // fires when a file is attached; the attachment is the safety backstop that
+  // lets us relax the strict adjacency without grabbing ordinary doc tasks.
+  // Placed BEFORE interaction/ecommerce/image so a wedged "把…填入…模板…留空"
+  // (which could otherwise match the browser form-fill pattern) lands here.
+  if (ctx.hasFileAttachment) {
+    const soft = matchTemplateFillSoft(intent);
+    if (soft) {
+      return { mode: 'template_fill', source: 'kw:template_fill_file', match: soft };
+    }
   }
 
   // 0. Product-listing / comparison shopping tasks need the supercar
@@ -600,6 +650,7 @@ function decide(intent: string): RouteDecision {
 
 export async function classifyExecutionMode(opts: ClassifyOpts): Promise<ExecutionMode> {
   const intent = opts.intent.trim();
+  const hasFileAttachment = opts.hasFileAttachment ?? false;
   if (!intent) {
     opts.logger.info(
       { mode: 'generate', source: 'empty-intent' },
@@ -608,7 +659,7 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
     return 'generate';
   }
 
-  const key = cacheKey(intent);
+  const key = cacheKey(intent, hasFileAttachment);
   const cached = cacheGet(key);
   if (cached) {
     opts.logger.info(
@@ -635,9 +686,10 @@ export async function classifyExecutionMode(opts: ClassifyOpts): Promise<Executi
   // generate) still defer to the skill hint when one is installed.
   // This preserves the user's explicit "use this skill" intent for
   // ambiguous prompts while preventing the search-verb foot-gun.
-  const d = decide(intent);
+  const d = decide(intent, { hasFileAttachment });
   const STRONG_SIGNAL_SOURCES = new Set([
     'kw:template_fill',
+    'kw:template_fill_file',
     'kw:image',
     'kw:interaction',
     'kw:url',
