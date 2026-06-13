@@ -18,6 +18,7 @@ import type { PlannedStep } from '../../agent/task-controller.js';
 import { TaskController } from '../../agent/task-controller.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { classifyExecutionMode } from '../../agent/intent-classifier.js';
+import { ashareQaHandlesMode } from '../../agent/a-share/ashare-qa-lane-gate.js';
 import { runGenerateTask } from '../../agent/generate-runner.js';
 import { runScrapeTask } from '../../agent/scrape-runner.js';
 import {
@@ -172,6 +173,15 @@ const BYPASS_CONCURRENCY = 100;
 const BYPASS_RATE = { max: 30, windowMs: 60_000 };
 const GLOBAL_QUEUE_DEPTH_LIMIT = 100;
 
+// Phase 1 #2 ④ — a-share 问答灰度白名单（ASHARE_QA_ALLOWLIST CSV）。flag off 或
+// 不在名单 → a-share 问句落通用路径。空名单 = 全量（widen 后）；非空 = 灰度。
+const ASHARE_QA_ALLOWLIST: ReadonlySet<string> = new Set(
+  (appEnv.ASHARE_QA_ALLOWLIST ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+
 // Module-scope Anthropic client for url-resolver. Cheap to construct
 // but no reason to pay per request — cache once at import time.
 const anthropicForResolver: Anthropic | null = appEnv.ANTHROPIC_API_KEY
@@ -232,6 +242,12 @@ const createInput = z.object({
    * the wire lets us short-circuit the guard cleanly.
    */
   skillId: z.string().min(1).max(64).optional(),
+  /**
+   * Phase 1 #2 ④ — alias for skillId. 历史上 skill/role 字段在本仓库混用，
+   * API 调用方（含对抗实测）常传 `roleId`。接受为 skillId 的别名，避免选了
+   * a-share 技能却因字段名不符落通用路径泄漏建议（Q3 修）。
+   */
+  roleId: z.string().min(1).max(64).optional(),
   /**
    * Optimization #3 R1 — viewport profile the SPA wants for this
    * task's per-Brave geometry. Picked from the user's current
@@ -483,6 +499,7 @@ export const tasksRouter = router({
         id: users.id,
         plan: users.plan,
         selectedRoles: users.selectedRoles,
+        selectedSkills: users.selectedSkills,
       })
       .from(users)
       .where(eq(users.externalId, ctx.userId))
@@ -1101,6 +1118,233 @@ export const tasksRouter = router({
       };
     }
     // ===== end image-mode fork =====
+
+    // ===== a-share 即时问答 fork (Phase 1 #2 ④, flag + allowlist 灰度) =====
+    // 命中 a-share 个股问答 → 自取数组装确定性事实卡 → LLM③解读 → 合规闸门
+    // （越线降级纯数据 + 打日志计数）→ 直接完成任务。镜像 template-fill lane：
+    // 无 agent loop、无 pool slot、背景 async 出答案后 persist + 广播 terminal。
+    // 默认 ASHARE_QA_ENABLED=false：关时落通用 generate 路径，零副作用。
+    // BOSS 拍板门控（持久启用式 + signal-based）：**启用** a-share 技能（users.selectedSkills）
+    // 或显式选技能（skillId/roleId/gatedRole）= 上下文内。上下文内**命中任一 A股信号**（个股
+    // 解析成功 / A股术语 / 持仓语境词 / 自选股整体问）→ 进合规框架（lane 或引导兜底）；**完全无
+    // A股信号**（如「帮我写周报」）→ 放行通用路径，不误拦。per-task 选择器(发 skillId)记 backlog。
+    const ashareSkillEnabled =
+      Array.isArray(userRow.selectedSkills) &&
+      (userRow.selectedSkills as string[]).includes('a-share-analyst');
+    const ashareContext =
+      ashareSkillEnabled ||
+      input.skillId === 'a-share-analyst' ||
+      input.roleId === 'a-share-analyst' ||
+      gatedRole === 'a-share-analyst';
+    // Cross-session guard (#1 session, 2026-06-13, see SESSION_STATUS): only
+    // enter the a-share QA lane for GENERIC info intents — a dedicated lane the
+    // classifier already chose (template_fill / image / browser) must win, or
+    // the matcher hijacks it (bug: "按这个周报模板填充…" → answered as stock 600415).
+    // widen（BOSS 批准，④ 验收关闭）：ASHARE_QA_ALLOWLIST 为空 = 全量用户可用（flag on）；
+    // 非空 = 仅名单内（灰度）。
+    const ashareQaAllowed = ASHARE_QA_ALLOWLIST.size === 0 || ASHARE_QA_ALLOWLIST.has(ctx.userId);
+    if (
+      appEnv.ASHARE_QA_ENABLED &&
+      ashareQaHandlesMode(executionMode) &&
+      anthropicForResolver &&
+      ashareQaAllowed
+    ) {
+      const { resolveAshareQa, resolveAshareInContext } = await import(
+        '../../agent/a-share/ashare-qa-matcher.js'
+      );
+      const { HttpAkshareClient } = await import('../../agent/a-share/akshare-http-client.js');
+      const { listWatchlistForUser } = await import('../../agent/a-share/briefing-service.js');
+      const wl = await listWatchlistForUser(ctx.db, userRow.id);
+      const watchlist = wl.map((w) => ({ symbol: w.symbol, displayName: w.displayName }));
+      const aksClient = new HttpAkshareClient({
+        baseUrl: process.env.AKSHARE_HTTP_URL ?? 'http://127.0.0.1:8848',
+        logger: ctx.logger,
+      });
+      const searchFn = async (q: string) => {
+        const env = await aksClient.searchSymbol(q);
+        return (env.data ?? [])
+          .map((r) => ({
+            symbol: String(r.code ?? ''),
+            displayName: r.name != null ? String(r.name) : null,
+          }))
+          .filter((s) => s.symbol);
+      };
+      let ashareQaMatch: Awaited<ReturnType<typeof resolveAshareQa>> = null;
+      let guidanceNeeded = false;
+      if (ashareContext) {
+        // 上下文内：总是尝试解析；命中信号无个股 → 引导兜底；无信号 → 放行通用。
+        const r = await resolveAshareInContext(
+          { intent: input.intent, watchlist, now: new Date() },
+          searchFn,
+        );
+        ashareQaMatch = r.match;
+        guidanceNeeded = !r.match && r.hasSignal;
+      } else {
+        // 非上下文（未启用/未选技能）：强信号(术语+个股)出 lane，否则放行（无引导兜底）。
+        ashareQaMatch = await resolveAshareQa(
+          {
+            intent: input.intent,
+            roleId: input.skillId ?? input.roleId ?? null,
+            watchlist,
+            now: new Date(),
+          },
+          searchFn,
+        );
+      }
+      if (ashareQaMatch) {
+        const taskId = newExternalId('task');
+        const repo = new TaskRepository(ctx.db);
+        await repo.insertTask(
+          { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
+          {
+            userId: userRow.id,
+            intent: input.intent,
+            roleId: gatedRole === 'none' ? null : gatedRole,
+            opusUsed: false,
+          },
+        );
+        ctx.logger.info(
+          {
+            taskId,
+            userId: ctx.userId,
+            executorLane: 'ashare_qa',
+            kind: ashareQaMatch.kind,
+            stocks: ashareQaMatch.stocks.map((s) => s.symbol),
+          },
+          'task: executor lane selected',
+        );
+        broadcastSubStatus(ctx.userId, taskId, 'generating');
+
+        const anthropicClient = anthropicForResolver;
+        const qaModel = appEnv.ASHARE_QA_MODEL;
+        void (async () => {
+          const { runAshareQa } = await import('../../agent/a-share/ashare-qa-runner.js');
+          // 技能 markdown（人设/红线）→ DB skills.manifest.body；缺则内置兜底人设
+          // （合规硬约束已在 runner 的 system prompt，故缺 markdown 也安全）。
+          let skillMarkdown: string | null = null;
+          try {
+            const { skills } = await import('../../db/schema/skills.js');
+            const [row] = await ctx.db
+              .select({ manifest: skills.manifest })
+              .from(skills)
+              .where(eq(skills.slug, 'a-share-analyst'))
+              .limit(1);
+            const body = (row?.manifest as { body?: unknown } | null)?.body;
+            if (typeof body === 'string' && body.trim()) skillMarkdown = body;
+          } catch (err) {
+            ctx.logger.warn({ err, taskId }, 'ashare-qa: 技能 markdown 读取失败，用兜底人设');
+          }
+          const FALLBACK_PERSONA =
+            '你是严谨的 A股信息分析助手：只聚合公开信息、客观陈述事实，绝不荐股、不预测涨跌、不给买卖或择时建议。';
+          let answer: string;
+          try {
+            const r = await runAshareQa(
+              {
+                client: aksClient,
+                skillMarkdown: skillMarkdown ?? FALLBACK_PERSONA,
+                interpret: async ({ system, user }) => {
+                  const resp = await anthropicClient.messages.create({
+                    model: qaModel,
+                    max_tokens: 700,
+                    system,
+                    messages: [{ role: 'user', content: user }],
+                  });
+                  const block = resp.content[0];
+                  return block && block.type === 'text' ? block.text : '';
+                },
+                logger: ctx.logger,
+                now: new Date(),
+                context: { userId: ctx.userId, taskId },
+              },
+              ashareQaMatch,
+            );
+            answer = r.answer;
+            ctx.logger.info(
+              { taskId, degraded: r.degraded, reason: r.reason, interpreted: r.interpreted },
+              'ashare-qa: lane done',
+            );
+          } catch (err) {
+            ctx.logger.error({ err, taskId }, 'ashare-qa: lane failed');
+            answer = '抱歉，A股问答处理失败，请稍后重试。';
+          }
+          try {
+            const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+            if (taskInternalId != null) {
+              await repo.persistVisionOutcome(taskId, {
+                status: 'completed',
+                summary: answer,
+                tickCount: 1,
+                metadata: { executionMode: 'generate', lane: 'ashare_qa' },
+              });
+            }
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'completed',
+              summary: answer,
+            });
+          } catch (err) {
+            ctx.logger.error({ err, taskId }, 'ashare-qa: persist/broadcast failed');
+          }
+        })();
+
+        return {
+          taskId,
+          status: 'executing' as const,
+          steps: [],
+          executionMode: 'generate' as const,
+        };
+      }
+      // P0 兜底（BOSS 要求①）：上下文内命中 A股信号（持仓语境词/术语）但没解析出个股 →
+      // 静态引导话术，**绝不落通用 LLM**。无 A股信号的问句 guidanceNeeded=false，正常放行
+      // 通用路径（如「帮我写周报」不误拦）。
+      if (guidanceNeeded) {
+        const { ASHARE_QA_GUIDANCE } = await import('../../agent/a-share/ashare-qa-runner.js');
+        const taskId = newExternalId('task');
+        const repo = new TaskRepository(ctx.db);
+        await repo.insertTask(
+          { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
+          {
+            userId: userRow.id,
+            intent: input.intent,
+            roleId: gatedRole === 'none' ? null : gatedRole,
+            opusUsed: false,
+          },
+        );
+        ctx.logger.info(
+          { taskId, userId: ctx.userId, executorLane: 'ashare_qa_guidance' },
+          'task: executor lane selected',
+        );
+        void (async () => {
+          try {
+            const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
+            if (taskInternalId != null) {
+              await repo.persistVisionOutcome(taskId, {
+                status: 'completed',
+                summary: ASHARE_QA_GUIDANCE,
+                tickCount: 1,
+                metadata: { executionMode: 'generate', lane: 'ashare_qa_guidance' },
+              });
+            }
+            broadcastToUser(ctx.userId, {
+              type: 'server.task.terminal',
+              taskId,
+              status: 'completed',
+              summary: ASHARE_QA_GUIDANCE,
+            });
+          } catch (err) {
+            ctx.logger.error({ err, taskId }, 'ashare-qa-guidance: persist/broadcast failed');
+          }
+        })();
+        return {
+          taskId,
+          status: 'executing' as const,
+          steps: [],
+          executionMode: 'generate' as const,
+        };
+      }
+    }
+    // ===== end a-share QA fork =====
 
     // ===== template-fill fork (Phase 1 #1) =====
     // Fill a user-uploaded Office template (docx/xlsx) deterministically
