@@ -1,7 +1,8 @@
 /**
  * Messy-material end-to-end fixture (Phase 1 #1) — pinned in CI because this
  * exact scenario caught real bugs during acceptance (2026-06-13): the derived-
- * calc re-check ([待核对]), the xlsx multi-row loop degrade, and honest missing.
+ * calc re-check ([待核对]), the xlsx multi-row loop EXPANSION (E10 P0 — was a
+ * data-losing skip, now block-duplicated), and honest missing.
  *
  * Deterministic + offline: builds a 14-field weekly-report xlsx template, feeds
  * a FIXED model mapping (the shape the real model produced), runs the full
@@ -56,7 +57,7 @@ async function buildWeeklyTemplate(): Promise<Buffer> {
   ws.getCell('A9').value = '上周订单：{orders_last}';
   ws.getCell('A10').value = '订单环比：{orders_wow}%';
   ws.getCell('A11').value = '毛利：{gross_profit}'; // derived, unit-confused → [待核对]
-  ws.getCell('A13').value = '{#tasks}';              // multi-row loop → degrade
+  ws.getCell('A13').value = '{#tasks}';              // multi-row loop → block-duplicated (E10)
   ws.getCell('A14').value = '{task_name} — {task_status}';
   ws.getCell('A15').value = '{/tasks}';
   ws.getCell('A17').value = '任务数：{task_count}';
@@ -103,20 +104,22 @@ describe('messy-material e2e (2026-06-13 acceptance fixture)', () => {
       logger: fakeLogger(),
     });
 
-    // terminal status: partial_success (missing remark + flagged gross_profit + skipped tasks)
+    // terminal status: partial_success — now driven by (missing remark +
+    // flagged gross_profit) ONLY; the multi-row loop expands so it no longer
+    // contributes a skip.
     expect(out.status).toBe('partial_success');
     expect(out.format).toBe('xlsx');
 
-    // multi-row loop degraded (not failed)
-    expect(out.skippedLoops).toContain('tasks');
+    // P0/E10 — multi-row loop fully expanded, NOT skipped
+    expect(out.skippedLoops ?? []).toHaveLength(0);
     // honest missing
     expect(out.missing).toContain('remark');
-    // the summary surfaces the derived re-check, the degrade, and the missing
-    // field honestly (gross_profit flagged; the correct derivations are NOT).
+    // the summary surfaces the derived re-check + the missing field honestly
+    // (gross_profit flagged; the correct derivations are NOT).
     expect(out.summary).toContain('待核对');
     expect(out.summary).toContain('gross_profit');
-    expect(out.summary).toContain('循环段未填充');
     expect(out.summary).toContain('remark');
+    expect(out.summary).not.toContain('循环段未填充'); // nothing skipped now
     // (per-field re-check outcome is asserted on the downloaded cells below:
     //  A7/A10 hold the correct derived values, A11 is [待核对].)
 
@@ -134,10 +137,12 @@ describe('messy-material e2e (2026-06-13 acceptance fixture)', () => {
     expect(cell('A8')).toBe('本周订单：1500');
     expect(cell('A10')).toBe('订单环比：25%'); // derived, re-check passed
     expect(cell('A11')).toBe('毛利：[待核对]'); // derived, unit-confused → flagged
+    // P0/E10 — the 3-task multi-row loop expanded in place (rows 13-15);
+    // markers gone, every task row present (this is the data that was lost).
+    expect(cell('A13')).toBe('拉新 — 已完成');
+    expect(cell('A14')).toBe('上架 — 进行中');
+    expect(cell('A15')).toBe('对账 — 待办');
     expect(cell('A17')).toBe('任务数：3');
     expect(cell('A18')).toBe('备注：'); // remark missing → blank
-    // multi-row loop markers cleared (no {tag} leak)
-    expect(cell('A13')).not.toContain('{');
-    expect(cell('A15')).not.toContain('{');
   });
 });

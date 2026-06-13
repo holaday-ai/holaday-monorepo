@@ -128,23 +128,102 @@ describe('fill (xlsx)', () => {
     expect(ws.getCell('A2').value).toBe('结尾');
   });
 
-  it('DEGRADES a multi-row loop — skips it, keeps other fields (P0 regression fix)', async () => {
+  // P0 / E10 — multi-row loop bodies are now block-duplicated (previously the
+  // whole section was skipped and the data lost). This is the E10 shape:
+  // {#tasks} on its own row, a body row of fields, {/tasks} on its own row.
+  it('EXPANDS a multi-row loop (own-row markers) into one body row per item', async () => {
     const buf = await buildXlsx((ws) => {
-      ws.getCell('A1').value = '客户：{client_name}';
-      ws.getCell('A3').value = '{#items}';
-      ws.getCell('A4').value = '{desc}';
-      ws.getCell('A5').value = '{/items}';
+      ws.getCell('A1').value = '本周完成事项：';
+      ws.getCell('A2').value = '{#tasks}'; // pure open marker (delimiter)
+      ws.getCell('A3').value = '{seq}';
+      ws.getCell('B3').value = '{title}';
+      ws.getCell('C3').value = '{status}';
+      ws.getCell('A4').value = '{/tasks}'; // pure close marker (delimiter)
+      ws.getCell('A5').value = '下周计划：{plan}';
     });
     const { buffer: out, skippedLoops } = await fill(buf, {
-      client_name: '张三',
-      items: [{ desc: 'x' }],
+      plan: '灰度发布',
+      tasks: [
+        { seq: '1', title: '登录模块开发', status: '已完成' },
+        { seq: '2', title: '支付联调', status: '进行中' },
+        { seq: '3', title: '报表导出', status: '已完成' },
+      ],
     });
-    expect(skippedLoops).toContain('items'); // reported, not thrown
+    expect(skippedLoops).toHaveLength(0); // NOT skipped — fully expanded
     const ws = await reload(out);
-    expect(ws.getCell('A1').value).toBe('客户：张三'); // non-loop field still filled
-    // the skipped loop's leftover placeholders are cleared (no {tag} leak)
-    expect(String(ws.getCell('A3').value ?? '')).not.toContain('{');
-    expect(String(ws.getCell('A4').value ?? '')).not.toContain('{');
+    expect(ws.getCell('A1').value).toBe('本周完成事项：');
+    // delimiter marker rows are gone; 3 task rows take their place at rows 2-4
+    expect(ws.getCell('A2').value).toBe('1');
+    expect(ws.getCell('B2').value).toBe('登录模块开发');
+    expect(ws.getCell('C2').value).toBe('已完成');
+    expect(ws.getCell('A3').value).toBe('2');
+    expect(ws.getCell('B3').value).toBe('支付联调');
+    expect(ws.getCell('A4').value).toBe('3');
+    expect(ws.getCell('B4').value).toBe('报表导出');
+    // content below the loop shifts up to row 5 and is filled
+    expect(ws.getCell('A5').value).toBe('下周计划：灰度发布');
+    // no {tag} leaks anywhere
+    let leak = false;
+    ws.eachRow((row) => row.eachCell((c) => { if (String(c.value ?? '').includes('{')) leak = true; }));
+    expect(leak).toBe(false);
+  });
+
+  it('multi-row loop: preserves the body cells styles + row height across copies', async () => {
+    const buf = await buildXlsx((ws) => {
+      ws.getCell('A1').value = '{#rows}';
+      const body = ws.getCell('A2');
+      body.value = '{label}';
+      body.font = { bold: true, color: { argb: 'FF0000FF' } };
+      body.numFmt = '@';
+      ws.getRow(2).height = 33;
+      ws.getCell('A3').value = '{/rows}';
+    });
+    const { buffer: out, skippedLoops } = await fill(buf, {
+      rows: [{ label: '甲' }, { label: '乙' }],
+    });
+    expect(skippedLoops).toHaveLength(0);
+    const ws = await reload(out);
+    expect(ws.getCell('A1').value).toBe('甲');
+    expect(ws.getCell('A2').value).toBe('乙');
+    // style + height carried onto BOTH expanded rows
+    expect(ws.getCell('A1').font?.bold).toBe(true);
+    expect(ws.getCell('A1').font?.color?.argb).toBe('FF0000FF');
+    expect(ws.getCell('A2').font?.bold).toBe(true);
+    expect(ws.getRow(1).height).toBe(33);
+    expect(ws.getRow(2).height).toBe(33);
+  });
+
+  it('multi-row loop: handles a 2-row body block (each item spans two rows)', async () => {
+    const buf = await buildXlsx((ws) => {
+      ws.getCell('A1').value = '{#items}{name}'; // inline open marker — row stays
+      ws.getCell('A2').value = '  备注：{note}{/items}'; // inline close marker
+    });
+    const { buffer: out } = await fill(buf, {
+      items: [
+        { name: '苹果', note: '红色' },
+        { name: '香蕉', note: '黄色' },
+      ],
+    });
+    const ws = await reload(out);
+    expect(ws.getCell('A1').value).toBe('苹果');
+    expect(ws.getCell('A2').value).toBe('  备注：红色');
+    expect(ws.getCell('A3').value).toBe('香蕉');
+    expect(ws.getCell('A4').value).toBe('  备注：黄色');
+  });
+
+  it('multi-row loop with no data → the whole section is removed', async () => {
+    const buf = await buildXlsx((ws) => {
+      ws.getCell('A1').value = '标题';
+      ws.getCell('A2').value = '{#items}';
+      ws.getCell('A3').value = '{desc}';
+      ws.getCell('A4').value = '{/items}';
+      ws.getCell('A5').value = '结尾';
+    });
+    const { buffer: out, skippedLoops } = await fill(buf, { items: [] });
+    expect(skippedLoops).toHaveLength(0);
+    const ws = await reload(out);
+    expect(ws.getCell('A1').value).toBe('标题');
+    expect(ws.getCell('A2').value).toBe('结尾'); // section gone, 结尾 shifts up
   });
 
   it('produces a valid xlsx (PK zip) buffer', async () => {

@@ -192,6 +192,23 @@ export function decodeUploadFilename(name: string): string {
   return recovered.includes('\uFFFD') ? name : recovered;
 }
 
+/**
+ * Build a download `Content-Disposition: attachment` header value that keeps a
+ * non-ASCII (e.g. CJK) filename intact (P0 / E10). Per RFC 6266 we emit BOTH:
+ *   - `filename="<ascii>"` \u2014 fallback for ancient clients; MUST be ASCII-only
+ *     so a Chinese name never lands as latin1 mojibake (\u5468\u62A5 \u2192 \u00E5\u00A8\u00E6\u00A5\u2026). Non-ASCII
+ *     bytes and the quote/backslash chars are replaced with '_'.
+ *   - `filename*=UTF-8''<pct>` \u2014 the real UTF-8 name, percent-encoded; every
+ *     modern browser prefers this and shows the correct name.
+ */
+export function contentDispositionAttachment(filename: string): string {
+  const safe = (filename || 'download').trim() || 'download';
+  // eslint-disable-next-line no-control-regex
+  const ascii = safe.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+  const star = encodeURIComponent(safe);
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${star}`;
+}
+
 export class FileService {
   /**
    * Phase 5c — disk I/O routed through a StorageProvider. When the

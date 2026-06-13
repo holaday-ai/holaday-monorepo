@@ -37,6 +37,7 @@ import {
   classifyUpload,
   isMacroOfficeUpload,
   decodeUploadFilename,
+  contentDispositionAttachment,
   uploadByteLimit,
 } from './files/file-service.js';
 import { nextExpiryFor, type PayPalAdapter, type PlanId } from './payment/index.js';
@@ -707,10 +708,9 @@ export function createHttpApp(deps: HttpAppDeps) {
         return;
       }
       res.setHeader('content-type', loaded.row.mimetype);
-      res.setHeader(
-        'content-disposition',
-        `attachment; filename*=UTF-8''${encodeURIComponent(loaded.row.filename)}`,
-      );
+      // RFC 6266: UTF-8 filename* (modern clients) + ASCII filename= fallback
+      // — keeps CJK output names like 周报模板-已填充.xlsx intact (P0 / E10).
+      res.setHeader('content-disposition', contentDispositionAttachment(loaded.row.filename));
       res.setHeader('content-length', loaded.buffer.length.toString());
       res.status(200).send(loaded.buffer);
     } catch (err) {

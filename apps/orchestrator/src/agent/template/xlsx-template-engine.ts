@@ -58,21 +58,25 @@ export async function fill(
   const skippedLoops: string[] = [];
 
   // 1. Expand loops first — bottom-to-top so earlier-row spans keep their
-  //    indices while later spans grow/shrink.
+  //    indices while later spans grow/shrink. Single-row bodies use
+  //    duplicateRow (style-preserving); MULTI-row bodies ({#x}…{/x} spanning
+  //    rows) use block duplication (P0 / E10 fix — previously these were
+  //    skipped, losing all loop data). A loop that throws on an unusual
+  //    template (e.g. merged body cells) degrades to a skip rather than
+  //    crashing the whole fill; the runner then flags it.
   for (const sheet of worksheets(wb)) {
     const loops = findLoopSpans(sheet);
     for (const loop of [...loops].sort((a, b) => b.startRow - a.startRow)) {
-      if (loop.startRow !== loop.endRow) {
-        // v1 — multi-row loops aren't supported yet (P1 backlog). DON'T fail
-        // the whole task: skip this loop section and fill everything else.
-        // Its leftover {#x}/{/x}/{sub} cells are cleared by the simple-field
-        // pass below; the runner marks partial_success + explains which loop
-        // ({#name}…{/name}) went unfilled.
-        if (!skippedLoops.includes(loop.name)) skippedLoops.push(loop.name);
-        continue;
-      }
       const rows = Array.isArray(data[loop.name]) ? (data[loop.name] as FillRow[]) : [];
-      expandSingleRowLoop(sheet, loop, rows);
+      try {
+        if (loop.startRow === loop.endRow) {
+          expandSingleRowLoop(sheet, loop, rows);
+        } else {
+          expandMultiRowLoop(sheet, loop, rows);
+        }
+      } catch {
+        if (!skippedLoops.includes(loop.name)) skippedLoops.push(loop.name);
+      }
     }
   }
 
@@ -232,6 +236,133 @@ function expandSingleRowLoop(
       setCellText(cell, next);
     });
   }
+}
+
+// --- multi-row loop block duplication (P0 / E10) ---------------------------
+
+interface CellSnapshot {
+  readonly col: number;
+  readonly text: string;
+  readonly style: Partial<ExcelJS.Style>;
+}
+interface RowSnapshot {
+  readonly height: number | undefined;
+  readonly cells: readonly CellSnapshot[];
+}
+interface BuiltRow {
+  readonly values: (string | null)[];
+  readonly height: number | undefined;
+  readonly cells: readonly { col: number; style: Partial<ExcelJS.Style> }[];
+}
+
+/**
+ * Multi-row loop body — {#name} and {/name} sit on DIFFERENT rows, so the
+ * body is a BLOCK of rows that must be repeated once per data row while
+ * preserving cell styles + row heights. exceljs has no "duplicate a block"
+ * primitive, so we snapshot the body, splice the original span out, then
+ * splice N substituted copies back in and re-stamp styles.
+ *
+ * Boundary rows whose ONLY content is the loop marker are treated as
+ * delimiters and dropped, so a natural template
+ *   row R   : {#tasks}
+ *   row R+1 : {seq} | {title} | {status}
+ *   row R+2 : {/tasks}
+ * expands to one clean row per task (no blank marker rows). When a marker
+ * shares its row with real content the whole row stays part of the body.
+ */
+function expandMultiRowLoop(
+  sheet: ExcelJS.Worksheet,
+  loop: LoopSpan,
+  rows: readonly FillRow[],
+): void {
+  const openOnly = isPureMarkerRow(sheet, loop.startRow, '#', loop.name);
+  const closeOnly = isPureMarkerRow(sheet, loop.endRow, '/', loop.name);
+  const bodyStart = openOnly ? loop.startRow + 1 : loop.startRow;
+  const bodyEnd = closeOnly ? loop.endRow - 1 : loop.endRow;
+
+  // Snapshot the body block BEFORE mutating any rows.
+  const block: RowSnapshot[] = [];
+  for (let r = bodyStart; r <= bodyEnd; r++) block.push(snapshotRow(sheet, r));
+
+  // Replace the whole original span (markers + body) in one delete + one
+  // insert so rows below shift exactly once.
+  const spanHeight = loop.endRow - loop.startRow + 1;
+  sheet.spliceRows(loop.startRow, spanHeight);
+
+  const built: BuiltRow[] = [];
+  for (const item of rows) {
+    for (const snap of block) built.push(buildRow(snap, item));
+  }
+  if (built.length === 0) return; // no data (or empty body) → region removed
+
+  sheet.spliceRows(loop.startRow, 0, ...built.map((b) => b.values));
+  for (let k = 0; k < built.length; k++) {
+    stampRow(sheet.getRow(loop.startRow + k), built[k]!);
+  }
+}
+
+/** True when the row's only non-empty content is this loop's marker. */
+function isPureMarkerRow(
+  sheet: ExcelJS.Worksheet,
+  rowNum: number,
+  prefix: '#' | '/',
+  name: string,
+): boolean {
+  const marker = new RegExp(`\\{${prefix}${escapeRegExp(name)}\\}`, 'g');
+  let sawMarker = false;
+  let sawOther = false;
+  sheet.getRow(rowNum).eachCell({ includeEmpty: false }, (cell) => {
+    const text = cellText(cell);
+    if (!text) return;
+    const stripped = text.replace(marker, '');
+    if (stripped !== text) sawMarker = true;
+    if (stripped.trim() !== '') sawOther = true;
+  });
+  return sawMarker && !sawOther;
+}
+
+function snapshotRow(sheet: ExcelJS.Worksheet, rowNum: number): RowSnapshot {
+  const row = sheet.getRow(rowNum);
+  const cells: CellSnapshot[] = [];
+  row.eachCell({ includeEmpty: false }, (cell, col) => {
+    cells.push({ col, text: cellText(cell) ?? '', style: cloneStyle(cell.style) });
+  });
+  return { height: row.height, cells };
+}
+
+function buildRow(snap: RowSnapshot, item: FillRow): BuiltRow {
+  const maxCol = snap.cells.reduce((m, c) => Math.max(m, c.col), 0);
+  const values: (string | null)[] = new Array(maxCol).fill(null);
+  const cells: { col: number; style: Partial<ExcelJS.Style> }[] = [];
+  for (const c of snap.cells) {
+    const text = c.text.includes('{')
+      ? substitute(c.text, (name, kind) => {
+          if (kind !== 'field') return ''; // strip {#x}/{/x} markers
+          const v = item[name];
+          return typeof v === 'string' ? v : '';
+        })
+      : c.text;
+    values[c.col - 1] = text.length > 0 ? text : null;
+    cells.push({ col: c.col, style: c.style });
+  }
+  return { values, height: snap.height, cells };
+}
+
+function stampRow(row: ExcelJS.Row, built: BuiltRow): void {
+  if (built.height != null) row.height = built.height;
+  for (const { col, style } of built.cells) {
+    row.getCell(col).style = cloneStyle(style);
+  }
+}
+
+/** exceljs cell styles are plain data (font/fill/border/alignment/numFmt). */
+function cloneStyle(style: Partial<ExcelJS.Style> | undefined): Partial<ExcelJS.Style> {
+  if (!style) return {};
+  return JSON.parse(JSON.stringify(style)) as Partial<ExcelJS.Style>;
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // ---------------------------------------------------------------------------

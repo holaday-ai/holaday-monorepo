@@ -135,11 +135,11 @@ describe('runTemplateFillTask — xlsx', () => {
     expect(cell.font?.bold).toBe(true);
   });
 
-  it('DEGRADES a multi-row xlsx loop to partial_success (P0) — fills the rest', async () => {
+  it('EXPANDS a multi-row xlsx loop (P0/E10) — fills the task rows, status completed', async () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Report');
     ws.getCell('A1').value = 'GMV：{gmv}';
-    ws.getCell('A3').value = '{#tasks}';
+    ws.getCell('A3').value = '{#tasks}'; // own-row markers → multi-row loop
     ws.getCell('A4').value = '{title}';
     ws.getCell('A5').value = '{/tasks}';
     const template = Buffer.from((await wb.xlsx.writeBuffer()) as ArrayBuffer);
@@ -158,13 +158,17 @@ describe('runTemplateFillTask — xlsx', () => {
       ),
       logger: fakeLogger(),
     });
-    expect(out.status).toBe('partial_success'); // NOT failed
-    expect(out.skippedLoops).toContain('tasks');
-    expect(out.summary).toContain('循环段未填充');
-    expect(out.attachments).toHaveLength(1); // file still delivered
+    expect(out.status).toBe('completed'); // fully filled now (was a degraded skip)
+    expect(out.skippedLoops ?? []).toHaveLength(0); // NOT skipped
+    expect(out.attachments).toHaveLength(1);
     const wb2 = new ExcelJS.Workbook();
     await wb2.xlsx.load(captured.buffer!);
-    expect(wb2.getWorksheet('Report')!.getCell('A1').value).toBe('GMV：100万');
+    const ws2 = wb2.getWorksheet('Report')!;
+    expect(ws2.getCell('A1').value).toBe('GMV：100万');
+    // loop span was rows 3-5 (open/body/close); delimiter rows gone, the two
+    // tasks fill rows 3 and 4 (row 2 was always empty).
+    expect(ws2.getCell('A3').value).toBe('A');
+    expect(ws2.getCell('A4').value).toBe('B');
   });
 });
 
