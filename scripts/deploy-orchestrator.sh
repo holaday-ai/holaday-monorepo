@@ -1,17 +1,28 @@
 #!/bin/bash
-# Orchestrator deploy with healthz smoke check.
+# Orchestrator deploy with a pre-reset safety gate + healthz smoke check.
 #
-# Standard Vultr cycle (pre-approved per memory): fetch → reset →
-# install → build → restart → smoke check. Fails loudly if /healthz
-# doesn't respond with status=ok within 5s of restart so a busted
-# build doesn't silently leave clients hanging.
+# Standard Vultr cycle: preflight-gate → fetch → reset → install → build →
+# restart → smoke. Fails loudly if /healthz doesn't return status=ok after
+# restart so a busted build doesn't silently leave clients hanging.
+#
+# 协作铁律 / SESSION_STATUS hard rule 7 (2026-06-13, born from a real
+# incident): NEVER assume the prod branch from memory / SESSION_STATUS. This
+# script runs scripts/deploy-preflight.sh ON the server BEFORE any reset —
+# it reads the LIVE HEAD, prints which origin branch(es) contain it, and
+# REFUSES if the live HEAD is NOT an ancestor of origin/$BRANCH (a reset
+# would discard commits currently live). Override an intentional cutover /
+# rollback with ALLOW_DIVERGENT_DEPLOY=1. After a green deploy it prints the
+# authoritative `PROD LIVE REF = <branch>@<hash>` line for SESSION_STATUS.
 #
 # Usage:   ./scripts/deploy-orchestrator.sh [BRANCH]
 #          BRANCH defaults to claude/musing-keller-ae1d05
-# Env:     VULTR_PASSWORD (password auth)
-# Exits:   0 on success, 1 on health-check failure (no auto-rollback;
-#          PM2 keeps last-good binary running unless build broke,
-#          in which case re-run after fixing).
+# Env:     VULTR_PASSWORD             password auth
+#          ALLOW_DIVERGENT_DEPLOY=1   proceed despite a non-fast-forward
+#                                     (divergent) target — required for an
+#                                     intentional branch cutover / rollback.
+# Exits:   0 success; 1 health/keys failure; 3 divergent-target gate
+#          tripped; 4 could-not-verify-live-state. PM2 keeps last-good
+#          binary on build break.
 
 set -euo pipefail
 
@@ -96,7 +107,57 @@ rollback() {
 echo "→ Capturing current HEAD for rollback"
 PREV_HEAD=$(run_with_retry "Vultr prev-head" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
   "cd /opt/holaday-monorepo && git rev-parse HEAD" | tail -1 | tr -d '[:space:]')
-echo "   prev HEAD: ${PREV_HEAD:-unknown}"
+echo "   prev HEAD (LIVE): ${PREV_HEAD:-unknown}"
+
+# ── Pre-reset safety gate — SESSION_STATUS hard rule 7 (2026-06-13) ──────
+# Enforce the rule automatically: run scripts/deploy-preflight.sh (the single
+# source of truth) ON the server BEFORE reset. It reads the LIVE HEAD, prints
+# which origin branches contain it, and exits 1 if that HEAD is NOT an
+# ancestor of origin/$BRANCH (a reset would discard live commits) / 2 if it
+# can't fetch the source. The live checkout may predate the preflight script,
+# so we run it straight from the freshly-fetched ref (inline fallback if the
+# deploy branch doesn't carry it yet). Override with ALLOW_DIVERGENT_DEPLOY=1.
+echo "→ Pre-reset gate (hard rule 7): deploy-preflight.sh on the live server"
+set +e
+run_with_retry "Vultr gate-fetch" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+  "cd /opt/holaday-monorepo && git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' >/dev/null 2>&1"
+FETCH_RC=$?
+if (( FETCH_RC == 0 )); then
+  "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+    cd /opt/holaday-monorepo && \
+    if git cat-file -e 'origin/$BRANCH:scripts/deploy-preflight.sh' 2>/dev/null; then \
+      git show 'origin/$BRANCH:scripts/deploy-preflight.sh' | bash -s -- '$BRANCH'; \
+    else \
+      echo '(preflight not on origin/$BRANCH — inline ancestor check)'; \
+      echo \"current LIVE HEAD : \$(git rev-parse HEAD)\"; \
+      echo '  contained in origin branches:'; \
+      git branch -r --contains HEAD 2>/dev/null | sed 's/^/    /' || true; \
+      git merge-base --is-ancestor HEAD 'origin/$BRANCH'; \
+    fi"
+  GATE_RC=$?
+else
+  GATE_RC=2
+fi
+set -e
+case "$GATE_RC" in
+  0) echo "   ✅ preflight passed — forward (fast-forward) deploy, safe to reset" ;;
+  1)
+    echo "⛔ STOP (hard rule 7): live prod HEAD (${PREV_HEAD:-unknown}) is NOT an ancestor of" >&2
+    echo "   origin/$BRANCH — a reset would DISCARD commits currently live (wrong branch /" >&2
+    echo "   revert / divergence). The branch(es) prod actually lives on are printed above." >&2
+    echo "   Reconcile (merge the live HEAD into your source), or for an INTENTIONAL cutover /" >&2
+    echo "   rollback re-run with ALLOW_DIVERGENT_DEPLOY=1." >&2
+    if [[ "${ALLOW_DIVERGENT_DEPLOY:-0}" != "1" ]]; then
+      exit 3
+    fi
+    echo "⚠️  ALLOW_DIVERGENT_DEPLOY=1 set — proceeding despite divergence." >&2 ;;
+  2)
+    echo "⛔ STOP: could not fetch origin/$BRANCH on the server — refusing to reset blind." >&2
+    exit 4 ;;
+  *)
+    echo "⛔ STOP: gate check errored (ssh/git exit $GATE_RC) — refusing to reset blind." >&2
+    exit 4 ;;
+esac
 
 echo "→ Fetching $BRANCH on Vultr"
 run_with_retry "Vultr fetch" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
@@ -104,6 +165,9 @@ run_with_retry "Vultr fetch" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VU
   git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' && \
   git reset --hard origin/$BRANCH && \
   git rev-parse HEAD" | tail -5
+
+NEW_HEAD=$(run_with_retry "Vultr new-head" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+  "cd /opt/holaday-monorepo && git rev-parse --short HEAD" | tail -1 | tr -d '[:space:]')
 
 echo "→ Installing + building"
 run_with_retry "Vultr install/build" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
@@ -186,3 +250,12 @@ else
     echo "⚠️  Auto-smoke did not produce a parseable summary line — eval runner may have errored"
   fi
 fi
+
+# Authoritative post-deploy reference (hard rule 7). Copy this into the
+# `PROD LIVE REF = …` line at the TOP of docs/daily/SESSION_STATUS.md so the
+# next session reads the truth instead of guessing the prod branch.
+echo ""
+echo "────────────────────────────────────────────────────────────"
+echo "PROD LIVE REF = $BRANCH@${NEW_HEAD:-unknown}"
+echo "  → update the 'PROD LIVE REF =' line at the TOP of docs/daily/SESSION_STATUS.md"
+echo "────────────────────────────────────────────────────────────"
