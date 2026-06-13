@@ -8,12 +8,13 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`f60e698`
-（2026-06-13；视频 #4 Phase1 步骤1 上传链路改造（video/audio 白名单 + 200MB + R2 presigned-PUT）
-部署 prod，restart 639，localhost healthz ok，keys in process（GEMINI+ANTHROPIC）；preflight 实读
-live HEAD=`1ba76bb`（ancestor of f60e698）→ FF-safe；**migration 0034 已先于代码 apply prod**
-（users.qwen_voice_id + base_video_file_id，information_schema 证据已核）。此行由视频 session 实读
-Vultr live HEAD 核对写入。前态：`1ba76bb` restart 638。）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`2617392`
+（2026-06-13；#1 模板填充 E10 两个 P0 修复部署 prod，restart 640，healthz ok，build tsc0，
+keys in process（GEMINI+ANTHROPIC）；preflight 实读 live HEAD=`f60e698`（ancestor of 2617392）
+→ FF-safe（**安全闸首次真实部署生效**）；无新 migration。修复：xlsx 多行循环 block-duplication
+（本周完成事项 3 行任务不再丢）+ 下载 CJK 文件名 RFC6266（filename*=UTF-8 + ASCII fallback）。
+E10 live 复测：multi-row 3 行全到、status=completed、下载名 周报模板-已填充.xlsx 正确。
+前态：`f60e698` restart 639（视频 #4 步骤1，migration 0034 已 apply prod）。）
 
 ---
 
@@ -113,6 +114,7 @@ baseline `musing-keller` @ `9935e84` 已含 template-fill M1-M3 → **#1 templat
 - 状态：**收口待命 + 路由补强已上线**。M1+M2 docx + M3 xlsx 引擎 + e2e 已 commit；`9935e84` 在 baseline；`TEMPLATE_FILL_ENABLED=true` 已开。
 - **2026-06-13 fileIds-aware soft 路由（既有设计缺口，非回归）**：template_fill 路由原纯靠 intent 关键词、无视 fileIds，「把…填入周报模板缺的留空」漏命中 strict pattern → 当通用任务跑。修法：传文件 AND fill动词(填/录入/补全) AND 模板/空白名词 ⇒ 强制 template_fill；合取+文件兜底挡住普通带附件任务（总结/翻译/分析不升级）。改 `intent-classifier.ts`（`matchTemplateFillSoft`/`ClassifyOpts.hasFileAttachment`/cacheKey 折标志）+ `tasks.ts`（classify 调用传 `hasFileAttachment`，**共享文件加法 hunk，远离 ④ fork**）。
 - **落 3 分支同改动**：template-fill `c16f8a0`、ashare `123cceb`、**musing-keller(合并主干)`1ba76bb`←prod**。84 classifier + 1556 agent 测绿、tsc0；Vultr 真实证 ①原句+docx→template_fill、②总结这份文档+docx→generate（详 `qa-artifacts/route-fix-20260613/phase-summary.md`）。
+- **2026-06-13 Phase 0 评测 E10 两个 P0 修复已部署 prod（`2617392`，restart 640）**：①**xlsx 多行循环**（{#x}…{/x} 跨行）原被 skip→任务数据全丢，改 **exceljs block-duplication**（snapshot body→splice→restamp 样式/行高；纯标记行=分隔符丢弃，内联标记保留；异常模板 try/catch 降级不崩）；「诚实降级」不再替代功能。②**下载 CJK 文件名**：`http.ts` 下载路由改用 `contentDispositionAttachment`（RFC6266 `filename*=UTF-8` + ASCII `filename=` fallback，永不 latin1 乱码）。回归：xlsx 引擎多行/样式/空数据 + runner/e2e 由「skip」翻「expanded」+ `contentDispositionAttachment` round-trip。全量 **2638 测绿、tsc0**。**E10 live 复测**：3 行任务全到、status=completed、下载名正确。改了共享 `http.ts`/`file-service.ts`（加法）。
 
 ### #2 — A股数据层 (ashare)
 - worktree：`/Users/yaleiqi/holaday-ashare`　branch：`claude/ashare-ae1d05` @ `394830e`（**已 push origin** ✓，含 ④ widen + 简报 v2 + tasks.ts 去 churn）
