@@ -42,9 +42,26 @@
 - `SESSION_STATUS.md` 冲突 → `git checkout --theirs/--ours` 取 musing-keller 版后，手工把三支 session 节并入。
 - 合并后必跑：`pnpm install` + `tsc -b` + 全量 `vitest`（基线 #2 实测 **2570** 绿）才推 baseline。
 
+## 跨 session 触点 — `tasks.ts` 热路径（#1 守卫 × #2 ④ × #3 origin）
+
+`trpc/routers/tasks.ts` 不在上面 13 文件表（template-fill 分支不含 ④ fork），但 **#1 在共享 ashare 分支上对 #2 的 ④ fork 加了一处守卫**（`f8437c1`），属跨 session 触点，单列闭合。
+
+**#1 那一侧（template-fill session 提供）**：`f8437c1` — executionMode 守卫，防 ④ fork 劫持专用道。
+- 新增纯函数 `agent/a-share/ashare-qa-lane-gate.ts` `ashareQaHandlesMode(mode)` = `mode==='generate' || mode==='scrape'`（+ 回归测 `ashare-qa-lane-gate.test.ts`）。
+- 在 tasks.ts ④ fork 条件加 `&& ashareQaHandlesMode(executionMode)`（12 行）。
+- 修的真 bug：a-share 技能已启用的账号上传 docx + 「按这个周报模板填充…GMV…」→ ④ matcher 把 GMV/环比 prose 命中个股 600415、出简报，模板没填。
+
+**#2 那一侧（ashare session，本人，✅ 已确认）**：
+- **守卫与 ④ 设计一致 — 确认无误**：`ExecutionMode = browser|generate|image|scrape|template_fill`；守卫只放行 `generate|scrape`，**恰好排除 3 条专用道**（template_fill/image/browser）→ 分类器已选的专用道必胜，正是 ④ 本意（a-share 个股问答=信息类 `generate`，绝不抢专用道）。真问句 `generate` → lane 仍触发（「茅台为什么涨」实测过）。`scrape` 放行无害（matcher 仍需个股信号才命中）。
+- **已整合进 #2 canonical**：去 churn 重贴时 `f8437c1` 守卫已逐字纳入 `tasks.ts:1148`（`ashareQaHandlesMode(executionMode) &&`）；回归测在 #2 的 120 a-share 套件内（`ashare-qa-lane-gate.test.ts` 3 测绿）。
+- `ashare-qa-lane-gate.ts` 仅在 ashare 分支（④ 与守卫同住），template-fill 分支无 → **不是 #1∩#2 的内容冲突**。
+
+**裁决**：`tasks.ts`（router）+ `ashare-qa-lane-gate.ts` **canonical = #2 ashare（`394830e`）** —— ④ fork 是 #2 的道，#1 的守卫已并入 #2 版（一处条件）。合并 ashare 即取 #2 版（含守卫）。**#1 无需再单独合该文件**（其守卫已在 #2 内）。**闭合 = 合并可发令**。
+
 ### 关联（非本节、SESSION_STATUS 已记）
-- `trpc/routers/tasks.ts`（热路径）：ashare ④ QA fork + playbook origin 守卫，双方加法。**ashare 已去 churn**（`394830e`，244 纯增量），两支须都保持基线格式（别 `biome --write` 整文件）→ 只解几十行加法冲突。
+- `trpc/routers/tasks.ts`（热路径）vs **#3 playbook**：playbook 另加 origin 守卫 hunks（不同区域，加法）。**ashare 已去 churn**（`394830e`，244 纯增量），两支须都保持基线格式（别 `biome --write` 整文件）→ 只解几十行加法冲突。
 - `ids.ts` / `schema/index.ts` / `router.ts` / `index.ts` / `schema/tasks.ts`（schema）：ashare ∩ playbook 加法冲突，解法=两边都留（详见 SESSION_STATUS 合并方案）。
 
 ---
 _生成：2026-06-13，#2(ashare) session。证据命令：`comm -12` 两支 changed-files + `git diff --numstat <tip> <tip>`，merge-base `9935e84`。_
+_更新 2026-06-13：补「跨 session 触点 tasks.ts」节 — #2 确认 `f8437c1` executionMode 守卫与 ④ 设计一致（守卫已在 #2 `394830e` 内 tasks.ts:1148 + 回归测绿）。该条闭合 = 合并发令。_
