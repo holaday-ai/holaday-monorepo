@@ -63,6 +63,12 @@
   　→ **✅ 两项均已闭环（#2，2026-06-12）**：0032 已 apply + 回带 SHOW CREATE TABLE 证据；
   　分支 `claude/ashare-ae1d05`@`852c73a` 已 push origin（详见 #2 小节 + 教训②）。
 
+- **致全员（#1，2026-06-13）prod 部署分支已切回 `claude/musing-keller-ae1d05`（合并主干）**：
+  三分支合并完成上 origin/musing-keller（`b0fd428` merge #1+#2+#3），prod 现部署该合并主干，
+  **不再是 ashare-ae1d05**。#1 路由补强 `1ba76bb` 已落主干 + 部署（restart 638）。
+  → **致合并 session**：`/Users/yaleiqi/holaday-merge`（本地 `merge-integration`）仍停在 `b0fd428`，
+  落后 origin/musing-keller 1 commit（我的 routing fix），fetch 后可 fast-forward。
+
 ---
 
 ## 三分支合并回 musing-keller 方案（#2 预判，不急执行）
@@ -87,7 +93,9 @@ baseline `musing-keller` @ `9935e84` 已含 template-fill M1-M3 → **#1 templat
 
 ### #1 — 模板填充 (template-fill)
 - worktree：`/Users/yaleiqi/holaday-template-fill`　branch：`claude/template-fill-ae1d05`
-- 状态：← owner 更新（已知：M1+M2 docx + M3 xlsx 引擎已 commit；`9935e84` 已在 baseline；`TEMPLATE_FILL_ENABLED=true` 已由 #2 部署时翻开）
+- 状态：**收口待命 + 路由补强已上线**。M1+M2 docx + M3 xlsx 引擎 + e2e 已 commit；`9935e84` 在 baseline；`TEMPLATE_FILL_ENABLED=true` 已开。
+- **2026-06-13 fileIds-aware soft 路由（既有设计缺口，非回归）**：template_fill 路由原纯靠 intent 关键词、无视 fileIds，「把…填入周报模板缺的留空」漏命中 strict pattern → 当通用任务跑。修法：传文件 AND fill动词(填/录入/补全) AND 模板/空白名词 ⇒ 强制 template_fill；合取+文件兜底挡住普通带附件任务（总结/翻译/分析不升级）。改 `intent-classifier.ts`（`matchTemplateFillSoft`/`ClassifyOpts.hasFileAttachment`/cacheKey 折标志）+ `tasks.ts`（classify 调用传 `hasFileAttachment`，**共享文件加法 hunk，远离 ④ fork**）。
+- **落 3 分支同改动**：template-fill `c16f8a0`、ashare `123cceb`、**musing-keller(合并主干)`1ba76bb`←prod**。84 classifier + 1556 agent 测绿、tsc0；Vultr 真实证 ①原句+docx→template_fill、②总结这份文档+docx→generate（详 `qa-artifacts/route-fix-20260613/phase-summary.md`）。
 
 ### #2 — A股数据层 (ashare)
 - worktree：`/Users/yaleiqi/holaday-ashare`　branch：`claude/ashare-ae1d05` @ `394830e`（**已 push origin** ✓，含 ④ widen + 简报 v2 + tasks.ts 去 churn）
