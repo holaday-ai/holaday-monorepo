@@ -8,9 +8,12 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`1ba76bb`
-（2026-06-13；三分支合并 `b0fd428` 部署后，#1 路由补强 `1ba76bb` 已部署 prod，restart 638；
-此行由 #3 实读 Vultr live HEAD 核对写入。注：origin/musing-keller 顶 `ae498a7` 仅 docs，未部署。）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`f60e698`
+（2026-06-13；视频 #4 Phase1 步骤1 上传链路改造（video/audio 白名单 + 200MB + R2 presigned-PUT）
+部署 prod，restart 639，localhost healthz ok，keys in process（GEMINI+ANTHROPIC）；preflight 实读
+live HEAD=`1ba76bb`（ancestor of f60e698）→ FF-safe；**migration 0034 已先于代码 apply prod**
+（users.qwen_voice_id + base_video_file_id，information_schema 证据已核）。此行由视频 session 实读
+Vultr live HEAD 核对写入。前态：`1ba76bb` restart 638。）
 
 ---
 
