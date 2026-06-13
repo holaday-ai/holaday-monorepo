@@ -76,7 +76,8 @@ baseline `musing-keller` @ `9935e84` 已含 template-fill M1-M3 → **#1 templat
   - `apps/orchestrator/src/trpc/router.ts`：ashare 加 `watchlists` router；playbook 若加 router 各加一行。
   - `apps/orchestrator/src/index.ts`：ashare 加简报 dispatch 分支 + import；playbook 若动 boot wiring 则逐 hunk。
   - `packages/shared-types/src/index.ts` / `package.json` / `pnpm-lock.yaml`：各加导出/依赖；pnpm-lock 冲突则合并后 `pnpm install` 重生。
-  - `apps/orchestrator/src/db/schema/tasks.ts`：**仅 playbook 动**（origin 列 + 2 索引），ashare 未碰 → **无冲突**。
+  - `apps/orchestrator/src/db/schema/tasks.ts`（**schema**）：**仅 playbook 动**（origin 列 + 2 索引），ashare 未碰 → **无冲突**。
+  - `apps/orchestrator/src/trpc/routers/tasks.ts`（**router，热路径**）：ashare 加 ④ QA fork、playbook 加 origin 守卫 hunks——**双方都加法**。**✅ 2026-06-13 ashare 已去 churn**：原 ④ 接线连带 biome 整文件 reformat(+2075/−2013) 是冲突震源，已 `checkout 基线 9935e84 重贴` → ashare 侧 diff vs 基线 = **244 插入 / 0 删除（纯 ④ 增量，零既有代码格式改动）**，全量 2570 测绿、行为零变化（`394830e` 已部署）。两支现都保持基线格式 → 合并只解各自加的几十行加法冲突，不再撞 2000 行 reformat。**playbook 侧也须保持基线格式**（别 biome --write 整文件）才能对齐。
 - **migration**：0032(ashare) + 0033(playbook) 已都落生产库，disjoint，numbered applier skip-on-exists，合并后全量重跑安全。
 - **合并后必跑**：`pnpm install` + `tsc -b` + 全量 `vitest`（#2 实测 2449 测基线）必须绿才推 baseline。
 
@@ -89,7 +90,7 @@ baseline `musing-keller` @ `9935e84` 已含 template-fill M1-M3 → **#1 templat
 - 状态：← owner 更新（已知：M1+M2 docx + M3 xlsx 引擎已 commit；`9935e84` 已在 baseline；`TEMPLATE_FILL_ENABLED=true` 已由 #2 部署时翻开）
 
 ### #2 — A股数据层 (ashare)
-- worktree：`/Users/yaleiqi/holaday-ashare`　branch：`claude/ashare-ae1d05` @ `162824a`（**已 push origin** ✓，含 ④ widen + 简报 v2）
+- worktree：`/Users/yaleiqi/holaday-ashare`　branch：`claude/ashare-ae1d05` @ `394830e`（**已 push origin** ✓，含 ④ widen + 简报 v2 + tasks.ts 去 churn）
 - 状态（2026-06-12 **②③简报全链 + 内容三优化 + ④即时问答 M1+M2 全部署**；④ 在 BOSS-only 灰度）：
   - **②③**：`watchlists` 表 + tRPC CRUD（幂等增删）；确定性盘前/盘后简报渲染器（每行源+时间戳+固定免责，**不预测不荐股**）+ dev/prod 双模。
   - **§6 数据层**：⚠️ **push2.eastmoney 从 Vultr 不可达**（RemoteDisconnected，非瞬时；交接「Vultr 可达」前提作废）→ quote/kline/A股指数/港股指数全改 **sina**（实测可达）。北向净买额 2024-08 停披露(恒 0.0)→整行省略。龙虎榜接 akshare 自带「解读」列。详见 worktree `apps/akshare-mcp/README` 已知限制节。
@@ -125,6 +126,10 @@ baseline `musing-keller` @ `9935e84` 已含 template-fill M1-M3 → **#1 templat
     - **数据层（逐个先验 Vultr 可达性，push2 教训）**：可达 substitutes `stock_zt_pool_em(date)`/`_dtgc_em`/`_zbgc_em` + `stock_board_industry_summary_ths`(同花顺，一调给板块+涨跌家数+净流入) + 综指 spot 两市成交额；`get_market_pulse(date,prev?)`/`get_zt_pool_summary(date)` 单行聚合逐源容错。**⛔ 2 名指 _em 接口 push2 死** → 改 ths；**❌ 2 指标无可达源故不出**（成交额环比% / 自选股主力净占比列，同北向停披露红线）。详见 [[reference_ashare_vultr_data]] 2026-06-13 UPDATE。
     - **Vultr 全链真渲染实证**（盘前+盘后 pin Friday 跑真 `HttpAkshareClient`→真数据 markdown）：涨停89(昨69)/最高4连板/炸板率41.1%/净流入-141亿/两市3.21万亿/板块工业金属+5.28%(新威凌)；昨日涨停回顾 69家·活跃化学制品8·半导体8。
     - **测试**：a-share 120（+10：长度锁/段序/温度计/板块/合规哨兵/降级/昨日涨停回顾）+ 全量 **2570** 全绿；tsc/biome clean。**周六非交易日 skip**，周一 BOSS scheduled id43/id45 自动产 v2 真投递。
+  - **v2 收尾两调整 + tasks.ts 去 churn（`f698f4b`+`394830e`，已部署 restart 634）**：
+    - 无源指标（成交额环比% / 自选股净占比列）BOSS 拍板**接受不出**，按北向同款红线，不引新数据商依赖。
+    - 板块主线 涨跌前5→**前3**（正文更短；data 层留前5，展示 slice(0,3)）。
+    - **tasks.ts 去 churn（合并前置·重点，BOSS 指令）**：详见上「三分支合并方案」router tasks.ts 条 — checkout 基线 9935e84 重贴 ④ 真实改动，2176 churn → **244 插入/0 删除纯增量**，全量 2570 测绿、行为零变化。后续合并/回滚从「解2000行热路径」变「解几十行」。
 
 ### #3 — Playbook + Evidence Ledger（本约定创建者）
 - worktree：`/Users/yaleiqi/holaday-playbook-ledger`　branch：`claude/playbook-ledger-ae1d05`（已 push）
