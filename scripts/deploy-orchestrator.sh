@@ -98,10 +98,38 @@ PREV_HEAD=$(run_with_retry "Vultr prev-head" "${VULTR_AUTH_PREFIX[@]}" ssh "${SS
   "cd /opt/holaday-monorepo && git rev-parse HEAD" | tail -1 | tr -d '[:space:]')
 echo "   prev HEAD: ${PREV_HEAD:-unknown}"
 
-echo "→ Fetching $BRANCH on Vultr"
-run_with_retry "Vultr fetch" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+# --- Pre-reset safety guard (协作铁律 2026-06-13) ----------------------
+# NEVER assume the prod ref from memory / SESSION_STATUS. Read the LIVE
+# server HEAD, show which origin branches contain it, and REFUSE to reset
+# if that HEAD is NOT an ancestor of the deploy target origin/$BRANCH —
+# resetting then would silently discard commits currently live on prod.
+# Override for an INTENTIONAL divergent deploy (rollback / branch switch)
+# with DEPLOY_ALLOW_NON_ANCESTOR=1.
+echo "→ Fetching all origin heads on Vultr (for ancestry check + reset)"
+run_with_retry "Vultr fetch-all" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+  cd /opt/holaday-monorepo && git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'" >/dev/null
+echo "→ Pre-reset safety: LIVE prod ref + ancestry vs origin/$BRANCH"
+LIVE_INFO=$(run_with_retry "Vultr live-ref" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
   cd /opt/holaday-monorepo && \
-  git fetch origin '+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH' && \
+  echo \"LIVE_HEAD=\$(git rev-parse HEAD)\"; \
+  echo \"ON_BRANCHES=\$(git branch -r --contains HEAD 2>/dev/null | sed 's/^[ *]*//' | paste -sd, - )\"; \
+  if git merge-base --is-ancestor HEAD origin/$BRANCH; then echo 'ANCESTRY=ok'; else echo 'ANCESTRY=DIVERGED'; fi")
+echo "$LIVE_INFO" | sed 's/^/   /'
+if echo "$LIVE_INFO" | grep -q 'ANCESTRY=DIVERGED'; then
+  if [[ "${DEPLOY_ALLOW_NON_ANCESTOR:-0}" == "1" ]]; then
+    echo "⚠️  LIVE HEAD is NOT an ancestor of origin/$BRANCH — proceeding ONLY because DEPLOY_ALLOW_NON_ANCESTOR=1" >&2
+  else
+    echo "❌ STOP: live prod HEAD is NOT an ancestor of origin/$BRANCH." >&2
+    echo "   Resetting would discard commits currently live on prod (see LIVE_HEAD/ON_BRANCHES above)." >&2
+    echo "   If this divergence is intentional (rollback / deliberate branch switch)," >&2
+    echo "   re-run with DEPLOY_ALLOW_NON_ANCESTOR=1. Otherwise reconcile first." >&2
+    exit 1
+  fi
+fi
+
+echo "→ Resetting to origin/$BRANCH on Vultr"
+run_with_retry "Vultr reset" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" "set -e; \
+  cd /opt/holaday-monorepo && \
   git reset --hard origin/$BRANCH && \
   git rev-parse HEAD" | tail -5
 
@@ -135,6 +163,12 @@ fi
 RESTART=$(run_with_retry "Vultr restart count" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
   "node -e \"const list=JSON.parse(require('child_process').execFileSync('pm2',['jlist'],{encoding:'utf8'})); const app=list.find((p)=>p.name==='holaday-orchestrator'); process.stdout.write(String(app?.pm2_env?.restart_time ?? 'unknown'));\"")
 echo "✅ Orchestrator deployed — restart count: $RESTART"
+
+# Surface the new live ref so the deployer updates SESSION_STATUS's fixed
+# "PROD LIVE REF = <branch>@<hash>" line (协作铁律 2026-06-13).
+NEW_HEAD=$(run_with_retry "Vultr new-head" "${VULTR_AUTH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$VULTR_HOST" \
+  "cd /opt/holaday-monorepo && git rev-parse HEAD" | tail -1 | tr -d '[:space:]')
+echo "📌 PROD LIVE REF = $BRANCH@${NEW_HEAD:0:7}  — update the SESSION_STATUS top line now"
 
 # Verify the required LLM keys actually made it INTO the running process
 # (not just the .env file). A plain `pm2 restart` reuses pm2's cached env
