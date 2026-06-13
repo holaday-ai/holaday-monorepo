@@ -254,10 +254,13 @@ describe('v2 盘后：速读 / 市场温度计 / 板块主线（BOSS 四原则�
     expect(md).toContain('主力净流入 +86.00亿元');
   });
 
-  it('板块主线：涨幅前5（含龙头领涨股）+ 跌幅前5', () => {
-    expect(md).toContain('涨幅前5：汽车零部件 +3.20%（迪生力）');
+  it('板块主线：涨幅前3（含龙头领涨股）+ 跌幅前3（正文更短，data 层留5、展示裁3）', () => {
+    expect(md).toContain('涨幅前3：汽车零部件 +3.20%（迪生力）');
     expect(md).toContain('小金属 +2.80%（金钼股份）');
-    expect(md).toContain('跌幅前5：白酒 -2.10%');
+    expect(md).toContain('光伏设备 +2.10%（阳光电源）'); // 第3 仍在
+    expect(md).toContain('跌幅前3：白酒 -2.10%');
+    expect(md).not.toContain('风电设备'); // 第4/5 已裁
+    expect(md).not.toContain('半导体 +1.50%');
   });
 
   it('原则3 数据密度：全文只有 1 张表（自选股表现），市场级数据全部行内化', () => {

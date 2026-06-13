@@ -427,14 +427,15 @@ function thermometerLines(
   return out;
 }
 
-/** 板块主线（涨幅前5+跌幅前5；行内；领涨股=龙头）。纯指标，无定性标签。 */
+/** 板块主线（涨幅前3+跌幅前3；行内；领涨股=龙头）。纯指标，无定性标签。
+ * 取前3（BOSS 易读性：正文更短）；data 层保留前5，展示层裁剪。 */
 function sectorLines(env: AkEnvelope<MarketPulseRow> | undefined, mode: BriefingMode): string[] {
   const p = env?.data[0];
   if (!env || env.error || !p) {
     return [unavailableLine('板块', env ?? ({ error: '' } as AkEnvelope), mode)];
   }
-  const up = p.sectors_up ?? [];
-  const down = p.sectors_down ?? [];
+  const up = (p.sectors_up ?? []).slice(0, 3);
+  const down = (p.sectors_down ?? []).slice(0, 3);
   if (up.length === 0 && down.length === 0) return ['- 板块数据暂不可用。'];
   const fmtUp = (s: SectorEntry) =>
     `${s.板块} ${fmtPct(s.涨跌幅)}${s.领涨股 ? `（${s.领涨股}）` : ''}`;
