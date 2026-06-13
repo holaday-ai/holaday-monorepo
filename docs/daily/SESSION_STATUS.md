@@ -7,6 +7,11 @@
 > 维护者：各 session 自己。创建者：#3（Playbook+Ledger）2026-06-12。
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
+<!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`1ba76bb`
+（2026-06-13；三分支合并 `b0fd428` 部署后，#1 路由补强 `1ba76bb` 已部署 prod，restart 638；
+此行由 #3 实读 Vultr live HEAD 核对写入。注：origin/musing-keller 顶 `ae498a7` 仅 docs，未部署。）
+
 ---
 
 ## 协作约定（硬规则，立即生效）
@@ -35,6 +40,15 @@
 6. **写明目标库**：apply 时必须确认连的是哪个 DB（生产 = Vultr `holaday`@127.0.0.1，取
    `apps/orchestrator/.env` 的 `DATABASE_URL`）。多次「应用到了别的库 / 本地 dev 库」的误传
    都源于没核对目标库——apply 脚本里要 echo 出 `host/db` 并在验证里复查。
+
+7. **部署铁律 —— 先实读 live HEAD，不许凭记忆假设 prod 分支（lesson ③）**：部署前**必须从
+   live 服务器实读当前 HEAD**（`git rev-parse HEAD` + `git branch -r --contains HEAD`），
+   不许凭记忆 / SESSION_STATUS / 口头假设 prod 在哪个分支。**reset 前 preflight 必打印**
+   「当前 HEAD + 它在哪些 origin 分支上」；若**当前 HEAD 不是你预期部署源的祖先** → **停下报告，
+   不许继续 reset**（防止把别人刚部署的 prod 覆盖回旧码）。部署后**部署者更新顶部 `PROD LIVE REF`
+   行**。工具：`scripts/deploy-preflight.sh <分支>`（在 live 上跑，非 0 退出即拒绝部署）。
+   　由来：#3 凭「live 跑 musing-keller@b0fd428」假设，实读发现 prod 已是 #1 的 `1ba76bb`（路由补强，
+   　部署在我合并之后）；若当时盲目按 b0fd428 redeploy 会**覆盖掉 #1 刚上线的修复**。规则当场拦下。
 
 ---
 
