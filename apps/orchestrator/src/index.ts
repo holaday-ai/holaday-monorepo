@@ -31,6 +31,7 @@ import { PlaywrightExecutor } from './agent/vision-loop/playwright-executor.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { db } from './db/client.js';
+import { runRetentionReaper } from './evidence/retention-reaper.js';
 import { createHttpApp } from './http.js';
 import { buildScheduledDispatchNotification } from './notifications/scheduled-copy.js';
 import { createWsServer, loadRehydratedTasks } from './ws/server.js';
@@ -690,6 +691,31 @@ async function main() {
   // Don't keep the event loop alive on a sleeping timer; the HTTP
   // server is what holds the process up.
   zombieReaperTimer.unref?.();
+
+  // Phase 1 #3 Pack B — Evidence retention reaper. Nightly sweep of
+  // expired evidence_artifacts (delete R2 object then MySQL row; skip
+  // manual_hold). Gated by RETENTION_REAPER_ENABLED (default off: no
+  // artifacts exist until LEDGER_DB_WRITE is on). unref so a sleeping
+  // timer never holds the process up.
+  if (process.env.RETENTION_REAPER_ENABLED === "true") {
+    const RETENTION_REAP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+    const retentionReaperTimer = setInterval(() => {
+      void (async () => {
+        try {
+          const swept = await runRetentionReaper({ db, logger });
+          if (swept.deleted > 0 || swept.r2Failed > 0) {
+            logger.info(swept, "retention reaper: swept expired evidence artifacts");
+          }
+        } catch (err) {
+          logger.warn(
+            { err: err instanceof Error ? err.message : String(err) },
+            "retention reaper: sweep failed (non-fatal)",
+          );
+        }
+      })();
+    }, RETENTION_REAP_INTERVAL_MS);
+    retentionReaperTimer.unref?.();
+  }
 
   const recovery = await loadRehydratedTasks();
   logger.info(recovery, 'restart recovery: rehydrated in-flight tasks');

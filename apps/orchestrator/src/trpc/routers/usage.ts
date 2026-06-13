@@ -109,7 +109,7 @@ export const usageRouter = router({
         count: sql<number>`COUNT(*)`,
       })
       .from(tasks)
-      .where(and(eq(tasks.userId, user.id), gte(tasks.createdAt, monthStart)))
+      .where(and(eq(tasks.userId, user.id), gte(tasks.createdAt, monthStart), eq(tasks.origin, 'user')))
       .groupBy(tasks.status);
     const {
       monthTasksTotal,
@@ -136,7 +136,7 @@ export const usageRouter = router({
         count: sql<number>`COUNT(*)`,
       })
       .from(tasks)
-      .where(and(eq(tasks.userId, user.id), gte(tasks.createdAt, sevenDaysAgoStart)))
+      .where(and(eq(tasks.userId, user.id), gte(tasks.createdAt, sevenDaysAgoStart), eq(tasks.origin, 'user')))
       .groupBy(sql`DATE(${tasks.createdAt})`);
     const byDate = new Map<string, number>();
     for (const row of dailyRows) {

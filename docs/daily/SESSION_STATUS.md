@@ -132,16 +132,19 @@ baseline `musing-keller` @ `9935e84` 已含 template-fill M1-M3 → **#1 templat
     - **tasks.ts 去 churn（合并前置·重点，BOSS 指令）**：详见上「三分支合并方案」router tasks.ts 条 — checkout 基线 9935e84 重贴 ④ 真实改动，2176 churn → **244 插入/0 删除纯增量**，全量 2570 测绿、行为零变化。后续合并/回滚从「解2000行热路径」变「解几十行」。
 
 ### #3 — Playbook + Evidence Ledger（本约定创建者）
-- worktree：`/Users/yaleiqi/holaday-playbook-ledger`　branch：`claude/playbook-ledger-ae1d05`（已 push）
-- HEAD：`84e0cc5`（Pack A）
-- 状态（2026-06-12 停点）：
-  - **Pack A 完成**：tasks.origin 列 + 9 表 schema + migration `0033` + R2 helper + 4 repository
-    + TaskOrigin 常量 + §5.6 origin='user' 读取守卫。tsc 0 错 + 31 新测绿。
-  - **`0033` 已落 Vultr 生产库 `holaday` 并验证通过**：9 表 + `tasks.origin`(varchar32/NOT NULL/
-    default 'user') + 2 个 origin 索引 + 外键全对 + 2719 tasks 全 origin='user' 无损。
-  - **Pack B 暂缓**：等 #2 的部署 + 简报验收完成后解锁（Pack B 要碰 task 完成 hook，又是
-    `tasks.ts`，避免与 #2 撞车）。
-  - eval origin 标记 defer 到 Pack C。
+- worktree：`/Users/yaleiqi/holaday-playbook-ledger`　branch：`claude/playbook-ledger-ae1d05`（已 push `0f644e4`）
+- 状态（2026-06-12 **Pack A+B 完成，本次合并并入 musing-keller**）：
+  - **Pack A**：tasks.origin 列 + 9 表 schema + migration `0033` + R2 helper + 4 repository
+    + TaskOrigin 常量 + §5.6 origin='user' 读取守卫。**`0033` 已落 Vultr 生产库并验证**（9 表 +
+    origin 列 varchar32/NOT NULL/default 'user' + 2 索引 + 外键全对 + 2719 tasks 无损）。
+  - **Pack B**：终态 hook `writeLedgerToDb`（3 处 persistExecution 后、disposeExecution 前）镜像
+    内存 EvidenceLedger → `evidence_artifacts`+`claims`+`claim_evidence_links`（+ R2 bundle 独占）；
+    `LedgerRepository` 读 API skeleton（未接 verifier，逻辑零改）；任务删除分流 §4.9；retention reaper
+    nightly cron（gated `RETENTION_REAPER_ENABLED` 默认 off）。全程 flag `LEDGER_DB_WRITE`（默认 off）。
+    **无新 migration**（用 0033 表）。
+  - **合并**：本次 #3→musing 只 SESSION_STATUS 冲突（代码全 clean）；落地后翻 `LEDGER_DB_WRITE=on`
+    跑真任务积累 Ledger 数据（Phase 0 评测受益）。
+  - eval origin 标记 defer 到 Pack C（explorer/canary，等指令）。
 
 ### #5 — 图片生成 (image)
 - 状态：← owner 更新

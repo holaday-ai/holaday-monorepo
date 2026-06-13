@@ -95,6 +95,8 @@ import { skills } from '../../db/schema/skills.js';
 import { taskEvents } from '../../db/schema/task-events.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
 import { tasks as tasksTable } from '../../db/schema/tasks.js';
+import { routeTaskEvidenceOnDelete } from '../../evidence/evidence-deletion-service.js';
+import { writeLedgerToDb } from '../../evidence/ledger-write-service.js';
 import { users } from '../../db/schema/users.js';
 import {
   broadcastToUser,
@@ -521,6 +523,7 @@ export const tasksRouter = router({
           and(
             eq(tasksTable.externalId, input.replyToTaskId),
             eq(tasksTable.userId, userRow.id),
+            eq(tasksTable.origin, 'user'),
           ),
         )
         .limit(1);
@@ -1765,7 +1768,11 @@ export const tasksRouter = router({
           verification: executionVerification,
           db: ctx.db,
           logger: ctx.logger,
-        }).finally(() => disposeExecution(taskId));
+        })
+          .then(() =>
+            writeLedgerToDb({ taskExternalId: taskId, verification: executionVerification, db: ctx.db, logger: ctx.logger }),
+          )
+          .finally(() => disposeExecution(taskId));
       })();
 
       return {
@@ -2259,7 +2266,11 @@ export const tasksRouter = router({
           verification: executionVerification,
           db: ctx.db,
           logger: ctx.logger,
-        }).finally(() => disposeExecution(taskId));
+        })
+          .then(() =>
+            writeLedgerToDb({ taskExternalId: taskId, verification: executionVerification, db: ctx.db, logger: ctx.logger }),
+          )
+          .finally(() => disposeExecution(taskId));
       })();
 
       return {
@@ -4144,7 +4155,11 @@ export const tasksRouter = router({
               verification: executionVerification,
               db: ctx.db,
               logger: ctx.logger,
-            }).finally(() => disposeExecution(taskId));
+            })
+          .then(() =>
+            writeLedgerToDb({ taskExternalId: taskId, verification: executionVerification, db: ctx.db, logger: ctx.logger }),
+          )
+          .finally(() => disposeExecution(taskId));
           });
 
       // Phase 24 — fire the runFn directly (pre-queue path). Per-task
@@ -4962,7 +4977,9 @@ export const tasksRouter = router({
       if (!userRow) {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown user' });
       }
-      const conds = [eq(tasksTable.userId, userRow.id)];
+      // Phase 1 #3 — isolation boundary: user history excludes canary/exploration/eval
+      // tasks (no-op today; every row defaults to origin='user').
+      const conds = [eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, 'user')];
       // Cursor is an opaque numeric token whose interpretation matches
       // the active ORDER BY. In starred mode we order by `starredAt
       // DESC` and treat the cursor as a unix-ms timestamp; otherwise
@@ -5128,7 +5145,7 @@ export const tasksRouter = router({
       const [taskRow] = await ctx.db
         .select()
         .from(tasksTable)
-        .where(and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)))
+        .where(and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, 'user')))
         .limit(1);
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
@@ -5268,7 +5285,7 @@ export const tasksRouter = router({
       const [taskRow] = await ctx.db
         .select({ id: tasksTable.id })
         .from(tasksTable)
-        .where(and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)))
+        .where(and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, 'user')))
         .limit(1);
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
@@ -5801,7 +5818,7 @@ export const tasksRouter = router({
       const [taskRow] = await ctx.db
         .select({ id: tasksTable.id, status: tasksTable.status })
         .from(tasksTable)
-        .where(and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)))
+        .where(and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, 'user')))
         .limit(1);
       if (!taskRow) {
         throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
@@ -6060,7 +6077,7 @@ export const tasksRouter = router({
         .select({ id: tasksTable.id, status: tasksTable.status })
         .from(tasksTable)
         .where(
-          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)),
+          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, 'user')),
         )
         .limit(1);
       if (!taskRow) {
@@ -6076,6 +6093,18 @@ export const tasksRouter = router({
           code: 'PRECONDITION_FAILED',
           message: `cannot delete task in status=${taskRow.status}; pause or cancel first`,
         });
+      }
+      // Phase 1 #3 Pack B — route this task's evidence artifacts by
+      // purpose/retention BEFORE deleting the task row (while task_id is
+      // still set): task_evidence -> delete row + R2; audit/manual_hold
+      // -> scrub + retain (design 4.9). No-op when no artifacts.
+      try {
+        await routeTaskEvidenceOnDelete(ctx.db, taskRow.id, { logger: ctx.logger });
+      } catch (err) {
+        ctx.logger.warn(
+          { err, taskId: input.taskId },
+          "tasks.delete: evidence routing failed (non-blocking)",
+        );
       }
       // task_steps has onDelete:cascade via FK; task_events has no FK
       // (append-only audit log) so we clean it up manually in one tx
@@ -6106,7 +6135,7 @@ export const tasksRouter = router({
     const failedRows = await ctx.db
       .select({ id: tasksTable.id })
       .from(tasksTable)
-      .where(and(eq(tasksTable.userId, userRow.id), eq(tasksTable.status, 'failed')));
+      .where(and(eq(tasksTable.userId, userRow.id), eq(tasksTable.status, 'failed'), eq(tasksTable.origin, 'user')));
     const failedIds = failedRows.map((row) => row.id);
     if (failedIds.length === 0) {
       return { ok: true as const, deleted: 0 };
@@ -6149,7 +6178,7 @@ export const tasksRouter = router({
         .select({ id: tasksTable.id })
         .from(tasksTable)
         .where(
-          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)),
+          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, 'user')),
         )
         .limit(1);
       if (!taskRow) {
@@ -6259,7 +6288,7 @@ export const tasksRouter = router({
         .select({ id: tasksTable.id })
         .from(tasksTable)
         .where(
-          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)),
+          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, 'user')),
         )
         .limit(1);
       if (!taskRow) {
@@ -6300,7 +6329,7 @@ export const tasksRouter = router({
         .select({ id: tasksTable.id })
         .from(tasksTable)
         .where(
-          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id)),
+          and(eq(tasksTable.externalId, input.taskId), eq(tasksTable.userId, userRow.id), eq(tasksTable.origin, 'user')),
         )
         .limit(1);
       if (!taskRow) {
@@ -6410,7 +6439,7 @@ export const tasksRouter = router({
       .select({ count: sql<number>`COUNT(*)` })
       .from(tasksTable)
       .where(
-        and(eq(tasksTable.userId, userRow.id), eq(tasksTable.status, 'failed')),
+        and(eq(tasksTable.userId, userRow.id), eq(tasksTable.status, 'failed'), eq(tasksTable.origin, 'user')),
       );
     return { count: Number(row?.count ?? 0) };
   }),

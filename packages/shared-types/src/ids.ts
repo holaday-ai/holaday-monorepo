@@ -29,6 +29,16 @@ export const ID_PREFIXES = {
   // Phase 26B — per-user inbox row + external webhook channel.
   notification: 'nfn',
   notificationChannel: 'nch',
+  // Phase 1 #3 — Site Playbook + Evidence Ledger (storage foundation).
+  // operation_path_steps and claim_evidence_links have no external_id
+  // (addressed by composite/internal keys), so they get no prefix.
+  site: 'site',
+  siteCapability: 'cap',
+  operationPath: 'opath',
+  explorationRun: 'exr',
+  evidenceArtifact: 'art',
+  claim: 'clm',
+  canaryResult: 'cnr',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;
