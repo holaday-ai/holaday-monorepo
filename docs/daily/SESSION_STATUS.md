@@ -8,7 +8,20 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`c092562`
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`19c473f`
+（2026-06-15；**#2 A股 Phase2 全景速览 step1 部署 prod**，restart 648，healthz ok，preflight 实读
+live HEAD 各步 FF-safe；build tsc0，全量 **2678** 测绿；无新 migration。**先验数据可达性再写码**
+（push2 不可达→同花顺/百度/cninfo 替代，迪生力 603335 真调验通）。**④ 基本面**（同花顺 营收/净利+
+同比增速·销售毛利率·ROE·资产负债率·近3年趋势，硬标「基于2026Q1财报，CAS」）+ **⑤ 估值**（百度
+PE-TTM/PB + 近5年历史分位 + cninfo 行业静态PE中位，硬标「估值截至06-14」）+ **deep 触发**（详细分析/
+全面看看/深度分析 XX→七维全景版；**不动**速览/为什么涨/割肉/指数 lane，意图区分保「一句话即得」）+
+**⑦ 分析师视角**（LLM 白话状态画像，状态判断非买卖，过合规闸门；越线/失败→丢⑦留①-⑤优雅降级+计数）。
+合规闸门补盲（设计评审 workflow 发现真缺口）：估值数(PE/PB/分位/倍数)**数值容差接地**(容忍 67.2/67.20
+口语约数)+排年份(假目标价不被年份误接地)+张力延展拦截(高位早晚回落=predict)；④⑤ 确定性层零形容
+（判断统一归⑦）。**真路径实证**：「详细分析迪生力」→ executorLane=ashare_panorama 出 ①-⑤+⑦；
+「迪生力为什么涨」→ 轻量速览(①②③)不误伤。⑦ 真 haiku 通过率：迪生力 6/6、茅台/平安 4/6（降级=合规
+安全网，①-⑤ 恒在）。step2(资金连续性/行业个股对位)待验证后做。
+前态：`c092562`（#5 图片 P1 执行层）。）
 （2026-06-14；**#5 图片 P1 执行层重修 部署 prod**，restart 644，两边 healthz 200，SPA 双边
 `index-CtjniCcy.js`，preflight 实读 live HEAD=`3f76062`（ancestor of c092562）→ FF-safe；keys（GEMINI+
 ANTHROPIC）在进程；无新 migration。**纠正 `707af37` 误判**：上轮把 P1 当作 FileDownloadCard 缩略图占位
