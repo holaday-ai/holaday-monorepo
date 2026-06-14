@@ -75,6 +75,49 @@ const schema = z.object({
   GEMINI_IMAGE_MODEL_PRO: z.string().default('gemini-3-pro-image'),
 
   /**
+   * Phase 1 #4 — video creation pipeline (script → Qwen3-TTS-VC voice
+   * clone → Wanxiang B-roll → fal lip-sync → subtitles → FFmpeg vertical
+   * compose). DASHSCOPE_API_KEY = Alibaba Cloud INTERNATIONAL (Singapore)
+   * key, shared by Wanxiang (B-roll) AND Qwen3-TTS-VC (voice clone). FAL_KEY
+   * = fal.ai (lip-sync). All optional/default '' so deploying before
+   * provisioning is a no-op — the video lane stays dark behind the flag.
+   * Keys are NEVER logged. Orchestrator runs on Vultr (Singapore egress)
+   * → reaches dashscope-intl (~48ms) + queue.fal.run directly.
+   */
+  DASHSCOPE_API_KEY: z.string().optional().default(''),
+  /** DashScope INTERNATIONAL (Singapore) host — a Beijing key will NOT work here. */
+  DASHSCOPE_BASE_URL: z.string().url().default('https://dashscope-intl.aliyuncs.com'),
+  /**
+   * Optional DashScope business-space id. When set, requests carry the
+   * `X-DashScope-WorkSpace` header so calls are scoped to that workspace.
+   * Empty → the default workspace (the bare Bearer key works there, as the
+   * 2026-06-13 real-call verification confirmed).
+   */
+  DASHSCOPE_WORKSPACE_ID: z.string().optional().default(''),
+  FAL_KEY: z.string().optional().default(''),
+  FAL_BASE_URL: z.string().url().default('https://queue.fal.run'),
+  /**
+   * Pinned model ids (from the reachability matrix). A wrong id is a
+   * one-env-var fix, never a redeploy — the adapters never hard-code them.
+   */
+  WANXIANG_T2I_MODEL: z.string().default('wan2.2-t2i-flash'),
+  WANXIANG_T2V_MODEL: z.string().default('wan2.1-t2v-turbo'),
+  FAL_LIPSYNC_MODEL: z.string().default('fal-ai/latentsync'),
+  QWEN_TTS_VC_MODEL: z.string().default('qwen3-tts-vc-2026-01-22'),
+  /**
+   * Video-creation lane gate. Default OFF — video_creation intents fall
+   * through to the generate lane (the model honestly says it can't produce
+   * a video) until vetted. Wire + unit-test behind off; flip on only for
+   * the end-to-end run. Same gating shape as GEMINI_API_KEY / TEMPLATE_FILL.
+   */
+  VIDEO_CREATION_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /** Gradual rollout: allowed user externalIds (CSV). Empty = all (when ENABLED). */
+  VIDEO_CREATION_ALLOWLIST: z.string().default(''),
+
+  /**
    * Phase 1 #1 — template fill. When true, the 'template_fill' lane
    * fills a user-uploaded Office template (.docx/.xlsx) deterministically
    * and returns the filled file. When false (default), template_fill

@@ -69,6 +69,15 @@ describe('createImageTask', () => {
     expect(out.taskId).toBe('t2');
     expect(calls.length).toBe(2);
   });
+
+  it('sends X-DashScope-WorkSpace header only when workspaceId is set', async () => {
+    const q1 = jsonQueue([{ body: { output: { task_id: 't', task_status: 'PENDING' } } }]);
+    await createImageTask({ apiKey: KEY, prompt: 'x', workspaceId: 'ws_123', fetchImpl: q1.fetchImpl });
+    expect((q1.calls[0]?.init as RequestInit & { headers: Record<string, string> }).headers['x-dashscope-workspace']).toBe('ws_123');
+    const q2 = jsonQueue([{ body: { output: { task_id: 't', task_status: 'PENDING' } } }]);
+    await createImageTask({ apiKey: KEY, prompt: 'x', fetchImpl: q2.fetchImpl });
+    expect((q2.calls[0]?.init as RequestInit & { headers: Record<string, string> }).headers['x-dashscope-workspace']).toBeUndefined();
+  });
 });
 
 describe('getTaskStatus', () => {

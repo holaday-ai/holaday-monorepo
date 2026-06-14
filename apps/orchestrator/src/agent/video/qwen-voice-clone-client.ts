@@ -65,6 +65,8 @@ export interface QwenBaseParams {
   /** DashScope INTERNATIONAL (Singapore-region) API key. Empty → no_api_key. */
   readonly apiKey: string;
   readonly baseUrl?: string;
+  /** Optional DashScope business-space id → `X-DashScope-WorkSpace` header. */
+  readonly workspaceId?: string;
   readonly timeoutMs?: number;
   readonly fetchImpl?: typeof fetch;
   readonly signal?: AbortSignal;
@@ -98,7 +100,11 @@ async function postJson(
         url,
         {
           method: 'POST',
-          headers: { 'content-type': 'application/json', authorization: `Bearer ${p.apiKey}` },
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${p.apiKey}`,
+            ...(p.workspaceId ? { 'x-dashscope-workspace': p.workspaceId } : {}),
+          },
           body: JSON.stringify(body),
         },
         { timeoutMs: p.timeoutMs ?? defaultTimeoutMs, ...(p.signal ? { signal: p.signal } : {}), fetchImpl },

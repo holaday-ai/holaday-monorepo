@@ -77,6 +77,8 @@ export interface WanxiangBaseParams {
   readonly apiKey: string;
   /** Defaults to https://dashscope-intl.aliyuncs.com. No trailing slash needed. */
   readonly baseUrl?: string;
+  /** Optional DashScope business-space id → `X-DashScope-WorkSpace` header. */
+  readonly workspaceId?: string;
   /** Per-HTTP wall-clock timeout. Default 30s. */
   readonly timeoutMs?: number;
   /** Injectable for tests; defaults to global fetch. */
@@ -173,6 +175,7 @@ async function postCreate(
             'content-type': 'application/json',
             authorization: `Bearer ${p.apiKey}`,
             'x-dashscope-async': 'enable',
+            ...(p.workspaceId ? { 'x-dashscope-workspace': p.workspaceId } : {}),
           },
           body: JSON.stringify(body),
         },
@@ -258,7 +261,13 @@ export async function getTaskStatus(
   try {
     res = await fetchWithTimeout(
       `${base(p)}/api/v1/tasks/${encodeURIComponent(p.taskId)}`,
-      { method: 'GET', headers: { authorization: `Bearer ${p.apiKey}` } },
+      {
+        method: 'GET',
+        headers: {
+          authorization: `Bearer ${p.apiKey}`,
+          ...(p.workspaceId ? { 'x-dashscope-workspace': p.workspaceId } : {}),
+        },
+      },
       { timeoutMs: p.timeoutMs ?? DEFAULT_TIMEOUT_MS, ...(p.signal ? { signal: p.signal } : {}), fetchImpl },
     );
   } catch (err) {

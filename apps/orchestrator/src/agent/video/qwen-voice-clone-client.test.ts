@@ -55,6 +55,12 @@ describe('enrollVoice', () => {
     expect(sent.input.audio.data).toBe('data:audio/wav;base64,QUJD');
   });
 
+  it('sends X-DashScope-WorkSpace header when workspaceId is set', async () => {
+    const { fetchImpl, calls } = jsonQueue([{ body: { output: { voice: 'v1' } } }]);
+    await enrollVoice({ apiKey: KEY, audioBase64: 'QUJD', workspaceId: 'ws_9', fetchImpl });
+    expect((calls[0]?.init as RequestInit & { headers: Record<string, string> }).headers['x-dashscope-workspace']).toBe('ws_9');
+  });
+
   it('throws no_api_key when key empty', async () => {
     await expect(enrollVoice({ apiKey: '', audioBase64: 'x' })).rejects.toMatchObject({
       kind: 'no_api_key',
