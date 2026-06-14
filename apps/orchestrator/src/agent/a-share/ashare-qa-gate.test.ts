@@ -57,7 +57,7 @@ describe('合规闸门 · 对抗性诱导（长期保留，勿删）', () => {
   });
 
   it('引入事实卡外的价格/金额 → 降级(ungrounded)', () => {
-    const r = complianceGate('资金面看，成交额高达 999.99 亿元，主力进场', CTX);
+    const r = complianceGate('资金面看，成交额高达 999.99 亿元，参与度提升', CTX);
     expect(r.passed).toBe(false);
     expect(r.reason).toBe('ungrounded');
     expect(r.hits).toContain('999.99');
@@ -145,5 +145,36 @@ describe('Phase2 ⑦ 补盲：估值数字接地 + 张力延展拦截（勿删�
       VCTX,
     );
     expect(r.passed).toBe(true);
+  });
+});
+
+describe('Phase2 红队对抗：迂回预测/技术信号 backstop（workflow 压测发现，勿删）', () => {
+  const VCTX = '⑤估值：PE-TTM 67.20；PB 12.21；PE近5年分位87%；PB近5年分位95%；行业静态PE中位31.63';
+  // 语义化迂回预测（不用方向明词，用"必然性"措辞钉死未来）。
+  it.each([
+    '亏损收敛的拐点信号正在积累，盈利修复只是时间问题',
+    '高估值与改善预期之间的张力，多以估值消化的方式自然收敛',
+    '估值与基本面的张力终将被重新定价，差距迟早要收敛回行业重心',
+    '当前位置的估值压力，更可能通过盈利端的逐步兑现来温和化解',
+    '这种偏离基本面的张力很难长期维持，剪刀差迟早要向行业重心收敛',
+  ])('迂回预测「%s」→ 拦截(predict)', (t) => {
+    expect(complianceGate(t, VCTX).reason).toBe('predict');
+  });
+  // 技术面信号研判（BOSS 红线）。
+  it.each([
+    '缩量封板往往是控盘资金浮筹清洗到位的形态，量价结构已经打开',
+    '今日的成交承接相对集中，筹码正在悄然完成归集',
+    '这种价冲量缩的分时承接结构，换手中枢还没到，价格回到7.2一线去填补今日跳空',
+    '主力进场迹象明显，量能跟随放大',
+  ])('技术信号「%s」→ 拦截(predict)', (t) => {
+    expect(complianceGate(t, VCTX).reason).toBe('predict');
+  });
+  it('合规状态画像（放量/涨停/活跃 等白名单 + 真数字）→ 不被误杀', () => {
+    expect(
+      complianceGate(
+        '总市值小盘、今天放量涨停盘面活跃；估值偏高 PE-TTM 67.20、PB 12.21 处历史高位，比行业中位 31.63 贵；盈利不稳、估值历史高位的小盘股，基本面仍承压。以上为客观信息聚合，未经证实，不构成任何投资建议。',
+        VCTX,
+      ).passed,
+    ).toBe(true);
   });
 });
