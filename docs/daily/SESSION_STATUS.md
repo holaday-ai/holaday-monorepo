@@ -8,7 +8,8 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`a139887`
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`d4da1e5`
+（2026-06-14；**#5 图片 P0 文案合规 + P1 预览占位 部署 prod**：SPA 双边 `index-bh0_PXtK.js` + orchestrator restart 642，preflight FF-safe（live a139887 是 ancestor），key 校验「GEMINI+ANTHROPIC 在进程」，healthz 200。commit `dcbf015`(P0 营销图禁编造促销文案——buildImagePrompt 硬约束 + 负向测 + live 实证「全场五折」只出一个优惠) + `707af37`(P1 FileDownloadCard 图片加载占位，消「文字先出图片后到」割裂)。一并带上 a139887(#2④) + #1 模板修复。**Phase 0 待 Claude 重跑全套对比 12/16 基线。**）
 （2026-06-14；#2 A股 ④ matcher E03/E16 精修部署 prod，restart 641，healthz ok，build tsc0，
 preflight 实读 live HEAD=`2617392`（ancestor of a139887）→ FF-safe；akshare-mcp 同步重启（停用词）；
 无新 migration。修复（Phase 0 评测暴露的 ④ matcher 两处过激，prod 日志实证根因）：
