@@ -1,0 +1,206 @@
+/**
+ * FFmpeg vertical-compose command builder (step ⑥).
+ *
+ * PURE — builds the ffmpeg argv for assembling the per-segment clips
+ * (from the pipeline runner) into the final vertical 1080×1920 MP4. The
+ * actual spawn happens at the lane (3e) against the real ffmpeg 4.4.2
+ * (installed on Vultr, libx264 + aac verified). Keeping the command a
+ * pure function means the filtergraph is unit-testable without ffmpeg.
+ *
+ * The graph:
+ *   1. normalize each clip → scale-to-fit + pad to W×H + setsar=1 + fps
+ *   2. concat the normalized v/a streams in order
+ *   3. burn in subtitles (SRT)
+ *   4. WATERMARK (compliance, 防盗用他人声音/肖像) — ALWAYS applied: an
+ *      explicit text/image watermark, or a default text watermark if none
+ *      is supplied (so an output can never ship un-watermarked)
+ *   5. BGM with sidechain ducking (压低 under narration)
+ *   6. encode libx264 + aac + yuv420p (+faststart for mobile streaming)
+ *
+ * Every per-segment clip is assumed to carry BOTH video and the segment's
+ * narration audio (the runner's lip-sync / broll-render deps produce that).
+ */
+
+const DEFAULT_WIDTH = 1080;
+const DEFAULT_HEIGHT = 1920;
+const DEFAULT_FPS = 30;
+const DEFAULT_BGM_VOLUME = 0.4;
+const DEFAULT_WATERMARK_TEXT = 'HOLA DAY · AI 合成';
+
+export type WatermarkPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
+
+export interface ComposeWatermark {
+  /** Watermark text (drawtext). Use one of text / imagePath. */
+  readonly text?: string;
+  /** Watermark image path (overlay). */
+  readonly imagePath?: string;
+  /** Default bottom-right. */
+  readonly position?: WatermarkPosition;
+  /** 0..1. Default 0.6. */
+  readonly opacity?: number;
+}
+
+export interface ComposeInput {
+  /** Per-segment clip paths, in play order. Each has video + narration audio. */
+  readonly segmentClipPaths: readonly string[];
+  readonly outputPath: string;
+  /** SRT subtitle file to burn in. Omit to skip subtitles. */
+  readonly srtPath?: string;
+  /** Watermark. Omit → a default text watermark is applied (compliance). */
+  readonly watermark?: ComposeWatermark;
+  /** Background music file. Omit to skip BGM. */
+  readonly bgmPath?: string;
+  /** BGM base volume 0..1 before ducking. Default 0.4. */
+  readonly bgmVolume?: number;
+  readonly width?: number;
+  readonly height?: number;
+  readonly fps?: number;
+}
+
+export interface FfmpegCommand {
+  readonly bin: string;
+  readonly args: string[];
+}
+
+/** Escape a value embedded in an ffmpeg filtergraph option. */
+function escapeFilterValue(v: string): string {
+  return v.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'").replace(/%/g, '\\%');
+}
+
+function drawtextPosition(pos: WatermarkPosition): string {
+  switch (pos) {
+    case 'bottom-left':
+      return 'x=40:y=h-th-48';
+    case 'top-right':
+      return 'x=w-tw-40:y=40';
+    case 'top-left':
+      return 'x=40:y=40';
+    default: // bottom-right
+      return 'x=w-tw-40:y=h-th-48';
+  }
+}
+
+function overlayPosition(pos: WatermarkPosition): string {
+  switch (pos) {
+    case 'bottom-left':
+      return 'x=40:y=main_h-overlay_h-48';
+    case 'top-right':
+      return 'x=main_w-overlay_w-40:y=40';
+    case 'top-left':
+      return 'x=40:y=40';
+    default:
+      return 'x=main_w-overlay_w-40:y=main_h-overlay_h-48';
+  }
+}
+
+/**
+ * Build the ffmpeg command to compose the final vertical video. Pure: no
+ * IO, no spawn. Throws if there are no clips.
+ */
+export function buildComposeCommand(
+  input: ComposeInput,
+  opts?: { ffmpegBin?: string },
+): FfmpegCommand {
+  const clips = input.segmentClipPaths;
+  if (clips.length === 0) throw new Error('compose: no segment clips');
+  const W = input.width ?? DEFAULT_WIDTH;
+  const H = input.height ?? DEFAULT_HEIGHT;
+  const FPS = input.fps ?? DEFAULT_FPS;
+
+  // ---- inputs (track indices) ----
+  const inputArgs: string[] = [];
+  let idx = 0;
+  for (const clip of clips) {
+    inputArgs.push('-i', clip);
+    idx += 1;
+  }
+  let bgmIdx = -1;
+  if (input.bgmPath) {
+    inputArgs.push('-i', input.bgmPath);
+    bgmIdx = idx;
+    idx += 1;
+  }
+  // Watermark image input (only when an image watermark is requested).
+  const wantImageWatermark = !!input.watermark?.imagePath;
+  let wmImgIdx = -1;
+  if (wantImageWatermark) {
+    inputArgs.push('-i', input.watermark!.imagePath!);
+    wmImgIdx = idx;
+    idx += 1;
+  }
+
+  // ---- filtergraph ----
+  const fc: string[] = [];
+  // 1. normalize each clip → W×H, fps, sar.
+  clips.forEach((_clip, i) => {
+    fc.push(
+      `[${i}:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
+        `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${FPS}[v${i}]`,
+    );
+    fc.push(`[${i}:a]aresample=async=1:first_pts=0[a${i}]`);
+  });
+  // 2. concat.
+  const concatPairs = clips.map((_c, i) => `[v${i}][a${i}]`).join('');
+  fc.push(`${concatPairs}concat=n=${clips.length}:v=1:a=1[cv][ca]`);
+  let vcur = 'cv';
+  let acur = 'ca';
+
+  // 3. subtitles burn-in.
+  if (input.srtPath) {
+    fc.push(`[${vcur}]subtitles=${escapeFilterValue(input.srtPath)}[sv]`);
+    vcur = 'sv';
+  }
+
+  // 4. watermark (ALWAYS — compliance). Image watermark if provided, else
+  // an explicit/default text watermark.
+  const opacity = input.watermark?.opacity ?? 0.6;
+  const position = input.watermark?.position ?? 'bottom-right';
+  if (wantImageWatermark) {
+    fc.push(`[${wmImgIdx}:v]format=rgba,colorchannelmixer=aa=${opacity}[wm]`);
+    fc.push(`[${vcur}][wm]overlay=${overlayPosition(position)}[wv]`);
+    vcur = 'wv';
+  } else {
+    const text = input.watermark?.text ?? DEFAULT_WATERMARK_TEXT;
+    fc.push(
+      `[${vcur}]drawtext=text='${escapeFilterValue(text)}':fontcolor=white@${opacity}:` +
+        `fontsize=36:box=1:boxcolor=black@0.35:boxborderw=10:${drawtextPosition(position)}[wv]`,
+    );
+    vcur = 'wv';
+  }
+
+  // 5. BGM with sidechain ducking (压低 while narration plays).
+  if (bgmIdx >= 0) {
+    const bv = input.bgmVolume ?? DEFAULT_BGM_VOLUME;
+    fc.push(`[${bgmIdx}:a]volume=${bv},aloop=loop=-1:size=2000000000[bgmraw]`);
+    fc.push(`[bgmraw][${acur}]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=300[bgmduck]`);
+    fc.push(`[${acur}][bgmduck]amix=inputs=2:duration=first:dropout_transition=0[mixa]`);
+    acur = 'mixa';
+  }
+
+  const args = [
+    '-y',
+    ...inputArgs,
+    '-filter_complex',
+    fc.join(';'),
+    '-map',
+    `[${vcur}]`,
+    '-map',
+    `[${acur}]`,
+    '-c:v',
+    'libx264',
+    '-preset',
+    'medium',
+    '-pix_fmt',
+    'yuv420p',
+    '-r',
+    String(FPS),
+    '-c:a',
+    'aac',
+    '-b:a',
+    '192k',
+    '-movflags',
+    '+faststart',
+    input.outputPath,
+  ];
+  return { bin: opts?.ffmpegBin ?? 'ffmpeg', args };
+}
