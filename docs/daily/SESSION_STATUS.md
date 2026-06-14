@@ -199,3 +199,11 @@ baseline `musing-keller` @ `9935e84` 已含 template-fill M1-M3 → **#1 templat
 
 ### #5 — 图片生成 (image)
 - 状态：← owner 更新
+
+### #4 — 视频生成 (video)
+- **状态：管线就绪，等真人正脸出镜底版做端到端验收。** worktree `/Users/yaleiqi/holaday-video` branch `claude/video-ae1d05`（**未 merge / 未部署**，全 flag-gated 默认 off）。
+- **进度**：步骤1 上传链路（presigned-PUT + media 白名单 + 200MB + migration `0034` users.qwen_voice_id/base_video_file_id）**已部署 prod**（曾 `f60e698`，现 prod 已被其他 session 推进到 `c092562`，video 列与代码仍在）。步骤2 三适配器（Wanxiang/fal/Qwen3-TTS-VC）+ 真调证据全绿。步骤3 编排 **3a→3e-2 全 done + 单测**（env/时间轴对齐/runner/FFmpeg竖屏合成/脚本生成/ffmpeg子进程/video-lane），全套 2704 绿。
+- **2026-06-15 全管线连通性冒烟通过**（≠验收）：脚本直跑真 `runVideoCreation`，6 步串通，真出 1080×1920 h264+aac MP4 27.5s/4.3MB，OSS→R2 全落。录屏底版换口型废、不计验收。测试素材+克隆音色已清。
+- **未做（刻意暂停）**：3e-3 接 `tasks.ts` 后台协程 gate + onboarding（高风险共享文件改动，等 BOSS 录真底版 + 过目 hunk 再接）。**不动 tasks.ts。**
+- **BACKLOG（验收前必修）**：lip-sync clip 比其音频短 ~0.11s/段（冒烟 28.16s 时间轴 vs 27.478s 成片，~0.68s 漂移）→ `lipSyncSegment` 用 ffmpeg `-t`/`apad` 把 fal 输出 trim/pad 到精确音频时长，锁死音视字三轨。
+- 详见 memory `project_phase1_video_impl_2026-06-13`。
