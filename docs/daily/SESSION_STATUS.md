@@ -8,7 +8,18 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`3f76062`
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`c092562`
+（2026-06-14；**#5 图片 P1 执行层重修 部署 prod**，restart 644，两边 healthz 200，SPA 双边
+`index-CtjniCcy.js`，preflight 实读 live HEAD=`3f76062`（ancestor of c092562）→ FF-safe；keys（GEMINI+
+ANTHROPIC）在进程；无新 migration。**纠正 `707af37` 误判**：上轮把 P1 当作 FileDownloadCard 缩略图占位
+来修，线上行为没变——真问题在执行层两处：① 图片任务执行期进度显示通用「正在生成回答…」→ 新增
+`generating_image` 子状态（「正在生成图片…」），图片 lane 发出，贯穿 WS substatus 帧 + TaskStream 实时
+chip + TaskListItem 列表 chip；② 文字结果「已生成1张图片」先 commit、缩略图一个 tasks.detail 往返后才到
+（用户截图的割裂）→ 图片 lane 把 `attachments[]` 挂上 `server.task.terminal` 帧，SPA terminal handler
+立即 stamp 到任务，图卡与摘要文字同帧渲染；附件校验器抽成共享 `parseUiAttachments()`。orchestrator
+2657 测 + SPA 测全绿（唯一失败 `control-tooltip.test.ts` 经 stash 实证为 `5d4bb2c` NotificationBell
+预存在，已开 task chip 上报，与本次无关）。**待 Claude 重测：① 执行期「正在生成图片」② 图文同帧出现。**
+前态：3f76062（#1 模板）。）
 （2026-06-14；**#1 模板填充 E10 P0 文件名乱码（深层根因）修复部署 prod**，restart 643，healthz ok，
 build tsc0，keys in process；preflight 实读 live HEAD=`d4da1e5`（ancestor of 3f76062）→ FF-safe；
 无新 migration。根因：**存储的模板名本身就是 mojibake**（SPA 存成 å¨æ¥æ¨¡æ¿.xlsx），输出名=模板名+
