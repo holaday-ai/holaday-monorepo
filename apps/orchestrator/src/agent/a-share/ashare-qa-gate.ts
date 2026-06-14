@@ -37,19 +37,29 @@ export interface GateResult {
 }
 
 /**
- * 抽取「显著数字」token 做接地校验：只盯**金额/价格类**（带 元/亿/万 单位，或 ≥100 的数，
- * 如收盘价/成交额/代码）。**放过百分比与小数**（涨跌幅 1.01% 等）——LLM 常对其四舍五入
- * 复述，纳入会误判降级。目标是抓「凭空捏造的价格/目标位」，不是抓改写。
+ * 抽取「显著金额/价格」token（带 元/亿/万 单位，或 ≥100 的数，如收盘价/成交额）+ 是否带 money 单位。
+ * **放过百分比与小数**（涨跌幅 1.01% 等）——LLM 常四舍五入复述，纳入会误判。`unit` 用于剔除
+ * 「年份」（无单位 4 位整数，如 2025年度）作接地锚——否则假目标价 2000 会被年份 2025 误接地。
  */
-function significantNumbers(text: string): string[] {
-  const out: string[] = [];
+interface AmountTok {
+  raw: string;
+  v: number;
+  unit: boolean;
+}
+function amountTokens(text: string): AmountTok[] {
+  const out: AmountTok[] = [];
   for (const m of text.matchAll(/(\d[\d,]*\.?\d*)\s*(元|亿|万)?/g)) {
     const raw = (m[1] ?? '').replace(/,/g, '');
-    const n = Number(raw);
-    if (!Number.isFinite(n)) continue;
-    if (m[2] || n >= 100) out.push(raw);
+    const v = Number(raw);
+    if (!Number.isFinite(v)) continue;
+    if (m[2] || v >= 100) out.push({ raw, v, unit: !!m[2] });
   }
   return out;
+}
+
+/** 年份样（无单位 4 位整数 1990-2099）——不作金额接地锚/声明，避免污染（2025年度 ≠ 目标价）。 */
+function isYearLike(n: number): boolean {
+  return Number.isInteger(n) && n >= 1990 && n <= 2099;
 }
 
 /**
@@ -102,24 +112,29 @@ export function complianceGate(interpretation: string, factContext: string): Gat
   const tensionHit = interpretation.match(TENSION_PREDICT_PATTERN);
   if (tensionHit) return { passed: false, reason: 'predict', hits: [tensionHit[0]] };
 
-  // 接地校验：③/⑦ 出现的显著数字必须在事实卡上下文里出现过，否则=凭空数据。
-  const ctxNums = new Set(significantNumbers(factContext));
-  const ungrounded = significantNumbers(interpretation).filter((n) => !ctxNums.has(n));
-  if (ungrounded.length > 0) return { passed: false, reason: 'ungrounded', hits: ungrounded };
-
-  // ⑦ 补盲：估值数字（PE/PB/分位/行业中位/倍数，无单位小数）也必须接地（significantNumbers 盲区）。
-  // **数值比较**（容忍 67.2 vs 67.20 这类改写）：⑦ 的估值数若数值不在上下文任一数附近 → 凭空。
-  const ctxValNums = [...significantNumbers(factContext), ...valuationNumbers(factContext)]
-    .map((s) => Number(s))
-    .filter((n) => Number.isFinite(n));
-  const ungroundedVal = valuationNumbers(interpretation).filter((s) => {
+  // 接地校验（**数值容差 + 排年份**，容忍 LLM 口语化约数：1981→1981.72、4848→「4800多」、
+  // 34→34.47、67.2→67.20）：③/⑦ 的「金额/价格 + 估值数(PE/PB/分位/中位/倍数)」都必须数值接近
+  // 上下文某个**非年份**锚，否则=凭空捏造。容差 2%(相对)/0.05(绝对)。无单位年份(2025年度)既不作锚、
+  // 也不作声明检查（避免假目标价 2000 被年份 2025 误接地、又不误杀「2026Q1财报」这类年份引用）。
+  const ctxAnchors = [
+    ...valuationNumbers(factContext).map(Number),
+    ...amountTokens(factContext)
+      .filter((t) => t.unit || !isYearLike(t.v))
+      .map((t) => t.v),
+  ].filter(Number.isFinite);
+  const isGrounded = (x: number): boolean =>
+    ctxAnchors.some((c) => Math.abs(c - x) < 0.05 || (c !== 0 && Math.abs((c - x) / c) <= 0.02));
+  const claims: string[] = [
+    ...valuationNumbers(interpretation),
+    ...amountTokens(interpretation)
+      .filter((t) => t.unit || !isYearLike(t.v))
+      .map((t) => t.raw),
+  ];
+  const ungrounded = claims.filter((s) => {
     const x = Number(s);
-    if (!Number.isFinite(x)) return false;
-    return !ctxValNums.some(
-      (c) => Math.abs(c - x) < 0.05 || (c !== 0 && Math.abs((c - x) / c) < 0.01),
-    );
+    return Number.isFinite(x) && !isGrounded(x);
   });
-  if (ungroundedVal.length > 0) return { passed: false, reason: 'ungrounded', hits: ungroundedVal };
+  if (ungrounded.length > 0) return { passed: false, reason: 'ungrounded', hits: ungrounded };
 
   return { passed: true, hits: [] };
 }
