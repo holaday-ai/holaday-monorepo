@@ -36,7 +36,13 @@ interface Props {
   batchDisabled?: boolean;
 }
 
-type TaskLiveSubStatus = 'planning' | 'browsing' | 'extracting' | 'verifying' | 'generating';
+type TaskLiveSubStatus =
+  | 'planning'
+  | 'browsing'
+  | 'extracting'
+  | 'verifying'
+  | 'generating'
+  | 'generating_image';
 type TaskLiveSubStatusEntry =
   | TaskLiveSubStatus
   | { subStatus: TaskLiveSubStatus; since: number };
@@ -47,6 +53,7 @@ const LIVE_SUB_STATUS_LABELS: Record<TaskLiveSubStatus, string> = {
   extracting: '正在提取数据',
   verifying: '正在验证结果',
   generating: '正在生成回答',
+  generating_image: '正在生成图片',
 };
 
 /**

@@ -350,7 +350,8 @@ type TaskSubStatus =
   | 'browsing'
   | 'extracting'
   | 'verifying'
-  | 'generating';
+  | 'generating'
+  | 'generating_image';
 
 const TASK_SUB_STATUS_LABEL: Record<TaskSubStatus, string> = {
   planning: '正在规划任务…',
@@ -358,6 +359,7 @@ const TASK_SUB_STATUS_LABEL: Record<TaskSubStatus, string> = {
   extracting: '正在提取数据…',
   verifying: '正在验证结果…',
   generating: '正在生成回答…',
+  generating_image: '正在生成图片…',
 };
 
 function broadcastSubStatus(
@@ -987,7 +989,7 @@ export const tasksRouter = router({
         { taskId, userId: ctx.userId, executorLane: 'image', executionMode },
         'task: executor lane selected',
       );
-      broadcastSubStatus(ctx.userId, taskId, 'generating');
+      broadcastSubStatus(ctx.userId, taskId, 'generating_image');
 
       // Input images (图生图 / edit) come from the user's uploaded
       // attachments, already parsed into base64 image content blocks.
@@ -1102,6 +1104,13 @@ export const tasksRouter = router({
               taskId,
               status: 'completed',
               ...(result.summary ? { summary: result.summary } : {}),
+              // P1 timing fix: ship attachments ON the terminal frame so
+              // the SPA renders the image card WITH the summary text
+              // instead of after a separate tasks.detail round-trip
+              // (was: text "已生成1张图片" first, thumbnail seconds later).
+              ...(result.attachments.length > 0
+                ? { attachments: result.attachments }
+                : {}),
             });
           } else {
             broadcastToUser(ctx.userId, {

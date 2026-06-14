@@ -922,7 +922,13 @@ function LiveSubStatusChip({
   subStatus,
   since,
 }: {
-  subStatus: 'planning' | 'browsing' | 'extracting' | 'verifying' | 'generating';
+  subStatus:
+    | 'planning'
+    | 'browsing'
+    | 'extracting'
+    | 'verifying'
+    | 'generating'
+    | 'generating_image';
   since: number;
 }): JSX.Element {
   const labels: Record<typeof subStatus, string> = {
@@ -931,6 +937,7 @@ function LiveSubStatusChip({
     extracting: '正在提取数据',
     verifying: '正在验证结果',
     generating: '正在生成回答',
+    generating_image: '正在生成图片',
   };
   const [now, setNow] = React.useState(() => Date.now());
   React.useEffect(() => {
@@ -967,7 +974,13 @@ function LiveSubStatusChip({
 }
 
 export function liveSubStatusLongRunningHint(
-  subStatus: 'planning' | 'browsing' | 'extracting' | 'verifying' | 'generating',
+  subStatus:
+    | 'planning'
+    | 'browsing'
+    | 'extracting'
+    | 'verifying'
+    | 'generating'
+    | 'generating_image',
   elapsedSec: number,
 ): string | null {
   if (elapsedSec < 120) return null;
