@@ -1,0 +1,158 @@
+/**
+ * FFmpeg / ffprobe subprocess layer for the video lane (step ⑥ + audio
+ * duration measurement for the timeline).
+ *
+ * `spawn` is injected so the command construction + ffprobe parsing are
+ * unit-testable without a real binary; the lane (3e wiring) calls these
+ * against the real ffmpeg 4.4.2 installed on Vultr (libx264 + aac verified).
+ */
+
+import { spawn as nodeSpawn, type SpawnOptions } from 'node:child_process';
+
+export interface ProcLike {
+  stdout: { on(ev: 'data', cb: (chunk: Buffer | string) => void): void } | null;
+  stderr: { on(ev: 'data', cb: (chunk: Buffer | string) => void): void } | null;
+  on(ev: 'close', cb: (code: number | null) => void): void;
+  on(ev: 'error', cb: (err: Error) => void): void;
+  kill(signal?: NodeJS.Signals | number): void;
+}
+export type SpawnFn = (cmd: string, args: readonly string[], options?: SpawnOptions) => ProcLike;
+
+export interface FfmpegExecOpts {
+  ffmpegBin?: string;
+  ffprobeBin?: string;
+  spawnFn?: SpawnFn;
+  /** Wall-clock cap. Default 10min (a multi-clip vertical compose can be slow). */
+  timeoutMs?: number;
+}
+
+const DEFAULT_TIMEOUT_MS = 600_000;
+
+/** Run a binary; capture stdout/stderr; reject on non-zero exit, spawn error, or timeout. */
+async function runProcess(
+  bin: string,
+  args: readonly string[],
+  opts: FfmpegExecOpts,
+): Promise<{ stdout: string; stderr: string }> {
+  const spawnFn = opts.spawnFn ?? (nodeSpawn as unknown as SpawnFn);
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  return new Promise((resolve, reject) => {
+    let child: ProcLike;
+    try {
+      child = spawnFn(bin, args, {});
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    let stdout = '';
+    let stderr = '';
+    let done = false;
+    const finish = (fn: () => void) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      fn();
+    };
+    const timer = setTimeout(() => {
+      finish(() => {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          /* already gone */
+        }
+        reject(new Error(`${bin} timed out after ${timeoutMs}ms`));
+      });
+    }, timeoutMs);
+    child.stdout?.on('data', (c) => {
+      stdout += c.toString();
+    });
+    child.stderr?.on('data', (c) => {
+      stderr += c.toString();
+    });
+    child.on('error', (err) => finish(() => reject(err)));
+    child.on('close', (code) =>
+      finish(() => {
+        if (code === 0) resolve({ stdout, stderr });
+        else reject(new Error(`${bin} exited ${code}: ${stderr.slice(0, 500)}`));
+      }),
+    );
+  });
+}
+
+/** Probe a media file's duration → milliseconds. Throws on a missing/invalid duration. */
+export async function ffprobeDurationMs(filePath: string, opts: FfmpegExecOpts = {}): Promise<number> {
+  const args = [
+    '-v',
+    'error',
+    '-show_entries',
+    'format=duration',
+    '-of',
+    'default=noprint_wrappers=1:nokey=1',
+    filePath,
+  ];
+  const { stdout } = await runProcess(opts.ffprobeBin ?? 'ffprobe', args, opts);
+  const sec = Number.parseFloat(stdout.trim());
+  if (!Number.isFinite(sec) || sec <= 0) {
+    throw new Error(`ffprobe: bad duration "${stdout.trim()}" for ${filePath}`);
+  }
+  return Math.round(sec * 1000);
+}
+
+export interface RenderImageClipInput {
+  imagePath: string;
+  audioPath: string;
+  outPath: string;
+  durationMs: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+}
+
+/**
+ * Render a still B-roll image over its narration audio into a fixed-length
+ * vertical mp4 clip (so a B-roll segment becomes a concat-able clip the same
+ * length as its audio). libx264 + aac + yuv420p, scaled+padded to W×H.
+ */
+export async function renderImageClip(
+  input: RenderImageClipInput,
+  opts: FfmpegExecOpts = {},
+): Promise<void> {
+  const W = input.width ?? 1080;
+  const H = input.height ?? 1920;
+  const FPS = input.fps ?? 30;
+  const durSec = (input.durationMs / 1000).toFixed(3);
+  const args = [
+    '-y',
+    '-loop',
+    '1',
+    '-framerate',
+    String(FPS),
+    '-i',
+    input.imagePath,
+    '-i',
+    input.audioPath,
+    '-t',
+    durSec,
+    '-vf',
+    `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${FPS}`,
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    '-b:a',
+    '192k',
+    '-shortest',
+    input.outPath,
+  ];
+  await runProcess(opts.ffmpegBin ?? 'ffmpeg', args, opts);
+}
+
+/** Execute a prebuilt ffmpeg command (e.g. from buildComposeCommand). */
+export async function runFfmpeg(
+  cmd: { bin: string; args: readonly string[] },
+  opts: FfmpegExecOpts = {},
+): Promise<void> {
+  await runProcess(cmd.bin, cmd.args, opts);
+}
