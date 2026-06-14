@@ -1269,6 +1269,8 @@ export const tasksRouter = router({
                   const resp = await anthropicClient.messages.create({
                     model: qaModel,
                     max_tokens: 700,
+                    // 低温：③/⑦ 更忠实照抄数字（降低 ungrounded 误降级），措辞仍自然。
+                    temperature: 0.3,
                     system,
                     messages: [{ role: 'user', content: user }],
                   });
