@@ -209,6 +209,24 @@ export function contentDispositionAttachment(filename: string): string {
   return `attachment; filename="${ascii}"; filename*=UTF-8''${star}`;
 }
 
+/**
+ * Heuristic: does this string still look like UTF-8-as-latin1 mojibake AFTER a
+ * recovery attempt? A readable filename is ASCII + real letters (incl. CJK
+ * > U+00FF and accented latin like é = U+00E9). Mojibake from UTF-8 bytes read
+ * as latin1 leaves C1 control codepoints (U+0080–U+009F — the continuation
+ * bytes of a multi-byte char, e.g. 周 = E5 91 A8 → 'å','','¨'), which
+ * NEVER appear in a legitimate filename. Replacement chars (U+FFFD) likewise
+ * signal a failed decode. café (only U+00E9, not C1) is NOT flagged.
+ */
+export function looksLikeMojibake(s: string): boolean {
+  if (!s) return false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if ((c >= 0x80 && c <= 0x9f) || c === 0xfffd) return true;
+  }
+  return false;
+}
+
 export class FileService {
   /**
    * Phase 5c — disk I/O routed through a StorageProvider. When the

@@ -4,6 +4,7 @@ import {
   isMacroOfficeUpload,
   decodeUploadFilename,
   contentDispositionAttachment,
+  looksLikeMojibake,
   ACCEPTED_MIMES,
   ACCEPTED_EXTENSIONS,
 } from './file-service.js';
@@ -119,5 +120,30 @@ describe('contentDispositionAttachment (P0 / E10 — download filename encoding)
 
   it('falls back to "download" for an empty name', () => {
     expect(contentDispositionAttachment('')).toContain('filename="download"');
+  });
+});
+
+describe('looksLikeMojibake (P0 / E10 — output-name defense)', () => {
+  it('flags UTF-8-as-latin1 mojibake (C1 control bytes)', () => {
+    // 周报模板 stored as latin1 → the classic å¨æ¥… garble (has C1 controls)
+    const garble = Buffer.from('周报模板', 'utf8').toString('latin1');
+    expect(looksLikeMojibake(garble)).toBe(true);
+  });
+  it('flags a replacement char', () => {
+    expect(looksLikeMojibake('bad�name')).toBe(true);
+  });
+  it('does NOT flag clean CJK', () => {
+    expect(looksLikeMojibake('周报模板')).toBe(false);
+  });
+  it('does NOT flag a genuine accented latin name (café)', () => {
+    expect(looksLikeMojibake('café')).toBe(false);
+  });
+  it('does NOT flag plain ASCII or empty', () => {
+    expect(looksLikeMojibake('report-2026')).toBe(false);
+    expect(looksLikeMojibake('')).toBe(false);
+  });
+  it('a recoverable mojibake name, once repaired, is no longer flagged', () => {
+    const garble = Buffer.from('周报模板', 'utf8').toString('latin1');
+    expect(looksLikeMojibake(decodeUploadFilename(garble))).toBe(false); // → 周报模板
   });
 });

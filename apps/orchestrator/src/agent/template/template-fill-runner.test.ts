@@ -172,6 +172,50 @@ describe('runTemplateFillTask — xlsx', () => {
   });
 });
 
+describe('runTemplateFillTask — output filename defense (P0 / E10 mojibake)', () => {
+  const xlsxMime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  async function simpleXlsx(): Promise<Buffer> {
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet('s').getCell('A1').value = '姓名：{name}';
+    return Buffer.from((await wb.xlsx.writeBuffer()) as ArrayBuffer);
+  }
+  const fill = async (filename: string) => {
+    const { save } = capturingSave();
+    const out = await runTemplateFillTask({
+      intent: '姓名张三',
+      template: { buffer: await simpleXlsx(), filename, mimetype: xlsxMime },
+      allowedFormats: PRO_FORMATS,
+      save,
+      model: modelReturning('{"fields":{"name":"张三"},"loops":{},"missing":[]}'),
+      logger: fakeLogger(),
+    });
+    return out.attachments[0]!.filename;
+  };
+
+  // The exact E10 failure: the SPA stored the template as latin1 mojibake
+  // (周报模板 → å¨æ¥…), so the output name inherited the garble. Defend at
+  // output generation: repair the name (latin1→utf8) → clean Chinese.
+  it('REPAIRS a recoverable mojibake template name → clean Chinese output', async () => {
+    const garble = Buffer.from('周报模板', 'utf8').toString('latin1') + '.xlsx';
+    const name = await fill(garble);
+    expect(name).toBe('周报模板-已填充.xlsx');
+  });
+
+  it('falls back to a clean default for an UNRECOVERABLE mojibake name', async () => {
+    const garble = String.fromCharCode(0x80, 0x81, 0x82) + '.xlsx';
+    const name = await fill(garble);
+    expect(name).toMatch(/^填充结果-\d{8}-\d{6}\.xlsx$/);
+  });
+
+  it('leaves a clean CJK template name untouched', async () => {
+    expect(await fill('季度报表.xlsx')).toBe('季度报表-已填充.xlsx');
+  });
+
+  it('leaves a genuine accented-latin name (café) untouched', async () => {
+    expect(await fill('café.xlsx')).toBe('café-已填充.xlsx');
+  });
+});
+
 describe('runTemplateFillTask — partial / honest paths', () => {
   it('returns partial_success and lists missing fields', async () => {
     const template = await buildDocx(['{client_name} {invoice_no} {date}']);

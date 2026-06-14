@@ -30,6 +30,7 @@ import {
   type TemplateFormat,
 } from './placeholder-schema.js';
 import { inspectTemplate, checkPlaceholderBudget } from './template-safety.js';
+import { decodeUploadFilename, looksLikeMojibake } from '../../files/file-service.js';
 import * as docxEngine from './docx-template-engine.js';
 import * as xlsxEngine from './xlsx-template-engine.js';
 
@@ -229,12 +230,15 @@ export async function runTemplateFillTask(
     logger.info({ typeErrors: validated.typeErrors }, 'template-fill: validator type notes');
   }
 
+  // A readable label for summary text — never echo a mojibake stored name.
+  const tplLabel = displayTemplateName(template.filename);
+
   // 10. Nothing fillable → honest partial, no useless blank file.
   if (Object.keys(validated.data).length === 0) {
     return {
       status: 'partial_success',
       summary:
-        `未能从你提供的内容中提取到可填充的数据。模板「${template.filename}」需要这些字段：` +
+        `未能从你提供的内容中提取到可填充的数据。模板「${tplLabel}」需要这些字段：` +
         `${flattenTop(schema).join('、')}。请在指令中补充数据，或上传一个包含数据的 csv/xlsx 文件后重试。`,
       attachments: [],
       missing: validated.missing,
@@ -248,7 +252,7 @@ export async function runTemplateFillTask(
   if (!opts.allowedFormats.includes(format)) {
     return {
       status: 'completed',
-      summary: buildPreviewMarkdown(schema, validated.data, template.filename, format),
+      summary: buildPreviewMarkdown(schema, validated.data, tplLabel, format),
       attachments: [],
       missing: validated.missing,
       format,
@@ -316,7 +320,7 @@ export async function runTemplateFillTask(
       validated.missing,
       validated.flagged,
       skippedLoops,
-      template.filename,
+      tplLabel,
     ),
     attachments: [attachment],
     missing: validated.missing,
@@ -550,9 +554,46 @@ function flattenTop(schema: PlaceholderSchema): string[] {
 // Misc helpers
 // ---------------------------------------------------------------------------
 
-function outputFilename(templateName: string, format: TemplateFormat): string {
-  const base = templateName.replace(/\.[^.]+$/, '').trim() || '模板';
-  return `${base}-已填充.${format}`;
+/**
+ * Build the downloaded file's name from the template's name. The OUTPUT name
+ * propagates whatever was stored upstream, so a mojibake template name (e.g.
+ * the SPA stored "å¨æ¥æ¨¡æ¿.xlsx" instead of "周报模板.xlsx") would otherwise
+ * hand the user a garbled "å¨æ¥æ¨¡æ¿-已填充.xlsx" no matter how the download
+ * header is encoded. So we defend HERE (E10 P0):
+ *   1. repair the base name (latin1→utf8 re-decode — the same recovery the
+ *      upload path uses) so a recoverable mojibake name comes back readable;
+ *   2. if it's STILL mojibake (unrecoverable), fall back to a clean default
+ *      name — never emit a garbled filename.
+ * `now` is injectable for deterministic tests.
+ */
+function outputFilename(
+  templateName: string,
+  format: TemplateFormat,
+  now: number = Date.now(),
+): string {
+  const rawBase = templateName.replace(/\.[^.]+$/, '').trim();
+  const repaired = decodeUploadFilename(rawBase).trim();
+  if (!repaired || looksLikeMojibake(repaired)) {
+    return `填充结果-${fileStamp(now)}.${format}`; // clean fallback, never mojibake
+  }
+  return `${repaired}-已填充.${format}`;
+}
+
+/** Compact, filename-safe timestamp: YYYYMMDD-HHmmss (UTC). */
+function fileStamp(now: number): string {
+  const d = new Date(now);
+  const p = (n: number, w = 2): string => String(n).padStart(w, '0');
+  return (
+    `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}` +
+    `-${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}`
+  );
+}
+
+/** A readable template name for user-facing summary text — repairs a mojibake
+ *  stored name, or falls back to a clean generic so we never echo garbage. */
+function displayTemplateName(name: string): string {
+  const repaired = decodeUploadFilename(name).trim();
+  return !repaired || looksLikeMojibake(repaired) ? '你的模板' : repaired;
 }
 
 function errMessage(err: unknown, fallback: string): string {
