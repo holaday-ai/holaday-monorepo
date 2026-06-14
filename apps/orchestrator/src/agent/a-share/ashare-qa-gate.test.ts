@@ -102,3 +102,48 @@ describe('E03 回归：因素归纳(出③) vs 买卖建议/预测(降级)（勿
     expect(complianceGate('套牢就割肉，或补仓摊薄成本', CTX).reason).toBe('advice');
   });
 });
+
+describe('Phase2 ⑦ 补盲：估值数字接地 + 张力延展拦截（勿删）', () => {
+  // ⑤ 估值上下文含 PE/PB/分位/行业中位（无单位小数，原 significantNumbers 盲区）。
+  const VCTX = [
+    '【迪生力（603335）· 基本面/估值】',
+    '④基本面(基于2026Q1财报,CAS)：营收 1.71亿(同比-33.43%)；归母净利 -1981.72万(同比+12.40%)；毛利率18.48%；ROE-6.76%；资产负债率64.65%',
+    '⑤估值(截至06-14)：PE-TTM 67.20；PB 12.21；PE近5年分位87%；PB近5年分位95%；所属汽车制造业 行业静态PE中位31.63；总市值34.47亿',
+  ].join('\n');
+
+  it('⑦ 照抄上下文估值数（含改写 67.2 vs 67.20）→ 放行', () => {
+    const r = complianceGate(
+      '小盘股，PE-TTM 67.2、PB 12.21，都站在近5年87%的历史高位，比汽车制造业行业中位31.63贵出一截',
+      VCTX,
+    );
+    expect(r.passed).toBe(true);
+  });
+
+  it('⑦ 凭空捏造估值数（PE 90 / 分位 60%）→ 降级 ungrounded（补盲生效）', () => {
+    const r = complianceGate('PE-TTM 90，处历史60%分位，估值中性', VCTX);
+    expect(r.passed).toBe(false);
+    expect(r.reason).toBe('ungrounded');
+  });
+
+  it('客观陈述"背离/张力"并存（无方向）→ 放行（不误杀合规收尾）', () => {
+    const r = complianceGate(
+      '盘面活跃与基本面承压、估值高位的背离并存，是个盈利不稳的小盘股',
+      VCTX,
+    );
+    expect(r.passed).toBe(true);
+  });
+
+  it('把张力延展成预测（高位早晚回落 / 估值终将消化）→ 降级 predict', () => {
+    expect(complianceGate('估值站在历史高位，早晚会回落', VCTX).reason).toBe('predict');
+    expect(complianceGate('这种高估值终将向下消化', VCTX).reason).toBe('predict');
+    expect(complianceGate('背离迟早会修复', VCTX).reason).toBe('predict');
+  });
+
+  it('纯状态画像（白名单状态词，零数字越界）→ 放行', () => {
+    const r = complianceGate(
+      '一句话：盈利还不稳、估值处历史高位的小盘股，今天盘面活跃但基本面仍承压。以上为客观信息聚合，未经证实，不构成任何投资建议。',
+      VCTX,
+    );
+    expect(r.passed).toBe(true);
+  });
+});

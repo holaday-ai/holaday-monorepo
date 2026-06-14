@@ -152,6 +152,49 @@ export interface ZtReviewRow {
   [k: string]: unknown;
 }
 
+/** ④ 基本面行（get_fundamentals；最新报告期 + 近3年趋势，CAS 口径）。 */
+export interface FundamentalsRow {
+  /** 最新报告期 'YYYY-MM-DD'（时效标注用，如 2026Q1=2026-03-31）。 */
+  report_period?: string | null;
+  /** 营业总收入（元）/ 同比增速（%）。 */
+  revenue?: number | null;
+  revenue_yoy?: number | null;
+  /** 归母净利润（元）/ 同比增速（%）。 */
+  net_profit?: number | null;
+  net_profit_yoy?: number | null;
+  /** 销售毛利率 / 净资产收益率(ROE) / 资产负债率（均 %）。 */
+  gross_margin?: number | null;
+  roe?: number | null;
+  debt_ratio?: number | null;
+  /** 近3年趋势（年度，老→新），每条同上字段子集。 */
+  trend3y?: Array<{
+    report_period?: string | null;
+    revenue?: number | null;
+    revenue_yoy?: number | null;
+    net_profit?: number | null;
+    net_profit_yoy?: number | null;
+  }>;
+  [k: string]: unknown;
+}
+
+/** ⑤ 估值行（get_valuation；PE/PB + 历史分位 + 行业静态PE中位）。 */
+export interface ValuationRow {
+  /** 市盈率(TTM) / 市净率（当前）。 */
+  pe_ttm?: number | null;
+  pb?: number | null;
+  /** 近五年历史分位（%，越高越贵）。 */
+  pe_pctile_5y?: number | null;
+  pb_pctile_5y?: number | null;
+  /** 估值数据截止日 'YYYY-MM-DD'（时效标注）。 */
+  as_of?: string | null;
+  /** 总市值（亿元）。 */
+  total_mv_yi?: number | null;
+  /** 所属行业大类（中上协口径）+ 行业静态PE中位（行业分位对照）。 */
+  industry?: string | null;
+  industry_pe_median?: number | null;
+  [k: string]: unknown;
+}
+
 /** 用户自选股清单条目（watchlists 表 list 输出的子集）。 */
 export interface WatchlistEntry {
   symbol: string;

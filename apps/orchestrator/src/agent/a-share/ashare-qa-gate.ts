@@ -53,6 +53,41 @@ function significantNumbers(text: string): string[] {
 }
 
 /**
+ * 估值数字（PE/PB/历史分位/行业中位/倍数）—— Phase2 ⑦ 全景视角补盲（设计评审发现）.
+ *
+ * `significantNumbers` 只盯带 元/亿/万 或 ≥100 的数；而 PE-TTM 67.2 / PB 12.21 / 分位 85% /
+ * 行业中位 35 这类**无单位小数**全在其接地盲区——恰是 ⑦ 决策权重最高的数字、幻觉敞口 100%。
+ * 本函数专抓"估值语境里的数"，与 significantNumbers 并集做接地校验（**不动旧逻辑**，旧对抗测不破）。
+ */
+const VALUATION_NUM_RES: RegExp[] = [
+  /PE-?\s*T?T?M?\s*[:：约]?\s*(\d+\.?\d*)/gi,
+  /市盈率\s*[（(]?\s*T?T?M?\s*[)）]?\s*[:：约]?\s*(\d+\.?\d*)/g,
+  /PB\s*[:：约]?\s*(\d+\.?\d*)/gi,
+  /市净率\s*[:：约]?\s*(\d+\.?\d*)/g,
+  /分位\s*[约为]?\s*(\d+\.?\d*)\s*%/g,
+  /(?:行业)?中位\s*(?:PE)?\s*[约]?\s*(\d+\.?\d*)/g,
+  /(\d+\.?\d*)\s*倍/g,
+];
+function valuationNumbers(text: string): string[] {
+  const out: string[] = [];
+  for (const re of VALUATION_NUM_RES) {
+    for (const m of text.matchAll(re)) {
+      const raw = (m[1] ?? '').replace(/,/g, '');
+      if (raw && Number.isFinite(Number(raw))) out.push(raw);
+    }
+  }
+  return out;
+}
+
+/**
+ * 张力/背离延展成"预测" —— Phase2 ⑦ 补盲（设计评审）.
+ * 「背离/张力/高位/偏高/估值 + 方向修复词」= 把客观矛盾延展成未来判断 → predict。
+ * **绑定式**：仅当并存词后紧跟"会/将/迟早…修复/回落/收敛…"才拦，避免误杀合规的"…的背离"陈述。
+ */
+const TENSION_PREDICT_PATTERN =
+  /(背离|张力|高位|偏高|估值|溢价).{0,8}(会|将|迟早|早晚|终将|终会|势必).{0,4}(修复|回落|回归|收敛|消化|化解|向下|下行|抹平)/;
+
+/**
  * 合规闸门。`interpretation`=LLM 生成的③解读；`factContext`=喂给 LLM 的事实卡上下文。
  * 返回是否通过 + 降级原因 + 命中片段。
  */
@@ -63,10 +98,28 @@ export function complianceGate(interpretation: string, factContext: string): Gat
   const predictHit = interpretation.match(PREDICT_PATTERN);
   if (predictHit) return { passed: false, reason: 'predict', hits: [predictHit[0]] };
 
-  // 接地校验：③ 出现的显著数字必须在事实卡上下文里出现过，否则=凭空数据。
+  // ⑦ 补盲：张力/背离延展成未来修复判断 = 预测（绑定式，不误杀客观"背离"陈述）。
+  const tensionHit = interpretation.match(TENSION_PREDICT_PATTERN);
+  if (tensionHit) return { passed: false, reason: 'predict', hits: [tensionHit[0]] };
+
+  // 接地校验：③/⑦ 出现的显著数字必须在事实卡上下文里出现过，否则=凭空数据。
   const ctxNums = new Set(significantNumbers(factContext));
   const ungrounded = significantNumbers(interpretation).filter((n) => !ctxNums.has(n));
   if (ungrounded.length > 0) return { passed: false, reason: 'ungrounded', hits: ungrounded };
+
+  // ⑦ 补盲：估值数字（PE/PB/分位/行业中位/倍数，无单位小数）也必须接地（significantNumbers 盲区）。
+  // **数值比较**（容忍 67.2 vs 67.20 这类改写）：⑦ 的估值数若数值不在上下文任一数附近 → 凭空。
+  const ctxValNums = [...significantNumbers(factContext), ...valuationNumbers(factContext)]
+    .map((s) => Number(s))
+    .filter((n) => Number.isFinite(n));
+  const ungroundedVal = valuationNumbers(interpretation).filter((s) => {
+    const x = Number(s);
+    if (!Number.isFinite(x)) return false;
+    return !ctxValNums.some(
+      (c) => Math.abs(c - x) < 0.05 || (c !== 0 && Math.abs((c - x) / c) < 0.01),
+    );
+  });
+  if (ungroundedVal.length > 0) return { passed: false, reason: 'ungrounded', hits: ungroundedVal };
 
   return { passed: true, hits: [] };
 }

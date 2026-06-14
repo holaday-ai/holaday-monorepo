@@ -56,6 +56,9 @@ _tradecal = cached(adp.TTL_TRADECAL)(adp.is_trading_day)
 # v2 简报：温度计+板块(含即时 ths/指数 spot)→ 短 TTL 覆盖投递窗口；涨停回顾(prevday 历史)→ 长 TTL。
 _pulse = cached(adp.TTL_INDEX)(adp.get_market_pulse)
 _ztsum = cached(adp.TTL_LHB)(adp.get_zt_pool_summary)
+# Phase 2 全景速览 step1：④ 基本面（季度级长缓存）+ ⑤ 估值（日级缓存）。
+_fund = cached(adp.TTL_FUND)(adp.get_fundamentals)
+_val = cached(adp.TTL_VAL)(adp.get_valuation)
 
 app = FastAPI(title="akshare-cn-http", docs_url=None, redoc_url=None)
 
@@ -123,6 +126,18 @@ def market_pulse(date: str, prev_date: str = "") -> dict[str, Any]:
 def zt_pool_summary(date: str) -> dict[str, Any]:
     """date 'YYYYMMDD'。某交易日涨停池聚合（盘前回顾上一交易日涨停梯队用）。"""
     return _safe(_ztsum, date)
+
+
+@app.get("/fundamentals/{symbol}")
+def fundamentals(symbol: str) -> dict[str, Any]:
+    """④ 基本面：营收/净利+同比增速、毛利率、ROE、负债率（最新报告期）+ 近 3 年趋势。"""
+    return _safe(_fund, symbol)
+
+
+@app.get("/valuation/{symbol}")
+def valuation(symbol: str) -> dict[str, Any]:
+    """⑤ 估值：PE(TTM)/PB 当前 + 近五年历史分位 + 行业静态 PE 中位（行业分位）。"""
+    return _safe(_val, symbol)
 
 
 @app.get("/symbol-search/{query}")

@@ -54,6 +54,20 @@ export function fmtPct(v: unknown): string {
   return `${sign}${n.toFixed(2)}%`;
 }
 
+/** 比率类百分比（毛利率/ROE/负债率），不强制 + 号（负数保留 -）；空值→「—」。 */
+export function fmtPctPlain(v: unknown): string {
+  const n = toNum(v);
+  if (n === null) return '—';
+  return `${n.toFixed(2)}%`;
+}
+
+/** 历史分位（%，整数）；空值→「—」。 */
+export function fmtPctile(v: unknown): string {
+  const n = toNum(v);
+  if (n === null) return '—';
+  return `${Math.round(n)}%`;
+}
+
 /** 原始「元」金额 → 「X.XX亿元」。signed=true 时正数带 +。空值→「—」。 */
 export function fmtYiYuan(v: unknown, signed = false): string {
   const n = toNum(v);
@@ -61,6 +75,17 @@ export function fmtYiYuan(v: unknown, signed = false): string {
   const yi = n / 1e8;
   const sign = signed && yi > 0 ? '+' : '';
   return `${sign}${yi.toFixed(2)}亿元`;
+}
+
+/** 原始「元」金额 → 自动「X.XX亿元」(≥1亿) / 「X.XX万元」(≥1万) / 「N元」。signed 时正数带 +。空值→「—」。 */
+export function fmtMoneyAuto(v: unknown, signed = false): string {
+  const n = toNum(v);
+  if (n === null) return '—';
+  const abs = Math.abs(n);
+  const sign = signed && n > 0 ? '+' : '';
+  if (abs >= 1e8) return `${sign}${(n / 1e8).toFixed(2)}亿元`;
+  if (abs >= 1e4) return `${sign}${(n / 1e4).toFixed(2)}万元`;
+  return `${sign}${n.toFixed(0)}元`;
 }
 
 /** 已是「亿元」单位的值（如北向汇总）→「±X.XX亿元」。空值→「—」。 */

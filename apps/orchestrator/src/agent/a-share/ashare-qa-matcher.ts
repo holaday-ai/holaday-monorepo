@@ -107,6 +107,30 @@ export function isIndexQuery(text: string): boolean {
 }
 
 /**
+ * 深度/全景意图（Phase2）：「详细分析/全面看看/深度分析 XX」→ 出七维全景版。
+ * 仅作"全景 vs 轻量"的开关，**不改变**触发门槛（仍需解析出个股）；不命中 → 轻量速览（现有行为）。
+ */
+const DEEP_TERMS = [
+  '详细分析',
+  '深度分析',
+  '深入分析',
+  '全面分析',
+  '全面看看',
+  '全面看',
+  '详细看看',
+  '全面了解',
+  '详细了解',
+  '深扒',
+  '深度解析',
+  '全方位',
+  '全景',
+  '基本面和估值',
+];
+export function isDeepQuery(text: string): boolean {
+  return DEEP_TERMS.some((t) => text.includes(t));
+}
+
+/**
  * name-search 仅用于**短问句 / 明确个股指向**（E16 修：长查询不在里面乱匹配名称，
  * 防普通词被短名窗口误命中）。门槛：去掉指数/大盘信号 + 长度上限（短问句）。
  */
@@ -170,6 +194,7 @@ export function matchAshareQa(opts: MatchAshareQaOpts): AshareQaMatch | null {
     stocks: g.syncStocks.slice(0, 5),
     dateIso: g.dateIso,
     dateCompact: g.dateCompact,
+    deep: isDeepQuery(opts.intent ?? ''),
   };
 }
 
@@ -186,12 +211,14 @@ export async function resolveAshareQa(
 ): Promise<AshareQaMatch | null> {
   const g = intentGate(opts);
   if (!g.gated) return null;
+  const deep = isDeepQuery(opts.intent ?? '');
   if (g.syncStocks.length > 0) {
     return {
       kind: g.kind,
       stocks: g.syncStocks.slice(0, 5),
       dateIso: g.dateIso,
       dateCompact: g.dateCompact,
+      deep,
     };
   }
   // 仅短问句 / 明确个股指向才 name-search（E16：长查询不乱匹配名称）。
@@ -208,6 +235,7 @@ export async function resolveAshareQa(
     stocks: found.slice(0, 5),
     dateIso: g.dateIso,
     dateCompact: g.dateCompact,
+    deep,
   };
 }
 
@@ -226,10 +254,11 @@ export async function resolveAshareInContext(
   const text = opts.intent ?? '';
   const hasTerm = ASHARE_TERMS.some((t) => text.includes(t)); // 含持仓语境词
   const wantsWatchlist = WATCHLIST_TERMS.some((t) => text.includes(t));
+  const deep = isDeepQuery(text);
   const toMatch = (stocks: ResolvedStock[]): AshareQaMatch => {
     const kind: QaKind = ANOMALY_TERMS.some((t) => text.includes(t)) ? 'anomaly' : 'info';
     const { iso, compact } = cnDateParts(opts.now ?? new Date());
-    return { kind, stocks: stocks.slice(0, 5), dateIso: iso, dateCompact: compact };
+    return { kind, stocks: stocks.slice(0, 5), dateIso: iso, dateCompact: compact, deep };
   };
 
   // 显式个股优先（代码 / 自选股名 / 自选股整体问），零网络。

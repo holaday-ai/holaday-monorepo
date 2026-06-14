@@ -12,11 +12,13 @@ import type {
   AkEnvelope,
   AnnouncementRow,
   DragonTigerRow,
+  FundamentalsRow,
   IndexRow,
   KlineRow,
   MarketPulseRow,
   NorthboundRow,
   UnlockRow,
+  ValuationRow,
   ZtReviewRow,
 } from './briefing-types.js';
 
@@ -129,5 +131,11 @@ export class HttpAkshareClient implements AkshareClient {
   }
   getZtPoolSummary(date: string) {
     return this.get<ZtReviewRow>(`/zt-pool-summary/${encodeURIComponent(date)}`);
+  }
+  getFundamentals(symbol: string) {
+    return this.get<FundamentalsRow>(`/fundamentals/${encodeURIComponent(symbol)}`);
+  }
+  getValuation(symbol: string) {
+    return this.get<ValuationRow>(`/valuation/${encodeURIComponent(symbol)}`);
   }
 }

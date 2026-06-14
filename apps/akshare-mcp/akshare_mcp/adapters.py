@@ -67,6 +67,8 @@ TTL_NORTHBOUND = _ttl("NORTHBOUND", 600)
 TTL_INDEX = _ttl("INDEX", 600)
 TTL_UNLOCK = _ttl("UNLOCK", 3600)
 TTL_TRADECAL = _ttl("TRADECAL", 86400)  # 交易日历日内基本不变，缓存 1 天
+TTL_FUND = _ttl("FUND", 86400)  # 财报季度才变，缓存 1 天
+TTL_VAL = _ttl("VAL", 3600)  # 估值日级，缓存 1 小时
 
 # Row caps so a single tool call can't dump thousands of rows into the
 # model's context.
@@ -450,6 +452,128 @@ def get_market_pulse(date: str, prev_date: str = "") -> tuple[list[dict[str, Any
     out.update(_board_summary())  # up_count/down_count/net_inflow_yi/sectors_up/sectors_down
     out["two_market_amount"] = _two_market_amount()
     return [out], "akshare:zt_pool+dtgc+zbgc+board_summary_ths+index_spot_sina"
+
+
+# --- ④ 基本面 + ⑤ 估值（Phase 2 全景速览 step1；Vultr 实测可达）-------------
+# ⚠️ 逐个先验（push2 教训）：stock_individual_info_em / stock_a_indicator_lg 从 Vultr
+#   不可达/不存在 → 用以下可达替代（实测 2026-06-14，迪生力 603335 真调）：
+#     ④ 基本面 → stock_financial_abstract_ths(同花顺)：净利/营收+同比增速、销售毛利率、
+#        净资产收益率(ROE)、资产负债率；按报告期取最新季(含 2026Q1)，按年度取近 3 年趋势。
+#     ⑤ 估值   → stock_zh_valuation_baidu(百度)：市盈率(TTM)/市净率 当前 + 近五年序列→历史分位；
+#        行业分位 = stock_industry_change_cninfo(个股→行业大类) + stock_industry_pe_ratio_cninfo
+#        (行业静态 PE 中位)。财报为 CAS 法定口径；时效标注=最新报告期 / 估值截至当日。
+def _parse_ths_num(v: Any) -> float | None:
+    """同花顺字符串值 → float。'1.71亿'→1.71e8、'4883.46万'→4.88e7、'12.40%'→12.40、false/''→None。"""
+    if v is None or v is False:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().replace(",", "")
+    if s in ("", "False", "false", "--", "—", "nan", "None"):
+        return None
+    s = s.rstrip("%")  # 百分比保留数字本身（12.40% → 12.40）
+    mult = 1.0
+    if s.endswith("亿"):
+        mult, s = 1e8, s[:-1]
+    elif s.endswith("万"):
+        mult, s = 1e4, s[:-1]
+    try:
+        return float(s) * mult
+    except ValueError:
+        return None
+
+
+def _fundamentals_row(r: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "report_period": str(r.get("报告期")),
+        "revenue": _parse_ths_num(r.get("营业总收入")),
+        "revenue_yoy": _parse_ths_num(r.get("营业总收入同比增长率")),
+        "net_profit": _parse_ths_num(r.get("净利润")),
+        "net_profit_yoy": _parse_ths_num(r.get("净利润同比增长率")),
+        "gross_margin": _parse_ths_num(r.get("销售毛利率")),
+        "roe": _parse_ths_num(r.get("净资产收益率")),
+        "debt_ratio": _parse_ths_num(r.get("资产负债率")),
+    }
+
+
+def get_fundamentals(symbol: str) -> tuple[list[dict[str, Any]], str]:
+    """④ 基本面：最新报告期 + 近 3 年趋势（同花顺，CAS 口径）。symbol 形如 '603335'。"""
+    a = _require_ak()
+    try:
+        rep = _records(a.stock_financial_abstract_ths(symbol=symbol, indicator="按报告期"), limit=80)
+    except Exception:  # noqa: BLE001
+        rep = []
+    try:
+        ann = _records(a.stock_financial_abstract_ths(symbol=symbol, indicator="按年度"), limit=80)
+    except Exception:  # noqa: BLE001
+        ann = []
+    if not rep and not ann:
+        return [], "akshare:stock_financial_abstract_ths(无数据)"
+    latest = _fundamentals_row(rep[-1]) if rep else _fundamentals_row(ann[-1])
+    trend3y = [_fundamentals_row(r) for r in ann[-3:]]  # 近 3 年（年度，老→新）
+    return [{**latest, "trend3y": trend3y}], "akshare:stock_financial_abstract_ths(report+annual)"
+
+
+def _pctile(series: list[float | None], cur: float | None) -> float | None:
+    """cur 在序列中的历史分位（%，≤cur 占比）。空/None → None。"""
+    vals = [v for v in series if isinstance(v, (int, float))]
+    if not vals or cur is None:
+        return None
+    below = sum(1 for v in vals if v <= cur)
+    return round(below / len(vals) * 100, 1)
+
+
+def _baidu_series(symbol: str, indicator: str, period: str = "近五年") -> tuple[list[float | None], str | None]:
+    try:
+        df = ak.stock_zh_valuation_baidu(symbol=symbol, indicator=indicator, period=period)
+    except Exception:  # noqa: BLE001
+        return [], None
+    if df is None or len(df) == 0:
+        return [], None
+    vals = [_to_float(x) for x in df["value"].tolist()]
+    last_date = str(df["date"].iloc[-1])
+    return vals, last_date
+
+
+def get_valuation(symbol: str) -> tuple[list[dict[str, Any]], str]:
+    """⑤ 估值：PE(TTM)/PB 当前 + 近五年历史分位 + 行业静态 PE 中位（行业分位）。symbol '603335'。"""
+    _require_ak()
+    pe_series, pe_date = _baidu_series(symbol, "市盈率(TTM)")
+    pb_series, pb_date = _baidu_series(symbol, "市净率")
+    pe = pe_series[-1] if pe_series else None
+    pb = pb_series[-1] if pb_series else None
+    out: dict[str, Any] = {
+        "pe_ttm": pe,
+        "pb": pb,
+        "pe_pctile_5y": _pctile(pe_series, pe),
+        "pb_pctile_5y": _pctile(pb_series, pb),
+        "as_of": pe_date or pb_date,
+        "industry": None,
+        "industry_pe_median": None,
+    }
+    mv_series, _ = _baidu_series(symbol, "总市值", "近一年")
+    out["total_mv_yi"] = mv_series[-1] if mv_series else None
+    # 行业分位：个股 → 行业大类（中上协口径）→ 行业静态 PE 中位。
+    try:
+        today = datetime.date.today().strftime("%Y%m%d")
+        chg = _records(
+            ak.stock_industry_change_cninfo(symbol=symbol, start_date="20200101", end_date=today),
+            limit=10,
+        )
+        ind_name = str(chg[-1].get("行业大类") or "").strip() if chg else ""
+        if ind_name and ind_name not in ("nan", "None"):
+            out["industry"] = ind_name
+            for d in (today, "20260612"):  # cninfo 按特定披露日；今日无则退近期已知日
+                pe_rows = _records(
+                    ak.stock_industry_pe_ratio_cninfo(symbol="证监会行业分类", date=d), limit=400
+                )
+                hit = [r for r in pe_rows if str(r.get("行业名称")).strip() == ind_name]
+                if hit:
+                    out["industry_pe_median"] = _to_float(hit[0].get("静态市盈率-中位数"))
+                    break
+    except Exception:  # noqa: BLE001
+        pass
+    return [out], "akshare:zh_valuation_baidu(PE/PB+5y分位)+industry_pe_cninfo"
 
 
 # --- 交易日历（P1：非交易日不投递简报） -----------------------------

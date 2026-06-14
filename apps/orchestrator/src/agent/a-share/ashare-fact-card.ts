@@ -17,8 +17,11 @@ import {
   type BriefingMode,
   dateHeader,
   fmtClock,
+  fmtMoneyAuto,
   fmtNum,
   fmtPct,
+  fmtPctPlain,
+  fmtPctile,
   fmtYiUnit,
   fmtYiYuan,
   pick,
@@ -34,9 +37,11 @@ import type {
   AkEnvelope,
   AnnouncementRow,
   DragonTigerRow,
+  FundamentalsRow,
   KlineRow,
   NorthboundRow,
   UnlockRow,
+  ValuationRow,
 } from './briefing-types.js';
 
 export interface FactCardDeps {
@@ -348,4 +353,181 @@ function northboundContextLine(nb: AkEnvelope<NorthboundRow>): string {
         `${String(pick(r, ['板块', '类型']) ?? '北向')} ${fmtYiUnit(pick(r, ['成交净买额']), true)}`,
     )
     .join('；')}`;
+}
+
+// ===== Phase 2 全景速览：④基本面 + ⑤估值 + ⑦分析师视角 ============================
+// 设计规范见 docs（workflow 评审定稿）：④⑤ 是**确定性渲染层**——只摆"数字 + 时效标注"，
+// 零形容词、零判断（"偏高/承压/不稳"等综合形容统一归 ⑦ 一段，避免确定性层越界成诊断，
+// 也让 ④⑤ 永远逐字可溯源）。⑦ 由 runner 的 LLM 层生成并过合规闸门。
+
+/** 报告期 'YYYY-MM-DD' → "2026Q1财报 / 2025年报 / 2026中报"（时效标注）。 */
+function reportLabel(iso: string | null | undefined): string {
+  const m = String(iso ?? '').match(/(\d{4})-(\d{2})-\d{2}/);
+  if (!m) return '最新财报';
+  const [, y, mo] = m;
+  if (mo === '03') return `${y}Q1财报`;
+  if (mo === '06') return `${y}中报`;
+  if (mo === '09') return `${y}三季报`;
+  if (mo === '12') return `${y}年报`;
+  return `${y}-${mo}财报`;
+}
+
+/** ④ 基本面段（确定性，纯数字 + 时效；缺指标诚实"—"，无源不臆造）。 */
+export function fundamentalsLines(
+  env: AkEnvelope<FundamentalsRow> | undefined,
+  mode: BriefingMode,
+): string[] {
+  const f = env?.data[0];
+  if (!env || env.error || !f) {
+    return ['**④ 基本面**', unavailableLine('基本面', env ?? ({ error: '' } as AkEnvelope), mode)];
+  }
+  const out: string[] = [`**④ 基本面**（基于 ${reportLabel(f.report_period)}，会计准则 CAS）`];
+  out.push(`- 营业总收入 ${fmtMoneyAuto(f.revenue)}（同比 ${fmtPct(f.revenue_yoy)}）`);
+  out.push(`- 归母净利润 ${fmtMoneyAuto(f.net_profit)}（同比 ${fmtPct(f.net_profit_yoy)}）`);
+  out.push(
+    `- 销售毛利率 ${fmtPctPlain(f.gross_margin)} ｜ ROE ${fmtPctPlain(f.roe)} ｜ 资产负债率 ${fmtPctPlain(f.debt_ratio)}`,
+  );
+  const t = (f.trend3y ?? []).filter((x) => x.report_period);
+  if (t.length) {
+    const parts = t.map((x) => {
+      const yr = String(x.report_period ?? '').slice(0, 4);
+      return `${yr} 净利 ${fmtMoneyAuto(x.net_profit)}`;
+    });
+    out.push(`- 近 ${t.length} 年净利趋势：${parts.join(' → ')}`);
+  }
+  out.push(`  （${sourceTag(env)}）`);
+  return out;
+}
+
+/** ⑤ 估值段（确定性，纯数字 + 时效；分位/行业对比只给数不下"贵/低"判断）。 */
+export function valuationLines(
+  env: AkEnvelope<ValuationRow> | undefined,
+  mode: BriefingMode,
+): string[] {
+  const v = env?.data[0];
+  if (!env || env.error || !v) {
+    return ['**⑤ 估值**', unavailableLine('估值', env ?? ({ error: '' } as AkEnvelope), mode)];
+  }
+  const asOf = v.as_of ? `（估值截至 ${shortDate(v.as_of)}）` : '';
+  const out: string[] = [`**⑤ 估值**${asOf}`];
+  out.push(`- PE-TTM ${fmtNum(v.pe_ttm)} ｜ PB ${fmtNum(v.pb)}`);
+  const pct: string[] = [];
+  if (v.pe_pctile_5y != null) pct.push(`PE 近5年分位 ${fmtPctile(v.pe_pctile_5y)}`);
+  if (v.pb_pctile_5y != null) pct.push(`PB 近5年分位 ${fmtPctile(v.pb_pctile_5y)}`);
+  if (pct.length) out.push(`- ${pct.join(' ｜ ')}`);
+  if (v.industry && v.industry_pe_median != null) {
+    out.push(`- 所属${v.industry}，行业静态PE中位 ${fmtNum(v.industry_pe_median)}`);
+  }
+  if (v.total_mv_yi != null) out.push(`- 总市值 ${fmtNum(v.total_mv_yi)}亿元`);
+  out.push(`  （${sourceTag(env)}）`);
+  return out;
+}
+
+/** ④⑤ 喂 ⑦ LLM 的紧凑上下文（含 PE/PB/分位/行业中位 等原值，供闸门接地校验）。 */
+function fundamentalsContext(env: AkEnvelope<FundamentalsRow> | undefined): string {
+  const f = env?.data[0];
+  if (!env || env.error || !f) return '④基本面：数据暂不可用';
+  const t = (f.trend3y ?? [])
+    .filter((x) => x.report_period)
+    .map((x) => `${String(x.report_period).slice(0, 4)} ${fmtMoneyAuto(x.net_profit)}`)
+    .join('→');
+  return [
+    `④基本面(基于${reportLabel(f.report_period)},CAS)：`,
+    `营收 ${fmtMoneyAuto(f.revenue)}(同比${fmtPct(f.revenue_yoy)})；`,
+    `归母净利 ${fmtMoneyAuto(f.net_profit)}(同比${fmtPct(f.net_profit_yoy)})；`,
+    `毛利率${fmtPctPlain(f.gross_margin)}；ROE${fmtPctPlain(f.roe)}；资产负债率${fmtPctPlain(f.debt_ratio)}`,
+    t ? `；近年净利 ${t}` : '',
+  ].join('');
+}
+
+function valuationContext(env: AkEnvelope<ValuationRow> | undefined): string {
+  const v = env?.data[0];
+  if (!env || env.error || !v) return '⑤估值：数据暂不可用';
+  const parts = [
+    `⑤估值(截至${v.as_of ? shortDate(v.as_of) : '近日'})：`,
+    `PE-TTM ${fmtNum(v.pe_ttm)}；PB ${fmtNum(v.pb)}`,
+  ];
+  if (v.pe_pctile_5y != null) parts.push(`；PE近5年分位${fmtPctile(v.pe_pctile_5y)}`);
+  if (v.pb_pctile_5y != null) parts.push(`；PB近5年分位${fmtPctile(v.pb_pctile_5y)}`);
+  if (v.industry && v.industry_pe_median != null) {
+    parts.push(`；所属${v.industry} 行业静态PE中位${fmtNum(v.industry_pe_median)}`);
+  }
+  if (v.total_mv_yi != null) parts.push(`；总市值${fmtNum(v.total_mv_yi)}亿`);
+  return parts.join('');
+}
+
+/** 全景取数：①②③（fetchFactData）+ 每股 ④基本面/⑤估值。 */
+export interface PanoramaStockData {
+  fundamentals: AkEnvelope<FundamentalsRow>;
+  valuation: AkEnvelope<ValuationRow>;
+}
+export interface PanoramaData extends FactData {
+  bySymbol: Record<string, PanoramaStockData>;
+}
+
+export async function fetchPanoramaData(
+  client: AkshareClient,
+  match: AshareQaMatch,
+): Promise<PanoramaData> {
+  const [base, ...pairs] = await Promise.all([
+    fetchFactData(client, match),
+    ...match.stocks.map(
+      async (s): Promise<readonly [string, PanoramaStockData]> =>
+        [
+          s.symbol,
+          {
+            fundamentals: await client.getFundamentals(s.symbol),
+            valuation: await client.getValuation(s.symbol),
+          },
+        ] as const,
+    ),
+  ]);
+  return { ...base, bySymbol: Object.fromEntries(pairs) };
+}
+
+/** 全景版 ①-⑤ 确定性 body（每股；②资金=龙虎榜+北向，③消息=公告+解禁，④基本面，⑤估值）。 */
+export function renderPanoramaBody(
+  data: PanoramaData,
+  match: AshareQaMatch,
+  now: Date,
+  mode: BriefingMode,
+): string {
+  const lines: string[] = [
+    `# 📈 HOLA DAY · A股全景速览（${dateHeader(match.dateIso)}）`,
+    `> 生成于 ${fmtClock(now.toISOString())} ｜ ①-⑤ 为公开信息客观聚合，⑦ 为分析师判断·未经证实；**均不构成投资建议**。`,
+    '',
+  ];
+  for (const p of data.perStock) {
+    const pano = data.bySymbol[p.stock.symbol];
+    lines.push(`## ${stockLabel(p.stock)}`, '');
+    lines.push('**① 盘面事实**', ...marketFactLines(p, mode), '');
+    lines.push('**② 资金面**');
+    lines.push(...dragonTigerLines(p.stock.symbol, data.dragonTiger, mode));
+    const nb = northboundLine(data.northbound);
+    lines.push(
+      ...(nb.length ? nb : ['- 北向资金：沪深股通净买额自 2024-08 停披露，暂无可展示口径']),
+    );
+    lines.push('');
+    lines.push('**③ 消息面**');
+    lines.push(...announcementLines(p, mode));
+    const ul = unlockLines(p);
+    lines.push(...(ul.length ? ul : ['- 限售解禁：近期无']));
+    lines.push('');
+    lines.push(...fundamentalsLines(pano?.fundamentals, mode), '');
+    lines.push(...valuationLines(pano?.valuation, mode));
+    lines.push('');
+  }
+  return lines.join('\n').trimEnd();
+}
+
+/** ⑦ 上下文（①②③ + ④⑤，单股；token 上限保护沿用 buildFactContext）。 */
+export function buildPanoramaContext(data: PanoramaData, match: AshareQaMatch): string {
+  const blocks = [buildFactContext(data, match)];
+  for (const p of data.perStock) {
+    const pano = data.bySymbol[p.stock.symbol];
+    blocks.push(`【${stockLabel(p.stock)} · 基本面/估值】`);
+    blocks.push(fundamentalsContext(pano?.fundamentals));
+    blocks.push(valuationContext(pano?.valuation));
+  }
+  return blocks.filter(Boolean).join('\n');
 }

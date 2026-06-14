@@ -5,8 +5,13 @@
 import { describe, expect, it } from 'vitest';
 import type { AkshareClient } from './akshare-client.js';
 import { buildIndexCard } from './ashare-fact-card.js';
-import { isIndexQuery, resolveAshareInContext, resolveAshareQa } from './ashare-qa-matcher.js';
-import { ASHARE_QA_GUIDANCE, runAshareQa } from './ashare-qa-runner.js';
+import {
+  isDeepQuery,
+  isIndexQuery,
+  resolveAshareInContext,
+  resolveAshareQa,
+} from './ashare-qa-matcher.js';
+import { ASHARE_QA_GUIDANCE, runAsharePanorama, runAshareQa } from './ashare-qa-runner.js';
 import type { AshareQaMatch, ResolvedStock } from './ashare-qa-types.js';
 
 const MATCH: AshareQaMatch = {
@@ -39,6 +44,41 @@ function fakeClient(): AkshareClient {
       Promise.resolve(env([{ 板块: '沪股通', 资金方向: '北向', 成交净买额: 0 }])),
     getTradingDay: () => Promise.resolve(env([{ is_trading_day: true }])),
     searchSymbol: () => Promise.resolve(env([])),
+    getFundamentals: () =>
+      Promise.resolve(
+        env([
+          {
+            report_period: '2026-03-31',
+            revenue: 1.71e8,
+            revenue_yoy: -33.43,
+            net_profit: -1.98172e7,
+            net_profit_yoy: 12.4,
+            gross_margin: 18.48,
+            roe: -6.76,
+            debt_ratio: 64.65,
+            trend3y: [
+              { report_period: '2023-12-31', net_profit: -1.49e8 },
+              { report_period: '2024-12-31', net_profit: -1.45e8 },
+              { report_period: '2025-12-31', net_profit: 4.848e7 },
+            ],
+          },
+        ]),
+      ),
+    getValuation: () =>
+      Promise.resolve(
+        env([
+          {
+            pe_ttm: 67.2,
+            pb: 12.21,
+            pe_pctile_5y: 87.1,
+            pb_pctile_5y: 95.1,
+            as_of: '2026-06-14',
+            total_mv_yi: 34.47,
+            industry: '汽车制造业',
+            industry_pe_median: 31.63,
+          },
+        ]),
+      ),
     // biome-ignore lint/suspicious/noExplicitAny: fake
   } as any;
 }
@@ -333,6 +373,101 @@ describe('E16 回归：指数查询走指数 lane，不误命中个股（勿删�
     expect(md).toContain('创业板指 3,830.35（+0.50%）');
     expect(md).toContain('免责声明');
     expect(md).not.toContain('今天国际');
+  });
+});
+
+describe('Phase2 全景速览：deep 触发 + ⑦ 分析师视角（勿删）', () => {
+  const WL: ResolvedStock[] = [{ symbol: '603335', displayName: '迪生力' }];
+  const DEEP_MATCH: AshareQaMatch = {
+    kind: 'info',
+    stocks: [{ symbol: '603335', displayName: '迪生力' }],
+    dateIso: '2026-06-14',
+    dateCompact: '20260614',
+    deep: true,
+  };
+
+  it('isDeepQuery：深度意图 true，轻量速览 false', () => {
+    expect(isDeepQuery('详细分析迪生力')).toBe(true);
+    expect(isDeepQuery('全面看看茅台')).toBe(true);
+    expect(isDeepQuery('深度分析600519')).toBe(true);
+    expect(isDeepQuery('迪生力为什么涨')).toBe(false);
+    expect(isDeepQuery('茅台速览')).toBe(false);
+  });
+
+  it('deep 意图带个股 → match.deep=true；普通问句不误触发', async () => {
+    const deep = await resolveAshareInContext(
+      { intent: '详细分析迪生力', watchlist: WL, now: NOW },
+      async () => [],
+    );
+    expect(deep.match?.deep).toBe(true);
+    const light = await resolveAshareInContext(
+      { intent: '迪生力为什么涨', watchlist: WL, now: NOW },
+      async () => [],
+    );
+    expect(light.match?.deep).toBe(false);
+  });
+
+  it('合规 ⑦ → 全景版含 ①-⑤ + ⑦分析师视角，不降级', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      {
+        client: fakeClient(),
+        interpret: async () =>
+          '迪生力是总市值34.47亿的小盘股，今天盘面活跃；2026Q1营收1.71亿、同比-33.43%，归母还亏1981.72万但亏损收窄，近几年盈利不稳；估值偏高，PE-TTM67.2、PB12.21都处历史高位，比行业中位31.63贵。一句话：盈利不稳、估值在历史高位的小盘股。以上为客观信息聚合，未经证实，不构成任何投资建议。',
+        logger,
+        now: NOW,
+      },
+      DEEP_MATCH,
+    );
+    expect(r.degraded).toBe(false);
+    expect(r.interpreted).toBe(true);
+    expect(r.answer).toContain('全景速览');
+    expect(r.answer).toContain('**④ 基本面**');
+    expect(r.answer).toContain('PE-TTM 67.20'); // ⑤ 估值确定性渲染
+    expect(r.answer).toContain('## ⑦ 分析师视角');
+    expect(r.answer).toContain('免责声明');
+  });
+
+  it('④⑤ 确定性段：纯数字 + 时效标注，零判断形容词', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      { client: fakeClient(), interpret: async () => '客观状态画像。', logger, now: NOW },
+      DEEP_MATCH,
+    );
+    expect(r.answer).toContain('基于 2026Q1财报，会计准则 CAS');
+    expect(r.answer).toContain('估值截至 06-14');
+    expect(r.answer).toContain('营业总收入 1.71亿元（同比 -33.43%）');
+    expect(r.answer).toContain('行业静态PE中位 31.63');
+  });
+
+  it('⑦ 含买卖词 → 降级，丢⑦留①-⑤数据', async () => {
+    const { logger, warns } = fakeLogger();
+    const r = await runAsharePanorama(
+      {
+        client: fakeClient(),
+        interpret: async () => '估值偏高，建议逢低买入，目标价翻倍',
+        logger,
+        now: NOW,
+        context: { userId: 'u', taskId: 't' },
+      },
+      DEEP_MATCH,
+    );
+    expect(r.degraded).toBe(true);
+    expect(r.answer).not.toContain('## ⑦ 分析师视角');
+    expect(r.answer).toContain('**④ 基本面**'); // ①-⑤ 数据围栏隔离，仍在
+    expect(
+      warns.some((w) => w.obj?.event === 'ashare_qa_degrade' && w.obj?.lane === 'panorama'),
+    ).toBe(true);
+  });
+
+  it('⑦ 凭空捏造估值数（PE 90）→ 降级 ungrounded', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      { client: fakeClient(), interpret: async () => 'PE-TTM 90，估值中性', logger, now: NOW },
+      DEEP_MATCH,
+    );
+    expect(r.degraded).toBe(true);
+    expect(r.reason).toBe('ungrounded');
   });
 });
 

@@ -1225,7 +1225,7 @@ export const tasksRouter = router({
           {
             taskId,
             userId: ctx.userId,
-            executorLane: 'ashare_qa',
+            executorLane: ashareQaMatch.deep ? 'ashare_panorama' : 'ashare_qa',
             kind: ashareQaMatch.kind,
             stocks: ashareQaMatch.stocks.map((s) => s.symbol),
           },
@@ -1236,7 +1236,9 @@ export const tasksRouter = router({
         const anthropicClient = anthropicForResolver;
         const qaModel = appEnv.ASHARE_QA_MODEL;
         void (async () => {
-          const { runAshareQa } = await import('../../agent/a-share/ashare-qa-runner.js');
+          const { runAshareQa, runAsharePanorama } = await import(
+            '../../agent/a-share/ashare-qa-runner.js'
+          );
           // 技能 markdown（人设/红线）→ DB skills.manifest.body；缺则内置兜底人设
           // （合规硬约束已在 runner 的 system prompt，故缺 markdown 也安全）。
           let skillMarkdown: string | null = null;
@@ -1256,7 +1258,10 @@ export const tasksRouter = router({
             '你是严谨的 A股信息分析助手：只聚合公开信息、客观陈述事实，绝不荐股、不预测涨跌、不给买卖或择时建议。';
           let answer: string;
           try {
-            const r = await runAshareQa(
+            // deep 意图（详细分析/全面看看）→ 七维全景版（含 ④基本面⑤估值 + ⑦分析师视角）；
+            // 否则轻量速览（①②③ + ③解读）。⑦ prompt 自含人设，不依赖 skillMarkdown。
+            const runner = ashareQaMatch.deep ? runAsharePanorama : runAshareQa;
+            const r = await runner(
               {
                 client: aksClient,
                 skillMarkdown: skillMarkdown ?? FALLBACK_PERSONA,
