@@ -8,7 +8,14 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`19c473f`
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`95ee29a`
+（2026-06-15；**#2 Phase2 全景速览 step1 + ⑦闸门对抗加固 部署 prod**，restart 649，healthz ok，
+全量 **2688** 测绿。**ultracode 对抗复审**：4 红队策略压测 ⑦ 合规闸门，真 complianceGate 实测初版
+漏 3/12（语义迂回预测 + 技术信号 regex 盲区）→ 补 SEMANTIC_PREDICT(拐点正在积累/只是时间问题/
+自然收敛)+TECHNICAL_SIGNAL(筹码锁定/控盘/缩量封板/量价背离/跳空/回到X一线，BOSS 红线 MACD金叉=买入)+
+TENSION repair 词 → **复审 0/12 漏，合规⑦不误杀，+10 永久回归测**。⑦ 真 haiku 通过率 迪生力6/6、
+茅台3/6、平安5/6（降级=安全网，①-⑤恒在）。**残留(诚实)**：regex 是 backstop，语义评判有天花板；主防线
+=⑦ prompt；更高保证可加 LLM-intent-judge(step2，BOSS 拍板，加一次 LLM 成本)。以下为 step1 主体：）
 （2026-06-15；**#2 A股 Phase2 全景速览 step1 部署 prod**，restart 648，healthz ok，preflight 实读
 live HEAD 各步 FF-safe；build tsc0，全量 **2678** 测绿；无新 migration。**先验数据可达性再写码**
 （push2 不可达→同花顺/百度/cninfo 替代，迪生力 603335 真调验通）。**④ 基本面**（同花顺 营收/净利+
