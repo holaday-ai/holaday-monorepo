@@ -35,10 +35,17 @@ import { runVideoPipeline, type PipelineLogger, type VideoPipelineDeps } from '.
 import { optimizeUserScript, type LlmComplete } from './video-script.js';
 import { generateBrollImage, generateBrollVideo } from './wanxiang-client.js';
 
-// 画面整洁约束 (P1-2): AI 文生图/视频常生成乱码招牌文字 → 提示+负向尽力压低概率。
-const CLEAN_SCENE_SUFFIX = '，画面整洁，不出现任何文字、招牌文字、字幕或水印';
-const NO_TEXT_NEGATIVE =
-  '文字, 文本, 字幕, 标题, 招牌文字, 水印, 错乱的字, 乱码, text, words, letters, captions, signage, watermark, gibberish';
+// 画面整洁约束 (P1-2): AI 文生图/视频画产品包装/标签特写时必然编造乱码假字。
+// 双管齐下 — 主要靠 optimizeUserScript 把画面引导成「场景/人物/氛围」(非产品标签特写),
+// 这里的后缀+负向词是兜底:进一步压低任何残留文字出现的概率。
+const CLEAN_SCENE_SUFFIX =
+  '，画面整洁，纯场景/人物/氛围，不出现任何产品包装文字、标签、瓶身文字、招牌、屏幕文字、书本文字、字幕或水印，画面中不能有任何文字';
+const NO_TEXT_NEGATIVE = [
+  // 中文
+  '文字, 文本, 字幕, 标题, 标签, 包装文字, 瓶身文字, 招牌, 招牌文字, 屏幕文字, 书本文字, 水印, 错乱的字, 乱码',
+  // English
+  'text, words, letters, label, labels, packaging text, signage, screen text, captions, subtitles, watermark, gibberish text, fake text, garbled text',
+].join(', ');
 
 export type VisualMode = 'image' | 'video';
 export type VideoSource = 'wanxiang' | 'veo';

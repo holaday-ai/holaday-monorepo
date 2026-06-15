@@ -139,4 +139,12 @@ describe('optimizeUserScript (原方案 — faithful to user draft)', () => {
     expect(p).toContain('visual');
     expect(p).toContain('只输出 JSON');
   });
+
+  it('steers画面描述 to text-free scenes/people/atmosphere (P1-2 root fix)', () => {
+    const p = buildOptimizeSystemPrompt(6);
+    // visual prompts must be scenes/people/atmosphere, NOT product-label closeups
+    expect(p).toMatch(/场景\/人物\/动作\/氛围|场景\/人物/);
+    expect(p).toMatch(/产品包装|瓶身|标签/); // explicitly forbids the text-bearing closeups
+    expect(p).toMatch(/不能出现任何文字|编造乱码/);
+  });
 });
