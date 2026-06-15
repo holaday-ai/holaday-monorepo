@@ -46,6 +46,9 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
   const mountedRef = React.useRef(false);
   const [state, setState] = React.useState<'idle' | 'loading' | 'failed'>('idle');
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
+  const [previewState, setPreviewState] = React.useState<
+    'idle' | 'loading' | 'ready' | 'failed'
+  >('idle');
   const kind = classifyDownloadFileKind(payload.filename);
   const kindLabel = downloadFileKindLabel(kind);
   const metaLabel = downloadFileMetaLabel({
@@ -77,18 +80,26 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
     if (kind !== 'image') return;
     let cancelled = false;
     let objectUrl: string | null = null;
+    // Show the placeholder immediately so the image slot is visible
+    // from the start — fixes the P1 gap where the summary text rendered
+    // first and the thumbnail popped in seconds later.
+    setPreviewState('loading');
     void (async () => {
       const res = await fetchFileBlobAuthed({ url: payload.downloadUrl });
       if (cancelled) return;
       if (res.ok && res.blob) {
         objectUrl = URL.createObjectURL(res.blob);
         setPreviewUrl(objectUrl);
+        setPreviewState('ready');
+      } else {
+        setPreviewState('failed'); // fall back to the icon-only card
       }
     })();
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       setPreviewUrl(null);
+      setPreviewState('idle');
     };
   }, [kind, payload.downloadUrl]);
 
@@ -126,13 +137,21 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
       aria-label={actionLabel}
       title={actionLabel}
     >
-      {previewUrl ? (
+      {previewState === 'ready' && previewUrl ? (
         <img
           src={previewUrl}
           alt={payload.filename}
           loading="lazy"
           className="max-h-64 w-full rounded-[6px] border border-[#DCDDDD] object-contain dark:border-white/10"
         />
+      ) : previewState === 'loading' ? (
+        <span
+          aria-label="图片生成中"
+          className="flex h-40 w-full animate-pulse items-center justify-center gap-2 rounded-[6px] border border-[#DCDDDD] bg-[#EFEFEF]/50 text-[11px] text-muted-foreground dark:border-white/10 dark:bg-white/5"
+        >
+          <Loader2 className="h-4 w-4 animate-spin text-[#57479C]" />
+          图片加载中…
+        </span>
       ) : null}
       <span className="flex w-full items-center gap-3">
         <span

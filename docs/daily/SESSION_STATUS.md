@@ -8,12 +8,80 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`f60e698`
-（2026-06-13；视频 #4 Phase1 步骤1 上传链路改造（video/audio 白名单 + 200MB + R2 presigned-PUT）
-部署 prod，restart 639，localhost healthz ok，keys in process（GEMINI+ANTHROPIC）；preflight 实读
-live HEAD=`1ba76bb`（ancestor of f60e698）→ FF-safe；**migration 0034 已先于代码 apply prod**
-（users.qwen_voice_id + base_video_file_id，information_schema 证据已核）。此行由视频 session 实读
-Vultr live HEAD 核对写入。前态：`1ba76bb` restart 638。）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`115ba53`
+（2026-06-15；**#2 ⑦ LLM 意图判官第二层 + 总市值万亿口径 部署 prod**，restart 655，preflight FF-safe，
+无新 migration。BOSS 拍板：⑦ 要稳定出现，不接受 ~78% 降级率(同股不同次不一致)。**双层防御**(regex
+之后加温度0 LLM 判官，只判买卖引导/涨跌预测两红线)：regex PASS→judge 仅明确 block 才否决(补漏网)；
+regex SOFT(predict/tension/semantic)误杀→judge 仅明确 pass 才救回；regex HARD(advice/technical/
+ungrounded)→regex 终判 judge 不介入；judge unclear/失败→回落 regex(PASS 仍出/SOFT 仍降级)，绝不因
+judge 抖动制造新降级。flag `ASHARE_INTENT_JUDGE_ENABLED`=true 已开 Vultr(进程实证)，仅挂全景⑦不动
+轻量③。**复测主因纠偏**：降级主因不是 predict 误杀，而是 ⑤ 用 fmtNum 呈现「18,402.50亿」、⑦ 天然说
+「1.84万亿」→ 闸门裸值比 1.84≠18402 误判 ungrounded(千亿级 mega-cap 必踩，宁德 4/4 降)；`fmtMvYi`
+≥1万亿 统一「X.XX万亿」口径(body+context 同口径，⑦ 照抄即接地)。**真路径复测⑦通过率 78%→94%**
+(迪生力/茅台/宁德 4/4 稳定，治好「迪生力时好时降级」；金钼 6/6 隔离稳定)。**对抗复审**：买卖/预测
+泄漏 **0/12**(判官补抓 regex 漏网 4 例：用…价格在买/会反弹/未来高增长可期/目标看翻倍)，合规误降 **0/5**。
+全量 **2708** 测绿(+判官9+gate subReason+runner 双层7+fmtMvYi+万亿接地)；tasks.ts 仅 +14 行无 churn。
+前态：审查批 `bfaef0e`(restart 652)。）
+（2026-06-15；**#2 全景速览审查批 follow-up + ②资金面铁律 部署 prod**，restart 652，preflight 实读
+live HEAD FF-safe，无新 migration。修：**P0 报告期取错**（`stock_financial_abstract_ths` 旧用
+`df.head(80)` 截断长历史股最新期→驰宏取成「2022中报」与趋势矛盾=信任杀手；改 `_ths_sorted` 按报告期
+升序取 `iloc[-1]`，驰宏实证 2026-03-31）+ **P1 ④补**扣非净利润/每股经营现金流/季度环比 + **P1 ⑤补**
+相对行业静态PE中位（cninfo `_retry` 包裹→行业分位真渲染，⑦方向预算正确）+ **P2 ⑦真解读**（数字翻人话+
+点重大信号如解禁抛压，③⑦解禁口径统一「全部N笔合计」）+ **②资金面铁律**（`bfaef0e`：⑦ prompt 加铁律——
+龙虎榜/北向无数据时绝不编造主买/资金流入，regex 闸门抓不住无数字的定性脑补）。**真路径实证**：驰宏600497
+（今日涨停·有龙虎榜→⑦如实引「买一主买」）+ 茅台600519（当日未上榜→② 龙虎榜「当日未上榜」、⑦「龙虎榜
+当日无数据」**零编造**）；两股 ④报告期=2026Q1、⑤行业中位方向正确、零买卖词、标时效、disclaimer 全在。
+前态：step1 `95ee29a`（restart 649）。）
+（2026-06-15；**#2 Phase2 全景速览 step1 + ⑦闸门对抗加固 部署 prod**，restart 649，healthz ok，
+全量 **2688** 测绿。**ultracode 对抗复审**：4 红队策略压测 ⑦ 合规闸门，真 complianceGate 实测初版
+漏 3/12（语义迂回预测 + 技术信号 regex 盲区）→ 补 SEMANTIC_PREDICT(拐点正在积累/只是时间问题/
+自然收敛)+TECHNICAL_SIGNAL(筹码锁定/控盘/缩量封板/量价背离/跳空/回到X一线，BOSS 红线 MACD金叉=买入)+
+TENSION repair 词 → **复审 0/12 漏，合规⑦不误杀，+10 永久回归测**。⑦ 真 haiku 通过率 迪生力6/6、
+茅台3/6、平安5/6（降级=安全网，①-⑤恒在）。**残留(诚实)**：regex 是 backstop，语义评判有天花板；主防线
+=⑦ prompt；更高保证可加 LLM-intent-judge(step2，BOSS 拍板，加一次 LLM 成本)。以下为 step1 主体：）
+（2026-06-15；**#2 A股 Phase2 全景速览 step1 部署 prod**，restart 648，healthz ok，preflight 实读
+live HEAD 各步 FF-safe；build tsc0，全量 **2678** 测绿；无新 migration。**先验数据可达性再写码**
+（push2 不可达→同花顺/百度/cninfo 替代，迪生力 603335 真调验通）。**④ 基本面**（同花顺 营收/净利+
+同比增速·销售毛利率·ROE·资产负债率·近3年趋势，硬标「基于2026Q1财报，CAS」）+ **⑤ 估值**（百度
+PE-TTM/PB + 近5年历史分位 + cninfo 行业静态PE中位，硬标「估值截至06-14」）+ **deep 触发**（详细分析/
+全面看看/深度分析 XX→七维全景版；**不动**速览/为什么涨/割肉/指数 lane，意图区分保「一句话即得」）+
+**⑦ 分析师视角**（LLM 白话状态画像，状态判断非买卖，过合规闸门；越线/失败→丢⑦留①-⑤优雅降级+计数）。
+合规闸门补盲（设计评审 workflow 发现真缺口）：估值数(PE/PB/分位/倍数)**数值容差接地**(容忍 67.2/67.20
+口语约数)+排年份(假目标价不被年份误接地)+张力延展拦截(高位早晚回落=predict)；④⑤ 确定性层零形容
+（判断统一归⑦）。**真路径实证**：「详细分析迪生力」→ executorLane=ashare_panorama 出 ①-⑤+⑦；
+「迪生力为什么涨」→ 轻量速览(①②③)不误伤。⑦ 真 haiku 通过率：迪生力 6/6、茅台/平安 4/6（降级=合规
+安全网，①-⑤ 恒在）。step2(资金连续性/行业个股对位)待验证后做。
+前态：`c092562`（#5 图片 P1 执行层）。）
+（2026-06-14；**#5 图片 P1 执行层重修 部署 prod**，restart 644，两边 healthz 200，SPA 双边
+`index-CtjniCcy.js`，preflight 实读 live HEAD=`3f76062`（ancestor of c092562）→ FF-safe；keys（GEMINI+
+ANTHROPIC）在进程；无新 migration。**纠正 `707af37` 误判**：上轮把 P1 当作 FileDownloadCard 缩略图占位
+来修，线上行为没变——真问题在执行层两处：① 图片任务执行期进度显示通用「正在生成回答…」→ 新增
+`generating_image` 子状态（「正在生成图片…」），图片 lane 发出，贯穿 WS substatus 帧 + TaskStream 实时
+chip + TaskListItem 列表 chip；② 文字结果「已生成1张图片」先 commit、缩略图一个 tasks.detail 往返后才到
+（用户截图的割裂）→ 图片 lane 把 `attachments[]` 挂上 `server.task.terminal` 帧，SPA terminal handler
+立即 stamp 到任务，图卡与摘要文字同帧渲染；附件校验器抽成共享 `parseUiAttachments()`。orchestrator
+2657 测 + SPA 测全绿（唯一失败 `control-tooltip.test.ts` 经 stash 实证为 `5d4bb2c` NotificationBell
+预存在，已开 task chip 上报，与本次无关）。**待 Claude 重测：① 执行期「正在生成图片」② 图文同帧出现。**
+前态：3f76062（#1 模板）。）
+（2026-06-14；**#1 模板填充 E10 P0 文件名乱码（深层根因）修复部署 prod**，restart 643，healthz ok，
+build tsc0，keys in process；preflight 实读 live HEAD=`d4da1e5`（ancestor of 3f76062）→ FF-safe；
+无新 migration。根因：**存储的模板名本身就是 mojibake**（SPA 存成 å¨æ¥æ¨¡æ¿.xlsx），输出名=模板名+
+"-已填充" 传播坏名→下载头再正确编码也是乱码。修法：**输出名生成处防御**（`outputFilename` 先
+`decodeUploadFilename` latin1→utf8 修复，仍乱码则 fallback `填充结果-<ts>.xlsx`；摘要文案同样修复→
+`你的模板` 兜底）+ 新 `looksLikeMojibake`（C1 控制字节/U+FFFD，不误伤 café/CJK）。**live 实证用 BOSS
+原 mojibake 文件 `file_wmCFjV2iwBhZQYj5i8mtF` 重测：输出名=`周报模板-已填充.xlsx` 干净**。2667 测绿。
+前态：d4da1e5（#5 图片）。）
+（2026-06-14；**#5 图片 P0 文案合规 + P1 预览占位 部署 prod**：SPA 双边 `index-bh0_PXtK.js` + orchestrator restart 642，preflight FF-safe（live a139887 是 ancestor），key 校验「GEMINI+ANTHROPIC 在进程」，healthz 200。commit `dcbf015`(P0 营销图禁编造促销文案——buildImagePrompt 硬约束 + 负向测 + live 实证「全场五折」只出一个优惠) + `707af37`(P1 FileDownloadCard 图片加载占位，消「文字先出图片后到」割裂)。一并带上 a139887(#2④) + #1 模板修复。**Phase 0 待 Claude 重跑全套对比 12/16 基线。**）
+（2026-06-14；#2 A股 ④ matcher E03/E16 精修部署 prod，restart 641，healthz ok，build tsc0，
+preflight 实读 live HEAD=`2617392`（ancestor of a139887）→ FF-safe；akshare-mcp 同步重启（停用词）；
+无新 migration。修复（Phase 0 评测暴露的 ④ matcher 两处过激，prod 日志实证根因）：
+E03「X 为什么涨」因素归纳③不再被裸词「后市」误降级——gate 改「后市+方向词」才算预测、
+中性「后市表现/走势」放行（真买卖建议/割肉/补仓仍降级）；E16「查今天A股三大指数收盘」不再
+误命中「今天国际(300532)」——走新**指数 lane**（确定性三大指数速览卡）+ name-search 收紧
+（indexIntent/长查询跳过）+ 服务端常见词停用词。**真路径复测**（createCaller 打 prod）：
+E16→executorLane=ashare_index 出大盘速览卡；E03→出③段、尾「以上因素与股价变动的关联未经证实」、
+未降级。全量 2643 测绿（+13 回归锁 E03/E16 原文）。
+前态：`2617392`（#1 模板填充 E10 两个 P0）；`f60e698`（视频 #4 步骤1，migration 0034）。）
 
 ---
 
@@ -113,6 +181,7 @@ baseline `musing-keller` @ `9935e84` 已含 template-fill M1-M3 → **#1 templat
 - 状态：**收口待命 + 路由补强已上线**。M1+M2 docx + M3 xlsx 引擎 + e2e 已 commit；`9935e84` 在 baseline；`TEMPLATE_FILL_ENABLED=true` 已开。
 - **2026-06-13 fileIds-aware soft 路由（既有设计缺口，非回归）**：template_fill 路由原纯靠 intent 关键词、无视 fileIds，「把…填入周报模板缺的留空」漏命中 strict pattern → 当通用任务跑。修法：传文件 AND fill动词(填/录入/补全) AND 模板/空白名词 ⇒ 强制 template_fill；合取+文件兜底挡住普通带附件任务（总结/翻译/分析不升级）。改 `intent-classifier.ts`（`matchTemplateFillSoft`/`ClassifyOpts.hasFileAttachment`/cacheKey 折标志）+ `tasks.ts`（classify 调用传 `hasFileAttachment`，**共享文件加法 hunk，远离 ④ fork**）。
 - **落 3 分支同改动**：template-fill `c16f8a0`、ashare `123cceb`、**musing-keller(合并主干)`1ba76bb`←prod**。84 classifier + 1556 agent 测绿、tsc0；Vultr 真实证 ①原句+docx→template_fill、②总结这份文档+docx→generate（详 `qa-artifacts/route-fix-20260613/phase-summary.md`）。
+- **2026-06-13 Phase 0 评测 E10 两个 P0 修复已部署 prod（`2617392`，restart 640）**：①**xlsx 多行循环**（{#x}…{/x} 跨行）原被 skip→任务数据全丢，改 **exceljs block-duplication**（snapshot body→splice→restamp 样式/行高；纯标记行=分隔符丢弃，内联标记保留；异常模板 try/catch 降级不崩）；「诚实降级」不再替代功能。②**下载 CJK 文件名**：`http.ts` 下载路由改用 `contentDispositionAttachment`（RFC6266 `filename*=UTF-8` + ASCII `filename=` fallback，永不 latin1 乱码）。回归：xlsx 引擎多行/样式/空数据 + runner/e2e 由「skip」翻「expanded」+ `contentDispositionAttachment` round-trip。全量 **2638 测绿、tsc0**。**E10 live 复测**：3 行任务全到、status=completed、下载名正确。改了共享 `http.ts`/`file-service.ts`（加法）。
 
 ### #2 — A股数据层 (ashare)
 - worktree：`/Users/yaleiqi/holaday-ashare`　branch：`claude/ashare-ae1d05` @ `394830e`（**已 push origin** ✓，含 ④ widen + 简报 v2 + tasks.ts 去 churn）
@@ -173,3 +242,11 @@ baseline `musing-keller` @ `9935e84` 已含 template-fill M1-M3 → **#1 templat
 
 ### #5 — 图片生成 (image)
 - 状态：← owner 更新
+
+### #4 — 视频生成 (video)
+- **状态：管线就绪，等真人正脸出镜底版做端到端验收。** worktree `/Users/yaleiqi/holaday-video` branch `claude/video-ae1d05`（**未 merge / 未部署**，全 flag-gated 默认 off）。
+- **进度**：步骤1 上传链路（presigned-PUT + media 白名单 + 200MB + migration `0034` users.qwen_voice_id/base_video_file_id）**已部署 prod**（曾 `f60e698`，现 prod 已被其他 session 推进到 `c092562`，video 列与代码仍在）。步骤2 三适配器（Wanxiang/fal/Qwen3-TTS-VC）+ 真调证据全绿。步骤3 编排 **3a→3e-2 全 done + 单测**（env/时间轴对齐/runner/FFmpeg竖屏合成/脚本生成/ffmpeg子进程/video-lane），全套 2704 绿。
+- **2026-06-15 全管线连通性冒烟通过**（≠验收）：脚本直跑真 `runVideoCreation`，6 步串通，真出 1080×1920 h264+aac MP4 27.5s/4.3MB，OSS→R2 全落。录屏底版换口型废、不计验收。测试素材+克隆音色已清。
+- **未做（刻意暂停）**：3e-3 接 `tasks.ts` 后台协程 gate + onboarding（高风险共享文件改动，等 BOSS 录真底版 + 过目 hunk 再接）。**不动 tasks.ts。**
+- **BACKLOG（验收前必修）**：lip-sync clip 比其音频短 ~0.11s/段（冒烟 28.16s 时间轴 vs 27.478s 成片，~0.68s 漂移）→ `lipSyncSegment` 用 ffmpeg `-t`/`apad` 把 fal 输出 trim/pad 到精确音频时长，锁死音视字三轨。
+- 详见 memory `project_phase1_video_impl_2026-06-13`。

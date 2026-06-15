@@ -145,6 +145,15 @@ const schema = z.object({
   ASHARE_QA_ALLOWLIST: z.string().default(''),
   /** ③ 解读 LLM 模型。Haiku 快/省（gate 兜底合规）。 */
   ASHARE_QA_MODEL: z.string().default('claude-haiku-4-5-20251001'),
+  /**
+   * Phase 2 ⑦ — 意图判官（regex complianceGate 之后的第二层防御）。默认 OFF。
+   * on → 每个全景⑦多一次温度0 LLM judge：救回 regex 误杀的合规⑦(过去式/状态描述被当预测)
+   * + 补 regex 漏网的语义暗示。regex HARD 红线(advice/technical/ungrounded)不受 judge 影响。
+   */
+  ASHARE_INTENT_JUDGE_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
 
   /**
    * Phase D Step 3 rollout switch.

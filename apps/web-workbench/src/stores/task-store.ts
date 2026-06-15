@@ -97,7 +97,16 @@ export interface TaskStore {
    */
   subStatusByTask: Record<
     string,
-    { subStatus: 'planning' | 'browsing' | 'extracting' | 'verifying' | 'generating'; since: number }
+    {
+      subStatus:
+        | 'planning'
+        | 'browsing'
+        | 'extracting'
+        | 'verifying'
+        | 'generating'
+        | 'generating_image';
+      since: number;
+    }
   >;
   /**
    * Phase 24 RC follow-up — set of taskIds that have reached a
@@ -469,37 +478,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         // Both fields are nullable; we only pass them through when
         // the shape validates so a malformed metadata block can't
         // crash the renderer.
-        const attachments: UiTask['attachments'] | undefined = (() => {
-          const arr = metadata.attachments;
-          if (!Array.isArray(arr) || arr.length === 0) return undefined;
-          const cleaned = arr
-            .map((entry) => {
-              if (!entry || typeof entry !== 'object') return null;
-              const e = entry as Record<string, unknown>;
-              if (
-                typeof e.fileId !== 'string' ||
-                typeof e.downloadUrl !== 'string' ||
-                typeof e.filename !== 'string' ||
-                typeof e.mimetype !== 'string' ||
-                typeof e.sizeBytes !== 'number' ||
-                typeof e.expiresAt !== 'string' ||
-                typeof e.kind !== 'string'
-              ) {
-                return null;
-              }
-              return {
-                fileId: e.fileId,
-                downloadUrl: e.downloadUrl,
-                filename: e.filename,
-                mimetype: e.mimetype,
-                sizeBytes: e.sizeBytes,
-                expiresAt: e.expiresAt,
-                kind: e.kind,
-              };
-            })
-            .filter((v): v is NonNullable<typeof v> => v !== null);
-          return cleaned.length > 0 ? cleaned : undefined;
-        })();
+        const attachments: UiTask['attachments'] | undefined = parseUiAttachments(
+          metadata.attachments,
+        );
         const expertWorkflowId =
           safeTaskListText(metadata.expertWorkflowId).length > 0
             ? safeTaskListText(metadata.expertWorkflowId)
@@ -1225,6 +1206,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const incomingFailedChecks =
           (msg as { failedChecks?: Array<{ type: string; detail: string }> })
             .failedChecks ?? null;
+        // P1 timing fix — the image lane now ships attachments[] ON the
+        // terminal frame (see orchestrator tasks.ts + ws.ts). Stamp them
+        // onto the task immediately so the image card renders WITH the
+        // "已生成1张图片" summary, instead of arriving one tasks.detail
+        // round-trip later (the gap the user reported as 文字先出图后到).
+        const incomingAttachments = parseUiAttachments(
+          (msg as { attachments?: unknown }).attachments,
+        );
         return {
           tasks: prev.tasks.map((t) =>
             t.taskId === msg.taskId
@@ -1236,6 +1225,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                   ...(incomingFailedChecks !== null
                     ? { failedChecks: incomingFailedChecks }
                     : {}),
+                  ...(incomingAttachments ? { attachments: incomingAttachments } : {}),
                 }
               : t,
           ),
@@ -1326,7 +1316,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         subStatus === 'browsing' ||
         subStatus === 'extracting' ||
         subStatus === 'verifying' ||
-        subStatus === 'generating'
+        subStatus === 'generating' ||
+        subStatus === 'generating_image'
           ? subStatus
           : null;
       set((prev) => {
@@ -2085,6 +2076,46 @@ function normalizeFinalViewport(
     width: Math.floor(width),
     height: Math.floor(height),
   };
+}
+
+/**
+ * Validate a raw attachments[] array (from metadata.attachments on a
+ * tasks.detail payload, OR from the attachments field now carried on
+ * the server.task.terminal WS frame) into the UiTask attachment shape.
+ * Only well-formed entries pass; a malformed block yields undefined so
+ * the renderer can never crash. Shared by hydrateDetail and the
+ * terminal handler so the image card lands WITH the summary text
+ * instead of one detail round-trip later (P1 timing fix).
+ */
+function parseUiAttachments(arr: unknown): UiTask['attachments'] | undefined {
+  if (!Array.isArray(arr) || arr.length === 0) return undefined;
+  const cleaned = arr
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null;
+      const e = entry as Record<string, unknown>;
+      if (
+        typeof e.fileId !== 'string' ||
+        typeof e.downloadUrl !== 'string' ||
+        typeof e.filename !== 'string' ||
+        typeof e.mimetype !== 'string' ||
+        typeof e.sizeBytes !== 'number' ||
+        typeof e.expiresAt !== 'string' ||
+        typeof e.kind !== 'string'
+      ) {
+        return null;
+      }
+      return {
+        fileId: e.fileId,
+        downloadUrl: e.downloadUrl,
+        filename: e.filename,
+        mimetype: e.mimetype,
+        sizeBytes: e.sizeBytes,
+        expiresAt: e.expiresAt,
+        kind: e.kind,
+      };
+    })
+    .filter((v): v is NonNullable<typeof v> => v !== null);
+  return cleaned.length > 0 ? cleaned : undefined;
 }
 
 function safeNullableTaskListDate(value: unknown): Date | null {

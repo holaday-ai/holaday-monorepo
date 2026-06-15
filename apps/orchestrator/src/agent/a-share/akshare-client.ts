@@ -17,11 +17,13 @@ import type {
   AkEnvelope,
   AnnouncementRow,
   DragonTigerRow,
+  FundamentalsRow,
   IndexRow,
   KlineRow,
   MarketPulseRow,
   NorthboundRow,
   UnlockRow,
+  ValuationRow,
   ZtReviewRow,
 } from './briefing-types.js';
 
@@ -68,6 +70,10 @@ export interface AkshareClient {
   getMarketPulse(date: string, prevDate?: string): Promise<AkEnvelope<MarketPulseRow>>;
   /** get_zt_pool_summary(date) — v2 盘前回顾某交易日涨停梯队（date 'YYYYMMDD'）。 */
   getZtPoolSummary(date: string): Promise<AkEnvelope<ZtReviewRow>>;
+  /** get_fundamentals(symbol) — Phase2 ④ 基本面（最新报告期 + 近3年趋势）。 */
+  getFundamentals(symbol: string): Promise<AkEnvelope<FundamentalsRow>>;
+  /** get_valuation(symbol) — Phase2 ⑤ 估值（PE/PB + 历史分位 + 行业PE中位）。 */
+  getValuation(symbol: string): Promise<AkEnvelope<ValuationRow>>;
 }
 
 const STUB_DISCLAIMER = '数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。';
@@ -128,5 +134,13 @@ export class StubAkshareClient implements AkshareClient {
   }
   getZtPoolSummary(date: string) {
     return Promise.resolve(this.err<ZtReviewRow>(`akshare:zt_pool_summary(${date})`, this.now()));
+  }
+  getFundamentals(symbol: string) {
+    return Promise.resolve(
+      this.err<FundamentalsRow>(`akshare:fundamentals(${symbol})`, this.now()),
+    );
+  }
+  getValuation(symbol: string) {
+    return Promise.resolve(this.err<ValuationRow>(`akshare:valuation(${symbol})`, this.now()));
   }
 }

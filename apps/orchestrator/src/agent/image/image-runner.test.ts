@@ -1,6 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Logger } from 'pino';
-import { runImageTask, type ImageAttachment, type SaveImageFn } from './image-runner.js';
+import {
+  runImageTask,
+  buildImagePrompt,
+  type ImageAttachment,
+  type SaveImageFn,
+} from './image-runner.js';
 import { GeminiImageError } from './gemini-image-client.js';
 
 function fakeLogger(): Logger {
@@ -29,7 +34,47 @@ function okGenerate(images = [{ buffer: Buffer.from('PNG'), mimeType: 'image/png
   return vi.fn().mockResolvedValue({ images, model: 'gemini-3.1-flash-image' });
 }
 
+describe('buildImagePrompt — P0 marketing compliance', () => {
+  it('passes plain images through unchanged (no constraint)', () => {
+    expect(buildImagePrompt('画一只橘猫', 'flash')).toBe('画一只橘猫');
+  });
+  it('appends the no-fabricated-promo constraint for marketing keywords', () => {
+    const p = buildImagePrompt('做一张促销海报', 'flash');
+    expect(p).toContain('做一张促销海报');
+    expect(p).toContain('严格约束');
+    expect(p).toContain('不得自行添加');
+  });
+  it('appends the constraint for Pro-tier (text/poster) images', () => {
+    expect(buildImagePrompt('设计一张杂志封面', 'pro')).toContain('严格约束');
+  });
+  it('forbids a second offer when only one was given (negative example)', () => {
+    const p = buildImagePrompt('做一张写着“全场五折”的促销海报', 'pro');
+    expect(p).toContain('只给了一个优惠就只呈现这一个');
+    expect(p).toContain('不要补第二个');
+  });
+});
+
 describe('runImageTask', () => {
+  it('sends the marketing compliance constraint to the model for promo posters', async () => {
+    const generate = okGenerate();
+    await runImageTask({
+      intent: '做一张写着“全场五折”的促销海报',
+      apiKey: 'k',
+      save,
+      logger: fakeLogger(),
+      generate,
+    });
+    const sentPrompt = generate.mock.calls[0]![0].prompt;
+    expect(sentPrompt).toContain('全场五折'); // user text preserved verbatim
+    expect(sentPrompt).toContain('不要补第二个'); // hard constraint attached
+  });
+
+  it('does NOT add the constraint to a plain non-marketing image', async () => {
+    const generate = okGenerate();
+    await runImageTask({ intent: '画一只猫', apiKey: 'k', save, logger: fakeLogger(), generate });
+    expect(generate.mock.calls[0]![0].prompt).toBe('画一只猫');
+  });
+
   it('generates with NB2 by default and returns an attachment', async () => {
     const generate = okGenerate();
     const out = await runImageTask({

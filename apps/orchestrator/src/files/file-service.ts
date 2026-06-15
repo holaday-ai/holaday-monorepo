@@ -192,6 +192,41 @@ export function decodeUploadFilename(name: string): string {
   return recovered.includes('\uFFFD') ? name : recovered;
 }
 
+/**
+ * Build a download `Content-Disposition: attachment` header value that keeps a
+ * non-ASCII (e.g. CJK) filename intact (P0 / E10). Per RFC 6266 we emit BOTH:
+ *   - `filename="<ascii>"` \u2014 fallback for ancient clients; MUST be ASCII-only
+ *     so a Chinese name never lands as latin1 mojibake (\u5468\u62A5 \u2192 \u00E5\u00A8\u00E6\u00A5\u2026). Non-ASCII
+ *     bytes and the quote/backslash chars are replaced with '_'.
+ *   - `filename*=UTF-8''<pct>` \u2014 the real UTF-8 name, percent-encoded; every
+ *     modern browser prefers this and shows the correct name.
+ */
+export function contentDispositionAttachment(filename: string): string {
+  const safe = (filename || 'download').trim() || 'download';
+  // eslint-disable-next-line no-control-regex
+  const ascii = safe.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+  const star = encodeURIComponent(safe);
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${star}`;
+}
+
+/**
+ * Heuristic: does this string still look like UTF-8-as-latin1 mojibake AFTER a
+ * recovery attempt? A readable filename is ASCII + real letters (incl. CJK
+ * > U+00FF and accented latin like é = U+00E9). Mojibake from UTF-8 bytes read
+ * as latin1 leaves C1 control codepoints (U+0080–U+009F — the continuation
+ * bytes of a multi-byte char, e.g. 周 = E5 91 A8 → 'å','','¨'), which
+ * NEVER appear in a legitimate filename. Replacement chars (U+FFFD) likewise
+ * signal a failed decode. café (only U+00E9, not C1) is NOT flagged.
+ */
+export function looksLikeMojibake(s: string): boolean {
+  if (!s) return false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if ((c >= 0x80 && c <= 0x9f) || c === 0xfffd) return true;
+  }
+  return false;
+}
+
 export class FileService {
   /**
    * Phase 5c — disk I/O routed through a StorageProvider. When the

@@ -427,6 +427,23 @@ export const serverTaskTerminalSchema = z.object({
    * only handoffTaskId.
    */
   handoffTaskId: z.string().optional(),
+  // P1 timing fix — the image lane ships its result attachments on the
+  // terminal frame so the SPA renders the download card (image thumbnail)
+  // WITH the summary text, instead of after a separate tasks.detail
+  // round-trip (which made the text appear first, the thumbnail later).
+  attachments: z
+    .array(
+      z.object({
+        fileId: z.string(),
+        downloadUrl: z.string(),
+        filename: z.string(),
+        mimetype: z.string(),
+        sizeBytes: z.number(),
+        expiresAt: z.string(),
+        kind: z.string(),
+      }),
+    )
+    .optional(),
 });
 
 /**
@@ -753,9 +770,19 @@ export const serverTaskProgressSchema = z.object({
    *   verifying  — verifyAndFinalize entered (post-runner, pre-persist)
    *   generating — generate / scrape LLM stream actively producing
    *                text
+   *   generating_image — image lane (nano banana) actively rendering
+   *                an image; distinct copy so the chip reads "正在生成
+   *                图片…" not the generic "正在生成回答…"
    */
   subStatus: z
-    .enum(['planning', 'browsing', 'extracting', 'verifying', 'generating'])
+    .enum([
+      'planning',
+      'browsing',
+      'extracting',
+      'verifying',
+      'generating',
+      'generating_image',
+    ])
     .optional(),
 });
 

@@ -135,11 +135,11 @@ describe('runTemplateFillTask — xlsx', () => {
     expect(cell.font?.bold).toBe(true);
   });
 
-  it('DEGRADES a multi-row xlsx loop to partial_success (P0) — fills the rest', async () => {
+  it('EXPANDS a multi-row xlsx loop (P0/E10) — fills the task rows, status completed', async () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Report');
     ws.getCell('A1').value = 'GMV：{gmv}';
-    ws.getCell('A3').value = '{#tasks}';
+    ws.getCell('A3').value = '{#tasks}'; // own-row markers → multi-row loop
     ws.getCell('A4').value = '{title}';
     ws.getCell('A5').value = '{/tasks}';
     const template = Buffer.from((await wb.xlsx.writeBuffer()) as ArrayBuffer);
@@ -158,13 +158,61 @@ describe('runTemplateFillTask — xlsx', () => {
       ),
       logger: fakeLogger(),
     });
-    expect(out.status).toBe('partial_success'); // NOT failed
-    expect(out.skippedLoops).toContain('tasks');
-    expect(out.summary).toContain('循环段未填充');
-    expect(out.attachments).toHaveLength(1); // file still delivered
+    expect(out.status).toBe('completed'); // fully filled now (was a degraded skip)
+    expect(out.skippedLoops ?? []).toHaveLength(0); // NOT skipped
+    expect(out.attachments).toHaveLength(1);
     const wb2 = new ExcelJS.Workbook();
     await wb2.xlsx.load(captured.buffer!);
-    expect(wb2.getWorksheet('Report')!.getCell('A1').value).toBe('GMV：100万');
+    const ws2 = wb2.getWorksheet('Report')!;
+    expect(ws2.getCell('A1').value).toBe('GMV：100万');
+    // loop span was rows 3-5 (open/body/close); delimiter rows gone, the two
+    // tasks fill rows 3 and 4 (row 2 was always empty).
+    expect(ws2.getCell('A3').value).toBe('A');
+    expect(ws2.getCell('A4').value).toBe('B');
+  });
+});
+
+describe('runTemplateFillTask — output filename defense (P0 / E10 mojibake)', () => {
+  const xlsxMime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  async function simpleXlsx(): Promise<Buffer> {
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet('s').getCell('A1').value = '姓名：{name}';
+    return Buffer.from((await wb.xlsx.writeBuffer()) as ArrayBuffer);
+  }
+  const fill = async (filename: string) => {
+    const { save } = capturingSave();
+    const out = await runTemplateFillTask({
+      intent: '姓名张三',
+      template: { buffer: await simpleXlsx(), filename, mimetype: xlsxMime },
+      allowedFormats: PRO_FORMATS,
+      save,
+      model: modelReturning('{"fields":{"name":"张三"},"loops":{},"missing":[]}'),
+      logger: fakeLogger(),
+    });
+    return out.attachments[0]!.filename;
+  };
+
+  // The exact E10 failure: the SPA stored the template as latin1 mojibake
+  // (周报模板 → å¨æ¥…), so the output name inherited the garble. Defend at
+  // output generation: repair the name (latin1→utf8) → clean Chinese.
+  it('REPAIRS a recoverable mojibake template name → clean Chinese output', async () => {
+    const garble = Buffer.from('周报模板', 'utf8').toString('latin1') + '.xlsx';
+    const name = await fill(garble);
+    expect(name).toBe('周报模板-已填充.xlsx');
+  });
+
+  it('falls back to a clean default for an UNRECOVERABLE mojibake name', async () => {
+    const garble = String.fromCharCode(0x80, 0x81, 0x82) + '.xlsx';
+    const name = await fill(garble);
+    expect(name).toMatch(/^填充结果-\d{8}-\d{6}\.xlsx$/);
+  });
+
+  it('leaves a clean CJK template name untouched', async () => {
+    expect(await fill('季度报表.xlsx')).toBe('季度报表-已填充.xlsx');
+  });
+
+  it('leaves a genuine accented-latin name (café) untouched', async () => {
+    expect(await fill('café.xlsx')).toBe('café-已填充.xlsx');
   });
 });
 

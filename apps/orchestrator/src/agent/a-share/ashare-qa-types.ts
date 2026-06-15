@@ -24,4 +24,9 @@ export interface AshareQaMatch {
   dateIso: string;
   /** 北京 compact 'YYYYMMDD'（龙虎榜接口用）。 */
   dateCompact: string;
+  /**
+   * Phase 2 全景速览：用户要「详细分析/全面看看/深度分析 XX」→ true → 出七维全景版
+   * （①-⑤ + ⑦ 分析师视角）。默认 false → 轻量速览（①②③ + ③解读），现有行为不变。
+   */
+  deep?: boolean;
 }

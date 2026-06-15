@@ -3,6 +3,8 @@ import {
   isAcceptedUpload,
   isMacroOfficeUpload,
   decodeUploadFilename,
+  contentDispositionAttachment,
+  looksLikeMojibake,
   ACCEPTED_MIMES,
   ACCEPTED_EXTENSIONS,
 } from './file-service.js';
@@ -80,5 +82,68 @@ describe('decodeUploadFilename (P2 — multipart latin1→utf8)', () => {
   });
   it('handles empty input', () => {
     expect(decodeUploadFilename('')).toBe('');
+  });
+});
+
+describe('contentDispositionAttachment (P0 / E10 — download filename encoding)', () => {
+  // The full chain that mojibake'd in E10: a Chinese template name flows into
+  // the filled output name "周报模板-已填充.xlsx" and must survive download.
+  it('keeps a CJK output name intact via RFC 5987 filename*', () => {
+    const name = '周报模板-已填充.xlsx';
+    const header = contentDispositionAttachment(name);
+    const m = header.match(/filename\*=UTF-8''([^;]+)$/);
+    expect(m, header).toBeTruthy();
+    // the star param round-trips back to the exact UTF-8 name (no mojibake)
+    expect(decodeURIComponent(m![1]!)).toBe(name);
+  });
+
+  it('the ASCII fallback filename= is pure ASCII (never latin1 mojibake)', () => {
+    const header = contentDispositionAttachment('周报模板-已填充.xlsx');
+    const ascii = header.match(/filename="([^"]*)"/)?.[1] ?? '';
+    expect(ascii).toMatch(/^[\x20-\x7e]*$/); // ASCII-only
+    expect(ascii).toContain('.xlsx'); // extension preserved
+    expect(ascii).not.toMatch(/å|æ|¥/); // not the mojibake bytes
+  });
+
+  it('leaves an ASCII name as-is in both params', () => {
+    const header = contentDispositionAttachment('report-2026.xlsx');
+    expect(header).toContain('filename="report-2026.xlsx"');
+    expect(header).toContain("filename*=UTF-8''report-2026.xlsx");
+  });
+
+  it('quotes/backslashes in the name cannot break out of filename=', () => {
+    const header = contentDispositionAttachment('a"b\\c.xlsx');
+    const ascii = header.match(/filename="([^"]*)"/)?.[1] ?? '';
+    expect(ascii).not.toContain('"');
+    expect(ascii).not.toContain('\\');
+  });
+
+  it('falls back to "download" for an empty name', () => {
+    expect(contentDispositionAttachment('')).toContain('filename="download"');
+  });
+});
+
+describe('looksLikeMojibake (P0 / E10 — output-name defense)', () => {
+  it('flags UTF-8-as-latin1 mojibake (C1 control bytes)', () => {
+    // 周报模板 stored as latin1 → the classic å¨æ¥… garble (has C1 controls)
+    const garble = Buffer.from('周报模板', 'utf8').toString('latin1');
+    expect(looksLikeMojibake(garble)).toBe(true);
+  });
+  it('flags a replacement char', () => {
+    expect(looksLikeMojibake('bad�name')).toBe(true);
+  });
+  it('does NOT flag clean CJK', () => {
+    expect(looksLikeMojibake('周报模板')).toBe(false);
+  });
+  it('does NOT flag a genuine accented latin name (café)', () => {
+    expect(looksLikeMojibake('café')).toBe(false);
+  });
+  it('does NOT flag plain ASCII or empty', () => {
+    expect(looksLikeMojibake('report-2026')).toBe(false);
+    expect(looksLikeMojibake('')).toBe(false);
+  });
+  it('a recoverable mojibake name, once repaired, is no longer flagged', () => {
+    const garble = Buffer.from('周报模板', 'utf8').toString('latin1');
+    expect(looksLikeMojibake(decodeUploadFilename(garble))).toBe(false); // → 周报模板
   });
 });
