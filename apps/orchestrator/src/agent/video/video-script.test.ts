@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildOptimizeSystemPrompt,
   buildScriptSystemPrompt,
   generateVideoScript,
+  optimizeUserScript,
   VideoScriptError,
   type LlmComplete,
 } from './video-script.js';
@@ -91,5 +93,50 @@ describe('buildScriptSystemPrompt', () => {
 describe('VideoScriptError', () => {
   it('is an Error with a discriminated kind', () => {
     expect(new VideoScriptError('x', 'parse').kind).toBe('parse');
+  });
+});
+
+describe('optimizeUserScript (原方案 — faithful to user draft)', () => {
+  const OPTIMIZED = JSON.stringify({
+    title: '夏季防晒',
+    segments: [
+      { text: '夏天紫外线很强，防晒不能偷懒', visual: '烈日下的海滩，阳光强烈' },
+      { text: '出门前二十分钟涂够量', visual: '防晒霜挤在手心特写' },
+    ],
+    bgmMood: '轻快',
+  });
+
+  it('optimizes the user draft into segments (all narrated visuals)', async () => {
+    const out = await optimizeUserScript(
+      { userText: '我想做个讲夏天防晒的视频，提醒大家涂够量' },
+      { llm: llmReturning(OPTIMIZED) },
+    );
+    expect(out.title).toBe('夏季防晒');
+    expect(out.segments).toHaveLength(2);
+    // every segment is a narrated visual (type 'broll', has text + visual)
+    for (const s of out.segments) {
+      expect(s.type).toBe('broll');
+      expect(s.text.length).toBeGreaterThan(0);
+      expect(s.visual && s.visual.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('throws empty on a blank user draft', async () => {
+    await expect(optimizeUserScript({ userText: '   ' }, { llm: llmReturning('x') })).rejects.toMatchObject({
+      kind: 'empty',
+    });
+  });
+
+  it('throws parse on a non-JSON reply', async () => {
+    await expect(
+      optimizeUserScript({ userText: '防晒' }, { llm: llmReturning('抱歉') }),
+    ).rejects.toMatchObject({ kind: 'parse' });
+  });
+
+  it('system prompt instructs faithful optimization (no fabrication)', () => {
+    const p = buildOptimizeSystemPrompt(6);
+    expect(p).toMatch(/忠于用户文案|不杜撰/);
+    expect(p).toContain('visual');
+    expect(p).toContain('只输出 JSON');
   });
 });

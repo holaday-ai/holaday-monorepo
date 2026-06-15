@@ -143,3 +143,84 @@ export async function generateVideoScript(
   }
   return parsed.data as VideoScript;
 }
+
+// ---------------------------------------------------------------------------
+// 原方案 (simplified) — optimize a USER-PROVIDED draft.
+// ---------------------------------------------------------------------------
+
+export interface OptimizeScriptInput {
+  /** The user's draft copy / idea (NOT a one-line ask). */
+  readonly userText: string;
+  /** Soft cap guiding the model. Default 6. */
+  readonly maxSegments?: number;
+}
+
+export function buildOptimizeSystemPrompt(maxSegments: number): string {
+  return [
+    '你是 HOLA DAY 的短视频文案优化师。',
+    '用户会给你一段草稿文案或想法，你把它优化、拆成一条可拍摄的竖屏短视频脚本（图文配音，无真人出镜、无换口型）。',
+    '',
+    '硬性要求：',
+    `- ${Math.max(3, maxSegments - 2)}~${maxSegments} 个分段，每段一句精炼旁白（text，口语化、保留用户原意）。`,
+    '- 每段都要一句画面描述（visual，用于 AI 文生图/文生视频），与旁白匹配。',
+    '- 忠于用户文案：优化表达/分段/补画面，但不改变事实主张、不杜撰、不模仿或冒充他人。',
+    '',
+    '只输出 JSON（不要 markdown、不要解释）：',
+    '{"title": "...", "segments": [{"text": "旁白句", "visual": "画面描述"}], "bgmMood": "轻快", "hashtags": ["#..."]}',
+  ].join('\n');
+}
+
+/** Normalize the optimize reply — every segment is a narrated visual ('broll'). */
+function normalizeOptimized(raw: unknown): unknown {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const rawSegs = Array.isArray(r.segments) ? r.segments : [];
+  return {
+    title: r.title ?? r.标题,
+    segments: rawSegs.map((s) => {
+      const seg = (s ?? {}) as Record<string, unknown>;
+      return {
+        text: seg.text ?? seg.文案 ?? seg.narration,
+        type: 'broll' as const,
+        visual: seg.visual ?? seg.画面 ?? undefined,
+        durationHintSec: seg.durationHintSec ?? seg.duration_hint ?? undefined,
+      };
+    }),
+    bgmMood: r.bgmMood ?? r.bgm_mood ?? undefined,
+    hashtags: Array.isArray(r.hashtags) ? r.hashtags : undefined,
+  };
+}
+
+/**
+ * Optimize a user-provided draft into a VideoScript. Unlike
+ * generateVideoScript (which invents from a one-line ask), this stays
+ * FAITHFUL to the user's text — optimize / segment / add visual prompts, no
+ * fabrication, no impersonation. Every segment is a narrated visual (no
+ * 出镜 / lip-sync) for the simplified 原方案 pipeline.
+ */
+export async function optimizeUserScript(
+  input: OptimizeScriptInput,
+  deps: { llm: LlmComplete },
+): Promise<VideoScript> {
+  if (!input.userText || !input.userText.trim()) {
+    throw new VideoScriptError('user script text is empty', 'empty');
+  }
+  const maxSegments = input.maxSegments ?? 6;
+  let text: string;
+  try {
+    text = await deps.llm({ system: buildOptimizeSystemPrompt(maxSegments), user: input.userText });
+  } catch (err) {
+    throw new VideoScriptError('optimize LLM call failed', 'llm', err instanceof Error ? err.message : String(err));
+  }
+  if (!text || !text.trim()) throw new VideoScriptError('optimize LLM returned empty', 'empty');
+  let raw: unknown;
+  try {
+    raw = parseJsonLoose(text);
+  } catch (err) {
+    throw new VideoScriptError('optimize reply not parseable JSON', 'parse', `${(err as Error).message} :: ${text.slice(0, 200)}`);
+  }
+  const parsed = ScriptSchema.safeParse(normalizeOptimized(raw));
+  if (!parsed.success) {
+    throw new VideoScriptError('optimized script did not match schema', 'parse', JSON.stringify(parsed.error.issues).slice(0, 400));
+  }
+  return parsed.data as VideoScript;
+}

@@ -156,3 +156,111 @@ export async function runFfmpeg(
 ): Promise<void> {
   await runProcess(cmd.bin, cmd.args, opts);
 }
+
+export interface RenderKenBurnsInput {
+  imagePath: string;
+  audioPath: string;
+  outPath: string;
+  durationMs: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+}
+
+/**
+ * 原方案 default visual — a still image with a slow Ken Burns zoom over its
+ * narration audio → a fixed-length vertical clip (gives a static AI image a
+ * "video feel" cheaply). zoompan z ramps with the output frame index `on`.
+ */
+export async function renderImageKenBurns(
+  input: RenderKenBurnsInput,
+  opts: FfmpegExecOpts = {},
+): Promise<void> {
+  const W = input.width ?? 1080;
+  const H = input.height ?? 1920;
+  const FPS = input.fps ?? 30;
+  const durSec = (input.durationMs / 1000).toFixed(3);
+  const args = [
+    '-y',
+    '-loop',
+    '1',
+    '-framerate',
+    String(FPS),
+    '-i',
+    input.imagePath,
+    '-i',
+    input.audioPath,
+    '-t',
+    durSec,
+    '-vf',
+    `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},` +
+      `zoompan=z='min(1+0.0008*on,1.25)':d=1:fps=${FPS}:s=${W}x${H}:` +
+      `x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',setsar=1`,
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    '-b:a',
+    '192k',
+    '-shortest',
+    input.outPath,
+  ];
+  await runProcess(opts.ffmpegBin ?? 'ffmpeg', args, opts);
+}
+
+export interface RenderVideoClipInput {
+  /** A generated background video (Veo / Wanxiang t2v). */
+  videoPath: string;
+  audioPath: string;
+  outPath: string;
+  durationMs: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+}
+
+/**
+ * 原方案 optional video visual — loop+trim a generated background video to the
+ * narration audio length and mux the NARRATION audio (drop the source video's
+ * audio, e.g. Veo's bundled track) → a fixed-length vertical clip. `-stream_loop`
+ * covers the case where the bg video is shorter than the narration.
+ */
+export async function renderVideoClip(
+  input: RenderVideoClipInput,
+  opts: FfmpegExecOpts = {},
+): Promise<void> {
+  const W = input.width ?? 1080;
+  const H = input.height ?? 1920;
+  const FPS = input.fps ?? 30;
+  const durSec = (input.durationMs / 1000).toFixed(3);
+  const args = [
+    '-y',
+    '-stream_loop',
+    '-1',
+    '-i',
+    input.videoPath,
+    '-i',
+    input.audioPath,
+    '-t',
+    durSec,
+    '-vf',
+    `scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
+      `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${FPS}`,
+    '-map',
+    '0:v:0',
+    '-map',
+    '1:a:0',
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    '-b:a',
+    '192k',
+    input.outPath,
+  ];
+  await runProcess(opts.ffmpegBin ?? 'ffmpeg', args, opts);
+}

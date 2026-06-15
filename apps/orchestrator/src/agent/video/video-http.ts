@@ -77,11 +77,17 @@ export async function fetchWithTimeout(
  */
 export async function downloadToBuffer(
   url: string,
-  opts: { fetchImpl?: typeof fetch; timeoutMs?: number; maxBytes?: number } = {},
+  opts: {
+    fetchImpl?: typeof fetch;
+    timeoutMs?: number;
+    maxBytes?: number;
+    /** Extra request headers (e.g. x-goog-api-key for a Veo result URI). */
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<{ buffer: Buffer; contentType?: string; sizeBytes: number }> {
   const res = await fetchWithTimeout(
     url,
-    { method: 'GET' },
+    { method: 'GET', ...(opts.headers ? { headers: opts.headers } : {}) },
     { timeoutMs: opts.timeoutMs ?? 120_000, fetchImpl: opts.fetchImpl },
   );
   if (!res.ok) {

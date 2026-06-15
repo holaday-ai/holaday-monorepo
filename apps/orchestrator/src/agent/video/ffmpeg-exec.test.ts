@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   ffprobeDurationMs,
   renderImageClip,
+  renderImageKenBurns,
+  renderVideoClip,
   runFfmpeg,
   type SpawnFn,
 } from './ffmpeg-exec.js';
@@ -89,5 +91,35 @@ describe('runFfmpeg', () => {
   it('surfaces a spawn error', async () => {
     const { fn } = fakeSpawn({ error: 'ENOENT' });
     await expect(runFfmpeg({ bin: 'ffmpeg', args: [] }, { spawnFn: fn })).rejects.toThrow(/ENOENT/);
+  });
+});
+
+describe('renderImageKenBurns', () => {
+  it('builds a loop-image + zoompan Ken Burns command of audio length', async () => {
+    const { fn, calls } = fakeSpawn({ code: 0 });
+    await renderImageKenBurns(
+      { imagePath: '/r2/img.png', audioPath: '/r2/a.wav', outPath: '/r2/clip.mp4', durationMs: 4000 },
+      { spawnFn: fn },
+    );
+    const args = calls[0]!.args;
+    expect(args).toEqual(expect.arrayContaining(['-loop', '1', '-i', '/r2/img.png', '-i', '/r2/a.wav', '-t', '4.000']));
+    expect(args.join(' ')).toContain('zoompan=');
+    expect(args.join(' ')).toContain('scale=1080:1920');
+    expect(args).toEqual(expect.arrayContaining(['-c:v', 'libx264', '-shortest']));
+  });
+});
+
+describe('renderVideoClip', () => {
+  it('loops+trims a bg video to audio length, muxing the narration audio', async () => {
+    const { fn, calls } = fakeSpawn({ code: 0 });
+    await renderVideoClip(
+      { videoPath: '/r2/veo.mp4', audioPath: '/r2/a.wav', outPath: '/r2/clip.mp4', durationMs: 3500 },
+      { spawnFn: fn },
+    );
+    const args = calls[0]!.args;
+    // -stream_loop before the bg video, -t to the audio length, map narration audio (1:a)
+    expect(args).toEqual(expect.arrayContaining(['-stream_loop', '-1', '-i', '/r2/veo.mp4', '-t', '3.500']));
+    expect(args).toEqual(expect.arrayContaining(['-map', '0:v:0', '-map', '1:a:0']));
+    expect(args.join(' ')).toContain('scale=1080:1920');
   });
 });
