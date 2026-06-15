@@ -8,7 +8,20 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`bfaef0e`
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`115ba53`
+（2026-06-15；**#2 ⑦ LLM 意图判官第二层 + 总市值万亿口径 部署 prod**，restart 655，preflight FF-safe，
+无新 migration。BOSS 拍板：⑦ 要稳定出现，不接受 ~78% 降级率(同股不同次不一致)。**双层防御**(regex
+之后加温度0 LLM 判官，只判买卖引导/涨跌预测两红线)：regex PASS→judge 仅明确 block 才否决(补漏网)；
+regex SOFT(predict/tension/semantic)误杀→judge 仅明确 pass 才救回；regex HARD(advice/technical/
+ungrounded)→regex 终判 judge 不介入；judge unclear/失败→回落 regex(PASS 仍出/SOFT 仍降级)，绝不因
+judge 抖动制造新降级。flag `ASHARE_INTENT_JUDGE_ENABLED`=true 已开 Vultr(进程实证)，仅挂全景⑦不动
+轻量③。**复测主因纠偏**：降级主因不是 predict 误杀，而是 ⑤ 用 fmtNum 呈现「18,402.50亿」、⑦ 天然说
+「1.84万亿」→ 闸门裸值比 1.84≠18402 误判 ungrounded(千亿级 mega-cap 必踩，宁德 4/4 降)；`fmtMvYi`
+≥1万亿 统一「X.XX万亿」口径(body+context 同口径，⑦ 照抄即接地)。**真路径复测⑦通过率 78%→94%**
+(迪生力/茅台/宁德 4/4 稳定，治好「迪生力时好时降级」；金钼 6/6 隔离稳定)。**对抗复审**：买卖/预测
+泄漏 **0/12**(判官补抓 regex 漏网 4 例：用…价格在买/会反弹/未来高增长可期/目标看翻倍)，合规误降 **0/5**。
+全量 **2708** 测绿(+判官9+gate subReason+runner 双层7+fmtMvYi+万亿接地)；tasks.ts 仅 +14 行无 churn。
+前态：审查批 `bfaef0e`(restart 652)。）
 （2026-06-15；**#2 全景速览审查批 follow-up + ②资金面铁律 部署 prod**，restart 652，preflight 实读
 live HEAD FF-safe，无新 migration。修：**P0 报告期取错**（`stock_financial_abstract_ths` 旧用
 `df.head(80)` 截断长历史股最新期→驰宏取成「2022中报」与趋势矛盾=信任杀手；改 `_ths_sorted` 按报告期
