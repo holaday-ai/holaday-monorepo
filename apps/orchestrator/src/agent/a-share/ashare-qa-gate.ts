@@ -28,12 +28,33 @@ export const PREDICT_PATTERN =
 
 export type GateReason = 'advice' | 'predict' | 'ungrounded';
 
+/**
+ * 细分原因（Phase2 ⑦ 意图判官分流用）。`reason` 是对外的粗桶（向后兼容，旧对抗测照断言
+ * 'predict'）；`subReason` 把 predict 桶拆细，供第二层 judge 决定能否复核救回：
+ *   - SOFT（predict/tension/semantic）：对**未来方向**的推断，regex 易把过去式/状态描述误杀 → 交 judge 复核。
+ *   - HARD（advice/technical/ungrounded）：显式买卖措辞 / 技术信号黑话(BOSS 红线) / 凭空数字 → regex 终判，judge 不救。
+ */
+export type GateSubReason =
+  | 'advice'
+  | 'predict'
+  | 'tension'
+  | 'semantic'
+  | 'technical'
+  | 'ungrounded';
+
 export interface GateResult {
   passed: boolean;
-  /** 命中的降级原因（首个）。 */
+  /** 命中的降级原因（首个，粗桶，向后兼容）。 */
   reason?: GateReason;
+  /** 细分原因（judge 分流：SOFT 可复核救回 / HARD regex 终判）。 */
+  subReason?: GateSubReason;
   /** 命中的具体片段（脱敏排查用）。 */
   hits: string[];
+}
+
+/** SOFT 原因 = regex 易误杀的「未来方向推断」族，交 LLM judge 复核可救回；HARD 由 regex 终判。 */
+export function isSoftGateReason(sub: GateSubReason | undefined): boolean {
+  return sub === 'predict' || sub === 'tension' || sub === 'semantic';
 }
 
 /**
@@ -117,22 +138,27 @@ const TECHNICAL_SIGNAL_PATTERN =
  */
 export function complianceGate(interpretation: string, factContext: string): GateResult {
   const adviceHit = interpretation.match(ADVICE_PATTERN);
-  if (adviceHit) return { passed: false, reason: 'advice', hits: [adviceHit[0]] };
+  if (adviceHit)
+    return { passed: false, reason: 'advice', subReason: 'advice', hits: [adviceHit[0]] };
 
   const predictHit = interpretation.match(PREDICT_PATTERN);
-  if (predictHit) return { passed: false, reason: 'predict', hits: [predictHit[0]] };
+  if (predictHit)
+    return { passed: false, reason: 'predict', subReason: 'predict', hits: [predictHit[0]] };
 
   // ⑦ 补盲：张力/背离延展成未来修复判断 = 预测（绑定式，不误杀客观"背离"陈述）。
   const tensionHit = interpretation.match(TENSION_PREDICT_PATTERN);
-  if (tensionHit) return { passed: false, reason: 'predict', hits: [tensionHit[0]] };
+  if (tensionHit)
+    return { passed: false, reason: 'predict', subReason: 'tension', hits: [tensionHit[0]] };
 
   // ⑦ 补盲（红队对抗发现）：语义化迂回预测（拐点正在积累/只是时间问题/终将收敛）= 预测。
   const semHit = interpretation.match(SEMANTIC_PREDICT_PATTERN);
-  if (semHit) return { passed: false, reason: 'predict', hits: [semHit[0]] };
+  if (semHit) return { passed: false, reason: 'predict', subReason: 'semantic', hits: [semHit[0]] };
 
   // ⑦ 补盲（BOSS 红线）：技术面信号研判（筹码/控盘/量价/均线 暗示方向）= 投顾越线 → 视作预测降级。
+  // technical 归 HARD（judge 不救）：技术黑话本身违规，judge 若只判"买卖/预测"可能误放。
   const techHit = interpretation.match(TECHNICAL_SIGNAL_PATTERN);
-  if (techHit) return { passed: false, reason: 'predict', hits: [techHit[0]] };
+  if (techHit)
+    return { passed: false, reason: 'predict', subReason: 'technical', hits: [techHit[0]] };
 
   // 接地校验（**数值容差 + 排年份**，容忍 LLM 口语化约数：1981→1981.72、4848→「4800多」、
   // 34→34.47、67.2→67.20）：③/⑦ 的「金额/价格 + 估值数(PE/PB/分位/中位/倍数)」都必须数值接近
@@ -156,7 +182,8 @@ export function complianceGate(interpretation: string, factContext: string): Gat
     const x = Number(s);
     return Number.isFinite(x) && !isGrounded(x);
   });
-  if (ungrounded.length > 0) return { passed: false, reason: 'ungrounded', hits: ungrounded };
+  if (ungrounded.length > 0)
+    return { passed: false, reason: 'ungrounded', subReason: 'ungrounded', hits: ungrounded };
 
   return { passed: true, hits: [] };
 }

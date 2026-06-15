@@ -1277,6 +1277,20 @@ export const tasksRouter = router({
                   const block = resp.content[0];
                   return block && block.type === 'text' ? block.text : '';
                 },
+                // Phase2 ⑦ 意图判官（第二层，flag 控制）：温度0 求确定性（同股同文同判，治"时好时降级"）。
+                judge: appEnv.ASHARE_INTENT_JUDGE_ENABLED
+                  ? async ({ system, user }) => {
+                      const resp = await anthropicClient.messages.create({
+                        model: qaModel,
+                        max_tokens: 160,
+                        temperature: 0,
+                        system,
+                        messages: [{ role: 'user', content: user }],
+                      });
+                      const block = resp.content[0];
+                      return block && block.type === 'text' ? block.text : '';
+                    }
+                  : undefined,
                 logger: ctx.logger,
                 now: new Date(),
                 context: { userId: ctx.userId, taskId },

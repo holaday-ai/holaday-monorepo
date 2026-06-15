@@ -23,7 +23,8 @@ import {
   renderPanoramaBody,
 } from './ashare-fact-card.js';
 import type { BriefingMode } from './ashare-format.js';
-import { type GateReason, complianceGate } from './ashare-qa-gate.js';
+import { judgeIntent } from './ashare-intent-judge.js';
+import { type GateReason, complianceGate, isSoftGateReason } from './ashare-qa-gate.js';
 import type { AshareQaMatch } from './ashare-qa-types.js';
 
 interface QaLogger {
@@ -35,6 +36,11 @@ export interface AshareQaRunnerDeps {
   client: AkshareClient;
   /** 单次 LLM 调用 system+user → text。注入便于 mock。 */
   interpret: (input: { system: string; user: string }) => Promise<string>;
+  /**
+   * Phase2 ⑦ 意图判官（温度0 的单次 LLM 调用，注入即启用第二层；缺省=regex-only 原行为）。
+   * 由 tasks.ts 按 `ASHARE_INTENT_JUDGE_ENABLED` 决定是否注入。仅作用于全景⑦，不动轻量③。
+   */
+  judge?: (input: { system: string; user: string }) => Promise<string>;
   /** 技能 markdown（人设/红线/版式）；空 → 跳过解读，纯事实卡。 */
   skillMarkdown?: string | null;
   logger: QaLogger;
@@ -305,6 +311,106 @@ export async function runAsharePanorama(
   }
 
   const gate = complianceGate(interpretation, context);
+  const stocks = match.stocks.map((s) => s.symbol);
+  const mkPass = (): AshareQaResult => ({
+    answer: assemblePanoramaPassed(body, interpretation),
+    degraded: false,
+    interpreted: true,
+  });
+  const mkDegrade = (reason?: GateReason): AshareQaResult => ({
+    answer: assemblePanoramaDegraded(body),
+    degraded: true,
+    reason,
+    interpreted: false,
+  });
+
+  // ── 第二层：LLM 意图判官（deps.judge 注入即启用，tasks.ts 按 ASHARE_INTENT_JUDGE_ENABLED 控制）──
+  //   regex PASS                          → judge 仅"明确 block"才否决（补 regex 漏网的语义暗示）
+  //   regex SOFT(predict/tension/semantic) → judge 仅"明确 pass"才救回（过去式/状态被误杀）
+  //   regex HARD(advice/technical/ungrounded) → regex 终判，judge 不介入（红线不松动）
+  //   judge unclear/失败                    → 回落 regex（PASS 仍出 / SOFT 仍降级），不制造新降级
+  if (deps.judge) {
+    if (gate.passed) {
+      const j = await judgeIntent(deps.judge, interpretation);
+      if (j.verdict === 'block') {
+        deps.logger.warn(
+          {
+            ...deps.context,
+            event: 'ashare_qa_degrade',
+            reason: 'judge',
+            lane: 'panorama',
+            layer: 'intent-judge',
+            judgeRedline: j.redline,
+            judgeQuote: j.quote,
+            stocks,
+          },
+          'ashare-qa:intent-judge-block（regex 已过，judge 补抓漏网）',
+        );
+        // 红线A(买卖)→advice，否则→predict（仅影响降级 reason 标注）。
+        return mkDegrade(j.redline === 'A' || j.redline === 'both' ? 'advice' : 'predict');
+      }
+      deps.logger.info(
+        {
+          ...deps.context,
+          event: 'ashare_qa_judge',
+          lane: 'panorama',
+          regexPassed: true,
+          judge: j.verdict,
+          stocks,
+        },
+        'ashare-qa:intent-judge-pass',
+      );
+      return mkPass();
+    }
+    if (isSoftGateReason(gate.subReason)) {
+      const j = await judgeIntent(deps.judge, interpretation);
+      if (j.verdict === 'pass') {
+        deps.logger.info(
+          {
+            ...deps.context,
+            event: 'ashare_qa_judge_rescue',
+            lane: 'panorama',
+            regexReason: gate.subReason,
+            regexHits: gate.hits,
+            stocks,
+          },
+          'ashare-qa:intent-judge-rescue（救回 regex 误杀的合规⑦）',
+        );
+        return mkPass();
+      }
+      deps.logger.warn(
+        {
+          ...deps.context,
+          event: 'ashare_qa_degrade',
+          reason: gate.reason,
+          subReason: gate.subReason,
+          hits: gate.hits,
+          lane: 'panorama',
+          judge: j.verdict,
+          stocks,
+        },
+        'ashare-qa:compliance-gate-degradation（SOFT + judge 确认/unclear）',
+      );
+      return mkDegrade(gate.reason);
+    }
+    // HARD：advice/technical/ungrounded —— regex 终判。
+    deps.logger.warn(
+      {
+        ...deps.context,
+        event: 'ashare_qa_degrade',
+        reason: gate.reason,
+        subReason: gate.subReason,
+        hits: gate.hits,
+        lane: 'panorama',
+        judge: 'skipped-hard',
+        stocks,
+      },
+      'ashare-qa:compliance-gate-degradation（HARD 红线，judge 不介入）',
+    );
+    return mkDegrade(gate.reason);
+  }
+
+  // ── judge 未注入：regex-only（原行为，零变化）──
   if (!gate.passed) {
     deps.logger.warn(
       {
@@ -313,20 +419,11 @@ export async function runAsharePanorama(
         reason: gate.reason,
         hits: gate.hits,
         lane: 'panorama',
-        stocks: match.stocks.map((s) => s.symbol),
+        stocks,
       },
       'ashare-qa:compliance-gate-degradation',
     );
-    return {
-      answer: assemblePanoramaDegraded(body),
-      degraded: true,
-      reason: gate.reason,
-      interpreted: false,
-    };
+    return mkDegrade(gate.reason);
   }
-  return {
-    answer: assemblePanoramaPassed(body, interpretation),
-    degraded: false,
-    interpreted: true,
-  };
+  return mkPass();
 }

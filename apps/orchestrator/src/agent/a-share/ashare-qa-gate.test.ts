@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { complianceGate } from './ashare-qa-gate.js';
+import { complianceGate, isSoftGateReason } from './ashare-qa-gate.js';
 
 /** 模拟喂给 LLM 的事实卡上下文（含真实价格/金额，供接地校验）。 */
 const CTX = [
@@ -176,5 +176,26 @@ describe('Phase2 红队对抗：迂回预测/技术信号 backstop（workflow �
         VCTX,
       ).passed,
     ).toBe(true);
+  });
+});
+
+describe('细分原因 subReason + isSoftGateReason（Phase2 ⑦ judge 分流，勿删）', () => {
+  it('HARD = advice/technical/ungrounded；SOFT = predict/tension/semantic', () => {
+    expect(complianceGate('套牢就割肉，或补仓摊薄成本', CTX).subReason).toBe('advice');
+    expect(complianceGate('后市看好', CTX).subReason).toBe('predict');
+    expect(complianceGate('估值站在历史高位，早晚会回落', CTX).subReason).toBe('tension');
+    expect(complianceGate('修复只是时间问题', CTX).subReason).toBe('semantic');
+    expect(complianceGate('MACD 金叉显现', CTX).subReason).toBe('technical');
+    expect(complianceGate('凭空目标位 8888 元', CTX).subReason).toBe('ungrounded');
+  });
+
+  it('isSoftGateReason：SOFT 三族 true，HARD 三族 + undefined false', () => {
+    expect(isSoftGateReason('predict')).toBe(true);
+    expect(isSoftGateReason('tension')).toBe(true);
+    expect(isSoftGateReason('semantic')).toBe(true);
+    expect(isSoftGateReason('advice')).toBe(false);
+    expect(isSoftGateReason('technical')).toBe(false);
+    expect(isSoftGateReason('ungrounded')).toBe(false);
+    expect(isSoftGateReason(undefined)).toBe(false);
   });
 });

@@ -479,6 +479,133 @@ describe('Phase2 全景速览：deep 触发 + ⑦ 分析师视角（勿删）', 
     expect(r.degraded).toBe(true);
     expect(r.reason).toBe('ungrounded');
   });
+
+  // ── Phase2 ⑦ 第二层：LLM 意图判官（regex 之后，BOSS 拍板。双层不削弱+救误杀，勿删）──
+  // 接地、无买卖/技术黑话，但 "跌到" 触发 SOFT(predict) regex → 是 regex 误杀典型，judge 可救回。
+  const SOFT_PREDICT =
+    '股价已从高位跌到近期低点，估值仍处历史高位区间。以上为客观信息聚合，不构成投资建议。';
+  // 接地且过 regex 的合规⑦（沿用上文"合规⑦"用例原文）。
+  const GROUNDED_OK =
+    '迪生力是总市值34.47亿的小盘股，今天盘面活跃；2026Q1营收1.71亿、同比-33.43%，归母还亏1981.72万但亏损收窄；估值偏高，PE-TTM67.2、PB12.21都处历史高位，比行业中位31.63贵。以上为客观信息聚合，未经证实，不构成任何投资建议。';
+
+  it('judge 未注入 → regex-only 原行为：SOFT 命中即降级（零变化）', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      { client: fakeClient(), interpret: async () => SOFT_PREDICT, logger, now: NOW },
+      DEEP_MATCH,
+    );
+    expect(r.degraded).toBe(true); // 无 judge，"跌到"误杀照旧（这正是要救的）
+  });
+
+  it('judge 开 + SOFT 误杀 + judge pass → 救回⑦（不降级，拉高通过率）', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      {
+        client: fakeClient(),
+        interpret: async () => SOFT_PREDICT,
+        judge: async () => '{"verdict":"pass","redline":"none","quote":""}',
+        logger,
+        now: NOW,
+      },
+      DEEP_MATCH,
+    );
+    expect(r.degraded).toBe(false);
+    expect(r.interpreted).toBe(true);
+    expect(r.answer).toContain('## ⑦ 分析师视角');
+  });
+
+  it('judge 开 + SOFT + judge block → 维持降级（judge 同意 regex）', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      {
+        client: fakeClient(),
+        interpret: async () => SOFT_PREDICT,
+        judge: async () => '{"verdict":"block","redline":"B","quote":"跌到"}',
+        logger,
+        now: NOW,
+      },
+      DEEP_MATCH,
+    );
+    expect(r.degraded).toBe(true);
+    expect(r.answer).not.toContain('## ⑦ 分析师视角');
+  });
+
+  it('judge 开 + SOFT + judge 失败(unclear) → 回落 regex（仍降级，不放过误杀）', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      {
+        client: fakeClient(),
+        interpret: async () => SOFT_PREDICT,
+        judge: async () => {
+          throw new Error('judge down');
+        },
+        logger,
+        now: NOW,
+      },
+      DEEP_MATCH,
+    );
+    expect(r.degraded).toBe(true); // SOFT 通道 fail-closed
+  });
+
+  it('judge 开 + regex PASS + judge block → 补抓 regex 漏网，降级 reason=judge', async () => {
+    const { logger, warns } = fakeLogger();
+    const r = await runAsharePanorama(
+      {
+        client: fakeClient(),
+        interpret: async () => GROUNDED_OK,
+        judge: async () => '{"verdict":"block","redline":"B","quote":"暗示后市"}',
+        logger,
+        now: NOW,
+        context: { userId: 'u', taskId: 't' },
+      },
+      DEEP_MATCH,
+    );
+    expect(r.degraded).toBe(true);
+    expect(r.answer).not.toContain('## ⑦ 分析师视角');
+    expect(r.answer).toContain('**④ 基本面**'); // ①-⑤ 安全网仍在
+    expect(warns.some((w) => w.obj?.reason === 'judge' && w.obj?.layer === 'intent-judge')).toBe(
+      true,
+    );
+  });
+
+  it('judge 开 + regex PASS + judge 失败(unclear) → 仍出⑦（稳定优先，不制造新降级）', async () => {
+    const { logger } = fakeLogger();
+    const r = await runAsharePanorama(
+      {
+        client: fakeClient(),
+        interpret: async () => GROUNDED_OK,
+        judge: async () => {
+          throw new Error('judge down');
+        },
+        logger,
+        now: NOW,
+      },
+      DEEP_MATCH,
+    );
+    expect(r.degraded).toBe(false); // PASS 通道 fail-open：regex 已背书，judge 抖动不拉下马
+    expect(r.interpreted).toBe(true);
+    expect(r.answer).toContain('## ⑦ 分析师视角');
+  });
+
+  it('judge 开 + HARD(advice) → regex 终判降级，judge 根本不被调用', async () => {
+    const { logger } = fakeLogger();
+    let judgeCalls = 0;
+    const r = await runAsharePanorama(
+      {
+        client: fakeClient(),
+        interpret: async () => '估值偏高，建议逢低买入，目标价翻倍',
+        judge: async () => {
+          judgeCalls += 1;
+          return '{"verdict":"pass","redline":"none","quote":""}'; // 即便 judge 想放行
+        },
+        logger,
+        now: NOW,
+      },
+      DEEP_MATCH,
+    );
+    expect(r.degraded).toBe(true); // HARD 红线不可救
+    expect(judgeCalls).toBe(0); // judge 不介入 HARD，红线 regex 终判
+  });
 });
 
 describe('ASHARE_QA_GUIDANCE（P0 兜底引导话术）', () => {
