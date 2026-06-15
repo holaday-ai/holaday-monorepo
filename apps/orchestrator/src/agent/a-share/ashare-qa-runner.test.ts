@@ -51,11 +51,17 @@ function fakeClient(): AkshareClient {
             report_period: '2026-03-31',
             revenue: 1.71e8,
             revenue_yoy: -33.43,
+            revenue_qoq: -12.5,
             net_profit: -1.98172e7,
             net_profit_yoy: 12.4,
+            net_profit_qoq: -122.75,
+            deduct_net_profit: -1.98452e7,
+            deduct_net_profit_yoy: 12.17,
             gross_margin: 18.48,
+            net_margin: -14.31,
             roe: -6.76,
             debt_ratio: 64.65,
+            ocf_per_share: 0.03,
             trend3y: [
               { report_period: '2023-12-31', net_profit: -1.49e8 },
               { report_period: '2024-12-31', net_profit: -1.45e8 },
@@ -436,8 +442,12 @@ describe('Phase2 全景速览：deep 触发 + ⑦ 分析师视角（勿删）', 
     );
     expect(r.answer).toContain('基于 2026Q1财报，会计准则 CAS');
     expect(r.answer).toContain('估值截至 06-14');
-    expect(r.answer).toContain('营业总收入 1.71亿元（同比 -33.43%）');
-    expect(r.answer).toContain('行业静态PE中位 31.63');
+    expect(r.answer).toContain('营业总收入 1.71亿元（同比 -33.43%，环比 -12.50%）'); // P1 季度环比
+    expect(r.answer).toContain('归母净利润 -1981.72万元（同比 +12.40%，环比 -122.75%）');
+    expect(r.answer).toContain('扣非净利润 -1984.52万元'); // P1 扣非
+    expect(r.answer).toContain('净利率 -14.31%');
+    expect(r.answer).toContain('每股经营现金流 0.03 元'); // P1 现金流
+    expect(r.answer).toContain('行业静态PE中位 31.63（本股 PE-TTM 高于行业中位）'); // P1 行业对比落地
   });
 
   it('⑦ 含买卖词 → 降级，丢⑦留①-⑤数据', async () => {

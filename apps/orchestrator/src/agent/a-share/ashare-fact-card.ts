@@ -304,11 +304,23 @@ function contextBlock(p: PerStock, dt: AkEnvelope<DragonTigerRow>, annCap: numbe
       );
   }
   if (!p.unlock.error && p.unlock.data.length > 0) {
-    const u = p.unlock.data
-      .slice(0, 2)
-      .map((r) => `${pick(r, ['解禁时间']) ? shortDate(String(pick(r, ['解禁时间']))) : ''}解禁`)
+    // P2：把解禁**股数 + 合计**喂给 ⑦，使其能点出"大额解禁=潜在抛压"，不止罗列。
+    const fmtSh = (n: number) =>
+      n >= 1e8
+        ? `${(n / 1e8).toFixed(2)}亿股`
+        : n >= 1e4
+          ? `${(n / 1e4).toFixed(0)}万股`
+          : `${Math.round(n)}股`;
+    const rows = p.unlock.data.slice(0, 5);
+    const total = rows.reduce((s, r) => s + (toNum(pick(r, ['解禁数量'])) ?? 0), 0);
+    const items = rows
+      .map((r) => {
+        const when = pick(r, ['解禁时间']) ? shortDate(String(pick(r, ['解禁时间']))) : '';
+        const qty = toNum(pick(r, ['解禁数量']));
+        return `${when}解禁${qty != null ? fmtSh(qty) : ''}`;
+      })
       .join('；');
-    b.push(`- 解禁：${u}`);
+    b.push(`- 解禁：${items}${total > 0 ? `（合计约${fmtSh(total)}）` : ''}`);
   }
   return b.join('\n');
 }
@@ -382,11 +394,22 @@ export function fundamentalsLines(
     return ['**④ 基本面**', unavailableLine('基本面', env ?? ({ error: '' } as AkEnvelope), mode)];
   }
   const out: string[] = [`**④ 基本面**（基于 ${reportLabel(f.report_period)}，会计准则 CAS）`];
-  out.push(`- 营业总收入 ${fmtMoneyAuto(f.revenue)}（同比 ${fmtPct(f.revenue_yoy)}）`);
-  out.push(`- 归母净利润 ${fmtMoneyAuto(f.net_profit)}（同比 ${fmtPct(f.net_profit_yoy)}）`);
+  const qoq = (v: number | null | undefined) => (v != null ? `，环比 ${fmtPct(v)}` : '');
   out.push(
-    `- 销售毛利率 ${fmtPctPlain(f.gross_margin)} ｜ ROE ${fmtPctPlain(f.roe)} ｜ 资产负债率 ${fmtPctPlain(f.debt_ratio)}`,
+    `- 营业总收入 ${fmtMoneyAuto(f.revenue)}（同比 ${fmtPct(f.revenue_yoy)}${qoq(f.revenue_qoq)}）`,
   );
+  out.push(
+    `- 归母净利润 ${fmtMoneyAuto(f.net_profit)}（同比 ${fmtPct(f.net_profit_yoy)}${qoq(f.net_profit_qoq)}）`,
+  );
+  if (f.deduct_net_profit != null) {
+    out.push(
+      `- 扣非净利润 ${fmtMoneyAuto(f.deduct_net_profit)}（同比 ${fmtPct(f.deduct_net_profit_yoy)}）`,
+    );
+  }
+  out.push(
+    `- 销售毛利率 ${fmtPctPlain(f.gross_margin)} ｜ 净利率 ${fmtPctPlain(f.net_margin)} ｜ ROE ${fmtPctPlain(f.roe)} ｜ 资产负债率 ${fmtPctPlain(f.debt_ratio)}`,
+  );
+  if (f.ocf_per_share != null) out.push(`- 每股经营现金流 ${fmtNum(f.ocf_per_share)} 元`);
   const t = (f.trend3y ?? []).filter((x) => x.report_period);
   if (t.length) {
     const parts = t.map((x) => {
@@ -416,7 +439,18 @@ export function valuationLines(
   if (v.pb_pctile_5y != null) pct.push(`PB 近5年分位 ${fmtPctile(v.pb_pctile_5y)}`);
   if (pct.length) out.push(`- ${pct.join(' ｜ ')}`);
   if (v.industry && v.industry_pe_median != null) {
-    out.push(`- 所属${v.industry}，行业静态PE中位 ${fmtNum(v.industry_pe_median)}`);
+    // 相对行业落地：本股 PE-TTM vs 行业静态PE中位（客观高于/低于，"贵/便宜"判断留 ⑦）。
+    const cmp =
+      v.pe_ttm != null && v.industry_pe_median
+        ? v.pe_ttm > v.industry_pe_median
+          ? '高于'
+          : v.pe_ttm < v.industry_pe_median
+            ? '低于'
+            : '接近'
+        : '';
+    out.push(
+      `- 所属${v.industry}，行业静态PE中位 ${fmtNum(v.industry_pe_median)}${cmp ? `（本股 PE-TTM ${cmp}行业中位）` : ''}`,
+    );
   }
   if (v.total_mv_yi != null) out.push(`- 总市值 ${fmtNum(v.total_mv_yi)}亿元`);
   out.push(`  （${sourceTag(env)}）`);
@@ -431,11 +465,14 @@ function fundamentalsContext(env: AkEnvelope<FundamentalsRow> | undefined): stri
     .filter((x) => x.report_period)
     .map((x) => `${String(x.report_period).slice(0, 4)} ${fmtMoneyAuto(x.net_profit)}`)
     .join('→');
+  const qoq = (v: number | null | undefined) => (v != null ? `,环比${fmtPct(v)}` : '');
   return [
     `④基本面(基于${reportLabel(f.report_period)},CAS)：`,
-    `营收 ${fmtMoneyAuto(f.revenue)}(同比${fmtPct(f.revenue_yoy)})；`,
-    `归母净利 ${fmtMoneyAuto(f.net_profit)}(同比${fmtPct(f.net_profit_yoy)})；`,
-    `毛利率${fmtPctPlain(f.gross_margin)}；ROE${fmtPctPlain(f.roe)}；资产负债率${fmtPctPlain(f.debt_ratio)}`,
+    `营收 ${fmtMoneyAuto(f.revenue)}(同比${fmtPct(f.revenue_yoy)}${qoq(f.revenue_qoq)})；`,
+    `归母净利 ${fmtMoneyAuto(f.net_profit)}(同比${fmtPct(f.net_profit_yoy)}${qoq(f.net_profit_qoq)})；`,
+    f.deduct_net_profit != null ? `扣非净利 ${fmtMoneyAuto(f.deduct_net_profit)}；` : '',
+    `毛利率${fmtPctPlain(f.gross_margin)}；净利率${fmtPctPlain(f.net_margin)}；ROE${fmtPctPlain(f.roe)}；资产负债率${fmtPctPlain(f.debt_ratio)}`,
+    f.ocf_per_share != null ? `；每股经营现金流${fmtNum(f.ocf_per_share)}元` : '',
     t ? `；近年净利 ${t}` : '',
   ].join('');
 }
@@ -450,7 +487,13 @@ function valuationContext(env: AkEnvelope<ValuationRow> | undefined): string {
   if (v.pe_pctile_5y != null) parts.push(`；PE近5年分位${fmtPctile(v.pe_pctile_5y)}`);
   if (v.pb_pctile_5y != null) parts.push(`；PB近5年分位${fmtPctile(v.pb_pctile_5y)}`);
   if (v.industry && v.industry_pe_median != null) {
-    parts.push(`；所属${v.industry} 行业静态PE中位${fmtNum(v.industry_pe_median)}`);
+    const cmp =
+      v.pe_ttm != null && v.industry_pe_median
+        ? v.pe_ttm > v.industry_pe_median
+          ? '高于行业中位'
+          : '低于行业中位'
+        : '';
+    parts.push(`；所属${v.industry} 行业静态PE中位${fmtNum(v.industry_pe_median)}(本股${cmp})`);
   }
   if (v.total_mv_yi != null) parts.push(`；总市值${fmtNum(v.total_mv_yi)}亿`);
   return parts.join('');

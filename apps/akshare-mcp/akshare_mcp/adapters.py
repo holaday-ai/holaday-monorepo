@@ -490,28 +490,69 @@ def _fundamentals_row(r: dict[str, Any]) -> dict[str, Any]:
         "revenue_yoy": _parse_ths_num(r.get("营业总收入同比增长率")),
         "net_profit": _parse_ths_num(r.get("净利润")),
         "net_profit_yoy": _parse_ths_num(r.get("净利润同比增长率")),
+        # P1：扣非净利润（判断利润是否靠非经常性损益）。
+        "deduct_net_profit": _parse_ths_num(r.get("扣非净利润")),
+        "deduct_net_profit_yoy": _parse_ths_num(r.get("扣非净利润同比增长率")),
         "gross_margin": _parse_ths_num(r.get("销售毛利率")),
+        "net_margin": _parse_ths_num(r.get("销售净利率")),
         "roe": _parse_ths_num(r.get("净资产收益率")),
         "debt_ratio": _parse_ths_num(r.get("资产负债率")),
+        # P1：每股经营现金流（判断利润含金量）。
+        "ocf_per_share": _parse_ths_num(r.get("每股经营现金流")),
     }
 
 
+def _ths_sorted(df: Any) -> Any:
+    """同花顺财报 df 按「报告期」升序排序（防不同股票排列不定 / head 截断取错期）。返回 None / df。"""
+    if df is None or len(df) == 0:
+        return None
+    d = df.copy()
+    d["_rk"] = d["报告期"].astype(str)
+    return d.sort_values("_rk")
+
+
 def get_fundamentals(symbol: str) -> tuple[list[dict[str, Any]], str]:
-    """④ 基本面：最新报告期 + 近 3 年趋势（同花顺，CAS 口径）。symbol 形如 '603335'。"""
+    """④ 基本面：**真正最新一期**（按报告期排序取 max，非 head 截断）+ 季度环比 + 近 3 年趋势。
+
+    ⚠️ P0 修：原 `_records(head 80)` 对长上市史个股（如驰宏 600497 共 95 期）会截断掉最新几期、
+    取成 2022 中报。改为按报告期日期排序取真正最新一期，头部时效标与趋势年份口径才一致。
+    """
     a = _require_ak()
     try:
-        rep = _records(a.stock_financial_abstract_ths(symbol=symbol, indicator="按报告期"), limit=80)
+        rep = _ths_sorted(a.stock_financial_abstract_ths(symbol=symbol, indicator="按报告期"))
     except Exception:  # noqa: BLE001
-        rep = []
+        rep = None
     try:
-        ann = _records(a.stock_financial_abstract_ths(symbol=symbol, indicator="按年度"), limit=80)
+        ann = _ths_sorted(a.stock_financial_abstract_ths(symbol=symbol, indicator="按年度"))
     except Exception:  # noqa: BLE001
-        ann = []
-    if not rep and not ann:
+        ann = None
+    src = rep if rep is not None else ann
+    if src is None:
         return [], "akshare:stock_financial_abstract_ths(无数据)"
-    latest = _fundamentals_row(rep[-1]) if rep else _fundamentals_row(ann[-1])
-    trend3y = [_fundamentals_row(r) for r in ann[-3:]]  # 近 3 年（年度，老→新）
-    return [{**latest, "trend3y": trend3y}], "akshare:stock_financial_abstract_ths(report+annual)"
+    latest = _fundamentals_row(src.iloc[-1].to_dict())
+    # P1 季度环比（按单季度，最新单季 vs 上一单季；看加速/减速）。
+    try:
+        sq = _ths_sorted(a.stock_financial_abstract_ths(symbol=symbol, indicator="按单季度"))
+        if sq is not None and len(sq) >= 2:
+            cur, prev = sq.iloc[-1].to_dict(), sq.iloc[-2].to_dict()
+            np_c, np_p = _parse_ths_num(cur.get("净利润")), _parse_ths_num(prev.get("净利润"))
+            rv_c, rv_p = _parse_ths_num(cur.get("营业总收入")), _parse_ths_num(prev.get("营业总收入"))
+            latest["net_profit_qoq"] = (
+                round((np_c - np_p) / abs(np_p) * 100, 2)
+                if (np_c is not None and np_p not in (None, 0))
+                else None
+            )
+            latest["revenue_qoq"] = (
+                round((rv_c - rv_p) / abs(rv_p) * 100, 2)
+                if (rv_c is not None and rv_p not in (None, 0))
+                else None
+            )
+    except Exception:  # noqa: BLE001
+        pass
+    trend3y = (
+        [_fundamentals_row(r) for r in ann.tail(3).to_dict("records")] if ann is not None else []
+    )
+    return [{**latest, "trend3y": trend3y}], "akshare:stock_financial_abstract_ths(report+annual+quarter)"
 
 
 def _pctile(series: list[float | None], cur: float | None) -> float | None:

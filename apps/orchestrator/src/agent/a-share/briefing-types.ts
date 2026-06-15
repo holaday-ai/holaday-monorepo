@@ -162,10 +162,19 @@ export interface FundamentalsRow {
   /** 归母净利润（元）/ 同比增速（%）。 */
   net_profit?: number | null;
   net_profit_yoy?: number | null;
-  /** 销售毛利率 / 净资产收益率(ROE) / 资产负债率（均 %）。 */
+  /** 扣非净利润（元）/ 同比（%）——判断利润是否靠非经常性损益。 */
+  deduct_net_profit?: number | null;
+  deduct_net_profit_yoy?: number | null;
+  /** 净利润 / 营收 季度环比（%，按单季度，看加速/减速）。 */
+  net_profit_qoq?: number | null;
+  revenue_qoq?: number | null;
+  /** 销售毛利率 / 销售净利率 / 净资产收益率(ROE) / 资产负债率（均 %）。 */
   gross_margin?: number | null;
+  net_margin?: number | null;
   roe?: number | null;
   debt_ratio?: number | null;
+  /** 每股经营现金流（元）——判断利润含金量。 */
+  ocf_per_share?: number | null;
   /** 近3年趋势（年度，老→新），每条同上字段子集。 */
   trend3y?: Array<{
     report_period?: string | null;
