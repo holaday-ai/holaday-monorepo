@@ -39,6 +39,36 @@ describe('buildComposeCommand', () => {
     expect(graph).toContain('subtitles=/r2/subs.srt');
   });
 
+  it('uses the styled ASS filter when assPath given (preferred over srt)', () => {
+    const graph = fc(
+      buildComposeCommand({
+        segmentClipPaths: CLIPS,
+        outputPath: OUT,
+        assPath: '/r2/subs.ass',
+        srtPath: '/r2/subs.srt',
+      }).args,
+    );
+    expect(graph).toContain('ass=/r2/subs.ass'); // ASS preferred
+    expect(graph).not.toContain('subtitles=/r2/subs.srt');
+  });
+
+  it('default watermark is English-only (no CJK boxes, P0-2)', () => {
+    const graph = fc(buildComposeCommand({ segmentClipPaths: CLIPS, outputPath: OUT }).args);
+    expect(graph).toContain('HOLA DAY · AI');
+    expect(graph).not.toContain('合成');
+  });
+
+  it('passes a watermark fontfile to drawtext when provided', () => {
+    const graph = fc(
+      buildComposeCommand({
+        segmentClipPaths: CLIPS,
+        outputPath: OUT,
+        watermark: { fontFile: '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc' },
+      }).args,
+    );
+    expect(graph).toContain("fontfile='/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc'");
+  });
+
   it('uses an explicit text watermark', () => {
     const graph = fc(
       buildComposeCommand({

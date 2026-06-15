@@ -28,11 +28,17 @@ import {
 } from './ffmpeg-exec.js';
 import { synthesizeSpeech } from './qwen-voice-clone-client.js';
 import { generateVeoVideo } from './veo-client.js';
+import { buildAss } from './timeline.js';
 import { buildComposeCommand } from './video-compose.js';
 import { downloadToBuffer } from './video-http.js';
 import { runVideoPipeline, type PipelineLogger, type VideoPipelineDeps } from './video-pipeline.js';
 import { optimizeUserScript, type LlmComplete } from './video-script.js';
 import { generateBrollImage, generateBrollVideo } from './wanxiang-client.js';
+
+// 画面整洁约束 (P1-2): AI 文生图/视频常生成乱码招牌文字 → 提示+负向尽力压低概率。
+const CLEAN_SCENE_SUFFIX = '，画面整洁，不出现任何文字、招牌文字、字幕或水印';
+const NO_TEXT_NEGATIVE =
+  '文字, 文本, 字幕, 标题, 招牌文字, 水印, 错乱的字, 乱码, text, words, letters, captions, signage, watermark, gibberish';
 
 export type VisualMode = 'image' | 'video';
 export type VideoSource = 'wanxiang' | 'veo';
@@ -60,6 +66,10 @@ export interface SimpleVideoConfig {
   readonly wanxiangT2iModel: string; // wan2.2-t2i-flash
   readonly wanxiangT2vModel: string; // wan2.1-t2v-turbo
   readonly veoModel: string; // veo-3.0-fast-generate-001
+  /** Subtitle font family (fontconfig). Default in buildAss ('WenQuanYi Zen Hei', on Vultr). */
+  readonly subtitleFontName?: string;
+  /** Watermark drawtext fontfile (CJK-capable) for safe glyph rendering. */
+  readonly watermarkFontFile?: string;
   readonly ffmpegBin?: string;
   readonly ffprobeBin?: string;
 }
@@ -158,7 +168,8 @@ export function createSimplePipelineDeps(
           baseUrl: cfg.dashscopeBaseUrl,
           ...ws,
           model: cfg.wanxiangT2iModel,
-          prompt: visual,
+          prompt: visual + CLEAN_SCENE_SUFFIX,
+          negativePrompt: NO_TEXT_NEGATIVE,
           n: 1,
         });
         const url = r.imageUrls[0];
@@ -177,7 +188,7 @@ export function createSimplePipelineDeps(
           apiKey: cfg.geminiApiKey ?? '',
           ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
           model: cfg.veoModel,
-          prompt: visual,
+          prompt: visual + CLEAN_SCENE_SUFFIX,
           aspectRatio: '9:16',
           durationSeconds: opts.veoDurationSeconds ?? 4,
         });
@@ -189,7 +200,7 @@ export function createSimplePipelineDeps(
           baseUrl: cfg.dashscopeBaseUrl,
           ...ws,
           model: cfg.wanxiangT2vModel,
-          prompt: visual,
+          prompt: visual + CLEAN_SCENE_SUFFIX,
         });
         if (!v.videoUrl) throw new SimpleVideoError(`broll video seg ${index} produced no url`, 'compose');
         url = v.videoUrl;
@@ -262,13 +273,21 @@ export async function runSimpleVideoCreation(
     { script, ...(input.retries !== undefined ? { retries: input.retries } : {}) },
     deps,
   );
-  // ⑤ subtitle file
-  const srtPath = path.join(svc.workdir, 'subtitles.srt');
-  await fns.writeFile(srtPath, Buffer.from(result.srt, 'utf-8'));
-  // ⑥ compose (watermark always applied by buildComposeCommand)
+  // ⑤ subtitle file — styled ASS (CJK font + safe margins + auto-wrap, fixes overflow P0-1)
+  const assPath = path.join(svc.workdir, 'subtitles.ass');
+  await fns.writeFile(
+    assPath,
+    Buffer.from(buildAss(result.timeline, cfg.subtitleFontName ? { fontName: cfg.subtitleFontName } : {}), 'utf-8'),
+  );
+  // ⑥ compose — ASS subtitles + English watermark (+ optional CJK fontfile), 1080×1920
   const outPath = path.join(svc.workdir, 'final.mp4');
   const cmd = buildComposeCommand(
-    { segmentClipPaths: result.segments.map((s) => s.clipRef), outputPath: outPath, srtPath },
+    {
+      segmentClipPaths: result.segments.map((s) => s.clipRef),
+      outputPath: outPath,
+      assPath,
+      ...(cfg.watermarkFontFile ? { watermark: { fontFile: cfg.watermarkFontFile } } : {}),
+    },
     ffOpts,
   );
   await fns.runFfmpeg(cmd, ffOpts);

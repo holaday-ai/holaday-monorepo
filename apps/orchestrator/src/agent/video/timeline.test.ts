@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { buildSrt, buildTimeline, formatSrtTime } from './timeline.js';
+import {
+  buildAss,
+  buildSrt,
+  buildTimeline,
+  formatAssTime,
+  formatSrtTime,
+  wrapCjk,
+} from './timeline.js';
 import type { VideoSegment } from './types.js';
 
 const SEGS: VideoSegment[] = [
@@ -53,5 +60,36 @@ describe('buildSrt', () => {
     expect(srt).toContain('3\n00:00:06,500 --> 00:00:09,700\n记得每两小时补涂一次哦');
     // SRT timecodes must match the timeline exactly (audio→subtitle sync).
     expect(srt).toContain(`--> ${formatSrtTime(tl.totalDurationMs)}`);
+  });
+});
+
+describe('wrapCjk', () => {
+  it('wraps long lines at maxPerLine with the ASS hard break', () => {
+    expect(wrapCjk('短句')).toBe('短句');
+    expect(wrapCjk('一二三四五六七八九十一二三四五六', 8)).toBe('一二三四五六七八\\N九十一二三四五六');
+  });
+});
+
+describe('formatAssTime', () => {
+  it('formats H:MM:SS.cc (centiseconds)', () => {
+    expect(formatAssTime(0)).toBe('0:00:00.00');
+    expect(formatAssTime(4250)).toBe('0:00:04.25');
+    expect(formatAssTime(3_661_500)).toBe('1:01:01.50');
+  });
+});
+
+describe('buildAss — styled, fixes subtitle overflow (P0-1)', () => {
+  it('sets PlayRes to the video, a CJK font, safe margins, wrapped cues', () => {
+    const tl = buildTimeline(SEGS, [4000, 2500, 3200]);
+    const ass = buildAss(tl, { maxCharsPerLine: 8 });
+    expect(ass).toContain('PlayResX: 1080');
+    expect(ass).toContain('PlayResY: 1920');
+    // CJK font + bottom-center alignment (2) + L/R safe margins (80) present in the Style.
+    expect(ass).toMatch(/Style: Default,WenQuanYi Zen Hei,54,.*,1,3,1,2,80,80,140,1/);
+    // a long cue (18 chars) is wrapped at 8 chars/line with the ASS hard break \N
+    expect(ass).toContain('姐妹们夏天到了千\\N');
+    expect(ass).toContain('姐妹们'); // text preserved
+    // cue timecodes in ASS format
+    expect(ass).toContain('Dialogue: 0,0:00:00.00,0:00:04.00,Default');
   });
 });

@@ -25,7 +25,9 @@ const DEFAULT_WIDTH = 1080;
 const DEFAULT_HEIGHT = 1920;
 const DEFAULT_FPS = 30;
 const DEFAULT_BGM_VOLUME = 0.4;
-const DEFAULT_WATERMARK_TEXT = 'HOLA DAY · AI 合成';
+// English-only by default — avoids missing-CJK-glyph boxes in the watermark
+// (P0-2); a CJK font for the watermark can still be passed via watermark.fontFile.
+const DEFAULT_WATERMARK_TEXT = 'HOLA DAY · AI';
 
 export type WatermarkPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 
@@ -38,13 +40,20 @@ export interface ComposeWatermark {
   readonly position?: WatermarkPosition;
   /** 0..1. Default 0.6. */
   readonly opacity?: number;
+  /** drawtext fontfile path — pass a CJK-capable font to render any glyph safely. */
+  readonly fontFile?: string;
 }
 
 export interface ComposeInput {
   /** Per-segment clip paths, in play order. Each has video + narration audio. */
   readonly segmentClipPaths: readonly string[];
   readonly outputPath: string;
-  /** SRT subtitle file to burn in. Omit to skip subtitles. */
+  /**
+   * Styled ASS subtitle file to burn in (PREFERRED — margins/CJK font/wrap,
+   * fixes overflow). Takes precedence over srtPath.
+   */
+  readonly assPath?: string;
+  /** SRT subtitle file to burn in (fallback styling). Omit to skip subtitles. */
   readonly srtPath?: string;
   /** Watermark. Omit → a default text watermark is applied (compliance). */
   readonly watermark?: ComposeWatermark;
@@ -145,8 +154,11 @@ export function buildComposeCommand(
   let vcur = 'cv';
   let acur = 'ca';
 
-  // 3. subtitles burn-in.
-  if (input.srtPath) {
+  // 3. subtitles burn-in — ASS preferred (styled: margins/CJK font/wrap), SRT fallback.
+  if (input.assPath) {
+    fc.push(`[${vcur}]ass=${escapeFilterValue(input.assPath)}[sv]`);
+    vcur = 'sv';
+  } else if (input.srtPath) {
     fc.push(`[${vcur}]subtitles=${escapeFilterValue(input.srtPath)}[sv]`);
     vcur = 'sv';
   }
@@ -161,8 +173,11 @@ export function buildComposeCommand(
     vcur = 'wv';
   } else {
     const text = input.watermark?.text ?? DEFAULT_WATERMARK_TEXT;
+    const fontFilePart = input.watermark?.fontFile
+      ? `fontfile='${escapeFilterValue(input.watermark.fontFile)}':`
+      : '';
     fc.push(
-      `[${vcur}]drawtext=text='${escapeFilterValue(text)}':fontcolor=white@${opacity}:` +
+      `[${vcur}]drawtext=${fontFilePart}text='${escapeFilterValue(text)}':fontcolor=white@${opacity}:` +
         `fontsize=36:box=1:boxcolor=black@0.35:boxborderw=10:${drawtextPosition(position)}[wv]`,
     );
     vcur = 'wv';

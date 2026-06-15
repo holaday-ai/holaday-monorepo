@@ -104,7 +104,8 @@ describe('renderImageKenBurns', () => {
     const args = calls[0]!.args;
     expect(args).toEqual(expect.arrayContaining(['-loop', '1', '-i', '/r2/img.png', '-i', '/r2/a.wav', '-t', '4.000']));
     expect(args.join(' ')).toContain('zoompan=');
-    expect(args.join(' ')).toContain('scale=1080:1920');
+    expect(args.join(' ')).toContain('scale=2160:3840'); // 2x upscale for smoothness
+    expect(args.join(' ')).toContain(':s=1080x1920'); // zoompan downscales to target
     expect(args).toEqual(expect.arrayContaining(['-c:v', 'libx264', '-shortest']));
   });
 });

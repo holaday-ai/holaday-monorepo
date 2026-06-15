@@ -74,3 +74,82 @@ export function buildSrt(timeline: Timeline): string {
     })
     .join('\n');
 }
+
+/** Format milliseconds → ASS timecode `H:MM:SS.cc` (centiseconds). */
+export function formatAssTime(ms: number): string {
+  const total = Math.max(0, Math.round(ms));
+  const h = Math.floor(total / 3_600_000);
+  const m = Math.floor((total % 3_600_000) / 60_000);
+  const s = Math.floor((total % 60_000) / 1_000);
+  const cs = Math.floor((total % 1_000) / 10);
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  return `${h}:${p2(m)}:${p2(s)}.${p2(cs)}`;
+}
+
+/**
+ * Wrap a (CJK-heavy) line to at most `maxPerLine` characters per visual line,
+ * joining with the ASS hard line-break `\N`. Char-count ≈ visual width for
+ * CJK, which is what we care about for staying inside the safe margins.
+ */
+export function wrapCjk(text: string, maxPerLine = 14): string {
+  const t = text.trim().replace(/\s+/g, ' ');
+  if (t.length <= maxPerLine) return t;
+  const lines: string[] = [];
+  for (let i = 0; i < t.length; i += maxPerLine) lines.push(t.slice(i, i + maxPerLine));
+  return lines.join('\\N');
+}
+
+export interface AssStyleOptions {
+  /** Subtitle font family (fontconfig). Default 'WenQuanYi Zen Hei' (present on Vultr). */
+  fontName?: string;
+  /** Font size in PlayRes px (PlayRes matches the video, so this is real px). Default 54. */
+  fontSize?: number;
+  width?: number; // PlayResX, default 1080
+  height?: number; // PlayResY, default 1920
+  /** Left/right safe margin px. Default 80 (BOSS asked ≥60). */
+  marginH?: number;
+  /** Bottom margin px. Default 140. */
+  marginV?: number;
+  /** Auto-wrap threshold (chars/line). Default 14 (CJK). */
+  maxCharsPerLine?: number;
+}
+
+/**
+ * Render the timeline to a STYLED ASS subtitle string for FFmpeg's `ass`
+ * filter. Fixes the SRT-default overflow (P0-1): PlayRes matches the video so
+ * sizes/margins are real px; bottom-center alignment with L/R safe margins;
+ * a CJK font; and each cue's text is auto-wrapped to maxCharsPerLine. Outline
+ * for legibility over any background.
+ */
+export function buildAss(timeline: Timeline, opts: AssStyleOptions = {}): string {
+  const W = opts.width ?? 1080;
+  const H = opts.height ?? 1920;
+  const font = opts.fontName ?? 'WenQuanYi Zen Hei';
+  const size = opts.fontSize ?? 54;
+  const mH = opts.marginH ?? 80;
+  const mV = opts.marginV ?? 140;
+  const maxChars = opts.maxCharsPerLine ?? 14;
+  const header = [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    `PlayResX: ${W}`,
+    `PlayResY: ${H}`,
+    'WrapStyle: 2',
+    'ScaledBorderAndShadow: yes',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    // white text, black outline, semi-transparent shadow; Alignment 2 = bottom-center.
+    `Style: Default,${font},${size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,3,1,2,${mH},${mH},${mV},1`,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+  ].join('\n');
+  const events = timeline.segments
+    .map(
+      (seg) =>
+        `Dialogue: 0,${formatAssTime(seg.startMs)},${formatAssTime(seg.endMs)},Default,,0,0,0,,${wrapCjk(seg.text, maxChars)}`,
+    )
+    .join('\n');
+  return `${header}\n${events}\n`;
+}
