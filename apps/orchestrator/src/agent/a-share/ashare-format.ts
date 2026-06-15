@@ -96,6 +96,18 @@ export function fmtYiUnit(v: unknown, signed = false): string {
   return `${sign}${n.toFixed(2)}亿元`;
 }
 
+/**
+ * 总市值（已是「亿元」单位）→ ≥1万亿 用「X.XX万亿」，否则沿用 fmtNum 的「亿」格式（不带元，调用侧补）。
+ * 人话化 + **与 ⑦ LLM 口径一致**：大盘股 ⑦ 天然说「1.84万亿」，若上下文呈现「18,402.50亿」则
+ * 合规闸门按单位裸值比对 1.84≠18402 → 误判 ungrounded（mega-cap 必踩、整段降级）。统一呈现即解。
+ */
+export function fmtMvYi(yi: unknown): string {
+  const n = toNum(yi);
+  if (n === null) return '—';
+  if (Math.abs(n) >= 1e4) return `${(n / 1e4).toFixed(2)}万亿`;
+  return `${fmtNum(n)}亿`;
+}
+
 /** 已是「亿元」单位的值 → 紧凑「±N亿」（0 位，速读行用）。空值→「—」。 */
 export function fmtYiCompact(v: unknown): string {
   const n = toNum(v);

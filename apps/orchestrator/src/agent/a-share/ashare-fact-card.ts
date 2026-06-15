@@ -18,6 +18,7 @@ import {
   dateHeader,
   fmtClock,
   fmtMoneyAuto,
+  fmtMvYi,
   fmtNum,
   fmtPct,
   fmtPctPlain,
@@ -460,7 +461,7 @@ export function valuationLines(
       `- 所属${v.industry}，行业静态PE中位 ${fmtNum(v.industry_pe_median)}${cmp ? `（本股 PE-TTM ${cmp}行业中位）` : ''}`,
     );
   }
-  if (v.total_mv_yi != null) out.push(`- 总市值 ${fmtNum(v.total_mv_yi)}亿元`);
+  if (v.total_mv_yi != null) out.push(`- 总市值 ${fmtMvYi(v.total_mv_yi)}元`);
   out.push(`  （${sourceTag(env)}）`);
   return out;
 }
@@ -503,7 +504,7 @@ function valuationContext(env: AkEnvelope<ValuationRow> | undefined): string {
         : '';
     parts.push(`；所属${v.industry} 行业静态PE中位${fmtNum(v.industry_pe_median)}(本股${cmp})`);
   }
-  if (v.total_mv_yi != null) parts.push(`；总市值${fmtNum(v.total_mv_yi)}亿`);
+  if (v.total_mv_yi != null) parts.push(`；总市值${fmtMvYi(v.total_mv_yi)}`);
   return parts.join('');
 }
 

@@ -199,3 +199,16 @@ describe('细分原因 subReason + isSoftGateReason（Phase2 ⑦ judge 分流，
     expect(isSoftGateReason(undefined)).toBe(false);
   });
 });
+
+describe('mega-cap 万亿 接地一致（Phase2 ⑦ 修，勿删）', () => {
+  // ⑤ 上下文与 ⑦ 同口径呈现「万亿」(fmtMvYi)→ ⑦ 照抄即接地。
+  // 修复前：上下文「18,402.50亿」 vs ⑦「1.84万亿」→ 误判 ungrounded、整段降级（千亿级必踩）。
+  const MVCTX = '⑤估值(截至06-15)：PE-TTM 23.32；PB 5.16；总市值1.84万亿';
+  it('⑦「市值1.84万亿」+ 上下文同口径 → 接地通过（不再 ungrounded）', () => {
+    const r = complianceGate(
+      '宁德时代是超大盘龙头，市值1.84万亿，估值 PE-TTM 23.32 处于近5年偏低分位。',
+      MVCTX,
+    );
+    expect(r.passed).toBe(true);
+  });
+});
