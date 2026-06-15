@@ -126,6 +126,21 @@ def _to_float(v: Any) -> float | None:
         return None
 
 
+def _retry(fn: Any, attempts: int = 3, sleep: float = 1.2) -> Any:
+    """重试网络抖动（ths IncompleteRead / cninfo ConnectionError 等间歇性失败）。末次仍败则抛。"""
+    last: Exception | None = None
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001 - 网络抖动统一重试
+            last = e
+            if i < attempts - 1:
+                time.sleep(sleep)
+    if last is not None:
+        raise last
+    return None
+
+
 def pct_change(prev_close: Any, last_close: Any) -> float | None:
     """末 2 行 close 环比涨跌幅（百分比，2 位）。任一不可用 → None。可单测。"""
     prev = _to_float(prev_close)
@@ -519,11 +534,11 @@ def get_fundamentals(symbol: str) -> tuple[list[dict[str, Any]], str]:
     """
     a = _require_ak()
     try:
-        rep = _ths_sorted(a.stock_financial_abstract_ths(symbol=symbol, indicator="按报告期"))
+        rep = _ths_sorted(_retry(lambda: a.stock_financial_abstract_ths(symbol=symbol, indicator="按报告期")))
     except Exception:  # noqa: BLE001
         rep = None
     try:
-        ann = _ths_sorted(a.stock_financial_abstract_ths(symbol=symbol, indicator="按年度"))
+        ann = _ths_sorted(_retry(lambda: a.stock_financial_abstract_ths(symbol=symbol, indicator="按年度")))
     except Exception:  # noqa: BLE001
         ann = None
     src = rep if rep is not None else ann
@@ -532,7 +547,7 @@ def get_fundamentals(symbol: str) -> tuple[list[dict[str, Any]], str]:
     latest = _fundamentals_row(src.iloc[-1].to_dict())
     # P1 季度环比（按单季度，最新单季 vs 上一单季；看加速/减速）。
     try:
-        sq = _ths_sorted(a.stock_financial_abstract_ths(symbol=symbol, indicator="按单季度"))
+        sq = _ths_sorted(_retry(lambda: a.stock_financial_abstract_ths(symbol=symbol, indicator="按单季度")))
         if sq is not None and len(sq) >= 2:
             cur, prev = sq.iloc[-1].to_dict(), sq.iloc[-2].to_dict()
             np_c, np_p = _parse_ths_num(cur.get("净利润")), _parse_ths_num(prev.get("净利润"))
@@ -566,7 +581,7 @@ def _pctile(series: list[float | None], cur: float | None) -> float | None:
 
 def _baidu_series(symbol: str, indicator: str, period: str = "近五年") -> tuple[list[float | None], str | None]:
     try:
-        df = ak.stock_zh_valuation_baidu(symbol=symbol, indicator=indicator, period=period)
+        df = _retry(lambda: ak.stock_zh_valuation_baidu(symbol=symbol, indicator=indicator, period=period))
     except Exception:  # noqa: BLE001
         return [], None
     if df is None or len(df) == 0:
@@ -598,7 +613,11 @@ def get_valuation(symbol: str) -> tuple[list[dict[str, Any]], str]:
     try:
         today = datetime.date.today().strftime("%Y%m%d")
         chg = _records(
-            ak.stock_industry_change_cninfo(symbol=symbol, start_date="20200101", end_date=today),
+            _retry(
+                lambda: ak.stock_industry_change_cninfo(
+                    symbol=symbol, start_date="20200101", end_date=today
+                )
+            ),
             limit=10,
         )
         ind_name = str(chg[-1].get("行业大类") or "").strip() if chg else ""
@@ -606,7 +625,8 @@ def get_valuation(symbol: str) -> tuple[list[dict[str, Any]], str]:
             out["industry"] = ind_name
             for d in (today, "20260612"):  # cninfo 按特定披露日；今日无则退近期已知日
                 pe_rows = _records(
-                    ak.stock_industry_pe_ratio_cninfo(symbol="证监会行业分类", date=d), limit=400
+                    _retry(lambda d=d: ak.stock_industry_pe_ratio_cninfo(symbol="证监会行业分类", date=d)),
+                    limit=400,
                 )
                 hit = [r for r in pe_rows if str(r.get("行业名称")).strip() == ind_name]
                 if hit:

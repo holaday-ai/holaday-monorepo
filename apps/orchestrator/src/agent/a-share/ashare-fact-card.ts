@@ -122,7 +122,14 @@ function dragonTigerLines(
   return out;
 }
 
-/** ② 限售解禁（临近）。 */
+/** 解禁股数 → 「X.XX亿股 / X万股 / N股」。 */
+function fmtShares(n: number): string {
+  if (n >= 1e8) return `${(n / 1e8).toFixed(2)}亿股`;
+  if (n >= 1e4) return `${(n / 1e4).toFixed(0)}万股`;
+  return `${Math.round(n)}股`;
+}
+
+/** ② 限售解禁（临近）。展示前3 + **全部合计**（与 ⑦ 上下文口径一致，避免合计对不上）。 */
 function unlockLines(p: PerStock): string[] {
   if (p.unlock.error || p.unlock.data.length === 0) return [];
   const out: string[] = ['- 限售解禁：'];
@@ -135,6 +142,10 @@ function unlockLines(p: PerStock): string[] {
     out.push(
       `  - ${when ? `${shortDate(String(when))} ` : ''}解禁${detail ? `（${detail}）` : ''}`,
     );
+  }
+  const total = p.unlock.data.reduce((s, r) => s + (toNum(pick(r, ['解禁数量'])) ?? 0), 0);
+  if (total > 0) {
+    out.push(`  - 合计 ${p.unlock.data.length} 笔，约 ${fmtShares(total)}`);
   }
   out.push(`  （${sourceTag(p.unlock)}）`);
   return out;
@@ -304,23 +315,20 @@ function contextBlock(p: PerStock, dt: AkEnvelope<DragonTigerRow>, annCap: numbe
       );
   }
   if (!p.unlock.error && p.unlock.data.length > 0) {
-    // P2：把解禁**股数 + 合计**喂给 ⑦，使其能点出"大额解禁=潜在抛压"，不止罗列。
-    const fmtSh = (n: number) =>
-      n >= 1e8
-        ? `${(n / 1e8).toFixed(2)}亿股`
-        : n >= 1e4
-          ? `${(n / 1e4).toFixed(0)}万股`
-          : `${Math.round(n)}股`;
-    const rows = p.unlock.data.slice(0, 5);
-    const total = rows.reduce((s, r) => s + (toNum(pick(r, ['解禁数量'])) ?? 0), 0);
-    const items = rows
+    // P2：把解禁**股数 + 全部合计**喂给 ⑦，使其能点出"大额解禁=潜在抛压"，不止罗列。
+    // 合计口径与 ③ 渲染一致（全部笔数），避免 ③ 与 ⑦ 合计对不上。
+    const total = p.unlock.data.reduce((s, r) => s + (toNum(pick(r, ['解禁数量'])) ?? 0), 0);
+    const items = p.unlock.data
+      .slice(0, 3)
       .map((r) => {
         const when = pick(r, ['解禁时间']) ? shortDate(String(pick(r, ['解禁时间']))) : '';
         const qty = toNum(pick(r, ['解禁数量']));
-        return `${when}解禁${qty != null ? fmtSh(qty) : ''}`;
+        return `${when}解禁${qty != null ? fmtShares(qty) : ''}`;
       })
       .join('；');
-    b.push(`- 解禁：${items}${total > 0 ? `（合计约${fmtSh(total)}）` : ''}`);
+    b.push(
+      `- 解禁：${items}${total > 0 ? `（全部 ${p.unlock.data.length} 笔合计约${fmtShares(total)}）` : ''}`,
+    );
   }
   return b.join('\n');
 }
