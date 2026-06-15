@@ -106,6 +106,8 @@ export interface CreateVideoTaskParams extends WanxiangBaseParams {
   readonly model?: string;
   /** Public reference image URL for image-to-video. Omit for text-to-video. */
   readonly imageUrl?: string;
+  /** Suppresses unwanted content (e.g. fabricated on-screen text). */
+  readonly negativePrompt?: string;
   /** e.g. '1280*720'. Default omitted (model default). */
   readonly size?: string;
 }
@@ -244,6 +246,7 @@ export async function createVideoTask(
   if (p.size) parameters.size = p.size;
   const input: Record<string, unknown> = { prompt: p.prompt };
   if (p.imageUrl) input.img_url = p.imageUrl;
+  if (p.negativePrompt) input.negative_prompt = p.negativePrompt;
   const taskId = await postCreate(
     `${base(p)}/api/v1/services/aigc/video-generation/video-synthesis`,
     { model, input, ...(Object.keys(parameters).length ? { parameters } : {}) },

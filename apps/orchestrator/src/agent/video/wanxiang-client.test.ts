@@ -158,6 +158,16 @@ describe('generateBrollVideo', () => {
     expect(out.videoUrl).toBe('https://oss/v.mp4');
     expect(calls[0]?.url).toContain('/api/v1/services/aigc/video-generation/video-synthesis');
   });
+
+  it('passes negative_prompt into the t2v input when supplied (no-text constraint)', async () => {
+    const { fetchImpl, calls } = jsonQueue([
+      { body: { output: { task_id: 'v', task_status: 'PENDING' } } },
+      { body: { output: { task_id: 'v', task_status: 'SUCCEEDED', video_url: 'https://oss/v.mp4' } } },
+    ]);
+    await generateBrollVideo({ apiKey: KEY, prompt: 'clip', negativePrompt: '乱码, gibberish', fetchImpl, ...TINY });
+    const init = calls[0]?.init as RequestInit;
+    expect(JSON.parse(init.body as string)).toMatchObject({ input: { negative_prompt: '乱码, gibberish' } });
+  });
 });
 
 describe('WanxiangError', () => {

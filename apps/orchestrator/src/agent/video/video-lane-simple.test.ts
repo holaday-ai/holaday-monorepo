@@ -55,9 +55,10 @@ function makeServices() {
   return { svc, mocks: { ...mocks, storeOutput } };
 }
 
-describe('runSimpleVideoCreation — image (default)', () => {
-  it('optimizes draft → preset-voice synth → wan-t2i n=1 → Ken Burns → compose', async () => {
+describe('runSimpleVideoCreation — video (default, wanxiang)', () => {
+  it('empty opts → preset-voice synth → wan-t2v (no-text prompt) → renderVideoClip → compose', async () => {
     const { svc, mocks } = makeServices();
+    // BOSS 2026-06-15: default is now 动态视频 (wanxiang), NOT image.
     const out = await runSimpleVideoCreation({ userText: '讲讲夏天防晒' }, CFG, {}, svc);
 
     expect(mocks.optimizeUserScript).toHaveBeenCalledTimes(1);
@@ -65,21 +66,39 @@ describe('runSimpleVideoCreation — image (default)', () => {
     const synthArg = (mocks.synthesizeSpeech.mock.calls[0] as unknown[])[0] as { voiceId: string; model: string };
     expect(synthArg.voiceId).toBe('Cherry');
     expect(synthArg.model).toBe('qwen3-tts-flash');
-    // image visual: wan-t2i n=1, Ken Burns (NOT video clip)
-    expect((mocks.generateBrollImage.mock.calls[0] as unknown[])[0]).toMatchObject({ n: 1 });
-    expect(mocks.renderImageKenBurns).toHaveBeenCalledTimes(2);
-    expect(mocks.renderVideoClip).not.toHaveBeenCalled();
+    // default video visual: wan-t2v + renderVideoClip (NOT image / Ken Burns)
+    expect(mocks.generateBrollVideo).toHaveBeenCalledTimes(2);
+    expect(mocks.renderVideoClip).toHaveBeenCalledTimes(2);
+    expect(mocks.generateBrollImage).not.toHaveBeenCalled();
+    expect(mocks.renderImageKenBurns).not.toHaveBeenCalled();
     expect(mocks.generateVeoVideo).not.toHaveBeenCalled();
+    // verification #4: the t2v call carries the no-text constraint (suffix + negative)
+    const t2vArg = (mocks.generateBrollVideo.mock.calls[0] as unknown[])[0] as { prompt: string; negativePrompt?: string };
+    expect(t2vArg.prompt).toContain('画面整洁');
+    expect(t2vArg.negativePrompt ?? '').toMatch(/乱码|gibberish/);
     expect(mocks.runFfmpeg).toHaveBeenCalledTimes(1);
-    expect(out.visualMode).toBe('image');
+    expect(out.visualMode).toBe('video');
     expect(out.fileId).toBe('f_video.mp4');
     expect(out.segments).toBe(2);
     expect(out.totalDurationMs).toBe(5000);
   });
 });
 
-describe('runSimpleVideoCreation — video', () => {
-  it('wanxiang (default video source) → t2v + renderVideoClip', async () => {
+describe('runSimpleVideoCreation — image (low-cost opt-in)', () => {
+  it('visualMode=image → wan-t2i n=1 → Ken Burns (NOT video clip)', async () => {
+    const { svc, mocks } = makeServices();
+    const opts: SimpleVideoOptions = { visualMode: 'image' };
+    const out = await runSimpleVideoCreation({ userText: '讲讲夏天防晒' }, CFG, opts, svc);
+    expect((mocks.generateBrollImage.mock.calls[0] as unknown[])[0]).toMatchObject({ n: 1 });
+    expect(mocks.renderImageKenBurns).toHaveBeenCalledTimes(2);
+    expect(mocks.generateBrollVideo).not.toHaveBeenCalled();
+    expect(mocks.renderVideoClip).not.toHaveBeenCalled();
+    expect(out.visualMode).toBe('image');
+  });
+});
+
+describe('runSimpleVideoCreation — video (explicit)', () => {
+  it('wanxiang (explicit) → t2v + renderVideoClip', async () => {
     const { svc, mocks } = makeServices();
     const opts: SimpleVideoOptions = { visualMode: 'video' };
     await runSimpleVideoCreation({ userText: 'x' }, CFG, opts, svc);

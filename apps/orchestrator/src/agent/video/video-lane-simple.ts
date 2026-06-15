@@ -72,6 +72,12 @@ export interface SimpleVideoConfig {
   readonly presetVoice: string; // 'Cherry'
   readonly wanxiangT2iModel: string; // wan2.2-t2i-flash
   readonly wanxiangT2vModel: string; // wan2.1-t2v-turbo
+  /**
+   * t2v output resolution `W*H`. Default vertical '720*1280' so the clip
+   * fills the 1080×1920 frame (a landscape source would letterbox). 720P
+   * tier on wan2.1-t2v-turbo.
+   */
+  readonly wanxiangVideoSize?: string;
   readonly veoModel: string; // veo-3.0-fast-generate-001
   /** Subtitle font family (fontconfig). Default in buildAss ('WenQuanYi Zen Hei', on Vultr). */
   readonly subtitleFontName?: string;
@@ -82,9 +88,12 @@ export interface SimpleVideoConfig {
 }
 
 export interface SimpleVideoOptions {
-  /** Task-level (整条统一). Default 'image'. */
+  /**
+   * Task-level (整条统一). Default 'video' (BOSS 2026-06-15: 图片版幻灯片感 +
+   * AI 乱码拿不出手，默认要动态视频). 'image' is the low-cost opt-in.
+   */
   readonly visualMode?: VisualMode;
-  /** When visualMode='video'. Default 'wanxiang' (cheaper); 'veo' = high-quality tier. */
+  /** When visualMode='video'. Default 'wanxiang' (~¥8); 'veo' = high-quality tier (~¥17). */
   readonly videoSource?: VideoSource;
   /** Veo clip length seconds (number). Default 4. */
   readonly veoDurationSeconds?: number;
@@ -141,7 +150,7 @@ export function createSimplePipelineDeps(
   const fns = { ...realFns(), ...(svc.overrides ?? {}) };
   const ws = cfg.dashscopeWorkspaceId ? { workspaceId: cfg.dashscopeWorkspaceId } : {};
   const ffOpts = cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {};
-  const visualMode = opts.visualMode ?? 'image';
+  const visualMode = opts.visualMode ?? 'video';
   const videoSource = opts.videoSource ?? 'wanxiang';
 
   return {
@@ -208,6 +217,8 @@ export function createSimplePipelineDeps(
           ...ws,
           model: cfg.wanxiangT2vModel,
           prompt: visual + CLEAN_SCENE_SUFFIX,
+          negativePrompt: NO_TEXT_NEGATIVE,
+          size: cfg.wanxiangVideoSize ?? '720*1280', // vertical → fills 竖屏 frame
         });
         if (!v.videoUrl) throw new SimpleVideoError(`broll video seg ${index} produced no url`, 'compose');
         url = v.videoUrl;
@@ -262,7 +273,7 @@ export async function runSimpleVideoCreation(
   svc: SimpleVideoServices,
 ): Promise<SimpleVideoResult> {
   if (!cfg.dashscopeApiKey) throw new SimpleVideoError('DASHSCOPE_API_KEY not configured', 'config');
-  const visualMode = opts.visualMode ?? 'image';
+  const visualMode = opts.visualMode ?? 'video';
   if (visualMode === 'video' && (opts.videoSource ?? 'wanxiang') === 'veo' && !cfg.geminiApiKey) {
     throw new SimpleVideoError('Veo selected but GEMINI_API_KEY not configured', 'config');
   }
