@@ -147,4 +147,13 @@ describe('optimizeUserScript (原方案 — faithful to user draft)', () => {
     expect(p).toMatch(/产品包装|瓶身|标签/); // explicitly forbids the text-bearing closeups
     expect(p).toMatch(/不能出现任何文字|编造乱码/);
   });
+
+  it('steers away from high-anatomy-risk framing (extra-arm root fix)', () => {
+    const p = buildOptimizeSystemPrompt(6);
+    // avoid hand-object-hand stacked framing that grows extra arms
+    expect(p).toMatch(/手-物-手|叠手|高解剖风险/);
+    expect(p).toMatch(/多余手臂|畸形手/);
+    // and the old text-free example must no longer suggest a 手部特写
+    expect(p).not.toContain('户外涂防晒的手部特写');
+  });
 });

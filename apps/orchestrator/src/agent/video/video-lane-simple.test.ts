@@ -14,9 +14,11 @@ const CFG: SimpleVideoConfig = {
   geminiBaseUrl: 'https://generativelanguage.googleapis.com',
   qwenTtsModel: 'qwen3-tts-flash',
   presetVoice: 'Cherry',
-  wanxiangT2iModel: 'wan2.2-t2i-flash',
+  geminiImageModel: 'gemini-3.1-flash-image',
   wanxiangT2vModel: 'wan2.1-t2v-turbo',
-  veoModel: 'veo-3.0-fast-generate-001',
+  veoFastModel: 'veo-3.1-fast-generate-preview',
+  veoLiteModel: 'veo-3.1-lite-generate-preview',
+  veoStandardModel: 'veo-3.1-generate-preview',
 };
 
 const SCRIPT: VideoScript = {
@@ -33,12 +35,12 @@ function makeServices() {
   const mocks = {
     optimizeUserScript: vi.fn(async () => SCRIPT),
     synthesizeSpeech: vi.fn(async () => ({ audioUrl: 'https://oss/a.wav', characters: 5 })),
-    generateBrollImage: vi.fn(async () => ({ taskStatus: 'SUCCEEDED', imageUrls: ['https://oss/i.png'] })),
+    generateImages: vi.fn(async () => ({ images: [{ buffer: Buffer.from('img'), mimeType: 'image/png' }], model: 'nb' })),
     generateBrollVideo: vi.fn(async () => ({ taskStatus: 'SUCCEEDED', imageUrls: [], videoUrl: 'https://oss/v.mp4' })),
     generateVeoVideo: vi.fn(async () => ({ videoUri: 'https://gl/veo.mp4', elapsedMs: 1 })),
     downloadToBuffer: vi.fn(async () => ({ buffer: Buffer.from('x'), sizeBytes: 1 })),
     ffprobeDurationMs: vi.fn(async () => 2500),
-    renderImageKenBurns: vi.fn(async () => undefined),
+    renderImageClip: vi.fn(async () => undefined),
     renderVideoClip: vi.fn(async () => undefined),
     runFfmpeg: vi.fn(async () => undefined),
     writeFile: vi.fn(async () => undefined),
@@ -55,27 +57,32 @@ function makeServices() {
   return { svc, mocks: { ...mocks, storeOutput } };
 }
 
-describe('runSimpleVideoCreation — video (default, wanxiang)', () => {
-  it('empty opts → preset-voice synth → wan-t2v (no-text prompt) → renderVideoClip → compose', async () => {
+describe('runSimpleVideoCreation — video (default = veo_fast)', () => {
+  it('empty opts → Cherry synth → Veo 3.1 Fast (8s/1080p/9:16, anatomy prompt) → renderVideoClip → compose', async () => {
     const { svc, mocks } = makeServices();
-    // BOSS 2026-06-15: default is now 动态视频 (wanxiang), NOT image.
+    // BOSS 2026-06-15: 万相手部畸形 + Lite 解剖不稳 → 默认 Veo 3.1 Fast.
     const out = await runSimpleVideoCreation({ userText: '讲讲夏天防晒' }, CFG, {}, svc);
 
     expect(mocks.optimizeUserScript).toHaveBeenCalledTimes(1);
-    // preset voice synth (Cherry on qwen3-tts-flash)
     const synthArg = (mocks.synthesizeSpeech.mock.calls[0] as unknown[])[0] as { voiceId: string; model: string };
     expect(synthArg.voiceId).toBe('Cherry');
     expect(synthArg.model).toBe('qwen3-tts-flash');
-    // default video visual: wan-t2v + renderVideoClip (NOT image / Ken Burns)
-    expect(mocks.generateBrollVideo).toHaveBeenCalledTimes(2);
+    // default video visual: Veo Fast + renderVideoClip (NOT nano banana / wanxiang)
+    expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(2);
     expect(mocks.renderVideoClip).toHaveBeenCalledTimes(2);
-    expect(mocks.generateBrollImage).not.toHaveBeenCalled();
-    expect(mocks.renderImageKenBurns).not.toHaveBeenCalled();
-    expect(mocks.generateVeoVideo).not.toHaveBeenCalled();
-    // verification #4: the t2v call carries the no-text constraint (suffix + negative)
-    const t2vArg = (mocks.generateBrollVideo.mock.calls[0] as unknown[])[0] as { prompt: string; negativePrompt?: string };
-    expect(t2vArg.prompt).toContain('画面整洁');
-    expect(t2vArg.negativePrompt ?? '').toMatch(/乱码|gibberish/);
+    expect(mocks.generateBrollVideo).not.toHaveBeenCalled();
+    expect(mocks.generateImages).not.toHaveBeenCalled();
+    expect(mocks.renderImageClip).not.toHaveBeenCalled();
+    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as {
+      model: string; prompt: string; aspectRatio: string; durationSeconds: number; resolution: string;
+    };
+    expect(veoArg.model).toBe('veo-3.1-fast-generate-preview');
+    expect(veoArg.aspectRatio).toBe('9:16');
+    expect(veoArg.durationSeconds).toBe(8); // BOSS: 8s
+    expect(veoArg.resolution).toBe('1080p'); // BOSS: 1080p
+    // no-text + anatomy constraints ride in the prompt
+    expect(veoArg.prompt).toContain('画面整洁');
+    expect(veoArg.prompt).toMatch(/五指完整|多余肢体|双臂可追溯/);
     expect(mocks.runFfmpeg).toHaveBeenCalledTimes(1);
     expect(out.visualMode).toBe('video');
     expect(out.fileId).toBe('f_video.mp4');
@@ -84,41 +91,56 @@ describe('runSimpleVideoCreation — video (default, wanxiang)', () => {
   });
 });
 
-describe('runSimpleVideoCreation — image (low-cost opt-in)', () => {
-  it('visualMode=image → wan-t2i n=1 → Ken Burns (NOT video clip)', async () => {
+describe('runSimpleVideoCreation — image (nano banana, static)', () => {
+  it('visualMode=image → nano banana (anatomy+vertical prompt) → renderImageClip (NO Ken Burns)', async () => {
     const { svc, mocks } = makeServices();
     const opts: SimpleVideoOptions = { visualMode: 'image' };
     const out = await runSimpleVideoCreation({ userText: '讲讲夏天防晒' }, CFG, opts, svc);
-    expect((mocks.generateBrollImage.mock.calls[0] as unknown[])[0]).toMatchObject({ n: 1 });
-    expect(mocks.renderImageKenBurns).toHaveBeenCalledTimes(2);
-    expect(mocks.generateBrollVideo).not.toHaveBeenCalled();
+    expect(mocks.generateImages).toHaveBeenCalledTimes(2);
+    const imgArg = (mocks.generateImages.mock.calls[0] as unknown[])[0] as { model: string; prompt: string };
+    expect(imgArg.model).toBe('gemini-3.1-flash-image'); // nano banana
+    expect(imgArg.prompt).toContain('竖屏'); // 9:16 ridden in prompt (no aspectRatio param)
+    expect(imgArg.prompt).toMatch(/五指完整|多余肢体/); // anatomy
+    // STATIC render, no Ken Burns, no video
+    expect(mocks.renderImageClip).toHaveBeenCalledTimes(2);
     expect(mocks.renderVideoClip).not.toHaveBeenCalled();
+    expect(mocks.generateVeoVideo).not.toHaveBeenCalled();
+    expect(mocks.generateBrollVideo).not.toHaveBeenCalled();
     expect(out.visualMode).toBe('image');
   });
 });
 
-describe('runSimpleVideoCreation — video (explicit)', () => {
-  it('wanxiang (explicit) → t2v + renderVideoClip', async () => {
+describe('runSimpleVideoCreation — Veo tiers (explicit)', () => {
+  it('veo_lite (省钱) → lite model', async () => {
     const { svc, mocks } = makeServices();
-    const opts: SimpleVideoOptions = { visualMode: 'video' };
-    await runSimpleVideoCreation({ userText: 'x' }, CFG, opts, svc);
-    expect(mocks.generateBrollVideo).toHaveBeenCalledTimes(2);
-    expect(mocks.generateVeoVideo).not.toHaveBeenCalled();
-    expect(mocks.renderVideoClip).toHaveBeenCalledTimes(2);
-    expect(mocks.renderImageKenBurns).not.toHaveBeenCalled();
+    await runSimpleVideoCreation({ userText: 'x' }, CFG, { visualMode: 'video', videoSource: 'veo_lite' }, svc);
+    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as { model: string };
+    expect(veoArg.model).toBe('veo-3.1-lite-generate-preview');
   });
 
-  it('veo (high-quality tier) → Veo + download with x-goog-api-key + renderVideoClip', async () => {
+  it('veo_standard (高质量) → standard model + x-goog-api-key download', async () => {
     const { svc, mocks } = makeServices();
-    const opts: SimpleVideoOptions = { visualMode: 'video', videoSource: 'veo' };
-    await runSimpleVideoCreation({ userText: 'x' }, CFG, opts, svc);
-    expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(2);
-    // the Veo result uri is downloaded WITH the x-goog-api-key header
+    await runSimpleVideoCreation({ userText: 'x' }, CFG, { visualMode: 'video', videoSource: 'veo_standard' }, svc);
+    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as { model: string };
+    expect(veoArg.model).toBe('veo-3.1-generate-preview');
     const dlVeo = mocks.downloadToBuffer.mock.calls.find(
       (c) => ((c as unknown[])[0] as string) === 'https://gl/veo.mp4',
     ) as unknown[] | undefined;
     expect((((dlVeo?.[1] as { headers?: Record<string, string> })?.headers ?? {}) as Record<string, string>)['x-goog-api-key']).toBe('gk');
+  });
+});
+
+describe('runSimpleVideoCreation — wanxiang (fallback, explicit)', () => {
+  it('videoSource=wanxiang → t2v (no-text+anatomy negative) + renderVideoClip', async () => {
+    const { svc, mocks } = makeServices();
+    await runSimpleVideoCreation({ userText: 'x' }, CFG, { visualMode: 'video', videoSource: 'wanxiang' }, svc);
+    expect(mocks.generateBrollVideo).toHaveBeenCalledTimes(2);
+    expect(mocks.generateVeoVideo).not.toHaveBeenCalled();
     expect(mocks.renderVideoClip).toHaveBeenCalledTimes(2);
+    const t2vArg = (mocks.generateBrollVideo.mock.calls[0] as unknown[])[0] as { prompt: string; negativePrompt?: string; size?: string };
+    expect(t2vArg.prompt).toContain('画面整洁');
+    expect(t2vArg.negativePrompt ?? '').toMatch(/乱码|多余手臂|extra arm/);
+    expect(t2vArg.size).toBe('720*1280');
   });
 });
 
@@ -130,15 +152,17 @@ describe('runSimpleVideoCreation — config gates', () => {
     ).rejects.toMatchObject({ kind: 'config' });
   });
 
-  it('throws config when Veo selected but GEMINI key missing', async () => {
+  it('throws config when video (default Veo) but GEMINI key missing', async () => {
     const { svc } = makeServices();
     await expect(
-      runSimpleVideoCreation(
-        { userText: 'x' },
-        { ...CFG, geminiApiKey: '' },
-        { visualMode: 'video', videoSource: 'veo' },
-        svc,
-      ),
+      runSimpleVideoCreation({ userText: 'x' }, { ...CFG, geminiApiKey: '' }, {}, svc),
+    ).rejects.toMatchObject({ kind: 'config' });
+  });
+
+  it('throws config when image (nano banana) but GEMINI key missing', async () => {
+    const { svc } = makeServices();
+    await expect(
+      runSimpleVideoCreation({ userText: 'x' }, { ...CFG, geminiApiKey: '' }, { visualMode: 'image' }, svc),
     ).rejects.toMatchObject({ kind: 'config' });
   });
 });

@@ -1,31 +1,32 @@
 /**
  * 原方案 (simplified) video lane — "对话式 AI 辅助图文配音视频".
  *
- * Pipeline: 用户文案 → AI 优化 → Qwen 预设音色 TTS → AI 画面(图默认/视频可选)
- *           → 字幕 → FFmpeg 竖屏合成. NO lip-sync, NO clone, NO onboarding,
- * NO base video — needs ZERO user material, so it's independently acceptable.
+ * Pipeline: 用户文案 → AI 优化 → Qwen Cherry 预设音色 TTS → AI 画面 → 字幕 →
+ *           FFmpeg 竖屏合成. NO lip-sync, NO clone, NO onboarding, NO base video —
+ *           needs ZERO user material, so it's independently acceptable.
  *
- * Reuses runVideoPipeline: every segment is a narrated visual ('broll'), so
- * the runner just calls generateBroll + renderBrollClip per segment (the
- * lip-sync branch is never hit). This lane supplies the per-step IO:
- *   - synth  = Qwen3-TTS preset voice (qwen3-tts-flash + 'Cherry'), no clone.
- *   - visual = image (wan-t2i n=1 + Ken Burns) by default; OR video (Wanxiang
- *              t2v default / Veo premium, user-opt-in 「更贵/更慢」).
- *   - clip   = Ken Burns (image) / loop-trim-to-audio (video).
- * Compose adds subtitles + watermark (compliance) + BGM, 1080×1920.
+ * Visual sources (BOSS 2026-06-15):
+ *   - video (DEFAULT) = Veo 3.1 Fast, 8s · 1080p · 9:16 (~¥7/条, 解剖稳).
+ *     'veo_lite' 省钱档 / 'veo_standard' 高质量可选 / 'wanxiang' 便宜兜底.
+ *   - image = nano banana (gemini-3.1-flash-image), STATIC (无 Ken Burns), 低成本可选.
  *
- * Cost (BOSS-confirmed framing): image ~¥1-1.5 (default) · Wanxiang video ~¥8
- * (default video source) · Veo veo-3-fast 720p ~¥17 (high-quality tier, opt-in).
+ * Audio: Veo on the Gemini Developer API ALWAYS renders an audio track — it
+ *   can't be disabled (`generateAudio:false` → 400) and there's no audio-off
+ *   price tier. We DISCARD that track and dub with Qwen Cherry, so the Veo
+ *   audio is paid-for but unused. Don't try to turn it off.
+ *
+ * Anatomy: every visual prompt carries explicit anatomy constraints (single
+ *   subject / arms traceable to shoulders / five fingers / no extra limbs /
+ *   avoid hand-object-hand stacked framing) — AI t2v/t2i otherwise grows extra
+ *   arms (observed on BOTH Veo Lite and nano banana). Veo & nano banana have no
+ *   separate negative-prompt field, so the constraint lives in the prompt text;
+ *   wanxiang t2v additionally takes NO_TEXT_NEGATIVE.
  */
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import {
-  ffprobeDurationMs,
-  renderImageKenBurns,
-  renderVideoClip,
-  runFfmpeg,
-} from './ffmpeg-exec.js';
+import { generateImages } from '../image/gemini-image-client.js';
+import { ffprobeDurationMs, renderImageClip, renderVideoClip, runFfmpeg } from './ffmpeg-exec.js';
 import { synthesizeSpeech } from './qwen-voice-clone-client.js';
 import { generateVeoVideo } from './veo-client.js';
 import { buildAss } from './timeline.js';
@@ -33,22 +34,55 @@ import { buildComposeCommand } from './video-compose.js';
 import { downloadToBuffer } from './video-http.js';
 import { runVideoPipeline, type PipelineLogger, type VideoPipelineDeps } from './video-pipeline.js';
 import { optimizeUserScript, type LlmComplete } from './video-script.js';
-import { generateBrollImage, generateBrollVideo } from './wanxiang-client.js';
+import { generateBrollVideo } from './wanxiang-client.js';
 
-// 画面整洁约束 (P1-2): AI 文生图/视频画产品包装/标签特写时必然编造乱码假字。
-// 双管齐下 — 主要靠 optimizeUserScript 把画面引导成「场景/人物/氛围」(非产品标签特写),
-// 这里的后缀+负向词是兜底:进一步压低任何残留文字出现的概率。
+// 无文字 + 解剖约束 — AI 文生图/视频画产品标签会编乱码字 (P1-2),画「手-物-手
+// 竖直叠帧」会长出多余手臂(Veo Lite / nano banana 都吐过)。约束并进 prompt 文本
+// (Veo / nano banana 无独立 negative 参数);wanxiang t2v 另传 NO_TEXT_NEGATIVE。
 const CLEAN_SCENE_SUFFIX =
-  '，画面整洁，纯场景/人物/氛围，不出现任何产品包装文字、标签、瓶身文字、招牌、屏幕文字、书本文字、字幕或水印，画面中不能有任何文字';
+  '，画面整洁，纯场景/人物/氛围；' +
+  '单人出镜，双臂可追溯到肩膀，五指完整、手部解剖正确，' +
+  '不出现多余肢体、断肢或悬空小臂，避开手-物-手竖直叠帧这类高解剖风险构图；' +
+  '不出现任何产品包装文字、标签、瓶身文字、招牌、屏幕文字、书本文字、字幕或水印，画面中不能有任何文字';
 const NO_TEXT_NEGATIVE = [
-  // 中文
+  // 中文 — 文字
   '文字, 文本, 字幕, 标题, 标签, 包装文字, 瓶身文字, 招牌, 招牌文字, 屏幕文字, 书本文字, 水印, 错乱的字, 乱码',
+  // 中文 — 解剖
+  '多余手臂, 多手, 多臂, 第三只手, 畸形手, 多指, 断肢, 悬空手臂, 解剖错误',
   // English
-  'text, words, letters, label, labels, packaging text, signage, screen text, captions, subtitles, watermark, gibberish text, fake text, garbled text',
+  'text, words, letters, label, packaging text, signage, watermark, gibberish text,' +
+    ' extra arm, extra hand, third arm, deformed hands, extra fingers, floating limb, anatomical error',
 ].join(', ');
 
 export type VisualMode = 'image' | 'video';
-export type VideoSource = 'wanxiang' | 'veo';
+/**
+ * Video visual source tiers (BOSS 2026-06-15: 万相手部畸形 → Veo;Lite 解剖不稳
+ * → 默认 Fast):
+ *   'veo_fast'     — Veo 3.1 Fast, DEFAULT (8s/1080p ≈ ¥7/条, 解剖稳).
+ *   'veo_lite'     — Veo 3.1 Lite, 省钱档 (≈ ¥4.6/条, 解剖偶失,一字可改).
+ *   'veo_standard' — Veo 3.1 Standard, 高质量可选 (≈ ¥23/条).
+ *   'wanxiang'     — wan2.1-t2v-turbo, 便宜兜底 (Veo 降级时).
+ */
+export type VideoSource = 'veo_fast' | 'veo_lite' | 'veo_standard' | 'wanxiang';
+
+const VEO_MODEL_DEFAULT: Record<'veo_fast' | 'veo_lite' | 'veo_standard', string> = {
+  veo_fast: 'veo-3.1-fast-generate-preview',
+  veo_lite: 'veo-3.1-lite-generate-preview',
+  veo_standard: 'veo-3.1-generate-preview',
+};
+const isVeoSource = (s: VideoSource): boolean =>
+  s === 'veo_fast' || s === 'veo_lite' || s === 'veo_standard';
+
+function resolveVeoModel(source: VideoSource, cfg: SimpleVideoConfig): string {
+  switch (source) {
+    case 'veo_lite':
+      return cfg.veoLiteModel ?? VEO_MODEL_DEFAULT.veo_lite;
+    case 'veo_standard':
+      return cfg.veoStandardModel ?? VEO_MODEL_DEFAULT.veo_standard;
+    default: // veo_fast
+      return cfg.veoFastModel ?? VEO_MODEL_DEFAULT.veo_fast;
+  }
+}
 
 export type SimpleVideoErrorKind = 'config' | 'compose';
 export class SimpleVideoError extends Error {
@@ -65,20 +99,20 @@ export interface SimpleVideoConfig {
   readonly dashscopeApiKey: string;
   readonly dashscopeBaseUrl: string;
   readonly dashscopeWorkspaceId?: string;
-  /** Reused from the #5 image lane env (GEMINI_API_KEY) — only needed for Veo. */
+  /** Shared Google key (same one as #5 nano banana) — Veo video AND nano banana image. */
   readonly geminiApiKey?: string;
   readonly geminiBaseUrl?: string;
   readonly qwenTtsModel: string; // qwen3-tts-flash
   readonly presetVoice: string; // 'Cherry'
-  readonly wanxiangT2iModel: string; // wan2.2-t2i-flash
-  readonly wanxiangT2vModel: string; // wan2.1-t2v-turbo
-  /**
-   * t2v output resolution `W*H`. Default vertical '720*1280' so the clip
-   * fills the 1080×1920 frame (a landscape source would letterbox). 720P
-   * tier on wan2.1-t2v-turbo.
-   */
+  /** Image source = nano banana. Default 'gemini-3.1-flash-image'. */
+  readonly geminiImageModel?: string;
+  readonly wanxiangT2vModel: string; // wan2.1-t2v-turbo (兜底)
+  /** t2v 竖屏 size `W*H`. Default '720*1280' (fills 1080×1920, no letterbox). */
   readonly wanxiangVideoSize?: string;
-  readonly veoModel: string; // veo-3.0-fast-generate-001
+  /** Veo model id per tier — each optional → built-in default. */
+  readonly veoFastModel?: string;
+  readonly veoLiteModel?: string;
+  readonly veoStandardModel?: string;
   /** Subtitle font family (fontconfig). Default in buildAss ('WenQuanYi Zen Hei', on Vultr). */
   readonly subtitleFontName?: string;
   /** Watermark drawtext fontfile (CJK-capable) for safe glyph rendering. */
@@ -88,25 +122,24 @@ export interface SimpleVideoConfig {
 }
 
 export interface SimpleVideoOptions {
-  /**
-   * Task-level (整条统一). Default 'video' (BOSS 2026-06-15: 图片版幻灯片感 +
-   * AI 乱码拿不出手，默认要动态视频). 'image' is the low-cost opt-in.
-   */
+  /** Task-level (整条统一). Default 'video' (动态视频); 'image' = nano banana 静态低成本可选. */
   readonly visualMode?: VisualMode;
-  /** When visualMode='video'. Default 'wanxiang' (~¥8); 'veo' = high-quality tier (~¥17). */
+  /** When visualMode='video'. Default 'veo_fast'. */
   readonly videoSource?: VideoSource;
-  /** Veo clip length seconds (number). Default 4. */
+  /** Veo clip length seconds. Default 8 (Veo 3.1 native length). */
   readonly veoDurationSeconds?: number;
+  /** Veo output resolution. Default '1080p'. */
+  readonly veoResolution?: '720p' | '1080p';
 }
 
 interface SimpleFns {
   synthesizeSpeech: typeof synthesizeSpeech;
-  generateBrollImage: typeof generateBrollImage;
-  generateBrollVideo: typeof generateBrollVideo;
+  generateImages: typeof generateImages; // nano banana (image source)
+  generateBrollVideo: typeof generateBrollVideo; // wanxiang t2v (fallback)
   generateVeoVideo: typeof generateVeoVideo;
   downloadToBuffer: typeof downloadToBuffer;
   ffprobeDurationMs: typeof ffprobeDurationMs;
-  renderImageKenBurns: typeof renderImageKenBurns;
+  renderImageClip: typeof renderImageClip; // STATIC (no Ken Burns)
   renderVideoClip: typeof renderVideoClip;
   runFfmpeg: typeof runFfmpeg;
   optimizeUserScript: typeof optimizeUserScript;
@@ -128,12 +161,12 @@ export interface SimpleVideoServices {
 function realFns(): SimpleFns {
   return {
     synthesizeSpeech,
-    generateBrollImage,
+    generateImages,
     generateBrollVideo,
     generateVeoVideo,
     downloadToBuffer,
     ffprobeDurationMs,
-    renderImageKenBurns,
+    renderImageClip,
     renderVideoClip,
     runFfmpeg,
     optimizeUserScript,
@@ -151,7 +184,7 @@ export function createSimplePipelineDeps(
   const ws = cfg.dashscopeWorkspaceId ? { workspaceId: cfg.dashscopeWorkspaceId } : {};
   const ffOpts = cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {};
   const visualMode = opts.visualMode ?? 'video';
-  const videoSource = opts.videoSource ?? 'wanxiang';
+  const videoSource = opts.videoSource ?? 'veo_fast';
 
   return {
     logger: svc.logger,
@@ -179,38 +212,41 @@ export function createSimplePipelineDeps(
 
     async generateBroll({ index, visual }) {
       if (visualMode === 'image') {
-        const r = await fns.generateBrollImage({
-          apiKey: cfg.dashscopeApiKey,
-          baseUrl: cfg.dashscopeBaseUrl,
-          ...ws,
-          model: cfg.wanxiangT2iModel,
-          prompt: visual + CLEAN_SCENE_SUFFIX,
-          negativePrompt: NO_TEXT_NEGATIVE,
-          n: 1,
+        // 图源 = nano banana (gemini image). 无独立 negative/aspectRatio →
+        // 无文字+解剖+竖屏约束并进 prompt 文本。返回 buffer 直接用(非 URL)。
+        const img = await fns.generateImages({
+          apiKey: cfg.geminiApiKey ?? '',
+          ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
+          model: cfg.geminiImageModel ?? 'gemini-3.1-flash-image',
+          prompt: `${visual}${CLEAN_SCENE_SUFFIX}，竖屏 9:16 构图`,
         });
-        const url = r.imageUrls[0];
-        if (!url) throw new SimpleVideoError(`broll image seg ${index} produced no url`, 'compose');
-        const dl = await fns.downloadToBuffer(url);
-        await svc.storeOutput({ filename: `seg${index}-img.png`, mimetype: 'image/png', buffer: dl.buffer });
+        const first = img.images[0];
+        if (!first) throw new SimpleVideoError(`nano banana seg ${index} produced no image`, 'compose');
+        await svc.storeOutput({ filename: `seg${index}-img.png`, mimetype: first.mimeType, buffer: first.buffer });
         const localPath = path.join(svc.workdir, `seg${index}-img.png`);
-        await fns.writeFile(localPath, dl.buffer);
+        await fns.writeFile(localPath, first.buffer);
         return { visualRef: localPath };
       }
       // video visual
       let url: string;
       let headers: Record<string, string> | undefined;
-      if (videoSource === 'veo') {
+      if (isVeoSource(videoSource)) {
+        // Veo (default veo_fast). NOTE: the Gemini Developer API ALWAYS renders
+        // an audio track — it can't be disabled (generateAudio:false → 400) and
+        // there's no audio-off price tier. We discard it and dub with Qwen Cherry.
         const v = await fns.generateVeoVideo({
           apiKey: cfg.geminiApiKey ?? '',
           ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
-          model: cfg.veoModel,
+          model: resolveVeoModel(videoSource, cfg),
           prompt: visual + CLEAN_SCENE_SUFFIX,
           aspectRatio: '9:16',
-          durationSeconds: opts.veoDurationSeconds ?? 4,
+          durationSeconds: opts.veoDurationSeconds ?? 8,
+          resolution: opts.veoResolution ?? '1080p',
         });
         url = v.videoUri;
         headers = { 'x-goog-api-key': cfg.geminiApiKey ?? '' }; // Veo uri needs the key
       } else {
+        // wanxiang t2v 兜底 (Veo 降级时)
         const v = await fns.generateBrollVideo({
           apiKey: cfg.dashscopeApiKey,
           baseUrl: cfg.dashscopeBaseUrl,
@@ -233,7 +269,8 @@ export function createSimplePipelineDeps(
     async renderBrollClip({ index, visualRef, audioRef, durationMs }) {
       const outPath = path.join(svc.workdir, `seg${index}-clip.mp4`);
       if (visualMode === 'image') {
-        await fns.renderImageKenBurns({ imagePath: visualRef, audioPath: audioRef, outPath, durationMs }, ffOpts);
+        // 静态图(无 Ken Burns 运镜)— BOSS 2026-06-15.
+        await fns.renderImageClip({ imagePath: visualRef, audioPath: audioRef, outPath, durationMs }, ffOpts);
       } else {
         await fns.renderVideoClip({ videoPath: visualRef, audioPath: audioRef, outPath, durationMs }, ffOpts);
       }
@@ -274,8 +311,11 @@ export async function runSimpleVideoCreation(
 ): Promise<SimpleVideoResult> {
   if (!cfg.dashscopeApiKey) throw new SimpleVideoError('DASHSCOPE_API_KEY not configured', 'config');
   const visualMode = opts.visualMode ?? 'video';
-  if (visualMode === 'video' && (opts.videoSource ?? 'wanxiang') === 'veo' && !cfg.geminiApiKey) {
-    throw new SimpleVideoError('Veo selected but GEMINI_API_KEY not configured', 'config');
+  const videoSource = opts.videoSource ?? 'veo_fast';
+  // Veo (any tier) AND nano banana image both run on the shared Google key.
+  const needsGemini = visualMode === 'image' || (visualMode === 'video' && isVeoSource(videoSource));
+  if (needsGemini && !cfg.geminiApiKey) {
+    throw new SimpleVideoError('Veo/nano banana selected but GEMINI_API_KEY not configured', 'config');
   }
   const fns = { ...realFns(), ...(svc.overrides ?? {}) };
   const ffOpts = cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {};
