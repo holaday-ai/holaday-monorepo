@@ -8,7 +8,17 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`95ee29a`
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`bfaef0e`
+（2026-06-15；**#2 全景速览审查批 follow-up + ②资金面铁律 部署 prod**，restart 652，preflight 实读
+live HEAD FF-safe，无新 migration。修：**P0 报告期取错**（`stock_financial_abstract_ths` 旧用
+`df.head(80)` 截断长历史股最新期→驰宏取成「2022中报」与趋势矛盾=信任杀手；改 `_ths_sorted` 按报告期
+升序取 `iloc[-1]`，驰宏实证 2026-03-31）+ **P1 ④补**扣非净利润/每股经营现金流/季度环比 + **P1 ⑤补**
+相对行业静态PE中位（cninfo `_retry` 包裹→行业分位真渲染，⑦方向预算正确）+ **P2 ⑦真解读**（数字翻人话+
+点重大信号如解禁抛压，③⑦解禁口径统一「全部N笔合计」）+ **②资金面铁律**（`bfaef0e`：⑦ prompt 加铁律——
+龙虎榜/北向无数据时绝不编造主买/资金流入，regex 闸门抓不住无数字的定性脑补）。**真路径实证**：驰宏600497
+（今日涨停·有龙虎榜→⑦如实引「买一主买」）+ 茅台600519（当日未上榜→② 龙虎榜「当日未上榜」、⑦「龙虎榜
+当日无数据」**零编造**）；两股 ④报告期=2026Q1、⑤行业中位方向正确、零买卖词、标时效、disclaimer 全在。
+前态：step1 `95ee29a`（restart 649）。）
 （2026-06-15；**#2 Phase2 全景速览 step1 + ⑦闸门对抗加固 部署 prod**，restart 649，healthz ok，
 全量 **2688** 测绿。**ultracode 对抗复审**：4 红队策略压测 ⑦ 合规闸门，真 complianceGate 实测初版
 漏 3/12（语义迂回预测 + 技术信号 regex 盲区）→ 补 SEMANTIC_PREDICT(拐点正在积累/只是时间问题/
