@@ -181,6 +181,28 @@ export async function enrollVoice(p: EnrollVoiceParams): Promise<EnrollVoiceResu
   return { voiceId: output.voice, targetModel: output.target_model ?? targetModel };
 }
 
+export interface DeleteVoiceParams extends QwenBaseParams {
+  readonly voiceId: string;
+}
+
+/**
+ * Delete a cloned voice from DashScope (隐私: 清掉用户在云端的声纹). Same
+ * customization endpoint, `action:'delete'`. Best-effort: the caller treats
+ * an already-gone voice as success (the local users.qwen_voice_id is cleared
+ * regardless). Synthesis billing is per-character, so a dangling voice costs
+ * nothing — but we delete it to honour the user's "remove my voice" request.
+ */
+export async function deleteVoice(p: DeleteVoiceParams): Promise<void> {
+  assertKey(p.apiKey);
+  if (!p.voiceId) throw new QwenVoiceCloneError('deleteVoice requires a voiceId', 'no_voice');
+  await postJson(
+    `${base(p)}/api/v1/services/audio/tts/customization`,
+    { model: ENROLL_MODEL, input: { action: 'delete', voice: p.voiceId } },
+    p,
+    DEFAULT_ENROLL_TIMEOUT_MS,
+  );
+}
+
 export interface SynthesizeParams extends QwenBaseParams {
   readonly voiceId: string;
   readonly text: string;

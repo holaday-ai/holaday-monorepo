@@ -62,6 +62,12 @@ export const users = mysqlTable(
     qwenVoiceId: varchar('qwen_voice_id', { length: 128 }),
     baseVideoFileId: varchar('base_video_file_id', { length: 32 }),
     /**
+     * Phase 2 第三期 — when the user signed the「本人授权声明（仅用本人
+     * 声音/肖像）」consent. NULL = not signed / revoked. The IP-person
+     * lip-sync lane (video-lane.ts) hard-refuses unless this is set.
+     */
+    videoSelfUseAuthorizedAt: datetime('video_self_use_authorized_at', { mode: 'date', fsp: 3 }),
+    /**
      * Open-pool role ids the Basic-plan user has actively chosen
      * (max 5). Pro plan ignores this — they get all 33 by default.
      * Stored as JSON so future schemas can carry per-pick metadata

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  deleteVoice,
   enrollVoice,
   QwenVoiceCloneError,
   synthesizeSpeech,
@@ -125,5 +126,24 @@ describe('QwenVoiceCloneError', () => {
     const e = new QwenVoiceCloneError('x', 'no_voice');
     expect(e).toBeInstanceOf(Error);
     expect(e.kind).toBe('no_voice');
+  });
+});
+
+describe('deleteVoice — 清云端声纹 (Phase 3 隐私)', () => {
+  it('posts customization action=delete with the voice id', async () => {
+    const { fetchImpl, calls } = jsonQueue([{ body: { output: {} } }]);
+    await deleteVoice({ apiKey: KEY, voiceId: 'qwen-tts-vc-holaday-x', fetchImpl });
+    expect(calls[0]?.url).toContain('/api/v1/services/audio/tts/customization');
+    const body = JSON.parse((calls[0]?.init as RequestInit).body as string);
+    expect(body).toMatchObject({
+      model: 'qwen-voice-enrollment',
+      input: { action: 'delete', voice: 'qwen-tts-vc-holaday-x' },
+    });
+  });
+
+  it('throws no_voice when voiceId is empty; no_api_key when key empty', async () => {
+    const { fetchImpl } = jsonQueue([{ body: { output: {} } }]);
+    await expect(deleteVoice({ apiKey: KEY, voiceId: '', fetchImpl })).rejects.toMatchObject({ kind: 'no_voice' });
+    await expect(deleteVoice({ apiKey: '', voiceId: 'v' })).rejects.toMatchObject({ kind: 'no_api_key' });
   });
 });

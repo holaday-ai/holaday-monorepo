@@ -476,6 +476,26 @@ export class FileService {
   }
 
   /**
+   * Delete a file (R2 object + task_files row) for the caller. Ownership-
+   * checked. Used by the video onboarding flow: 样本即弃 (delete the voice
+   * sample right after enrollment mints the voice_id) + base-video removal
+   * when the user clears their IP assets. Returns false when missing /
+   * not-owned (idempotent-friendly); R2 delete is best-effort (a missing
+   * object still drops the row). Server-side only — no plan/quota gating.
+   */
+  async deleteForUser(fileExternalId: string, userIdInternal: number): Promise<boolean> {
+    const [row] = await this.db
+      .select()
+      .from(taskFiles)
+      .where(eq(taskFiles.externalId, fileExternalId))
+      .limit(1);
+    if (!row || row.userId !== userIdInternal) return false;
+    await this.storage.delete(row.storagePath).catch(() => {});
+    await this.db.delete(taskFiles).where(eq(taskFiles.externalId, fileExternalId));
+    return true;
+  }
+
+  /**
    * Load a file by external id, verifying it belongs to the caller.
    * Returns null when the file is missing OR owned by a different
    * user — both are 404s on the API surface (don't leak existence).

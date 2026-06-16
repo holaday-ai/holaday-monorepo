@@ -19,6 +19,7 @@ import { scheduledTasksRouter } from './routers/scheduled-tasks.js';
 import { skillsRouter } from './routers/skills.js';
 import { tasksRouter } from './routers/tasks.js';
 import { usageRouter } from './routers/usage.js';
+import { videoOnboardingRouter } from './routers/video-onboarding.js';
 import { watchlistsRouter } from './routers/watchlists.js';
 import { publicProcedure, router } from './trpc.js';
 
@@ -47,6 +48,7 @@ export const appRouter = router({
   notificationChannels: notificationChannelsRouter,
   admin: adminRouter,
   watchlists: watchlistsRouter,
+  videoOnboarding: videoOnboardingRouter,
 });
 
 export type AppRouter = typeof appRouter;
