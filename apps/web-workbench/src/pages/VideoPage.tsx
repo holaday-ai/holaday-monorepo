@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  Check,
   CheckCircle2,
   CircleSlash,
   Clapperboard,
@@ -8,9 +9,14 @@ import {
   Film,
   ImagePlus,
   Loader2,
+  Lock,
+  Mic,
   PawPrint,
+  ShieldCheck,
   Sparkles,
+  Trash2,
   UserRound,
+  Video as VideoIcon,
   X,
   XCircle,
 } from 'lucide-react';
@@ -20,7 +26,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
-import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
+import { uploadFailureMessage, uploadFile, uploadMediaFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import { useTaskStore } from '@/stores/task-store';
@@ -56,7 +62,7 @@ const TABS: ReadonlyArray<{
 }> = [
   { id: 'normal', label: '普通视频', icon: Film, enabled: true },
   { id: 'pet', label: '宠物动起来', icon: PawPrint, enabled: true },
-  { id: 'ip', label: 'IP 人物换口型', icon: UserRound, enabled: false },
+  { id: 'ip', label: 'IP 人物换口型', icon: UserRound, enabled: true },
 ];
 
 export function VideoPage(): JSX.Element {
@@ -103,7 +109,7 @@ export function VideoPage(): JSX.Element {
       ) : tab === 'pet' ? (
         <PetVideoForm />
       ) : (
-        <ComingSoon tab={tab} />
+        <IpOnboardingWizard />
       )}
     </PageContainer>
   );
@@ -701,36 +707,340 @@ function formatTime(value: string | number | Date): string {
 }
 
 // ---------------------------------------------------------------------------
-// 占位:IP 人物 / 宠物
+// IP 人物换口型 — onboarding 向导 (Phase 2 第三期 阶段2)
+// 三步:本人授权 → 传声音(克隆)→ 传出镜底版。素材就绪后才能生成(生成留阶段3)。
 // ---------------------------------------------------------------------------
 
-function ComingSoon({ tab }: { tab: VideoTab }): JSX.Element {
-  const copy =
-    tab === 'ip'
-      ? {
-          icon: UserRound,
-          title: 'IP 人物换口型',
-          desc: '上传你的出镜底版,用你本人的声音 + 口型,把文案讲出来。正在接入,敬请期待。',
-        }
-      : {
-          icon: PawPrint,
-          title: '宠物动起来',
-          desc: '上传一张宠物照片,让它在画面里自然活动。正在接入,敬请期待。',
-        };
-  const Icon = copy.icon;
+interface OnboardingStatus {
+  hasVoice: boolean;
+  hasBaseVideo: boolean;
+  authorized: boolean;
+}
+
+function IpOnboardingWizard(): JSX.Element {
+  const toast = useToast();
+  const [status, setStatus] = React.useState<OnboardingStatus | null>(null);
+  const [loadError, setLoadError] = React.useState(false);
+  const [consent, setConsent] = React.useState(false);
+  const [authorizing, setAuthorizing] = React.useState(false);
+  const [uploadingVoice, setUploadingVoice] = React.useState(false);
+  const [uploadingVideo, setUploadingVideo] = React.useState(false);
+  const [clearing, setClearing] = React.useState(false);
+  const voiceRef = React.useRef<HTMLInputElement>(null);
+  const videoRef = React.useRef<HTMLInputElement>(null);
+  const mountedRef = React.useRef(true);
+
+  const load = React.useCallback(async () => {
+    setLoadError(false);
+    try {
+      const s = await trpc.videoOnboarding.status.query();
+      if (!mountedRef.current) return;
+      setStatus({ hasVoice: s.hasVoice, hasBaseVideo: s.hasBaseVideo, authorized: s.authorized });
+    } catch {
+      if (!mountedRef.current) return;
+      setLoadError(true);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    void load();
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [load]);
+
+  async function handleAuthorize(): Promise<void> {
+    if (!consent || authorizing) return;
+    setAuthorizing(true);
+    try {
+      await trpc.videoOnboarding.authorize.mutate();
+      await load();
+      toast.show('已签署本人授权声明', 'info', 2000);
+    } catch (err) {
+      toast.show(err instanceof Error ? err.message : '提交失败,请重试', 'error');
+    } finally {
+      setAuthorizing(false);
+    }
+  }
+
+  async function handleVoice(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!/\.(wav|mp3|m4a)$/i.test(file.name) && !/^audio\/(wav|mpeg|mp4|x-m4a)$/i.test(file.type)) {
+      toast.show('声音样本请用 WAV / MP3 / M4A', 'error');
+      return;
+    }
+    setUploadingVoice(true);
+    try {
+      const up = await uploadMediaFile(file);
+      await trpc.videoOnboarding.enrollVoice.mutate({ audioFileId: up.fileId });
+      await load();
+      toast.show('声音已就绪', 'info', 2000);
+    } catch (err) {
+      toast.show(uploadFailureMessage(err), 'error');
+    } finally {
+      setUploadingVoice(false);
+    }
+  }
+
+  async function handleVideo(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!/\.(mp4|mov)$/i.test(file.name) && !/^video\/(mp4|quicktime)$/i.test(file.type)) {
+      toast.show('出镜底版请用 MP4 / MOV', 'error');
+      return;
+    }
+    setUploadingVideo(true);
+    try {
+      const up = await uploadMediaFile(file);
+      await trpc.videoOnboarding.setBaseVideo.mutate({ videoFileId: up.fileId });
+      await load();
+      toast.show('底版已就绪', 'info', 2000);
+    } catch (err) {
+      toast.show(uploadFailureMessage(err), 'error');
+    } finally {
+      setUploadingVideo(false);
+    }
+  }
+
+  async function handleClear(): Promise<void> {
+    if (clearing) return;
+    setClearing(true);
+    try {
+      await trpc.videoOnboarding.deleteAssets.mutate();
+      setConsent(false);
+      await load();
+      toast.show('已清除全部 IP 素材', 'info', 2000);
+    } catch (err) {
+      toast.show(err instanceof Error ? err.message : '清除失败,请重试', 'error');
+    } finally {
+      setClearing(false);
+    }
+  }
+
+  if (status === null) {
+    return (
+      <Section>
+        {loadError ? (
+          <div className="flex flex-col items-start gap-2 py-4 text-[13px] text-muted-foreground">
+            <span>加载失败,请稍后重试</span>
+            <Button variant="outline" size="sm" onClick={() => void load()}>
+              重试
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 py-6 text-[13px] text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            加载中…
+          </div>
+        )}
+      </Section>
+    );
+  }
+
+  const ready = status.authorized && status.hasVoice && status.hasBaseVideo;
+  const anyAsset = status.authorized || status.hasVoice || status.hasBaseVideo;
+
   return (
-    <Section>
-      <div className="flex flex-col items-center gap-3 py-12 text-center">
-        <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#EA1F59]/10 text-[#EA1F59]">
-          <Icon className="h-6 w-6" />
-        </span>
-        <div className="text-base font-semibold text-foreground">{copy.title}</div>
-        <p className="max-w-sm text-[13px] leading-relaxed text-muted-foreground">{copy.desc}</p>
-        <span className="rounded-full bg-[#EFEFEF] px-3 py-1 text-[12px] font-medium text-muted-foreground">
-          即将上线
-        </span>
+    <div className="space-y-6">
+      <input ref={voiceRef} type="file" accept=".wav,.mp3,.m4a,audio/wav,audio/mpeg,audio/mp4" className="hidden" onChange={(e) => void handleVoice(e)} />
+      <input ref={videoRef} type="file" accept=".mp4,.mov,video/mp4,video/quicktime" className="hidden" onChange={(e) => void handleVideo(e)} />
+
+      <Section title="开通「IP 人物换口型」" description="用你本人的声音 + 出镜底版,把文案讲出来。先完成三步素材准备。">
+        <div className="space-y-4">
+          {/* Step 1 — 授权 */}
+          <WizardStep
+            index={1}
+            done={status.authorized}
+            icon={ShieldCheck}
+            title="本人授权声明"
+            locked={false}
+          >
+            {status.authorized ? (
+              <div className="text-[13px] text-muted-foreground">已签署 —— 仅用于你本人、可随时删除。</div>
+            ) : (
+              <div className="space-y-3">
+                <label className="flex cursor-pointer items-start gap-2 text-[13px] text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={consent}
+                    onChange={(e) => setConsent(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 accent-[#EA1F59]"
+                  />
+                  <span>我确认:上传的声音与出镜视频<strong>均为本人</strong>,仅用于生成<strong>本人</strong>的视频,且我可随时删除这些素材。</span>
+                </label>
+                <Button type="button" size="sm" onClick={() => void handleAuthorize()} disabled={!consent || authorizing}>
+                  {authorizing ? '提交中…' : '同意并继续'}
+                </Button>
+              </div>
+            )}
+          </WizardStep>
+
+          {/* Step 2 — 声音 */}
+          <WizardStep
+            index={2}
+            done={status.hasVoice}
+            icon={Mic}
+            title="本人声音(克隆)"
+            locked={!status.authorized}
+          >
+            <div className="space-y-2">
+              {status.hasVoice ? (
+                <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
+                  <span>声音已就绪 ✓</span>
+                  <Button variant="outline" size="sm" onClick={() => voiceRef.current?.click()} disabled={uploadingVoice}>
+                    {uploadingVoice ? '上传中…' : '重新上传'}
+                  </Button>
+                </div>
+              ) : (
+                <Button type="button" size="sm" onClick={() => voiceRef.current?.click()} disabled={!status.authorized || uploadingVoice}>
+                  {uploadingVoice ? (
+                    <>
+                      <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                      上传并克隆…
+                    </>
+                  ) : (
+                    '上传声音样本'
+                  )}
+                </Button>
+              )}
+              <p className="text-[11px] text-muted-foreground">
+                WAV / MP3 / M4A,10-20 秒清晰人声(安静环境、连续说话);用完即弃,只保留声纹。
+              </p>
+            </div>
+          </WizardStep>
+
+          {/* Step 3 — 底版 */}
+          <WizardStep
+            index={3}
+            done={status.hasBaseVideo}
+            icon={VideoIcon}
+            title="本人出镜底版"
+            locked={!status.authorized}
+          >
+            <div className="space-y-2">
+              {status.hasBaseVideo ? (
+                <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
+                  <span>底版已就绪 ✓</span>
+                  <Button variant="outline" size="sm" onClick={() => videoRef.current?.click()} disabled={uploadingVideo}>
+                    {uploadingVideo ? '上传中…' : '重新上传'}
+                  </Button>
+                </div>
+              ) : (
+                <Button type="button" size="sm" onClick={() => videoRef.current?.click()} disabled={!status.authorized || uploadingVideo}>
+                  {uploadingVideo ? (
+                    <>
+                      <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                      上传中…
+                    </>
+                  ) : (
+                    '上传出镜视频'
+                  )}
+                </Button>
+              )}
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                MP4 / MOV,10-60 秒竖屏口播。<span className="font-medium text-[#595757]">为保证换口型质量:正脸面对镜头、光线均匀打亮脸部、画面只有你一人、对焦清晰、安静环境、嘴部不被遮挡。</span>侧脸/逆光/模糊会明显变差。
+              </p>
+            </div>
+          </WizardStep>
+        </div>
+      </Section>
+
+      {/* 就绪 + 生成占位(阶段3) */}
+      <Section className={ready ? 'border-[#EA1F59]/20 bg-[#EA1F59]/[0.03]' : undefined}>
+        {ready ? (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-2 text-[13px] font-medium text-[#EA1F59]">
+              <CheckCircle2 className="h-4 w-4" />
+              素材已就绪 —— 声音 + 出镜底版 + 授权都已完成。
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[12px] text-muted-foreground">填文案、用你本人声音口播的生成功能即将上线。</span>
+              <Button type="button" disabled className="min-w-[140px]">
+                <Lock className="mr-1.5 h-4 w-4" />
+                生成(即将上线)
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[13px] text-muted-foreground">完成上面三步,即可解锁「IP 人物」视频生成。</span>
+            <Button type="button" disabled className="min-w-[140px]">
+              <Lock className="mr-1.5 h-4 w-4" />
+              生成(未就绪)
+            </Button>
+          </div>
+        )}
+      </Section>
+
+      {/* 隐私 + 清除 */}
+      <Section title="隐私与素材管理">
+        <ul className="mb-3 space-y-1 text-[12px] leading-relaxed text-muted-foreground">
+          <li>· 声音样本在克隆出声纹后<span className="font-medium text-[#595757]">即刻删除</span>,我们只保留声纹用于合成。</li>
+          <li>· 出镜底版加密存储、仅用于你本人的视频,可随时删除/重传。</li>
+          <li>· 一键清除会删掉云端声纹 + 出镜底版 + 授权记录。</li>
+        </ul>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void handleClear()}
+          disabled={!anyAsset || clearing}
+          className="border-[#DCDDDD] text-[#595757] hover:border-[#EA1F59]/40 hover:text-[#EA1F59]"
+        >
+          {clearing ? (
+            <>
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              清除中…
+            </>
+          ) : (
+            <>
+              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+              清除全部 IP 素材
+            </>
+          )}
+        </Button>
+      </Section>
+    </div>
+  );
+}
+
+function WizardStep({
+  index,
+  done,
+  locked,
+  icon: Icon,
+  title,
+  children,
+}: {
+  index: number;
+  done: boolean;
+  locked: boolean;
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <div className={cn('flex gap-3 rounded-lg border p-4', done ? 'border-[#EA1F59]/30 bg-[#EA1F59]/[0.04]' : 'border-[#DCDDDD] bg-white', locked && 'opacity-60')}>
+      <span
+        className={cn(
+          'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[13px] font-medium',
+          done ? 'bg-[#EA1F59] text-white' : 'bg-[#EFEFEF] text-[#595757]',
+        )}
+      >
+        {done ? <Check className="h-4 w-4" /> : index}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 text-[14px] font-medium text-foreground">
+          <Icon className="h-4 w-4 text-[#EA1F59]" />
+          {title}
+          {locked && <Lock className="h-3 w-3 text-muted-foreground" />}
+        </div>
+        <div className="mt-2">{children}</div>
       </div>
-    </Section>
+    </div>
   );
 }
 

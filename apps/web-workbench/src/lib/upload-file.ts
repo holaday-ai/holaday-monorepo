@@ -75,3 +75,61 @@ export function uploadFailureMessage(err: unknown): string {
 
   return pageErrorMessage(err.message, '上传失败，请稍后重试。');
 }
+
+async function toUploadError(res: Response, fallback: string): Promise<UploadError> {
+  let body: { error?: string; message?: string } = {};
+  try {
+    body = (await res.json()) as { error?: string; message?: string };
+  } catch {
+    // non-JSON (e.g. nginx 413)
+  }
+  return {
+    status: res.status,
+    message: body.message ?? (res.status === 413 ? '文件超过大小限制' : res.status === 415 ? '不支持的文件类型' : fallback),
+    ...(body.error ? { code: body.error } : {}),
+  };
+}
+
+/**
+ * Two-stage media upload (audio/video) — direct-to-R2 presigned PUT.
+ *
+ * The simple `uploadFile` (/api/files/upload, memoryStorage) rejects media
+ * by the document allowlist; audio/video go through the presigned path:
+ *   1. POST /api/files/upload-url  { filename, mimetype, sizeBytes } → { uploadUrl, requiredHeaders, fileId }
+ *   2. PUT the bytes straight to R2 (presigned URL; no auth header, just Content-Type)
+ *   3. POST /api/files/upload-confirm { fileId } → finalized { fileId, ... }
+ * Used by the IP-person onboarding wizard for voice sample + base video.
+ */
+export async function uploadMediaFile(file: File): Promise<UploadedFileMeta> {
+  const token = getAccessToken();
+  const authHeaders: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
+  // 1. presign
+  const urlRes = await fetch('/api/files/upload-url', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...authHeaders },
+    body: JSON.stringify({ filename: file.name, mimetype: file.type, sizeBytes: file.size }),
+  });
+  if (!urlRes.ok) throw await toUploadError(urlRes, '获取上传地址失败');
+  const presigned = (await urlRes.json()) as {
+    fileId: string;
+    uploadUrl: string;
+    requiredHeaders?: Record<string, string>;
+  };
+  // 2. PUT bytes to R2 (presigned — do NOT attach the auth header)
+  const putRes = await fetch(presigned.uploadUrl, {
+    method: 'PUT',
+    headers: presigned.requiredHeaders ?? { 'Content-Type': file.type || 'application/octet-stream' },
+    body: file,
+  });
+  if (!putRes.ok) {
+    throw { status: putRes.status, message: '上传到存储失败，请重试' } as UploadError;
+  }
+  // 3. confirm (server HEADs R2 + verifies real size against plan cap)
+  const confRes = await fetch('/api/files/upload-confirm', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...authHeaders },
+    body: JSON.stringify({ fileId: presigned.fileId }),
+  });
+  if (!confRes.ok) throw await toUploadError(confRes, '确认上传失败');
+  return (await confRes.json()) as UploadedFileMeta;
+}
