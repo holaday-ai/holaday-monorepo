@@ -102,6 +102,8 @@ const schema = z.object({
    */
   WANXIANG_T2I_MODEL: z.string().default('wan2.2-t2i-flash'),
   WANXIANG_T2V_MODEL: z.string().default('wan2.1-t2v-turbo'),
+  /** HappyHorse-1.0 文生视频(同 DashScope intl 端点/同 key,仅改 model). */
+  HAPPYHORSE_T2V_MODEL: z.string().default('happyhorse-1.0-t2v'),
   FAL_LIPSYNC_MODEL: z.string().default('fal-ai/latentsync'),
   QWEN_TTS_VC_MODEL: z.string().default('qwen3-tts-vc-2026-01-22'),
   /**

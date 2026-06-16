@@ -57,19 +57,39 @@ export function decideVideoGate(choice: VideoChoice, claimed: boolean): VideoGat
   return choice === 'image' ? 'generate_image' : 'generate_video';
 }
 
-// 报价:硬编码的只有官方单价表 + 汇率;动态部分 = 本次真实段数。
-// TODO(pricing): 价表/汇率为硬编码快照，Google 可能调价 → 需手动同步
+// 报价:硬编码的只有官方单价表 + 汇率;动态部分 = 本次真实段数 + 选定档/画质/时长。
+// TODO(pricing): 价表/汇率为硬编码快照，Google/阿里 可能调价 → 需手动同步
 //   https://ai.google.dev/gemini-api/docs/pricing (Veo 每秒价 + nano banana 图片价)。
-export const VEO_USD_PER_SEC_1080P: Record<VideoSource, number> = {
-  veo_fast: 0.12,
-  veo_lite: 0.08,
-  veo_standard: 0.4,
-  happyhorse: 1.6 / 7.3, // HappyHorse 1080P ¥1.6/s(阿里官方,以控制台为准)→ 换算成 USD/s
-  wanxiang: 0, // 兜底源,不进报价(仅 Veo 降级时用)
+//   HappyHorse: 阿里 DashScope 控制台(720P ¥0.9/s · 1080P ¥1.6/s)。
+type Resolution = '720p' | '1080p';
+/** 每秒美元单价 — 按档 × 画质。720p/1080p 影响真实计费,据此诚实定价(不一律按 1080p)。*/
+const VEO_USD_PER_SEC: Record<VideoSource, Record<Resolution, number>> = {
+  veo_fast: { '720p': 0.1, '1080p': 0.12 },
+  veo_lite: { '720p': 0.05, '1080p': 0.08 },
+  veo_standard: { '720p': 0.4, '1080p': 0.4 }, // 高质量档单价不随画质降
+  happyhorse: { '720p': 0.9 / 7.3, '1080p': 1.6 / 7.3 }, // ¥/s → USD/s
+  wanxiang: { '720p': 0, '1080p': 0 }, // 兜底源,不进报价(仅 Veo 降级时用)
+};
+/** 档位中文标签 — 报价卡如实标注选了哪档,不再硬写「Veo Fast」。 */
+const TIER_LABEL: Record<VideoSource, string> = {
+  veo_fast: 'Veo Fast',
+  veo_lite: 'Veo Lite',
+  veo_standard: 'Veo 高质量',
+  happyhorse: '快马 HappyHorse',
+  wanxiang: '万相',
 };
 const NB_USD_PER_IMG = 0.067; // nano banana 1K/张
 const USD_TO_CNY = 7.3;
-const CLIP_BILL_SEC = 8; // Veo 3.1 每段按 8s 生成计费(成片那段按音频时长裁剪,Veo 计费仍按 8s)
+const DEFAULT_BILL_SEC = 8; // 每段默认按 8s 生成计费(成片那段按音频时长裁剪,计费仍按生成时长)
+
+export interface VideoQuoteOpts {
+  /** 画质,影响每秒单价。默认 '1080p'。 */
+  readonly resolution?: Resolution;
+  /** 每段生成时长(6/8),影响计费秒数。默认 8。 */
+  readonly durationSeconds?: number;
+  /** 画幅,只改报价文案的「竖/横/方屏」措辞,不影响价格。默认竖屏。 */
+  readonly aspectRatio?: '9:16' | '16:9' | '1:1';
+}
 
 export interface VideoQuote {
   readonly segments: number;
@@ -78,13 +98,18 @@ export interface VideoQuote {
   readonly message: string;
 }
 
-/** Dynamic price quote — videoCny = 真实段数 × 8s × 选定档单价 × 汇率. */
-export function quoteVideo(segments: number, tier: VideoSource): VideoQuote {
-  const videoCny = Math.ceil(segments * CLIP_BILL_SEC * (VEO_USD_PER_SEC_1080P[tier] || 0) * USD_TO_CNY);
+/** Dynamic price quote — videoCny = 真实段数 × 每段秒数 × 选定档/画质单价 × 汇率. */
+export function quoteVideo(segments: number, tier: VideoSource, opts: VideoQuoteOpts = {}): VideoQuote {
+  const resolution: Resolution = opts.resolution ?? '1080p';
+  const billSec = opts.durationSeconds ?? DEFAULT_BILL_SEC;
+  const perSec = VEO_USD_PER_SEC[tier]?.[resolution] ?? 0;
+  const videoCny = Math.ceil(segments * billSec * perSec * USD_TO_CNY);
   const imageCny = Math.ceil(segments * NB_USD_PER_IMG * USD_TO_CNY);
+  const shape =
+    opts.aspectRatio === '16:9' ? '横屏' : opts.aspectRatio === '1:1' ? '方形' : '竖屏';
   const message =
-    `将用 ${segments} 段动态画面合成一条竖屏视频，预计费用约 ¥${videoCny}` +
-    `（Veo Fast · 1080p · 每段 8 秒计费）。\n` +
+    `将用 ${segments} 段动态画面合成一条${shape}视频，预计费用约 ¥${videoCny}` +
+    `（${TIER_LABEL[tier]} · ${resolution} · 每段 ${billSec} 秒计费）。\n` +
     `点「确认制作」开始；或选「图片版」改用静态图（更省，约 ¥${imageCny}）；不需要可「取消」。`;
   return { segments, videoCny, imageCny, message };
 }

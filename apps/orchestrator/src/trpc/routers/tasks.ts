@@ -97,8 +97,9 @@ import { taskEvents } from '../../db/schema/task-events.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
 import { tasks as tasksTable } from '../../db/schema/tasks.js';
 import { decideVideoGate, parseVideoConfirm, quoteVideo } from '../../agent/video/video-confirm.js';
-import type { SimpleVideoConfig, VideoSource } from '../../agent/video/video-lane-simple.js';
+import type { AspectRatio, SimpleVideoConfig, VideoSource } from '../../agent/video/video-lane-simple.js';
 import type { VideoScript } from '../../agent/video/types.js';
+import type { VideoStyle } from '../../agent/video/video-script.js';
 import { routeTaskEvidenceOnDelete } from '../../evidence/evidence-deletion-service.js';
 import { writeLedgerToDb } from '../../evidence/ledger-write-service.js';
 import { users } from '../../db/schema/users.js';
@@ -216,6 +217,7 @@ function buildVideoCfg(): SimpleVideoConfig {
     presetVoice: 'Cherry',
     geminiImageModel: appEnv.GEMINI_IMAGE_MODEL,
     wanxiangT2vModel: appEnv.WANXIANG_T2V_MODEL,
+    happyhorseModel: appEnv.HAPPYHORSE_T2V_MODEL ?? 'happyhorse-1.0-t2v',
     watermarkFontFile: '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
   };
 }
@@ -298,6 +300,22 @@ const createInput = z.object({
    */
   viewportProfile: z
     .enum(['sidepanel', 'desktop', 'fullscreen', 'mobile'])
+    .optional(),
+  /**
+   * Phase 2 第一期 — 视频独立界面参数。SPA「普通视频」面板把用户选的模型档/
+   * 风格/画幅/画质/时长带上来:Phase1 video fork 据此报价(诚实定价)+ 存进
+   * result.metadata.videoOptions,confirmVideo 原子抢占后透传给 runSimpleVideoCreation。
+   * omitted = 各项走 lane 默认(veo_fast / 自动 / 竖屏 9:16 / 1080p / 8s)。
+   * 仅当 video fork 命中(VIDEO_CREATION_ENABLED + 灰度内)才被读取;其余意图忽略。
+   */
+  videoOptions: z
+    .object({
+      model: z.enum(['veo_fast', 'veo_lite', 'veo_standard', 'happyhorse', 'wanxiang']).optional(),
+      style: z.enum(['auto', 'realistic', 'atmospheric', 'science']).optional(),
+      aspectRatio: z.enum(['9:16', '16:9', '1:1']).optional(),
+      resolution: z.enum(['720p', '1080p']).optional(),
+      durationSeconds: z.union([z.literal(6), z.literal(8)]).optional(),
+    })
     .optional(),
 });
 
@@ -1181,11 +1199,14 @@ export const tasksRouter = router({
       if (appEnv.VIDEO_CREATION_ENABLED && videoIntent && videoAllowed && anthropicForResolver) {
         const anthropicClient = anthropicForResolver;
         const { optimizeUserScript } = await import('../../agent/video/video-script.js');
+        // Phase 2 第一期 — SPA「普通视频」面板把模型档/风格/画幅/画质/时长带上来。
+        const vOpts = input.videoOptions ?? {};
+        const style = vOpts.style as VideoStyle | undefined;
         let script: VideoScript | null = null;
         try {
-          // optimize = LLM(~¥0.01),**非 Veo**。出真实段数以便动态报价。
+          // optimize = LLM(~¥0.01),**非 Veo**。出真实段数以便动态报价;风格只调画面语气。
           script = await optimizeUserScript(
-            { userText: input.intent },
+            { userText: input.intent, ...(style ? { style } : {}) },
             {
               llm: async ({ system, user }) => {
                 const resp = await anthropicClient.messages.create({
@@ -1203,8 +1224,12 @@ export const tasksRouter = router({
           ctx.logger.error({ err, userId: ctx.userId }, 'video_creation: optimize(报价前) failed — 落通用');
         }
         if (script) {
-          const tier: VideoSource = 'veo_fast';
-          const quote = quoteVideo(script.segments.length, tier);
+          const tier: VideoSource = vOpts.model ?? 'veo_fast';
+          const quote = quoteVideo(script.segments.length, tier, {
+            ...(vOpts.resolution ? { resolution: vOpts.resolution } : {}),
+            ...(vOpts.durationSeconds ? { durationSeconds: vOpts.durationSeconds } : {}),
+            ...(vOpts.aspectRatio ? { aspectRatio: vOpts.aspectRatio } : {}),
+          });
           const taskId = newExternalId('task');
           const repo = new TaskRepository(ctx.db);
           await repo.insertTask(
@@ -1222,7 +1247,12 @@ export const tasksRouter = router({
               awaitingKind: 'video_quote',
               result: {
                 summary: quote.message,
-                metadata: { lane: 'video_creation_confirm', videoScript: script, videoTier: tier },
+                metadata: {
+                  lane: 'video_creation_confirm',
+                  videoScript: script,
+                  videoTier: tier,
+                  videoOptions: vOpts,
+                },
               },
             })
             .where(eq(tasksTable.externalId, taskId));
@@ -5428,10 +5458,24 @@ export const tasksRouter = router({
 
       // generate_video | generate_image — Veo 在此之后(已过原子抢占=确认后)。
       const meta =
-        ((row.result as { metadata?: { videoScript?: VideoScript; videoTier?: VideoSource } } | null)
-          ?.metadata) ?? {};
+        ((
+          row.result as {
+            metadata?: {
+              videoScript?: VideoScript;
+              videoTier?: VideoSource;
+              videoOptions?: {
+                model?: VideoSource;
+                style?: VideoStyle;
+                aspectRatio?: AspectRatio;
+                resolution?: '720p' | '1080p';
+                durationSeconds?: number;
+              };
+            };
+          } | null
+        )?.metadata) ?? {};
       const script = meta.videoScript;
       const tier: VideoSource = meta.videoTier ?? 'veo_fast';
+      const vOpts = meta.videoOptions ?? {};
       if (!script) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '报价脚本丢失' });
       const visualMode = action === 'generate_image' ? ('image' as const) : ('video' as const);
 
@@ -5495,9 +5539,15 @@ export const tasksRouter = router({
         };
         try {
           const result = await runSimpleVideoCreation(
-            { userText: intentText, script },
+            { userText: intentText, script, ...(vOpts.style ? { style: vOpts.style } : {}) },
             buildVideoCfg(),
-            { visualMode, videoSource: tier },
+            {
+              visualMode,
+              videoSource: tier,
+              ...(vOpts.aspectRatio ? { aspectRatio: vOpts.aspectRatio } : {}),
+              ...(vOpts.resolution ? { veoResolution: vOpts.resolution } : {}),
+              ...(vOpts.durationSeconds ? { veoDurationSeconds: vOpts.durationSeconds } : {}),
+            },
             { storeOutput, workdir, logger, llm },
           );
           const summary = `视频已生成（${result.segments} 段 / ${Math.round(result.totalDurationMs / 1000)} 秒）。`;

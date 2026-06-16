@@ -93,4 +93,27 @@ describe('quoteVideo — dynamic by segment count', () => {
   it('lite tier is cheaper than fast for the same segments', () => {
     expect(quoteVideo(5, 'veo_lite').videoCny).toBeLessThan(quoteVideo(5, 'veo_fast').videoCny);
   });
+
+  it('720p is cheaper than 1080p (画质诚实定价) for Veo Fast', () => {
+    const p720 = quoteVideo(5, 'veo_fast', { resolution: '720p' });
+    const p1080 = quoteVideo(5, 'veo_fast', { resolution: '1080p' });
+    expect(p720.videoCny).toBe(Math.ceil(5 * 8 * 0.1 * 7.3)); // 720p $0.10/s
+    expect(p720.videoCny).toBeLessThan(p1080.videoCny);
+    expect(p720.message).toContain('720p');
+  });
+
+  it('6s duration bills less than 8s (时长进计费)', () => {
+    const d6 = quoteVideo(5, 'veo_fast', { durationSeconds: 6 });
+    const d8 = quoteVideo(5, 'veo_fast', { durationSeconds: 8 });
+    expect(d6.videoCny).toBe(Math.ceil(5 * 6 * 0.12 * 7.3));
+    expect(d6.videoCny).toBeLessThan(d8.videoCny);
+    expect(d6.message).toContain('每段 6 秒');
+  });
+
+  it('label + 画幅措辞如实标注选定档 (happyhorse / 横屏)', () => {
+    const q = quoteVideo(4, 'happyhorse', { aspectRatio: '16:9' });
+    expect(q.message).toContain('快马 HappyHorse');
+    expect(q.message).toContain('横屏');
+    expect(q.message).not.toContain('Veo Fast'); // 不再硬写 Fast
+  });
 });
