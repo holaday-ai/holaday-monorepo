@@ -1,24 +1,34 @@
 /**
- * Phase 2 第一期 — 视频独立界面的前端类型 + 客户端价格预览。
+ * Phase 2 — 视频独立界面的前端类型 + 客户端价格预览。
  *
- * 这里的 VideoCreationOptions 与后端 `tasks.create` 的 `videoOptions` 入参
- * 一一对应(orchestrator src/trpc/routers/tasks.ts);`estimatePerSegmentCny`
- * 镜像后端 `video-confirm.ts` 的单价矩阵,只用于"价格预览实时"。**它只是
- * 估算** —— 真实段数由后端 optimize 决定,权威报价走 video_quote 卡确认。
+ * VideoCreationOptions 与后端 `tasks.create` 的 `videoOptions` 入参一一对应
+ * (orchestrator src/trpc/routers/tasks.ts);`estimatePerSegmentCny` /
+ * `estimatePetCny` 镜像后端 `video-confirm.ts` 的单价矩阵,只用于"价格预览
+ * 实时"。**它只是估算** —— 真实段数/价格以后端 video_quote 卡确认为准。
  */
 
+export type VideoTab = 'normal' | 'pet';
 export type VideoModel = 'veo_fast' | 'happyhorse' | 'veo_standard';
+export type PetModel = 'wan_i2v' | 'happyhorse_i2v';
 export type VideoStyleOption = 'auto' | 'realistic' | 'atmospheric' | 'science';
 export type VideoAspect = '9:16' | '16:9' | '1:1';
 export type VideoResolution = '720p' | '1080p';
 export type VideoDuration = 6 | 8;
+export type PetDuration = 3 | 5;
 
 export interface VideoCreationOptions {
+  /** 'normal' 普通文生(默) / 'pet' 宠物图生 i2v. */
+  tab?: VideoTab;
   model?: VideoModel;
+  /** 宠物 i2v 档(tab='pet'). */
+  petModel?: PetModel;
+  /** 已上传宠物照片的 fileId(tab='pet' 必填). */
+  petImageFileId?: string;
   style?: VideoStyleOption;
   aspectRatio?: VideoAspect;
   resolution?: VideoResolution;
-  durationSeconds?: VideoDuration;
+  /** 普通 6/8;宠物 3/5. */
+  durationSeconds?: number;
 }
 
 /** 每秒美元单价(档 × 画质)。镜像后端 video-confirm.ts VEO_USD_PER_SEC。 */
@@ -29,8 +39,27 @@ const USD_PER_SEC: Record<VideoModel, Record<VideoResolution, number>> = {
 };
 const USD_TO_CNY = 7.3;
 
-/** 单段预计人民币(向上取整),= 每段秒数 × 档/画质单价 × 汇率。 */
-export function estimatePerSegmentCny(opts: Required<Pick<VideoCreationOptions, 'model' | 'resolution' | 'durationSeconds'>>): number {
+/** 普通文生:单段预计人民币(向上取整),= 每段秒数 × 档/画质单价 × 汇率。 */
+export function estimatePerSegmentCny(
+  opts: Required<Pick<VideoCreationOptions, 'model' | 'resolution' | 'durationSeconds'>>,
+): number {
   const perSec = USD_PER_SEC[opts.model]?.[opts.resolution] ?? 0;
   return Math.ceil(opts.durationSeconds * perSec * USD_TO_CNY);
+}
+
+/**
+ * 宠物 i2v 每秒人民币(元/秒,原生 RMB,无汇率)。镜像后端 I2V_CNY_PER_SEC。
+ * ⚠️ wan_i2v 720/1080 真实价待 console 核(当前 0.1 占位下限);happyhorse 高置信。
+ */
+const I2V_CNY_PER_SEC: Record<PetModel, Record<VideoResolution, number>> = {
+  wan_i2v: { '720p': 0.1, '1080p': 0.1 },
+  happyhorse_i2v: { '720p': 0.9, '1080p': 1.6 },
+};
+
+/** 宠物 i2v 预计人民币(向上取整,floor ¥1) = 时长(秒) × 档/画质 元/秒。 */
+export function estimatePetCny(
+  opts: Required<Pick<VideoCreationOptions, 'petModel' | 'resolution' | 'durationSeconds'>>,
+): number {
+  const perSec = I2V_CNY_PER_SEC[opts.petModel]?.[opts.resolution] ?? 0;
+  return Math.max(1, Math.ceil(opts.durationSeconds * perSec));
 }

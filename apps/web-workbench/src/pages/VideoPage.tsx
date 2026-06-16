@@ -6,10 +6,12 @@ import {
   Clock,
   Download,
   Film,
+  ImagePlus,
   Loader2,
   PawPrint,
   Sparkles,
   UserRound,
+  X,
   XCircle,
 } from 'lucide-react';
 import * as React from 'react';
@@ -18,11 +20,15 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
+import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import { useTaskStore } from '@/stores/task-store';
 import {
   estimatePerSegmentCny,
+  estimatePetCny,
+  type PetDuration,
+  type PetModel,
   type VideoAspect,
   type VideoCreationOptions,
   type VideoDuration,
@@ -49,8 +55,8 @@ const TABS: ReadonlyArray<{
   enabled: boolean;
 }> = [
   { id: 'normal', label: '普通视频', icon: Film, enabled: true },
+  { id: 'pet', label: '宠物动起来', icon: PawPrint, enabled: true },
   { id: 'ip', label: 'IP 人物换口型', icon: UserRound, enabled: false },
-  { id: 'pet', label: '宠物动起来', icon: PawPrint, enabled: false },
 ];
 
 export function VideoPage(): JSX.Element {
@@ -92,7 +98,13 @@ export function VideoPage(): JSX.Element {
           );
         })}
       </div>
-      {tab === 'normal' ? <NormalVideoForm /> : <ComingSoon tab={tab} />}
+      {tab === 'normal' ? (
+        <NormalVideoForm />
+      ) : tab === 'pet' ? (
+        <PetVideoForm />
+      ) : (
+        <ComingSoon tab={tab} />
+      )}
     </PageContainer>
   );
 }
@@ -227,6 +239,209 @@ function NormalVideoForm(): JSX.Element {
           ) : (
             <>
               <Sparkles className="mr-1.5 h-4 w-4" />
+              生成视频
+            </>
+          )}
+        </Button>
+      </div>
+
+      <VideoHistory />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 宠物视频 i2v 表单 (Phase 2 第二期)
+// ---------------------------------------------------------------------------
+
+const PET_MODEL_OPTIONS: ReadonlyArray<{ value: PetModel; label: string; hint?: string }> = [
+  { value: 'wan_i2v', label: '万相 i2v', hint: '推荐 · 省钱' },
+  { value: 'happyhorse_i2v', label: '快马 i2v', hint: '高质量 · 偏贵' },
+];
+const PET_DURATION_OPTIONS: ReadonlyArray<{ value: PetDuration; label: string }> = [
+  { value: 5, label: '5 秒' },
+  { value: 3, label: '3 秒' },
+];
+
+function PetVideoForm(): JSX.Element {
+  const navigate = useNavigate();
+  const toast = useToast();
+  const createTask = useTaskStore((s) => s.createTask);
+
+  const [prompt, setPrompt] = React.useState('');
+  const [petModel, setPetModel] = React.useState<PetModel>('wan_i2v');
+  const [aspectRatio, setAspectRatio] = React.useState<VideoAspect>('9:16');
+  const [resolution, setResolution] = React.useState<VideoResolution>('1080p');
+  const [durationSeconds, setDurationSeconds] = React.useState<PetDuration>(5);
+  const [photo, setPhoto] = React.useState<{ fileId: string; name: string; previewUrl: string } | null>(null);
+  const [uploading, setUploading] = React.useState(false);
+  const [submitting, setSubmitting] = React.useState(false);
+  const fileRef = React.useRef<HTMLInputElement>(null);
+
+  const estCny = estimatePetCny({ petModel, resolution, durationSeconds });
+
+  React.useEffect(() => {
+    const url = photo?.previewUrl;
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [photo?.previewUrl]);
+
+  async function handlePick(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
+      toast.show('请上传 JPG / PNG / WebP 图片', 'error');
+      return;
+    }
+    setUploading(true);
+    try {
+      const res = await uploadFile(file);
+      setPhoto((prev) => {
+        if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+        return { fileId: res.fileId, name: res.filename, previewUrl: URL.createObjectURL(file) };
+      });
+    } catch (err) {
+      toast.show(uploadFailureMessage(err), 'error');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function removePhoto(): void {
+    setPhoto((prev) => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+  }
+
+  async function handleSubmit(): Promise<void> {
+    if (!photo) {
+      toast.show('请先上传一张宠物照片', 'error');
+      return;
+    }
+    const intent = prompt.trim();
+    if (intent.length < 2) {
+      toast.show('请描述要宠物做什么(如:歪头看镜头、眨眨眼)', 'error');
+      return;
+    }
+    if (submitting) return;
+    setSubmitting(true);
+    const opts: VideoCreationOptions = {
+      tab: 'pet',
+      petImageFileId: photo.fileId,
+      petModel,
+      aspectRatio,
+      resolution,
+      durationSeconds,
+    };
+    try {
+      const res = await createTask(intent, undefined, undefined, undefined, undefined, undefined, opts);
+      if ('error' in res) {
+        toast.show(res.error || '提交失败,请重试', 'error');
+        return;
+      }
+      toast.show('已提交,请在对话区确认报价后开始制作', 'info', 3500);
+      navigate(`/?task=${encodeURIComponent(res.taskId)}`);
+    } catch (err) {
+      toast.show(err instanceof Error ? err.message : '提交失败,请重试', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <Section title="宠物照片" description="上传一张清晰的宠物正面照,AI 会让它在画面里自然活动。">
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="hidden"
+          onChange={(e) => void handlePick(e)}
+        />
+        {photo ? (
+          <div className="flex items-center gap-4">
+            <img
+              src={photo.previewUrl}
+              alt="宠物照片预览"
+              className="h-24 w-24 rounded-lg border border-[#DCDDDD] object-cover"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[13px] text-foreground">{photo.name}</div>
+              <div className="mt-1 flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()} disabled={uploading}>
+                  {uploading ? '上传中…' : '换一张'}
+                </Button>
+                <button
+                  type="button"
+                  onClick={removePhoto}
+                  className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-[12px] text-muted-foreground hover:text-[#EA1F59]"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  移除
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            className="flex w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-[#DCDDDD] py-10 text-muted-foreground transition-colors hover:border-[#EA1F59]/40 hover:text-[#EA1F59] disabled:opacity-60"
+          >
+            {uploading ? <Loader2 className="h-6 w-6 animate-spin" /> : <ImagePlus className="h-6 w-6" />}
+            <span className="text-[13px]">{uploading ? '上传中…' : '点击上传宠物照片'}</span>
+            <span className="text-[11px] text-muted-foreground">JPG / PNG / WebP</span>
+          </button>
+        )}
+      </Section>
+
+      <Section title="动作描述" description="想让宠物做什么动作或表情。">
+        <Textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="例如:小猫歪头看镜头、慢慢眨眼,尾巴轻轻摆动"
+          rows={3}
+          className="resize-y"
+        />
+      </Section>
+
+      <Section title="参数">
+        <div className="space-y-5">
+          <SegGroup label="模型" value={petModel} options={PET_MODEL_OPTIONS} onChange={setPetModel} />
+          <SegGroup label="尺寸" value={aspectRatio} options={ASPECT_OPTIONS} onChange={setAspectRatio} />
+          <SegGroup label="画质" value={resolution} options={RES_OPTIONS} onChange={setResolution} />
+          <SegGroup label="时长" value={durationSeconds} options={PET_DURATION_OPTIONS} onChange={setDurationSeconds} />
+        </div>
+      </Section>
+
+      <Section title="价格预览" className="border-[#EA1F59]/20 bg-[#EA1F59]/[0.03]">
+        <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
+          <span className="text-2xl font-semibold text-[#EA1F59]">约 ¥{estCny}</span>
+          <span className="text-[13px] text-muted-foreground">
+            {petModel === 'wan_i2v' ? '万相 i2v' : '快马 i2v'} · {resolution} · {durationSeconds} 秒
+          </span>
+        </div>
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          单图生成一条短视频,无配音/字幕;
+          <span className="font-medium text-[#595757]"> 提交后会先给精确报价,确认后才扣费。</span>
+        </p>
+      </Section>
+
+      <div className="flex items-center justify-end gap-3">
+        <span className="text-[12px] text-muted-foreground">提交后先报价,不会立即扣费</span>
+        <Button type="button" onClick={() => void handleSubmit()} disabled={submitting} className="min-w-[120px]">
+          {submitting ? (
+            <>
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              提交中…
+            </>
+          ) : (
+            <>
+              <PawPrint className="mr-1.5 h-4 w-4" />
               生成视频
             </>
           )}
