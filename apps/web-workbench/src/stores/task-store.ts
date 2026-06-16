@@ -526,7 +526,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           awaitingKindRaw === 'captcha' ||
           awaitingKindRaw === 'permission' ||
           awaitingKindRaw === 'browser_action' ||
-          awaitingKindRaw === 'clarification'
+          awaitingKindRaw === 'clarification' ||
+          awaitingKindRaw === 'video_quote'
             ? awaitingKindRaw
             : undefined;
         const executionMode = extractExecutionMode(detail.result);

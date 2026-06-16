@@ -86,7 +86,7 @@ export interface UiTask {
    * panel to take over the screen. Missing == 'clarification'
    * (chat composer is enough).
    */
-  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'permission' | 'browser_action';
+  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'permission' | 'browser_action' | 'video_quote';
   /**
    * Which dispatcher lane this task is running in. Source order:
    *   - `result.executionMode` (set on awaiting_user park from generate)
@@ -303,7 +303,7 @@ export interface UiAwaitingUser {
    * onto the task's awaitingKind so refreshing tasks.detail
    * preserves the BrowserPanel's expand/banner decision.
    */
-  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'permission' | 'browser_action';
+  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'permission' | 'browser_action' | 'video_quote';
 }
 
 /**

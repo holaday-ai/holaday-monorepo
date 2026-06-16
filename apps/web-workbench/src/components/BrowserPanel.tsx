@@ -195,7 +195,7 @@ interface Props {
    * without losing the page they were watching. Missing == treated
    * as `clarification` for safety on legacy events.
    */
-  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'permission' | 'browser_action';
+  awaitingKind?: 'clarification' | 'login' | 'captcha' | 'permission' | 'browser_action' | 'video_quote';
   /** Active task id — forwarded on user_input events so backend can correlate. */
   activeTaskId?: string | null;
   /**
@@ -283,7 +283,9 @@ export function BrowserPanel({
   const browserAwaiting =
     awaitingUser === true &&
     awaitingKind != null &&
-    awaitingKind !== 'clarification';
+    awaitingKind !== 'clarification' &&
+    // video_quote 是聊天内的报价卡(无浏览器会话)→ 不触发浏览器面板接管。
+    awaitingKind !== 'video_quote';
   const toast = useToast();
   const mountedRef = React.useRef(false);
   const [collapsedLocal, setCollapsedLocal] = React.useState(false);

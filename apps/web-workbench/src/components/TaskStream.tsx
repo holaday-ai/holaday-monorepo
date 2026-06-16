@@ -11,6 +11,7 @@ import {
   FileText,
   Globe,
   KeyRound,
+  Clapperboard,
   Link2,
   ListChecks,
   Loader2,
@@ -721,6 +722,7 @@ function AwaitingUserBanner({
   const toast = useToast();
   const mountedRef = useMountedRef();
   const [cancelling, setCancelling] = React.useState(false);
+  const [confirming, setConfirming] = React.useState<string | null>(null);
   const kind = wait.awaitingKind ?? 'clarification';
   const copy = awaitingUserCopy(kind);
   const message = awaitingUserStreamMessage(kind, wait.question);
@@ -745,6 +747,25 @@ function AwaitingUserBanner({
       }
     }
   }, [cancelling, mountedRef, taskId, toast]);
+  // Phase 1 #4 — 视频报价确认:结构化按钮硬绑【这张卡的 taskId】(不绑"最近任务")。
+  // 前端不解析确认意图、不算价 — 只把选择透传给后端 confirmVideo(Veo 在后端确认后才烧)。
+  const handleConfirmVideo = React.useCallback(
+    async (choice: 'confirm_video' | 'confirm_image' | 'cancel') => {
+      if (confirming) return;
+      setConfirming(choice);
+      try {
+        await trpc.tasks.confirmVideo.mutate({ taskId, choice });
+        if (!mountedRef.current) return;
+        toast.show(choice === 'cancel' ? '已取消，未产生费用' : '开始制作视频…', 'info', 2000);
+      } catch (err) {
+        if (!mountedRef.current) return;
+        toast.show(pageActionError('操作失败', err), 'error');
+      } finally {
+        if (mountedRef.current) setConfirming(null);
+      }
+    },
+    [confirming, mountedRef, taskId, toast],
+  );
   return (
     <div className="rounded-lg border border-[#FFC910]/55 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(17,24,39,0.05)] dark:border-[#FFC910]/35 dark:bg-card/85">
       <div className="flex items-start gap-2.5">
@@ -761,24 +782,55 @@ function AwaitingUserBanner({
               {message.followUp}
             </p>
           )}
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
-            {taskTickCount > 0 && (
-              <span className="rounded-md border border-[#FFC910]/55 bg-[#FFC910]/10 px-2 py-0.5 text-[#595757] dark:border-[#FFC910]/35 dark:text-foreground">
-                已完成 {taskTickCount} 步
+          {kind === 'video_quote' ? (
+            // 三个结构化按钮(确认制作 / 图片版 / 取消)→ tasks.confirmVideo。
+            // 价格显示在上方 body(后端报价文案),按钮只透传选择。
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+              <button
+                type="button"
+                onClick={() => void handleConfirmVideo('confirm_video')}
+                disabled={confirming !== null}
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-[#57479C] bg-[#57479C] px-3 font-medium text-white transition-colors hover:bg-[#473a82] disabled:opacity-60"
+              >
+                {confirming === 'confirm_video' ? '提交中…' : '确认制作'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmVideo('confirm_image')}
+                disabled={confirming !== null}
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-[#DCDDDD] bg-transparent px-3 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:opacity-60 dark:border-white/10 dark:text-foreground dark:hover:bg-white/10"
+              >
+                {confirming === 'confirm_image' ? '提交中…' : '图片版'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmVideo('cancel')}
+                disabled={confirming !== null}
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-[#DCDDDD] bg-transparent px-3 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:opacity-60 dark:border-white/10 dark:text-foreground dark:hover:bg-white/10"
+              >
+                {confirming === 'cancel' ? '取消中…' : '取消'}
+              </button>
+            </div>
+          ) : (
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+              {taskTickCount > 0 && (
+                <span className="rounded-md border border-[#FFC910]/55 bg-[#FFC910]/10 px-2 py-0.5 text-[#595757] dark:border-[#FFC910]/35 dark:text-foreground">
+                  已完成 {taskTickCount} 步
+                </span>
+              )}
+              <span className="text-muted-foreground">
+                {copy.streamHint}
               </span>
-            )}
-            <span className="text-muted-foreground">
-              {copy.streamHint}
-            </span>
-            <button
-              type="button"
-              onClick={() => void handleCancel()}
-              disabled={cancelling}
-              className="ml-auto inline-flex h-7 items-center gap-1 rounded-md border border-[#DCDDDD] bg-transparent px-2.5 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:opacity-60 dark:border-white/10 dark:text-foreground dark:hover:bg-white/10"
-            >
-              {cancelling ? '正在取消…' : '取消任务'}
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => void handleCancel()}
+                disabled={cancelling}
+                className="ml-auto inline-flex h-7 items-center gap-1 rounded-md border border-[#DCDDDD] bg-transparent px-2.5 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:opacity-60 dark:border-white/10 dark:text-foreground dark:hover:bg-white/10"
+              >
+                {cancelling ? '正在取消…' : '取消任务'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -794,6 +846,7 @@ const AWAITING_KIND_ICON: Record<
   clarification: MessageCircleQuestion,
   permission: KeyRound,
   browser_action: MousePointerClick,
+  video_quote: Clapperboard,
 };
 
 /**

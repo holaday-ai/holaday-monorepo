@@ -63,6 +63,17 @@ const COPY_BY_KIND: Record<AwaitingKind, AwaitingUserCopy> = {
     toolbarLabel: '需要确认',
     composerPlaceholder: '确认无误后回复继续，或说明要调整的地方...',
   },
+  // Phase 1 #4 — 视频报价确认。报价文案(含价)由后端 quoteVideo 给,显示在 body;
+  // 卡上三个按钮(确认制作/图片版/取消)直接走 tasks.confirmVideo,前端不重算价。
+  video_quote: {
+    title: '视频报价确认',
+    streamBody: '请确认是否按报价制作视频。',
+    streamHint: '点下方按钮选择',
+    panelTitle: '视频报价',
+    panelBody: '请确认是否按报价制作视频。',
+    toolbarLabel: '待确认报价',
+    composerPlaceholder: '回复「确认」开始，或「图片版」「取消」...',
+  },
 };
 
 export function normalizeAwaitingKind(
@@ -94,6 +105,13 @@ export function awaitingUserStreamMessage(
     return {
       body: trimmedQuestion,
       followUp: '确认无误后在下方回复继续；最终提交、支付、发送、分享、改权限、删除或退订由你手动完成。',
+    };
+  }
+  if (normalized === 'video_quote' && trimmedQuestion) {
+    // 报价文案(含两个价)由后端 quoteVideo 给 → 原样显示;按钮在卡上。
+    return {
+      body: trimmedQuestion,
+      followUp: '点「确认制作」开始；或选「图片版」更省，「取消」不产生费用。',
     };
   }
   return {
