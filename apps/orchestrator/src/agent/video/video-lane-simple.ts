@@ -33,7 +33,7 @@ import { buildAss } from './timeline.js';
 import { buildComposeCommand } from './video-compose.js';
 import { downloadToBuffer } from './video-http.js';
 import { runVideoPipeline, type PipelineLogger, type VideoPipelineDeps } from './video-pipeline.js';
-import { optimizeUserScript, type LlmComplete } from './video-script.js';
+import { optimizeUserScript, type LlmComplete, type VideoStyle } from './video-script.js';
 import type { VideoScript } from './types.js';
 import { generateBrollVideo } from './wanxiang-client.js';
 
@@ -65,15 +65,34 @@ export type VisualMode = 'image' | 'video';
  *   'veo_standard' — Veo 3.1 Standard, 高质量可选 (≈ ¥23/条).
  *   'wanxiang'     — wan2.1-t2v-turbo, 便宜兜底 (Veo 降级时).
  */
-export type VideoSource = 'veo_fast' | 'veo_lite' | 'veo_standard' | 'wanxiang';
+export type VideoSource = 'veo_fast' | 'veo_lite' | 'veo_standard' | 'happyhorse' | 'wanxiang';
 
 const VEO_MODEL_DEFAULT: Record<'veo_fast' | 'veo_lite' | 'veo_standard', string> = {
   veo_fast: 'veo-3.1-fast-generate-preview',
   veo_lite: 'veo-3.1-lite-generate-preview',
   veo_standard: 'veo-3.1-generate-preview',
 };
+const DEFAULT_HAPPYHORSE_MODEL = 'happyhorse-1.0-t2v';
 const isVeoSource = (s: VideoSource): boolean =>
   s === 'veo_fast' || s === 'veo_lite' || s === 'veo_standard';
+
+/** 三档画幅 (Phase 2 第一期). Veo 仅支持 9:16/16:9 → 1:1 用 9:16 出, compose pad 到方形. */
+export type AspectRatio = '9:16' | '16:9' | '1:1';
+function resolveAspect(ar: AspectRatio): {
+  width: number;
+  height: number;
+  veoAspect: '9:16' | '16:9';
+  hhSize: string;
+} {
+  switch (ar) {
+    case '16:9':
+      return { width: 1920, height: 1080, veoAspect: '16:9', hhSize: '1920*1080' };
+    case '1:1':
+      return { width: 1080, height: 1080, veoAspect: '9:16', hhSize: '1080*1080' };
+    default: // 9:16 竖屏
+      return { width: 1080, height: 1920, veoAspect: '9:16', hhSize: '1080*1920' };
+  }
+}
 
 function resolveVeoModel(source: VideoSource, cfg: SimpleVideoConfig): string {
   switch (source) {
@@ -111,6 +130,8 @@ export interface SimpleVideoConfig {
   readonly wanxiangT2vModel: string; // wan2.1-t2v-turbo (兜底)
   /** t2v 竖屏 size `W*H`. Default '720*1280' (fills 1080×1920, no letterbox). */
   readonly wanxiangVideoSize?: string;
+  /** HappyHorse t2v model (阿里 DashScope, 同 key 同端点). Default 'happyhorse-1.0-t2v'. */
+  readonly happyhorseModel?: string;
   /** Veo model id per tier — each optional → built-in default. */
   readonly veoFastModel?: string;
   readonly veoLiteModel?: string;
@@ -132,6 +153,8 @@ export interface SimpleVideoOptions {
   readonly veoDurationSeconds?: number;
   /** Veo output resolution. Default '1080p'. */
   readonly veoResolution?: '720p' | '1080p';
+  /** 画幅 (Phase 2 第一期). Default '9:16' 竖屏. Drives compose/clip W×H + Veo aspectRatio. */
+  readonly aspectRatio?: AspectRatio;
 }
 
 interface SimpleFns {
@@ -187,6 +210,8 @@ export function createSimplePipelineDeps(
   const ffOpts = cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {};
   const visualMode = opts.visualMode ?? 'video';
   const videoSource = opts.videoSource ?? 'veo_fast';
+  const aspect = resolveAspect(opts.aspectRatio ?? '9:16');
+  const aspectLabel = opts.aspectRatio === '16:9' ? '横屏 16:9' : opts.aspectRatio === '1:1' ? '方形 1:1' : '竖屏 9:16';
 
   return {
     logger: svc.logger,
@@ -220,7 +245,7 @@ export function createSimplePipelineDeps(
           apiKey: cfg.geminiApiKey ?? '',
           ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
           model: cfg.geminiImageModel ?? 'gemini-3.1-flash-image',
-          prompt: `${visual}${CLEAN_SCENE_SUFFIX}，竖屏 9:16 构图`,
+          prompt: `${visual}${CLEAN_SCENE_SUFFIX}，${aspectLabel} 构图`,
         });
         const first = img.images[0];
         if (!first) throw new SimpleVideoError(`nano banana seg ${index} produced no image`, 'compose');
@@ -241,22 +266,24 @@ export function createSimplePipelineDeps(
           ...(cfg.geminiBaseUrl ? { baseUrl: cfg.geminiBaseUrl } : {}),
           model: resolveVeoModel(videoSource, cfg),
           prompt: visual + CLEAN_SCENE_SUFFIX,
-          aspectRatio: '9:16',
+          aspectRatio: aspect.veoAspect, // 1:1 时用 9:16 出, compose pad 到方形
           durationSeconds: opts.veoDurationSeconds ?? 8,
           resolution: opts.veoResolution ?? '1080p',
         });
         url = v.videoUri;
         headers = { 'x-goog-api-key': cfg.geminiApiKey ?? '' }; // Veo uri needs the key
       } else {
-        // wanxiang t2v 兜底 (Veo 降级时)
+        // wanxiang / happyhorse t2v — 同 DashScope video-synthesis 端点, 改 model + size.
+        const isHH = videoSource === 'happyhorse';
         const v = await fns.generateBrollVideo({
           apiKey: cfg.dashscopeApiKey,
           baseUrl: cfg.dashscopeBaseUrl,
           ...ws,
-          model: cfg.wanxiangT2vModel,
+          model: isHH ? (cfg.happyhorseModel ?? DEFAULT_HAPPYHORSE_MODEL) : cfg.wanxiangT2vModel,
           prompt: visual + CLEAN_SCENE_SUFFIX,
           negativePrompt: NO_TEXT_NEGATIVE,
-          size: cfg.wanxiangVideoSize ?? '720*1280', // vertical → fills 竖屏 frame
+          // HappyHorse 1080P 按画幅; wanxiang 兜底保持 720 竖屏(第一期不做多尺寸).
+          size: isHH ? aspect.hhSize : (cfg.wanxiangVideoSize ?? '720*1280'),
         });
         if (!v.videoUrl) throw new SimpleVideoError(`broll video seg ${index} produced no url`, 'compose');
         url = v.videoUrl;
@@ -272,9 +299,9 @@ export function createSimplePipelineDeps(
       const outPath = path.join(svc.workdir, `seg${index}-clip.mp4`);
       if (visualMode === 'image') {
         // 静态图(无 Ken Burns 运镜)— BOSS 2026-06-15.
-        await fns.renderImageClip({ imagePath: visualRef, audioPath: audioRef, outPath, durationMs }, ffOpts);
+        await fns.renderImageClip({ imagePath: visualRef, audioPath: audioRef, outPath, durationMs, width: aspect.width, height: aspect.height }, ffOpts);
       } else {
-        await fns.renderVideoClip({ videoPath: visualRef, audioPath: audioRef, outPath, durationMs }, ffOpts);
+        await fns.renderVideoClip({ videoPath: visualRef, audioPath: audioRef, outPath, durationMs, width: aspect.width, height: aspect.height }, ffOpts);
       }
       return { clipRef: outPath };
     },
@@ -297,6 +324,8 @@ export interface RunSimpleVideoInput {
    * quoted/charged segment count. Omit for the standalone (no-quote) path.
    */
   readonly script?: VideoScript;
+  /** Picture style (Phase 2). Passed to optimizeUserScript; ignored when `script` is supplied. */
+  readonly style?: VideoStyle;
 }
 
 export interface SimpleVideoResult {
@@ -320,6 +349,7 @@ export async function runSimpleVideoCreation(
   if (!cfg.dashscopeApiKey) throw new SimpleVideoError('DASHSCOPE_API_KEY not configured', 'config');
   const visualMode = opts.visualMode ?? 'video';
   const videoSource = opts.videoSource ?? 'veo_fast';
+  const aspect = resolveAspect(opts.aspectRatio ?? '9:16');
   // Veo (any tier) AND nano banana image both run on the shared Google key.
   const needsGemini = visualMode === 'image' || (visualMode === 'video' && isVeoSource(videoSource));
   if (needsGemini && !cfg.geminiApiKey) {
@@ -334,7 +364,11 @@ export async function runSimpleVideoCreation(
   const script =
     input.script ??
     (await fns.optimizeUserScript(
-      { userText: input.userText, ...(input.maxSegments !== undefined ? { maxSegments: input.maxSegments } : {}) },
+      {
+        userText: input.userText,
+        ...(input.maxSegments !== undefined ? { maxSegments: input.maxSegments } : {}),
+        ...(input.style ? { style: input.style } : {}),
+      },
       { llm: svc.llm },
     ));
   // ②-⑤ runner (synth preset voice + visual + clip per segment)
@@ -347,15 +381,24 @@ export async function runSimpleVideoCreation(
   const assPath = path.join(svc.workdir, 'subtitles.ass');
   await fns.writeFile(
     assPath,
-    Buffer.from(buildAss(result.timeline, cfg.subtitleFontName ? { fontName: cfg.subtitleFontName } : {}), 'utf-8'),
+    Buffer.from(
+      buildAss(result.timeline, {
+        ...(cfg.subtitleFontName ? { fontName: cfg.subtitleFontName } : {}),
+        width: aspect.width, // PlayRes 跟随画幅, 字幕边距按真实像素
+        height: aspect.height,
+      }),
+      'utf-8',
+    ),
   );
-  // ⑥ compose — ASS subtitles + English watermark (+ optional CJK fontfile), 1080×1920
+  // ⑥ compose — ASS subtitles + English watermark (+ optional CJK fontfile), W×H 按画幅
   const outPath = path.join(svc.workdir, 'final.mp4');
   const cmd = buildComposeCommand(
     {
       segmentClipPaths: result.segments.map((s) => s.clipRef),
       outputPath: outPath,
       assPath,
+      width: aspect.width,
+      height: aspect.height,
       ...(cfg.watermarkFontFile ? { watermark: { fontFile: cfg.watermarkFontFile } } : {}),
     },
     ffOpts,

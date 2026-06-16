@@ -147,6 +147,40 @@ describe('runSimpleVideoCreation — wanxiang (fallback, explicit)', () => {
   });
 });
 
+describe('runSimpleVideoCreation — happyhorse (Phase 2)', () => {
+  it('videoSource=happyhorse → generateBrollVideo with happyhorse-1.0-t2v + 1080P size', async () => {
+    const { svc, mocks } = makeServices();
+    await runSimpleVideoCreation({ userText: 'x' }, CFG, { visualMode: 'video', videoSource: 'happyhorse' }, svc);
+    expect(mocks.generateBrollVideo).toHaveBeenCalledTimes(2);
+    expect(mocks.generateVeoVideo).not.toHaveBeenCalled();
+    const arg = (mocks.generateBrollVideo.mock.calls[0] as unknown[])[0] as { model: string; size?: string };
+    expect(arg.model).toBe('happyhorse-1.0-t2v'); // 同端点改 model
+    expect(arg.size).toBe('1080*1920'); // 默认 9:16 1080P
+  });
+});
+
+describe('runSimpleVideoCreation — aspectRatio (Phase 2 多画幅)', () => {
+  it('16:9 → veo aspectRatio 16:9 + render/compose 1920×1080', async () => {
+    const { svc, mocks } = makeServices();
+    await runSimpleVideoCreation({ userText: 'x' }, CFG, { visualMode: 'video', videoSource: 'veo_fast', aspectRatio: '16:9' }, svc);
+    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as { aspectRatio: string };
+    expect(veoArg.aspectRatio).toBe('16:9');
+    const clipArg = (mocks.renderVideoClip.mock.calls[0] as unknown[])[0] as { width: number; height: number };
+    expect(clipArg.width).toBe(1920);
+    expect(clipArg.height).toBe(1080);
+  });
+
+  it('1:1 → veo aspectRatio falls back to 9:16, render/compose 1080×1080', async () => {
+    const { svc, mocks } = makeServices();
+    await runSimpleVideoCreation({ userText: 'x' }, CFG, { visualMode: 'video', videoSource: 'veo_fast', aspectRatio: '1:1' }, svc);
+    const veoArg = (mocks.generateVeoVideo.mock.calls[0] as unknown[])[0] as { aspectRatio: string };
+    expect(veoArg.aspectRatio).toBe('9:16'); // Veo 无 1:1 → 9:16 出, compose pad 到方形
+    const clipArg = (mocks.renderVideoClip.mock.calls[0] as unknown[])[0] as { width: number; height: number };
+    expect(clipArg.width).toBe(1080);
+    expect(clipArg.height).toBe(1080);
+  });
+});
+
 describe('runSimpleVideoCreation — config gates', () => {
   it('throws config when DASHSCOPE key missing', async () => {
     const { svc } = makeServices();

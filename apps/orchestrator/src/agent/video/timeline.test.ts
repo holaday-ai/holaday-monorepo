@@ -5,7 +5,6 @@ import {
   buildTimeline,
   formatAssTime,
   formatSrtTime,
-  sanitizeKeyText,
   wrapCjk,
 } from './timeline.js';
 import type { VideoSegment } from './types.js';
@@ -95,48 +94,11 @@ describe('buildAss — styled, fixes subtitle overflow (P0-1)', () => {
   });
 });
 
-describe('sanitizeKeyText — 脏/超长兜底 (范围2 防御)', () => {
-  it('trims, caps 8 chars, strips ASS control chars {} \\ and newlines; empty → null', () => {
-    expect(sanitizeKeyText('SPF50')).toBe('SPF50');
-    expect(sanitizeKeyText('  SPF50  ')).toBe('SPF50'); // trim
-    expect(sanitizeKeyText('超过八个字符的超长信息点词')).toBe('超过八个字符的超'); // cap 8
-    expect(sanitizeKeyText('a\nb\tc')).toBe('a b c'); // newline/tab → space
-    expect(sanitizeKeyText('{SPF50}')).toBe('SPF50'); // strip { } braces
-    expect(sanitizeKeyText('SP\\F50')).toBe('SPF50'); // strip backslash (\N injection)
-    expect(sanitizeKeyText('')).toBeNull();
-    expect(sanitizeKeyText(undefined)).toBeNull();
-    expect(sanitizeKeyText('{}\\')).toBeNull(); // 全是控制字符 → 空 → null
-  });
-});
-
-describe('buildAss — KeyCard 信息点字卡 (范围2)', () => {
-  const SEGS_KEY: VideoSegment[] = [
-    { text: '夏天紫外线很强', type: 'broll', visual: 'v1' }, // 无 keyText
-    { text: '选防晒认准SPF50', type: 'broll', visual: 'v2', keyText: 'SPF50' }, // 有 keyText
-  ];
-
-  it('adds a KeyCard Style (magenta &H006B0BE5, size 72, Alignment 8, MarginV 360)', () => {
-    const ass = buildAss(buildTimeline(SEGS_KEY, [3000, 4000]));
-    expect(ass).toContain('Style: KeyCard,WenQuanYi Zen Hei,72,&H006B0BE5,'); // magenta BGR 转对
-    expect(ass).toMatch(/Style: KeyCard,[^\n]*,1,4,1,8,80,80,360,1/); // Bold1 Outline4 Alignment8 MarginV360
-  });
-
-  it('叠 KeyCard Dialogue 只对有 keyText 的段, 含 \\fad 淡入淡出', () => {
-    const ass = buildAss(buildTimeline(SEGS_KEY, [3000, 4000]));
-    // 该段 [3000,7000) → KeyCard cue 与底部字幕同步
-    expect(ass).toContain('KeyCard,,0,0,0,,{\\fad(300,300)}SPF50');
-    expect((ass.match(/,KeyCard,/g) ?? []).length).toBe(1); // 只一段有 keyText → 只一条 KeyCard
-    expect(ass).toContain('Default,,0,0,0,,选防晒认准SPF50'); // 底部字幕仍在
-  });
-
-  it('脏/超长 keyText → ASS 里 sanitize, 不注入不溢出 (兜底不崩)', () => {
-    const dirty: VideoSegment[] = [
-      { text: 'x', type: 'broll', visual: 'v', keyText: '注入{\\N}超长信息点文字串' },
-    ];
-    const ass = buildAss(buildTimeline(dirty, [3000]));
-    const kt = ass.split('{\\fad(300,300)}')[1]?.split('\n')[0] ?? '';
-    expect(kt.length).toBeLessThanOrEqual(8); // 截断 8
-    expect(kt).not.toMatch(/[{}]/); // 无 {} 注入
-    expect(kt).not.toContain('\\N'); // 无 \N 注入
+describe('buildAss — keyText 已撤回, 不再叠 KeyCard', () => {
+  it('无 KeyCard Style / 无 KeyCard Dialogue, 只剩底部字幕', () => {
+    const ass = buildAss(buildTimeline(SEGS, [4000, 2500, 3200]));
+    expect(ass).not.toContain('Style: KeyCard');
+    expect(ass).not.toContain(',KeyCard,');
+    expect((ass.match(/,Default,/g) ?? []).length).toBe(3); // 仍每段一条底部字幕
   });
 });

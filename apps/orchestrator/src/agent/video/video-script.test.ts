@@ -153,28 +153,18 @@ describe('optimizeUserScript (原方案 — faithful to user draft)', () => {
     expect(p).not.toContain('画面中不能有任何文字');
   });
 
-  it('keyText: 系统提示引导(≤8字/字体叠加不乱码) + JSON 示例含 keyText', () => {
+  it('keyText 已撤回: 系统提示不再引导 keyText, JSON 示例无 keyText 字段', () => {
     const p = buildOptimizeSystemPrompt(6);
-    expect(p).toMatch(/信息点字卡|keyText/);
-    expect(p).toMatch(/≤\s*8\s*字|点睛短词/);
-    expect(p).toMatch(/字体叠加|不会乱码/);
-    expect(p).toContain('"keyText"');
+    expect(p).not.toMatch(/信息点字卡|keyText/);
+    expect(p).not.toContain('"keyText"');
   });
 
-  it('keyText schema: ≤8 保留, 超长/脏 → undefined(不崩整个 parse)', async () => {
-    const j = JSON.stringify({
-      title: 't',
-      segments: [
-        { text: '选防晒认准SPF50', visual: '阳光下涂防晒动作', keyText: 'SPF50' },
-        { text: '每两小时补涂', visual: '户外补涂画面', keyText: '超过八个字符的超长信息点词' },
-        { text: '纯描述段无信息点', visual: '海边氛围' },
-      ],
-    });
-    const out = await optimizeUserScript({ userText: '夏季防晒' }, { llm: llmReturning(j) });
-    expect(out.segments[0]?.keyText).toBe('SPF50');
-    expect(out.segments[1]?.keyText).toBeUndefined(); // 超长 catch → undefined, parse 不崩
-    expect(out.segments[2]?.keyText).toBeUndefined();
-    expect(out.segments).toHaveLength(3); // 整个 script 没因脏 keyText 失败
+  it('style: 风格词进系统提示(写实/氛围感/科普清晰), auto/undefined 不加风格行 (Phase 2)', () => {
+    expect(buildOptimizeSystemPrompt(6, 'realistic')).toMatch(/【风格:写实】/);
+    expect(buildOptimizeSystemPrompt(6, 'atmospheric')).toMatch(/【风格:氛围感】/);
+    expect(buildOptimizeSystemPrompt(6, 'science')).toMatch(/【风格:科普清晰】/);
+    expect(buildOptimizeSystemPrompt(6, 'auto')).not.toMatch(/【风格/);
+    expect(buildOptimizeSystemPrompt(6)).not.toMatch(/【风格/);
   });
 
   it('steers away from high-anatomy-risk framing (extra-arm root fix)', () => {

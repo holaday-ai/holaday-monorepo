@@ -64,6 +64,7 @@ export const VEO_USD_PER_SEC_1080P: Record<VideoSource, number> = {
   veo_fast: 0.12,
   veo_lite: 0.08,
   veo_standard: 0.4,
+  happyhorse: 1.6 / 7.3, // HappyHorse 1080P ¥1.6/s(阿里官方,以控制台为准)→ 换算成 USD/s
   wanxiang: 0, // 兜底源,不进报价(仅 Veo 降级时用)
 };
 const NB_USD_PER_IMG = 0.067; // nano banana 1K/张
