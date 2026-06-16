@@ -453,6 +453,29 @@ export class FileService {
   }
 
   /**
+   * Mint a short-lived public GET URL for an uploaded file (ownership +
+   * expiry checked). Phase 2 第二期: the pet i2v lane needs a PUBLIC img_url
+   * the DashScope model can fetch — R2 presigned GET does that. Returns
+   * null when missing / not-owned / expired, or when the provider can't
+   * sign (LocalStorageProvider → no signed url in dev). `userIdInternal`
+   * is the internal bigint id (resolved at the route/caller layer).
+   */
+  async signedReadUrl(
+    fileExternalId: string,
+    userIdInternal: number,
+    expiresInSeconds = 3600,
+  ): Promise<string | null> {
+    const [row] = await this.db
+      .select()
+      .from(taskFiles)
+      .where(eq(taskFiles.externalId, fileExternalId))
+      .limit(1);
+    if (!row || row.userId !== userIdInternal) return null;
+    if (row.expiresAt && row.expiresAt < new Date()) return null;
+    return this.storage.getSignedUrl(row.storagePath, { expiresInSeconds });
+  }
+
+  /**
    * Load a file by external id, verifying it belongs to the caller.
    * Returns null when the file is missing OR owned by a different
    * user — both are 404s on the API surface (don't leak existence).

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   createImageTask,
+  createVideoTask,
   generateBrollImage,
   generateBrollVideo,
   getTaskStatus,
@@ -77,6 +78,39 @@ describe('createImageTask', () => {
     const q2 = jsonQueue([{ body: { output: { task_id: 't', task_status: 'PENDING' } } }]);
     await createImageTask({ apiKey: KEY, prompt: 'x', fetchImpl: q2.fetchImpl });
     expect((q2.calls[0]?.init as RequestInit & { headers: Record<string, string> }).headers['x-dashscope-workspace']).toBeUndefined();
+  });
+});
+
+describe('createVideoTask — i2v 图生 (Phase 2 第二期)', () => {
+  it('imageUrl → input.img_url; durationSeconds → parameters.duration; size passthrough', async () => {
+    const { fetchImpl, calls } = jsonQueue([
+      { body: { output: { task_id: 'v1', task_status: 'PENDING' } } },
+    ]);
+    const out = await createVideoTask({
+      apiKey: KEY,
+      model: 'wan2.2-i2v-flash',
+      prompt: '小猫眨眨眼',
+      imageUrl: 'https://r2/pet.jpg',
+      size: '1080*1920',
+      durationSeconds: 5,
+      fetchImpl,
+    });
+    expect(out).toEqual({ taskId: 'v1', model: 'wan2.2-i2v-flash' });
+    expect(calls[0]?.url).toContain('/api/v1/services/aigc/video-generation/video-synthesis');
+    const body = JSON.parse((calls[0]?.init as RequestInit).body as string);
+    expect(body).toMatchObject({
+      model: 'wan2.2-i2v-flash',
+      input: { prompt: '小猫眨眨眼', img_url: 'https://r2/pet.jpg' },
+      parameters: { size: '1080*1920', duration: 5 },
+    });
+  });
+
+  it('t2v (no imageUrl) omits img_url + duration', async () => {
+    const { fetchImpl, calls } = jsonQueue([{ body: { output: { task_id: 'v2', task_status: 'PENDING' } } }]);
+    await createVideoTask({ apiKey: KEY, prompt: 'a beach', fetchImpl });
+    const body = JSON.parse((calls[0]?.init as RequestInit).body as string);
+    expect(body.input.img_url).toBeUndefined();
+    expect(body.parameters?.duration).toBeUndefined();
   });
 });
 

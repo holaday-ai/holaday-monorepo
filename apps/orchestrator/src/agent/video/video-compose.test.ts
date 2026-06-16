@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildComposeCommand } from './video-compose.js';
+import { buildComposeCommand, buildPetVideoCommand } from './video-compose.js';
 
 const CLIPS = ['/r2/clip_0.mp4', '/r2/clip_1.mp4', '/r2/clip_2.mp4'];
 const OUT = '/r2/final.mp4';
@@ -123,5 +123,38 @@ describe('buildComposeCommand', () => {
 
   it('throws on no clips', () => {
     expect(() => buildComposeCommand({ segmentClipPaths: [], outputPath: OUT })).toThrow(/no segment clips/);
+  });
+});
+
+describe('buildPetVideoCommand — 宠物 i2v 单 clip (静默, Phase 2 第二期)', () => {
+  function petFc(args: string[]): string {
+    return args[args.indexOf('-filter_complex') + 1]!;
+  }
+
+  it('pads single clip to 画幅 + 水印 + 静默音轨(anullsrc) + shortest, no concat/subtitles', () => {
+    const cmd = buildPetVideoCommand({ clipPath: '/r2/pet-raw.mp4', outputPath: OUT, width: 1080, height: 1920 });
+    // the i2v clip is input 0; silent audio is the lavfi anullsrc input
+    expect(cmd.args[cmd.args.indexOf('/r2/pet-raw.mp4') - 1]).toBe('-i');
+    expect(cmd.args).toEqual(expect.arrayContaining(['-f', 'lavfi']));
+    expect(cmd.args.some((a) => a.startsWith('anullsrc'))).toBe(true);
+    const graph = petFc(cmd.args);
+    expect(graph).toContain('scale=1080:1920:force_original_aspect_ratio=decrease');
+    expect(graph).toContain('pad=1080:1920');
+    expect(graph).not.toContain('concat='); // single clip, no concat
+    expect(graph).not.toContain('ass='); // no subtitles for pet i2v
+    // compliance watermark ALWAYS present
+    expect(graph).toContain('HOLA DAY');
+    // map padded video + the silent audio (input 1), clamp to video length
+    expect(cmd.args).toEqual(expect.arrayContaining(['-map', '1:a', '-shortest']));
+    expect(cmd.args).toEqual(expect.arrayContaining(['-c:v', 'libx264', '-c:a', 'aac', '-pix_fmt', 'yuv420p']));
+  });
+
+  it('honours custom 画幅 (横屏) + ffmpeg bin', () => {
+    const cmd = buildPetVideoCommand(
+      { clipPath: '/r2/pet.mp4', outputPath: OUT, width: 1920, height: 1080 },
+      { ffmpegBin: '/usr/bin/ffmpeg' },
+    );
+    expect(cmd.bin).toBe('/usr/bin/ffmpeg');
+    expect(petFc(cmd.args)).toContain('scale=1920:1080');
   });
 });

@@ -78,7 +78,7 @@ const isVeoSource = (s: VideoSource): boolean =>
 
 /** 三档画幅 (Phase 2 第一期). Veo 仅支持 9:16/16:9 → 1:1 用 9:16 出, compose pad 到方形. */
 export type AspectRatio = '9:16' | '16:9' | '1:1';
-function resolveAspect(ar: AspectRatio): {
+export function resolveAspect(ar: AspectRatio): {
   width: number;
   height: number;
   veoAspect: '9:16' | '16:9';
@@ -132,6 +132,9 @@ export interface SimpleVideoConfig {
   readonly wanxiangVideoSize?: string;
   /** HappyHorse t2v model (阿里 DashScope, 同 key 同端点). Default 'happyhorse-1.0-t2v'. */
   readonly happyhorseModel?: string;
+  /** i2v 图生视频 model ids (Phase 2 第二期 宠物视频, 同 DashScope video-synthesis 端点). */
+  readonly wanI2vModel?: string; // 默认 wan2.2-i2v-flash
+  readonly happyhorseI2vModel?: string; // 默认 happyhorse-1.0-i2v(intl 区可达性灰度前核)
   /** Veo model id per tier — each optional → built-in default. */
   readonly veoFastModel?: string;
   readonly veoLiteModel?: string;

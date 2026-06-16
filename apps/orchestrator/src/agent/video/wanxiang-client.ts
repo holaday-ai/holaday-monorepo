@@ -110,6 +110,8 @@ export interface CreateVideoTaskParams extends WanxiangBaseParams {
   readonly negativePrompt?: string;
   /** e.g. '1280*720'. Default omitted (model default). */
   readonly size?: string;
+  /** Clip length in seconds → parameters.duration (i2v 宠物视频 时长). Omit = model default. */
+  readonly durationSeconds?: number;
 }
 
 export interface WanxiangTaskResult {
@@ -244,6 +246,7 @@ export async function createVideoTask(
   const model = p.model ?? DEFAULT_VIDEO_MODEL;
   const parameters: Record<string, unknown> = {};
   if (p.size) parameters.size = p.size;
+  if (p.durationSeconds !== undefined) parameters.duration = p.durationSeconds;
   const input: Record<string, unknown> = { prompt: p.prompt };
   if (p.imageUrl) input.img_url = p.imageUrl;
   if (p.negativePrompt) input.negative_prompt = p.negativePrompt;

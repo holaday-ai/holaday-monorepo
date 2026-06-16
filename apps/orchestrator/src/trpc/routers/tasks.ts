@@ -96,8 +96,9 @@ import { skills } from '../../db/schema/skills.js';
 import { taskEvents } from '../../db/schema/task-events.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
 import { tasks as tasksTable } from '../../db/schema/tasks.js';
-import { decideVideoGate, parseVideoConfirm, quoteVideo } from '../../agent/video/video-confirm.js';
+import { decideVideoGate, parseVideoConfirm, quotePetI2v, quoteVideo } from '../../agent/video/video-confirm.js';
 import type { AspectRatio, SimpleVideoConfig, VideoSource } from '../../agent/video/video-lane-simple.js';
+import type { PetI2vModel } from '../../agent/video/video-pet-i2v.js';
 import type { VideoScript } from '../../agent/video/types.js';
 import type { VideoStyle } from '../../agent/video/video-script.js';
 import { routeTaskEvidenceOnDelete } from '../../evidence/evidence-deletion-service.js';
@@ -218,6 +219,8 @@ function buildVideoCfg(): SimpleVideoConfig {
     geminiImageModel: appEnv.GEMINI_IMAGE_MODEL,
     wanxiangT2vModel: appEnv.WANXIANG_T2V_MODEL,
     happyhorseModel: appEnv.HAPPYHORSE_T2V_MODEL ?? 'happyhorse-1.0-t2v',
+    wanI2vModel: appEnv.WANXIANG_I2V_MODEL ?? 'wan2.2-i2v-flash',
+    happyhorseI2vModel: appEnv.HAPPYHORSE_I2V_MODEL ?? 'happyhorse-1.0-i2v',
     watermarkFontFile: '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
   };
 }
@@ -310,11 +313,17 @@ const createInput = z.object({
    */
   videoOptions: z
     .object({
+      /** Phase 2 第二期 — 'normal' 普通文生 / 'pet' 宠物图生 i2v. Default 普通(omitted). */
+      tab: z.enum(['normal', 'pet']).optional(),
       model: z.enum(['veo_fast', 'veo_lite', 'veo_standard', 'happyhorse', 'wanxiang']).optional(),
+      /** 宠物 i2v 档(tab='pet'). Default 'wan_i2v'(省钱+已证可达). */
+      petModel: z.enum(['wan_i2v', 'happyhorse_i2v']).optional(),
+      /** 宠物照片的已上传 fileId(tab='pet' 必填). confirmVideo 据此 mint presigned GET 当 img_url. */
+      petImageFileId: z.string().min(1).max(64).optional(),
       style: z.enum(['auto', 'realistic', 'atmospheric', 'science']).optional(),
       aspectRatio: z.enum(['9:16', '16:9', '1:1']).optional(),
       resolution: z.enum(['720p', '1080p']).optional(),
-      durationSeconds: z.union([z.literal(6), z.literal(8)]).optional(),
+      durationSeconds: z.number().int().min(3).max(15).optional(),
     })
     .optional(),
 });
@@ -1201,6 +1210,52 @@ export const tasksRouter = router({
         const { optimizeUserScript } = await import('../../agent/video/video-script.js');
         // Phase 2 第一期 — SPA「普通视频」面板把模型档/风格/画幅/画质/时长带上来。
         const vOpts = input.videoOptions ?? {};
+
+        // ===== 宠物 i2v 分支 (Phase 2 第二期) — 单图图生, 无 optimize/脚本/TTS =====
+        // tab='pet' + 已上传 petImageFileId → 跳过文生那套, 直接 i2v 报价 + 存 metadata.
+        // confirmVideo 原子抢占后 mint presigned GET 当 img_url → runPetVideoCreation.
+        if (vOpts.tab === 'pet' && vOpts.petImageFileId) {
+          const petModel: PetI2vModel = vOpts.petModel ?? 'wan_i2v';
+          const petDuration = vOpts.durationSeconds ?? 5;
+          const petQuote = quotePetI2v(petDuration, petModel, vOpts.resolution ?? '1080p');
+          const taskId = newExternalId('task');
+          const repo = new TaskRepository(ctx.db);
+          await repo.insertTask(
+            { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
+            { userId: userRow.id, intent: input.intent, roleId: 'video-creator', opusUsed: false },
+          );
+          await ctx.db
+            .update(tasksTable)
+            .set({
+              status: 'awaiting_user',
+              awaitingQuestion: petQuote.message,
+              awaitingKind: 'video_quote',
+              result: {
+                summary: petQuote.message,
+                metadata: {
+                  lane: 'video_creation_confirm',
+                  petImageFileId: vOpts.petImageFileId,
+                  petModel,
+                  i2vPrompt: input.intent,
+                  videoOptions: vOpts,
+                },
+              },
+            })
+            .where(eq(tasksTable.externalId, taskId));
+          ctx.logger.info(
+            { taskId, userId: ctx.userId, executorLane: 'video_creation_confirm', petModel, videoCny: petQuote.videoCny },
+            'task: executor lane selected (pet i2v)',
+          );
+          broadcastToUser(ctx.userId, {
+            type: 'server.supercar.awaiting_user',
+            taskId,
+            question: petQuote.message,
+            awaitingKind: 'video_quote',
+          });
+          return { taskId, status: 'awaiting_user' as const, steps: [], executionMode: 'generate' as const };
+        }
+        // ===== end 宠物 i2v 分支 =====
+
         const style = vOpts.style as VideoStyle | undefined;
         let script: VideoScript | null = null;
         try {
@@ -5463,6 +5518,10 @@ export const tasksRouter = router({
             metadata?: {
               videoScript?: VideoScript;
               videoTier?: VideoSource;
+              // Phase 2 第二期 宠物 i2v — single-image, no script.
+              petImageFileId?: string;
+              petModel?: PetI2vModel;
+              i2vPrompt?: string;
               videoOptions?: {
                 model?: VideoSource;
                 style?: VideoStyle;
@@ -5473,10 +5532,12 @@ export const tasksRouter = router({
             };
           } | null
         )?.metadata) ?? {};
+      const isPet = !!meta.petImageFileId;
       const script = meta.videoScript;
       const tier: VideoSource = meta.videoTier ?? 'veo_fast';
       const vOpts = meta.videoOptions ?? {};
-      if (!script) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '报价脚本丢失' });
+      // 宠物 i2v 无脚本;普通文生必须有脚本(报价时存的).
+      if (!isPet && !script) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '报价脚本丢失' });
       const visualMode = action === 'generate_image' ? ('image' as const) : ('video' as const);
 
       const newTaskId = newExternalId('task');
@@ -5538,19 +5599,40 @@ export const tasksRouter = router({
           return { fileId: s.externalId, storagePath: s.externalId };
         };
         try {
-          const result = await runSimpleVideoCreation(
-            { userText: intentText, script, ...(vOpts.style ? { style: vOpts.style } : {}) },
-            buildVideoCfg(),
-            {
-              visualMode,
-              videoSource: tier,
-              ...(vOpts.aspectRatio ? { aspectRatio: vOpts.aspectRatio } : {}),
-              ...(vOpts.resolution ? { veoResolution: vOpts.resolution } : {}),
-              ...(vOpts.durationSeconds ? { veoDurationSeconds: vOpts.durationSeconds } : {}),
-            },
-            { storeOutput, workdir, logger, llm },
-          );
-          const summary = `视频已生成（${result.segments} 段 / ${Math.round(result.totalDurationMs / 1000)} 秒）。`;
+          let summary: string;
+          if (isPet) {
+            // 宠物 i2v: fileId → presigned GET → i2v 单图 → pad+水印+静默 → store.
+            const { runPetVideoCreation } = await import('../../agent/video/video-pet-i2v.js');
+            const imageUrl = await fileService.signedReadUrl(meta.petImageFileId!, userInternalId);
+            if (!imageUrl) {
+              throw new Error('宠物照片不可用(已过期或无法生成访问链接)');
+            }
+            await runPetVideoCreation(
+              { imageUrl, motionPrompt: meta.i2vPrompt ?? intentText },
+              buildVideoCfg(),
+              {
+                ...(meta.petModel ? { model: meta.petModel } : {}),
+                ...(vOpts.aspectRatio ? { aspectRatio: vOpts.aspectRatio } : {}),
+                ...(vOpts.durationSeconds ? { durationSeconds: vOpts.durationSeconds } : {}),
+              },
+              { storeOutput, workdir, logger },
+            );
+            summary = '宠物视频已生成。';
+          } else {
+            const result = await runSimpleVideoCreation(
+              { userText: intentText, script: script!, ...(vOpts.style ? { style: vOpts.style } : {}) },
+              buildVideoCfg(),
+              {
+                visualMode,
+                videoSource: tier,
+                ...(vOpts.aspectRatio ? { aspectRatio: vOpts.aspectRatio } : {}),
+                ...(vOpts.resolution ? { veoResolution: vOpts.resolution } : {}),
+                ...(vOpts.durationSeconds ? { veoDurationSeconds: vOpts.durationSeconds } : {}),
+              },
+              { storeOutput, workdir, logger, llm },
+            );
+            summary = `视频已生成（${result.segments} 段 / ${Math.round(result.totalDurationMs / 1000)} 秒）。`;
+          }
           await repo.persistVisionOutcome(newTaskId, {
             status: 'completed',
             summary,

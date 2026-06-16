@@ -104,6 +104,14 @@ const schema = z.object({
   WANXIANG_T2V_MODEL: z.string().default('wan2.1-t2v-turbo'),
   /** HappyHorse-1.0 文生视频(同 DashScope intl 端点/同 key,仅改 model). */
   HAPPYHORSE_T2V_MODEL: z.string().default('happyhorse-1.0-t2v'),
+  /**
+   * 图生视频 i2v (Phase 2 第二期 宠物视频). 同 DashScope video-synthesis 端点,
+   * input.img_url 走单图. 默认 wan2.2-i2v-flash(更省 + 已证同 intl 端点/key);
+   * happyhorse-1.0-i2v 作高质量可选(⚠️ intl 区可达性未核,examples 用 CN host,
+   * 灰度前需 console 核 region). 价表见 video-confirm.ts。
+   */
+  WANXIANG_I2V_MODEL: z.string().default('wan2.2-i2v-flash'),
+  HAPPYHORSE_I2V_MODEL: z.string().default('happyhorse-1.0-i2v'),
   FAL_LIPSYNC_MODEL: z.string().default('fal-ai/latentsync'),
   QWEN_TTS_VC_MODEL: z.string().default('qwen3-tts-vc-2026-01-22'),
   /**

@@ -219,3 +219,103 @@ export function buildComposeCommand(
   ];
   return { bin: opts?.ffmpegBin ?? 'ffmpeg', args };
 }
+
+export interface PetComposeInput {
+  /** The raw i2v clip (single image animated). */
+  readonly clipPath: string;
+  readonly outputPath: string;
+  /** Watermark. Omit → default text watermark (compliance — never un-watermarked). */
+  readonly watermark?: ComposeWatermark;
+  readonly width?: number;
+  readonly height?: number;
+  readonly fps?: number;
+}
+
+/**
+ * Build the ffmpeg command for a SINGLE-IMAGE i2v (宠物视频) clip → final MP4.
+ *
+ * Unlike buildComposeCommand (multi-segment, every clip carries narration
+ * audio), pet i2v is one clip with NO narration / NO subtitles. We:
+ *   1. scale-to-fit + pad to W×H + setsar + fps (画幅对齐, 不裁切);
+ *   2. burn the compliance watermark (ALWAYS — text or image);
+ *   3. dub a SILENT stereo track (anullsrc) so the container always has a
+ *      valid audio stream regardless of whether the i2v model emitted one,
+ *      and `-shortest` clamps it to the video length.
+ * Deterministic — no audio-stream probing, so it can't fail on a silent
+ * i2v output. BGM / narration is a later enhancement.
+ */
+export function buildPetVideoCommand(
+  input: PetComposeInput,
+  opts?: { ffmpegBin?: string },
+): FfmpegCommand {
+  const W = input.width ?? DEFAULT_WIDTH;
+  const H = input.height ?? DEFAULT_HEIGHT;
+  const FPS = input.fps ?? DEFAULT_FPS;
+
+  const inputArgs = [
+    '-i',
+    input.clipPath,
+    // silent stereo audio source (input index 1)
+    '-f',
+    'lavfi',
+    '-i',
+    'anullsrc=channel_layout=stereo:sample_rate=44100',
+  ];
+  const wantImageWatermark = !!input.watermark?.imagePath;
+  let wmImgIdx = -1;
+  if (wantImageWatermark) {
+    inputArgs.push('-i', input.watermark!.imagePath!);
+    wmImgIdx = 2;
+  }
+
+  const fc: string[] = [
+    `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
+      `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${FPS}[v]`,
+  ];
+  let vcur = 'v';
+  const opacity = input.watermark?.opacity ?? 0.6;
+  const position = input.watermark?.position ?? 'bottom-right';
+  if (wantImageWatermark) {
+    fc.push(`[${wmImgIdx}:v]format=rgba,colorchannelmixer=aa=${opacity}[wm]`);
+    fc.push(`[${vcur}][wm]overlay=${overlayPosition(position)}[wv]`);
+    vcur = 'wv';
+  } else {
+    const text = input.watermark?.text ?? DEFAULT_WATERMARK_TEXT;
+    const fontFilePart = input.watermark?.fontFile
+      ? `fontfile='${escapeFilterValue(input.watermark.fontFile)}':`
+      : '';
+    fc.push(
+      `[${vcur}]drawtext=${fontFilePart}text='${escapeFilterValue(text)}':fontcolor=white@${opacity}:` +
+        `fontsize=36:box=1:boxcolor=black@0.35:boxborderw=10:${drawtextPosition(position)}[wv]`,
+    );
+    vcur = 'wv';
+  }
+
+  const args = [
+    '-y',
+    ...inputArgs,
+    '-filter_complex',
+    fc.join(';'),
+    '-map',
+    `[${vcur}]`,
+    '-map',
+    '1:a',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'medium',
+    '-pix_fmt',
+    'yuv420p',
+    '-r',
+    String(FPS),
+    '-c:a',
+    'aac',
+    '-b:a',
+    '128k',
+    '-shortest',
+    '-movflags',
+    '+faststart',
+    input.outputPath,
+  ];
+  return { bin: opts?.ffmpegBin ?? 'ffmpeg', args };
+}

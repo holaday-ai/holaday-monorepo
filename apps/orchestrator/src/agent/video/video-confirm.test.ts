@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { decideVideoGate, parseVideoConfirm, quoteVideo } from './video-confirm.js';
+import { decideVideoGate, parseVideoConfirm, quotePetI2v, quoteVideo } from './video-confirm.js';
 
 describe('parseVideoConfirm — structured action wins', () => {
   it('maps button actions with zero text guessing', () => {
@@ -115,5 +115,32 @@ describe('quoteVideo — dynamic by segment count', () => {
     expect(q.message).toContain('快马 HappyHorse');
     expect(q.message).toContain('横屏');
     expect(q.message).not.toContain('Veo Fast'); // 不再硬写 Fast
+  });
+});
+
+describe('quotePetI2v — 宠物 i2v 报价 (Phase 2 第二期, 原生 RMB/秒)', () => {
+  it('happyhorse i2v: videoCny = 秒 × 元/秒 (720P 0.9 / 1080P 1.6), 1080 比 720 贵', () => {
+    const p720 = quotePetI2v(5, 'happyhorse_i2v', '720p');
+    const p1080 = quotePetI2v(5, 'happyhorse_i2v', '1080p');
+    expect(p720.videoCny).toBe(Math.ceil(5 * 0.9)); // = 5
+    expect(p1080.videoCny).toBe(Math.ceil(5 * 1.6)); // = 8
+    expect(p1080.videoCny).toBeGreaterThan(p720.videoCny);
+    expect(p720.message).toContain('快马 i2v');
+    expect(p720.message).toContain('5 秒');
+  });
+
+  it('wan i2v(默认)远便宜于 happyhorse; 文案不含「图片版」', () => {
+    const wan = quotePetI2v(5, 'wan_i2v', '1080p');
+    const hh = quotePetI2v(5, 'happyhorse_i2v', '1080p');
+    expect(wan.videoCny).toBeLessThan(hh.videoCny);
+    expect(wan.videoCny).toBeGreaterThanOrEqual(1); // floor ¥1
+    expect(wan.message).toContain('万相 i2v');
+    expect(wan.message).not.toContain('图片版'); // 宠物只有 确认/取消
+  });
+
+  it('longer duration costs more', () => {
+    expect(quotePetI2v(8, 'happyhorse_i2v', '1080p').videoCny).toBeGreaterThan(
+      quotePetI2v(3, 'happyhorse_i2v', '1080p').videoCny,
+    );
   });
 });

@@ -9,6 +9,7 @@
  * Veo 烧钱严格在「确认」之后 —— 本模块只决定 choice，不发任何生成调用。
  */
 import type { VideoSource } from './video-lane-simple.js';
+import type { PetI2vModel } from './video-pet-i2v.js';
 
 export type VideoChoice = 'video' | 'image' | 'cancel' | 'unclear';
 
@@ -96,6 +97,44 @@ export interface VideoQuote {
   readonly videoCny: number;
   readonly imageCny: number;
   readonly message: string;
+}
+
+// ---------------------------------------------------------------------------
+// 宠物 i2v 报价 (Phase 2 第二期). i2v 单价原生人民币(元/秒),不经汇率.
+// ---------------------------------------------------------------------------
+// BOSS 2026-06-16 核价:
+//   happyhorse-1.0-i2v: 720P 0.9 / 1080P 1.6 元/秒 (高置信, per-resolution, 与 t2v 同价).
+//   wan2.2-i2v-flash:   仅确认 floor「低至 0.1 元/秒」(约 480P);720/1080 官方价表 JS 渲染
+//     未能抓取 → TODO(pricing): 灰度前必须 console 核 wan i2v 720/1080 真实 元/秒,
+//     当前两档都用 0.1 为占位**下限**(不烧不计费阶段, 仅供预览,确认报价以实际为准).
+const I2V_CNY_PER_SEC: Record<PetI2vModel, Record<Resolution, number>> = {
+  wan_i2v: { '720p': 0.1, '1080p': 0.1 }, // ⚠️ 占位下限, 待 console 核
+  happyhorse_i2v: { '720p': 0.9, '1080p': 1.6 },
+};
+const I2V_LABEL: Record<PetI2vModel, string> = {
+  wan_i2v: '万相 i2v(省钱)',
+  happyhorse_i2v: '快马 i2v(高质量)',
+};
+
+export interface PetVideoQuote {
+  readonly durationSeconds: number;
+  readonly videoCny: number;
+  readonly message: string;
+}
+
+/** 宠物 i2v 报价 — videoCny = 时长(秒) × 选定档/画质 元/秒(原生 RMB,无汇率). */
+export function quotePetI2v(
+  durationSeconds: number,
+  model: PetI2vModel,
+  resolution: Resolution = '1080p',
+): PetVideoQuote {
+  const perSec = I2V_CNY_PER_SEC[model]?.[resolution] ?? 0;
+  const videoCny = Math.max(1, Math.ceil(durationSeconds * perSec));
+  const message =
+    `将把这张照片生成一条约 ${durationSeconds} 秒的宠物动态视频，预计费用约 ¥${videoCny}` +
+    `（${I2V_LABEL[model]} · ${resolution} · 按 ${durationSeconds} 秒计费）。\n` +
+    `点「确认制作」开始；不需要可「取消」。`;
+  return { durationSeconds, videoCny, message };
 }
 
 /** Dynamic price quote — videoCny = 真实段数 × 每段秒数 × 选定档/画质单价 × 汇率. */
