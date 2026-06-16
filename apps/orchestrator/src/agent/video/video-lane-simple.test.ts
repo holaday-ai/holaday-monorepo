@@ -80,9 +80,12 @@ describe('runSimpleVideoCreation — video (default = veo_fast)', () => {
     expect(veoArg.aspectRatio).toBe('9:16');
     expect(veoArg.durationSeconds).toBe(8); // BOSS: 8s
     expect(veoArg.resolution).toBe('1080p'); // BOSS: 1080p
-    // no-text + anatomy constraints ride in the prompt
+    // anatomy constraints ride in the prompt
     expect(veoArg.prompt).toContain('画面整洁');
     expect(veoArg.prompt).toMatch(/五指完整|多余肢体|双臂可追溯/);
+    // 范围2 收窄: 仍压"含文字物体/编造乱码假字", 但删掉"任何文字"一刀切
+    expect(veoArg.prompt).toMatch(/含文字物体|编造乱码假字/);
+    expect(veoArg.prompt).not.toContain('不能有任何文字');
     expect(mocks.runFfmpeg).toHaveBeenCalledTimes(1);
     expect(out.visualMode).toBe('video');
     expect(out.fileId).toBe('f_video.mp4');

@@ -41,6 +41,7 @@ export function buildTimeline(
       index: i,
       type: seg.type,
       text: seg.text,
+      ...(seg.keyText !== undefined ? { keyText: seg.keyText } : {}),
       startMs: cursor,
       endMs: cursor + dur,
       durationMs: dur,
@@ -112,6 +113,28 @@ export interface AssStyleOptions {
   marginV?: number;
   /** Auto-wrap threshold (chars/line). Default 14 (CJK). */
   maxCharsPerLine?: number;
+  /** KeyCard (信息点字卡) font size. Default 72 (bigger than subtitle). */
+  keyFontSize?: number;
+  /** KeyCard vertical margin from TOP (Alignment 8). Default 360 (中上, clears bottom subtitle). */
+  keyMarginV?: number;
+}
+
+/** KeyCard 字卡颜色: 品牌 magenta #E50B6B → ASS &HAABBGGRR (BGR 倒序: BB=6B GG=0B RR=E5). */
+const KEYCARD_COLOUR = '&H006B0BE5';
+
+/**
+ * Defend a keyText before it enters the ASS layer (范围2 防御): strip ASS
+ * control chars (`{` `}` `\` — would inject override tags / break the file)
+ * and newlines/tabs, trim, then hard-cap 8 chars. A dirty / over-long / empty
+ * keyText degrades to `null` (that segment simply gets no KeyCard) — it can
+ * never crash the ASS render or overflow. (schema is the first cap; this is
+ * belt-and-braces for whatever the model emits.)
+ */
+export function sanitizeKeyText(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  const cleaned = raw.replace(/[{}\\]/g, '').replace(/[\r\n\t]+/g, ' ').trim();
+  if (!cleaned) return null;
+  return cleaned.length > 8 ? cleaned.slice(0, 8) : cleaned;
 }
 
 /**
@@ -129,6 +152,8 @@ export function buildAss(timeline: Timeline, opts: AssStyleOptions = {}): string
   const mH = opts.marginH ?? 80;
   const mV = opts.marginV ?? 140;
   const maxChars = opts.maxCharsPerLine ?? 14;
+  const keySize = opts.keyFontSize ?? 72;
+  const keyMV = opts.keyMarginV ?? 360;
   const header = [
     '[Script Info]',
     'ScriptType: v4.00+',
@@ -139,17 +164,27 @@ export function buildAss(timeline: Timeline, opts: AssStyleOptions = {}): string
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    // white text, black outline, semi-transparent shadow; Alignment 2 = bottom-center.
+    // 底部字幕: white text, black outline; Alignment 2 = bottom-center.
     `Style: Default,${font},${size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,3,1,2,${mH},${mH},${mV},1`,
+    // 信息点字卡: magenta bold, thicker outline; Alignment 8 = top-center, MarginV from top.
+    `Style: KeyCard,${font},${keySize},${KEYCARD_COLOUR},&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,1,8,${mH},${mH},${keyMV},1`,
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ].join('\n');
-  const events = timeline.segments
+  // 底部字幕(每段一条 Default cue)。
+  const subEvents = timeline.segments.map(
+    (seg) =>
+      `Dialogue: 0,${formatAssTime(seg.startMs)},${formatAssTime(seg.endMs)},Default,,0,0,0,,${wrapCjk(seg.text, maxChars)}`,
+  );
+  // 信息点字卡(只对 sanitize 后非空的 keyText 段叠 KeyCard cue, \fad 300ms 淡入淡出)。
+  const keyEvents = timeline.segments
+    .map((seg) => ({ seg, kt: sanitizeKeyText(seg.keyText) }))
+    .filter((x): x is { seg: TimelineSegment; kt: string } => x.kt !== null)
     .map(
-      (seg) =>
-        `Dialogue: 0,${formatAssTime(seg.startMs)},${formatAssTime(seg.endMs)},Default,,0,0,0,,${wrapCjk(seg.text, maxChars)}`,
-    )
-    .join('\n');
+      ({ seg, kt }) =>
+        `Dialogue: 0,${formatAssTime(seg.startMs)},${formatAssTime(seg.endMs)},KeyCard,,0,0,0,,{\\fad(300,300)}${kt}`,
+    );
+  const events = [...subEvents, ...keyEvents].join('\n');
   return `${header}\n${events}\n`;
 }

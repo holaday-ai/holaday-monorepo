@@ -45,6 +45,9 @@ const SegmentSchema = z.object({
   text: z.string().min(1),
   type: z.enum(['voiceover', 'broll']),
   visual: z.string().min(1).optional(),
+  // 信息点字卡(短词 ≤8字). `.catch(undefined)`: 超长/脏值 → 该段不叠,绝不让一个脏
+  // keyText 崩掉整个 script parse. buildAss 还有第二层 sanitize(去 ASS 控制字符).
+  keyText: z.string().trim().min(1).max(8).optional().catch(undefined),
   durationHintSec: z.coerce.number().positive().optional(),
 });
 
@@ -162,15 +165,21 @@ export function buildOptimizeSystemPrompt(maxSegments: number): string {
     '',
     '硬性要求：',
     `- ${Math.max(3, maxSegments - 2)}~${maxSegments} 个分段，每段一句精炼旁白（text，口语化、保留用户原意）。`,
-    '- 每段都要一句画面描述（visual，用于 AI 文生图/文生视频），与旁白匹配。',
-    '- 【画面描述只写「场景/人物/动作/氛围」】，例如阳光沙滩、戴遮阳帽墨镜的氛围感人物、泳池边的半身画面。',
-    '  绝不写「产品包装/瓶身/标签/招牌/屏幕/书本」这类含文字的特写构图——AI 生图会在上面编造乱码假字。画面中不能出现任何文字。',
+    '- 每段一句画面描述（visual，用于 AI 文生图/文生视频）。【让画面视觉化该段旁白在说的核心动作或对象】：',
+    '  例如「选 SPF50」段→阳光下手在小臂上抹开乳白防晒乳的动作；「每两小时补涂」段→户外看时间、再次涂抹的画面；',
+    '  「紫外线很强」段→正午烈日暴晒的街景/皮肤。不要用与旁白无关的泛泛空镜（如随手一个草帽女）。',
+    '- 【不要画含文字的特写构图】：产品包装/瓶身/标签/招牌/屏幕/书本这类——AI 会在上面编造乱码假字，一律不画、不特写。',
+    '  环境里自然的远景文字（模糊路牌等）不强求避开，但别让文字成为画面主体或特写。',
     '- 【避开高解剖风险构图】：AI 画「手-物-手竖直叠帧」「双手紧贴特写」会长出多余手臂或畸形手。',
     '  优先单人、半身或环境景；手部动作用侧面、单手的简单姿势，避免「一只手拿物、另一只手操作」的正面叠手特写。',
+    '- 【信息点字卡 keyText（可选）】：若该段旁白含一个值得在画面上「浮一行字」强调的关键信息点',
+    '  （如「SPF50」「PA+++」「每2小时补涂」），在该段填 keyText，提炼成 ≤8 字的点睛短词。',
+    '  这行字由系统用字体叠加到画面上（不是 AI 画），不会乱码，放心填；纯描述、无明确信息点的段就不填。',
+    '  keyText 只是要强调的关键词，不是完整旁白（旁白已是 text）。',
     '- 忠于用户文案：优化表达/分段/补画面，但不改变事实主张、不杜撰、不模仿或冒充他人。',
     '',
     '只输出 JSON（不要 markdown、不要解释）：',
-    '{"title": "...", "segments": [{"text": "旁白句", "visual": "画面描述"}], "bgmMood": "轻快", "hashtags": ["#..."]}',
+    '{"title": "...", "segments": [{"text": "旁白句", "visual": "画面描述", "keyText": "SPF50"}], "bgmMood": "轻快", "hashtags": ["#..."]}',
   ].join('\n');
 }
 
@@ -186,6 +195,7 @@ function normalizeOptimized(raw: unknown): unknown {
         text: seg.text ?? seg.文案 ?? seg.narration,
         type: 'broll' as const,
         visual: seg.visual ?? seg.画面 ?? undefined,
+        keyText: seg.keyText ?? seg.关键词 ?? seg.信息点 ?? undefined,
         durationHintSec: seg.durationHintSec ?? seg.duration_hint ?? undefined,
       };
     }),

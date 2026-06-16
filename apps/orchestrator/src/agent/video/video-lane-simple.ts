@@ -37,21 +37,22 @@ import { optimizeUserScript, type LlmComplete } from './video-script.js';
 import type { VideoScript } from './types.js';
 import { generateBrollVideo } from './wanxiang-client.js';
 
-// 无文字 + 解剖约束 — AI 文生图/视频画产品标签会编乱码字 (P1-2),画「手-物-手
-// 竖直叠帧」会长出多余手臂(Veo Lite / nano banana 都吐过)。约束并进 prompt 文本
-// (Veo / nano banana 无独立 negative 参数);wanxiang t2v 另传 NO_TEXT_NEGATIVE。
+// 收窄(范围2,BOSS 松绑):不再全禁"任何文字"(那是过度一刀切,也拖累画面-文案关联)。
+// 只阻止 AI 把【含文字的物体】画成主体/特写(瓶身标签/招牌/屏幕…AI 会编乱码假字);
+// 想要的文字(字幕/信息点字卡)由合成层 ASS 字体叠加,不经 AI、永不乱码。环境远景文字不强禁。
+// 解剖约束保留:画「手-物-手竖直叠帧」会长出多余手臂(Veo Lite / nano banana 都吐过)。
 const CLEAN_SCENE_SUFFIX =
   '，画面整洁，纯场景/人物/氛围；' +
   '单人出镜，双臂可追溯到肩膀，五指完整、手部解剖正确，' +
   '不出现多余肢体、断肢或悬空小臂，避开手-物-手竖直叠帧这类高解剖风险构图；' +
-  '不出现任何产品包装文字、标签、瓶身文字、招牌、屏幕文字、书本文字、字幕或水印，画面中不能有任何文字';
+  '不要把产品包装、瓶身标签、招牌、屏幕、书本等含文字物体作为画面主体或特写（AI 会在上面编造乱码假字）';
 const NO_TEXT_NEGATIVE = [
-  // 中文 — 文字
-  '文字, 文本, 字幕, 标题, 标签, 包装文字, 瓶身文字, 招牌, 招牌文字, 屏幕文字, 书本文字, 水印, 错乱的字, 乱码',
+  // 中文 — 只压 AI 会编乱码的产品文字载体 + 乱码本身(不再全禁通用文字)
+  '瓶身文字, 包装文字, 标签文字, 招牌文字, 屏幕文字, 书本文字, 错乱的字, 乱码假字',
   // 中文 — 解剖
   '多余手臂, 多手, 多臂, 第三只手, 畸形手, 多指, 断肢, 悬空手臂, 解剖错误',
   // English
-  'text, words, letters, label, packaging text, signage, watermark, gibberish text,' +
+  'garbled text, fake text, gibberish text, packaging label text, signage text, deformed text,' +
     ' extra arm, extra hand, third arm, deformed hands, extra fingers, floating limb, anatomical error',
 ].join(', ');
 

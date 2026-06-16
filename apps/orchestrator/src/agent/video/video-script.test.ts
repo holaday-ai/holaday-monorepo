@@ -140,12 +140,41 @@ describe('optimizeUserScript (原方案 — faithful to user draft)', () => {
     expect(p).toContain('只输出 JSON');
   });
 
-  it('steers画面描述 to text-free scenes/people/atmosphere (P1-2 root fix)', () => {
+  it('范围2松绑: 关联性引导 + 保留压产品乱码 + 删掉"任何文字"一刀切', () => {
     const p = buildOptimizeSystemPrompt(6);
-    // visual prompts must be scenes/people/atmosphere, NOT product-label closeups
-    expect(p).toMatch(/场景\/人物\/动作\/氛围|场景\/人物/);
-    expect(p).toMatch(/产品包装|瓶身|标签/); // explicitly forbids the text-bearing closeups
-    expect(p).toMatch(/不能出现任何文字|编造乱码/);
+    // 关联性(范围3): 画面视觉化该段旁白的核心动作/对象
+    expect(p).toMatch(/视觉化该段旁白|核心动作或对象/);
+    // 收窄保留: 不画含文字特写 + 产品乱码假字
+    expect(p).toMatch(/不要画含文字的特写|含文字的特写构图/);
+    expect(p).toMatch(/产品包装|瓶身|标签/);
+    expect(p).toMatch(/编造乱码/);
+    // 松绑: 一刀切"画面中不能(出现|有)任何文字"必须已删
+    expect(p).not.toContain('画面中不能出现任何文字');
+    expect(p).not.toContain('画面中不能有任何文字');
+  });
+
+  it('keyText: 系统提示引导(≤8字/字体叠加不乱码) + JSON 示例含 keyText', () => {
+    const p = buildOptimizeSystemPrompt(6);
+    expect(p).toMatch(/信息点字卡|keyText/);
+    expect(p).toMatch(/≤\s*8\s*字|点睛短词/);
+    expect(p).toMatch(/字体叠加|不会乱码/);
+    expect(p).toContain('"keyText"');
+  });
+
+  it('keyText schema: ≤8 保留, 超长/脏 → undefined(不崩整个 parse)', async () => {
+    const j = JSON.stringify({
+      title: 't',
+      segments: [
+        { text: '选防晒认准SPF50', visual: '阳光下涂防晒动作', keyText: 'SPF50' },
+        { text: '每两小时补涂', visual: '户外补涂画面', keyText: '超过八个字符的超长信息点词' },
+        { text: '纯描述段无信息点', visual: '海边氛围' },
+      ],
+    });
+    const out = await optimizeUserScript({ userText: '夏季防晒' }, { llm: llmReturning(j) });
+    expect(out.segments[0]?.keyText).toBe('SPF50');
+    expect(out.segments[1]?.keyText).toBeUndefined(); // 超长 catch → undefined, parse 不崩
+    expect(out.segments[2]?.keyText).toBeUndefined();
+    expect(out.segments).toHaveLength(3); // 整个 script 没因脏 keyText 失败
   });
 
   it('steers away from high-anatomy-risk framing (extra-arm root fix)', () => {
