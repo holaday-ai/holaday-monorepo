@@ -45,6 +45,7 @@ const SkillsPage = lazyRoute(() => import('@/pages/SkillsPage'), 'SkillsPage');
 const StarredPage = lazyRoute(() => import('@/pages/StarredPage'), 'StarredPage');
 const TermsPage = lazyRoute(() => import('@/pages/TermsPage'), 'TermsPage');
 const UsagePage = lazyRoute(() => import('@/pages/UsagePage'), 'UsagePage');
+const VideoPage = lazyRoute(() => import('@/pages/VideoPage'), 'VideoPage');
 
 /**
  * Route table. Every authed route lives inside one `<AppShell>` layout
@@ -134,6 +135,7 @@ export function App(): JSX.Element {
           <Route path="/projects" element={lazyElement(<ProjectsPage />)} />
           <Route path="/starred" element={lazyElement(<StarredPage />)} />
           <Route path="/files" element={lazyElement(<FilesPage />)} />
+          <Route path="/video" element={lazyElement(<VideoPage />)} />
           <Route path="/scheduled" element={lazyElement(<ScheduledPage />)} />
           <Route path="/batch" element={lazyElement(<BatchPage />)} />
           <Route path="/batch/:batchId" element={lazyElement(<BatchPage />)} />

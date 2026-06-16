@@ -1,5 +1,6 @@
 import {
   Check,
+  Clapperboard,
   Clipboard,
   Clock,
   FolderOpen,
@@ -998,6 +999,7 @@ interface FeatureItem {
 
 const FEATURES: readonly FeatureItem[] = [
   { icon: Sparkles, label: '专家技能', href: '/skills' },
+  { icon: Clapperboard, label: '视频任务', href: '/video' },
   { icon: Clock, label: '定时任务', href: '/scheduled' },
   { icon: ListPlus, label: '批量任务', href: '/batch' },
   { icon: FolderOpen, label: '文件库', href: '/files' },

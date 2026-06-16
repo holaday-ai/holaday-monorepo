@@ -18,6 +18,7 @@ import type {
   UiWebSearchEvent,
 } from '@/types/task';
 import { isTerminalStatus } from '@/types/task';
+import type { VideoCreationOptions } from '@/types/video';
 
 /**
  * Single source of truth for the task list + selection. Data flows in
@@ -240,6 +241,12 @@ export interface TaskStore {
      * absent.
      */
     viewportProfile?: BrowserViewportProfile,
+    /**
+     * Phase 2 第一期 — 视频独立界面带上来的模型档/风格/画幅/画质/时长。
+     * 仅当 video fork 命中(VIDEO_CREATION_ENABLED + 灰度内)被后端读取;
+     * 其余任务忽略。透传给 `tasks.create` 的 `videoOptions`。
+     */
+    videoOptions?: VideoCreationOptions,
   ): Promise<{ taskId: string } | { error: string }>;
   deleteTask(taskId: string): Promise<{ ok: true } | { error: string }>;
   renameTask(taskId: string, title: string): Promise<{ ok: true } | { error: string }>;
@@ -1058,7 +1065,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     }
   },
 
-  async createTask(intent, fileIds, replyToTaskId, mode, expertMode, viewportProfile) {
+  async createTask(intent, fileIds, replyToTaskId, mode, expertMode, viewportProfile, videoOptions) {
     // Reject intents that are obviously control commands typed into
     // the wrong box (e.g. user typing "停止" into the composer
     // because they didn't see the Stop button). Fails client-side
@@ -1097,6 +1104,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         ...(replyToTaskId ? { replyToTaskId } : {}),
         ...(mode === 'plan' ? { mode } : {}),
         ...(expertMode && expertMode !== 'auto' ? { expertMode } : {}),
+        ...(videoOptions ? { videoOptions } : {}),
         viewportProfile: pickedViewportProfile,
       });
       // Optimistic insert at the top so the UI feels instant; the next
