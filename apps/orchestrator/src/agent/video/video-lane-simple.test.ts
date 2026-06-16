@@ -166,3 +166,21 @@ describe('runSimpleVideoCreation — config gates', () => {
     ).rejects.toMatchObject({ kind: 'config' });
   });
 });
+
+describe('runSimpleVideoCreation — pre-optimized script (Phase-1 quote reuse)', () => {
+  it('uses input.script verbatim and SKIPS optimize (quote segs == gen segs)', async () => {
+    const { svc, mocks } = makeServices();
+    const SCRIPT3: VideoScript = {
+      title: 'q',
+      segments: [
+        { text: 'a', type: 'broll', visual: 'va' },
+        { text: 'b', type: 'broll', visual: 'vb' },
+        { text: 'c', type: 'broll', visual: 'vc' },
+      ],
+    };
+    const out = await runSimpleVideoCreation({ userText: 'x', script: SCRIPT3 }, CFG, {}, svc);
+    expect(mocks.optimizeUserScript).not.toHaveBeenCalled(); // optimize skipped
+    expect(mocks.generateVeoVideo).toHaveBeenCalledTimes(3); // 3 段 = 报价段数(默认 veo_fast)
+    expect(out.segments).toBe(3);
+  });
+});

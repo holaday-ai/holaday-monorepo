@@ -96,6 +96,9 @@ import { skills } from '../../db/schema/skills.js';
 import { taskEvents } from '../../db/schema/task-events.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
 import { tasks as tasksTable } from '../../db/schema/tasks.js';
+import { decideVideoGate, parseVideoConfirm, quoteVideo } from '../../agent/video/video-confirm.js';
+import type { SimpleVideoConfig, VideoSource } from '../../agent/video/video-lane-simple.js';
+import type { VideoScript } from '../../agent/video/types.js';
 import { routeTaskEvidenceOnDelete } from '../../evidence/evidence-deletion-service.js';
 import { writeLedgerToDb } from '../../evidence/ledger-write-service.js';
 import { users } from '../../db/schema/users.js';
@@ -183,6 +186,39 @@ const ASHARE_QA_ALLOWLIST: ReadonlySet<string> = new Set(
     .map((s) => s.trim())
     .filter(Boolean),
 );
+
+// Phase 1 #4 — video-creation 灰度白名单（VIDEO_CREATION_ALLOWLIST CSV）。flag off
+// 或不在名单 → video 意图落通用路径。空名单 = 全量（当 ENABLED）；非空 = 灰度。
+const VIDEO_CREATION_ALLOWLIST: ReadonlySet<string> = new Set(
+  (appEnv.VIDEO_CREATION_ALLOWLIST ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+
+// Anthropic model for the video优化/脚本 step.
+// TODO(env): 接进 env.ts (VIDEO_SCRIPT_MODEL) when the video lane env block lands.
+const VIDEO_SCRIPT_MODEL = 'claude-sonnet-4-6';
+
+/**
+ * Build the simplified-video-lane config from env. Model ids / 音色 / 字体 use
+ * built-in defaults (Vultr-verified); env-ising them is a nice-to-have.
+ * TODO(env): VEO_*_MODEL / QWEN_TTS_MODEL / PRESET_VOICE / font paths.
+ */
+function buildVideoCfg(): SimpleVideoConfig {
+  return {
+    dashscopeApiKey: appEnv.DASHSCOPE_API_KEY,
+    dashscopeBaseUrl: appEnv.DASHSCOPE_BASE_URL,
+    ...(appEnv.DASHSCOPE_WORKSPACE_ID ? { dashscopeWorkspaceId: appEnv.DASHSCOPE_WORKSPACE_ID } : {}),
+    geminiApiKey: appEnv.GEMINI_API_KEY,
+    geminiBaseUrl: appEnv.GEMINI_BASE_URL,
+    qwenTtsModel: 'qwen3-tts-flash',
+    presetVoice: 'Cherry',
+    geminiImageModel: appEnv.GEMINI_IMAGE_MODEL,
+    wanxiangT2vModel: appEnv.WANXIANG_T2V_MODEL,
+    watermarkFontFile: '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
+  };
+}
 
 // Module-scope Anthropic client for url-resolver. Cheap to construct
 // but no reason to pay per request — cache once at import time.
@@ -1133,6 +1169,84 @@ export const tasksRouter = router({
       };
     }
     // ===== end image-mode fork =====
+
+    // ===== video-creation fork (Phase 1 #4 原方案, flag + allowlist 灰度) =====
+    // 两段式:Phase1 出 awaiting_user 报价卡(只跑 optimize=LLM,零 Veo);确认走
+    // tasks.confirmVideo(结构化按钮)。Veo 烧钱严格在 confirmVideo 的原子抢占之后。
+    // 默认 VIDEO_CREATION_ENABLED=false → video 意图落通用 generate(诚实说不能出视频)。
+    {
+      const videoAllowed =
+        VIDEO_CREATION_ALLOWLIST.size === 0 || VIDEO_CREATION_ALLOWLIST.has(ctx.userId);
+      const videoIntent = executionMode === 'video_creation' || input.roleId === 'video-creator';
+      if (appEnv.VIDEO_CREATION_ENABLED && videoIntent && videoAllowed && anthropicForResolver) {
+        const anthropicClient = anthropicForResolver;
+        const { optimizeUserScript } = await import('../../agent/video/video-script.js');
+        let script: VideoScript | null = null;
+        try {
+          // optimize = LLM(~¥0.01),**非 Veo**。出真实段数以便动态报价。
+          script = await optimizeUserScript(
+            { userText: input.intent },
+            {
+              llm: async ({ system, user }) => {
+                const resp = await anthropicClient.messages.create({
+                  model: VIDEO_SCRIPT_MODEL,
+                  max_tokens: 2000,
+                  system,
+                  messages: [{ role: 'user', content: user }],
+                });
+                const b = resp.content[0];
+                return b && b.type === 'text' ? b.text : '';
+              },
+            },
+          );
+        } catch (err) {
+          ctx.logger.error({ err, userId: ctx.userId }, 'video_creation: optimize(报价前) failed — 落通用');
+        }
+        if (script) {
+          const tier: VideoSource = 'veo_fast';
+          const quote = quoteVideo(script.segments.length, tier);
+          const taskId = newExternalId('task');
+          const repo = new TaskRepository(ctx.db);
+          await repo.insertTask(
+            { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
+            { userId: userRow.id, intent: input.intent, roleId: 'video-creator', opusUsed: false },
+          );
+          // persistVisionOutcome 不支持 awaiting_user → 直接补 awaitingKind/result.
+          // result.metadata 存 videoScript(确认后复用,保证段数=报价段数)+ lane(给
+          // consumeVideoConfirm 原子抢占识别)。
+          await ctx.db
+            .update(tasksTable)
+            .set({
+              status: 'awaiting_user',
+              awaitingQuestion: quote.message,
+              awaitingKind: 'video_quote',
+              result: {
+                summary: quote.message,
+                metadata: { lane: 'video_creation_confirm', videoScript: script, videoTier: tier },
+              },
+            })
+            .where(eq(tasksTable.externalId, taskId));
+          ctx.logger.info(
+            {
+              taskId,
+              userId: ctx.userId,
+              executorLane: 'video_creation_confirm',
+              segs: script.segments.length,
+              videoCny: quote.videoCny,
+            },
+            'task: executor lane selected',
+          );
+          broadcastToUser(ctx.userId, {
+            type: 'server.supercar.awaiting_user',
+            taskId,
+            question: quote.message,
+            awaitingKind: 'video_quote',
+          });
+          return { taskId, status: 'awaiting_user' as const, steps: [], executionMode: 'generate' as const };
+        }
+      }
+    }
+    // ===== end video-creation fork =====
 
     // ===== a-share 即时问答 fork (Phase 1 #2 ④, flag + allowlist 灰度) =====
     // 命中 a-share 个股问答 → 自取数组装确定性事实卡 → LLM③解读 → 合规闸门
@@ -5219,6 +5333,212 @@ export const tasksRouter = router({
         if (eff.kind === 'send') broadcastToUser(ctx.userId, eff.message);
       }
       return { taskId: next.taskId, status: next.status };
+    }),
+
+  /**
+   * Phase 1 #4 — 视频报价确认(结构化)。Veo 烧钱严格在此之后,且仅当
+   * consumeVideoConfirm 原子抢占成功时(防双击双扣)。`choice` 结构化按钮优先;
+   * `text` 自由文本兜底走 parseVideoConfirm(否定护栏优先 + 锚定确认词)。
+   */
+  confirmVideo: protectedProcedure
+    .input(
+      z.object({
+        taskId: z.string().min(1),
+        choice: z.enum(['confirm_video', 'confirm_image', 'cancel']).optional(),
+        text: z.string().max(200).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [userRow] = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.externalId, ctx.userId))
+        .limit(1);
+      if (!userRow) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'user not found' });
+      const repo = new TaskRepository(ctx.db);
+      const [row] = await ctx.db
+        .select({
+          status: tasksTable.status,
+          awaitingKind: tasksTable.awaitingKind,
+          intent: tasksTable.intent,
+          result: tasksTable.result,
+        })
+        .from(tasksTable)
+        .where(
+          and(
+            eq(tasksTable.externalId, input.taskId),
+            eq(tasksTable.userId, userRow.id),
+            eq(tasksTable.origin, 'user'),
+          ),
+        )
+        .limit(1);
+      if (!row || row.awaitingKind !== 'video_quote') {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '找不到待确认的视频报价' });
+      }
+
+      const choice = parseVideoConfirm({
+        ...(input.choice ? { action: input.choice } : {}),
+        ...(input.text ? { text: input.text } : {}),
+      });
+
+      // cancel — 标记消费(杜绝再确认)+ 取消,绝不进生成。
+      if (choice === 'cancel') {
+        await repo.consumeVideoConfirm(input.taskId);
+        await ctx.db
+          .update(tasksTable)
+          .set({
+            status: 'cancelled',
+            awaitingKind: null,
+            awaitingQuestion: null,
+            result: { summary: '已取消，未产生任何费用。', metadata: { lane: 'video_creation_cancelled' } },
+            completedAt: new Date(),
+          })
+          .where(eq(tasksTable.externalId, input.taskId));
+        broadcastToUser(ctx.userId, {
+          type: 'server.task.terminal',
+          taskId: input.taskId,
+          status: 'cancelled',
+          summary: '已取消，未产生任何费用。',
+        });
+        return { taskId: input.taskId, status: 'cancelled' as const };
+      }
+      // unclear — 没听懂 → 重出报价卡,仍 awaiting,不消费、不烧钱。
+      if (choice === 'unclear') {
+        broadcastToUser(ctx.userId, {
+          type: 'server.supercar.awaiting_user',
+          taskId: input.taskId,
+          question: '请点按钮选择：确认制作 / 图片版 / 取消。',
+          awaitingKind: 'video_quote',
+        });
+        return { taskId: input.taskId, status: 'awaiting_user' as const };
+      }
+
+      // video|image — 原子抢占(防双击双扣)。只有抢到才生成。
+      const claimed = await repo.consumeVideoConfirm(input.taskId);
+      const action = decideVideoGate(choice, claimed);
+      if (action === 'already_consumed') {
+        broadcastToUser(ctx.userId, {
+          type: 'server.task.terminal',
+          taskId: input.taskId,
+          status: 'completed',
+          summary: '该报价已开始制作或已取消，未重复扣费。',
+        });
+        return { taskId: input.taskId, status: 'completed' as const };
+      }
+
+      // generate_video | generate_image — Veo 在此之后(已过原子抢占=确认后)。
+      const meta =
+        ((row.result as { metadata?: { videoScript?: VideoScript; videoTier?: VideoSource } } | null)
+          ?.metadata) ?? {};
+      const script = meta.videoScript;
+      const tier: VideoSource = meta.videoTier ?? 'veo_fast';
+      if (!script) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '报价脚本丢失' });
+      const visualMode = action === 'generate_image' ? ('image' as const) : ('video' as const);
+
+      const newTaskId = newExternalId('task');
+      await repo.insertTask(
+        { taskId: newTaskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
+        { userId: userRow.id, intent: row.intent, roleId: 'video-creator', opusUsed: false },
+      );
+      broadcastSubStatus(ctx.userId, newTaskId, 'generating');
+
+      const anthropicClient = anthropicForResolver;
+      const userExternalId = ctx.userId;
+      const userInternalId = userRow.id;
+      const logger = ctx.logger;
+      const db = ctx.db;
+      const intentText = row.intent;
+      void (async () => {
+        const taskInternalId = await taskInternalIdFor(db, newTaskId);
+        if (taskInternalId == null) return;
+        const { runSimpleVideoCreation } = await import('../../agent/video/video-lane-simple.js');
+        const os = await import('node:os');
+        const path = await import('node:path');
+        const { promises: fsp } = await import('node:fs');
+        const fileService = new FileService(db, logger);
+        const workdir = await fsp.mkdtemp(path.join(os.tmpdir(), 'hd-video-'));
+        let finalAtt: ImageAttachment | null = null;
+        const llm = async ({ system, user }: { system: string; user: string }) => {
+          if (!anthropicClient) return '';
+          const resp = await anthropicClient.messages.create({
+            model: VIDEO_SCRIPT_MODEL,
+            max_tokens: 2000,
+            system,
+            messages: [{ role: 'user', content: user }],
+          });
+          const b = resp.content[0];
+          return b && b.type === 'text' ? b.text : '';
+        };
+        // 仅最终 video.mp4 落用户文件;中间段产物只用 workdir 副本(pipeline 用本地路径)。
+        const storeOutput = async (i: { filename: string; mimetype: string; buffer: Buffer }) => {
+          if (i.filename !== 'video.mp4') {
+            return { fileId: `tmp:${i.filename}`, storagePath: `tmp:${i.filename}` };
+          }
+          const s = await fileService.storeOutput({
+            userIdInternal: userInternalId,
+            userExternalId,
+            taskIdInternal: taskInternalId,
+            filename: 'holaday-video.mp4',
+            mimetype: 'video/mp4',
+            buffer: i.buffer,
+          });
+          finalAtt = {
+            fileId: s.externalId,
+            downloadUrl: `/api/files/${s.externalId}/download`,
+            filename: s.filename,
+            mimetype: s.mimetype,
+            sizeBytes: Number(s.sizeBytes),
+            expiresAt: s.expiresAt ? s.expiresAt.toISOString() : new Date(Date.now() + 864e5).toISOString(),
+            kind: 'output',
+          };
+          return { fileId: s.externalId, storagePath: s.externalId };
+        };
+        try {
+          const result = await runSimpleVideoCreation(
+            { userText: intentText, script },
+            buildVideoCfg(),
+            { visualMode, videoSource: tier },
+            { storeOutput, workdir, logger, llm },
+          );
+          const summary = `视频已生成（${result.segments} 段 / ${Math.round(result.totalDurationMs / 1000)} 秒）。`;
+          await repo.persistVisionOutcome(newTaskId, {
+            status: 'completed',
+            summary,
+            tickCount: 1,
+            metadata: {
+              executionMode: 'generate',
+              lane: 'video_creation',
+              visualMode,
+              ...(finalAtt ? { attachments: [finalAtt] } : {}),
+            },
+          });
+          broadcastToUser(userExternalId, {
+            type: 'server.task.terminal',
+            taskId: newTaskId,
+            status: 'completed',
+            summary,
+          });
+        } catch (err) {
+          logger.error({ err, taskId: newTaskId }, 'video_creation: lane failed');
+          await repo
+            .persistVisionOutcome(newTaskId, {
+              status: 'failed',
+              reason: '视频生成失败，请稍后重试。',
+              tickCount: 1,
+              metadata: { executionMode: 'generate', lane: 'video_creation' },
+            })
+            .catch(() => {});
+          broadcastToUser(userExternalId, {
+            type: 'server.task.terminal',
+            taskId: newTaskId,
+            status: 'failed',
+            reason: '视频生成失败，请稍后重试。',
+          });
+        } finally {
+          await fsp.rm(workdir, { recursive: true, force: true }).catch(() => {});
+        }
+      })();
+      return { taskId: newTaskId, status: 'executing' as const };
     }),
 
   /**

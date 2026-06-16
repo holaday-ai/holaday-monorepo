@@ -551,6 +551,24 @@ export class TaskRepository {
     `);
   }
 
+  /**
+   * Phase 1 #4 — 原子抢占一条视频报价任务的「确认 → 生成」权。条件更新:仅当
+   * `result.metadata.lane` 仍是 'video_creation_confirm' 才翻成 '..._consumed'。
+   * 返回 true = 本次抢到(可生成);false = 已被别的请求消费(双击/二次确认)→ 不重烧。
+   * 单一报价 ⇒ 至多一次扣费。MySQL UPDATE affectedRows = 实际改变行数(值由 confirm→
+   * consumed,故匹配行 affectedRows=1;二次 WHERE 不再匹配 → 0)。真 MySQL 上实测。
+   */
+  async consumeVideoConfirm(taskExternalId: string): Promise<boolean> {
+    const result = await this.db.execute(sql`
+      UPDATE tasks
+      SET result = JSON_SET(result, '$.metadata.lane', 'video_creation_consumed')
+      WHERE external_id = ${taskExternalId}
+        AND JSON_UNQUOTE(JSON_EXTRACT(result, '$.metadata.lane')) = 'video_creation_confirm'
+    `);
+    const header = (Array.isArray(result) ? result[0] : result) as { affectedRows?: number } | undefined;
+    return (header?.affectedRows ?? 0) === 1;
+  }
+
   async rehydrateInFlight(): Promise<RehydratedTask[]> {
     const rows = await this.db
       .select({

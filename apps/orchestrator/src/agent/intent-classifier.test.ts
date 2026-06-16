@@ -1167,3 +1167,32 @@ describe('classifyExecutionMode — fileIds-aware soft template_fill (§5, 2026-
     }
   });
 });
+
+describe('classifyExecutionMode — video_creation (Phase 1 #4)', () => {
+  it('strong "make a video" signals → video_creation', async () => {
+    for (const intent of [
+      '帮我用这段文案做条种草视频',
+      '做个口播视频',
+      '生成一个带货视频',
+      '帮我做一条夏季防晒短视频',
+      '做个vlog',
+    ]) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).toBe('video_creation');
+    }
+  });
+
+  // ③ 写稿/文案/封面请求 → NOT video_creation (话题护栏挡掉,留 generate)
+  it('③ "做视频脚本/文案/封面" → NOT video_creation', async () => {
+    for (const intent of [
+      '帮我做个视频脚本',
+      '做个短视频文案',
+      '做个视频封面图',
+      '写个短视频脚本',
+      '帮我做视频营销策略',
+    ]) {
+      const out = await classifyExecutionMode({ intent, logger: fakeLogger() });
+      expect(out, intent).not.toBe('video_creation');
+    }
+  });
+});

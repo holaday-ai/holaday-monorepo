@@ -33,6 +33,9 @@ interface ModeBuckets {
   // Phase 1 #1 — template fill. Deterministic engine + one model call,
   // no pool slot; tracked like image/generate/scrape.
   template_fill: Set<string>;
+  // Phase 1 #4 — video creation. Background coroutine (no pool slot);
+  // tracked like image/template_fill.
+  video_creation: Set<string>;
 }
 
 const TRACKER = new Map<string, ModeBuckets>();
@@ -46,6 +49,7 @@ function getOrInit(userId: string): ModeBuckets {
       scrape: new Set(),
       image: new Set(),
       template_fill: new Set(),
+      video_creation: new Set(),
     };
     TRACKER.set(userId, b);
   }

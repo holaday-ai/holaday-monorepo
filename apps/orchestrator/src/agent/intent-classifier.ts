@@ -33,7 +33,8 @@ export type ExecutionMode =
   | 'generate'
   | 'image'
   | 'scrape'
-  | 'template_fill';
+  | 'template_fill'
+  | 'video_creation';
 
 interface CacheEntry {
   mode: ExecutionMode;
@@ -291,6 +292,29 @@ const IMAGE_MAKE_VERB = /(?:做|制作|生成|设计|画|绘制|搞|出|整)/;
 const QUOTED_TEXT = /["'“”‘’「」『』][^"'“”‘’「」『』]{1,40}["'“”‘’「」『』]/;
 const IMAGE_QUOTE_DOC_WORDS =
   /报告|文档|文章|方案|计划|周报|日报|论文|ppt|表格|excel|word|邮件|短信|文案|脚本|代码|总结/i;
+
+// 视频创作强信号 (Phase 1 #4) — 动词(做/制作/生成/剪辑/剪,**不含「写」**)紧邻
+// 视频名词。"写视频文案/写脚本" → 动词不在表里 → 不触发(留 generate)。
+const VIDEO_MAKE_RE =
+  /(?:做|制作|生成|剪辑|剪)(?:[一]?[条段个])?\s*(?:.{0,4})?(?:短视频|种草视频|带货视频|口播视频|宣传片|vlog|视频)|(?:口播|种草|带货)视频|vlog/i;
+// 话题护栏:做了视频但要的是策略/分析等文本产物 → 不是出视频。脚本/分镜/配音稿
+// 几乎总是文本产物,宽挡。
+const VIDEO_TOPIC_GUARD_RE = /策略|分析|方案|报告|大纲|拆解|复盘|运营|商业模式|脚本|分镜|配音稿/;
+// 产物护栏:「视频文案/视频标题/视频封面/缩略图」= 文本/图产物。但「用这段文案做视频」
+// 的文案是【输入】,故只在产物词【紧跟视频名词】时才挡,避免误挡最典型的「用文案做视频」。
+const VIDEO_PRODUCT_GUARD_RE = /(?:视频|短视频|口播|种草视频|带货视频)(?:的)?\s*(?:文案|标题|封面|缩略图)/;
+
+/**
+ * Tight 'video_creation' signal. Returns the matched span or null.
+ * Deliberately strict: a vague ask must NOT fire (the user re-asks), and even a
+ * false positive only reaches the price-confirm card — it never burns Veo.
+ */
+function matchVideoCreation(intent: string): string | null {
+  if (VIDEO_TOPIC_GUARD_RE.test(intent)) return null; // 策略/分析/脚本/分镜/配音稿
+  if (VIDEO_PRODUCT_GUARD_RE.test(intent)) return null; // 视频文案/视频封面(产物紧跟视频)
+  const m = VIDEO_MAKE_RE.exec(intent);
+  return m ? m[0].slice(0, 48) : null;
+}
 
 function matchImagePattern(intent: string): string | null {
   // Diagram/chart/map asks stay OUT of the photoreal image lane unless
@@ -600,6 +624,13 @@ function decide(
   const interactionPattern = matchInteractionPattern(intent);
   if (interactionPattern) {
     return { mode: 'browser', source: 'kw:interaction', match: interactionPattern };
+  }
+
+  // 1a. 视频创作强信号 — 专用 video_creation lane(两段式:报价确认→Veo 生成)。
+  // 在 image 之前:"做个种草视频" 应进视频 lane 而非 image 单图。误判只到报价卡、不烧钱。
+  const video = matchVideoCreation(intent);
+  if (video) {
+    return { mode: 'video_creation', source: 'kw:video_creation', match: video };
   }
 
   // 1b. Image generation / editing — the dedicated nano-banana lane.

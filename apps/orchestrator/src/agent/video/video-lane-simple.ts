@@ -34,6 +34,7 @@ import { buildComposeCommand } from './video-compose.js';
 import { downloadToBuffer } from './video-http.js';
 import { runVideoPipeline, type PipelineLogger, type VideoPipelineDeps } from './video-pipeline.js';
 import { optimizeUserScript, type LlmComplete } from './video-script.js';
+import type { VideoScript } from './types.js';
 import { generateBrollVideo } from './wanxiang-client.js';
 
 // 无文字 + 解剖约束 — AI 文生图/视频画产品标签会编乱码字 (P1-2),画「手-物-手
@@ -289,6 +290,12 @@ export interface RunSimpleVideoInput {
   readonly userText: string;
   readonly maxSegments?: number;
   readonly retries?: number;
+  /**
+   * Pre-optimized script (from the Phase-1 price-quote step). When provided,
+   * optimize is SKIPPED so the generated segment count exactly matches the
+   * quoted/charged segment count. Omit for the standalone (no-quote) path.
+   */
+  readonly script?: VideoScript;
 }
 
 export interface SimpleVideoResult {
@@ -320,11 +327,15 @@ export async function runSimpleVideoCreation(
   const fns = { ...realFns(), ...(svc.overrides ?? {}) };
   const ffOpts = cfg.ffmpegBin ? { ffmpegBin: cfg.ffmpegBin } : {};
 
-  // ① optimize the user's draft (faithful, no fabrication)
-  const script = await fns.optimizeUserScript(
-    { userText: input.userText, ...(input.maxSegments !== undefined ? { maxSegments: input.maxSegments } : {}) },
-    { llm: svc.llm },
-  );
+  // ① optimize the user's draft (faithful, no fabrication) — UNLESS a
+  // pre-optimized script is supplied (Phase-1 quote), in which case reuse it
+  // verbatim so generated segments == quoted segments.
+  const script =
+    input.script ??
+    (await fns.optimizeUserScript(
+      { userText: input.userText, ...(input.maxSegments !== undefined ? { maxSegments: input.maxSegments } : {}) },
+      { llm: svc.llm },
+    ));
   // ②-⑤ runner (synth preset voice + visual + clip per segment)
   const deps = createSimplePipelineDeps(cfg, opts, svc);
   const result = await runVideoPipeline(
