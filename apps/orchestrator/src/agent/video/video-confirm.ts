@@ -137,6 +137,42 @@ export function quotePetI2v(
   return { durationSeconds, videoCny, message };
 }
 
+// ---------------------------------------------------------------------------
+// IP 人物 真人换口型 报价 (Phase 2 第三期, B 架构单 clip 口播).
+// ---------------------------------------------------------------------------
+// 成本由 clip 数主导(B = 1 clip):fal latentsync $0.20/clip(≤40s 平价) +
+// Qwen3-TTS-VC 合成按字符(此规模 <1% 可忽略)。
+// TODO(pricing): fal $0.20/clip、Qwen ~$0.13/万字、汇率 7.3 为硬编码快照,需手动同步:
+//   https://fal.ai/models/fal-ai/latentsync (≤40s $0.20,>40s +$0.005/s)
+//   阿里 Model Studio qwen-tts 计费(按字符)。
+const FAL_USD_PER_CLIP = 0.2;
+const QWEN_USD_PER_10K_CHARS = 0.13;
+// B 架构 ~40s 对应的中文字数粗界(~4 字/秒 → ~160 字),超则提示可能 >40s。
+const IP_CHAR_WARN = 180;
+
+export interface IpVideoQuote {
+  readonly chars: number;
+  readonly videoCny: number;
+  readonly maybeTooLong: boolean;
+  readonly message: string;
+}
+
+/** IP 口播报价 — videoCny = (1×fal + 字符×Qwen) × 汇率(原生 USD 折人民币). */
+export function quoteIpVideo(copyText: string): IpVideoQuote {
+  const chars = copyText.trim().length;
+  const usd = FAL_USD_PER_CLIP + (chars / 10_000) * QWEN_USD_PER_10K_CHARS;
+  const videoCny = Math.max(1, Math.ceil(usd * USD_TO_CNY));
+  const maybeTooLong = chars > IP_CHAR_WARN;
+  const message =
+    `将用你本人的声音 + 出镜底版,把这段文案口播出来,预计费用约 ¥${videoCny}` +
+    `（真人换口型 · 单条 ≤40 秒）。\n` +
+    (maybeTooLong
+      ? `⚠️ 文案约 ${chars} 字,可能超过 40 秒上限;过长会被拒,请适当截短。\n`
+      : '') +
+    `点「确认制作」开始;不需要可「取消」。`;
+  return { chars, videoCny, maybeTooLong, message };
+}
+
 /** Dynamic price quote — videoCny = 真实段数 × 每段秒数 × 选定档/画质单价 × 汇率. */
 export function quoteVideo(segments: number, tier: VideoSource, opts: VideoQuoteOpts = {}): VideoQuote {
   const resolution: Resolution = opts.resolution ?? '1080p';

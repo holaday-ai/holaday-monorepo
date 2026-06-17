@@ -31,6 +31,7 @@ import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import { useTaskStore } from '@/stores/task-store';
 import {
+  estimateIpVideo,
   estimatePerSegmentCny,
   estimatePetCny,
   type PetDuration,
@@ -949,23 +950,11 @@ function IpOnboardingWizard(): JSX.Element {
         </div>
       </Section>
 
-      {/* 就绪 + 生成占位(阶段3) */}
-      <Section className={ready ? 'border-[#EA1F59]/20 bg-[#EA1F59]/[0.03]' : undefined}>
-        {ready ? (
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2 text-[13px] font-medium text-[#EA1F59]">
-              <CheckCircle2 className="h-4 w-4" />
-              素材已就绪 —— 声音 + 出镜底版 + 授权都已完成。
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[12px] text-muted-foreground">填文案、用你本人声音口播的生成功能即将上线。</span>
-              <Button type="button" disabled className="min-w-[140px]">
-                <Lock className="mr-1.5 h-4 w-4" />
-                生成(即将上线)
-              </Button>
-            </div>
-          </div>
-        ) : (
+      {/* 就绪 → 生成表单;未就绪 → 引导 */}
+      {ready ? (
+        <IpGenerateForm />
+      ) : (
+        <Section>
           <div className="flex items-center justify-between gap-3">
             <span className="text-[13px] text-muted-foreground">完成上面三步,即可解锁「IP 人物」视频生成。</span>
             <Button type="button" disabled className="min-w-[140px]">
@@ -973,8 +962,8 @@ function IpOnboardingWizard(): JSX.Element {
               生成(未就绪)
             </Button>
           </div>
-        )}
-      </Section>
+        </Section>
+      )}
 
       {/* 隐私 + 清除 */}
       <Section title="隐私与素材管理">
@@ -1004,6 +993,86 @@ function IpOnboardingWizard(): JSX.Element {
         </Button>
       </Section>
     </div>
+  );
+}
+
+function IpGenerateForm(): JSX.Element {
+  const navigate = useNavigate();
+  const toast = useToast();
+  const createTask = useTaskStore((s) => s.createTask);
+  const [copy, setCopy] = React.useState('');
+  const [aspectRatio, setAspectRatio] = React.useState<VideoAspect>('9:16');
+  const [submitting, setSubmitting] = React.useState(false);
+
+  const est = estimateIpVideo(copy);
+
+  async function handleSubmit(): Promise<void> {
+    const intent = copy.trim();
+    if (intent.length < 4) {
+      toast.show('请先写一段要口播的文案(至少 4 个字)', 'error');
+      return;
+    }
+    if (submitting) return;
+    setSubmitting(true);
+    const opts: VideoCreationOptions = { tab: 'ip_person', aspectRatio };
+    try {
+      const res = await createTask(intent, undefined, undefined, undefined, undefined, undefined, opts);
+      if ('error' in res) {
+        toast.show(res.error || '提交失败,请重试', 'error');
+        return;
+      }
+      toast.show('已提交,请在对话区确认报价后开始制作', 'info', 3500);
+      navigate(`/?task=${encodeURIComponent(res.taskId)}`);
+    } catch (err) {
+      toast.show(err instanceof Error ? err.message : '提交失败,请重试', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Section title="生成视频" description="素材已就绪 —— 用你本人的声音 + 出镜底版,把文案口播出来。" className="border-[#EA1F59]/20 bg-[#EA1F59]/[0.03]">
+      <div className="space-y-5">
+        <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+          <CheckCircle2 className="h-4 w-4 text-[#EA1F59]" />
+          使用你已上传的本人声音 + 出镜底版(可在上方重传/清除)。
+        </div>
+        <Textarea
+          value={copy}
+          onChange={(e) => setCopy(e.target.value)}
+          placeholder="写你要口播的文案,会用你本人的声音讲出来(单条 ≤40 秒,约 160 字内)。"
+          rows={4}
+          className="resize-y"
+        />
+        <SegGroup label="尺寸" value={aspectRatio} options={ASPECT_OPTIONS} onChange={setAspectRatio} />
+        <div className="rounded-lg border border-[#EA1F59]/20 bg-white px-4 py-3">
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <span className="text-xl font-semibold text-[#EA1F59]">约 ¥{est.videoCny}</span>
+            <span className="text-[13px] text-muted-foreground">真人换口型 · 单条 ≤40 秒(约 {est.chars} 字)</span>
+          </div>
+          {est.maybeTooLong && (
+            <p className="mt-1 text-[11px] text-[#B45309]">⚠️ 文案偏长,可能超过 40 秒上限;过长会被拒,请适当截短。</p>
+          )}
+          <p className="mt-1 text-[11px] text-muted-foreground">提交后会先给精确报价,确认后才扣费。</p>
+        </div>
+        <div className="flex items-center justify-end gap-3">
+          <span className="text-[12px] text-muted-foreground">提交后先报价,不会立即扣费</span>
+          <Button type="button" onClick={() => void handleSubmit()} disabled={submitting} className="min-w-[120px]">
+            {submitting ? (
+              <>
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                提交中…
+              </>
+            ) : (
+              <>
+                <Sparkles className="mr-1.5 h-4 w-4" />
+                生成视频
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+    </Section>
   );
 }
 

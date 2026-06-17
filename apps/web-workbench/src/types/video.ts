@@ -7,7 +7,7 @@
  * 实时"。**它只是估算** —— 真实段数/价格以后端 video_quote 卡确认为准。
  */
 
-export type VideoTab = 'normal' | 'pet';
+export type VideoTab = 'normal' | 'pet' | 'ip_person';
 export type VideoModel = 'veo_fast' | 'happyhorse' | 'veo_standard';
 export type PetModel = 'wan_i2v' | 'happyhorse_i2v';
 export type VideoStyleOption = 'auto' | 'realistic' | 'atmospheric' | 'science';
@@ -62,4 +62,15 @@ export function estimatePetCny(
 ): number {
   const perSec = I2V_CNY_PER_SEC[opts.petModel]?.[opts.resolution] ?? 0;
   return Math.max(1, Math.ceil(opts.durationSeconds * perSec));
+}
+
+/**
+ * IP 真人换口型(B 架构单 clip)预计价。镜像后端 quoteIpVideo:
+ * 1 clip × fal $0.20 + 字符 × Qwen(~$0.13/万字)→ 折人民币 floor ¥1。
+ * maybeTooLong: 文案 >180 字可能超 40s 上限。
+ */
+export function estimateIpVideo(copyText: string): { videoCny: number; chars: number; maybeTooLong: boolean } {
+  const chars = copyText.trim().length;
+  const usd = 0.2 + (chars / 10_000) * 0.13;
+  return { videoCny: Math.max(1, Math.ceil(usd * 7.3)), chars, maybeTooLong: chars > 180 };
 }

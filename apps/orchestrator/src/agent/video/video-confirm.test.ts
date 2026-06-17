@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { decideVideoGate, parseVideoConfirm, quotePetI2v, quoteVideo } from './video-confirm.js';
+import { decideVideoGate, parseVideoConfirm, quoteIpVideo, quotePetI2v, quoteVideo } from './video-confirm.js';
 
 describe('parseVideoConfirm — structured action wins', () => {
   it('maps button actions with zero text guessing', () => {
@@ -142,5 +142,24 @@ describe('quotePetI2v — 宠物 i2v 报价 (Phase 2 第二期, 原生 RMB/秒)'
     expect(quotePetI2v(8, 'happyhorse_i2v', '1080p').videoCny).toBeGreaterThan(
       quotePetI2v(3, 'happyhorse_i2v', '1080p').videoCny,
     );
+  });
+});
+
+describe('quoteIpVideo — IP 真人换口型 B 架构 (Phase 3)', () => {
+  it('videoCny ≈ 1 clip fal $0.20 × 7.3 (字符费可忽略),floor ¥1', () => {
+    const q = quoteIpVideo('大家好这是一段不太长的口播文案。');
+    expect(q.videoCny).toBe(Math.max(1, Math.ceil((0.2 + (q.chars / 10000) * 0.13) * 7.3))); // ≈ ¥2
+    expect(q.videoCny).toBeGreaterThanOrEqual(1);
+    expect(q.maybeTooLong).toBe(false);
+    expect(q.message).toContain('真人换口型');
+    expect(q.message).not.toContain('图片版');
+  });
+
+  it('超长文案 → maybeTooLong + 文案里有 40 秒提示', () => {
+    const long = '这是一段很长的口播文案需要超过一百八十个字才能触发提示'.repeat(12);
+    const q = quoteIpVideo(long);
+    expect(q.chars).toBeGreaterThan(180);
+    expect(q.maybeTooLong).toBe(true);
+    expect(q.message).toMatch(/40 秒|超过/);
   });
 });

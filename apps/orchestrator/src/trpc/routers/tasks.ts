@@ -96,9 +96,10 @@ import { skills } from '../../db/schema/skills.js';
 import { taskEvents } from '../../db/schema/task-events.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
 import { tasks as tasksTable } from '../../db/schema/tasks.js';
-import { decideVideoGate, parseVideoConfirm, quotePetI2v, quoteVideo } from '../../agent/video/video-confirm.js';
+import { decideVideoGate, parseVideoConfirm, quoteIpVideo, quotePetI2v, quoteVideo } from '../../agent/video/video-confirm.js';
 import type { AspectRatio, SimpleVideoConfig, VideoSource } from '../../agent/video/video-lane-simple.js';
 import type { PetI2vModel } from '../../agent/video/video-pet-i2v.js';
+import type { IpVideoConfig } from '../../agent/video/video-ip-lipsync.js';
 import type { VideoScript } from '../../agent/video/types.js';
 import type { VideoStyle } from '../../agent/video/video-script.js';
 import { routeTaskEvidenceOnDelete } from '../../evidence/evidence-deletion-service.js';
@@ -225,6 +226,20 @@ function buildVideoCfg(): SimpleVideoConfig {
   };
 }
 
+/** Phase 2 第三期 — IP 人物 B-lane(克隆音 + fal 换口型)config. */
+function buildIpVideoCfg(): IpVideoConfig {
+  return {
+    dashscopeApiKey: appEnv.DASHSCOPE_API_KEY,
+    dashscopeBaseUrl: appEnv.DASHSCOPE_BASE_URL,
+    ...(appEnv.DASHSCOPE_WORKSPACE_ID ? { dashscopeWorkspaceId: appEnv.DASHSCOPE_WORKSPACE_ID } : {}),
+    qwenTtsVcModel: appEnv.QWEN_TTS_VC_MODEL,
+    falApiKey: appEnv.FAL_KEY,
+    falBaseUrl: appEnv.FAL_BASE_URL,
+    falLipsyncModel: appEnv.FAL_LIPSYNC_MODEL,
+    watermarkFontFile: '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
+  };
+}
+
 // Module-scope Anthropic client for url-resolver. Cheap to construct
 // but no reason to pay per request — cache once at import time.
 const anthropicForResolver: Anthropic | null = appEnv.ANTHROPIC_API_KEY
@@ -313,8 +328,8 @@ const createInput = z.object({
    */
   videoOptions: z
     .object({
-      /** Phase 2 第二期 — 'normal' 普通文生 / 'pet' 宠物图生 i2v. Default 普通(omitted). */
-      tab: z.enum(['normal', 'pet']).optional(),
+      /** 'normal' 普通文生 / 'pet' 宠物图生 i2v / 'ip_person' 真人换口型(第三期). Default 普通. */
+      tab: z.enum(['normal', 'pet', 'ip_person']).optional(),
       model: z.enum(['veo_fast', 'veo_lite', 'veo_standard', 'happyhorse', 'wanxiang']).optional(),
       /** 宠物 i2v 档(tab='pet'). Default 'wan_i2v'(省钱+已证可达). */
       petModel: z.enum(['wan_i2v', 'happyhorse_i2v']).optional(),
@@ -567,6 +582,10 @@ export const tasksRouter = router({
         plan: users.plan,
         selectedRoles: users.selectedRoles,
         selectedSkills: users.selectedSkills,
+        // Phase 2 第三期 — IP 人物生成门控(三件齐 + 授权才放行)。
+        qwenVoiceId: users.qwenVoiceId,
+        baseVideoFileId: users.baseVideoFileId,
+        videoSelfUseAuthorizedAt: users.videoSelfUseAuthorizedAt,
       })
       .from(users)
       .where(eq(users.externalId, ctx.userId))
@@ -1255,6 +1274,51 @@ export const tasksRouter = router({
           return { taskId, status: 'awaiting_user' as const, steps: [], executionMode: 'generate' as const };
         }
         // ===== end 宠物 i2v 分支 =====
+
+        // ===== IP 人物 换口型分支 (Phase 2 第三期, B 架构单 clip 口播) =====
+        // 门控:三件齐(克隆声音 + 出镜底版 + 本人授权)才放行;缺则引导去 onboarding。
+        // 无 optimize 多段那套:全文案直接 quoteIpVideo → 报价卡 → confirmVideo 跑 B lane。
+        if (vOpts.tab === 'ip_person') {
+          const ipReady =
+            !!userRow.qwenVoiceId && !!userRow.baseVideoFileId && !!userRow.videoSelfUseAuthorizedAt;
+          if (!ipReady) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: '请先在「视频任务 → IP 人物」完成素材准备(本人授权 + 声音 + 出镜底版)。',
+            });
+          }
+          const ipQuote = quoteIpVideo(input.intent);
+          const taskId = newExternalId('task');
+          const repo = new TaskRepository(ctx.db);
+          await repo.insertTask(
+            { taskId, status: 'awaiting_user', plan: [], cursor: 0, pendingConfirm: null },
+            { userId: userRow.id, intent: input.intent, roleId: 'video-creator', opusUsed: false },
+          );
+          await ctx.db
+            .update(tasksTable)
+            .set({
+              status: 'awaiting_user',
+              awaitingQuestion: ipQuote.message,
+              awaitingKind: 'video_quote',
+              result: {
+                summary: ipQuote.message,
+                metadata: { lane: 'video_creation_confirm', ipCopyText: input.intent, videoOptions: vOpts },
+              },
+            })
+            .where(eq(tasksTable.externalId, taskId));
+          ctx.logger.info(
+            { taskId, userId: ctx.userId, executorLane: 'video_creation_confirm', ipChars: ipQuote.chars, videoCny: ipQuote.videoCny },
+            'task: executor lane selected (ip lip-sync)',
+          );
+          broadcastToUser(ctx.userId, {
+            type: 'server.supercar.awaiting_user',
+            taskId,
+            question: ipQuote.message,
+            awaitingKind: 'video_quote',
+          });
+          return { taskId, status: 'awaiting_user' as const, steps: [], executionMode: 'generate' as const };
+        }
+        // ===== end IP 人物分支 =====
 
         const style = vOpts.style as VideoStyle | undefined;
         let script: VideoScript | null = null;
@@ -5435,7 +5499,12 @@ export const tasksRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const [userRow] = await ctx.db
-        .select({ id: users.id })
+        .select({
+          id: users.id,
+          // Phase 2 第三期 — IP 人物 lane 需要克隆声音 + 出镜底版。
+          qwenVoiceId: users.qwenVoiceId,
+          baseVideoFileId: users.baseVideoFileId,
+        })
         .from(users)
         .where(eq(users.externalId, ctx.userId))
         .limit(1);
@@ -5522,22 +5591,26 @@ export const tasksRouter = router({
               petImageFileId?: string;
               petModel?: PetI2vModel;
               i2vPrompt?: string;
+              // Phase 2 第三期 IP 人物 — full copy text, no script.
+              ipCopyText?: string;
               videoOptions?: {
                 model?: VideoSource;
                 style?: VideoStyle;
                 aspectRatio?: AspectRatio;
                 resolution?: '720p' | '1080p';
                 durationSeconds?: number;
+                tab?: 'normal' | 'pet' | 'ip_person';
               };
             };
           } | null
         )?.metadata) ?? {};
       const isPet = !!meta.petImageFileId;
+      const isIp = meta.videoOptions?.tab === 'ip_person' || meta.ipCopyText !== undefined;
       const script = meta.videoScript;
       const tier: VideoSource = meta.videoTier ?? 'veo_fast';
       const vOpts = meta.videoOptions ?? {};
-      // 宠物 i2v 无脚本;普通文生必须有脚本(报价时存的).
-      if (!isPet && !script) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '报价脚本丢失' });
+      // 宠物 i2v / IP 换口型无脚本;普通文生必须有脚本(报价时存的).
+      if (!isPet && !isIp && !script) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '报价脚本丢失' });
       const visualMode = action === 'generate_image' ? ('image' as const) : ('video' as const);
 
       const newTaskId = newExternalId('task');
@@ -5550,6 +5623,8 @@ export const tasksRouter = router({
       const anthropicClient = anthropicForResolver;
       const userExternalId = ctx.userId;
       const userInternalId = userRow.id;
+      const ipVoiceId = userRow.qwenVoiceId; // Phase 2 第三期 IP lane
+      const ipBaseFileId = userRow.baseVideoFileId;
       const logger = ctx.logger;
       const db = ctx.db;
       const intentText = row.intent;
@@ -5618,6 +5693,48 @@ export const tasksRouter = router({
               { storeOutput, workdir, logger },
             );
             summary = '宠物视频已生成。';
+          } else if (isIp) {
+            // IP 人物 B 架构: 克隆音(全文案)→ 1 次 fal 换口型(loop_mode 补够)→ 字幕+水印 → store.
+            const { runIpVideoCreation } = await import('../../agent/video/video-ip-lipsync.js');
+            if (!ipVoiceId || !ipBaseFileId) throw new Error('IP 素材缺失,请先完成 onboarding');
+            const baseVideoUrl = await fileService.signedReadUrl(ipBaseFileId, userInternalId);
+            if (!baseVideoUrl) throw new Error('出镜底版不可用(无法生成访问链接)');
+            // IP 专用 storeOutput: 中间克隆音 + 最终视频都真存(克隆音要 presign 给 fal)。
+            const storeOutputIp = async (i: { filename: string; mimetype: string; buffer: Buffer }) => {
+              const s = await fileService.storeOutput({
+                userIdInternal: userInternalId,
+                userExternalId,
+                taskIdInternal: taskInternalId,
+                filename: i.filename === 'video.mp4' ? 'holaday-ip-video.mp4' : i.filename,
+                mimetype: i.mimetype,
+                buffer: i.buffer,
+              });
+              if (i.filename === 'video.mp4') {
+                finalAtt = {
+                  fileId: s.externalId,
+                  downloadUrl: `/api/files/${s.externalId}/download`,
+                  filename: s.filename,
+                  mimetype: s.mimetype,
+                  sizeBytes: Number(s.sizeBytes),
+                  expiresAt: s.expiresAt ? s.expiresAt.toISOString() : new Date(Date.now() + 864e5).toISOString(),
+                  kind: 'output',
+                };
+              }
+              return { fileId: s.externalId };
+            };
+            const result = await runIpVideoCreation(
+              { copyText: meta.ipCopyText ?? intentText },
+              buildIpVideoCfg(),
+              { voiceId: ipVoiceId, baseVideoUrl },
+              { ...(vOpts.aspectRatio ? { aspectRatio: vOpts.aspectRatio } : {}) },
+              {
+                storeOutput: storeOutputIp,
+                presignByFileId: (fid: string) => fileService.signedReadUrl(fid, userInternalId),
+                workdir,
+                logger,
+              },
+            );
+            summary = `真人换口型视频已生成（约 ${Math.round(result.totalDurationMs / 1000)} 秒）。`;
           } else {
             const result = await runSimpleVideoCreation(
               { userText: intentText, script: script!, ...(vOpts.style ? { style: vOpts.style } : {}) },
