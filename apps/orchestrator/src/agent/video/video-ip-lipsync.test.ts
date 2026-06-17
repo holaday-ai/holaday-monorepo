@@ -95,4 +95,19 @@ describe('splitIpCues — 全文案按字数比例切逐句字幕', () => {
     expect(segments).toHaveLength(1);
     expect(durations).toEqual([3000]);
   });
+
+  it('多句 + 充足时长 → 和恰好 == totalMs(不超时)', () => {
+    const text = '一。二。三。四。五。六。七。八。';
+    const { durations } = splitIpCues(text, 9000);
+    expect(durations.reduce((a, b) => a + b, 0)).toBe(9000);
+    expect(durations.every((d) => d >= 1)).toBe(true);
+  });
+
+  it('退化:句数 > totalMs(ms) → 各 >=1、不崩、不出现 0/负(优雅降级)', () => {
+    const text = '一。'.repeat(50); // 50 句
+    const { segments, durations } = splitIpCues(text, 10); // 10ms << 50 句
+    expect(segments).toHaveLength(50);
+    expect(durations).toHaveLength(50);
+    expect(durations.every((d) => d >= 1)).toBe(true); // buildTimeline 不会因非正时长抛错
+  });
 });

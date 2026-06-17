@@ -108,16 +108,21 @@ export function splitIpCues(copyText: string, totalMs: number): { segments: Vide
   const sentences = parts.length > 0 ? parts : [copyText.trim() || ' '];
   const totalChars = sentences.reduce((n, s) => n + s.length, 0) || 1;
   const segments: VideoSegment[] = sentences.map((text) => ({ text, type: 'voiceover' as const }));
-  // proportional, each >=1ms, last absorbs rounding so the sum == totalMs.
+  // proportional, each >=1ms, last absorbs rounding so the sum == totalMs
+  // (when totalMs >= 句数). 给后面每句预留 1ms,保证最后一句也 >=1 且不超总长;
+  // 退化情形 totalMs < 句数 时无法满足(N 个 >=1 之和 >= N > totalMs),优雅降级为各 1ms。
   const durations: number[] = [];
-  let acc = 0;
+  let remaining = totalMs;
   for (let i = 0; i < sentences.length; i += 1) {
     if (i === sentences.length - 1) {
-      durations.push(Math.max(1, totalMs - acc));
+      durations.push(Math.max(1, remaining));
     } else {
-      const d = Math.max(1, Math.round((sentences[i]!.length / totalChars) * totalMs));
+      const sentencesLeftAfter = sentences.length - 1 - i;
+      const ideal = Math.round((sentences[i]!.length / totalChars) * totalMs);
+      const maxForThis = Math.max(1, remaining - sentencesLeftAfter); // 留给后面每句至少 1ms
+      const d = Math.min(Math.max(1, ideal), maxForThis);
       durations.push(d);
-      acc += d;
+      remaining -= d;
     }
   }
   return { segments, durations };

@@ -1223,7 +1223,14 @@ export const tasksRouter = router({
     {
       const videoAllowed =
         VIDEO_CREATION_ALLOWLIST.size === 0 || VIDEO_CREATION_ALLOWLIST.has(ctx.userId);
-      const videoIntent = executionMode === 'video_creation' || input.roleId === 'video-creator';
+      // 视频意图:分类器命中 video_creation,或选了 video-creator 技能,**或**前端「视频任务」
+      // 界面显式带了 videoOptions.tab(普通/宠物/IP)。后者是关键——宠物动作 prompt / IP 口播文案
+      // 本身不含「视频」关键词,分类器会判 generate;只有 videoOptions.tab 这个显式信号能可靠把
+      // 三类 tab 提交都送进视频 fork(只有视频界面会设它,其它 createTask 路径绝不带)。
+      const videoIntent =
+        executionMode === 'video_creation' ||
+        input.roleId === 'video-creator' ||
+        input.videoOptions?.tab !== undefined;
       if (appEnv.VIDEO_CREATION_ENABLED && videoIntent && videoAllowed && anthropicForResolver) {
         const anthropicClient = anthropicForResolver;
         const { optimizeUserScript } = await import('../../agent/video/video-script.js');
@@ -5501,9 +5508,10 @@ export const tasksRouter = router({
       const [userRow] = await ctx.db
         .select({
           id: users.id,
-          // Phase 2 第三期 — IP 人物 lane 需要克隆声音 + 出镜底版。
+          // Phase 2 第三期 — IP 人物 lane 需要克隆声音 + 出镜底版 + 本人授权(合规硬闸)。
           qwenVoiceId: users.qwenVoiceId,
           baseVideoFileId: users.baseVideoFileId,
+          videoSelfUseAuthorizedAt: users.videoSelfUseAuthorizedAt,
         })
         .from(users)
         .where(eq(users.externalId, ctx.userId))
@@ -5625,6 +5633,7 @@ export const tasksRouter = router({
       const userInternalId = userRow.id;
       const ipVoiceId = userRow.qwenVoiceId; // Phase 2 第三期 IP lane
       const ipBaseFileId = userRow.baseVideoFileId;
+      const ipAuthorized = !!userRow.videoSelfUseAuthorizedAt; // 合规:确认时复核本人授权(可能已被撤销)
       const logger = ctx.logger;
       const db = ctx.db;
       const intentText = row.intent;
@@ -5696,7 +5705,10 @@ export const tasksRouter = router({
           } else if (isIp) {
             // IP 人物 B 架构: 克隆音(全文案)→ 1 次 fal 换口型(loop_mode 补够)→ 字幕+水印 → store.
             const { runIpVideoCreation } = await import('../../agent/video/video-ip-lipsync.js');
-            if (!ipVoiceId || !ipBaseFileId) throw new Error('IP 素材缺失,请先完成 onboarding');
+            // 合规硬闸:确认时复核三件齐 + 本人授权(报价后、生成前可能已撤销/清除素材)。
+            if (!ipVoiceId || !ipBaseFileId || !ipAuthorized) {
+              throw new Error('IP 素材或授权缺失(可能已被清除),请重新完成 onboarding');
+            }
             const baseVideoUrl = await fileService.signedReadUrl(ipBaseFileId, userInternalId);
             if (!baseVideoUrl) throw new Error('出镜底版不可用(无法生成访问链接)');
             // IP 专用 storeOutput: 中间克隆音 + 最终视频都真存(克隆音要 presign 给 fal)。
