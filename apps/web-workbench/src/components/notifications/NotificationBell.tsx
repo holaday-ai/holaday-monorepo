@@ -578,6 +578,7 @@ function NotificationDetailModal({
             onClick={onClose}
             className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
             aria-label="关闭"
+            title="关闭"
           >
             <X className="h-4 w-4" />
           </button>
