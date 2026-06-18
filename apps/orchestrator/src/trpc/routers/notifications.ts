@@ -27,6 +27,7 @@ import {
   notificationChannels,
   notifications,
 } from '../../db/schema/notifications.js';
+import { readAffectedRows } from '../../db/mysql-result.js';
 import { users } from '../../db/schema/users.js';
 import {
   buildPayload,
@@ -276,8 +277,7 @@ export const notificationChannelsRouter = router({
             eq(notificationChannels.userId, userId),
           ),
         );
-      const affected =
-        (result as unknown as { affectedRows?: number }).affectedRows ?? 0;
+      const affected = readAffectedRows(result);
       if (affected === 0) {
         throw new TRPCError({ code: 'NOT_FOUND', message: '通知渠道不存在' });
       }

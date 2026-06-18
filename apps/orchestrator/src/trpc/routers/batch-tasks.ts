@@ -27,6 +27,7 @@ import {
   insertBatch,
   summarizeBatchItemStatuses,
 } from '../../agent/batch-executor.js';
+import { readAffectedRows } from '../../db/mysql-result.js';
 import { batchTaskItems, batchTasks } from '../../db/schema/batch-tasks.js';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
@@ -306,7 +307,7 @@ export const batchTasksRouter = router({
             inArray(batchTasks.status, ['pending', 'running']),
           ),
         );
-      const affected = (result as unknown as { affectedRows?: number }).affectedRows;
+      const affected = readAffectedRows(result);
       if (affected) {
         // Happy path — executor sees status='cancelled' on its next
         // iteration and drains.

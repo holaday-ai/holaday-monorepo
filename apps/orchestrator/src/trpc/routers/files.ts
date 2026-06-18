@@ -11,6 +11,7 @@
 import { TRPCError } from '@trpc/server';
 import { and, desc, eq, like, or } from 'drizzle-orm';
 import { z } from 'zod';
+import { readAffectedRows } from '../../db/mysql-result.js';
 import { taskFiles } from '../../db/schema/task-files.js';
 import { users } from '../../db/schema/users.js';
 import { protectedProcedure, router } from '../trpc.js';
@@ -93,7 +94,7 @@ export const filesRouter = router({
         .where(
           and(eq(taskFiles.externalId, input.fileId), eq(taskFiles.userId, userId)),
         );
-      if ((result as unknown as { affectedRows?: number }).affectedRows === 0) {
+      if (readAffectedRows(result) === 0) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'file not found' });
       }
       return { ok: true as const };

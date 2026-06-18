@@ -22,6 +22,7 @@ import { and, between, desc, eq, gte, lte, or } from 'drizzle-orm';
 import rrule from 'rrule';
 import { z } from 'zod';
 import { computeNextRunFromInputs } from '../../agent/scheduled-runner.js';
+import { readAffectedRows } from '../../db/mysql-result.js';
 import { scheduledTasks } from '../../db/schema/scheduled-tasks.js';
 
 const { rrulestr } = rrule as { rrulestr: (s: string) => unknown };
@@ -458,7 +459,7 @@ export const scheduledTasksRouter = router({
             eq(scheduledTasks.status, row.status),
           ),
         );
-      const affected = (result as unknown as { affectedRows?: number }).affectedRows ?? 0;
+      const affected = readAffectedRows(result);
       if (affected === 0) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -548,7 +549,7 @@ export const scheduledTasksRouter = router({
             eq(scheduledTasks.userId, userId),
           ),
         );
-      if ((result as unknown as { affectedRows?: number }).affectedRows === 0) {
+      if (readAffectedRows(result) === 0) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'scheduled task not found' });
       }
       return { ok: true as const };
@@ -636,7 +637,7 @@ export const scheduledTasksRouter = router({
             eq(scheduledTasks.status, row.status),
           ),
         );
-      const affected = (result as unknown as { affectedRows?: number }).affectedRows ?? 0;
+      const affected = readAffectedRows(result);
       if (affected === 0) {
         throw new TRPCError({
           code: 'BAD_REQUEST',

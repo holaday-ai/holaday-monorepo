@@ -43,6 +43,7 @@ import { and, eq, lt } from 'drizzle-orm';
 import type { Logger } from 'pino';
 import { webhookIdempotency } from '../db/schema/webhook-idempotency.js';
 import type { DB } from '../db/client.js';
+import { readAffectedRows } from '../db/mysql-result.js';
 
 export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1_000;
 
@@ -329,8 +330,7 @@ async function tryReclaim(
           eq(webhookIdempotency.taskId, CLAIM_PLACEHOLDER_TASK_ID),
         ),
       );
-    const affected =
-      (delResult as unknown as { affectedRows?: number }).affectedRows ?? 0;
+    const affected = readAffectedRows(delResult);
     if (affected === 0) return false;
     // DELETE succeeded; now INSERT our claim. On the off chance
     // someone else also took the orphan we'd get DUP again here —
@@ -394,8 +394,7 @@ export async function finalizeClaim(
           eq(webhookIdempotency.taskId, CLAIM_PLACEHOLDER_TASK_ID),
         ),
       );
-    const affected =
-      (result as unknown as { affectedRows?: number }).affectedRows ?? 0;
+    const affected = readAffectedRows(result);
     return affected > 0;
   } catch (err) {
     deps.logger.warn(
@@ -436,8 +435,7 @@ export async function releaseClaim(
           eq(webhookIdempotency.taskId, CLAIM_PLACEHOLDER_TASK_ID),
         ),
       );
-    const affected =
-      (result as unknown as { affectedRows?: number }).affectedRows ?? 0;
+    const affected = readAffectedRows(result);
     return affected > 0;
   } catch (err) {
     deps.logger.warn(
@@ -464,8 +462,7 @@ export async function cleanup(deps: IdempotencyServiceDeps): Promise<number> {
     const result = await deps.db
       .delete(webhookIdempotency)
       .where(lt(webhookIdempotency.expiresAt, nowFn()));
-    const affected =
-      (result as unknown as { affectedRows?: number }).affectedRows ?? 0;
+    const affected = readAffectedRows(result);
     if (affected > 0) {
       deps.logger.info(
         { deleted: affected },

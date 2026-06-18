@@ -32,6 +32,7 @@ import { TRPCError } from '@trpc/server';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { describePlanOrder, isPaidPlan, nextExpiryFor } from '../../payment/plans.js';
+import { readAffectedRows } from '../../db/mysql-result.js';
 import { payments } from '../../db/schema/payments.js';
 import { users } from '../../db/schema/users.js';
 import { QuotaService } from '../../quota/quota-service.js';
@@ -251,8 +252,7 @@ export const paymentRouter = router({
           },
         })
         .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
-      const transitioned =
-        ((updateResult as unknown as { affectedRows?: number }).affectedRows ?? 0) === 1;
+      const transitioned = readAffectedRows(updateResult) === 1;
       if (transitioned) {
         await quotaService.applyAddonPack(userRow.id, planId, row.plan as AddonPackId);
       }
@@ -296,8 +296,7 @@ export const paymentRouter = router({
           },
         })
         .where(and(eq(payments.id, row.id), eq(payments.status, 'pending')));
-      const affected =
-        (updateResult as unknown as { affectedRows?: number }).affectedRows ?? 0;
+      const affected = readAffectedRows(updateResult);
       if (affected !== 1) return false;
       await tx
         .update(users)

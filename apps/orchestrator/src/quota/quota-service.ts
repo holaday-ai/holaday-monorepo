@@ -39,6 +39,7 @@ import {
 import { TRPCError } from '@trpc/server';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
+import { readAffectedRows } from '../db/mysql-result.js';
 import { taskQuotas, type TaskQuota } from '../db/schema/task-quotas.js';
 import { tasks } from '../db/schema/tasks.js';
 
@@ -205,7 +206,7 @@ export class QuotaService {
         .where(
           and(eq(taskQuotas.id, row.id), sql`${taskQuotas.bonusOpus} > 0`),
         );
-      if (((bonusBurn as unknown as { affectedRows?: number }).affectedRows ?? 0) === 1) {
+      if (readAffectedRows(bonusBurn) === 1) {
         return { ok: true };
       }
       const opusLimit = def.tasks.opus;
@@ -218,7 +219,7 @@ export class QuotaService {
             sql`${taskQuotas.opusUsed} < ${opusLimit}`,
           ),
         );
-      if (((regBurn as unknown as { affectedRows?: number }).affectedRows ?? 0) === 1) {
+      if (readAffectedRows(regBurn) === 1) {
         return { ok: true };
       }
       return { ok: false, reason: 'opus_limit' };
@@ -231,7 +232,7 @@ export class QuotaService {
       .where(
         and(eq(taskQuotas.id, row.id), sql`${taskQuotas.bonusTasks} > 0`),
       );
-    if (((bonusBurn as unknown as { affectedRows?: number }).affectedRows ?? 0) === 1) {
+    if (readAffectedRows(bonusBurn) === 1) {
       return { ok: true };
     }
     const regBurn = await this.db
@@ -243,7 +244,7 @@ export class QuotaService {
           sql`${taskQuotas.tasksUsed} < ${tasksLimit}`,
         ),
       );
-    if (((regBurn as unknown as { affectedRows?: number }).affectedRows ?? 0) === 1) {
+    if (readAffectedRows(regBurn) === 1) {
       return { ok: true };
     }
     return {
