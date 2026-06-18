@@ -175,7 +175,7 @@ function NormalVideoForm(): JSX.Element {
     }
     if (submitting) return;
     setSubmitting(true);
-    const opts: VideoCreationOptions = { model, style, aspectRatio, resolution, durationSeconds };
+    const opts: VideoCreationOptions = { tab: 'normal', model, style, aspectRatio, resolution, durationSeconds };
     try {
       const res = await createTask(intent, undefined, undefined, undefined, undefined, undefined, opts);
       if ('error' in res) {
