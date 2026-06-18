@@ -16,6 +16,7 @@ describe('auth.me state helpers', () => {
         multiUser: 1,
         selectedRoles: [' researcher ', null, { unsafe: true }, 'operator'],
         role: 'admin',
+        videoEnabled: true,
       }),
     ).toEqual({
       userId: 'u1',
@@ -26,6 +27,7 @@ describe('auth.me state helpers', () => {
       multiUser: true,
       selectedRoles: ['researcher', 'operator'],
       role: 'admin',
+      videoEnabled: true,
     });
   });
 
@@ -39,6 +41,7 @@ describe('auth.me state helpers', () => {
       multiUser: false,
       selectedRoles: [],
       role: 'user',
+      videoEnabled: false,
     });
     expect(
       normalizeAuthMeProfile({

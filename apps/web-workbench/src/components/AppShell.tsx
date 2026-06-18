@@ -759,6 +759,7 @@ export function AppShell(): JSX.Element {
         userDisplayName={displayName}
         userPlan={me?.plan ?? 'free'}
         userRole={me?.role ?? 'user'}
+        videoEnabled={me?.videoEnabled ?? false}
         onLogout={handleLogout}
         onOpenFeedback={() => setFeedbackOpen(true)}
         onOpenSearch={() => setSearchOpen(true)}

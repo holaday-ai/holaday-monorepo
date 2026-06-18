@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { EmailCodeError, createEmailCodeService } from '../../auth/email-code.js';
 import { AuthError, AuthService } from '../../auth/service.js';
+import { isVideoEnabledFor } from '../../agent/video/video-access.js';
 import { users } from '../../db/schema/users.js';
 import { protectedProcedure, publicProcedure, router } from '../trpc.js';
 
@@ -282,6 +283,10 @@ export const authRouter = router({
       // Phase 27 — admin gate. SPA reads this to decide whether to
       // render the "管理后台" sidebar entry + the /admin guard.
       role: row.role as 'user' | 'admin',
+      // Phase 1 #4 — video-creation gradual-rollout gate. The SPA reads
+      // this to show/hide the「视频任务」sidebar entry + guard /video.
+      // Single source with the tasks.ts fork (agent/video/video-access.ts).
+      videoEnabled: isVideoEnabledFor(ctx.userId),
     };
   }),
 });

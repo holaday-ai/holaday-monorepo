@@ -118,6 +118,12 @@ interface Props {
    * "管理后台" entry that routes to /admin. Default 'user'.
    */
   userRole?: 'user' | 'admin';
+  /**
+   * Phase 1 #4 — video-creation reachable for this user (flag on + in
+   * allowlist, from auth.me). When false the「视频任务」FeatureNav entry
+   * is hidden (the /video route is also guarded in App.tsx).
+   */
+  videoEnabled?: boolean;
   onLogout(): void;
   onOpenFeedback?(): void;
   /** O12 — open the in-app settings modal instead of navigating. */
@@ -191,6 +197,7 @@ export function Sidebar({
   userDisplayName,
   userPlan,
   userRole = 'user',
+  videoEnabled = false,
   onLogout,
   onOpenFeedback,
   failedTaskCount = 0,
@@ -396,7 +403,7 @@ export function Sidebar({
             list when space is tight; tall windows behave identically
             because the content fits and there's no scroll. */}
         <SidebarContent className="px-0 bg-white/45 dark:bg-transparent">
-            <FeatureNav userRole={userRole} />
+            <FeatureNav userRole={userRole} videoEnabled={videoEnabled} />
             {projectFilter && (
               <div
                 className={cn(
@@ -1015,7 +1022,13 @@ const FEATURES: readonly FeatureItem[] = [
  * routes render as clickable nav links; disabled rows keep a neutral
  * unavailable label. Compact density (32px row).
  */
-function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
+function FeatureNav({
+  userRole,
+  videoEnabled,
+}: {
+  userRole: 'user' | 'admin';
+  videoEnabled: boolean;
+}): JSX.Element {
   const navigate = useNavigate();
   // Read pathname directly so the active highlight updates on route
   // switch without forcing a re-render through props. The shrink-0
@@ -1027,7 +1040,11 @@ function FeatureNav({ userRole }: { userRole: 'user' | 'admin' }): JSX.Element {
     <SidebarGroup className="shrink-0 border-b border-[#DCDDDD]/70 dark:border-white/10">
       <SidebarGroupContent>
         <SidebarMenu>
-          {FEATURES.map(({ icon: Icon, label, href }) => {
+          {FEATURES.filter(
+            // Phase 1 #4 — hide「视频任务」unless video is enabled for this
+            // user (flag on + in allowlist). All other entries always show.
+            (feature) => feature.href !== '/video' || videoEnabled,
+          ).map(({ icon: Icon, label, href }) => {
             if (href) {
               const isActive = pathname === href;
               return (

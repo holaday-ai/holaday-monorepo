@@ -19,6 +19,7 @@ import { TaskController } from '../../agent/task-controller.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { classifyExecutionMode } from '../../agent/intent-classifier.js';
 import { ashareQaHandlesMode } from '../../agent/a-share/ashare-qa-lane-gate.js';
+import { VIDEO_CREATION_ALLOWLIST } from '../../agent/video/video-access.js';
 import { runGenerateTask } from '../../agent/generate-runner.js';
 import { runScrapeTask } from '../../agent/scrape-runner.js';
 import {
@@ -190,14 +191,9 @@ const ASHARE_QA_ALLOWLIST: ReadonlySet<string> = new Set(
     .filter(Boolean),
 );
 
-// Phase 1 #4 — video-creation 灰度白名单（VIDEO_CREATION_ALLOWLIST CSV）。flag off
-// 或不在名单 → video 意图落通用路径。空名单 = 全量（当 ENABLED）；非空 = 灰度。
-const VIDEO_CREATION_ALLOWLIST: ReadonlySet<string> = new Set(
-  (appEnv.VIDEO_CREATION_ALLOWLIST ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean),
-);
+// VIDEO_CREATION_ALLOWLIST + isVideoEnabledFor live in
+// agent/video/video-access.ts (single source shared with auth.me's
+// videoEnabled frontend gate — imported above; can't drift).
 
 // Anthropic model for the video优化/脚本 step.
 // TODO(env): 接进 env.ts (VIDEO_SCRIPT_MODEL) when the video lane env block lands.

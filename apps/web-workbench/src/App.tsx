@@ -1,7 +1,7 @@
 import { lazy, Suspense, type ComponentType, type LazyExoticComponent, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AdminLayout } from '@/components/AdminLayout';
-import { AppShell } from '@/components/AppShell';
+import { AppShell, useAppShellContext } from '@/components/AppShell';
 import {
   LazyLoadBoundary,
   RouteLoadingFallback,
@@ -135,7 +135,7 @@ export function App(): JSX.Element {
           <Route path="/projects" element={lazyElement(<ProjectsPage />)} />
           <Route path="/starred" element={lazyElement(<StarredPage />)} />
           <Route path="/files" element={lazyElement(<FilesPage />)} />
-          <Route path="/video" element={lazyElement(<VideoPage />)} />
+          <Route path="/video" element={<VideoGate />} />
           <Route path="/scheduled" element={lazyElement(<ScheduledPage />)} />
           <Route path="/batch" element={lazyElement(<BatchPage />)} />
           <Route path="/batch/:batchId" element={lazyElement(<BatchPage />)} />
@@ -209,4 +209,17 @@ function lazyElement(children: ReactNode): JSX.Element {
       <Suspense fallback={<RouteLoadingFallback />}>{children}</Suspense>
     </LazyLoadBoundary>
   );
+}
+
+/**
+ * Phase 1 #4 — /video route guard. Rendered inside the AppShell Outlet, so
+ * `me` is the bootstrapped profile. When video isn't enabled for this user
+ * (flag off or not in the allowlist — `videoEnabled` mirrors the backend
+ * fork gate), bounce to home instead of exposing the 3-tab video page; the
+ * sidebar entry is hidden in parallel (Sidebar FeatureNav).
+ */
+function VideoGate(): JSX.Element {
+  const { me } = useAppShellContext();
+  if (!me?.videoEnabled) return <Navigate to="/" replace />;
+  return lazyElement(<VideoPage />);
 }
