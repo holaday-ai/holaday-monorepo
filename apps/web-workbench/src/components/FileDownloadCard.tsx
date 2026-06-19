@@ -143,7 +143,11 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
             playsInline
             preload="metadata"
             aria-label={`预览视频 ${payload.filename}`}
-            className="max-h-64 w-full rounded-[6px] border border-[#DCDDDD] bg-black object-contain dark:border-white/10"
+            // Size to the video's own aspect ratio (cap height, never force
+            // full width) so 9:16 / 16:9 clips show at their true shape with
+            // no black letterbox. Dropping w-full + bg-black + object-contain
+            // is what removes the bars.
+            className="mx-auto block max-h-80 w-auto max-w-full rounded-[6px] border border-[#DCDDDD] dark:border-white/10"
           />
         ) : (
           <img

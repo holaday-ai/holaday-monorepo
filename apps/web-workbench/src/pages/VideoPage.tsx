@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { FileDownloadCard, type FileDownloadPayload } from '@/components/FileDownloadCard';
+import { FileDownloadCard } from '@/components/FileDownloadCard';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
@@ -29,6 +29,7 @@ import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile, uploadMediaFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
 import { selectStepsFor, shouldRefreshForTask } from '@/lib/video-task-selectors';
+import { toVideoRow, type VideoRow } from '@/lib/video-history-row';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import { useTaskStore } from '@/stores/task-store';
 import type { UiTask } from '@/types/task';
@@ -112,7 +113,13 @@ export function VideoPage(): JSX.Element {
               role="tab"
               aria-selected={active}
               disabled={!t.enabled}
-              onClick={() => t.enabled && setTab(t.id)}
+              onClick={() => {
+                if (!t.enabled || t.id === tab) return;
+                setTab(t.id);
+                // 切到别的 tab 时清掉 ?task= → 「当前制作」面板自然消失，
+                // 不再显示上一个 tab 的任务。
+                if (taskId) navigate('/video');
+              }}
               className={cn(
                 'inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[13px] font-medium transition-colors',
                 active
@@ -717,63 +724,10 @@ function SegGroup<T extends string | number>({
 // 生成历史
 // ---------------------------------------------------------------------------
 
-interface VideoResultMeta {
-  lane?: string;
-  visualMode?: string;
-  attachments?: ReadonlyArray<{
-    fileId?: string;
-    downloadUrl?: string;
-    filename?: string;
-    sizeBytes?: number;
-  }>;
-}
-interface VideoRow {
-  taskId: string;
-  intent: string;
-  title: string | null;
-  status: string;
-  createdAt: string | number | Date;
-  download?: FileDownloadPayload;
-}
-
-function isVideoLane(lane: string | undefined): boolean {
-  return typeof lane === 'string' && lane.startsWith('video_creation');
-}
-
-function toVideoRow(raw: unknown): VideoRow | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const r = raw as {
-    taskId?: string;
-    intent?: string;
-    title?: string | null;
-    status?: string;
-    createdAt?: string | number | Date;
-    result?: { metadata?: VideoResultMeta } | null;
-  };
-  const meta = r.result?.metadata;
-  if (!isVideoLane(meta?.lane)) return null;
-  if (!r.taskId || !r.status) return null;
-  const att = meta?.attachments?.find(
-    (a) => a.fileId && a.downloadUrl && a.filename && typeof a.sizeBytes === 'number',
-  );
-  return {
-    taskId: r.taskId,
-    intent: r.intent ?? '',
-    title: r.title ?? null,
-    status: r.status,
-    createdAt: r.createdAt ?? Date.now(),
-    ...(att?.fileId && att.downloadUrl && att.filename && typeof att.sizeBytes === 'number'
-      ? {
-          download: {
-            fileId: att.fileId,
-            downloadUrl: att.downloadUrl,
-            filename: att.filename,
-            size: att.sizeBytes,
-          },
-        }
-      : {}),
-  };
-}
+// VideoResultMeta / VideoRow / isVideoLane / toVideoRow moved to
+// '@/lib/video-history-row' so the "only successful 成片" filter is
+// unit-testable. toVideoRow now drops failed / cancelled / awaiting
+// (报价 stub) / executing rows — 生成历史 only lists completed 成片.
 
 function VideoHistory(): JSX.Element {
   const navigate = useNavigate();

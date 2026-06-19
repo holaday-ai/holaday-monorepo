@@ -241,7 +241,7 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
                 controls
                 playsInline
                 preload="metadata"
-                className="max-h-full max-w-full bg-black"
+                className="max-h-full max-w-full"
               />
             )}
             {!loading && !errorMessage && objectUrl && kind === 'pdf' && (
