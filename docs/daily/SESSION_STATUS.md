@@ -8,7 +8,22 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`fad7971`
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`8c8bdb4e`（SPA）/ orch `6fb2dbb9`
+（2026-06-19；**#4 视频页内闭环(Codex `6fb2dbb9`) + React #185 修复(`8c8bdb4e`) 部署 prod**。SPA bundle
+`index-BN6tjkhC.js` 双端 smoke 过无回滚；**orch 未重部署**(本次纯前端，8c8bdb4e vs 6fb2dbb9 只差 VideoPage 前端)，
+orch 仍跑 `6fb2dbb9`(restart 660，healthz ok)。无新 migration；flag/allowlist 未动(`VIDEO_CREATION_ENABLED`=
+true + allowlist=`usr_EeYp…` BOSS-only 灰度)。**`6fb2dbb9`=Codex 5 commit**：视频 报价→确认→进度→成片预览→下载
+全留 /video 页内闭环(不再跳主对话流) + 附件挂 terminal 帧(成片即时呈现) + 文件产物/下载处理。拓扑核对纯快进、
+敏感区(钱/门控/migration)全未碰。**部署后真机验抓到 P0 回归 React #185**：每次提交视频→切 /video?task= 那一刻
+无限渲染崩到「页面暂时无法加载」错误卡，只手动 reload 恢复(仅影响 BOSS-only 灰度，零真实用户)。**`8c8bdb4e`=fix
+#185(纯前端,fix-forward 不回滚)**：根因=VideoPage `CurrentVideoTaskPanel` 的 `(s)=>s.stepsByTask[id] ?? []`
+每次 new 一个 `[]`，Zustand v5 裸 `useSyncExternalStore` 要求快照引用稳定→无限重渲(#185)；刚提交的任务无 steps
+必踩，reload 后 detail 填了稳定数组才不崩。修：抽 `EMPTY_STEPS`(冻结模块常量)+`selectStepsFor` 返回稳定引用 +
+deep-link refresh effect 加一次性 ref 守卫(`shouldRefreshForTask`)。**真机复验**：3 次提交报价卡直接渲染、不崩、
+不用 reload、console 零 #185；首页/核心路径正常；**零 Veo**。+9 测(选择器引用稳定性 + getSnapshot 收敛模拟，
+临时改回 `?? []` 实证红→恢复绿)；web 652 全绿、build(lint react-hooks/tsc/vite)0 错。lint 没拦住是因 selector
+无依赖数组、exhaustive-deps 不分析其返回引用稳定性(运行时契约，静态 lint 不建模)。下一步=BOSS 在场授权后真机验
+「确认制作→出片→进度→页内预览→下载」整条 + 真用户烧 Veo 验收。前态：#4 `fad7971`(restart 659)。）
 （2026-06-19；**#4 视频 段数 P1 + 报价卡面板 P3 两修 部署 prod**，restart 659，preflight FF-safe，
 无新 migration。承接 4c（视频三类型 BOSS-only 灰度 LIVE，flag `VIDEO_CREATION_ENABLED=true`+allowlist=
 `usr_EeYp…`）。fad7971 经 merge `77c2afe` **含 #2 的 115ba53/判官 f1d8693，无 revert**。**P1 段数**：
