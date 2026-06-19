@@ -5,7 +5,6 @@ import {
   CircleSlash,
   Clapperboard,
   Clock,
-  Download,
   Film,
   ImagePlus,
   Loader2,
@@ -22,7 +21,7 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { FileDownloadCard } from '@/components/FileDownloadCard';
+import { FileDownloadCard, type FileDownloadPayload } from '@/components/FileDownloadCard';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
@@ -713,7 +712,12 @@ function SegGroup<T extends string | number>({
 interface VideoResultMeta {
   lane?: string;
   visualMode?: string;
-  attachments?: ReadonlyArray<{ downloadUrl?: string; filename?: string }>;
+  attachments?: ReadonlyArray<{
+    fileId?: string;
+    downloadUrl?: string;
+    filename?: string;
+    sizeBytes?: number;
+  }>;
 }
 interface VideoRow {
   taskId: string;
@@ -721,7 +725,7 @@ interface VideoRow {
   title: string | null;
   status: string;
   createdAt: string | number | Date;
-  download?: { url: string; filename: string };
+  download?: FileDownloadPayload;
 }
 
 function isVideoLane(lane: string | undefined): boolean {
@@ -741,14 +745,25 @@ function toVideoRow(raw: unknown): VideoRow | null {
   const meta = r.result?.metadata;
   if (!isVideoLane(meta?.lane)) return null;
   if (!r.taskId || !r.status) return null;
-  const att = meta?.attachments?.find((a) => a.downloadUrl);
+  const att = meta?.attachments?.find(
+    (a) => a.fileId && a.downloadUrl && a.filename && typeof a.sizeBytes === 'number',
+  );
   return {
     taskId: r.taskId,
     intent: r.intent ?? '',
     title: r.title ?? null,
     status: r.status,
     createdAt: r.createdAt ?? Date.now(),
-    ...(att?.downloadUrl ? { download: { url: att.downloadUrl, filename: att.filename ?? 'video.mp4' } } : {}),
+    ...(att?.fileId && att.downloadUrl && att.filename && typeof att.sizeBytes === 'number'
+      ? {
+          download: {
+            fileId: att.fileId,
+            downloadUrl: att.downloadUrl,
+            filename: att.filename,
+            size: att.sizeBytes,
+          },
+        }
+      : {}),
   };
 }
 
@@ -803,30 +818,26 @@ function VideoHistory(): JSX.Element {
       ) : (
         <div className="divide-y divide-[#EFEFEF]">
           {rows.map((t) => (
-            <div key={t.taskId} className="group flex items-center gap-3 py-3">
-              <VideoStatusIcon status={t.status} />
-              <button
-                type="button"
-                onClick={() => navigate(`/video?task=${encodeURIComponent(t.taskId)}`)}
-                className="min-w-0 flex-1 text-left"
-              >
-                <div className="truncate text-[13px] text-foreground group-hover:text-[#EA1F59]">
-                  {t.title?.trim() || t.intent || '视频任务'}
-                </div>
-                <div className="mt-0.5 text-[11px] text-muted-foreground">
-                  {videoStatusLabel(t.status)} · {formatTime(t.createdAt)}
-                </div>
-              </button>
-              {t.download && (
-                <a
-                  href={t.download.url}
-                  download={t.download.filename}
-                  onClick={(e) => e.stopPropagation()}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#DCDDDD] bg-white px-2.5 text-[12px] text-[#595757] transition-colors hover:border-[#ADADAD] hover:text-[#EA1F59]"
+            <div key={t.taskId} className="group py-3">
+              <div className="flex items-center gap-3">
+                <VideoStatusIcon status={t.status} />
+                <button
+                  type="button"
+                  onClick={() => navigate(`/video?task=${encodeURIComponent(t.taskId)}`)}
+                  className="min-w-0 flex-1 text-left"
                 >
-                  <Download className="h-3.5 w-3.5" />
-                  下载
-                </a>
+                  <div className="truncate text-[13px] text-foreground group-hover:text-[#EA1F59]">
+                    {t.title?.trim() || t.intent || '视频任务'}
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">
+                    {videoStatusLabel(t.status)} · {formatTime(t.createdAt)}
+                  </div>
+                </button>
+              </div>
+              {t.download && (
+                <div className="ml-10 mt-2">
+                  <FileDownloadCard payload={t.download} />
+                </div>
               )}
             </div>
           ))}
