@@ -21,6 +21,7 @@ import { buildComposeCommand } from './video-compose.js';
 import { downloadToBuffer } from './video-http.js';
 import { resolveAspect, type AspectRatio } from './video-lane-simple.js';
 import type { PipelineLogger } from './video-pipeline.js';
+import { generatePosterFile } from './video-poster.js';
 import type { VideoSegment } from './types.js';
 
 /** B 架构平价边界:总音频 ≤40s(fal flat fee);超则要进阶档/截短。 */
@@ -223,6 +224,13 @@ export async function runIpVideoCreation(
 
   const finalBuf = await fns.readFile(outPath);
   const stored = await svc.storeOutput({ filename: 'video.mp4', mimetype: 'video/mp4', buffer: finalBuf });
+  // 首帧 poster（非致命）。storeOutput=storeOutputIp(真存)，poster 分支盖 posterUrl。
+  await generatePosterFile({
+    videoPath: outPath,
+    posterPath: path.join(svc.workdir, 'poster.jpg'),
+    deps: { runFfmpeg: fns.runFfmpeg, readFile: fns.readFile, storeOutput: svc.storeOutput, logger: svc.logger },
+    ffOpts,
+  });
   svc.logger.info({ fileId: stored.fileId, audioMs }, 'video: IP single-clip lip-sync complete');
   return { fileId: stored.fileId, downloadUrl: `/api/files/${stored.fileId}/download`, totalDurationMs: audioMs };
 }

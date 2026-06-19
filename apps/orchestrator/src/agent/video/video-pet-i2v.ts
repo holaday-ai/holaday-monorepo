@@ -25,6 +25,7 @@ import { downloadToBuffer } from './video-http.js';
 import type { PipelineLogger } from './video-pipeline.js';
 import { resolveAspect, SimpleVideoError, type AspectRatio, type SimpleVideoConfig } from './video-lane-simple.js';
 import { generateBrollVideo } from './wanxiang-client.js';
+import { generatePosterFile } from './video-poster.js';
 
 const DEFAULT_WAN_I2V_MODEL = 'wan2.2-i2v-flash';
 const DEFAULT_HAPPYHORSE_I2V_MODEL = 'happyhorse-1.0-i2v';
@@ -144,6 +145,13 @@ export async function runPetVideoCreation(
   // ④ store final
   const finalBuffer = await fns.readFile(outPath);
   const stored = await svc.storeOutput({ filename: 'video.mp4', mimetype: 'video/mp4', buffer: finalBuffer });
+  // 首帧 poster（非致命）。
+  await generatePosterFile({
+    videoPath: outPath,
+    posterPath: path.join(svc.workdir, 'poster.jpg'),
+    deps: { runFfmpeg: fns.runFfmpeg, readFile: fns.readFile, storeOutput: svc.storeOutput, logger: svc.logger },
+    ffOpts,
+  });
   svc.logger.info({ fileId: stored.fileId, model, aspect: opts.aspectRatio ?? '9:16' }, 'video: pet i2v complete');
   return { fileId: stored.fileId, downloadUrl: `/api/files/${stored.fileId}/download` };
 }

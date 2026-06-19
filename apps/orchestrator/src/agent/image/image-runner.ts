@@ -29,6 +29,13 @@ export interface ImageAttachment {
   /** ISO string — the SPA rejects non-string expiresAt. */
   expiresAt: string;
   kind: 'output';
+  /**
+   * Phase 2 video batch-2 — first-frame JPEG poster for a 成片 (set by the
+   * video lanes' poster step). The SPA shows this `<img>` thumbnail instead
+   * of eagerly fetching the full video blob. Absent for non-video outputs
+   * and for 成片 whose poster generation failed (non-fatal).
+   */
+  posterUrl?: string;
 }
 
 export interface RunImageTaskResult {

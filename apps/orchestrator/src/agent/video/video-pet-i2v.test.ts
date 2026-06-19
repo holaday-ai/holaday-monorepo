@@ -65,9 +65,12 @@ describe('runPetVideoCreation — 宠物 i2v 单图', () => {
     expect(arg.imageUrl).toBe('https://r2/pet.jpg');
     expect(arg.size).toBe('1080*1920'); // 默认竖屏 9:16
     expect(arg.prompt).toContain('小猫眨眨眼');
-    // composed via ffmpeg + final stored
-    expect(mocks.runFfmpeg).toHaveBeenCalledTimes(1);
+    // composed via ffmpeg + final stored + 首帧 poster
+    expect(mocks.runFfmpeg).toHaveBeenCalledTimes(2); // compose + poster
     expect(mocks.storeOutput).toHaveBeenCalledWith(expect.objectContaining({ filename: 'video.mp4' }));
+    expect(mocks.storeOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ filename: 'poster.jpg', mimetype: 'image/jpeg' }),
+    );
     expect(res.fileId).toBe('f_video.mp4');
     expect(res.downloadUrl).toContain('/download');
   });

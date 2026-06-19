@@ -59,9 +59,12 @@ describe('runIpVideoCreation — B 架构单 clip 口播', () => {
     expect(lipArg.extra?.loop_mode).toBe('loop');
     // 只 1 次 fal(B 架构 = 1 clip)
     expect(mocks.runLipSync).toHaveBeenCalledTimes(1);
-    // ③ compose + 最终 store
-    expect(mocks.runFfmpeg).toHaveBeenCalledTimes(1);
+    // ③ compose + 最终 store + 首帧 poster
+    expect(mocks.runFfmpeg).toHaveBeenCalledTimes(2); // compose + poster
     expect(mocks.storeOutput).toHaveBeenCalledWith(expect.objectContaining({ filename: 'video.mp4' }));
+    expect(mocks.storeOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ filename: 'poster.jpg', mimetype: 'image/jpeg' }),
+    );
     expect(res.fileId).toBe('f_video.mp4');
     expect(res.totalDurationMs).toBe(8000);
   });

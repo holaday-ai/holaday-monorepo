@@ -33,6 +33,7 @@ import { buildAss } from './timeline.js';
 import { buildComposeCommand } from './video-compose.js';
 import { downloadToBuffer } from './video-http.js';
 import { runVideoPipeline, type PipelineLogger, type VideoPipelineDeps } from './video-pipeline.js';
+import { generatePosterFile } from './video-poster.js';
 import { optimizeUserScript, type LlmComplete, type VideoStyle } from './video-script.js';
 import type { VideoScript } from './types.js';
 import { generateBrollVideo } from './wanxiang-client.js';
@@ -409,6 +410,13 @@ export async function runSimpleVideoCreation(
   await fns.runFfmpeg(cmd, ffOpts);
   const finalBuffer = await fns.readFile(outPath);
   const stored = await svc.storeOutput({ filename: 'video.mp4', mimetype: 'video/mp4', buffer: finalBuffer });
+  // 首帧 poster（非致命：抽帧失败只 log，成片照常完成）。
+  await generatePosterFile({
+    videoPath: outPath,
+    posterPath: path.join(svc.workdir, 'poster.jpg'),
+    deps: { runFfmpeg: fns.runFfmpeg, readFile: fns.readFile, storeOutput: svc.storeOutput, logger: svc.logger },
+    ffOpts,
+  });
   svc.logger.info(
     { fileId: stored.fileId, segments: result.segments.length, visualMode, totalDurationMs: result.timeline.totalDurationMs },
     'video: simplified creation complete',

@@ -1,0 +1,76 @@
+import { describe, expect, it } from 'vitest';
+import {
+  deriveVideoType,
+  mapVideoFailureReason,
+  VIDEO_FAILURE_REASONS,
+} from './video-confirm-meta.js';
+
+describe('deriveVideoType', () => {
+  it('tab wins: normal/pet/ip_person', () => {
+    expect(deriveVideoType({ isPet: false, isIp: false, tab: 'normal' })).toBe('normal');
+    expect(deriveVideoType({ isPet: false, isIp: false, tab: 'pet' })).toBe('pet');
+    expect(deriveVideoType({ isPet: false, isIp: false, tab: 'ip_person' })).toBe('ip_person');
+  });
+  it('falls back to isPet / isIp flags when tab absent', () => {
+    expect(deriveVideoType({ isPet: true, isIp: false })).toBe('pet');
+    expect(deriveVideoType({ isPet: false, isIp: true })).toBe('ip_person');
+  });
+  it('defaults to normal', () => {
+    expect(deriveVideoType({ isPet: false, isIp: false })).toBe('normal');
+  });
+});
+
+const ALL = Object.values(VIDEO_FAILURE_REASONS);
+const isWhitelisted = (s: string) => ALL.includes(s as (typeof ALL)[number]);
+
+describe('mapVideoFailureReason — safe, whitelisted, no leak', () => {
+  it('fal exhausted_balance → 服务繁忙', () => {
+    expect(mapVideoFailureReason({ name: 'FalLipSyncError', kind: 'exhausted_balance' })).toBe(
+      VIDEO_FAILURE_REASONS.busy,
+    );
+  });
+
+  it('fal 422 face_detection → 检测不到清晰人脸', () => {
+    const err = {
+      name: 'FalLipSyncError',
+      kind: 'http',
+      status: 422,
+      detail: '{"detail":[{"type":"face_detection_error","input":"https://r2/usr_X/file_Y/secret"}]}',
+    };
+    expect(mapVideoFailureReason(err)).toBe(VIDEO_FAILURE_REASONS.face);
+  });
+
+  it('fal timeout/network/job_failed → 服务繁忙', () => {
+    for (const kind of ['timeout', 'network', 'job_failed']) {
+      expect(mapVideoFailureReason({ name: 'FalLipSyncError', kind })).toBe(VIDEO_FAILURE_REASONS.busy);
+    }
+  });
+
+  it('IpVideoError too_long → 文案过长; config → IP 素材缺失', () => {
+    expect(mapVideoFailureReason({ name: 'IpVideoError', kind: 'too_long' })).toBe(VIDEO_FAILURE_REASONS.tooLong);
+    expect(mapVideoFailureReason({ name: 'IpVideoError', kind: 'config' })).toBe(VIDEO_FAILURE_REASONS.ipAssets);
+  });
+
+  it('SimpleVideoError / unknown / null / string → generic', () => {
+    expect(mapVideoFailureReason({ name: 'SimpleVideoError', kind: 'compose' })).toBe(VIDEO_FAILURE_REASONS.generic);
+    expect(mapVideoFailureReason(new Error('raw internal boom'))).toBe(VIDEO_FAILURE_REASONS.generic);
+    expect(mapVideoFailureReason(null)).toBe(VIDEO_FAILURE_REASONS.generic);
+    expect(mapVideoFailureReason('some string')).toBe(VIDEO_FAILURE_REASONS.generic);
+  });
+
+  it('★ NEVER leaks internal detail (url / file id / stack / message)', () => {
+    const sensitive = {
+      name: 'FalLipSyncError',
+      kind: 'http',
+      status: 422,
+      message: 'fal result returned 422',
+      detail: 'https://holaday-files-prod.r2.cloudflarestorage.com/usr_EeYp/input/file_LMywvC9UKjLThWSDqu4Hw',
+      stack: 'FalLipSyncError: ...\n at fal-lipsync-client.ts:130',
+    };
+    const out = mapVideoFailureReason(sensitive);
+    expect(isWhitelisted(out)).toBe(true);
+    for (const leak of ['http', 'r2', 'file_', 'usr_', 'fal-lipsync-client', '422', 'cloudflarestorage']) {
+      expect(out).not.toContain(leak);
+    }
+  });
+});

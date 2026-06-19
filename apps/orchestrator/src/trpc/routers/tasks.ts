@@ -99,6 +99,7 @@ import { taskEvents } from '../../db/schema/task-events.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
 import { tasks as tasksTable } from '../../db/schema/tasks.js';
 import { decideVideoGate, parseVideoConfirm, quoteIpVideo, quotePetI2v, quoteVideo } from '../../agent/video/video-confirm.js';
+import { deriveVideoType, mapVideoFailureReason } from '../../agent/video/video-confirm-meta.js';
 import type { AspectRatio, SimpleVideoConfig, VideoSource } from '../../agent/video/video-lane-simple.js';
 import type { PetI2vModel } from '../../agent/video/video-pet-i2v.js';
 import type { IpVideoConfig } from '../../agent/video/video-ip-lipsync.js';
@@ -5712,6 +5713,8 @@ export const tasksRouter = router({
         const fileService = new FileService(db, logger);
         const workdir = await fsp.mkdtemp(path.join(os.tmpdir(), 'hd-video-'));
         let finalAtt: ImageAttachment | null = null;
+        // 首帧 poster 的下载 URL（poster 由 lane 在成片后抽帧存盘，再盖到 finalAtt 上）。
+        let posterUrl: string | null = null;
         const llm = async ({ system, user }: { system: string; user: string }) => {
           if (!anthropicClient) return '';
           const resp = await anthropicClient.messages.create({
@@ -5725,6 +5728,21 @@ export const tasksRouter = router({
         };
         // 仅最终 video.mp4 落用户文件;中间段产物只用 workdir 副本(pipeline 用本地路径)。
         const storeOutput = async (i: { filename: string; mimetype: string; buffer: Buffer }) => {
+          if (i.filename === 'poster.jpg') {
+            const ps = await fileService.storeOutput({
+              userIdInternal: userInternalId,
+              userExternalId,
+              taskIdInternal: taskInternalId,
+              filename: 'holaday-video-poster.jpg',
+              mimetype: 'image/jpeg',
+              buffer: i.buffer,
+            });
+            const url = `/api/files/${ps.externalId}/download`;
+            posterUrl = url;
+            const fa = finalAtt;
+            if (fa) fa.posterUrl = url;
+            return { fileId: ps.externalId, storagePath: ps.externalId };
+          }
           if (i.filename !== 'video.mp4') {
             return { fileId: `tmp:${i.filename}`, storagePath: `tmp:${i.filename}` };
           }
@@ -5744,6 +5762,7 @@ export const tasksRouter = router({
             sizeBytes: Number(s.sizeBytes),
             expiresAt: s.expiresAt ? s.expiresAt.toISOString() : new Date(Date.now() + 864e5).toISOString(),
             kind: 'output',
+            ...(posterUrl ? { posterUrl } : {}),
           };
           return { fileId: s.externalId, storagePath: s.externalId };
         };
@@ -5782,7 +5801,12 @@ export const tasksRouter = router({
                 userIdInternal: userInternalId,
                 userExternalId,
                 taskIdInternal: taskInternalId,
-                filename: i.filename === 'video.mp4' ? 'holaday-ip-video.mp4' : i.filename,
+                filename:
+                  i.filename === 'video.mp4'
+                    ? 'holaday-ip-video.mp4'
+                    : i.filename === 'poster.jpg'
+                      ? 'holaday-ip-video-poster.jpg'
+                      : i.filename,
                 mimetype: i.mimetype,
                 buffer: i.buffer,
               });
@@ -5795,7 +5819,14 @@ export const tasksRouter = router({
                   sizeBytes: Number(s.sizeBytes),
                   expiresAt: s.expiresAt ? s.expiresAt.toISOString() : new Date(Date.now() + 864e5).toISOString(),
                   kind: 'output',
+                  ...(posterUrl ? { posterUrl } : {}),
                 };
+              }
+              if (i.filename === 'poster.jpg') {
+                const url = `/api/files/${s.externalId}/download`;
+                posterUrl = url;
+                const fa = finalAtt;
+                if (fa) fa.posterUrl = url;
               }
               return { fileId: s.externalId };
             };
@@ -5835,6 +5866,7 @@ export const tasksRouter = router({
               executionMode: 'generate',
               lane: 'video_creation',
               visualMode,
+              videoType: deriveVideoType({ isPet, isIp, tab: vOpts.tab }),
               ...(finalAtt ? { attachments: [finalAtt] } : {}),
             },
           });
@@ -5846,11 +5878,14 @@ export const tasksRouter = router({
             ...(finalAtt ? { attachments: [finalAtt] } : {}),
           });
         } catch (err) {
+          // Full error to the server log (internal); a SAFE whitelisted reason
+          // to the user — never leak stack / detail / urls / file ids.
           logger.error({ err, taskId: newTaskId }, 'video_creation: lane failed');
+          const friendlyReason = mapVideoFailureReason(err);
           await repo
             .persistVisionOutcome(newTaskId, {
               status: 'failed',
-              reason: '视频生成失败，请稍后重试。',
+              reason: friendlyReason,
               tickCount: 1,
               metadata: { executionMode: 'generate', lane: 'video_creation' },
             })
@@ -5859,7 +5894,7 @@ export const tasksRouter = router({
             type: 'server.task.terminal',
             taskId: newTaskId,
             status: 'failed',
-            reason: '视频生成失败，请稍后重试。',
+            reason: friendlyReason,
           });
         } finally {
           await fsp.rm(workdir, { recursive: true, force: true }).catch(() => {});

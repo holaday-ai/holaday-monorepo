@@ -86,7 +86,10 @@ describe('runSimpleVideoCreation — video (default = veo_fast)', () => {
     // 范围2 收窄: 仍压"含文字物体/编造乱码假字", 但删掉"任何文字"一刀切
     expect(veoArg.prompt).toMatch(/含文字物体|编造乱码假字/);
     expect(veoArg.prompt).not.toContain('不能有任何文字');
-    expect(mocks.runFfmpeg).toHaveBeenCalledTimes(1);
+    expect(mocks.runFfmpeg).toHaveBeenCalledTimes(2); // compose + 首帧 poster
+    expect(mocks.storeOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ filename: 'poster.jpg', mimetype: 'image/jpeg' }),
+    );
     expect(out.visualMode).toBe('video');
     expect(out.fileId).toBe('f_video.mp4');
     expect(out.segments).toBe(2);
