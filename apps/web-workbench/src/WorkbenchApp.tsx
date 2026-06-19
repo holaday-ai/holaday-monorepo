@@ -35,6 +35,7 @@ import { useTaskStore } from '@/stores/task-store';
 import { isQuotaExhausted, useQuotaStatus } from '@/lib/use-quota-status';
 import {
   computeSidePanelMode,
+  needsBrowserViewport,
   sidePanelModeForToolbar,
   type SidePanelMode,
   type SidePanelOverride,
@@ -322,13 +323,12 @@ export function WorkbenchApp(): JSX.Element {
     const fromTask = tasks.find((t) => t.taskId === selectedTaskId)?.awaitingKind;
     return fromTask;
   })();
-  const selectedNeedsBrowser = Boolean(
-    selectedTaskId &&
-      (captchaWaitByTask[selectedTaskId] ||
-        (selectedNeedsUser &&
-          selectedAwaitingKind != null &&
-          selectedAwaitingKind !== 'clarification')),
-  );
+  const selectedNeedsBrowser = needsBrowserViewport({
+    hasSelectedTask: Boolean(selectedTaskId),
+    captchaWait: Boolean(selectedTaskId && captchaWaitByTask[selectedTaskId]),
+    needsUser: selectedNeedsUser,
+    awaitingKind: selectedAwaitingKind,
+  });
 
   // Reset the side-panel intent on task switch so a manual open/close
   // from task A doesn't follow into task B — each task starts from

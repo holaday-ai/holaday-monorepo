@@ -173,7 +173,7 @@ export function buildOptimizeSystemPrompt(maxSegments: number, style?: VideoStyl
     '用户会给你一段草稿文案或想法，你把它优化、拆成一条可拍摄的竖屏短视频脚本（图文配音，无真人出镜、无换口型）。',
     '',
     '硬性要求：',
-    `- ${Math.max(3, maxSegments - 2)}~${maxSegments} 个分段，每段一句精炼旁白（text，口语化、保留用户原意）。`,
+    `- ${Math.max(1, maxSegments - 2)}~${maxSegments} 个分段，每段一句精炼旁白（text，口语化、保留用户原意）。段数按内容量定：短文案别硬凑、宁少勿多，不要为凑时长重复内容或加无关空镜。`,
     ...(styleLine ? [styleLine] : []),
     '- 每段一句画面描述（visual，用于 AI 文生图/文生视频）。【让画面视觉化该段旁白在说的核心动作或对象】：',
     '  例如「选 SPF50」段→阳光下手在小臂上抹开乳白防晒乳的动作；「每两小时补涂」段→户外看时间、再次涂抹的画面；',
@@ -210,6 +210,17 @@ function normalizeOptimized(raw: unknown): unknown {
 }
 
 /**
+ * Segment-count cap by content volume. A one-sentence draft must NOT be
+ * inflated into a 6-segment / 48s video: ~1 segment per 30 non-whitespace
+ * chars, clamped 1..6. The 普通视频 quote stage (tasks.ts) passes this as
+ * optimizeUserScript's maxSegments so a ~50-char 文案 → ≤2 段, long 文案 → 6.
+ */
+export function segmentCapForText(text: string): number {
+  const chars = (text ?? '').replace(/\s/g, '').length;
+  return Math.min(6, Math.max(1, Math.round(chars / 30)));
+}
+
+/**
  * Optimize a user-provided draft into a VideoScript. Unlike
  * generateVideoScript (which invents from a one-line ask), this stays
  * FAITHFUL to the user's text — optimize / segment / add visual prompts, no
@@ -241,5 +252,12 @@ export async function optimizeUserScript(
   if (!parsed.success) {
     throw new VideoScriptError('optimized script did not match schema', 'parse', JSON.stringify(parsed.error.issues).slice(0, 400));
   }
-  return parsed.data as VideoScript;
+  const script = parsed.data as VideoScript;
+  // Hard cap — never exceed maxSegments even if the model over-produces, so a
+  // one-sentence draft can't be inflated into a 6-segment / 48s video. The
+  // prompt already guides this; the slice guarantees it (and keeps the quote,
+  // which is segments.length × billSec, honest).
+  return script.segments.length > maxSegments
+    ? { ...script, segments: script.segments.slice(0, maxSegments) }
+    : script;
 }

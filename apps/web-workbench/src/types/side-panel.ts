@@ -64,6 +64,31 @@ export function computeSidePanelMode(
   return 'closed';
 }
 
+/**
+ * Whether the agent needs the user in the browser viewport for the selected
+ * task — feeds `selectedNeedsBrowser` → computeSidePanelMode → 'browser-live'.
+ * True for a captcha wait, or an awaiting-user state that's a genuine browser
+ * hand-off (login / captcha / permission / browser_action). NOT for chat-only
+ * awaits: 'clarification' and 'video_quote' (the video report card lives in
+ * the chat stream and has no browser session — mounting the panel just shows a
+ * futile "正在连接浏览器画面" over the quote card).
+ */
+export function needsBrowserViewport(input: {
+  hasSelectedTask: boolean;
+  captchaWait: boolean;
+  needsUser: boolean;
+  awaitingKind: string | null | undefined;
+}): boolean {
+  if (!input.hasSelectedTask) return false;
+  if (input.captchaWait) return true;
+  return (
+    input.needsUser &&
+    input.awaitingKind != null &&
+    input.awaitingKind !== 'clarification' &&
+    input.awaitingKind !== 'video_quote'
+  );
+}
+
 export function sidePanelModeForToolbar({
   sidePanelMode,
   isMobile,

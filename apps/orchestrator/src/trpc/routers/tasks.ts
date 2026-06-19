@@ -1229,7 +1229,7 @@ export const tasksRouter = router({
         input.videoOptions?.tab !== undefined;
       if (appEnv.VIDEO_CREATION_ENABLED && videoIntent && videoAllowed && anthropicForResolver) {
         const anthropicClient = anthropicForResolver;
-        const { optimizeUserScript } = await import('../../agent/video/video-script.js');
+        const { optimizeUserScript, segmentCapForText } = await import('../../agent/video/video-script.js');
         // Phase 2 第一期 — SPA「普通视频」面板把模型档/风格/画幅/画质/时长带上来。
         const vOpts = input.videoOptions ?? {};
 
@@ -1327,8 +1327,11 @@ export const tasksRouter = router({
         let script: VideoScript | null = null;
         try {
           // optimize = LLM(~¥0.01),**非 Veo**。出真实段数以便动态报价;风格只调画面语气。
+          // 段数按文案内容量定上限(segmentCapForText):一句话→1~2 段,长文案→6 段。
+          // 避免短文案被硬凑成 6 段 48s、报价虚高(quoteVideo = 段数 × 每段秒数)。
+          const segCap = segmentCapForText(input.intent);
           script = await optimizeUserScript(
-            { userText: input.intent, ...(style ? { style } : {}) },
+            { userText: input.intent, maxSegments: segCap, ...(style ? { style } : {}) },
             {
               llm: async ({ system, user }) => {
                 const resp = await anthropicClient.messages.create({

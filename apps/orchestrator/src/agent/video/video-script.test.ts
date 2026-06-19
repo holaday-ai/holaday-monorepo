@@ -4,6 +4,7 @@ import {
   buildScriptSystemPrompt,
   generateVideoScript,
   optimizeUserScript,
+  segmentCapForText,
   VideoScriptError,
   type LlmComplete,
 } from './video-script.js';
@@ -174,5 +175,52 @@ describe('optimizeUserScript (原方案 — faithful to user draft)', () => {
     expect(p).toMatch(/多余手臂|畸形手/);
     // and the old text-free example must no longer suggest a 手部特写
     expect(p).not.toContain('户外涂防晒的手部特写');
+  });
+});
+
+describe('段数按内容量动态定 (Problem 1 — 短文案不被硬凑成 6 段)', () => {
+  const sixSegReply = JSON.stringify({
+    title: 'x',
+    segments: Array.from({ length: 6 }, (_, i) => ({ text: `第${i}句旁白`, visual: `画面${i}` })),
+  });
+
+  it('segmentCapForText: 一句话(~40字) → ≤2 段', () => {
+    const oneLine =
+      '夏天紫外线很强,出门前二十分钟涂够防晒,每两小时补涂一次,别让紫外线毁了你的皮肤';
+    expect(oneLine.replace(/\s/g, '').length).toBeLessThanOrEqual(60);
+    expect(segmentCapForText(oneLine)).toBeLessThanOrEqual(2);
+  });
+
+  it('segmentCapForText: 长文案(~200字) → 6 段, 钳在 1..6', () => {
+    expect(segmentCapForText('夏'.repeat(200))).toBe(6);
+    expect(segmentCapForText('夏'.repeat(1000))).toBe(6); // clamped
+    expect(segmentCapForText('')).toBe(1);
+    expect(segmentCapForText('防晒')).toBe(1);
+  });
+
+  it('系统提示下限随 maxSegments 缩: 1→「1~1」, 2→「1~2」, 6→「4~6」+ 别硬凑', () => {
+    expect(buildOptimizeSystemPrompt(1)).toContain('1~1 个分段');
+    expect(buildOptimizeSystemPrompt(2)).toContain('1~2 个分段');
+    expect(buildOptimizeSystemPrompt(6)).toContain('4~6 个分段'); // 长文案不变
+    expect(buildOptimizeSystemPrompt(2)).toMatch(/短文案别硬凑|按内容量定/);
+  });
+
+  it('★ 端到端: 模型多产 6 段, 一句话文案过 optimize 后 segments.length ≤ 2 (硬截断钉死)', async () => {
+    const oneLine = '夏天紫外线很强,记得涂防晒';
+    const cap = segmentCapForText(oneLine); // ≤2
+    const out = await optimizeUserScript(
+      { userText: oneLine, maxSegments: cap },
+      { llm: llmReturning(sixSegReply) },
+    );
+    expect(out.segments.length).toBeLessThanOrEqual(2);
+    expect(out.segments.length).toBe(cap);
+  });
+
+  it('长文案: 模型产 6 段 + maxSegments=6 → 保留 6 段(不截)', async () => {
+    const out = await optimizeUserScript(
+      { userText: '夏'.repeat(200), maxSegments: 6 },
+      { llm: llmReturning(sixSegReply) },
+    );
+    expect(out.segments).toHaveLength(6);
   });
 });
