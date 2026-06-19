@@ -73,6 +73,7 @@ export function VideoPage(): JSX.Element {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const tasks = useTaskStore((s) => s.tasks);
+  const refreshTasks = useTaskStore((s) => s.refreshTasks);
   const taskId = searchParams.get('task');
   const currentTask = taskId ? tasks.find((task) => task.taskId === taskId) ?? null : null;
   const handleTaskCreated = React.useCallback(
@@ -81,6 +82,11 @@ export function VideoPage(): JSX.Element {
     },
     [navigate],
   );
+
+  React.useEffect(() => {
+    if (!taskId || currentTask) return;
+    void refreshTasks();
+  }, [currentTask, refreshTasks, taskId]);
 
   return (
     <PageContainer width="form">

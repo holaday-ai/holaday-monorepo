@@ -5843,6 +5843,7 @@ export const tasksRouter = router({
             taskId: newTaskId,
             status: 'completed',
             summary,
+            ...(finalAtt ? { attachments: [finalAtt] } : {}),
           });
         } catch (err) {
           logger.error({ err, taskId: newTaskId }, 'video_creation: lane failed');
