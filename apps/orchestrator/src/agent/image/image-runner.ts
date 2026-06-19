@@ -151,8 +151,14 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
 
   const attachments: ImageAttachment[] = [];
   for (let i = 0; i < result.images.length; i += 1) {
+    const image = result.images[i]!;
+    const safeMime = normalizeGeneratedImageMime(image.mimeType);
+    if (!safeMime) {
+      opts.logger.warn({ mimeType: image.mimeType, index: i }, 'image: unsupported mime skipped');
+      continue;
+    }
     try {
-      attachments.push(await opts.save(result.images[i]!, i));
+      attachments.push(await opts.save({ ...image, mimeType: safeMime }, i));
     } catch (err) {
       opts.logger.warn(
         { err: err instanceof Error ? err.message : String(err), index: i },
@@ -179,6 +185,15 @@ export async function runImageTask(opts: RunImageTaskOpts): Promise<RunImageTask
     model: result.model ?? decision.model,
     tier: effectiveTier,
   };
+}
+
+function normalizeGeneratedImageMime(mimeType: string): string | null {
+  const lower = mimeType.toLowerCase().split(';', 1)[0]?.trim() ?? '';
+  if (lower === 'image/png') return 'image/png';
+  if (lower === 'image/jpeg' || lower === 'image/jpg') return 'image/jpeg';
+  if (lower === 'image/webp') return 'image/webp';
+  if (lower === 'image/gif') return 'image/gif';
+  return null;
 }
 
 // P0 compliance: 营销/海报类图片绝不能自行添加促销承诺（AI 擅自加优惠

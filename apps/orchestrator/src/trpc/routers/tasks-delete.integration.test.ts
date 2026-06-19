@@ -62,6 +62,38 @@ describe('tRPC tasks.delete', () => {
     return externalId;
   }
 
+  async function seedAuditEvidence(userInternalId: number, taskExternalId: string): Promise<string> {
+    const { newExternalId } = await import('@holaday/shared-types');
+    const { db } = await import('../../db/client.js');
+    const { eq } = await import('drizzle-orm');
+    const { tasks } = await import('../../db/schema/tasks.js');
+    const { evidenceArtifacts } = await import('../../db/schema/evidence-artifacts.js');
+    const [task] = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.externalId, taskExternalId))
+      .limit(1);
+    if (!task) throw new Error(`task ${taskExternalId} missing`);
+    const externalId = newExternalId('evidenceArtifact');
+    await db.insert(evidenceArtifacts).values({
+      externalId,
+      ownerUserId: userInternalId,
+      taskId: task.id,
+      artifactKind: 'screenshot',
+      purpose: 'audit',
+      r2Bucket: 'test-bucket',
+      r2Key: `test/${externalId}.jpg`,
+      contentType: 'image/jpeg',
+      sizeBytes: 123,
+      sha256: 'a'.repeat(64),
+      capturedAt: new Date(),
+      collectorLane: 'browser_cdp',
+      retentionPolicy: 'audit_180d',
+      expiresAt: new Date(Date.now() + 86_400_000),
+    });
+    return externalId;
+  }
+
   async function bootTrpcServer() {
     const { signAccessToken } = await import('../../auth/jwt.js');
     const { createHttpApp } = await import('../../http.js');
@@ -196,6 +228,38 @@ describe('tRPC tasks.delete', () => {
       expect(byId.get(completed)).toBe('completed');
       expect(byId.get(partial)).toBe('partial_success');
       expect(byId.get(otherFailed)).toBe('failed');
+    } finally {
+      await close();
+    }
+  });
+
+  it('clearFailed routes evidence before deleting failed task rows', async () => {
+    const user = await seedUser();
+    const failed = await seedTask(user.internalId, 'failed');
+    const evidenceId = await seedAuditEvidence(user.internalId, failed);
+    const { port, signAccessToken, close } = await bootTrpcServer();
+    try {
+      const token = await signAccessToken({ sub: user.external, plan: 'free' });
+      const res = await callClearFailed(port, token);
+      expect(res.status).toBe(200);
+
+      const { db } = await import('../../db/client.js');
+      const { eq } = await import('drizzle-orm');
+      const { evidenceArtifacts } = await import('../../db/schema/evidence-artifacts.js');
+      const [row] = await db
+        .select({
+          ownerUserId: evidenceArtifacts.ownerUserId,
+          taskId: evidenceArtifacts.taskId,
+          metadataJson: evidenceArtifacts.metadataJson,
+        })
+        .from(evidenceArtifacts)
+        .where(eq(evidenceArtifacts.externalId, evidenceId))
+        .limit(1);
+
+      expect(row).toBeTruthy();
+      expect(row?.ownerUserId).toBeNull();
+      expect(row?.taskId).toBeNull();
+      expect((row?.metadataJson as Record<string, unknown> | null)?.scrubbed).toBe(true);
     } finally {
       await close();
     }

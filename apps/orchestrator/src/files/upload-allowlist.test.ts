@@ -7,6 +7,7 @@ import {
   looksLikeMojibake,
   ACCEPTED_MIMES,
   ACCEPTED_EXTENSIONS,
+  FileService,
 } from './file-service.js';
 
 const DOCX_MIME =
@@ -145,5 +146,160 @@ describe('looksLikeMojibake (P0 / E10 — output-name defense)', () => {
   it('a recoverable mojibake name, once repaired, is no longer flagged', () => {
     const garble = Buffer.from('周报模板', 'utf8').toString('latin1');
     expect(looksLikeMojibake(decodeUploadFilename(garble))).toBe(false); // → 周报模板
+  });
+});
+
+function collectColumnNames(node: unknown, out = new Set<string>()): Set<string> {
+  if (!node || typeof node !== 'object') return out;
+  const record = node as Record<string, unknown>;
+  if (typeof record.name === 'string' && typeof record.columnType === 'string') {
+    out.add(record.name);
+  }
+  const chunks = record.queryChunks;
+  if (Array.isArray(chunks)) {
+    for (const chunk of chunks) collectColumnNames(chunk, out);
+  }
+  return out;
+}
+
+describe('FileService.linkToTask ownership guard', () => {
+  it('creates presigned pending uploads with a finite expiry for cleanup', async () => {
+    let inserted: Record<string, unknown> | undefined;
+    const db = {
+      insert: () => ({
+        values: (row: Record<string, unknown>) => {
+          inserted = row;
+          return Promise.resolve();
+        },
+      }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    const logger = {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    const storage = {
+      getSignedPutUrl: () =>
+        Promise.resolve({ url: 'https://r2.example/upload', storagePath: 'usr/input/file/clip.mp4' }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+
+    const service = new FileService(db, logger, storage);
+    const out = await service.createPendingUpload({
+      userIdInternal: 7,
+      userExternalId: 'usr_owner',
+      filename: 'clip.mp4',
+      mimetype: 'video/mp4',
+      declaredSize: 123,
+    });
+
+    expect(out?.uploadUrl).toContain('r2.example');
+    expect(inserted?.status).toBe('pending');
+    expect(inserted?.expiresAt).toBeInstanceOf(Date);
+    expect((inserted?.expiresAt as Date).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('updates attachment task_id only when external_id, owner user_id, and active status match', async () => {
+    let whereClause: unknown;
+    const db = {
+      update: () => ({
+        set: () => ({
+          where: (condition: unknown) => {
+            whereClause = condition;
+            return Promise.resolve();
+          },
+        }),
+      }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    const logger = {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+
+    const service = new FileService(db, logger);
+    await service.linkToTask(['file_foreign'], 42, 7);
+
+    expect(collectColumnNames(whereClause)).toEqual(
+      new Set(['external_id', 'user_id', 'status']),
+    );
+  });
+
+  it('does not load pending presigned uploads before upload-confirm activates them', async () => {
+    const row = {
+      externalId: 'file_pending',
+      userId: 7,
+      status: 'pending',
+      expiresAt: null,
+      storagePath: 'usr/input/file_pending/video.mp4',
+    };
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: () => Promise.resolve([row]),
+          }),
+        }),
+      }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    const logger = {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    const storage = {
+      get: () => {
+        throw new Error('pending upload should not be read');
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+
+    const service = new FileService(db, logger, storage);
+    await expect(service.loadMany(['file_pending'], 7)).resolves.toEqual([]);
+  });
+
+  it('does not download pending presigned uploads before upload-confirm activates them', async () => {
+    const row = {
+      externalId: 'file_pending',
+      userId: 7,
+      status: 'pending',
+      expiresAt: null,
+      storagePath: 'usr/input/file_pending/video.mp4',
+    };
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: () => Promise.resolve([row]),
+          }),
+        }),
+      }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    const logger = {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    const storage = {
+      get: () => {
+        throw new Error('pending upload should not be downloaded');
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+
+    const service = new FileService(db, logger, storage);
+    await expect(service.loadForUser('file_pending', 'usr_owner')).resolves.toBeNull();
   });
 });

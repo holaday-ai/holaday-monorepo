@@ -23,7 +23,7 @@ import {
   type PlanId,
 } from '@holaday/shared-types';
 import type { Logger } from 'pino';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { taskFiles, type TaskFile } from '../db/schema/task-files.js';
 import { tasks } from '../db/schema/tasks.js';
@@ -344,6 +344,7 @@ export class FileService {
       sizeBytes: opts.declaredSize,
       storagePath: signed.storagePath,
       status: 'pending',
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
     });
     this.logger.info(
       {
@@ -510,6 +511,7 @@ export class FileService {
       .where(eq(taskFiles.externalId, fileExternalId))
       .limit(1);
     if (!row) return null;
+    if (row.status !== 'active') return null;
     // Look up the user by id since task_files stores user_id internal.
     // The cheapest way to verify ownership without an extra lookup is
     // to compare via the file's storage path, but that's brittle.
@@ -543,6 +545,8 @@ export class FileService {
         .limit(1);
       if (!row) continue;
       if (row.userId !== userIdInternal) continue;
+      if (row.status !== 'active') continue;
+      if (row.expiresAt && row.expiresAt < new Date()) continue;
       const buffer = await this.storage.get(row.storagePath);
       if (buffer) {
         out.push({ row, buffer });
@@ -567,9 +571,14 @@ export class FileService {
       await this.db
         .update(taskFiles)
         .set({ taskId: taskIdInternal })
-        .where(eq(taskFiles.externalId, id));
+        .where(
+          and(
+            eq(taskFiles.externalId, id),
+            eq(taskFiles.userId, userIdInternal),
+            eq(taskFiles.status, 'active'),
+          ),
+        );
     }
-    void userIdInternal;
   }
 
   /**

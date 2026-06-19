@@ -80,6 +80,7 @@ import {
 import { parseInputs } from '../../execution/expert-workflow-parser.js';
 import { getFeatureFlags as getExecutionFeatureFlags } from '../../execution/feature-flags.js';
 import { FileService, taskInternalIdFor } from '../../files/file-service.js';
+import { MAX_DOWNLOAD_BYTES } from '../../files/download-manager.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
 import {
   allowedFormatsForPlan,
@@ -1094,6 +1095,11 @@ export const tasksRouter = router({
             img: { buffer: Buffer; mimeType: string },
             index: number,
           ): Promise<ImageAttachment> => {
+            if (img.buffer.length > MAX_DOWNLOAD_BYTES) {
+              throw new Error(
+                `generated image too large (${img.buffer.length} bytes > ${MAX_DOWNLOAD_BYTES} cap)`,
+              );
+            }
             const ext =
               img.mimeType === 'image/jpeg'
                 ? 'jpg'
@@ -1102,11 +1108,31 @@ export const tasksRouter = router({
                   : img.mimeType === 'image/gif'
                     ? 'gif'
                     : 'png';
+            const filename = `holaday-image-${index + 1}.${ext}`;
+            if (ctx.downloadManager) {
+              const saved = await ctx.downloadManager.save({
+                userIdInternal: userRow.id,
+                userExternalId: ctx.userId,
+                taskIdInternal: taskInternalId,
+                content: img.buffer,
+                filename,
+                mimetype: img.mimeType,
+              });
+              return {
+                fileId: saved.fileId,
+                downloadUrl: saved.downloadUrl,
+                filename: saved.filename,
+                mimetype: saved.mimetype,
+                sizeBytes: saved.sizeBytes,
+                expiresAt: saved.expiresAt.toISOString(),
+                kind: 'output',
+              };
+            }
             const stored = await fileService.storeOutput({
               userIdInternal: userRow.id,
               userExternalId: ctx.userId,
               taskIdInternal: taskInternalId,
-              filename: `holaday-image-${index + 1}.${ext}`,
+              filename,
               mimetype: img.mimeType,
               buffer: img.buffer,
             });
@@ -1526,6 +1552,7 @@ export const tasksRouter = router({
           const FALLBACK_PERSONA =
             '你是严谨的 A股信息分析助手：只聚合公开信息、客观陈述事实，绝不荐股、不预测涨跌、不给买卖或择时建议。';
           let answer: string;
+          let terminalStatus: 'completed' | 'failed' = 'completed';
           try {
             // deep 意图（详细分析/全面看看）→ 七维全景版（含 ④基本面⑤估值 + ⑦分析师视角）；
             // 否则轻量速览（①②③ + ③解读）。⑦ prompt 自含人设，不依赖 skillMarkdown。
@@ -1574,23 +1601,42 @@ export const tasksRouter = router({
           } catch (err) {
             ctx.logger.error({ err, taskId }, 'ashare-qa: lane failed');
             answer = '抱歉，A股问答处理失败，请稍后重试。';
+            terminalStatus = 'failed';
           }
           try {
             const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
             if (taskInternalId != null) {
-              await repo.persistVisionOutcome(taskId, {
+              if (terminalStatus === 'completed') {
+                await repo.persistVisionOutcome(taskId, {
+                  status: 'completed',
+                  summary: answer,
+                  tickCount: 1,
+                  metadata: { executionMode: 'generate', lane: 'ashare_qa' },
+                });
+              } else {
+                await repo.persistVisionOutcome(taskId, {
+                  status: 'failed',
+                  reason: answer,
+                  tickCount: 1,
+                  metadata: { executionMode: 'generate', lane: 'ashare_qa' },
+                });
+              }
+            }
+            if (terminalStatus === 'completed') {
+              broadcastToUser(ctx.userId, {
+                type: 'server.task.terminal',
+                taskId,
                 status: 'completed',
                 summary: answer,
-                tickCount: 1,
-                metadata: { executionMode: 'generate', lane: 'ashare_qa' },
+              });
+            } else {
+              broadcastToUser(ctx.userId, {
+                type: 'server.task.terminal',
+                taskId,
+                status: 'failed',
+                reason: answer,
               });
             }
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: 'completed',
-              summary: answer,
-            });
           } catch (err) {
             ctx.logger.error({ err, taskId }, 'ashare-qa: persist/broadcast failed');
           }
@@ -1625,28 +1671,48 @@ export const tasksRouter = router({
         broadcastSubStatus(ctx.userId, taskId, 'generating');
         void (async () => {
           let answer: string;
+          let terminalStatus: 'completed' | 'failed' = 'completed';
           try {
             answer = await buildIndexCard({ client: aksClient, now: new Date() });
           } catch (err) {
             ctx.logger.error({ err, taskId }, 'ashare-index: lane failed');
             answer = '抱歉，A股大盘指数查询处理失败，请稍后重试。';
+            terminalStatus = 'failed';
           }
           try {
             const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
             if (taskInternalId != null) {
-              await repo.persistVisionOutcome(taskId, {
+              if (terminalStatus === 'completed') {
+                await repo.persistVisionOutcome(taskId, {
+                  status: 'completed',
+                  summary: answer,
+                  tickCount: 1,
+                  metadata: { executionMode: 'generate', lane: 'ashare_index' },
+                });
+              } else {
+                await repo.persistVisionOutcome(taskId, {
+                  status: 'failed',
+                  reason: answer,
+                  tickCount: 1,
+                  metadata: { executionMode: 'generate', lane: 'ashare_index' },
+                });
+              }
+            }
+            if (terminalStatus === 'completed') {
+              broadcastToUser(ctx.userId, {
+                type: 'server.task.terminal',
+                taskId,
                 status: 'completed',
                 summary: answer,
-                tickCount: 1,
-                metadata: { executionMode: 'generate', lane: 'ashare_index' },
+              });
+            } else {
+              broadcastToUser(ctx.userId, {
+                type: 'server.task.terminal',
+                taskId,
+                status: 'failed',
+                reason: answer,
               });
             }
-            broadcastToUser(ctx.userId, {
-              type: 'server.task.terminal',
-              taskId,
-              status: 'completed',
-              summary: answer,
-            });
           } catch (err) {
             ctx.logger.error({ err, taskId }, 'ashare-index: persist/broadcast failed');
           }
@@ -7054,6 +7120,22 @@ export const tasksRouter = router({
     const failedIds = failedRows.map((row) => row.id);
     if (failedIds.length === 0) {
       return { ok: true as const, deleted: 0 };
+    }
+
+    // Same evidence semantics as single-task delete: route artifacts
+    // before deleting rows while task_id is still populated. Without
+    // this, the evidence_artifacts.task_id FK would SET NULL and leave
+    // task_evidence / audit rows orphaned without applying the
+    // user-delete vs audit-retention split from design §4.9.
+    for (const taskId of failedIds) {
+      try {
+        await routeTaskEvidenceOnDelete(ctx.db, taskId, { logger: ctx.logger });
+      } catch (err) {
+        ctx.logger.warn(
+          { err, taskInternalId: taskId },
+          "tasks.clearFailed: evidence routing failed (non-blocking)",
+        );
+      }
     }
 
     // task_steps cascades via FK; task_events has no FK and must be

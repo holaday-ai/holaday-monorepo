@@ -35,7 +35,8 @@ export const filesRouter = router({
    * List the caller's uploaded input files. Accepts a `type` filter:
    *   - 'all'       (default): every input file
    *   - 'images'    : mime starts with 'image/'
-   *   - 'documents' : every other mime (excludes images)
+   *   - 'videos'    : mime starts with 'video/'
+   *   - 'documents' : every other non-media mime (excludes images/videos)
    * Optional `q` does a simple LIKE on filename for the search box
    * on the SPA's library page.
    */
@@ -43,7 +44,7 @@ export const filesRouter = router({
     .input(
       z
         .object({
-          type: z.enum(['all', 'images', 'documents']).default('all'),
+          type: z.enum(['all', 'images', 'videos', 'documents']).default('all'),
           q: z.string().max(100).optional(),
         })
         .default({ type: 'all' }),
@@ -66,11 +67,9 @@ export const filesRouter = router({
         .where(and(...conds))
         .orderBy(desc(taskFiles.createdAt))
         .limit(200);
-      const filtered = rows.filter((r) => {
-        if (input.type === 'images') return r.mimetype.startsWith('image/');
-        if (input.type === 'documents') return !r.mimetype.startsWith('image/');
-        return true;
-      });
+      const filtered = rows.filter((r) =>
+        fileMatchesLibraryFilter(r.mimetype, input.type),
+      );
       return filtered.map((r) => ({
         fileId: r.externalId,
         filename: r.filename,
@@ -104,3 +103,19 @@ export const filesRouter = router({
 // Suppress unused-import warning for `or` if not used yet — kept for
 // future filename+mime OR composition.
 void or;
+
+type LibraryFileFilter = 'all' | 'images' | 'videos' | 'documents';
+
+function fileMatchesLibraryFilter(mimetype: string, filter: LibraryFileFilter): boolean {
+  const normalized = mimetype.toLowerCase();
+  if (filter === 'images') return normalized.startsWith('image/');
+  if (filter === 'videos') return normalized.startsWith('video/');
+  if (filter === 'documents') {
+    return !normalized.startsWith('image/') && !normalized.startsWith('video/');
+  }
+  return true;
+}
+
+export const __filesRouterInternals = {
+  fileMatchesLibraryFilter,
+};

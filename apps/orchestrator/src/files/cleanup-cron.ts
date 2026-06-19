@@ -3,11 +3,12 @@
  * schedule (hourly via `pm2 start ... --cron-restart "0 * * * *"`).
  *
  * Each run:
- *   1. SELECT every task_files row with status='active' AND
- *      expires_at < NOW(). 'output' rows have a 24h TTL by spec;
- *      'input' rows leave expires_at NULL and are never matched.
- *   2. For each row, fs.unlink the storage_path. Log per-file
- *      result (deleted / already missing / errored) so a botched
+ *   1. SELECT every task_files row with status IN ('active','pending')
+ *      AND expires_at < NOW(). 'output' rows and abandoned presigned
+ *      uploads have a 24h TTL; ordinary input rows leave expires_at
+ *      NULL and are never matched.
+ *   2. For each row, delete storage_path via the configured storage
+ *      provider (local disk or R2). Log per-file result so a botched
  *      run can be diagnosed from pm2 logs alone.
  *   3. UPDATE the row to status='expired' once the disk side has
  *      been handled (deleted OR confirmed-missing). Errored unlinks
@@ -25,13 +26,13 @@
  *       in `pm2 list` for ops visibility.
  */
 
-import { promises as fs } from 'node:fs';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import mysql from 'mysql2/promise';
 import { drizzle } from 'drizzle-orm/mysql2';
 import * as schema from '../db/schema/index.js';
 import { taskFiles } from '../db/schema/task-files.js';
 import { logger } from '../config/logger.js';
+import { getSharedStorageProvider } from './storage-provider.js';
 
 async function main(): Promise<void> {
   const url = process.env.DATABASE_URL;
@@ -49,6 +50,7 @@ async function main(): Promise<void> {
 
   const startedAt = Date.now();
   logger.info({ kind: 'cleanup-cron' }, 'cleanup-cron: scanning task_files for expired rows');
+  const storage = getSharedStorageProvider({ logger });
 
   // Gather candidates. Bound the batch — under steady-state usage we
   // expect < 1000 expirations per hour; if something unusual lands a
@@ -56,7 +58,7 @@ async function main(): Promise<void> {
   const candidates = await db
     .select()
     .from(taskFiles)
-    .where(eq(taskFiles.status, 'active'))
+    .where(inArray(taskFiles.status, ['active', 'pending']))
     .limit(2000);
   const now = Date.now();
   const expired = candidates.filter(
@@ -72,48 +74,28 @@ async function main(): Promise<void> {
   let errored = 0;
   for (const row of expired) {
     try {
-      await fs.unlink(row.storagePath);
+      await storage.delete(row.storagePath);
       unlinked += 1;
       logger.info(
         { kind: 'cleanup-cron', fileId: row.externalId, path: row.storagePath, action: 'unlinked' },
-        'cleanup-cron: deleted on-disk file',
+        'cleanup-cron: deleted storage object',
       );
     } catch (err: unknown) {
-      const code = (err as NodeJS.ErrnoException)?.code;
-      if (code === 'ENOENT') {
-        alreadyMissing += 1;
-        logger.info(
-          { kind: 'cleanup-cron', fileId: row.externalId, action: 'already-missing' },
-          'cleanup-cron: file already gone (orphaned row)',
-        );
-      } else {
-        errored += 1;
-        logger.error(
-          { kind: 'cleanup-cron', fileId: row.externalId, err: err instanceof Error ? err.message : String(err) },
-          'cleanup-cron: unlink failed — row stays active for next tick',
-        );
-        continue; // Don't flip status when disk side failed.
-      }
+      errored += 1;
+      logger.error(
+        {
+          kind: 'cleanup-cron',
+          fileId: row.externalId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'cleanup-cron: storage delete failed — row stays active/pending for next tick',
+      );
+      continue; // Don't flip status when storage side failed.
     }
     await db
       .update(taskFiles)
       .set({ status: 'expired' })
       .where(eq(taskFiles.id, row.id));
-  }
-
-  // Optional: try removing the per-file directory. fs.rmdir only
-  // succeeds when the directory is already empty, so if some other
-  // file shares the dir (shouldn't happen — each file gets its own
-  // <fileId>/ dir) this no-ops cleanly.
-  for (const row of expired) {
-    if (errored && row.storagePath) continue;
-    const dir = row.storagePath.slice(0, row.storagePath.lastIndexOf('/'));
-    if (!dir) continue;
-    try {
-      await fs.rmdir(dir);
-    } catch {
-      // Non-fatal; usually 'directory not empty' or 'no such directory'.
-    }
   }
 
   await pool.end();

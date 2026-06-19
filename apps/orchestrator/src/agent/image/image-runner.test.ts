@@ -163,6 +163,27 @@ describe('runImageTask', () => {
     expect(out.attachments).toHaveLength(2);
   });
 
+  it('skips unsupported generated mime types instead of exposing them as downloads', async () => {
+    const generate = okGenerate([
+      { buffer: Buffer.from('<svg></svg>'), mimeType: 'image/svg+xml' },
+      { buffer: Buffer.from('PNG'), mimeType: 'image/png; charset=binary' },
+    ]);
+    const saveMimeTypes: string[] = [];
+    const out = await runImageTask({
+      intent: '生成图片：城市夜景',
+      apiKey: 'k',
+      save: vi.fn(async (img, index) => {
+        saveMimeTypes.push(img.mimeType);
+        return attachmentFor(index);
+      }),
+      logger: fakeLogger(),
+      generate,
+    });
+    expect(out.status).toBe('completed');
+    expect(out.attachments).toHaveLength(1);
+    expect(saveMimeTypes).toEqual(['image/png']);
+  });
+
   it('fails clearly when intent is empty and no input image', async () => {
     const out = await runImageTask({
       intent: '   ',
