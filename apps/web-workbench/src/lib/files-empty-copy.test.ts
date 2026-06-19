@@ -17,7 +17,16 @@ describe('filesEmptyCopy', () => {
       '还没有图片',
     );
     expect(filesEmptyCopy({ query: '', filter: 'documents' }).title).toBe(
-      '还没有文档',
+      '还没有文件',
+    );
+    expect(filesEmptyCopy({ query: '', filter: 'documents' }).body).toContain(
+      '办公文档',
+    );
+    expect(filesEmptyCopy({ query: '', filter: 'videos' }).title).toBe(
+      '还没有视频',
+    );
+    expect(filesEmptyCopy({ query: '', filter: 'videos' }).body).toContain(
+      '预览、下载和复用',
     );
   });
 });

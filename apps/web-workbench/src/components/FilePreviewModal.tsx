@@ -35,6 +35,7 @@ interface Props {
  * In-product file preview. Opens the file via authed fetch + object
  * URL, then renders it inline based on the MIME:
  *   • image/* → <img>
+ *   • video/* → <video controls>
  *   • application/pdf → <iframe>
  *   • text/* / json / md → <pre> with the decoded text
  *   • anything else → "无法预览此文件类型" + 下载到本地 button
@@ -232,6 +233,15 @@ export function FilePreviewModal({ payload, onClose }: Props): JSX.Element | nul
                 src={objectUrl}
                 alt={payload.filename}
                 className="max-h-full max-w-full object-contain"
+              />
+            )}
+            {!loading && !errorMessage && objectUrl && kind === 'video' && (
+              <video
+                src={objectUrl}
+                controls
+                playsInline
+                preload="metadata"
+                className="max-h-full max-w-full bg-black"
               />
             )}
             {!loading && !errorMessage && objectUrl && kind === 'pdf' && (

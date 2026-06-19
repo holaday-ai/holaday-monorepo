@@ -2,6 +2,7 @@ export type DownloadFileKind =
   | 'spreadsheet'
   | 'presentation'
   | 'image'
+  | 'video'
   | 'document'
   | 'generic';
 
@@ -10,6 +11,7 @@ export function classifyDownloadFileKind(filename: string): DownloadFileKind {
   if (['xlsx', 'xls', 'csv'].includes(ext)) return 'spreadsheet';
   if (['pptx', 'ppt'].includes(ext)) return 'presentation';
   if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) return 'image';
+  if (['mp4', 'mov', 'webm', 'm4v'].includes(ext)) return 'video';
   if (['pdf', 'docx', 'doc', 'txt', 'md', 'json'].includes(ext)) return 'document';
   return 'generic';
 }
@@ -18,6 +20,7 @@ export function downloadFileKindLabel(kind: DownloadFileKind): string {
   if (kind === 'spreadsheet') return '表格文件';
   if (kind === 'presentation') return '演示文稿';
   if (kind === 'image') return '图片文件';
+  if (kind === 'video') return '视频文件';
   if (kind === 'document') return '文档文件';
   return '产出文件';
 }

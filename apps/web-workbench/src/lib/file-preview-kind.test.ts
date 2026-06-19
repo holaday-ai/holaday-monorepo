@@ -8,6 +8,13 @@ describe('filePreviewKind', () => {
     );
   });
 
+  it('detects video previews from MIME or filename', () => {
+    expect(filePreviewKind({ mime: 'video/mp4', filename: 'clip.bin' })).toBe(
+      'video',
+    );
+    expect(filePreviewKind({ mime: '', filename: 'demo.MOV' })).toBe('video');
+  });
+
   it('detects PDFs from MIME or filename', () => {
     expect(filePreviewKind({ mime: 'application/pdf', filename: 'x' })).toBe('pdf');
     expect(filePreviewKind({ mime: '', filename: 'deck.PDF' })).toBe('pdf');

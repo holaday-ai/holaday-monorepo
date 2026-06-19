@@ -5,6 +5,7 @@ import {
   File as FileIcon,
   FileSpreadsheet,
   FileText,
+  Film,
   Image as ImageIcon,
   MoreHorizontal,
   Plus,
@@ -204,6 +205,11 @@ export function FilesPage(): JSX.Element {
               label="图片"
               active={filter === 'images'}
               onClick={() => setFilter('images')}
+            />
+            <FilterTab
+              label="视频"
+              active={filter === 'videos'}
+              onClick={() => setFilter('videos')}
             />
             <FilterTab
               label="文件"
@@ -417,6 +423,7 @@ function IconTooltip({
 
 function iconForMime(mime: string): typeof FileIcon {
   if (mime.startsWith('image/')) return ImageIcon;
+  if (mime.startsWith('video/')) return Film;
   if (mime.includes('pdf')) return FileText;
   if (mime.includes('sheet') || mime.includes('excel') || mime.includes('csv')) {
     return FileSpreadsheet;

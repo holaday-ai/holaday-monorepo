@@ -1,4 +1,4 @@
-import { Download, File, FileSpreadsheet, FileText, Image as ImageIcon, Loader2, Presentation } from 'lucide-react';
+import { Download, File, FileSpreadsheet, FileText, Film, Image as ImageIcon, Loader2, Presentation } from 'lucide-react';
 import * as React from 'react';
 import { useToast } from '@/components/ui/toast';
 import {
@@ -71,13 +71,17 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
     return () => clearTimeout(t);
   }, [state]);
 
-  // Image outputs (文生图 / 图生图) get an inline thumbnail. The
-  // download URL is Bearer-gated, so a plain <img src> would 401 —
+  // Image / video outputs get an inline preview. The download URL is
+  // Bearer-gated, so a plain <img>/<video> src would 401 —
   // fetch the blob once with auth and render from an object URL
-  // (revoked on unmount / url change). Non-image kinds keep the
+  // (revoked on unmount / url change). Non-media kinds keep the
   // icon-only card; a fetch failure silently falls back to the icon.
   React.useEffect(() => {
-    if (kind !== 'image') return;
+    if (kind !== 'image' && kind !== 'video') {
+      setPreviewUrl(null);
+      setPreviewState('idle');
+      return;
+    }
     let cancelled = false;
     let objectUrl: string | null = null;
     // Show the placeholder immediately so the image slot is visible
@@ -121,11 +125,7 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
   const actionLabel = `下载${kindLabel} ${payload.filename}`;
 
   return (
-    <button
-      type="button"
-      onClick={() => void handleClick()}
-      disabled={state === 'loading'}
-      aria-busy={state === 'loading'}
+    <div
       className={cn(
         'group my-2 flex w-full max-w-md flex-col gap-2 rounded-[8px] border bg-white px-3 py-3 text-left text-sm shadow-[0_1px_3px_rgba(17,24,39,0.05)] transition-colors dark:bg-card/85 sm:px-4',
         state === 'failed'
@@ -134,26 +134,43 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
             ? 'border-[#57479C]/40 bg-[#57479C]/5 opacity-90'
             : 'border-[#DCDDDD] hover:border-[#ADADAD] hover:bg-[#EFEFEF]/35 dark:border-white/10 dark:hover:border-white/20 dark:hover:bg-white/[0.04]',
       )}
-      aria-label={actionLabel}
-      title={actionLabel}
     >
       {previewState === 'ready' && previewUrl ? (
-        <img
-          src={previewUrl}
-          alt={payload.filename}
-          loading="lazy"
-          className="max-h-64 w-full rounded-[6px] border border-[#DCDDDD] object-contain dark:border-white/10"
-        />
+        kind === 'video' ? (
+          <video
+            src={previewUrl}
+            controls
+            playsInline
+            preload="metadata"
+            aria-label={`预览视频 ${payload.filename}`}
+            className="max-h-64 w-full rounded-[6px] border border-[#DCDDDD] bg-black object-contain dark:border-white/10"
+          />
+        ) : (
+          <img
+            src={previewUrl}
+            alt={payload.filename}
+            loading="lazy"
+            className="max-h-64 w-full rounded-[6px] border border-[#DCDDDD] object-contain dark:border-white/10"
+          />
+        )
       ) : previewState === 'loading' ? (
         <span
-          aria-label="图片生成中"
+          aria-label={kind === 'video' ? '视频加载中' : '图片加载中'}
           className="flex h-40 w-full animate-pulse items-center justify-center gap-2 rounded-[6px] border border-[#DCDDDD] bg-[#EFEFEF]/50 text-[11px] text-muted-foreground dark:border-white/10 dark:bg-white/5"
         >
           <Loader2 className="h-4 w-4 animate-spin text-[#57479C]" />
-          图片加载中…
+          {kind === 'video' ? '视频加载中…' : '图片加载中…'}
         </span>
       ) : null}
-      <span className="flex w-full items-center gap-3">
+      <button
+        type="button"
+        onClick={() => void handleClick()}
+        disabled={state === 'loading'}
+        aria-busy={state === 'loading'}
+        aria-label={actionLabel}
+        title={actionLabel}
+        className="flex w-full items-center gap-3 text-left"
+      >
         <span
           className={cn(
             'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border',
@@ -195,8 +212,8 @@ export function FileDownloadCard({ payload }: { payload: FileDownloadPayload }):
             )}
           />
         )}
-      </span>
-    </button>
+      </button>
+    </div>
   );
 }
 
@@ -205,6 +222,7 @@ function FileTypeIcon({ kind }: { kind: DownloadFileKind }): JSX.Element {
   if (kind === 'spreadsheet') return <FileSpreadsheet className={cls} />;
   if (kind === 'presentation') return <Presentation className={cls} />;
   if (kind === 'image') return <ImageIcon className={cls} />;
+  if (kind === 'video') return <Film className={cls} />;
   if (kind === 'document') return <FileText className={cls} />;
   return <File className={cls} />;
 }

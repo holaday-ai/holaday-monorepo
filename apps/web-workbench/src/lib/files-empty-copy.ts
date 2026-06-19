@@ -1,4 +1,4 @@
-export type FileFilter = 'all' | 'images' | 'documents';
+export type FileFilter = 'all' | 'images' | 'videos' | 'documents';
 
 export function filesEmptyCopy({
   query,
@@ -24,8 +24,15 @@ export function filesEmptyCopy({
 
   if (filter === 'documents') {
     return {
-      title: '还没有文档',
+      title: '还没有文件',
       body: '上传 PDF、表格、文本或办公文档后，可以在这里预览和复用。',
+    };
+  }
+
+  if (filter === 'videos') {
+    return {
+      title: '还没有视频',
+      body: '上传或生成视频后，可以在这里预览、下载和复用。',
     };
   }
 

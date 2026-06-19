@@ -10,6 +10,7 @@ describe('file-download-card-copy', () => {
     expect(classifyDownloadFileKind('report.csv')).toBe('spreadsheet');
     expect(classifyDownloadFileKind('deck.pptx')).toBe('presentation');
     expect(classifyDownloadFileKind('screen.webp')).toBe('image');
+    expect(classifyDownloadFileKind('demo.MP4')).toBe('video');
     expect(classifyDownloadFileKind('summary.md')).toBe('document');
     expect(classifyDownloadFileKind('archive.bin')).toBe('generic');
   });
@@ -18,6 +19,7 @@ describe('file-download-card-copy', () => {
     expect(downloadFileKindLabel('spreadsheet')).toBe('表格文件');
     expect(downloadFileKindLabel('presentation')).toBe('演示文稿');
     expect(downloadFileKindLabel('image')).toBe('图片文件');
+    expect(downloadFileKindLabel('video')).toBe('视频文件');
     expect(downloadFileKindLabel('document')).toBe('文档文件');
     expect(downloadFileKindLabel('generic')).toBe('产出文件');
   });
