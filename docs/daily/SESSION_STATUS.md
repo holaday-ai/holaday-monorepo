@@ -10,6 +10,23 @@
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
 ## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`a70642c2`（SPA）/ orch `68f28859`
 
+<!-- ========== 🎬 视频 Phase 2 状态 + backlog（2026-06-19/20 换 session 收尾）========== -->
+**🎬 视频 Phase 2 — 当前状态（一句话）**：三类型 prod 真机全验通（普通¥8/宠物¥1/IP¥2，BOSS 都认了）；第一批前端 polish + 第二批第一轮后端**都已 LIVE**。**PROD LIVE REF = SPA `a70642c2` / orch `68f28859`**。
+- **第一批前端 polish（`a70642c2` LIVE）**：黑边修（去 bg-black/w-auto）+ 失败不进历史（toVideoRow 只留 completed 有附件）+ 切 tab 清面板（清 ?task=）。
+- **第二批第一轮后端（`68f28859` LIVE）**：①poster 生成（三 lane compose 后 ffmpeg 抽首帧存 R2、posterUrl 盖 attachment、**抽帧失败兜底不拖垮成片**）②videoType（deriveVideoType 打 metadata）③reason 白名单映射（mapVideoFailureReason，**不泄 stack/url/file_id**）。真机实证：poster.jpg 生成 + posterUrl + 成片正常；reason 降级「服务繁忙」零泄露。
+- **★fal lipsync timeout 根因已查清（非 fal 波动/非余额，fal 还 $18.40）**：**确定性长素材超时**——latentsync ~12-14× 实时，`DEFAULT_MAX_WAIT_MS=300s` 固定值对 >~20s 输出不够（16s 片 ~225s 成功、37s 片需 ~460-520s → 300s 客户端主动放弃）。loop_mode 让输出长度=音频长度。无 retry。
+
+**📋 待做清单（下一 session 接续，按优先级）**
+- 🔴 **IP 稳定性（fal 超时修，后端小改）**：`runLipSync` 的 maxWaitMs 改成按音频长度 `clamp(60s + 音频秒 × 16s, 300s, 720s)`（覆盖 ≤40s 上限；IP lane 已有 audioMs 传进去）。配在 `fal-lipsync-client.ts` 的 `DEFAULT_MAX_WAIT_MS`/`runLipSync`（lane 传 maxWaitMs）。**retry 已否决**（确定性超时，重试只再卡再烧）。
+- 🔴 **配套 UX 期望文案（前端）**：IP「生成中」面板明确「真人换口型较慢，预计约 X 分钟，请耐心等待」（否则用户等 8-10 分钟以为卡死）。
+- 🔴 **待 BOSS 决策·产品**：latentsync ~12-14× 实时太慢（40s 等 ~10 分钟），长期要不要换更快换口型方案/端点。未定。
+- 🟡 **第二轮前端（完整设计已出）**：4b 成片内联播放（poster `<img>`+lazy：默认不拉全量 5MB、不渲 `<video>`，显 poster + ▶播放/下载；点播放才按需新建单个 video；poster 后端已 LIVE）｜2 面板位置（甩顶部→生成视频下方就近）｜4 历史按 tab 隔离 + IP 历史（后端 videoType 已 LIVE，前端接）｜6 失败 reason 展示+重试+清 loading 残留（后端 reason 已 LIVE，前端接）｜7 IP 去图片版｜videoType enabler（plumb 到 UiTask）。
+- 🟢 **IP 合规闸（上线前必做）**：授权声明保留 + 条款 +「AI 生成」标识 + 可追溯（BOSS 拍板轻量方案）。
+- 🟢 **全屏关闭误触浏览器**：自定义全屏容器 / 页内退出。
+- 🧹 **prod 测试数据清理**：`tsk_duct`/`tsk_RCrQ`/今天一堆 + 之前 `qa-*` 号（无害但污染统计，删 prod 数据需谨慎、先列清单给 BOSS）。
+- 🧹 **MEMORY.md 超限**（30.8KB > 24.4KB）：下轮列可归档 stale 条目清单给 BOSS 过目再清。
+<!-- ========== 视频 Phase 2 状态 + backlog 结束 ========== -->
+
 <!-- 2026-06-19/20 — 视频第二批·第一轮后端部署（poster/videoType/reason） -->
 **📦 视频第二批·第一轮后端 `68f28859` 部署 prod**（deploy-orch，preflight SAFE，restart 661，healthz ok；**SPA 不动**仍 `a70642c2`；无 migration、flag 未动）。三笔：①**poster**（lane compose 后 ffmpeg 抽首帧 JPEG 存盘，非致命）②**videoType**（成片 metadata 打 normal/pet/ip_person）③**reason 白名单映射**（lane 失败透传安全友好 reason，不泄 stack/url/file_id）。**真机烧片实证（BOSS 授权）**：①poster 普通视频 `tsk_duct`（1段720p ¥6）→ completed、task_files 多 `holaday-video-poster.jpg`(88KB)、attachment 带 `posterUrl`、`videoType=normal`、**成片本身正常完成**（poster 没拖垮）；②reason `tsk_RCrQ`（IP，文案 37s 过了 too_long 闸→走 fal）→ fal **timeout** 失败 → DB reason=**「服务繁忙，请稍后再试。」**（具体 busy、非通用兜底）、完整 err(message/stack/路径)只进**服务端日志**、用户 reason **零泄露**。metered 无 429。**未碰钱/门控/migration**。⚠️ 顺带：fal lipsync 300s 超时（fal 侧慢/账户，本次降级正确，非本批 bug）。前端第二轮（poster `<img>`+lazy + 面板位置 + 历史隔离 + reason 展示 + IP 去图片版）待做。前态：SPA `a70642c2`/orch `6fb2dbb9`。
 
