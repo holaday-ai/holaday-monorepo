@@ -28,6 +28,7 @@ import { useToast } from '@/components/ui/toast';
 import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile, uploadMediaFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
+import { selectStepsFor, shouldRefreshForTask } from '@/lib/video-task-selectors';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import { useTaskStore } from '@/stores/task-store';
 import type { UiTask } from '@/types/task';
@@ -82,8 +83,15 @@ export function VideoPage(): JSX.Element {
     [navigate],
   );
 
+  // Deep-linked `?task=` whose row isn't in the store yet → fetch the
+  // list ONCE. The ref guard stops the effect feeding itself (refresh →
+  // store change → re-render → refresh …); without it a row that the
+  // list never returns would loop.
+  const refreshedTaskIds = React.useRef<Set<string>>(new Set());
   React.useEffect(() => {
-    if (!taskId || currentTask) return;
+    const already = taskId ? refreshedTaskIds.current.has(taskId) : false;
+    if (!shouldRefreshForTask({ taskId, hasTask: Boolean(currentTask), already })) return;
+    if (taskId) refreshedTaskIds.current.add(taskId);
     void refreshTasks();
   }, [currentTask, refreshTasks, taskId]);
 
@@ -150,7 +158,7 @@ function CurrentVideoTaskPanel({
   const subStatus = useTaskStore((s) => s.subStatusByTask[taskId]?.subStatus);
   const streamingText = useTaskStore((s) => s.streamingByTask[taskId]);
   const awaiting = useTaskStore((s) => s.awaitingUserByTask[taskId]);
-  const steps = useTaskStore((s) => s.stepsByTask[taskId] ?? []);
+  const steps = useTaskStore(selectStepsFor(taskId));
   const abortTask = useTaskStore((s) => s.abortTask);
   const [confirming, setConfirming] = React.useState<string | null>(null);
   const latestStep = steps[steps.length - 1];
