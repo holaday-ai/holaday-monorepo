@@ -21,7 +21,8 @@ import {
   XCircle,
 } from 'lucide-react';
 import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { FileDownloadCard } from '@/components/FileDownloadCard';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
@@ -30,6 +31,7 @@ import { uploadFailureMessage, uploadFile, uploadMediaFile } from '@/lib/upload-
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import { useTaskStore } from '@/stores/task-store';
+import type { UiTask } from '@/types/task';
 import {
   estimateIpVideo,
   estimatePerSegmentCny,
@@ -68,6 +70,18 @@ const TABS: ReadonlyArray<{
 
 export function VideoPage(): JSX.Element {
   const [tab, setTab] = React.useState<VideoTab>('normal');
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const tasks = useTaskStore((s) => s.tasks);
+  const taskId = searchParams.get('task');
+  const currentTask = taskId ? tasks.find((task) => task.taskId === taskId) ?? null : null;
+  const handleTaskCreated = React.useCallback(
+    (createdTaskId: string) => {
+      navigate(`/video?task=${encodeURIComponent(createdTaskId)}`);
+    },
+    [navigate],
+  );
+
   return (
     <PageContainer width="form">
       <PageHeader
@@ -105,15 +119,194 @@ export function VideoPage(): JSX.Element {
           );
         })}
       </div>
+      {taskId && <CurrentVideoTaskPanel taskId={taskId} task={currentTask} />}
       {tab === 'normal' ? (
-        <NormalVideoForm />
+        <NormalVideoForm onTaskCreated={handleTaskCreated} />
       ) : tab === 'pet' ? (
-        <PetVideoForm />
+        <PetVideoForm onTaskCreated={handleTaskCreated} />
       ) : (
-        <IpOnboardingWizard />
+        <IpOnboardingWizard onTaskCreated={handleTaskCreated} />
       )}
     </PageContainer>
   );
+}
+
+function CurrentVideoTaskPanel({
+  taskId,
+  task,
+}: {
+  taskId: string;
+  task: UiTask | null;
+}): JSX.Element {
+  const navigate = useNavigate();
+  const toast = useToast();
+  const refreshTasks = useTaskStore((s) => s.refreshTasks);
+  const progress = useTaskStore((s) => s.progressByTask[taskId]);
+  const subStatus = useTaskStore((s) => s.subStatusByTask[taskId]?.subStatus);
+  const streamingText = useTaskStore((s) => s.streamingByTask[taskId]);
+  const awaiting = useTaskStore((s) => s.awaitingUserByTask[taskId]);
+  const steps = useTaskStore((s) => s.stepsByTask[taskId] ?? []);
+  const abortTask = useTaskStore((s) => s.abortTask);
+  const [confirming, setConfirming] = React.useState<string | null>(null);
+  const latestStep = steps[steps.length - 1];
+  const liveText =
+    awaiting?.question ||
+    videoSubStatusCopy(subStatus) ||
+    progress ||
+    streamingText ||
+    latestStep?.actionSummary ||
+    task?.resultText ||
+    '';
+
+  async function confirmVideo(choice: 'confirm_video' | 'confirm_image' | 'cancel'): Promise<void> {
+    if (confirming) return;
+    setConfirming(choice);
+    try {
+      const result = await trpc.tasks.confirmVideo.mutate({ taskId, choice });
+      await refreshTasks().catch(() => undefined);
+      if (choice === 'cancel') {
+        toast.show('已取消，未产生费用', 'info', 2000);
+      } else {
+        toast.show('已确认，开始制作', 'info', 2000);
+        navigate(`/video?task=${encodeURIComponent(result.taskId)}`);
+      }
+    } catch (err) {
+      toast.show(err instanceof Error ? err.message : '操作失败，请重试', 'error');
+    } finally {
+      setConfirming(null);
+    }
+  }
+
+  async function cancelTask(): Promise<void> {
+    if (confirming) return;
+    setConfirming('abort');
+    try {
+      const res = await abortTask(taskId);
+      if ('error' in res) {
+        toast.show(res.error, 'error');
+      } else {
+        toast.show('已取消任务', 'info', 2000);
+      }
+      await refreshTasks().catch(() => undefined);
+    } finally {
+      setConfirming(null);
+    }
+  }
+
+  return (
+    <Section
+      title="当前制作"
+      description="报价确认、制作进度和最终文件都留在本页，不需要跳回任务界面。"
+      className="mb-6 border-[#EA1F59]/20 bg-[#EA1F59]/[0.025]"
+    >
+      {!task ? (
+        <div className="flex items-center gap-2 py-2 text-[13px] text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          正在同步视频任务…
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-start gap-3">
+            <VideoStatusIcon status={task.status} />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[14px] font-medium text-foreground">
+                  {task.title?.trim() || task.intent || '视频任务'}
+                </span>
+                <span className="rounded-full border border-[#DCDDDD] bg-white px-2 py-0.5 text-[11px] text-muted-foreground">
+                  {videoStatusLabel(task.status)}
+                </span>
+              </div>
+              {liveText && (
+                <p className="mt-2 whitespace-pre-wrap text-[13px] leading-relaxed text-[#595757]">
+                  {liveText}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {task.status === 'awaiting_user' && task.awaitingKind === 'video_quote' && (
+            <div className="flex flex-wrap items-center gap-2 rounded-[8px] border border-[#FFC910]/55 bg-white px-3 py-3 text-[12px]">
+              <span className="mr-auto text-muted-foreground">确认后才会开始制作并消耗额度。</span>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void confirmVideo('confirm_video')}
+                disabled={confirming !== null}
+              >
+                {confirming === 'confirm_video' ? '提交中…' : '确认制作'}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void confirmVideo('confirm_image')}
+                disabled={confirming !== null}
+              >
+                {confirming === 'confirm_image' ? '提交中…' : '图片版'}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void confirmVideo('cancel')}
+                disabled={confirming !== null}
+              >
+                {confirming === 'cancel' ? '取消中…' : '取消'}
+              </Button>
+            </div>
+          )}
+
+          {(task.status === 'queued' || task.status === 'executing' || task.status === 'awaiting_user') &&
+            task.awaitingKind !== 'video_quote' && (
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void cancelTask()}
+                  disabled={confirming !== null}
+                >
+                  {confirming === 'abort' ? '取消中…' : '取消任务'}
+                </Button>
+              </div>
+            )}
+
+          {task.attachments && task.attachments.length > 0 && (
+            <div className="space-y-2 border-t border-[#DCDDDD]/70 pt-3">
+              <div className="text-[11px] font-medium text-muted-foreground">产出文件</div>
+              {task.attachments.map((attachment) => (
+                <FileDownloadCard
+                  key={attachment.fileId}
+                  payload={{
+                    fileId: attachment.fileId,
+                    filename: attachment.filename,
+                    size: attachment.sizeBytes,
+                    downloadUrl: attachment.downloadUrl,
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function videoSubStatusCopy(subStatus: string | undefined): string {
+  switch (subStatus) {
+    case 'queued':
+      return '已进入制作队列。';
+    case 'generating':
+      return '正在生成视频…';
+    case 'verifying':
+      return '正在整理结果…';
+    case 'awaiting_user':
+      return '等待你确认下一步。';
+    default:
+      return '';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -150,8 +343,7 @@ const SEG_ESTIMATE = 5;
 const NB_USD_PER_IMG = 0.067;
 const USD_TO_CNY = 7.3;
 
-function NormalVideoForm(): JSX.Element {
-  const navigate = useNavigate();
+function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) => void }): JSX.Element {
   const toast = useToast();
   const createTask = useTaskStore((s) => s.createTask);
 
@@ -182,9 +374,8 @@ function NormalVideoForm(): JSX.Element {
         toast.show(res.error || '提交失败,请重试', 'error');
         return;
       }
-      toast.show('已提交,请在对话区确认报价后开始制作', 'info', 3500);
-      // createTask 已选中新任务;显式导航到对话区,报价卡(video_quote)在那里确认。
-      navigate(`/?task=${encodeURIComponent(res.taskId)}`);
+      toast.show('已提交,请在本页确认报价后开始制作', 'info', 3500);
+      onTaskCreated(res.taskId);
     } catch (err) {
       toast.show(err instanceof Error ? err.message : '提交失败,请重试', 'error');
     } finally {
@@ -270,8 +461,7 @@ const PET_DURATION_OPTIONS: ReadonlyArray<{ value: PetDuration; label: string }>
   { value: 3, label: '3 秒' },
 ];
 
-function PetVideoForm(): JSX.Element {
-  const navigate = useNavigate();
+function PetVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) => void }): JSX.Element {
   const toast = useToast();
   const createTask = useTaskStore((s) => s.createTask);
 
@@ -349,8 +539,8 @@ function PetVideoForm(): JSX.Element {
         toast.show(res.error || '提交失败,请重试', 'error');
         return;
       }
-      toast.show('已提交,请在对话区确认报价后开始制作', 'info', 3500);
-      navigate(`/?task=${encodeURIComponent(res.taskId)}`);
+      toast.show('已提交,请在本页确认报价后开始制作', 'info', 3500);
+      onTaskCreated(res.taskId);
     } catch (err) {
       toast.show(err instanceof Error ? err.message : '提交失败,请重试', 'error');
     } finally {
@@ -611,7 +801,7 @@ function VideoHistory(): JSX.Element {
               <VideoStatusIcon status={t.status} />
               <button
                 type="button"
-                onClick={() => navigate(`/?task=${encodeURIComponent(t.taskId)}`)}
+                onClick={() => navigate(`/video?task=${encodeURIComponent(t.taskId)}`)}
                 className="min-w-0 flex-1 text-left"
               >
                 <div className="truncate text-[13px] text-foreground group-hover:text-[#EA1F59]">
@@ -718,7 +908,7 @@ interface OnboardingStatus {
   authorized: boolean;
 }
 
-function IpOnboardingWizard(): JSX.Element {
+function IpOnboardingWizard({ onTaskCreated }: { onTaskCreated: (taskId: string) => void }): JSX.Element {
   const toast = useToast();
   const [status, setStatus] = React.useState<OnboardingStatus | null>(null);
   const [loadError, setLoadError] = React.useState(false);
@@ -952,7 +1142,7 @@ function IpOnboardingWizard(): JSX.Element {
 
       {/* 就绪 → 生成表单;未就绪 → 引导 */}
       {ready ? (
-        <IpGenerateForm />
+        <IpGenerateForm onTaskCreated={onTaskCreated} />
       ) : (
         <Section>
           <div className="flex items-center justify-between gap-3">
@@ -996,8 +1186,7 @@ function IpOnboardingWizard(): JSX.Element {
   );
 }
 
-function IpGenerateForm(): JSX.Element {
-  const navigate = useNavigate();
+function IpGenerateForm({ onTaskCreated }: { onTaskCreated: (taskId: string) => void }): JSX.Element {
   const toast = useToast();
   const createTask = useTaskStore((s) => s.createTask);
   const [copy, setCopy] = React.useState('');
@@ -1021,8 +1210,8 @@ function IpGenerateForm(): JSX.Element {
         toast.show(res.error || '提交失败,请重试', 'error');
         return;
       }
-      toast.show('已提交,请在对话区确认报价后开始制作', 'info', 3500);
-      navigate(`/?task=${encodeURIComponent(res.taskId)}`);
+      toast.show('已提交,请在本页确认报价后开始制作', 'info', 3500);
+      onTaskCreated(res.taskId);
     } catch (err) {
       toast.show(err instanceof Error ? err.message : '提交失败,请重试', 'error');
     } finally {
