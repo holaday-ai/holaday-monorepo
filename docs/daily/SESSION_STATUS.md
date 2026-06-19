@@ -8,7 +8,17 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`115ba53`
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`fad7971`
+（2026-06-19；**#4 视频 段数 P1 + 报价卡面板 P3 两修 部署 prod**，restart 659，preflight FF-safe，
+无新 migration。承接 4c（视频三类型 BOSS-only 灰度 LIVE，flag `VIDEO_CREATION_ENABLED=true`+allowlist=
+`usr_EeYp…`）。fad7971 经 merge `77c2afe` **含 #2 的 115ba53/判官 f1d8693，无 revert**。**P1 段数**：
+`segmentCapForText`(≈每30非空白字1段,clamp1..6) 传 optimizeUserScript maxSegments + 提示词下限 max(3→1)
++ 硬截断 `slice(0,maxSegments)` → 短文案不再硬凑 6 段，报价随段数降。**P3 面板**：抽 `needsBrowserViewport`
+排除 video_quote(+clarification) → 视频报价卡不再被 BrowserPanel 误挂遮挡。**双向实证(Chrome,BOSS号)**：
+短文案~36字→**1段/¥8**(原6段/¥36)、长文案~145字→**5段/¥36**(仍多段没矫枉过正)；报价卡两次
+`hasBrowserPanel:false`；metered 号建任务**无 429**(quota affectedRows 修未受影响)。只到报价卡、**零 Veo
+消耗**、flag/allowlist 未动。SPA bundle `index-DiPfLrm_.js` 双端 smoke 过无回滚；orchestrator 2886+web
+642 测绿。前态：#2 `115ba53`（restart 655）。下一步=BOSS 真用户烧 Veo 验收。）
 （2026-06-15；**#2 ⑦ LLM 意图判官第二层 + 总市值万亿口径 部署 prod**，restart 655，preflight FF-safe，
 无新 migration。BOSS 拍板：⑦ 要稳定出现，不接受 ~78% 降级率(同股不同次不一致)。**双层防御**(regex
 之后加温度0 LLM 判官，只判买卖引导/涨跌预测两红线)：regex PASS→judge 仅明确 block 才否决(补漏网)；
