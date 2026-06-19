@@ -9,6 +9,21 @@
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
 ## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`8c8bdb4e`（SPA）/ orch `6fb2dbb9`
+
+<!-- ========== 🎬 视频 Phase 2 今日收尾 2026-06-19（验收，无新部署） ========== -->
+**🎬 视频 Phase 2 — 三类型 prod 真机全验通（BOSS-only 灰度，BOSS 逐条授权烧片）**
+- **普通文生 ✅** ¥8，质量「还可以」（tsk_uT5 / tsk_7GFj）。**宠物 i2v ✅** ¥1，「动起来了」（报价 tsk_yVRa→出片 tsk_WKVj）。**IP 换口型 ✅** ¥2，嘴型「可以」（报价 tsk_N6dB→出片 tsk_tAqb，本人合格底版）。
+- **三类型页内闭环全部成立**：报价→确认→生成进度→成片**内联预览**→下载，全留 `/video` 不跳主流。
+- **本 session 修复并 LIVE 的 bug 链**（细节见下方部署块）：`fad7971` 段数虚高 + 面板遮报价卡 → `6fb2dbb9`(Codex) 页内闭环 + artifact 安全 → `8c8bdb4e` React #185 无限渲染崩溃。**今日纯验收无新部署**，PROD LIVE REF 不变。
+- **IP 失败根因（已查实，非 bug）**：fal latentsync **422 face_detection_error**；失败 tsk_39We 用的底版是抖音 @央视新闻 民警视频（**别人的脸**），Claude 合规拦下；换 BOSS 本人合格底版后成功（tsk_tAqb）。计费：Qwen 合成那笔真扣（按字符/几分钱级），fal 422 预检无产出≈未计费，用户额度 ¥0。
+- **下一轮 backlog（完整清单 + 优先级见交接 memory `handoff-2026-06-18-video` §backlog）**，标题速览：
+  - 🔴 **全屏关闭误触浏览器**（视频原生全屏后顶部无页内退出→点到浏览器关闭按钮关掉整个浏览器，真实伤害）｜**IP 合规闸**（上线前必做，BOSS 拍板轻量 4 条：本人授权声明+条款+「AI 生成」标识+可追溯，不做重技术校验，《深度合成管理规定》最低线）
+  - 🟡 **「视频前端体验 polish」一包**（建议同片 VideoPage+播放器+历史列表一轮改）：历史按 tab 隔离 + IP 自己的历史 / 报价面板位置就近（别甩到顶部挤乱布局）/ 失败任务不进生成历史 / 预览黑边按实际宽高比自适应 / 切 tab「当前制作」面板不切不清 / 失败原因透传（fal「检测不到人脸」等 actionable 错误被 tasks.ts:5781 抹成「请稍后重试」）+ 重试入口 / 失败态残留「正在生成回答…」
+  - 🟢 IP tab 去掉无意义的「图片版」选项
+  - 🧹 prod 测试数据清理（今日烧的 tsk_uT5/7GFj/yVRa/WKVj/N6dB/tAqb/39We + 一堆 qa-* 测试号；**删 prod 有风险，谨慎**）
+  - **建议**：🟡+🟢 打包成「视频前端体验 polish」一轮（方案→一起修→一次部署，防零敲引新 bug）；🔴 全屏误关 + IP 合规闸 + 数据清理各自单独评估。
+<!-- ========== 收尾结束 ========== -->
+
 （2026-06-19；**#4 视频页内闭环(Codex `6fb2dbb9`) + React #185 修复(`8c8bdb4e`) 部署 prod**。SPA bundle
 `index-BN6tjkhC.js` 双端 smoke 过无回滚；**orch 未重部署**(本次纯前端，8c8bdb4e vs 6fb2dbb9 只差 VideoPage 前端)，
 orch 仍跑 `6fb2dbb9`(restart 660，healthz ok)。无新 migration；flag/allowlist 未动(`VIDEO_CREATION_ENABLED`=
