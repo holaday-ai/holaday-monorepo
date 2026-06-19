@@ -8,7 +8,10 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`a70642c2`（SPA）/ orch `6fb2dbb9`
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`a70642c2`（SPA）/ orch `68f28859`
+
+<!-- 2026-06-19/20 — 视频第二批·第一轮后端部署（poster/videoType/reason） -->
+**📦 视频第二批·第一轮后端 `68f28859` 部署 prod**（deploy-orch，preflight SAFE，restart 661，healthz ok；**SPA 不动**仍 `a70642c2`；无 migration、flag 未动）。三笔：①**poster**（lane compose 后 ffmpeg 抽首帧 JPEG 存盘，非致命）②**videoType**（成片 metadata 打 normal/pet/ip_person）③**reason 白名单映射**（lane 失败透传安全友好 reason，不泄 stack/url/file_id）。**真机烧片实证（BOSS 授权）**：①poster 普通视频 `tsk_duct`（1段720p ¥6）→ completed、task_files 多 `holaday-video-poster.jpg`(88KB)、attachment 带 `posterUrl`、`videoType=normal`、**成片本身正常完成**（poster 没拖垮）；②reason `tsk_RCrQ`（IP，文案 37s 过了 too_long 闸→走 fal）→ fal **timeout** 失败 → DB reason=**「服务繁忙，请稍后再试。」**（具体 busy、非通用兜底）、完整 err(message/stack/路径)只进**服务端日志**、用户 reason **零泄露**。metered 无 429。**未碰钱/门控/migration**。⚠️ 顺带：fal lipsync 300s 超时（fal 侧慢/账户，本次降级正确，非本批 bug）。前端第二轮（poster `<img>`+lazy + 面板位置 + 历史隔离 + reason 展示 + IP 去图片版）待做。前态：SPA `a70642c2`/orch `6fb2dbb9`。
 
 <!-- 2026-06-19 — 视频前端 polish 第一批部署（纯前端 SPA，orch 不动） -->
 **📦 视频前端 polish 第一批 `a70642c2` 部署 prod**（SPA bundle `index-D6HnnOOe.js` 双端 smoke 过无回滚；orch 仍 `6fb2dbb9`；无 migration、flag 未动）。三项纯前端：**①黑边**（FileDownloadCard/Modal 内联 `<video>` 去 `w-full`+`bg-black`+`object-contain`→跟视频固有比例，DOM 实证 `bg:rgba(0,0,0,0)`+`w-auto`，黑边消除）；**③失败不进历史**（抽 `lib/video-history-row.ts`，只收 `completed`+有附件成片，失败/取消/报价 stub/executing 全 drop，+10 单测；真机实证历史只剩成片、失败任务消失）；**⑤切 tab 清面板**（切 tab `navigate('/video')` 清 `?task=`，真机实证切到宠物 tab 面板消失）。**真机复验**：提交→报价卡页内直出**不复发 #185**（console 零错）、首页/文件库/图片预览正常、共享组件回归干净（猫图预览不变形）、**零 Veo**。web 662 绿。⚠️**新发现（非本批、留 backlog）**：成片**内联视频播放器卡 buffering**（`readyState:0` on 有效 5MB mp4 blob，可能 6fb2dbb9 内联预览实现或 Chrome 多视频并发节流；下载可正常）→ 待查。第二批=面板位置/历史按 tab 隔离/失败原因透传/IP 图片版 + videoType enabler。前态：`8c8bdb4e`。
