@@ -101,6 +101,12 @@ export interface UiTask {
    */
   executionMode?: 'browser' | 'generate' | 'scrape';
   /**
+   * Phase 2 video batch-2 — backend-stamped 成片 type (deriveVideoType),
+   * hydrated from `result.metadata.videoType`. Drives per-tab history
+   * isolation, the type chip, and the IP-only "生成中较慢" hint.
+   */
+  videoType?: 'normal' | 'pet' | 'ip_person';
+  /**
    * Phase 4 R1 — terminal metadata.attachments[] hydrated from
    * `tasks.detail.result.metadata.attachments` (L1 auto-screenshot
    * + L2 save_page_as_pdf outputs). Empty / undefined means no

@@ -5,14 +5,19 @@ import type { FileDownloadPayload } from '@/components/FileDownloadCard';
  * the "only successful 成片 show up" filter is unit-testable without a DOM.
  */
 
+/** Backend-stamped 成片 type (deriveVideoType in video-confirm-meta.ts). */
+export type VideoType = 'normal' | 'pet' | 'ip_person';
+
 export interface VideoResultMeta {
   lane?: string;
   visualMode?: string;
+  videoType?: string;
   attachments?: ReadonlyArray<{
     fileId?: string;
     downloadUrl?: string;
     filename?: string;
     sizeBytes?: number;
+    posterUrl?: string;
   }>;
 }
 
@@ -23,10 +28,19 @@ export interface VideoRow {
   status: string;
   createdAt: string | number | Date;
   download?: FileDownloadPayload;
+  /** Backend-stamped type — drives per-tab history isolation + the type chip. */
+  videoType?: VideoType;
+  /** First-frame poster (R2, Bearer-gated) — rendered as a lazy thumbnail. */
+  posterUrl?: string;
 }
 
 export function isVideoLane(lane: string | undefined): boolean {
   return typeof lane === 'string' && lane.startsWith('video_creation');
+}
+
+/** Narrow an unknown metadata.videoType to the enum, else undefined. */
+export function asVideoType(value: unknown): VideoType | undefined {
+  return value === 'normal' || value === 'pet' || value === 'ip_person' ? value : undefined;
 }
 
 /**
@@ -58,6 +72,8 @@ export function toVideoRow(raw: unknown): VideoRow | null {
   if (!att?.fileId || !att.downloadUrl || !att.filename || typeof att.sizeBytes !== 'number') {
     return null;
   }
+  const videoType = asVideoType(meta?.videoType);
+  const posterUrl = typeof att.posterUrl === 'string' && att.posterUrl.length > 0 ? att.posterUrl : undefined;
   return {
     taskId: r.taskId,
     intent: r.intent ?? '',
@@ -70,5 +86,7 @@ export function toVideoRow(raw: unknown): VideoRow | null {
       filename: att.filename,
       size: att.sizeBytes,
     },
+    ...(videoType ? { videoType } : {}),
+    ...(posterUrl ? { posterUrl } : {}),
   };
 }

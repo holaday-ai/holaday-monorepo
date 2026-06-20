@@ -1,5 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { isVideoLane, toVideoRow } from './video-history-row';
+import { asVideoType, isVideoLane, toVideoRow } from './video-history-row';
+
+describe('asVideoType — enum narrowing (A3/A5)', () => {
+  it('keeps the three valid values, drops the rest', () => {
+    expect(asVideoType('normal')).toBe('normal');
+    expect(asVideoType('pet')).toBe('pet');
+    expect(asVideoType('ip_person')).toBe('ip_person');
+    expect(asVideoType('bogus')).toBeUndefined();
+    expect(asVideoType(undefined)).toBeUndefined();
+    expect(asVideoType(42)).toBeUndefined();
+  });
+});
+
+describe('toVideoRow — videoType + posterUrl extraction (A4/A5)', () => {
+  it('extracts metadata.videoType + attachment.posterUrl', () => {
+    const out = toVideoRow({
+      taskId: 'tsk_ip', status: 'completed',
+      result: { metadata: {
+        lane: 'video_creation', videoType: 'ip_person',
+        attachments: [{ fileId: 'f', downloadUrl: '/api/files/f/download', filename: 'v.mp4', sizeBytes: 5_000_000, posterUrl: '/api/files/p/download' }],
+      } },
+    });
+    expect(out?.videoType).toBe('ip_person');
+    expect(out?.posterUrl).toBe('/api/files/p/download');
+  });
+  it('omits videoType when invalid/absent, posterUrl when absent', () => {
+    const out = toVideoRow({
+      taskId: 'tsk_n', status: 'completed',
+      result: { metadata: { lane: 'video_creation', videoType: 'weird', attachments: [{ fileId: 'f', downloadUrl: '/api/files/f/download', filename: 'v.mp4', sizeBytes: 1000 }] } },
+    });
+    expect(out).not.toBeNull();
+    expect(out?.videoType).toBeUndefined();
+    expect(out?.posterUrl).toBeUndefined();
+  });
+});
 
 const ATT = {
   fileId: 'file_x',

@@ -2000,6 +2000,11 @@ export function toUiTask(row: ListRow): UiTask {
   const summaryFromResult = extractSummary(rowResult);
   const failedChecks = extractFailedChecks(rowResult);
   const executionMode = extractExecutionMode(rowResult);
+  const videoTypeRaw = (metadata as { videoType?: unknown }).videoType;
+  const videoType =
+    videoTypeRaw === 'normal' || videoTypeRaw === 'pet' || videoTypeRaw === 'ip_person'
+      ? videoTypeRaw
+      : undefined;
   const finalScreenshot =
     safeTaskListText(resultObj.finalScreenshot).length > 0
       ? safeTaskListText(resultObj.finalScreenshot)
@@ -2040,6 +2045,7 @@ export function toUiTask(row: ListRow): UiTask {
     tickCount: 0,
     ...(resultText ? { resultText } : {}),
     ...(executionMode ? { executionMode } : {}),
+    ...(videoType ? { videoType } : {}),
     ...(finalScreenshot ? { finalScreenshot } : {}),
     ...(finalUrl ? { finalUrl } : {}),
     ...(finalViewport ? { finalViewport } : {}),

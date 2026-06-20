@@ -29,7 +29,9 @@ import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile, uploadMediaFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
 import { selectStepsFor, shouldRefreshForTask } from '@/lib/video-task-selectors';
-import { toVideoRow, type VideoRow } from '@/lib/video-history-row';
+import { toVideoRow, type VideoRow, type VideoType } from '@/lib/video-history-row';
+import { ipRenderingHint } from '@/lib/video-ip-estimate';
+import { LazyPosterImg } from '@/components/LazyPosterImg';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import { useTaskStore } from '@/stores/task-store';
 import type { UiTask } from '@/types/task';
@@ -213,6 +215,15 @@ function CurrentVideoTaskPanel({
     }
   }
 
+  // A2 retry — re-open the form to re-submit. NOTE: a failed 成片 task does NOT
+  // persist its original videoOptions (model/style/aspect) or the pet photo
+  // fileId, so a one-click "same-params re-burn" isn't reconstructable from the
+  // task alone. We send the user back to the form (cleared ?task=) where the
+  // 报价卡→确认制作 flow is the inherent spend confirmation (防误点).
+  function retryFailed(): void {
+    navigate('/video');
+  }
+
   return (
     <Section
       title="当前制作"
@@ -242,6 +253,14 @@ function CurrentVideoTaskPanel({
                   {liveText}
                 </p>
               )}
+              {/* A1 — IP 换口型慢，给等待预期（仅 ip_person 生成中）。 */}
+              {task.videoType === 'ip_person' &&
+                (task.status === 'executing' || task.status === 'queued') && (
+                  <p className="mt-2 flex items-start gap-1.5 text-[12px] leading-relaxed text-[#8A6A00]">
+                    <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    {ipRenderingHint(task.intent)}
+                  </p>
+                )}
             </div>
           </div>
 
@@ -291,6 +310,21 @@ function CurrentVideoTaskPanel({
                 </Button>
               </div>
             )}
+
+          {/* A2 — 失败态：透传后端白名单友好 reason（在 task.resultText 里）+ 重试入口。 */}
+          {task.status === 'failed' && (
+            <div className="rounded-[8px] border border-[#EA1F59]/30 bg-[#EA1F59]/5 px-3 py-3 text-[12px]">
+              <div className="text-[13px] font-medium text-[#EA1F59]">生成失败</div>
+              <p className="mt-1 whitespace-pre-wrap leading-relaxed text-[#595757]">
+                {task.resultText?.trim() || '生成失败，请重试。'}
+              </p>
+              <div className="mt-2.5">
+                <Button type="button" variant="outline" size="sm" onClick={() => retryFailed()}>
+                  重新制作
+                </Button>
+              </div>
+            </div>
+          )}
 
           {task.attachments && task.attachments.length > 0 && (
             <div className="space-y-2 border-t border-[#DCDDDD]/70 pt-3">
@@ -463,7 +497,7 @@ function NormalVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) =>
         </Button>
       </div>
 
-      <VideoHistory />
+      <VideoHistory videoType="normal" />
     </div>
   );
 }
@@ -665,7 +699,7 @@ function PetVideoForm({ onTaskCreated }: { onTaskCreated: (taskId: string) => vo
         </Button>
       </div>
 
-      <VideoHistory />
+      <VideoHistory videoType="pet" />
     </div>
   );
 }
@@ -729,7 +763,7 @@ function SegGroup<T extends string | number>({
 // unit-testable. toVideoRow now drops failed / cancelled / awaiting
 // (报价 stub) / executing rows — 生成历史 only lists completed 成片.
 
-function VideoHistory(): JSX.Element {
+function VideoHistory({ videoType }: { videoType: VideoType }): JSX.Element {
   const navigate = useNavigate();
   const [rows, setRows] = React.useState<VideoRow[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -757,9 +791,13 @@ function VideoHistory(): JSX.Element {
     };
   }, [load]);
 
+  // 按类型隔离：每个 tab 只看自己的成片。legacy 成片（videoType 缺失，
+  // 早于后端 stamping）回落到「普通」tab，避免彻底消失。
+  const visible = rows === null ? null : rows.filter((r) => (r.videoType ?? 'normal') === videoType);
+
   return (
     <Section title="生成历史" description="你提交过的视频任务">
-      {rows === null ? (
+      {visible === null ? (
         <div className="flex items-center gap-2 py-6 text-[13px] text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           加载中…
@@ -771,7 +809,7 @@ function VideoHistory(): JSX.Element {
             重试
           </Button>
         </div>
-      ) : rows.length === 0 ? (
+      ) : visible.length === 0 ? (
         <div className="flex flex-col items-center gap-2 py-10 text-center">
           <Clapperboard className="h-8 w-8 text-muted-foreground/40" />
           <div className="text-[13px] font-medium text-foreground/80">还没有视频任务</div>
@@ -779,17 +817,30 @@ function VideoHistory(): JSX.Element {
         </div>
       ) : (
         <div className="divide-y divide-[#EFEFEF]">
-          {rows.map((t) => (
+          {visible.map((t) => (
             <div key={t.taskId} className="group py-3">
               <div className="flex items-center gap-3">
-                <VideoStatusIcon status={t.status} />
+                {t.posterUrl ? (
+                  <LazyPosterImg
+                    posterUrl={t.posterUrl}
+                    alt={t.title?.trim() || t.intent || '视频缩略图'}
+                    className="h-11 w-11"
+                  />
+                ) : (
+                  <VideoStatusIcon status={t.status} />
+                )}
                 <button
                   type="button"
                   onClick={() => navigate(`/video?task=${encodeURIComponent(t.taskId)}`)}
                   className="min-w-0 flex-1 text-left"
                 >
-                  <div className="truncate text-[13px] text-foreground group-hover:text-[#EA1F59]">
-                    {t.title?.trim() || t.intent || '视频任务'}
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-[13px] text-foreground group-hover:text-[#EA1F59]">
+                      {t.title?.trim() || t.intent || '视频任务'}
+                    </span>
+                    <span className="shrink-0 rounded-full bg-[#EFEFEF] px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      {videoTypeLabel(t.videoType)}
+                    </span>
                   </div>
                   <div className="mt-0.5 text-[11px] text-muted-foreground">
                     {videoStatusLabel(t.status)} · {formatTime(t.createdAt)}
@@ -797,7 +848,7 @@ function VideoHistory(): JSX.Element {
                 </button>
               </div>
               {t.download && (
-                <div className="ml-10 mt-2">
+                <div className="ml-[3.25rem] mt-2">
                   <FileDownloadCard payload={t.download} />
                 </div>
               )}
@@ -807,6 +858,20 @@ function VideoHistory(): JSX.Element {
       )}
     </Section>
   );
+}
+
+/** Render-only type chip (A5). Legacy 成片 (no videoType) → 「视频」. */
+function videoTypeLabel(videoType: VideoType | undefined): string {
+  switch (videoType) {
+    case 'ip_person':
+      return '真人换口型';
+    case 'pet':
+      return '宠物动画';
+    case 'normal':
+      return '文本视频';
+    default:
+      return '视频';
+  }
 }
 
 function videoStatusLabel(status: string): string {
@@ -1199,6 +1264,7 @@ function IpGenerateForm({ onTaskCreated }: { onTaskCreated: (taskId: string) => 
   }
 
   return (
+    <div className="space-y-6">
     <Section title="生成视频" description="素材已就绪 —— 用你本人的声音 + 出镜底版,把文案口播出来。" className="border-[#EA1F59]/20 bg-[#EA1F59]/[0.03]">
       <div className="space-y-5">
         <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
@@ -1241,6 +1307,8 @@ function IpGenerateForm({ onTaskCreated }: { onTaskCreated: (taskId: string) => 
         </div>
       </div>
     </Section>
+      <VideoHistory videoType="ip_person" />
+    </div>
   );
 }
 
