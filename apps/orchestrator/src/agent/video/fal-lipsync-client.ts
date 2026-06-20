@@ -31,8 +31,34 @@ const DEFAULT_BASE_URL = 'https://queue.fal.run';
 const DEFAULT_MODEL = 'fal-ai/latentsync';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_POLL_INTERVAL_MS = 3_000;
-// latentsync is diffusion-based ~2min/clip; 5min ceiling absorbs queue depth.
+// Floor / fallback poll ceiling (used when no maxWaitMs is passed). The real
+// ceiling for the IP lane is dynamic — see lipSyncMaxWaitMs.
 const DEFAULT_MAX_WAIT_MS = 300_000;
+// Hard upper bound so a stuck fal job can't hold the fire-and-poll coroutine
+// forever. A ≤40s IP clip needs ~700s; 720s leaves margin without going wild.
+const MAX_LIPSYNC_WAIT_MS = 720_000;
+const LIPSYNC_BASE_MS = 60_000;
+const LIPSYNC_MS_PER_AUDIO_SEC = 16_000;
+
+/**
+ * Dynamic poll ceiling for latentsync, scaled by output length (= audio
+ * length, since loop_mode loops the base to cover the audio).
+ *
+ * Root cause this fixes: latentsync is diffusion-based ~12-14× realtime, so a
+ * fixed 300s ceiling timed out anything past ~20s output (16s clip ≈ 225s OK,
+ * 37s clip needs ~460-520s → the client gave up at 300s and surfaced a false
+ * "timeout" / "服务繁忙"). Retry is useless here (deterministic slowness, not a
+ * flake) — the patient fix is to wait proportionally.
+ *
+ * `60s + audioSec × 16s`, clamped to [300s floor, 720s ceiling]. The IP lane
+ * caps audio at 40s (IP_MAX_AUDIO_MS) before calling fal, so the realistic max
+ * is ~700s — under the 720s ceiling, i.e. no in-spec clip is capped short.
+ */
+export function lipSyncMaxWaitMs(audioMs: number): number {
+  const audioSec = Math.max(0, Math.ceil((Number.isFinite(audioMs) ? audioMs : 0) / 1000));
+  const wanted = LIPSYNC_BASE_MS + audioSec * LIPSYNC_MS_PER_AUDIO_SEC;
+  return Math.min(MAX_LIPSYNC_WAIT_MS, Math.max(DEFAULT_MAX_WAIT_MS, wanted));
+}
 
 export type FalLipSyncErrorKind =
   | 'no_api_key'

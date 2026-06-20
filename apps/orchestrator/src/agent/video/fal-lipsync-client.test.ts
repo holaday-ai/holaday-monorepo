@@ -3,9 +3,44 @@ import {
   FalLipSyncError,
   getLipSyncResult,
   getLipSyncStatus,
+  lipSyncMaxWaitMs,
   runLipSync,
   submitLipSync,
 } from './fal-lipsync-client.js';
+
+describe('lipSyncMaxWaitMs — dynamic poll ceiling (fal timeout fix)', () => {
+  it('scales 60s + audioSec × 16s for in-range clips', () => {
+    expect(lipSyncMaxWaitMs(16_000)).toBe(316_000); // 16s clip (old 300s was too tight)
+    expect(lipSyncMaxWaitMs(37_000)).toBe(652_000); // 37s clip that falsely timed out
+    expect(lipSyncMaxWaitMs(40_000)).toBe(700_000); // ≤40s IP cap → ≤700s, under ceiling
+  });
+
+  it('floors at 300s for short clips (never below the old default)', () => {
+    expect(lipSyncMaxWaitMs(5_000)).toBe(300_000); // 60+80=140s → floor 300s
+    expect(lipSyncMaxWaitMs(0)).toBe(300_000);
+    expect(lipSyncMaxWaitMs(15_000)).toBe(300_000); // 60+240=300s → exactly floor
+  });
+
+  it('caps at the 720s hard ceiling for anything past the cap', () => {
+    expect(lipSyncMaxWaitMs(45_000)).toBe(720_000); // 60+720=780 → clamp 720s
+    expect(lipSyncMaxWaitMs(10_000_000)).toBe(720_000);
+  });
+
+  it('rounds audio seconds up + tolerates junk input', () => {
+    expect(lipSyncMaxWaitMs(16_001)).toBe(60_000 + 17 * 16_000); // ceil(16.001s)=17 → 332s
+    expect(lipSyncMaxWaitMs(Number.NaN)).toBe(300_000);
+    expect(lipSyncMaxWaitMs(-5_000)).toBe(300_000);
+  });
+
+  it('is monotonic non-decreasing in audio length', () => {
+    let prev = 0;
+    for (let s = 0; s <= 60; s += 5) {
+      const v = lipSyncMaxWaitMs(s * 1000);
+      expect(v).toBeGreaterThanOrEqual(prev);
+      prev = v;
+    }
+  });
+});
 
 function jsonQueue(responses: Array<{ status?: number; body: unknown }>) {
   const calls: Array<{ url: string; init: RequestInit }> = [];

@@ -14,7 +14,7 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { ffprobeDurationMs, runFfmpeg } from './ffmpeg-exec.js';
-import { runLipSync } from './fal-lipsync-client.js';
+import { lipSyncMaxWaitMs, runLipSync } from './fal-lipsync-client.js';
 import { synthesizeSpeech } from './qwen-voice-clone-client.js';
 import { buildAss, buildTimeline } from './timeline.js';
 import { buildComposeCommand } from './video-compose.js';
@@ -188,6 +188,9 @@ export async function runIpVideoCreation(
     videoUrl: ctx.baseVideoUrl,
     audioUrl,
     extra: { loop_mode: 'loop' },
+    // latentsync ~12-14× realtime → poll ceiling scales with audio length so
+    // long clips don't false-"timeout" at the old fixed 300s (audioMs ≤ 40s here).
+    maxWaitMs: lipSyncMaxWaitMs(audioMs),
   });
   const lipDl = await fns.downloadToBuffer(lip.videoUrl);
   const lipLocal = path.join(svc.workdir, 'ip-lipsync.mp4');
