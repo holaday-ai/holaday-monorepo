@@ -8,7 +8,10 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`a70642c2`（SPA）/ orch `b8cc4d83`
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`49ae6ee1`（SPA bundle `index-B8q1wOE7.js`）/ orch `b8cc4d83`
+
+<!-- 2026-06-21 — 第二轮前端 A组+B组+ops 部署（SPA-only，orch 不动） -->
+**📦 第二轮前端 `49ae6ee1` 部署 prod**（deploy-spa 双端 Aliyun+Vultr，smoke 双绿 http200+HOLA DAY+hash，bundle `index-B8q1wOE7.js`；无 migration、flag 未动、orch 仍 `b8cc4d83`）。三栈 FF push：`a655c265`(A组 UX hint/reason+retry/历史隔离/poster/videoType)+`5d23225b`(ops vultr-exec.sh)+`49ae6ee1`(B组 面板位置/IP去图片版)。**回归测 `c93dd885`(test-only) 未推**——单独审后 push-only。web 679 测绿。真机验收进行中（零烧钱，A1 文案本轮不验=需生成中态烧钱未授权）。
 
 <!-- 2026-06-20 — IP fal 动态超时修部署 + 真机验通 -->
 **📦 IP fal 动态超时修 `b8cc4d83` 部署 prod**（deploy-orch，preflight SAFE，restart 662，healthz ok；SPA 不动仍 `a70642c2`；无 migration、flag 未动）。`runLipSync` 的 `maxWaitMs` 改成 `lipSyncMaxWaitMs(audioMs)=clamp(60s+音频秒×16s, 300s, 720s)`（IP lane 传 audioMs，≤40s→≤700s）；retry 仍无；+5 单测；orch 2915 测绿。**★真机验通**：烧一条 185 字→**约 35 秒** IP（`tsk_k88u`，allowlist BOSS）→ **completed**（maxWaitMs=**620s**；fal latentsync 实耗 **~350s**——**>旧 300s，旧码必超时**，新 620s 顶住）；总 421s 出片，output+poster 都有，`videoType=ip_person`，无 timeout/无 error。前态：orch `68f28859`。配套 UX 文案（IP「生成中」「约 X 分钟」）仍归 🟡 第二轮前端。
