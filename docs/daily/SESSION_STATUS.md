@@ -8,7 +8,10 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`a70642c2`（SPA）/ orch `68f28859`
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`a70642c2`（SPA）/ orch `b8cc4d83`
+
+<!-- 2026-06-20 — IP fal 动态超时修部署 + 真机验通 -->
+**📦 IP fal 动态超时修 `b8cc4d83` 部署 prod**（deploy-orch，preflight SAFE，restart 662，healthz ok；SPA 不动仍 `a70642c2`；无 migration、flag 未动）。`runLipSync` 的 `maxWaitMs` 改成 `lipSyncMaxWaitMs(audioMs)=clamp(60s+音频秒×16s, 300s, 720s)`（IP lane 传 audioMs，≤40s→≤700s）；retry 仍无；+5 单测；orch 2915 测绿。**★真机验通**：烧一条 185 字→**约 35 秒** IP（`tsk_k88u`，allowlist BOSS）→ **completed**（maxWaitMs=**620s**；fal latentsync 实耗 **~350s**——**>旧 300s，旧码必超时**，新 620s 顶住）；总 421s 出片，output+poster 都有，`videoType=ip_person`，无 timeout/无 error。前态：orch `68f28859`。配套 UX 文案（IP「生成中」「约 X 分钟」）仍归 🟡 第二轮前端。
 
 <!-- ========== 🎬 视频 Phase 2 状态 + backlog（2026-06-19/20 换 session 收尾）========== -->
 **🎬 视频 Phase 2 — 当前状态（一句话）**：三类型 prod 真机全验通（普通¥8/宠物¥1/IP¥2，BOSS 都认了）；第一批前端 polish + 第二批第一轮后端**都已 LIVE**。**PROD LIVE REF = SPA `a70642c2` / orch `68f28859`**。
