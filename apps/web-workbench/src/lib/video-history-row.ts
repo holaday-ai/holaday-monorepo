@@ -44,6 +44,16 @@ export function asVideoType(value: unknown): VideoType | undefined {
 }
 
 /**
+ * Whether the 「图片版」 (confirm_image) option should show on a video_quote
+ * card (B2). Static image is meaningless for 真人换口型 (you can't lip-sync a
+ * still), so hide it for ip_person only — normal/pet keep it. Unknown type
+ * (legacy / not-yet-hydrated) defaults to showing it (safe: only IP hides).
+ */
+export function showImageOption(videoType: VideoType | undefined): boolean {
+  return videoType !== 'ip_person';
+}
+
+/**
  * Map a tasks.list row to a 生成历史 entry, or null to drop it.
  *
  * 生成历史只显示**成功出片**的成片任务：`status==='completed'` 且带一条可

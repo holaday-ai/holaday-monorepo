@@ -86,6 +86,7 @@ import { hdDebug } from '@/lib/hd-debug';
 import { markdownCodeBlockMeta } from '@/lib/markdown-code-block-state';
 import { trpc } from '@/lib/trpc';
 import { useTaskStore } from '@/stores/task-store';
+import { showImageOption } from '@/lib/video-history-row';
 import { cn } from '@/lib/utils';
 import type {
   UiAwaitingUser,
@@ -727,6 +728,11 @@ function AwaitingUserBanner({
   const copy = awaitingUserCopy(kind);
   const message = awaitingUserStreamMessage(kind, wait.question);
   const Icon = AWAITING_KIND_ICON[kind] ?? AWAITING_KIND_ICON.clarification;
+  // B2 — hide 图片版 for ip_person. UiAwaitingUser doesn't carry the type, but
+  // we have the taskId; read videoType off the task (toUiTask falls back to
+  // metadata.videoOptions.tab so the quote task has it). Primitive selector →
+  // referentially stable, no #185 risk.
+  const videoType = useTaskStore((s) => s.tasks.find((t) => t.taskId === taskId)?.videoType);
   const handleCancel = React.useCallback(async () => {
     if (cancelling) return;
     setCancelling(true);
@@ -794,14 +800,16 @@ function AwaitingUserBanner({
               >
                 {confirming === 'confirm_video' ? '提交中…' : '确认制作'}
               </button>
-              <button
-                type="button"
-                onClick={() => void handleConfirmVideo('confirm_image')}
-                disabled={confirming !== null}
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-[#DCDDDD] bg-transparent px-3 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:opacity-60 dark:border-white/10 dark:text-foreground dark:hover:bg-white/10"
-              >
-                {confirming === 'confirm_image' ? '提交中…' : '图片版'}
-              </button>
+              {showImageOption(videoType) && (
+                <button
+                  type="button"
+                  onClick={() => void handleConfirmVideo('confirm_image')}
+                  disabled={confirming !== null}
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-[#DCDDDD] bg-transparent px-3 text-[#595757] transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/60 disabled:opacity-60 dark:border-white/10 dark:text-foreground dark:hover:bg-white/10"
+                >
+                  {confirming === 'confirm_image' ? '提交中…' : '图片版'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => void handleConfirmVideo('cancel')}

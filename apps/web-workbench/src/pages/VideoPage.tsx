@@ -29,7 +29,7 @@ import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile, uploadMediaFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
 import { selectStepsFor, shouldRefreshForTask } from '@/lib/video-task-selectors';
-import { toVideoRow, type VideoRow, type VideoType } from '@/lib/video-history-row';
+import { showImageOption, toVideoRow, type VideoRow, type VideoType } from '@/lib/video-history-row';
 import { ipRenderingHint } from '@/lib/video-ip-estimate';
 import { LazyPosterImg } from '@/components/LazyPosterImg';
 import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
@@ -141,7 +141,8 @@ export function VideoPage(): JSX.Element {
           );
         })}
       </div>
-      {taskId && <CurrentVideoTaskPanel taskId={taskId} task={currentTask} />}
+      {/* B1 — 「当前制作」面板放在表单之后，落到「生成视频」下方就近，不再
+          甩到页面顶部把表单整体下推。?task= 驱动 + 切tab清面板逻辑不变。 */}
       {tab === 'normal' ? (
         <NormalVideoForm onTaskCreated={handleTaskCreated} />
       ) : tab === 'pet' ? (
@@ -149,6 +150,7 @@ export function VideoPage(): JSX.Element {
       ) : (
         <IpOnboardingWizard onTaskCreated={handleTaskCreated} />
       )}
+      {taskId && <CurrentVideoTaskPanel taskId={taskId} task={currentTask} />}
     </PageContainer>
   );
 }
@@ -275,15 +277,18 @@ function CurrentVideoTaskPanel({
               >
                 {confirming === 'confirm_video' ? '提交中…' : '确认制作'}
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void confirmVideo('confirm_image')}
-                disabled={confirming !== null}
-              >
-                {confirming === 'confirm_image' ? '提交中…' : '图片版'}
-              </Button>
+              {/* B2 — 真人换口型没法降级成静图，ip_person 不出「图片版」。 */}
+              {showImageOption(task.videoType) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void confirmVideo('confirm_image')}
+                  disabled={confirming !== null}
+                >
+                  {confirming === 'confirm_image' ? '提交中…' : '图片版'}
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="outline"

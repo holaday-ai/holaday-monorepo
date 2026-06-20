@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { asVideoType, isVideoLane, toVideoRow } from './video-history-row';
+import { asVideoType, isVideoLane, showImageOption, toVideoRow } from './video-history-row';
+
+describe('showImageOption — 图片版 gate (B2)', () => {
+  it('hides 图片版 for ip_person only', () => {
+    expect(showImageOption('ip_person')).toBe(false);
+  });
+  it('shows it for normal / pet', () => {
+    expect(showImageOption('normal')).toBe(true);
+    expect(showImageOption('pet')).toBe(true);
+  });
+  it('shows it for unknown / legacy (undefined) — safe default', () => {
+    expect(showImageOption(undefined)).toBe(true);
+  });
+});
 
 describe('asVideoType — enum narrowing (A3/A5)', () => {
   it('keeps the three valid values, drops the rest', () => {

@@ -2000,7 +2000,11 @@ export function toUiTask(row: ListRow): UiTask {
   const summaryFromResult = extractSummary(rowResult);
   const failedChecks = extractFailedChecks(rowResult);
   const executionMode = extractExecutionMode(rowResult);
-  const videoTypeRaw = (metadata as { videoType?: unknown }).videoType;
+  // Generation (success) tasks carry metadata.videoType; the quote task
+  // (awaiting video_quote) carries metadata.videoOptions.tab instead — fall
+  // back to it so the quote card can hide 图片版 for ip_person (B2).
+  const videoMeta = metadata as { videoType?: unknown; videoOptions?: { tab?: unknown } };
+  const videoTypeRaw = videoMeta.videoType ?? videoMeta.videoOptions?.tab;
   const videoType =
     videoTypeRaw === 'normal' || videoTypeRaw === 'pet' || videoTypeRaw === 'ip_person'
       ? videoTypeRaw
