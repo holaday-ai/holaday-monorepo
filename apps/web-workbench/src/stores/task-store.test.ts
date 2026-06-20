@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { trpc } from '@/lib/trpc';
+import { showImageOption } from '@/lib/video-history-row';
 import type { UiTask } from '@/types/task';
 import {
   mergeFirstPageWithPreservedSelection,
@@ -259,6 +260,47 @@ describe('toUiTask', () => {
       finalViewport: { width: 390, height: 844 },
     });
   });
+
+  // B2 regression guard — the REAL chain, not the showImageOption pure unit.
+  // A quote task (awaiting video_quote) carries metadata.videoOptions.tab and
+  // NO top-level metadata.videoType (videoType is only stamped on the
+  // generation task). This proves toUiTask's `videoType ?? videoOptions.tab`
+  // fallback maps the tab literal → videoType → 图片版 gate end-to-end. If the
+  // fallback or the tab token ever drifts, the direct-feed showImageOption
+  // tests stay green but THIS one breaks.
+  it.each([
+    { tab: 'ip_person', expectVideoType: 'ip_person', expectImageOption: false },
+    { tab: 'normal', expectVideoType: 'normal', expectImageOption: true },
+    { tab: 'pet', expectVideoType: 'pet', expectImageOption: true },
+  ])(
+    'quote task with only videoOptions.tab=$tab → toUiTask videoType=$expectVideoType → 图片版 shown=$expectImageOption',
+    ({ tab, expectVideoType, expectImageOption }) => {
+      const task = toUiTask({
+        taskId: `tsk_quote_${tab}`,
+        intent: '夏天防晒文案',
+        title: null,
+        status: 'awaiting_user',
+        result: {
+          metadata: {
+            lane: 'video_creation_confirm',
+            // NB: no top-level videoType — only the tab, like the real quote task.
+            videoOptions: { tab },
+          },
+        },
+        errorMessage: null,
+        createdAt: new Date('2026-06-21T00:00:00Z'),
+        opusUsed: false,
+        starred: false,
+        starredAt: null,
+        projectId: null,
+        verificationPassed: null,
+        failureLevel: null,
+      } as never);
+
+      expect(task.videoType).toBe(expectVideoType);
+      expect(showImageOption(task.videoType)).toBe(expectImageOption);
+    },
+  );
 
   it('normalizes malformed task list rows safely', () => {
     expect(
