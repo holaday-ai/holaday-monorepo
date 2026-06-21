@@ -8,7 +8,10 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`49ae6ee1`（SPA bundle `index-B8q1wOE7.js`）/ orch `b8cc4d83`
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`d123c5f9`（SPA bundle `index-B8q1wOE7.js` 未变）/ orch `d123c5f9`
+
+<!-- 2026-06-21 — 成片 TTL 24h→30d（orch-only，deploy-orch） -->
+**📦 成片 TTL 24h→30d `d123c5f9` 部署 prod**（deploy-orch，preflight SAFE[live b8cc4d83→d123c5f9 FF]，pm2 restart 663，healthz ok；SPA 不动仍 `index-B8q1wOE7.js`；**无 migration、未翻 flag**）。`storeOutput` 的 `expires_at` 从 hardcoded 24h 改 `now+outputFileTtlMs()`=`OUTPUT_FILE_TTL_DAYS`(默认30d，正整数守卫)；读时闸+cleanup-cron 认每行 expires_at 自动跟随，零改。**Vultr 未设该 env→默认30d（进程env+.env 双实证 absent，新 helper 3 refs 已进 dist）**。划界守住：上传占位24h/input NULL/cron/读闸 未动，不迁移旧行。orch 2920 测绿(+5)。**验收：30d 实戳需新成片才看得到=烧钱，本轮不烧；单测绿=逻辑已证，BOSS 下次真生成白捡查 DB（expires_at≈now+30d）**。前态：orch `b8cc4d83`。
 
 <!-- 2026-06-21 — 第二轮前端 A组+B组+ops 部署（SPA-only，orch 不动） -->
 **📦 第二轮前端 `49ae6ee1` 部署 prod**（deploy-spa 双端 Aliyun+Vultr，smoke 双绿 http200+HOLA DAY+hash，bundle `index-B8q1wOE7.js`；无 migration、flag 未动、orch 仍 `b8cc4d83`）。三栈 FF push：`a655c265`(A组 UX hint/reason+retry/历史隔离/poster/videoType)+`5d23225b`(ops vultr-exec.sh)+`49ae6ee1`(B组 面板位置/IP去图片版)。**回归测 `c93dd885`(test-only) 未推**——单独审后 push-only。web 679 测绿。真机验收进行中（零烧钱，A1 文案本轮不验=需生成中态烧钱未授权）。
