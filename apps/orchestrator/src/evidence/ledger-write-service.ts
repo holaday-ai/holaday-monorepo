@@ -32,7 +32,24 @@ import { EvidenceArtifactRepository } from './evidence-artifact-repository.js';
  * answer verifier are never affected (acceptance: verifier unchanged).
  */
 
-const TASK_EVIDENCE_RETENTION_DAYS = 30;
+/**
+ * Days a `task_evidence` artifact is retained before the retention reaper
+ * may sweep it. env-configurable via `LEDGER_RETENTION_DAYS`; defaults to
+ * 60 — a conservative window for the first reaper enablement (observe
+ * before tightening). Invalid / non-positive / NaN / Infinity values fall
+ * back to the default — same guard as `outputFileTtlMs` (file-service.ts)
+ * so behaviour is consistent across the codebase.
+ *
+ * NOTE: this only affects NEWLY written artifacts. Existing rows keep the
+ * `expires_at` stamped at write time; the reaper reads each row's own
+ * `expires_at` (there is no global retention constant on the reaper side),
+ * so changing this never retroactively re-dates rows already in the table.
+ */
+export const DEFAULT_LEDGER_RETENTION_DAYS = 60;
+export function ledgerRetentionDays(): number {
+  const raw = Number(process.env.LEDGER_RETENTION_DAYS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_LEDGER_RETENTION_DAYS;
+}
 
 const NOOP_LOGGER = {
   warn() {},
@@ -131,7 +148,7 @@ export async function writeLedgerToDbUnchecked(
 
   const groundedUrls = ledger.getGroundedUrls();
   const firstFact = ledger.getObservedFacts()[0]?.fact ?? ledger.entries[0]?.fact ?? null;
-  const expiresAt = new Date(now.getTime() + TASK_EVIDENCE_RETENTION_DAYS * 86_400_000);
+  const expiresAt = new Date(now.getTime() + ledgerRetentionDays() * 86_400_000);
 
   const artifactRepo = new EvidenceArtifactRepository(db);
   const artifact = await artifactRepo.create({

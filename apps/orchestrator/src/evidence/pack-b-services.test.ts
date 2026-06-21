@@ -14,7 +14,12 @@ import { reloadFeatureFlagsForTest, setFeatureFlagsForTest } from '../execution/
 import type { StorageProvider } from '../files/storage-provider.js';
 import { routeTaskEvidenceOnDelete } from './evidence-deletion-service.js';
 import { LedgerRepository } from './ledger-repository.js';
-import { writeLedgerToDb, writeLedgerToDbUnchecked } from './ledger-write-service.js';
+import {
+  DEFAULT_LEDGER_RETENTION_DAYS,
+  ledgerRetentionDays,
+  writeLedgerToDb,
+  writeLedgerToDbUnchecked,
+} from './ledger-write-service.js';
 import { runRetentionReaper } from './retention-reaper.js';
 
 const DRIZZLE_NAME = Symbol.for('drizzle:Name');
@@ -362,5 +367,32 @@ describe('LedgerRepository (read API skeleton)', () => {
     const ev = await repo.getEvidenceForClaim('clm_abc');
     expect(ev).toHaveLength(1);
     expect(ev[0]?.artifact.externalId).toBe('art_x');
+  });
+});
+
+describe('ledgerRetentionDays (LEDGER_RETENTION_DAYS env guard)', () => {
+  const KEY = 'LEDGER_RETENTION_DAYS';
+  const original = process.env[KEY];
+  afterEach(() => {
+    if (original === undefined) delete process.env[KEY];
+    else process.env[KEY] = original;
+  });
+
+  it('defaults to 60 when unset', () => {
+    delete process.env[KEY];
+    expect(DEFAULT_LEDGER_RETENTION_DAYS).toBe(60);
+    expect(ledgerRetentionDays()).toBe(60);
+  });
+
+  it('honours a valid positive override (90 → 90)', () => {
+    process.env[KEY] = '90';
+    expect(ledgerRetentionDays()).toBe(90);
+  });
+
+  it('falls back to 60 for garbage / non-positive / non-finite values', () => {
+    for (const bad of ['', 'abc', '0', '-5', 'NaN', 'Infinity', '-Infinity']) {
+      process.env[KEY] = bad;
+      expect(ledgerRetentionDays()).toBe(60);
+    }
   });
 });
