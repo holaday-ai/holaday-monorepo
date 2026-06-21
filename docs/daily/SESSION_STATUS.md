@@ -8,8 +8,10 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`d123c5f9`（SPA bundle `index-B8q1wOE7.js` 未变）/ orch `d123c5f9`
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`b6e5dea0`（SPA bundle `index-CLucrgwa.js`）/ orch `d123c5f9`（未变）
 
+<!-- 2026-06-21 — 批1 SPA：全屏误关修(①) + bundle 版本检测(③)，SPA-only -->
+**📦 批1 SPA `b6e5dea0` 部署 prod**（deploy-spa 双端 Aliyun+Vultr，smoke 双绿 http200+HOLA DAY+hash，bundle `index-CLucrgwa.js`；无 migration、未翻 flag、orch 仍 `d123c5f9`）。两 commit：**①`922ccdd5` 全屏误关修**（BrowserPanel 伪全屏退出从 2.5s 自动隐藏 bar 豁免出来→常驻右上 pill 拦原生关闭 X + 「Esc 退出」角标；核心 UI 非视频专属）｜**③`b6e5dea0` bundle 版本检测**（轮询 live index.html `cache:'no-store'` 比对 hash→可关闭「有新版本」横幅，用户点才刷新、绝不静默 reload；nginx index.html 已 no-cache 旁证）。web 689 测绿。真机验收进行中（零烧钱）。前态：SPA `index-B8q1wOE7.js`。
 <!-- 2026-06-21 — 成片 TTL 24h→30d（orch-only，deploy-orch） -->
 **📦 成片 TTL 24h→30d `d123c5f9` 部署 prod**（deploy-orch，preflight SAFE[live b8cc4d83→d123c5f9 FF]，pm2 restart 663，healthz ok；SPA 不动仍 `index-B8q1wOE7.js`；**无 migration、未翻 flag**）。`storeOutput` 的 `expires_at` 从 hardcoded 24h 改 `now+outputFileTtlMs()`=`OUTPUT_FILE_TTL_DAYS`(默认30d，正整数守卫)；读时闸+cleanup-cron 认每行 expires_at 自动跟随，零改。**Vultr 未设该 env→默认30d（进程env+.env 双实证 absent，新 helper 3 refs 已进 dist）**。划界守住：上传占位24h/input NULL/cron/读闸 未动，不迁移旧行。orch 2920 测绿(+5)。**验收：30d 实戳需新成片才看得到=烧钱，本轮不烧；单测绿=逻辑已证，BOSS 下次真生成白捡查 DB（expires_at≈now+30d）**。前态：orch `b8cc4d83`。
 
