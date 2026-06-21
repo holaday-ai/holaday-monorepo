@@ -8,7 +8,10 @@
 > **归属（BOSS 定）：本文件住共享 baseline `claude/musing-keller-ae1d05`**——三 worktree 分支最终都合回这里，协调文件理应在汇合点。各 session 更新时只对 musing-keller push 这**一个文件**（单文件无冲突风险）。
 
 <!-- 固定维护：每次部署后由部署者更新这一行（硬规则 7）。改 ref 前必实读 live HEAD。 -->
-## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05`@`8da47b4b`（SPA bundle `index-DiYh_GAx.js`）/ orch `ebc00054`（未变）
+## 🔴 PROD LIVE REF = `claude/musing-keller-ae1d05` — orch `4beaa0ca`（reaper ON + ledger 留存 60d）/ SPA `8da47b4b`（bundle `index-DiYh_GAx.js`，未变）
+
+<!-- 2026-06-22 — Playbook P0：开 RETENTION_REAPER + ledger 留存 env 化 60d（orch-only，deploy-orch + 配 env flag）-->
+**📦 Playbook P0 reaper `4beaa0ca` 部署 prod**（deploy-orch，preflight SAFE[live `ebc00054`→`4beaa0ca` FF]，pm2 restart 666，healthz ok，keys present，auto-smoke skip=零烧钱；SPA 不动仍 `index-DiYh_GAx.js`；**无 migration、未碰 schema**）。两件：**①留存 env 化**（`ledger-write-service.ts` 硬编 `TASK_EVIDENCE_RETENTION_DAYS=30` → `ledgerRetentionDays()` 读 `LEDGER_RETENTION_DAYS`，**默认 60**，neg/0/NaN/Infinity 守卫同 `outputFileTtlMs`；**只影响新写 artifact，旧行 expires_at 不回溯**；+3 守卫单测）｜**②开 reaper flag**（Vultr `.env` 加 `RETENTION_REAPER_ENABLED=true`，**未配 `LEDGER_RETENTION_DAYS`→走默认 60**；`index.ts:774` 的 `setInterval(24h)+unref` cron 翻 flag 即注册，process env 实证 `RETENTION_REAPER_ENABLED=true`）。reaper **只删过期 `evidence_artifacts`+级联 links**（不碰 claims/tasks/playbook 等活数据），R2 先删对象后删行，有界 200/次。**首跑 no-op**（最早 artifact 06-12 写、新写已 60d，本轮注册即可、删 0 行）。orch 2930 测绿。明确 carry backlog：孤儿 claim 清理 / R2 严格 retry。前态：orch `ebc00054`。
 
 <!-- 2026-06-22 — 批2 IP 合规闸 SPA 段（①per-generate 授权勾选 + ②条款链接），SPA-only -->
 **📦 批2 IP 合规闸 SPA 段 `8da47b4b` 部署 prod**（deploy-spa 双端 Aliyun+Vultr，smoke 双绿 http200+HOLA DAY+hash，bundle `index-DiYh_GAx.js`；无 migration、未翻 flag、orch 仍 `ebc00054`）。**①per-generate 授权勾选**：IpGenerateForm 加每次生成都要勾的 consent（默认 false），handleSubmit 守卫 + 生成按钮 `disabled={submitting||!consent}`；**onboarding consent 零改（双保险）**。**②条款链接**：consent 旁挂现有 `/terms`+`/privacy`（复用，未新建页/路由、未单列深度合成专页）。web 689 测绿。**至此 IP 合规闸 4 条齐活**：orch ③元数据+④审计(ebc00054) + SPA ①勾选+②条款(8da47b4b)，**仍 BOSS-only 灰度未 widen**。真机验收进行中（零烧钱，验到提交校验为止）。前态：SPA `index-CLucrgwa.js`。
