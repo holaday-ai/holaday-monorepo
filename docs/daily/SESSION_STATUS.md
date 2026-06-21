@@ -31,7 +31,7 @@
 - 🔴 **待 BOSS 决策·产品**：latentsync ~12-14× 实时太慢（40s 等 ~10 分钟），长期要不要换更快换口型方案/端点。未定。
 - 🟡 **第二轮前端（完整设计已出）**：4b 成片内联播放（poster `<img>`+lazy：默认不拉全量 5MB、不渲 `<video>`，显 poster + ▶播放/下载；点播放才按需新建单个 video；poster 后端已 LIVE）｜2 面板位置（甩顶部→生成视频下方就近）｜4 历史按 tab 隔离 + IP 历史（后端 videoType 已 LIVE，前端接）｜6 失败 reason 展示+重试+清 loading 残留（后端 reason 已 LIVE，前端接）｜7 IP 去图片版｜videoType enabler（plumb 到 UiTask）。
 - 🟢 **IP 合规闸（上线前必做）**：授权声明保留 + 条款 +「AI 生成」标识 + 可追溯（BOSS 拍板轻量方案）。
-- 🟢 **全屏关闭误触浏览器**：自定义全屏容器 / 页内退出。
+- 🔴 **[核心 UI，非视频专属] 全屏关闭误触浏览器**：BrowserPanel **CSS 伪全屏**（非原生 Fullscreen API）→ 浏览器原生关闭 X 一直可触；FullscreenFloatingToolbar 含唯一页内退出但 2.5s 整条自动隐藏→用户找不到出口点原生 X 关掉浏览器（真实伤害）。影响**所有 browser/scrape 执行型任务**的截屏面板。**A+B fix 已落码（待部署）**：退出 pill 豁免出 2.5s 隐藏门、常驻显眼（右上拦截「去关闭」本能）+ 常驻「Esc 退出」角标。**C（改真·原生 Fullscreen API，根治误触 surface）单独排期未动**。
 - 🧹 **prod 测试数据清理**：`tsk_duct`/`tsk_RCrQ`/今天一堆 + 之前 `qa-*` 号（无害但污染统计，删 prod 数据需谨慎、先列清单给 BOSS）。
 - 🧹 **MEMORY.md 超限**（30.8KB > 24.4KB）：下轮列可归档 stale 条目清单给 BOSS 过目再清。
 

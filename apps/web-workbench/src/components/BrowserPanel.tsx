@@ -1271,26 +1271,51 @@ export function BrowserPanel({
             // lonely exit button with a peek-on-hover bar that
             // mirrors the non-fullscreen header essentials: status
             // dot, back / forward / reload, URL bar, takeover
-            // toggle, exit. Auto-hides 2.5s after the cursor leaves
-            // so the canvas stays unobstructed while the user
-            // watches the agent work; reappears on hover or focus.
+            // toggle. Auto-hides 2.5s after the cursor leaves so the
+            // canvas stays unobstructed while the user watches the
+            // agent work; reappears on hover or focus.
             //
             // The bar sits at the TOP — covering the page title is
             // a smaller hit than covering action buttons at the
             // bottom of most sites.
-            <FullscreenFloatingToolbar
-              displayUrl={displayUrl}
-              status={displayedHeaderStatus}
-              interactiveActive={interactiveActive}
-              interactive={interactive}
-              onToggleInteractive={handleUserTakeoverClick}
-              navTaskId={evidenceHeaderActive ? null : activeTaskId ?? null}
-              controlsEnabled={!evidenceHeaderActive}
-              isExecuting={!evidenceHeaderActive && isExecuting}
-              aborting={aborting}
-              onStop={onStopClick}
-              onExitFullscreen={onToggleFullscreen}
-            />
+            //
+            // EXIT is NOT in this auto-hiding bar (see the persistent
+            // pill below): this is CSS pseudo-fullscreen, so the
+            // browser's own window close-X stays reachable top-right;
+            // once the bar auto-hid users had no in-page exit and hit
+            // that native X, closing the whole browser (real harm).
+            <>
+              <FullscreenFloatingToolbar
+                displayUrl={displayUrl}
+                status={displayedHeaderStatus}
+                interactiveActive={interactiveActive}
+                interactive={interactive}
+                onToggleInteractive={handleUserTakeoverClick}
+                navTaskId={evidenceHeaderActive ? null : activeTaskId ?? null}
+                controlsEnabled={!evidenceHeaderActive}
+                isExecuting={!evidenceHeaderActive && isExecuting}
+                aborting={aborting}
+                onStop={onStopClick}
+              />
+              {/* A — persistent exit. Never auto-hides; sits top-right where
+                  the "go close it" instinct lands, intercepting it before the
+                  browser's native window X. */}
+              <button
+                type="button"
+                onClick={onToggleFullscreen}
+                title="退出全屏 (Esc)"
+                aria-label="退出全屏"
+                className="absolute right-3 top-3 z-[60] inline-flex h-9 items-center gap-1.5 rounded-lg border border-white/20 bg-black/65 px-3 text-[13px] font-medium text-white shadow-2xl backdrop-blur-md transition-colors hover:bg-black/80"
+              >
+                <Minimize2 className="h-4 w-4" />
+                退出全屏
+              </button>
+              {/* B — persistent Esc hint. Esc already exits (WorkbenchApp Esc
+                  routing); this just makes it discoverable. */}
+              <div className="pointer-events-none absolute right-3 top-[3.25rem] z-[60] rounded-md bg-black/45 px-2 py-0.5 text-[11px] text-white/75 backdrop-blur-sm">
+                或按 Esc 退出
+              </div>
+            </>
           )}
           {!fullscreen && showHeader && (shouldConnect || evidenceHeaderActive) && (
             <header
@@ -2729,7 +2754,6 @@ function FullscreenFloatingToolbar({
   isExecuting,
   aborting,
   onStop,
-  onExitFullscreen,
 }: {
   displayUrl: string;
   status: BrowserPanelHeaderStatus;
@@ -2741,7 +2765,6 @@ function FullscreenFloatingToolbar({
   isExecuting: boolean;
   aborting: boolean;
   onStop: () => Promise<void> | void;
-  onExitFullscreen: () => void;
 }): JSX.Element {
   const [visible, setVisible] = React.useState(true);
   const hideTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2837,15 +2860,6 @@ function FullscreenFloatingToolbar({
           <Hand className="h-3.5 w-3.5" />
         </button>
       )}
-      <button
-        type="button"
-        onClick={onExitFullscreen}
-        title="退出全屏 (Cmd/Ctrl+Esc)"
-        aria-label="退出全屏"
-        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-white/85 transition-colors hover:bg-white/10"
-      >
-        <Minimize2 className="h-3.5 w-3.5" />
-      </button>
     </div>
   );
 }
