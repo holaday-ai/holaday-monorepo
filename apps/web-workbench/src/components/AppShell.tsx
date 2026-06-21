@@ -13,6 +13,7 @@ import { LoginGate } from '@/components/LoginGate';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { SearchOverlay } from '@/components/SearchOverlay';
 import { Sidebar } from '@/components/Sidebar';
+import { UpdateBanner } from '@/components/UpdateBanner';
 import { AppSkeleton } from '@/components/Skeleton';
 import {
   SidebarInset,
@@ -785,6 +786,7 @@ export function AppShell(): JSX.Element {
         <Outlet context={ctx} />
       </SidebarInset>
       <MobileNotificationBellSlot />
+      <UpdateBanner />
 
       <SearchOverlay
         open={searchOpen}
