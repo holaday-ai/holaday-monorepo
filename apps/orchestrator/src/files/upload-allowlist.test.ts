@@ -200,6 +200,12 @@ describe('FileService.linkToTask ownership guard', () => {
     expect(inserted?.status).toBe('pending');
     expect(inserted?.expiresAt).toBeInstanceOf(Date);
     expect((inserted?.expiresAt as Date).getTime()).toBeGreaterThan(Date.now());
+    // Regression guard: presigned-pending uploads (kind='input') keep their own
+    // 24h TTL. The OUTPUT_FILE_TTL_DAYS (30d) change to storeOutput must NOT
+    // leak here — pin this path to ~24h so a future refactor can't conflate them.
+    const pendingTtlMs = (inserted?.expiresAt as Date).getTime() - Date.now();
+    expect(pendingTtlMs).toBeGreaterThan(23 * 60 * 60 * 1000);
+    expect(pendingTtlMs).toBeLessThanOrEqual(24 * 60 * 60 * 1000 + 5_000);
   });
 
   it('updates attachment task_id only when external_id, owner user_id, and active status match', async () => {

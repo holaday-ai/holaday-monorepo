@@ -386,8 +386,9 @@ export function createHttpApp(deps: HttpAppDeps) {
   //   GET  /files/:id/download                  → file bytes
   //                         auth: bearer; verifies the file's user_id
   //                               matches req.userId.
-  //                         Output kind enforces a 24h expires_at; reads
-  //                         past that 404.
+  //                         Output kind enforces a configurable expires_at
+  //                         (OUTPUT_FILE_TTL_DAYS, default 30d); reads past
+  //                         that 404.
   //
   // multer's memoryStorage keeps the buffer in process for the duration
   // of the request — fine for the 10MB cap. Disk-storage would race

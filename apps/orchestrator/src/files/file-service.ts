@@ -35,6 +35,25 @@ export type FileKind = 'input' | 'output';
 export const FILES_ROOT = process.env.HOLADAY_FILES_ROOT ?? '/tmp/holaday-files';
 
 /**
+ * TTL for agent-generated `output` files (成片 等), in whole days, read from
+ * `OUTPUT_FILE_TTL_DAYS` (default 30). Invalid / non-positive values fall back
+ * to the default. The download read-gate (`loadForUser` expires_at check) and
+ * the hourly cleanup-cron both key off each row's `expires_at`, so they follow
+ * this value automatically — no other code needs touching to retune it.
+ *
+ * Read per-call (not a boot-time const) so it is unit-testable via `vi.stubEnv`
+ * without reloading the module; prod sets it once via .env so the per-call cost
+ * is irrelevant. ONLY `output` files use this — `input` uploads and
+ * presigned-pending rows keep their own separate (24h) TTLs, unchanged.
+ */
+export const DEFAULT_OUTPUT_FILE_TTL_DAYS = 30;
+export function outputFileTtlMs(): number {
+  const raw = Number(process.env.OUTPUT_FILE_TTL_DAYS);
+  const days = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_OUTPUT_FILE_TTL_DAYS;
+  return days * 24 * 60 * 60 * 1000;
+}
+
+/**
  * Per-plan upload caps in bytes. 0 disables uploads entirely; the
  * upload route returns a typed 403 in that case so the SPA can
  * render the right upsell copy.
@@ -410,7 +429,8 @@ export class FileService {
 
   /**
    * Persist an agent-generated buffer. Same shape as storeUpload but
-   * tagged kind='output' and given a 24h TTL via expires_at. Always
+   * tagged kind='output' and given a configurable TTL via expires_at
+   * (`OUTPUT_FILE_TTL_DAYS`, default 30d — see outputFileTtlMs). Always
    * scoped to a specific task — outputs only exist as a result of
    * tool calls inside a running task.
    */
@@ -432,7 +452,7 @@ export class FileService {
       buffer: opts.buffer,
       mimetype: opts.mimetype,
     });
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + outputFileTtlMs());
     await this.db.insert(taskFiles).values({
       externalId,
       userId: opts.userIdInternal,
