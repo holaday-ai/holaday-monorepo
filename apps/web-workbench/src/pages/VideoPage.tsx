@@ -20,7 +20,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import * as React from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { FileDownloadCard } from '@/components/FileDownloadCard';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -1241,6 +1241,9 @@ function IpGenerateForm({ onTaskCreated }: { onTaskCreated: (taskId: string) => 
   const [copy, setCopy] = React.useState('');
   const [aspectRatio, setAspectRatio] = React.useState<VideoAspect>('9:16');
   const [submitting, setSubmitting] = React.useState(false);
+  // ① 合规闸 — per-generate 授权确认。与 onboarding 的一次性 consent 双保险:
+  // 每次生成都要重新勾(默认 false),不勾禁止提交。
+  const [consent, setConsent] = React.useState(false);
 
   const est = estimateIpVideo(copy);
 
@@ -1248,6 +1251,10 @@ function IpGenerateForm({ onTaskCreated }: { onTaskCreated: (taskId: string) => 
     const intent = copy.trim();
     if (intent.length < 4) {
       toast.show('请先写一段要口播的文案(至少 4 个字)', 'error');
+      return;
+    }
+    if (!consent) {
+      toast.show('请先勾选「本人肖像、已获授权」确认', 'error');
       return;
     }
     if (submitting) return;
@@ -1294,9 +1301,34 @@ function IpGenerateForm({ onTaskCreated }: { onTaskCreated: (taskId: string) => 
           )}
           <p className="mt-1 text-[11px] text-muted-foreground">提交后会先给精确报价,确认后才扣费。</p>
         </div>
+        {/* ① per-generate 授权确认 + ② 条款链接(复用现有 /terms /privacy)。 */}
+        <label className="flex cursor-pointer items-start gap-2 text-[12px] leading-relaxed text-foreground">
+          <input
+            type="checkbox"
+            checked={consent}
+            onChange={(e) => setConsent(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-[#EA1F59]"
+          />
+          <span>
+            我承诺:口播所用的声音与出镜底版<strong>均为本人</strong>、已获授权;勾选即表示同意
+            <Link to="/terms" target="_blank" className="text-[#EA1F59] underline">
+              《服务条款》
+            </Link>
+            与
+            <Link to="/privacy" target="_blank" className="text-[#EA1F59] underline">
+              《隐私政策》
+            </Link>
+            。
+          </span>
+        </label>
         <div className="flex items-center justify-end gap-3">
           <span className="text-[12px] text-muted-foreground">提交后先报价,不会立即扣费</span>
-          <Button type="button" onClick={() => void handleSubmit()} disabled={submitting} className="min-w-[120px]">
+          <Button
+            type="button"
+            onClick={() => void handleSubmit()}
+            disabled={submitting || !consent}
+            className="min-w-[120px]"
+          >
             {submitting ? (
               <>
                 <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
