@@ -8,6 +8,30 @@ function fc(args: string[]): string {
   return args[args.indexOf('-filter_complex') + 1]!;
 }
 
+describe('AI-generated metadata tag (深度合成 compliance)', () => {
+  for (const [label, build] of [
+    ['buildComposeCommand', () => buildComposeCommand({ segmentClipPaths: CLIPS, outputPath: OUT })],
+    ['buildPetVideoCommand', () => buildPetVideoCommand({ clipPath: '/r2/pet.mp4', outputPath: OUT })],
+  ] as const) {
+    it(`${label} embeds a comment="AI 生成 …" metadata tag before the output path`, () => {
+      const { args } = build();
+      const at = args.indexOf('-metadata');
+      expect(at).toBeGreaterThan(0);
+      expect(args[at + 1]).toMatch(/^comment=/);
+      expect(args[at + 1]).toContain('AI 生成');
+      // -metadata is an output option → must come BEFORE the output path.
+      expect(at + 1).toBeLessThan(args.length - 1);
+      expect(args[args.length - 1]).toBe(OUT);
+    });
+
+    it(`${label} STILL applies the visible drawtext watermark (regression guard)`, () => {
+      const graph = fc(build().args);
+      expect(graph).toContain('drawtext=');
+      expect(graph).toContain('HOLA DAY · AI');
+    });
+  }
+});
+
 describe('buildComposeCommand', () => {
   it('builds a vertical 1080x1920 h264+aac concat with default watermark + faststart', () => {
     const cmd = buildComposeCommand({ segmentClipPaths: CLIPS, outputPath: OUT });

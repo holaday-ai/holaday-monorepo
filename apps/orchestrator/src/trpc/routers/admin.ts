@@ -20,7 +20,7 @@
  */
 
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, gte, inArray, like, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, like, lte, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { llmCalls } from '../../db/schema/llm-calls.js';
 import { tasks } from '../../db/schema/tasks.js';
@@ -78,6 +78,73 @@ function buildDashboardDayStats(rows: TrendStatusRow[]): Map<string, DayStats> {
     byDay.set(day, cur);
   }
   return byDay;
+}
+
+export interface IpComplianceAuditRow {
+  taskId: string;
+  userExternalId: string;
+  userEmail: string | null;
+  status: string;
+  createdAt: Date;
+  /** 口播文案 (= tasks.intent for the IP lane). */
+  ipCopyText: string;
+  /** 本人授权时间戳 — proves 可追溯到授权 (深度合成). */
+  authorizedAt: Date | null;
+  /** 本人素材引用: 出镜底版 file + 克隆声纹 id. */
+  baseVideoFileId: string | null;
+  qwenVoiceId: string | null;
+  /** 输出成片 (from result.metadata.attachments). */
+  outputFile: { fileId: string; filename: string | null; sizeBytes: number | null } | null;
+  videoType: string | null;
+}
+
+/**
+ * Assemble one IP 合规追溯 row from a joined tasks+users select. PURE — pulls
+ * the output-file ref + videoType out of the task `result` JSON (which MariaDB
+ * may hand back as a string). No DB, so the extraction is unit-testable.
+ */
+export function mapIpComplianceRow(row: {
+  taskId: string;
+  userExternalId: string;
+  userEmail: string | null;
+  status: string;
+  createdAt: Date;
+  ipCopyText: string;
+  authorizedAt: Date | null;
+  baseVideoFileId: string | null;
+  qwenVoiceId: string | null;
+  result: unknown;
+}): IpComplianceAuditRow {
+  const parsed = ((): { metadata?: Record<string, unknown> } | null => {
+    if (typeof row.result === 'string') {
+      try {
+        return JSON.parse(row.result) as { metadata?: Record<string, unknown> };
+      } catch {
+        return null;
+      }
+    }
+    return (row.result as { metadata?: Record<string, unknown> } | null) ?? null;
+  })();
+  const meta = parsed?.metadata ?? {};
+  const attachments = Array.isArray(meta.attachments) ? meta.attachments : [];
+  const att = attachments[0] as
+    | { fileId?: string; filename?: string; sizeBytes?: number }
+    | undefined;
+  return {
+    taskId: row.taskId,
+    userExternalId: row.userExternalId,
+    userEmail: row.userEmail,
+    status: row.status,
+    createdAt: row.createdAt,
+    ipCopyText: row.ipCopyText,
+    authorizedAt: row.authorizedAt,
+    baseVideoFileId: row.baseVideoFileId,
+    qwenVoiceId: row.qwenVoiceId,
+    outputFile: att?.fileId
+      ? { fileId: att.fileId, filename: att.filename ?? null, sizeBytes: att.sizeBytes ?? null }
+      : null,
+    videoType: typeof meta.videoType === 'string' ? meta.videoType : null,
+  };
 }
 
 export const adminRouter = router({
@@ -461,6 +528,52 @@ export const adminRouter = router({
               : null,
         })),
       };
+    }),
+
+  // ──────────────────────────────────── IP 合规追溯 (深度合成 audit) ──
+  // Read-only aggregation for the IP「真人换口型」compliance audit: each
+  // completed IP 成片 with 谁 / 何时生成 / 何时授权 / 文案 / 本人素材引用 /
+  // 输出文件. Pure assembly of EXISTING columns — NO new table/field/migration.
+  // videoType='ip_person' is stamped only on success → selects 成片.
+  ipComplianceAudit: adminProcedure
+    .input(
+      z
+        .object({
+          userExternalId: z.string().optional(),
+          from: z.string().datetime().optional(),
+          to: z.string().datetime().optional(),
+          limit: z.number().int().min(1).max(200).default(50),
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      const conds = [
+        sql`JSON_UNQUOTE(JSON_EXTRACT(${tasks.result}, '$.metadata.videoType')) = 'ip_person'`,
+      ];
+      if (input?.userExternalId) conds.push(eq(users.externalId, input.userExternalId));
+      if (input?.from) conds.push(gte(tasks.createdAt, new Date(input.from)));
+      if (input?.to) conds.push(lte(tasks.createdAt, new Date(input.to)));
+
+      const rows = await ctx.db
+        .select({
+          taskId: tasks.externalId,
+          userExternalId: users.externalId,
+          userEmail: users.email,
+          status: tasks.status,
+          createdAt: tasks.createdAt,
+          ipCopyText: tasks.intent,
+          authorizedAt: users.videoSelfUseAuthorizedAt,
+          baseVideoFileId: users.baseVideoFileId,
+          qwenVoiceId: users.qwenVoiceId,
+          result: tasks.result,
+        })
+        .from(tasks)
+        .innerJoin(users, eq(tasks.userId, users.id))
+        .where(and(...conds))
+        .orderBy(desc(tasks.createdAt))
+        .limit(input?.limit ?? 50);
+
+      return { rows: rows.map(mapIpComplianceRow) };
     }),
 
   // Phase 27B — nested finance namespace (revenue + cost).

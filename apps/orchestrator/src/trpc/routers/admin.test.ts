@@ -14,7 +14,53 @@
 
 import { TRPCError } from '@trpc/server';
 import { describe, expect, it, vi } from 'vitest';
-import { __adminInternals, adminRouter } from './admin.js';
+import { __adminInternals, adminRouter, mapIpComplianceRow } from './admin.js';
+
+describe('mapIpComplianceRow — IP 合规追溯 row assembly', () => {
+  const base = {
+    taskId: 'tsk_ip1',
+    userExternalId: 'usr_1',
+    userEmail: 'a@b.com',
+    status: 'completed',
+    createdAt: new Date('2026-06-21T00:00:00Z'),
+    ipCopyText: '早睡早起身体好',
+    authorizedAt: new Date('2026-06-20T00:00:00Z'),
+    baseVideoFileId: 'file_base',
+    qwenVoiceId: 'voice_x',
+  };
+  const meta = {
+    videoType: 'ip_person',
+    attachments: [{ fileId: 'file_out', filename: 'holaday-ip-video.mp4', sizeBytes: 5_000_000 }],
+  };
+
+  it('extracts output file + videoType + 素材引用 from an OBJECT result', () => {
+    const out = mapIpComplianceRow({ ...base, result: { metadata: meta } });
+    expect(out.outputFile).toEqual({
+      fileId: 'file_out',
+      filename: 'holaday-ip-video.mp4',
+      sizeBytes: 5_000_000,
+    });
+    expect(out.videoType).toBe('ip_person');
+    expect(out.authorizedAt).toEqual(base.authorizedAt);
+    expect(out.baseVideoFileId).toBe('file_base');
+    expect(out.qwenVoiceId).toBe('voice_x');
+    expect(out.ipCopyText).toBe('早睡早起身体好');
+  });
+
+  it('handles MariaDB string-JSON result', () => {
+    const out = mapIpComplianceRow({ ...base, result: JSON.stringify({ metadata: meta }) });
+    expect(out.outputFile?.fileId).toBe('file_out');
+    expect(out.videoType).toBe('ip_person');
+  });
+
+  it('null outputFile when no attachment / unparseable / null result', () => {
+    expect(
+      mapIpComplianceRow({ ...base, result: { metadata: { videoType: 'ip_person' } } }).outputFile,
+    ).toBeNull();
+    expect(mapIpComplianceRow({ ...base, result: 'not json' }).outputFile).toBeNull();
+    expect(mapIpComplianceRow({ ...base, result: null }).outputFile).toBeNull();
+  });
+});
 
 const { beijingDayStartUtc, beijingDayString, buildDashboardDayStats } =
   __adminInternals;
